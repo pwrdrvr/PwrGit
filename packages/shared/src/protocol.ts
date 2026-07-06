@@ -14,7 +14,8 @@ import type {
   Profile,
   ProfileId,
   Repo,
-  RepoSearchHit
+  RepoSearchHit,
+  WorktreeState
 } from "./types";
 
 export type ProfileList = {
@@ -48,6 +49,14 @@ export interface Commands {
   "repo:search": { req: { query: string }; res: RepoSearchHit[] };
   "repo:setPin": { req: { repoId: string; pinned: boolean }; res: null };
   "worktree:setPin": { req: { worktreeId: string; pinned: boolean }; res: null };
+
+  // Worktree state (U8)
+  "worktree:getState": {
+    req: { worktreeId: string };
+    res: WorktreeState | null;
+  };
+  "worktree:activate": { req: { worktreeId: string }; res: null };
+
   "dialog:pickDirectory": { req: void; res: string | null };
 }
 

@@ -12,6 +12,7 @@ import {
   type Worktree
 } from "@pwrgit/shared";
 import type { DB } from "../persistence/db";
+import { mapLimit } from "../util/map-limit";
 import type { GitExec } from "./dugite";
 import { listWorktrees } from "./git-service";
 
@@ -47,6 +48,10 @@ type WorktreeRow = {
   path: string;
   is_primary: number;
   pinned: number;
+  dirty: number | null;
+  ahead: number | null;
+  behind: number | null;
+  last_activity_at: string | null;
 };
 
 /**
@@ -70,7 +75,7 @@ export class RepoIndexer {
     // Resolve each found dir to its canonical (primary worktree) path via git,
     // deduping repos reachable from more than one worktree dir.
     const canonical = new Map<string, { path: string; worktrees: Worktree[] }>();
-    await mapWithConcurrency([...found], GIT_CONCURRENCY, async (dir) => {
+    await mapLimit([...found], GIT_CONCURRENCY, async (dir) => {
       const listed = await listWorktrees(this.git, dir);
       if (!listed.ok || listed.value.length === 0) return;
       const primary = listed.value[0];
@@ -193,22 +198,30 @@ export class RepoIndexer {
     const worktrees = (
       this.db
         .prepare(
-          "SELECT id, repo_id, branch, path, is_primary, pinned FROM worktrees WHERE repo_id = ? ORDER BY is_primary DESC, branch"
+          `SELECT w.id, w.repo_id, w.branch, w.path, w.is_primary, w.pinned,
+                  s.dirty AS dirty, s.ahead AS ahead, s.behind AS behind,
+                  s.last_activity_at AS last_activity_at
+           FROM worktrees w
+           LEFT JOIN worktree_state s ON s.worktree_id = w.id
+           WHERE w.repo_id = ?
+           ORDER BY w.is_primary DESC, w.branch`
         )
         .all(r.id) as WorktreeRow[]
-    ).map(
-      (w): Worktree => ({
+    ).map((w): Worktree => {
+      const wt: Worktree = {
         id: w.id,
         repoId: w.repo_id,
         branch: w.branch,
         path: w.path,
-        dirty: 0,
-        ahead: 0,
-        behind: 0,
+        dirty: w.dirty ?? 0,
+        ahead: w.ahead ?? 0,
+        behind: w.behind ?? 0,
         pinned: w.pinned === 1,
         isPrimary: w.is_primary === 1
-      })
-    );
+      };
+      if (w.last_activity_at !== null) wt.lastActivityAt = w.last_activity_at;
+      return wt;
+    });
     return {
       id: r.id,
       name: r.name,
@@ -327,21 +340,4 @@ export function findRepoDirs(
 
   walk(root, 0);
   return results;
-}
-
-async function mapWithConcurrency<T>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<void>
-): Promise<void> {
-  let cursor = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (cursor < items.length) {
-      const index = cursor;
-      cursor += 1;
-      const item = items[index];
-      if (item !== undefined) await fn(item);
-    }
-  });
-  await Promise.all(workers);
 }

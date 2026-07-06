@@ -755,6 +755,28 @@ input {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.sync-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font: 600 11px/1 var(--font-mono);
+  flex: 0 0 auto;
+}
+.sync-chip--muted {
+  background: var(--bg-panel);
+  color: var(--text-muted);
+}
+.sync-chip--ok {
+  background: var(--success-soft);
+  color: var(--success-bright);
+}
+.sync-chip--warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
 .main-empty {
   flex: 0 0 auto;
   padding: 20px;

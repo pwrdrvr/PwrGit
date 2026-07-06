@@ -37,6 +37,8 @@ export type Worktree = {
   ahead: number;
   /** Commits behind upstream. */
   behind: number;
+  /** ISO-8601 time of the worktree branch's last commit (staleness signal). */
+  lastActivityAt?: string;
   pinned: boolean;
   /** True for the repo's primary checkout (not a linked worktree). */
   isPrimary: boolean;
@@ -81,6 +83,8 @@ export type WorktreeState = {
   ahead: number;
   behind: number;
   dirty: number;
+  /** ISO-8601 time of the branch's last commit. */
+  lastActivityAt?: string;
   /** ISO-8601 time the snapshot was computed. */
   updatedAt: string;
 };
