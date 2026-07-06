@@ -113,6 +113,29 @@ export type GraphLog = {
   defaultBranch: string;
 };
 
+export type RebaseStep = {
+  action: "pick" | "squash";
+  shortHash: string;
+  subject: string;
+};
+
+export type RebasePlan = {
+  op: "squash" | "reorder";
+  steps: RebaseStep[];
+  summary: string;
+  /** False when the selection can't be rebased (e.g. not the most-recent run). */
+  valid: boolean;
+  reason?: string;
+};
+
+export type RebaseCommitRef = { hash: string; subject: string };
+
+export type AgentStatus = {
+  available: boolean;
+  home?: string;
+  reason?: string;
+};
+
 export type Lens = "Recent" | "Pinned" | "Behind" | "Stale" | "All";
 export type WorktreeSort = "pinned" | "az" | "active" | "custom";
 

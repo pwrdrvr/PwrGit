@@ -11,10 +11,13 @@
 // graph, and rebase entries.
 
 import type {
+  AgentStatus,
   ChangeSet,
   GraphLog,
   Profile,
   ProfileId,
+  RebaseCommitRef,
+  RebasePlan,
   Repo,
   RepoSearchHit,
   WorktreeState
@@ -82,6 +85,25 @@ export interface Commands {
   "graph:log": {
     req: { worktreeId: string; limit?: number };
     res: GraphLog;
+  };
+
+  // Agent + rebase assistant (U15 / U16)
+  "agent:status": { req: void; res: AgentStatus };
+  "rebase:draft": {
+    req: {
+      worktreeId: string;
+      commits: RebaseCommitRef[];
+      op: "squash" | "reorder";
+    };
+    res: RebasePlan;
+  };
+  "rebase:apply": {
+    req: {
+      worktreeId: string;
+      commits: RebaseCommitRef[];
+      op: "squash" | "reorder";
+    };
+    res: null;
   };
 
   // Changes (U11 / U12)

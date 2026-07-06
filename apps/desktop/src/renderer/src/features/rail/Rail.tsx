@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Worktree, WorktreeState } from "@pwrgit/shared";
+import { AgentTab } from "./AgentTab";
 import { ChangesTab } from "./ChangesTab";
 
 type RailTab = "changes" | "agent";
@@ -8,15 +9,25 @@ export function Rail({
   worktree,
   state,
   activeEmail,
+  selectedHashes,
+  agentAction,
+  onClearSelection,
   onCollapse
 }: {
   worktree: Worktree | null;
   state: WorktreeState | null;
   activeEmail: string;
+  selectedHashes: string[];
+  agentAction: "squash" | "reorder" | null;
+  onClearSelection: () => void;
   onCollapse: () => void;
 }) {
   const [tab, setTab] = useState<RailTab>("changes");
   const dirty = state?.dirty ?? worktree?.dirty ?? 0;
+
+  useEffect(() => {
+    if (agentAction !== null) setTab("agent");
+  }, [agentAction]);
 
   return (
     <aside className="pane pane--rail" data-testid="rail">
@@ -33,6 +44,9 @@ export function Rail({
           onClick={() => setTab("agent")}
         >
           Agent
+          {selectedHashes.length > 0 && (
+            <span className="rail-tab__badge">{selectedHashes.length}</span>
+          )}
         </button>
         <span style={{ flex: 1 }} />
         <button
@@ -48,7 +62,12 @@ export function Rail({
       {tab === "changes" ? (
         <ChangesTab worktree={worktree} activeEmail={activeEmail} />
       ) : (
-        <div className="rail-empty">Rebase assistant — U16</div>
+        <AgentTab
+          worktreeId={worktree?.id ?? null}
+          selectedHashes={selectedHashes}
+          op={agentAction}
+          onClear={onClearSelection}
+        />
       )}
     </aside>
   );

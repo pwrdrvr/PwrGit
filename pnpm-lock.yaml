@@ -31,6 +31,12 @@ importers:
       '@fontsource/geist-sans':
         specifier: ^5.2.5
         version: 5.2.5
+      '@pwrdrvr/agent-core':
+        specifier: ^0.2.0
+        version: 0.2.0
+      '@pwrdrvr/codex-discovery':
+        specifier: ^0.1.3
+        version: 0.1.3
       '@pwrgit/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -590,6 +596,12 @@ packages:
     resolution: {integrity: sha512-8nKv6+0RJSL9FE4jYOEGXnPeM/Hg12qZpmqzZjRh3qM0Y7c3z1mrOTfFLids72RDQYVh9WpLEfR5WdpNX4fkig==}
     engines: {node: '>=18'}
     hasBin: true
+
+  '@pwrdrvr/agent-core@0.2.0':
+    resolution: {integrity: sha512-zTo7vJGekyZX2h9xWYiZfQvt+qKTPhuciWyCouow1shaKgg0Bn6B8S5lTRvMzxvT7feKOZ7zy/To2Cu6+1i1+A==}
+
+  '@pwrdrvr/codex-discovery@0.1.3':
+    resolution: {integrity: sha512-9i6ZuDujKougP3JP+KRFf/V/wLmCxd73vLVwld4YTPqihQtlygjFHyqMCopTcDoIhMkSPogFcv5jzBxyAcX8qg==}
 
   '@rolldown/pluginutils@1.0.0-rc.3':
     resolution: {integrity: sha512-eybk3TjzzzV97Dlj5c+XrBFW57eTNhzod66y9HrBlzJ6NsCrWCp/2kaPS3K9wJmurBC0Tdw4yPjXKZqlznim3Q==}
@@ -2614,6 +2626,12 @@ snapshots:
   '@playwright/test@1.61.1':
     dependencies:
       playwright: 1.61.1
+
+  '@pwrdrvr/agent-core@0.2.0': {}
+
+  '@pwrdrvr/codex-discovery@0.1.3':
+    dependencies:
+      '@pwrdrvr/agent-core': 0.2.0
 
   '@rolldown/pluginutils@1.0.0-rc.3': {}
 

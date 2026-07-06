@@ -748,6 +748,150 @@ input {
   color: var(--danger);
 }
 
+/* ---- Rail: Agent (rebase assistant) tab ---- */
+
+.agent-tab {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+}
+.agent-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.agent-head__icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--bg-active);
+  border: 1px solid var(--accent-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-bright);
+  font-size: 14px;
+}
+.agent-head__title {
+  font: 700 13px/1 var(--font-sans);
+  color: var(--text-primary);
+}
+.agent-head__sub {
+  font: 500 10.5px/1 var(--font-mono);
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+.agent-empty {
+  padding: 20px 8px;
+  border: 1px dashed var(--border-default);
+  border-radius: 9px;
+  text-align: center;
+  font: 500 12px/1.6 var(--font-sans);
+  color: var(--text-muted);
+}
+.agent-accent {
+  color: var(--accent-bright);
+}
+.agent-section {
+  font: 600 10px/1 var(--font-sans);
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 14px 0 8px;
+}
+.agent-commits {
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+.agent-commit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border-bottom: 1px solid rgba(247, 243, 235, 0.06);
+}
+.agent-commit__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  flex: 0 0 auto;
+}
+.agent-commit__msg {
+  flex: 1;
+  min-width: 0;
+  font: 500 11.5px/1.3 var(--font-sans);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-commit__hash {
+  font: 500 9.5px/1 var(--font-mono);
+  color: var(--text-subtle);
+}
+.agent-plan {
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  background: var(--bg-input);
+  padding: 12px 14px;
+}
+.agent-plan__row {
+  display: flex;
+  gap: 8px;
+  font: 500 11.5px/1.7 var(--font-mono);
+  color: var(--text-secondary);
+}
+.agent-plan__text {
+  flex: 1;
+  min-width: 0;
+}
+.agent-plan__summary {
+  color: var(--text-subtle);
+}
+.agent-plan__invalid {
+  font: 500 11.5px/1.5 var(--font-sans);
+  color: var(--warn);
+}
+.agent-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+.agent-apply {
+  flex: 1;
+  height: 34px;
+  border-radius: 7px;
+  border: none;
+  background: var(--accent);
+  color: var(--accent-on);
+  font: 700 12px/1 var(--font-sans);
+  cursor: pointer;
+}
+.agent-apply:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.agent-discard {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 7px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font: 600 12px/1 var(--font-sans);
+  cursor: pointer;
+}
+.agent-note {
+  margin-top: 10px;
+  font: 500 10.5px/1.5 var(--font-sans);
+  color: var(--text-subtle);
+}
+
 /* ---- New-worktree modal ---- */
 
 .modal {

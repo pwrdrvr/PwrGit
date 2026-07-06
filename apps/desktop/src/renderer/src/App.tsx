@@ -35,7 +35,9 @@ export function App() {
   const [selectedCommits, setSelectedCommits] = useState<Set<string>>(
     new Set()
   );
-  const [, setAgentAction] = useState<"squash" | "reorder" | null>(null);
+  const [agentAction, setAgentAction] = useState<"squash" | "reorder" | null>(
+    null
+  );
 
   // Clear commit selection when the worktree changes.
   useEffect(() => {
@@ -50,6 +52,16 @@ export function App() {
       else next.add(hash);
       return next;
     });
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    setSelectedCommits(new Set());
+    setAgentAction(null);
+  }, []);
+
+  const startAgent = useCallback((op: "squash" | "reorder") => {
+    setAgentAction(op);
+    setRailCollapsed(false);
   }, []);
 
   // ⌘K / Ctrl+K opens the repo switcher; Escape closes it.
@@ -148,10 +160,10 @@ export function App() {
               {selectedCommits.size > 0 && (
                 <SelectionBar
                   count={selectedCommits.size}
-                  onSquash={() => setAgentAction("squash")}
-                  onReorder={() => setAgentAction("reorder")}
-                  onAskAgent={() => setAgentAction((a) => a ?? "squash")}
-                  onClear={() => setSelectedCommits(new Set())}
+                  onSquash={() => startAgent("squash")}
+                  onReorder={() => startAgent("reorder")}
+                  onAskAgent={() => startAgent(agentAction ?? "squash")}
+                  onClear={clearSelection}
                 />
               )}
             </>
@@ -167,6 +179,9 @@ export function App() {
             worktree={selectedWorktree}
             state={worktreeState}
             activeEmail={activeProfile?.email ?? ""}
+            selectedHashes={Array.from(selectedCommits)}
+            agentAction={agentAction}
+            onClearSelection={clearSelection}
             onCollapse={() => setRailCollapsed(true)}
           />
         )}

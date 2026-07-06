@@ -6,6 +6,7 @@ import { registerDialogHandlers } from "./dialog-handlers";
 import { execGit } from "./git/dugite";
 import { registerChangesHandlers } from "./git/changes-handlers";
 import { registerGraphHandlers } from "./git/graph-handlers";
+import { registerRebaseHandlers } from "./git/rebase-handlers";
 import { registerRemoteHandlers } from "./git/remote-handlers";
 import { registerRepoHandlers } from "./git/repo-handlers";
 import { RepoIndexer } from "./git/repo-indexer";
@@ -95,6 +96,7 @@ if (!gotSingleInstanceLock) {
     registerRemoteHandlers(bus, db, refresher);
     registerGraphHandlers(bus, db, stateService);
     registerChangesHandlers(bus, db, refresher);
+    registerRebaseHandlers(bus, db, refresher);
     registerDialogHandlers(bus);
 
     registerIpc(bus);
