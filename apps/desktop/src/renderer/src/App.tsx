@@ -3,10 +3,12 @@ import type { Repo, RepoSearchHit, Worktree } from "@pwrgit/shared";
 import { LineageGraph } from "./features/graph/LineageGraph";
 import { SelectionBar } from "./features/graph/SelectionBar";
 import { WorktreeHeader } from "./features/graph/WorktreeHeader";
+import { PaneResizer } from "./features/shell/PaneResizer";
 import { Rail } from "./features/rail/Rail";
 import { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
 import { Sidebar } from "./features/sidebar/Sidebar";
 import { useAppearance } from "./lib/useAppearance";
+import { useColumnResize } from "./lib/useColumnResize";
 import { useProfiles } from "./state/useProfiles";
 import { useRepoTree } from "./state/useRepoTree";
 import { useWorktreeState } from "./state/useWorktreeState";
@@ -15,6 +17,8 @@ type Selection = { repoId: string; worktreeId: string };
 
 export function App() {
   useAppearance();
+  const sidebar = useColumnResize("pwrgit.sidebarWidth", 320, 240, 520, "left");
+  const rail = useColumnResize("pwrgit.railWidth", 344, 280, 560, "right");
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [overlayOpen, setOverlayOpen] = useState(false);
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -114,8 +118,8 @@ export function App() {
   const selectedWorktree =
     selectedRepo?.worktrees.find((w) => w.id === selection?.worktreeId) ?? null;
 
-  const gridTemplateColumns = `320px minmax(0, 1fr) ${
-    railCollapsed ? "0px" : "344px"
+  const gridTemplateColumns = `${sidebar.width}px minmax(0, 1fr) ${
+    railCollapsed ? "0px" : `${rail.width}px`
   }`;
 
   return (
@@ -143,6 +147,18 @@ export function App() {
           onExpandRepo={computeRepoState}
           onAddFolder={() => void addFolder()}
           onOpenSearch={() => setOverlayOpen(true)}
+        />
+
+        <PaneResizer
+          side="left"
+          offset={sidebar.width}
+          width={sidebar.width}
+          min={sidebar.min}
+          max={sidebar.max}
+          onPointerDown={sidebar.onPointerDown}
+          onNudge={sidebar.nudge}
+          onReset={sidebar.reset}
+          ariaLabel="Resize sidebar"
         />
 
         <main className="pane pane--main" data-testid="main">
@@ -175,6 +191,20 @@ export function App() {
             </div>
           )}
         </main>
+
+        {!railCollapsed && (
+          <PaneResizer
+            side="right"
+            offset={rail.width}
+            width={rail.width}
+            min={rail.min}
+            max={rail.max}
+            onPointerDown={rail.onPointerDown}
+            onNudge={rail.nudge}
+            onReset={rail.reset}
+            ariaLabel="Resize panel"
+          />
+        )}
 
         {!railCollapsed && (
           <Rail

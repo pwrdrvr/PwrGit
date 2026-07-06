@@ -117,6 +117,9 @@ export interface Commands {
   };
 
   "dialog:pickDirectory": { req: void; res: string | null };
+
+  // Reveal a path in the OS file manager (Finder / Explorer / …).
+  "shell:revealPath": { req: { path: string }; res: null };
 }
 
 export type CommandName = keyof Commands;

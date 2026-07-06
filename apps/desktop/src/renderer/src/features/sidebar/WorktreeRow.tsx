@@ -1,5 +1,6 @@
 import type { DragEvent } from "react";
 import type { Worktree } from "@pwrgit/shared";
+import { WorktreeMenu } from "../shell/WorktreeMenu";
 import { isPrunableWorktree, relativeAge } from "./repo-view";
 
 export function WorktreeRow({
@@ -60,7 +61,9 @@ export function WorktreeRow({
         <circle cx="18" cy="6" r="3" />
         <path d="M18 9c0 6-6 6-6 12" />
       </svg>
-      <span className="wt-row__branch">{worktree.branch}</span>
+      <span className="wt-row__branch" title={worktree.branch}>
+        {worktree.branch}
+      </span>
       {worktree.dirty > 0 && (
         <span className="badge badge--warn">●{worktree.dirty}</span>
       )}
@@ -99,20 +102,11 @@ export function WorktreeRow({
           {relativeAge(worktree.lastActivityAt)}
         </span>
       )}
-      {!worktree.isPrimary && (
-        <span
-          className="wt-remove"
-          title="Remove worktree"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-        >
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" />
-          </svg>
-        </span>
-      )}
+      <WorktreeMenu
+        worktree={worktree}
+        onRemove={onRemove}
+        className="wt-row__menu"
+      />
       <span
         className={`pin${worktree.pinned ? " is-pinned" : ""}`}
         title="Pin worktree"

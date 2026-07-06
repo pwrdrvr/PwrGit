@@ -7,6 +7,8 @@ import type {
   WorktreeState
 } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
+import { CopyTarget } from "../shell/CopyTarget";
+import { WorktreeMenu } from "../shell/WorktreeMenu";
 
 type Chip = { text: string; tone: "muted" | "ok" | "warn" };
 
@@ -87,10 +89,16 @@ export function WorktreeHeader({
       <div className="wt-header__id">
         <span className="wt-header__repo">{repo.name}</span>
         <span className="wt-header__sep">›</span>
-        <span className="wt-header__branch">
+        <CopyTarget
+          value={worktree.branch}
+          label="Copy branch name"
+          hint={`${worktree.branch}\nClick to copy`}
+          className="wt-header__branch copyable"
+          stopPropagation={false}
+        >
           <span className="wt-header__dot" />
           {worktree.branch}
-        </span>
+        </CopyTarget>
         {dirty > 0 && <span className="badge badge--warn">●{dirty}</span>}
         <span style={{ flex: 1 }} />
         <span className={`sync-chip sync-chip--${chip.tone}`}>{chip.text}</span>
@@ -144,7 +152,17 @@ export function WorktreeHeader({
           </button>
         </div>
       </div>
-      <div className="wt-header__path">{worktree.path}</div>
+      <div className="wt-header__pathrow">
+        <CopyTarget
+          value={worktree.path}
+          label="Copy worktree path"
+          className="wt-header__path copyable"
+          stopPropagation={false}
+        >
+          {worktree.path}
+        </CopyTarget>
+        <WorktreeMenu worktree={worktree} />
+      </div>
     </div>
   );
 }

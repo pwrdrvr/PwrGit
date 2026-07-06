@@ -22,6 +22,7 @@ import { openDatabase } from "./persistence/db";
 import { readGitIdentityDefaults } from "./profiles/git-identity";
 import { registerProfileHandlers } from "./profiles/profile-handlers";
 import { ProfileService } from "./profiles/profile-service";
+import { registerShellHandlers } from "./shell-handlers";
 import { SettingsService } from "./settings/settings-service";
 import { createMainWindow } from "./window";
 
@@ -91,6 +92,7 @@ if (!gotSingleInstanceLock) {
     registerChangesHandlers(bus, db, refresher);
     registerRebaseHandlers(bus, db, refresher);
     registerDialogHandlers(bus);
+    registerShellHandlers(bus);
 
     registerIpc(bus);
     mainWindow = createMainWindow();
