@@ -1,0 +1,18 @@
+{
+  "name": "@pwrgit/shared",
+  "version": "0.0.1-alpha.0",
+  "private": true,
+  "description": "Cross-process types shared between main, preload, and renderer in @pwrgit/desktop: typed Commands/Events registry, Result-pattern, domain types.",
+  "author": "PwrDrvr LLC",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./protocol": "./src/protocol.ts",
+    "./result": "./src/result.ts",
+    "./types": "./src/types.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

@@ -25,6 +25,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@pwrgit/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       react:
         specifier: ^19.2.7
         version: 19.2.7
@@ -56,6 +59,8 @@ importers:
       vite:
         specifier: ^7.3.5
         version: 7.3.6(@types/node@24.12.4)(jiti@2.7.0)
+
+  packages/shared: {}
 
 packages:
 

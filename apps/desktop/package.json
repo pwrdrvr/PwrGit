@@ -18,6 +18,7 @@
     "test:e2e": "playwright test -c playwright.config.ts"
   },
   "dependencies": {
+    "@pwrgit/shared": "workspace:*",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
