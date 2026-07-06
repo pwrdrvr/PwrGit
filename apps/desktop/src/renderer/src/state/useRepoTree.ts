@@ -8,6 +8,13 @@ export type UseRepoTree = {
   setRepoPin: (repoId: string, pinned: boolean) => void;
   setWorktreePin: (worktreeId: string, pinned: boolean) => void;
   addFolder: () => Promise<void>;
+  createWorktree: (
+    repoId: string,
+    branch: string,
+    newBranch: boolean
+  ) => Promise<string | null>;
+  removeWorktree: (worktreeId: string) => Promise<void>;
+  persistWorktreeOrder: (repoId: string, orderedIds: string[]) => void;
 };
 
 /** Repos for the active profile, kept in sync with `repo:changed`. */
@@ -61,5 +68,53 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     // profile:addRoot rescans and emits repo:changed, which reloads.
   }, [activeProfileId]);
 
-  return { repos, loading, setRepoPin, setWorktreePin, addFolder };
+  const createWorktree = useCallback(
+    async (repoId: string, branch: string, newBranch: boolean) => {
+      const r = await dispatch("worktree:create", {
+        repoId,
+        branch,
+        newBranch
+      });
+      return r.ok ? null : r.error.message;
+    },
+    []
+  );
+
+  const removeWorktree = useCallback(async (worktreeId: string) => {
+    let r = await dispatch("worktree:remove", { worktreeId, force: false });
+    if (!r.ok && r.error.code === "dirty") {
+      if (
+        window.confirm(
+          "This worktree has uncommitted changes. Remove it anyway?"
+        )
+      ) {
+        r = await dispatch("worktree:remove", { worktreeId, force: true });
+      } else {
+        return;
+      }
+    }
+    if (!r.ok) window.alert(r.error.message);
+  }, []);
+
+  const persistWorktreeOrder = useCallback(
+    (repoId: string, orderedIds: string[]) => {
+      void dispatch("worktree:setOrder", {
+        repoId,
+        orderedWorktreeIds: orderedIds
+      });
+    },
+    []
+  );
+
+  return {
+    repos,
+    loading,
+    setRepoPin,
+    setWorktreePin,
+    addFolder,
+    createWorktree,
+    removeWorktree,
+    persistWorktreeOrder
+  };
 }
+

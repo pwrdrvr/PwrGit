@@ -14,6 +14,7 @@ export function RepoRow({
   onToggleRepoPin,
   onSelectWorktree,
   onToggleWorktreePin,
+  onRemoveWorktree,
   onCycleSort,
   onReorder,
   onNewWorktree
@@ -28,6 +29,7 @@ export function RepoRow({
   onToggleRepoPin: () => void;
   onSelectWorktree: (worktree: Worktree) => void;
   onToggleWorktreePin: (worktreeId: string, pinned: boolean) => void;
+  onRemoveWorktree: (worktreeId: string) => void;
   onCycleSort: () => void;
   onReorder: (orderedIds: string[]) => void;
   onNewWorktree: () => void;
@@ -101,6 +103,7 @@ export function RepoRow({
               selected={w.id === selectedWorktreeId}
               onSelect={() => onSelectWorktree(w)}
               onTogglePin={() => onToggleWorktreePin(w.id, !w.pinned)}
+              onRemove={() => onRemoveWorktree(w.id)}
               onDragStart={() => {
                 dragId.current = w.id;
               }}

@@ -55,6 +55,7 @@ type WorktreeRow = {
   merged_into_default: number | null;
   is_default_branch: number | null;
   last_activity_at: string | null;
+  custom_order: number | null;
 };
 
 /**
@@ -168,6 +169,30 @@ export class RepoIndexer {
       .run(pinned ? 1 : 0, worktreeId);
   }
 
+  /** Persist a manual drag order for a repo's worktrees (U14). */
+  setWorktreeOrder(repoId: string, orderedIds: string[]): void {
+    const stmt = this.db.prepare(
+      "UPDATE worktrees SET custom_order = ? WHERE id = ? AND repo_id = ?"
+    );
+    const run = this.db.transaction(() => {
+      orderedIds.forEach((id, i) => stmt.run(i, id, repoId));
+    });
+    run();
+  }
+
+  /** Re-list an existing repo's worktrees (after create/remove), preserving
+   *  its source, pins, and custom order (syncWorktrees only touches identity). */
+  async refreshRepoWorktrees(repoId: string): Promise<void> {
+    const repo = this.getRepo(repoId);
+    if (repo === null) return;
+    const listed = await listWorktrees(this.git, repo.path);
+    if (!listed.ok) return;
+    const worktrees = listed.value
+      .filter((w) => !w.bare)
+      .map((w, i) => worktreeShape(w.path, w.branch, i === 0));
+    this.syncWorktrees(repoId, worktrees);
+  }
+
   searchAll(query: string): RepoSearchHit[] {
     const like = `%${query.trim().toLowerCase()}%`;
     const rows = this.db
@@ -202,6 +227,7 @@ export class RepoIndexer {
       this.db
         .prepare(
           `SELECT w.id, w.repo_id, w.branch, w.path, w.is_primary, w.pinned,
+                  w.custom_order AS custom_order,
                   s.dirty AS dirty, s.ahead AS ahead, s.behind AS behind,
                   s.behind_default AS behind_default,
                   s.merged_into_default AS merged_into_default,
@@ -210,7 +236,7 @@ export class RepoIndexer {
            FROM worktrees w
            LEFT JOIN worktree_state s ON s.worktree_id = w.id
            WHERE w.repo_id = ?
-           ORDER BY w.is_primary DESC, w.branch`
+           ORDER BY (w.custom_order IS NULL), w.custom_order, w.is_primary DESC, w.branch`
         )
         .all(r.id) as WorktreeRow[]
     ).map((w): Worktree => {
@@ -229,6 +255,7 @@ export class RepoIndexer {
         isPrimary: w.is_primary === 1
       };
       if (w.last_activity_at !== null) wt.lastActivityAt = w.last_activity_at;
+      if (w.custom_order !== null) wt.order = w.custom_order;
       return wt;
     });
     return {

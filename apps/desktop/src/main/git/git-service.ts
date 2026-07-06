@@ -237,6 +237,59 @@ export async function listWorktrees(
   return ok(parseWorktreeList(checked.value.stdout));
 }
 
+/** Create a worktree, optionally checking out a new branch. */
+export async function worktreeAdd(
+  git: GitExec,
+  repoPath: string,
+  worktreePath: string,
+  branch: string,
+  options: { newBranch: boolean }
+): Promise<Result<void>> {
+  const args = options.newBranch
+    ? ["worktree", "add", "-b", branch, worktreePath]
+    : ["worktree", "add", worktreePath, branch];
+  const raw = await git(args, repoPath);
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode !== 0) {
+    const message = raw.value.stderr.trim();
+    const code = /already exists|already checked out|already used/i.test(message)
+      ? "already_exists"
+      : "worktree_add_failed";
+    return err({ kind: "repo", code, message: message || "worktree add failed" });
+  }
+  return ok(undefined);
+}
+
+/** Remove a worktree; refuses when it has changes unless forced. */
+export async function worktreeRemove(
+  git: GitExec,
+  repoPath: string,
+  worktreePath: string,
+  options: { force: boolean } = { force: false }
+): Promise<Result<void>> {
+  const args = ["worktree", "remove"];
+  if (options.force) args.push("--force");
+  args.push(worktreePath);
+  const raw = await git(args, repoPath);
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode !== 0) {
+    const message = raw.value.stderr.trim();
+    const code = /modified or untracked|contains modified|is dirty|use --force/i.test(
+      message
+    )
+      ? "dirty"
+      : /is a main working tree|main worktree/i.test(message)
+        ? "is_primary"
+        : "worktree_remove_failed";
+    return err({
+      kind: "repo",
+      code,
+      message: message || "worktree remove failed"
+    });
+  }
+  return ok(undefined);
+}
+
 /** Fetch all remotes and prune deleted remote branches. */
 export async function fetchRemote(
   git: GitExec,

@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Lens, Profile, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
 import { LensFilter } from "./LensFilter";
+import { NewWorktreeModal } from "./NewWorktreeModal";
 import { ProfileChip } from "./ProfileChip";
 import { RepoRow } from "./RepoRow";
 import { filterReposByLens, lensCounts, SORT_CYCLE } from "./repo-view";
@@ -15,6 +16,9 @@ export function Sidebar({
   onSelectWorktree,
   onSetRepoPin,
   onSetWorktreePin,
+  onRemoveWorktree,
+  onCreateWorktree,
+  onPersistOrder,
   onAddFolder,
   onOpenSearch
 }: {
@@ -27,6 +31,13 @@ export function Sidebar({
   onSelectWorktree: (repo: Repo, worktree: Worktree) => void;
   onSetRepoPin: (repoId: string, pinned: boolean) => void;
   onSetWorktreePin: (worktreeId: string, pinned: boolean) => void;
+  onRemoveWorktree: (worktreeId: string) => void;
+  onCreateWorktree: (
+    repoId: string,
+    branch: string,
+    newBranch: boolean
+  ) => Promise<string | null>;
+  onPersistOrder: (repoId: string, orderedIds: string[]) => void;
   onAddFolder: () => void;
   onOpenSearch: () => void;
 }) {
@@ -34,6 +45,31 @@ export function Sidebar({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [sortByRepo, setSortByRepo] = useState<Record<string, WorktreeSort>>({});
   const [orderByRepo, setOrderByRepo] = useState<Record<string, string[]>>({});
+  const [newWorktreeRepo, setNewWorktreeRepo] = useState<Repo | null>(null);
+
+  // Seed the drag order from persisted custom_order for repos not yet
+  // reordered this session.
+  useEffect(() => {
+    setOrderByRepo((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const repo of repos) {
+        if (repo.id in next) continue;
+        if (repo.worktrees.some((w) => w.order !== undefined)) {
+          next[repo.id] = repo.worktrees
+            .slice()
+            .sort(
+              (a, b) =>
+                (a.order ?? Number.MAX_SAFE_INTEGER) -
+                (b.order ?? Number.MAX_SAFE_INTEGER)
+            )
+            .map((w) => w.id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [repos]);
 
   const counts = lensCounts(repos);
   const filtered = filterReposByLens(repos, lens);
@@ -116,11 +152,13 @@ export function Sidebar({
             onToggleRepoPin={() => onSetRepoPin(repo.id, !repo.pinned)}
             onSelectWorktree={(w) => onSelectWorktree(repo, w)}
             onToggleWorktreePin={onSetWorktreePin}
+            onRemoveWorktree={onRemoveWorktree}
             onCycleSort={() => cycleSort(repo.id)}
-            onReorder={(ids) =>
-              setOrderByRepo((prev) => ({ ...prev, [repo.id]: ids }))
-            }
-            onNewWorktree={() => undefined}
+            onReorder={(ids) => {
+              setOrderByRepo((prev) => ({ ...prev, [repo.id]: ids }));
+              onPersistOrder(repo.id, ids);
+            }}
+            onNewWorktree={() => setNewWorktreeRepo(repo)}
           />
         ))}
 
@@ -138,6 +176,16 @@ export function Sidebar({
           <span className="new-wt__plus">+</span> Add repo folder…
         </button>
       </div>
+
+      {newWorktreeRepo !== null && (
+        <NewWorktreeModal
+          repo={newWorktreeRepo}
+          onCreate={(branch, newBranch) =>
+            onCreateWorktree(newWorktreeRepo.id, branch, newBranch)
+          }
+          onClose={() => setNewWorktreeRepo(null)}
+        />
+      )}
     </aside>
   );
 }

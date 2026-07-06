@@ -21,9 +21,16 @@ export function App() {
   const [pendingRepoId, setPendingRepoId] = useState<string | null>(null);
 
   const { profiles, activeProfile, switchProfile } = useProfiles();
-  const { repos, loading, setRepoPin, setWorktreePin, addFolder } = useRepoTree(
-    activeProfile?.id ?? null
-  );
+  const {
+    repos,
+    loading,
+    setRepoPin,
+    setWorktreePin,
+    addFolder,
+    createWorktree,
+    removeWorktree,
+    persistWorktreeOrder
+  } = useRepoTree(activeProfile?.id ?? null);
   const worktreeState = useWorktreeState(selection?.worktreeId ?? null);
   const [selectedCommits, setSelectedCommits] = useState<Set<string>>(
     new Set()
@@ -117,6 +124,9 @@ export function App() {
           onSelectWorktree={selectWorktree}
           onSetRepoPin={setRepoPin}
           onSetWorktreePin={setWorktreePin}
+          onRemoveWorktree={(id) => void removeWorktree(id)}
+          onCreateWorktree={createWorktree}
+          onPersistOrder={persistWorktreeOrder}
           onAddFolder={() => void addFolder()}
           onOpenSearch={() => setOverlayOpen(true)}
         />

@@ -46,6 +46,8 @@ export type Worktree = {
   /** ISO-8601 time of the worktree branch's last commit (staleness signal). */
   lastActivityAt?: string;
   pinned: boolean;
+  /** Persisted drag-order index within the repo (U14); absent until reordered. */
+  order?: number;
   /** True for the repo's primary checkout (not a linked worktree). */
   isPrimary: boolean;
 };

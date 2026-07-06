@@ -7,6 +7,7 @@ export function WorktreeRow({
   selected,
   onSelect,
   onTogglePin,
+  onRemove,
   onDragStart,
   onDragOver,
   onDrop,
@@ -16,6 +17,7 @@ export function WorktreeRow({
   selected: boolean;
   onSelect: () => void;
   onTogglePin: () => void;
+  onRemove: () => void;
   onDragStart: (e: DragEvent) => void;
   onDragOver: (e: DragEvent) => void;
   onDrop: (e: DragEvent) => void;
@@ -86,6 +88,20 @@ export function WorktreeRow({
       {worktree.lastActivityAt !== undefined && (
         <span className="wt-age" title={worktree.lastActivityAt}>
           {relativeAge(worktree.lastActivityAt)}
+        </span>
+      )}
+      {!worktree.isPrimary && (
+        <span
+          className="wt-remove"
+          title="Remove worktree"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" />
+          </svg>
         </span>
       )}
       <span

@@ -59,6 +59,17 @@ export interface Commands {
   };
   "worktree:activate": { req: { worktreeId: string }; res: null };
 
+  // Worktree lifecycle (U14)
+  "worktree:create": {
+    req: { repoId: string; branch: string; newBranch: boolean };
+    res: null;
+  };
+  "worktree:remove": { req: { worktreeId: string; force?: boolean }; res: null };
+  "worktree:setOrder": {
+    req: { repoId: string; orderedWorktreeIds: string[] };
+    res: null;
+  };
+
   // Remotes (U9 / U13)
   "remote:fetch": { req: { worktreeId: string }; res: null };
   "remote:pull": {

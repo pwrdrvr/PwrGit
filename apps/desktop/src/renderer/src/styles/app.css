@@ -733,6 +733,95 @@ input {
   color: var(--text-subtle);
 }
 
+.wt-remove {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--text-subtle);
+}
+.wt-remove:hover {
+  color: var(--danger);
+}
+
+/* ---- New-worktree modal ---- */
+
+.modal {
+  width: min(420px, 92vw);
+  background: var(--bg-menu);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-overlay);
+  padding: 18px;
+}
+.modal__title {
+  font: 700 13px/1 var(--font-sans);
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+.modal__input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  margin-bottom: 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font: 500 13px/1 var(--font-mono);
+  outline: none;
+}
+.modal__input:focus {
+  border-color: var(--accent-border);
+}
+.modal__check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 500 12px/1 var(--font-sans);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.modal__error {
+  margin-top: 10px;
+  font: 500 11px/1.4 var(--font-mono);
+  color: var(--danger);
+}
+.modal__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+.modal__cancel {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 7px;
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-secondary);
+  font: 600 12px/1 var(--font-sans);
+  cursor: pointer;
+}
+.modal__create {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 7px;
+  border: none;
+  background: var(--accent);
+  color: var(--accent-on);
+  font: 700 12px/1 var(--font-sans);
+  cursor: pointer;
+}
+.modal__create:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ---- Main pane: worktree header (Fetch/Pull/Push arrive in U9) ---- */
 
 .wt-header {

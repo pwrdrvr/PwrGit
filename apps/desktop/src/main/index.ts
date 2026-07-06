@@ -14,12 +14,14 @@ import {
   createWorktreeRefresher,
   registerWorktreeHandlers
 } from "./git/worktree-handlers";
+import { registerWorktreeLifecycleHandlers } from "./git/worktree-lifecycle-handlers";
 import { WorktreeStateService } from "./git/worktree-state";
 import { emitEvent, registerIpc } from "./ipc";
 import { openDatabase } from "./persistence/db";
 import { readGitIdentityDefaults } from "./profiles/git-identity";
 import { registerProfileHandlers } from "./profiles/profile-handlers";
 import { ProfileService } from "./profiles/profile-service";
+import { SettingsService } from "./settings/settings-service";
 import { createMainWindow } from "./window";
 
 let mainWindow: BrowserWindow | null = null;
@@ -45,6 +47,9 @@ if (!gotSingleInstanceLock) {
 
   app.whenReady().then(() => {
     const db = openDatabase(join(app.getPath("userData"), "pwrgit.db"));
+    const settings = new SettingsService(
+      join(app.getPath("userData"), "settings.json")
+    );
     const profiles = new ProfileService(db);
     const identity = readGitIdentityDefaults();
     profiles.ensureSeed({
@@ -86,6 +91,7 @@ if (!gotSingleInstanceLock) {
     registerProfileHandlers(bus, profiles, rescanInBackground);
     registerRepoHandlers(bus, indexer, profiles);
     registerWorktreeHandlers(bus, stateService, watchers, db, refresher);
+    registerWorktreeLifecycleHandlers(bus, db, indexer, settings);
     registerRemoteHandlers(bus, db, refresher);
     registerGraphHandlers(bus, db, stateService);
     registerChangesHandlers(bus, db, refresher);
