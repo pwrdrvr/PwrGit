@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, type MouseEvent as ReactMouseEvent } from "react";
 import type { Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
 import { orderWorktrees, reorder, SORT_LABEL } from "./repo-view";
 import { PinIcon, WorktreeRow } from "./WorktreeRow";
@@ -8,13 +8,17 @@ export function RepoRow({
   expanded,
   containsSelection,
   selectedWorktreeId,
+  selectedIds,
   sort,
   customOrder,
   onToggleExpand,
   onToggleRepoPin,
   onSelectWorktree,
+  onContextWorktree,
   onToggleWorktreePin,
   onRemoveWorktree,
+  onRemoveSelected,
+  onClearSelected,
   onCycleSort,
   onReorder,
   onNewWorktree
@@ -23,13 +27,25 @@ export function RepoRow({
   expanded: boolean;
   containsSelection: boolean;
   selectedWorktreeId: string | null;
+  selectedIds: Set<string>;
   sort: WorktreeSort;
   customOrder: string[] | undefined;
   onToggleExpand: () => void;
   onToggleRepoPin: () => void;
-  onSelectWorktree: (worktree: Worktree) => void;
+  onSelectWorktree: (
+    worktree: Worktree,
+    e: ReactMouseEvent,
+    orderedIds: string[]
+  ) => void;
+  onContextWorktree: (
+    worktree: Worktree,
+    e: ReactMouseEvent,
+    orderedIds: string[]
+  ) => void;
   onToggleWorktreePin: (worktreeId: string, pinned: boolean) => void;
   onRemoveWorktree: (worktreeId: string) => void;
+  onRemoveSelected: () => void;
+  onClearSelected: () => void;
   onCycleSort: () => void;
   onReorder: (orderedIds: string[]) => void;
   onNewWorktree: () => void;
@@ -96,12 +112,41 @@ export function RepoRow({
             </button>
           </div>
 
+          {selectedIds.size > 1 && (
+            <div className="wt-selbar">
+              <span className="wt-selbar__count">
+                {selectedIds.size} selected
+              </span>
+              <span style={{ flex: 1 }} />
+              <button
+                className="wt-selbar__btn wt-selbar__btn--danger"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemoveSelected();
+                }}
+              >
+                Remove
+              </button>
+              <button
+                className="wt-selbar__btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClearSelected();
+                }}
+              >
+                Clear
+              </button>
+            </div>
+          )}
+
           {ordered.map((w) => (
             <WorktreeRow
               key={w.id}
               worktree={w}
               selected={w.id === selectedWorktreeId}
-              onSelect={() => onSelectWorktree(w)}
+              multiSelected={selectedIds.has(w.id)}
+              onSelect={(e) => onSelectWorktree(w, e, orderedIds)}
+              onContextMenu={(e) => onContextWorktree(w, e, orderedIds)}
               onTogglePin={() => onToggleWorktreePin(w.id, !w.pinned)}
               onRemove={() => onRemoveWorktree(w.id)}
               onDragStart={() => {

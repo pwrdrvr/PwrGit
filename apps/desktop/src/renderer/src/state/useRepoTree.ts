@@ -13,7 +13,7 @@ export type UseRepoTree = {
     branch: string,
     newBranch: boolean
   ) => Promise<string | null>;
-  removeWorktree: (worktreeId: string) => Promise<void>;
+  removeWorktrees: (worktreeIds: string[]) => Promise<void>;
   persistWorktreeOrder: (repoId: string, orderedIds: string[]) => void;
   computeRepoState: (repoId: string) => void;
 };
@@ -81,20 +81,58 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     []
   );
 
-  const removeWorktree = useCallback(async (worktreeId: string) => {
-    let r = await dispatch("worktree:remove", { worktreeId, force: false });
-    if (!r.ok && r.error.code === "dirty") {
+  const removeWorktrees = useCallback(async (worktreeIds: string[]) => {
+    if (worktreeIds.length === 0) return;
+    // Removing >1 is a bulk destructive action → confirm up front. A single
+    // removal (trash icon / context menu) goes straight to the attempt and
+    // only prompts if that worktree is dirty, matching the prior behaviour.
+    if (
+      worktreeIds.length > 1 &&
+      !window.confirm(
+        `Remove ${worktreeIds.length} worktrees? Their working directories ` +
+          `will be deleted. Branches and commits are kept.`
+      )
+    ) {
+      return;
+    }
+
+    const first = await dispatch("worktree:removeMany", {
+      worktreeIds,
+      force: false
+    });
+    if (!first.ok) {
+      window.alert(first.error.message);
+      return;
+    }
+    const { dirty } = first.value;
+    const failures = [...first.value.failed];
+
+    if (dirty.length > 0) {
+      const have = dirty.length === 1 ? "worktree has" : "worktrees have";
+      const them = dirty.length === 1 ? "it" : "them";
       if (
         window.confirm(
-          "This worktree has uncommitted changes. Remove it anyway?"
+          `${dirty.length} ${have} uncommitted changes. Remove ${them} anyway?`
         )
       ) {
-        r = await dispatch("worktree:remove", { worktreeId, force: true });
-      } else {
-        return;
+        const forced = await dispatch("worktree:removeMany", {
+          worktreeIds: dirty,
+          force: true
+        });
+        if (forced.ok) failures.push(...forced.value.failed);
+        else window.alert(forced.error.message);
       }
     }
-    if (!r.ok) window.alert(r.error.message);
+
+    if (failures.length > 0) {
+      const shown = failures
+        .slice(0, 6)
+        .map((f) => `• ${f.message}`)
+        .join("\n");
+      const more =
+        failures.length > 6 ? `\n…and ${failures.length - 6} more` : "";
+      window.alert(`Some worktrees couldn't be removed:\n${shown}${more}`);
+    }
   }, []);
 
   const persistWorktreeOrder = useCallback(
@@ -119,7 +157,7 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     setWorktreePin,
     addFolder,
     createWorktree,
-    removeWorktree,
+    removeWorktrees,
     persistWorktreeOrder,
     computeRepoState
   };

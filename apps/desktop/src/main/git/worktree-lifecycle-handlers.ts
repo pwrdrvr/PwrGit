@@ -39,44 +39,60 @@ export function registerWorktreeLifecycleHandlers(
     return ok(null);
   });
 
-  bus.register("worktree:remove", async (req) => {
-    const wt = db
-      .prepare(
-        `SELECT w.path AS path, w.is_primary AS is_primary,
-                r.id AS repo_id, r.path AS repo_path, r.profile_id AS profile_id
-         FROM worktrees w JOIN repos r ON r.id = w.repo_id
-         WHERE w.id = ?`
-      )
-      .get(req.worktreeId) as
-      | {
-          path: string;
-          is_primary: number;
-          repo_id: string;
-          repo_path: string;
-          profile_id: string;
-        }
-      | undefined;
-    if (wt === undefined) {
-      return err({
-        kind: "repo",
-        code: "not_found",
-        message: "worktree not found"
+  bus.register("worktree:removeMany", async (req) => {
+    type Row = {
+      path: string;
+      is_primary: number;
+      repo_id: string;
+      repo_path: string;
+      profile_id: string;
+    };
+    const stmt = db.prepare(
+      `SELECT w.path AS path, w.is_primary AS is_primary,
+              r.id AS repo_id, r.path AS repo_path, r.profile_id AS profile_id
+       FROM worktrees w JOIN repos r ON r.id = w.repo_id
+       WHERE w.id = ?`
+    );
+
+    const removed: string[] = [];
+    const dirty: string[] = [];
+    const failed: { id: string; message: string }[] = [];
+    const affectedRepos = new Set<string>();
+    const affectedProfiles = new Set<string>();
+
+    // Remove sequentially — concurrent `git worktree remove` in one repo would
+    // race on .git/worktrees. Dozens of removes is still fast.
+    for (const id of req.worktreeIds) {
+      const wt = stmt.get(id) as Row | undefined;
+      if (wt === undefined) {
+        failed.push({ id, message: "worktree not found" });
+        continue;
+      }
+      if (wt.is_primary === 1) {
+        failed.push({ id, message: "Can't remove the primary worktree" });
+        continue;
+      }
+      const res = await worktreeRemove(execGit, wt.repo_path, wt.path, {
+        force: req.force ?? false
       });
+      if (res.ok) {
+        removed.push(id);
+        affectedRepos.add(wt.repo_id);
+        affectedProfiles.add(wt.profile_id);
+      } else if (res.error.code === "dirty") {
+        dirty.push(id);
+      } else {
+        failed.push({ id, message: res.error.message });
+      }
     }
-    if (wt.is_primary === 1) {
-      return err({
-        kind: "repo",
-        code: "is_primary",
-        message: "Can't remove the repo's primary worktree"
-      });
+
+    for (const repoId of affectedRepos) {
+      await indexer.refreshRepoWorktrees(repoId);
     }
-    const removed = await worktreeRemove(execGit, wt.repo_path, wt.path, {
-      force: req.force ?? false
-    });
-    if (!removed.ok) return removed;
-    await indexer.refreshRepoWorktrees(wt.repo_id);
-    emitEvent("repo:changed", { profileId: wt.profile_id });
-    return ok(null);
+    for (const profileId of affectedProfiles) {
+      emitEvent("repo:changed", { profileId });
+    }
+    return ok({ removed, dirty, failed });
   });
 
   bus.register("worktree:setOrder", (req) => {

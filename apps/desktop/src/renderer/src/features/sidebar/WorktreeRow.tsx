@@ -1,4 +1,4 @@
-import type { DragEvent } from "react";
+import type { DragEvent, MouseEvent as ReactMouseEvent } from "react";
 import type { Worktree } from "@pwrgit/shared";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
 import { isPrunableWorktree, relativeAge } from "./repo-view";
@@ -6,7 +6,9 @@ import { isPrunableWorktree, relativeAge } from "./repo-view";
 export function WorktreeRow({
   worktree,
   selected,
+  multiSelected,
   onSelect,
+  onContextMenu,
   onTogglePin,
   onRemove,
   onDragStart,
@@ -16,7 +18,9 @@ export function WorktreeRow({
 }: {
   worktree: Worktree;
   selected: boolean;
-  onSelect: () => void;
+  multiSelected: boolean;
+  onSelect: (e: ReactMouseEvent) => void;
+  onContextMenu: (e: ReactMouseEvent) => void;
   onTogglePin: () => void;
   onRemove: () => void;
   onDragStart: (e: DragEvent) => void;
@@ -27,13 +31,16 @@ export function WorktreeRow({
   const prunable = isPrunableWorktree(worktree);
   return (
     <div
-      className={`wt-row${selected ? " is-selected" : ""}${prunable ? " is-stale" : ""}`}
+      className={`wt-row${selected ? " is-selected" : ""}${
+        multiSelected ? " is-multiselected" : ""
+      }${prunable ? " is-stale" : ""}`}
       draggable
       onDragStart={onDragStart}
       onDragOver={onDragOver}
       onDrop={onDrop}
       onDragEnd={onDragEnd}
       onClick={onSelect}
+      onContextMenu={onContextMenu}
     >
       <span className="wt-row__handle" title="Drag to reorder">
         <svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor">

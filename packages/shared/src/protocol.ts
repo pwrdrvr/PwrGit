@@ -68,7 +68,16 @@ export interface Commands {
     req: { repoId: string; branch: string; newBranch: boolean };
     res: null;
   };
-  "worktree:remove": { req: { worktreeId: string; force?: boolean }; res: null };
+  "worktree:removeMany": {
+    req: { worktreeIds: string[]; force?: boolean };
+    res: {
+      removed: string[];
+      /** Skipped because they have uncommitted changes (retry with force). */
+      dirty: string[];
+      /** Other failures (e.g. primary worktree, not found). */
+      failed: { id: string; message: string }[];
+    };
+  };
   "worktree:setOrder": {
     req: { repoId: string; orderedWorktreeIds: string[] };
     res: null;

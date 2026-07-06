@@ -7,16 +7,7 @@ import {
 import { createPortal } from "react-dom";
 import type { Worktree } from "@pwrgit/shared";
 import { copyText } from "../../lib/copyText";
-import { dispatch } from "../../lib/pwrgit";
-
-const revealLabel =
-  typeof navigator === "undefined"
-    ? "Show in folder"
-    : navigator.platform.startsWith("Mac")
-      ? "Reveal in Finder"
-      : navigator.platform.startsWith("Win")
-        ? "Show in Explorer"
-        : "Show in folder";
+import { revealLabel, revealPath } from "./reveal";
 
 /**
  * A "⋯" actions menu for a worktree: copy branch/path and reveal in the OS file
@@ -97,32 +88,28 @@ export function WorktreeMenu({
         createPortal(
           <div
             ref={menuRef}
-            className="kebab__menu"
+            className="pop-menu"
             role="menu"
             style={{ position: "fixed", top: pos.top, right: pos.right }}
           >
             <button
-              className="kebab__item"
+              className="pop-menu__item"
               role="menuitem"
               onClick={(e) => pick(e, () => void copyText(worktree.branch))}
             >
               Copy branch name
             </button>
             <button
-              className="kebab__item"
+              className="pop-menu__item"
               role="menuitem"
               onClick={(e) => pick(e, () => void copyText(worktree.path))}
             >
               Copy path
             </button>
             <button
-              className="kebab__item"
+              className="pop-menu__item"
               role="menuitem"
-              onClick={(e) =>
-                pick(e, () =>
-                  void dispatch("shell:revealPath", { path: worktree.path })
-                )
-              }
+              onClick={(e) => pick(e, () => revealPath(worktree.path))}
             >
               {revealLabel}
             </button>

@@ -32,7 +32,7 @@ export function App() {
     setWorktreePin,
     addFolder,
     createWorktree,
-    removeWorktree,
+    removeWorktrees,
     persistWorktreeOrder,
     computeRepoState
   } = useRepoTree(activeProfile?.id ?? null);
@@ -141,7 +141,8 @@ export function App() {
           onSelectWorktree={selectWorktree}
           onSetRepoPin={setRepoPin}
           onSetWorktreePin={setWorktreePin}
-          onRemoveWorktree={(id) => void removeWorktree(id)}
+          onRemoveWorktree={(id) => void removeWorktrees([id])}
+          onRemoveWorktrees={(ids) => void removeWorktrees(ids)}
           onCreateWorktree={createWorktree}
           onPersistOrder={persistWorktreeOrder}
           onExpandRepo={computeRepoState}
