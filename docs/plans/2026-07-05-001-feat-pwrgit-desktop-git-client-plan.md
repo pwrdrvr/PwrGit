@@ -43,6 +43,7 @@ The visual and interaction contract is already fixed by an imported, fully-worki
 - R10. Expandable repo → worktree list: sort-cycle Pinned / A–Z / Active, drag-reorder persisted per repo, per-repo and per-worktree pin toggles, and dirty / ahead / behind badges.
 - R11. Selecting a worktree renders its header, graph, and changes with no perceptible pause or reload (served from cache, invalidated by watchers).
 - R12. Worktree lifecycle: create a new worktree under a PwrGit-managed dedicated worktree root, discover worktrees created elsewhere, and remove worktrees.
+- R18. Worktree staleness signals — surfaces which of many worktrees are safe to prune. Each worktree exposes: clean vs dirty, commits behind its repo's **default branch**, whether it is already **merged into** the default branch, and **last-activity age**. A single-click **Stale** lens surfaces prunable worktrees (clean + merged-or-stale + old); the same signals show as subtle inline indicators on each worktree row. Visibility only in Milestone B; one-click removal is R12/U14.
 
 ### Git operations
 
@@ -334,14 +335,25 @@ Grouped into four milestones. Sibling code referenced as "patterns to follow" li
 
 ### U8. Worktree state read-model + instant switch cache
 
-- Goal: A cached, watcher-invalidated per-worktree state (dirty counts, ahead/behind, HEAD) that renders synchronously on selection.
+- Goal: A cached, watcher-invalidated per-worktree state (dirty counts, ahead/behind, HEAD, last-activity) that renders synchronously on selection.
 - Requirements: R11, R13 (sync-status data), R10 (badge data).
 - Dependencies: U6.
 - Files: `apps/desktop/src/main/git/worktree-state.ts`, `apps/desktop/src/main/git/watchers.ts`, `apps/desktop/src/main/persistence/migrations/0003_wt_state.sql`, `apps/desktop/src/main/handlers/worktree-handlers.ts`, `apps/desktop/src/main/git/worktree-state.test.ts`.
-- Approach: Derive state from `status --porcelain=v2 --branch` (dirty + ahead/behind hints) and `rev-list --left-right --count @{u}...HEAD` when an upstream exists; cache snapshots in SQLite. `worktree:getState` returns the cached snapshot immediately and schedules a background refresh; `chokidar` watches the active worktree's tree (debounced) and each repo's `.git/HEAD` + `.git/refs`, emitting `worktree:changed` to invalidate and re-read (KTD2). Watch lazily — active worktree deeply, others only at `.git` ref level — to bound handle usage.
+- Approach: Derive state from `status --porcelain=v2 --branch` (dirty + ahead/behind hints) and `rev-list --left-right --count @{u}...HEAD` when an upstream exists; also record last-commit time (`log -1 --format=%ct`) as `lastActivityAt`. Cache snapshots in SQLite. `worktree:getState` returns the cached snapshot immediately and schedules a background refresh; `chokidar` watches the active worktree's tree (debounced) and each repo's `.git/HEAD` + `.git/refs`, emitting `worktree:changed` to invalidate and re-read (KTD2). Watch lazily — active worktree deeply, others only at `.git` ref level — to bound handle usage. Staleness-vs-default-branch signals extend this model in U18.
 - Patterns to follow: `git status --porcelain=v2` format; `chokidar` awaitWriteFinish/debounce; PwrSnap event-broadcast pattern.
 - Test scenarios: Covers R11. First `getState` after a cold start returns within the synchronous budget from cache (empty→placeholder, then refresh event); editing a file in a watched worktree emits `worktree:changed` and the new dirty count appears; ahead/behind computed correctly against a fixture with an upstream 2 ahead / 3 behind; a worktree with no upstream reports no ahead/behind without error; switching rapidly between two worktrees never blocks on a git call.
 - Verification: clicking between worktrees shows state with no perceptible pause; external edits reflect promptly.
+
+### U18. Worktree staleness signals + Stale filter
+
+- Goal: Surface which worktrees are safe to prune across many worktrees — clean, already merged into (or far behind) the repo's default branch, and old.
+- Requirements: R18.
+- Dependencies: U8 (extends the state read-model), U7 (sidebar surface).
+- Files: `apps/desktop/src/main/git/worktree-state.ts` (extend), `apps/desktop/src/main/git/git-service.ts` (default-branch detect + merged/behind-default), `apps/desktop/src/main/persistence/migrations/0003_wt_state.sql` (extend), `apps/desktop/src/renderer/src/features/sidebar/repo-view.ts` (Stale filter), `apps/desktop/src/renderer/src/features/sidebar/WorktreeRow.tsx` (inline indicators), `apps/desktop/src/main/git/staleness.test.ts`, `apps/desktop/src/renderer/src/features/sidebar/repo-view.test.ts` (extend).
+- Approach: Detect each repo's default branch once (`git symbolic-ref refs/remotes/origin/HEAD`, fallback to a local `main`/`master`). Per worktree, compute `behindDefault` (`rev-list --count <branch>..<default>`), `mergedIntoDefault` (`merge-base --is-ancestor <branch> <default>`), and reuse `lastActivityAt` from U8. Fold into the cached snapshot (same background-refresh + concurrency-bounded path as U8 — 156 worktrees means these git calls must be batched, cached, and lazy, never on the click path). A worktree is **stale/prunable** when clean AND (merged into default OR far-behind-with-no-unique-commits) AND `lastActivityAt` older than a threshold. Add a `Stale` lens to `repo-view` filtering to repos with prunable worktrees; render subtle inline indicators (merged · ↓N behind main · age) on each worktree row. Visibility only — removal is U14.
+- Patterns to follow: U8's cached-snapshot + concurrency-bounded refresh; `merge-base --is-ancestor` exit-code semantics; the existing lens/`repo-view` structure from U7.
+- Test scenarios: Covers R18. default-branch detection resolves origin/HEAD then falls back to main/master; `mergedIntoDefault` true for a branch whose tip is an ancestor of default, false otherwise; `behindDefault` counts default-only commits correctly; a clean+merged+old worktree is classified prunable while a dirty or ahead-with-unique-commits one is not; the `Stale` lens filters to repos containing a prunable worktree; inline indicators render merged/behind/age. Edge: a worktree on the default branch itself is never flagged stale.
+- Verification: on a repo with a merged, untouched feature worktree, the Stale lens surfaces it and the row shows merged + age; active/dirty worktrees are excluded.
 
 ### U9. Worktree header + sync controls (Fetch/Pull/Push)
 
