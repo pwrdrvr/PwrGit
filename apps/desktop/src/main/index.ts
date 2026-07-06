@@ -28,6 +28,15 @@ import { createMainWindow } from "./window";
 
 let mainWindow: BrowserWindow | null = null;
 
+// Relocate all app data (db, settings, profiles) to an explicit directory when
+// PWRGIT_USER_DATA_DIR is set. e2e uses this to give each run an isolated,
+// disposable data dir; unset in normal use, so production is unaffected. Must
+// run before anything reads app.getPath("userData").
+const dataDirOverride = process.env["PWRGIT_USER_DATA_DIR"];
+if (dataDirOverride !== undefined && dataDirOverride !== "") {
+  app.setPath("userData", dataDirOverride);
+}
+
 const bus = new CommandBus();
 bus.register("ping", () => ok("pong"));
 

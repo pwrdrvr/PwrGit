@@ -1,5 +1,8 @@
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { _electron as electron, expect, test } from "@playwright/test";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 /**
  * U1 verification: the app boots a single window with the React root mounted.
@@ -9,7 +12,7 @@ import { _electron as electron, expect, test } from "@playwright/test";
  */
 test("boots a single window with #root mounted", async () => {
   const electronApp = await electron.launch({
-    args: [join(__dirname, "..", "out", "main", "index.js")]
+    args: [join(HERE, "..", "out", "main", "index.js")]
   });
 
   const window = await electronApp.firstWindow();
