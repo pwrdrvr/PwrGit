@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800;900&family=Geist+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: #0a0908; color: #f5efe3; font-family: "Geist","SF Pro Text","Inter",system-ui,sans-serif; overflow: hidden; -webkit-font-smoothing: antialiased; }
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-thumb { background: rgba(140,133,122,0.4); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  @keyframes pg-sweep { 0%{left:-40%;transform:scaleX(1)} 50%{left:100%;transform:scaleX(1)} 50.01%{left:100%;transform:scaleX(-1)} 100%{left:-40%;transform:scaleX(-1)} }
+  @keyframes pg-fade { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
+  @keyframes pg-scan { 0%{top:-10%;opacity:0} 15%{opacity:1} 85%{opacity:1} 100%{top:110%;opacity:0} }
+  button { font-family: inherit; }
+  input { font-family: inherit; }
+</style>
+</helmet>
+
+<div style="height:100vh; display:flex; flex-direction:column; background:#0a0908;">
+
+  <!-- Titlebar -->
+  <div style="height:32px; flex:0 0 auto; display:flex; align-items:center; gap:10px; padding:0 12px; background:#050403; border-bottom:1px solid rgba(247,243,235,0.08); position:relative; z-index:30;">
+    <div style="display:flex; gap:8px;">
+      <span style="width:12px;height:12px;border-radius:999px;background:#ff5f56;"></span>
+      <span style="width:12px;height:12px;border-radius:999px;background:#ffbd2e;"></span>
+      <span style="width:12px;height:12px;border-radius:999px;background:#27c93f;"></span>
+    </div>
+    <div style="flex:1; text-align:center; font:700 12px/1 'Geist',sans-serif; color:#b8b0a4; letter-spacing:0.01em;">PwrGit</div>
+    <div style="width:52px;"></div>
+  </div>
+
+  <!-- 3-pane body -->
+  <div style="flex:1; min-height:0; display:grid; grid-template-columns:320px minmax(0,1fr) {{ railWidth }}; position:relative;">
+
+    <!-- ============ SIDEBAR ============ -->
+    <aside style="background:#0e0d0b; border-right:1px solid rgba(247,243,235,0.08); display:flex; flex-direction:column; min-height:0;">
+
+      <!-- Profile chip -->
+      <div style="padding:12px 12px 10px; border-bottom:1px solid rgba(247,243,235,0.08); position:relative;">
+        <button onClick="{{ onToggleProfileMenu }}" style="{{ profileChipStyle }}">
+          <span style="{{ profileMonoStyle }}">{{ profileMono }}</span>
+          <span style="flex:1; min-width:0; text-align:left; display:flex; flex-direction:column; gap:2px;">
+            <span style="font:700 13px/1 'Geist',sans-serif; color:#f5efe3;">{{ profileName }}</span>
+            <span style="font:500 10.5px/1 'Geist Mono',monospace; color:#8a8275; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ profileEmail }}</span>
+          </span>
+          <span style="{{ profileCaretStyle }}"></span>
+        </button>
+
+        <sc-if value="{{ profileMenuOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute; top:calc(100% - 2px); left:12px; right:12px; z-index:40; background:#1a1714; border:1px solid rgba(247,243,235,0.12); border-radius:10px; box-shadow:0 18px 48px rgba(0,0,0,0.5); padding:6px; animation:pg-fade 140ms cubic-bezier(0.22,1,0.36,1);">
+            <div style="padding:6px 8px 4px; font:600 10px/1 'Geist',sans-serif; color:#8a8275; letter-spacing:0.08em; text-transform:uppercase;">Profiles</div>
+            <sc-for list="{{ profileMenu }}" as="p" hint-placeholder-count="3">
+              <button onClick="{{ p.onPick }}" style="{{ p.style }}">
+                <span style="{{ p.monoStyle }}">{{ p.mono }}</span>
+                <span style="flex:1; min-width:0; text-align:left; display:flex; flex-direction:column; gap:1px;">
+                  <span style="font:600 12.5px/1.1 'Geist',sans-serif; color:#f5efe3;">{{ p.name }}</span>
+                  <span style="font:500 10px/1 'Geist Mono',monospace; color:#8a8275; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ p.email }}</span>
+                </span>
+                <sc-if value="{{ p.open }}"><span style="font:600 9px/1 'Geist Mono',monospace; color:#9ce5b3; display:flex; align-items:center; gap:4px;"><span style="width:6px;height:6px;border-radius:999px;background:#6dba7e;"></span>open</span></sc-if>
+              </button>
+            </sc-for>
+            <div style="height:1px; background:rgba(247,243,235,0.08); margin:6px 4px;"></div>
+            <div style="padding:4px 8px 6px; font:500 10.5px/1.4 'Geist',sans-serif; color:#5a544b;">Same GitHub identity · commit email set per profile</div>
+          </div>
+        </sc-if>
+      </div>
+
+      <!-- Repo search -->
+      <div style="padding:10px 12px 8px;">
+        <button onClick="{{ onOpenOverlay }}" style="width:100%; height:34px; display:flex; align-items:center; gap:8px; padding:0 10px; background:#0d0c0a; border:1px solid rgba(247,243,235,0.12); border-radius:8px; color:#8a8275; cursor:pointer; transition:border-color 140ms ease;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          <span style="flex:1; text-align:left; font:500 12.5px/1 'Geist',sans-serif;">Jump to repo…</span>
+          <span style="font:600 10px/1 'Geist Mono',monospace; color:#5a544b; border:1px solid rgba(247,243,235,0.12); border-radius:4px; padding:3px 5px;">⌘K</span>
+        </button>
+      </div>
+
+      <!-- Filter lens -->
+      <div style="padding:0 12px 10px;">
+        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:3px; padding:3px; border:1px solid rgba(247,243,235,0.08); border-radius:9px; background:#13110e;">
+          <sc-for list="{{ lenses }}" as="l" hint-placeholder-count="4">
+            <button onClick="{{ l.onClick }}" style="{{ l.style }}">{{ l.label }}<sc-if value="{{ l.count }}"><span style="{{ l.countStyle }}">{{ l.count }}</span></sc-if></button>
+          </sc-for>
+        </div>
+      </div>
+
+      <!-- Repo / worktree list -->
+      <div style="flex:1; min-height:0; overflow-y:auto; padding:0 8px 16px;">
+        <sc-for list="{{ repos }}" as="repo" hint-placeholder-count="6">
+          <div style="margin-bottom:2px;">
+            <div onClick="{{ repo.onToggleExpand }}" style="{{ repo.rowStyle }}">
+              <span style="{{ repo.chevStyle }}"></span>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="{{ repo.iconColor }}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="flex:0 0 auto;"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
+              <span style="flex:1; min-width:0; text-align:left; font:600 13px/1.1 'Geist',sans-serif; color:#f5efe3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ repo.name }}</span>
+              <sc-if value="{{ repo.behindFlag }}"><span style="display:inline-flex; align-items:center; height:18px; padding:0 6px; border-radius:999px; background:rgba(216,168,90,0.14); color:#e8c890; font:600 10px/1 'Geist Mono',monospace;">{{ repo.behindText }}</span></sc-if>
+              <span style="font:500 10.5px/1 'Geist Mono',monospace; color:#5a544b;">{{ repo.wtCountText }}</span>
+              <span onClick="{{ repo.onTogglePin }}" style="{{ repo.pinStyle }}" title="Pin repo">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="{{ repo.pinFill }}" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9Z"/></svg>
+              </span>
+            </div>
+
+            <sc-if value="{{ repo.expanded }}">
+              <div style="padding:3px 0 6px 8px; margin:2px 0 4px 15px; border-left:1px solid rgba(247,243,235,0.08);">
+                <div style="display:flex; align-items:center; gap:6px; padding:2px 6px 6px 4px;">
+                  <span style="font:600 9px/1 'Geist',sans-serif; color:#5a544b; letter-spacing:0.08em; text-transform:uppercase;">Worktrees</span>
+                  <span style="flex:1;"></span>
+                  <button onClick="{{ repo.onCycleSort }}" style="display:inline-flex; align-items:center; gap:4px; height:20px; padding:0 7px; background:transparent; border:1px solid rgba(247,243,235,0.08); border-radius:6px; color:#8a8275; font:600 9.5px/1 'Geist Mono',monospace; cursor:pointer;">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h13M3 12h9M3 18h5M18 9l3-3 3 3M21 6v12"/></svg>
+                    {{ repo.sortLabel }}
+                  </button>
+                </div>
+                <sc-for list="{{ repo.worktrees }}" as="wt" hint-placeholder-count="2">
+                  <div draggable="true" onDragStart="{{ wt.onDragStart }}" onDragOver="{{ wt.onDragOver }}" onDrop="{{ wt.onDrop }}" onDragEnd="{{ wt.onDragEnd }}" onClick="{{ wt.onSelect }}" style="{{ wt.rowStyle }}">
+                    <span style="{{ wt.handleStyle }}"><svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor"><circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="2" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="2" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg></span>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="{{ wt.branchColor }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:0 0 auto;"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg>
+                    <span style="{{ wt.labelStyle }}">{{ wt.branch }}</span>
+                    <sc-if value="{{ wt.dirty }}"><span style="display:inline-flex; align-items:center; height:16px; padding:0 5px; border-radius:999px; background:rgba(216,168,90,0.14); color:#e8c890; font:600 9.5px/1 'Geist Mono',monospace; flex:0 0 auto;">{{ wt.dirtyText }}</span></sc-if>
+                    <sc-if value="{{ wt.ahead }}"><span style="font:600 10px/1 'Geist Mono',monospace; color:#9ce5b3; flex:0 0 auto;">{{ wt.aheadText }}</span></sc-if>
+                    <sc-if value="{{ wt.behind }}"><span style="font:600 10px/1 'Geist Mono',monospace; color:#e8c890; flex:0 0 auto;">{{ wt.behindText }}</span></sc-if>
+                    <span onClick="{{ wt.onTogglePin }}" style="{{ wt.pinStyle }}" title="Pin worktree">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="{{ wt.pinFill }}" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9Z"/></svg>
+                    </span>
+                  </div>
+                </sc-for>
+                <button onClick="{{ repo.onNewWorktree }}" style="display:flex; align-items:center; gap:7px; width:100%; height:28px; padding:0 8px; margin-top:2px; background:transparent; border:1px dashed rgba(247,243,235,0.12); border-radius:7px; color:#8a8275; font:500 11px/1 'Geist',sans-serif; cursor:pointer;">
+                  <span style="font-size:13px;">+</span> New worktree
+                </button>
+              </div>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </aside>
+
+    <!-- ============ MAIN PANE ============ -->
+    <main style="display:flex; flex-direction:column; min-width:0; min-height:0; background:#0a0908;">
+
+      <!-- Worktree header -->
+      <div style="flex:0 0 auto; padding:14px 20px; border-bottom:1px solid rgba(247,243,235,0.08); display:flex; align-items:center; gap:14px;">
+        <div style="flex:1; min-width:0; overflow:hidden;">
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:5px; min-width:0; overflow:hidden;">
+            <span style="font:700 15px/1 'Geist',sans-serif; color:#fda984; flex:0 0 auto;">{{ hdrRepo }}</span>
+            <span style="color:#5a544b; flex:0 0 auto;">›</span>
+            <span style="display:inline-flex; align-items:center; gap:6px; height:22px; padding:0 9px; border-radius:999px; background:rgba(232,116,58,0.14); color:#f5efe3; font:500 11.5px/1 'Geist Mono',monospace; min-width:0; overflow:hidden;">
+              <span style="width:7px;height:7px;border-radius:999px;background:#e8743a; flex:0 0 auto;"></span><span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ hdrBranch }}</span>
+            </span>
+          </div>
+          <div style="font:500 11px/1 'Geist Mono',monospace; color:#8a8275; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ hdrPath }}</div>
+        </div>
+
+        <!-- sync status -->
+        <sc-if value="{{ showBtnLabels }}">
+        <div style="display:flex; align-items:center; gap:6px; font:600 11px/1 'Geist Mono',monospace; flex:0 0 auto;">
+          <span style="{{ hdrSyncStyle }}">{{ hdrSyncText }}</span>
+        </div>
+        </sc-if>
+
+        <div style="display:flex; gap:8px; flex:0 0 auto;">
+          <button onClick="{{ onFetch }}" title="Fetch" style="{{ fetchBtnStyle }}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg><sc-if value="{{ showBtnLabels }}">Fetch</sc-if>
+          </button>
+          <button onClick="{{ onPull }}" title="{{ pullTitle }}" style="{{ pullBtnStyle }}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg><sc-if value="{{ showBtnLabels }}">{{ pullLabel }}</sc-if>
+          </button>
+          <button onClick="{{ onPush }}" title="Push" style="{{ pushBtnStyle }}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V9"/><path d="m7 14 5-5 5 5"/><path d="M5 4h14"/></svg><sc-if value="{{ showBtnLabels }}">Push</sc-if>
+          </button>
+        </div>
+      </div>
+
+      <!-- Graph toolbar -->
+      <div style="flex:0 0 auto; padding:12px 20px 10px; display:flex; align-items:center; gap:12px;">
+        <span style="font:600 11px/1 'Geist',sans-serif; color:#e8743a; letter-spacing:0.06em; text-transform:uppercase;">Lineage</span>
+        <span style="flex:1;"></span>
+        <span style="font:500 11px/1 'Geist',sans-serif; color:#8a8275;">{{ graphCountText }}</span>
+        <button onClick="{{ onToggleOnlyMe }}" style="{{ onlyMeStyle }}">
+          <span style="{{ onlyMeDotStyle }}"></span>Only me
+        </button>
+      </div>
+
+      <!-- Commit graph -->
+      <div style="flex:1; min-height:0; overflow-y:auto; padding:0 20px 20px; position:relative;">
+        <div style="border:1px solid rgba(247,243,235,0.08); border-radius:10px; background:#13110e; overflow:hidden;">
+          <sc-for list="{{ commits }}" as="c" hint-placeholder-count="7">
+            <div onClick="{{ c.onClick }}" style="{{ c.rowStyle }}">
+              <div style="width:46px; flex:0 0 auto; align-self:stretch;">
+                <svg width="46" height="100%" viewBox="0 0 46 66" preserveAspectRatio="none" style="display:block; height:100%;">
+                  <line x1="23" y1="0" x2="23" y2="33" stroke="{{ c.topColor }}" stroke-width="2"/>
+                  <line x1="23" y1="33" x2="23" y2="66" stroke="{{ c.botColor }}" stroke-width="2"/>
+                  <path d="M41 66 C 41 48, 32 40, 23 33" fill="none" stroke="{{ c.mergeColor }}" stroke-width="2"/>
+                  <circle cx="41" cy="60" r="{{ c.mergeDotR }}" fill="{{ c.mergeColor }}"/>
+                  <circle cx="23" cy="33" r="6" fill="{{ c.dotFill }}" stroke="{{ c.dotStroke }}" stroke-width="2.5"/>
+                </svg>
+              </div>
+              <span style="{{ c.checkStyle }}"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#1a0d05" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="m20 6-11 11-5-5"/></svg></span>
+              <div style="flex:1; min-width:0; padding:11px 0;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                  <span style="{{ c.msgStyle }}">{{ c.msg }}</span>
+                  <span style="font:500 10.5px/1 'Geist',sans-serif; color:#5a544b; flex:0 0 auto;">{{ c.time }}</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px; margin-top:5px;">
+                  <span style="{{ c.authorStyle }}">{{ c.author }}</span>
+                  <span style="font:500 10px/1 'Geist Mono',monospace; color:#5a544b;">{{ c.hash }}</span>
+                  <sc-if value="{{ c.isMergeFlag }}"><span style="display:inline-flex; align-items:center; height:16px; padding:0 6px; border-radius:999px; background:#1a1714; color:#8a8275; font:600 9px/1 'Geist Mono',monospace;">merge</span></sc-if>
+                  <sc-if value="{{ c.isBaseFlag }}"><span style="display:inline-flex; align-items:center; height:16px; padding:0 6px; border-radius:999px; background:rgba(232,116,58,0.14); color:#fda984; font:600 9px/1 'Geist Mono',monospace;">branch root</span></sc-if>
+                </div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+        <sc-if value="{{ hiddenNoteVisible }}">
+          <div style="margin-top:10px; padding:10px 14px; border:1px dashed rgba(247,243,235,0.1); border-radius:8px; display:flex; align-items:center; gap:10px; font:500 11.5px/1.4 'Geist',sans-serif; color:#8a8275;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a8275" stroke-width="1.7" stroke-linecap="round"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7v5l3 2"/></svg>
+            {{ hiddenNoteText }} <button onClick="{{ onToggleOnlyMe }}" style="background:none;border:none;color:#fda984;font:600 11.5px/1 'Geist',sans-serif;cursor:pointer;padding:0;">Show all branches</button>
+          </div>
+        </sc-if>
+      </div>
+
+      <!-- Selection action bar -->
+      <sc-if value="{{ actionBarVisible }}">
+        <div style="flex:0 0 auto; margin:0 20px 16px; padding:10px 14px; border:1px solid rgba(232,116,58,0.38); border-radius:10px; background:#2a1810; display:flex; align-items:center; gap:12px; box-shadow:0 12px 28px rgba(0,0,0,0.36); animation:pg-fade 160ms cubic-bezier(0.22,1,0.36,1);">
+          <span style="font:700 12px/1 'Geist',sans-serif; color:#fda984;">{{ selCountText }}</span>
+          <span style="width:1px; height:16px; background:rgba(247,243,235,0.14);"></span>
+          <button onClick="{{ onSquash }}" style="height:28px; padding:0 11px; border-radius:6px; border:1px solid rgba(232,116,58,0.38); background:#1a1714; color:#f5efe3; font:600 11.5px/1 'Geist',sans-serif; cursor:pointer;">Squash</button>
+          <button onClick="{{ onReorder }}" style="height:28px; padding:0 11px; border-radius:6px; border:1px solid rgba(247,243,235,0.12); background:#1a1714; color:#f5efe3; font:600 11.5px/1 'Geist',sans-serif; cursor:pointer;">Reorder</button>
+          <span style="flex:1;"></span>
+          <button onClick="{{ onAskAgent }}" style="height:28px; padding:0 12px; border-radius:6px; border:none; background:#e8743a; color:#1a0d05; font:700 11.5px/1 'Geist',sans-serif; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">Ask agent →</button>
+          <button onClick="{{ onClearSel }}" style="height:28px; width:28px; border-radius:6px; border:1px solid rgba(247,243,235,0.12); background:transparent; color:#8a8275; font:600 13px/1 'Geist',sans-serif; cursor:pointer;">×</button>
+        </div>
+      </sc-if>
+    </main>
+
+    <!-- ============ RIGHT RAIL ============ -->
+    <aside style="{{ railStyle }}">
+      <!-- rail tabs -->
+      <div style="flex:0 0 auto; display:flex; align-items:center; gap:2px; padding:10px 12px; border-bottom:1px solid rgba(247,243,235,0.08);">
+        <sc-for list="{{ railTabs }}" as="t" hint-placeholder-count="2">
+          <button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.label }}<sc-if value="{{ t.badge }}"><span style="{{ t.badgeStyle }}">{{ t.badge }}</span></sc-if></button>
+        </sc-for>
+        <span style="flex:1;"></span>
+        <button onClick="{{ onToggleRail }}" style="width:26px;height:26px;border-radius:6px;border:1px solid rgba(247,243,235,0.08);background:transparent;color:#8a8275;cursor:pointer;" title="Collapse">›</button>
+      </div>
+
+      <!-- CHANGES tab -->
+      <sc-if value="{{ showChanges }}">
+        <div style="flex:1; min-height:0; display:flex; flex-direction:column;">
+          <div style="flex:1; min-height:0; overflow-y:auto; padding:12px;">
+            <sc-if value="{{ hasChanges }}">
+              <div>
+                <div style="font:600 10px/1 'Geist',sans-serif; color:#8a8275; letter-spacing:0.08em; text-transform:uppercase; margin:2px 0 8px;">Staged · {{ stagedCount }}</div>
+                <sc-for list="{{ stagedFiles }}" as="f" hint-placeholder-count="3">
+                  <div style="display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:7px; margin-bottom:2px; background:#13110e;">
+                    <span style="{{ f.statusStyle }}">{{ f.status }}</span>
+                    <span style="flex:1; min-width:0; font:500 11px/1.3 'Geist Mono',monospace; color:#b8b0a4; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; direction:rtl; text-align:left;">{{ f.path }}</span>
+                    <button onClick="{{ f.onToggle }}" style="width:20px;height:20px;border-radius:5px;border:1px solid rgba(247,243,235,0.12);background:transparent;color:#8a8275;font:600 12px/1 'Geist',sans-serif;cursor:pointer;">−</button>
+                  </div>
+                </sc-for>
+                <div style="font:600 10px/1 'Geist',sans-serif; color:#8a8275; letter-spacing:0.08em; text-transform:uppercase; margin:14px 0 8px;">Changes · {{ unstagedCount }}</div>
+                <sc-for list="{{ unstagedFiles }}" as="f" hint-placeholder-count="3">
+                  <div style="display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:7px; margin-bottom:2px;">
+                    <span style="{{ f.statusStyle }}">{{ f.status }}</span>
+                    <span style="flex:1; min-width:0; font:500 11px/1.3 'Geist Mono',monospace; color:#8a8275; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; direction:rtl; text-align:left;">{{ f.path }}</span>
+                    <button onClick="{{ f.onToggle }}" style="width:20px;height:20px;border-radius:5px;border:1px solid rgba(247,243,235,0.12);background:transparent;color:#8a8275;font:600 12px/1 'Geist',sans-serif;cursor:pointer;">+</button>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+            <sc-if value="{{ noChanges }}">
+              <div style="padding:40px 16px; text-align:center;">
+                <div style="width:40px;height:40px;margin:0 auto 12px;border-radius:999px;background:rgba(109,186,126,0.14);display:flex;align-items:center;justify-content:center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6dba7e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m20 6-11 11-5-5"/></svg></div>
+                <div style="font:600 13px/1.4 'Geist',sans-serif; color:#b8b0a4;">Worktree is clean.</div>
+                <div style="font:500 11px/1.5 'Geist',sans-serif; color:#5a544b; margin-top:4px;">Nothing to commit.</div>
+              </div>
+            </sc-if>
+          </div>
+          <sc-if value="{{ hasChanges }}">
+            <div style="flex:0 0 auto; border-top:1px solid rgba(247,243,235,0.08); padding:12px; background:#0e0d0b;">
+              <input value="{{ commitMsg }}" onInput="{{ onCommitMsg }}" placeholder="Summary" style="width:100%; height:32px; padding:0 10px; margin-bottom:8px; background:#0d0c0a; border:1px solid rgba(247,243,235,0.12); border-radius:7px; color:#f5efe3; font:500 12px/1 'Geist',sans-serif; outline:none;">
+              <div style="display:flex; gap:8px;">
+                <button onClick="{{ onCommit }}" style="{{ commitBtnStyle }}">{{ commitLabel }}</button>
+                <button style="height:32px; padding:0 12px; border-radius:7px; border:1px solid rgba(247,243,235,0.12); background:#1a1714; color:#b8b0a4; font:600 12px/1 'Geist',sans-serif; cursor:pointer;">Amend</button>
+              </div>
+              <div style="margin-top:8px; font:500 10.5px/1.3 'Geist Mono',monospace; color:#5a544b;">as {{ profileEmail }}</div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+
+      <!-- AGENT tab -->
+      <sc-if value="{{ showAgent }}">
+        <div style="flex:1; min-height:0; overflow-y:auto; padding:14px;">
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:14px;">
+            <span style="width:26px;height:26px;border-radius:7px;background:#2a1810;border:1px solid rgba(232,116,58,0.38);display:flex;align-items:center;justify-content:center;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fda984" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/></svg></span>
+            <div style="flex:1;">
+              <div style="font:700 13px/1 'Geist',sans-serif; color:#f5efe3;">Rebase assistant</div>
+              <div style="font:500 10.5px/1 'Geist Mono',monospace; color:#8a8275; margin-top:3px;">Codex · gpt-5.5 · ACP</div>
+            </div>
+          </div>
+
+          <sc-if value="{{ agentEmpty }}">
+            <div style="padding:20px 8px; border:1px dashed rgba(247,243,235,0.12); border-radius:9px; text-align:center;">
+              <div style="font:500 12px/1.6 'Geist',sans-serif; color:#8a8275;">Select commits in the graph, then choose <span style="color:#fda984;">Squash</span> or <span style="color:#fda984;">Reorder</span>. The agent drafts a rebase plan you approve before it runs.</div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ agentActive }}">
+            <div>
+              <div style="font:600 10px/1 'Geist',sans-serif; color:#8a8275; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:8px;">{{ agentActionLabel }} · {{ agentSelCount }} commits</div>
+              <div style="border:1px solid rgba(247,243,235,0.08); border-radius:9px; background:#13110e; overflow:hidden; margin-bottom:14px;">
+                <sc-for list="{{ agentCommits }}" as="ac" hint-placeholder-count="3">
+                  <div style="display:flex; align-items:center; gap:8px; padding:9px 11px; border-bottom:1px solid rgba(247,243,235,0.06);">
+                    <span style="width:6px;height:6px;border-radius:999px;background:#e8743a;flex:0 0 auto;"></span>
+                    <span style="flex:1; min-width:0; font:500 11.5px/1.3 'Geist',sans-serif; color:#f5efe3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ ac.msg }}</span>
+                    <span style="font:500 9.5px/1 'Geist Mono',monospace; color:#5a544b;">{{ ac.hash }}</span>
+                  </div>
+                </sc-for>
+              </div>
+
+              <div style="font:600 10px/1 'Geist',sans-serif; color:#8a8275; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:8px;">Proposed plan</div>
+              <div style="position:relative; border:1px solid rgba(247,243,235,0.08); border-radius:9px; background:#0d0c0a; padding:12px 14px; margin-bottom:14px; overflow:hidden;">
+                <sc-if value="{{ agentRunning }}"><div style="position:absolute; left:0; right:0; height:36px; background:linear-gradient(180deg, transparent, rgba(232,116,58,0.16), transparent); animation:pg-scan 1.5s ease-in-out infinite; pointer-events:none;"></div></sc-if>
+                <sc-for list="{{ agentPlan }}" as="pl" hint-placeholder-count="3">
+                  <div style="display:flex; gap:8px; font:500 11.5px/1.7 'Geist Mono',monospace; color:#b8b0a4;"><span style="color:{{ pl.color }};">{{ pl.op }}</span><span style="flex:1; min-width:0;">{{ pl.text }}</span></div>
+                </sc-for>
+              </div>
+
+              <div style="display:flex; gap:8px;">
+                <button onClick="{{ onApplyRebase }}" style="{{ applyBtnStyle }}">{{ applyLabel }}</button>
+                <button onClick="{{ onClearSel }}" style="height:34px; padding:0 14px; border-radius:7px; border:1px solid rgba(247,243,235,0.12); background:#1a1714; color:#b8b0a4; font:600 12px/1 'Geist',sans-serif; cursor:pointer;">Discard</button>
+              </div>
+              <div style="margin-top:10px; font:500 10.5px/1.5 'Geist',sans-serif; color:#5a544b;">Runs locally on the worktree. Nothing is pushed until you press Push.</div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+    </aside>
+
+    <!-- collapsed rail tab -->
+    <sc-if value="{{ railCollapsed }}">
+      <button onClick="{{ onToggleRail }}" style="position:absolute; top:14px; right:14px; z-index:20; height:32px; padding:0 12px; border-radius:7px; border:1px solid rgba(247,243,235,0.12); background:#1a1714; color:#b8b0a4; font:600 12px/1 'Geist',sans-serif; cursor:pointer;">‹ Panel</button>
+    </sc-if>
+
+  </div>
+
+  <!-- ============ REPO SWITCHER OVERLAY ============ -->
+  <sc-if value="{{ overlayOpen }}">
+    <div onClick="{{ onCloseOverlay }}" style="position:fixed; inset:0; z-index:100; background:rgba(10,9,8,0.72); display:flex; align-items:flex-start; justify-content:center; padding-top:12vh; animation:pg-fade 120ms ease;">
+      <div onClick="{{ stop }}" style="width:min(620px,92vw); background:#1a1714; border:1px solid rgba(247,243,235,0.14); border-radius:14px; box-shadow:0 32px 80px rgba(0,0,0,0.6); overflow:hidden;">
+        <div style="display:flex; align-items:center; gap:11px; padding:15px 18px; border-bottom:1px solid rgba(247,243,235,0.08);">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#8a8275" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          <input id="pg-repo-search" value="{{ query }}" onInput="{{ onQuery }}" placeholder="Search repos across all profiles…" style="flex:1; background:transparent; border:none; outline:none; color:#f5efe3; font:500 15px/1 'Geist',sans-serif;">
+          <span style="font:600 10px/1 'Geist Mono',monospace; color:#5a544b; border:1px solid rgba(247,243,235,0.12); border-radius:4px; padding:3px 6px;">esc</span>
+        </div>
+        <div style="max-height:52vh; overflow-y:auto; padding:8px;">
+          <sc-for list="{{ results }}" as="r" hint-placeholder-count="6">
+            <button onClick="{{ r.onPick }}" style="{{ r.style }}">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8a8275" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="flex:0 0 auto;"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
+              <span style="flex:1; min-width:0; text-align:left; font:600 13px/1.2 'Geist',sans-serif; color:#f5efe3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ r.name }}</span>
+              <span style="font:500 10px/1 'Geist Mono',monospace; color:#8a8275;">{{ r.meta }}</span>
+              <span style="{{ r.profStyle }}">{{ r.profile }}</span>
+            </button>
+          </sc-for>
+          <sc-if value="{{ noResults }}"><div style="padding:28px; text-align:center; font:500 12.5px/1 'Geist',sans-serif; color:#5a544b;">No repos match "{{ query }}"</div></sc-if>
+        </div>
+        <div style="display:flex; align-items:center; gap:16px; padding:10px 18px; border-top:1px solid rgba(247,243,235,0.08); font:500 10.5px/1 'Geist Mono',monospace; color:#5a544b;">
+          <span>↑↓ navigate</span><span>↵ open</span><span style="flex:1;"></span><span>{{ resultCountText }}</span>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- toast -->
+  <sc-if value="{{ toastVisible }}">
+    <div style="position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:120; padding:11px 16px; border-radius:9px; background:#1a1714; border:1px solid rgba(232,116,58,0.38); box-shadow:0 18px 48px rgba(0,0,0,0.5); display:flex; align-items:center; gap:9px; animation:pg-fade 160ms cubic-bezier(0.22,1,0.36,1);">
+      <span style="width:7px;height:7px;border-radius:999px;background:#6dba7e;"></span>
+      <span style="font:600 12px/1 'Geist',sans-serif; color:#f5efe3;">{{ toastText }}</span>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1360,&quot;height&quot;:860}}">
+const PROFILES = [
+  { id: 'pwrdrvr', name: 'PwrDrvr', email: 'nick@pwrdrvr.com', mono: 'P', kind: 'Personal org' },
+  { id: 'acme', name: 'Acme Cloud', email: 'n.maddox@acmecloud.io', mono: 'A', kind: 'Work' },
+  { id: 'openclaw', name: 'Openclaw', email: 'nick@openclaw.dev', mono: 'O', kind: 'Side' },
+];
+
+function wt(branch, dirty, ahead, behind) { return { branch, dirty, ahead, behind }; }
+
+const REPOS = {
+  pwrdrvr: [
+    { id: 'pwrgit', name: 'PwrGit', wts: [ wt('feat/worktree-drag-sort', 6, 3, 0), wt('main', 0, 0, 0), wt('fix/graph-only-me-scope', 0, 0, 2) ] },
+    { id: 'pwragnt', name: 'PwrAgnt', wts: [ wt('main', 0, 0, 0), wt('fix/telegram-topic-resume-picker', 2, 1, 0), wt('messaging-streaming-oai', 0, 0, 4) ] },
+    { id: 'pwrsnap', name: 'PwrSnap', wts: [ wt('main', 0, 0, 3), wt('fix/editor-selection-render-loop', 1, 0, 0) ] },
+    { id: 'microapps-router', name: 'microapps-router', wts: [ wt('main', 0, 0, 0) ] },
+    { id: 'microapps-release', name: 'microapps-app-release', wts: [ wt('main', 0, 0, 1) ] },
+    { id: 'cdk-constructs', name: 'cdk-constructs', wts: [ wt('main', 0, 0, 0), wt('chore/bump-aws-cdk', 0, 2, 0) ] },
+    { id: 'codex-app-server', name: 'codex-app-server', wts: [ wt('main', 0, 0, 5) ] },
+    { id: 'telegram-adapter', name: 'telegram-adapter', wts: [ wt('main', 0, 0, 0) ] },
+  ],
+  acme: [
+    { id: 'billing-service', name: 'billing-service', wts: [ wt('main', 0, 0, 0), wt('fix/invoice-rounding', 3, 1, 0) ] },
+    { id: 'edge-gateway', name: 'edge-gateway', wts: [ wt('main', 0, 0, 2) ] },
+    { id: 'terraform-infra', name: 'terraform-infra', wts: [ wt('main', 0, 0, 0), wt('feat/vpc-peering', 0, 4, 0) ] },
+    { id: 'auth-broker', name: 'auth-broker', wts: [ wt('main', 0, 0, 1) ] },
+    { id: 'data-pipeline', name: 'data-pipeline', wts: [ wt('main', 0, 0, 0) ] },
+  ],
+  openclaw: [
+    { id: 'clawback', name: 'clawback', wts: [ wt('main', 0, 0, 0), wt('feat/crab-cache', 4, 2, 0) ] },
+    { id: 'crab-cli', name: 'crab-cli', wts: [ wt('main', 0, 0, 1) ] },
+    { id: 'shellback', name: 'shellback', wts: [ wt('main', 0, 0, 0) ] },
+  ],
+};
+
+const COMMIT_SETS = {
+  'pwrgit::feat/worktree-drag-sort': [
+    { id: 'k8', msg: 'feat: persist worktree drag order per repo', me: true, hash: 'a3f91c2', time: '2h ago' },
+    { id: 'k7', msg: 'feat: drag handles + dnd reorder for worktrees', me: true, hash: '7d0be14', time: '3h ago' },
+    { id: 'k6', msg: 'refactor: extract WorktreeList selector', me: true, hash: '12e8a9f', time: '5h ago' },
+    { id: 'k5', msg: "Merge branch 'main' into feat/worktree-drag-sort", me: true, merge: true, hash: 'ff02aa1', time: 'yesterday' },
+    { id: 'k4', msg: 'chore: bump electron to 30.1', me: false, author: 'Dana Ng', hash: '9c73d20', time: '2d ago' },
+    { id: 'k3', msg: 'fix: sidebar scroll jank on expand', me: true, hash: '4b1c0de', time: '3d ago' },
+    { id: 'k2', msg: 'feat: worktree model + IPC surface', me: true, hash: 'e50f7a3', time: '4d ago' },
+    { id: 'k1', msg: 'feat: initial worktree scaffolding', me: true, base: true, hash: '0091b2c', time: '5d ago' },
+  ],
+};
+
+const CHANGES = {
+  'pwrgit::feat/worktree-drag-sort': {
+    staged: [
+      { status: 'M', path: 'src/renderer/features/worktrees/WorktreeList.tsx' },
+      { status: 'M', path: 'src/renderer/features/worktrees/dnd.ts' },
+      { status: 'A', path: 'src/renderer/features/worktrees/useWorktreeOrder.ts' },
+    ],
+    unstaged: [
+      { status: 'M', path: 'src/renderer/features/sidebar/Sidebar.tsx' },
+      { status: 'M', path: 'packages/agent-core/src/worktree.ts' },
+      { status: '?', path: 'notes/dnd-scratch.md' },
+    ],
+  },
+};
+
+class Component extends DCLogic {
+  state = {
+    profileId: 'pwrdrvr',
+    profileMenuOpen: false,
+    openProfiles: ['pwrdrvr'],
+    lens: 'Recent',
+    expanded: { pwrgit: true },
+    sel: 'pwrgit::feat/worktree-drag-sort',
+    pinnedRepos: { pwrgit: true, pwragnt: true },
+    pinnedWts: { 'pwrgit::feat/worktree-drag-sort': true },
+    wtSort: {},
+    wtOrder: {},
+    railTab: 'changes',
+    railCollapsed: false,
+    onlyMe: true,
+    selCommits: {},
+    agentAction: null,
+    agentRunning: false,
+    applied: false,
+    overlayOpen: false,
+    query: '',
+    winW: typeof window !== 'undefined' ? window.innerWidth : 1360,
+    sync: 'idle',
+    commitMsg: '',
+    staged: {},
+    toast: null,
+  };
+
+  componentDidMount() {
+    this._key = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); this.openOverlay(); }
+      if (e.key === 'Escape') { this.setState({ overlayOpen: false, profileMenuOpen: false }); }
+    };
+    window.addEventListener('keydown', this._key);
+    this._resize = () => this.setState({ winW: window.innerWidth });
+    window.addEventListener('resize', this._resize);
+  }
+  componentWillUnmount() { window.removeEventListener('keydown', this._key); window.removeEventListener('resize', this._resize); }
+
+  toast(text) { clearTimeout(this._tt); this.setState({ toast: text }); this._tt = setTimeout(() => this.setState({ toast: null }), 2400); }
+
+  openOverlay() {
+    this.setState({ overlayOpen: true, query: '' });
+    setTimeout(() => { const el = document.getElementById('pg-repo-search'); if (el) el.focus(); }, 40);
+  }
+
+  reposFor(pid) { return REPOS[pid] || []; }
+  repoById(id) { return this.reposFor(this.state.profileId).find(r => r.id === id); }
+
+  orderedWts(repo) {
+    const s = this.state;
+    let list = repo.wts.slice();
+    const custom = s.wtOrder[repo.id];
+    if (custom) {
+      list.sort((a, b) => custom.indexOf(a.branch) - custom.indexOf(b.branch));
+    } else {
+      const mode = s.wtSort[repo.id] || 'pinned';
+      if (mode === 'az') list.sort((a, b) => a.branch.localeCompare(b.branch));
+      else if (mode === 'active') list.sort((a, b) => (b.dirty + b.ahead) - (a.dirty + a.ahead));
+    }
+    const mode = s.wtSort[repo.id] || 'pinned';
+    if (mode === 'pinned' && !custom) {
+      list.sort((a, b) => (s.pinnedWts[repo.id + '::' + b.branch] ? 1 : 0) - (s.pinnedWts[repo.id + '::' + a.branch] ? 1 : 0));
+    }
+    return list;
+  }
+
+  switchProfile(pid) {
+    const repos = this.reposFor(pid);
+    const first = repos[0];
+    const sel = first ? first.id + '::' + first.wts[0].branch : null;
+    const open = this.state.openProfiles.includes(pid) ? this.state.openProfiles : [...this.state.openProfiles, pid];
+    this.setState({ profileId: pid, profileMenuOpen: false, sel, expanded: first ? { [first.id]: true } : {}, selCommits: {}, agentAction: null, openProfiles: open });
+    this.toast('Switched to ' + PROFILES.find(p => p.id === pid).name);
+  }
+
+  commitsForSel() {
+    const s = this.state;
+    let list = COMMIT_SETS[s.sel];
+    if (!list) {
+      const branch = s.sel.split('::')[1] || 'main';
+      list = [
+        { id: 'g4', msg: 'chore: prep release notes', me: true, hash: 'aa11bb2', time: '4h ago' },
+        { id: 'g3', msg: 'Merge pull request #— into ' + branch, me: false, author: 'ci-bot', merge: true, hash: 'cc33dd4', time: '1d ago' },
+        { id: 'g2', msg: 'fix: tighten error handling on ' + branch, me: true, hash: 'ee55ff6', time: '2d ago' },
+        { id: 'g1', msg: 'feat: scaffold ' + branch, me: true, base: true, hash: '778899a', time: '3d ago' },
+      ];
+    }
+    return list;
+  }
+
+  changesForSel() { return CHANGES[this.state.sel] || null; }
+
+  renderVals() {
+    const s = this.state;
+    const prof = PROFILES.find(p => p.id === s.profileId);
+    const repos = this.reposFor(s.profileId);
+    const selRepoId = s.sel ? s.sel.split('::')[0] : null;
+    const selBranch = s.sel ? s.sel.split('::')[1] : null;
+    const selRepo = this.repoById(selRepoId);
+    const selWt = selRepo ? selRepo.wts.find(w => w.branch === selBranch) : null;
+
+    // ---------- profile ----------
+    const profileChipStyle = 'width:100%; display:flex; align-items:center; gap:10px; padding:7px 8px; background:' + (s.profileMenuOpen ? '#1f1a15' : 'transparent') + '; border:1px solid ' + (s.profileMenuOpen ? 'rgba(232,116,58,0.38)' : 'rgba(247,243,235,0.08)') + '; border-radius:9px; cursor:pointer; transition:background 140ms ease, border-color 140ms ease;';
+    const monoTile = (bg, col) => 'width:30px; height:30px; flex:0 0 auto; border-radius:8px; display:flex; align-items:center; justify-content:center; font:800 14px/1 "Geist",sans-serif; background:' + bg + '; color:' + col + ';';
+    const profileMono = prof.mono;
+    const profileMonoStyle = monoTile('#2a1810', '#fda984');
+    const profileCaretStyle = 'width:7px;height:7px;border-right:1.6px solid #8a8275;border-bottom:1.6px solid #8a8275;transform:rotate(' + (s.profileMenuOpen ? '-135deg' : '45deg') + ');transition:transform 140ms ease;flex:0 0 auto;margin-right:2px;';
+
+    const profileMenu = PROFILES.map(p => {
+      const active = p.id === s.profileId;
+      return {
+        name: p.name, email: p.email, mono: p.mono, open: s.openProfiles.includes(p.id),
+        style: 'width:100%; display:flex; align-items:center; gap:10px; padding:8px; border-radius:8px; border:1px solid ' + (active ? 'rgba(232,116,58,0.38)' : 'transparent') + '; background:' + (active ? '#2a1810' : 'transparent') + '; cursor:pointer;',
+        monoStyle: monoTile(active ? '#3a2216' : '#13110e', active ? '#fda984' : '#b8b0a4'),
+        onPick: () => this.switchProfile(p.id),
+      };
+    });
+
+    // ---------- lenses ----------
+    const behindCount = repos.filter(r => r.wts.some(w => w.behind > 0)).length;
+    const pinnedCount = repos.filter(r => s.pinnedRepos[r.id] || r.wts.some(w => s.pinnedWts[r.id + '::' + w.branch])).length;
+    const lensDefs = [
+      { key: 'Recent', label: 'Recent', count: 0 },
+      { key: 'Pinned', label: 'Pinned', count: pinnedCount },
+      { key: 'Behind', label: 'Behind', count: behindCount },
+      { key: 'All', label: 'All', count: repos.length },
+    ];
+    const lenses = lensDefs.map(l => {
+      const active = s.lens === l.key;
+      return {
+        label: l.label, count: l.count || 0,
+        onClick: () => this.setState({ lens: l.key }),
+        style: 'position:relative; height:30px; display:flex; align-items:center; justify-content:center; gap:5px; border-radius:7px; border:1px solid ' + (active ? 'rgba(232,116,58,0.38)' : 'transparent') + '; background:' + (active ? '#2a1810' : 'transparent') + '; color:' + (active ? '#fda984' : '#8a8275') + '; font:600 11.5px/1 "Geist",sans-serif; cursor:pointer;',
+        countStyle: 'font:600 9px/1 "Geist Mono",monospace; color:' + (active ? '#fda984' : '#5a544b') + '; opacity:0.9;',
+      };
+    });
+
+    // ---------- repo list (filtered) ----------
+    let filtered = repos.slice();
+    if (s.lens === 'Behind') filtered = filtered.filter(r => r.wts.some(w => w.behind > 0));
+    else if (s.lens === 'Pinned') filtered = filtered.filter(r => s.pinnedRepos[r.id] || r.wts.some(w => s.pinnedWts[r.id + '::' + w.branch]));
+    // pinned repos first (except when filtering behind)
+    filtered.sort((a, b) => (s.pinnedRepos[b.id] ? 1 : 0) - (s.pinnedRepos[a.id] ? 1 : 0));
+
+    const sortLabels = { pinned: 'Pinned', az: 'A–Z', active: 'Active' };
+    const sortCycle = { pinned: 'az', az: 'active', active: 'pinned' };
+
+    const reposVM = filtered.map(repo => {
+      const expanded = !!s.expanded[repo.id];
+      const behind = repo.wts.reduce((m, w) => Math.max(m, w.behind), 0);
+      const pinned = !!s.pinnedRepos[repo.id];
+      const active = repo.id === selRepoId;
+      const mode = s.wtSort[repo.id] || 'pinned';
+      return {
+        id: repo.id, name: repo.name,
+        expanded,
+        behindFlag: behind > 0, behindText: '↓' + behind,
+        wtCountText: repo.wts.length + (repo.wts.length === 1 ? ' wt' : ' wts'),
+        iconColor: active ? '#fda984' : '#8a8275',
+        rowStyle: 'display:flex; align-items:center; gap:9px; width:100%; height:36px; padding:0 8px; border:1px solid transparent; border-radius:8px; cursor:pointer; background:' + (active && !expanded ? '#1f1a15' : 'transparent') + '; transition:background 140ms ease;',
+        chevStyle: 'width:7px;height:7px;flex:0 0 auto;border-right:1.7px solid #8a8275;border-bottom:1.7px solid #8a8275;transform:rotate(' + (expanded ? '45deg' : '-45deg') + ');transition:transform 140ms ease;',
+        pinned, pinFill: pinned ? '#e8743a' : 'none',
+        pinStyle: 'flex:0 0 auto; width:20px; height:20px; display:flex; align-items:center; justify-content:center; border-radius:5px; cursor:pointer; color:' + (pinned ? '#e8743a' : '#5a544b') + ';',
+        onToggleExpand: () => this.setState(st => ({ expanded: { ...st.expanded, [repo.id]: !st.expanded[repo.id] }, sel: st.sel && st.sel.split('::')[0] === repo.id ? st.sel : (repo.id + '::' + repo.wts[0].branch), selCommits: {}, agentAction: null })),
+        onTogglePin: (e) => { e.stopPropagation(); this.setState(st => ({ pinnedRepos: { ...st.pinnedRepos, [repo.id]: !st.pinnedRepos[repo.id] } })); },
+        onCycleSort: (e) => { e.stopPropagation(); this.setState(st => ({ wtSort: { ...st.wtSort, [repo.id]: sortCycle[st.wtSort[repo.id] || 'pinned'] }, wtOrder: { ...st.wtOrder, [repo.id]: undefined } })); },
+        onNewWorktree: (e) => { e.stopPropagation(); this.toast('New worktree from ' + repo.name); },
+        sortLabel: sortLabels[mode],
+        worktrees: this.orderedWts(repo).map(w => {
+          const wid = repo.id + '::' + w.branch;
+          const selected = wid === s.sel;
+          const wpinned = !!s.pinnedWts[wid];
+          return {
+            branch: w.branch, dirty: w.dirty, ahead: w.ahead, behind: w.behind,
+            dirtyText: '●' + w.dirty, aheadText: '↑' + w.ahead, behindText: '↓' + w.behind,
+            selected,
+            branchColor: selected ? '#fda984' : '#8a8275',
+            rowStyle: 'display:flex; align-items:center; gap:7px; padding:0 7px 0 4px; height:30px; border-radius:7px; cursor:pointer; border:1px solid ' + (selected ? 'rgba(232,116,58,0.38)' : 'transparent') + '; background:' + (selected ? '#2a1810' : 'transparent') + '; transition:background 120ms ease;',
+            labelStyle: 'flex:1; min-width:0; text-align:left; font:500 11.5px/1.2 "Geist Mono",monospace; color:' + (selected ? '#fda984' : '#b8b0a4') + '; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;',
+            handleStyle: 'flex:0 0 auto; width:11px; display:flex; align-items:center; justify-content:center; color:#5a544b; cursor:grab;',
+            pinFill: wpinned ? '#e8743a' : 'none',
+            pinStyle: 'flex:0 0 auto; width:18px; height:18px; display:flex; align-items:center; justify-content:center; border-radius:5px; cursor:pointer; color:' + (wpinned ? '#e8743a' : '#5a544b') + ';',
+            onSelect: () => this.setState({ sel: wid, selCommits: {}, agentAction: null, applied: false, commitMsg: '', staged: {}, railTab: 'changes' }),
+            onTogglePin: (e) => { e.stopPropagation(); this.setState(st => ({ pinnedWts: { ...st.pinnedWts, [wid]: !st.pinnedWts[wid] } })); },
+            onDragStart: (e) => { this._dragWt = { repo: repo.id, branch: w.branch }; e.dataTransfer.effectAllowed = 'move'; },
+            onDragOver: (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; },
+            onDragEnd: () => { this._dragWt = null; },
+            onDrop: (e) => {
+              e.preventDefault(); e.stopPropagation();
+              const d = this._dragWt; if (!d || d.repo !== repo.id || d.branch === w.branch) return;
+              const cur = this.orderedWts(repo).map(x => x.branch);
+              const from = cur.indexOf(d.branch); const to = cur.indexOf(w.branch);
+              cur.splice(to, 0, cur.splice(from, 1)[0]);
+              this.setState(st => ({ wtOrder: { ...st.wtOrder, [repo.id]: cur }, wtSort: { ...st.wtSort, [repo.id]: 'custom' } }));
+              this._dragWt = null;
+            },
+          };
+        }),
+      };
+    });
+
+    // ---------- header ----------
+    const behindSel = selWt ? selWt.behind : 0;
+    const aheadSel = selWt ? selWt.ahead : 0;
+    const hdrRepo = selRepo ? selRepo.name : '—';
+    const hdrBranch = selBranch || '—';
+    const hdrPath = '~/wt/' + (selRepoId || 'repo') + '/' + (selBranch ? selBranch.replace(/\//g, '-') : 'main');
+    let hdrSyncText, hdrSyncStyle;
+    const syncChip = (txt, col, bg) => 'display:inline-flex; align-items:center; gap:6px; height:24px; padding:0 10px; border-radius:999px; background:' + bg + '; color:' + col + '; font:600 11px/1 "Geist Mono",monospace;';
+    if (s.sync === 'fetching') { hdrSyncText = 'fetching…'; hdrSyncStyle = syncChip('#e8c890', '#e8c890', 'rgba(216,168,90,0.14)'); }
+    else if (s.sync === 'done') { hdrSyncText = 'fast-forwarded'; hdrSyncStyle = syncChip('#9ce5b3', '#9ce5b3', 'rgba(109,186,126,0.14)'); }
+    else if (behindSel > 0) { hdrSyncText = '↓' + behindSel + ' behind' + (aheadSel ? ' · ↑' + aheadSel : ''); hdrSyncStyle = syncChip('#e8c890', '#e8c890', 'rgba(216,168,90,0.14)'); }
+    else if (aheadSel > 0) { hdrSyncText = '↑' + aheadSel + ' ahead'; hdrSyncStyle = syncChip('#9ce5b3', '#9ce5b3', 'rgba(109,186,126,0.14)'); }
+    else { hdrSyncText = 'up to date'; hdrSyncStyle = syncChip('#8a8275', '#8a8275', '#13110e'); }
+
+    const pullDisabled = s.sync === 'fetching';
+    const pullLabel = s.sync === 'fetching' ? 'Pulling…' : 'Pull';
+    // responsive: collapse sync buttons to icon-only when the main pane is tight
+    const mainW = s.winW - 320 - (s.railCollapsed ? 0 : 344);
+    const compact = mainW < 500;
+    const showBtnLabels = !compact;
+    const sizing = compact ? 'width:32px; padding:0; justify-content:center;' : 'padding:0 12px;';
+    const pullSizing = compact ? 'width:32px; padding:0; justify-content:center;' : 'padding:0 13px;';
+    const neutralBtn = 'height:32px; ' + sizing + ' border-radius:7px; border:1px solid rgba(247,243,235,0.12); background:#1a1714; color:#f5efe3; font:600 12px/1 "Geist",sans-serif; cursor:pointer; display:inline-flex; align-items:center; gap:6px;';
+    const fetchBtnStyle = neutralBtn;
+    const pushBtnStyle = neutralBtn;
+    const pullTitle = behindSel > 0 ? 'Pull · fetch + fast-forward (↓' + behindSel + ')' : 'Pull · fetch + fast-forward';
+    const pullBtnStyle = 'height:32px; ' + pullSizing + ' border-radius:7px; border:1px solid rgba(232,116,58,0.38); background:' + (behindSel > 0 && s.sync === 'idle' ? '#2a1810' : '#1a1714') + '; color:#fda984; font:700 12px/1 "Geist",sans-serif; cursor:' + (pullDisabled ? 'wait' : 'pointer') + '; opacity:' + (pullDisabled ? '0.7' : '1') + '; display:inline-flex; align-items:center; gap:6px;';
+
+    // ---------- commit graph ----------
+    let raw = this.commitsForSel();
+    const visible = s.onlyMe ? raw.filter(c => c.me || c.base) : raw;
+    const hiddenCount = raw.length - visible.length;
+    const n = visible.length;
+    const commits = visible.map((c, i) => {
+      const selected = !!s.selCommits[c.id];
+      const other = !c.me;
+      const dotFill = c.base ? '#0e0d0b' : (other ? '#4a443b' : '#e8743a');
+      const dotStroke = c.base ? '#e8743a' : (other ? '#3a352e' : '#0e0d0b');
+      return {
+        msg: c.msg, time: c.time, hash: c.hash,
+        author: c.me ? 'you' : (c.author || 'unknown'),
+        authorStyle: 'font:600 10.5px/1 "Geist",sans-serif; color:' + (c.me ? '#b8b0a4' : '#8a8275') + ';',
+        isMergeFlag: !!c.merge, isBaseFlag: !!c.base,
+        topColor: i > 0 ? '#5b4025' : 'transparent',
+        botColor: i < n - 1 ? '#5b4025' : 'transparent',
+        mergeColor: c.merge ? '#7a5f3f' : 'transparent',
+        mergeDotR: c.merge ? 4 : 0,
+        dotFill, dotStroke,
+        checkStyle: 'flex:0 0 auto; align-self:center; width:18px; height:18px; border-radius:5px; display:flex; align-items:center; justify-content:center; border:1.5px solid ' + (selected ? '#e8743a' : 'rgba(247,243,235,0.14)') + '; background:' + (selected ? '#e8743a' : 'transparent') + ';',
+        msgStyle: 'flex:1; min-width:0; font:600 12.5px/1.3 "Geist",sans-serif; color:' + (other ? '#8a8275' : '#f5efe3') + '; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;',
+        rowStyle: 'display:flex; align-items:stretch; gap:9px; padding:0 12px 0 4px; min-height:66px; cursor:pointer; border-bottom:1px solid rgba(247,243,235,0.05); background:' + (selected ? 'rgba(232,116,58,0.08)' : 'transparent') + '; transition:background 120ms ease;',
+        onClick: () => this.setState(st => { const sc = { ...st.selCommits }; if (sc[c.id]) delete sc[c.id]; else sc[c.id] = true; return { selCommits: sc, agentAction: st.agentAction && Object.keys(sc).length ? st.agentAction : null }; }),
+      };
+    });
+
+    const selIds = Object.keys(s.selCommits).filter(id => visible.some(c => c.id === id));
+    const selCount = selIds.length;
+    const graphCountText = s.onlyMe ? (visible.length + ' commits by you') : (visible.length + ' commits');
+    const hiddenNoteVisible = s.onlyMe && hiddenCount > 0;
+    const hiddenNoteText = hiddenCount + ' commit' + (hiddenCount === 1 ? '' : 's') + ' from others hidden.';
+
+    // ---------- rail ----------
+    const changes = this.changesForSel();
+    const dirtyCount = selWt ? selWt.dirty : 0;
+    const railWidth = s.railCollapsed ? '0px' : '344px';
+    const railStyle = 'background:#0e0d0b; border-left:1px solid rgba(247,243,235,0.08); display:' + (s.railCollapsed ? 'none' : 'flex') + '; flex-direction:column; min-height:0;';
+
+    const railTabDefs = [ { key: 'changes', label: 'Changes', badge: dirtyCount || 0 }, { key: 'agent', label: 'Agent', badge: 0 } ];
+    const railTabs = railTabDefs.map(t => {
+      const active = s.railTab === t.key;
+      return {
+        label: t.label, badge: t.badge || 0,
+        onClick: () => this.setState({ railTab: t.key }),
+        style: 'display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 12px; border-radius:7px; border:1px solid ' + (active ? 'rgba(232,116,58,0.38)' : 'transparent') + '; background:' + (active ? '#2a1810' : 'transparent') + '; color:' + (active ? '#fda984' : '#8a8275') + '; font:600 12px/1 "Geist",sans-serif; cursor:pointer;',
+        badgeStyle: 'display:inline-flex; align-items:center; justify-content:center; min-width:16px; height:16px; padding:0 4px; border-radius:999px; background:rgba(216,168,90,0.16); color:#e8c890; font:600 9px/1 "Geist Mono",monospace;',
+      };
+    });
+
+    const statusStyle = (st) => {
+      const map = { M: ['#e8c890', 'rgba(216,168,90,0.14)'], A: ['#9ce5b3', 'rgba(109,186,126,0.14)'], D: ['#ffb0a1', 'rgba(232,90,58,0.16)'], '?': ['#8a8275', '#1a1714'] };
+      const c = map[st] || map['?'];
+      return 'flex:0 0 auto; width:18px; height:18px; border-radius:5px; display:flex; align-items:center; justify-content:center; font:700 10px/1 "Geist Mono",monospace; color:' + c[0] + '; background:' + c[1] + ';';
+    };
+    const mkFile = (f, staged) => ({ status: f.status, statusStyle: statusStyle(f.status), path: f.path, onToggle: () => this.toast((staged ? 'Unstaged ' : 'Staged ') + f.path.split('/').pop()) });
+    const stagedFiles = changes ? changes.staged.map(f => mkFile(f, true)) : [];
+    const unstagedFiles = changes ? changes.unstaged.map(f => mkFile(f, false)) : [];
+    const hasChanges = !!changes;
+    const commitBtnStyle = 'flex:1; height:32px; border-radius:7px; border:none; background:' + (s.commitMsg.trim() ? '#e8743a' : '#2a1810') + '; color:' + (s.commitMsg.trim() ? '#1a0d05' : '#8a5a3a') + '; font:700 12px/1 "Geist",sans-serif; cursor:' + (s.commitMsg.trim() ? 'pointer' : 'not-allowed') + ';';
+    const commitLabel = 'Commit ' + (stagedFiles.length ? stagedFiles.length + ' file' + (stagedFiles.length === 1 ? '' : 's') : '');
+
+    // ---------- agent ----------
+    const agentActive = !!s.agentAction && selCount > 0;
+    const agentSel = visible.filter(c => s.selCommits[c.id]);
+    const agentCommits = agentSel.map(c => ({ msg: c.msg, hash: c.hash }));
+    const agentActionLabel = s.agentAction === 'reorder' ? 'Reorder' : 'Squash';
+    let agentPlan = [];
+    if (s.agentAction === 'squash') {
+      const top = agentSel[0];
+      agentPlan = [
+        { op: 'pick', color: '#9ce5b3', text: (top ? top.hash + '  ' + top.msg : '') },
+        ...agentSel.slice(1).map(c => ({ op: 'squash', color: '#e8743a', text: c.hash + '  ' + c.msg })),
+        { op: '#', color: '#5a544b', text: '→ 1 commit, message drafted from ' + selCount + ' subjects' },
+      ];
+    } else if (s.agentAction === 'reorder') {
+      agentPlan = agentSel.slice().reverse().map((c, i) => ({ op: (i + 1) + '.', color: '#6b9ad8', text: c.hash + '  ' + c.msg }));
+      agentPlan.push({ op: '#', color: '#5a544b', text: '→ oldest-first, no content change' });
+    }
+    const applyLabel = s.applied ? 'Applied ✓' : (s.agentRunning ? 'Running…' : 'Apply rebase');
+    const applyBtnStyle = 'flex:1; height:34px; border-radius:7px; border:none; background:' + (s.applied ? '#2a1810' : '#e8743a') + '; color:' + (s.applied ? '#9ce5b3' : '#1a0d05') + '; font:700 12px/1 "Geist",sans-serif; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:6px;';
+
+    // ---------- overlay ----------
+    const q = s.query.trim().toLowerCase();
+    let allRepos = [];
+    PROFILES.forEach(p => (REPOS[p.id] || []).forEach(r => allRepos.push({ repo: r, profile: p })));
+    let matched = q ? allRepos.filter(x => x.repo.name.toLowerCase().includes(q) || x.repo.id.toLowerCase().includes(q)) : allRepos.filter(x => x.profile.id === s.profileId);
+    matched = matched.slice(0, 40);
+    const profTint = { pwrdrvr: '#fda984', acme: '#6b9ad8', openclaw: '#9ce5b3' };
+    const results = matched.map((x, i) => ({
+      name: x.repo.name,
+      meta: x.repo.wts.length + (x.repo.wts.length === 1 ? ' wt' : ' wts'),
+      profile: x.profile.name,
+      profStyle: 'flex:0 0 auto; display:inline-flex; align-items:center; height:20px; padding:0 8px; border-radius:999px; background:#13110e; border:1px solid rgba(247,243,235,0.08); color:' + (profTint[x.profile.id] || '#8a8275') + '; font:600 9.5px/1 "Geist Mono",monospace;',
+      style: 'width:100%; display:flex; align-items:center; gap:11px; padding:9px 11px; border-radius:8px; border:1px solid transparent; background:' + (i === 0 ? '#2a1810' : 'transparent') + '; cursor:pointer;',
+      onPick: () => {
+        const pid = x.profile.id;
+        const openIt = () => this.setState(st => ({ overlayOpen: false, expanded: { ...st.expanded, [x.repo.id]: true }, sel: x.repo.id + '::' + x.repo.wts[0].branch, selCommits: {}, agentAction: null, railTab: 'changes' }));
+        if (pid !== s.profileId) { this.switchProfile(pid); setTimeout(openIt, 0); } else openIt();
+        this.toast('Opened ' + x.repo.name);
+      },
+    }));
+
+    return {
+      railWidth,
+      // profile
+      profileName: prof.name, profileEmail: prof.email, profileMono, profileMonoStyle, profileChipStyle, profileCaretStyle,
+      profileMenuOpen: s.profileMenuOpen, profileMenu,
+      onToggleProfileMenu: () => this.setState(st => ({ profileMenuOpen: !st.profileMenuOpen })),
+      // overlay open
+      onOpenOverlay: () => this.openOverlay(),
+      // lenses + repos
+      lenses, repos: reposVM,
+      // header
+      hdrRepo, hdrBranch, hdrPath, hdrSyncText, hdrSyncStyle, pullBtnStyle, pullLabel, pullTitle,
+      fetchBtnStyle, pushBtnStyle, showBtnLabels,
+      onFetch: () => { this.setState({ sync: 'fetching' }); setTimeout(() => { this.setState({ sync: 'idle' }); this.toast('Fetched ' + hdrRepo); }, 900); },
+      onPull: () => {
+        if (s.sync === 'fetching') return;
+        this.setState({ sync: 'fetching' });
+        setTimeout(() => {
+          const repos2 = REPOS[s.profileId]; const r = repos2.find(rr => rr.id === selRepoId);
+          if (r) { const w = r.wts.find(ww => ww.branch === selBranch); if (w) w.behind = 0; }
+          this.setState({ sync: 'done' });
+          this.toast('Fast-forwarded · up to date');
+          setTimeout(() => this.setState({ sync: 'idle' }), 1600);
+        }, 950);
+      },
+      onPush: () => this.toast('Pushed ' + hdrBranch),
+      // graph
+      graphCountText, commits, hiddenNoteVisible, hiddenNoteText,
+      onlyMeStyle: 'display:inline-flex; align-items:center; gap:7px; height:28px; padding:0 11px; border-radius:7px; border:1px solid ' + (s.onlyMe ? 'rgba(232,116,58,0.38)' : 'rgba(247,243,235,0.12)') + '; background:' + (s.onlyMe ? '#2a1810' : 'transparent') + '; color:' + (s.onlyMe ? '#fda984' : '#8a8275') + '; font:600 11.5px/1 "Geist",sans-serif; cursor:pointer;',
+      onlyMeDotStyle: 'width:8px;height:8px;border-radius:2px;background:' + (s.onlyMe ? '#e8743a' : 'transparent') + ';border:1.5px solid ' + (s.onlyMe ? '#e8743a' : '#5a544b') + ';',
+      onToggleOnlyMe: () => this.setState(st => ({ onlyMe: !st.onlyMe })),
+      // action bar
+      actionBarVisible: selCount > 0,
+      selCountText: selCount + ' commit' + (selCount === 1 ? '' : 's') + ' selected',
+      onSquash: () => this.setState({ agentAction: 'squash', railTab: 'agent', applied: false }),
+      onReorder: () => this.setState({ agentAction: 'reorder', railTab: 'agent', applied: false }),
+      onAskAgent: () => this.setState({ agentAction: s.agentAction || 'squash', railTab: 'agent', applied: false }),
+      onClearSel: () => this.setState({ selCommits: {}, agentAction: null, applied: false }),
+      // rail
+      railStyle, railCollapsed: s.railCollapsed,
+      onToggleRail: () => this.setState(st => ({ railCollapsed: !st.railCollapsed })),
+      railTabs, showChanges: s.railTab === 'changes', showAgent: s.railTab === 'agent',
+      hasChanges, noChanges: !hasChanges,
+      stagedFiles, unstagedFiles, stagedCount: stagedFiles.length, unstagedCount: unstagedFiles.length,
+      commitMsg: s.commitMsg, onCommitMsg: (e) => this.setState({ commitMsg: e.target.value }),
+      commitBtnStyle, commitLabel,
+      onCommit: () => { if (!s.commitMsg.trim()) return; this.toast('Committed to ' + hdrBranch); this.setState({ commitMsg: '' }); },
+      // agent
+      agentEmpty: !agentActive, agentActive,
+      agentActionLabel, agentSelCount: selCount, agentCommits, agentPlan,
+      agentRunning: s.agentRunning, applyLabel, applyBtnStyle,
+      onApplyRebase: () => {
+        if (s.applied) return;
+        this.setState({ agentRunning: true });
+        setTimeout(() => { this.setState({ agentRunning: false, applied: true }); this.toast(agentActionLabel + ' applied to ' + hdrBranch); }, 1400);
+      },
+      // overlay
+      overlayOpen: s.overlayOpen, query: s.query,
+      onQuery: (e) => this.setState({ query: e.target.value }),
+      onCloseOverlay: () => this.setState({ overlayOpen: false }),
+      stop: (e) => e.stopPropagation(),
+      results, noResults: results.length === 0, resultCountText: results.length + ' repos',
+      // toast
+      toastVisible: !!s.toast, toastText: s.toast || '',
+    };
+  }
+}
+</script>
+</body>
+</html>

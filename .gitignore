@@ -1,0 +1,51 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+out/
+build/
+*.tsbuildinfo
+
+# Electron packaging / distributables
+release/
+*.app
+*.dmg
+*.exe
+*.AppImage
+*.deb
+*.snap
+
+# Native module build artifacts
+prebuilds/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# Test / coverage
+coverage/
+playwright-report/
+test-results/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+.idea/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Claude Design exports (redundant with the extracted source under design/)
+design/*.zip
+design/.thumbnail
