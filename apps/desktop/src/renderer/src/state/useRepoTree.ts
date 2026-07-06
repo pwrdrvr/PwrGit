@@ -179,9 +179,11 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     []
   );
 
-  // Compute a repo's worktree badges lazily when its row is expanded.
+  // Compute a repo's worktree badges lazily when its row is expanded, and
+  // refresh GitHub PR status (TTL-throttled in the main process).
   const computeRepoState = useCallback((repoId: string) => {
     void dispatch("repo:computeState", { repoId });
+    void dispatch("pr:refresh", { repoId });
   }, []);
 
   return {

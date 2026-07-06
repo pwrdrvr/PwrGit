@@ -49,8 +49,12 @@ export const STALE_AGE_DAYS = 14;
 export function isPrunableWorktree(w: Worktree, now: number = Date.now()): boolean {
   if (w.isDefaultBranch || w.isPrimary) return false;
   if (w.dirty > 0) return false;
-  // Safe to prune when merged into the default branch, or when the branch
-  // shares no history with it (rewritten/orphaned) — both plus old + clean.
+  // A merged PR is definitive — the work is in the base branch, so it's safe to
+  // prune at any age. This catches squash/rebase merges that the git-ancestry
+  // check below can't see (the original commits aren't in the default branch).
+  if (w.pr?.state === "merged") return true;
+  // Otherwise fall back to the git heuristic: contained in the default branch,
+  // or sharing no history with it (rewritten/orphaned) — both plus old + clean.
   if (!w.mergedIntoDefault && !w.divergedFromDefault) return false;
   if (w.lastActivityAt === undefined) return false;
   const ageMs = now - new Date(w.lastActivityAt).getTime();

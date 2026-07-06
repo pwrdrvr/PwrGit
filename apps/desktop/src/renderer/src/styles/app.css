@@ -2034,3 +2034,61 @@ body.is-col-resizing {
   background: var(--danger);
   color: #2a0d08;
 }
+
+/* ---- PR status chip ---- */
+
+.pr-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 18px;
+  padding: 0 7px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  font: 600 9.5px/1 var(--font-mono);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.pr-chip:hover,
+.pr-chip:focus-visible {
+  outline: none;
+  border-color: var(--accent-border);
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+.pr-chip__dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.pr-chip--open .pr-chip__dot {
+  background: var(--info);
+}
+.pr-chip--merged .pr-chip__dot {
+  background: var(--success-bright);
+}
+.pr-chip--closed .pr-chip__dot {
+  background: var(--text-subtle);
+}
+.pr-chip--merged {
+  color: var(--success-bright);
+}
+.pr-chip--draft .pr-chip__dot {
+  opacity: 0.7;
+}
+.pr-chip__draft-bar {
+  position: absolute;
+  bottom: 2px;
+  left: 7px;
+  width: 12px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--text-subtle);
+  pointer-events: none;
+}

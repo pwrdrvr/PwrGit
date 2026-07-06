@@ -223,3 +223,31 @@ describe("repoPrimaryBehind", () => {
     expect(repoPrimaryBehind(r)).toBe(2);
   });
 });
+
+describe("staleness with PR status", () => {
+  const recently = new Date().toISOString();
+  const mergedPr = { number: 5, url: "u", title: "t", state: "merged" as const, isDraft: false };
+
+  it("prunes a merged-PR worktree at any age (catches squash/rebase merges)", () => {
+    const w = wt({
+      id: "m",
+      branch: "feat/squashed",
+      mergedIntoDefault: false,
+      divergedFromDefault: false,
+      lastActivityAt: recently,
+      pr: mergedPr
+    });
+    expect(isPrunableWorktree(w)).toBe(true);
+  });
+
+  it("does not prune on an open PR, and not while dirty even if merged", () => {
+    const open = wt({
+      id: "o",
+      branch: "feat/open",
+      lastActivityAt: recently,
+      pr: { number: 1, url: "u", title: "t", state: "open", isDraft: false }
+    });
+    expect(isPrunableWorktree(open)).toBe(false);
+    expect(isPrunableWorktree({ ...open, dirty: 1, pr: mergedPr })).toBe(false);
+  });
+});

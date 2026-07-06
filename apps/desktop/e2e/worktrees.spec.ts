@@ -71,13 +71,15 @@ test("batch-removes worktrees (including a dirty one) via multi-select", async (
 
   await addRootAndExpand(window, handle, sandbox, "gamma");
 
-  // Plain-click the first, ⌘-click the other two → 3 selected.
-  await branchRow(window, "wt/one").locator(".wt-row__branch").click();
+  // Plain-click the first, ⌘-click the other two → 3 selected. Click the branch
+  // icon (fixed-width, always present) rather than the flex branch label, which
+  // can be squeezed to ~0px on a narrow sidebar and become unclickable.
+  await branchRow(window, "wt/one").locator(".wt-row__branch-icon").click();
   await branchRow(window, "wt/two")
-    .locator(".wt-row__branch")
+    .locator(".wt-row__branch-icon")
     .click({ modifiers: ["Meta"] });
   await branchRow(window, "wt/dirty")
-    .locator(".wt-row__branch")
+    .locator(".wt-row__branch-icon")
     .click({ modifiers: ["Meta"] });
   await expect(window.locator(".wt-selbar__count")).toHaveText("3 selected");
 

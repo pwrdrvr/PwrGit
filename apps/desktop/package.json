@@ -24,6 +24,7 @@
   "dependencies": {
     "@fontsource/geist-mono": "^5.2.8",
     "@fontsource/geist-sans": "^5.2.5",
+    "@octokit/graphql": "^8.2.1",
     "@pwrdrvr/agent-core": "^0.2.0",
     "@pwrdrvr/codex-discovery": "^0.1.3",
     "@pwrgit/shared": "workspace:*",

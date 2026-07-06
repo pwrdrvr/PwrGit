@@ -57,6 +57,11 @@ type WorktreeRow = {
   is_default_branch: number | null;
   last_activity_at: string | null;
   custom_order: number | null;
+  pr_number: number | null;
+  pr_url: string | null;
+  pr_title: string | null;
+  pr_state: string | null;
+  pr_is_draft: number | null;
 };
 
 /**
@@ -234,9 +239,12 @@ export class RepoIndexer {
                   s.merged_into_default AS merged_into_default,
                   s.diverged_from_default AS diverged_from_default,
                   s.is_default_branch AS is_default_branch,
-                  s.last_activity_at AS last_activity_at
+                  s.last_activity_at AS last_activity_at,
+                  p.number AS pr_number, p.url AS pr_url, p.title AS pr_title,
+                  p.state AS pr_state, p.is_draft AS pr_is_draft
            FROM worktrees w
            LEFT JOIN worktree_state s ON s.worktree_id = w.id
+           LEFT JOIN branch_pr p ON p.repo_id = w.repo_id AND p.branch = w.branch
            WHERE w.repo_id = ?
            ORDER BY (w.custom_order IS NULL), w.custom_order, w.is_primary DESC, w.branch`
         )
@@ -259,6 +267,21 @@ export class RepoIndexer {
       };
       if (w.last_activity_at !== null) wt.lastActivityAt = w.last_activity_at;
       if (w.custom_order !== null) wt.order = w.custom_order;
+      if (w.pr_number !== null && w.pr_url !== null) {
+        const state =
+          w.pr_state === "merged"
+            ? "merged"
+            : w.pr_state === "closed"
+              ? "closed"
+              : "open";
+        wt.pr = {
+          number: w.pr_number,
+          url: w.pr_url,
+          title: w.pr_title ?? "",
+          state,
+          isDraft: w.pr_is_draft === 1
+        };
+      }
       return wt;
     });
     return {

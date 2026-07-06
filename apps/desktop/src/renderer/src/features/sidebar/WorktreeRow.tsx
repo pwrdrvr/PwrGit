@@ -1,6 +1,7 @@
 import type { DragEvent, MouseEvent as ReactMouseEvent } from "react";
 import type { Worktree } from "@pwrgit/shared";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
+import { PrChip } from "./PrChip";
 import { isPrunableWorktree, relativeAge } from "./repo-view";
 
 export function WorktreeRow({
@@ -112,30 +113,39 @@ export function WorktreeRow({
       {worktree.behind > 0 && (
         <span className="badge-text badge-text--warn">↓{worktree.behind}</span>
       )}
-      {!worktree.isDefaultBranch && worktree.mergedIntoDefault && (
-        <span className="wt-tag wt-tag--merged" title="Merged into the default branch">
-          merged
-        </span>
+      {worktree.pr !== undefined ? (
+        <PrChip pr={worktree.pr} />
+      ) : (
+        <>
+          {!worktree.isDefaultBranch && worktree.mergedIntoDefault && (
+            <span
+              className="wt-tag wt-tag--merged"
+              title="Contained in the default branch by ancestry — not necessarily a merged PR (squash/rebase merges won't show here)"
+            >
+              in default
+            </span>
+          )}
+          {!worktree.isDefaultBranch && worktree.divergedFromDefault && (
+            <span
+              className="wt-tag wt-tag--diverged"
+              title="No shared history with the default branch (rewritten or orphaned)"
+            >
+              diverged
+            </span>
+          )}
+          {!worktree.isDefaultBranch &&
+            !worktree.mergedIntoDefault &&
+            !worktree.divergedFromDefault &&
+            worktree.behindDefault > 0 && (
+              <span
+                className="wt-tag wt-tag--behind"
+                title={`${worktree.behindDefault} commits behind the default branch`}
+              >
+                ↓{worktree.behindDefault}
+              </span>
+            )}
+        </>
       )}
-      {!worktree.isDefaultBranch && worktree.divergedFromDefault && (
-        <span
-          className="wt-tag wt-tag--diverged"
-          title="No shared history with the default branch (rewritten or orphaned)"
-        >
-          diverged
-        </span>
-      )}
-      {!worktree.isDefaultBranch &&
-        !worktree.mergedIntoDefault &&
-        !worktree.divergedFromDefault &&
-        worktree.behindDefault > 0 && (
-          <span
-            className="wt-tag wt-tag--behind"
-            title={`${worktree.behindDefault} commits behind the default branch`}
-          >
-            ↓{worktree.behindDefault}
-          </span>
-        )}
       {worktree.lastActivityAt !== undefined && (
         <span className="wt-age" title={worktree.lastActivityAt}>
           {relativeAge(worktree.lastActivityAt)}

@@ -55,6 +55,19 @@ export type Worktree = {
   order?: number;
   /** True for the repo's primary checkout (not a linked worktree). */
   isPrimary: boolean;
+  /** Most-recent GitHub PR for this branch, if any (populated when fetched). */
+  pr?: PrSummary;
+};
+
+/** Lifecycle of a pull request — the only status we track in the first cut. */
+export type PrLifecycle = "open" | "merged" | "closed";
+
+export type PrSummary = {
+  number: number;
+  url: string;
+  title: string;
+  state: PrLifecycle;
+  isDraft: boolean;
 };
 
 export type Repo = {

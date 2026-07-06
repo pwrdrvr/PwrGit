@@ -68,6 +68,13 @@ export interface Commands {
   "repo:search": { req: { query: string }; res: RepoSearchHit[] };
   "repo:setPin": { req: { repoId: string; pinned: boolean }; res: null };
   "repo:computeState": { req: { repoId: string }; res: null };
+
+  // GitHub PR status (bulk, cached)
+  "pr:refresh": { req: { repoId: string; force?: boolean }; res: null };
+  "github:status": {
+    req: void;
+    res: { installed: boolean; loggedIn: boolean };
+  };
   "worktree:setPin": { req: { worktreeId: string; pinned: boolean }; res: null };
 
   // Worktree state (U8)
@@ -144,6 +151,8 @@ export interface Commands {
 
   // Reveal a path in the OS file manager (Finder / Explorer / …).
   "shell:revealPath": { req: { path: string }; res: null };
+  // Open a URL in the default browser (e.g. a PR link).
+  "shell:openExternal": { req: { url: string }; res: null };
 }
 
 export type CommandName = keyof Commands;

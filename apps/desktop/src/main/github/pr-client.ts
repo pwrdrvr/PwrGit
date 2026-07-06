@@ -1,0 +1,134 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { graphql, GraphqlResponseError } from "@octokit/graphql";
+import type { PrSummary } from "@pwrgit/shared";
+import { buildPrQuery, parsePrResponse } from "./pr-query";
+
+const execFileAsync = promisify(execFile);
+
+// Electron's PATH may miss Homebrew etc. in a packaged app; augment it so `gh`
+// resolves the way it does in the user's shell.
+const EXTRA_PATH = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"];
+function ghEnv(): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    PATH: [process.env.PATH ?? "", ...EXTRA_PATH].filter(Boolean).join(":")
+  };
+}
+async function gh(args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync("gh", args, {
+    env: ghEnv(),
+    timeout: 10_000
+  });
+  return stdout.trim();
+}
+
+let tokenCache: { token: string; at: number } | null = null;
+const TOKEN_TTL_MS = 5 * 60_000;
+
+/** GITHUB_TOKEN if set, else `gh auth token` (reusing the user's gh login). */
+export async function getGitHubToken(): Promise<string | null> {
+  if (tokenCache !== null && Date.now() - tokenCache.at < TOKEN_TTL_MS) {
+    return tokenCache.token;
+  }
+  const env = process.env.GITHUB_TOKEN?.trim();
+  if (env) {
+    tokenCache = { token: env, at: Date.now() };
+    return env;
+  }
+  try {
+    const token = await gh(["auth", "token"]);
+    if (token) {
+      tokenCache = { token, at: Date.now() };
+      return token;
+    }
+  } catch {
+    // gh missing or not logged in
+  }
+  return null;
+}
+
+export type GhStatus = { installed: boolean; loggedIn: boolean };
+
+export async function getGhStatus(): Promise<GhStatus> {
+  try {
+    await gh(["--version"]);
+  } catch {
+    return { installed: false, loggedIn: false };
+  }
+  return { installed: true, loggedIn: (await getGitHubToken()) !== null };
+}
+
+// One request covers this many branches (aliased); 100 branches → 2 requests.
+const BATCH = 50;
+const MAX_RETRIES = 4;
+
+const delay = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+const clamp = (ms: number): number => Math.max(0, Math.min(ms, 60_000));
+
+/** ghcrawl-style backoff: respect Retry-After / rate-limit reset, exponential
+ *  for transient/5xx, and don't retry GraphQL-level or 4xx errors. */
+function retryDelayMs(error: unknown, attempt: number): number | null {
+  const status = (error as { status?: number }).status;
+  const headers =
+    (error as { response?: { headers?: Record<string, string> } }).response
+      ?.headers ?? {};
+  const retryAfter = Number(headers["retry-after"]);
+  if (Number.isFinite(retryAfter) && retryAfter > 0) return clamp(retryAfter * 1000);
+
+  const remaining = Number(headers["x-ratelimit-remaining"]);
+  const reset = Number(headers["x-ratelimit-reset"]);
+  if ((status === 403 || status === 429) && remaining === 0 && Number.isFinite(reset)) {
+    return clamp(reset * 1000 - Date.now());
+  }
+  if (status === 429 || status === undefined || (status !== undefined && status >= 500)) {
+    return clamp(1000 * 2 ** (attempt - 1));
+  }
+  return null; // 401/403/404/422 etc. — not worth retrying
+}
+
+async function runQuery(
+  token: string,
+  query: string,
+  variables: Record<string, string>
+): Promise<unknown> {
+  const client = graphql.defaults({
+    headers: { authorization: `token ${token}` }
+  });
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await client(query, variables);
+    } catch (error) {
+      // GraphQL-level errors (missing repo, one bad alias) won't fix on retry —
+      // salvage whatever partial data came back.
+      if (error instanceof GraphqlResponseError) {
+        return (error as GraphqlResponseError<unknown>).data ?? null;
+      }
+      attempt += 1;
+      const wait = retryDelayMs(error, attempt);
+      if (wait === null || attempt > MAX_RETRIES) throw error;
+      await delay(wait);
+    }
+  }
+}
+
+/** Fetch the most-recent PR for each branch in one repo (batched + backed off). */
+export async function fetchPrsForRepo(
+  token: string,
+  owner: string,
+  repo: string,
+  branches: string[]
+): Promise<Map<string, PrSummary | null>> {
+  const result = new Map<string, PrSummary | null>();
+  for (let i = 0; i < branches.length; i += BATCH) {
+    const chunk = branches.slice(i, i + BATCH);
+    const { query, variables } = buildPrQuery(owner, repo, chunk);
+    const data = await runQuery(token, query, variables);
+    for (const [branch, pr] of parsePrResponse(chunk, data)) {
+      result.set(branch, pr);
+    }
+  }
+  return result;
+}

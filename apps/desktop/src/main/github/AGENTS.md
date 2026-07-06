@@ -1,0 +1,20 @@
+# github — AGENTS.md
+
+Bulk GitHub PR status for worktree branches. Best-effort: silently no-ops when
+origin isn't github.com, `gh` isn't logged in, or the network fails.
+
+- **Auth**: `getGitHubToken()` prefers `GITHUB_TOKEN`, else `gh auth token`
+  (reuses the user's gh login — no separate flow). Cached ~5 min.
+- **Bulk query**: `pr-query.ts` builds ONE GraphQL query per ~50 branches via
+  aliased `pullRequests(headRefName: $bN)` — so 100 branches ≈ 2 requests, not
+  100. Matching by `headRefName` (not the live ref) still finds PRs whose branch
+  was deleted after a squash/merge.
+- **Backoff**: `pr-client.ts` wraps `@octokit/graphql` (ESM — named import is
+  fine) with Retry-After / rate-limit-reset respect + exponential backoff
+  (ghcrawl's semantics, without the `bottleneck`-based octokit plugins that a
+  git-hosted transitive dep made uninstallable here).
+- **Cache**: `PrService` upserts `branch_pr` (repo+branch, negative-cached);
+  `pr:refresh` is TTL-throttled (10 min) unless `force`. `listRepos` LEFT JOINs
+  it onto `Worktree.pr`.
+- A **merged PR** makes a branch prunable at any age (`isPrunableWorktree`) —
+  catches squash/rebase merges the git-ancestry "in default" check can't see.
