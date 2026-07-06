@@ -1,0 +1,66 @@
+/* PwrGit design tokens — the exact palette from design/PwrGit.dc.html, in the
+   sibling apps' token structure. Warm-dark surfaces, bone text, tangerine
+   accent. Single dark theme for now (no light variant in the design yet). */
+:root {
+  color-scheme: dark;
+
+  /* Type */
+  --font-sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+  --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+
+  /* Surfaces */
+  --bg-app: #0a0908;
+  --bg-titlebar: #050403;
+  --bg-sidebar: #0e0d0b;
+  --bg-rail: #0e0d0b;
+  --bg-panel: #13110e;
+  --bg-input: #0d0c0a;
+  --bg-elevated: #1a1714;
+  --bg-row-hover: #14110d;
+  --bg-hover-strong: #1f1a15;
+  --bg-menu: #1a1714;
+  --bg-overlay: rgba(10, 9, 8, 0.72);
+
+  /* Accent-tinted actives */
+  --bg-active: #2a1810;
+  --bg-active-strong: #3a2216;
+
+  /* Borders */
+  --border-subtle: rgba(247, 243, 235, 0.08);
+  --border-default: rgba(247, 243, 235, 0.12);
+  --border-strong: rgba(247, 243, 235, 0.14);
+
+  /* Text */
+  --text-primary: #f5efe3;
+  --text-secondary: #b8b0a4;
+  --text-muted: #8a8275;
+  --text-subtle: #5a544b;
+
+  /* Accent (tangerine copper) */
+  --accent: #e8743a;
+  --accent-bright: #fda984;
+  --accent-on: #1a0d05;
+  --accent-border: rgba(232, 116, 58, 0.38);
+  --accent-soft: rgba(232, 116, 58, 0.14);
+  --accent-tint: rgba(232, 116, 58, 0.08);
+
+  /* Semantic */
+  --success: #6dba7e;
+  --success-bright: #9ce5b3;
+  --success-soft: rgba(109, 186, 126, 0.14);
+  --warn: #e8c890;
+  --warn-soft: rgba(216, 168, 90, 0.14);
+  --danger: #ffb0a1;
+  --danger-soft: rgba(232, 90, 58, 0.16);
+  --info: #6b9ad8;
+
+  /* Radii */
+  --radius-sm: 5px;
+  --radius-md: 7px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+
+  /* Shadows */
+  --shadow-popover: 0 18px 48px rgba(0, 0, 0, 0.5);
+  --shadow-overlay: 0 32px 80px rgba(0, 0, 0, 0.6);
+}
