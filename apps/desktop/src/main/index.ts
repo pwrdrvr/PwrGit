@@ -88,7 +88,7 @@ if (!gotSingleInstanceLock) {
     registerWorktreeHandlers(bus, stateService, watchers, db, refresher);
     registerRemoteHandlers(bus, db, refresher);
     registerGraphHandlers(bus, db, stateService);
-    registerChangesHandlers(bus, db);
+    registerChangesHandlers(bus, db, refresher);
     registerDialogHandlers(bus);
 
     registerIpc(bus);

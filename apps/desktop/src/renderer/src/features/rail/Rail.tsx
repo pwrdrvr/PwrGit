@@ -7,10 +7,12 @@ type RailTab = "changes" | "agent";
 export function Rail({
   worktree,
   state,
+  activeEmail,
   onCollapse
 }: {
   worktree: Worktree | null;
   state: WorktreeState | null;
+  activeEmail: string;
   onCollapse: () => void;
 }) {
   const [tab, setTab] = useState<RailTab>("changes");
@@ -44,7 +46,7 @@ export function Rail({
       </div>
 
       {tab === "changes" ? (
-        <ChangesTab worktree={worktree} />
+        <ChangesTab worktree={worktree} activeEmail={activeEmail} />
       ) : (
         <div className="rail-empty">Rebase assistant — U16</div>
       )}

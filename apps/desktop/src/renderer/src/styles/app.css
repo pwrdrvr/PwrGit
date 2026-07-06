@@ -1191,6 +1191,87 @@ input {
   text-align: left;
 }
 
+.changes-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.file-row.is-staged {
+  background: var(--bg-panel);
+}
+.file-toggle {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-muted);
+  font: 600 12px/1 var(--font-sans);
+  cursor: pointer;
+}
+
+.commit-box {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--border-subtle);
+  padding: 12px;
+  background: var(--bg-sidebar);
+}
+.commit-input {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  margin-bottom: 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  color: var(--text-primary);
+  font: 500 12px/1 var(--font-sans);
+  outline: none;
+}
+.commit-input:focus {
+  border-color: var(--accent-border);
+}
+.commit-actions {
+  display: flex;
+  gap: 8px;
+}
+.commit-btn {
+  flex: 1;
+  height: 32px;
+  border-radius: 7px;
+  border: none;
+  background: var(--accent);
+  color: var(--accent-on);
+  font: 700 12px/1 var(--font-sans);
+  cursor: pointer;
+}
+.commit-btn:disabled {
+  background: var(--bg-active);
+  color: #8a5a3a;
+  cursor: not-allowed;
+}
+.amend-btn {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 7px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font: 600 12px/1 var(--font-sans);
+  cursor: pointer;
+}
+.amend-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.commit-as {
+  margin-top: 8px;
+  font: 500 10.5px/1.3 var(--font-mono);
+  color: var(--text-subtle);
+}
+
 .changes-clean {
   padding: 40px 16px;
   text-align: center;

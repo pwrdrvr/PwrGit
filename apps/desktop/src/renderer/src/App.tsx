@@ -156,6 +156,7 @@ export function App() {
           <Rail
             worktree={selectedWorktree}
             state={worktreeState}
+            activeEmail={activeProfile?.email ?? ""}
             onCollapse={() => setRailCollapsed(true)}
           />
         )}

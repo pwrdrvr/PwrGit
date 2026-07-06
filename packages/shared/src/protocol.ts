@@ -73,8 +73,14 @@ export interface Commands {
     res: GraphLog;
   };
 
-  // Changes (U11)
+  // Changes (U11 / U12)
   "changes:list": { req: { worktreeId: string }; res: ChangeSet };
+  "changes:stage": { req: { worktreeId: string; path: string }; res: null };
+  "changes:unstage": { req: { worktreeId: string; path: string }; res: null };
+  "changes:commit": {
+    req: { worktreeId: string; message: string; amend?: boolean };
+    res: null;
+  };
 
   "dialog:pickDirectory": { req: void; res: string | null };
 }

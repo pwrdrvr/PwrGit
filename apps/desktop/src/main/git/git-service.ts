@@ -77,6 +77,65 @@ export async function readChanges(
   return ok(parseChanges(checked.value.stdout));
 }
 
+export async function stagePath(
+  git: GitExec,
+  cwd: string,
+  path: string
+): Promise<Result<void>> {
+  const raw = await git(["add", "--", path], cwd);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["add"]);
+  return checked.ok ? ok(undefined) : checked;
+}
+
+export async function unstagePath(
+  git: GitExec,
+  cwd: string,
+  path: string
+): Promise<Result<void>> {
+  const raw = await git(["restore", "--staged", "--", path], cwd);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["restore"]);
+  return checked.ok ? ok(undefined) : checked;
+}
+
+export type CommitIdentity = { name?: string; email: string };
+
+/**
+ * Commit staged changes under a per-commit identity override — PwrGit never
+ * writes repo-local `user.email` (KTD4). Amend rewrites the last commit.
+ */
+export async function commitChanges(
+  git: GitExec,
+  cwd: string,
+  message: string,
+  identity: CommitIdentity,
+  options: { amend?: boolean } = {}
+): Promise<Result<void>> {
+  const args = ["-c", `user.email=${identity.email}`];
+  if (identity.name !== undefined && identity.name !== "") {
+    args.push("-c", `user.name=${identity.name}`);
+  }
+  args.push("commit");
+  if (options.amend === true) args.push("--amend");
+  args.push("-m", message);
+
+  const raw = await git(args, cwd);
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode !== 0) {
+    const combined = `${raw.value.stdout}\n${raw.value.stderr}`;
+    const code = /nothing to commit/i.test(combined)
+      ? "nothing_to_commit"
+      : "commit_failed";
+    return err({
+      kind: "git",
+      code,
+      message: raw.value.stderr.trim() || "commit failed"
+    });
+  }
+  return ok(undefined);
+}
+
 const LOG_FORMAT = ["%H", "%P", "%an", "%ae", "%cI", "%s"].join("%x1f") + "%x1e";
 
 /** Parse the delimited `git log` output produced with LOG_FORMAT. */
