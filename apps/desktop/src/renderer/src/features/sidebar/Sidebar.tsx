@@ -20,7 +20,8 @@ export function Sidebar({
   onCreateWorktree,
   onPersistOrder,
   onAddFolder,
-  onOpenSearch
+  onOpenSearch,
+  onExpandRepo
 }: {
   profiles: Profile[];
   activeProfile: Profile | null;
@@ -40,6 +41,7 @@ export function Sidebar({
   onPersistOrder: (repoId: string, orderedIds: string[]) => void;
   onAddFolder: () => void;
   onOpenSearch: () => void;
+  onExpandRepo: (repoId: string) => void;
 }) {
   const [lens, setLens] = useState<Lens>("Recent");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -75,12 +77,16 @@ export function Sidebar({
   const filtered = filterReposByLens(repos, lens);
 
   const toggleExpand = (repo: Repo): void => {
+    const willExpand = !expanded.has(repo.id);
     setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(repo.id)) next.delete(repo.id);
       else next.add(repo.id);
       return next;
     });
+    // Compute this repo's worktree badges lazily on first look — state isn't
+    // computed for every repo up front.
+    if (willExpand) onExpandRepo(repo.id);
     const hasSelection = repo.worktrees.some((w) => w.id === selectedWorktreeId);
     if (!hasSelection && repo.worktrees.length > 0) {
       const primary =

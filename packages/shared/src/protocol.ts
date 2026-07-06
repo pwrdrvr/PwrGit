@@ -53,6 +53,7 @@ export interface Commands {
   "repo:add": { req: { profileId: ProfileId; path: string }; res: Repo };
   "repo:search": { req: { query: string }; res: RepoSearchHit[] };
   "repo:setPin": { req: { repoId: string; pinned: boolean }; res: null };
+  "repo:computeState": { req: { repoId: string }; res: null };
   "worktree:setPin": { req: { worktreeId: string; pinned: boolean }; res: null };
 
   // Worktree state (U8)

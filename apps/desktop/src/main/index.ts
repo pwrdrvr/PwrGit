@@ -11,7 +11,6 @@ import { registerRebaseHandlers } from "./git/rebase-handlers";
 import { registerRemoteHandlers } from "./git/remote-handlers";
 import { registerRepoHandlers } from "./git/repo-handlers";
 import { RepoIndexer } from "./git/repo-indexer";
-import { WorktreeWatchers } from "./git/watchers";
 import {
   createWorktreeRefresher,
   registerWorktreeHandlers
@@ -64,36 +63,28 @@ if (!gotSingleInstanceLock) {
     const indexer = new RepoIndexer(db, execGit);
     const stateService = new WorktreeStateService(db, execGit);
     const refresher = createWorktreeRefresher(stateService, db);
-    const watchers = new WorktreeWatchers({
-      onRepoRefsChanged: (repoId) => refresher.refreshRepoWorktrees(repoId),
-      onWorktreeTreeChanged: (worktreeId) =>
-        refresher.refreshWorktree(worktreeId)
-    });
+
+    // The worktree the user is currently viewing; refreshed on focus + a gentle
+    // interval instead of via filesystem watchers (which peg fseventd on large
+    // trees). PwrGit's own git ops refresh directly through the refresher.
+    let activeWorktreeId: string | null = null;
 
     const rescanInBackground = (profile: Profile): void => {
+      // Scan lists repos + worktrees (cheap). Per-worktree *state*
+      // (dirty/ahead/behind/staleness) is computed lazily per repo when its row
+      // is expanded (repo:computeState) — computing all 156 at launch storms git.
       void indexer
         .rescanProfile(profile)
-        .then((repos) => {
-          emitEvent("repo:changed", { profileId: profile.id });
-          // Compute every worktree's state in the background (bounded via
-          // p-map-iterable), then refresh the sidebar badges when it settles.
-          // Watching is set up lazily on selection (active repo + worktree
-          // only), never for every repo — see WorktreeWatchers.
-          const worktreeIds: string[] = [];
-          for (const repo of repos) {
-            for (const wt of repo.worktrees) worktreeIds.push(wt.id);
-          }
-          void stateService
-            .refreshMany(worktreeIds)
-            .then(() => emitEvent("repo:changed", { profileId: profile.id }));
-        })
+        .then(() => emitEvent("repo:changed", { profileId: profile.id }))
         .catch(() => undefined);
     };
 
     // Switching profiles kicks a background rescan of the newly active one.
     registerProfileHandlers(bus, profiles, rescanInBackground);
     registerRepoHandlers(bus, indexer, profiles);
-    registerWorktreeHandlers(bus, stateService, watchers, db, refresher);
+    registerWorktreeHandlers(bus, stateService, db, refresher, (id) => {
+      activeWorktreeId = id;
+    });
     registerWorktreeLifecycleHandlers(bus, db, indexer, settings);
     registerRemoteHandlers(bus, db, refresher);
     registerGraphHandlers(bus, db, stateService);
@@ -105,7 +96,16 @@ if (!gotSingleInstanceLock) {
     mainWindow = createMainWindow();
     initAutoUpdater();
 
-    // Fill the sidebar for the active profile without blocking window creation.
+    const refreshActive = (): void => {
+      if (activeWorktreeId !== null) refresher.refreshWorktree(activeWorktreeId);
+    };
+    mainWindow.on("focus", refreshActive);
+    const activeStatePoll = setInterval(() => {
+      if (mainWindow?.isFocused() === true) refreshActive();
+    }, 15_000);
+    app.on("before-quit", () => clearInterval(activeStatePoll));
+
+    // Scan the active profile so the sidebar lists its repos.
     const activeId = profiles.getActiveId();
     const activeProfile = activeId === null ? null : profiles.get(activeId);
     if (activeProfile !== null) rescanInBackground(activeProfile);
@@ -114,10 +114,6 @@ if (!gotSingleInstanceLock) {
       if (BrowserWindow.getAllWindows().length === 0) {
         mainWindow = createMainWindow();
       }
-    });
-
-    app.on("before-quit", () => {
-      void watchers.closeAll();
     });
   });
 

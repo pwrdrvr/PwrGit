@@ -15,6 +15,7 @@ export type UseRepoTree = {
   ) => Promise<string | null>;
   removeWorktree: (worktreeId: string) => Promise<void>;
   persistWorktreeOrder: (repoId: string, orderedIds: string[]) => void;
+  computeRepoState: (repoId: string) => void;
 };
 
 /** Repos for the active profile, kept in sync with `repo:changed`. */
@@ -106,6 +107,11 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     []
   );
 
+  // Compute a repo's worktree badges lazily when its row is expanded.
+  const computeRepoState = useCallback((repoId: string) => {
+    void dispatch("repo:computeState", { repoId });
+  }, []);
+
   return {
     repos,
     loading,
@@ -114,7 +120,8 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     addFolder,
     createWorktree,
     removeWorktree,
-    persistWorktreeOrder
+    persistWorktreeOrder,
+    computeRepoState
   };
 }
 

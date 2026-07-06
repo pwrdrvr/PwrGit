@@ -29,7 +29,8 @@ export function App() {
     addFolder,
     createWorktree,
     removeWorktree,
-    persistWorktreeOrder
+    persistWorktreeOrder,
+    computeRepoState
   } = useRepoTree(activeProfile?.id ?? null);
   const worktreeState = useWorktreeState(selection?.worktreeId ?? null);
   const [selectedCommits, setSelectedCommits] = useState<Set<string>>(
@@ -139,6 +140,7 @@ export function App() {
           onRemoveWorktree={(id) => void removeWorktree(id)}
           onCreateWorktree={createWorktree}
           onPersistOrder={persistWorktreeOrder}
+          onExpandRepo={computeRepoState}
           onAddFolder={() => void addFolder()}
           onOpenSearch={() => setOverlayOpen(true)}
         />

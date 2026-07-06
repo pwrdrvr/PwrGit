@@ -7,7 +7,7 @@ Notes for the desktop app. See the root `AGENTS.md` for setup + conventions.
 `src/main/**` is bundled and run as ESM. A **named** import from a CommonJS
 package throws at launch (`SyntaxError: Named export 'x' not found`), even
 though it type-checks and bundles fine. Our CJS deps: `electron-updater`,
-`dugite`, `chokidar`, `better-sqlite3`.
+`dugite`, `better-sqlite3`.
 
 ```ts
 import { autoUpdater } from "electron-updater"; // ✗ crashes at runtime

@@ -2,7 +2,6 @@ import { ok, type WorktreeState } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import type { DB } from "../persistence/db";
-import type { WorktreeWatchers } from "./watchers";
 import type { WorktreeStateService } from "./worktree-state";
 
 function stateChanged(a: WorktreeState, b: WorktreeState): boolean {
@@ -63,9 +62,9 @@ export function createWorktreeRefresher(
 export function registerWorktreeHandlers(
   bus: CommandBus,
   state: WorktreeStateService,
-  watchers: WorktreeWatchers,
   db: DB,
-  refresher: WorktreeRefresher
+  refresher: WorktreeRefresher,
+  onActivate: (worktreeId: string) => void
 ): void {
   bus.register("worktree:getState", (req) => {
     const cached = state.getCached(req.worktreeId);
@@ -75,20 +74,19 @@ export function registerWorktreeHandlers(
 
   bus.register("worktree:activate", (req) => {
     const row = db
-      .prepare(
-        `SELECT w.id AS id, w.path AS path, r.id AS repo_id, r.path AS repo_path
-         FROM worktrees w JOIN repos r ON r.id = w.repo_id
-         WHERE w.id = ?`
-      )
-      .get(req.worktreeId) as
-      | { id: string; path: string; repo_id: string; repo_path: string }
-      | undefined;
+      .prepare("SELECT id FROM worktrees WHERE id = ?")
+      .get(req.worktreeId) as { id: string } | undefined;
     if (row !== undefined) {
-      // Watch only what's being looked at now (single active repo + worktree).
-      watchers.watchActiveRepo(row.repo_id, row.repo_path);
-      watchers.watchActiveWorktree(row.id, row.path);
+      onActivate(row.id);
       refresher.refreshWorktree(row.id);
     }
+    return ok(null);
+  });
+
+  // Lazily compute a repo's worktree states when its row is expanded, so a
+  // 156-worktree repo only pays for git when the user looks at it.
+  bus.register("repo:computeState", (req) => {
+    refresher.refreshRepoWorktrees(req.repoId);
     return ok(null);
   });
 }
