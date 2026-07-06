@@ -34,7 +34,7 @@ export function WorktreeRow({
       className={`wt-row${selected ? " is-selected" : ""}${
         multiSelected ? " is-multiselected" : ""
       }${prunable ? " is-stale" : ""}`}
-      draggable
+      draggable={!worktree.isPrimary}
       onDragStart={onDragStart}
       onDragOver={onDragOver}
       onDrop={onDrop}
@@ -42,15 +42,21 @@ export function WorktreeRow({
       onClick={onSelect}
       onContextMenu={onContextMenu}
     >
-      <span className="wt-row__handle" title="Drag to reorder">
-        <svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor">
-          <circle cx="2" cy="2" r="1.3" />
-          <circle cx="7" cy="2" r="1.3" />
-          <circle cx="2" cy="7" r="1.3" />
-          <circle cx="7" cy="7" r="1.3" />
-          <circle cx="2" cy="12" r="1.3" />
-          <circle cx="7" cy="12" r="1.3" />
-        </svg>
+      {/* The local checkout is fixed at the top — no drag handle. */}
+      <span
+        className="wt-row__handle"
+        title={worktree.isPrimary ? undefined : "Drag to reorder"}
+      >
+        {!worktree.isPrimary && (
+          <svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor">
+            <circle cx="2" cy="2" r="1.3" />
+            <circle cx="7" cy="2" r="1.3" />
+            <circle cx="2" cy="7" r="1.3" />
+            <circle cx="7" cy="7" r="1.3" />
+            <circle cx="2" cy="12" r="1.3" />
+            <circle cx="7" cy="12" r="1.3" />
+          </svg>
+        )}
       </span>
       {worktree.isPrimary ? (
         <svg

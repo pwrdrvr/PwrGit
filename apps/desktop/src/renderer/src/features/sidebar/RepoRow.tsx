@@ -58,8 +58,14 @@ export function RepoRow({
   const dragId = useRef<string | null>(null);
 
   const behind = repoPrimaryBehind(repo);
-  const ordered = orderWorktrees(repo.worktrees, sort, customOrder);
+  const primary = repo.worktrees.find((w) => w.isPrimary);
+  const linked = repo.worktrees.filter((w) => !w.isPrimary);
+  const ordered = orderWorktrees(linked, sort, customOrder);
   const orderedIds = ordered.map((w) => w.id);
+  // Selection ranges (⇧-click) span the local checkout + worktrees in display
+  // order; drag reordering only touches the linked worktrees (orderedIds).
+  const displayIds =
+    primary === undefined ? orderedIds : [primary.id, ...orderedIds];
   const wtCount = repo.worktrees.length;
   const activeCollapsed = containsSelection && !expanded;
 
@@ -102,6 +108,25 @@ export function RepoRow({
 
       {expanded && (
         <div className="wt-section">
+          {primary !== undefined && (
+            <WorktreeRow
+              key={primary.id}
+              worktree={primary}
+              selected={primary.id === selectedWorktreeId}
+              multiSelected={selectedIds.has(primary.id)}
+              onSelect={(e) => onSelectWorktree(primary, e, displayIds)}
+              onContextMenu={(e) => onContextWorktree(primary, e, displayIds)}
+              onTogglePin={() =>
+                onToggleWorktreePin(primary.id, !primary.pinned)
+              }
+              onRemove={() => onRemoveWorktree(primary.id)}
+              onDragStart={() => undefined}
+              onDragOver={() => undefined}
+              onDrop={() => undefined}
+              onDragEnd={() => undefined}
+            />
+          )}
+
           <div className="wt-section__head">
             <span className="wt-section__label">Worktrees</span>
             <span style={{ flex: 1 }} />
@@ -150,8 +175,8 @@ export function RepoRow({
               worktree={w}
               selected={w.id === selectedWorktreeId}
               multiSelected={selectedIds.has(w.id)}
-              onSelect={(e) => onSelectWorktree(w, e, orderedIds)}
-              onContextMenu={(e) => onContextWorktree(w, e, orderedIds)}
+              onSelect={(e) => onSelectWorktree(w, e, displayIds)}
+              onContextMenu={(e) => onContextWorktree(w, e, displayIds)}
               onTogglePin={() => onToggleWorktreePin(w.id, !w.pinned)}
               onRemove={() => onRemoveWorktree(w.id)}
               onDragStart={() => {
