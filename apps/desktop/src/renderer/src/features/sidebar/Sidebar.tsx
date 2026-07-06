@@ -163,7 +163,10 @@ export function Sidebar({
       });
       return;
     }
-    setSel({ repoId: repo.id, ids: EMPTY_IDS, anchor: w.id });
+    // A plain click IS the first member of the selection — so a following
+    // ⌘/Shift-click extends from it (2 selected), rather than leaving the
+    // viewed row in a separate state from the batch.
+    setSel({ repoId: repo.id, ids: new Set([w.id]), anchor: w.id });
     onSelectWorktree(repo, w);
   };
 

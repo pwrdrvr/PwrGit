@@ -563,6 +563,12 @@ input {
   background: var(--accent-tint);
   box-shadow: inset 2px 0 0 0 var(--accent);
 }
+/* The viewed row (main pane) is also part of the selection after a plain click;
+   keep its stronger "active" look and drop the redundant multi-select bar. */
+.wt-row.is-selected.is-multiselected {
+  background: var(--bg-active);
+  box-shadow: none;
+}
 .wt-row.is-multiselected .wt-remove,
 .wt-row.is-multiselected .wt-row__menu {
   opacity: 1;
