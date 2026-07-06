@@ -1,0 +1,21 @@
+packages:
+  - apps/*
+  - packages/*
+
+# Native modules that need their build scripts to run during install.
+allowBuilds:
+  better-sqlite3: true
+  electron: true
+  esbuild: true
+
+# The @pwrdrvr/agent-kit packages are PwrDrvr's own, freshly published, and
+# pinned — exempt them from any minimumReleaseAge gate so PwrGit can consume
+# new versions immediately.
+minimumReleaseAgeExclude:
+  - "@pwrdrvr/codex-app-server-protocol"
+  - "@pwrdrvr/agent-core"
+  - "@pwrdrvr/agent-transport"
+  - "@pwrdrvr/codex-discovery"
+  - "@pwrdrvr/agent-client"
+  - "@pwrdrvr/agent-acp"
+  - "@pwrdrvr/agent-chat-react"

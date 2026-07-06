@@ -1,0 +1,28 @@
+{
+  "name": "pwrgit-workspace",
+  "version": "0.0.1-alpha.0",
+  "private": true,
+  "description": "Cross-platform desktop git client (Pwr family)",
+  "author": "PwrDrvr LLC",
+  "license": "MIT",
+  "copyright": "Copyright © 2026 PwrDrvr LLC",
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "build": "pnpm --filter @pwrgit/desktop build",
+    "dev": "pnpm --filter @pwrgit/desktop dev",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "pnpm --filter @pwrgit/desktop test:e2e"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.9"
+  },
+  "pnpm": {
+    "overrides": {
+      "@types/node": "24.12.4"
+    }
+  }
+}
