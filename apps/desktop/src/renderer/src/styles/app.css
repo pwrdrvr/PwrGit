@@ -1905,3 +1905,58 @@ body.is-col-resizing {
   font: 500 11.5px/1 var(--font-sans);
   cursor: pointer;
 }
+
+/* ---- Sidebar: group-by-folder ---- */
+
+.sidebar__group {
+  padding: 0 12px 8px;
+}
+.group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  font: 600 11px/1 var(--font-sans);
+  cursor: pointer;
+}
+.group-toggle.is-on {
+  border-color: var(--accent-border);
+  background: var(--bg-active);
+  color: var(--accent-bright);
+}
+.group-toggle__box {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  border: 1.5px solid var(--text-subtle);
+}
+.group-toggle.is-on .group-toggle__box {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.repo-group {
+  margin-bottom: 6px;
+}
+.repo-group__head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 8px 5px;
+}
+.repo-group__label {
+  font: 700 9.5px/1 var(--font-sans);
+  color: var(--text-muted);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.repo-group__count {
+  margin-left: auto;
+  font: 600 9.5px/1 var(--font-mono);
+  color: var(--text-subtle);
+}

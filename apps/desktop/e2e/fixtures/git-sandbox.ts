@@ -1,5 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -48,7 +54,10 @@ export type GitSandbox = {
  * `git worktree list`. Call cleanup() (in afterEach) to delete everything.
  */
 export function createGitSandbox(): GitSandbox {
-  const base = mkdtempSync(join(tmpdir(), "pwrgit-e2e-"));
+  // realpath so roots match git's canonical worktree paths — on macOS tmpdir()
+  // is /var/… symlinked to /private/var/…, which would break root-prefix
+  // grouping (real user paths like ~/GIPHY aren't symlinked).
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "pwrgit-e2e-")));
   const reposDir = join(base, "repos");
   const worktreesDir = join(base, "worktrees");
   const worktreeRoot = join(base, "new-worktrees");

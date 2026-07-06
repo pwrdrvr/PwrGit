@@ -53,4 +53,14 @@ test("creates a profile with multiple root folders in one step", async () => {
   await expect(
     window.locator(".repo-row__name", { hasText: "pwr-svc" })
   ).toBeVisible();
+
+  // Group-by-folder splits them into one section per root.
+  await window.locator(".group-toggle").click();
+  await expect(window.locator(".repo-group")).toHaveCount(2);
+  await expect(
+    window.locator(".repo-row__name", { hasText: "giphy-svc" })
+  ).toBeVisible();
+  await expect(
+    window.locator(".repo-row__name", { hasText: "pwr-svc" })
+  ).toBeVisible();
 });

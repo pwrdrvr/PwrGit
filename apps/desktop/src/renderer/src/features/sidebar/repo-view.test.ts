@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Repo, Worktree } from "@pwrgit/shared";
 import {
   filterReposByLens,
+  groupReposByRoot,
   isPrunableWorktree,
   lensCounts,
   orderWorktrees,
@@ -155,5 +156,40 @@ describe("staleness (isPrunableWorktree + Stale lens)", () => {
     ];
     expect(lensCounts(repos).Stale).toBe(1);
     expect(filterReposByLens(repos, "Stale").map((r) => r.id)).toEqual(["stale"]);
+  });
+});
+
+describe("groupReposByRoot", () => {
+  const repos: Repo[] = [
+    repo({ id: "giphy-svc", path: "/Users/h/GIPHY/giphy-svc" }),
+    repo({ id: "pwrgit", path: "/Users/h/pwrdrvr/PwrGit" }),
+    repo({ id: "kit", path: "/Users/h/github/agent-kit" }),
+    repo({ id: "loose", path: "/Users/h/elsewhere/loose" })
+  ];
+  const roots = ["/Users/h/pwrdrvr", "/Users/h/github", "/Users/h/GIPHY"];
+
+  it("buckets repos under their root, labelled by the folder's last segment", () => {
+    const groups = groupReposByRoot(repos, roots);
+    expect(groups.map((g) => [g.label, g.repos.map((r) => r.id)])).toEqual([
+      ["pwrdrvr", ["pwrgit"]],
+      ["github", ["kit"]],
+      ["GIPHY", ["giphy-svc"]],
+      ["Other", ["loose"]]
+    ]);
+  });
+
+  it("attributes to the longest matching root when roots nest", () => {
+    const nested = ["/Users/h", "/Users/h/pwrdrvr"];
+    const groups = groupReposByRoot(
+      [repo({ id: "pwrgit", path: "/Users/h/pwrdrvr/PwrGit" })],
+      nested
+    );
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.root).toBe("/Users/h/pwrdrvr");
+  });
+
+  it("drops empty groups and omits Other when all repos are placed", () => {
+    const groups = groupReposByRoot([repos[0]!], roots);
+    expect(groups.map((g) => g.label)).toEqual(["GIPHY"]);
   });
 });

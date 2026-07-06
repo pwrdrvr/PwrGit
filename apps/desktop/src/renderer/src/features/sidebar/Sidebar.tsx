@@ -7,7 +7,12 @@ import { LensFilter } from "./LensFilter";
 import { NewWorktreeModal } from "./NewWorktreeModal";
 import { ProfileChip } from "./ProfileChip";
 import { RepoRow } from "./RepoRow";
-import { filterReposByLens, lensCounts, SORT_CYCLE } from "./repo-view";
+import {
+  filterReposByLens,
+  groupReposByRoot,
+  lensCounts,
+  SORT_CYCLE
+} from "./repo-view";
 
 const EMPTY_IDS: Set<string> = new Set();
 
@@ -70,6 +75,23 @@ export function Sidebar({
     anchor: null
   });
   const [ctx, setCtx] = useState<ContextState | null>(null);
+  const [groupByFolder, setGroupByFolder] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem("pwrgit.groupByFolder") === "1";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "pwrgit.groupByFolder",
+        groupByFolder ? "1" : "0"
+      );
+    } catch {
+      // ignore private-mode/quota failures
+    }
+  }, [groupByFolder]);
 
   // Seed the drag order from persisted custom_order for repos not yet
   // reordered this session.
@@ -253,6 +275,44 @@ export function Sidebar({
     });
   };
 
+  const renderRepo = (repo: Repo) => (
+    <RepoRow
+      key={repo.id}
+      repo={repo}
+      expanded={expanded.has(repo.id)}
+      containsSelection={repo.worktrees.some(
+        (w) => w.id === selectedWorktreeId
+      )}
+      selectedWorktreeId={selectedWorktreeId}
+      selectedIds={sel.repoId === repo.id ? sel.ids : EMPTY_IDS}
+      sort={sortByRepo[repo.id] ?? "pinned"}
+      customOrder={orderByRepo[repo.id]}
+      onToggleExpand={() => toggleExpand(repo)}
+      onToggleRepoPin={() => onSetRepoPin(repo.id, !repo.pinned)}
+      onSelectWorktree={(w, e, orderedIds) =>
+        handleRowClick(repo, w, e, orderedIds)
+      }
+      onContextWorktree={(w, e, orderedIds) =>
+        handleRowContext(repo, w, e, orderedIds)
+      }
+      onToggleWorktreePin={onSetWorktreePin}
+      onRemoveWorktree={onRemoveWorktree}
+      onRemoveSelected={() => onRemoveWorktrees(Array.from(sel.ids))}
+      onClearSelected={clearSel}
+      onCycleSort={() => cycleSort(repo.id)}
+      onReorder={(ids) => {
+        setOrderByRepo((prev) => ({ ...prev, [repo.id]: ids }));
+        onPersistOrder(repo.id, ids);
+      }}
+      onNewWorktree={() => setNewWorktreeRepo(repo)}
+    />
+  );
+
+  const roots = activeProfile?.roots ?? [];
+  const canGroup = roots.length > 1;
+  const grouped = groupByFolder && canGroup;
+  const groups = grouped ? groupReposByRoot(filtered, roots) : [];
+
   return (
     <aside className="pane pane--sidebar" data-testid="sidebar">
       <div className="sidebar__profile">
@@ -288,39 +348,34 @@ export function Sidebar({
         <LensFilter lens={lens} counts={counts} onChange={setLens} />
       </div>
 
+      {canGroup && (
+        <div className="sidebar__group">
+          <button
+            className={`group-toggle${groupByFolder ? " is-on" : ""}`}
+            onClick={() => setGroupByFolder((v) => !v)}
+            title="Group repos by the folder they were found in"
+          >
+            <span className="group-toggle__box" />
+            Group by folder
+          </button>
+        </div>
+      )}
+
       <div className="sidebar__list">
-        {filtered.map((repo) => (
-          <RepoRow
-            key={repo.id}
-            repo={repo}
-            expanded={expanded.has(repo.id)}
-            containsSelection={repo.worktrees.some(
-              (w) => w.id === selectedWorktreeId
-            )}
-            selectedWorktreeId={selectedWorktreeId}
-            selectedIds={sel.repoId === repo.id ? sel.ids : EMPTY_IDS}
-            sort={sortByRepo[repo.id] ?? "pinned"}
-            customOrder={orderByRepo[repo.id]}
-            onToggleExpand={() => toggleExpand(repo)}
-            onToggleRepoPin={() => onSetRepoPin(repo.id, !repo.pinned)}
-            onSelectWorktree={(w, e, orderedIds) =>
-              handleRowClick(repo, w, e, orderedIds)
-            }
-            onContextWorktree={(w, e, orderedIds) =>
-              handleRowContext(repo, w, e, orderedIds)
-            }
-            onToggleWorktreePin={onSetWorktreePin}
-            onRemoveWorktree={onRemoveWorktree}
-            onRemoveSelected={() => onRemoveWorktrees(Array.from(sel.ids))}
-            onClearSelected={clearSel}
-            onCycleSort={() => cycleSort(repo.id)}
-            onReorder={(ids) => {
-              setOrderByRepo((prev) => ({ ...prev, [repo.id]: ids }));
-              onPersistOrder(repo.id, ids);
-            }}
-            onNewWorktree={() => setNewWorktreeRepo(repo)}
-          />
-        ))}
+        {grouped
+          ? groups.map((g) => (
+              <div className="repo-group" key={g.root || "__other"}>
+                <div
+                  className="repo-group__head"
+                  title={g.root || "Not under any added folder"}
+                >
+                  <span className="repo-group__label">{g.label}</span>
+                  <span className="repo-group__count">{g.repos.length}</span>
+                </div>
+                {g.repos.map(renderRepo)}
+              </div>
+            ))
+          : filtered.map(renderRepo)}
 
         {filtered.length === 0 && (
           <div className="sidebar__empty">
