@@ -1,7 +1,7 @@
 ---
 title: "feat: PwrGit — cross-platform desktop git client (Pwr family)"
 type: feat
-status: active
+status: completed
 date: 2026-07-05
 ---
 
