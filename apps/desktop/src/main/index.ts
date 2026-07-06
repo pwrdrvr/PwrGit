@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { app, BrowserWindow } from "electron";
 import { ok, type Profile } from "@pwrgit/shared";
+import { initAutoUpdater } from "./auto-updater";
 import { CommandBus } from "./command-bus";
 import { registerDialogHandlers } from "./dialog-handlers";
 import { execGit } from "./git/dugite";
@@ -101,6 +102,7 @@ if (!gotSingleInstanceLock) {
 
     registerIpc(bus);
     mainWindow = createMainWindow();
+    initAutoUpdater();
 
     // Fill the sidebar for the active profile without blocking window creation.
     const activeId = profiles.getActiveId();

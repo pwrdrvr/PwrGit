@@ -1,0 +1,41 @@
+appId: com.pwrdrvr.pwrgit
+productName: PwrGit
+copyright: Copyright © 2026 PwrDrvr LLC
+
+directories:
+  output: release
+  buildResources: build
+
+# electron-vite emits to out/; ship that plus the manifest. Production
+# node_modules are included automatically.
+files:
+  - out/**
+  - package.json
+
+# Native modules and dugite's bundled git binary must live outside the asar
+# so they can be dlopen'd / spawned at runtime.
+asarUnpack:
+  - "**/node_modules/better-sqlite3/**"
+  - "**/node_modules/dugite/**"
+
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+    - zip
+  # Signing + notarization are gated on credentials being present in the
+  # environment; without them a local unsigned build is still produced.
+  hardenedRuntime: true
+
+win:
+  target:
+    - nsis
+
+linux:
+  category: Development
+  target:
+    - AppImage
+    - deb
+
+# Configured per release channel at publish time (e.g. GitHub / S3).
+publish: null
