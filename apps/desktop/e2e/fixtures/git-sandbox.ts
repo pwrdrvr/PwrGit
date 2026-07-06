@@ -45,6 +45,11 @@ export type GitSandbox = {
   /** Where the app is told to create NEW worktrees (settings.worktreeRoot). */
   worktreeRoot: string;
   makeRepo: (name: string, opts?: { worktrees?: string[] }) => TestRepo;
+  /** A repo whose primary branch is `behindBy` commits behind its origin. */
+  makeRepoBehindRemote: (
+    name: string,
+    opts?: { behindBy?: number }
+  ) => TestRepo;
   cleanup: () => void;
 };
 
@@ -61,25 +66,25 @@ export function createGitSandbox(): GitSandbox {
   const reposDir = join(base, "repos");
   const worktreesDir = join(base, "worktrees");
   const worktreeRoot = join(base, "new-worktrees");
+  const remotesDir = join(base, "remotes");
   mkdirSync(reposDir, { recursive: true });
   mkdirSync(worktreesDir, { recursive: true });
   mkdirSync(worktreeRoot, { recursive: true });
+  mkdirSync(remotesDir, { recursive: true });
 
-  const makeRepo = (
-    name: string,
-    opts: { worktrees?: string[] } = {}
-  ): TestRepo => {
+  const initRepo = (name: string): string => {
     const repoPath = join(reposDir, name);
     mkdirSync(repoPath, { recursive: true });
     git(repoPath, "init", "-b", "main");
     writeFileSync(join(repoPath, "README.md"), `# ${name}\n`);
     git(repoPath, "add", "-A");
     git(repoPath, "commit", "-m", "initial commit");
+    return repoPath;
+  };
 
-    const addWorktree = (
-      branch: string,
-      wtOpts: { dirty?: boolean } = {}
-    ): string => {
+  const worktreeAdder =
+    (name: string, repoPath: string) =>
+    (branch: string, wtOpts: { dirty?: boolean } = {}): string => {
       const wtPath = join(worktreesDir, name, slug(branch));
       mkdirSync(join(worktreesDir, name), { recursive: true });
       git(repoPath, "worktree", "add", "-b", branch, wtPath);
@@ -89,14 +94,41 @@ export function createGitSandbox(): GitSandbox {
       return wtPath;
     };
 
+  const makeRepo = (
+    name: string,
+    opts: { worktrees?: string[] } = {}
+  ): TestRepo => {
+    const repoPath = initRepo(name);
+    const addWorktree = worktreeAdder(name, repoPath);
     for (const branch of opts.worktrees ?? []) addWorktree(branch);
     return { name, path: repoPath, addWorktree };
   };
 
+  const makeRepoBehindRemote = (
+    name: string,
+    opts: { behindBy?: number } = {}
+  ): TestRepo => {
+    const behindBy = opts.behindBy ?? 1;
+    const repoPath = initRepo(name);
+    // Bare remote lives outside reposDir so it isn't itself scanned as a repo.
+    git(remotesDir, "init", "--bare", `${name}.git`);
+    git(repoPath, "remote", "add", "origin", join(remotesDir, `${name}.git`));
+    git(repoPath, "push", "-u", "origin", "main");
+    // Advance the remote, then rewind local + fetch so main trails origin/main.
+    for (let i = 0; i < behindBy; i += 1) {
+      writeFileSync(join(repoPath, `remote-${i}.txt`), `${i}\n`);
+      git(repoPath, "add", "-A");
+      git(repoPath, "commit", "-m", `remote commit ${i}`);
+    }
+    git(repoPath, "push", "origin", "main");
+    git(repoPath, "reset", "--hard", `HEAD~${behindBy}`);
+    git(repoPath, "fetch", "origin");
+    return { name, path: repoPath, addWorktree: worktreeAdder(name, repoPath) };
+  };
+
   const cleanup = (): void => {
-    // Prune worktree admin state first, then nuke the tree.
     rmSync(base, { recursive: true, force: true });
   };
 
-  return { reposDir, worktreeRoot, makeRepo, cleanup };
+  return { reposDir, worktreeRoot, makeRepo, makeRepoBehindRemote, cleanup };
 }

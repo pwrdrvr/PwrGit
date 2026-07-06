@@ -33,8 +33,21 @@ export function createWorktreeRefresher(
     const before = state.getCached(worktreeId);
     void state.compute(worktreeId).then((fresh) => {
       if (fresh === null) return;
-      if (before === null || stateChanged(before, fresh)) {
-        emitEvent("worktree:changed", { worktreeId });
+      if (before !== null && !stateChanged(before, fresh)) return;
+      // The header reads live worktree state (worktree:changed); the sidebar's
+      // badges (behind/ahead/merged/…) come from the repo tree, which reloads on
+      // repo:changed — so a single-worktree change (pull/fetch/push/commit) must
+      // nudge both, or e.g. the ↓N badge goes stale after a fast-forward.
+      emitEvent("worktree:changed", { worktreeId });
+      const row = db
+        .prepare(
+          `SELECT r.profile_id AS profile_id
+           FROM worktrees w JOIN repos r ON r.id = w.repo_id
+           WHERE w.id = ?`
+        )
+        .get(worktreeId) as { profile_id: string } | undefined;
+      if (row !== undefined) {
+        emitEvent("repo:changed", { profileId: row.profile_id });
       }
     });
   };

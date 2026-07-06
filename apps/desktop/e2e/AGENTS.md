@@ -31,5 +31,9 @@ the Electron build.
 
 - Specs run as **ESM** — use `import.meta.url` + `fileURLToPath`, not
   `__dirname`.
-- `window.confirm` / `alert` block the renderer; register
-  `window.on("dialog", d => d.accept())` before triggering a destructive flow.
+- Confirms/alerts are **in-app** dialogs (not native), so drive them by clicking
+  `.modal--dialog .modal__create` (confirm) / `.modal__cancel` — don't use
+  Playwright's `window.on("dialog", …)`.
+- Shared step helpers (`addRootAndExpand`, `branchRow`) live in
+  `fixtures/steps.ts`; a repo that trails its origin comes from
+  `sandbox.makeRepoBehindRemote(name, { behindBy })`.
