@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseLog, parseWorktreeList } from "./git-service";
+import { parseChanges, parseLog, parseWorktreeList } from "./git-service";
 
 describe("parseWorktreeList", () => {
   it("parses primary + linked worktrees and strips refs/heads/", () => {
@@ -62,5 +62,33 @@ describe("parseLog", () => {
       parents: [],
       isMerge: false
     });
+  });
+});
+
+describe("parseChanges", () => {
+  it("splits staged vs unstaged and handles rename + untracked", () => {
+    const stdout = [
+      "1 M. N... 100644 100644 100644 aaa bbb staged-only.txt",
+      "1 .M N... 100644 100644 100644 ccc ddd unstaged.txt",
+      "1 MM N... 100644 100644 100644 eee fff both.txt",
+      "2 R. N... 100644 100644 100644 ggg hhh R100 new.txt\told.txt",
+      "? untracked.txt"
+    ].join("\n");
+
+    const cs = parseChanges(stdout);
+    expect(cs.staged.map((f) => f.path)).toEqual([
+      "staged-only.txt",
+      "both.txt",
+      "new.txt"
+    ]);
+    expect(cs.unstaged.map((f) => f.path)).toEqual([
+      "unstaged.txt",
+      "both.txt",
+      "untracked.txt"
+    ]);
+    expect(cs.staged.find((f) => f.path === "new.txt")?.status).toBe("R");
+    expect(cs.unstaged.find((f) => f.path === "untracked.txt")?.status).toBe(
+      "?"
+    );
   });
 });

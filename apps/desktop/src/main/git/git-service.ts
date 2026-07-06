@@ -1,5 +1,81 @@
-import { type Commit, err, ok, type Result } from "@pwrgit/shared";
+import {
+  type ChangeSet,
+  type Commit,
+  err,
+  type FileStatus,
+  ok,
+  type Result
+} from "@pwrgit/shared";
 import { requireExit0, type GitExec } from "./dugite";
+
+function mapStatusCode(c: string | undefined): FileStatus {
+  switch (c) {
+    case "A":
+      return "A";
+    case "D":
+      return "D";
+    case "R":
+      return "R";
+    case "C":
+      return "C";
+    case "U":
+      return "U";
+    default:
+      return "M";
+  }
+}
+
+/**
+ * Parse `git status --porcelain=v2`. Ordinary/renamed entries carry an index
+ * (staged) code X and a worktree (unstaged) code Y; a file can appear in both.
+ */
+export function parseChanges(stdout: string): ChangeSet {
+  const staged: ChangeSet["staged"] = [];
+  const unstaged: ChangeSet["unstaged"] = [];
+
+  for (const line of stdout.split("\n")) {
+    if (line.length === 0) continue;
+    const kind = line[0];
+
+    if (kind === "1" || kind === "2") {
+      const parts = line.split(" ");
+      const xy = parts[1] ?? "..";
+      const x = xy[0];
+      const y = xy[1];
+      const path =
+        kind === "1"
+          ? parts.slice(8).join(" ")
+          : (parts.slice(9).join(" ").split("\t")[0] ?? "");
+      if (path === "") continue;
+      if (x !== "." && x !== undefined) {
+        staged.push({ path, status: mapStatusCode(x), staged: true });
+      }
+      if (y !== "." && y !== undefined) {
+        unstaged.push({ path, status: mapStatusCode(y), staged: false });
+      }
+    } else if (kind === "u") {
+      const path = line.split(" ").slice(10).join(" ");
+      if (path !== "") unstaged.push({ path, status: "U", staged: false });
+    } else if (kind === "?") {
+      const path = line.slice(2);
+      if (path !== "") unstaged.push({ path, status: "?", staged: false });
+    }
+  }
+
+  return { staged, unstaged };
+}
+
+/** Read the staged/unstaged change set for a worktree. */
+export async function readChanges(
+  git: GitExec,
+  cwd: string
+): Promise<Result<ChangeSet>> {
+  const raw = await git(["status", "--porcelain=v2"], cwd);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["status"]);
+  if (!checked.ok) return checked;
+  return ok(parseChanges(checked.value.stdout));
+}
 
 const LOG_FORMAT = ["%H", "%P", "%an", "%ae", "%cI", "%s"].join("%x1f") + "%x1e";
 

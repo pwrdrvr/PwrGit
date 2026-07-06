@@ -68,6 +68,11 @@ export type FileChange = {
   staged: boolean;
 };
 
+export type ChangeSet = {
+  staged: FileChange[];
+  unstaged: FileChange[];
+};
+
 export type Commit = {
   hash: string;
   shortHash: string;

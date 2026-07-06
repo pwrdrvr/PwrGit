@@ -11,6 +11,7 @@
 // graph, and rebase entries.
 
 import type {
+  ChangeSet,
   GraphLog,
   Profile,
   ProfileId,
@@ -71,6 +72,9 @@ export interface Commands {
     req: { worktreeId: string; limit?: number };
     res: GraphLog;
   };
+
+  // Changes (U11)
+  "changes:list": { req: { worktreeId: string }; res: ChangeSet };
 
   "dialog:pickDirectory": { req: void; res: string | null };
 }

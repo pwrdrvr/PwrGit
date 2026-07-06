@@ -3,6 +3,7 @@ import type { Repo, RepoSearchHit, Worktree } from "@pwrgit/shared";
 import { LineageGraph } from "./features/graph/LineageGraph";
 import { SelectionBar } from "./features/graph/SelectionBar";
 import { WorktreeHeader } from "./features/graph/WorktreeHeader";
+import { Rail } from "./features/rail/Rail";
 import { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
 import { Sidebar } from "./features/sidebar/Sidebar";
 import { useAppearance } from "./lib/useAppearance";
@@ -152,22 +153,11 @@ export function App() {
         </main>
 
         {!railCollapsed && (
-          <aside className="pane pane--rail" data-testid="rail">
-            <div className="rail__bar">
-              <span className="pane__placeholder" style={{ padding: 0 }}>
-                Changes · Agent — U11+
-              </span>
-              <span style={{ flex: 1 }} />
-              <button
-                className="icon-btn"
-                onClick={() => setRailCollapsed(true)}
-                title="Collapse panel"
-                aria-label="Collapse panel"
-              >
-                ›
-              </button>
-            </div>
-          </aside>
+          <Rail
+            worktree={selectedWorktree}
+            state={worktreeState}
+            onCollapse={() => setRailCollapsed(true)}
+          />
         )}
 
         {railCollapsed && (
