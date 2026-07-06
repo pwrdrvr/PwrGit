@@ -78,10 +78,10 @@ export function WorktreeMenu({
         title="More actions"
         onClick={toggle}
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-          <circle cx="12" cy="5" r="1.55" />
-          <circle cx="12" cy="12" r="1.55" />
-          <circle cx="12" cy="19" r="1.55" />
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <circle cx="12" cy="5" r="2.3" />
+          <circle cx="12" cy="12" r="2.3" />
+          <circle cx="12" cy="19" r="2.3" />
         </svg>
       </button>
       {open &&

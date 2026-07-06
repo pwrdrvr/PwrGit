@@ -469,14 +469,17 @@ input {
 
 .pin {
   flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 5px;
+  border-radius: 6px;
   cursor: pointer;
   color: var(--text-subtle);
+}
+.pin:hover {
+  color: var(--text-secondary);
 }
 .pin.is-pinned {
   color: var(--accent);
@@ -798,20 +801,23 @@ input {
 
 .wt-remove {
   flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 5px;
-  border: none;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
   background: transparent;
   cursor: pointer;
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
-.wt-remove:hover {
+.wt-remove:hover,
+.wt-remove:focus-visible {
+  outline: none;
   background: var(--danger-soft);
+  border-color: transparent;
   color: var(--danger);
 }
 
@@ -1721,21 +1727,28 @@ body.is-col-resizing {
   display: inline-flex;
 }
 .kebab__btn {
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 6px;
-  border: 1px solid transparent;
+  border: 1px solid var(--border-subtle);
   background: transparent;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background 120ms ease, color 120ms ease,
+    border-color 120ms ease;
 }
 .kebab__btn:hover,
 .kebab__btn[aria-expanded="true"] {
   background: var(--bg-hover-strong);
+  border-color: var(--border-default);
+  color: var(--text-primary);
+}
+.kebab__btn:focus-visible {
+  outline: none;
+  border-color: var(--accent-border);
   color: var(--text-primary);
 }
 /* Shared dropdown/context-menu surface (kebab + right-click menus). */
