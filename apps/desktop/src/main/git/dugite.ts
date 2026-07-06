@@ -1,5 +1,9 @@
-import { exec } from "dugite";
+// dugite is CommonJS; default-import + destructure so the strict-ESM main
+// bundle loads it (a named `import { exec }` throws at runtime).
+import dugite from "dugite";
 import { err, ok, type PwrGitError, type Result } from "@pwrgit/shared";
+
+const { exec } = dugite;
 
 export type GitOutput = { stdout: string; stderr: string; exitCode: number };
 

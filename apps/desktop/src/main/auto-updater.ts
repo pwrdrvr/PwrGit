@@ -1,5 +1,7 @@
 import { app } from "electron";
-import { autoUpdater } from "electron-updater";
+// electron-updater is CommonJS; import the default and destructure so the
+// strict-ESM main bundle can load it (named ESM imports fail at runtime).
+import electronUpdater from "electron-updater";
 
 /**
  * Check for updates on startup in the packaged app only. electron-updater
@@ -9,6 +11,7 @@ import { autoUpdater } from "electron-updater";
  */
 export function initAutoUpdater(): void {
   if (!app.isPackaged) return;
+  const { autoUpdater } = electronUpdater;
   autoUpdater.on("error", () => undefined);
   void autoUpdater.checkForUpdatesAndNotify().catch(() => undefined);
 }
