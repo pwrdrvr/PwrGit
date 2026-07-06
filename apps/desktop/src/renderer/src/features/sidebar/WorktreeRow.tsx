@@ -102,11 +102,23 @@ export function WorktreeRow({
           {relativeAge(worktree.lastActivityAt)}
         </span>
       )}
-      <WorktreeMenu
-        worktree={worktree}
-        onRemove={onRemove}
-        className="wt-row__menu"
-      />
+      {!worktree.isPrimary && (
+        <button
+          type="button"
+          className="wt-remove"
+          title="Remove worktree"
+          aria-label="Remove worktree"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" />
+          </svg>
+        </button>
+      )}
+      <WorktreeMenu worktree={worktree} className="wt-row__menu" />
       <span
         className={`pin${worktree.pinned ? " is-pinned" : ""}`}
         title="Pin worktree"

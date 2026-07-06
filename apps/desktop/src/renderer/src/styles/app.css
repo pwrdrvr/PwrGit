@@ -739,17 +739,39 @@ input {
 
 .wt-remove {
   flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 5px;
+  border: none;
+  background: transparent;
   cursor: pointer;
-  color: var(--text-subtle);
+  color: var(--text-muted);
 }
 .wt-remove:hover {
+  background: var(--danger-soft);
   color: var(--danger);
+}
+
+/* Row action affordances (remove + ⋯) stay hidden until the row is hovered,
+   selected, or keyboard-focused — then they fade in at readable contrast.
+   The star/pin is always visible; these secondary/destructive actions aren't. */
+.wt-remove,
+.wt-row__menu {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.wt-row:hover .wt-remove,
+.wt-row:hover .wt-row__menu,
+.wt-row:focus-within .wt-remove,
+.wt-row:focus-within .wt-row__menu,
+.wt-row.is-selected .wt-remove,
+.wt-row.is-selected .wt-row__menu,
+.wt-row__menu:has(.kebab__btn[aria-expanded="true"]) {
+  opacity: 1;
 }
 
 /* ---- Rail: Agent (rebase assistant) tab ---- */
@@ -1640,30 +1662,22 @@ body.is-col-resizing {
   display: inline-flex;
 }
 .kebab__btn {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 6px;
   border: 1px solid transparent;
   background: transparent;
-  color: var(--text-subtle);
+  color: var(--text-muted);
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
 }
 .kebab__btn:hover,
 .kebab__btn[aria-expanded="true"] {
   background: var(--bg-hover-strong);
-  color: var(--text-secondary);
-}
-/* In the sidebar list, keep the handle quiet until the row is hovered. */
-.wt-row__menu .kebab__btn {
-  opacity: 0.5;
-}
-.wt-row:hover .wt-row__menu .kebab__btn,
-.wt-row__menu .kebab__btn[aria-expanded="true"] {
-  opacity: 1;
+  color: var(--text-primary);
 }
 .kebab__menu {
   z-index: 120;
@@ -1692,16 +1706,4 @@ body.is-col-resizing {
 .kebab__item:hover {
   background: var(--bg-hover-strong);
   color: var(--text-primary);
-}
-.kebab__item--danger {
-  color: var(--danger);
-}
-.kebab__item--danger:hover {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-.kebab__sep {
-  height: 1px;
-  background: var(--border-subtle);
-  margin: 4px;
 }

@@ -19,17 +19,15 @@ const revealLabel =
         : "Show in folder";
 
 /**
- * A "⋯" actions menu for a worktree: copy branch/path, reveal in the OS file
- * manager, and (for non-primary worktrees) remove. The dropdown is portalled to
- * <body> so the sidebar's scroll container can't clip it.
+ * A "⋯" actions menu for a worktree: copy branch/path and reveal in the OS file
+ * manager. (Removal has its own visible trash button on the row.) The dropdown
+ * is portalled to <body> so the sidebar's scroll container can't clip it.
  */
 export function WorktreeMenu({
   worktree,
-  onRemove,
   className
 }: {
   worktree: Worktree;
-  onRemove?: () => void;
   className?: string;
 }) {
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -128,18 +126,6 @@ export function WorktreeMenu({
             >
               {revealLabel}
             </button>
-            {onRemove !== undefined && !worktree.isPrimary && (
-              <>
-                <div className="kebab__sep" />
-                <button
-                  className="kebab__item kebab__item--danger"
-                  role="menuitem"
-                  onClick={(e) => pick(e, onRemove)}
-                >
-                  Remove worktree
-                </button>
-              </>
-            )}
           </div>,
           document.body
         )}
