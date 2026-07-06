@@ -1,12 +1,71 @@
-import { useProfiles } from "../../state/useProfiles";
+import { useState } from "react";
+import type { Lens, Profile, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
+import { LensFilter } from "./LensFilter";
 import { ProfileChip } from "./ProfileChip";
+import { RepoRow } from "./RepoRow";
+import { filterReposByLens, lensCounts, SORT_CYCLE } from "./repo-view";
 
-/**
- * Left pane. U5 wires the profile chip/menu; U6-U7 add repo search, lens
- * filters, and the expandable repo→worktree list below.
- */
-export function Sidebar() {
-  const { profiles, activeProfile, switchProfile } = useProfiles();
+export function Sidebar({
+  profiles,
+  activeProfile,
+  onSwitchProfile,
+  repos,
+  loading,
+  selectedWorktreeId,
+  onSelectWorktree,
+  onSetRepoPin,
+  onSetWorktreePin,
+  onAddFolder,
+  onOpenSearch
+}: {
+  profiles: Profile[];
+  activeProfile: Profile | null;
+  onSwitchProfile: (profileId: string) => void;
+  repos: Repo[];
+  loading: boolean;
+  selectedWorktreeId: string | null;
+  onSelectWorktree: (repo: Repo, worktree: Worktree) => void;
+  onSetRepoPin: (repoId: string, pinned: boolean) => void;
+  onSetWorktreePin: (worktreeId: string, pinned: boolean) => void;
+  onAddFolder: () => void;
+  onOpenSearch: () => void;
+}) {
+  const [lens, setLens] = useState<Lens>("Recent");
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [sortByRepo, setSortByRepo] = useState<Record<string, WorktreeSort>>({});
+  const [orderByRepo, setOrderByRepo] = useState<Record<string, string[]>>({});
+
+  const counts = lensCounts(repos);
+  const filtered = filterReposByLens(repos, lens);
+
+  const toggleExpand = (repo: Repo): void => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(repo.id)) next.delete(repo.id);
+      else next.add(repo.id);
+      return next;
+    });
+    const hasSelection = repo.worktrees.some((w) => w.id === selectedWorktreeId);
+    if (!hasSelection && repo.worktrees.length > 0) {
+      const primary =
+        repo.worktrees.find((w) => w.isPrimary) ?? repo.worktrees[0];
+      if (primary !== undefined) onSelectWorktree(repo, primary);
+    }
+  };
+
+  const cycleSort = (repoId: string): void => {
+    setSortByRepo((prev) => {
+      const current = prev[repoId] ?? "pinned";
+      const next = current === "custom" ? "pinned" : SORT_CYCLE[current];
+      return { ...prev, [repoId]: next };
+    });
+    // Cycling clears a manual drag order.
+    setOrderByRepo((prev) => {
+      const next = { ...prev };
+      delete next[repoId];
+      return next;
+    });
+  };
 
   return (
     <aside className="pane pane--sidebar" data-testid="sidebar">
@@ -14,10 +73,71 @@ export function Sidebar() {
         <ProfileChip
           profiles={profiles}
           activeProfile={activeProfile}
-          onSwitch={switchProfile}
+          onSwitch={onSwitchProfile}
         />
       </div>
-      <div className="pane__placeholder">Repos · lenses · ⌘K (U6-U7)</div>
+
+      <div className="sidebar__search">
+        <button className="jump-btn" onClick={onOpenSearch}>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <path d="m21 21-4.3-4.3" />
+          </svg>
+          <span className="jump-btn__label">Jump to repo…</span>
+          <span className="kbd">⌘K</span>
+        </button>
+      </div>
+
+      <div className="sidebar__lens">
+        <LensFilter lens={lens} counts={counts} onChange={setLens} />
+      </div>
+
+      <div className="sidebar__list">
+        {filtered.map((repo) => (
+          <RepoRow
+            key={repo.id}
+            repo={repo}
+            expanded={expanded.has(repo.id)}
+            containsSelection={repo.worktrees.some(
+              (w) => w.id === selectedWorktreeId
+            )}
+            selectedWorktreeId={selectedWorktreeId}
+            sort={sortByRepo[repo.id] ?? "pinned"}
+            customOrder={orderByRepo[repo.id]}
+            onToggleExpand={() => toggleExpand(repo)}
+            onToggleRepoPin={() => onSetRepoPin(repo.id, !repo.pinned)}
+            onSelectWorktree={(w) => onSelectWorktree(repo, w)}
+            onToggleWorktreePin={onSetWorktreePin}
+            onCycleSort={() => cycleSort(repo.id)}
+            onReorder={(ids) =>
+              setOrderByRepo((prev) => ({ ...prev, [repo.id]: ids }))
+            }
+            onNewWorktree={() => undefined}
+          />
+        ))}
+
+        {filtered.length === 0 && (
+          <div className="sidebar__empty">
+            {loading
+              ? "Scanning…"
+              : lens === "All" || lens === "Recent"
+                ? "No repos yet — add a folder to scan."
+                : `No ${lens.toLowerCase()} repos.`}
+          </div>
+        )}
+
+        <button className="add-folder" onClick={onAddFolder}>
+          <span className="new-wt__plus">+</span> Add repo folder…
+        </button>
+      </div>
     </aside>
   );
 }

@@ -51,5 +51,19 @@ export function registerRepoHandlers(
     return ok(repos);
   });
 
+  bus.register("repo:setPin", (req) => {
+    indexer.setRepoPinned(req.repoId, req.pinned);
+    const profileId = profiles.getActiveId();
+    if (profileId !== null) emitEvent("repo:changed", { profileId });
+    return ok(null);
+  });
+
+  bus.register("worktree:setPin", (req) => {
+    indexer.setWorktreePinned(req.worktreeId, req.pinned);
+    const profileId = profiles.getActiveId();
+    if (profileId !== null) emitEvent("repo:changed", { profileId });
+    return ok(null);
+  });
+
   bus.register("repo:search", (req) => ok(indexer.searchAll(req.query)));
 }

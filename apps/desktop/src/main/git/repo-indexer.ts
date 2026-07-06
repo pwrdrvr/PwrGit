@@ -148,6 +148,18 @@ export class RepoIndexer {
     return row === undefined ? null : this.repoFromRow(row);
   }
 
+  setRepoPinned(repoId: string, pinned: boolean): void {
+    this.db
+      .prepare("UPDATE repos SET pinned = ? WHERE id = ?")
+      .run(pinned ? 1 : 0, repoId);
+  }
+
+  setWorktreePinned(worktreeId: string, pinned: boolean): void {
+    this.db
+      .prepare("UPDATE worktrees SET pinned = ? WHERE id = ?")
+      .run(pinned ? 1 : 0, worktreeId);
+  }
+
   searchAll(query: string): RepoSearchHit[] {
     const like = `%${query.trim().toLowerCase()}%`;
     const rows = this.db

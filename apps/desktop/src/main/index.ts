@@ -1,7 +1,8 @@
 import { join } from "node:path";
 import { app, BrowserWindow } from "electron";
-import { ok } from "@pwrgit/shared";
+import { ok, type Profile } from "@pwrgit/shared";
 import { CommandBus } from "./command-bus";
+import { registerDialogHandlers } from "./dialog-handlers";
 import { execGit } from "./git/dugite";
 import { registerRepoHandlers } from "./git/repo-handlers";
 import { RepoIndexer } from "./git/repo-indexer";
@@ -44,24 +45,27 @@ if (!gotSingleInstanceLock) {
       kind: "Personal",
       roots: []
     });
-    registerProfileHandlers(bus, profiles);
-
     const indexer = new RepoIndexer(db, execGit);
+
+    const rescanInBackground = (profile: Profile): void => {
+      void indexer
+        .rescanProfile(profile)
+        .then(() => emitEvent("repo:changed", { profileId: profile.id }))
+        .catch(() => undefined);
+    };
+
+    // Switching profiles kicks a background rescan of the newly active one.
+    registerProfileHandlers(bus, profiles, rescanInBackground);
     registerRepoHandlers(bus, indexer, profiles);
+    registerDialogHandlers(bus);
 
     registerIpc(bus);
     mainWindow = createMainWindow();
 
-    // Kick a background rescan of the active profile so the sidebar fills in
-    // without blocking window creation.
+    // Fill the sidebar for the active profile without blocking window creation.
     const activeId = profiles.getActiveId();
     const activeProfile = activeId === null ? null : profiles.get(activeId);
-    if (activeProfile !== null) {
-      void indexer
-        .rescanProfile(activeProfile)
-        .then(() => emitEvent("repo:changed", { profileId: activeProfile.id }))
-        .catch(() => undefined);
-    }
+    if (activeProfile !== null) rescanInBackground(activeProfile);
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {

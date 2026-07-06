@@ -46,6 +46,8 @@ export interface Commands {
   "repo:rescan": { req: { profileId?: ProfileId }; res: Repo[] };
   "repo:add": { req: { profileId: ProfileId; path: string }; res: Repo };
   "repo:search": { req: { query: string }; res: RepoSearchHit[] };
+  "repo:setPin": { req: { repoId: string; pinned: boolean }; res: null };
+  "worktree:setPin": { req: { worktreeId: string; pinned: boolean }; res: null };
   "dialog:pickDirectory": { req: void; res: string | null };
 }
 

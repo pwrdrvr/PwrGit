@@ -1,15 +1,89 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { Repo, RepoSearchHit, Worktree } from "@pwrgit/shared";
+import { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
 import { Sidebar } from "./features/sidebar/Sidebar";
 import { useAppearance } from "./lib/useAppearance";
+import { useProfiles } from "./state/useProfiles";
+import { useRepoTree } from "./state/useRepoTree";
 
-/**
- * Three-pane app shell (titlebar · sidebar · main · collapsible rail) matching
- * design/PwrGit.dc.html. Pane contents are filled by later units: the sidebar
- * in U5-U7, the main graph in U8-U10, the rail in U11+.
- */
+type Selection = { repoId: string; worktreeId: string };
+
+function WorktreeHeader({ repo, worktree }: { repo: Repo; worktree: Worktree }) {
+  return (
+    <div className="wt-header">
+      <div className="wt-header__id">
+        <span className="wt-header__repo">{repo.name}</span>
+        <span className="wt-header__sep">›</span>
+        <span className="wt-header__branch">
+          <span className="wt-header__dot" />
+          {worktree.branch}
+        </span>
+      </div>
+      <div className="wt-header__path">{worktree.path}</div>
+    </div>
+  );
+}
+
 export function App() {
   useAppearance();
   const [railCollapsed, setRailCollapsed] = useState(false);
+  const [overlayOpen, setOverlayOpen] = useState(false);
+  const [selection, setSelection] = useState<Selection | null>(null);
+  const [pendingRepoId, setPendingRepoId] = useState<string | null>(null);
+
+  const { profiles, activeProfile, switchProfile } = useProfiles();
+  const { repos, loading, setRepoPin, setWorktreePin, addFolder } = useRepoTree(
+    activeProfile?.id ?? null
+  );
+
+  // ⌘K / Ctrl+K opens the repo switcher; Escape closes it.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setOverlayOpen(true);
+      } else if (e.key === "Escape") {
+        setOverlayOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Resolve a cross-profile pick once the target profile's repos have loaded.
+  useEffect(() => {
+    if (pendingRepoId === null) return;
+    const repo = repos.find((r) => r.id === pendingRepoId);
+    if (repo === undefined) return;
+    const primary =
+      repo.worktrees.find((w) => w.isPrimary) ?? repo.worktrees[0];
+    if (primary !== undefined) {
+      setSelection({ repoId: repo.id, worktreeId: primary.id });
+    }
+    setPendingRepoId(null);
+  }, [pendingRepoId, repos]);
+
+  const selectWorktree = useCallback((repo: Repo, worktree: Worktree) => {
+    setSelection({ repoId: repo.id, worktreeId: worktree.id });
+  }, []);
+
+  const onPickSearch = useCallback(
+    (hit: RepoSearchHit) => {
+      setOverlayOpen(false);
+      if (activeProfile !== null && hit.profileId !== activeProfile.id) {
+        switchProfile(hit.profileId);
+      }
+      setPendingRepoId(hit.repoId);
+    },
+    [activeProfile, switchProfile]
+  );
+
+  const selectedRepo = useMemo(
+    () => repos.find((r) => r.id === selection?.repoId) ?? null,
+    [repos, selection]
+  );
+  const selectedWorktree =
+    selectedRepo?.worktrees.find((w) => w.id === selection?.worktreeId) ?? null;
 
   const gridTemplateColumns = `320px minmax(0, 1fr) ${
     railCollapsed ? "0px" : "344px"
@@ -24,17 +98,36 @@ export function App() {
       </div>
 
       <div className="app-body" style={{ gridTemplateColumns }}>
-        <Sidebar />
+        <Sidebar
+          profiles={profiles}
+          activeProfile={activeProfile}
+          onSwitchProfile={switchProfile}
+          repos={repos}
+          loading={loading}
+          selectedWorktreeId={selection?.worktreeId ?? null}
+          onSelectWorktree={selectWorktree}
+          onSetRepoPin={setRepoPin}
+          onSetWorktreePin={setWorktreePin}
+          onAddFolder={() => void addFolder()}
+          onOpenSearch={() => setOverlayOpen(true)}
+        />
 
         <main className="pane pane--main" data-testid="main">
-          <div className="pane__placeholder">Lineage</div>
+          {selectedRepo !== null && selectedWorktree !== null ? (
+            <WorktreeHeader repo={selectedRepo} worktree={selectedWorktree} />
+          ) : (
+            <div className="main-empty">
+              {loading ? "Scanning repos…" : "Select a worktree from the sidebar"}
+            </div>
+          )}
+          <div className="pane__placeholder">Lineage graph — U8-U10</div>
         </main>
 
         {!railCollapsed && (
           <aside className="pane pane--rail" data-testid="rail">
             <div className="rail__bar">
               <span className="pane__placeholder" style={{ padding: 0 }}>
-                Changes
+                Changes · Agent — U11+
               </span>
               <span style={{ flex: 1 }} />
               <button
@@ -50,14 +143,18 @@ export function App() {
         )}
 
         {railCollapsed && (
-          <button
-            className="rail-reopen"
-            onClick={() => setRailCollapsed(false)}
-          >
+          <button className="rail-reopen" onClick={() => setRailCollapsed(false)}>
             ‹ Panel
           </button>
         )}
       </div>
+
+      {overlayOpen && (
+        <RepoSwitcherOverlay
+          onClose={() => setOverlayOpen(false)}
+          onPick={onPickSearch}
+        />
+      )}
     </div>
   );
 }
