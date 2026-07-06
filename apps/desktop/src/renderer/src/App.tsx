@@ -1,10 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type {
-  Repo,
-  RepoSearchHit,
-  Worktree,
-  WorktreeState
-} from "@pwrgit/shared";
+import type { Repo, RepoSearchHit, Worktree } from "@pwrgit/shared";
+import { WorktreeHeader } from "./features/graph/WorktreeHeader";
 import { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
 import { Sidebar } from "./features/sidebar/Sidebar";
 import { useAppearance } from "./lib/useAppearance";
@@ -13,49 +9,6 @@ import { useRepoTree } from "./state/useRepoTree";
 import { useWorktreeState } from "./state/useWorktreeState";
 
 type Selection = { repoId: string; worktreeId: string };
-
-function syncChip(state: WorktreeState | null): {
-  text: string;
-  tone: "muted" | "ok" | "warn";
-} {
-  if (state === null) return { text: "…", tone: "muted" };
-  if (state.behind > 0) {
-    const ahead = state.ahead > 0 ? ` · ↑${state.ahead}` : "";
-    return { text: `↓${state.behind} behind${ahead}`, tone: "warn" };
-  }
-  if (state.ahead > 0) return { text: `↑${state.ahead} ahead`, tone: "ok" };
-  if (!state.hasUpstream) return { text: "no upstream", tone: "muted" };
-  return { text: "up to date", tone: "muted" };
-}
-
-function WorktreeHeader({
-  repo,
-  worktree,
-  state
-}: {
-  repo: Repo;
-  worktree: Worktree;
-  state: WorktreeState | null;
-}) {
-  const chip = syncChip(state);
-  const dirty = state?.dirty ?? worktree.dirty;
-  return (
-    <div className="wt-header">
-      <div className="wt-header__id">
-        <span className="wt-header__repo">{repo.name}</span>
-        <span className="wt-header__sep">›</span>
-        <span className="wt-header__branch">
-          <span className="wt-header__dot" />
-          {worktree.branch}
-        </span>
-        {dirty > 0 && <span className="badge badge--warn">●{dirty}</span>}
-        <span style={{ flex: 1 }} />
-        <span className={`sync-chip sync-chip--${chip.tone}`}>{chip.text}</span>
-      </div>
-      <div className="wt-header__path">{worktree.path}</div>
-    </div>
-  );
-}
 
 export function App() {
   useAppearance();

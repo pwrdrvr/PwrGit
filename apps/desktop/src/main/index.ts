@@ -4,6 +4,7 @@ import { ok, type Profile } from "@pwrgit/shared";
 import { CommandBus } from "./command-bus";
 import { registerDialogHandlers } from "./dialog-handlers";
 import { execGit } from "./git/dugite";
+import { registerRemoteHandlers } from "./git/remote-handlers";
 import { registerRepoHandlers } from "./git/repo-handlers";
 import { RepoIndexer } from "./git/repo-indexer";
 import { WorktreeWatchers } from "./git/watchers";
@@ -83,6 +84,7 @@ if (!gotSingleInstanceLock) {
     registerProfileHandlers(bus, profiles, rescanInBackground);
     registerRepoHandlers(bus, indexer, profiles);
     registerWorktreeHandlers(bus, stateService, watchers, db, refresher);
+    registerRemoteHandlers(bus, db, refresher);
     registerDialogHandlers(bus);
 
     registerIpc(bus);

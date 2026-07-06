@@ -1,4 +1,4 @@
-import { ok, type Result } from "@pwrgit/shared";
+import { err, ok, type Result } from "@pwrgit/shared";
 import { requireExit0, type GitExec } from "./dugite";
 
 export type WorktreeInfo = {
@@ -59,4 +59,64 @@ export async function listWorktrees(
   const checked = requireExit0(raw.value, ["worktree", "list"]);
   if (!checked.ok) return checked;
   return ok(parseWorktreeList(checked.value.stdout));
+}
+
+/** Fetch all remotes and prune deleted remote branches. */
+export async function fetchRemote(
+  git: GitExec,
+  cwd: string
+): Promise<Result<void>> {
+  const raw = await git(["fetch", "--prune"], cwd);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["fetch"]);
+  return checked.ok ? ok(undefined) : checked;
+}
+
+/** Pull = fetch + fast-forward-only merge of the tracked upstream. */
+export async function pullFastForward(
+  git: GitExec,
+  cwd: string
+): Promise<Result<{ fastForwarded: boolean }>> {
+  const fetched = await fetchRemote(git, cwd);
+  if (!fetched.ok) return fetched;
+
+  const merge = await git(["merge", "--ff-only", "@{u}"], cwd);
+  if (!merge.ok) return merge;
+  if (merge.value.exitCode !== 0) {
+    const message = merge.value.stderr.trim();
+    const code = /fast-forward/i.test(message)
+      ? "not_fast_forward"
+      : /upstream|tracking/i.test(message)
+        ? "no_upstream"
+        : "merge_failed";
+    return err({
+      kind: "remote",
+      code,
+      message: message !== "" ? message : "pull could not fast-forward"
+    });
+  }
+  return ok({ fastForwarded: true });
+}
+
+/** Push the current branch to its upstream. */
+export async function pushRemote(
+  git: GitExec,
+  cwd: string
+): Promise<Result<void>> {
+  const raw = await git(["push"], cwd);
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode !== 0) {
+    const message = raw.value.stderr.trim();
+    const code = /non-fast-forward|rejected/i.test(message)
+      ? "rejected"
+      : /no upstream|has no upstream/i.test(message)
+        ? "no_upstream"
+        : "push_failed";
+    return err({
+      kind: "remote",
+      code,
+      message: message !== "" ? message : "push failed"
+    });
+  }
+  return ok(undefined);
 }

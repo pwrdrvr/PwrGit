@@ -133,6 +133,7 @@ input {
 
 .pane--main {
   background: var(--bg-app);
+  container-type: inline-size;
 }
 
 .pane--rail {
@@ -802,6 +803,54 @@ input {
 .sync-chip--warn {
   background: var(--warn-soft);
   color: var(--warn);
+}
+
+.wt-actions {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin-left: 12px;
+}
+.wt-btn {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font: 600 12px/1 var(--font-sans);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.wt-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.wt-btn--pull {
+  border-color: var(--accent-border);
+  color: var(--accent-bright);
+  font-weight: 700;
+}
+.wt-btn--pull.is-behind {
+  background: var(--bg-active);
+}
+
+/* Collapse button labels + sync chip when the main pane is tight. */
+@container (max-width: 540px) {
+  .wt-btn {
+    padding: 0;
+    width: 32px;
+    justify-content: center;
+  }
+  .wt-btn__label {
+    display: none;
+  }
+  .wt-header__id .sync-chip {
+    display: none;
+  }
 }
 
 .main-empty {

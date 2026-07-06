@@ -57,6 +57,14 @@ export interface Commands {
   };
   "worktree:activate": { req: { worktreeId: string }; res: null };
 
+  // Remotes (U9 / U13)
+  "remote:fetch": { req: { worktreeId: string }; res: null };
+  "remote:pull": {
+    req: { worktreeId: string };
+    res: { fastForwarded: boolean };
+  };
+  "remote:push": { req: { worktreeId: string }; res: null };
+
   "dialog:pickDirectory": { req: void; res: string | null };
 }
 
