@@ -1,9 +1,26 @@
 import type { Lens, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
 
-export const LENSES: Lens[] = ["Recent", "Pinned", "Behind", "All"];
+export const LENSES: Lens[] = ["Recent", "Pinned", "Behind", "Stale", "All"];
+
+/** A worktree is "safe to prune": clean, fully merged into the default branch,
+ *  not the default/primary checkout, and untouched for a while. */
+export const STALE_AGE_DAYS = 14;
+
+export function isPrunableWorktree(w: Worktree, now: number = Date.now()): boolean {
+  if (w.isDefaultBranch || w.isPrimary) return false;
+  if (w.dirty > 0) return false;
+  if (!w.mergedIntoDefault) return false;
+  if (w.lastActivityAt === undefined) return false;
+  const ageMs = now - new Date(w.lastActivityAt).getTime();
+  return ageMs > STALE_AGE_DAYS * 24 * 60 * 60 * 1000;
+}
 
 function repoIsPinned(r: Repo): boolean {
   return r.pinned || r.worktrees.some((w) => w.pinned);
+}
+
+function repoHasPrunable(r: Repo): boolean {
+  return r.worktrees.some((w) => isPrunableWorktree(w));
 }
 
 /** Counts shown on the lens chips. Recent has no counter (it's the default). */
@@ -12,6 +29,7 @@ export function lensCounts(repos: Repo[]): Record<Lens, number> {
     Recent: 0,
     Pinned: repos.filter(repoIsPinned).length,
     Behind: repos.filter((r) => r.worktrees.some((w) => w.behind > 0)).length,
+    Stale: repos.filter(repoHasPrunable).length,
     All: repos.length
   };
 }
@@ -23,6 +41,8 @@ export function filterReposByLens(repos: Repo[], lens: Lens): Repo[] {
     list = repos.filter((r) => r.worktrees.some((w) => w.behind > 0));
   } else if (lens === "Pinned") {
     list = repos.filter(repoIsPinned);
+  } else if (lens === "Stale") {
+    list = repos.filter(repoHasPrunable);
   }
   return [...list].sort(
     (a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)
@@ -68,6 +88,16 @@ export function orderWorktrees(
   }
   // "pinned"
   return list.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+}
+
+/** Short relative age label for a last-activity timestamp. */
+export function relativeAge(iso: string, now: number = Date.now()): string {
+  const days = Math.floor((now - new Date(iso).getTime()) / 86_400_000);
+  if (days < 1) return "today";
+  if (days < 7) return `${days}d`;
+  if (days < 30) return `${Math.floor(days / 7)}w`;
+  if (days < 365) return `${Math.floor(days / 30)}mo`;
+  return `${Math.floor(days / 365)}y`;
 }
 
 /** Move an id to sit just before `beforeId` (drag-reorder). */

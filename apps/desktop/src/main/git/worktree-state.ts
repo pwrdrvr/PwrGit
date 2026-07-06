@@ -42,7 +42,13 @@ export function parseStatus(stdout: string): ParsedStatus {
   return { head, branch, hasUpstream, ahead, behind, dirty };
 }
 
-type WorktreeRow = { id: string; branch: string; path: string };
+type WorktreeRow = {
+  id: string;
+  branch: string;
+  path: string;
+  repo_id: string;
+  repo_path: string;
+};
 type StateRow = {
   worktree_id: string;
   branch: string;
@@ -51,6 +57,9 @@ type StateRow = {
   ahead: number;
   behind: number;
   dirty: number;
+  behind_default: number;
+  merged_into_default: number;
+  is_default_branch: number;
   last_activity_at: string | null;
   updated_at: string;
 };
@@ -64,6 +73,9 @@ function rowToState(r: StateRow): WorktreeState {
     ahead: r.ahead,
     behind: r.behind,
     dirty: r.dirty,
+    behindDefault: r.behind_default,
+    mergedIntoDefault: r.merged_into_default === 1,
+    isDefaultBranch: r.is_default_branch === 1,
     updatedAt: r.updated_at
   };
   if (r.last_activity_at !== null) s.lastActivityAt = r.last_activity_at;
@@ -76,6 +88,12 @@ function rowToState(r: StateRow): WorktreeState {
  * GitExec is injected (tests drive it against system git).
  */
 export class WorktreeStateService {
+  /** Per-repo default branch (ref + name), resolved once per process. */
+  private readonly defaultBranch = new Map<
+    string,
+    { ref: string; name: string }
+  >();
+
   constructor(
     private readonly db: DB,
     private readonly git: GitExec
@@ -90,9 +108,49 @@ export class WorktreeStateService {
 
   private worktreeRow(worktreeId: string): WorktreeRow | null {
     const row = this.db
-      .prepare("SELECT id, branch, path FROM worktrees WHERE id = ?")
+      .prepare(
+        `SELECT w.id, w.branch, w.path, w.repo_id, r.path AS repo_path
+         FROM worktrees w JOIN repos r ON r.id = w.repo_id
+         WHERE w.id = ?`
+      )
       .get(worktreeId) as WorktreeRow | undefined;
     return row ?? null;
+  }
+
+  /**
+   * Resolve a repo's default branch: prefer the remote default
+   * (`origin/HEAD` → `origin/<name>`), fall back to a local `main`/`master`.
+   * Cached per repo for the process lifetime.
+   */
+  async resolveDefaultBranch(
+    repoId: string,
+    repoPath: string
+  ): Promise<{ ref: string; name: string }> {
+    const cached = this.defaultBranch.get(repoId);
+    if (cached !== undefined) return cached;
+
+    let resolved: { ref: string; name: string } = { ref: "main", name: "main" };
+    const sym = await this.git(
+      ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
+      repoPath
+    );
+    if (sym.ok && sym.value.exitCode === 0) {
+      const name = sym.value.stdout.trim().replace("refs/remotes/origin/", "");
+      if (name !== "") resolved = { ref: `origin/${name}`, name };
+    } else {
+      for (const cand of ["main", "master"]) {
+        const v = await this.git(
+          ["rev-parse", "--verify", "--quiet", cand],
+          repoPath
+        );
+        if (v.ok && v.value.exitCode === 0) {
+          resolved = { ref: cand, name: cand };
+          break;
+        }
+      }
+    }
+    this.defaultBranch.set(repoId, resolved);
+    return resolved;
   }
 
   /** Run git and cache a fresh snapshot for one worktree. */
@@ -116,14 +174,38 @@ export class WorktreeStateService {
       if (iso !== "") lastActivityAt = iso;
     }
 
+    // Staleness vs the repo's default branch.
+    const branchName = parsed.branch !== "" ? parsed.branch : wt.branch;
+    const def = await this.resolveDefaultBranch(wt.repo_id, wt.repo_path);
+    const isDefaultBranch = branchName === def.name;
+    let behindDefault = 0;
+    let mergedIntoDefault = false;
+    if (!isDefaultBranch) {
+      const bd = await this.git(
+        ["rev-list", "--count", `HEAD..${def.ref}`],
+        wt.path
+      );
+      if (bd.ok && bd.value.exitCode === 0) {
+        behindDefault = Number(bd.value.stdout.trim()) || 0;
+      }
+      const anc = await this.git(
+        ["merge-base", "--is-ancestor", "HEAD", def.ref],
+        wt.path
+      );
+      mergedIntoDefault = anc.ok && anc.value.exitCode === 0;
+    }
+
     const state: WorktreeState = {
       worktreeId,
-      branch: parsed.branch !== "" ? parsed.branch : wt.branch,
+      branch: branchName,
       head: parsed.head,
       hasUpstream: parsed.hasUpstream,
       ahead: parsed.ahead,
       behind: parsed.behind,
       dirty: parsed.dirty,
+      behindDefault,
+      mergedIntoDefault,
+      isDefaultBranch,
       updatedAt: new Date().toISOString()
     };
     if (lastActivityAt !== undefined) state.lastActivityAt = lastActivityAt;
@@ -143,12 +225,19 @@ export class WorktreeStateService {
     this.db
       .prepare(
         `INSERT INTO worktree_state
-           (worktree_id, branch, head, has_upstream, ahead, behind, dirty, last_activity_at, updated_at)
-         VALUES (@worktree_id, @branch, @head, @has_upstream, @ahead, @behind, @dirty, @last_activity_at, @updated_at)
+           (worktree_id, branch, head, has_upstream, ahead, behind, dirty,
+            behind_default, merged_into_default, is_default_branch,
+            last_activity_at, updated_at)
+         VALUES (@worktree_id, @branch, @head, @has_upstream, @ahead, @behind, @dirty,
+                 @behind_default, @merged_into_default, @is_default_branch,
+                 @last_activity_at, @updated_at)
          ON CONFLICT(worktree_id) DO UPDATE SET
            branch = excluded.branch, head = excluded.head,
            has_upstream = excluded.has_upstream, ahead = excluded.ahead,
            behind = excluded.behind, dirty = excluded.dirty,
+           behind_default = excluded.behind_default,
+           merged_into_default = excluded.merged_into_default,
+           is_default_branch = excluded.is_default_branch,
            last_activity_at = excluded.last_activity_at, updated_at = excluded.updated_at`
       )
       .run({
@@ -159,6 +248,9 @@ export class WorktreeStateService {
         ahead: s.ahead,
         behind: s.behind,
         dirty: s.dirty,
+        behind_default: s.behindDefault,
+        merged_into_default: s.mergedIntoDefault ? 1 : 0,
+        is_default_branch: s.isDefaultBranch ? 1 : 0,
         last_activity_at: s.lastActivityAt ?? null,
         updated_at: s.updatedAt
       });

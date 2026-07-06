@@ -12,6 +12,8 @@ function stateChanged(a: WorktreeState, b: WorktreeState): boolean {
     a.behind !== b.behind ||
     a.head !== b.head ||
     a.branch !== b.branch ||
+    a.behindDefault !== b.behindDefault ||
+    a.mergedIntoDefault !== b.mergedIntoDefault ||
     a.lastActivityAt !== b.lastActivityAt
   );
 }

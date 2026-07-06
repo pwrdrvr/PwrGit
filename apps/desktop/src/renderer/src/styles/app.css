@@ -364,8 +364,8 @@ input {
 }
 .lens-filter {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 3px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 2px;
   padding: 3px;
   border: 1px solid var(--border-subtle);
   border-radius: 9px;
@@ -377,13 +377,14 @@ input {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 4px;
   border-radius: 7px;
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-muted);
-  font: 600 11.5px/1 var(--font-sans);
+  font: 600 11px/1 var(--font-sans);
   cursor: pointer;
+  overflow: hidden;
 }
 .lens-chip.is-active {
   border-color: var(--accent-border);
@@ -580,6 +581,32 @@ input {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.wt-row.is-stale .wt-row__branch {
+  color: var(--text-muted);
+}
+
+.wt-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font: 600 9px/1 var(--font-mono);
+  flex: 0 0 auto;
+}
+.wt-tag--merged {
+  background: var(--success-soft);
+  color: var(--success-bright);
+}
+.wt-tag--behind {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.wt-age {
+  font: 500 9.5px/1 var(--font-mono);
+  color: var(--text-subtle);
+  flex: 0 0 auto;
 }
 
 .new-wt,

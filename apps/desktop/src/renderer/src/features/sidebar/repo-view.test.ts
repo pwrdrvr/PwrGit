@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Repo, Worktree } from "@pwrgit/shared";
 import {
   filterReposByLens,
+  isPrunableWorktree,
   lensCounts,
   orderWorktrees,
   reorder,
@@ -15,11 +16,16 @@ function wt(partial: Partial<Worktree> & { id: string; branch: string }): Worktr
     dirty: 0,
     ahead: 0,
     behind: 0,
+    behindDefault: 0,
+    mergedIntoDefault: false,
+    isDefaultBranch: false,
     pinned: false,
     isPrimary: false,
     ...partial
   };
 }
+
+const OLD = "2000-01-01T00:00:00.000Z";
 
 function repo(partial: Partial<Repo> & { id: string }): Repo {
   return {
@@ -41,7 +47,7 @@ describe("lensCounts / filterReposByLens", () => {
 
   it("counts pinned (repo or worktree), behind, and all", () => {
     const counts = lensCounts(repos);
-    expect(counts).toEqual({ Recent: 0, Pinned: 2, Behind: 1, All: 3 });
+    expect(counts).toEqual({ Recent: 0, Pinned: 2, Behind: 1, Stale: 0, All: 3 });
   });
 
   it("Behind lens keeps only repos with a behind worktree", () => {
@@ -101,5 +107,41 @@ describe("reorder", () => {
   });
   it("is a no-op when dragging onto itself", () => {
     expect(reorder(["1", "2", "3"], "2", "2")).toEqual(["1", "2", "3"]);
+  });
+});
+
+describe("staleness (isPrunableWorktree + Stale lens)", () => {
+  const prunable = wt({
+    id: "p",
+    branch: "old/merged",
+    mergedIntoDefault: true,
+    lastActivityAt: OLD
+  });
+
+  it("flags a clean, merged, old, non-default worktree as prunable", () => {
+    expect(isPrunableWorktree(prunable)).toBe(true);
+  });
+
+  it("excludes dirty, unmerged, default, recent, or primary worktrees", () => {
+    expect(isPrunableWorktree({ ...prunable, dirty: 2 })).toBe(false);
+    expect(isPrunableWorktree({ ...prunable, mergedIntoDefault: false })).toBe(
+      false
+    );
+    expect(isPrunableWorktree({ ...prunable, isDefaultBranch: true })).toBe(
+      false
+    );
+    expect(isPrunableWorktree({ ...prunable, isPrimary: true })).toBe(false);
+    expect(
+      isPrunableWorktree({ ...prunable, lastActivityAt: new Date().toISOString() })
+    ).toBe(false);
+  });
+
+  it("Stale lens filters to repos with a prunable worktree and counts them", () => {
+    const repos = [
+      repo({ id: "stale", worktrees: [prunable] }),
+      repo({ id: "fresh", worktrees: [wt({ id: "f", branch: "main", isDefaultBranch: true })] })
+    ];
+    expect(lensCounts(repos).Stale).toBe(1);
+    expect(filterReposByLens(repos, "Stale").map((r) => r.id)).toEqual(["stale"]);
   });
 });

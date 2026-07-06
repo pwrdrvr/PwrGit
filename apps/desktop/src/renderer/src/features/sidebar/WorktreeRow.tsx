@@ -1,5 +1,6 @@
 import type { DragEvent } from "react";
 import type { Worktree } from "@pwrgit/shared";
+import { isPrunableWorktree, relativeAge } from "./repo-view";
 
 export function WorktreeRow({
   worktree,
@@ -20,9 +21,10 @@ export function WorktreeRow({
   onDrop: (e: DragEvent) => void;
   onDragEnd: () => void;
 }) {
+  const prunable = isPrunableWorktree(worktree);
   return (
     <div
-      className={`wt-row${selected ? " is-selected" : ""}`}
+      className={`wt-row${selected ? " is-selected" : ""}${prunable ? " is-stale" : ""}`}
       draggable
       onDragStart={onDragStart}
       onDragOver={onDragOver}
@@ -65,6 +67,26 @@ export function WorktreeRow({
       )}
       {worktree.behind > 0 && (
         <span className="badge-text badge-text--warn">↓{worktree.behind}</span>
+      )}
+      {!worktree.isDefaultBranch && worktree.mergedIntoDefault && (
+        <span className="wt-tag wt-tag--merged" title="Merged into the default branch">
+          merged
+        </span>
+      )}
+      {!worktree.isDefaultBranch &&
+        !worktree.mergedIntoDefault &&
+        worktree.behindDefault > 0 && (
+          <span
+            className="wt-tag wt-tag--behind"
+            title={`${worktree.behindDefault} commits behind the default branch`}
+          >
+            ↓{worktree.behindDefault}
+          </span>
+        )}
+      {worktree.lastActivityAt !== undefined && (
+        <span className="wt-age" title={worktree.lastActivityAt}>
+          {relativeAge(worktree.lastActivityAt)}
+        </span>
       )}
       <span
         className={`pin${worktree.pinned ? " is-pinned" : ""}`}

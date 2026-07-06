@@ -37,6 +37,12 @@ export type Worktree = {
   ahead: number;
   /** Commits behind upstream. */
   behind: number;
+  /** Commits the repo's default branch is ahead of this worktree (staleness). */
+  behindDefault: number;
+  /** This worktree's branch is fully merged into the default branch. */
+  mergedIntoDefault: boolean;
+  /** This worktree is on the repo's default branch (never flagged stale). */
+  isDefaultBranch: boolean;
   /** ISO-8601 time of the worktree branch's last commit (staleness signal). */
   lastActivityAt?: string;
   pinned: boolean;
@@ -83,13 +89,16 @@ export type WorktreeState = {
   ahead: number;
   behind: number;
   dirty: number;
+  behindDefault: number;
+  mergedIntoDefault: boolean;
+  isDefaultBranch: boolean;
   /** ISO-8601 time of the branch's last commit. */
   lastActivityAt?: string;
   /** ISO-8601 time the snapshot was computed. */
   updatedAt: string;
 };
 
-export type Lens = "Recent" | "Pinned" | "Behind" | "All";
+export type Lens = "Recent" | "Pinned" | "Behind" | "Stale" | "All";
 export type WorktreeSort = "pinned" | "az" | "active" | "custom";
 
 export type RepoSearchHit = {
