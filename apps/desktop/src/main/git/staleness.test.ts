@@ -59,6 +59,15 @@ beforeAll(async () => {
   git(repo, ["add", "."]);
   git(repo, ["commit", "-m", "c3 on main"]);
 
+  // An orphan branch: no shared history with main (rewritten/orphaned).
+  git(repo, ["checkout", "--orphan", "orphan"]);
+  git(repo, ["rm", "-rf", "."]);
+  writeFileSync(join(repo, "o.txt"), "o\n");
+  git(repo, ["add", "o.txt"]);
+  git(repo, ["commit", "-m", "orphan root"]);
+  git(repo, ["checkout", "main"]);
+  git(repo, ["worktree", "add", join(root, "orphan"), "orphan"]);
+
   db = openDatabase(":memory:");
   const profiles = new ProfileService(db);
   const p = profiles.create({ name: "T", email: "t@t.com" });
@@ -90,5 +99,12 @@ describe("staleness signals", () => {
     const unmerged = byBranch.get("unmerged");
     expect(unmerged?.mergedIntoDefault).toBe(false);
     expect((unmerged?.behindDefault ?? 0) > 0).toBe(true);
+  });
+
+  it("flags an orphan branch as diverged (not an inflated behind count)", () => {
+    const orphan = byBranch.get("orphan");
+    expect(orphan?.divergedFromDefault).toBe(true);
+    expect(orphan?.mergedIntoDefault).toBe(false);
+    expect(orphan?.behindDefault).toBe(0);
   });
 });

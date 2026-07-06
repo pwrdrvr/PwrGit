@@ -37,10 +37,13 @@ export type Worktree = {
   ahead: number;
   /** Commits behind upstream. */
   behind: number;
-  /** Commits the repo's default branch is ahead of this worktree (staleness). */
+  /** Commits the repo's default branch is ahead of this worktree (staleness).
+   *  0 when the branch shares no history with the default (see divergedFromDefault). */
   behindDefault: number;
   /** This worktree's branch is fully merged into the default branch. */
   mergedIntoDefault: boolean;
+  /** No common ancestor with the default branch (rewritten/orphaned history). */
+  divergedFromDefault: boolean;
   /** This worktree is on the repo's default branch (never flagged stale). */
   isDefaultBranch: boolean;
   /** ISO-8601 time of the worktree branch's last commit (staleness signal). */
@@ -98,6 +101,7 @@ export type WorktreeState = {
   dirty: number;
   behindDefault: number;
   mergedIntoDefault: boolean;
+  divergedFromDefault: boolean;
   isDefaultBranch: boolean;
   /** ISO-8601 time of the branch's last commit. */
   lastActivityAt?: string;

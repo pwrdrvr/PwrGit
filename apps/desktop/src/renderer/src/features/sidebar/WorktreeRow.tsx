@@ -75,8 +75,17 @@ export function WorktreeRow({
           merged
         </span>
       )}
+      {!worktree.isDefaultBranch && worktree.divergedFromDefault && (
+        <span
+          className="wt-tag wt-tag--diverged"
+          title="No shared history with the default branch (rewritten or orphaned)"
+        >
+          diverged
+        </span>
+      )}
       {!worktree.isDefaultBranch &&
         !worktree.mergedIntoDefault &&
+        !worktree.divergedFromDefault &&
         worktree.behindDefault > 0 && (
           <span
             className="wt-tag wt-tag--behind"

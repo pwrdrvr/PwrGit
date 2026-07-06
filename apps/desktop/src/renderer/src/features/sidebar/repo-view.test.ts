@@ -18,6 +18,7 @@ function wt(partial: Partial<Worktree> & { id: string; branch: string }): Worktr
     behind: 0,
     behindDefault: 0,
     mergedIntoDefault: false,
+    divergedFromDefault: false,
     isDefaultBranch: false,
     pinned: false,
     isPrimary: false,
@@ -120,6 +121,17 @@ describe("staleness (isPrunableWorktree + Stale lens)", () => {
 
   it("flags a clean, merged, old, non-default worktree as prunable", () => {
     expect(isPrunableWorktree(prunable)).toBe(true);
+  });
+
+  it("also flags a clean, diverged (orphaned), old worktree as prunable", () => {
+    const diverged = wt({
+      id: "d",
+      branch: "orphan",
+      mergedIntoDefault: false,
+      divergedFromDefault: true,
+      lastActivityAt: OLD
+    });
+    expect(isPrunableWorktree(diverged)).toBe(true);
   });
 
   it("excludes dirty, unmerged, default, recent, or primary worktrees", () => {

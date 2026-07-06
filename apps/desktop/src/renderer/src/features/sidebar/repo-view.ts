@@ -9,7 +9,9 @@ export const STALE_AGE_DAYS = 14;
 export function isPrunableWorktree(w: Worktree, now: number = Date.now()): boolean {
   if (w.isDefaultBranch || w.isPrimary) return false;
   if (w.dirty > 0) return false;
-  if (!w.mergedIntoDefault) return false;
+  // Safe to prune when merged into the default branch, or when the branch
+  // shares no history with it (rewritten/orphaned) — both plus old + clean.
+  if (!w.mergedIntoDefault && !w.divergedFromDefault) return false;
   if (w.lastActivityAt === undefined) return false;
   const ageMs = now - new Date(w.lastActivityAt).getTime();
   return ageMs > STALE_AGE_DAYS * 24 * 60 * 60 * 1000;

@@ -59,6 +59,7 @@ type StateRow = {
   dirty: number;
   behind_default: number;
   merged_into_default: number;
+  diverged_from_default: number;
   is_default_branch: number;
   last_activity_at: string | null;
   updated_at: string;
@@ -75,6 +76,7 @@ function rowToState(r: StateRow): WorktreeState {
     dirty: r.dirty,
     behindDefault: r.behind_default,
     mergedIntoDefault: r.merged_into_default === 1,
+    divergedFromDefault: r.diverged_from_default === 1,
     isDefaultBranch: r.is_default_branch === 1,
     updatedAt: r.updated_at
   };
@@ -180,19 +182,29 @@ export class WorktreeStateService {
     const isDefaultBranch = branchName === def.name;
     let behindDefault = 0;
     let mergedIntoDefault = false;
+    let divergedFromDefault = false;
     if (!isDefaultBranch) {
-      const bd = await this.git(
-        ["rev-list", "--count", `HEAD..${def.ref}`],
-        wt.path
-      );
-      if (bd.ok && bd.value.exitCode === 0) {
-        behindDefault = Number(bd.value.stdout.trim()) || 0;
+      // With no common ancestor (rewritten/orphaned history), `HEAD..default`
+      // counts the *entire* default branch — a misleading "behind" number. Flag
+      // it as diverged instead of reporting the inflated count.
+      const mergeBase = await this.git(["merge-base", "HEAD", def.ref], wt.path);
+      const hasMergeBase = mergeBase.ok && mergeBase.value.exitCode === 0;
+      if (!hasMergeBase) {
+        divergedFromDefault = true;
+      } else {
+        const bd = await this.git(
+          ["rev-list", "--count", `HEAD..${def.ref}`],
+          wt.path
+        );
+        if (bd.ok && bd.value.exitCode === 0) {
+          behindDefault = Number(bd.value.stdout.trim()) || 0;
+        }
+        const anc = await this.git(
+          ["merge-base", "--is-ancestor", "HEAD", def.ref],
+          wt.path
+        );
+        mergedIntoDefault = anc.ok && anc.value.exitCode === 0;
       }
-      const anc = await this.git(
-        ["merge-base", "--is-ancestor", "HEAD", def.ref],
-        wt.path
-      );
-      mergedIntoDefault = anc.ok && anc.value.exitCode === 0;
     }
 
     const state: WorktreeState = {
@@ -205,6 +217,7 @@ export class WorktreeStateService {
       dirty: parsed.dirty,
       behindDefault,
       mergedIntoDefault,
+      divergedFromDefault,
       isDefaultBranch,
       updatedAt: new Date().toISOString()
     };
@@ -226,17 +239,18 @@ export class WorktreeStateService {
       .prepare(
         `INSERT INTO worktree_state
            (worktree_id, branch, head, has_upstream, ahead, behind, dirty,
-            behind_default, merged_into_default, is_default_branch,
-            last_activity_at, updated_at)
+            behind_default, merged_into_default, diverged_from_default,
+            is_default_branch, last_activity_at, updated_at)
          VALUES (@worktree_id, @branch, @head, @has_upstream, @ahead, @behind, @dirty,
-                 @behind_default, @merged_into_default, @is_default_branch,
-                 @last_activity_at, @updated_at)
+                 @behind_default, @merged_into_default, @diverged_from_default,
+                 @is_default_branch, @last_activity_at, @updated_at)
          ON CONFLICT(worktree_id) DO UPDATE SET
            branch = excluded.branch, head = excluded.head,
            has_upstream = excluded.has_upstream, ahead = excluded.ahead,
            behind = excluded.behind, dirty = excluded.dirty,
            behind_default = excluded.behind_default,
            merged_into_default = excluded.merged_into_default,
+           diverged_from_default = excluded.diverged_from_default,
            is_default_branch = excluded.is_default_branch,
            last_activity_at = excluded.last_activity_at, updated_at = excluded.updated_at`
       )
@@ -250,6 +264,7 @@ export class WorktreeStateService {
         dirty: s.dirty,
         behind_default: s.behindDefault,
         merged_into_default: s.mergedIntoDefault ? 1 : 0,
+        diverged_from_default: s.divergedFromDefault ? 1 : 0,
         is_default_branch: s.isDefaultBranch ? 1 : 0,
         last_activity_at: s.lastActivityAt ?? null,
         updated_at: s.updatedAt

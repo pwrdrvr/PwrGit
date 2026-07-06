@@ -604,6 +604,10 @@ input {
   background: var(--warn-soft);
   color: var(--warn);
 }
+.wt-tag--diverged {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
 .wt-age {
   font: 500 9.5px/1 var(--font-mono);
   color: var(--text-subtle);
