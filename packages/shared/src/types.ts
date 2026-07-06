@@ -20,6 +20,8 @@ export type Profile = {
   mono: string;
   /** Free-form label, e.g. "Work", "Personal org", "Side". */
   kind?: string;
+  /** Default GitHub org/owner for new repos under this profile, e.g. "pwrdrvr". */
+  org?: string;
   /** Root folders scanned to discover this profile's repos. */
   roots: string[];
   /** ISO-8601 timestamp of the last time this profile was active. */

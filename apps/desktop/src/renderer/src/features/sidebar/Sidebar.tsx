@@ -32,7 +32,9 @@ export function Sidebar({
   onPersistOrder,
   onAddFolder,
   onOpenSearch,
-  onExpandRepo
+  onExpandRepo,
+  onNewProfile,
+  onManageProfile
 }: {
   profiles: Profile[];
   activeProfile: Profile | null;
@@ -54,6 +56,8 @@ export function Sidebar({
   onAddFolder: () => void;
   onOpenSearch: () => void;
   onExpandRepo: (repoId: string) => void;
+  onNewProfile: () => void;
+  onManageProfile: () => void;
 }) {
   const [lens, setLens] = useState<Lens>("Recent");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -256,6 +260,8 @@ export function Sidebar({
           profiles={profiles}
           activeProfile={activeProfile}
           onSwitch={onSwitchProfile}
+          onNewProfile={onNewProfile}
+          onManageProfile={onManageProfile}
         />
       </div>
 
@@ -327,7 +333,7 @@ export function Sidebar({
         )}
 
         <button className="add-folder" onClick={onAddFolder}>
-          <span className="new-wt__plus">+</span> Add repo folder…
+          <span className="new-wt__plus">+</span> Add folders…
         </button>
       </div>
 

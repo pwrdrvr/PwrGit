@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Repo, RepoSearchHit, Worktree } from "@pwrgit/shared";
+import type { Profile, Repo, RepoSearchHit, Worktree } from "@pwrgit/shared";
 import { LineageGraph } from "./features/graph/LineageGraph";
 import { SelectionBar } from "./features/graph/SelectionBar";
 import { WorktreeHeader } from "./features/graph/WorktreeHeader";
 import { PaneResizer } from "./features/shell/PaneResizer";
 import { Rail } from "./features/rail/Rail";
+import { ProfileModal } from "./features/sidebar/ProfileModal";
 import { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
 import { Sidebar } from "./features/sidebar/Sidebar";
 import { useAppearance } from "./lib/useAppearance";
@@ -24,18 +25,36 @@ export function App() {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [pendingRepoId, setPendingRepoId] = useState<string | null>(null);
 
-  const { profiles, activeProfile, switchProfile } = useProfiles();
+  const {
+    profiles,
+    activeProfile,
+    switchProfile,
+    createProfile,
+    updateProfile,
+    setRoots,
+    pickDirectories
+  } = useProfiles();
+  const [profileModal, setProfileModal] = useState<
+    { mode: "create" } | { mode: "edit"; profile: Profile } | null
+  >(null);
   const {
     repos,
     loading,
     setRepoPin,
     setWorktreePin,
-    addFolder,
     createWorktree,
     removeWorktrees,
     persistWorktreeOrder,
     computeRepoState
   } = useRepoTree(activeProfile?.id ?? null);
+
+  // Add one or more folders to the active profile in a single native dialog.
+  const addFolders = useCallback(async () => {
+    if (activeProfile === null) return;
+    const picked = await pickDirectories();
+    if (picked.length === 0) return;
+    await setRoots(activeProfile.id, [...activeProfile.roots, ...picked]);
+  }, [activeProfile, pickDirectories, setRoots]);
   const worktreeState = useWorktreeState(selection?.worktreeId ?? null);
   const [selectedCommits, setSelectedCommits] = useState<Set<string>>(
     new Set()
@@ -146,8 +165,13 @@ export function App() {
           onCreateWorktree={createWorktree}
           onPersistOrder={persistWorktreeOrder}
           onExpandRepo={computeRepoState}
-          onAddFolder={() => void addFolder()}
+          onAddFolder={() => void addFolders()}
           onOpenSearch={() => setOverlayOpen(true)}
+          onNewProfile={() => setProfileModal({ mode: "create" })}
+          onManageProfile={() =>
+            activeProfile !== null &&
+            setProfileModal({ mode: "edit", profile: activeProfile })
+          }
         />
 
         <PaneResizer
@@ -230,6 +254,20 @@ export function App() {
         <RepoSwitcherOverlay
           onClose={() => setOverlayOpen(false)}
           onPick={onPickSearch}
+        />
+      )}
+
+      {profileModal !== null && (
+        <ProfileModal
+          mode={profileModal.mode}
+          profile={
+            profileModal.mode === "edit" ? profileModal.profile : undefined
+          }
+          onCreate={createProfile}
+          onUpdate={updateProfile}
+          onSetRoots={setRoots}
+          pickDirectories={pickDirectories}
+          onClose={() => setProfileModal(null)}
         />
       )}
     </div>

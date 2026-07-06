@@ -8,11 +8,15 @@ function monogram(p: Profile): string {
 export function ProfileChip({
   profiles,
   activeProfile,
-  onSwitch
+  onSwitch,
+  onNewProfile,
+  onManageProfile
 }: {
   profiles: Profile[];
   activeProfile: Profile | null;
   onSwitch: (profileId: string) => void;
+  onNewProfile: () => void;
+  onManageProfile: () => void;
 }) {
   const [open, setOpen] = useState(false);
   if (activeProfile === null) return null;
@@ -59,8 +63,29 @@ export function ProfileChip({
             );
           })}
           <div className="profile-menu__sep" />
+          <button
+            className="profile-menu__action"
+            onClick={() => {
+              onManageProfile();
+              setOpen(false);
+            }}
+          >
+            <span className="profile-menu__action-icon">⚙</span>
+            Edit “{activeProfile.name}”…
+          </button>
+          <button
+            className="profile-menu__action"
+            onClick={() => {
+              onNewProfile();
+              setOpen(false);
+            }}
+          >
+            <span className="profile-menu__action-icon">＋</span>
+            New profile…
+          </button>
+          <div className="profile-menu__sep" />
           <div className="profile-menu__hint">
-            Same GitHub identity · commit email set per profile
+            Same GitHub identity · commit email &amp; org set per profile
           </div>
         </div>
       )}

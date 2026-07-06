@@ -7,7 +7,6 @@ export type UseRepoTree = {
   loading: boolean;
   setRepoPin: (repoId: string, pinned: boolean) => void;
   setWorktreePin: (worktreeId: string, pinned: boolean) => void;
-  addFolder: () => Promise<void>;
   createWorktree: (
     repoId: string,
     branch: string,
@@ -57,17 +56,6 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     );
     void dispatch("worktree:setPin", { worktreeId, pinned });
   }, []);
-
-  const addFolder = useCallback(async () => {
-    if (activeProfileId === null) return;
-    const picked = await dispatch("dialog:pickDirectory", undefined);
-    if (!picked.ok || picked.value === null) return;
-    await dispatch("profile:addRoot", {
-      profileId: activeProfileId,
-      root: picked.value
-    });
-    // profile:addRoot rescans and emits repo:changed, which reloads.
-  }, [activeProfileId]);
 
   const createWorktree = useCallback(
     async (repoId: string, branch: string, newBranch: boolean) => {
@@ -155,7 +143,6 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     loading,
     setRepoPin,
     setWorktreePin,
-    addFolder,
     createWorktree,
     removeWorktrees,
     persistWorktreeOrder,

@@ -25,6 +25,33 @@ export function registerProfileHandlers(
     return ok(snapshot);
   });
 
+  bus.register("profile:update", (req) => {
+    if (req.name !== undefined && req.name.trim() === "") {
+      return err({
+        kind: "validation",
+        code: "name_required",
+        message: "Profile name can't be empty"
+      });
+    }
+    if (req.email !== undefined && req.email.trim() === "") {
+      return err({
+        kind: "validation",
+        code: "email_required",
+        message: "Commit email can't be empty"
+      });
+    }
+    const profile = profiles.update(req);
+    if (profile === null) {
+      return err({
+        kind: "profile",
+        code: "not_found",
+        message: `No profile "${req.profileId}"`
+      });
+    }
+    emitEvent("profile:changed", profiles.snapshot());
+    return ok(profile);
+  });
+
   bus.register("profile:create", (req) => {
     if (req.name.trim() === "") {
       return err({

@@ -1,4 +1,4 @@
-import { err, ok } from "@pwrgit/shared";
+import { err, ok, type Profile } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import type { ProfileService } from "../profiles/profile-service";
@@ -37,19 +37,29 @@ export function registerRepoHandlers(
     return result;
   });
 
-  bus.register("profile:addRoot", async (req) => {
-    const profile = profiles.addRoot(req.profileId, req.root);
+  // Add/remove scan roots all rescan the profile and return the fresh repo list.
+  const rescanAfter = async (
+    profileId: string,
+    mutate: () => Profile | null
+  ) => {
+    const profile = mutate();
     if (profile === null) {
       return err({
-        kind: "profile",
+        kind: "profile" as const,
         code: "not_found",
-        message: `No profile "${req.profileId}"`
+        message: `No profile "${profileId}"`
       });
     }
     const repos = await indexer.rescanProfile(profile);
+    // Roots changed → refresh both the profile list and the repo tree.
+    emitEvent("profile:changed", profiles.snapshot());
     emitEvent("repo:changed", { profileId: profile.id });
     return ok(repos);
-  });
+  };
+
+  bus.register("profile:setRoots", (req) =>
+    rescanAfter(req.profileId, () => profiles.setRoots(req.profileId, req.roots))
+  );
 
   bus.register("repo:setPin", (req) => {
     indexer.setRepoPinned(req.repoId, req.pinned);

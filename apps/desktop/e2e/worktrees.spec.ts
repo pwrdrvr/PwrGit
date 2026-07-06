@@ -29,7 +29,7 @@ async function addRootAndExpand(
   repoName: string
 ): Promise<void> {
   await app.setPickDirectory(box.reposDir);
-  await window.getByRole("button", { name: /Add repo folder/i }).click();
+  await window.getByRole("button", { name: /Add folders/i }).click();
   await window.locator(".lens-chip", { hasText: "All" }).click();
   const repoRow = window.locator(".repo-row__name", { hasText: repoName });
   await expect(repoRow).toBeVisible({ timeout: 20_000 });

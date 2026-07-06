@@ -14,8 +14,9 @@ const MAIN = join(HERE, "..", "..", "out", "main", "index.js");
 export type AppHandle = {
   app: ElectronApplication;
   window: Page;
-  /** Set what the next native folder-picker (dialog:pickDirectory) returns. */
+  /** Set what the next folder picker returns (single or multi-select). */
   setPickDirectory: (dir: string) => Promise<void>;
+  setPickDirectories: (dirs: string[]) => Promise<void>;
   cleanup: () => Promise<void>;
 };
 
@@ -53,29 +54,32 @@ export async function launchApp(
   const window = await app.firstWindow();
   await window.waitForSelector("#root");
 
-  // Stub dialog.showOpenDialog in the main process; __pickDir drives the result.
+  // Stub dialog.showOpenDialog in the main process; __pickDirs drives the result
+  // (works for both the single and multi-select handlers).
   await app.evaluate(({ dialog }) => {
     const d = dialog as unknown as {
-      __pickDir: string | null;
+      __pickDirs: string[];
       showOpenDialog: () => Promise<{ canceled: boolean; filePaths: string[] }>;
     };
-    d.__pickDir = null;
+    d.__pickDirs = [];
     d.showOpenDialog = async () => ({
-      canceled: d.__pickDir === null,
-      filePaths: d.__pickDir === null ? [] : [d.__pickDir]
+      canceled: d.__pickDirs.length === 0,
+      filePaths: d.__pickDirs
     });
   });
 
-  const setPickDirectory = async (dir: string): Promise<void> => {
-    await app.evaluate(({ dialog }, d) => {
-      (dialog as unknown as { __pickDir: string | null }).__pickDir = d;
-    }, dir);
+  const setPickDirectories = async (dirs: string[]): Promise<void> => {
+    await app.evaluate(({ dialog }, ds) => {
+      (dialog as unknown as { __pickDirs: string[] }).__pickDirs = ds;
+    }, dirs);
   };
+  const setPickDirectory = (dir: string): Promise<void> =>
+    setPickDirectories([dir]);
 
   const cleanup = async (): Promise<void> => {
     await app.close();
     rmSync(userData, { recursive: true, force: true });
   };
 
-  return { app, window, setPickDirectory, cleanup };
+  return { app, window, setPickDirectory, setPickDirectories, cleanup };
 }

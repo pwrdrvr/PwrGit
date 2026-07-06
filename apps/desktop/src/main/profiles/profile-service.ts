@@ -2,7 +2,8 @@ import type {
   CreateProfileRequest,
   Profile,
   ProfileId,
-  ProfileList
+  ProfileList,
+  UpdateProfileRequest
 } from "@pwrgit/shared";
 import type { DB } from "../persistence/db";
 
@@ -13,6 +14,7 @@ type ProfileRow = {
   author_name: string | null;
   mono: string;
   kind: string | null;
+  org: string | null;
   roots: string;
   last_used_at: string | null;
   sort_order: number;
@@ -40,6 +42,7 @@ function rowToProfile(r: ProfileRow): Profile {
   };
   if (r.author_name !== null) p.authorName = r.author_name;
   if (r.kind !== null) p.kind = r.kind;
+  if (r.org !== null) p.org = r.org;
   if (r.last_used_at !== null) p.lastUsedAt = r.last_used_at;
   return p;
 }
@@ -91,8 +94,8 @@ export class ProfileService {
 
     this.db
       .prepare(
-        `INSERT INTO profiles (id, name, email, author_name, mono, kind, roots, sort_order)
-         VALUES (@id, @name, @email, @author_name, @mono, @kind, @roots, @sort_order)`
+        `INSERT INTO profiles (id, name, email, author_name, mono, kind, org, roots, sort_order)
+         VALUES (@id, @name, @email, @author_name, @mono, @kind, @org, @roots, @sort_order)`
       )
       .run({
         id,
@@ -101,6 +104,7 @@ export class ProfileService {
         author_name: input.authorName ?? null,
         mono,
         kind: input.kind ?? null,
+        org: input.org?.trim() ? input.org.trim() : null,
         roots: JSON.stringify(input.roots ?? []),
         sort_order: nextOrder
       });
@@ -120,15 +124,51 @@ export class ProfileService {
     return this.snapshot();
   }
 
-  /** Append a scan root to a profile (idempotent). Returns the updated profile. */
-  addRoot(id: ProfileId, root: string): Profile | null {
+  /** Patch a profile's editable fields (only provided keys change). */
+  update(patch: UpdateProfileRequest): Profile | null {
+    const profile = this.get(patch.profileId);
+    if (profile === null) return null;
+    const sets: string[] = [];
+    const args: Record<string, string | null> = { id: patch.profileId };
+    if (patch.name !== undefined) {
+      sets.push("name = @name");
+      args.name = patch.name;
+    }
+    if (patch.email !== undefined) {
+      sets.push("email = @email");
+      args.email = patch.email;
+    }
+    if (patch.authorName !== undefined) {
+      sets.push("author_name = @author_name");
+      args.author_name = patch.authorName.trim() ? patch.authorName.trim() : null;
+    }
+    if (patch.org !== undefined) {
+      sets.push("org = @org");
+      args.org = patch.org.trim() ? patch.org.trim() : null;
+    }
+    if (sets.length > 0) {
+      this.db
+        .prepare(`UPDATE profiles SET ${sets.join(", ")} WHERE id = @id`)
+        .run(args);
+    }
+    return this.get(patch.profileId);
+  }
+
+  /**
+   * Replace a profile's scan roots wholesale (trimmed + de-duped, order kept).
+   * Repos under removed roots are pruned on the next rescan.
+   */
+  setRoots(id: ProfileId, roots: string[]): Profile | null {
     const profile = this.get(id);
     if (profile === null) return null;
-    if (profile.roots.includes(root)) return profile;
-    const roots = [...profile.roots, root];
+    const cleaned: string[] = [];
+    for (const r of roots) {
+      const t = r.trim();
+      if (t !== "" && !cleaned.includes(t)) cleaned.push(t);
+    }
     this.db
       .prepare("UPDATE profiles SET roots = ? WHERE id = ?")
-      .run(JSON.stringify(roots), id);
+      .run(JSON.stringify(cleaned), id);
     return this.get(id);
   }
 

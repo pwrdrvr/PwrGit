@@ -34,7 +34,16 @@ export type CreateProfileRequest = {
   authorName?: string;
   mono?: string;
   kind?: string;
+  org?: string;
   roots?: string[];
+};
+
+export type UpdateProfileRequest = {
+  profileId: ProfileId;
+  name?: string;
+  email?: string;
+  authorName?: string;
+  org?: string;
 };
 
 export interface Commands {
@@ -45,7 +54,12 @@ export interface Commands {
   "profile:list": { req: void; res: ProfileList };
   "profile:switch": { req: { profileId: ProfileId }; res: ProfileList };
   "profile:create": { req: CreateProfileRequest; res: Profile };
-  "profile:addRoot": { req: { profileId: ProfileId; root: string }; res: Repo[] };
+  "profile:update": { req: UpdateProfileRequest; res: Profile };
+  /** Replace a profile's scan roots wholesale, then rescan. */
+  "profile:setRoots": {
+    req: { profileId: ProfileId; roots: string[] };
+    res: Repo[];
+  };
 
   // Repos & discovery (U6)
   "repo:list": { req: { profileId?: ProfileId }; res: Repo[] };
@@ -126,6 +140,7 @@ export interface Commands {
   };
 
   "dialog:pickDirectory": { req: void; res: string | null };
+  "dialog:pickDirectories": { req: void; res: string[] };
 
   // Reveal a path in the OS file manager (Finder / Explorer / …).
   "shell:revealPath": { req: { path: string }; res: null };
