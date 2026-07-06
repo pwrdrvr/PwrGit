@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { AgentStatus, RebaseCommitRef, RebasePlan } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
+import { notifyDialog } from "../shell/dialogs";
 
 async function orderedSelection(
   worktreeId: string,
@@ -76,7 +77,7 @@ export function AgentTab({
       setApplied(true);
       setTimeout(onClear, 900);
     } else {
-      window.alert(r.error.message);
+      void notifyDialog({ title: "Rebase failed", message: r.error.message });
     }
   };
 

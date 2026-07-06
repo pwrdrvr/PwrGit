@@ -81,8 +81,6 @@ test("batch-removes worktrees (including a dirty one) via multi-select", async (
   const dirty = repo.addWorktree("wt/dirty", { dirty: true });
   handle = await launchApp();
   const { window } = handle;
-  // Accept the confirms: the up-front "remove 3?" and the "1 is dirty, force?".
-  window.on("dialog", (d) => void d.accept());
 
   await addRootAndExpand(window, handle, sandbox, "gamma");
 
@@ -97,6 +95,9 @@ test("batch-removes worktrees (including a dirty one) via multi-select", async (
   await expect(window.locator(".wt-selbar__count")).toHaveText("3 selected");
 
   await window.locator(".wt-selbar__btn--danger").click();
+  // Styled in-app confirm, then the "1 is dirty — remove anyway?" confirm.
+  await window.locator(".modal--dialog .modal__create").click();
+  await window.locator(".modal--dialog .modal__create").click();
 
   await expect(branchRow(window, "wt/one")).toHaveCount(0, { timeout: 20_000 });
   await expect(branchRow(window, "wt/two")).toHaveCount(0);

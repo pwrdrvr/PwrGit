@@ -1995,3 +1995,18 @@ body.is-col-resizing {
   border-top-color: var(--accent);
   animation: pg-spin 700ms linear infinite;
 }
+
+/* ---- In-app confirm / alert dialog ---- */
+
+.modal--dialog {
+  width: min(400px, 92vw);
+}
+.dialog__message {
+  font: 500 12.5px/1.55 var(--font-sans);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+}
+.modal__create--danger {
+  background: var(--danger);
+  color: #2a0d08;
+}

@@ -3,6 +3,7 @@ import type { Profile, Repo, RepoSearchHit, Worktree } from "@pwrgit/shared";
 import { LineageGraph } from "./features/graph/LineageGraph";
 import { SelectionBar } from "./features/graph/SelectionBar";
 import { WorktreeHeader } from "./features/graph/WorktreeHeader";
+import { DialogHost } from "./features/shell/DialogHost";
 import { PaneResizer } from "./features/shell/PaneResizer";
 import { Rail } from "./features/rail/Rail";
 import { ProfileModal } from "./features/sidebar/ProfileModal";
@@ -282,6 +283,8 @@ export function App() {
           onClose={() => setProfileModal(null)}
         />
       )}
+
+      <DialogHost />
     </div>
   );
 }

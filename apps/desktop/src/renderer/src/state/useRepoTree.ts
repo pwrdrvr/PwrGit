@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Repo } from "@pwrgit/shared";
+import { confirmDialog, notifyDialog } from "../features/shell/dialogs";
 import { dispatch, subscribe } from "../lib/pwrgit";
 
 export type RemovalProgress = { done: number; total: number };
@@ -99,14 +100,15 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     // Removing >1 is a bulk destructive action → confirm up front. A single
     // removal (trash icon / context menu) goes straight to the attempt and
     // only prompts if that worktree is dirty, matching the prior behaviour.
-    if (
-      worktreeIds.length > 1 &&
-      !window.confirm(
-        `Remove ${worktreeIds.length} worktrees? Their working directories ` +
-          `will be deleted. Branches and commits are kept.`
-      )
-    ) {
-      return;
+    if (worktreeIds.length > 1) {
+      const go = await confirmDialog({
+        title: `Remove ${worktreeIds.length} worktrees?`,
+        message:
+          "Their working directories will be deleted. Branches and commits are kept.",
+        confirmLabel: `Remove ${worktreeIds.length}`,
+        danger: true
+      });
+      if (!go) return;
     }
 
     // Show the progress indicator for the whole flow (both passes); each
@@ -118,7 +120,10 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
         force: false
       });
       if (!first.ok) {
-        window.alert(first.error.message);
+        await notifyDialog({
+          title: "Couldn't remove",
+          message: first.error.message
+        });
         return;
       }
       const { dirty } = first.value;
@@ -127,17 +132,23 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
       if (dirty.length > 0) {
         const have = dirty.length === 1 ? "worktree has" : "worktrees have";
         const them = dirty.length === 1 ? "it" : "them";
-        if (
-          window.confirm(
-            `${dirty.length} ${have} uncommitted changes. Remove ${them} anyway?`
-          )
-        ) {
+        const force = await confirmDialog({
+          title: "Uncommitted changes",
+          message: `${dirty.length} ${have} uncommitted changes. Remove ${them} anyway?`,
+          confirmLabel: "Remove anyway",
+          danger: true
+        });
+        if (force) {
           const forced = await dispatch("worktree:removeMany", {
             worktreeIds: dirty,
             force: true
           });
           if (forced.ok) failures.push(...forced.value.failed);
-          else window.alert(forced.error.message);
+          else
+            await notifyDialog({
+              title: "Couldn't remove",
+              message: forced.error.message
+            });
         }
       }
 
@@ -148,7 +159,10 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
           .join("\n");
         const more =
           failures.length > 6 ? `\n…and ${failures.length - 6} more` : "";
-        window.alert(`Some worktrees couldn't be removed:\n${shown}${more}`);
+        await notifyDialog({
+          title: "Some worktrees couldn't be removed",
+          message: `${shown}${more}`
+        });
       }
     } finally {
       setRemovalProgress(null);
