@@ -2,6 +2,17 @@ import type { Lens, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
 
 export const LENSES: Lens[] = ["Recent", "Pinned", "Behind", "Stale", "All"];
 
+/**
+ * The folder-row "behind" count reflects the repo's **primary checkout** (its
+ * local directory), not a max across all worktrees — a stale feature-branch
+ * worktree that's behind its own upstream shouldn't make the whole repo look
+ * behind. Falls back to the first worktree if none is flagged primary.
+ */
+export function repoPrimaryBehind(repo: Repo): number {
+  const primary = repo.worktrees.find((w) => w.isPrimary) ?? repo.worktrees[0];
+  return primary?.behind ?? 0;
+}
+
 export type RepoGroup = { root: string; label: string; repos: Repo[] };
 
 const lastSegment = (path: string): string =>

@@ -23,14 +23,20 @@ test("Pull fast-forwards and clears the ↓behind badge in the sidebar", async (
 
   await addRootAndExpand(window, handle, sandbox, "svc");
 
-  // The primary branch trails origin by 2 → the row shows a ↓2 badge.
+  // The primary branch trails origin by 2 → both the row badge and the folder
+  // badge (which reflects the primary checkout) show ↓2.
   const behindBadge = branchRow(window, "main").locator(".badge-text--warn");
+  const folderBadge = window
+    .locator(".repo-row", { hasText: "svc" })
+    .locator(".badge--warn");
   await expect(behindBadge).toHaveText("↓2", { timeout: 20_000 });
+  await expect(folderBadge).toHaveText("↓2");
 
   // Pull = fetch + fast-forward.
   await window.getByRole("button", { name: /^Pull/ }).click();
 
-  // The badge must clear — the sidebar reads `behind` from the repo tree, so the
+  // Both must clear — the sidebar reads `behind` from the repo tree, so the
   // single-worktree refresh has to nudge repo:changed, not just worktree:changed.
   await expect(behindBadge).toHaveCount(0, { timeout: 20_000 });
+  await expect(folderBadge).toHaveCount(0);
 });

@@ -1,6 +1,11 @@
 import { useRef, type MouseEvent as ReactMouseEvent } from "react";
 import type { Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
-import { orderWorktrees, reorder, SORT_LABEL } from "./repo-view";
+import {
+  orderWorktrees,
+  reorder,
+  repoPrimaryBehind,
+  SORT_LABEL
+} from "./repo-view";
 import { PinIcon, WorktreeRow } from "./WorktreeRow";
 
 export function RepoRow({
@@ -52,7 +57,7 @@ export function RepoRow({
 }) {
   const dragId = useRef<string | null>(null);
 
-  const behind = repo.worktrees.reduce((m, w) => Math.max(m, w.behind), 0);
+  const behind = repoPrimaryBehind(repo);
   const ordered = orderWorktrees(repo.worktrees, sort, customOrder);
   const orderedIds = ordered.map((w) => w.id);
   const wtCount = repo.worktrees.length;

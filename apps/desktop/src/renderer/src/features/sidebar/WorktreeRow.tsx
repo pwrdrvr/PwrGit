@@ -52,25 +52,51 @@ export function WorktreeRow({
           <circle cx="7" cy="12" r="1.3" />
         </svg>
       </span>
-      <svg
-        className="wt-row__branch-icon"
-        width="12"
-        height="12"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M6 3v12" />
-        <circle cx="6" cy="18" r="3" />
-        <circle cx="18" cy="6" r="3" />
-        <path d="M18 9c0 6-6 6-6 12" />
-      </svg>
+      {worktree.isPrimary ? (
+        <svg
+          className="wt-row__branch-icon wt-row__branch-icon--local"
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-label="Local checkout"
+        >
+          <path d="M3 10.5 12 3l9 7.5" />
+          <path d="M5 9.5V20h14V9.5" />
+        </svg>
+      ) : (
+        <svg
+          className="wt-row__branch-icon"
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M6 3v12" />
+          <circle cx="6" cy="18" r="3" />
+          <circle cx="18" cy="6" r="3" />
+          <path d="M18 9c0 6-6 6-6 12" />
+        </svg>
+      )}
       <span className="wt-row__branch" title={worktree.branch}>
         {worktree.branch}
       </span>
+      {worktree.isPrimary && (
+        <span
+          className="wt-tag wt-tag--local"
+          title="The repo's local checkout (primary working tree)"
+        >
+          local
+        </span>
+      )}
       {worktree.dirty > 0 && (
         <span className="badge badge--warn">●{worktree.dirty}</span>
       )}

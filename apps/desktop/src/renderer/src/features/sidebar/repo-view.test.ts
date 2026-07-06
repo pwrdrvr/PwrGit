@@ -7,6 +7,7 @@ import {
   lensCounts,
   orderWorktrees,
   reorder,
+  repoPrimaryBehind,
   SORT_CYCLE
 } from "./repo-view";
 
@@ -191,5 +192,34 @@ describe("groupReposByRoot", () => {
   it("drops empty groups and omits Other when all repos are placed", () => {
     const groups = groupReposByRoot([repos[0]!], roots);
     expect(groups.map((g) => g.label)).toEqual(["GIPHY"]);
+  });
+});
+
+describe("repoPrimaryBehind", () => {
+  it("reflects the primary checkout, not the max across worktrees", () => {
+    const r = repo({
+      id: "svc",
+      worktrees: [
+        wt({ id: "p", branch: "develop", isPrimary: true, behind: 0 }),
+        wt({ id: "f", branch: "feature", behind: 5 })
+      ]
+    });
+    expect(repoPrimaryBehind(r)).toBe(0);
+  });
+
+  it("reports the primary's own behind count", () => {
+    const r = repo({
+      id: "svc",
+      worktrees: [
+        wt({ id: "p", branch: "develop", isPrimary: true, behind: 3 }),
+        wt({ id: "f", branch: "feature", behind: 5 })
+      ]
+    });
+    expect(repoPrimaryBehind(r)).toBe(3);
+  });
+
+  it("falls back to the first worktree when none is flagged primary", () => {
+    const r = repo({ id: "svc", worktrees: [wt({ id: "a", branch: "x", behind: 2 })] });
+    expect(repoPrimaryBehind(r)).toBe(2);
   });
 });

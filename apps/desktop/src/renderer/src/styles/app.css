@@ -656,6 +656,15 @@ input {
   background: var(--danger-soft);
   color: var(--danger);
 }
+.wt-tag--local {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.wt-row__branch-icon--local {
+  color: var(--accent);
+}
 .wt-age {
   font: 500 9.5px/1 var(--font-mono);
   color: var(--text-subtle);
