@@ -40,6 +40,7 @@ export function App() {
   const {
     repos,
     loading,
+    removalProgress,
     setRepoPin,
     setWorktreePin,
     createWorktree,
@@ -255,6 +256,17 @@ export function App() {
           onClose={() => setOverlayOpen(false)}
           onPick={onPickSearch}
         />
+      )}
+
+      {removalProgress !== null && (
+        <div className="removal-toast" role="status" aria-live="polite">
+          <span className="removal-toast__spinner" />
+          <span>
+            {removalProgress.done < removalProgress.total
+              ? `Removing worktrees… ${removalProgress.done} / ${removalProgress.total}`
+              : "Finishing up…"}
+          </span>
+        </div>
       )}
 
       {profileModal !== null && (

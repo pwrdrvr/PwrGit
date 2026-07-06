@@ -79,6 +79,9 @@ export function registerWorktreeLifecycleHandlers(
         removed.push(id);
         affectedRepos.add(wt.repo_id);
         affectedProfiles.add(wt.profile_id);
+        // Stream each removal so the sidebar prunes the row live — a batch of
+        // dozens can take a while (each deletes the whole working tree).
+        emitEvent("worktree:removed", { worktreeId: id });
       } else if (res.error.code === "dirty") {
         dirty.push(id);
       } else {

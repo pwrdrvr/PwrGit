@@ -155,6 +155,8 @@ export interface Events {
   "profile:changed": ProfileList;
   "repo:changed": { profileId: ProfileId };
   "worktree:changed": { worktreeId: string };
+  /** A worktree finished being removed (streamed during a batch remove). */
+  "worktree:removed": { worktreeId: string };
 }
 
 export type EventChannel = keyof Events;

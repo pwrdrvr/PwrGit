@@ -2,9 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import type { Repo } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../lib/pwrgit";
 
+export type RemovalProgress = { done: number; total: number };
+
 export type UseRepoTree = {
   repos: Repo[];
   loading: boolean;
+  /** Non-null while a batch removal is in flight (for a progress indicator). */
+  removalProgress: RemovalProgress | null;
   setRepoPin: (repoId: string, pinned: boolean) => void;
   setWorktreePin: (worktreeId: string, pinned: boolean) => void;
   createWorktree: (
@@ -21,6 +25,8 @@ export type UseRepoTree = {
 export function useRepoTree(activeProfileId: string | null): UseRepoTree {
   const [repos, setRepos] = useState<Repo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [removalProgress, setRemovalProgress] =
+    useState<RemovalProgress | null>(null);
 
   const reload = useCallback(async () => {
     const r = await dispatch("repo:list", {});
@@ -39,6 +45,25 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     const off = subscribe("repo:changed", () => void reload());
     return off;
   }, [activeProfileId, reload]);
+
+  // Prune each worktree from the tree as its removal completes — live feedback
+  // during a long batch delete, and it advances the progress counter.
+  useEffect(() => {
+    return subscribe("worktree:removed", ({ worktreeId }) => {
+      setRepos((rs) =>
+        rs.map((r) => {
+          if (!r.worktrees.some((w) => w.id === worktreeId)) return r;
+          return {
+            ...r,
+            worktrees: r.worktrees.filter((w) => w.id !== worktreeId)
+          };
+        })
+      );
+      setRemovalProgress((p) =>
+        p === null ? p : { ...p, done: p.done + 1 }
+      );
+    });
+  }, []);
 
   const setRepoPin = useCallback((repoId: string, pinned: boolean) => {
     setRepos((rs) => rs.map((r) => (r.id === repoId ? { ...r, pinned } : r)));
@@ -84,42 +109,49 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
       return;
     }
 
-    const first = await dispatch("worktree:removeMany", {
-      worktreeIds,
-      force: false
-    });
-    if (!first.ok) {
-      window.alert(first.error.message);
-      return;
-    }
-    const { dirty } = first.value;
-    const failures = [...first.value.failed];
-
-    if (dirty.length > 0) {
-      const have = dirty.length === 1 ? "worktree has" : "worktrees have";
-      const them = dirty.length === 1 ? "it" : "them";
-      if (
-        window.confirm(
-          `${dirty.length} ${have} uncommitted changes. Remove ${them} anyway?`
-        )
-      ) {
-        const forced = await dispatch("worktree:removeMany", {
-          worktreeIds: dirty,
-          force: true
-        });
-        if (forced.ok) failures.push(...forced.value.failed);
-        else window.alert(forced.error.message);
+    // Show the progress indicator for the whole flow (both passes); each
+    // worktree:removed event ticks `done` forward.
+    setRemovalProgress({ done: 0, total: worktreeIds.length });
+    try {
+      const first = await dispatch("worktree:removeMany", {
+        worktreeIds,
+        force: false
+      });
+      if (!first.ok) {
+        window.alert(first.error.message);
+        return;
       }
-    }
+      const { dirty } = first.value;
+      const failures = [...first.value.failed];
 
-    if (failures.length > 0) {
-      const shown = failures
-        .slice(0, 6)
-        .map((f) => `• ${f.message}`)
-        .join("\n");
-      const more =
-        failures.length > 6 ? `\n…and ${failures.length - 6} more` : "";
-      window.alert(`Some worktrees couldn't be removed:\n${shown}${more}`);
+      if (dirty.length > 0) {
+        const have = dirty.length === 1 ? "worktree has" : "worktrees have";
+        const them = dirty.length === 1 ? "it" : "them";
+        if (
+          window.confirm(
+            `${dirty.length} ${have} uncommitted changes. Remove ${them} anyway?`
+          )
+        ) {
+          const forced = await dispatch("worktree:removeMany", {
+            worktreeIds: dirty,
+            force: true
+          });
+          if (forced.ok) failures.push(...forced.value.failed);
+          else window.alert(forced.error.message);
+        }
+      }
+
+      if (failures.length > 0) {
+        const shown = failures
+          .slice(0, 6)
+          .map((f) => `• ${f.message}`)
+          .join("\n");
+        const more =
+          failures.length > 6 ? `\n…and ${failures.length - 6} more` : "";
+        window.alert(`Some worktrees couldn't be removed:\n${shown}${more}`);
+      }
+    } finally {
+      setRemovalProgress(null);
     }
   }, []);
 
@@ -141,6 +173,7 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
   return {
     repos,
     loading,
+    removalProgress,
     setRepoPin,
     setWorktreePin,
     createWorktree,

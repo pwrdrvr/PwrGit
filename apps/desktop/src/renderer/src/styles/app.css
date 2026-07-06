@@ -1960,3 +1960,38 @@ body.is-col-resizing {
   font: 600 9.5px/1 var(--font-mono);
   color: var(--text-subtle);
 }
+
+/* ---- Batch-removal progress toast ---- */
+
+@keyframes pg-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.removal-toast {
+  position: fixed;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 140;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: var(--bg-menu);
+  border: 1px solid var(--accent-border);
+  box-shadow: var(--shadow-popover);
+  color: var(--text-primary);
+  font: 600 12px/1 var(--font-sans);
+  animation: pg-fade 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.removal-toast__spinner {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 2px solid var(--accent-soft);
+  border-top-color: var(--accent);
+  animation: pg-spin 700ms linear infinite;
+}
