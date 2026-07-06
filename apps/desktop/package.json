@@ -13,7 +13,6 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "rebuild:electron-native": "electron-rebuild -f -w better-sqlite3",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "pretest:e2e": "electron-vite build",
     "test:e2e": "playwright test -c playwright.config.ts"
@@ -28,7 +27,6 @@
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
-    "@electron/rebuild": "^4.0.1",
     "@playwright/test": "^1.61.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/react": "^19.2.17",
