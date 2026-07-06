@@ -25,6 +25,7 @@ export type ProfileList = {
 export type CreateProfileRequest = {
   name: string;
   email: string;
+  authorName?: string;
   mono?: string;
   kind?: string;
   roots?: string[];

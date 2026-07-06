@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Sidebar } from "./features/sidebar/Sidebar";
 import { useAppearance } from "./lib/useAppearance";
 
 /**
@@ -23,9 +24,7 @@ export function App() {
       </div>
 
       <div className="app-body" style={{ gridTemplateColumns }}>
-        <aside className="pane pane--sidebar" data-testid="sidebar">
-          <div className="pane__placeholder">Repos</div>
-        </aside>
+        <Sidebar />
 
         <main className="pane pane--main" data-testid="main">
           <div className="pane__placeholder">Lineage</div>

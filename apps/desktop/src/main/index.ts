@@ -1,7 +1,12 @@
+import { join } from "node:path";
 import { app, BrowserWindow } from "electron";
 import { ok } from "@pwrgit/shared";
 import { CommandBus } from "./command-bus";
 import { registerIpc } from "./ipc";
+import { openDatabase } from "./persistence/db";
+import { readGitIdentityDefaults } from "./profiles/git-identity";
+import { registerProfileHandlers } from "./profiles/profile-handlers";
+import { ProfileService } from "./profiles/profile-service";
 import { createMainWindow } from "./window";
 
 let mainWindow: BrowserWindow | null = null;
@@ -26,6 +31,18 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(() => {
+    const db = openDatabase(join(app.getPath("userData"), "pwrgit.db"));
+    const profiles = new ProfileService(db);
+    const identity = readGitIdentityDefaults();
+    profiles.ensureSeed({
+      name: identity.name ?? "Default",
+      email: identity.email ?? "",
+      mono: "",
+      kind: "Personal",
+      roots: []
+    });
+    registerProfileHandlers(bus, profiles);
+
     registerIpc(bus);
     mainWindow = createMainWindow();
 
