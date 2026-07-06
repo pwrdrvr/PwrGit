@@ -1,7 +1,13 @@
 import { app, BrowserWindow } from "electron";
+import { ok } from "@pwrgit/shared";
+import { CommandBus } from "./command-bus";
+import { registerIpc } from "./ipc";
 import { createMainWindow } from "./window";
 
 let mainWindow: BrowserWindow | null = null;
+
+const bus = new CommandBus();
+bus.register("ping", () => ok("pong"));
 
 /**
  * Single-instance: PwrGit is a single-instance app (profiles switch in-app,
@@ -20,6 +26,7 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(() => {
+    registerIpc(bus);
     mainWindow = createMainWindow();
 
     app.on("activate", () => {
