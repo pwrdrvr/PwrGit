@@ -1,20 +1,20 @@
-/** Run an async fn over items with a bounded number of concurrent workers. */
+import { IterableQueueMapperSimple } from "@shutterstock/p-map-iterable";
+
+/**
+ * Run `fn` over `items` with bounded concurrency + backpressure via
+ * @shutterstock/p-map-iterable (the parallelism control the sibling apps use),
+ * so a large fan-out (e.g. 156 worktrees × git calls) never spawns an
+ * unbounded process storm.
+ */
 export async function mapLimit<T>(
   items: T[],
   limit: number,
-  fn: (item: T, index: number) => Promise<void>
+  fn: (item: T) => Promise<void>
 ): Promise<void> {
-  let cursor = 0;
-  const workers = Array.from(
-    { length: Math.min(limit, items.length) },
-    async () => {
-      while (cursor < items.length) {
-        const index = cursor;
-        cursor += 1;
-        const item = items[index];
-        if (item !== undefined) await fn(item, index);
-      }
-    }
-  );
-  await Promise.all(workers);
+  if (items.length === 0) return;
+  const queue = new IterableQueueMapperSimple<T>(fn, {
+    concurrency: Math.max(1, limit)
+  });
+  for (const item of items) await queue.enqueue(item);
+  await queue.onIdle();
 }

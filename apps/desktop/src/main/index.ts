@@ -75,11 +75,12 @@ if (!gotSingleInstanceLock) {
         .rescanProfile(profile)
         .then((repos) => {
           emitEvent("repo:changed", { profileId: profile.id });
-          // Watch each repo's refs; compute every worktree's state in the
-          // background, then refresh the sidebar badges when it settles.
+          // Compute every worktree's state in the background (bounded via
+          // p-map-iterable), then refresh the sidebar badges when it settles.
+          // Watching is set up lazily on selection (active repo + worktree
+          // only), never for every repo — see WorktreeWatchers.
           const worktreeIds: string[] = [];
           for (const repo of repos) {
-            watchers.watchRepoRefs(repo.id, repo.path);
             for (const wt of repo.worktrees) worktreeIds.push(wt.id);
           }
           void stateService

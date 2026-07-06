@@ -75,9 +75,17 @@ export function registerWorktreeHandlers(
 
   bus.register("worktree:activate", (req) => {
     const row = db
-      .prepare("SELECT id, path FROM worktrees WHERE id = ?")
-      .get(req.worktreeId) as { id: string; path: string } | undefined;
+      .prepare(
+        `SELECT w.id AS id, w.path AS path, r.id AS repo_id, r.path AS repo_path
+         FROM worktrees w JOIN repos r ON r.id = w.repo_id
+         WHERE w.id = ?`
+      )
+      .get(req.worktreeId) as
+      | { id: string; path: string; repo_id: string; repo_path: string }
+      | undefined;
     if (row !== undefined) {
+      // Watch only what's being looked at now (single active repo + worktree).
+      watchers.watchActiveRepo(row.repo_id, row.repo_path);
       watchers.watchActiveWorktree(row.id, row.path);
       refresher.refreshWorktree(row.id);
     }

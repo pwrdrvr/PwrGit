@@ -6,58 +6,116 @@ export type WatcherCallbacks = {
   onWorktreeTreeChanged: (worktreeId: string) => void;
 };
 
+// Never descend into these — watching node_modules etc. is what pegged
+// fseventd and hung the app. Segment-matched against every path component.
+const IGNORE_SEGMENTS = new Set([
+  "node_modules",
+  ".git",
+  "dist",
+  "out",
+  "build",
+  "target",
+  "vendor",
+  "coverage",
+  ".cache",
+  ".next",
+  ".turbo",
+  ".venv",
+  "__pycache__",
+  ".idea",
+  ".vscode"
+]);
+
+function isIgnoredPath(p: string): boolean {
+  return p.split(sep).some((seg) => IGNORE_SEGMENTS.has(seg));
+}
+
+const DEBOUNCE_MS = 300;
+
 /**
- * Lazy fs watching (KTD2). Each active-profile repo gets a cheap watch on its
- * ref store (commits, checkouts, branch moves, linked-worktree HEADs); the
- * currently-selected worktree gets a deeper watch on its working tree (dirty
- * edits). Only one working-tree watch is active at a time, bounding handles.
+ * Watches ONLY what the user is currently looking at — the active repo's ref
+ * store (commits, fetches, branch moves) and the active worktree's working
+ * tree (dirty edits) — never every repo/worktree. Both are single-slot
+ * (activating a new one closes the old), so at most two watchers exist at
+ * once, and events are debounced so a burst collapses into one recompute.
+ * This keeps FSEvents cost flat regardless of repo/worktree count.
  */
 export class WorktreeWatchers {
-  private readonly repoWatchers = new Map<string, FSWatcher>();
-  private activeWatcher: { worktreeId: string; watcher: FSWatcher } | null =
+  private repoWatcher: { repoId: string; watcher: FSWatcher } | null = null;
+  private worktreeWatcher: { worktreeId: string; watcher: FSWatcher } | null =
     null;
+  private readonly timers = new Map<string, NodeJS.Timeout>();
 
   constructor(private readonly cb: WatcherCallbacks) {}
 
-  watchRepoRefs(repoId: string, repoPath: string): void {
-    if (this.repoWatchers.has(repoId)) return;
-    const gitDir = join(repoPath, ".git");
-    const watcher = chokidar.watch(
-      [join(gitDir, "HEAD"), join(gitDir, "refs"), join(gitDir, "worktrees")],
-      {
-        ignoreInitial: true,
-        depth: 4,
-        awaitWriteFinish: { stabilityThreshold: 150, pollInterval: 50 }
-      }
+  private debounce(key: string, fn: () => void): void {
+    const existing = this.timers.get(key);
+    if (existing !== undefined) clearTimeout(existing);
+    this.timers.set(
+      key,
+      setTimeout(() => {
+        this.timers.delete(key);
+        fn();
+      }, DEBOUNCE_MS)
     );
-    watcher.on("all", () => this.cb.onRepoRefsChanged(repoId));
-    watcher.on("error", () => undefined);
-    this.repoWatchers.set(repoId, watcher);
   }
 
-  /** Deep-watch one worktree's working tree, replacing the previous one. */
+  /** Watch the active repo's refs (cheap — refs are small). Replaces any prior. */
+  watchActiveRepo(repoId: string, repoPath: string): void {
+    if (this.repoWatcher?.repoId === repoId) return;
+    void this.repoWatcher?.watcher.close();
+    const gitDir = join(repoPath, ".git");
+    const watcher = chokidar.watch(
+      [
+        join(gitDir, "HEAD"),
+        join(gitDir, "refs"),
+        join(gitDir, "packed-refs")
+      ],
+      {
+        ignoreInitial: true,
+        depth: 5,
+        ignorePermissionErrors: true,
+        awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 80 }
+      }
+    );
+    watcher.on("all", () =>
+      this.debounce(`repo:${repoId}`, () => this.cb.onRepoRefsChanged(repoId))
+    );
+    watcher.on("error", () => undefined);
+    this.repoWatcher = { repoId, watcher };
+  }
+
+  /** Deep-watch one worktree's working tree, heavy dirs excluded. Replaces any prior. */
   watchActiveWorktree(worktreeId: string, worktreePath: string): void {
-    if (this.activeWatcher?.worktreeId === worktreeId) return;
-    void this.activeWatcher?.watcher.close();
-    const gitInfix = `${sep}.git${sep}`;
-    const gitSuffix = `${sep}.git`;
+    if (this.worktreeWatcher?.worktreeId === worktreeId) return;
+    void this.worktreeWatcher?.watcher.close();
     const watcher = chokidar.watch(worktreePath, {
       ignoreInitial: true,
       depth: 12,
-      ignored: (p: string) => p.includes(gitInfix) || p.endsWith(gitSuffix),
-      awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 60 }
+      followSymlinks: false,
+      ignorePermissionErrors: true,
+      ignored: (p: string) => isIgnoredPath(p),
+      awaitWriteFinish: { stabilityThreshold: 300, pollInterval: 100 }
     });
-    watcher.on("all", () => this.cb.onWorktreeTreeChanged(worktreeId));
+    watcher.on("all", () =>
+      this.debounce(`wt:${worktreeId}`, () =>
+        this.cb.onWorktreeTreeChanged(worktreeId)
+      )
+    );
     watcher.on("error", () => undefined);
-    this.activeWatcher = { worktreeId, watcher };
+    this.worktreeWatcher = { worktreeId, watcher };
   }
 
   async closeAll(): Promise<void> {
-    for (const w of this.repoWatchers.values()) await w.close();
-    this.repoWatchers.clear();
-    if (this.activeWatcher !== null) {
-      await this.activeWatcher.watcher.close();
-      this.activeWatcher = null;
+    for (const timer of this.timers.values()) clearTimeout(timer);
+    this.timers.clear();
+    if (this.repoWatcher !== null) {
+      await this.repoWatcher.watcher.close();
+      this.repoWatcher = null;
+    }
+    if (this.worktreeWatcher !== null) {
+      await this.worktreeWatcher.watcher.close();
+      this.worktreeWatcher = null;
     }
   }
 }
