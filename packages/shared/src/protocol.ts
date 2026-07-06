@@ -39,12 +39,14 @@ export interface Commands {
   "profile:list": { req: void; res: ProfileList };
   "profile:switch": { req: { profileId: ProfileId }; res: ProfileList };
   "profile:create": { req: CreateProfileRequest; res: Profile };
+  "profile:addRoot": { req: { profileId: ProfileId; root: string }; res: Repo[] };
 
   // Repos & discovery (U6)
   "repo:list": { req: { profileId?: ProfileId }; res: Repo[] };
   "repo:rescan": { req: { profileId?: ProfileId }; res: Repo[] };
   "repo:add": { req: { profileId: ProfileId; path: string }; res: Repo };
   "repo:search": { req: { query: string }; res: RepoSearchHit[] };
+  "dialog:pickDirectory": { req: void; res: string | null };
 }
 
 export type CommandName = keyof Commands;

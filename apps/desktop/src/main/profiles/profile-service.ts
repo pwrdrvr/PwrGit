@@ -120,6 +120,18 @@ export class ProfileService {
     return this.snapshot();
   }
 
+  /** Append a scan root to a profile (idempotent). Returns the updated profile. */
+  addRoot(id: ProfileId, root: string): Profile | null {
+    const profile = this.get(id);
+    if (profile === null) return null;
+    if (profile.roots.includes(root)) return profile;
+    const roots = [...profile.roots, root];
+    this.db
+      .prepare("UPDATE profiles SET roots = ? WHERE id = ?")
+      .run(JSON.stringify(roots), id);
+    return this.get(id);
+  }
+
   /** Ensure at least one profile exists; seeds a default on first run. */
   ensureSeed(seed: CreateProfileRequest): void {
     const count = (

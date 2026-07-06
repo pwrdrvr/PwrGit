@@ -2,7 +2,10 @@ import { join } from "node:path";
 import { app, BrowserWindow } from "electron";
 import { ok } from "@pwrgit/shared";
 import { CommandBus } from "./command-bus";
-import { registerIpc } from "./ipc";
+import { execGit } from "./git/dugite";
+import { registerRepoHandlers } from "./git/repo-handlers";
+import { RepoIndexer } from "./git/repo-indexer";
+import { emitEvent, registerIpc } from "./ipc";
 import { openDatabase } from "./persistence/db";
 import { readGitIdentityDefaults } from "./profiles/git-identity";
 import { registerProfileHandlers } from "./profiles/profile-handlers";
@@ -43,8 +46,22 @@ if (!gotSingleInstanceLock) {
     });
     registerProfileHandlers(bus, profiles);
 
+    const indexer = new RepoIndexer(db, execGit);
+    registerRepoHandlers(bus, indexer, profiles);
+
     registerIpc(bus);
     mainWindow = createMainWindow();
+
+    // Kick a background rescan of the active profile so the sidebar fills in
+    // without blocking window creation.
+    const activeId = profiles.getActiveId();
+    const activeProfile = activeId === null ? null : profiles.get(activeId);
+    if (activeProfile !== null) {
+      void indexer
+        .rescanProfile(activeProfile)
+        .then(() => emitEvent("repo:changed", { profileId: activeProfile.id }))
+        .catch(() => undefined);
+    }
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {

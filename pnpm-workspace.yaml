@@ -5,6 +5,7 @@ packages:
 # Native modules that need their build scripts to run during install.
 allowBuilds:
   better-sqlite3: true
+  dugite: true
   electron: true
   esbuild: true
 

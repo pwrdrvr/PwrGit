@@ -23,6 +23,7 @@
     "@fontsource/geist-sans": "^5.2.5",
     "@pwrgit/shared": "workspace:*",
     "better-sqlite3": "^12.10.0",
+    "dugite": "^3.2.2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
