@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Repo, RepoSearchHit, Worktree } from "@pwrgit/shared";
+import { LineageGraph } from "./features/graph/LineageGraph";
+import { SelectionBar } from "./features/graph/SelectionBar";
 import { WorktreeHeader } from "./features/graph/WorktreeHeader";
 import { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
 import { Sidebar } from "./features/sidebar/Sidebar";
@@ -22,6 +24,25 @@ export function App() {
     activeProfile?.id ?? null
   );
   const worktreeState = useWorktreeState(selection?.worktreeId ?? null);
+  const [selectedCommits, setSelectedCommits] = useState<Set<string>>(
+    new Set()
+  );
+  const [, setAgentAction] = useState<"squash" | "reorder" | null>(null);
+
+  // Clear commit selection when the worktree changes.
+  useEffect(() => {
+    setSelectedCommits(new Set());
+    setAgentAction(null);
+  }, [selection?.worktreeId]);
+
+  const toggleCommit = useCallback((hash: string) => {
+    setSelectedCommits((prev) => {
+      const next = new Set(prev);
+      if (next.has(hash)) next.delete(hash);
+      else next.add(hash);
+      return next;
+    });
+  }, []);
 
   // ⌘K / Ctrl+K opens the repo switcher; Escape closes it.
   useEffect(() => {
@@ -101,17 +122,33 @@ export function App() {
 
         <main className="pane pane--main" data-testid="main">
           {selectedRepo !== null && selectedWorktree !== null ? (
-            <WorktreeHeader
-              repo={selectedRepo}
-              worktree={selectedWorktree}
-              state={worktreeState}
-            />
+            <>
+              <WorktreeHeader
+                repo={selectedRepo}
+                worktree={selectedWorktree}
+                state={worktreeState}
+              />
+              <LineageGraph
+                worktreeId={selectedWorktree.id}
+                activeEmail={activeProfile?.email ?? ""}
+                selectedCommits={selectedCommits}
+                onToggleCommit={toggleCommit}
+              />
+              {selectedCommits.size > 0 && (
+                <SelectionBar
+                  count={selectedCommits.size}
+                  onSquash={() => setAgentAction("squash")}
+                  onReorder={() => setAgentAction("reorder")}
+                  onAskAgent={() => setAgentAction((a) => a ?? "squash")}
+                  onClear={() => setSelectedCommits(new Set())}
+                />
+              )}
+            </>
           ) : (
             <div className="main-empty">
               {loading ? "Scanning repos…" : "Select a worktree from the sidebar"}
             </div>
           )}
-          <div className="pane__placeholder">Lineage graph — U8-U10</div>
         </main>
 
         {!railCollapsed && (

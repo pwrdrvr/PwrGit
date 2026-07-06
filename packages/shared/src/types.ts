@@ -98,6 +98,14 @@ export type WorktreeState = {
   updatedAt: string;
 };
 
+/** A page of commit history plus the branch's divergence point. */
+export type GraphLog = {
+  commits: Commit[];
+  /** merge-base of HEAD and the default branch (the branch root). */
+  branchRoot: string | null;
+  defaultBranch: string;
+};
+
 export type Lens = "Recent" | "Pinned" | "Behind" | "Stale" | "All";
 export type WorktreeSort = "pinned" | "az" | "active" | "custom";
 

@@ -1,5 +1,46 @@
-import { err, ok, type Result } from "@pwrgit/shared";
+import { type Commit, err, ok, type Result } from "@pwrgit/shared";
 import { requireExit0, type GitExec } from "./dugite";
+
+const LOG_FORMAT = ["%H", "%P", "%an", "%ae", "%cI", "%s"].join("%x1f") + "%x1e";
+
+/** Parse the delimited `git log` output produced with LOG_FORMAT. */
+export function parseLog(stdout: string): Commit[] {
+  return stdout
+    .split("\x1e")
+    .map((r) => r.trim())
+    .filter((r) => r.length > 0)
+    .map((rec) => {
+      const [hash = "", parents = "", an = "", ae = "", cI = "", subject = ""] =
+        rec.split("\x1f");
+      const parentList = parents.trim().split(/\s+/).filter((p) => p.length > 0);
+      return {
+        hash,
+        shortHash: hash.slice(0, 7),
+        parents: parentList,
+        subject,
+        authorName: an,
+        authorEmail: ae,
+        committedAt: cI,
+        isMerge: parentList.length > 1
+      };
+    });
+}
+
+/** Read a page of commit history for a worktree (HEAD-first). */
+export async function readLog(
+  git: GitExec,
+  cwd: string,
+  limit: number
+): Promise<Result<Commit[]>> {
+  const raw = await git(
+    ["log", `--pretty=format:${LOG_FORMAT}`, "-n", String(limit)],
+    cwd
+  );
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["log"]);
+  if (!checked.ok) return checked;
+  return ok(parseLog(checked.value.stdout));
+}
 
 export type WorktreeInfo = {
   path: string;

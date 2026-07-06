@@ -11,6 +11,7 @@
 // graph, and rebase entries.
 
 import type {
+  GraphLog,
   Profile,
   ProfileId,
   Repo,
@@ -64,6 +65,12 @@ export interface Commands {
     res: { fastForwarded: boolean };
   };
   "remote:push": { req: { worktreeId: string }; res: null };
+
+  // Lineage graph (U10)
+  "graph:log": {
+    req: { worktreeId: string; limit?: number };
+    res: GraphLog;
+  };
 
   "dialog:pickDirectory": { req: void; res: string | null };
 }
