@@ -66,6 +66,31 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     });
   }, []);
 
+  // Patch PR status onto the tree in place from the targeted delta — every
+  // surface reading the tree updates together, no full repo:list reload.
+  useEffect(() => {
+    return subscribe("pr:changed", ({ repoId, prs }) => {
+      const has = (b: string): boolean =>
+        Object.prototype.hasOwnProperty.call(prs, b);
+      setRepos((rs) =>
+        rs.map((r) => {
+          if (r.id !== repoId) return r;
+          return {
+            ...r,
+            worktrees: r.worktrees.map((w) => {
+              if (!has(w.branch)) return w;
+              const pr = prs[w.branch];
+              const next = { ...w };
+              if (pr) next.pr = pr;
+              else delete next.pr;
+              return next;
+            })
+          };
+        })
+      );
+    });
+  }, []);
+
   const setRepoPin = useCallback((repoId: string, pinned: boolean) => {
     setRepos((rs) => rs.map((r) => (r.id === repoId ? { ...r, pinned } : r)));
     void dispatch("repo:setPin", { repoId, pinned });

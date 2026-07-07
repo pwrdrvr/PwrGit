@@ -105,7 +105,7 @@ if (!gotSingleInstanceLock) {
     registerRebaseHandlers(bus, db, refresher);
     registerDialogHandlers(bus);
     registerShellHandlers(bus);
-    registerGitHubHandlers(bus, prService, db);
+    registerGitHubHandlers(bus, prService);
 
     registerIpc(bus);
     mainWindow = createMainWindow();

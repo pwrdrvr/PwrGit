@@ -13,8 +13,10 @@ origin isn't github.com, `gh` isn't logged in, or the network fails.
   fine) with Retry-After / rate-limit-reset respect + exponential backoff
   (ghcrawl's semantics, without the `bottleneck`-based octokit plugins that a
   git-hosted transitive dep made uninstallable here).
-- **Cache**: `PrService` upserts `branch_pr` (repo+branch, negative-cached);
-  `pr:refresh` is TTL-throttled (10 min) unless `force`. `listRepos` LEFT JOINs
-  it onto `Worktree.pr`.
+- **Cache + bus**: `PrService` upserts `branch_pr` (repo+branch, negative-cached)
+  and returns the *changed* branches; `pr:refresh` (TTL-throttled 10 min unless
+  `force`) emits a targeted `pr:changed { repoId, prs }` delta the renderer
+  patches onto the tree in place — no full `repo:list` reload. `listRepos` also
+  LEFT JOINs `branch_pr` onto `Worktree.pr` for the initial load.
 - A **merged PR** makes a branch prunable at any age (`isPrunableWorktree`) —
   catches squash/rebase merges the git-ancestry "in default" check can't see.

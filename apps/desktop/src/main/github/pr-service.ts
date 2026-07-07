@@ -17,29 +17,30 @@ export class PrService {
     private readonly git: GitExec
   ) {}
 
-  /** Returns true if any PR state changed (caller emits repo:changed). */
+  /** Returns the branches whose PR state changed (empty = nothing to publish). */
   async refreshRepo(
     repoId: string,
     opts: { force?: boolean } = {}
-  ): Promise<boolean> {
+  ): Promise<Map<string, PrSummary | null>> {
+    const empty = new Map<string, PrSummary | null>();
     const repo = this.db
       .prepare("SELECT path FROM repos WHERE id = ?")
       .get(repoId) as { path: string } | undefined;
-    if (repo === undefined) return false;
-    if (opts.force !== true && this.isFresh(repoId)) return false;
+    if (repo === undefined) return empty;
+    if (opts.force !== true && this.isFresh(repoId)) return empty;
 
     const remote = await this.originRemote(repo.path);
-    if (remote === null) return false;
+    if (remote === null) return empty;
     const token = await getGitHubToken();
-    if (token === null) return false;
+    if (token === null) return empty;
     const branches = this.branchesToCheck(repoId);
-    if (branches.length === 0) return false;
+    if (branches.length === 0) return empty;
 
     let prs: Map<string, PrSummary | null>;
     try {
       prs = await fetchPrsForRepo(token, remote.owner, remote.repo, branches);
     } catch {
-      return false; // best-effort; keep whatever's cached
+      return empty; // best-effort; keep whatever's cached
     }
     return this.upsert(repoId, prs);
   }
@@ -67,7 +68,10 @@ export class PrService {
       .filter((b) => b !== "" && b !== "HEAD" && !b.startsWith("detached@"));
   }
 
-  private upsert(repoId: string, prs: Map<string, PrSummary | null>): boolean {
+  private upsert(
+    repoId: string,
+    prs: Map<string, PrSummary | null>
+  ): Map<string, PrSummary | null> {
     const prev = new Map(
       (
         this.db
@@ -88,14 +92,14 @@ export class PrService {
          fetched_at = excluded.fetched_at`
     );
     const now = new Date().toISOString();
-    let changed = false;
+    const changed = new Map<string, PrSummary | null>();
     this.db.transaction(() => {
       for (const [branch, pr] of prs) {
         const before = prev.get(branch);
         const number = pr?.number ?? null;
         const state = pr?.state ?? null;
         if (before === undefined || before.number !== number || before.state !== state) {
-          changed = true;
+          changed.set(branch, pr);
         }
         stmt.run({
           repo_id: repoId,

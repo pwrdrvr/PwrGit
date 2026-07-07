@@ -14,6 +14,7 @@ import type {
   AgentStatus,
   ChangeSet,
   GraphLog,
+  PrSummary,
   Profile,
   ProfileId,
   RebaseCommitRef,
@@ -166,6 +167,12 @@ export interface Events {
   "worktree:changed": { worktreeId: string };
   /** A worktree finished being removed (streamed during a batch remove). */
   "worktree:removed": { worktreeId: string };
+  /**
+   * PR status changed for some of a repo's branches — a targeted delta the
+   * renderer patches onto the tree in place (no full reload). null clears a
+   * branch's PR. Keyed by branch name.
+   */
+  "pr:changed": { repoId: string; prs: Record<string, PrSummary | null> };
 }
 
 export type EventChannel = keyof Events;
