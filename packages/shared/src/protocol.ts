@@ -146,6 +146,13 @@ export interface Commands {
     req: { worktreeId: string; message: string; amend?: boolean };
     res: null;
   };
+  /** Unified diff for one working-tree file (staged or unstaged). */
+  "diff:file": {
+    req: { worktreeId: string; path: string; staged: boolean };
+    res: string;
+  };
+  /** Unified diff of the changes a commit introduced. */
+  "diff:commit": { req: { worktreeId: string; hash: string }; res: string };
 
   "dialog:pickDirectory": { req: void; res: string | null };
   "dialog:pickDirectories": { req: void; res: string[] };

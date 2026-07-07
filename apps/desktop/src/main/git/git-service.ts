@@ -99,6 +99,45 @@ export async function unstagePath(
   return checked.ok ? ok(undefined) : checked;
 }
 
+/** Unified diff for one working-tree file. Untracked files (empty `git diff`)
+ *  are rendered as a new-file diff via --no-index. */
+export async function fileDiff(
+  git: GitExec,
+  cwd: string,
+  path: string,
+  staged: boolean
+): Promise<Result<string>> {
+  const args = staged
+    ? ["diff", "--cached", "--no-color", "--", path]
+    : ["diff", "--no-color", "--", path];
+  const raw = await git(args, cwd);
+  if (!raw.ok) return raw;
+  if (staged || raw.value.stdout.trim() !== "") return ok(raw.value.stdout);
+  // Unstaged but empty → likely untracked; synthesize a new-file diff.
+  const nul = process.platform === "win32" ? "NUL" : "/dev/null";
+  const untracked = await git(
+    ["diff", "--no-color", "--no-index", "--", nul, path],
+    cwd
+  );
+  // --no-index exits 1 when the files differ (the normal case here), so we take
+  // stdout regardless of exit code.
+  return untracked.ok ? ok(untracked.value.stdout) : ok(raw.value.stdout);
+}
+
+/** Unified diff of the changes a commit introduced (all files, renames detected). */
+export async function commitDiff(
+  git: GitExec,
+  cwd: string,
+  hash: string
+): Promise<Result<string>> {
+  const raw = await git(
+    ["show", "--no-color", "--format=", "--patch", "-M", hash],
+    cwd
+  );
+  if (!raw.ok) return raw;
+  return ok(raw.value.stdout);
+}
+
 export type CommitIdentity = { name?: string; email: string };
 
 /**

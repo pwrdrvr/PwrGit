@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Profile, Repo, RepoSearchHit, Worktree } from "@pwrgit/shared";
+import { DiffPane, type DiffTarget } from "./features/diff/DiffPane";
 import { LineageGraph } from "./features/graph/LineageGraph";
 import { SelectionBar } from "./features/graph/SelectionBar";
 import { WorktreeHeader } from "./features/graph/WorktreeHeader";
@@ -64,11 +65,13 @@ export function App() {
   const [agentAction, setAgentAction] = useState<"squash" | "reorder" | null>(
     null
   );
+  const [diffTarget, setDiffTarget] = useState<DiffTarget | null>(null);
 
-  // Clear commit selection when the worktree changes.
+  // Clear commit selection + any open diff when the worktree changes.
   useEffect(() => {
     setSelectedCommits(new Set());
     setAgentAction(null);
+    setDiffTarget(null);
   }, [selection?.worktreeId]);
 
   const toggleCommit = useCallback((hash: string) => {
@@ -196,20 +199,33 @@ export function App() {
                 worktree={selectedWorktree}
                 state={worktreeState}
               />
-              <LineageGraph
-                worktreeId={selectedWorktree.id}
-                activeEmail={activeProfile?.email ?? ""}
-                selectedCommits={selectedCommits}
-                onToggleCommit={toggleCommit}
-              />
-              {selectedCommits.size > 0 && (
-                <SelectionBar
-                  count={selectedCommits.size}
-                  onSquash={() => startAgent("squash")}
-                  onReorder={() => startAgent("reorder")}
-                  onAskAgent={() => startAgent(agentAction ?? "squash")}
-                  onClear={clearSelection}
+              {diffTarget !== null ? (
+                <DiffPane
+                  worktreeId={selectedWorktree.id}
+                  target={diffTarget}
+                  onClose={() => setDiffTarget(null)}
                 />
+              ) : (
+                <>
+                  <LineageGraph
+                    worktreeId={selectedWorktree.id}
+                    activeEmail={activeProfile?.email ?? ""}
+                    selectedCommits={selectedCommits}
+                    onToggleCommit={toggleCommit}
+                    onOpenCommit={(hash, subject) =>
+                      setDiffTarget({ kind: "commit", hash, subject })
+                    }
+                  />
+                  {selectedCommits.size > 0 && (
+                    <SelectionBar
+                      count={selectedCommits.size}
+                      onSquash={() => startAgent("squash")}
+                      onReorder={() => startAgent("reorder")}
+                      onAskAgent={() => startAgent(agentAction ?? "squash")}
+                      onClear={clearSelection}
+                    />
+                  )}
+                </>
               )}
             </>
           ) : (
@@ -242,6 +258,9 @@ export function App() {
             agentAction={agentAction}
             onClearSelection={clearSelection}
             onCollapse={() => setRailCollapsed(true)}
+            onOpenDiff={(path, staged) =>
+              setDiffTarget({ kind: "file", path, staged })
+            }
           />
         )}
 

@@ -4,7 +4,9 @@ import type { DB } from "../persistence/db";
 import { execGit } from "./dugite";
 import {
   commitChanges,
+  commitDiff,
   type CommitIdentity,
+  fileDiff,
   readChanges,
   stagePath,
   unstagePath
@@ -87,5 +89,17 @@ export function registerChangesHandlers(
     if (!result.ok) return result;
     refresher.refreshWorktree(req.worktreeId);
     return ok(null);
+  });
+
+  bus.register("diff:file", async (req) => {
+    const path = pathOf(req.worktreeId);
+    if (path === null) return err(notFound);
+    return fileDiff(execGit, path, req.path, req.staged);
+  });
+
+  bus.register("diff:commit", async (req) => {
+    const path = pathOf(req.worktreeId);
+    if (path === null) return err(notFound);
+    return commitDiff(execGit, path, req.hash);
   });
 }

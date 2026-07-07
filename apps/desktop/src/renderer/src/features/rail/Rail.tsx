@@ -12,7 +12,8 @@ export function Rail({
   selectedHashes,
   agentAction,
   onClearSelection,
-  onCollapse
+  onCollapse,
+  onOpenDiff
 }: {
   worktree: Worktree | null;
   state: WorktreeState | null;
@@ -21,6 +22,7 @@ export function Rail({
   agentAction: "squash" | "reorder" | null;
   onClearSelection: () => void;
   onCollapse: () => void;
+  onOpenDiff: (path: string, staged: boolean) => void;
 }) {
   const [tab, setTab] = useState<RailTab>("changes");
   const dirty = state?.dirty ?? worktree?.dirty ?? 0;
@@ -60,7 +62,11 @@ export function Rail({
       </div>
 
       {tab === "changes" ? (
-        <ChangesTab worktree={worktree} activeEmail={activeEmail} />
+        <ChangesTab
+          worktree={worktree}
+          activeEmail={activeEmail}
+          onOpenDiff={onOpenDiff}
+        />
       ) : (
         <AgentTab
           worktreeId={worktree?.id ?? null}

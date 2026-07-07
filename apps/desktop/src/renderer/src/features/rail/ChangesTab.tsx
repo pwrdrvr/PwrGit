@@ -14,13 +14,19 @@ const STATUS_TONE: Record<string, string> = {
 
 function FileRow({
   file,
-  onToggle
+  onToggle,
+  onOpen
 }: {
   file: FileChange;
   onToggle: () => void;
+  onOpen: () => void;
 }) {
   return (
-    <div className={`file-row${file.staged ? " is-staged" : ""}`}>
+    <div
+      className={`file-row is-clickable${file.staged ? " is-staged" : ""}`}
+      onClick={onOpen}
+      title="View changes"
+    >
       <span
         className={`file-status file-status--${STATUS_TONE[file.status] ?? "muted"}`}
       >
@@ -31,7 +37,10 @@ function FileRow({
       </span>
       <button
         className="file-toggle"
-        onClick={onToggle}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggle();
+        }}
         title={file.staged ? "Unstage" : "Stage"}
       >
         {file.staged ? "−" : "+"}
@@ -42,10 +51,12 @@ function FileRow({
 
 export function ChangesTab({
   worktree,
-  activeEmail
+  activeEmail,
+  onOpenDiff
 }: {
   worktree: Worktree | null;
   activeEmail: string;
+  onOpenDiff: (path: string, staged: boolean) => void;
 }) {
   const [changes, setChanges] = useState<ChangeSet | null>(null);
   const [message, setMessage] = useState("");
@@ -110,20 +121,34 @@ export function ChangesTab({
 
   return (
     <div className="changes-pane">
+      <div className="changes-wip" title="Uncommitted changes in the working tree">
+        <span className="changes-wip__dot" />
+        Work in progress · uncommitted
+      </div>
       <div className="changes-list">
         {staged.length > 0 && (
           <>
             <div className="changes-section">Staged · {staged.length}</div>
             {staged.map((f, i) => (
-              <FileRow key={`s-${i}-${f.path}`} file={f} onToggle={() => unstage(f.path)} />
+              <FileRow
+                key={`s-${i}-${f.path}`}
+                file={f}
+                onToggle={() => unstage(f.path)}
+                onOpen={() => onOpenDiff(f.path, true)}
+              />
             ))}
           </>
         )}
         {unstaged.length > 0 && (
           <>
-            <div className="changes-section">Changes · {unstaged.length}</div>
+            <div className="changes-section">Unstaged · {unstaged.length}</div>
             {unstaged.map((f, i) => (
-              <FileRow key={`u-${i}-${f.path}`} file={f} onToggle={() => stage(f.path)} />
+              <FileRow
+                key={`u-${i}-${f.path}`}
+                file={f}
+                onToggle={() => stage(f.path)}
+                onOpen={() => onOpenDiff(f.path, false)}
+              />
             ))}
           </>
         )}

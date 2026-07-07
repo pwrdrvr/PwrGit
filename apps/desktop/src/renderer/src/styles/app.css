@@ -2102,3 +2102,200 @@ body.is-col-resizing {
   background: var(--text-subtle);
   pointer-events: none;
 }
+
+/* ---- WIP framing + clickable change/commit rows ---- */
+
+.changes-wip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  font: 600 10px/1 var(--font-sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--warn);
+}
+.changes-wip__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--warn);
+}
+.file-row.is-clickable {
+  cursor: pointer;
+}
+.file-row.is-clickable:hover {
+  background: var(--bg-row-hover);
+}
+.commit-check {
+  cursor: pointer;
+}
+.commit-check:hover {
+  border-color: var(--accent-border);
+}
+
+/* ---- Diff pane + viewer ---- */
+
+.diff-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.diff-pane__head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.diff-pane__back {
+  height: 26px;
+  padding: 0 10px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font: 600 11.5px/1 var(--font-sans);
+  cursor: pointer;
+}
+.diff-pane__title {
+  min-width: 0;
+  font: 600 12.5px/1.3 var(--font-mono);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.diff-pane__sub {
+  flex: 0 0 auto;
+  font: 500 10.5px/1 var(--font-mono);
+  color: var(--text-subtle);
+}
+.diff-pane__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 20px 20px;
+}
+.diff-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-subtle);
+  font: 500 12px/1.5 var(--font-sans);
+}
+.diff-binary {
+  padding: 10px 12px;
+  color: var(--text-muted);
+  font: 500 11.5px/1.4 var(--font-sans);
+}
+
+.diff-file {
+  margin-bottom: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--bg-panel);
+}
+.diff-file__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-input);
+}
+.diff-file__status {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font: 600 9px/1 var(--font-sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.diff-file__status--added {
+  background: var(--success-soft);
+  color: var(--success-bright);
+}
+.diff-file__status--deleted {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.diff-file__status--renamed {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.diff-file__status--modified {
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+.diff-file__path {
+  min-width: 0;
+  font: 600 11.5px/1.3 var(--font-mono);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+.diff-hunk__header {
+  padding: 5px 12px;
+  font: 500 10.5px/1.4 var(--font-mono);
+  color: var(--text-subtle);
+  background: var(--bg-hover-strong);
+}
+.diff-row {
+  display: grid;
+  grid-template-columns: 44px 44px 14px minmax(0, 1fr);
+  gap: 6px;
+  padding: 1px 12px 1px 0;
+  align-items: baseline;
+  font: 500 11.5px/1.55 var(--font-mono);
+}
+.diff-row--add {
+  background: rgba(109, 186, 126, 0.1);
+}
+.diff-row--del {
+  background: rgba(232, 90, 58, 0.11);
+}
+.diff-gutter {
+  text-align: right;
+  color: var(--text-subtle);
+  font-size: 10px;
+  user-select: none;
+}
+.diff-sym {
+  text-align: center;
+  color: var(--text-subtle);
+}
+.diff-row--add .diff-sym,
+.diff-row--add .diff-text {
+  color: var(--success-bright);
+}
+.diff-row--del .diff-sym,
+.diff-row--del .diff-text {
+  color: var(--danger);
+}
+.diff-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary);
+}
+
+.diff-stat {
+  display: inline-flex;
+  gap: 6px;
+  flex: 0 0 auto;
+  font: 600 10.5px/1 var(--font-mono);
+}
+.diff-stat__add {
+  color: var(--success-bright);
+}
+.diff-stat__del {
+  color: var(--danger);
+}

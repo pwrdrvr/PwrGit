@@ -6,13 +6,15 @@ export function CommitRow({
   index,
   total,
   selected,
-  onToggle
+  onToggle,
+  onOpen
 }: {
   row: CommitRowVM;
   index: number;
   total: number;
   selected: boolean;
   onToggle: () => void;
+  onOpen: () => void;
 }) {
   const topColor = index > 0 ? "#5b4025" : "transparent";
   const botColor = index < total - 1 ? "#5b4025" : "transparent";
@@ -22,7 +24,8 @@ export function CommitRow({
   return (
     <div
       className={`commit-row${selected ? " is-selected" : ""}`}
-      onClick={onToggle}
+      onClick={onOpen}
+      title="View this commit's changes"
     >
       <div className="commit-rail">
         <svg
@@ -55,7 +58,16 @@ export function CommitRow({
         </svg>
       </div>
 
-      <span className={`commit-check${selected ? " is-checked" : ""}`}>
+      <span
+        className={`commit-check${selected ? " is-checked" : ""}`}
+        role="checkbox"
+        aria-checked={selected}
+        title={selected ? "Deselect for rebase" : "Select for rebase"}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggle();
+        }}
+      >
         {selected && (
           <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#1a0d05" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
             <path d="m20 6-11 11-5-5" />

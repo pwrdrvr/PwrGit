@@ -8,12 +8,14 @@ export function LineageGraph({
   worktreeId,
   activeEmail,
   selectedCommits,
-  onToggleCommit
+  onToggleCommit,
+  onOpenCommit
 }: {
   worktreeId: string;
   activeEmail: string;
   selectedCommits: Set<string>;
   onToggleCommit: (hash: string) => void;
+  onOpenCommit: (hash: string, subject: string) => void;
 }) {
   const [log, setLog] = useState<GraphLog | null>(null);
   const [onlyMe, setOnlyMe] = useState(true);
@@ -75,6 +77,7 @@ export function LineageGraph({
                 total={visible.length}
                 selected={selectedCommits.has(row.hash)}
                 onToggle={() => onToggleCommit(row.hash)}
+                onOpen={() => onOpenCommit(row.hash, row.subject)}
               />
             ))}
           </div>
