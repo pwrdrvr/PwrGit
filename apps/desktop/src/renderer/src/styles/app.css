@@ -476,15 +476,20 @@ input {
   flex: 0 0 auto;
   width: 24px;
   height: 24px;
+  padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
   cursor: pointer;
   color: var(--text-subtle);
+  transition: background 120ms ease, color 120ms ease;
 }
 .pin:hover {
-  color: var(--text-secondary);
+  color: var(--accent-bright);
+  background: var(--accent-soft);
 }
 .pin.is-pinned {
   color: var(--accent);
@@ -847,13 +852,6 @@ input {
   pointer-events: none;
   transition: opacity 120ms ease;
 }
-.wt-row__pindot {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  color: var(--accent);
-  transition: opacity 120ms ease;
-}
 .wt-row__menu {
   opacity: 0;
   transition: opacity 120ms ease;
@@ -883,9 +881,7 @@ input {
 .wt-row:hover .badge,
 .wt-row:focus-within .badge,
 .wt-row:hover .badge-text,
-.wt-row:focus-within .badge-text,
-.wt-row:hover .wt-row__pindot,
-.wt-row:focus-within .wt-row__pindot {
+.wt-row:focus-within .badge-text {
   opacity: 0;
 }
 

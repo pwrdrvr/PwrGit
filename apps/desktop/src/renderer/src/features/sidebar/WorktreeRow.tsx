@@ -151,15 +151,9 @@ export function WorktreeRow({
           {relativeAge(worktree.lastActivityAt)}
         </span>
       )}
-      {/* A pinned row keeps a persistent star at rest; on hover it yields to the
-          interactive controls, which float in over the right edge. */}
-      {worktree.pinned && (
-        <span className="wt-row__pindot" aria-hidden="true">
-          <PinIcon filled size={11} />
-        </span>
-      )}
       {/* Trash + pin toggle reserve no space at rest — they float over the row's
-          right edge on hover/selection. The kebab keeps its reserved slot. */}
+          right edge on hover only (pinned state reads from sort order + the
+          section's "Pinned" badge, as in PwrAgnt). The kebab keeps its slot. */}
       <div className="wt-row__hoveracts">
         {!worktree.isPrimary && (
           <button
