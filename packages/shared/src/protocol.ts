@@ -12,6 +12,7 @@
 
 import type {
   AgentStatus,
+  BranchRef,
   ChangeSet,
   GraphLog,
   PrSummary,
@@ -104,6 +105,10 @@ export interface Commands {
     req: { repoId: string; orderedWorktreeIds: string[] };
     res: null;
   };
+
+  // Branch switching — list local + remote branches, check one out in place
+  "branch:list": { req: { worktreeId: string }; res: BranchRef[] };
+  "branch:switch": { req: { worktreeId: string; branch: string }; res: null };
 
   // Remotes (U9 / U13)
   "remote:fetch": { req: { worktreeId: string }; res: null };

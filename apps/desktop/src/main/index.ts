@@ -5,6 +5,7 @@ import { initAutoUpdater } from "./auto-updater";
 import { CommandBus } from "./command-bus";
 import { registerDialogHandlers } from "./dialog-handlers";
 import { execGit } from "./git/dugite";
+import { registerBranchHandlers } from "./git/branch-handlers";
 import { registerChangesHandlers } from "./git/changes-handlers";
 import { registerGraphHandlers } from "./git/graph-handlers";
 import { registerRebaseHandlers } from "./git/rebase-handlers";
@@ -99,6 +100,7 @@ if (!gotSingleInstanceLock) {
       activeWorktreeId = id;
     });
     registerWorktreeLifecycleHandlers(bus, db, indexer, settings);
+    registerBranchHandlers(bus, db, indexer, refresher);
     registerRemoteHandlers(bus, db, refresher);
     registerGraphHandlers(bus, db, stateService);
     registerChangesHandlers(bus, db, refresher);

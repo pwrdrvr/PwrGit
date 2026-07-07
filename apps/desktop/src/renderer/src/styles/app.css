@@ -1110,6 +1110,84 @@ input {
   background: var(--accent);
   flex: 0 0 auto;
 }
+/* The branch chip doubles as a switcher trigger (click to change branch). */
+.wt-header__branch--switch {
+  max-width: 320px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: box-shadow 120ms ease, background 120ms ease;
+}
+.wt-header__branch--switch:hover {
+  background: var(--accent-border, var(--accent-soft));
+  box-shadow: inset 0 0 0 1px var(--accent-border);
+}
+.wt-header__branch--switch:focus-visible {
+  outline: 1px solid var(--accent-border);
+  outline-offset: 2px;
+}
+.wt-header__branch-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wt-header__caret {
+  flex: 0 0 auto;
+  color: var(--text-subtle);
+  margin-left: -1px;
+}
+
+/* Branch switcher — rows in the overlay list (reuses .overlay-* chrome). */
+.branch-item__dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--text-subtle);
+}
+.branch-item__dot.is-current {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.branch-item__name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  font: 600 13px/1.2 var(--font-mono);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.branch-item__here {
+  flex: 0 0 auto;
+  color: var(--accent-bright);
+  font: 600 9.5px/1 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.branch-item__badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font: 600 9px/1 var(--font-mono);
+}
+.branch-item__meta {
+  flex: 0 0 auto;
+  font: 500 10px/1 var(--font-mono);
+  color: var(--text-subtle);
+}
+.overlay-foot--error {
+  color: var(--warn, #e8c890);
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+}
 .wt-header__pathrow {
   display: flex;
   align-items: center;

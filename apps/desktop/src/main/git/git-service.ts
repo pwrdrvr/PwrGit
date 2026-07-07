@@ -1,4 +1,5 @@
 import {
+  type BranchRef,
   type ChangeSet,
   type Commit,
   err,
@@ -364,6 +365,89 @@ export async function pullFastForward(
     });
   }
   return ok({ fastForwarded: true });
+}
+
+// Tab-delimited so subjects (last field) can contain anything but a tab.
+const BRANCH_FORMAT = [
+  "%(refname)",
+  "%(refname:short)",
+  "%(HEAD)",
+  "%(upstream:short)",
+  "%(committerdate:iso8601-strict)",
+  "%(contents:subject)"
+].join("%09");
+
+/** Parse the tab-delimited `git for-each-ref` output produced with BRANCH_FORMAT. */
+export function parseBranchRefs(stdout: string): BranchRef[] {
+  const out: BranchRef[] = [];
+  for (const line of stdout.split("\n")) {
+    if (line.trim() === "") continue;
+    const [full = "", name = "", head = "", upstream = "", date = "", subject = ""] =
+      line.split("\t");
+    if (full === "" || name === "") continue;
+    const isRemote = full.startsWith("refs/remotes/");
+    // Skip a remote's symbolic HEAD pointer (e.g. origin/HEAD -> origin/main).
+    if (isRemote && name.endsWith("/HEAD")) continue;
+    const ref: BranchRef = { name, isRemote, isCurrent: head === "*" };
+    if (upstream !== "") ref.upstream = upstream;
+    if (date !== "") ref.lastCommitAt = date;
+    if (subject !== "") ref.subject = subject;
+    out.push(ref);
+  }
+  return out;
+}
+
+/**
+ * List a worktree's switchable branches — local heads and remote-tracking refs,
+ * most-recently-committed first. `%(HEAD)` marks the branch checked out in the
+ * worktree the command runs in (so it's correct per-worktree, not per-repo).
+ */
+export async function listBranches(
+  git: GitExec,
+  cwd: string
+): Promise<Result<BranchRef[]>> {
+  const raw = await git(
+    [
+      "for-each-ref",
+      "--sort=-committerdate",
+      `--format=${BRANCH_FORMAT}`,
+      "refs/heads",
+      "refs/remotes"
+    ],
+    cwd
+  );
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["for-each-ref"]);
+  if (!checked.ok) return checked;
+  return ok(parseBranchRefs(checked.value.stdout));
+}
+
+/**
+ * Check out `branch` in this worktree. `git switch` DWIMs a bare remote name
+ * (e.g. "main" when only origin/main exists) into a new tracking branch, so
+ * callers pass the short local name even for remote-only branches.
+ */
+export async function switchBranch(
+  git: GitExec,
+  cwd: string,
+  branch: string
+): Promise<Result<void>> {
+  const raw = await git(["switch", branch], cwd);
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode !== 0) {
+    const message = raw.value.stderr.trim();
+    const code = /already used by worktree|already checked out/i.test(message)
+      ? "checked_out_elsewhere"
+      : /overwritten by checkout|local changes|would be overwritten/i.test(message)
+        ? "dirty"
+        : "switch_failed";
+    return err({
+      kind: "repo",
+      code,
+      message: message !== "" ? message : "Could not switch branch"
+    });
+  }
+  return ok(undefined);
 }
 
 /** Push the current branch to its upstream. */

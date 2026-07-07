@@ -9,6 +9,7 @@ import type {
 import { dispatch } from "../../lib/pwrgit";
 import { CopyTarget } from "../shell/CopyTarget";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
+import { BranchSwitcher } from "./BranchSwitcher";
 
 type Chip = { text: string; tone: "muted" | "ok" | "warn" };
 
@@ -36,6 +37,7 @@ export function WorktreeHeader({
 }) {
   const [busy, setBusy] = useState<Busy>(null);
   const [flash, setFlash] = useState<Chip | null>(null);
+  const [switching, setSwitching] = useState(false);
 
   const showFlash = (chip: Chip, ms: number): void => {
     setFlash(chip);
@@ -89,16 +91,27 @@ export function WorktreeHeader({
       <div className="wt-header__id">
         <span className="wt-header__repo">{repo.name}</span>
         <span className="wt-header__sep">›</span>
-        <CopyTarget
-          value={worktree.branch}
-          label="Copy branch name"
-          hint={`${worktree.branch}\nClick to copy`}
-          className="wt-header__branch copyable"
-          stopPropagation={false}
+        <button
+          className="wt-header__branch wt-header__branch--switch"
+          title="Switch branch"
+          onClick={() => setSwitching(true)}
         >
           <span className="wt-header__dot" />
-          {worktree.branch}
-        </CopyTarget>
+          <span className="wt-header__branch-name">{worktree.branch}</span>
+          <svg
+            className="wt-header__caret"
+            width="11"
+            height="11"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </button>
         {dirty > 0 && <span className="badge badge--warn">●{dirty}</span>}
         <span style={{ flex: 1 }} />
         <span className={`sync-chip sync-chip--${chip.tone}`}>{chip.text}</span>
@@ -163,6 +176,13 @@ export function WorktreeHeader({
         </CopyTarget>
         <WorktreeMenu worktree={worktree} />
       </div>
+      {switching && (
+        <BranchSwitcher
+          worktreeId={worktree.id}
+          currentBranch={worktree.branch}
+          onClose={() => setSwitching(false)}
+        />
+      )}
     </div>
   );
 }

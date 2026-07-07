@@ -59,6 +59,20 @@ export type Worktree = {
   pr?: PrSummary;
 };
 
+/** A branch a worktree can switch to (a local head or a remote-tracking ref). */
+export type BranchRef = {
+  /** Short name — "main"/"feature/x" for locals, "origin/main" for remotes. */
+  name: string;
+  isRemote: boolean;
+  /** The branch currently checked out in this worktree (detached ⇒ none). */
+  isCurrent: boolean;
+  /** Configured upstream (local branches only), e.g. "origin/main". */
+  upstream?: string;
+  /** ISO-8601 time of the ref's tip commit (recency sort). */
+  lastCommitAt?: string;
+  subject?: string;
+};
+
 /** Lifecycle of a pull request — the only status we track in the first cut. */
 export type PrLifecycle = "open" | "merged" | "closed";
 

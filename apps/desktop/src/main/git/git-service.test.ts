@@ -1,5 +1,73 @@
 import { describe, expect, it } from "vitest";
-import { parseChanges, parseLog, parseWorktreeList } from "./git-service";
+import {
+  parseBranchRefs,
+  parseChanges,
+  parseLog,
+  parseWorktreeList
+} from "./git-service";
+
+describe("parseBranchRefs", () => {
+  const row = (fields: string[]): string => fields.join("\t");
+
+  it("marks the current branch, classifies remotes, and reads upstream", () => {
+    const out = parseBranchRefs(
+      [
+        row([
+          "refs/heads/main",
+          "main",
+          "*",
+          "origin/main",
+          "2026-07-01T00:00:00-04:00",
+          "latest on main"
+        ]),
+        row([
+          "refs/heads/feat/x",
+          "feat/x",
+          " ",
+          "",
+          "2026-06-01T00:00:00-04:00",
+          "wip"
+        ]),
+        row([
+          "refs/remotes/origin/release",
+          "origin/release",
+          " ",
+          "",
+          "2026-05-01T00:00:00-04:00",
+          "cut release"
+        ])
+      ].join("\n")
+    );
+    expect(out).toHaveLength(3);
+    expect(out[0]).toMatchObject({
+      name: "main",
+      isRemote: false,
+      isCurrent: true,
+      upstream: "origin/main"
+    });
+    expect(out[1]).toMatchObject({ name: "feat/x", isCurrent: false });
+    expect(out[1].upstream).toBeUndefined();
+    expect(out[2]).toMatchObject({ name: "origin/release", isRemote: true });
+  });
+
+  it("skips a remote's symbolic HEAD pointer", () => {
+    const out = parseBranchRefs(
+      [
+        row(["refs/remotes/origin/HEAD", "origin/HEAD", " ", "", "", ""]),
+        row([
+          "refs/remotes/origin/main",
+          "origin/main",
+          " ",
+          "",
+          "2026-05-01T00:00:00-04:00",
+          "tip"
+        ])
+      ].join("\n")
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].name).toBe("origin/main");
+  });
+});
 
 describe("parseWorktreeList", () => {
   it("parses primary + linked worktrees and strips refs/heads/", () => {

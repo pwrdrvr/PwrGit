@@ -37,6 +37,8 @@ export type TestRepo = {
   path: string;
   /** Add a linked worktree on a new branch; returns its path. */
   addWorktree: (branch: string, opts?: { dirty?: boolean }) => string;
+  /** Create a branch ref at HEAD without checking it out (switchable). */
+  createBranch: (branch: string) => void;
 };
 
 export type GitSandbox = {
@@ -101,7 +103,12 @@ export function createGitSandbox(): GitSandbox {
     const repoPath = initRepo(name);
     const addWorktree = worktreeAdder(name, repoPath);
     for (const branch of opts.worktrees ?? []) addWorktree(branch);
-    return { name, path: repoPath, addWorktree };
+    return {
+      name,
+      path: repoPath,
+      addWorktree,
+      createBranch: (branch: string) => git(repoPath, "branch", branch)
+    };
   };
 
   const makeRepoBehindRemote = (
@@ -123,7 +130,12 @@ export function createGitSandbox(): GitSandbox {
     git(repoPath, "push", "origin", "main");
     git(repoPath, "reset", "--hard", `HEAD~${behindBy}`);
     git(repoPath, "fetch", "origin");
-    return { name, path: repoPath, addWorktree: worktreeAdder(name, repoPath) };
+    return {
+      name,
+      path: repoPath,
+      addWorktree: worktreeAdder(name, repoPath),
+      createBranch: (branch: string) => git(repoPath, "branch", branch)
+    };
   };
 
   const cleanup = (): void => {
