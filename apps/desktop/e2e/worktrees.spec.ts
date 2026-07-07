@@ -37,6 +37,15 @@ test("scans a folder and lists a repo with its worktrees", async () => {
   const firstRow = window.locator(".wt-row").first();
   await expect(firstRow.locator(".wt-row__branch")).toHaveText("main");
   await expect(firstRow.locator(".wt-tag--local")).toBeVisible();
+
+  // Row actions float over the right edge (absolute → reserve no space at rest)
+  // and only fade in on hover; the kebab keeps its reserved slot.
+  const restRow = branchRow(window, "feature/login");
+  const acts = restRow.locator(".wt-row__hoveracts");
+  await expect(acts).toHaveCSS("position", "absolute");
+  await expect(acts).toHaveCSS("opacity", "0");
+  await restRow.hover();
+  await expect(acts).toHaveCSS("opacity", "1");
 });
 
 test("creates a worktree through the New worktree modal", async () => {

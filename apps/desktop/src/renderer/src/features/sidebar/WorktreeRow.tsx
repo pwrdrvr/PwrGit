@@ -113,7 +113,7 @@ export function WorktreeRow({
       {worktree.behind > 0 && (
         <span className="badge-text badge-text--warn">↓{worktree.behind}</span>
       )}
-      {worktree.pr !== undefined ? (
+      {worktree.pr !== undefined && !worktree.isDefaultBranch ? (
         <PrChip pr={worktree.pr} />
       ) : (
         <>
@@ -151,33 +151,46 @@ export function WorktreeRow({
           {relativeAge(worktree.lastActivityAt)}
         </span>
       )}
-      {!worktree.isPrimary && (
+      {/* A pinned row keeps a persistent star at rest; on hover it yields to the
+          interactive controls, which float in over the right edge. */}
+      {worktree.pinned && (
+        <span className="wt-row__pindot" aria-hidden="true">
+          <PinIcon filled size={11} />
+        </span>
+      )}
+      {/* Trash + pin toggle reserve no space at rest — they float over the row's
+          right edge on hover/selection. The kebab keeps its reserved slot. */}
+      <div className="wt-row__hoveracts">
+        {!worktree.isPrimary && (
+          <button
+            type="button"
+            className="wt-remove"
+            title="Remove worktree"
+            aria-label="Remove worktree"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove();
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" />
+            </svg>
+          </button>
+        )}
         <button
           type="button"
-          className="wt-remove"
-          title="Remove worktree"
-          aria-label="Remove worktree"
+          className={`pin${worktree.pinned ? " is-pinned" : ""}`}
+          title={worktree.pinned ? "Unpin worktree" : "Pin worktree"}
+          aria-label={worktree.pinned ? "Unpin worktree" : "Pin worktree"}
           onClick={(e) => {
             e.stopPropagation();
-            onRemove();
+            onTogglePin();
           }}
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" />
-          </svg>
+          <PinIcon filled={worktree.pinned} size={11} />
         </button>
-      )}
+      </div>
       <WorktreeMenu worktree={worktree} className="wt-row__menu" />
-      <span
-        className={`pin${worktree.pinned ? " is-pinned" : ""}`}
-        title="Pin worktree"
-        onClick={(e) => {
-          e.stopPropagation();
-          onTogglePin();
-        }}
-      >
-        <PinIcon filled={worktree.pinned} size={11} />
-      </span>
     </div>
   );
 }
