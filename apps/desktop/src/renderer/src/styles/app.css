@@ -414,6 +414,9 @@ input {
   margin-bottom: 2px;
 }
 .repo-row {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   display: flex;
   align-items: center;
   gap: 9px;
@@ -423,7 +426,9 @@ input {
   border: 1px solid transparent;
   border-radius: 8px;
   cursor: pointer;
-  background: transparent;
+  /* Opaque (matches the sidebar) so scrolling rows don't show through when the
+     header is pinned to the top of the list. */
+  background: var(--bg-sidebar);
   transition: background 140ms ease;
 }
 .repo-row:hover {
@@ -559,6 +564,11 @@ input {
   background: var(--bg-row-hover);
 }
 .wt-row.is-selected {
+  /* Keep the active worktree pinned just below the folder header so it doesn't
+     scroll out of view down a long worktree list. */
+  position: sticky;
+  top: 36px;
+  z-index: 2;
   border-color: var(--accent-border);
   background: var(--bg-active);
 }
