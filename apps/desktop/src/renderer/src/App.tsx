@@ -199,33 +199,38 @@ export function App() {
                 worktree={selectedWorktree}
                 state={worktreeState}
               />
-              {diffTarget !== null ? (
+              {/* Keep the lineage graph mounted while a diff is shown — hidden,
+                  not unmounted — so returning to it is instant (its multi-branch
+                  query is expensive to re-run). */}
+              <div
+                className="graph-wrap"
+                style={{ display: diffTarget !== null ? "none" : "flex" }}
+              >
+                <LineageGraph
+                  worktreeId={selectedWorktree.id}
+                  activeEmail={activeProfile?.email ?? ""}
+                  selectedCommits={selectedCommits}
+                  onToggleCommit={toggleCommit}
+                  onOpenCommit={(hash, subject) =>
+                    setDiffTarget({ kind: "commit", hash, subject })
+                  }
+                />
+                {selectedCommits.size > 0 && (
+                  <SelectionBar
+                    count={selectedCommits.size}
+                    onSquash={() => startAgent("squash")}
+                    onReorder={() => startAgent("reorder")}
+                    onAskAgent={() => startAgent(agentAction ?? "squash")}
+                    onClear={clearSelection}
+                  />
+                )}
+              </div>
+              {diffTarget !== null && (
                 <DiffPane
                   worktreeId={selectedWorktree.id}
                   target={diffTarget}
                   onClose={() => setDiffTarget(null)}
                 />
-              ) : (
-                <>
-                  <LineageGraph
-                    worktreeId={selectedWorktree.id}
-                    activeEmail={activeProfile?.email ?? ""}
-                    selectedCommits={selectedCommits}
-                    onToggleCommit={toggleCommit}
-                    onOpenCommit={(hash, subject) =>
-                      setDiffTarget({ kind: "commit", hash, subject })
-                    }
-                  />
-                  {selectedCommits.size > 0 && (
-                    <SelectionBar
-                      count={selectedCommits.size}
-                      onSquash={() => startAgent("squash")}
-                      onReorder={() => startAgent("reorder")}
-                      onAskAgent={() => startAgent(agentAction ?? "squash")}
-                      onClear={clearSelection}
-                    />
-                  )}
-                </>
               )}
             </>
           ) : (

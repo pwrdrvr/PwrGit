@@ -1356,6 +1356,13 @@ input {
   border-color: var(--accent);
 }
 
+/* Wraps the lineage toolbar + scroll so the whole graph can be hidden (kept
+   mounted) behind a diff without re-running its query. */
+.graph-wrap {
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
 .graph-scroll {
   flex: 1;
   min-height: 0;
