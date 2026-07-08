@@ -25,17 +25,19 @@ export function LineageGraph({
 
   useEffect(() => {
     let active = true;
-    const load = (): void => {
-      void dispatch("graph:lanes", { worktreeId, scope }).then((r) => {
+    const load = (force: boolean): void => {
+      void dispatch("graph:lanes", { worktreeId, scope, force }).then((r) => {
         if (!active) return;
         if (r.ok) setData(r.value);
         setLoading(false);
       });
     };
     setLoading(true);
-    load();
+    // A plain worktree/scope switch reuses the repo's cached lanes (fast); an
+    // actual change to this worktree forces a recompute.
+    load(false);
     const off = subscribe("worktree:changed", (p) => {
-      if (p.worktreeId === worktreeId) load();
+      if (p.worktreeId === worktreeId) load(true);
     });
     return () => {
       active = false;

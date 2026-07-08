@@ -284,24 +284,39 @@ export async function branchTips(
   return ok(map);
 }
 
-async function branchHasMyCommit(
+/**
+ * Which of `branches` contain a commit (not in the default branch) authored or
+ * co-authored by `email` — computed in ONE `git log` across all of them via
+ * `--source` (%S), rather than one process per branch.
+ */
+async function branchesIAuthored(
   git: GitExec,
   cwd: string,
   defaultRef: string,
-  branch: string,
+  branches: string[],
   email: string
-): Promise<boolean> {
-  if (email === "") return false;
+): Promise<Set<string>> {
+  const mine = new Set<string>();
+  if (email === "" || branches.length === 0) return mine;
+  const fmt =
+    "%S%x00%ae%x00%(trailers:key=Co-authored-by,valueonly,separator=%x1f)";
   const raw = await git(
-    [
-      "log",
-      `${defaultRef}..${branch}`,
-      "--format=%ae%x00%(trailers:key=Co-authored-by,valueonly,separator=%x00)"
-    ],
+    ["log", "--source", "--no-patch", `--format=${fmt}`, ...branches, "--not", defaultRef],
     cwd
   );
-  if (!raw.ok || raw.value.exitCode !== 0) return false;
-  return raw.value.stdout.toLowerCase().includes(email);
+  if (!raw.ok || raw.value.exitCode !== 0) return mine;
+  for (const line of raw.value.stdout.split("\n")) {
+    if (line === "") continue;
+    const [src = "", authorEmail = "", coauthors = ""] = line.split("\x00");
+    if (src === "") continue;
+    if (
+      authorEmail.toLowerCase() === email ||
+      coauthors.toLowerCase().includes(email)
+    ) {
+      mine.add(src);
+    }
+  }
+  return mine;
 }
 
 export type ActiveBranchInput = {
@@ -343,21 +358,26 @@ export async function selectActiveBranches(
   const candidates = checked.value.stdout
     .split("\n")
     .map((s) => s.trim())
-    .filter((s) => s !== "" && s !== input.defaultName);
+    .filter(
+      (s) =>
+        s !== "" && s !== input.defaultName && !input.mergedPrBranches.has(s)
+    );
 
-  const email = input.email.toLowerCase();
-  const active: string[] = [];
-  for (const branch of candidates) {
-    if (input.mergedPrBranches.has(branch)) continue;
-    if (input.worktreeBranches.has(branch)) {
-      active.push(branch);
-      continue;
-    }
-    if (await branchHasMyCommit(git, cwd, input.defaultRef, branch, email)) {
-      active.push(branch);
-    }
+  // Worktree branches are "mine" outright; the rest need an authorship check,
+  // batched into a single git log.
+  const worktreeMine: string[] = [];
+  const others: string[] = [];
+  for (const b of candidates) {
+    (input.worktreeBranches.has(b) ? worktreeMine : others).push(b);
   }
-  return ok(active);
+  const authored = await branchesIAuthored(
+    git,
+    cwd,
+    input.defaultRef,
+    others,
+    input.email.toLowerCase()
+  );
+  return ok([...worktreeMine, ...others.filter((b) => authored.has(b))]);
 }
 
 export type WorktreeInfo = {

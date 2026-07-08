@@ -130,9 +130,15 @@ export interface Commands {
     req: { worktreeId: string; limit?: number };
     res: GraphLog;
   };
-  /** Multi-lane lineage across active (or all) branches. */
+  /** Multi-lane lineage across active (or all) branches. The branch set + log
+   *  is cached per repo; `force` recomputes it (else only HEAD is re-resolved). */
   "graph:lanes": {
-    req: { worktreeId: string; scope: "active" | "all"; limit?: number };
+    req: {
+      worktreeId: string;
+      scope: "active" | "all";
+      limit?: number;
+      force?: boolean;
+    };
     res: LaneGraph;
   };
 
