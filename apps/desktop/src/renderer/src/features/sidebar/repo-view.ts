@@ -127,7 +127,14 @@ export function orderWorktrees(
     return list.sort((a, b) => rank(a.id) - rank(b.id));
   }
   if (sort === "az") {
-    return list.sort((a, b) => a.branch.localeCompare(b.branch));
+    // Case-insensitive + natural-numeric, so "Foo" sits by "foo" and "v2"
+    // precedes "v10" — not ASCII order with every capital hoisted to the top.
+    return list.sort((a, b) =>
+      a.branch.localeCompare(b.branch, undefined, {
+        sensitivity: "accent",
+        numeric: true
+      })
+    );
   }
   if (sort === "active") {
     return list.sort((a, b) => b.dirty + b.ahead - (a.dirty + a.ahead));

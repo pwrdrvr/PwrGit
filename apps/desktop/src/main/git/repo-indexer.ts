@@ -148,9 +148,13 @@ export class RepoIndexer {
   }
 
   listRepos(profileId: ProfileId): Repo[] {
+    // NOCASE so "apple" sorts next to "Apple" rather than after "Zebra" —
+    // SQLite's default TEXT collation is binary (all uppercase before any
+    // lowercase). The trailing `name` breaks NOCASE ties deterministically.
     const repoRows = this.db
       .prepare(
-        "SELECT id, profile_id, name, path, pinned FROM repos WHERE profile_id = ? ORDER BY pinned DESC, sort_order, name"
+        `SELECT id, profile_id, name, path, pinned FROM repos WHERE profile_id = ?
+         ORDER BY pinned DESC, sort_order, name COLLATE NOCASE, name`
       )
       .all(profileId) as RepoRow[];
     return repoRows.map((r) => this.repoFromRow(r));
@@ -207,7 +211,7 @@ export class RepoIndexer {
                 (SELECT COUNT(*) FROM worktrees w WHERE w.repo_id = r.id) AS wt_count
          FROM repos r JOIN profiles p ON p.id = r.profile_id
          WHERE lower(r.name) LIKE ? OR lower(r.path) LIKE ?
-         ORDER BY r.name LIMIT 50`
+         ORDER BY r.name COLLATE NOCASE, r.name LIMIT 50`
       )
       .all(like, like) as {
       id: string;
@@ -246,7 +250,8 @@ export class RepoIndexer {
            LEFT JOIN worktree_state s ON s.worktree_id = w.id
            LEFT JOIN branch_pr p ON p.repo_id = w.repo_id AND p.branch = w.branch
            WHERE w.repo_id = ?
-           ORDER BY (w.custom_order IS NULL), w.custom_order, w.is_primary DESC, w.branch`
+           ORDER BY (w.custom_order IS NULL), w.custom_order, w.is_primary DESC,
+                    w.branch COLLATE NOCASE, w.branch`
         )
         .all(r.id) as WorktreeRow[]
     ).map((w): Worktree => {
