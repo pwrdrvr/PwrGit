@@ -46,6 +46,10 @@ export type GitSandbox = {
   reposDir: string;
   /** Where the app is told to create NEW worktrees (settings.worktreeRoot). */
   worktreeRoot: string;
+  /** Run a raw git command in a checkout (test setup escape hatch). */
+  git: (cwd: string, ...args: string[]) => string;
+  /** Write a file and commit it in a checkout. */
+  commit: (cwd: string, file: string, message: string) => void;
   makeRepo: (name: string, opts?: { worktrees?: string[] }) => TestRepo;
   /** A repo whose primary branch is `behindBy` commits behind its origin. */
   makeRepoBehindRemote: (
@@ -138,9 +142,23 @@ export function createGitSandbox(): GitSandbox {
     };
   };
 
+  const commit = (cwd: string, file: string, message: string): void => {
+    writeFileSync(join(cwd, file), `${message}\n`);
+    git(cwd, "add", "-A");
+    git(cwd, "commit", "-m", message);
+  };
+
   const cleanup = (): void => {
     rmSync(base, { recursive: true, force: true });
   };
 
-  return { reposDir, worktreeRoot, makeRepo, makeRepoBehindRemote, cleanup };
+  return {
+    reposDir,
+    worktreeRoot,
+    git: (cwd: string, ...args: string[]) => git(cwd, ...args),
+    commit,
+    makeRepo,
+    makeRepoBehindRemote,
+    cleanup
+  };
 }

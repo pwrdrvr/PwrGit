@@ -217,6 +217,149 @@ export async function readLog(
   return ok(parseLog(checked.value.stdout));
 }
 
+/** Read a topo-ordered union log across several refs (for the multi-lane graph). */
+export async function readLogRefs(
+  git: GitExec,
+  cwd: string,
+  refs: string[],
+  limit: number
+): Promise<Result<Commit[]>> {
+  if (refs.length === 0) return ok([]);
+  const raw = await git(
+    [
+      "log",
+      "--topo-order",
+      `--pretty=format:${LOG_FORMAT}`,
+      "-n",
+      String(limit),
+      ...refs,
+      "--"
+    ],
+    cwd
+  );
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["log"]);
+  if (!checked.ok) return checked;
+  return ok(parseLog(checked.value.stdout));
+}
+
+/** Short names of all local branches. */
+export async function listLocalBranchNames(
+  git: GitExec,
+  cwd: string
+): Promise<Result<string[]>> {
+  const raw = await git(
+    ["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+    cwd
+  );
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["for-each-ref"]);
+  if (!checked.ok) return checked;
+  return ok(
+    checked.value.stdout.split("\n").map((s) => s.trim()).filter((s) => s !== "")
+  );
+}
+
+/** hash → local branch names whose tip is that commit (for graph ref labels). */
+export async function branchTips(
+  git: GitExec,
+  cwd: string
+): Promise<Result<Record<string, string[]>>> {
+  const raw = await git(
+    ["for-each-ref", "--format=%(objectname) %(refname:short)", "refs/heads"],
+    cwd
+  );
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["for-each-ref"]);
+  if (!checked.ok) return checked;
+  const map: Record<string, string[]> = {};
+  for (const line of checked.value.stdout.split("\n")) {
+    const sp = line.indexOf(" ");
+    if (sp === -1) continue;
+    const hash = line.slice(0, sp);
+    const name = line.slice(sp + 1).trim();
+    if (hash === "" || name === "") continue;
+    (map[hash] ??= []).push(name);
+  }
+  return ok(map);
+}
+
+async function branchHasMyCommit(
+  git: GitExec,
+  cwd: string,
+  defaultRef: string,
+  branch: string,
+  email: string
+): Promise<boolean> {
+  if (email === "") return false;
+  const raw = await git(
+    [
+      "log",
+      `${defaultRef}..${branch}`,
+      "--format=%ae%x00%(trailers:key=Co-authored-by,valueonly,separator=%x00)"
+    ],
+    cwd
+  );
+  if (!raw.ok || raw.value.exitCode !== 0) return false;
+  return raw.value.stdout.toLowerCase().includes(email);
+}
+
+export type ActiveBranchInput = {
+  /** e.g. "origin/develop" or "main". */
+  defaultRef: string;
+  defaultName: string;
+  /** Active profile's commit email (authored/co-authored ⇒ "mine"). */
+  email: string;
+  /** Branches checked out in a local worktree (always count as "mine"). */
+  worktreeBranches: Set<string>;
+  /** Branches with a merged PR — hidden even if not ancestry-merged (squash). */
+  mergedPrBranches: Set<string>;
+};
+
+/**
+ * The quiet default set: local branches with work not in the default branch
+ * (ancestry-unmerged), that are "mine" (authored/co-authored a commit, or
+ * checked out in a worktree), and not already merged via PR. This is what keeps
+ * the lineage from becoming "everything that ever happened".
+ */
+export async function selectActiveBranches(
+  git: GitExec,
+  cwd: string,
+  input: ActiveBranchInput
+): Promise<Result<string[]>> {
+  const raw = await git(
+    [
+      "for-each-ref",
+      "--format=%(refname:short)",
+      `--no-merged=${input.defaultRef}`,
+      "refs/heads"
+    ],
+    cwd
+  );
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["for-each-ref"]);
+  if (!checked.ok) return checked;
+
+  const candidates = checked.value.stdout
+    .split("\n")
+    .map((s) => s.trim())
+    .filter((s) => s !== "" && s !== input.defaultName);
+
+  const email = input.email.toLowerCase();
+  const active: string[] = [];
+  for (const branch of candidates) {
+    if (input.mergedPrBranches.has(branch)) continue;
+    if (input.worktreeBranches.has(branch)) {
+      active.push(branch);
+      continue;
+    }
+    if (await branchHasMyCommit(git, cwd, input.defaultRef, branch, email)) {
+      active.push(branch);
+    }
+  }
+  return ok(active);
+}
+
 export type WorktreeInfo = {
   path: string;
   branch: string;

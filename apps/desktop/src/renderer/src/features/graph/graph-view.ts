@@ -1,33 +1,6 @@
-import type { Commit } from "@pwrgit/shared";
-
-export type CommitRowVM = Commit & {
-  /** Authored by the active profile's email. */
-  isMine: boolean;
-  /** This commit is the branch's divergence point (merge-base with default). */
-  isBase: boolean;
-};
-
-export function decorateCommits(
-  commits: Commit[],
-  activeEmail: string,
-  branchRoot: string | null
-): CommitRowVM[] {
-  const email = activeEmail.toLowerCase();
-  return commits.map((c) => ({
-    ...c,
-    isMine: c.authorEmail.toLowerCase() === email,
-    isBase: branchRoot !== null && c.hash === branchRoot
-  }));
-}
-
-/** "Only me" keeps your commits plus the branch root (for orientation). */
-export function filterOnlyMe(
-  rows: CommitRowVM[],
-  onlyMe: boolean
-): CommitRowVM[] {
-  if (!onlyMe) return rows;
-  return rows.filter((r) => r.isMine || r.isBase);
-}
+// Shared helper for the lineage graph. (Lane assignment lives in lane-layout.ts;
+// the old single-branch "Only me" author filter was replaced by the multi-lane
+// active-branch view.)
 
 /** Short "time since" label for a commit timestamp. */
 export function shortWhen(iso: string, now: number = Date.now()): string {

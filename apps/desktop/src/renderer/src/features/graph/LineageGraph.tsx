@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
-import type { GraphLog } from "@pwrgit/shared";
+import { useEffect, useMemo, useState } from "react";
+import type { LaneGraph } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
-import { CommitRow } from "./CommitRow";
-import { decorateCommits, filterOnlyMe } from "./graph-view";
+import { GraphRow, type GraphRowVM } from "./GraphRow";
+import { layoutLanes } from "./lane-layout";
+
+type Scope = "active" | "all";
 
 export function LineageGraph({
   worktreeId,
@@ -17,16 +19,16 @@ export function LineageGraph({
   onToggleCommit: (hash: string) => void;
   onOpenCommit: (hash: string, subject: string) => void;
 }) {
-  const [log, setLog] = useState<GraphLog | null>(null);
-  const [onlyMe, setOnlyMe] = useState(true);
+  const [data, setData] = useState<LaneGraph | null>(null);
+  const [scope, setScope] = useState<Scope>("active");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
     const load = (): void => {
-      void dispatch("graph:log", { worktreeId }).then((r) => {
+      void dispatch("graph:lanes", { worktreeId, scope }).then((r) => {
         if (!active) return;
-        if (r.ok) setLog(r.value);
+        if (r.ok) setData(r.value);
         setLoading(false);
       });
     };
@@ -39,15 +41,34 @@ export function LineageGraph({
       active = false;
       off();
     };
-  }, [worktreeId]);
+  }, [worktreeId, scope]);
 
-  const rows = decorateCommits(
-    log?.commits ?? [],
-    activeEmail,
-    log?.branchRoot ?? null
+  const email = activeEmail.toLowerCase();
+  const layout = useMemo(
+    () =>
+      layoutLanes(
+        (data?.commits ?? []).map((c) => ({ hash: c.hash, parents: c.parents }))
+      ),
+    [data]
   );
-  const visible = filterOnlyMe(rows, onlyMe);
-  const hidden = rows.length - visible.length;
+
+  const vms: GraphRowVM[] = useMemo(() => {
+    const commits = data?.commits ?? [];
+    const tips = data?.tips ?? {};
+    const head = data?.head ?? "";
+    const defaultBranch = data?.defaultBranch ?? "";
+    return commits.map((commit, i) => ({
+      commit,
+      row: layout.rows[i] ?? { lane: 0, top: [], bottom: [] },
+      refs: tips[commit.hash] ?? [],
+      isHead: commit.hash === head,
+      isMine: commit.authorEmail.toLowerCase() === email,
+      defaultBranch
+    }));
+  }, [data, layout, email]);
+
+  const shown = data?.shownBranches.length ?? 0;
+  const hidden = data?.hiddenBranches ?? 0;
 
   return (
     <>
@@ -55,42 +76,53 @@ export function LineageGraph({
         <span className="graph-toolbar__label">Lineage</span>
         <span style={{ flex: 1 }} />
         <span className="graph-toolbar__count">
-          {onlyMe ? `${visible.length} by you` : `${visible.length} commits`}
+          {scope === "active"
+            ? `${shown} active branch${shown === 1 ? "" : "es"}`
+            : `${vms.length} commits`}
         </span>
         <button
-          className={`only-me${onlyMe ? " is-on" : ""}`}
-          onClick={() => setOnlyMe((v) => !v)}
+          className={`only-me${scope === "active" ? " is-on" : ""}`}
+          title={
+            scope === "active"
+              ? "Showing your active, unmerged branches. Click to show all branches."
+              : "Showing all branches. Click to show only active ones."
+          }
+          onClick={() => setScope((s) => (s === "active" ? "all" : "active"))}
         >
           <span className="only-me__dot" />
-          Only me
+          {scope === "active" ? "Active" : "All branches"}
         </button>
       </div>
 
       <div className="graph-scroll">
-        {visible.length > 0 ? (
+        {vms.length > 0 ? (
           <div className="graph-card">
-            {visible.map((row, i) => (
-              <CommitRow
-                key={row.hash}
-                row={row}
-                index={i}
-                total={visible.length}
-                selected={selectedCommits.has(row.hash)}
-                onToggle={() => onToggleCommit(row.hash)}
-                onOpen={() => onOpenCommit(row.hash, row.subject)}
+            {vms.map((vm) => (
+              <GraphRow
+                key={vm.commit.hash}
+                vm={vm}
+                laneCount={layout.laneCount}
+                selected={selectedCommits.has(vm.commit.hash)}
+                onToggle={() => onToggleCommit(vm.commit.hash)}
+                onOpen={() => onOpenCommit(vm.commit.hash, vm.commit.subject)}
               />
             ))}
           </div>
         ) : (
           <div className="graph-empty">
-            {loading ? "Loading history…" : "No commits."}
+            {loading
+              ? "Loading history…"
+              : scope === "active"
+                ? "No active branches — you're all caught up."
+                : "No commits."}
           </div>
         )}
 
-        {onlyMe && hidden > 0 && (
+        {scope === "active" && hidden > 0 && (
           <div className="graph-hidden-note">
-            {hidden} commit{hidden === 1 ? "" : "s"} from others hidden.{" "}
-            <button onClick={() => setOnlyMe(false)}>Show all branches</button>
+            {hidden} more branch{hidden === 1 ? "" : "es"} hidden (merged or
+            inactive).{" "}
+            <button onClick={() => setScope("all")}>Show all branches</button>
           </div>
         )}
       </div>

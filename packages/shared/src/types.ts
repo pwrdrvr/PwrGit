@@ -146,6 +146,21 @@ export type GraphLog = {
   defaultBranch: string;
 };
 
+/** Multi-branch lineage: a topo-ordered union log across the drawn branches. */
+export type LaneGraph = {
+  /** Topological order (newest first); each carries its parent hashes. */
+  commits: Commit[];
+  /** commit hash → local branch names tipped there (for ref labels). */
+  tips: Record<string, string[]>;
+  /** Current HEAD commit, to highlight where you are. */
+  head: string;
+  defaultBranch: string;
+  /** Branches drawn besides the default spine. */
+  shownBranches: string[];
+  /** Branches the "active" filter hid (merged/inactive) — for the reveal hint. */
+  hiddenBranches: number;
+};
+
 export type RebaseStep = {
   action: "pick" | "squash";
   shortHash: string;

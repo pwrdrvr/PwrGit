@@ -1473,6 +1473,54 @@ input {
   background: var(--accent-soft);
   color: var(--accent-bright);
 }
+.commit-tag--head {
+  background: var(--accent);
+  color: #1a0d05;
+}
+
+/* Multi-lane graph rows — the lane gutter is an SVG whose width scales with the
+   number of active lanes; commit body reuses the .commit-* classes above. */
+.graph-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding: 0 12px 0 6px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(247, 243, 235, 0.05);
+  transition: background 120ms ease;
+}
+.graph-row:hover {
+  background: var(--accent-tint);
+}
+.graph-row.is-selected {
+  background: var(--accent-soft);
+}
+.graph-lanes {
+  flex: 0 0 auto;
+  align-self: center;
+  display: block;
+}
+.ref-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  max-width: 170px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font: 600 9.5px/1 var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ref-chip--default {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent-bright);
+}
 
 .graph-hidden-note {
   margin-top: 10px;

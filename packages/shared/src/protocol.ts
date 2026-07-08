@@ -15,6 +15,7 @@ import type {
   BranchRef,
   ChangeSet,
   GraphLog,
+  LaneGraph,
   PrSummary,
   Profile,
   ProfileId,
@@ -128,6 +129,11 @@ export interface Commands {
   "graph:log": {
     req: { worktreeId: string; limit?: number };
     res: GraphLog;
+  };
+  /** Multi-lane lineage across active (or all) branches. */
+  "graph:lanes": {
+    req: { worktreeId: string; scope: "active" | "all"; limit?: number };
+    res: LaneGraph;
   };
 
   // Agent + rebase assistant (U15 / U16)
