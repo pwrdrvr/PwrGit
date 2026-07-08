@@ -70,9 +70,27 @@ export function WorktreeHeader({
     );
   };
   const onPull = (): void => {
-    void run("pull", () => dispatch("remote:pull", { worktreeId: id }), {
-      text: "fast-forwarded",
-      tone: "ok"
+    setBusy("pull");
+    void dispatch("remote:pull", { worktreeId: id }).then((result) => {
+      setBusy(null);
+      if (!result.ok) {
+        showFlash(
+          { text: result.error.message.split("\n")[0].slice(0, 64), tone: "warn" },
+          3200
+        );
+        return;
+      }
+      const { stashed, reappliedWithConflicts } = result.value;
+      if (reappliedWithConflicts) {
+        showFlash(
+          { text: "pulled · resolve stash conflicts", tone: "warn" },
+          4000
+        );
+      } else if (stashed) {
+        showFlash({ text: "pulled · changes reapplied", tone: "ok" }, 2400);
+      } else {
+        showFlash({ text: "fast-forwarded", tone: "ok" }, 1600);
+      }
     });
   };
   const onPush = (): void => {

@@ -1666,6 +1666,35 @@ input {
   font: 600 12px/1 var(--font-sans);
   cursor: pointer;
 }
+/* Discard-file button: hidden until the row is hovered/focused (destructive, so
+   not always in your face), then a danger-tinted trash. */
+.file-discard {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+.file-row:hover .file-discard,
+.file-row:focus-within .file-discard {
+  opacity: 1;
+}
+.file-discard:hover,
+.file-discard:focus-visible {
+  outline: none;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: transparent;
+}
 
 .commit-box {
   flex: 0 0 auto;
@@ -2236,6 +2265,24 @@ body.is-col-resizing {
   height: 7px;
   border-radius: 999px;
   background: var(--warn);
+}
+.changes-wip__discard {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-muted);
+  font: 600 9px/1 var(--font-sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+.changes-wip__discard:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: transparent;
 }
 .file-row.is-clickable {
   cursor: pointer;

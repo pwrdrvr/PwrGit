@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ChangeSet, FileChange, Worktree } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { confirmDialog } from "../shell/dialogs";
 
 const STATUS_TONE: Record<string, string> = {
   M: "warn",
@@ -15,11 +16,13 @@ const STATUS_TONE: Record<string, string> = {
 function FileRow({
   file,
   onToggle,
-  onOpen
+  onOpen,
+  onDiscard
 }: {
   file: FileChange;
   onToggle: () => void;
   onOpen: () => void;
+  onDiscard: () => void;
 }) {
   return (
     <div
@@ -35,6 +38,19 @@ function FileRow({
       <span className="file-path" title={file.path}>
         {file.path}
       </span>
+      <button
+        className="file-discard"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDiscard();
+        }}
+        title="Discard changes"
+        aria-label="Discard changes"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" />
+        </svg>
+      </button>
       <button
         className="file-toggle"
         onClick={(e) => {
@@ -100,6 +116,35 @@ export function ChangesTab({
     );
   };
 
+  const discardOne = async (file: FileChange): Promise<void> => {
+    if (wtId === null) return;
+    const yes = await confirmDialog({
+      title: "Discard changes?",
+      message: `Discard your changes to ${file.path}? This can't be undone.`,
+      confirmLabel: "Discard",
+      danger: true
+    });
+    if (yes) void dispatch("changes:discard", { worktreeId: wtId, path: file.path });
+  };
+
+  const discardAll = async (): Promise<void> => {
+    if (wtId === null) return;
+    const paths = [
+      ...new Set([...(changes?.staged ?? []), ...(changes?.unstaged ?? [])].map((f) => f.path))
+    ];
+    if (paths.length === 0) return;
+    const yes = await confirmDialog({
+      title: "Discard all changes?",
+      message: `Discard all uncommitted changes across ${paths.length} file${paths.length === 1 ? "" : "s"}? This can't be undone.`,
+      confirmLabel: "Discard all",
+      danger: true
+    });
+    if (!yes) return;
+    for (const path of paths) {
+      await dispatch("changes:discard", { worktreeId: wtId, path });
+    }
+  };
+
   const staged = changes?.staged ?? [];
   const unstaged = changes?.unstaged ?? [];
   const hasChanges = staged.length > 0 || unstaged.length > 0;
@@ -124,6 +169,14 @@ export function ChangesTab({
       <div className="changes-wip" title="Uncommitted changes in the working tree">
         <span className="changes-wip__dot" />
         Work in progress · uncommitted
+        <span style={{ flex: 1 }} />
+        <button
+          className="changes-wip__discard"
+          onClick={() => void discardAll()}
+          title="Discard every uncommitted change in this worktree"
+        >
+          Discard all
+        </button>
       </div>
       <div className="changes-list">
         {staged.length > 0 && (
@@ -135,6 +188,7 @@ export function ChangesTab({
                 file={f}
                 onToggle={() => unstage(f.path)}
                 onOpen={() => onOpenDiff(f.path, true)}
+                onDiscard={() => void discardOne(f)}
               />
             ))}
           </>
@@ -148,6 +202,7 @@ export function ChangesTab({
                 file={f}
                 onToggle={() => stage(f.path)}
                 onOpen={() => onOpenDiff(f.path, false)}
+                onDiscard={() => void discardOne(f)}
               />
             ))}
           </>

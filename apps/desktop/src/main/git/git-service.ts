@@ -341,17 +341,53 @@ export async function fetchRemote(
   return checked.ok ? ok(undefined) : checked;
 }
 
-/** Pull = fetch + fast-forward-only merge of the tracked upstream. */
+export type PullOutcome = {
+  fastForwarded: boolean;
+  /** Local work was stashed to let the fast-forward proceed. */
+  stashed: boolean;
+  /** Reapplying the stash after the pull hit conflicts (markers left in-tree). */
+  reappliedWithConflicts: boolean;
+};
+
+/**
+ * Pull = fetch + fast-forward-only merge of the tracked upstream. When the
+ * working tree is dirty, local work (tracked + untracked) is auto-stashed so a
+ * fast-forward that touches those files isn't blocked, then reapplied — the
+ * GitHub-Desktop behavior. A conflicting reapply is reported, not hidden.
+ */
 export async function pullFastForward(
   git: GitExec,
   cwd: string
-): Promise<Result<{ fastForwarded: boolean }>> {
+): Promise<Result<PullOutcome>> {
   const fetched = await fetchRemote(git, cwd);
   if (!fetched.ok) return fetched;
 
+  const status = await git(["status", "--porcelain"], cwd);
+  const dirty = status.ok && status.value.stdout.trim() !== "";
+
+  let stashed = false;
+  if (dirty) {
+    const stash = await git(
+      ["stash", "push", "--include-untracked", "-m", "pwrgit: auto-stash before pull"],
+      cwd
+    );
+    if (!stash.ok) return stash;
+    stashed =
+      stash.value.exitCode === 0 &&
+      !/no local changes to save/i.test(stash.value.stdout);
+  }
+
+  const restoreStash = async (): Promise<void> => {
+    if (stashed) await git(["stash", "pop"], cwd);
+  };
+
   const merge = await git(["merge", "--ff-only", "@{u}"], cwd);
-  if (!merge.ok) return merge;
+  if (!merge.ok) {
+    await restoreStash();
+    return merge;
+  }
   if (merge.value.exitCode !== 0) {
+    await restoreStash();
     const message = merge.value.stderr.trim();
     const code = /fast-forward/i.test(message)
       ? "not_fast_forward"
@@ -364,7 +400,48 @@ export async function pullFastForward(
       message: message !== "" ? message : "pull could not fast-forward"
     });
   }
-  return ok({ fastForwarded: true });
+
+  if (!stashed) {
+    return ok({ fastForwarded: true, stashed: false, reappliedWithConflicts: false });
+  }
+  // Reapply the stashed work. `git stash pop` leaves conflict markers (and keeps
+  // the stash) when it can't apply cleanly — surface that so the user can resolve.
+  const pop = await git(["stash", "pop"], cwd);
+  if (!pop.ok) return pop;
+  return ok({
+    fastForwarded: true,
+    stashed: true,
+    reappliedWithConflicts: pop.value.exitCode !== 0
+  });
+}
+
+/**
+ * Discard a file's uncommitted changes. A file that exists in HEAD is reset
+ * (index + worktree) back to HEAD; a new file (untracked, or staged-add) is
+ * unstaged and removed. Destructive — callers confirm first.
+ */
+export async function discardPath(
+  git: GitExec,
+  cwd: string,
+  path: string
+): Promise<Result<void>> {
+  const inHead = await git(["cat-file", "-e", `HEAD:${path}`], cwd);
+  if (inHead.ok && inHead.value.exitCode === 0) {
+    const raw = await git(
+      ["restore", "--source=HEAD", "--staged", "--worktree", "--", path],
+      cwd
+    );
+    if (!raw.ok) return raw;
+    const checked = requireExit0(raw.value, ["restore"]);
+    return checked.ok ? ok(undefined) : checked;
+  }
+  // New file: best-effort unstage (a no-op/expected error for untracked), then
+  // remove it from the working tree.
+  await git(["restore", "--staged", "--", path], cwd);
+  const clean = await git(["clean", "-fd", "--", path], cwd);
+  if (!clean.ok) return clean;
+  const checked = requireExit0(clean.value, ["clean"]);
+  return checked.ok ? ok(undefined) : checked;
 }
 
 // Tab-delimited so subjects (last field) can contain anything but a tab.

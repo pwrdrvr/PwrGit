@@ -6,6 +6,7 @@ import {
   commitChanges,
   commitDiff,
   type CommitIdentity,
+  discardPath,
   fileDiff,
   readChanges,
   stagePath,
@@ -50,6 +51,15 @@ export function registerChangesHandlers(
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
     const result = await unstagePath(execGit, path, req.path);
+    if (!result.ok) return result;
+    refresher.refreshWorktree(req.worktreeId);
+    return ok(null);
+  });
+
+  bus.register("changes:discard", async (req) => {
+    const path = pathOf(req.worktreeId);
+    if (path === null) return err(notFound);
+    const result = await discardPath(execGit, path, req.path);
     if (!result.ok) return result;
     refresher.refreshWorktree(req.worktreeId);
     return ok(null);

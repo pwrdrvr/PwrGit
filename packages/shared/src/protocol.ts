@@ -114,7 +114,13 @@ export interface Commands {
   "remote:fetch": { req: { worktreeId: string }; res: null };
   "remote:pull": {
     req: { worktreeId: string };
-    res: { fastForwarded: boolean };
+    res: {
+      fastForwarded: boolean;
+      /** Local work was auto-stashed to let the fast-forward through. */
+      stashed: boolean;
+      /** Reapplying the stashed work after the pull hit conflicts. */
+      reappliedWithConflicts: boolean;
+    };
   };
   "remote:push": { req: { worktreeId: string }; res: null };
 
@@ -147,6 +153,8 @@ export interface Commands {
   "changes:list": { req: { worktreeId: string }; res: ChangeSet };
   "changes:stage": { req: { worktreeId: string; path: string }; res: null };
   "changes:unstage": { req: { worktreeId: string; path: string }; res: null };
+  /** Discard a file's uncommitted changes (revert to HEAD, or delete if new). */
+  "changes:discard": { req: { worktreeId: string; path: string }; res: null };
   "changes:commit": {
     req: { worktreeId: string; message: string; amend?: boolean };
     res: null;
