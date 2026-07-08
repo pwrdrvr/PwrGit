@@ -2,23 +2,34 @@ import type { Commit } from "@pwrgit/shared";
 import type { LaneRow } from "./lane-layout";
 import { shortWhen } from "./graph-view";
 
-export const LANE_W = 15;
+export const LANE_W = 16;
 const ROW_H = 64;
+const MID = ROW_H / 2;
 
-// Lane colors — the default/first lane gets the accent; others cycle through a
-// small, dark-theme-legible palette. Kept modest (this graph stays quiet).
+// Lane palette tuned for the dark warm background. Lane 0 (the default-branch
+// spine) is the app accent; the rest rotate through legible, distinct hues.
 const LANE_COLORS = [
   "#e8743a",
-  "#6dba7e",
+  "#62c882",
   "#7aa2f7",
-  "#c9a36b",
-  "#b58cd6",
-  "#e0687f"
+  "#e5b566",
+  "#bd8ff0",
+  "#ef7f95",
+  "#58cfc0",
+  "#a9b665"
 ];
 export const laneColor = (i: number): string =>
   LANE_COLORS[i % LANE_COLORS.length] ?? "#e8743a";
 
 const cx = (lane: number): number => lane * LANE_W + LANE_W / 2;
+
+// Curved lane transitions with vertical tangents at both ends — adjacent rows
+// meet with matching (vertical) slopes, so a multi-row swerve reads as one
+// continuous ribbon instead of a chain of straight diagonals.
+const curveTop = (from: number, to: number): string =>
+  `M ${cx(from)} 0 C ${cx(from)} ${MID * 0.5}, ${cx(to)} ${MID * 0.5}, ${cx(to)} ${MID}`;
+const curveBottom = (from: number, to: number): string =>
+  `M ${cx(from)} ${MID} C ${cx(from)} ${MID + MID * 0.5}, ${cx(to)} ${MID + MID * 0.5}, ${cx(to)} ${ROW_H}`;
 
 export type GraphRowVM = {
   commit: Commit;
@@ -28,6 +39,17 @@ export type GraphRowVM = {
   isMine: boolean;
   defaultBranch: string;
 };
+
+function BranchGlyph() {
+  return (
+    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 3v12" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="18" cy="6" r="3" />
+      <path d="M18 9c0 6-6 6-6 12" />
+    </svg>
+  );
+}
 
 export function GraphRow({
   vm,
@@ -45,6 +67,20 @@ export function GraphRow({
   const { commit, row, refs, isHead, isMine } = vm;
   const width = Math.max(1, laneCount) * LANE_W;
   const color = laneColor(row.lane);
+  const isTip = refs.length > 0;
+  const x = cx(row.lane);
+
+  // A lane that runs straight through both halves of the row is drawn as ONE
+  // full-height line (no half-line seam at the vertical midpoint).
+  const passThrough = new Set<number>();
+  for (const t of row.top) {
+    if (
+      t.from === t.to &&
+      row.bottom.some((b) => b.from === b.to && b.from === t.from)
+    ) {
+      passThrough.add(t.from);
+    }
+  }
 
   return (
     <div
@@ -59,47 +95,96 @@ export function GraphRow({
         height={ROW_H}
         viewBox={`0 0 ${width} ${ROW_H}`}
       >
-        {row.top.map((s, i) => (
+        {[...passThrough].map((k) => (
           <line
-            key={`t${i}`}
-            x1={cx(s.from)}
+            key={`p${k}`}
+            x1={cx(k)}
             y1={0}
-            x2={cx(s.to)}
-            y2={ROW_H / 2}
-            stroke={laneColor(s.from)}
-            strokeWidth={2}
-          />
-        ))}
-        {row.bottom.map((s, i) => (
-          <line
-            key={`b${i}`}
-            x1={cx(s.from)}
-            y1={ROW_H / 2}
-            x2={cx(s.to)}
+            x2={cx(k)}
             y2={ROW_H}
-            stroke={laneColor(s.to)}
+            stroke={laneColor(k)}
             strokeWidth={2}
           />
         ))}
+        {row.top
+          .filter((s) => !(s.from === s.to && passThrough.has(s.from)))
+          .map((s, i) =>
+            s.from === s.to ? (
+              <line
+                key={`t${i}`}
+                x1={cx(s.from)}
+                y1={0}
+                x2={cx(s.to)}
+                y2={MID}
+                stroke={laneColor(s.from)}
+                strokeWidth={2}
+              />
+            ) : (
+              <path
+                key={`t${i}`}
+                d={curveTop(s.from, s.to)}
+                fill="none"
+                stroke={laneColor(s.from)}
+                strokeWidth={2}
+                strokeLinecap="round"
+              />
+            )
+          )}
+        {row.bottom
+          .filter((s) => !(s.from === s.to && passThrough.has(s.from)))
+          .map((s, i) =>
+            s.from === s.to ? (
+              <line
+                key={`b${i}`}
+                x1={cx(s.from)}
+                y1={MID}
+                x2={cx(s.to)}
+                y2={ROW_H}
+                stroke={laneColor(s.to)}
+                strokeWidth={2}
+              />
+            ) : (
+              <path
+                key={`b${i}`}
+                d={curveBottom(s.from, s.to)}
+                fill="none"
+                stroke={laneColor(s.to)}
+                strokeWidth={2}
+                strokeLinecap="round"
+              />
+            )
+          )}
+
+        {/* Soft halo behind branch tips + HEAD so the eye lands on them. */}
+        {(isTip || isHead) && (
+          <circle cx={x} cy={MID} r={9} fill={color} opacity={0.16} />
+        )}
         {isHead && (
           <circle
-            cx={cx(row.lane)}
-            cy={ROW_H / 2}
+            className="head-ring"
+            cx={x}
+            cy={MID}
             r={7.5}
             fill="none"
             stroke={color}
             strokeWidth={1.5}
-            opacity={0.5}
           />
         )}
-        <circle
-          cx={cx(row.lane)}
-          cy={ROW_H / 2}
-          r={isHead ? 5 : 4}
-          fill={isMine ? color : "#0e0d0b"}
-          stroke={isMine ? "#0e0d0b" : color}
-          strokeWidth={2}
-        />
+        {commit.isMerge ? (
+          <>
+            <circle cx={x} cy={MID} r={4} fill="#0e0d0b" stroke={color} strokeWidth={2} />
+            <circle cx={x} cy={MID} r={1.6} fill={color} />
+          </>
+        ) : (
+          <circle
+            cx={x}
+            cy={MID}
+            r={isTip || isHead ? 5 : 4}
+            fill={isMine ? color : "#0e0d0b"}
+            stroke={isMine ? "#0e0d0b" : color}
+            strokeWidth={2}
+          />
+        )}
       </svg>
 
       <span
@@ -124,9 +209,17 @@ export function GraphRow({
           {refs.map((name) => (
             <span
               key={name}
-              className={`ref-chip${name === vm.defaultBranch ? " ref-chip--default" : ""}`}
-              title={name === vm.defaultBranch ? "Default branch" : "Branch tip"}
+              className="ref-chip"
+              style={{
+                color,
+                borderColor: `color-mix(in srgb, ${color} 45%, transparent)`,
+                background: `color-mix(in srgb, ${color} 13%, transparent)`
+              }}
+              title={
+                name === vm.defaultBranch ? "Default branch" : "Branch tip"
+              }
             >
+              <BranchGlyph />
               {name}
             </span>
           ))}

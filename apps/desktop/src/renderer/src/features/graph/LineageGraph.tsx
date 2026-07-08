@@ -98,7 +98,9 @@ export function LineageGraph({
 
       <div className="graph-scroll">
         {vms.length > 0 ? (
-          <div className="graph-card">
+          <div
+            className={`graph-card${selectedCommits.size > 0 ? " has-selection" : ""}`}
+          >
             {vms.map((vm) => (
               <GraphRow
                 key={vm.commit.hash}

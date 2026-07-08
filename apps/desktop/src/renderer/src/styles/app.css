@@ -1491,7 +1491,7 @@ input {
   display: flex;
   align-items: stretch;
   gap: 8px;
-  padding: 0 12px 0 6px;
+  padding: 0 12px 0 8px;
   cursor: pointer;
   border-bottom: 1px solid rgba(247, 243, 235, 0.05);
   transition: background 120ms ease;
@@ -1507,13 +1507,55 @@ input {
   align-self: center;
   display: block;
 }
+/* HEAD's ring breathes gently so "where am I" is findable at a glance. */
+.graph-lanes .head-ring {
+  animation: head-pulse 2.6s ease-in-out infinite;
+}
+@keyframes head-pulse {
+  0%,
+  100% {
+    opacity: 0.9;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+/* Rebase checkboxes are hover-revealed (or pinned while a selection exists) —
+   a column of empty boxes on every row was visual noise. */
+.graph-row .commit-check {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.graph-row:hover .commit-check,
+.graph-card.has-selection .commit-check,
+.commit-check.is-checked {
+  opacity: 1;
+}
+.graph-card {
+  animation: card-in 240ms ease-out;
+}
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .graph-card,
+  .graph-lanes .head-ring {
+    animation: none;
+  }
+}
+/* Branch-tip chips are tinted per lane inline (color / border / background),
+   so a label and its lane read as one thing. */
 .ref-chip {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  height: 16px;
-  max-width: 170px;
-  padding: 0 7px;
+  gap: 4px;
+  height: 17px;
+  max-width: 180px;
+  padding: 0 8px;
   border-radius: 999px;
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
@@ -1523,10 +1565,9 @@ input {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ref-chip--default {
-  background: var(--accent-soft);
-  border-color: var(--accent-border);
-  color: var(--accent-bright);
+.ref-chip svg {
+  flex: 0 0 auto;
+  opacity: 0.85;
 }
 
 .graph-hidden-note {
