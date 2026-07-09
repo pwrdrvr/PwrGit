@@ -1697,7 +1697,16 @@ input {
   }
 }
 /* Branch-tip chips are tinted per lane inline (color / border / background),
-   so a label and its lane read as one thing. */
+   so a label and its lane read as one thing. The strip is capped in JSX (+N
+   pill) AND shrink-safe here, so it can never push the subject off the row. */
+.ref-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
 .ref-chip {
   flex: 0 0 auto;
   display: inline-flex;
@@ -1718,6 +1727,10 @@ input {
 .ref-chip svg {
   flex: 0 0 auto;
   opacity: 0.85;
+}
+/* Overflow pill ("+N") — neutral, after .ref-chip so its color wins. */
+.ref-chip--more {
+  color: var(--text-muted);
 }
 
 .graph-hidden-note {

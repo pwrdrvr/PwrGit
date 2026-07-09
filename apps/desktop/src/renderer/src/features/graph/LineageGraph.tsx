@@ -84,14 +84,26 @@ export function LineageGraph({
     const commits = data?.commits ?? [];
     const tips = data?.tips ?? {};
     const defaultBranch = data?.defaultBranch ?? "";
-    return commits.map((commit, i) => ({
-      commit,
-      row: layout.rows[i] ?? { lane: 0, top: [], bottom: [] },
-      refs: tips[commit.hash] ?? [],
-      isHead: commit.hash === head,
-      isMine: commit.authorEmail.toLowerCase() === email,
-      defaultBranch
-    }));
+    // Drawn branches (and the default) win the capped chip slots on a commit
+    // tipped by many branches; stale hangers-on collapse into the +N pill.
+    const drawn = new Set([...(data?.shownBranches ?? []), defaultBranch]);
+    return commits.map((commit, i) => {
+      const names = tips[commit.hash] ?? [];
+      const refs =
+        names.length > 1
+          ? [...names].sort(
+              (a, b) => (drawn.has(b) ? 1 : 0) - (drawn.has(a) ? 1 : 0)
+            )
+          : names;
+      return {
+        commit,
+        row: layout.rows[i] ?? { lane: 0, top: [], bottom: [] },
+        refs,
+        isHead: commit.hash === head,
+        isMine: commit.authorEmail.toLowerCase() === email,
+        defaultBranch
+      };
+    });
   }, [data, layout, email, head]);
 
   // name → tip hash (from the hash → names map) for the branch navigator.

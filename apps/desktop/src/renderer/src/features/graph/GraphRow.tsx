@@ -9,6 +9,8 @@ const MID = ROW_H / 2;
 /** The gutter viewport shows at most this many lanes; wider graphs scroll
  *  horizontally inside it so commit text never gets pushed off-screen. */
 export const MAX_GUTTER_LANES = 10;
+/** Most branch-tip chips shown on one row; the rest collapse into "+N". */
+const MAX_REF_CHIPS = 2;
 export const gutterWidth = (laneCount: number): number =>
   Math.min(Math.max(1, laneCount), MAX_GUTTER_LANES) * LANE_W;
 
@@ -220,23 +222,32 @@ export function GraphRow({
 
       <div className="commit-body">
         <div className="commit-line">
-          {refs.map((name) => (
-            <span
-              key={name}
-              className="ref-chip"
-              style={{
-                color,
-                borderColor: `color-mix(in srgb, ${color} 45%, transparent)`,
-                background: `color-mix(in srgb, ${color} 13%, transparent)`
-              }}
-              title={
-                name === vm.defaultBranch ? "Default branch" : "Branch tip"
-              }
-            >
-              <BranchGlyph />
-              {name}
+          {/* Chips are capped — a commit tipped by dozens of stale branches
+              must not shove the subject off the row. Overflow collapses into
+              a +N pill whose tooltip lists everything. */}
+          {refs.length > 0 && (
+            <span className="ref-chips" title={refs.join("\n")}>
+              {refs.slice(0, MAX_REF_CHIPS).map((name) => (
+                <span
+                  key={name}
+                  className="ref-chip"
+                  style={{
+                    color,
+                    borderColor: `color-mix(in srgb, ${color} 45%, transparent)`,
+                    background: `color-mix(in srgb, ${color} 13%, transparent)`
+                  }}
+                >
+                  <BranchGlyph />
+                  {name}
+                </span>
+              ))}
+              {refs.length > MAX_REF_CHIPS && (
+                <span className="ref-chip ref-chip--more">
+                  +{refs.length - MAX_REF_CHIPS}
+                </span>
+              )}
             </span>
-          ))}
+          )}
           <span className={`commit-msg${isMine ? "" : " is-other"}`}>
             {commit.subject}
           </span>

@@ -162,6 +162,31 @@ test("caps drawn branches and clips the lane gutter on branch-heavy repos", asyn
   ).toBeVisible();
 });
 
+test("a commit tipped by many branches caps its chips instead of flooding", async () => {
+  sandbox = createGitSandbox();
+  const s = sandbox;
+  const repo = s.makeRepo("tipfarm");
+  // 8 stale branches all parked at HEAD — with main that's 9 tips on ONE
+  // commit. Unbounded chips used to shove the commit message off-screen.
+  for (let i = 1; i <= 8; i += 1) {
+    s.git(repo.path, "branch", `stale/b${i}`);
+  }
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, s, "tipfarm");
+  await branchRow(window, "main").first().click();
+
+  const headRow = window.locator(".graph-row--head");
+  await expect(headRow.locator(".ref-chip--more")).toHaveText("+7", {
+    timeout: 20_000
+  });
+  // Two named chips + the overflow pill, and the subject stays readable.
+  await expect(headRow.locator(".ref-chip")).toHaveCount(3);
+  await expect(headRow.locator(".commit-msg")).toContainText("initial commit");
+  await expect(headRow.locator(".commit-msg")).toBeInViewport();
+});
+
 test("All-branches scope reveals remote (teammate) branches", async () => {
   sandbox = createGitSandbox();
   const s = sandbox;
