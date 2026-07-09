@@ -93,10 +93,13 @@ export function App() {
     setRailCollapsed(false);
   }, []);
 
-  // ⌘K / Ctrl+K opens the repo switcher; Escape closes it.
+  // ⌘K / ⌘F (and Ctrl variants) open the repo switcher; Escape closes it.
+  // ⌘F is the muscle-memory "find" — nothing else claims find yet; if an
+  // in-diff text search lands later, scope ⌘F by focus then.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      const key = e.key.toLowerCase();
+      if ((e.metaKey || e.ctrlKey) && (key === "k" || key === "f")) {
         e.preventDefault();
         setOverlayOpen(true);
       } else if (e.key === "Escape") {

@@ -1,4 +1,9 @@
-import { useEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent
+} from "react";
 import type { Lens, Profile, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
 import { copyText } from "../../lib/copyText";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
@@ -116,6 +121,36 @@ export function Sidebar({
       return changed ? next : prev;
     });
   }, [repos]);
+
+  // The selected worktree must always be findable in the tree: when selection
+  // arrives from outside the sidebar (⌘K/⌘F search pick), expand its repo and
+  // scroll the row into view once it has rendered. pendingReveal makes the
+  // scroll wait for the expansion render; the ref-guard keeps ordinary repo
+  // refreshes from yanking the list back to the selection.
+  const pendingRevealRef = useRef<string | null>(null);
+  const lastRevealedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (selectedWorktreeId === null) return;
+    if (lastRevealedRef.current === selectedWorktreeId) return;
+    lastRevealedRef.current = selectedWorktreeId;
+    const repo = repos.find((r) =>
+      r.worktrees.some((w) => w.id === selectedWorktreeId)
+    );
+    if (repo === undefined) return;
+    pendingRevealRef.current = selectedWorktreeId;
+    if (!expanded.has(repo.id)) {
+      setExpanded((prev) => new Set(prev).add(repo.id));
+      onExpandRepo(repo.id); // lazy badge/state compute, like a manual expand
+    }
+  }, [selectedWorktreeId, repos, expanded, onExpandRepo]);
+  useEffect(() => {
+    const id = pendingRevealRef.current;
+    if (id === null) return;
+    const el = document.querySelector(`[data-wt-id="${id}"]`);
+    if (el === null) return; // not rendered yet — retry after the next render
+    pendingRevealRef.current = null;
+    el.scrollIntoView({ block: "nearest" });
+  });
 
   // Drop selected ids that no longer exist (e.g. after a batch remove reloads).
   useEffect(() => {

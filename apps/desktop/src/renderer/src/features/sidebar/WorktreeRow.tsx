@@ -35,6 +35,7 @@ export function WorktreeRow({
       className={`wt-row${selected ? " is-selected" : ""}${
         multiSelected ? " is-multiselected" : ""
       }${prunable ? " is-stale" : ""}`}
+      data-wt-id={worktree.id}
       draggable={!worktree.isPrimary}
       onDragStart={onDragStart}
       onDragOver={onDragOver}
