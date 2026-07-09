@@ -375,7 +375,10 @@ export function Sidebar({
             <path d="m21 21-4.3-4.3" />
           </svg>
           <span className="jump-btn__label">Jump to repo…</span>
-          <span className="kbd">⌘K</span>
+          {/* ⌘F is the advertised find shortcut; ⌘K stays as a silent alias. */}
+          <span className="kbd" title="⌘F or ⌘K">
+            ⌘F
+          </span>
         </button>
       </div>
 
