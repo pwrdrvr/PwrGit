@@ -7,7 +7,10 @@ import {
   listLocalBranchNames,
   readLog,
   readLogRefs,
-  selectActiveBranches
+  readUniqueCommits,
+  selectActiveBranches,
+  selectAllGraphBranches,
+  topoMergeCommits
 } from "./git-service";
 import type { WorktreeStateService } from "./worktree-state";
 
@@ -25,6 +28,10 @@ type CachedLanes = {
 };
 const laneCache = new Map<string, CachedLanes>();
 const LANE_TTL_MS = 30_000;
+/** Trunk window — recent default-branch history drawn as the spine. */
+const TRUNK_CAP = 150;
+/** Cap on the one-walk union of all branch segments (not-in-trunk commits). */
+const UNIQUE_CAP = 500;
 
 export function registerGraphHandlers(
   bus: CommandBus,
@@ -86,31 +93,33 @@ export function registerGraphHandlers(
 
     if (!fresh) {
       const def = await state.resolveDefaultBranch(wt.repo_id, wt.path);
-      const worktreeBranches = new Set(
-        (
-          db
-            .prepare("SELECT branch FROM worktrees WHERE repo_id = ?")
-            .all(wt.repo_id) as { branch: string }[]
-        ).map((r) => r.branch)
-      );
-      const mergedPrBranches = new Set(
-        (
-          db
-            .prepare(
-              "SELECT branch FROM branch_pr WHERE repo_id = ? AND state = 'merged'"
-            )
-            .all(wt.repo_id) as { branch: string }[]
-        ).map((r) => r.branch)
-      );
-
-      const allLocal = await listLocalBranchNames(execGit, wt.path);
-      if (!allLocal.ok) return allLocal;
-      const totalOther = allLocal.value.filter((b) => b !== def.name).length;
 
       let shown: string[];
+      let hiddenBranches = 0;
       if (req.scope === "all") {
-        shown = allLocal.value.filter((b) => b !== def.name);
+        // Everything in flight: unmerged local + remote branches, recency-capped.
+        const all = await selectAllGraphBranches(execGit, wt.path, def.ref, def.name);
+        if (!all.ok) return all;
+        shown = all.value;
       } else {
+        const worktreeBranches = new Set(
+          (
+            db
+              .prepare("SELECT branch FROM worktrees WHERE repo_id = ?")
+              .all(wt.repo_id) as { branch: string }[]
+          ).map((r) => r.branch)
+        );
+        const mergedPrBranches = new Set(
+          (
+            db
+              .prepare(
+                "SELECT branch FROM branch_pr WHERE repo_id = ? AND state = 'merged'"
+              )
+              .all(wt.repo_id) as { branch: string }[]
+          ).map((r) => r.branch)
+        );
+        const allLocal = await listLocalBranchNames(execGit, wt.path);
+        if (!allLocal.ok) return allLocal;
         const active = await selectActiveBranches(execGit, wt.path, {
           defaultRef: def.ref,
           defaultName: def.name,
@@ -120,23 +129,40 @@ export function registerGraphHandlers(
         });
         if (!active.ok) return active;
         shown = active.value;
+        const totalOther = allLocal.value.filter((b) => b !== def.name).length;
+        hiddenBranches = Math.max(0, totalOther - shown.length);
       }
 
-      // Repo-level refs (default spine + shown branches) — no per-worktree HEAD,
-      // so the result is worktree-independent and cacheable.
-      const refs = [...new Set([def.ref, ...shown])];
-      const commits = await readLogRefs(execGit, wt.path, refs, req.limit ?? 300);
-      if (!commits.ok) return commits;
+      // Compose the log from segments instead of one flat window: a busy trunk
+      // would otherwise flood `git log refs -n N` and silently drop every
+      // branch tip older than the trunk's newest N commits. Trunk and branch
+      // segments are fetched separately (branch segments in ONE not-in-trunk
+      // walk) and topo-merged, so every drawn branch is genuinely present.
+      const trunk = await readLogRefs(
+        execGit,
+        wt.path,
+        [def.ref],
+        req.limit ?? TRUNK_CAP
+      );
+      if (!trunk.ok) return trunk;
+      const uniques = await readUniqueCommits(
+        execGit,
+        wt.path,
+        def.ref,
+        shown,
+        UNIQUE_CAP
+      );
+      if (!uniques.ok) return uniques;
       const tips = await branchTips(execGit, wt.path);
       if (!tips.ok) return tips;
 
       cached = {
-        commits: commits.value,
+        commits: topoMergeCommits([trunk.value, uniques.value]),
         tips: tips.value,
         defaultBranch: def.name,
         defaultRef: def.ref,
         shownBranches: shown,
-        hiddenBranches: Math.max(0, totalOther - shown.length),
+        hiddenBranches,
         at: Date.now()
       };
       laneCache.set(key, cached);
@@ -167,12 +193,27 @@ export function registerGraphHandlers(
       ) {
         out = supCached;
       } else {
-        const refs = [
-          ...new Set([cached.defaultRef, ...cached.shownBranches, head])
-        ];
-        const commits = await readLogRefs(execGit, wt.path, refs, req.limit ?? 300);
-        if (!commits.ok) return commits;
-        out = { ...cached, commits: commits.value, at: Date.now() };
+        // HEAD's own line (commits not in the trunk), topo-merged into the
+        // cached graph. A HEAD that IS old trunk history has no unique
+        // commits — fall back to the lone commit so "you are here" resolves.
+        const line = await readUniqueCommits(
+          execGit,
+          wt.path,
+          cached.defaultRef,
+          [head],
+          80
+        );
+        if (!line.ok) return line;
+        let extra = line.value;
+        if (!extra.some((c) => c.hash === head)) {
+          const self = await readLogRefs(execGit, wt.path, [head], 1);
+          if (self.ok) extra = [...extra, ...self.value];
+        }
+        out = {
+          ...cached,
+          commits: topoMergeCommits([cached.commits, extra]),
+          at: Date.now()
+        };
         laneCache.set(supKey, out);
       }
     }

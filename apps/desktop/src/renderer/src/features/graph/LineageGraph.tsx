@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LaneGraph } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
-import { GraphRow, type GraphRowVM } from "./GraphRow";
+import { GraphRow, type GraphRowVM, laneColor } from "./GraphRow";
+import { shortWhen } from "./graph-view";
 import { layoutLanes } from "./lane-layout";
 
 type Scope = "active" | "all";
@@ -28,6 +29,7 @@ export function LineageGraph({
   const [scope, setScope] = useState<Scope>("active");
   const [loading, setLoading] = useState(true);
   const [flash, setFlash] = useState<string | null>(null);
+  const [branchesOpen, setBranchesOpen] = useState(false);
   const scrollerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -73,11 +75,11 @@ export function LineageGraph({
     return () => clearTimeout(t);
   }, [flash]);
 
-  const locate = (): void => {
-    if (head === "") return;
-    const el = scrollerRef.current?.querySelector(`[data-hash="${head}"]`);
+  const locateHash = (hash: string): void => {
+    if (hash === "") return;
+    const el = scrollerRef.current?.querySelector(`[data-hash="${hash}"]`);
     el?.scrollIntoView({ block: "center", behavior: scrollBehavior() });
-    setFlash(head);
+    setFlash(hash);
   };
 
   const email = activeEmail.toLowerCase();
@@ -103,6 +105,19 @@ export function LineageGraph({
     }));
   }, [data, layout, email, head]);
 
+  // name → tip hash (from the hash → names map) for the branch navigator.
+  const tipByName = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const [hash, names] of Object.entries(data?.tips ?? {})) {
+      for (const n of names) m.set(n, hash);
+    }
+    return m;
+  }, [data]);
+  const vmByHash = useMemo(
+    () => new Map(vms.map((vm) => [vm.commit.hash, vm])),
+    [vms]
+  );
+
   const shown = data?.shownBranches.length ?? 0;
   const hidden = data?.hiddenBranches ?? 0;
 
@@ -111,15 +126,80 @@ export function LineageGraph({
       <div className="graph-toolbar">
         <span className="graph-toolbar__label">Lineage</span>
         <span style={{ flex: 1 }} />
-        <span className="graph-toolbar__count">
-          {scope === "active"
-            ? `${shown} active branch${shown === 1 ? "" : "es"}`
-            : `${vms.length} commits`}
+        <span className="graph-branches-wrap">
+          <button
+            className="graph-branches"
+            aria-haspopup="menu"
+            aria-expanded={branchesOpen}
+            title="Branches drawn in this graph — click one to jump to its tip"
+            onClick={() => setBranchesOpen((v) => !v)}
+          >
+            {scope === "active"
+              ? `${shown} active branch${shown === 1 ? "" : "es"}`
+              : `${shown} branch${shown === 1 ? "" : "es"} in flight`}
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </button>
+          {branchesOpen && (
+            <>
+              <div
+                className="branch-pop__backdrop"
+                onClick={() => setBranchesOpen(false)}
+              />
+              <div className="branch-pop" role="menu">
+                {(data?.shownBranches ?? []).map((name) => {
+                  const tipHash = tipByName.get(name);
+                  const vm =
+                    tipHash !== undefined ? vmByHash.get(tipHash) : undefined;
+                  return (
+                    <button
+                      key={name}
+                      className="branch-pop__item"
+                      role="menuitem"
+                      disabled={vm === undefined}
+                      title={
+                        vm === undefined
+                          ? "Tip is outside the loaded window"
+                          : `Jump to ${name}`
+                      }
+                      onClick={() => {
+                        if (tipHash !== undefined) {
+                          locateHash(tipHash);
+                          setBranchesOpen(false);
+                        }
+                      }}
+                    >
+                      <span
+                        className="branch-pop__dot"
+                        style={{
+                          background:
+                            vm !== undefined
+                              ? laneColor(vm.row.lane)
+                              : "var(--text-subtle)"
+                        }}
+                      />
+                      <span className="branch-pop__name">{name}</span>
+                      {vm !== undefined && (
+                        <span className="branch-pop__meta">
+                          {vm.isMine ? "you" : vm.commit.authorName} ·{" "}
+                          {shortWhen(vm.commit.committedAt)}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+                {shown === 0 && (
+                  <div className="branch-pop__empty">No branches drawn</div>
+                )}
+              </div>
+            </>
+          )}
         </span>
         {head !== "" && (
           <button
             className="graph-locate"
-            onClick={locate}
+            onClick={() => locateHash(head)}
             title="Scroll to this worktree's current commit (HEAD)"
           >
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">

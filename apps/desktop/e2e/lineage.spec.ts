@@ -39,8 +39,8 @@ test("multi-lane lineage shows active branches and hides merged ones", async () 
   await expect(window.locator(".ref-chip", { hasText: "feat/login" })).toBeVisible({
     timeout: 20_000
   });
-  await expect(window.locator(".graph-toolbar__count")).toHaveText(
-    /1 active branch\b/
+  await expect(window.locator(".graph-branches")).toContainText(
+    "1 active branch"
   );
   const hint = window.locator(".graph-hidden-note");
   await expect(hint).toBeVisible();
@@ -88,4 +88,69 @@ test("switching worktrees anchors the lineage on that worktree's HEAD", async ()
   await expect(headRow).toContainText("other feature work", { timeout: 20_000 });
   // The locate affordance is present once a HEAD is resolved.
   await expect(window.locator(".graph-locate")).toBeVisible();
+});
+
+test("branch tips survive a busy trunk, and the navigator jumps to them", async () => {
+  sandbox = createGitSandbox();
+  const s = sandbox;
+  const repo = s.makeRepo("floody");
+  const feat = repo.addWorktree("feat/buried");
+  s.commit(feat, "f1.txt", "buried feature work");
+  // Trunk races ahead — a flat `git log -n` window would be all trunk, and the
+  // branch tip (older timestamp) would silently vanish from the graph.
+  for (let i = 0; i < 30; i += 1) {
+    s.git(repo.path, "commit", "--allow-empty", "-m", `trunk churn ${i}`);
+  }
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, s, "floody");
+  await branchRow(window, "main").first().click();
+
+  // The branch's commit is in the graph despite the trunk churn.
+  await expect(
+    window.locator(".graph-row", { hasText: "buried feature work" })
+  ).toHaveCount(1, { timeout: 20_000 });
+
+  // Navigator: lists the branch, and clicking it jumps the view to its tip.
+  await window.locator(".graph-branches").click();
+  const item = window.locator(".branch-pop__item", { hasText: "feat/buried" });
+  await expect(item).toBeVisible();
+  await item.click();
+  await expect(
+    window.locator(".graph-row", { hasText: "buried feature work" })
+  ).toBeInViewport({ timeout: 20_000 });
+});
+
+test("All-branches scope reveals remote (teammate) branches", async () => {
+  sandbox = createGitSandbox();
+  const s = sandbox;
+  // A repo with an origin; a teammate's branch exists only on the remote.
+  const repo = s.makeRepoBehindRemote("teamrepo", { behindBy: 1 });
+  s.git(repo.path, "checkout", "-q", "-b", "team/rocket");
+  s.commit(repo.path, "rocket.txt", "teammate rocket work");
+  s.git(repo.path, "push", "-q", "origin", "team/rocket");
+  s.git(repo.path, "checkout", "-q", "main");
+  s.git(repo.path, "branch", "-q", "-D", "team/rocket");
+  s.git(repo.path, "fetch", "-q", "origin");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, s, "teamrepo");
+  await branchRow(window, "main").first().click();
+
+  // Active (mine only): the teammate's remote branch is not drawn.
+  await expect(window.locator(".graph-toolbar")).toBeVisible({ timeout: 20_000 });
+  await expect(
+    window.locator(".ref-chip", { hasText: "team/rocket" })
+  ).toHaveCount(0);
+
+  // All: the remote branch appears, labelled with its origin/ name.
+  await window.locator(".only-me").click();
+  await expect(
+    window.locator(".ref-chip", { hasText: "origin/team/rocket" })
+  ).toBeVisible({ timeout: 20_000 });
+  await expect(
+    window.locator(".graph-row", { hasText: "teammate rocket work" })
+  ).toHaveCount(1);
 });

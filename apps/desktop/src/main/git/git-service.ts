@@ -243,6 +243,141 @@ export async function readLogRefs(
   return ok(parseLog(checked.value.stdout));
 }
 
+/**
+ * The union of commits reachable from `refs` but NOT from `notRef`, in one
+ * walk. This is how branch segments are fetched for the graph: a flat
+ * `git log refs -n N` gets flooded by a busy trunk (newest N commits are all
+ * trunk), silently dropping branch tips — fetching only the not-in-trunk
+ * commits guarantees every branch's work is present no matter how noisy the
+ * default branch is.
+ */
+export async function readUniqueCommits(
+  git: GitExec,
+  cwd: string,
+  notRef: string,
+  refs: string[],
+  limit: number
+): Promise<Result<Commit[]>> {
+  if (refs.length === 0) return ok([]);
+  const raw = await git(
+    [
+      "log",
+      "--topo-order",
+      `--pretty=format:${LOG_FORMAT}`,
+      "-n",
+      String(limit),
+      ...refs,
+      "--not",
+      notRef,
+      "--"
+    ],
+    cwd
+  );
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["log"]);
+  if (!checked.ok) return checked;
+  return ok(parseLog(checked.value.stdout));
+}
+
+/**
+ * Merge separately-fetched commit groups (trunk window + branch segments) into
+ * one children-before-parents order, newest-first among the ready set — the
+ * order the lane layout expects. Kahn's algorithm over the sub-DAG; parents
+ * outside the set are simply absent (the layout draws them as trailing stubs).
+ */
+export function topoMergeCommits(groups: Commit[][]): Commit[] {
+  const byHash = new Map<string, Commit>();
+  for (const group of groups) {
+    for (const c of group) if (!byHash.has(c.hash)) byHash.set(c.hash, c);
+  }
+  const childCount = new Map<string, number>();
+  for (const c of byHash.values()) {
+    for (const p of c.parents) {
+      if (byHash.has(p)) childCount.set(p, (childCount.get(p) ?? 0) + 1);
+    }
+  }
+  const at = (c: Commit): number => new Date(c.committedAt).getTime();
+  const ready: Commit[] = [];
+  for (const c of byHash.values()) {
+    if ((childCount.get(c.hash) ?? 0) === 0) ready.push(c);
+  }
+  const out: Commit[] = [];
+  while (ready.length > 0) {
+    ready.sort((a, b) => at(b) - at(a));
+    const c = ready.shift();
+    if (c === undefined) break;
+    out.push(c);
+    for (const p of c.parents) {
+      const parent = byHash.get(p);
+      if (parent === undefined) continue;
+      const n = (childCount.get(p) ?? 0) - 1;
+      childCount.set(p, n);
+      if (n === 0) ready.push(parent);
+    }
+  }
+  return out;
+}
+
+/**
+ * Branches to draw in "all" scope: everything still in flight — local heads
+ * AND remote-tracking branches not merged into the default branch, most
+ * recently committed first, capped. Remote branches shadowed by a same-named
+ * local are dropped (the local lane covers them). This is the "is anybody
+ * else working on something here?" view.
+ */
+export async function selectAllGraphBranches(
+  git: GitExec,
+  cwd: string,
+  defaultRef: string,
+  defaultName: string,
+  cap = 40
+): Promise<Result<string[]>> {
+  const raw = await git(
+    [
+      "for-each-ref",
+      "--sort=-committerdate",
+      `--count=${cap * 3}`,
+      `--no-merged=${defaultRef}`,
+      "--format=%(refname)%09%(refname:short)",
+      "refs/heads",
+      "refs/remotes"
+    ],
+    cwd
+  );
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["for-each-ref"]);
+  if (!checked.ok) return checked;
+
+  type Entry = { short: string; remote: boolean };
+  const entries: Entry[] = [];
+  const locals = new Set<string>();
+  for (const line of checked.value.stdout.split("\n")) {
+    if (line.trim() === "") continue;
+    const [full = "", short = ""] = line.split("\t");
+    if (full === "" || short === "") continue;
+    if (full.startsWith("refs/heads/")) {
+      entries.push({ short, remote: false });
+      locals.add(short);
+    } else if (!short.endsWith("/HEAD")) {
+      entries.push({ short, remote: true });
+    }
+  }
+
+  const out: string[] = [];
+  for (const e of entries) {
+    if (out.length >= cap) break;
+    if (!e.remote) {
+      if (e.short !== defaultName) out.push(e.short);
+      continue;
+    }
+    const tail = e.short.replace(/^[^/]+\//, "");
+    if (tail === defaultName || e.short === defaultRef) continue;
+    if (locals.has(tail)) continue;
+    out.push(e.short);
+  }
+  return ok(out);
+}
+
 /** Short names of all local branches. */
 export async function listLocalBranchNames(
   git: GitExec,
@@ -260,26 +395,45 @@ export async function listLocalBranchNames(
   );
 }
 
-/** hash → local branch names whose tip is that commit (for graph ref labels). */
+/** hash → branch names whose tip is that commit (graph ref labels). Local
+ *  heads plus remote-tracking tips; a remote shadowed by a same-named local
+ *  is skipped so synced pairs don't double-label one commit. */
 export async function branchTips(
   git: GitExec,
   cwd: string
 ): Promise<Result<Record<string, string[]>>> {
   const raw = await git(
-    ["for-each-ref", "--format=%(objectname) %(refname:short)", "refs/heads"],
+    [
+      "for-each-ref",
+      "--format=%(objectname)%09%(refname)%09%(refname:short)",
+      "refs/heads",
+      "refs/remotes"
+    ],
     cwd
   );
   if (!raw.ok) return raw;
   const checked = requireExit0(raw.value, ["for-each-ref"]);
   if (!checked.ok) return checked;
-  const map: Record<string, string[]> = {};
+
+  type Tip = { hash: string; name: string; remote: boolean };
+  const tips: Tip[] = [];
+  const locals = new Set<string>();
   for (const line of checked.value.stdout.split("\n")) {
-    const sp = line.indexOf(" ");
-    if (sp === -1) continue;
-    const hash = line.slice(0, sp);
-    const name = line.slice(sp + 1).trim();
+    if (line.trim() === "") continue;
+    const [hash = "", full = "", name = ""] = line.split("\t");
     if (hash === "" || name === "") continue;
-    (map[hash] ??= []).push(name);
+    if (full.startsWith("refs/heads/")) {
+      tips.push({ hash, name, remote: false });
+      locals.add(name);
+    } else if (!name.endsWith("/HEAD")) {
+      tips.push({ hash, name, remote: true });
+    }
+  }
+
+  const map: Record<string, string[]> = {};
+  for (const t of tips) {
+    if (t.remote && locals.has(t.name.replace(/^[^/]+\//, ""))) continue;
+    (map[t.hash] ??= []).push(t.name);
   }
   return ok(map);
 }

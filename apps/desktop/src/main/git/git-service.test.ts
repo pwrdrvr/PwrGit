@@ -1,10 +1,53 @@
 import { describe, expect, it } from "vitest";
+import type { Commit } from "@pwrgit/shared";
 import {
   parseBranchRefs,
   parseChanges,
   parseLog,
-  parseWorktreeList
+  parseWorktreeList,
+  topoMergeCommits
 } from "./git-service";
+
+describe("topoMergeCommits", () => {
+  const mk = (hash: string, when: string, ...parents: string[]): Commit => ({
+    hash,
+    shortHash: hash.slice(0, 7),
+    parents,
+    subject: hash,
+    authorName: "a",
+    authorEmail: "a@x.com",
+    committedAt: when,
+    isMerge: parents.length > 1
+  });
+
+  it("keeps children before parents across separately fetched groups", () => {
+    const trunk = [
+      mk("T2", "2026-07-06T12:00:00Z", "T1"),
+      mk("T1", "2026-07-05T12:00:00Z", "B")
+    ];
+    // Branch segment fetched separately; its parent B is the fork commit,
+    // fetched in a third group.
+    const branch = [mk("F1", "2026-07-04T12:00:00Z", "B")];
+    const fork = [mk("B", "2026-07-01T12:00:00Z")];
+    const out = topoMergeCommits([trunk, branch, fork]).map((c) => c.hash);
+    // B must come after BOTH of its children (T1 and F1).
+    expect(out.indexOf("B")).toBeGreaterThan(out.indexOf("T1"));
+    expect(out.indexOf("B")).toBeGreaterThan(out.indexOf("F1"));
+    expect(out[0]).toBe("T2"); // newest ready commit first
+    expect(out).toHaveLength(4);
+  });
+
+  it("dedupes commits that appear in more than one group", () => {
+    const a = [mk("X", "2026-07-06T12:00:00Z", "Y"), mk("Y", "2026-07-05T12:00:00Z")];
+    const b = [mk("Y", "2026-07-05T12:00:00Z")];
+    expect(topoMergeCommits([a, b])).toHaveLength(2);
+  });
+
+  it("tolerates parents outside the fetched window (stubs)", () => {
+    const out = topoMergeCommits([[mk("A", "2026-07-06T12:00:00Z", "missing")]]);
+    expect(out.map((c) => c.hash)).toEqual(["A"]);
+  });
+});
 
 describe("parseBranchRefs", () => {
   const row = (fields: string[]): string => fields.join("\t");
