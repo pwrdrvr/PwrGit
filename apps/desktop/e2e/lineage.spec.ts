@@ -60,12 +60,12 @@ test("switching worktrees anchors the lineage on that worktree's HEAD", async ()
   const login = repo.addWorktree("feat/login");
   s.commit(login, "l1.txt", "start login flow");
 
-  // A branch authored by someone else (test identity ≠ profile email), never
+  // A branch authored by someone else (≠ the pinned profile identity), never
   // checked out on a branch-worktree ⇒ NOT in the active set — then a DETACHED
   // worktree parked at its tip. Its HEAD is on no drawn branch, so the graph
   // must widen its log to include it ("you are here" always resolves).
   s.git(repo.path, "checkout", "-q", "-b", "other/x");
-  s.commit(repo.path, "o1.txt", "other feature work");
+  s.commitAs("rando@example.com", repo.path, "o1.txt", "other feature work");
   s.git(repo.path, "checkout", "-q", "main");
   s.git(
     repo.path,
@@ -122,13 +122,53 @@ test("branch tips survive a busy trunk, and the navigator jumps to them", async 
   ).toBeInViewport({ timeout: 20_000 });
 });
 
+test("caps drawn branches and clips the lane gutter on branch-heavy repos", async () => {
+  sandbox = createGitSandbox();
+  const s = sandbox;
+  const repo = s.makeRepo("many");
+  // 31 active branches (each with an unmerged commit by "me") — more than the
+  // draw cap (30) and far more concurrent lanes than the gutter viewport (10).
+  for (let i = 0; i < 31; i += 1) {
+    const b = `b${String(i).padStart(2, "0")}`;
+    s.git(repo.path, "checkout", "-q", "-b", b);
+    s.git(repo.path, "commit", "--allow-empty", "-m", `work on ${b}`);
+    s.git(repo.path, "checkout", "-q", "main");
+  }
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, s, "many");
+  await branchRow(window, "main").first().click();
+
+  // Cap reported: 30 drawn of 31 active; the navigator notes the overflow.
+  await expect(window.locator(".graph-branches")).toContainText(
+    "30 of 31 active branches",
+    { timeout: 20_000 }
+  );
+  await window.locator(".graph-branches").click();
+  await expect(window.locator(".branch-pop__more")).toContainText("+1 more");
+  await window.keyboard.press("Escape");
+  await window.locator(".branch-pop__backdrop").click({ force: true }).catch(() => undefined);
+
+  // Gutter is clipped to 10 lanes (160px) with its own scrollbar — commit text
+  // is NOT pushed off-screen by 30+ lanes.
+  await expect(window.locator(".graph-lanes-clip").first()).toHaveCSS(
+    "width",
+    "160px"
+  );
+  await expect(window.locator(".lane-scrollbar")).toBeVisible();
+  await expect(
+    window.locator(".graph-row .commit-msg", { hasText: "work on b30" })
+  ).toBeVisible();
+});
+
 test("All-branches scope reveals remote (teammate) branches", async () => {
   sandbox = createGitSandbox();
   const s = sandbox;
   // A repo with an origin; a teammate's branch exists only on the remote.
   const repo = s.makeRepoBehindRemote("teamrepo", { behindBy: 1 });
   s.git(repo.path, "checkout", "-q", "-b", "team/rocket");
-  s.commit(repo.path, "rocket.txt", "teammate rocket work");
+  s.commitAs("teammate@example.com", repo.path, "rocket.txt", "teammate rocket work");
   s.git(repo.path, "push", "-q", "origin", "team/rocket");
   s.git(repo.path, "checkout", "-q", "main");
   s.git(repo.path, "branch", "-q", "-D", "team/rocket");

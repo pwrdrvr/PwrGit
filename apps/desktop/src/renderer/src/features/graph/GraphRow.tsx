@@ -6,6 +6,12 @@ export const LANE_W = 16;
 const ROW_H = 64;
 const MID = ROW_H / 2;
 
+/** The gutter viewport shows at most this many lanes; wider graphs scroll
+ *  horizontally inside it so commit text never gets pushed off-screen. */
+export const MAX_GUTTER_LANES = 10;
+export const gutterWidth = (laneCount: number): number =>
+  Math.min(Math.max(1, laneCount), MAX_GUTTER_LANES) * LANE_W;
+
 // Lane palette tuned for the dark warm background. Lane 0 (the default-branch
 // spine) is the app accent; the rest rotate through legible, distinct hues.
 const LANE_COLORS = [
@@ -95,12 +101,13 @@ export function GraphRow({
       title="View this commit's changes"
       style={{ height: ROW_H }}
     >
-      <svg
-        className="graph-lanes"
-        width={width}
-        height={ROW_H}
-        viewBox={`0 0 ${width} ${ROW_H}`}
-      >
+      <div className="graph-lanes-clip" style={{ width: gutterWidth(laneCount) }}>
+        <svg
+          className="graph-lanes"
+          width={width}
+          height={ROW_H}
+          viewBox={`0 0 ${width} ${ROW_H}`}
+        >
         {[...passThrough].map((k) => (
           <line
             key={`p${k}`}
@@ -191,7 +198,8 @@ export function GraphRow({
             strokeWidth={2}
           />
         )}
-      </svg>
+        </svg>
+      </div>
 
       <span
         className={`commit-check${selected ? " is-checked" : ""}`}

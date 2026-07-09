@@ -50,6 +50,8 @@ export type GitSandbox = {
   git: (cwd: string, ...args: string[]) => string;
   /** Write a file and commit it in a checkout. */
   commit: (cwd: string, file: string, message: string) => void;
+  /** Like commit, but authored by someone else (tests "not mine" paths). */
+  commitAs: (email: string, cwd: string, file: string, message: string) => void;
   makeRepo: (name: string, opts?: { worktrees?: string[] }) => TestRepo;
   /** A repo whose primary branch is `behindBy` commits behind its origin. */
   makeRepoBehindRemote: (
@@ -148,6 +150,27 @@ export function createGitSandbox(): GitSandbox {
     git(cwd, "commit", "-m", message);
   };
 
+  const commitAs = (
+    email: string,
+    cwd: string,
+    file: string,
+    message: string
+  ): void => {
+    writeFileSync(join(cwd, file), `${message}\n`);
+    git(cwd, "add", "-A");
+    execFileSync("git", ["commit", "-m", message], {
+      cwd,
+      env: {
+        ...GIT_ENV,
+        GIT_AUTHOR_NAME: "Someone Else",
+        GIT_AUTHOR_EMAIL: email,
+        GIT_COMMITTER_NAME: "Someone Else",
+        GIT_COMMITTER_EMAIL: email
+      },
+      encoding: "utf8"
+    });
+  };
+
   const cleanup = (): void => {
     rmSync(base, { recursive: true, force: true });
   };
@@ -157,6 +180,7 @@ export function createGitSandbox(): GitSandbox {
     worktreeRoot,
     git: (cwd: string, ...args: string[]) => git(cwd, ...args),
     commit,
+    commitAs,
     makeRepo,
     makeRepoBehindRemote,
     cleanup

@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LaneGraph } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
-import { GraphRow, type GraphRowVM, laneColor } from "./GraphRow";
+import {
+  GraphRow,
+  type GraphRowVM,
+  gutterWidth,
+  LANE_W,
+  laneColor,
+  MAX_GUTTER_LANES
+} from "./GraphRow";
 import { shortWhen } from "./graph-view";
 import { layoutLanes } from "./lane-layout";
 
@@ -31,6 +38,8 @@ export function LineageGraph({
   const [flash, setFlash] = useState<string | null>(null);
   const [branchesOpen, setBranchesOpen] = useState(false);
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const laneBarRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -56,31 +65,11 @@ export function LineageGraph({
 
   const head = data?.head ?? "";
 
-  // Selecting a worktree takes you to its HEAD: center it and flash it. Also
-  // re-centers when HEAD itself moves (commit, pull, switch branch).
-  useEffect(() => {
-    if (head === "") return;
-    const raf = requestAnimationFrame(() => {
-      const el = scrollerRef.current?.querySelector(`[data-hash="${head}"]`);
-      if (el === null || el === undefined) return;
-      el.scrollIntoView({ block: "center", behavior: scrollBehavior() });
-      setFlash(head);
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [head, worktreeId]);
-
   useEffect(() => {
     if (flash === null) return;
     const t = setTimeout(() => setFlash(null), 1600);
     return () => clearTimeout(t);
   }, [flash]);
-
-  const locateHash = (hash: string): void => {
-    if (hash === "") return;
-    const el = scrollerRef.current?.querySelector(`[data-hash="${hash}"]`);
-    el?.scrollIntoView({ block: "center", behavior: scrollBehavior() });
-    setFlash(hash);
-  };
 
   const email = activeEmail.toLowerCase();
   const layout = useMemo(
@@ -118,8 +107,56 @@ export function LineageGraph({
     [vms]
   );
 
+  const gutterW = gutterWidth(layout.laneCount);
+  const laneOverflow = layout.laneCount > MAX_GUTTER_LANES;
+
+  // Horizontally reveal a lane inside the clipped gutter (no-op when the
+  // gutter isn't overflowing). Scrolling the bar drives a CSS var on the card.
+  const revealLane = (lane: number): void => {
+    const bar = laneBarRef.current;
+    if (bar === null) return;
+    const x = lane * LANE_W;
+    bar.scrollLeft = Math.max(0, Math.min(x - gutterW / 2, bar.scrollWidth));
+  };
+
+  const locateHash = (hash: string): void => {
+    if (hash === "") return;
+    const vm = vmByHash.get(hash);
+    if (vm !== undefined) revealLane(vm.row.lane);
+    const el = scrollerRef.current?.querySelector(`[data-hash="${hash}"]`);
+    el?.scrollIntoView({
+      block: "center",
+      inline: "nearest",
+      behavior: scrollBehavior()
+    });
+    setFlash(hash);
+  };
+
+  // Selecting a worktree takes you to its HEAD: center it and flash it. Also
+  // re-centers when HEAD itself moves (commit, pull, switch branch).
+  useEffect(() => {
+    if (head === "") return;
+    const raf = requestAnimationFrame(() => locateHash(head));
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [head, worktreeId]);
+
+  // If the graph shrinks back under the gutter cap, undo any lane scroll.
+  useEffect(() => {
+    if (!laneOverflow) cardRef.current?.style.setProperty("--lane-scroll", "0px");
+  }, [laneOverflow]);
+
   const shown = data?.shownBranches.length ?? 0;
+  const matched = data?.matchedBranches ?? shown;
   const hidden = data?.hiddenBranches ?? 0;
+  const countLabel =
+    scope === "active"
+      ? `${shown}${matched > shown ? ` of ${matched}` : ""} active branch${
+          matched === 1 ? "" : "es"
+        }`
+      : `${shown}${matched > shown ? ` of ${matched}` : ""} branch${
+          matched === 1 ? "" : "es"
+        } in flight`;
 
   return (
     <>
@@ -134,9 +171,7 @@ export function LineageGraph({
             title="Branches drawn in this graph — click one to jump to its tip"
             onClick={() => setBranchesOpen((v) => !v)}
           >
-            {scope === "active"
-              ? `${shown} active branch${shown === 1 ? "" : "es"}`
-              : `${shown} branch${shown === 1 ? "" : "es"} in flight`}
+            {countLabel}
             <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
               <path d="m6 9 6 6 6-6" />
             </svg>
@@ -192,6 +227,12 @@ export function LineageGraph({
                 {shown === 0 && (
                   <div className="branch-pop__empty">No branches drawn</div>
                 )}
+                {matched > shown && (
+                  <div className="branch-pop__more">
+                    +{matched - shown} more not drawn — showing the {shown} most
+                    recent
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -224,8 +265,25 @@ export function LineageGraph({
       </div>
 
       <div className="graph-scroll" ref={scrollerRef}>
+        {laneOverflow && vms.length > 0 && (
+          <div
+            className="lane-scrollbar"
+            ref={laneBarRef}
+            title="Scroll the lane gutter — commits stay put"
+            style={{ width: gutterW }}
+            onScroll={(e) => {
+              cardRef.current?.style.setProperty(
+                "--lane-scroll",
+                `${-e.currentTarget.scrollLeft}px`
+              );
+            }}
+          >
+            <div style={{ width: layout.laneCount * LANE_W, height: 1 }} />
+          </div>
+        )}
         {vms.length > 0 ? (
           <div
+            ref={cardRef}
             className={`graph-card${selectedCommits.size > 0 ? " has-selection" : ""}`}
           >
             {vms.map((vm) => (

@@ -23,6 +23,7 @@ type CachedLanes = {
   /** The resolvable ref for the default branch (e.g. "origin/develop"). */
   defaultRef: string;
   shownBranches: string[];
+  matchedBranches: number;
   hiddenBranches: number;
   at: number;
 };
@@ -32,6 +33,10 @@ const LANE_TTL_MS = 30_000;
 const TRUNK_CAP = 150;
 /** Cap on the one-walk union of all branch segments (not-in-trunk commits). */
 const UNIQUE_CAP = 500;
+/** Most branches drawn as lanes in "active" scope — a machine with hundreds of
+ *  active worktree branches must not become a 400-lane curtain. Most recent
+ *  first; the toolbar reports "N of M". */
+const ACTIVE_DRAW_CAP = 30;
 
 export function registerGraphHandlers(
   bus: CommandBus,
@@ -95,12 +100,14 @@ export function registerGraphHandlers(
       const def = await state.resolveDefaultBranch(wt.repo_id, wt.path);
 
       let shown: string[];
+      let matchedBranches: number;
       let hiddenBranches = 0;
       if (req.scope === "all") {
         // Everything in flight: unmerged local + remote branches, recency-capped.
         const all = await selectAllGraphBranches(execGit, wt.path, def.ref, def.name);
         if (!all.ok) return all;
-        shown = all.value;
+        shown = all.value.branches;
+        matchedBranches = all.value.total;
       } else {
         const worktreeBranches = new Set(
           (
@@ -118,6 +125,7 @@ export function registerGraphHandlers(
               .all(wt.repo_id) as { branch: string }[]
           ).map((r) => r.branch)
         );
+        // Recency-sorted (listLocalBranchNames sorts by committerdate).
         const allLocal = await listLocalBranchNames(execGit, wt.path);
         if (!allLocal.ok) return allLocal;
         const active = await selectActiveBranches(execGit, wt.path, {
@@ -128,7 +136,12 @@ export function registerGraphHandlers(
           mergedPrBranches
         });
         if (!active.ok) return active;
-        shown = active.value;
+        // Draw the most recently committed active branches, capped.
+        const activeSet = new Set(active.value);
+        shown = allLocal.value
+          .filter((b) => activeSet.has(b))
+          .slice(0, ACTIVE_DRAW_CAP);
+        matchedBranches = active.value.length;
         const totalOther = allLocal.value.filter((b) => b !== def.name).length;
         hiddenBranches = Math.max(0, totalOther - shown.length);
       }
@@ -162,6 +175,7 @@ export function registerGraphHandlers(
         defaultBranch: def.name,
         defaultRef: def.ref,
         shownBranches: shown,
+        matchedBranches,
         hiddenBranches,
         at: Date.now()
       };
@@ -224,6 +238,7 @@ export function registerGraphHandlers(
       head,
       defaultBranch: out.defaultBranch,
       shownBranches: out.shownBranches,
+      matchedBranches: out.matchedBranches,
       hiddenBranches: out.hiddenBranches
     });
   });

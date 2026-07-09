@@ -1614,10 +1614,47 @@ input {
   font: 500 11px/1 var(--font-sans);
   color: var(--text-subtle);
 }
+.branch-pop__more {
+  padding: 8px 9px 5px;
+  border-top: 1px solid var(--border-subtle);
+  margin-top: 4px;
+  font: 500 10px/1.4 var(--font-sans);
+  color: var(--text-subtle);
+}
+/* The gutter viewport clips at MAX_GUTTER_LANES; wider graphs pan inside it
+   via --lane-scroll (driven by the shared .lane-scrollbar), so commit text
+   stays pinned in place no matter how many lanes exist. */
+.graph-lanes-clip {
+  flex: 0 0 auto;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
 .graph-lanes {
   flex: 0 0 auto;
-  align-self: center;
   display: block;
+  transform: translateX(var(--lane-scroll, 0px));
+}
+.lane-scrollbar {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 12px;
+  margin: 0 0 4px 9px;
+}
+.lane-scrollbar::-webkit-scrollbar {
+  height: 8px;
+}
+.lane-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+}
+.lane-scrollbar::-webkit-scrollbar-track {
+  background: var(--bg-panel);
+  border-radius: 999px;
 }
 /* HEAD's ring breathes gently so "where am I" is findable at a glance. */
 .graph-lanes .head-ring {

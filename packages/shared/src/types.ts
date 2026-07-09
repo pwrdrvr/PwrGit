@@ -157,6 +157,8 @@ export type LaneGraph = {
   defaultBranch: string;
   /** Branches drawn besides the default spine. */
   shownBranches: string[];
+  /** Branches that qualified for this scope before the draw cap. */
+  matchedBranches: number;
   /** Branches the "active" filter hid (merged/inactive) — for the reveal hint. */
   hiddenBranches: number;
 };

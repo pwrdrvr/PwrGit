@@ -331,7 +331,7 @@ export async function selectAllGraphBranches(
   defaultRef: string,
   defaultName: string,
   cap = 40
-): Promise<Result<string[]>> {
+): Promise<Result<{ branches: string[]; total: number }>> {
   const raw = await git(
     [
       "for-each-ref",
@@ -363,28 +363,32 @@ export async function selectAllGraphBranches(
     }
   }
 
-  const out: string[] = [];
+  const qualified: string[] = [];
   for (const e of entries) {
-    if (out.length >= cap) break;
     if (!e.remote) {
-      if (e.short !== defaultName) out.push(e.short);
+      if (e.short !== defaultName) qualified.push(e.short);
       continue;
     }
     const tail = e.short.replace(/^[^/]+\//, "");
     if (tail === defaultName || e.short === defaultRef) continue;
     if (locals.has(tail)) continue;
-    out.push(e.short);
+    qualified.push(e.short);
   }
-  return ok(out);
+  return ok({ branches: qualified.slice(0, cap), total: qualified.length });
 }
 
-/** Short names of all local branches. */
+/** Short names of all local branches, most recently committed first. */
 export async function listLocalBranchNames(
   git: GitExec,
   cwd: string
 ): Promise<Result<string[]>> {
   const raw = await git(
-    ["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+    [
+      "for-each-ref",
+      "--sort=-committerdate",
+      "--format=%(refname:short)",
+      "refs/heads"
+    ],
     cwd
   );
   if (!raw.ok) return raw;

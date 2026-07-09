@@ -65,7 +65,8 @@ if (!gotSingleInstanceLock) {
       join(app.getPath("userData"), "settings.json")
     );
     const profiles = new ProfileService(db);
-    const identity = readGitIdentityDefaults();
+    // PWRGIT_GITCONFIG (e2e seam) pins the seeded identity to a known file.
+    const identity = readGitIdentityDefaults(process.env["PWRGIT_GITCONFIG"]);
     profiles.ensureSeed({
       name: identity.name ?? "Default",
       email: identity.email ?? "",

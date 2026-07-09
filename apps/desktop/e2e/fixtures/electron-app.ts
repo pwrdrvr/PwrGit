@@ -46,10 +46,21 @@ export async function launchApp(
       JSON.stringify({ worktreeRoot: opts.worktreeRoot })
     );
   }
+  // Pin the seeded profile identity to the sandbox's commit identity so
+  // "mine" detection (authored-by-me) is deterministic — never the identity
+  // of whatever machine happens to run the tests.
+  const gitconfig = join(userData, "gitconfig");
+  writeFileSync(
+    gitconfig,
+    "[user]\n\tname = PwrGit Test\n\temail = test@pwrgit.dev\n"
+  );
 
   const app = await electron.launch({
     args: [MAIN],
-    env: cleanEnv({ PWRGIT_USER_DATA_DIR: userData })
+    env: cleanEnv({
+      PWRGIT_USER_DATA_DIR: userData,
+      PWRGIT_GITCONFIG: gitconfig
+    })
   });
   const window = await app.firstWindow();
   await window.waitForSelector("#root");
