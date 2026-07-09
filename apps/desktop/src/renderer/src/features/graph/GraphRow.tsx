@@ -55,12 +55,15 @@ export function GraphRow({
   vm,
   laneCount,
   selected,
+  flashing,
   onToggle,
   onOpen
 }: {
   vm: GraphRowVM;
   laneCount: number;
   selected: boolean;
+  /** One-shot attention pulse after a locate/worktree switch. */
+  flashing: boolean;
   onToggle: () => void;
   onOpen: () => void;
 }) {
@@ -84,7 +87,10 @@ export function GraphRow({
 
   return (
     <div
-      className={`graph-row${selected ? " is-selected" : ""}`}
+      className={`graph-row${selected ? " is-selected" : ""}${
+        isHead ? " graph-row--head" : ""
+      }${flashing ? " is-flash" : ""}`}
+      data-hash={commit.hash}
       onClick={onOpen}
       title="View this commit's changes"
       style={{ height: ROW_H }}

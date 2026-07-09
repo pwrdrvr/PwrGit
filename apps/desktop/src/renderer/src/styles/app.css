@@ -1502,6 +1502,45 @@ input {
 .graph-row.is-selected {
   background: var(--accent-soft);
 }
+/* "You are here" — the selected worktree's HEAD commit stays visibly anchored,
+   and pulses once when the view jumps to it (worktree switch / locate). */
+.graph-row--head {
+  background: rgba(232, 116, 58, 0.06);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.graph-row--head:hover {
+  background: var(--accent-tint);
+}
+.graph-row.is-flash {
+  animation: head-flash 1.6s ease-out;
+}
+@keyframes head-flash {
+  0% {
+    background: rgba(232, 116, 58, 0.32);
+  }
+  100% {
+    background: rgba(232, 116, 58, 0.06);
+  }
+}
+.graph-locate {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-secondary);
+  font: 600 10.5px/1 var(--font-sans);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.graph-locate:hover {
+  color: var(--accent-bright);
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
 .graph-lanes {
   flex: 0 0 auto;
   align-self: center;
@@ -1542,7 +1581,8 @@ input {
 }
 @media (prefers-reduced-motion: reduce) {
   .graph-card,
-  .graph-lanes .head-ring {
+  .graph-lanes .head-ring,
+  .graph-row.is-flash {
     animation: none;
   }
 }

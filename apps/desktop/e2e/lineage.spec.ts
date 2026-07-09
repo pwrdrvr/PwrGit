@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
@@ -48,4 +49,43 @@ test("multi-lane lineage shows active branches and hides merged ones", async () 
   await hint.locator("button").click();
   await expect(window.locator(".only-me")).toHaveText(/All branches/);
   await expect(hint).toBeHidden();
+});
+
+test("switching worktrees anchors the lineage on that worktree's HEAD", async () => {
+  sandbox = createGitSandbox();
+  const s = sandbox;
+  const repo = s.makeRepo("locdemo");
+
+  // An active branch of mine (worktree ⇒ always drawn).
+  const login = repo.addWorktree("feat/login");
+  s.commit(login, "l1.txt", "start login flow");
+
+  // A branch authored by someone else (test identity ≠ profile email), never
+  // checked out on a branch-worktree ⇒ NOT in the active set — then a DETACHED
+  // worktree parked at its tip. Its HEAD is on no drawn branch, so the graph
+  // must widen its log to include it ("you are here" always resolves).
+  s.git(repo.path, "checkout", "-q", "-b", "other/x");
+  s.commit(repo.path, "o1.txt", "other feature work");
+  s.git(repo.path, "checkout", "-q", "main");
+  s.git(
+    repo.path,
+    "worktree",
+    "add",
+    "--detach",
+    join(s.worktreeRoot, "locdemo-det"),
+    "other/x"
+  );
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, s, "locdemo");
+
+  await branchRow(window, "feat/login").click();
+  const headRow = window.locator(".graph-row--head");
+  await expect(headRow).toContainText("start login flow", { timeout: 20_000 });
+
+  await branchRow(window, "detached@").click();
+  await expect(headRow).toContainText("other feature work", { timeout: 20_000 });
+  // The locate affordance is present once a HEAD is resolved.
+  await expect(window.locator(".graph-locate")).toBeVisible();
 });

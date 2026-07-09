@@ -17,6 +17,8 @@ type CachedLanes = {
   commits: Commit[];
   tips: Record<string, string[]>;
   defaultBranch: string;
+  /** The resolvable ref for the default branch (e.g. "origin/develop"). */
+  defaultRef: string;
   shownBranches: string[];
   hiddenBranches: number;
   at: number;
@@ -132,6 +134,7 @@ export function registerGraphHandlers(
         commits: commits.value,
         tips: tips.value,
         defaultBranch: def.name,
+        defaultRef: def.ref,
         shownBranches: shown,
         hiddenBranches: Math.max(0, totalOther - shown.length),
         at: Date.now()
@@ -149,13 +152,38 @@ export function registerGraphHandlers(
         ? headSha.value.stdout.trim()
         : "";
 
+    // The worktree may sit on a commit no drawn branch reaches — a detached
+    // checkout, or a branch the active filter hid (e.g. merged via PR). The
+    // graph must still show "you are here", so widen the log with HEAD itself.
+    // Cached per head SHA; repos with few odd worktrees pay this rarely.
+    let out = cached;
+    if (head !== "" && !cached.commits.some((c) => c.hash === head)) {
+      const supKey = `${key}:${head}`;
+      const supCached = laneCache.get(supKey);
+      if (
+        supCached !== undefined &&
+        req.force !== true &&
+        Date.now() - supCached.at < LANE_TTL_MS
+      ) {
+        out = supCached;
+      } else {
+        const refs = [
+          ...new Set([cached.defaultRef, ...cached.shownBranches, head])
+        ];
+        const commits = await readLogRefs(execGit, wt.path, refs, req.limit ?? 300);
+        if (!commits.ok) return commits;
+        out = { ...cached, commits: commits.value, at: Date.now() };
+        laneCache.set(supKey, out);
+      }
+    }
+
     return ok({
-      commits: cached.commits,
-      tips: cached.tips,
+      commits: out.commits,
+      tips: out.tips,
       head,
-      defaultBranch: cached.defaultBranch,
-      shownBranches: cached.shownBranches,
-      hiddenBranches: cached.hiddenBranches
+      defaultBranch: out.defaultBranch,
+      shownBranches: out.shownBranches,
+      hiddenBranches: out.hiddenBranches
     });
   });
 }
