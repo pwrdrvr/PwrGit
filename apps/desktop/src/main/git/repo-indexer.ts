@@ -15,6 +15,7 @@ import type { DB } from "../persistence/db";
 import { mapLimit } from "../util/map-limit";
 import type { GitExec } from "./dugite";
 import { listWorktrees } from "./git-service";
+import { claimWorktreeOwnership } from "./repo-ownership";
 
 const MAX_SCAN_DEPTH = 5;
 const GIT_CONCURRENCY = 12;
@@ -157,7 +158,9 @@ export class RepoIndexer {
          ORDER BY pinned DESC, sort_order, name COLLATE NOCASE, name`
       )
       .all(profileId) as RepoRow[];
-    return repoRows.map((r) => this.repoFromRow(r));
+    // Ownership filter: a fossil DB (older builds) can hold the same worktree
+    // under two repos, which renders as two "selected" rows at once.
+    return claimWorktreeOwnership(repoRows.map((r) => this.repoFromRow(r)));
   }
 
   getRepo(repoId: string): Repo | null {
@@ -197,6 +200,16 @@ export class RepoIndexer {
     if (repo === null) return;
     const listed = await listWorktrees(this.git, repo.path);
     if (!listed.ok) return;
+    const primary = listed.value[0];
+    // A repo row whose dir is actually a LINKED worktree of another repo (its
+    // listed primary path isn't its own path) is a fossil — older builds could
+    // index one. Syncing it would steal the whole family back and forth with
+    // the canonical repo; delete it instead (worktrees cascade, and the
+    // canonical repo reclaims its rows on its own next sync).
+    if (primary !== undefined && !primary.bare && primary.path !== repo.path) {
+      this.db.prepare("DELETE FROM repos WHERE id = ?").run(repoId);
+      return;
+    }
     const worktrees = listed.value
       .filter((w) => !w.bare)
       .map((w, i) => worktreeShape(w.path, w.branch, i === 0));
@@ -322,10 +335,14 @@ export class RepoIndexer {
 
   private syncWorktrees(repoId: string, worktrees: Worktree[]): void {
     const seen: string[] = [];
+    // repo_id is reclaimed on conflict: the repo currently listing a path owns
+    // it. Without this, a row minted under an older/wrong repo (e.g. a linked
+    // worktree once indexed as its own repo) stays stranded there forever.
     const stmt = this.db.prepare(
       `INSERT INTO worktrees (id, repo_id, branch, path, is_primary, last_seen_at)
        VALUES (?, ?, ?, ?, ?, datetime('now'))
        ON CONFLICT(id) DO UPDATE SET
+         repo_id = excluded.repo_id,
          branch = excluded.branch,
          is_primary = excluded.is_primary,
          last_seen_at = datetime('now')`
