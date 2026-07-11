@@ -46,3 +46,46 @@ test("⌘F search pick expands the repo, selects Local, and scrolls it into view
   await expect(selected.locator(".wt-tag--local")).toBeVisible();
   await expect(selected).toBeInViewport();
 });
+
+test("moving selection via ⌘F leaves no second 'selected-looking' row behind", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepo("alpha-kit");
+  sandbox.makeRepo("bravo-park");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, sandbox, "bravo-park");
+
+  // A real sidebar click on bravo's Local row — this also seeds the batch
+  // (shift-range) set with that row.
+  await window
+    .locator(".repo-block", { hasText: "bravo-park" })
+    .locator(".wt-row")
+    .first()
+    .click();
+
+  // Now move the selection from OUTSIDE the sidebar: ⌘F → pick alpha-kit.
+  await window.keyboard.press("Meta+f");
+  await window.locator(".overlay-search input").fill("alpha-kit");
+  await window.keyboard.press("Enter");
+  await expect(window.locator(".wt-header__repo")).toHaveText("alpha-kit", {
+    timeout: 20_000
+  });
+
+  // Exactly ONE row may look selected. The active row itself may carry the
+  // batch class too (CSS neutralizes the combo) — what must NOT exist is a
+  // batch-tinted row that isn't the selected one (the "two selected repos at
+  // once" bug), and bravo must have no lit rows at all.
+  await expect(window.locator(".wt-row.is-selected")).toHaveCount(1);
+  await expect(
+    window.locator(".wt-row.is-multiselected:not(.is-selected)")
+  ).toHaveCount(0);
+  const bravo = window.locator(".repo-block", { hasText: "bravo-park" });
+  await expect(bravo.locator(".wt-row.is-selected")).toHaveCount(0);
+  await expect(bravo.locator(".wt-row.is-multiselected")).toHaveCount(0);
+  await expect(
+    window
+      .locator(".repo-block", { hasText: "alpha-kit" })
+      .locator(".wt-row.is-selected")
+  ).toHaveCount(1);
+});

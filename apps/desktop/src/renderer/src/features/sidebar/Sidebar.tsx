@@ -152,6 +152,29 @@ export function Sidebar({
     el.scrollIntoView({ block: "nearest" });
   });
 
+  // A plain row click seeds the batch (shift-range) set — but selection can
+  // also move WITHOUT a row click (⌘F/⌘K pick, expanding a repo auto-selects
+  // its primary). Re-seed the batch to the new selection then, or the old
+  // repo's seeded row keeps its tint forever and the sidebar shows two
+  // "selected" worktrees at once. ⌘/Shift gestures don't move the app
+  // selection, so ranges in progress are never disturbed.
+  useEffect(() => {
+    if (selectedWorktreeId === null) return;
+    setSel((prev) => {
+      if (prev.ids.has(selectedWorktreeId)) return prev;
+      if (prev.repoId === "" && prev.ids.size === 0) return prev;
+      const repo = repos.find((r) =>
+        r.worktrees.some((w) => w.id === selectedWorktreeId)
+      );
+      if (repo === undefined) return prev;
+      return {
+        repoId: repo.id,
+        ids: new Set([selectedWorktreeId]),
+        anchor: selectedWorktreeId
+      };
+    });
+  }, [selectedWorktreeId, repos]);
+
   // Drop selected ids that no longer exist (e.g. after a batch remove reloads).
   useEffect(() => {
     setSel((prev) => {
