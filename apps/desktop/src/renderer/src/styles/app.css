@@ -1125,6 +1125,19 @@ input {
   flex: 0 0 auto;
   padding: 14px 20px;
   border-bottom: 1px solid var(--border-subtle);
+  /* Container queries drive the header's own degrade ladder — the buttons
+     give up their labels before any name gets chopped. */
+  container-type: inline-size;
+}
+@container (max-width: 720px) {
+  .wt-btn__label {
+    display: none;
+  }
+}
+@container (max-width: 680px) {
+  .wt-header__id .sync-chip {
+    display: none;
+  }
 }
 .wt-header__id {
   display: flex;
@@ -1135,20 +1148,23 @@ input {
 .wt-header__repo {
   font: 700 15px/1 var(--font-sans);
   color: var(--accent-bright);
-  /* Never wraps — it shares the line with the branch + path chips. Shrinks
-     before the branch chip (shrink 2 vs 1) but after the path chip (4). */
-  flex: 0 2 auto;
-  min-width: 90px;
+  /* Never wraps — it shares the line with the branch + path chips. Sized to
+     its content at rest; gives way only after the path chip has fully
+     collapsed (shrink 1 vs the path's 999), flooring at a readable prefix. */
+  flex: 0 1 auto;
+  min-width: 64px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 /* Compact location chip: last two path segments; full path on hover, click
    copies it. Replaces the full-width path line the header used to spend.
-   First to shrink when the header tightens (shrink 4). */
+   Sized to its content; absorbs essentially ALL the squeeze before anything
+   else gives (shrink 999), collapsing down to just the folder icon (tooltip
+   + copy keep working). */
 .wt-header__pathchip {
-  flex: 0 4 auto;
-  min-width: 84px;
+  flex: 0 999 auto;
+  min-width: 36px;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -1200,14 +1216,20 @@ input {
   flex: 0 0 auto;
 }
 /* The branch chip doubles as a switcher trigger (click to change branch).
-   It's the most important context on the line — last to shrink (shrink 1). */
+   PwrAgnt chip semantics: sized exactly to the selected value — "main" is
+   never padded, never chopped. It does not shrink at all; oversized names
+   are capped at 320px (tighter in cramped headers) and ellipsize there. */
 .wt-header__branch--switch {
-  flex: 0 1 auto;
-  min-width: 130px;
+  flex: 0 0 auto;
   max-width: 320px;
   border: 1px solid transparent;
   cursor: pointer;
   transition: box-shadow 120ms ease, background 120ms ease;
+}
+@container (max-width: 760px) {
+  .wt-header__branch--switch {
+    max-width: 190px;
+  }
 }
 .wt-header__branch--switch:hover {
   background: var(--accent-border, var(--accent-soft));
