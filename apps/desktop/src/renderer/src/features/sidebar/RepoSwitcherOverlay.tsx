@@ -57,7 +57,7 @@ export function RepoSwitcherOverlay({
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search repos across all profiles…"
+            placeholder="Search repos & branches across all profiles…"
             onKeyDown={(e) => {
               if (e.key === "ArrowDown") {
                 e.preventDefault();
@@ -79,26 +79,46 @@ export function RepoSwitcherOverlay({
         <div className="overlay-results">
           {results.map((r, i) => (
             <button
-              key={r.repoId}
+              key={r.worktreeId ?? r.repoId}
               className={`overlay-result${i === sel ? " is-selected" : ""}`}
               onMouseEnter={() => setSel(i)}
               onClick={() => onPick(r)}
             >
-              <svg
-                width="15"
-                height="15"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.7"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
-              </svg>
+              {r.kind === "worktree" ? (
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M6 3v12" />
+                  <circle cx="6" cy="18" r="3" />
+                  <circle cx="18" cy="6" r="3" />
+                  <path d="M18 9c0 6-6 6-6 12" />
+                </svg>
+              ) : (
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+                </svg>
+              )}
               <span className="overlay-result__name">{r.name}</span>
               <span className="overlay-result__meta">
-                {r.worktreeCount} {r.worktreeCount === 1 ? "wt" : "wts"}
+                {r.kind === "worktree"
+                  ? (r.repoName ?? "")
+                  : `${r.worktreeCount} ${r.worktreeCount === 1 ? "wt" : "wts"}`}
               </span>
               <span className="overlay-result__profile">{r.profileName}</span>
             </button>
@@ -107,7 +127,7 @@ export function RepoSwitcherOverlay({
             <div className="overlay-empty">
               {query.trim() === ""
                 ? "No repos indexed yet"
-                : `No repos match "${query}"`}
+                : `Nothing matches "${query}"`}
             </div>
           )}
         </div>
@@ -117,7 +137,7 @@ export function RepoSwitcherOverlay({
           <span>↵ open</span>
           <span style={{ flex: 1 }} />
           <span>
-            {results.length} {results.length === 1 ? "repo" : "repos"}
+            {results.length} {results.length === 1 ? "result" : "results"}
           </span>
         </div>
       </div>

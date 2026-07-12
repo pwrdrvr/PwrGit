@@ -11,7 +11,11 @@ export type UseProfiles = ProfileList & {
   /** The profile THIS WINDOW is bound to (one window per profile). */
   activeProfile: Profile | null;
   /** Open (or focus) another profile's window; this window is unaffected. */
-  openProfile: (profileId: string, revealRepoId?: string) => Promise<void>;
+  openProfile: (
+    profileId: string,
+    revealRepoId?: string,
+    revealWorktreeId?: string
+  ) => Promise<void>;
   /** Create a profile and open its window. Returns an error message or null. */
   createProfile: (req: CreateProfileRequest) => Promise<string | null>;
   /** Patch an existing profile. Returns an error message or null. */
@@ -42,10 +46,15 @@ export function useProfiles(): UseProfiles {
   }, []);
 
   const openProfile = useCallback(
-    async (profileId: string, revealRepoId?: string) => {
+    async (
+      profileId: string,
+      revealRepoId?: string,
+      revealWorktreeId?: string
+    ) => {
       await dispatch("profile:openWindow", {
         profileId,
-        ...(revealRepoId !== undefined ? { revealRepoId } : {})
+        ...(revealRepoId !== undefined ? { revealRepoId } : {}),
+        ...(revealWorktreeId !== undefined ? { revealWorktreeId } : {})
       });
     },
     []

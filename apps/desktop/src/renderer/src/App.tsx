@@ -26,7 +26,12 @@ export function App() {
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [overlayOpen, setOverlayOpen] = useState(false);
   const [selection, setSelection] = useState<Selection | null>(null);
-  const [pendingRepoId, setPendingRepoId] = useState<string | null>(null);
+  // A queued "jump to this repo (and optionally this worktree)" — from ⌘F
+  // picks and cross-window reveals — resolved once the repo list has it.
+  const [pendingReveal, setPendingReveal] = useState<{
+    repoId: string;
+    worktreeId: string | null;
+  } | null>(null);
 
   const {
     profiles,
@@ -111,18 +116,23 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Resolve a repo reveal once this window's repos have loaded.
+  // Resolve a reveal once this window's repos have loaded: the named worktree
+  // if given (⌘F branch hit), else the repo's primary.
   useEffect(() => {
-    if (pendingRepoId === null) return;
-    const repo = repos.find((r) => r.id === pendingRepoId);
+    if (pendingReveal === null) return;
+    const repo = repos.find((r) => r.id === pendingReveal.repoId);
     if (repo === undefined) return;
-    const primary =
-      repo.worktrees.find((w) => w.isPrimary) ?? repo.worktrees[0];
-    if (primary !== undefined) {
-      setSelection({ repoId: repo.id, worktreeId: primary.id });
+    const target =
+      (pendingReveal.worktreeId !== null
+        ? repo.worktrees.find((w) => w.id === pendingReveal.worktreeId)
+        : undefined) ??
+      repo.worktrees.find((w) => w.isPrimary) ??
+      repo.worktrees[0];
+    if (target !== undefined) {
+      setSelection({ repoId: repo.id, worktreeId: target.id });
     }
-    setPendingRepoId(null);
-  }, [pendingRepoId, repos]);
+    setPendingReveal(null);
+  }, [pendingReveal, repos]);
 
   // One window per profile: on boot, pick up any reveal queued for this
   // window (a cross-profile ⌘F pick that opened it); afterwards, reveals for
@@ -131,10 +141,14 @@ export function App() {
     const profileId = windowProfileId();
     if (profileId === null) return;
     void dispatch("window:consumeReveal", { profileId }).then((r) => {
-      if (r.ok && r.value.repoId !== null) setPendingRepoId(r.value.repoId);
+      if (r.ok && r.value.repoId !== null) {
+        setPendingReveal({ repoId: r.value.repoId, worktreeId: r.value.worktreeId });
+      }
     });
     return subscribe("ui:revealRepo", (p) => {
-      if (p.profileId === profileId) setPendingRepoId(p.repoId);
+      if (p.profileId === profileId) {
+        setPendingReveal({ repoId: p.repoId, worktreeId: p.worktreeId });
+      }
     });
   }, []);
 
@@ -169,12 +183,12 @@ export function App() {
     (hit: RepoSearchHit) => {
       setOverlayOpen(false);
       if (activeProfile !== null && hit.profileId !== activeProfile.id) {
-        // Another profile's repo → open/focus THAT profile's window and
+        // Another profile's hit → open/focus THAT profile's window and
         // reveal it there; this window stays put.
-        void openProfile(hit.profileId, hit.repoId);
+        void openProfile(hit.profileId, hit.repoId, hit.worktreeId);
         return;
       }
-      setPendingRepoId(hit.repoId);
+      setPendingReveal({ repoId: hit.repoId, worktreeId: hit.worktreeId ?? null });
     },
     [activeProfile, openProfile]
   );

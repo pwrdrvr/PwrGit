@@ -97,7 +97,8 @@ if (!gotSingleInstanceLock) {
     // One window per profile. Opening a profile that already has a window
     // focuses it; cross-profile reveals are stashed until the new window asks.
     const windows = createProfileWindows();
-    const pendingReveals = new Map<string, string>();
+    type Reveal = { repoId: string; worktreeId: string | null };
+    const pendingReveals = new Map<string, Reveal>();
 
     const refreshMenu = (): void => {
       rebuildAppMenu({
@@ -111,7 +112,8 @@ if (!gotSingleInstanceLock) {
 
     const openProfileWindow = (
       profileId: string,
-      revealRepoId?: string
+      revealRepoId?: string,
+      revealWorktreeId?: string
     ): boolean => {
       const profile = profiles.get(profileId);
       if (profile === null) return false;
@@ -119,8 +121,12 @@ if (!gotSingleInstanceLock) {
       rescanInBackground(profile);
       const wasOpen = windows.has(profileId);
       if (revealRepoId !== undefined) {
-        if (wasOpen) emitEvent("ui:revealRepo", { profileId, repoId: revealRepoId });
-        else pendingReveals.set(profileId, revealRepoId);
+        const reveal: Reveal = {
+          repoId: revealRepoId,
+          worktreeId: revealWorktreeId ?? null
+        };
+        if (wasOpen) emitEvent("ui:revealRepo", { profileId, ...reveal });
+        else pendingReveals.set(profileId, reveal);
       }
       windows.open(profileId);
       refreshMenu();
@@ -132,9 +138,9 @@ if (!gotSingleInstanceLock) {
       onChanged: refreshMenu,
       openWindow: openProfileWindow,
       consumeReveal: (profileId) => {
-        const repoId = pendingReveals.get(profileId) ?? null;
+        const reveal = pendingReveals.get(profileId) ?? null;
         pendingReveals.delete(profileId);
-        return repoId;
+        return reveal;
       }
     });
     registerRepoHandlers(bus, indexer, profiles);

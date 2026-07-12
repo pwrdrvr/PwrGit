@@ -58,15 +58,19 @@ export interface Commands {
   "profile:list": { req: void; res: ProfileList };
   "profile:switch": { req: { profileId: ProfileId }; res: ProfileList };
   /** Open (or focus) the window bound to a profile; optionally reveal a repo
-   *  there once it's up (used by cross-profile ⌘F picks). */
+   *  (and a specific worktree) there once it's up — cross-profile ⌘F picks. */
   "profile:openWindow": {
-    req: { profileId: ProfileId; revealRepoId?: string };
+    req: {
+      profileId: ProfileId;
+      revealRepoId?: string;
+      revealWorktreeId?: string;
+    };
     res: null;
   };
-  /** A window asks, once on boot, whether a repo reveal is queued for it. */
+  /** A window asks, once on boot, whether a reveal is queued for it. */
   "window:consumeReveal": {
     req: { profileId: ProfileId };
-    res: { repoId: string | null };
+    res: { repoId: string | null; worktreeId: string | null };
   };
   "profile:create": { req: CreateProfileRequest; res: Profile };
   "profile:update": { req: UpdateProfileRequest; res: Profile };
@@ -220,8 +224,13 @@ export interface Events {
   /** Native Profiles-menu actions — handled by whichever window has focus. */
   "ui:newProfile": Record<string, never>;
   "ui:manageProfile": Record<string, never>;
-  /** Reveal a repo in the window bound to `profileId` (cross-profile ⌘F pick). */
-  "ui:revealRepo": { profileId: ProfileId; repoId: string };
+  /** Reveal a repo (and optionally a worktree) in the window bound to
+   *  `profileId` — cross-profile ⌘F pick landing in an open window. */
+  "ui:revealRepo": {
+    profileId: ProfileId;
+    repoId: string;
+    worktreeId: string | null;
+  };
 }
 
 export type EventChannel = keyof Events;

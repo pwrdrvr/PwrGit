@@ -190,10 +190,17 @@ export type Lens = "Recent" | "Pinned" | "Behind" | "Stale" | "All";
 export type WorktreeSort = "pinned" | "az" | "active" | "custom";
 
 export type RepoSearchHit = {
+  /** "repo" = the repo itself; "worktree" = a branch match within one. */
+  kind: "repo" | "worktree";
   repoId: RepoId;
+  /** Repo name — or the branch name for worktree hits. */
   name: string;
   path: string;
   profileId: ProfileId;
   profileName: string;
   worktreeCount: number;
+  /** The matched worktree (worktree hits only). */
+  worktreeId?: WorktreeId;
+  /** Owning repo's name, shown as context on worktree hits. */
+  repoName?: string;
 };

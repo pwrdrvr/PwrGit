@@ -47,6 +47,42 @@ test("⌘F search pick expands the repo, selects Local, and scrolls it into view
   await expect(selected).toBeInViewport();
 });
 
+test("⌘F finds a worktree by branch name and jumps to it", async () => {
+  sandbox = createGitSandbox();
+  const repo = sandbox.makeRepo("expfarm");
+  repo.addWorktree("claude/side-by-side-experiment-groups-8013ec");
+  for (let i = 0; i < 6; i += 1) repo.addWorktree(`claude/pad-${i}`);
+  sandbox.makeRepo("other-repo");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, sandbox, "other-repo");
+
+  // Paste the branch name — the worktree hit appears with its repo context.
+  await window.keyboard.press("Meta+f");
+  await window
+    .locator(".overlay-search input")
+    .fill("claude/side-by-side-experiment-groups-8013ec");
+  const hit = window.locator(".overlay-result", {
+    hasText: "claude/side-by-side-experiment-groups-8013ec"
+  });
+  await expect(hit).toBeVisible();
+  await expect(hit).toContainText("expfarm");
+  await window.keyboard.press("Enter");
+
+  // THAT worktree — not the repo's primary — is selected, revealed in the
+  // sidebar (repo expanded + scrolled), and driving the main pane.
+  const selected = window.locator(".wt-row.is-selected");
+  await expect(selected).toContainText(
+    "claude/side-by-side-experiment-groups-8013ec",
+    { timeout: 20_000 }
+  );
+  await expect(selected).toBeInViewport();
+  await expect(window.locator(".wt-header__branch-name")).toHaveText(
+    "claude/side-by-side-experiment-groups-8013ec"
+  );
+});
+
 test("moving selection via ⌘F leaves no second 'selected-looking' row behind", async () => {
   sandbox = createGitSandbox();
   sandbox.makeRepo("alpha-kit");

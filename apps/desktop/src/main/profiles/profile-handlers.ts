@@ -9,9 +9,15 @@ export type ProfileHandlerDeps = {
   /** Rebuild anything derived from the profile list (native Profiles menu). */
   onChanged?: () => void;
   /** Open-or-focus the window bound to a profile (one window per profile). */
-  openWindow: (profileId: string, revealRepoId?: string) => boolean;
-  /** Hand a queued repo-reveal to the window that just booted for a profile. */
-  consumeReveal: (profileId: string) => string | null;
+  openWindow: (
+    profileId: string,
+    revealRepoId?: string,
+    revealWorktreeId?: string
+  ) => boolean;
+  /** Hand a queued reveal to the window that just booted for a profile. */
+  consumeReveal: (
+    profileId: string
+  ) => { repoId: string; worktreeId: string | null } | null;
 };
 
 export function registerProfileHandlers(
@@ -40,7 +46,7 @@ export function registerProfileHandlers(
   });
 
   bus.register("profile:openWindow", (req) => {
-    const opened = openWindow(req.profileId, req.revealRepoId);
+    const opened = openWindow(req.profileId, req.revealRepoId, req.revealWorktreeId);
     if (!opened) {
       return err({
         kind: "profile",
@@ -52,9 +58,13 @@ export function registerProfileHandlers(
     return ok(null);
   });
 
-  bus.register("window:consumeReveal", (req) =>
-    ok({ repoId: consumeReveal(req.profileId) })
-  );
+  bus.register("window:consumeReveal", (req) => {
+    const reveal = consumeReveal(req.profileId);
+    return ok({
+      repoId: reveal?.repoId ?? null,
+      worktreeId: reveal?.worktreeId ?? null
+    });
+  });
 
   bus.register("profile:update", (req) => {
     if (req.name !== undefined && req.name.trim() === "") {

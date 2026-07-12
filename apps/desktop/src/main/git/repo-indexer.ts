@@ -216,15 +216,18 @@ export class RepoIndexer {
     this.syncWorktrees(repoId, worktrees);
   }
 
+  /** ⌘F search: repos by name/path AND worktrees by branch/path, across all
+   *  profiles. Worktree hits carry the branch as `name` plus repo context, so
+   *  pasting a branch name jumps straight to that worktree. */
   searchAll(query: string): RepoSearchHit[] {
     const like = `%${query.trim().toLowerCase()}%`;
-    const rows = this.db
+    const repoRows = this.db
       .prepare(
         `SELECT r.id, r.name, r.path, r.profile_id, p.name AS profile_name,
                 (SELECT COUNT(*) FROM worktrees w WHERE w.repo_id = r.id) AS wt_count
          FROM repos r JOIN profiles p ON p.id = r.profile_id
          WHERE lower(r.name) LIKE ? OR lower(r.path) LIKE ?
-         ORDER BY r.name COLLATE NOCASE, r.name LIMIT 50`
+         ORDER BY r.name COLLATE NOCASE, r.name LIMIT 20`
       )
       .all(like, like) as {
       id: string;
@@ -235,14 +238,52 @@ export class RepoIndexer {
       wt_count: number;
     }[];
 
-    return rows.map((r) => ({
-      repoId: r.id,
-      name: r.name,
-      path: r.path,
-      profileId: r.profile_id,
-      profileName: r.profile_name,
-      worktreeCount: r.wt_count
-    }));
+    const wtRows = this.db
+      .prepare(
+        `SELECT w.id, w.branch, w.path, r.id AS repo_id, r.name AS repo_name,
+                r.profile_id, p.name AS profile_name
+         FROM worktrees w
+         JOIN repos r ON r.id = w.repo_id
+         JOIN profiles p ON p.id = r.profile_id
+         WHERE lower(w.branch) LIKE ? OR lower(w.path) LIKE ?
+         ORDER BY w.branch COLLATE NOCASE, w.branch LIMIT 40`
+      )
+      .all(like, like) as {
+      id: string;
+      branch: string;
+      path: string;
+      repo_id: string;
+      repo_name: string;
+      profile_id: string;
+      profile_name: string;
+    }[];
+
+    return [
+      ...repoRows.map(
+        (r): RepoSearchHit => ({
+          kind: "repo",
+          repoId: r.id,
+          name: r.name,
+          path: r.path,
+          profileId: r.profile_id,
+          profileName: r.profile_name,
+          worktreeCount: r.wt_count
+        })
+      ),
+      ...wtRows.map(
+        (w): RepoSearchHit => ({
+          kind: "worktree",
+          repoId: w.repo_id,
+          name: w.branch,
+          path: w.path,
+          profileId: w.profile_id,
+          profileName: w.profile_name,
+          worktreeCount: 0,
+          worktreeId: w.id,
+          repoName: w.repo_name
+        })
+      )
+    ];
   }
 
   private repoFromRow(r: RepoRow): Repo {
