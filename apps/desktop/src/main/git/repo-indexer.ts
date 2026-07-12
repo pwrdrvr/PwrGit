@@ -238,8 +238,19 @@ export class RepoIndexer {
       .all(fts) as { entity_id: string; kind: "repo" | "worktree" }[];
     if (matches.length === 0) return [];
 
-    const repoIds = matches.filter((m) => m.kind === "repo").map((m) => m.entity_id);
-    const wtIds = matches
+    // One hit per entity: a dirty index (fossil DBs could double-insert via
+    // the 0008 backfill) must not emit duplicate hits — they become duplicate
+    // React keys in the overlay and leave ghost rows behind on re-render.
+    const seen = new Set<string>();
+    const unique = matches.filter((m) => {
+      const key = `${m.kind}:${m.entity_id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    const repoIds = unique.filter((m) => m.kind === "repo").map((m) => m.entity_id);
+    const wtIds = unique
       .filter((m) => m.kind === "worktree")
       .map((m) => m.entity_id);
 
@@ -312,7 +323,7 @@ export class RepoIndexer {
     // Emit in bm25 order; hydration misses (an index row whose entity vanished
     // mid-flight) are simply skipped.
     const out: RepoSearchHit[] = [];
-    for (const m of matches) {
+    for (const m of unique) {
       const hit =
         m.kind === "repo" ? repoHits.get(m.entity_id) : wtHits.get(m.entity_id);
       if (hit !== undefined) out.push(hit);

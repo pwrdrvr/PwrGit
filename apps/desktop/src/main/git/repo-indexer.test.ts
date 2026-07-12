@@ -44,6 +44,7 @@ let root: string;
 let profileService: ProfileService;
 let indexer: RepoIndexer;
 let profileId: string;
+let db: ReturnType<typeof openDatabase>;
 
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), "pwrgit-scan-"));
@@ -63,7 +64,7 @@ beforeAll(() => {
   // a plain non-repo folder
   mkdirSync(join(root, "plain"), { recursive: true });
 
-  const db = openDatabase(":memory:");
+  db = openDatabase(":memory:");
   profileService = new ProfileService(db);
   const p = profileService.create({
     name: "Scan",
@@ -170,5 +171,24 @@ describe("searchAll (FTS5)", () => {
     expect(empty.length).toBeGreaterThan(0);
     expect(empty.every((h) => h.kind === "repo")).toBe(true);
     expect(indexer.searchAll("/-·")).toEqual(empty);
+  });
+
+  it("emits one hit per entity even when the FTS index holds duplicates", () => {
+    // Fossil DBs (pre-PK worktree rows) can double-insert into search_fts via
+    // the migration backfill. Duplicate hits become duplicate React keys in
+    // the overlay → ghost rows that survive re-renders.
+    const repoRow = db
+      .prepare("SELECT id, name, path FROM repos WHERE name = 'repoA'")
+      .get() as { id: string; name: string; path: string };
+    db.prepare(
+      `INSERT INTO search_fts (entity_id, kind, name, path, repo_name)
+       VALUES (?, 'repo', ?, ?, NULL)`
+    ).run(repoRow.id, repoRow.name, repoRow.path);
+
+    const hits = indexer.searchAll("repoA");
+    const repoHits = hits.filter(
+      (h) => h.kind === "repo" && h.repoId === repoRow.id
+    );
+    expect(repoHits).toHaveLength(1);
   });
 });

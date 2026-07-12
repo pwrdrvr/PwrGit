@@ -136,7 +136,10 @@ export function RepoSwitcherOverlay({
         <div className="overlay-results" ref={resultsRef}>
           {results.map((r, i) => (
             <button
-              key={r.worktreeId ?? r.repoId}
+              // Kind-prefixed: a repo and its PRIMARY worktree share the same
+              // hash-of-path id, and duplicate keys strand ghost rows in the
+              // DOM across re-renders.
+              key={hitKey(r)}
               data-hit-key={hitKey(r)}
               className={`overlay-result${i === sel ? " is-selected" : ""}`}
               onMouseEnter={() => setSel(i)}

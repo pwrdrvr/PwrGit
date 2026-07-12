@@ -94,6 +94,40 @@ test("⌘F finds a worktree by branch name and jumps to it", async () => {
   );
 });
 
+test("narrowing a ⌘F query leaves no stale ghost rows behind", async () => {
+  sandbox = createGitSandbox();
+  const s = sandbox;
+  // A repo whose NAME matches a broad query while its PRIMARY worktree
+  // matches by PATH — repo id and primary-worktree id are the same
+  // hash-of-path, so a duplicate React key here corrupted reconciliation
+  // and stale rows survived every later re-render.
+  const repo = s.makeRepo("codex-tools");
+  const wt = repo.addWorktree("codex-search-quality-issues");
+  s.commit(wt, "q.txt", "quality work");
+  s.makeRepo("codex-extras");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, s, "codex-tools");
+
+  await window.keyboard.press("Meta+f");
+  const input = window.locator(".overlay-search input");
+  // Broad query first — repos + primary-worktree path hits render together.
+  await input.fill("codex");
+  await expect
+    .poll(async () => window.locator(".overlay-result").count())
+    .toBeGreaterThan(2);
+
+  // Narrow to the branch. ONLY the branch hit may remain — the row count
+  // must agree with the footer, no ghosts from the broad render.
+  await input.fill("codex-search-quality");
+  await expect(
+    window.locator(".overlay-result", { hasText: "codex-search-quality-issues" })
+  ).toBeVisible();
+  await expect(window.locator(".overlay-result")).toHaveCount(1);
+  await expect(window.locator(".overlay-foot")).toContainText("1 result");
+});
+
 test("moving selection via ⌘F leaves no second 'selected-looking' row behind", async () => {
   sandbox = createGitSandbox();
   sandbox.makeRepo("alpha-kit");
