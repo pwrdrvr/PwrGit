@@ -50,8 +50,9 @@ test("creating a profile opens its own window with repos from all roots", async 
   await expect(giphyWindow.locator(".profile-chip__name")).toHaveText("Giphy", {
     timeout: 20_000
   });
-  // The original window keeps ITS profile — no in-window switching.
-  await expect(window.locator(".profile-chip__name")).toHaveText("PwrGit Test");
+  // The original window keeps ITS profile — no in-window switching. (The
+  // seed is named "Personal" now — a workspace label, not the git identity.)
+  await expect(window.locator(".profile-chip__name")).toHaveText("Personal");
 
   // The new window lists repos from BOTH roots.
   await giphyWindow.locator(".lens-chip", { hasText: "All" }).click();

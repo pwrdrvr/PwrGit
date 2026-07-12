@@ -2338,6 +2338,12 @@ body.is-col-resizing {
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
+.field__hint {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  color: var(--text-subtle);
+}
 .field__opt {
   text-transform: none;
   letter-spacing: 0;

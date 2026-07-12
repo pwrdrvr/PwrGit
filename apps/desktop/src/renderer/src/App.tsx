@@ -10,6 +10,7 @@ import { Rail } from "./features/rail/Rail";
 import { ProfileModal } from "./features/sidebar/ProfileModal";
 import { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
 import { Sidebar } from "./features/sidebar/Sidebar";
+import { profileWindowTitle } from "./lib/profileTitle";
 import { dispatch, subscribe, windowProfileId } from "./lib/pwrgit";
 import { useAppearance } from "./lib/useAppearance";
 import { useColumnResize } from "./lib/useColumnResize";
@@ -169,11 +170,11 @@ export function App() {
   }, [activeProfile]);
 
   // Window title carries the profile so the Window menu / Mission Control can
-  // tell the profile windows apart.
+  // tell the profile windows apart (email-disambiguated on name collisions).
+  const windowTitle = profileWindowTitle(profiles, activeProfile);
   useEffect(() => {
-    document.title =
-      activeProfile !== null ? `PwrGit — ${activeProfile.name}` : "PwrGit";
-  }, [activeProfile]);
+    document.title = windowTitle;
+  }, [windowTitle]);
 
   const selectWorktree = useCallback((repo: Repo, worktree: Worktree) => {
     setSelection({ repoId: repo.id, worktreeId: worktree.id });
@@ -208,9 +209,7 @@ export function App() {
     <div className="app">
       <div className="titlebar">
         <div className="titlebar__gutter" />
-        <div className="titlebar__title">
-          {activeProfile !== null ? `PwrGit — ${activeProfile.name}` : "PwrGit"}
-        </div>
+        <div className="titlebar__title">{windowTitle}</div>
         <div className="titlebar__gutter" />
       </div>
 

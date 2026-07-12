@@ -14,9 +14,18 @@ export function rebuildAppMenu(opts: {
   onNewProfile: () => void;
   onManageProfiles: () => void;
 }): void {
+  // Email-disambiguate duplicate profile names — otherwise the menu (and the
+  // matching window titles) list indistinguishable twins.
+  const nameCounts = new Map<string, number>();
+  for (const p of opts.profiles) {
+    nameCounts.set(p.name, (nameCounts.get(p.name) ?? 0) + 1);
+  }
   const profileItems: MenuItemConstructorOptions[] = opts.profiles.map(
     (p, i) => ({
-      label: p.name,
+      label:
+        (nameCounts.get(p.name) ?? 0) > 1 && p.email !== ""
+          ? `${p.name} (${p.email})`
+          : p.name,
       type: "checkbox",
       checked: p.id === opts.currentProfileId,
       ...(i < 9 ? { accelerator: `CmdOrCtrl+${i + 1}` } : {}),

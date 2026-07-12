@@ -107,13 +107,18 @@ export function ProfileModal({
         </div>
 
         <label className="field">
-          <span className="field__label">Name</span>
+          <span className="field__label">
+            Profile name{" "}
+            <span className="field__hint">
+              · a workspace label (window title, Profiles menu) — not your name
+            </span>
+          </span>
           <input
             className="modal__input"
             autoFocus
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. GIPHY"
+            placeholder="e.g. GIPHY or PwrDrvr"
           />
         </label>
 
