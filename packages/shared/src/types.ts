@@ -189,6 +189,15 @@ export type AgentStatus = {
 export type Lens = "Recent" | "Pinned" | "Behind" | "Stale" | "All";
 export type WorktreeSort = "pinned" | "az" | "active" | "custom";
 
+/** Lazily-filled status for a ⌘F search hit (nulls = unknown/uncached). */
+export type SearchHitStatus = {
+  /** ISO-8601 time of the tip commit — "how stale is this branch". */
+  lastActivityAt: string | null;
+  dirty: number | null;
+  ahead: number | null;
+  behind: number | null;
+};
+
 export type RepoSearchHit = {
   /** "repo" = the repo itself; "worktree" = a branch match within one. */
   kind: "repo" | "worktree";

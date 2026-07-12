@@ -67,6 +67,12 @@ test("⌘F finds a worktree by branch name and jumps to it", async () => {
   });
   await expect(hit).toBeVisible();
   await expect(hit).toContainText("expfarm");
+  // The visible hit lazily fills its status (tip age via the cancelable
+  // asyncFill queue → search:status; git fallback since expfarm was never
+  // expanded/state-computed).
+  await expect(hit.locator(".hit-status__age")).toHaveText(/just now|\d/, {
+    timeout: 10_000
+  });
 
   // And the full pasted branch name works too, of course.
   await window

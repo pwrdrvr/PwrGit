@@ -12,6 +12,7 @@ import { registerRebaseHandlers } from "./git/rebase-handlers";
 import { registerRemoteHandlers } from "./git/remote-handlers";
 import { registerRepoHandlers } from "./git/repo-handlers";
 import { RepoIndexer } from "./git/repo-indexer";
+import { registerSearchStatusHandlers } from "./git/search-status-handlers";
 import {
   createWorktreeRefresher,
   registerWorktreeHandlers
@@ -156,6 +157,7 @@ if (!gotSingleInstanceLock) {
     registerDialogHandlers(bus);
     registerShellHandlers(bus);
     registerGitHubHandlers(bus, prService);
+    registerSearchStatusHandlers(bus, db);
 
     registerIpc(bus);
     initAutoUpdater();

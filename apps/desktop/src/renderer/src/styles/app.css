@@ -802,6 +802,27 @@ input {
   font: 500 10px/1 var(--font-mono);
   color: var(--text-muted);
 }
+/* Lazily-filled per-hit status: fades in as rows are seen (asyncFill). */
+.hit-status {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  animation: pg-fade 160ms ease;
+}
+.hit-status__b {
+  font: 600 9.5px/1 var(--font-mono);
+}
+.hit-status__b--warn {
+  color: var(--warn);
+}
+.hit-status__b--ok {
+  color: var(--success-bright);
+}
+.hit-status__age {
+  font: 500 9.5px/1 var(--font-mono);
+  color: var(--text-subtle);
+}
 .overlay-result__profile {
   flex: 0 0 auto;
   display: inline-flex;

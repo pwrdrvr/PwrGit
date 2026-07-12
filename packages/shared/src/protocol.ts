@@ -23,6 +23,7 @@ import type {
   RebasePlan,
   Repo,
   RepoSearchHit,
+  SearchHitStatus,
   WorktreeState
 } from "./types";
 
@@ -85,6 +86,13 @@ export interface Commands {
   "repo:rescan": { req: { profileId?: ProfileId }; res: Repo[] };
   "repo:add": { req: { profileId: ProfileId; path: string }; res: Repo };
   "repo:search": { req: { query: string }; res: RepoSearchHit[] };
+  /** Lazy per-hit status for ⌘F results (cached worktree_state when present;
+   *  else one cheap `git log -1` for tip age). Called one hit at a time — the
+   *  renderer's cancelable fill queue owns batching/concurrency. */
+  "search:status": {
+    req: { repoId: string; worktreeId?: string };
+    res: SearchHitStatus;
+  };
   "repo:setPin": { req: { repoId: string; pinned: boolean }; res: null };
   "repo:computeState": { req: { repoId: string }; res: null };
 
