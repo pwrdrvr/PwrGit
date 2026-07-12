@@ -44,8 +44,12 @@ test("scans a folder and lists a repo with its worktrees", async () => {
   const acts = restRow.locator(".wt-row__hoveracts");
   await expect(acts).toHaveCSS("position", "absolute");
   await expect(acts).toHaveCSS("opacity", "0");
-  await restRow.hover();
-  await expect(acts).toHaveCSS("opacity", "1");
+  // Re-hover inside the retry: boot-time repo refreshes can re-render the row
+  // list right after a hover lands, eating the :hover state.
+  await expect(async () => {
+    await restRow.hover();
+    await expect(acts).toHaveCSS("opacity", "1", { timeout: 500 });
+  }).toPass({ timeout: 10_000 });
 });
 
 test("creates a worktree through the New worktree modal", async () => {

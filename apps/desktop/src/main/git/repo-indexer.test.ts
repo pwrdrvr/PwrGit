@@ -132,3 +132,43 @@ describe("RepoIndexer", () => {
     expect(result.ok).toBe(false);
   });
 });
+
+describe("searchAll (FTS5)", () => {
+  it("finds worktrees by branch prefix, with repo context", async () => {
+    const profile = profileService.get(profileId);
+    if (profile === null) throw new Error("profile missing");
+    await indexer.rescanProfile(profile);
+
+    const hits = indexer.searchAll("feat");
+    const wt = hits.find((h) => h.kind === "worktree" && h.name === "feature");
+    expect(wt).toBeDefined();
+    expect(wt?.repoName).toBe("repoA");
+    expect(wt?.worktreeId).toBeDefined();
+  });
+
+  it("ANDs tokens across fields (branch + owning repo name)", () => {
+    // Both tokens must land on the same row: branch "feature" + repo_name
+    // "repoA" — the old LIKE implementation could never express this.
+    const hits = indexer.searchAll("repoa feat");
+    expect(
+      hits.some((h) => h.kind === "worktree" && h.name === "feature")
+    ).toBe(true);
+    // Junk that matches nothing returns empty, not everything.
+    expect(indexer.searchAll("repoa zzznosuch")).toHaveLength(0);
+  });
+
+  it("ranks name matches above path matches", () => {
+    // "repoA" appears in repoA's NAME and in its worktree's PATH (…/repoA-wt),
+    // so both rows match — the name hit must outrank the path hit.
+    const hits = indexer.searchAll("repoA");
+    expect(hits[0]?.kind).toBe("repo");
+    expect(hits[0]?.name).toBe("repoA");
+  });
+
+  it("falls back to browsing repos on an empty or junk query", () => {
+    const empty = indexer.searchAll("");
+    expect(empty.length).toBeGreaterThan(0);
+    expect(empty.every((h) => h.kind === "repo")).toBe(true);
+    expect(indexer.searchAll("/-·")).toEqual(empty);
+  });
+});

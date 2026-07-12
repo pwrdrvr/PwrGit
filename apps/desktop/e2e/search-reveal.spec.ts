@@ -58,16 +58,21 @@ test("⌘F finds a worktree by branch name and jumps to it", async () => {
   const { window } = handle;
   await addRootAndExpand(window, handle, sandbox, "other-repo");
 
-  // Paste the branch name — the worktree hit appears with its repo context.
+  // Out-of-order prefix tokens (FTS5) find the branch — "8013 exp side"
+  // matches side-by-side-experiment-groups-8013ec.
   await window.keyboard.press("Meta+f");
-  await window
-    .locator(".overlay-search input")
-    .fill("claude/side-by-side-experiment-groups-8013ec");
+  await window.locator(".overlay-search input").fill("8013 exp side");
   const hit = window.locator(".overlay-result", {
     hasText: "claude/side-by-side-experiment-groups-8013ec"
   });
   await expect(hit).toBeVisible();
   await expect(hit).toContainText("expfarm");
+
+  // And the full pasted branch name works too, of course.
+  await window
+    .locator(".overlay-search input")
+    .fill("claude/side-by-side-experiment-groups-8013ec");
+  await expect(hit).toBeVisible();
   await window.keyboard.press("Enter");
 
   // THAT worktree — not the repo's primary — is selected, revealed in the
