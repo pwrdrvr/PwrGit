@@ -221,10 +221,19 @@ export function GraphRow({
       </span>
 
       <div className="commit-body">
+        {/* Line 1 belongs to the subject — branch chips and authorship live on
+            the meta line so long messages aren't pushed off the edge. */}
         <div className="commit-line">
+          <span className={`commit-msg${isMine ? "" : " is-other"}`}>
+            {commit.subject}
+          </span>
+          <span className="commit-time">{shortWhen(commit.committedAt)}</span>
+        </div>
+        <div className="commit-meta">
+          {isHead && <span className="commit-tag commit-tag--head">HEAD</span>}
           {/* Chips are capped — a commit tipped by dozens of stale branches
-              must not shove the subject off the row. Overflow collapses into
-              a +N pill whose tooltip lists everything. */}
+              must not flood the row. Overflow collapses into a +N pill whose
+              tooltip lists everything. */}
           {refs.length > 0 && (
             <span className="ref-chips" title={refs.join("\n")}>
               {refs.slice(0, MAX_REF_CHIPS).map((name) => (
@@ -248,13 +257,6 @@ export function GraphRow({
               )}
             </span>
           )}
-          <span className={`commit-msg${isMine ? "" : " is-other"}`}>
-            {commit.subject}
-          </span>
-          <span className="commit-time">{shortWhen(commit.committedAt)}</span>
-        </div>
-        <div className="commit-meta">
-          {isHead && <span className="commit-tag commit-tag--head">HEAD</span>}
           <span className={`commit-author${isMine ? "" : " is-other"}`}>
             {isMine ? "you" : commit.authorName}
           </span>

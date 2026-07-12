@@ -26,6 +26,14 @@ function baseChip(state: WorktreeState | null): Chip {
 
 type Busy = "fetch" | "pull" | "push" | null;
 
+/** Compact path label: the last two segments locate a checkout precisely
+ *  ("GIPHY/search-compare", "mrb93172/PwrAgnt") without burning a line on
+ *  the full path — that lives in the tooltip, and click copies it. */
+function pathTail(path: string): string {
+  const parts = path.split("/").filter((p) => p !== "");
+  return parts.slice(-2).join("/");
+}
+
 export function WorktreeHeader({
   repo,
   worktree,
@@ -107,7 +115,9 @@ export function WorktreeHeader({
   return (
     <div className="wt-header">
       <div className="wt-header__id">
-        <span className="wt-header__repo">{repo.name}</span>
+        <span className="wt-header__repo" title={repo.name}>
+          {repo.name}
+        </span>
         <span className="wt-header__sep">›</span>
         <button
           className="wt-header__branch wt-header__branch--switch"
@@ -131,6 +141,18 @@ export function WorktreeHeader({
           </svg>
         </button>
         {dirty > 0 && <span className="badge badge--warn">●{dirty}</span>}
+        <CopyTarget
+          value={worktree.path}
+          label="Copy worktree path"
+          hint={`${worktree.path}\nClick to copy`}
+          className="wt-header__pathchip copyable"
+          stopPropagation={false}
+        >
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+          </svg>
+          {pathTail(worktree.path)}
+        </CopyTarget>
         <span style={{ flex: 1 }} />
         <span className={`sync-chip sync-chip--${chip.tone}`}>{chip.text}</span>
 
@@ -182,16 +204,6 @@ export function WorktreeHeader({
             </span>
           </button>
         </div>
-      </div>
-      <div className="wt-header__pathrow">
-        <CopyTarget
-          value={worktree.path}
-          label="Copy worktree path"
-          className="wt-header__path copyable"
-          stopPropagation={false}
-        >
-          {worktree.path}
-        </CopyTarget>
         <WorktreeMenu worktree={worktree} />
       </div>
       {switching && (
