@@ -53,9 +53,21 @@ export interface Commands {
   /** Liveness probe — proves the command-bus round-trip end to end. */
   ping: { req: void; res: string };
 
-  // Profiles (U5)
+  // Profiles (U5). One window per profile: "switching" means opening (or
+  // focusing) that profile's window, never repointing the current one.
   "profile:list": { req: void; res: ProfileList };
   "profile:switch": { req: { profileId: ProfileId }; res: ProfileList };
+  /** Open (or focus) the window bound to a profile; optionally reveal a repo
+   *  there once it's up (used by cross-profile ⌘F picks). */
+  "profile:openWindow": {
+    req: { profileId: ProfileId; revealRepoId?: string };
+    res: null;
+  };
+  /** A window asks, once on boot, whether a repo reveal is queued for it. */
+  "window:consumeReveal": {
+    req: { profileId: ProfileId };
+    res: { repoId: string | null };
+  };
   "profile:create": { req: CreateProfileRequest; res: Profile };
   "profile:update": { req: UpdateProfileRequest; res: Profile };
   /** Replace a profile's scan roots wholesale, then rescan. */
@@ -205,6 +217,11 @@ export interface Events {
    * branch's PR. Keyed by branch name.
    */
   "pr:changed": { repoId: string; prs: Record<string, PrSummary | null> };
+  /** Native Profiles-menu actions — handled by whichever window has focus. */
+  "ui:newProfile": Record<string, never>;
+  "ui:manageProfile": Record<string, never>;
+  /** Reveal a repo in the window bound to `profileId` (cross-profile ⌘F pick). */
+  "ui:revealRepo": { profileId: ProfileId; repoId: string };
 }
 
 export type EventChannel = keyof Events;

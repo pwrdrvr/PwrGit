@@ -9,6 +9,8 @@ import type {
 } from "@pwrgit/shared";
 
 type PwrGitBridge = {
+  /** The profile this window is bound to (one window per profile). */
+  profileId: string | null;
   dispatch: (name: string, req: unknown) => Promise<unknown>;
   on: (channel: string, handler: (payload: unknown) => void) => () => void;
 };
@@ -17,6 +19,11 @@ declare global {
   interface Window {
     pwrgit: PwrGitBridge;
   }
+}
+
+/** The profile this window was opened for (null only in dev edge cases). */
+export function windowProfileId(): string | null {
+  return window.pwrgit.profileId ?? null;
 }
 
 /** Typed command dispatch. Returns a Result — never throws for command errors. */

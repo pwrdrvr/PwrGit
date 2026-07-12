@@ -27,9 +27,8 @@ import { registerProfileHandlers } from "./profiles/profile-handlers";
 import { ProfileService } from "./profiles/profile-service";
 import { registerShellHandlers } from "./shell-handlers";
 import { SettingsService } from "./settings/settings-service";
-import { createMainWindow } from "./window";
-
-let mainWindow: BrowserWindow | null = null;
+import { rebuildAppMenu } from "./menu";
+import { createProfileWindows } from "./profile-windows";
 
 // Relocate all app data (db, settings, profiles) to an explicit directory when
 // PWRGIT_USER_DATA_DIR is set. e2e uses this to give each run an isolated,
@@ -44,9 +43,9 @@ const bus = new CommandBus();
 bus.register("ping", () => ok("pong"));
 
 /**
- * Single-instance: PwrGit is a single-instance app (profiles switch in-app,
- * not by spawning new processes). A second launch focuses the existing window
- * instead of opening another.
+ * Single-instance: PwrGit is a single-instance app — one window per profile
+ * inside it. A second launch focuses an existing window instead of spawning
+ * another process.
  */
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
@@ -54,9 +53,10 @@ if (!gotSingleInstanceLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    if (mainWindow === null) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win === undefined) return;
+    if (win.isMinimized()) win.restore();
+    win.focus();
   });
 
   app.whenReady().then(() => {
@@ -94,8 +94,49 @@ if (!gotSingleInstanceLock) {
         .catch(() => undefined);
     };
 
-    // Switching profiles kicks a background rescan of the newly active one.
-    registerProfileHandlers(bus, profiles, rescanInBackground);
+    // One window per profile. Opening a profile that already has a window
+    // focuses it; cross-profile reveals are stashed until the new window asks.
+    const windows = createProfileWindows();
+    const pendingReveals = new Map<string, string>();
+
+    const refreshMenu = (): void => {
+      rebuildAppMenu({
+        profiles: profiles.snapshot().profiles,
+        currentProfileId: windows.focusedProfileId() ?? profiles.getActiveId(),
+        onOpenProfile: (profileId) => openProfileWindow(profileId),
+        onNewProfile: () => emitEvent("ui:newProfile", {}),
+        onManageProfiles: () => emitEvent("ui:manageProfile", {})
+      });
+    };
+
+    const openProfileWindow = (
+      profileId: string,
+      revealRepoId?: string
+    ): boolean => {
+      const profile = profiles.get(profileId);
+      if (profile === null) return false;
+      profiles.switch(profileId); // record last-used (boot + activate default)
+      rescanInBackground(profile);
+      const wasOpen = windows.has(profileId);
+      if (revealRepoId !== undefined) {
+        if (wasOpen) emitEvent("ui:revealRepo", { profileId, repoId: revealRepoId });
+        else pendingReveals.set(profileId, revealRepoId);
+      }
+      windows.open(profileId);
+      refreshMenu();
+      return true;
+    };
+
+    registerProfileHandlers(bus, profiles, {
+      onActivated: rescanInBackground,
+      onChanged: refreshMenu,
+      openWindow: openProfileWindow,
+      consumeReveal: (profileId) => {
+        const repoId = pendingReveals.get(profileId) ?? null;
+        pendingReveals.delete(profileId);
+        return repoId;
+      }
+    });
     registerRepoHandlers(bus, indexer, profiles);
     registerWorktreeHandlers(bus, stateService, db, refresher, (id) => {
       activeWorktreeId = id;
@@ -111,26 +152,29 @@ if (!gotSingleInstanceLock) {
     registerGitHubHandlers(bus, prService);
 
     registerIpc(bus);
-    mainWindow = createMainWindow();
     initAutoUpdater();
 
     const refreshActive = (): void => {
       if (activeWorktreeId !== null) refresher.refreshWorktree(activeWorktreeId);
     };
-    mainWindow.on("focus", refreshActive);
+    app.on("browser-window-focus", () => {
+      refreshActive();
+      refreshMenu();
+    });
     const activeStatePoll = setInterval(() => {
-      if (mainWindow?.isFocused() === true) refreshActive();
+      if (BrowserWindow.getFocusedWindow() !== null) refreshActive();
     }, 15_000);
     app.on("before-quit", () => clearInterval(activeStatePoll));
 
-    // Scan the active profile so the sidebar lists its repos.
+    // Boot into the last-used profile's window (its rescan kicks off inside).
     const activeId = profiles.getActiveId();
-    const activeProfile = activeId === null ? null : profiles.get(activeId);
-    if (activeProfile !== null) rescanInBackground(activeProfile);
+    if (activeId !== null) openProfileWindow(activeId);
+    refreshMenu();
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {
-        mainWindow = createMainWindow();
+        const lastActive = profiles.getActiveId();
+        if (lastActive !== null) openProfileWindow(lastActive);
       }
     });
   });

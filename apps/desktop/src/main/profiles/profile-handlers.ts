@@ -3,11 +3,24 @@ import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import type { ProfileService } from "./profile-service";
 
+export type ProfileHandlerDeps = {
+  /** Kick a background rescan when a profile becomes active. */
+  onActivated?: (profile: Profile) => void;
+  /** Rebuild anything derived from the profile list (native Profiles menu). */
+  onChanged?: () => void;
+  /** Open-or-focus the window bound to a profile (one window per profile). */
+  openWindow: (profileId: string, revealRepoId?: string) => boolean;
+  /** Hand a queued repo-reveal to the window that just booted for a profile. */
+  consumeReveal: (profileId: string) => string | null;
+};
+
 export function registerProfileHandlers(
   bus: CommandBus,
   profiles: ProfileService,
-  onActivated?: (profile: Profile) => void
+  deps: ProfileHandlerDeps
 ): void {
+  const { onActivated, onChanged, openWindow, consumeReveal } = deps;
+
   bus.register("profile:list", () => ok(profiles.snapshot()));
 
   bus.register("profile:switch", (req) => {
@@ -22,8 +35,26 @@ export function registerProfileHandlers(
     const snapshot = profiles.switch(req.profileId);
     emitEvent("profile:changed", snapshot);
     onActivated?.(profile);
+    onChanged?.();
     return ok(snapshot);
   });
+
+  bus.register("profile:openWindow", (req) => {
+    const opened = openWindow(req.profileId, req.revealRepoId);
+    if (!opened) {
+      return err({
+        kind: "profile",
+        code: "not_found",
+        message: `No profile "${req.profileId}"`
+      });
+    }
+    emitEvent("profile:changed", profiles.snapshot());
+    return ok(null);
+  });
+
+  bus.register("window:consumeReveal", (req) =>
+    ok({ repoId: consumeReveal(req.profileId) })
+  );
 
   bus.register("profile:update", (req) => {
     if (req.name !== undefined && req.name.trim() === "") {
@@ -49,6 +80,7 @@ export function registerProfileHandlers(
       });
     }
     emitEvent("profile:changed", profiles.snapshot());
+    onChanged?.();
     return ok(profile);
   });
 
@@ -69,6 +101,7 @@ export function registerProfileHandlers(
     }
     const profile = profiles.create(req);
     emitEvent("profile:changed", profiles.snapshot());
+    onChanged?.();
     return ok(profile);
   });
 }

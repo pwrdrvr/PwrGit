@@ -5,12 +5,14 @@ import type {
   ProfileList,
   UpdateProfileRequest
 } from "@pwrgit/shared";
-import { dispatch, subscribe } from "../lib/pwrgit";
+import { dispatch, subscribe, windowProfileId } from "../lib/pwrgit";
 
 export type UseProfiles = ProfileList & {
+  /** The profile THIS WINDOW is bound to (one window per profile). */
   activeProfile: Profile | null;
-  switchProfile: (profileId: string) => Promise<void>;
-  /** Create a profile and make it active. Returns an error message or null. */
+  /** Open (or focus) another profile's window; this window is unaffected. */
+  openProfile: (profileId: string, revealRepoId?: string) => Promise<void>;
+  /** Create a profile and open its window. Returns an error message or null. */
   createProfile: (req: CreateProfileRequest) => Promise<string | null>;
   /** Patch an existing profile. Returns an error message or null. */
   updateProfile: (req: UpdateProfileRequest) => Promise<string | null>;
@@ -39,19 +41,24 @@ export function useProfiles(): UseProfiles {
     };
   }, []);
 
-  const switchProfile = useCallback(async (profileId: string) => {
-    const r = await dispatch("profile:switch", { profileId });
-    if (r.ok) setState(r.value);
-  }, []);
+  const openProfile = useCallback(
+    async (profileId: string, revealRepoId?: string) => {
+      await dispatch("profile:openWindow", {
+        profileId,
+        ...(revealRepoId !== undefined ? { revealRepoId } : {})
+      });
+    },
+    []
+  );
 
   const createProfile = useCallback(
     async (req: CreateProfileRequest): Promise<string | null> => {
       const r = await dispatch("profile:create", req);
       if (!r.ok) return r.error.message;
-      await switchProfile(r.value.id);
+      await openProfile(r.value.id);
       return null;
     },
-    [switchProfile]
+    [openProfile]
   );
 
   const updateProfile = useCallback(
@@ -71,13 +78,15 @@ export function useProfiles(): UseProfiles {
     return r.ok ? r.value : [];
   }, []);
 
-  const activeProfile =
-    state.profiles.find((p) => p.id === state.activeProfileId) ?? null;
+  // This window's profile is fixed at creation (preload argv); the global
+  // "active" id is only a fallback for windows created without a binding.
+  const boundId = windowProfileId() ?? state.activeProfileId;
+  const activeProfile = state.profiles.find((p) => p.id === boundId) ?? null;
 
   return {
     ...state,
     activeProfile,
-    switchProfile,
+    openProfile,
     createProfile,
     updateProfile,
     setRoots,

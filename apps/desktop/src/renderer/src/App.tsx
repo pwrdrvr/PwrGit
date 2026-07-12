@@ -10,6 +10,7 @@ import { Rail } from "./features/rail/Rail";
 import { ProfileModal } from "./features/sidebar/ProfileModal";
 import { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
 import { Sidebar } from "./features/sidebar/Sidebar";
+import { dispatch, subscribe, windowProfileId } from "./lib/pwrgit";
 import { useAppearance } from "./lib/useAppearance";
 import { useColumnResize } from "./lib/useColumnResize";
 import { useProfiles } from "./state/useProfiles";
@@ -30,7 +31,7 @@ export function App() {
   const {
     profiles,
     activeProfile,
-    switchProfile,
+    openProfile,
     createProfile,
     updateProfile,
     setRoots,
@@ -110,7 +111,7 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Resolve a cross-profile pick once the target profile's repos have loaded.
+  // Resolve a repo reveal once this window's repos have loaded.
   useEffect(() => {
     if (pendingRepoId === null) return;
     const repo = repos.find((r) => r.id === pendingRepoId);
@@ -123,6 +124,43 @@ export function App() {
     setPendingRepoId(null);
   }, [pendingRepoId, repos]);
 
+  // One window per profile: on boot, pick up any reveal queued for this
+  // window (a cross-profile ⌘F pick that opened it); afterwards, reveals for
+  // an already-open window arrive as ui:revealRepo events.
+  useEffect(() => {
+    const profileId = windowProfileId();
+    if (profileId === null) return;
+    void dispatch("window:consumeReveal", { profileId }).then((r) => {
+      if (r.ok && r.value.repoId !== null) setPendingRepoId(r.value.repoId);
+    });
+    return subscribe("ui:revealRepo", (p) => {
+      if (p.profileId === profileId) setPendingRepoId(p.repoId);
+    });
+  }, []);
+
+  // Native Profiles-menu actions land in the focused window.
+  useEffect(() => {
+    const offNew = subscribe("ui:newProfile", () => {
+      if (document.hasFocus()) setProfileModal({ mode: "create" });
+    });
+    const offManage = subscribe("ui:manageProfile", () => {
+      if (document.hasFocus() && activeProfile !== null) {
+        setProfileModal({ mode: "edit", profile: activeProfile });
+      }
+    });
+    return () => {
+      offNew();
+      offManage();
+    };
+  }, [activeProfile]);
+
+  // Window title carries the profile so the Window menu / Mission Control can
+  // tell the profile windows apart.
+  useEffect(() => {
+    document.title =
+      activeProfile !== null ? `PwrGit — ${activeProfile.name}` : "PwrGit";
+  }, [activeProfile]);
+
   const selectWorktree = useCallback((repo: Repo, worktree: Worktree) => {
     setSelection({ repoId: repo.id, worktreeId: worktree.id });
   }, []);
@@ -131,11 +169,14 @@ export function App() {
     (hit: RepoSearchHit) => {
       setOverlayOpen(false);
       if (activeProfile !== null && hit.profileId !== activeProfile.id) {
-        switchProfile(hit.profileId);
+        // Another profile's repo → open/focus THAT profile's window and
+        // reveal it there; this window stays put.
+        void openProfile(hit.profileId, hit.repoId);
+        return;
       }
       setPendingRepoId(hit.repoId);
     },
-    [activeProfile, switchProfile]
+    [activeProfile, openProfile]
   );
 
   const selectedRepo = useMemo(
@@ -153,7 +194,9 @@ export function App() {
     <div className="app">
       <div className="titlebar">
         <div className="titlebar__gutter" />
-        <div className="titlebar__title">PwrGit</div>
+        <div className="titlebar__title">
+          {activeProfile !== null ? `PwrGit — ${activeProfile.name}` : "PwrGit"}
+        </div>
         <div className="titlebar__gutter" />
       </div>
 
@@ -161,7 +204,7 @@ export function App() {
         <Sidebar
           profiles={profiles}
           activeProfile={activeProfile}
-          onSwitchProfile={switchProfile}
+          onSwitchProfile={(id) => void openProfile(id)}
           repos={repos}
           loading={loading}
           selectedWorktreeId={selection?.worktreeId ?? null}

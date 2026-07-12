@@ -2,10 +2,12 @@ import { join } from "node:path";
 import { BrowserWindow, shell } from "electron";
 
 /**
- * Create the single main window. Frameless-inset titlebar on macOS, custom
- * title-bar overlay on Windows; the renderer paints its own titlebar row.
+ * Create a profile-bound window (one window per profile). Frameless-inset
+ * titlebar on macOS, custom title-bar overlay on Windows; the renderer paints
+ * its own titlebar row. The bound profile travels via additionalArguments so
+ * the preload can expose it before the renderer boots.
  */
-export function createMainWindow(): BrowserWindow {
+export function createMainWindow(profileId: string): BrowserWindow {
   const window = new BrowserWindow({
     width: 1360,
     height: 860,
@@ -28,7 +30,8 @@ export function createMainWindow(): BrowserWindow {
       preload: join(__dirname, "../preload/index.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      additionalArguments: [`--pwrgit-profile=${profileId}`]
     }
   });
 

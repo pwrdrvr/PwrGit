@@ -187,7 +187,9 @@ input {
 /* ---- Sidebar: profile chip + menu ---- */
 
 .sidebar__profile {
-  padding: 12px 12px 10px;
+  /* A touch more headroom than the standard 12px so the chip's border and
+     focus ring never kiss the titlebar's bottom edge. */
+  padding: 14px 12px 10px;
   border-bottom: 1px solid var(--border-subtle);
   position: relative;
 }
@@ -229,6 +231,14 @@ input {
   background: var(--bg-hover-strong);
   border-color: var(--accent-border);
 }
+/* Slim themed ring instead of the chunky UA outline butting the titlebar. */
+.profile-chip:focus-visible {
+  outline: 1px solid var(--accent-border);
+  outline-offset: 2px;
+}
+.profile-chip:focus:not(:focus-visible) {
+  outline: none;
+}
 
 .profile-chip__text {
   flex: 1;
@@ -264,6 +274,12 @@ input {
   transform: rotate(-135deg);
 }
 
+/* Full-viewport catcher under the menu — any outside click closes it. */
+.profile-menu__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+}
 .profile-menu {
   position: absolute;
   top: calc(100% - 2px);

@@ -29,11 +29,14 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
   const [removalProgress, setRemovalProgress] =
     useState<RemovalProgress | null>(null);
 
+  // Always scope to THIS window's profile — with one window per profile, the
+  // global "active" profile changes whenever any window opens.
   const reload = useCallback(async () => {
-    const r = await dispatch("repo:list", {});
+    if (activeProfileId === null) return;
+    const r = await dispatch("repo:list", { profileId: activeProfileId });
     if (r.ok) setRepos(r.value);
     setLoading(false);
-  }, []);
+  }, [activeProfileId]);
 
   useEffect(() => {
     if (activeProfileId === null) {
@@ -43,7 +46,9 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     }
     setLoading(true);
     void reload();
-    const off = subscribe("repo:changed", () => void reload());
+    const off = subscribe("repo:changed", (p) => {
+      if (p.profileId === activeProfileId) void reload();
+    });
     return off;
   }, [activeProfileId, reload]);
 

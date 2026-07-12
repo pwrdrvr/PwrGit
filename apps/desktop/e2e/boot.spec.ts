@@ -18,7 +18,8 @@ test("boots a single window with #root mounted", async () => {
   const window = await electronApp.firstWindow();
   await window.waitForSelector("#root");
 
-  expect(await window.title()).toBe("PwrGit");
+  // One window per profile: the title carries the booted profile's name.
+  expect(await window.title()).toMatch(/^PwrGit( — .+)?$/);
   expect(electronApp.windows().length).toBe(1);
 
   await electronApp.close();

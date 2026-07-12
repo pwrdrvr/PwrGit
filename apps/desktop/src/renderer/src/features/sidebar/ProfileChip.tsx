@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Profile } from "@pwrgit/shared";
 
 function monogram(p: Profile): string {
@@ -19,6 +19,17 @@ export function ProfileChip({
   onManageProfile: () => void;
 }) {
   const [open, setOpen] = useState(false);
+
+  // Escape closes; clicks elsewhere land on the backdrop below.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
   if (activeProfile === null) return null;
 
   return (
@@ -37,6 +48,12 @@ export function ProfileChip({
         <span className={`profile-caret${open ? " is-open" : ""}`} />
       </button>
 
+      {open && (
+        <div
+          className="profile-menu__backdrop"
+          onClick={() => setOpen(false)}
+        />
+      )}
       {open && (
         <div className="profile-menu">
           <div className="profile-menu__label">Profiles</div>

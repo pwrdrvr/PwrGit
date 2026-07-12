@@ -14,6 +14,7 @@ afterEach(() => {
 describe("renderer dispatch helpers", () => {
   it("dispatch returns the Result the bridge produced", async () => {
     installBridge({
+      profileId: null,
       dispatch: async () => ({ ok: true, value: "pong" }),
       on: () => () => {}
     });
@@ -23,6 +24,7 @@ describe("renderer dispatch helpers", () => {
 
   it("dispatchOrThrow unwraps an ok Result", async () => {
     installBridge({
+      profileId: null,
       dispatch: async () => ({ ok: true, value: "pong" }),
       on: () => () => {}
     });
@@ -31,6 +33,7 @@ describe("renderer dispatch helpers", () => {
 
   it("dispatchOrThrow throws PwrGitDispatchError on an err Result", async () => {
     installBridge({
+      profileId: null,
       dispatch: async () => ({
         ok: false,
         error: { kind: "unknown", code: "x", message: "m" }
@@ -46,6 +49,7 @@ describe("renderer dispatch helpers", () => {
     let registeredChannel: string | null = null;
     let unsubscribed = false;
     installBridge({
+      profileId: null,
       dispatch: async () => ({ ok: true, value: "" }),
       on: (channel, _handler) => {
         registeredChannel = channel;
