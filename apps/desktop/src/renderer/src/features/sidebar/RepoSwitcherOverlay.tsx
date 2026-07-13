@@ -3,6 +3,7 @@ import type { RepoSearchHit, SearchHitStatus } from "@pwrgit/shared";
 import { createAsyncFill } from "../../lib/asyncFill";
 import { dispatch } from "../../lib/pwrgit";
 import { shortWhen } from "../graph/graph-view";
+import { PrChip } from "./PrChip";
 
 const hitKey = (hit: RepoSearchHit): string =>
   `${hit.kind}:${hit.worktreeId ?? hit.repoId}`;
@@ -176,6 +177,7 @@ export function RepoSwitcherOverlay({
                 </svg>
               )}
               <span className="overlay-result__name">{r.name}</span>
+              {r.pr !== undefined && <PrChip pr={r.pr} />}
               {(() => {
                 const s = statuses.get(hitKey(r));
                 if (s === undefined) return null;

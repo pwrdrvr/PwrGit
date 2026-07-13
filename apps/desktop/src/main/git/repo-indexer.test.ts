@@ -187,9 +187,13 @@ describe("searchAll (FTS5)", () => {
     ).run(repoRow.id);
 
     const byNumber = indexer.searchAll("13029");
-    expect(
-      byNumber.some((h) => h.kind === "worktree" && h.name === "feature")
-    ).toBe(true);
+    const hit = byNumber.find(
+      (h) => h.kind === "worktree" && h.name === "feature"
+    );
+    expect(hit).toBeDefined();
+    // The hit carries the PR itself, so the overlay can wear the chip.
+    expect(hit?.pr?.number).toBe(13029);
+    expect(hit?.pr?.state).toBe("open");
 
     const byTitle = indexer.searchAll("readonly channel");
     expect(

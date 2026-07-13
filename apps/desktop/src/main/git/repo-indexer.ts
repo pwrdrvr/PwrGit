@@ -6,6 +6,7 @@ import {
   ok,
   type Profile,
   type ProfileId,
+  type PrSummary,
   type Repo,
   type RepoSearchHit,
   type Result,
@@ -291,10 +292,14 @@ export class RepoIndexer {
       const rows = this.db
         .prepare(
           `SELECT w.id, w.branch, w.path, r.id AS repo_id, r.name AS repo_name,
-                  r.profile_id, p.name AS profile_name
+                  r.profile_id, p.name AS profile_name,
+                  pr.number AS pr_number, pr.url AS pr_url, pr.title AS pr_title,
+                  pr.state AS pr_state, pr.is_draft AS pr_is_draft
            FROM worktrees w
            JOIN repos r ON r.id = w.repo_id
            JOIN profiles p ON p.id = r.profile_id
+           LEFT JOIN branch_pr pr
+             ON pr.repo_id = w.repo_id AND pr.branch = w.branch
            WHERE w.id IN (${marks(wtIds.length)})`
         )
         .all(...wtIds) as {
@@ -305,9 +310,14 @@ export class RepoIndexer {
         repo_name: string;
         profile_id: string;
         profile_name: string;
+        pr_number: number | null;
+        pr_url: string | null;
+        pr_title: string | null;
+        pr_state: string | null;
+        pr_is_draft: number | null;
       }[];
       for (const w of rows) {
-        wtHits.set(w.id, {
+        const hit: RepoSearchHit = {
           kind: "worktree",
           repoId: w.repo_id,
           name: w.branch,
@@ -317,7 +327,17 @@ export class RepoIndexer {
           worktreeCount: 0,
           worktreeId: w.id,
           repoName: w.repo_name
-        });
+        };
+        if (w.pr_number !== null) {
+          hit.pr = {
+            number: w.pr_number,
+            url: w.pr_url ?? "",
+            title: w.pr_title ?? "",
+            state: (w.pr_state ?? "open") as PrSummary["state"],
+            isDraft: w.pr_is_draft === 1
+          };
+        }
+        wtHits.set(w.id, hit);
       }
     }
 

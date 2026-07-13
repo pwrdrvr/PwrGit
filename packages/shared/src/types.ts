@@ -212,4 +212,6 @@ export type RepoSearchHit = {
   worktreeId?: WorktreeId;
   /** Owning repo's name, shown as context on worktree hits. */
   repoName?: string;
+  /** The branch's PR, when known (worktree hits only). */
+  pr?: PrSummary;
 };
