@@ -152,26 +152,10 @@ export function WorktreeRow({
           {relativeAge(worktree.lastActivityAt)}
         </span>
       )}
-      {/* Trash + pin toggle reserve no space at rest — they float over the row's
-          right edge on hover only (pinned state reads from sort order + the
-          section's "Pinned" badge, as in PwrAgnt). The kebab keeps its slot. */}
+      {/* Only the pin star floats over the right edge on hover (it overlays
+          the age); removal lives in the kebab so the PR chip and status tags
+          never have to hide to make room. The kebab keeps its slot. */}
       <div className="wt-row__hoveracts">
-        {!worktree.isPrimary && (
-          <button
-            type="button"
-            className="wt-remove"
-            title="Remove worktree"
-            aria-label="Remove worktree"
-            onClick={(e) => {
-              e.stopPropagation();
-              onRemove();
-            }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" />
-            </svg>
-          </button>
-        )}
         <button
           type="button"
           className={`pin${worktree.pinned ? " is-pinned" : ""}`}
@@ -185,7 +169,11 @@ export function WorktreeRow({
           <PinIcon filled={worktree.pinned} size={11} />
         </button>
       </div>
-      <WorktreeMenu worktree={worktree} className="wt-row__menu" />
+      <WorktreeMenu
+        worktree={worktree}
+        className="wt-row__menu"
+        {...(worktree.isPrimary ? {} : { onRemove })}
+      />
     </div>
   );
 }

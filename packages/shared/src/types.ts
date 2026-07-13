@@ -187,7 +187,7 @@ export type AgentStatus = {
 };
 
 export type Lens = "Recent" | "Pinned" | "Behind" | "Stale" | "All";
-export type WorktreeSort = "pinned" | "az" | "active" | "custom";
+export type WorktreeSort = "recent" | "pinned" | "az" | "active" | "custom";
 
 /** Lazily-filled status for a ⌘F search hit (nulls = unknown/uncached). */
 export type SearchHitStatus = {

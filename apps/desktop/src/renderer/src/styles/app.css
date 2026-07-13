@@ -851,32 +851,9 @@ input {
   color: var(--text-subtle);
 }
 
-.wt-remove {
-  flex: 0 0 auto;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  border: 1px solid var(--border-subtle);
-  background: transparent;
-  cursor: pointer;
-  color: var(--text-secondary);
-}
-.wt-remove:hover,
-.wt-remove:focus-visible {
-  outline: none;
-  background: var(--danger-soft);
-  border-color: transparent;
-  color: var(--danger);
-}
-
-/* The trash + pin toggle float over the row's right edge, reserving no space at
-   rest — only the kebab keeps a reserved slot (so it never shifts). The cluster
-   fades in on hover / selection / focus / open-menu. A pinned row shows a
-   persistent star at rest that steps aside for the cluster on hover. */
+/* The pin star floats over the row's right edge, reserving no space at rest —
+   only the kebab keeps a reserved slot (so it never shifts). Removal lives in
+   the kebab so status tags and PR chips never hide to make room. */
 .wt-row__hoveracts {
   position: absolute;
   right: 33px; /* just left of the reserved 24px kebab (+ 7px row padding) */
@@ -906,19 +883,11 @@ input {
 .wt-row__menu:has(.kebab__btn[aria-expanded="true"]) {
   opacity: 1;
 }
-/* On hover the floating controls occupy the row's right edge; the trailing meta
-   (age, status tags, dirty/ahead-behind counts, pin star) yields so the
-   controls never overlap it — it returns the moment the pointer leaves. */
+/* On hover the floating star lands where the age text sits — ONLY the age
+   yields. PR chips, status tags, and count badges stay put and stay
+   interactive (the PR chip has its own click + tooltip). */
 .wt-row:hover .wt-age,
-.wt-row:focus-within .wt-age,
-.wt-row:hover .wt-tag,
-.wt-row:focus-within .wt-tag,
-.wt-row:hover .pr-chip,
-.wt-row:focus-within .pr-chip,
-.wt-row:hover .badge,
-.wt-row:focus-within .badge,
-.wt-row:hover .badge-text,
-.wt-row:focus-within .badge-text {
+.wt-row:focus-within .wt-age {
   opacity: 0;
 }
 

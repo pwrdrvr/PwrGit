@@ -76,10 +76,24 @@ describe("orderWorktrees", () => {
     wt({ id: "3", branch: "alpha", pinned: true })
   ];
 
-  it("sort cycle is pinned → az → active → pinned", () => {
+  it("sort cycle is recent → pinned → az → active → recent", () => {
+    expect(SORT_CYCLE.recent).toBe("pinned");
     expect(SORT_CYCLE.pinned).toBe("az");
     expect(SORT_CYCLE.az).toBe("active");
-    expect(SORT_CYCLE.active).toBe("pinned");
+    expect(SORT_CYCLE.active).toBe("recent");
+  });
+
+  it("Recent sorts by last activity, missing timestamps last", () => {
+    const dated = [
+      wt({ id: "old", branch: "old", lastActivityAt: "2026-06-01T00:00:00Z" }),
+      wt({ id: "none", branch: "none" }),
+      wt({ id: "new", branch: "new", lastActivityAt: "2026-07-10T00:00:00Z" })
+    ];
+    expect(orderWorktrees(dated, "recent").map((w) => w.id)).toEqual([
+      "new",
+      "old",
+      "none"
+    ]);
   });
 
   it("A–Z sorts by branch name", () => {

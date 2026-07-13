@@ -96,12 +96,14 @@ export function filterReposByLens(repos: Repo[], lens: Lens): Repo[] {
 }
 
 export const SORT_CYCLE: Record<Exclude<WorktreeSort, "custom">, WorktreeSort> = {
+  recent: "pinned",
   pinned: "az",
   az: "active",
-  active: "pinned"
+  active: "recent"
 };
 
 export const SORT_LABEL: Record<WorktreeSort, string> = {
+  recent: "Recent",
   pinned: "Pinned",
   az: "A–Z",
   active: "Active",
@@ -125,6 +127,19 @@ export function orderWorktrees(
       return i === -1 ? Number.MAX_SAFE_INTEGER : i;
     };
     return list.sort((a, b) => rank(a.id) - rank(b.id));
+  }
+  if (sort === "recent") {
+    // Most recently active first, so live work floats to the top instead of
+    // whatever discovery order happened to produce. Rows without a computed
+    // timestamp (state not filled yet) sink to the bottom and shuffle into
+    // place as their state lands.
+    return list.sort((a, b) => {
+      const ta =
+        a.lastActivityAt !== undefined ? Date.parse(a.lastActivityAt) : -1;
+      const tb =
+        b.lastActivityAt !== undefined ? Date.parse(b.lastActivityAt) : -1;
+      return tb - ta;
+    });
   }
   if (sort === "az") {
     // Case-insensitive + natural-numeric, so "Foo" sits by "foo" and "v2"

@@ -321,8 +321,8 @@ export function Sidebar({
 
   const cycleSort = (repoId: string): void => {
     setSortByRepo((prev) => {
-      const current = prev[repoId] ?? "pinned";
-      const next = current === "custom" ? "pinned" : SORT_CYCLE[current];
+      const current = prev[repoId] ?? "recent";
+      const next = current === "custom" ? "recent" : SORT_CYCLE[current];
       return { ...prev, [repoId]: next };
     });
     // Cycling clears a manual drag order.
@@ -343,7 +343,7 @@ export function Sidebar({
       )}
       selectedWorktreeId={selectedWorktreeId}
       selectedIds={sel.repoId === repo.id ? sel.ids : EMPTY_IDS}
-      sort={sortByRepo[repo.id] ?? "pinned"}
+      sort={sortByRepo[repo.id] ?? "recent"}
       customOrder={orderByRepo[repo.id]}
       onToggleExpand={() => toggleExpand(repo)}
       onToggleRepoPin={() => onSetRepoPin(repo.id, !repo.pinned)}

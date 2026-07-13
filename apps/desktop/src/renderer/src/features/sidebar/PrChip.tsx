@@ -1,7 +1,10 @@
 import type { PrSummary } from "@pwrgit/shared";
+import { copyText } from "../../lib/copyText";
 import { dispatch } from "../../lib/pwrgit";
 
-/** A compact PR-status chip: colored dot + #number, click to open the PR. */
+/** A compact PR-status chip: colored dot + #number. Click opens the PR in
+ *  the browser; ⌥-click copies its URL. The tooltip carries the full story —
+ *  number, title, state, draft. */
 export function PrChip({ pr }: { pr: PrSummary }) {
   const label =
     pr.state === "merged"
@@ -10,25 +13,29 @@ export function PrChip({ pr }: { pr: PrSummary }) {
         ? `closed #${pr.number}`
         : `#${pr.number}`;
   const open = (): void => void dispatch("shell:openExternal", { url: pr.url });
+  const activate = (altKey: boolean): void => {
+    if (altKey) void copyText(pr.url);
+    else open();
+  };
 
   return (
     <span
       className={`pr-chip pr-chip--${pr.state}${pr.isDraft ? " pr-chip--draft" : ""}`}
       role="button"
       tabIndex={0}
-      aria-label={`Open PR #${pr.number} (${pr.state}) in browser`}
-      title={`${pr.title || `PR #${pr.number}`}\n${pr.state}${
+      aria-label={`PR #${pr.number} (${pr.state}) — Enter opens in browser`}
+      title={`#${pr.number} — ${pr.title || "untitled"}\n${pr.state}${
         pr.isDraft ? " · draft" : ""
-      } — click to open`}
+      }\nClick to open · ⌥-click to copy URL`}
       onClick={(e) => {
         e.stopPropagation();
-        open();
+        activate(e.altKey);
       }}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.stopPropagation();
           e.preventDefault();
-          open();
+          activate(e.altKey);
         }
       }}
     >
