@@ -2,8 +2,11 @@ import { useEffect, useState } from "react";
 import type { Worktree, WorktreeState } from "@pwrgit/shared";
 import { AgentTab } from "./AgentTab";
 import { ChangesTab } from "./ChangesTab";
+import { CommitTab } from "./CommitTab";
 
 type RailTab = "changes" | "agent";
+
+export type CommitFocus = { hash: string; subject: string };
 
 export function Rail({
   worktree,
@@ -11,6 +14,10 @@ export function Rail({
   activeEmail,
   selectedHashes,
   agentAction,
+  commitFocus,
+  onCloseCommit,
+  onOpenCommitFile,
+  onOpenFullCommitDiff,
   onClearSelection,
   onCollapse,
   onOpenDiff
@@ -20,6 +27,11 @@ export function Rail({
   activeEmail: string;
   selectedHashes: string[];
   agentAction: "squash" | "reorder" | null;
+  /** A commit clicked in the lineage — the Changes tab shows ITS files. */
+  commitFocus: CommitFocus | null;
+  onCloseCommit: () => void;
+  onOpenCommitFile: (path: string) => void;
+  onOpenFullCommitDiff: () => void;
   onClearSelection: () => void;
   onCollapse: () => void;
   onOpenDiff: (path: string, staged: boolean) => void;
@@ -31,6 +43,11 @@ export function Rail({
     if (agentAction !== null) setTab("agent");
   }, [agentAction]);
 
+  // Clicking a commit pulls the rail to the (commit-scoped) changes view.
+  useEffect(() => {
+    if (commitFocus !== null) setTab("changes");
+  }, [commitFocus]);
+
   return (
     <aside className="pane pane--rail" data-testid="rail">
       <div className="rail__bar">
@@ -38,8 +55,10 @@ export function Rail({
           className={`rail-tab${tab === "changes" ? " is-active" : ""}`}
           onClick={() => setTab("changes")}
         >
-          Changes
-          {dirty > 0 && <span className="rail-tab__badge">{dirty}</span>}
+          {commitFocus !== null ? "Commit" : "Changes"}
+          {commitFocus === null && dirty > 0 && (
+            <span className="rail-tab__badge">{dirty}</span>
+          )}
         </button>
         <button
           className={`rail-tab${tab === "agent" ? " is-active" : ""}`}
@@ -62,11 +81,22 @@ export function Rail({
       </div>
 
       {tab === "changes" ? (
-        <ChangesTab
-          worktree={worktree}
-          activeEmail={activeEmail}
-          onOpenDiff={onOpenDiff}
-        />
+        commitFocus !== null && worktree !== null ? (
+          <CommitTab
+            worktreeId={worktree.id}
+            hash={commitFocus.hash}
+            subject={commitFocus.subject}
+            onOpenFile={onOpenCommitFile}
+            onOpenFullDiff={onOpenFullCommitDiff}
+            onClose={onCloseCommit}
+          />
+        ) : (
+          <ChangesTab
+            worktree={worktree}
+            activeEmail={activeEmail}
+            onOpenDiff={onOpenDiff}
+          />
+        )
       ) : (
         <AgentTab
           worktreeId={worktree?.id ?? null}

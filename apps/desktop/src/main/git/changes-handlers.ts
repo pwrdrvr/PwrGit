@@ -5,6 +5,8 @@ import { execGit } from "./dugite";
 import {
   commitChanges,
   commitDiff,
+  commitFileDiff,
+  commitFiles,
   type CommitIdentity,
   discardPath,
   fileDiff,
@@ -111,5 +113,17 @@ export function registerChangesHandlers(
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
     return commitDiff(execGit, path, req.hash);
+  });
+
+  bus.register("commit:files", async (req) => {
+    const path = pathOf(req.worktreeId);
+    if (path === null) return err(notFound);
+    return commitFiles(execGit, path, req.hash);
+  });
+
+  bus.register("diff:commitFile", async (req) => {
+    const path = pathOf(req.worktreeId);
+    if (path === null) return err(notFound);
+    return commitFileDiff(execGit, path, req.hash, req.path);
   });
 }

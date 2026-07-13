@@ -14,6 +14,7 @@ import type {
   AgentStatus,
   BranchRef,
   ChangeSet,
+  CommitFileChange,
   GraphLog,
   LaneGraph,
   PrSummary,
@@ -202,6 +203,16 @@ export interface Commands {
   };
   /** Unified diff of the changes a commit introduced. */
   "diff:commit": { req: { worktreeId: string; hash: string }; res: string };
+  /** The files a commit touched (rail's commit-scoped list). */
+  "commit:files": {
+    req: { worktreeId: string; hash: string };
+    res: CommitFileChange[];
+  };
+  /** Unified diff of ONE file within a commit. */
+  "diff:commitFile": {
+    req: { worktreeId: string; hash: string; path: string };
+    res: string;
+  };
 
   "dialog:pickDirectory": { req: void; res: string | null };
   "dialog:pickDirectories": { req: void; res: string[] };

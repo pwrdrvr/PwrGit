@@ -4,9 +4,30 @@ import {
   parseBranchRefs,
   parseChanges,
   parseLog,
+  parseNameStatus,
   parseWorktreeList,
   topoMergeCommits
 } from "./git-service";
+
+describe("parseNameStatus", () => {
+  it("parses modified/added/deleted and takes the NEW path for renames", () => {
+    const out = parseNameStatus(
+      [
+        "M\tsrc/app.ts",
+        "A\tdocs/new.md",
+        "D\told/file.txt",
+        "R100\tsrc/before.ts\tsrc/after.ts",
+        ""
+      ].join("\n")
+    );
+    expect(out).toEqual([
+      { path: "src/app.ts", status: "M" },
+      { path: "docs/new.md", status: "A" },
+      { path: "old/file.txt", status: "D" },
+      { path: "src/after.ts", status: "R" }
+    ]);
+  });
+});
 
 describe("topoMergeCommits", () => {
   const mk = (hash: string, when: string, ...parents: string[]): Commit => ({

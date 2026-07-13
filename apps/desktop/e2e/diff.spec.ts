@@ -43,3 +43,40 @@ test("clicking a changed file opens its diff, then back returns to lineage", asy
   await window.locator(".diff-pane__back").click();
   await expect(window.locator(".graph-toolbar")).toBeVisible();
 });
+
+test("clicking a commit scopes the rail to its files; a file opens its diff", async () => {
+  sandbox = createGitSandbox();
+  const repo = sandbox.makeRepo("commitscope");
+  sandbox.commit(repo.path, "second.md", "add second doc");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, sandbox, "commitscope");
+
+  // Click the commit in the lineage → the rail shows THAT commit's files,
+  // not a full-pane laundry-list diff.
+  await window.locator(".graph-row", { hasText: "add second doc" }).click();
+  const commitTab = window.locator(".commit-tab");
+  await expect(commitTab).toBeVisible({ timeout: 20_000 });
+  await expect(commitTab.locator(".commit-tab__subject")).toHaveText(
+    "add second doc"
+  );
+  await expect(window.locator(".diff-pane")).toHaveCount(0);
+  const fileRow = commitTab.locator(".file-row", { hasText: "second.md" });
+  await expect(fileRow).toBeVisible();
+
+  // Click the file → a diff scoped to that file within the commit.
+  await fileRow.click();
+  await expect(window.locator(".diff-pane")).toBeVisible();
+  await expect(
+    window.locator(".diff-row--add", { hasText: "add second doc" })
+  ).toBeVisible();
+  await expect(window.locator(".diff-pane__sub")).toContainText("in ");
+
+  // Back → lineage; ‹ Changes → the working-tree view returns.
+  await window.locator(".diff-pane__back").click();
+  await expect(window.locator(".graph-toolbar")).toBeVisible();
+  await commitTab.locator(".commit-tab__close").click();
+  await expect(window.locator(".commit-tab")).toHaveCount(0);
+  await expect(window.locator(".changes-clean")).toBeVisible();
+});

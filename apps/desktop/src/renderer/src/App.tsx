@@ -73,12 +73,19 @@ export function App() {
     null
   );
   const [diffTarget, setDiffTarget] = useState<DiffTarget | null>(null);
+  // A commit clicked in the lineage — the rail shows its file list, scoped
+  // like the WIP Changes tab; files open one-file diffs in the main pane.
+  const [commitFocus, setCommitFocus] = useState<{
+    hash: string;
+    subject: string;
+  } | null>(null);
 
   // Clear commit selection + any open diff when the worktree changes.
   useEffect(() => {
     setSelectedCommits(new Set());
     setAgentAction(null);
     setDiffTarget(null);
+    setCommitFocus(null);
   }, [selection?.worktreeId]);
 
   const toggleCommit = useCallback((hash: string) => {
@@ -270,9 +277,10 @@ export function App() {
                   activeEmail={activeProfile?.email ?? ""}
                   selectedCommits={selectedCommits}
                   onToggleCommit={toggleCommit}
-                  onOpenCommit={(hash, subject) =>
-                    setDiffTarget({ kind: "commit", hash, subject })
-                  }
+                  onOpenCommit={(hash, subject) => {
+                    setCommitFocus({ hash, subject });
+                    setRailCollapsed(false);
+                  }}
                   onRevealWorktree={(worktreeId) => {
                     const repo = repos.find((r) =>
                       r.worktrees.some((w) => w.id === worktreeId)
@@ -328,6 +336,27 @@ export function App() {
             activeEmail={activeProfile?.email ?? ""}
             selectedHashes={Array.from(selectedCommits)}
             agentAction={agentAction}
+            commitFocus={commitFocus}
+            onCloseCommit={() => setCommitFocus(null)}
+            onOpenCommitFile={(path) => {
+              if (commitFocus !== null) {
+                setDiffTarget({
+                  kind: "commitFile",
+                  hash: commitFocus.hash,
+                  path,
+                  subject: commitFocus.subject
+                });
+              }
+            }}
+            onOpenFullCommitDiff={() => {
+              if (commitFocus !== null) {
+                setDiffTarget({
+                  kind: "commit",
+                  hash: commitFocus.hash,
+                  subject: commitFocus.subject
+                });
+              }
+            }}
             onClearSelection={clearSelection}
             onCollapse={() => setRailCollapsed(true)}
             onOpenDiff={(path, staged) =>

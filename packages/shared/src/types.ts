@@ -107,6 +107,12 @@ export type ChangeSet = {
   unstaged: FileChange[];
 };
 
+/** One file touched by a commit (rail's commit-scoped file list). */
+export type CommitFileChange = {
+  path: string;
+  status: FileStatus;
+};
+
 export type Commit = {
   hash: string;
   shortHash: string;

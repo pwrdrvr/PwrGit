@@ -2,6 +2,7 @@ import {
   type BranchRef,
   type ChangeSet,
   type Commit,
+  type CommitFileChange,
   err,
   type FileStatus,
   ok,
@@ -133,6 +134,53 @@ export async function commitDiff(
 ): Promise<Result<string>> {
   const raw = await git(
     ["show", "--no-color", "--format=", "--patch", "-M", hash],
+    cwd
+  );
+  if (!raw.ok) return raw;
+  return ok(raw.value.stdout);
+}
+
+/** Parse `--name-status` output ("M\tpath", "R100\told\tnew", …). Renames and
+ *  copies report the NEW path. */
+export function parseNameStatus(stdout: string): CommitFileChange[] {
+  const out: CommitFileChange[] = [];
+  for (const line of stdout.split("\n")) {
+    if (line.trim() === "") continue;
+    const parts = line.split("\t");
+    const code = parts[0]?.[0];
+    if (code === undefined) continue;
+    const path = (parts.length > 2 ? parts[2] : parts[1]) ?? "";
+    if (path === "") continue;
+    out.push({ path, status: mapStatusCode(code) });
+  }
+  return out;
+}
+
+/** The files a commit touched, with status letters. */
+export async function commitFiles(
+  git: GitExec,
+  cwd: string,
+  hash: string
+): Promise<Result<CommitFileChange[]>> {
+  const raw = await git(
+    ["show", "--name-status", "--format=", "-M", hash],
+    cwd
+  );
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["show"]);
+  if (!checked.ok) return checked;
+  return ok(parseNameStatus(checked.value.stdout));
+}
+
+/** Unified diff of ONE file within a commit. */
+export async function commitFileDiff(
+  git: GitExec,
+  cwd: string,
+  hash: string,
+  path: string
+): Promise<Result<string>> {
+  const raw = await git(
+    ["show", "--no-color", "--format=", "--patch", "-M", hash, "--", path],
     cwd
   );
   if (!raw.ok) return raw;

@@ -4,7 +4,8 @@ import { DiffViewer } from "./DiffViewer";
 
 export type DiffTarget =
   | { kind: "file"; path: string; staged: boolean }
-  | { kind: "commit"; hash: string; subject: string };
+  | { kind: "commit"; hash: string; subject: string }
+  | { kind: "commitFile"; hash: string; path: string; subject: string };
 
 /** Full-pane diff: fetches the patch for a working-tree file or a commit and
  *  renders it, with a header + a back-to-lineage control. */
@@ -23,7 +24,9 @@ export function DiffPane({
   const key =
     target.kind === "file"
       ? `f:${target.path}:${target.staged}`
-      : `c:${target.hash}`;
+      : target.kind === "commitFile"
+        ? `cf:${target.hash}:${target.path}`
+        : `c:${target.hash}`;
 
   useEffect(() => {
     let active = true;
@@ -36,7 +39,13 @@ export function DiffPane({
             path: target.path,
             staged: target.staged
           })
-        : dispatch("diff:commit", { worktreeId, hash: target.hash });
+        : target.kind === "commitFile"
+          ? dispatch("diff:commitFile", {
+              worktreeId,
+              hash: target.hash,
+              path: target.path
+            })
+          : dispatch("diff:commit", { worktreeId, hash: target.hash });
     void req.then((r) => {
       if (!active) return;
       setPatch(r.ok ? r.value : "");
@@ -49,13 +58,18 @@ export function DiffPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [worktreeId, key]);
 
-  const title = target.kind === "file" ? target.path : target.subject;
+  const title =
+    target.kind === "file" || target.kind === "commitFile"
+      ? target.path
+      : target.subject;
   const sub =
     target.kind === "file"
       ? target.staged
         ? "staged change"
         : "working-tree change"
-      : `commit ${target.hash}`;
+      : target.kind === "commitFile"
+        ? `in ${target.hash.slice(0, 7)} — ${target.subject}`
+        : `commit ${target.hash}`;
 
   return (
     <div className="diff-pane">
