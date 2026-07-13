@@ -173,6 +173,41 @@ describe("searchAll (FTS5)", () => {
     expect(indexer.searchAll("/-·")).toEqual(empty);
   });
 
+  it("finds worktrees by PR number and PR title words", () => {
+    // The PR association lives in branch_pr — typing "13029" (or title
+    // words) must land on the worktree whose branch carries that PR.
+    const repoRow = db
+      .prepare("SELECT id FROM repos WHERE name = 'repoA'")
+      .get() as { id: string };
+    db.prepare(
+      `INSERT INTO branch_pr (repo_id, branch, number, url, title, state, is_draft)
+       VALUES (?, 'feature', 13029, 'https://x', 'Migrate readonly channel routes', 'open', 0)
+       ON CONFLICT(repo_id, branch) DO UPDATE SET
+         number = excluded.number, title = excluded.title`
+    ).run(repoRow.id);
+
+    const byNumber = indexer.searchAll("13029");
+    expect(
+      byNumber.some((h) => h.kind === "worktree" && h.name === "feature")
+    ).toBe(true);
+
+    const byTitle = indexer.searchAll("readonly channel");
+    expect(
+      byTitle.some((h) => h.kind === "worktree" && h.name === "feature")
+    ).toBe(true);
+
+    // Negative cache ("checked, no PR") clears the searchable text.
+    db.prepare(
+      `UPDATE branch_pr SET number = NULL, title = NULL
+       WHERE repo_id = ? AND branch = 'feature'`
+    ).run(repoRow.id);
+    expect(
+      indexer
+        .searchAll("13029")
+        .some((h) => h.kind === "worktree" && h.name === "feature")
+    ).toBe(false);
+  });
+
   it("emits one hit per entity even when the FTS index holds duplicates", () => {
     // Fossil DBs (pre-PK worktree rows) can double-insert into search_fts via
     // the migration backfill. Duplicate hits become duplicate React keys in

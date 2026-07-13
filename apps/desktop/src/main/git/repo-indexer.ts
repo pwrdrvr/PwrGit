@@ -226,13 +226,14 @@ export class RepoIndexer {
     const fts = buildFtsQuery(query);
     if (fts === null) return this.browseRepos();
 
-    // bm25 weights per column (entity_id, kind, name, path, repo_name):
-    // a hit in the repo/branch name outranks one buried in a path.
+    // bm25 weights per column (entity_id, kind, name, path, repo_name, pr):
+    // a hit in the repo/branch name outranks one buried in a path; PR
+    // number/title hits rank just under names.
     const matches = this.db
       .prepare(
         `SELECT entity_id, kind FROM search_fts
          WHERE search_fts MATCH ?
-         ORDER BY bm25(search_fts, 0.0, 0.0, 10.0, 2.0, 4.0)
+         ORDER BY bm25(search_fts, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0)
          LIMIT 60`
       )
       .all(fts) as { entity_id: string; kind: "repo" | "worktree" }[];
