@@ -273,6 +273,14 @@ export function App() {
                   onOpenCommit={(hash, subject) =>
                     setDiffTarget({ kind: "commit", hash, subject })
                   }
+                  onRevealWorktree={(worktreeId) => {
+                    const repo = repos.find((r) =>
+                      r.worktrees.some((w) => w.id === worktreeId)
+                    );
+                    if (repo !== undefined) {
+                      setPendingReveal({ repoId: repo.id, worktreeId });
+                    }
+                  }}
                 />
                 {selectedCommits.size > 0 && (
                   <SelectionBar

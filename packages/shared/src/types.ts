@@ -146,12 +146,22 @@ export type GraphLog = {
   defaultBranch: string;
 };
 
+/** Per-branch adornments for graph tip labels. */
+export type LaneBranchInfo = {
+  /** The branch's PR, when known. */
+  pr?: PrSummary;
+  /** The worktree this branch is checked out in, when any. */
+  worktreeId?: WorktreeId;
+};
+
 /** Multi-branch lineage: a topo-ordered union log across the drawn branches. */
 export type LaneGraph = {
   /** Topological order (newest first); each carries its parent hashes. */
   commits: Commit[];
   /** commit hash → local branch names tipped there (for ref labels). */
   tips: Record<string, string[]>;
+  /** branch name → PR / worktree adornments for the tip chips. */
+  branches: Record<string, LaneBranchInfo>;
   /** Current HEAD commit, to highlight where you are. */
   head: string;
   defaultBranch: string;

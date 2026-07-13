@@ -1,4 +1,10 @@
-import { type Commit, err, ok } from "@pwrgit/shared";
+import {
+  type Commit,
+  err,
+  type LaneBranchInfo,
+  ok,
+  type PrSummary
+} from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import type { DB } from "../persistence/db";
 import { execGit } from "./dugite";
@@ -19,6 +25,7 @@ import type { WorktreeStateService } from "./worktree-state";
 type CachedLanes = {
   commits: Commit[];
   tips: Record<string, string[]>;
+  branches: Record<string, LaneBranchInfo>;
   defaultBranch: string;
   /** The resolvable ref for the default branch (e.g. "origin/develop"). */
   defaultRef: string;
@@ -169,9 +176,44 @@ export function registerGraphHandlers(
       const tips = await branchTips(execGit, wt.path);
       if (!tips.ok) return tips;
 
+      // Per-branch adornments for the tip chips: PR (from branch_pr) and the
+      // worktree the branch is checked out in. Repo-level like everything
+      // else in this cache.
+      const branchInfo: Record<string, LaneBranchInfo> = {};
+      const wtRows = db
+        .prepare("SELECT id, branch FROM worktrees WHERE repo_id = ?")
+        .all(wt.repo_id) as { id: string; branch: string }[];
+      for (const row of wtRows) {
+        branchInfo[row.branch] = { worktreeId: row.id };
+      }
+      const prRows = db
+        .prepare(
+          `SELECT branch, number, url, title, state, is_draft
+           FROM branch_pr WHERE repo_id = ? AND number IS NOT NULL`
+        )
+        .all(wt.repo_id) as {
+        branch: string;
+        number: number;
+        url: string | null;
+        title: string | null;
+        state: string | null;
+        is_draft: number;
+      }[];
+      for (const row of prRows) {
+        const entry = (branchInfo[row.branch] ??= {});
+        entry.pr = {
+          number: row.number,
+          url: row.url ?? "",
+          title: row.title ?? "",
+          state: (row.state ?? "open") as PrSummary["state"],
+          isDraft: row.is_draft === 1
+        };
+      }
+
       cached = {
         commits: topoMergeCommits([trunk.value, uniques.value]),
         tips: tips.value,
+        branches: branchInfo,
         defaultBranch: def.name,
         defaultRef: def.ref,
         shownBranches: shown,
@@ -235,6 +277,7 @@ export function registerGraphHandlers(
     return ok({
       commits: out.commits,
       tips: out.tips,
+      branches: out.branches,
       head,
       defaultBranch: out.defaultBranch,
       shownBranches: out.shownBranches,

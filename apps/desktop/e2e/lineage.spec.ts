@@ -187,6 +187,58 @@ test("a commit tipped by many branches caps its chips instead of flooding", asyn
   await expect(headRow.locator(".commit-msg")).toBeInViewport();
 });
 
+test("a tip chip's worktree button jumps to that worktree", async () => {
+  sandbox = createGitSandbox();
+  const s = sandbox;
+  const repo = s.makeRepo("jumper");
+  const feat = repo.addWorktree("feat/hop");
+  s.commit(feat, "h.txt", "hop work");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, s, "jumper");
+  await branchRow(window, "main").first().click();
+
+  // The feat/hop tip chip carries a worktree-jump button.
+  const group = window.locator(".ref-group", { hasText: "feat/hop" });
+  await expect(group.locator(".ref-wt")).toBeVisible({ timeout: 20_000 });
+  await group.locator(".ref-wt").click();
+
+  // Selection moved to that worktree: sidebar row selected + header follows.
+  const selected = window.locator(".wt-row.is-selected");
+  await expect(selected).toContainText("feat/hop", { timeout: 20_000 });
+  await expect(window.locator(".wt-header__branch-name")).toHaveText("feat/hop");
+});
+
+test("horizontal wheel over the lane gutter pans lanes, not commits", async () => {
+  sandbox = createGitSandbox();
+  const s = sandbox;
+  const repo = s.makeRepo("panner");
+  for (let i = 0; i < 14; i += 1) {
+    const b = `lane/b${String(i).padStart(2, "0")}`;
+    s.git(repo.path, "checkout", "-q", "-b", b);
+    s.git(repo.path, "commit", "--allow-empty", "-m", `work ${b}`);
+    s.git(repo.path, "checkout", "-q", "main");
+  }
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, s, "panner");
+  await branchRow(window, "main").first().click();
+  await expect(window.locator(".lane-scrollbar")).toBeVisible({ timeout: 20_000 });
+
+  const before = await window
+    .locator(".lane-scrollbar")
+    .evaluate((el) => el.scrollLeft);
+  await window.locator(".graph-lanes-clip").first().hover();
+  await window.mouse.wheel(120, 0);
+  await expect
+    .poll(async () =>
+      window.locator(".lane-scrollbar").evaluate((el) => el.scrollLeft)
+    )
+    .toBeGreaterThan(before);
+});
+
 test("All-branches scope reveals remote (teammate) branches", async () => {
   sandbox = createGitSandbox();
   const s = sandbox;

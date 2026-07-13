@@ -1,4 +1,5 @@
-import type { Commit } from "@pwrgit/shared";
+import type { Commit, LaneBranchInfo } from "@pwrgit/shared";
+import { PrChip } from "../sidebar/PrChip";
 import type { LaneRow } from "./lane-layout";
 import { shortWhen } from "./graph-view";
 
@@ -64,16 +65,22 @@ export function GraphRow({
   laneCount,
   selected,
   flashing,
+  branchInfo,
   onToggle,
-  onOpen
+  onOpen,
+  onRevealWorktree
 }: {
   vm: GraphRowVM;
   laneCount: number;
   selected: boolean;
   /** One-shot attention pulse after a locate/worktree switch. */
   flashing: boolean;
+  /** branch name → PR / worktree adornments for tip chips. */
+  branchInfo?: Record<string, LaneBranchInfo>;
   onToggle: () => void;
   onOpen: () => void;
+  /** Jump to the worktree a tip branch is checked out in. */
+  onRevealWorktree?: (worktreeId: string) => void;
 }) {
   const { commit, row, refs, isHead, isMine } = vm;
   const width = Math.max(1, laneCount) * LANE_W;
@@ -236,20 +243,42 @@ export function GraphRow({
               tooltip lists everything. */}
           {refs.length > 0 && (
             <span className="ref-chips" title={refs.join("\n")}>
-              {refs.slice(0, MAX_REF_CHIPS).map((name) => (
-                <span
-                  key={name}
-                  className="ref-chip"
-                  style={{
-                    color,
-                    borderColor: `color-mix(in srgb, ${color} 45%, transparent)`,
-                    background: `color-mix(in srgb, ${color} 13%, transparent)`
-                  }}
-                >
-                  <BranchGlyph />
-                  {name}
-                </span>
-              ))}
+              {refs.slice(0, MAX_REF_CHIPS).map((name) => {
+                const info = branchInfo?.[name];
+                const wtId = info?.worktreeId;
+                return (
+                  <span key={name} className="ref-group">
+                    <span
+                      className="ref-chip"
+                      style={{
+                        color,
+                        borderColor: `color-mix(in srgb, ${color} 45%, transparent)`,
+                        background: `color-mix(in srgb, ${color} 13%, transparent)`
+                      }}
+                    >
+                      <BranchGlyph />
+                      {name}
+                    </span>
+                    {info?.pr !== undefined && <PrChip pr={info.pr} />}
+                    {wtId !== undefined && (
+                      <button
+                        className="ref-wt"
+                        title="Checked out in a worktree — click to open it"
+                        aria-label={`Open the ${name} worktree`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRevealWorktree?.(wtId);
+                        }}
+                      >
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M3 10.5 12 3l9 7.5" />
+                          <path d="M5 9.5V20h14V9.5" />
+                        </svg>
+                      </button>
+                    )}
+                  </span>
+                );
+              })}
               {refs.length > MAX_REF_CHIPS && (
                 <span className="ref-chip ref-chip--more">
                   +{refs.length - MAX_REF_CHIPS}

@@ -24,13 +24,16 @@ export function LineageGraph({
   activeEmail,
   selectedCommits,
   onToggleCommit,
-  onOpenCommit
+  onOpenCommit,
+  onRevealWorktree
 }: {
   worktreeId: string;
   activeEmail: string;
   selectedCommits: Set<string>;
   onToggleCommit: (hash: string) => void;
   onOpenCommit: (hash: string, subject: string) => void;
+  /** Jump to a worktree from a tip chip's worktree button. */
+  onRevealWorktree: (worktreeId: string) => void;
 }) {
   const [data, setData] = useState<LaneGraph | null>(null);
   const [scope, setScope] = useState<Scope>("active");
@@ -156,6 +159,27 @@ export function LineageGraph({
   // If the graph shrinks back under the gutter cap, undo any lane scroll.
   useEffect(() => {
     if (!laneOverflow) cardRef.current?.style.setProperty("--lane-scroll", "0px");
+  }, [laneOverflow]);
+
+  // Horizontal trackpad/wheel over the LANE GUTTER pans the lanes (via the
+  // shared scrollbar) without touching the commit list; vertical deltas pass
+  // through to normal list scrolling. Native non-passive listener — React's
+  // synthetic wheel can't preventDefault.
+  useEffect(() => {
+    if (!laneOverflow) return;
+    const card = cardRef.current;
+    if (card === null) return;
+    const onWheel = (e: WheelEvent): void => {
+      const target = e.target as HTMLElement | null;
+      if (target === null || target.closest(".graph-lanes-clip") === null) return;
+      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+      const bar = laneBarRef.current;
+      if (bar === null) return;
+      bar.scrollLeft += e.deltaX;
+      e.preventDefault();
+    };
+    card.addEventListener("wheel", onWheel, { passive: false });
+    return () => card.removeEventListener("wheel", onWheel);
   }, [laneOverflow]);
 
   const shown = data?.shownBranches.length ?? 0;
@@ -305,8 +329,10 @@ export function LineageGraph({
                 laneCount={layout.laneCount}
                 selected={selectedCommits.has(vm.commit.hash)}
                 flashing={flash === vm.commit.hash}
+                branchInfo={data?.branches ?? {}}
                 onToggle={() => onToggleCommit(vm.commit.hash)}
                 onOpen={() => onOpenCommit(vm.commit.hash, vm.commit.subject)}
+                onRevealWorktree={onRevealWorktree}
               />
             ))}
           </div>

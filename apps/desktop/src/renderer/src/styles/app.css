@@ -1788,6 +1788,32 @@ input {
 .ref-chip--more {
   color: var(--text-muted);
 }
+/* A tip chip plus its adornments (PR chip, worktree jump) read as one unit. */
+.ref-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.ref-wt {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.ref-wt:hover {
+  color: var(--accent-bright);
+  border-color: var(--accent-border);
+}
 
 .graph-hidden-note {
   margin-top: 10px;
