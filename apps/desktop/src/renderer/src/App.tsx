@@ -276,6 +276,7 @@ export function App() {
                   worktreeId={selectedWorktree.id}
                   activeEmail={activeProfile?.email ?? ""}
                   selectedCommits={selectedCommits}
+                  focusedCommit={commitFocus?.hash ?? null}
                   onToggleCommit={toggleCommit}
                   onOpenCommit={(hash, subject) => {
                     setCommitFocus({ hash, subject });

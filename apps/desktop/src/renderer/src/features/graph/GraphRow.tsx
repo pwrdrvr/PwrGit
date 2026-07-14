@@ -64,6 +64,7 @@ export function GraphRow({
   vm,
   laneCount,
   selected,
+  focused,
   flashing,
   branchInfo,
   onToggle,
@@ -73,6 +74,8 @@ export function GraphRow({
   vm: GraphRowVM;
   laneCount: number;
   selected: boolean;
+  /** This commit's files are open in the rail (commit focus). */
+  focused: boolean;
   /** One-shot attention pulse after a locate/worktree switch. */
   flashing: boolean;
   /** branch name → PR / worktree adornments for tip chips. */
@@ -104,7 +107,7 @@ export function GraphRow({
     <div
       className={`graph-row${selected ? " is-selected" : ""}${
         isHead ? " graph-row--head" : ""
-      }${flashing ? " is-flash" : ""}`}
+      }${focused ? " is-focused" : ""}${flashing ? " is-flash" : ""}`}
       data-hash={commit.hash}
       onClick={onOpen}
       title="View this commit's changes"

@@ -23,6 +23,7 @@ export function LineageGraph({
   worktreeId,
   activeEmail,
   selectedCommits,
+  focusedCommit,
   onToggleCommit,
   onOpenCommit,
   onRevealWorktree
@@ -30,6 +31,8 @@ export function LineageGraph({
   worktreeId: string;
   activeEmail: string;
   selectedCommits: Set<string>;
+  /** Commit whose files are open in the rail — highlighted even off-branch. */
+  focusedCommit: string | null;
   onToggleCommit: (hash: string) => void;
   onOpenCommit: (hash: string, subject: string) => void;
   /** Jump to a worktree from a tip chip's worktree button. */
@@ -328,6 +331,7 @@ export function LineageGraph({
                 vm={vm}
                 laneCount={layout.laneCount}
                 selected={selectedCommits.has(vm.commit.hash)}
+                focused={focusedCommit === vm.commit.hash}
                 flashing={flash === vm.commit.hash}
                 branchInfo={data?.branches ?? {}}
                 onToggle={() => onToggleCommit(vm.commit.hash)}

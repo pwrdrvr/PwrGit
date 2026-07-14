@@ -58,6 +58,10 @@ test("clicking a commit scopes the rail to its files; a file opens its diff", as
   await window.locator(".graph-row", { hasText: "add second doc" }).click();
   const commitTab = window.locator(".commit-tab");
   await expect(commitTab).toBeVisible({ timeout: 20_000 });
+  // The focused commit is highlighted in the graph — even when it isn't HEAD.
+  const focusedRow = window.locator(".graph-row.is-focused");
+  await expect(focusedRow).toHaveCount(1);
+  await expect(focusedRow).toContainText("add second doc");
   await expect(commitTab.locator(".commit-tab__subject")).toHaveText(
     "add second doc"
   );
@@ -78,5 +82,6 @@ test("clicking a commit scopes the rail to its files; a file opens its diff", as
   await expect(window.locator(".graph-toolbar")).toBeVisible();
   await commitTab.locator(".commit-tab__close").click();
   await expect(window.locator(".commit-tab")).toHaveCount(0);
+  await expect(window.locator(".graph-row.is-focused")).toHaveCount(0);
   await expect(window.locator(".changes-clean")).toBeVisible();
 });

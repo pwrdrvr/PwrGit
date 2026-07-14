@@ -1567,6 +1567,17 @@ input {
 .graph-row--head:hover {
   background: var(--accent-tint);
 }
+/* Commit focus — this commit's files are open in the rail. Ivory (not accent)
+   so it reads "inspecting", distinct from the orange HEAD anchor; declared
+   after --head so it wins when the focused commit IS the head. Works on any
+   branch — focus isn't limited to the checked-out lane. */
+.graph-row.is-focused {
+  background: rgba(247, 243, 235, 0.07);
+  box-shadow: inset 2px 0 0 var(--text-secondary);
+}
+.graph-row.is-focused:hover {
+  background: rgba(247, 243, 235, 0.1);
+}
 .graph-row.is-flash {
   animation: head-flash 1.6s ease-out;
 }
