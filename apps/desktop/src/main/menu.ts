@@ -48,7 +48,23 @@ export function rebuildAppMenu(opts: {
         { label: "Manage Profiles…", click: () => opts.onManageProfiles() }
       ]
     },
-    { role: "viewMenu" },
+    // macOS auto-inserts its own full-screen item (🌐F) into the View menu,
+    // so the stock viewMenu's togglefullscreen would show up as a duplicate —
+    // build the menu without it there and let the system item be the one.
+    process.platform === "darwin"
+      ? {
+          label: "View",
+          submenu: [
+            { role: "reload" },
+            { role: "forceReload" },
+            { role: "toggleDevTools" },
+            { type: "separator" },
+            { role: "resetZoom" },
+            { role: "zoomIn" },
+            { role: "zoomOut" }
+          ]
+        }
+      : { role: "viewMenu" },
     { role: "windowMenu" }
   ];
 
