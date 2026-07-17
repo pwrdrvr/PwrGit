@@ -41,3 +41,37 @@ test("switch the checked-out branch from the header switcher", async () => {
   await expect(branchName).toHaveText("develop", { timeout: 20_000 });
   await expect(window.locator(".overlay-panel")).toBeHidden();
 });
+
+// Reproduces the "stuck on an agent's branch" report: a terminal/agent switches
+// the checkout behind the app's back, the header keeps the stale label, and
+// clicking the (live) current branch in the switcher used to no-op instead of
+// reconciling the app with reality.
+test("an externally switched checkout reconciles from the switcher", async () => {
+  sandbox = createGitSandbox();
+  const repo = sandbox.makeRepo("agentflip");
+  repo.createBranch("feature/agent");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, sandbox, "agentflip");
+
+  await branchRow(window, "main").first().click();
+  const branchName = window.locator(".wt-header__branch-name");
+  await expect(branchName).toHaveText("main", { timeout: 20_000 });
+
+  // An agent flips the branch outside PwrGit.
+  sandbox.git(repo.path, "switch", "feature/agent");
+
+  // The switcher lists live git truth: feature/agent is current there even
+  // while the header may still say main. Picking it must heal the header.
+  await window.locator(".wt-header__branch--switch").click();
+  await expect(window.locator(".overlay-panel")).toBeVisible();
+  const liveCurrent = window.locator(".overlay-result", {
+    hasText: "feature/agent"
+  });
+  await expect(liveCurrent.locator(".branch-item__here")).toBeVisible();
+  await liveCurrent.click();
+
+  await expect(branchName).toHaveText("feature/agent", { timeout: 20_000 });
+  await expect(window.locator(".overlay-panel")).toBeHidden();
+});

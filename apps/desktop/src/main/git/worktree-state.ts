@@ -176,8 +176,23 @@ export class WorktreeStateService {
       if (iso !== "") lastActivityAt = iso;
     }
 
+    // Agents and terminal git switch branches without going through PwrGit,
+    // and only a full rescan rewrites the worktrees.branch column the sidebar
+    // and header labels read — so every state refresh (poll, focus, activate)
+    // reconciles that column with the live checkout. Detached HEADs get the
+    // same label the indexer writes.
+    const liveBranch =
+      parsed.branch === "(detached)"
+        ? `detached@${parsed.head.slice(0, 7)}`
+        : parsed.branch;
+    if (liveBranch !== "" && liveBranch !== wt.branch) {
+      this.db
+        .prepare("UPDATE worktrees SET branch = ? WHERE id = ?")
+        .run(liveBranch, worktreeId);
+    }
+
     // Staleness vs the repo's default branch.
-    const branchName = parsed.branch !== "" ? parsed.branch : wt.branch;
+    const branchName = liveBranch !== "" ? liveBranch : wt.branch;
     const def = await this.resolveDefaultBranch(wt.repo_id, wt.repo_path);
     const isDefaultBranch = branchName === def.name;
     let behindDefault = 0;

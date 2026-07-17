@@ -133,4 +133,31 @@ describe("WorktreeStateService (system git)", () => {
     expect(await service.compute("nope")).toBeNull();
     expect(service.getCached("nope")).toBeNull();
   });
+
+  // An agent or terminal switching branches never goes through PwrGit; the
+  // sidebar/header labels read the worktrees.branch column, so a state refresh
+  // must reconcile that column with the live checkout or the labels stick to
+  // whatever the last full rescan saw.
+  it("heals the worktrees.branch label when the checkout moved externally", async () => {
+    git(repoPath, ["switch", "-c", "feature/agent-work"]);
+    const state = await service.compute(worktreeId);
+    expect(state?.branch).toBe("feature/agent-work");
+    const row = db
+      .prepare("SELECT branch FROM worktrees WHERE id = ?")
+      .get(worktreeId) as { branch: string };
+    expect(row.branch).toBe("feature/agent-work");
+  });
+
+  it("labels an external detached checkout like the indexer does", async () => {
+    git(repoPath, ["checkout", "--detach"]);
+    const state = await service.compute(worktreeId);
+    const head = state?.head ?? "";
+    expect(head).not.toBe("");
+    expect(state?.branch).toBe(`detached@${head.slice(0, 7)}`);
+    const row = db
+      .prepare("SELECT branch FROM worktrees WHERE id = ?")
+      .get(worktreeId) as { branch: string };
+    expect(row.branch).toBe(`detached@${head.slice(0, 7)}`);
+    git(repoPath, ["switch", "main"]);
+  });
 });

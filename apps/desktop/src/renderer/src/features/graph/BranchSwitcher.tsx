@@ -66,7 +66,12 @@ export function BranchSwitcher({
   }, [query]);
 
   const pick = async (ref: BranchRef): Promise<void> => {
-    if (ref.isCurrent) {
+    // The list is live git truth; currentBranch is what the app is showing.
+    // When they agree, picking the current branch is a no-op. When they
+    // DISAGREE (the checkout moved externally and our label is stale), fall
+    // through — the switch is a git no-op but its refresh chain reconciles
+    // the header, sidebar, and graph with reality.
+    if (ref.isCurrent && ref.name === currentBranch) {
       onClose();
       return;
     }
