@@ -12,7 +12,7 @@ const p = (id: string, name: string, email: string): Profile => ({
 
 describe("profileWindowTitle", () => {
   it("uses the plain profile name when it's unique", () => {
-    const profiles = [p("a", "PwrDrvr", "h@pwrdrvr.com"), p("b", "GIPHY", "h@giphy.com")];
+    const profiles = [p("a", "PwrDrvr", "h@pwrdrvr.com"), p("b", "Acme", "h@acme.dev")];
     expect(profileWindowTitle(profiles, profiles[0] ?? null)).toBe(
       "PwrGit — PwrDrvr"
     );
@@ -21,13 +21,13 @@ describe("profileWindowTitle", () => {
   it("appends the email when two profiles share a name", () => {
     const profiles = [
       p("a", "Harold Hunt", "harold@pwrdrvr.com"),
-      p("b", "Harold Hunt", "hhunt@giphy.com")
+      p("b", "Harold Hunt", "hhunt@acme.dev")
     ];
     expect(profileWindowTitle(profiles, profiles[0] ?? null)).toBe(
       "PwrGit — Harold Hunt (harold@pwrdrvr.com)"
     );
     expect(profileWindowTitle(profiles, profiles[1] ?? null)).toBe(
-      "PwrGit — Harold Hunt (hhunt@giphy.com)"
+      "PwrGit — Harold Hunt (hhunt@acme.dev)"
     );
   });
 
