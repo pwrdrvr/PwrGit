@@ -118,7 +118,7 @@ export function ProfileModal({
             autoFocus
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. GIPHY or PwrDrvr"
+            placeholder="e.g. Acme or Personal"
           />
         </label>
 
@@ -152,7 +152,7 @@ export function ProfileModal({
               className="modal__input"
               value={org}
               onChange={(e) => setOrg(e.target.value)}
-              placeholder="e.g. pwrdrvr"
+              placeholder="e.g. acme-inc"
             />
           </label>
         </div>

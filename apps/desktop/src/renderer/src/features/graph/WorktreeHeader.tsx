@@ -27,7 +27,7 @@ function baseChip(state: WorktreeState | null): Chip {
 type Busy = "fetch" | "pull" | "push" | null;
 
 /** Compact path label: the last two segments locate a checkout precisely
- *  ("GIPHY/search-compare", "mrb93172/PwrAgnt") without burning a line on
+ *  ("Acme/search-compare", "pwrdrvr/PwrAgnt") without burning a line on
  *  the full path — that lives in the tooltip, and click copies it. */
 function pathTail(path: string): string {
   const parts = path.split("/").filter((p) => p !== "");

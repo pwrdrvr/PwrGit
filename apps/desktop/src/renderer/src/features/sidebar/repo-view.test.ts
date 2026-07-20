@@ -176,19 +176,19 @@ describe("staleness (isPrunableWorktree + Stale lens)", () => {
 
 describe("groupReposByRoot", () => {
   const repos: Repo[] = [
-    repo({ id: "giphy-svc", path: "/Users/h/GIPHY/giphy-svc" }),
+    repo({ id: "acme-svc", path: "/Users/h/Acme/acme-svc" }),
     repo({ id: "pwrgit", path: "/Users/h/pwrdrvr/PwrGit" }),
     repo({ id: "kit", path: "/Users/h/github/agent-kit" }),
     repo({ id: "loose", path: "/Users/h/elsewhere/loose" })
   ];
-  const roots = ["/Users/h/pwrdrvr", "/Users/h/github", "/Users/h/GIPHY"];
+  const roots = ["/Users/h/pwrdrvr", "/Users/h/github", "/Users/h/Acme"];
 
   it("buckets repos under their root, labelled by the folder's last segment", () => {
     const groups = groupReposByRoot(repos, roots);
     expect(groups.map((g) => [g.label, g.repos.map((r) => r.id)])).toEqual([
       ["pwrdrvr", ["pwrgit"]],
       ["github", ["kit"]],
-      ["GIPHY", ["giphy-svc"]],
+      ["Acme", ["acme-svc"]],
       ["Other", ["loose"]]
     ]);
   });
@@ -205,7 +205,7 @@ describe("groupReposByRoot", () => {
 
   it("drops empty groups and omits Other when all repos are placed", () => {
     const groups = groupReposByRoot([repos[0]!], roots);
-    expect(groups.map((g) => g.label)).toEqual(["GIPHY"]);
+    expect(groups.map((g) => g.label)).toEqual(["Acme"]);
   });
 });
 

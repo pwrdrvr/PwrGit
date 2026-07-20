@@ -67,7 +67,7 @@ if (!gotSingleInstanceLock) {
     );
     const profiles = new ProfileService(db);
     // PWRGIT_GITCONFIG (e2e seam) pins the seeded identity to a known file.
-    // The profile NAME is a workspace label ("Personal", "GIPHY", "PwrDrvr"),
+    // The profile NAME is a workspace label ("Personal", "Acme", "PwrDrvr"),
     // not a person — the git identity name seeds the commit AUTHOR instead.
     // (Seeding name from user.name gave every profile the same title.)
     const identity = readGitIdentityDefaults(process.env["PWRGIT_GITCONFIG"]);
