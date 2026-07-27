@@ -1,0 +1,192 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    # Do not add `labeled` here. Dependabot applies labels to dependency PRs,
+    # and label-triggered CI creates skipped check suites that can make those
+    # PRs appear to have no real status checks. Label-gated builds live in
+    # preview-build.yml.
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read
+
+jobs:
+  install-deps:
+    name: Install Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install Node.js and dependencies
+        uses: pwrdrvr/configure-nodejs@v1
+        with:
+          node-version: 24.x
+          lookup-only: "true"
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    needs: install-deps
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install Node.js and dependencies
+        uses: pwrdrvr/configure-nodejs@v1
+        with:
+          node-version: 24.x
+
+      - name: Type check
+        run: pnpm typecheck
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: install-deps
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install Node.js and dependencies
+        uses: pwrdrvr/configure-nodejs@v1
+        with:
+          node-version: 24.x
+
+      - name: Build
+        run: pnpm run build
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: install-deps
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install Node.js and dependencies
+        uses: pwrdrvr/configure-nodejs@v1
+        with:
+          node-version: 24.x
+
+      # vitest runs under Node, but the postinstall electron-rebuild leaves
+      # better-sqlite3 built for Electron's ABI. Rebuild for Node before the
+      # unit suite. Must run from apps/desktop — from the repo root the
+      # rebuild silently no-ops (better-sqlite3 is a desktop dep, not root).
+      - name: Rebuild better-sqlite3 for Node
+        working-directory: apps/desktop
+        run: pnpm rebuild better-sqlite3
+
+      - name: Test
+        run: pnpm run test
+
+  desktop-e2e:
+    name: Desktop E2E
+    runs-on: ubuntu-latest
+    needs: install-deps
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install Node.js and dependencies
+        uses: pwrdrvr/configure-nodejs@v1
+        with:
+          node-version: 24.x
+
+      - name: Run desktop Electron E2E specs
+        # No `playwright install-deps` step: `ubuntu-latest` ships
+        # Chrome + Firefox preinstalled, which drag in the GTK +
+        # libnss / libgbm / libasound stack Electron needs under xvfb.
+        # PwrAgnt/PwrSnap CI have run Electron E2E this way for months.
+        run: xvfb-run --auto-servernum pnpm run test:desktop-e2e
+
+      - name: Upload desktop Playwright artifacts
+        uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: desktop-e2e-artifacts
+          path: |
+            apps/desktop/playwright-report/
+            apps/desktop/test-results/
+          retention-days: 30
+
+  windows:
+    name: Windows (typecheck + build + test)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      # The shared pwrdrvr/configure-nodejs action is bash/Linux-oriented, so
+      # use the portable pnpm + setup-node combo here (PwrSnap's pattern).
+      - name: Install pnpm
+        # Version comes from package.json's `packageManager` field (omit
+        # `version` here) so there's no second pnpm pin to drift on upgrade.
+        uses: pnpm/action-setup@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Same Node-ABI dance as the Linux test job (see comment there).
+      - name: Rebuild better-sqlite3 for Node
+        working-directory: apps/desktop
+        run: pnpm rebuild better-sqlite3
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Test
+        run: pnpm run test
+
+  windows-e2e:
+    name: Windows Desktop E2E
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run desktop Electron E2E specs (Windows)
+        # windows-latest provides an interactive desktop session, so (unlike
+        # the Linux job) no xvfb is needed.
+        run: pnpm run test:desktop-e2e
+
+      - name: Upload desktop Playwright artifacts
+        uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: windows-desktop-e2e-artifacts
+          path: |
+            apps/desktop/playwright-report/
+            apps/desktop/test-results/
+          retention-days: 30

@@ -40,6 +40,15 @@ pnpm test       # vitest across the workspace (needs a Node-ABI native build)
 pnpm typecheck  # tsc across packages
 ```
 
+## Packaging & releases
+
+Packaging goes through `apps/desktop/scripts/release.mjs` (pnpm-deploy stage →
+electron-builder; `pnpm --filter @pwrgit/desktop package:dryrun` for a local
+unsigned DMG). Releases are cut by pushing a `vX.Y.Z` tag that matches
+`apps/desktop/package.json` and a `CHANGELOG.md` section (`pnpm release:check`
+verifies). CI, preview builds, and signing secrets are documented in
+`.github/workflows/README.md`.
+
 ## Docs & conventions
 
 - **Agent guidance lives in `AGENTS.md`** — not in READMEs or human-facing code
