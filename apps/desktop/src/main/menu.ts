@@ -14,6 +14,7 @@ export function rebuildAppMenu(opts: {
   onNewProfile: () => void;
   onManageProfiles: () => void;
   onOpenSettings: () => void;
+  onOpenLogs: () => void;
   /** Settings → General → Developer Mode: expose Reload / Force Reload /
    *  Toggle Developer Tools (and their shortcuts) in the View menu. */
   developerMode: boolean;
@@ -114,7 +115,19 @@ export function rebuildAppMenu(opts: {
             ] as MenuItemConstructorOptions[]))
       ]
     },
-    { role: "windowMenu" }
+    { role: "windowMenu" },
+    // Help › Logs (PwrAgnt convention) — the escape hatch when something
+    // fails without visible UI feedback.
+    {
+      role: "help",
+      submenu: [
+        {
+          label: "Logs",
+          accelerator: "CmdOrCtrl+Shift+L",
+          click: () => opts.onOpenLogs()
+        }
+      ]
+    }
   ];
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));

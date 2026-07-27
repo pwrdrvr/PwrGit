@@ -1,5 +1,6 @@
 import { err, ok } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
+import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import { execGit } from "./dugite";
 import {
@@ -99,6 +100,12 @@ export function registerChangesHandlers(
       amend: req.amend ?? false
     });
     if (!result.ok) return result;
+    logMain(
+      "info",
+      "commit",
+      `${req.amend === true ? "amended" : "committed"} in ${row.path}:`,
+      req.message.split("\n")[0]
+    );
     refresher.refreshWorktree(req.worktreeId);
     return ok(null);
   });

@@ -1,12 +1,13 @@
-/** Minimal tagged console logger for diagnostics (PwrAgnt has a full main
- *  logger; PwrGit's is still landing — this keeps diagnostics self-contained
- *  and swappable for it later). */
+import { logMain } from "../logs";
+
+/** Tagged logger for diagnostics, routed through the main app log so heap /
+ *  CPU profiling events show up in the Logs window (Help › Logs). */
 export type DiagLogger = Pick<Console, "info" | "warn" | "error">;
 
 export function getDiagLogger(tag: string): DiagLogger {
   return {
-    info: (...args: unknown[]) => console.info(`[${tag}]`, ...args),
-    warn: (...args: unknown[]) => console.warn(`[${tag}]`, ...args),
-    error: (...args: unknown[]) => console.error(`[${tag}]`, ...args)
+    info: (...args: unknown[]) => void logMain("info", tag, ...args),
+    warn: (...args: unknown[]) => void logMain("warn", tag, ...args),
+    error: (...args: unknown[]) => void logMain("error", tag, ...args)
   };
 }

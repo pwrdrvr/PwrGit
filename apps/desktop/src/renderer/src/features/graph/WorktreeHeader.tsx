@@ -7,6 +7,7 @@ import type {
   WorktreeState
 } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
+import { showErrorToast } from "../../lib/toast";
 import { CopyTarget } from "../shell/CopyTarget";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
 import { BranchSwitcher } from "./BranchSwitcher";
@@ -52,21 +53,30 @@ export function WorktreeHeader({
     setTimeout(() => setFlash(null), ms);
   };
 
+  // Failures surface twice on purpose: the inline chip flash (collapsed away
+  // in narrow headers) AND an error toast, which is visible at any width and
+  // links to the Logs window.
+  const flashError = (kind: string, error: PwrGitError): void => {
+    const firstLine = error.message.split("\n")[0];
+    showFlash({ text: firstLine.slice(0, 64), tone: "warn" }, 3200);
+    showErrorToast({
+      title: `${kind} failed`,
+      message: firstLine,
+      detail: error.message
+    });
+  };
+
   const run = async (
     kind: Exclude<Busy, null>,
     fn: () => Promise<Result<unknown, PwrGitError>>,
-    okChip: Chip
+    okChip: Chip,
+    label: string
   ): Promise<void> => {
     setBusy(kind);
     const result = await fn();
     setBusy(null);
     if (result.ok) showFlash(okChip, 1600);
-    else {
-      showFlash(
-        { text: result.error.message.split("\n")[0].slice(0, 64), tone: "warn" },
-        3200
-      );
-    }
+    else flashError(label, result.error);
   };
 
   const id = worktree.id;
@@ -74,7 +84,8 @@ export function WorktreeHeader({
     void run(
       "fetch",
       () => dispatch("remote:fetch", { worktreeId: id }),
-      { text: "fetched", tone: "muted" }
+      { text: "fetched", tone: "muted" },
+      "Fetch"
     );
   };
   const onPull = (): void => {
@@ -82,10 +93,7 @@ export function WorktreeHeader({
     void dispatch("remote:pull", { worktreeId: id }).then((result) => {
       setBusy(null);
       if (!result.ok) {
-        showFlash(
-          { text: result.error.message.split("\n")[0].slice(0, 64), tone: "warn" },
-          3200
-        );
+        flashError("Pull", result.error);
         return;
       }
       const { stashed, reappliedWithConflicts } = result.value;
@@ -102,10 +110,12 @@ export function WorktreeHeader({
     });
   };
   const onPush = (): void => {
-    void run("push", () => dispatch("remote:push", { worktreeId: id }), {
-      text: "pushed",
-      tone: "ok"
-    });
+    void run(
+      "push",
+      () => dispatch("remote:push", { worktreeId: id }),
+      { text: "pushed", tone: "ok" },
+      "Push"
+    );
   };
 
   const chip = flash ?? baseChip(state);
@@ -157,16 +167,26 @@ export function WorktreeHeader({
         <span className={`sync-chip sync-chip--${chip.tone}`}>{chip.text}</span>
 
         <div className="wt-actions">
+          {/* While an op runs its button swaps the icon for a spinner — the
+              labels and sync chip collapse away in narrow headers, so the
+              icon itself must carry the busy state. aria-label keeps the
+              accessible name when the label span is display:none. */}
           <button
             className="wt-btn"
             onClick={onFetch}
             disabled={busy !== null}
+            aria-label="Fetch"
+            aria-busy={busy === "fetch"}
             title="Fetch"
           >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
-              <path d="M21 3v5h-5" />
-            </svg>
+            {busy === "fetch" ? (
+              <span className="wt-btn__spinner" />
+            ) : (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
+                <path d="M21 3v5h-5" />
+              </svg>
+            )}
             <span className="wt-btn__label">
               {busy === "fetch" ? "Fetching…" : "Fetch"}
             </span>
@@ -176,13 +196,19 @@ export function WorktreeHeader({
             className={`wt-btn wt-btn--pull${behind > 0 ? " is-behind" : ""}`}
             onClick={onPull}
             disabled={busy !== null}
+            aria-label="Pull"
+            aria-busy={busy === "pull"}
             title="Pull · fetch + fast-forward"
           >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 4v11" />
-              <path d="m7 10 5 5 5-5" />
-              <path d="M5 20h14" />
-            </svg>
+            {busy === "pull" ? (
+              <span className="wt-btn__spinner" />
+            ) : (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 4v11" />
+                <path d="m7 10 5 5 5-5" />
+                <path d="M5 20h14" />
+              </svg>
+            )}
             <span className="wt-btn__label">
               {busy === "pull" ? "Pulling…" : "Pull"}
             </span>
@@ -192,13 +218,19 @@ export function WorktreeHeader({
             className="wt-btn"
             onClick={onPush}
             disabled={busy !== null}
+            aria-label="Push"
+            aria-busy={busy === "push"}
             title="Push"
           >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 20V9" />
-              <path d="m7 14 5-5 5 5" />
-              <path d="M5 4h14" />
-            </svg>
+            {busy === "push" ? (
+              <span className="wt-btn__spinner" />
+            ) : (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 20V9" />
+                <path d="m7 14 5-5 5 5" />
+                <path d="M5 4h14" />
+              </svg>
+            )}
             <span className="wt-btn__label">
               {busy === "push" ? "Pushing…" : "Push"}
             </span>

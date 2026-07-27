@@ -22,6 +22,13 @@ import { WorktreeStateService } from "./git/worktree-state";
 import { registerGitHubHandlers } from "./github/github-handlers";
 import { PrService } from "./github/pr-service";
 import { emitEvent, registerIpc } from "./ipc";
+import {
+  initLogFile,
+  logMain,
+  readLogSnapshot,
+  subscribeLogEntries
+} from "./logs";
+import { openLogsWindow } from "./logs-window";
 import { openDatabase } from "./persistence/db";
 import { readGitIdentityDefaults } from "./profiles/git-identity";
 import { registerProfileHandlers } from "./profiles/profile-handlers";
@@ -70,6 +77,16 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    // App log: ring buffer + file, streamed to the Logs window (Help › Logs).
+    initLogFile(join(app.getPath("userData"), "pwrgit-main.log"));
+    subscribeLogEntries((entry) => emitEvent("logs:entry", entry));
+    logMain("info", "app", `PwrGit ${app.getVersion()} starting`);
+    bus.register("logs:read", () => ok(readLogSnapshot()));
+    bus.register("logs:openWindow", () => {
+      openLogsWindow();
+      return ok(null);
+    });
+
     const db = openDatabase(join(app.getPath("userData"), "pwrgit.db"));
     const settings = new SettingsService(
       join(app.getPath("userData"), "settings.json")
@@ -131,10 +148,19 @@ if (!gotSingleInstanceLock) {
       // Scan lists repos + worktrees (cheap). Per-worktree *state*
       // (dirty/ahead/behind/staleness) is computed lazily per repo when its row
       // is expanded (repo:computeState) — computing all 156 at launch storms git.
+      const startedAt = Date.now();
       void indexer
         .rescanProfile(profile)
-        .then(() => emitEvent("repo:changed", { profileId: profile.id }))
-        .catch(() => undefined);
+        .then((repos) => {
+          logMain(
+            "info",
+            "scan",
+            `rescanned profile "${profile.name}": ${repos.length} repos` +
+              ` (${((Date.now() - startedAt) / 1000).toFixed(1)}s)`
+          );
+          emitEvent("repo:changed", { profileId: profile.id });
+        })
+        .catch((cause) => logMain("error", "scan", "rescan failed:", cause));
     };
 
     // One window per profile. Opening a profile that already has a window
@@ -151,6 +177,7 @@ if (!gotSingleInstanceLock) {
         onNewProfile: () => emitEvent("ui:newProfile", {}),
         onManageProfiles: () => emitEvent("ui:manageProfile", {}),
         onOpenSettings: () => openSettingsWindow(),
+        onOpenLogs: () => openLogsWindow(),
         developerMode: settingsSnapshot(settings, diagnosticsOutputRoot).general
           .developerMode
       });

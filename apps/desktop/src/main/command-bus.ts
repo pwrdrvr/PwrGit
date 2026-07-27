@@ -6,6 +6,7 @@ import {
   type Res,
   type Result
 } from "@pwrgit/shared";
+import { logMain } from "./logs";
 
 export type CommandContext = {
   signal?: AbortSignal;
@@ -51,8 +52,21 @@ export class CommandBus {
       });
     }
     try {
-      return (await handler(req, ctx)) as Result<Res<C>, PwrGitError>;
+      const result = (await handler(req, ctx)) as Result<Res<C>, PwrGitError>;
+      // Every command failure lands in the app log — the renderer may render
+      // errors small (or not at all); the Logs window must still have them.
+      if (!result.ok) {
+        logMain(
+          "error",
+          "command",
+          `${String(name)} failed:`,
+          `${result.error.kind}/${result.error.code}`,
+          result.error.message
+        );
+      }
+      return result;
     } catch (cause) {
+      logMain("error", "command", `${String(name)} threw:`, cause);
       return err({
         kind: "unknown",
         code: "handler_threw",
