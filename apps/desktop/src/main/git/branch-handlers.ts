@@ -1,6 +1,7 @@
 import { err, ok } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
+import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import { execGit } from "./dugite";
 import { listBranches, switchBranch } from "./git-service";
@@ -41,6 +42,7 @@ export function registerBranchHandlers(
     if (row === undefined) return err(notFound);
     const result = await switchBranch(execGit, row.path, req.branch);
     if (!result.ok) return result;
+    logMain("info", "branch", `switched ${row.path} to ${req.branch}`);
     // The worktree's branch column is now stale — re-list (branch is keyed by
     // path, so the id is stable) and recompute state so the header, graph, and
     // sidebar all reflect the new checkout.

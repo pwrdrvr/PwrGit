@@ -44,11 +44,23 @@ describe("logMain", () => {
   });
 
   it("drops the oldest entries past the buffer cap and reports truncation", () => {
-    for (let i = 0; i < 5010; i += 1) logMain("debug", "git", `line ${i}`);
+    for (let i = 0; i < 5010; i += 1) logMain("info", "git", `line ${i}`);
     const snapshot = readLogSnapshot();
     expect(snapshot.entries).toHaveLength(5000);
     expect(snapshot.truncated).toBe(true);
     expect(snapshot.entries[0].line).toContain("line 10");
     expect(snapshot.entries[4999].line).toContain("line 5009");
+  });
+
+  it("keeps error entries through a debug flood (separate debug quota)", () => {
+    logMain("error", "command", "the error you came to find");
+    for (let i = 0; i < 3000; i += 1) logMain("debug", "git", `probe ${i}`);
+    const snapshot = readLogSnapshot();
+    expect(snapshot.entries[0].level).toBe("error");
+    expect(snapshot.entries.filter((e) => e.level === "debug")).toHaveLength(1000);
+    expect(snapshot.truncated).toBe(true);
+    // The merged stream stays sequence-ordered across both buffers.
+    const sequences = snapshot.entries.map((e) => e.sequence);
+    expect(sequences).toEqual([...sequences].sort((a, b) => a - b));
   });
 });

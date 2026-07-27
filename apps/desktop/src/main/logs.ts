@@ -8,18 +8,59 @@ import type { LogEntry, LogSnapshot } from "@pwrgit/shared";
 // the buffer without an Electron runtime.
 
 const MAX_BUFFERED_LOG_ENTRIES = 5000;
+// Debug is dominated by routine git probes (upstream checks, cat-file -e
+// misses) that arrive in bulk during scans — quota them separately so they
+// can never evict the rare error/warn/info line the Logs window exists for.
+const MAX_BUFFERED_DEBUG_ENTRIES = 1000;
 const MAX_LOG_FILE_BYTES = 2 * 1024 * 1024;
 
 export type LogLevel = LogEntry["level"];
 
 type LogListener = (entry: LogEntry) => void;
 
-const entries = new Array<LogEntry | undefined>(MAX_BUFFERED_LOG_ENTRIES);
+class Ring {
+  private readonly slots: Array<LogEntry | undefined>;
+  private oldestIndex = 0;
+  private count = 0;
+  dropped = 0;
+
+  constructor(capacity: number) {
+    this.slots = new Array<LogEntry | undefined>(capacity);
+  }
+
+  push(entry: LogEntry): void {
+    if (this.count < this.slots.length) {
+      this.slots[(this.oldestIndex + this.count) % this.slots.length] = entry;
+      this.count += 1;
+    } else {
+      this.slots[this.oldestIndex] = entry;
+      this.oldestIndex = (this.oldestIndex + 1) % this.slots.length;
+      this.dropped += 1;
+    }
+  }
+
+  /** Entries oldest→newest (sequence-ordered — pushes are sequential). */
+  ordered(): LogEntry[] {
+    const out: LogEntry[] = [];
+    for (let offset = 0; offset < this.count; offset += 1) {
+      const entry = this.slots[(this.oldestIndex + offset) % this.slots.length];
+      if (entry !== undefined) out.push(entry);
+    }
+    return out;
+  }
+
+  reset(): void {
+    this.slots.fill(undefined);
+    this.oldestIndex = 0;
+    this.count = 0;
+    this.dropped = 0;
+  }
+}
+
+const mainRing = new Ring(MAX_BUFFERED_LOG_ENTRIES);
+const debugRing = new Ring(MAX_BUFFERED_DEBUG_ENTRIES);
 const listeners = new Set<LogListener>();
 let nextSequence = 1;
-let oldestIndex = 0;
-let count = 0;
-let dropped = 0;
 
 let logFilePath: string | null = null;
 // Serialize appends so lines never interleave; errors disable file logging
@@ -87,14 +128,7 @@ export function logMain(
   };
   nextSequence += 1;
 
-  if (count < MAX_BUFFERED_LOG_ENTRIES) {
-    entries[(oldestIndex + count) % entries.length] = entry;
-    count += 1;
-  } else {
-    entries[oldestIndex] = entry;
-    oldestIndex = (oldestIndex + 1) % entries.length;
-    dropped += 1;
-  }
+  (level === "debug" ? debugRing : mainRing).push(entry);
 
   if (logFilePath !== null && !fileBroken) {
     const path = logFilePath;
@@ -112,12 +146,23 @@ export function logMain(
 }
 
 export function readLogSnapshot(): LogSnapshot {
-  const ordered: LogEntry[] = [];
-  for (let offset = 0; offset < count; offset += 1) {
-    const entry = entries[(oldestIndex + offset) % entries.length];
-    if (entry !== undefined) ordered.push(entry);
+  // Merge the two sequence-sorted rings back into one chronological stream.
+  const main = mainRing.ordered();
+  const debug = debugRing.ordered();
+  const merged: LogEntry[] = [];
+  let m = 0;
+  let d = 0;
+  while (m < main.length || d < debug.length) {
+    const takeMain =
+      d >= debug.length ||
+      (m < main.length && main[m].sequence < debug[d].sequence);
+    merged.push(takeMain ? main[m++] : debug[d++]);
   }
-  return { entries: ordered, truncated: dropped > 0, logFilePath };
+  return {
+    entries: merged,
+    truncated: mainRing.dropped > 0 || debugRing.dropped > 0,
+    logFilePath
+  };
 }
 
 /** Live-stream new entries (index.ts forwards them as `logs:entry` events). */
@@ -127,12 +172,10 @@ export function subscribeLogEntries(listener: LogListener): () => void {
 }
 
 export function _resetLogsForTests(): void {
-  entries.fill(undefined);
+  mainRing.reset();
+  debugRing.reset();
   listeners.clear();
   nextSequence = 1;
-  oldestIndex = 0;
-  count = 0;
-  dropped = 0;
   logFilePath = null;
   fileBroken = false;
 }

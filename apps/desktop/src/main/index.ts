@@ -110,10 +110,19 @@ if (!gotSingleInstanceLock) {
       // Scan lists repos + worktrees (cheap). Per-worktree *state*
       // (dirty/ahead/behind/staleness) is computed lazily per repo when its row
       // is expanded (repo:computeState) — computing all 156 at launch storms git.
+      const startedAt = Date.now();
       void indexer
         .rescanProfile(profile)
-        .then(() => emitEvent("repo:changed", { profileId: profile.id }))
-        .catch(() => undefined);
+        .then((repos) => {
+          logMain(
+            "info",
+            "scan",
+            `rescanned profile "${profile.name}": ${repos.length} repos` +
+              ` (${((Date.now() - startedAt) / 1000).toFixed(1)}s)`
+          );
+          emitEvent("repo:changed", { profileId: profile.id });
+        })
+        .catch((cause) => logMain("error", "scan", "rescan failed:", cause));
     };
 
     // One window per profile. Opening a profile that already has a window
