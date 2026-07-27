@@ -13,6 +13,10 @@ export function rebuildAppMenu(opts: {
   onOpenProfile: (profileId: string) => void;
   onNewProfile: () => void;
   onManageProfiles: () => void;
+  onOpenSettings: () => void;
+  /** Settings → General → Developer Mode: expose Reload / Force Reload /
+   *  Toggle Developer Tools (and their shortcuts) in the View menu. */
+  developerMode: boolean;
 }): void {
   // Email-disambiguate duplicate profile names — otherwise the menu (and the
   // matching window titles) list indistinguishable twins.
@@ -33,11 +37,46 @@ export function rebuildAppMenu(opts: {
     })
   );
 
+  const settingsItem: MenuItemConstructorOptions = {
+    label: "Settings…",
+    accelerator: "CmdOrCtrl+,",
+    click: () => opts.onOpenSettings()
+  };
+
   const template: MenuItemConstructorOptions[] = [
+    // macOS: Settings… lives in the app menu (standard position, after About);
+    // elsewhere it goes at the top of the File menu.
     ...(process.platform === "darwin"
-      ? [{ role: "appMenu" } as MenuItemConstructorOptions]
+      ? [
+          {
+            role: "appMenu",
+            submenu: [
+              { role: "about" },
+              { type: "separator" },
+              settingsItem,
+              { type: "separator" },
+              { role: "services" },
+              { type: "separator" },
+              { role: "hide" },
+              { role: "hideOthers" },
+              { role: "unhide" },
+              { type: "separator" },
+              { role: "quit" }
+            ]
+          } as MenuItemConstructorOptions
+        ]
       : []),
-    { role: "fileMenu" },
+    process.platform === "darwin"
+      ? { role: "fileMenu" }
+      : {
+          label: "File",
+          submenu: [
+            settingsItem,
+            { type: "separator" },
+            { role: "close" },
+            { role: "quit" }
+          ]
+        },
     { role: "editMenu" },
     {
       label: "Profiles",
@@ -48,23 +87,33 @@ export function rebuildAppMenu(opts: {
         { label: "Manage Profiles…", click: () => opts.onManageProfiles() }
       ]
     },
-    // macOS auto-inserts its own full-screen item (🌐F) into the View menu,
-    // so the stock viewMenu's togglefullscreen would show up as a duplicate —
-    // build the menu without it there and let the system item be the one.
-    process.platform === "darwin"
-      ? {
-          label: "View",
-          submenu: [
-            { role: "reload" },
-            { role: "forceReload" },
-            { role: "toggleDevTools" },
-            { type: "separator" },
-            { role: "resetZoom" },
-            { role: "zoomIn" },
-            { role: "zoomOut" }
-          ]
-        }
-      : { role: "viewMenu" },
+    // Custom View menu on every platform: the Electron developer items
+    // (Reload / Force Reload / Toggle Developer Tools) only exist while
+    // Developer Mode is on. macOS additionally omits togglefullscreen — the
+    // system auto-inserts its own full-screen item (🌐F) and the stock one
+    // would show up as a duplicate.
+    {
+      label: "View",
+      submenu: [
+        ...(opts.developerMode
+          ? ([
+              { role: "reload" },
+              { role: "forceReload" },
+              { role: "toggleDevTools" },
+              { type: "separator" }
+            ] as MenuItemConstructorOptions[])
+          : []),
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        ...(process.platform === "darwin"
+          ? []
+          : ([
+              { type: "separator" },
+              { role: "togglefullscreen" }
+            ] as MenuItemConstructorOptions[]))
+      ]
+    },
     { role: "windowMenu" }
   ];
 
