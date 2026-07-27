@@ -35,8 +35,17 @@ import { registerProfileHandlers } from "./profiles/profile-handlers";
 import { ProfileService } from "./profiles/profile-service";
 import { registerShellHandlers } from "./shell-handlers";
 import { SettingsService } from "./settings/settings-service";
+import {
+  registerSettingsHandlers,
+  settingsSnapshot
+} from "./settings/settings-handlers";
+import {
+  DiagnosticsManager,
+  startStartupCpuProfiling
+} from "./diagnostics/diagnostics-manager";
 import { rebuildAppMenu } from "./menu";
 import { createProfileWindows } from "./profile-windows";
+import { openSettingsWindow } from "./settings-window";
 
 // Relocate all app data (db, settings, profiles) to an explicit directory when
 // PWRGIT_USER_DATA_DIR is set. e2e uses this to give each run an isolated,
@@ -67,7 +76,7 @@ if (!gotSingleInstanceLock) {
     win.focus();
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     // App log: ring buffer + file, streamed to the Logs window (Help › Logs).
     initLogFile(join(app.getPath("userData"), "pwrgit-main.log"));
     subscribeLogEntries((entry) => emitEvent("logs:entry", entry));
@@ -82,6 +91,35 @@ if (!gotSingleInstanceLock) {
     const settings = new SettingsService(
       join(app.getPath("userData"), "settings.json")
     );
+    const diagnosticsOutputRoot = join(app.getPath("userData"), "diagnostics");
+    const diagnostics = new DiagnosticsManager({
+      outputRoot: diagnosticsOutputRoot,
+      getDiagnostics: () =>
+        settingsSnapshot(settings, diagnosticsOutputRoot).diagnostics,
+      onHotCpuHeapSnapshotLimitReached: () => {
+        // Mirror PwrAgnt: a session that hits its heap-snapshot cap turns the
+        // capture flag off so the next arm doesn't silently refill the disk.
+        settings.update({
+          diagnostics: {
+            ...settings.get().diagnostics,
+            hotCpuProfilingCaptureHeapSnapshot: false
+          }
+        });
+        emitEvent(
+          "settings:changed",
+          settingsSnapshot(settings, diagnosticsOutputRoot)
+        );
+        diagnostics.sync();
+      }
+    });
+    // Startup CPU profiling must begin before the first window exists to
+    // cover window creation; enabled via Settings toggle or PWRGIT_* env.
+    const startupCpu = await startStartupCpuProfiling({
+      enabled: settingsSnapshot(settings, diagnosticsOutputRoot).diagnostics
+        .startupCpuProfilingEnabled,
+      outputRoot: diagnosticsOutputRoot
+    });
+    let startupCpuWindowPending = startupCpu !== null;
     const profiles = new ProfileService(db);
     // PWRGIT_GITCONFIG (e2e seam) pins the seeded identity to a known file.
     // The profile NAME is a workspace label ("Personal", "Acme", "PwrDrvr"),
@@ -138,7 +176,10 @@ if (!gotSingleInstanceLock) {
         onOpenProfile: (profileId) => openProfileWindow(profileId),
         onNewProfile: () => emitEvent("ui:newProfile", {}),
         onManageProfiles: () => emitEvent("ui:manageProfile", {}),
-        onOpenLogs: () => openLogsWindow()
+        onOpenSettings: () => openSettingsWindow(),
+        onOpenLogs: () => openLogsWindow(),
+        developerMode: settingsSnapshot(settings, diagnosticsOutputRoot).general
+          .developerMode
       });
     };
 
@@ -160,7 +201,14 @@ if (!gotSingleInstanceLock) {
         if (wasOpen) emitEvent("ui:revealRepo", { profileId, ...reveal });
         else pendingReveals.set(profileId, reveal);
       }
-      windows.open(profileId);
+      const opened = windows.open(profileId);
+      if (opened.created) {
+        diagnostics.attachWindow(opened.window);
+        if (startupCpuWindowPending) {
+          startupCpuWindowPending = false;
+          startupCpu?.attachFirstWindow(opened.window);
+        }
+      }
       refreshMenu();
       return true;
     };
@@ -189,6 +237,15 @@ if (!gotSingleInstanceLock) {
     registerShellHandlers(bus);
     registerGitHubHandlers(bus, prService);
     registerSearchStatusHandlers(bus, db);
+    registerSettingsHandlers(bus, settings, {
+      diagnosticsOutputRoot,
+      onChanged: (snapshot) => {
+        emitEvent("settings:changed", snapshot);
+        diagnostics.sync();
+        refreshMenu(); // Developer Mode toggles View-menu items live
+      }
+    });
+    diagnostics.sync(); // start any settings-enabled monitors at boot
 
     registerIpc(bus);
     initAutoUpdater();
@@ -204,6 +261,26 @@ if (!gotSingleInstanceLock) {
       if (BrowserWindow.getFocusedWindow() !== null) refreshActive();
     }, 15_000);
     app.on("before-quit", () => clearInterval(activeStatePoll));
+
+    // Drain diagnostics before quitting so final monitor-stopped events and
+    // manifest writes land on disk. Bounded and fail-safe: the drain races a
+    // timeout, and if the resumed quit is swallowed (automation teardown,
+    // re-entrant quit), app.exit() guarantees the process still dies.
+    let diagnosticsQuitState: "pending" | "draining" | "done" = "pending";
+    app.on("will-quit", (event) => {
+      if (diagnosticsQuitState === "done") return;
+      event.preventDefault();
+      if (diagnosticsQuitState === "draining") return; // drain will re-quit
+      diagnosticsQuitState = "draining";
+      const timeout = new Promise<void>((resolve) =>
+        setTimeout(resolve, 1_500)
+      );
+      void Promise.race([diagnostics.shutdown(), timeout]).finally(() => {
+        diagnosticsQuitState = "done";
+        app.quit();
+        setTimeout(() => app.exit(0), 500);
+      });
+    });
 
     // Boot into the last-used profile's window (its rescan kicks off inside).
     const activeId = profiles.getActiveId();
