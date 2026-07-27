@@ -6,6 +6,7 @@ import { SelectionBar } from "./features/graph/SelectionBar";
 import { WorktreeHeader } from "./features/graph/WorktreeHeader";
 import { DialogHost } from "./features/shell/DialogHost";
 import { PaneResizer } from "./features/shell/PaneResizer";
+import { ToastHost } from "./features/shell/ToastHost";
 import { Rail } from "./features/rail/Rail";
 import { ProfileModal } from "./features/sidebar/ProfileModal";
 import { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
@@ -405,6 +406,7 @@ export function App() {
         />
       )}
 
+      <ToastHost />
       <DialogHost />
     </div>
   );

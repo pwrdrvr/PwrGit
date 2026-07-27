@@ -2,6 +2,7 @@
 // bundle loads it (a named `import { exec }` throws at runtime).
 import dugite from "dugite";
 import { err, ok, type PwrGitError, type Result } from "@pwrgit/shared";
+import { logMain } from "../logs";
 
 const { exec } = dugite;
 
@@ -24,12 +25,24 @@ export type GitExec = (
 export const execGit: GitExec = async (args, cwd) => {
   try {
     const result = await exec(args, cwd);
+    // Non-zero exits are logged at debug: many are routine probes (cat-file
+    // -e, stash pop with conflicts), but when a command silently fails this
+    // is the ground truth the Logs window surfaces.
+    if (result.exitCode !== 0) {
+      logMain(
+        "debug",
+        "git",
+        `git ${args.join(" ")} (${cwd}) exited ${result.exitCode}:`,
+        result.stderr.trim()
+      );
+    }
     return ok({
       stdout: result.stdout,
       stderr: result.stderr,
       exitCode: result.exitCode
     });
   } catch (cause) {
+    logMain("error", "git", `git ${args.join(" ")} (${cwd}) failed to spawn:`, cause);
     return err({
       kind: "git",
       code: "spawn_failed",
