@@ -13,6 +13,7 @@ export function rebuildAppMenu(opts: {
   onOpenProfile: (profileId: string) => void;
   onNewProfile: () => void;
   onManageProfiles: () => void;
+  onOpenLogs: () => void;
 }): void {
   // Email-disambiguate duplicate profile names — otherwise the menu (and the
   // matching window titles) list indistinguishable twins.
@@ -65,7 +66,19 @@ export function rebuildAppMenu(opts: {
           ]
         }
       : { role: "viewMenu" },
-    { role: "windowMenu" }
+    { role: "windowMenu" },
+    // Help › Logs (PwrAgnt convention) — the escape hatch when something
+    // fails without visible UI feedback.
+    {
+      role: "help",
+      submenu: [
+        {
+          label: "Logs",
+          accelerator: "CmdOrCtrl+Shift+L",
+          click: () => opts.onOpenLogs()
+        }
+      ]
+    }
   ];
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));

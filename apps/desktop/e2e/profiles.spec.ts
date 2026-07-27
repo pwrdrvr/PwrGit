@@ -33,7 +33,9 @@ test("creating a profile opens its own window with repos from all roots", async 
   await window.locator(".profile-menu__action", { hasText: "New profile" }).click();
 
   // Fill identity.
-  await window.getByPlaceholder("e.g. Acme").fill("Acme");
+  // Full placeholder — the shorter "e.g. Acme" also matches "e.g. acme-inc"
+  // (placeholder matching is case-insensitive), tripping strict mode.
+  await window.getByPlaceholder("e.g. Acme or Personal").fill("Acme");
   await window.getByPlaceholder("you@company.com").fill("harold@acme.dev");
 
   // Add both folders in one native dialog.

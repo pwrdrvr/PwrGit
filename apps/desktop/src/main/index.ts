@@ -22,6 +22,13 @@ import { WorktreeStateService } from "./git/worktree-state";
 import { registerGitHubHandlers } from "./github/github-handlers";
 import { PrService } from "./github/pr-service";
 import { emitEvent, registerIpc } from "./ipc";
+import {
+  initLogFile,
+  logMain,
+  readLogSnapshot,
+  subscribeLogEntries
+} from "./logs";
+import { openLogsWindow } from "./logs-window";
 import { openDatabase } from "./persistence/db";
 import { readGitIdentityDefaults } from "./profiles/git-identity";
 import { registerProfileHandlers } from "./profiles/profile-handlers";
@@ -61,6 +68,16 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(() => {
+    // App log: ring buffer + file, streamed to the Logs window (Help › Logs).
+    initLogFile(join(app.getPath("userData"), "pwrgit-main.log"));
+    subscribeLogEntries((entry) => emitEvent("logs:entry", entry));
+    logMain("info", "app", `PwrGit ${app.getVersion()} starting`);
+    bus.register("logs:read", () => ok(readLogSnapshot()));
+    bus.register("logs:openWindow", () => {
+      openLogsWindow();
+      return ok(null);
+    });
+
     const db = openDatabase(join(app.getPath("userData"), "pwrgit.db"));
     const settings = new SettingsService(
       join(app.getPath("userData"), "settings.json")
@@ -111,7 +128,8 @@ if (!gotSingleInstanceLock) {
         currentProfileId: windows.focusedProfileId() ?? profiles.getActiveId(),
         onOpenProfile: (profileId) => openProfileWindow(profileId),
         onNewProfile: () => emitEvent("ui:newProfile", {}),
-        onManageProfiles: () => emitEvent("ui:manageProfile", {})
+        onManageProfiles: () => emitEvent("ui:manageProfile", {}),
+        onOpenLogs: () => openLogsWindow()
       });
     };
 

@@ -33,6 +33,25 @@ export type ProfileList = {
   profiles: Profile[];
 };
 
+/** One line in the main-process app log (ring-buffered, streamed live). */
+export type LogEntry = {
+  /** Monotonic id — lets the Logs window dedupe snapshot vs live stream. */
+  sequence: number;
+  timestamp: number;
+  level: "error" | "warn" | "info" | "debug";
+  scope: string;
+  /** Pre-formatted `[ts] [level] (scope) text` line. */
+  line: string;
+};
+
+export type LogSnapshot = {
+  entries: LogEntry[];
+  /** Older entries were dropped from the ring buffer. */
+  truncated: boolean;
+  /** On-disk log file, when file logging is active. */
+  logFilePath: string | null;
+};
+
 export type CreateProfileRequest = {
   name: string;
   email: string;
@@ -214,6 +233,10 @@ export interface Commands {
     res: string;
   };
 
+  // App logs (diagnosability — silent failures must be findable somewhere)
+  "logs:read": { req: void; res: LogSnapshot };
+  "logs:openWindow": { req: void; res: null };
+
   "dialog:pickDirectory": { req: void; res: string | null };
   "dialog:pickDirectories": { req: void; res: string[] };
 
@@ -250,6 +273,8 @@ export interface Events {
     repoId: string;
     worktreeId: string | null;
   };
+  /** A new main-process log line — streamed live to the Logs window. */
+  "logs:entry": LogEntry;
 }
 
 export type EventChannel = keyof Events;
