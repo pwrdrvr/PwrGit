@@ -3,12 +3,13 @@
 // individual knobs, and PWRGIT_HEAP_DIAGNOSTICS can force-enable without
 // touching settings.
 import path from "node:path";
+import { HEAP_MONITOR_TUNING } from "@pwrgit/shared";
 
-const DEFAULT_INTERVAL_MS = 5_000;
+const DEFAULT_INTERVAL_MS = HEAP_MONITOR_TUNING.intervalMs;
 const DEFAULT_SETTLE_DELAY_MS = 1_000;
-const DEFAULT_DELTA_THRESHOLD_BYTES = 100 * 1024 * 1024;
+const DEFAULT_DELTA_THRESHOLD_BYTES = HEAP_MONITOR_TUNING.deltaThresholdBytes;
 const DEFAULT_SNAPSHOT_COOLDOWN_MS = 60_000;
-const DEFAULT_MAX_SNAPSHOTS = 5;
+const DEFAULT_MAX_SNAPSHOTS = HEAP_MONITOR_TUNING.maxSnapshots;
 
 export type HeapMonitorConfig =
   | { enabled: false }

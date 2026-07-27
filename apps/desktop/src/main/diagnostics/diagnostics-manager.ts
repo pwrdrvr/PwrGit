@@ -2,6 +2,7 @@
 // configs from Settings (+ PWRGIT_* env), runs the main-process heap monitor,
 // attaches per-window renderer heap monitors and hot-CPU profilers, restarts
 // them when Settings change, and drives the startup CPU profiling flow.
+import fs from "node:fs/promises";
 import path from "node:path";
 import { writeHeapSnapshot } from "node:v8";
 import { app, type BrowserWindow } from "electron";
@@ -39,8 +40,32 @@ function versions(): HeapSessionVersions {
 type WindowEntry = {
   window: BrowserWindow;
   heapMonitor: RendererHeapMonitor | null;
+  heapSessionDir: string | null;
   hotCpuProfiler: RendererHotCpuProfiler | null;
+  hotCpuSessionDir: string | null;
 };
+
+/**
+ * Config tweaks restart monitoring with a fresh session directory, so rapid
+ * knob changes would otherwise litter the diagnostics root with empty dirs.
+ * After a stop, drop the session if it only ever wrote its manifest/events —
+ * any sample or artifact (.cpuprofile/.heapsnapshot/samples.ndjson) keeps it.
+ */
+async function discardSessionIfEmpty(
+  directoryPath: string | null
+): Promise<void> {
+  if (directoryPath === null) return;
+  try {
+    const entries = await fs.readdir(directoryPath);
+    const meaningful = entries.filter(
+      (name) => name !== "session.json" && name !== "events.ndjson"
+    );
+    if (meaningful.length > 0) return;
+    await fs.rm(directoryPath, { recursive: true, force: true });
+  } catch {
+    // Keeping an empty directory is harmless; never fail a stop over cleanup.
+  }
+}
 
 export class DiagnosticsManager {
   private readonly outputRoot: string;
@@ -51,6 +76,7 @@ export class DiagnosticsManager {
 
   private readonly windows = new Map<number, WindowEntry>();
   private mainHeapMonitor: MainProcessHeapMonitor | null = null;
+  private mainHeapSessionDir: string | null = null;
   private heapConfig: HeapMonitorConfig = { enabled: false };
   private hotCpuConfig: HotCpuProfileConfig = { enabled: false };
   private heapConfigKey = "";
@@ -77,15 +103,21 @@ export class DiagnosticsManager {
     const entry: WindowEntry = {
       window,
       heapMonitor: null,
-      hotCpuProfiler: null
+      heapSessionDir: null,
+      hotCpuProfiler: null,
+      hotCpuSessionDir: null
     };
     this.windows.set(id, entry);
     window.on("closed", () => {
       const closing = this.windows.get(id);
       this.windows.delete(id);
       if (closing !== undefined) {
-        void closing.heapMonitor?.stop("window-closed");
-        void closing.hotCpuProfiler?.stop("window-closed");
+        void closing.heapMonitor
+          ?.stop("window-closed")
+          .then(() => discardSessionIfEmpty(closing.heapSessionDir));
+        void closing.hotCpuProfiler
+          ?.stop("window-closed")
+          .then(() => discardSessionIfEmpty(closing.hotCpuSessionDir));
       }
     });
 
@@ -104,13 +136,15 @@ export class DiagnosticsManager {
     this.enqueueSync(() => this.syncInner());
   }
 
-  /** Stop everything (before-quit). */
-  shutdown(): void {
+  /** Stop everything. Resolves once final events/manifests are flushed —
+   *  index.ts drains this (with a timeout) in `will-quit`. */
+  shutdown(): Promise<void> {
     this.shuttingDown = true;
     this.enqueueSync(async () => {
       await this.stopHeapMonitoring("app-quit");
       await this.stopHotCpuProfiling("app-quit");
     });
+    return this.syncQueue;
   }
 
   private enqueueSync(task: () => Promise<void>): void {
@@ -174,6 +208,7 @@ export class DiagnosticsManager {
         session: mainSession.session,
         config
       });
+      this.mainHeapSessionDir = mainSession.session.directoryPath;
       await this.mainHeapMonitor.start();
     }
 
@@ -186,11 +221,15 @@ export class DiagnosticsManager {
     if (this.mainHeapMonitor !== null) {
       await this.mainHeapMonitor.stop(reason);
       this.mainHeapMonitor = null;
+      await discardSessionIfEmpty(this.mainHeapSessionDir);
+      this.mainHeapSessionDir = null;
     }
     for (const entry of this.windows.values()) {
       if (entry.heapMonitor !== null) {
         await entry.heapMonitor.stop(reason);
         entry.heapMonitor = null;
+        await discardSessionIfEmpty(entry.heapSessionDir);
+        entry.heapSessionDir = null;
       }
     }
   }
@@ -212,6 +251,7 @@ export class DiagnosticsManager {
       return;
     }
 
+    entry.heapSessionDir = session.session.directoryPath;
     entry.heapMonitor = new RendererHeapMonitor({
       config,
       session: session.session,
@@ -229,6 +269,8 @@ export class DiagnosticsManager {
       if (entry.hotCpuProfiler !== null) {
         await entry.hotCpuProfiler.stop(reason);
         entry.hotCpuProfiler = null;
+        await discardSessionIfEmpty(entry.hotCpuSessionDir);
+        entry.hotCpuSessionDir = null;
       }
     }
   }
@@ -252,6 +294,7 @@ export class DiagnosticsManager {
       directory: session.session.directoryPath
     });
 
+    entry.hotCpuSessionDir = session.session.directoryPath;
     entry.hotCpuProfiler = new RendererHotCpuProfiler({
       config,
       getAppMetrics: () => app.getAppMetrics(),

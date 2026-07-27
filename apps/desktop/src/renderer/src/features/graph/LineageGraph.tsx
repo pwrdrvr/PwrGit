@@ -15,9 +15,20 @@ import { layoutLanes } from "./lane-layout";
 type Scope = "active" | "all";
 
 // Experimental setting: open new graph views in the "all branches" scope.
-// Fetched once per window; the in-graph toggle still overrides per view.
+// Cached per window but kept fresh via settings:changed, so toggling the
+// setting applies to the next opened view without a reload. The in-graph
+// toggle still overrides per view.
 let defaultScopePromise: Promise<Scope> | null = null;
+let defaultScopeSubscribed = false;
 function defaultLineageScope(): Promise<Scope> {
+  if (!defaultScopeSubscribed) {
+    defaultScopeSubscribed = true;
+    subscribe("settings:changed", (snapshot) => {
+      defaultScopePromise = Promise.resolve(
+        snapshot.experimental.lineageAllBranches ? "all" : "active"
+      );
+    });
+  }
   defaultScopePromise ??= dispatch("settings:read", undefined).then((r) =>
     r.ok && r.value.experimental.lineageAllBranches ? "all" : "active"
   );

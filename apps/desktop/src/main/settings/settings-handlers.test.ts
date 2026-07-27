@@ -27,6 +27,12 @@ describe("settings handlers", () => {
     expect(r.value.experimental.lineageAllBranches).toBe(false);
     expect(r.value.diagnostics.heapMonitorEnabled).toBe(false);
     expect(r.value.diagnostics.hotCpuProfilingTriggerMode).toBe("sustained");
+    // No PWRGIT_* diagnostics vars in the test env → nothing env-forced.
+    expect(r.value.diagnosticsEnv).toEqual({
+      heapMonitorForcedOn: false,
+      hotCpuProfilingForcedOn: false,
+      startupCpuProfilingForcedOn: false
+    });
     expect(r.value.diagnosticsOutputRoot).toBe("/diag");
   });
 

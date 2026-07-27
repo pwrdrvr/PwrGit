@@ -260,9 +260,26 @@ if (!gotSingleInstanceLock) {
     const activeStatePoll = setInterval(() => {
       if (BrowserWindow.getFocusedWindow() !== null) refreshActive();
     }, 15_000);
-    app.on("before-quit", () => {
-      clearInterval(activeStatePoll);
-      diagnostics.shutdown();
+    app.on("before-quit", () => clearInterval(activeStatePoll));
+
+    // Drain diagnostics before quitting so final monitor-stopped events and
+    // manifest writes land on disk. Bounded and fail-safe: the drain races a
+    // timeout, and if the resumed quit is swallowed (automation teardown,
+    // re-entrant quit), app.exit() guarantees the process still dies.
+    let diagnosticsQuitState: "pending" | "draining" | "done" = "pending";
+    app.on("will-quit", (event) => {
+      if (diagnosticsQuitState === "done") return;
+      event.preventDefault();
+      if (diagnosticsQuitState === "draining") return; // drain will re-quit
+      diagnosticsQuitState = "draining";
+      const timeout = new Promise<void>((resolve) =>
+        setTimeout(resolve, 1_500)
+      );
+      void Promise.race([diagnostics.shutdown(), timeout]).finally(() => {
+        diagnosticsQuitState = "done";
+        app.quit();
+        setTimeout(() => app.exit(0), 500);
+      });
     });
 
     // Boot into the last-used profile's window (its rescan kicks off inside).

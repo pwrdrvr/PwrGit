@@ -3,6 +3,7 @@ import type {
   HotCpuStartDelayMs,
   HotCpuTriggerMode
 } from "@pwrgit/shared";
+import { HEAP_MONITOR_TUNING, HOT_CPU_TUNING } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import {
   SettingsField,
@@ -60,6 +61,19 @@ export function DiagnosticsSettings(props: {
   onStartupCpuEnabledChange: (enabled: boolean) => void;
 }) {
   const diag = props.snapshot.diagnostics;
+  const env = props.snapshot.diagnosticsEnv;
+  // Env vars (PWRGIT_*) can force a monitor on regardless of the switch —
+  // chips say so instead of showing a misleading "Off".
+  const heapOn = diag.heapMonitorEnabled || env.heapMonitorForcedOn;
+  const hotCpuOn = diag.hotCpuProfilingEnabled || env.hotCpuProfilingForcedOn;
+  const startupOn =
+    diag.startupCpuProfilingEnabled || env.startupCpuProfilingForcedOn;
+  const bothCapturePathsOn = heapOn && hotCpuOn;
+
+  const heapIntervalSeconds = HEAP_MONITOR_TUNING.intervalMs / 1_000;
+  const heapDeltaMb = HEAP_MONITOR_TUNING.deltaThresholdBytes / (1024 * 1024);
+  const hotIntervalSeconds = HOT_CPU_TUNING.intervalMs / 1_000;
+  const hotDurationSeconds = HOT_CPU_TUNING.profileDurationMs / 1_000;
 
   return (
     <div className="settings-stack" aria-label="Memory and CPU profiling settings">
@@ -91,14 +105,20 @@ export function DiagnosticsSettings(props: {
         eyebrow="Memory"
         title="Heap Monitor"
         description="Sample the main process and every window's heap on an interval; automatically capture a heap snapshot when usage jumps by more than the growth threshold. Starts and stops live."
-        chip={diag.heapMonitorEnabled ? "On" : "Off"}
-        chipKind={diag.heapMonitorEnabled ? "ok" : "default"}
+        chip={
+          env.heapMonitorForcedOn ? "On (env)" : heapOn ? "On" : "Off"
+        }
+        chipKind={env.heapMonitorForcedOn ? "warn" : heapOn ? "ok" : "default"}
       >
         <div className="settings-fields">
           <SettingsField
             label="Enable heap monitoring"
-            sub="Samples every 5s; snapshots on a 100 MB jump, max 5 per session."
-            help="Sampling is cheap; snapshots briefly pause the process being captured. Leave off unless chasing a leak."
+            sub={`Samples every ${heapIntervalSeconds}s; snapshots on a ${heapDeltaMb} MB jump, max ${HEAP_MONITOR_TUNING.maxSnapshots} per session.`}
+            help={
+              env.heapMonitorForcedOn
+                ? "Forced on by PWRGIT_HEAP_DIAGNOSTICS in this app's environment — the switch only controls the setting, not the running monitor."
+                : "Sampling is cheap; snapshots briefly pause the process being captured. Leave off unless chasing a leak."
+            }
             control={
               <SettingsSwitch
                 checked={diag.heapMonitorEnabled}
@@ -114,14 +134,34 @@ export function DiagnosticsSettings(props: {
       <SettingsSection
         eyebrow="CPU"
         title="Hot Renderer CPU Profiling"
-        description="Watch each window's CPU usage; when it stays above the trigger threshold, capture a 15-second CPU profile of that renderer. Arms and disarms live."
-        chip={diag.hotCpuProfilingEnabled ? "Armed" : "Off"}
-        chipKind={diag.hotCpuProfilingEnabled ? "ok" : "default"}
+        description={`Watch each window's CPU usage; when it stays above the trigger threshold, capture a ${hotDurationSeconds}-second CPU profile of that renderer. Arms and disarms live.`}
+        chip={
+          env.hotCpuProfilingForcedOn
+            ? "Armed (env)"
+            : hotCpuOn
+              ? "Armed"
+              : "Off"
+        }
+        chipKind={
+          env.hotCpuProfilingForcedOn ? "warn" : hotCpuOn ? "ok" : "default"
+        }
       >
+        {bothCapturePathsOn ? (
+          <p className="settings-callout settings-callout--warn" role="status">
+            Heap monitoring keeps each window's debugger attached, so hot-CPU
+            captures are skipped while both are on. Turn the heap monitor off
+            to let profiles trigger.
+          </p>
+        ) : null}
         <div className="settings-fields">
           <SettingsField
             label="Arm hot CPU capture"
-            sub="Monitoring samples CPU every 2s; profiles trigger at 50% (15% for slow burn)."
+            sub={`Monitoring samples CPU every ${hotIntervalSeconds}s; profiles trigger at ${HOT_CPU_TUNING.thresholdPercent}% (${HOT_CPU_TUNING.slowburnThresholdPercent}% for slow burn).`}
+            help={
+              env.hotCpuProfilingForcedOn
+                ? "Forced on by PWRGIT_HOT_CPU_PROFILING in this app's environment — the switch only controls the setting, not the running profiler."
+                : undefined
+            }
             control={
               <SettingsSwitch
                 checked={diag.hotCpuProfilingEnabled}
@@ -195,14 +235,24 @@ export function DiagnosticsSettings(props: {
         eyebrow="CPU"
         title="Startup CPU Profiling"
         description="Profile the main process and the first window from launch until shortly after first paint. Applies on the next launch and stays on for every launch until turned off."
-        chip={diag.startupCpuProfilingEnabled ? "Next launch" : "Off"}
-        chipKind={diag.startupCpuProfilingEnabled ? "warn" : "default"}
+        chip={
+          env.startupCpuProfilingForcedOn
+            ? "On (env)"
+            : startupOn
+              ? "Next launch"
+              : "Off"
+        }
+        chipKind={startupOn ? "warn" : "default"}
       >
         <div className="settings-fields">
           <SettingsField
             label="Profile startup"
             sub="Writes main.cpuprofile and renderer.cpuprofile per launch."
-            help="Remember to turn this back off — every launch writes a new session directory while it's on."
+            help={
+              env.startupCpuProfilingForcedOn
+                ? "Forced on by PWRGIT_STARTUP_CPU_PROFILING in this app's environment — the switch only controls the setting."
+                : "Remember to turn this back off — every launch writes a new session directory while it's on."
+            }
             control={
               <SettingsSwitch
                 checked={diag.startupCpuProfilingEnabled}

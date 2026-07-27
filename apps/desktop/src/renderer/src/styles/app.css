@@ -3756,3 +3756,19 @@ body.is-col-resizing {
   background: var(--accent);
   color: var(--accent-on);
 }
+
+/* Settings: inline callout (e.g. heap-monitor / hot-CPU contention note) */
+.settings-callout {
+  margin: 10px 0 2px;
+  padding: 9px 12px;
+  font: 450 12px/1.5 var(--font-sans);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+}
+.settings-callout--warn {
+  border-color: rgba(216, 168, 90, 0.35);
+  background: var(--warn-soft);
+  color: var(--warn);
+}

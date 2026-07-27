@@ -14,6 +14,9 @@ import {
 } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import type { SettingsService } from "./settings-service";
+import { resolveHeapMonitorConfig } from "../diagnostics/heap-monitor-config";
+import { resolveHotCpuProfileConfig } from "../diagnostics/hot-cpu-profile-config";
+import { resolveStartupCpuProfileConfig } from "../diagnostics/startup-cpu-profile-config";
 
 /** Stored settings are sparse; snapshots are fully defaulted. */
 export function settingsSnapshot(
@@ -21,10 +24,19 @@ export function settingsSnapshot(
   diagnosticsOutputRoot: string
 ): AppSettingsSnapshot {
   const stored = settings.get();
+  // A resolver called with the setting off can only come back enabled when a
+  // PWRGIT_* env var forces it — surfaced so the UI never shows "Off" while
+  // an env-armed monitor is running.
+  const off = { enabled: false, outputRoot: diagnosticsOutputRoot };
   return {
     general: { ...GENERAL_DEFAULTS, ...stored.general },
     experimental: { ...EXPERIMENTAL_DEFAULTS, ...stored.experimental },
     diagnostics: { ...DIAGNOSTICS_DEFAULTS, ...stored.diagnostics },
+    diagnosticsEnv: {
+      heapMonitorForcedOn: resolveHeapMonitorConfig(off).enabled,
+      hotCpuProfilingForcedOn: resolveHotCpuProfileConfig(off).enabled,
+      startupCpuProfilingForcedOn: resolveStartupCpuProfileConfig(off).enabled
+    },
     diagnosticsOutputRoot
   };
 }

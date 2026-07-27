@@ -88,6 +88,29 @@ export function isHotCpuTriggerMode(value: string): value is HotCpuTriggerMode {
 /** Renderer heap snapshots captured per hot-CPU profile; hard cap. */
 export const HOT_CPU_HEAP_SNAPSHOT_LIMIT_MAX = 3;
 
+// Diagnostics tuning defaults, shared so the Settings UI copy and the main
+// process resolvers can never drift. Env vars (PWRGIT_*) override at runtime.
+export const HEAP_MONITOR_TUNING = {
+  intervalMs: 5_000,
+  deltaThresholdBytes: 100 * 1024 * 1024,
+  maxSnapshots: 5
+} as const;
+
+export const HOT_CPU_TUNING = {
+  intervalMs: 2_000,
+  thresholdPercent: 50,
+  slowburnThresholdPercent: 15,
+  profileDurationMs: 15_000
+} as const;
+
+/** Diagnostics forced on by PWRGIT_* env vars — shown in the UI so a switch
+ *  reading "Off" can't hide an env-armed profiler. */
+export type DiagnosticsEnvOverrides = {
+  heapMonitorForcedOn: boolean;
+  hotCpuProfilingForcedOn: boolean;
+  startupCpuProfilingForcedOn: boolean;
+};
+
 export type GeneralSettings = {
   /** Expose Reload, Force Reload, and Developer Tools in the View menu. */
   developerMode: boolean;
@@ -135,6 +158,7 @@ export type AppSettingsSnapshot = {
   general: GeneralSettings;
   experimental: ExperimentalSettings;
   diagnostics: DiagnosticsSettings;
+  diagnosticsEnv: DiagnosticsEnvOverrides;
   /** Directory diagnostics sessions (profiles, snapshots) are written to. */
   diagnosticsOutputRoot: string;
 };
