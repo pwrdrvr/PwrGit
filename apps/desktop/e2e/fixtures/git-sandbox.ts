@@ -75,9 +75,12 @@ export type GitSandbox = {
  */
 export function createGitSandbox(): GitSandbox {
   // realpath so roots match git's canonical worktree paths — on macOS tmpdir()
-  // is /var/… symlinked to /private/var/…, which would break root-prefix
-  // grouping (real user paths like ~/Acme aren't symlinked).
-  const base = realpathSync(mkdtempSync(join(tmpdir(), "pwrgit-e2e-")));
+  // is /var/… symlinked to /private/var/…, and on Windows CI runners TEMP is
+  // the 8.3 short form (C:\Users\RUNNER~1\…) while git reports the long path
+  // (C:/Users/runneradmin/…). Either would break root-prefix grouping (real
+  // user paths aren't symlinked or shortened). `.native` is what expands 8.3
+  // names — the JS implementation only resolves symlinks.
+  const base = realpathSync.native(mkdtempSync(join(tmpdir(), "pwrgit-e2e-")));
   const reposDir = join(base, "repos");
   const worktreesDir = join(base, "worktrees");
   const worktreeRoot = join(base, "new-worktrees");

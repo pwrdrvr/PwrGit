@@ -1,3 +1,4 @@
+import { rmSync } from "node:fs";
 import {
   type BranchRef,
   type ChangeSet,
@@ -689,6 +690,28 @@ export async function worktreeRemove(
     if (!raw.ok) return raw;
     if (raw.value.exitCode === 0) return ok(undefined);
     const message = raw.value.stderr.trim();
+    // A retry can find the worktree already unregistered: the failed attempt
+    // pruned git's metadata before the file deletion hit the lock. Finish the
+    // delete ourselves (rmSync retries EPERM/EBUSY on Windows).
+    if (attempt > 1 && /is not a working tree/i.test(message)) {
+      try {
+        rmSync(worktreePath, {
+          recursive: true,
+          force: true,
+          maxRetries: 5,
+          retryDelay: 100
+        });
+        return ok(undefined);
+      } catch (cause) {
+        return err({
+          kind: "repo",
+          code: "worktree_remove_failed",
+          message: `left-over worktree directory could not be deleted: ${
+            cause instanceof Error ? cause.message : String(cause)
+          }`
+        });
+      }
+    }
     const transient = /permission denied|device or resource busy|ebusy|eperm/i.test(
       message
     );
