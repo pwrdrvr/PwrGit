@@ -70,6 +70,105 @@ export type UpdateProfileRequest = {
   org?: string;
 };
 
+// App settings (Settings window). Experimental + diagnostics sections are
+// stored sparsely in settings.json; reads return a fully-defaulted snapshot.
+
+export const HOT_CPU_START_DELAYS_MS = [0, 5_000, 10_000] as const;
+export type HotCpuStartDelayMs = (typeof HOT_CPU_START_DELAYS_MS)[number];
+export function isHotCpuStartDelayMs(value: number): value is HotCpuStartDelayMs {
+  return (HOT_CPU_START_DELAYS_MS as readonly number[]).includes(value);
+}
+
+export const HOT_CPU_TRIGGER_MODES = ["spike", "sustained", "slowburn"] as const;
+export type HotCpuTriggerMode = (typeof HOT_CPU_TRIGGER_MODES)[number];
+export function isHotCpuTriggerMode(value: string): value is HotCpuTriggerMode {
+  return (HOT_CPU_TRIGGER_MODES as readonly string[]).includes(value);
+}
+
+/** Renderer heap snapshots captured per hot-CPU profile; hard cap. */
+export const HOT_CPU_HEAP_SNAPSHOT_LIMIT_MAX = 3;
+
+// Diagnostics tuning defaults, shared so the Settings UI copy and the main
+// process resolvers can never drift. Env vars (PWRGIT_*) override at runtime.
+export const HEAP_MONITOR_TUNING = {
+  intervalMs: 5_000,
+  deltaThresholdBytes: 100 * 1024 * 1024,
+  maxSnapshots: 5
+} as const;
+
+export const HOT_CPU_TUNING = {
+  intervalMs: 2_000,
+  thresholdPercent: 50,
+  slowburnThresholdPercent: 15,
+  profileDurationMs: 15_000
+} as const;
+
+/** Diagnostics forced on by PWRGIT_* env vars — shown in the UI so a switch
+ *  reading "Off" can't hide an env-armed profiler. */
+export type DiagnosticsEnvOverrides = {
+  heapMonitorForcedOn: boolean;
+  hotCpuProfilingForcedOn: boolean;
+  startupCpuProfilingForcedOn: boolean;
+};
+
+export type GeneralSettings = {
+  /** Expose Reload, Force Reload, and Developer Tools in the View menu. */
+  developerMode: boolean;
+};
+
+export type ExperimentalSettings = {
+  /** Lineage graph opens scoped to all branches instead of active ones. */
+  lineageAllBranches: boolean;
+};
+
+export type DiagnosticsSettings = {
+  /** Sample main + renderer heaps; auto-snapshot on growth spikes. */
+  heapMonitorEnabled: boolean;
+  /** Arm the hot renderer CPU profiler (captures when CPU stays hot). */
+  hotCpuProfilingEnabled: boolean;
+  hotCpuProfilingStartDelayMs: HotCpuStartDelayMs;
+  hotCpuProfilingTriggerMode: HotCpuTriggerMode;
+  /** Also capture renderer heap snapshots around each hot-CPU profile. */
+  hotCpuProfilingCaptureHeapSnapshot: boolean;
+  /** 1..HOT_CPU_HEAP_SNAPSHOT_LIMIT_MAX snapshots per session. */
+  hotCpuProfilingHeapSnapshotLimit: number;
+  /** Profile app startup (main + first window) on every launch while on. */
+  startupCpuProfilingEnabled: boolean;
+};
+
+export const GENERAL_DEFAULTS: GeneralSettings = {
+  developerMode: false
+};
+
+export const EXPERIMENTAL_DEFAULTS: ExperimentalSettings = {
+  lineageAllBranches: false
+};
+
+export const DIAGNOSTICS_DEFAULTS: DiagnosticsSettings = {
+  heapMonitorEnabled: false,
+  hotCpuProfilingEnabled: false,
+  hotCpuProfilingStartDelayMs: 0,
+  hotCpuProfilingTriggerMode: "sustained",
+  hotCpuProfilingCaptureHeapSnapshot: false,
+  hotCpuProfilingHeapSnapshotLimit: 2,
+  startupCpuProfilingEnabled: false
+};
+
+export type AppSettingsSnapshot = {
+  general: GeneralSettings;
+  experimental: ExperimentalSettings;
+  diagnostics: DiagnosticsSettings;
+  diagnosticsEnv: DiagnosticsEnvOverrides;
+  /** Directory diagnostics sessions (profiles, snapshots) are written to. */
+  diagnosticsOutputRoot: string;
+};
+
+export type AppSettingsPatch = {
+  general?: Partial<GeneralSettings>;
+  experimental?: Partial<ExperimentalSettings>;
+  diagnostics?: Partial<DiagnosticsSettings>;
+};
+
 export interface Commands {
   /** Liveness probe — proves the command-bus round-trip end to end. */
   ping: { req: void; res: string };
@@ -233,6 +332,10 @@ export interface Commands {
     res: string;
   };
 
+  // App settings (Settings window)
+  "settings:read": { req: void; res: AppSettingsSnapshot };
+  "settings:update": { req: { patch: AppSettingsPatch }; res: AppSettingsSnapshot };
+
   // App logs (diagnosability — silent failures must be findable somewhere)
   "logs:read": { req: void; res: LogSnapshot };
   "logs:openWindow": { req: void; res: null };
@@ -266,6 +369,8 @@ export interface Events {
   /** Native Profiles-menu actions — handled by whichever window has focus. */
   "ui:newProfile": Record<string, never>;
   "ui:manageProfile": Record<string, never>;
+  /** App settings changed (any window) — payload is the fresh snapshot. */
+  "settings:changed": AppSettingsSnapshot;
   /** Reveal a repo (and optionally a worktree) in the window bound to
    *  `profileId` — cross-profile ⌘F pick landing in an open window. */
   "ui:revealRepo": {

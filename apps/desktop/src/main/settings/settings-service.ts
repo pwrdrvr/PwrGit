@@ -1,10 +1,20 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import type {
+  DiagnosticsSettings,
+  ExperimentalSettings,
+  GeneralSettings
+} from "@pwrgit/shared";
 
-/** App-level (not per-profile) settings. Grows as later units need it. */
+/** App-level (not per-profile) settings. Grows as later units need it.
+ *  Experimental/diagnostics are stored sparsely — only keys the user changed;
+ *  reads are defaulted at the settings:read handler. */
 export type AppSettings = {
   /** Root under which PwrGit-managed worktrees are created (U14). */
   worktreeRoot?: string;
+  general?: Partial<GeneralSettings>;
+  experimental?: Partial<ExperimentalSettings>;
+  diagnostics?: Partial<DiagnosticsSettings>;
 };
 
 const DEFAULTS: AppSettings = {};
