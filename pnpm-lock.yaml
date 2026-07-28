@@ -7,7 +7,7 @@ settings:
 overrides:
   '@types/node': 24.12.4
 
-pnpmfileChecksum: sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=
+pnpmfileChecksum: sha256-ysR/sAeuW8QJax++rnDZlIofNbQhNQczJpER4LsuRN4=
 
 importers:
 
