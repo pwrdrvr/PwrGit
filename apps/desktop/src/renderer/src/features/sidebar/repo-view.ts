@@ -15,11 +15,19 @@ export function repoPrimaryBehind(repo: Repo): number {
 
 export type RepoGroup = { root: string; label: string; repos: Repo[] };
 
-const lastSegment = (path: string): string =>
-  path.split("/").filter(Boolean).pop() ?? path;
+// Repo/root paths arrive with the platform's separators (backslashes on
+// Windows); normalize before any prefix or segment math so grouping doesn't
+// silently dump every repo into "Other" off-POSIX.
+const normalizeSlashes = (path: string): string => path.replace(/\\/g, "/");
 
-const isUnder = (path: string, root: string): boolean =>
-  path === root || path.startsWith(root.endsWith("/") ? root : `${root}/`);
+const lastSegment = (path: string): string =>
+  normalizeSlashes(path).split("/").filter(Boolean).pop() ?? path;
+
+const isUnder = (path: string, root: string): boolean => {
+  const p = normalizeSlashes(path);
+  const r = normalizeSlashes(root);
+  return p === r || p.startsWith(r.endsWith("/") ? r : `${r}/`);
+};
 
 /**
  * Bucket repos by the scan root they live under (longest-prefix wins, so nested
