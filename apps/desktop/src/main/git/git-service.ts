@@ -679,10 +679,23 @@ export async function worktreeRemove(
   const args = ["worktree", "remove"];
   if (options.force) args.push("--force");
   args.push(worktreePath);
-  const raw = await git(args, repoPath);
-  if (!raw.ok) return raw;
-  if (raw.value.exitCode !== 0) {
+  // Windows transiently locks files another process just touched (a finishing
+  // git child, antivirus scanning fresh files), failing the delete with
+  // "Permission denied". The lock clears in well under a second, so retry
+  // with a short backoff before reporting failure.
+  const maxAttempts = 4;
+  for (let attempt = 1; ; attempt += 1) {
+    const raw = await git(args, repoPath);
+    if (!raw.ok) return raw;
+    if (raw.value.exitCode === 0) return ok(undefined);
     const message = raw.value.stderr.trim();
+    const transient = /permission denied|device or resource busy|ebusy|eperm/i.test(
+      message
+    );
+    if (transient && attempt < maxAttempts) {
+      await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+      continue;
+    }
     const code = /modified or untracked|contains modified|is dirty|use --force/i.test(
       message
     )
@@ -696,7 +709,6 @@ export async function worktreeRemove(
       message: message || "worktree remove failed"
     });
   }
-  return ok(undefined);
 }
 
 /** Fetch all remotes and prune deleted remote branches. */
