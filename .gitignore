@@ -15,6 +15,9 @@ build/
 # Electron packaging / distributables
 release/
 release-stage/
+# Release maintenance scripts are source, not packaged artifacts.
+!scripts/release/
+!scripts/release/*.sh
 *.app
 *.dmg
 *.exe
