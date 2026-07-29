@@ -680,11 +680,15 @@ export async function worktreeRemove(
   const args = ["worktree", "remove"];
   if (options.force) args.push("--force");
   args.push(worktreePath);
-  // Windows transiently locks files another process just touched (a finishing
-  // git child, antivirus scanning fresh files), failing the delete with
-  // "Permission denied". The lock clears in well under a second, so retry
-  // with a short backoff before reporting failure.
-  const maxAttempts = 4;
+  // Windows transiently locks files another process just touched — antivirus
+  // scanning fresh files, or our own state probes: selecting a worktree row
+  // fires WorktreeStateService.compute, a chain of several git spawns whose
+  // cwd is the worktree, and a directory that is any process's cwd cannot be
+  // deleted on Windows. A cold runner can stretch that chain to a few
+  // seconds, so the retry budget must comfortably outlast it (~4.5s here,
+  // plus the rmSync fallback's own retries below) while staying bounded so a
+  // genuinely stuck handle still surfaces.
+  const maxAttempts = 6;
   for (let attempt = 1; ; attempt += 1) {
     const raw = await git(args, repoPath);
     if (!raw.ok) return raw;
@@ -698,8 +702,8 @@ export async function worktreeRemove(
         rmSync(worktreePath, {
           recursive: true,
           force: true,
-          maxRetries: 5,
-          retryDelay: 100
+          maxRetries: 15,
+          retryDelay: 300
         });
         return ok(undefined);
       } catch (cause) {
@@ -716,7 +720,7 @@ export async function worktreeRemove(
       message
     );
     if (transient && attempt < maxAttempts) {
-      await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+      await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
       continue;
     }
     const code = /modified or untracked|contains modified|is dirty|use --force/i.test(
