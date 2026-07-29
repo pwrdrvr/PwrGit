@@ -52,6 +52,13 @@ export type GitSandbox = {
   commit: (cwd: string, file: string, message: string) => void;
   /** Like commit, but authored by someone else (tests "not mine" paths). */
   commitAs: (email: string, cwd: string, file: string, message: string) => void;
+  /**
+   * Empty commit with a pinned author+committer date. Branch-ordering tests
+   * need strictly increasing timestamps: git dates have 1-second resolution,
+   * so a tight commit loop lands whole batches in the same second and
+   * `--sort=-committerdate` breaks the ties arbitrarily.
+   */
+  commitEmptyAt: (cwd: string, message: string, epochSeconds: number) => void;
   makeRepo: (name: string, opts?: { worktrees?: string[] }) => TestRepo;
   /** A repo whose primary branch is `behindBy` commits behind its origin. */
   makeRepoBehindRemote: (
@@ -68,9 +75,12 @@ export type GitSandbox = {
  */
 export function createGitSandbox(): GitSandbox {
   // realpath so roots match git's canonical worktree paths — on macOS tmpdir()
-  // is /var/… symlinked to /private/var/…, which would break root-prefix
-  // grouping (real user paths like ~/Acme aren't symlinked).
-  const base = realpathSync(mkdtempSync(join(tmpdir(), "pwrgit-e2e-")));
+  // is /var/… symlinked to /private/var/…, and on Windows CI runners TEMP is
+  // the 8.3 short form (C:\Users\RUNNER~1\…) while git reports the long path
+  // (C:/Users/runneradmin/…). Either would break root-prefix grouping (real
+  // user paths aren't symlinked or shortened). `.native` is what expands 8.3
+  // names — the JS implementation only resolves symlinks.
+  const base = realpathSync.native(mkdtempSync(join(tmpdir(), "pwrgit-e2e-")));
   const reposDir = join(base, "repos");
   const worktreesDir = join(base, "worktrees");
   const worktreeRoot = join(base, "new-worktrees");
@@ -171,6 +181,19 @@ export function createGitSandbox(): GitSandbox {
     });
   };
 
+  const commitEmptyAt = (
+    cwd: string,
+    message: string,
+    epochSeconds: number
+  ): void => {
+    const date = `${epochSeconds} +0000`;
+    execFileSync("git", ["commit", "--allow-empty", "-m", message], {
+      cwd,
+      env: { ...GIT_ENV, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+      encoding: "utf8"
+    });
+  };
+
   const cleanup = (): void => {
     rmSync(base, { recursive: true, force: true });
   };
@@ -181,6 +204,7 @@ export function createGitSandbox(): GitSandbox {
     git: (cwd: string, ...args: string[]) => git(cwd, ...args),
     commit,
     commitAs,
+    commitEmptyAt,
     makeRepo,
     makeRepoBehindRemote,
     cleanup

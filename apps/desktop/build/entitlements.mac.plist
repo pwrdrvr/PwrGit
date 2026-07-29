@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+                       "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Hardened Runtime exemptions required by Electron's V8 engine.
+       allow-jit: V8 JIT-compiles JS into RWX pages.
+       allow-unsigned-executable-memory: Electron mmaps non-MAP_JIT executable
+       pages; required on every Electron app to date.
+
+       NOT included (deliberately):
+       - com.apple.security.cs.disable-library-validation: our native modules
+         (better-sqlite3) and dugite's git binaries are signed with the same
+         Developer ID as the app by electron-builder's deep sign pass, so
+         library validation passes without the exemption. -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+</dict>
+</plist>

@@ -15,11 +15,28 @@ export function repoPrimaryBehind(repo: Repo): number {
 
 export type RepoGroup = { root: string; label: string; repos: Repo[] };
 
-const lastSegment = (path: string): string =>
-  path.split("/").filter(Boolean).pop() ?? path;
+// Repo/root paths arrive with the platform's separators (backslashes on
+// Windows); normalize before any prefix or segment math so grouping doesn't
+// silently dump every repo into "Other" off-POSIX.
+const normalizeSlashes = (path: string): string => path.replace(/\\/g, "/");
 
-const isUnder = (path: string, root: string): boolean =>
-  path === root || path.startsWith(root.endsWith("/") ? root : `${root}/`);
+// Windows paths (drive-letter prefix) additionally compare case-insensitively:
+// repo paths come from `git worktree list`, which reports true-case
+// forward-slash paths (C:/Users/runneradmin/…), while picked roots keep the
+// shell's casing (C:\Users\RUNNERADMIN\…) — same directory, different string.
+const comparablePath = (path: string): string => {
+  const normalized = normalizeSlashes(path);
+  return /^[A-Za-z]:\//.test(normalized) ? normalized.toLowerCase() : normalized;
+};
+
+const lastSegment = (path: string): string =>
+  normalizeSlashes(path).split("/").filter(Boolean).pop() ?? path;
+
+const isUnder = (path: string, root: string): boolean => {
+  const p = comparablePath(path);
+  const r = comparablePath(root);
+  return p === r || p.startsWith(r.endsWith("/") ? r : `${r}/`);
+};
 
 /**
  * Bucket repos by the scan root they live under (longest-prefix wins, so nested

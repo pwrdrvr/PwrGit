@@ -13,7 +13,9 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "pnpm --filter @pwrgit/desktop test:e2e"
+    "test:e2e": "pnpm --filter @pwrgit/desktop test:e2e",
+    "test:desktop-e2e": "pnpm --filter @pwrgit/desktop build && pnpm --filter @pwrgit/desktop test:e2e",
+    "release:check": "node ./scripts/check-desktop-release-metadata.mjs"
   },
   "devDependencies": {
     "@types/node": "24.12.4",

@@ -8,8 +8,16 @@ out/
 build/
 *.tsbuildinfo
 
+# electron-builder buildResources (entitlements, icons) are source, not output —
+# carve them out of the blanket build/ ignore above.
+!apps/desktop/build/
+
 # Electron packaging / distributables
 release/
+release-stage/
+# Release maintenance scripts are source, not packaged artifacts.
+!scripts/release/
+!scripts/release/*.sh
 *.app
 *.dmg
 *.exe

@@ -1,3 +1,4 @@
+import { rmSync } from "node:fs";
 import {
   type BranchRef,
   type ChangeSet,
@@ -679,10 +680,49 @@ export async function worktreeRemove(
   const args = ["worktree", "remove"];
   if (options.force) args.push("--force");
   args.push(worktreePath);
-  const raw = await git(args, repoPath);
-  if (!raw.ok) return raw;
-  if (raw.value.exitCode !== 0) {
+  // Windows transiently locks files another process just touched — antivirus
+  // scanning fresh files, or our own state probes: selecting a worktree row
+  // fires WorktreeStateService.compute, a chain of several git spawns whose
+  // cwd is the worktree, and a directory that is any process's cwd cannot be
+  // deleted on Windows. A cold runner can stretch that chain to a few
+  // seconds, so the retry budget must comfortably outlast it (~4.5s here,
+  // plus the rmSync fallback's own retries below) while staying bounded so a
+  // genuinely stuck handle still surfaces.
+  const maxAttempts = 6;
+  for (let attempt = 1; ; attempt += 1) {
+    const raw = await git(args, repoPath);
+    if (!raw.ok) return raw;
+    if (raw.value.exitCode === 0) return ok(undefined);
     const message = raw.value.stderr.trim();
+    // A retry can find the worktree already unregistered: the failed attempt
+    // pruned git's metadata before the file deletion hit the lock. Finish the
+    // delete ourselves (rmSync retries EPERM/EBUSY on Windows).
+    if (attempt > 1 && /is not a working tree/i.test(message)) {
+      try {
+        rmSync(worktreePath, {
+          recursive: true,
+          force: true,
+          maxRetries: 15,
+          retryDelay: 300
+        });
+        return ok(undefined);
+      } catch (cause) {
+        return err({
+          kind: "repo",
+          code: "worktree_remove_failed",
+          message: `left-over worktree directory could not be deleted: ${
+            cause instanceof Error ? cause.message : String(cause)
+          }`
+        });
+      }
+    }
+    const transient = /permission denied|device or resource busy|ebusy|eperm/i.test(
+      message
+    );
+    if (transient && attempt < maxAttempts) {
+      await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
+      continue;
+    }
     const code = /modified or untracked|contains modified|is dirty|use --force/i.test(
       message
     )
@@ -696,7 +736,6 @@ export async function worktreeRemove(
       message: message || "worktree remove failed"
     });
   }
-  return ok(undefined);
 }
 
 /** Fetch all remotes and prune deleted remote branches. */

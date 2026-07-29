@@ -207,6 +207,25 @@ describe("groupReposByRoot", () => {
     const groups = groupReposByRoot([repos[0]!], roots);
     expect(groups.map((g) => g.label)).toEqual(["Acme"]);
   });
+
+  it("matches Windows repo paths against backslash roots, case-insensitively", () => {
+    // Real Windows shape: repo paths come from `git worktree list` as
+    // true-case forward-slash paths, roots from the folder picker with the
+    // shell's separators and casing. Same directories, different strings.
+    const winRepos = [
+      repo({ id: "acme-svc", path: "C:/Users/runneradmin/Temp/a/repos/acme-svc" }),
+      repo({ id: "pwr-svc", path: "C:/Users/runneradmin/Temp/b/repos/pwr-svc" })
+    ];
+    const winRoots = [
+      "C:\\Users\\RUNNERADMIN\\Temp\\a\\repos",
+      "C:\\Users\\RUNNERADMIN\\Temp\\b\\repos"
+    ];
+    const groups = groupReposByRoot(winRepos, winRoots);
+    expect(groups.map((g) => [g.label, g.repos.map((r) => r.id)])).toEqual([
+      ["repos", ["acme-svc"]],
+      ["repos", ["pwr-svc"]]
+    ]);
+  });
 });
 
 describe("repoPrimaryBehind", () => {

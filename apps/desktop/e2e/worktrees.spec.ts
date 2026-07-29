@@ -106,8 +106,10 @@ test("batch-removes worktrees (including a dirty one) via multi-select", async (
   await expect(branchRow(window, "wt/dirty")).toHaveCount(0);
   await expect(branchRow(window, "main")).toBeVisible();
 
-  // ...and they're gone from disk too.
-  expect(existsSync(one)).toBe(false);
-  expect(existsSync(two)).toBe(false);
-  expect(existsSync(dirty)).toBe(false);
+  // ...and they're gone from disk too. Poll: rows disappear per-removal as the
+  // sidebar refreshes, so the last deletion can still be in flight (slow
+  // Windows CI filesystems surfaced this) when the UI already looks done.
+  await expect.poll(() => existsSync(one), { timeout: 20_000 }).toBe(false);
+  await expect.poll(() => existsSync(two), { timeout: 20_000 }).toBe(false);
+  await expect.poll(() => existsSync(dirty), { timeout: 20_000 }).toBe(false);
 });

@@ -128,10 +128,15 @@ test("caps drawn branches and clips the lane gutter on branch-heavy repos", asyn
   const repo = s.makeRepo("many");
   // 31 active branches (each with an unmerged commit by "me") — more than the
   // draw cap (30) and far more concurrent lanes than the gutter viewport (10).
+  // Pin strictly increasing commit dates so b30 is unambiguously the newest:
+  // the draw cap keeps the 30 most recently committed branches, and a tight
+  // same-second commit loop would leave the sort to arbitrary tie-breaking
+  // (CI once dropped b30 itself, failing the visibility check below).
+  const baseEpoch = Math.floor(Date.now() / 1000) - 3600;
   for (let i = 0; i < 31; i += 1) {
     const b = `b${String(i).padStart(2, "0")}`;
     s.git(repo.path, "checkout", "-q", "-b", b);
-    s.git(repo.path, "commit", "--allow-empty", "-m", `work on ${b}`);
+    s.commitEmptyAt(repo.path, `work on ${b}`, baseEpoch + i);
     s.git(repo.path, "checkout", "-q", "main");
   }
 

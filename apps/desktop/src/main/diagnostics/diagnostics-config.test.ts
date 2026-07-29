@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolveHeapMonitorConfig } from "./heap-monitor-config";
 import { resolveHotCpuProfileConfig } from "./hot-cpu-profile-config";
@@ -24,7 +25,9 @@ describe("diagnostics config resolvers", () => {
     });
     expect(heap).toMatchObject({
       enabled: true,
-      outputRoot: "/out",
+      // The resolver runs the root through path.resolve, which prefixes the
+      // current drive on Windows ("/out" → "D:\\out") — compare resolved form.
+      outputRoot: path.resolve("/out"),
       intervalMs: 250,
       deltaThresholdBytes: 100 * 1024 * 1024
     });

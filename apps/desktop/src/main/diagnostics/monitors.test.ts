@@ -39,7 +39,12 @@ async function flushAsync(): Promise<void> {
  *  awaited real fs op yields a full turn; bound it so a bug can't hang CI. */
 async function waitForRealIo(done: () => boolean): Promise<void> {
   const { access } = await import("node:fs/promises");
-  for (let i = 0; i < 200 && !done(); i += 1) {
+  // Bounded by real elapsed time via hrtime (NOT the faked Date/timers): a
+  // fixed iteration count of quick access() round-trips can lap a slow real
+  // fs write on Windows CI runners, reporting a capture as missing when it
+  // just hadn't landed yet.
+  const deadline = process.hrtime.bigint() + 10_000_000_000n; // 10s real time
+  while (!done() && process.hrtime.bigint() < deadline) {
     await access(".").catch(() => {});
   }
 }

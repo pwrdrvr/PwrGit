@@ -15,8 +15,10 @@
     "postinstall": "electron-rebuild -f",
     "preview": "electron-vite preview",
     "rebuild:electron-native": "electron-rebuild -f",
-    "package": "electron-vite build && electron-builder --config electron-builder.yml",
-    "release": "electron-vite build && electron-builder --config electron-builder.yml --publish always",
+    "package:dryrun": "node ./scripts/release.mjs --dryrun",
+    "package": "node ./scripts/release.mjs --no-publish",
+    "package:win": "node ./scripts/release.mjs --win",
+    "release": "node ./scripts/release.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "pretest:e2e": "electron-vite build",
     "test:e2e": "playwright test -c playwright.config.ts"
@@ -36,6 +38,7 @@
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
+    "@electron/asar": "^4.2.0",
     "@electron/rebuild": "^4.0.1",
     "@playwright/test": "^1.61.1",
     "@types/better-sqlite3": "^7.6.13",
