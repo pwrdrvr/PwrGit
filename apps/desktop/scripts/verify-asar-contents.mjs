@@ -42,7 +42,12 @@ if (!existsSync(asarPath)) {
 // from the desktop package's node_modules without an extra install step.
 const require = createRequire(import.meta.url);
 const asar = require("@electron/asar");
-const listing = asar.listPackage(asarPath, { isPack: false });
+// listPackage returns platform-separator paths (backslashes on Windows);
+// normalize so the required-file and forbidden-pattern checks below match on
+// every platform.
+const listing = asar
+  .listPackage(asarPath, { isPack: false })
+  .map((entry) => entry.replace(/\\/g, "/"));
 const required = [
   "/out/main/index.js",
 ];
