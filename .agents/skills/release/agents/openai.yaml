@@ -1,0 +1,4 @@
+interface:
+  display_name: "Release"
+  short_description: "Cut guarded PwrGit desktop releases"
+  default_prompt: "Use $release to prepare or publish a guarded PwrGit desktop release."
