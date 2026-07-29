@@ -131,10 +131,10 @@ jobs:
       - name: Install pnpm
         # Version comes from package.json's `packageManager` field (omit
         # `version` here) so there's no second pnpm pin to drift on upgrade.
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24.x
           cache: pnpm
@@ -165,10 +165,10 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24.x
           cache: pnpm

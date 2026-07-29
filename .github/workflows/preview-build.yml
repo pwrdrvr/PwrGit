@@ -75,10 +75,10 @@ jobs:
       # Portable pnpm + setup-node combo (the shared pwrdrvr/configure-nodejs
       # action is bash/Linux-oriented). Mirrors the `windows` job in ci.yml.
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24.x
           cache: pnpm
