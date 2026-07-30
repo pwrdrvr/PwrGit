@@ -25,6 +25,13 @@
   "pnpm": {
     "overrides": {
       "@types/node": "24.12.4"
-    }
+    },
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "dugite",
+      "electron",
+      "electron-winstaller",
+      "esbuild"
+    ]
   }
 }
