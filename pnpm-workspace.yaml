@@ -2,11 +2,12 @@ packages:
   - apps/*
   - packages/*
 
-# Native modules that need their build scripts to run during install.
+# Dependencies that need their build scripts to run during install.
 allowBuilds:
   better-sqlite3: true
   dugite: true
   electron: true
+  electron-winstaller: true
   esbuild: true
 
 # The @pwrdrvr/agent-kit packages are PwrDrvr's own, freshly published, and
