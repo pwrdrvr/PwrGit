@@ -9,7 +9,7 @@ export default defineConfig({
     include: [
       "packages/*/src/**/*.test.ts",
       "apps/desktop/src/**/*.test.{ts,tsx}",
-      "scripts/**/*.test.mjs"
+      "scripts/**/*.test.ts"
     ],
     exclude: ["**/node_modules/**", "**/out/**", "apps/desktop/e2e/**"]
   }
