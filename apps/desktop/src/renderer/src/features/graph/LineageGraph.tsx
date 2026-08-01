@@ -119,10 +119,14 @@ export function LineageGraph({
           : {
               tips: data.tips,
               defaultBranch: data.defaultBranch,
+              // This worktree's checked-out branch — pinned to lane 1.
+              headBranch: Object.entries(data.branches).find(
+                ([, info]) => info.worktreeId === worktreeId
+              )?.[0],
               shownBranches: data.shownBranches
             }
       ),
-    [data]
+    [data, worktreeId]
   );
 
   const vms: GraphRowVM[] = useMemo(() => {

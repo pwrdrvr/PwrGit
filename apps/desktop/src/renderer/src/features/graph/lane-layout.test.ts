@@ -185,6 +185,45 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
     );
   });
 
+  it("pins the checked-out branch to lane 1, ahead of newer branches", () => {
+    // n is more recent than head branch h — without the pin it would grab the
+    // lane next to the spine. h forked from T2, n from main's tip T1.
+    const { rows } = layoutLanes(
+      [c("N1", "T1"), c("H1", "T2"), c("T1", "T2"), c("T2")],
+      {
+        tips: { N1: ["n"], H1: ["h"], T1: ["main"] },
+        defaultBranch: "main",
+        headBranch: "h",
+        shownBranches: ["n", "h"]
+      }
+    );
+    const lanes = Object.fromEntries(
+      rows.map((r, i) => [["N1", "H1", "T1", "T2"][i], r.lane])
+    );
+    expect(lanes).toEqual({ N1: 2, H1: 1, T1: 0, T2: 0 });
+  });
+
+  it("keeps the checked-out branch on lane 1 even when stacked on another branch", () => {
+    // h builds on d's tip; its line converges into D's dot, so the lanes never
+    // overlap vertically and h can still sit second, with d further right.
+    const { rows } = layoutLanes(
+      [c("H1", "D"), c("D", "M"), c("M")],
+      {
+        tips: { H1: ["h"], D: ["d"], M: ["main"] },
+        defaultBranch: "main",
+        headBranch: "h",
+        shownBranches: ["h", "d"]
+      }
+    );
+    const lanes = Object.fromEntries(
+      rows.map((r, i) => [["H1", "D", "M"][i], r.lane])
+    );
+    expect(lanes).toEqual({ H1: 1, D: 2, M: 0 });
+    // h's line ends at D's dot; d's line ends at M's dot.
+    expect(rows[1].top).toEqual([{ from: 1, to: 2 }]);
+    expect(rows[2].top).toEqual([{ from: 2, to: 0 }]);
+  });
+
   it("skips the reservation when the default tip is outside the window", () => {
     // No spine drawn → nothing to protect; lane 0 goes to the first tip.
     const { rows, laneCount } = layoutLanes([c("F2", "F1"), c("F1", "B")], {
