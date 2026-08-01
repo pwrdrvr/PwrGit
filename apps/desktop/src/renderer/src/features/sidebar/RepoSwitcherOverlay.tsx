@@ -144,7 +144,11 @@ export function RepoSwitcherOverlay({
               } else if (e.key === "Enter") {
                 const hit = results[sel];
                 if (hit !== undefined) onPick(hit);
-              } else if ((e.metaKey || e.ctrlKey) && e.key === "p") {
+              } else if (
+                (e.metaKey || e.ctrlKey) &&
+                !e.shiftKey &&
+                e.key.toLowerCase() === "p"
+              ) {
                 e.preventDefault();
                 const hit = results[sel];
                 if (hit !== undefined) togglePin(hit);

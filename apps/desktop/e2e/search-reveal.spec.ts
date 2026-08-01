@@ -157,7 +157,11 @@ test("⌘F rows show pin state, toggle it by star click and ⌘P, and browse pin
   await expect(firstRow).toContainText("bravo-park");
   await expect(firstRow.locator(".pin.is-pinned")).toBeVisible();
 
-  // ⌘P unpins the keyboard-selected row (the first one).
+  // ⌘P unpins the SELECTED row. Selection follows hover, and the cursor is
+  // still parked where the star click left it — a re-render under a
+  // stationary cursor can re-fire hover on whatever row now sits there
+  // (seen on Windows CI), so point at the first row explicitly.
+  await firstRow.hover();
   await window.keyboard.press("Meta+p");
   await expect(firstRow.locator(".pin.is-pinned")).toHaveCount(0);
 });
