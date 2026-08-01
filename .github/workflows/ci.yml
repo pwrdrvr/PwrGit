@@ -44,6 +44,9 @@ jobs:
         with:
           node-version: 24.x
 
+      - name: Check package license policy and third-party notices
+        run: pnpm licenses:check
+
       - name: Type check
         run: pnpm typecheck
 

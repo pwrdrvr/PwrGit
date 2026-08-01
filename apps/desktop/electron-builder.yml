@@ -68,6 +68,10 @@ files:
   - "!**/node_modules/dugite/git/**"
 
 extraResources:
+  - from: LICENSE
+    to: LICENSE
+  - from: THIRD_PARTY_LICENSES
+    to: THIRD_PARTY_LICENSES
   - from: CHANGELOG.md
     to: CHANGELOG.md
   # The per-arch git distribution staged by scripts/beforepack-dugite-arch.mjs.
