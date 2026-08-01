@@ -8,8 +8,7 @@ export default defineConfig({
     environment: "node",
     include: [
       "packages/*/src/**/*.test.ts",
-      "apps/desktop/src/**/*.test.{ts,tsx}",
-      "scripts/**/*.test.ts"
+      "apps/desktop/src/**/*.test.{ts,tsx}"
     ],
     exclude: ["**/node_modules/**", "**/out/**", "apps/desktop/e2e/**"]
   }

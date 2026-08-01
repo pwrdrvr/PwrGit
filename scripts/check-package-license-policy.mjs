@@ -82,6 +82,9 @@ function runCli() {
   console.log("package license policy check passed");
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   runCli();
 }
