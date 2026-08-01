@@ -183,8 +183,12 @@ SOFTWARE.`;
   ].join("\n");
 }
 
+function normalizeLineEndings(text) {
+  return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
 function normalizeLicenseText(text) {
-  return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+  return normalizeLineEndings(text).trim();
 }
 
 function stableRecordKey(record) {
@@ -330,7 +334,12 @@ function main() {
   const output = `${lines.join("\n").replace(/[ \t]+$/gm, "").trimEnd()}\n`;
 
   if (check) {
-    const current = existsSync(outputPath) ? readFileSync(outputPath, "utf8") : "";
+    // Git may check this committed text file out with CRLF on Windows. The
+    // generated artifact is canonical LF, so compare content rather than the
+    // host checkout's line-ending convention.
+    const current = existsSync(outputPath)
+      ? normalizeLineEndings(readFileSync(outputPath, "utf8"))
+      : "";
     if (current !== output) {
       console.error(
         "THIRD_PARTY_LICENSES is out of date. Run `pnpm licenses:generate` and commit the result.",
