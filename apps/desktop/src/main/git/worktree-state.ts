@@ -96,6 +96,12 @@ export class WorktreeStateService {
     { ref: string; name: string }
   >();
 
+  /** Probes currently running git for a worktree (removal drains these). */
+  private readonly inFlight = new Map<string, Set<Promise<unknown>>>();
+
+  /** Worktrees whose removal is underway; counted so overlapping batches nest. */
+  private readonly removalLocks = new Map<string, number>();
+
   constructor(
     private readonly db: DB,
     private readonly git: GitExec
@@ -155,8 +161,56 @@ export class WorktreeStateService {
     return resolved;
   }
 
-  /** Run git and cache a fresh snapshot for one worktree. */
+  /**
+   * Run git and cache a fresh snapshot for one worktree. While the worktree is
+   * locked for removal the probe is dropped (cached state is returned, no git
+   * spawns): on Windows a directory that is any process's cwd cannot be
+   * deleted, so a probe racing the removal would make the delete fail.
+   */
   async compute(worktreeId: string): Promise<WorktreeState | null> {
+    if (this.removalLocks.has(worktreeId)) return this.getCached(worktreeId);
+
+    const run = this.computeFresh(worktreeId);
+    let running = this.inFlight.get(worktreeId);
+    if (running === undefined) {
+      running = new Set();
+      this.inFlight.set(worktreeId, running);
+    }
+    running.add(run);
+    try {
+      return await run;
+    } finally {
+      running.delete(run);
+      if (running.size === 0) this.inFlight.delete(worktreeId);
+    }
+  }
+
+  /**
+   * Lock a worktree for removal: from now until the returned release fn runs,
+   * compute() is a no-op for it. Resolves once every already-running probe has
+   * finished, i.e. once no git process has its cwd inside the worktree.
+   */
+  async lockForRemoval(worktreeId: string): Promise<() => void> {
+    this.removalLocks.set(
+      worktreeId,
+      (this.removalLocks.get(worktreeId) ?? 0) + 1
+    );
+    const running = this.inFlight.get(worktreeId);
+    if (running !== undefined) await Promise.allSettled([...running]);
+
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const count = this.removalLocks.get(worktreeId) ?? 0;
+      if (count <= 1) this.removalLocks.delete(worktreeId);
+      else this.removalLocks.set(worktreeId, count - 1);
+    };
+  }
+
+  private async computeFresh(
+    worktreeId: string
+  ): Promise<WorktreeState | null> {
     const wt = this.worktreeRow(worktreeId);
     if (wt === null) return null;
 
