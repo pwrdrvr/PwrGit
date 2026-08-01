@@ -11,17 +11,21 @@
 // the tip look mid-line). A commit with no continuable lane opens the lowest
 // free lane, subject to pinning: lane 0 is reserved for the default-branch
 // spine while its tip is in the window, and lane 1 for the worktree's
-// checked-out branch (its line never overlaps its base branch's line — the
-// stack converges into the base's tip — so it can always sit second). Freed
-// lanes are still reused by later, non-overlapping lines. Each additional
-// parent of a merge opens a fresh lane owned by the merged-in branch; those
-// converge naturally at the shared ancestor.
+// checked-out branch when that branch has a line of its own (its line never
+// overlaps its base branch's line — the stack converges into the base's tip —
+// so it can always sit second). Freed lanes are still reused by later,
+// non-overlapping lines. Each additional parent of a merge opens a fresh lane
+// owned by the merged-in branch; those converge naturally at the shared
+// ancestor.
 //
 // Ownership: each drawn branch claims the commits on its first-parent chain —
 // default branch, then the head branch, then shown order (recency). A walk
 // stops at commits a higher-priority branch claimed and at other drawn tips.
-// Without `refs`, every commit is unowned and the layout degrades to the
-// plain parent-driven sweep (lanes continue through any chain, as before).
+// The spine's walk starts at the REF the trunk was drawn from (e.g.
+// origin/main) when given, so fetched-but-unmerged trunk commits stay on the
+// spine's own lane — drawn dashed above the local tip rather than as a
+// separate anonymous line. Without `refs`, every commit is unowned and the
+// layout degrades to the plain parent-driven sweep.
 
 export type LaneCommit = { hash: string; parents: string[] };
 
@@ -30,6 +34,8 @@ export type LaneRefs = {
   /** commit hash → local branch names tipped there. */
   tips: Record<string, string[]>;
   defaultBranch: string;
+  /** Tip hash of the ref the trunk was drawn from (e.g. origin/main). */
+  defaultRefTip?: string | undefined;
   /** The branch checked out in the viewing worktree — pinned to lane 1. */
   headBranch?: string | undefined;
   /** Branches drawn besides the default spine (most recent first). */
@@ -37,8 +43,9 @@ export type LaneRefs = {
 };
 
 /** A drawn segment within a row cell: `from` lane at one edge → `to` lane at the
- *  row's vertical center (top half), or center → `to` at the bottom edge. */
-export type LaneSeg = { from: number; to: number };
+ *  row's vertical center (top half), or center → `to` at the bottom edge.
+ *  `dashed` marks trunk history the local default branch hasn't applied yet. */
+export type LaneSeg = { from: number; to: number; dashed?: boolean };
 
 export type LaneRow = {
   /** Column the commit's dot sits in. */
@@ -55,17 +62,23 @@ export type LaneLayout = {
   laneCount: number;
 };
 
+const seg = (from: number, to: number, dashed: boolean): LaneSeg =>
+  dashed ? { from, to, dashed: true } : { from, to };
+
 /** commit hash → drawn branch owning it, via prioritized first-parent walks. */
 function computeOwners(
-  commits: LaneCommit[],
+  byHash: Map<string, LaneCommit>,
   refs: LaneRefs
-): { owners: Map<string, string>; tipOf: Map<string, string> } {
-  const byHash = new Map(commits.map((c) => [c.hash, c]));
+): {
+  owners: Map<string, string>;
+  tipOf: Map<string, string>;
+  /** Where the spine's walk starts: the trunk ref's tip when drawn, else the
+   *  local default tip. */
+  spineStart: string | undefined;
+} {
   const priority = [refs.defaultBranch];
   if (refs.headBranch !== undefined) priority.push(refs.headBranch);
-  const drawn = [
-    ...new Set([...priority, ...refs.shownBranches])
-  ];
+  const drawn = [...new Set([...priority, ...refs.shownBranches])];
   const drawnSet = new Set(drawn);
   const tipOf = new Map<string, string>();
   const drawnTips = new Set<string>();
@@ -76,10 +89,14 @@ function computeOwners(
       drawnTips.add(hash);
     }
   }
+  const spineStart =
+    refs.defaultRefTip !== undefined && byHash.has(refs.defaultRefTip)
+      ? refs.defaultRefTip
+      : tipOf.get(refs.defaultBranch);
 
   const owners = new Map<string, string>();
   for (const b of drawn) {
-    const start = tipOf.get(b);
+    const start = b === refs.defaultBranch ? spineStart : tipOf.get(b);
     let cur = start;
     while (cur !== undefined) {
       const commit = byHash.get(cur);
@@ -93,28 +110,74 @@ function computeOwners(
       cur = commit.parents[0];
     }
   }
-  return { owners, tipOf };
+  return { owners, tipOf, spineStart };
+}
+
+/** Every in-window commit reachable from `start` through any parent link. */
+function reachable(
+  byHash: Map<string, LaneCommit>,
+  start: string | undefined
+): Set<string> {
+  const seen = new Set<string>();
+  if (start === undefined) return seen;
+  const stack = [start];
+  while (stack.length > 0) {
+    const h = stack.pop() as string;
+    if (seen.has(h)) continue;
+    const commit = byHash.get(h);
+    if (commit === undefined) continue;
+    seen.add(h);
+    for (const p of commit.parents) stack.push(p);
+  }
+  return seen;
 }
 
 export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout {
-  const { owners, tipOf } =
+  const byHash = new Map(commits.map((c) => [c.hash, c]));
+  const { owners, tipOf, spineStart } =
     refs === undefined
-      ? { owners: new Map<string, string>(), tipOf: new Map<string, string>() }
-      : computeOwners(commits, refs);
-  const inWindow = new Set(commits.map((c) => c.hash));
-  const tipDrawn = (b: string | undefined): boolean => {
-    if (b === undefined) return false;
-    const t = tipOf.get(b);
-    return t !== undefined && inWindow.has(t);
-  };
+      ? {
+          owners: new Map<string, string>(),
+          tipOf: new Map<string, string>(),
+          spineStart: undefined
+        }
+      : computeOwners(byHash, refs);
+
+  // Trunk commits fetched but not yet in the local default branch: same spine
+  // line, but drawn dashed above the local tip.
+  let unapplied = new Set<string>();
+  if (refs !== undefined) {
+    const localTip = tipOf.get(refs.defaultBranch);
+    const remoteTip = refs.defaultRefTip;
+    if (
+      remoteTip !== undefined &&
+      localTip !== undefined &&
+      remoteTip !== localTip &&
+      byHash.has(remoteTip)
+    ) {
+      unapplied = reachable(byHash, remoteTip);
+      for (const h of reachable(byHash, localTip)) unapplied.delete(h);
+    }
+  }
+
   // Pin lane 0 to the trunk while its tip is drawn — the spine stays leftmost
   // even when newer branches (processed first) open their lanes — and lane 1
-  // to the worktree's checked-out branch so "your" line reads second.
+  // to the worktree's checked-out branch so "your" line reads second. The
+  // head pin requires the branch to actually OWN its tip: a branch sitting
+  // exactly on the trunk (or inside it) has no line, and reserving a column
+  // for it would leave a phantom empty lane.
   const laneReservedFor: (string | undefined)[] = [];
-  if (tipDrawn(refs?.defaultBranch)) {
+  if (spineStart !== undefined && byHash.has(spineStart)) {
     laneReservedFor[0] = refs?.defaultBranch;
-    if (refs?.headBranch !== refs?.defaultBranch && tipDrawn(refs?.headBranch)) {
-      laneReservedFor[1] = refs?.headBranch;
+    const head = refs?.headBranch;
+    const headTip = head === undefined ? undefined : tipOf.get(head);
+    if (
+      head !== undefined &&
+      head !== refs?.defaultBranch &&
+      headTip !== undefined &&
+      owners.get(headTip) === head
+    ) {
+      laneReservedFor[1] = head;
     }
   }
   // Lowest lane this owner may use: free, and not reserved for someone else.
@@ -128,6 +191,7 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
 
   let lanes: (string | null)[] = [];
   let laneOwner: (string | null)[] = [];
+  let laneDashed: boolean[] = [];
   const rows: LaneRow[] = [];
   let laneCount = 0;
 
@@ -150,30 +214,36 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
     const top: LaneSeg[] = [];
     for (let k = 0; k < before.length; k += 1) {
       if (before[k] === null) continue;
-      top.push({ from: k, to: before[k] === c.hash ? myLane : k });
+      top.push(seg(k, before[k] === c.hash ? myLane : k, laneDashed[k] ?? false));
     }
 
     // Advance to the post-commit lane state.
     const work = [...before];
     const workOwner = [...laneOwner];
+    const workDashed = [...laneDashed];
     while (work.length <= myLane) {
       work.push(null);
       workOwner.push(null);
+      workDashed.push(false);
     }
     for (const k of incoming) {
       if (k !== myLane) {
         work[k] = null;
         workOwner[k] = null;
+        workDashed[k] = false;
       }
     }
 
     const fromDot = new Set<number>();
+    const dashedOut = unapplied.has(c.hash);
     if (c.parents.length === 0) {
       work[myLane] = null;
       workOwner[myLane] = null;
+      workDashed[myLane] = false;
     } else {
       work[myLane] = c.parents[0] ?? null;
       workOwner[myLane] = co;
+      workDashed[myLane] = dashedOut;
       fromDot.add(myLane);
       for (const p of c.parents.slice(1)) {
         const po = owners.get(p) ?? null;
@@ -181,28 +251,32 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
         while (work.length <= lane) {
           work.push(null);
           workOwner.push(null);
+          workDashed.push(false);
         }
         work[lane] = p;
         workOwner[lane] = po;
+        workDashed[lane] = dashedOut;
         fromDot.add(lane);
       }
     }
     while (work.length > 0 && work[work.length - 1] === null) {
       work.pop();
       workOwner.pop();
+      workDashed.pop();
     }
 
     // Bottom half: every lane leaving this row toward a parent.
     const bottom: LaneSeg[] = [];
     for (let k = 0; k < work.length; k += 1) {
       if (work[k] === null) continue;
-      bottom.push({ from: fromDot.has(k) ? myLane : k, to: k });
+      bottom.push(seg(fromDot.has(k) ? myLane : k, k, workDashed[k] ?? false));
     }
 
     rows.push({ lane: myLane, top, bottom });
     laneCount = Math.max(laneCount, before.length, work.length, myLane + 1);
     lanes = work;
     laneOwner = workOwner;
+    laneDashed = workDashed;
   }
 
   return { rows, laneCount };

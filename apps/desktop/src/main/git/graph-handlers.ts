@@ -29,6 +29,8 @@ type CachedLanes = {
   defaultBranch: string;
   /** The resolvable ref for the default branch (e.g. "origin/develop"). */
   defaultRef: string;
+  /** Tip hash of that ref (first commit of the trunk window). */
+  defaultRefTip: string;
   shownBranches: string[];
   matchedBranches: number;
   hiddenBranches: number;
@@ -216,6 +218,7 @@ export function registerGraphHandlers(
         branches: branchInfo,
         defaultBranch: def.name,
         defaultRef: def.ref,
+        defaultRefTip: trunk.value[0]?.hash ?? "",
         shownBranches: shown,
         matchedBranches,
         hiddenBranches,
@@ -280,6 +283,7 @@ export function registerGraphHandlers(
       branches: out.branches,
       head,
       defaultBranch: out.defaultBranch,
+      defaultRefTip: out.defaultRefTip,
       shownBranches: out.shownBranches,
       matchedBranches: out.matchedBranches,
       hiddenBranches: out.hiddenBranches

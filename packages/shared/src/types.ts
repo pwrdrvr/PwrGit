@@ -171,6 +171,9 @@ export type LaneGraph = {
   /** Current HEAD commit, to highlight where you are. */
   head: string;
   defaultBranch: string;
+  /** Tip hash of the ref the trunk was drawn from (e.g. origin/main) — lets
+   *  the graph draw fetched-but-unmerged trunk as a dashed spine. */
+  defaultRefTip: string;
   /** Branches drawn besides the default spine. */
   shownBranches: string[];
   /** Branches that qualified for this scope before the draw cap. */

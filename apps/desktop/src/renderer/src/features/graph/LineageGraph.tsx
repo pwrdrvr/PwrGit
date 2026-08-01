@@ -119,6 +119,8 @@ export function LineageGraph({
           : {
               tips: data.tips,
               defaultBranch: data.defaultBranch,
+              defaultRefTip:
+                data.defaultRefTip === "" ? undefined : data.defaultRefTip,
               // This worktree's checked-out branch — pinned to lane 1.
               headBranch: Object.entries(data.branches).find(
                 ([, info]) => info.worktreeId === worktreeId

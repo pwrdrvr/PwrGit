@@ -32,6 +32,10 @@ export const laneColor = (i: number): string =>
 
 const cx = (lane: number): number => lane * LANE_W + LANE_W / 2;
 
+// Fetched-but-unapplied trunk. 4+4 divides ROW_H and MID, so the dash phase
+// lines up across row seams and straight runs read as one continuous line.
+const DASH = "4 4";
+
 // Curved lane transitions with vertical tangents at both ends — adjacent rows
 // meet with matching (vertical) slopes, so a multi-row swerve reads as one
 // continuous ribbon instead of a chain of straight diagonals.
@@ -92,14 +96,15 @@ export function GraphRow({
   const x = cx(row.lane);
 
   // A lane that runs straight through both halves of the row is drawn as ONE
-  // full-height line (no half-line seam at the vertical midpoint).
-  const passThrough = new Set<number>();
+  // full-height line (no half-line seam at the vertical midpoint). Halves with
+  // different dash states (the local-tip row under a remote-ahead spine) stay
+  // separate so the dash boundary lands exactly at the dot.
+  const passThrough = new Map<number, boolean>();
   for (const t of row.top) {
-    if (
-      t.from === t.to &&
-      row.bottom.some((b) => b.from === b.to && b.from === t.from)
-    ) {
-      passThrough.add(t.from);
+    if (t.from !== t.to) continue;
+    const b = row.bottom.find((s) => s.from === s.to && s.from === t.from);
+    if (b !== undefined && (t.dashed ?? false) === (b.dashed ?? false)) {
+      passThrough.set(t.from, t.dashed ?? false);
     }
   }
 
@@ -120,7 +125,7 @@ export function GraphRow({
           height={ROW_H}
           viewBox={`0 0 ${width} ${ROW_H}`}
         >
-        {[...passThrough].map((k) => (
+        {[...passThrough].map(([k, dashed]) => (
           <line
             key={`p${k}`}
             x1={cx(k)}
@@ -129,6 +134,7 @@ export function GraphRow({
             y2={ROW_H}
             stroke={laneColor(k)}
             strokeWidth={2}
+            strokeDasharray={dashed ? DASH : undefined}
           />
         ))}
         {row.top
@@ -143,6 +149,7 @@ export function GraphRow({
                 y2={MID}
                 stroke={laneColor(s.from)}
                 strokeWidth={2}
+                strokeDasharray={s.dashed === true ? DASH : undefined}
               />
             ) : (
               <path
@@ -152,6 +159,7 @@ export function GraphRow({
                 stroke={laneColor(s.from)}
                 strokeWidth={2}
                 strokeLinecap="round"
+                strokeDasharray={s.dashed === true ? DASH : undefined}
               />
             )
           )}
@@ -167,6 +175,7 @@ export function GraphRow({
                 y2={ROW_H}
                 stroke={laneColor(s.to)}
                 strokeWidth={2}
+                strokeDasharray={s.dashed === true ? DASH : undefined}
               />
             ) : (
               <path
@@ -176,6 +185,7 @@ export function GraphRow({
                 stroke={laneColor(s.to)}
                 strokeWidth={2}
                 strokeLinecap="round"
+                strokeDasharray={s.dashed === true ? DASH : undefined}
               />
             )
           )}

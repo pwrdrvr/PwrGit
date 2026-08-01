@@ -224,6 +224,73 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
     expect(rows[2].top).toEqual([{ from: 2, to: 0 }]);
   });
 
+  it("draws remote-ahead trunk as the same spine lane, dashed above the local tip", () => {
+    // origin/main (R2..R1) is ahead of local main (L). One lane-0 line — the
+    // unapplied stretch is dashed, turning solid exactly at L's dot.
+    const { rows, laneCount } = layoutLanes(
+      [c("R2", "R1"), c("R1", "L"), c("L", "L1"), c("L1")],
+      {
+        tips: { L: ["main"] },
+        defaultBranch: "main",
+        defaultRefTip: "R2",
+        shownBranches: []
+      }
+    );
+    expect(rows.map((r) => r.lane)).toEqual([0, 0, 0, 0]);
+    expect(laneCount).toBe(1);
+    expect(rows[0].bottom).toEqual([{ from: 0, to: 0, dashed: true }]);
+    expect(rows[1].top).toEqual([{ from: 0, to: 0, dashed: true }]);
+    expect(rows[1].bottom).toEqual([{ from: 0, to: 0, dashed: true }]);
+    // The dash boundary is the local tip's dot: dashed above, solid below.
+    expect(rows[2].top).toEqual([{ from: 0, to: 0, dashed: true }]);
+    expect(rows[2].bottom).toEqual([{ from: 0, to: 0 }]);
+    expect(rows[3].top).toEqual([{ from: 0, to: 0 }]);
+  });
+
+  it("keeps branch lines solid alongside a dashed remote-ahead spine", () => {
+    // feat forked from local main's tip L; only the R→L stretch is dashed.
+    const { rows } = layoutLanes(
+      [c("R", "L"), c("F", "L"), c("L", "L1"), c("L1")],
+      {
+        tips: { L: ["main"], F: ["feat"] },
+        defaultBranch: "main",
+        defaultRefTip: "R",
+        shownBranches: ["feat"]
+      }
+    );
+    const lanes = Object.fromEntries(
+      rows.map((r, i) => [["R", "F", "L", "L1"][i], r.lane])
+    );
+    expect(lanes).toEqual({ R: 0, F: 1, L: 0, L1: 0 });
+    // At L: the spine arrives dashed, feat arrives solid, and both converge.
+    expect(rows[2].top).toEqual(
+      expect.arrayContaining([
+        { from: 0, to: 0, dashed: true },
+        { from: 1, to: 0 }
+      ])
+    );
+    expect(rows[2].bottom).toEqual([{ from: 0, to: 0 }]);
+  });
+
+  it("doesn't reserve lane 1 for a checked-out branch with no line of its own", () => {
+    // mine sits exactly on main's tip (fresh branch, no commits): it has no
+    // line, so feat gets lane 1 instead of leaving a phantom empty column.
+    const { rows, laneCount } = layoutLanes(
+      [c("F1", "M"), c("M", "M1"), c("M1")],
+      {
+        tips: { F1: ["feat"], M: ["main", "mine"] },
+        defaultBranch: "main",
+        headBranch: "mine",
+        shownBranches: ["feat"]
+      }
+    );
+    const lanes = Object.fromEntries(
+      rows.map((r, i) => [["F1", "M", "M1"][i], r.lane])
+    );
+    expect(lanes).toEqual({ F1: 1, M: 0, M1: 0 });
+    expect(laneCount).toBe(2);
+  });
+
   it("skips the reservation when the default tip is outside the window", () => {
     // No spine drawn → nothing to protect; lane 0 goes to the first tip.
     const { rows, laneCount } = layoutLanes([c("F2", "F1"), c("F1", "B")], {
