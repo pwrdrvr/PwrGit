@@ -227,7 +227,7 @@ if (!gotSingleInstanceLock) {
     registerWorktreeHandlers(bus, stateService, db, refresher, (id) => {
       activeWorktreeId = id;
     });
-    registerWorktreeLifecycleHandlers(bus, db, indexer, settings);
+    registerWorktreeLifecycleHandlers(bus, db, indexer, settings, stateService);
     registerBranchHandlers(bus, db, indexer, refresher);
     registerRemoteHandlers(bus, db, refresher);
     registerGraphHandlers(bus, db, stateService);

@@ -8,6 +8,7 @@ import type { SettingsService } from "../settings/settings-service";
 import { execGit } from "./dugite";
 import { worktreeAdd, worktreeRemove } from "./git-service";
 import type { RepoIndexer } from "./repo-indexer";
+import type { WorktreeStateService } from "./worktree-state";
 
 const slugBranch = (branch: string): string => branch.replace(/\//g, "-");
 
@@ -15,7 +16,8 @@ export function registerWorktreeLifecycleHandlers(
   bus: CommandBus,
   db: DB,
   indexer: RepoIndexer,
-  settings: SettingsService
+  settings: SettingsService,
+  state: WorktreeStateService
 ): void {
   const worktreeRoot = (): string =>
     settings.get().worktreeRoot ?? join(homedir(), "wt");
@@ -62,35 +64,46 @@ export function registerWorktreeLifecycleHandlers(
 
     // Remove sequentially — concurrent `git worktree remove` in one repo would
     // race on .git/worktrees. Dozens of removes is still fast.
-    for (const id of req.worktreeIds) {
-      const wt = stmt.get(id) as Row | undefined;
-      if (wt === undefined) {
-        failed.push({ id, message: "worktree not found" });
-        continue;
+    const releases: (() => void)[] = [];
+    try {
+      for (const id of req.worktreeIds) {
+        const wt = stmt.get(id) as Row | undefined;
+        if (wt === undefined) {
+          failed.push({ id, message: "worktree not found" });
+          continue;
+        }
+        if (wt.is_primary === 1) {
+          failed.push({ id, message: "Can't remove the primary worktree" });
+          continue;
+        }
+        // Windows can't delete a directory that is any process's cwd, and a
+        // state probe runs a chain of git commands with cwd inside the
+        // worktree — so block probes for this worktree (and drain running
+        // ones) before removing it. Held until the batch's indexer refresh
+        // drops the DB rows, so no probe spawns git in a deleted directory.
+        releases.push(await state.lockForRemoval(id));
+        const res = await worktreeRemove(execGit, wt.repo_path, wt.path, {
+          force: req.force ?? false
+        });
+        if (res.ok) {
+          removed.push(id);
+          affectedRepos.add(wt.repo_id);
+          affectedProfiles.add(wt.profile_id);
+          // Stream each removal so the sidebar prunes the row live — a batch of
+          // dozens can take a while (each deletes the whole working tree).
+          emitEvent("worktree:removed", { worktreeId: id });
+        } else if (res.error.code === "dirty") {
+          dirty.push(id);
+        } else {
+          failed.push({ id, message: res.error.message });
+        }
       }
-      if (wt.is_primary === 1) {
-        failed.push({ id, message: "Can't remove the primary worktree" });
-        continue;
-      }
-      const res = await worktreeRemove(execGit, wt.repo_path, wt.path, {
-        force: req.force ?? false
-      });
-      if (res.ok) {
-        removed.push(id);
-        affectedRepos.add(wt.repo_id);
-        affectedProfiles.add(wt.profile_id);
-        // Stream each removal so the sidebar prunes the row live — a batch of
-        // dozens can take a while (each deletes the whole working tree).
-        emitEvent("worktree:removed", { worktreeId: id });
-      } else if (res.error.code === "dirty") {
-        dirty.push(id);
-      } else {
-        failed.push({ id, message: res.error.message });
-      }
-    }
 
-    for (const repoId of affectedRepos) {
-      await indexer.refreshRepoWorktrees(repoId);
+      for (const repoId of affectedRepos) {
+        await indexer.refreshRepoWorktrees(repoId);
+      }
+    } finally {
+      for (const release of releases) release();
     }
     for (const profileId of affectedProfiles) {
       emitEvent("repo:changed", { profileId });

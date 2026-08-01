@@ -160,4 +160,81 @@ describe("WorktreeStateService (system git)", () => {
     expect(row.branch).toBe(`detached@${head.slice(0, 7)}`);
     git(repoPath, ["switch", "main"]);
   });
+
+  // Windows can't delete a directory that is any process's cwd; the removal
+  // lock is what keeps state probes (git spawned with cwd in the worktree)
+  // and `git worktree remove` mutually exclusive.
+  describe("removal lock", () => {
+    const deferred = (): { promise: Promise<void>; resolve: () => void } => {
+      let resolve!: () => void;
+      const promise = new Promise<void>((r) => {
+        resolve = r;
+      });
+      return { promise, resolve };
+    };
+
+    it("drains the in-flight probe before granting the lock", async () => {
+      const gate = deferred();
+      const gatedGit: GitExec = async (args, cwd) => {
+        if (args[0] === "status") await gate.promise;
+        return systemGit(args, cwd);
+      };
+      const svc = new WorktreeStateService(db, gatedGit);
+
+      const probe = svc.compute(worktreeId);
+      let locked = false;
+      const lock = svc.lockForRemoval(worktreeId).then((release) => {
+        locked = true;
+        return release;
+      });
+      await new Promise((r) => setTimeout(r, 25));
+      expect(locked).toBe(false);
+
+      gate.resolve();
+      const release = await lock;
+      expect(locked).toBe(true);
+      expect(await probe).not.toBeNull();
+      release();
+    });
+
+    it("drops probes while locked and resumes after release", async () => {
+      let spawns = 0;
+      const countingGit: GitExec = (args, cwd) => {
+        spawns += 1;
+        return systemGit(args, cwd);
+      };
+      const svc = new WorktreeStateService(db, countingGit);
+      await svc.compute(worktreeId); // seed the cache
+      const seeded = spawns;
+
+      const release = await svc.lockForRemoval(worktreeId);
+      const state = await svc.compute(worktreeId);
+      expect(spawns).toBe(seeded);
+      expect(state).toEqual(svc.getCached(worktreeId));
+
+      release();
+      expect(await svc.compute(worktreeId)).not.toBeNull();
+      expect(spawns).toBeGreaterThan(seeded);
+    });
+
+    it("stays locked until every overlapping lock is released", async () => {
+      let spawns = 0;
+      const countingGit: GitExec = (args, cwd) => {
+        spawns += 1;
+        return systemGit(args, cwd);
+      };
+      const svc = new WorktreeStateService(db, countingGit);
+      const releaseA = await svc.lockForRemoval(worktreeId);
+      const releaseB = await svc.lockForRemoval(worktreeId);
+
+      releaseA();
+      releaseA(); // double-release must not unlock the other holder
+      await svc.compute(worktreeId);
+      expect(spawns).toBe(0);
+
+      releaseB();
+      await svc.compute(worktreeId);
+      expect(spawns).toBeGreaterThan(0);
+    });
+  });
 });
