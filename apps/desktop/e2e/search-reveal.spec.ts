@@ -128,6 +128,40 @@ test("narrowing a ⌘F query leaves no stale ghost rows behind", async () => {
   await expect(window.locator(".overlay-foot")).toContainText("1 result");
 });
 
+test("⌘F rows show pin state, toggle it by star click and ⌘P, and browse pins-first", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepo("alpha-kit");
+  sandbox.makeRepo("bravo-park");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, sandbox, "alpha-kit");
+
+  // Empty-query browse: alphabetical, nothing pinned yet.
+  await window.keyboard.press("Meta+f");
+  await expect(window.locator(".overlay-panel")).toBeVisible();
+  const bravoRow = window.locator(".overlay-result", { hasText: "bravo-park" });
+  await expect(bravoRow).toBeVisible();
+  await expect(window.locator(".overlay-result .pin.is-pinned")).toHaveCount(0);
+
+  // Click bravo's star (revealed on hover) — pins without closing the overlay
+  // or reordering the open list.
+  await bravoRow.locator(".pin").click();
+  await expect(bravoRow.locator(".pin.is-pinned")).toBeVisible();
+  await expect(window.locator(".overlay-panel")).toBeVisible();
+
+  // Reopen: the pin persisted, and browse floats bravo-park to the top.
+  await window.keyboard.press("Escape");
+  await window.keyboard.press("Meta+f");
+  const firstRow = window.locator(".overlay-result").first();
+  await expect(firstRow).toContainText("bravo-park");
+  await expect(firstRow.locator(".pin.is-pinned")).toBeVisible();
+
+  // ⌘P unpins the keyboard-selected row (the first one).
+  await window.keyboard.press("Meta+p");
+  await expect(firstRow.locator(".pin.is-pinned")).toHaveCount(0);
+});
+
 test("moving selection via ⌘F leaves no second 'selected-looking' row behind", async () => {
   sandbox = createGitSandbox();
   sandbox.makeRepo("alpha-kit");

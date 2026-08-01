@@ -261,7 +261,7 @@ export class RepoIndexer {
     if (repoIds.length > 0) {
       const rows = this.db
         .prepare(
-          `SELECT r.id, r.name, r.path, r.profile_id, p.name AS profile_name,
+          `SELECT r.id, r.name, r.path, r.profile_id, r.pinned, p.name AS profile_name,
                   (SELECT COUNT(*) FROM worktrees w WHERE w.repo_id = r.id) AS wt_count
            FROM repos r JOIN profiles p ON p.id = r.profile_id
            WHERE r.id IN (${marks(repoIds.length)})`
@@ -271,6 +271,7 @@ export class RepoIndexer {
         name: string;
         path: string;
         profile_id: string;
+        pinned: number;
         profile_name: string;
         wt_count: number;
       }[];
@@ -282,7 +283,8 @@ export class RepoIndexer {
           path: r.path,
           profileId: r.profile_id,
           profileName: r.profile_name,
-          worktreeCount: r.wt_count
+          worktreeCount: r.wt_count,
+          pinned: r.pinned === 1
         });
       }
     }
@@ -291,7 +293,7 @@ export class RepoIndexer {
     if (wtIds.length > 0) {
       const rows = this.db
         .prepare(
-          `SELECT w.id, w.branch, w.path, r.id AS repo_id, r.name AS repo_name,
+          `SELECT w.id, w.branch, w.path, w.pinned, r.id AS repo_id, r.name AS repo_name,
                   r.profile_id, p.name AS profile_name,
                   pr.number AS pr_number, pr.url AS pr_url, pr.title AS pr_title,
                   pr.state AS pr_state, pr.is_draft AS pr_is_draft
@@ -306,6 +308,7 @@ export class RepoIndexer {
         id: string;
         branch: string;
         path: string;
+        pinned: number;
         repo_id: string;
         repo_name: string;
         profile_id: string;
@@ -325,6 +328,7 @@ export class RepoIndexer {
           profileId: w.profile_id,
           profileName: w.profile_name,
           worktreeCount: 0,
+          pinned: w.pinned === 1,
           worktreeId: w.id,
           repoName: w.repo_name
         };
@@ -352,20 +356,21 @@ export class RepoIndexer {
     return out;
   }
 
-  /** The overlay's empty-query state: all repos, alphabetical. */
+  /** The overlay's empty-query state: all repos, pinned first, alphabetical. */
   private browseRepos(): RepoSearchHit[] {
     const rows = this.db
       .prepare(
-        `SELECT r.id, r.name, r.path, r.profile_id, p.name AS profile_name,
+        `SELECT r.id, r.name, r.path, r.profile_id, r.pinned, p.name AS profile_name,
                 (SELECT COUNT(*) FROM worktrees w WHERE w.repo_id = r.id) AS wt_count
          FROM repos r JOIN profiles p ON p.id = r.profile_id
-         ORDER BY r.name COLLATE NOCASE, r.name LIMIT 50`
+         ORDER BY r.pinned DESC, r.name COLLATE NOCASE, r.name LIMIT 50`
       )
       .all() as {
       id: string;
       name: string;
       path: string;
       profile_id: string;
+      pinned: number;
       profile_name: string;
       wt_count: number;
     }[];
@@ -376,7 +381,8 @@ export class RepoIndexer {
       path: r.path,
       profileId: r.profile_id,
       profileName: r.profile_name,
-      worktreeCount: r.wt_count
+      worktreeCount: r.wt_count,
+      pinned: r.pinned === 1
     }));
   }
 

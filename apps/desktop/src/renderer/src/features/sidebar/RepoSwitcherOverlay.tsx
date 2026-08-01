@@ -4,6 +4,9 @@ import { createAsyncFill } from "../../lib/asyncFill";
 import { dispatch } from "../../lib/pwrgit";
 import { shortWhen } from "../graph/graph-view";
 import { PrChip } from "./PrChip";
+import { PinIcon } from "./WorktreeRow";
+
+const isMac = navigator.platform.startsWith("Mac");
 
 const hitKey = (hit: RepoSearchHit): string =>
   `${hit.kind}:${hit.worktreeId ?? hit.repoId}`;
@@ -44,6 +47,21 @@ export function RepoSwitcherOverlay({
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // Toggle the hit's pin optimistically; the sidebar picks up the change via
+  // the handler's repo:changed event, and our copy keeps results stable (no
+  // re-query, so rows don't jump while the overlay is open).
+  const togglePin = (hit: RepoSearchHit) => {
+    const pinned = !hit.pinned;
+    setResults((prev) =>
+      prev.map((h) => (hitKey(h) === hitKey(hit) ? { ...h, pinned } : h))
+    );
+    if (hit.kind === "worktree" && hit.worktreeId !== undefined) {
+      void dispatch("worktree:setPin", { worktreeId: hit.worktreeId, pinned });
+    } else {
+      void dispatch("repo:setPin", { repoId: hit.repoId, pinned });
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -126,6 +144,10 @@ export function RepoSwitcherOverlay({
               } else if (e.key === "Enter") {
                 const hit = results[sel];
                 if (hit !== undefined) onPick(hit);
+              } else if ((e.metaKey || e.ctrlKey) && e.key === "p") {
+                e.preventDefault();
+                const hit = results[sel];
+                if (hit !== undefined) togglePin(hit);
               } else if (e.key === "Escape") {
                 onClose();
               }
@@ -134,14 +156,18 @@ export function RepoSwitcherOverlay({
           <span className="kbd">esc</span>
         </div>
 
-        <div className="overlay-results" ref={resultsRef}>
+        <div className="overlay-results" role="listbox" ref={resultsRef}>
           {results.map((r, i) => (
-            <button
+            // A div, not a button: the pin star inside is a real <button>,
+            // and buttons can't nest.
+            <div
               // Kind-prefixed: a repo and its PRIMARY worktree share the same
               // hash-of-path id, and duplicate keys strand ghost rows in the
               // DOM across re-renders.
               key={hitKey(r)}
               data-hit-key={hitKey(r)}
+              role="option"
+              aria-selected={i === sel}
               className={`overlay-result${i === sel ? " is-selected" : ""}`}
               onMouseEnter={() => setSel(i)}
               onClick={() => onPick(r)}
@@ -177,6 +203,27 @@ export function RepoSwitcherOverlay({
                 </svg>
               )}
               <span className="overlay-result__name">{r.name}</span>
+              <button
+                type="button"
+                className={`pin${r.pinned ? " is-pinned" : ""}`}
+                title={
+                  r.pinned
+                    ? `Unpin ${r.kind === "worktree" ? "worktree" : "repo"}`
+                    : `Pin ${r.kind === "worktree" ? "worktree" : "repo"}`
+                }
+                aria-label={
+                  r.pinned
+                    ? `Unpin ${r.kind === "worktree" ? "worktree" : "repo"}`
+                    : `Pin ${r.kind === "worktree" ? "worktree" : "repo"}`
+                }
+                tabIndex={-1}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  togglePin(r);
+                }}
+              >
+                <PinIcon filled={r.pinned} size={12} />
+              </button>
               {r.pr !== undefined && <PrChip pr={r.pr} />}
               {(() => {
                 const s = statuses.get(hitKey(r));
@@ -215,7 +262,7 @@ export function RepoSwitcherOverlay({
                   : `${r.worktreeCount} ${r.worktreeCount === 1 ? "wt" : "wts"}`}
               </span>
               <span className="overlay-result__profile">{r.profileName}</span>
-            </button>
+            </div>
           ))}
           {results.length === 0 && (
             <div className="overlay-empty">
@@ -229,6 +276,7 @@ export function RepoSwitcherOverlay({
         <div className="overlay-foot">
           <span>↑↓ navigate</span>
           <span>↵ open</span>
+          <span>{isMac ? "⌘P" : "ctrl+P"} pin</span>
           <span style={{ flex: 1 }} />
           <span>
             {results.length} {results.length === 1 ? "result" : "results"}
