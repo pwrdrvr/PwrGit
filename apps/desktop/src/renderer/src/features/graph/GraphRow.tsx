@@ -32,6 +32,15 @@ export const laneColor = (i: number): string =>
 
 const cx = (lane: number): number => lane * LANE_W + LANE_W / 2;
 
+// Fetched-but-unapplied trunk, one pattern per remote tier: the stretch your
+// closest remote has is plain dashes, the next remote out is dash-dot, then
+// dash-dot-dot (cycling beyond that). Every pattern's period divides ROW_H
+// and MID, so the dash phase lines up across row seams and straight runs
+// read as one continuous line.
+const DASHES = ["4 4", "4 2 1 1", "6 3 1 2 1 3"];
+const dashFor = (tier: number): string =>
+  DASHES[(tier - 1) % DASHES.length] ?? "4 4";
+
 // Curved lane transitions with vertical tangents at both ends — adjacent rows
 // meet with matching (vertical) slopes, so a multi-row swerve reads as one
 // continuous ribbon instead of a chain of straight diagonals.
@@ -44,6 +53,9 @@ export type GraphRowVM = {
   commit: Commit;
   row: LaneRow;
   refs: string[];
+  /** Remote-tracking refs to chip here — full ("origin/main") when the remote
+   *  sits away from its local branch, collapsed ("origin") when synced. */
+  remoteRefs: string[];
   isHead: boolean;
   isMine: boolean;
   defaultBranch: string;
@@ -85,21 +97,23 @@ export function GraphRow({
   /** Jump to the worktree a tip branch is checked out in. */
   onRevealWorktree?: (worktreeId: string) => void;
 }) {
-  const { commit, row, refs, isHead, isMine } = vm;
+  const { commit, row, refs, remoteRefs, isHead, isMine } = vm;
   const width = Math.max(1, laneCount) * LANE_W;
   const color = laneColor(row.lane);
-  const isTip = refs.length > 0;
+  const chipCount = refs.length + remoteRefs.length;
+  const isTip = chipCount > 0;
   const x = cx(row.lane);
 
   // A lane that runs straight through both halves of the row is drawn as ONE
-  // full-height line (no half-line seam at the vertical midpoint).
-  const passThrough = new Set<number>();
+  // full-height line (no half-line seam at the vertical midpoint). Halves with
+  // different dash tiers (a local or remote tip row on the spine) stay
+  // separate so the pattern boundary lands exactly at the dot.
+  const passThrough = new Map<number, number>();
   for (const t of row.top) {
-    if (
-      t.from === t.to &&
-      row.bottom.some((b) => b.from === b.to && b.from === t.from)
-    ) {
-      passThrough.add(t.from);
+    if (t.from !== t.to) continue;
+    const b = row.bottom.find((s) => s.from === s.to && s.from === t.from);
+    if (b !== undefined && (t.dashed ?? 0) === (b.dashed ?? 0)) {
+      passThrough.set(t.from, t.dashed ?? 0);
     }
   }
 
@@ -120,7 +134,7 @@ export function GraphRow({
           height={ROW_H}
           viewBox={`0 0 ${width} ${ROW_H}`}
         >
-        {[...passThrough].map((k) => (
+        {[...passThrough].map(([k, dashed]) => (
           <line
             key={`p${k}`}
             x1={cx(k)}
@@ -129,6 +143,7 @@ export function GraphRow({
             y2={ROW_H}
             stroke={laneColor(k)}
             strokeWidth={2}
+            strokeDasharray={dashed > 0 ? dashFor(dashed) : undefined}
           />
         ))}
         {row.top
@@ -143,6 +158,7 @@ export function GraphRow({
                 y2={MID}
                 stroke={laneColor(s.from)}
                 strokeWidth={2}
+                strokeDasharray={s.dashed !== undefined ? dashFor(s.dashed) : undefined}
               />
             ) : (
               <path
@@ -152,6 +168,7 @@ export function GraphRow({
                 stroke={laneColor(s.from)}
                 strokeWidth={2}
                 strokeLinecap="round"
+                strokeDasharray={s.dashed !== undefined ? dashFor(s.dashed) : undefined}
               />
             )
           )}
@@ -167,6 +184,7 @@ export function GraphRow({
                 y2={ROW_H}
                 stroke={laneColor(s.to)}
                 strokeWidth={2}
+                strokeDasharray={s.dashed !== undefined ? dashFor(s.dashed) : undefined}
               />
             ) : (
               <path
@@ -176,6 +194,7 @@ export function GraphRow({
                 stroke={laneColor(s.to)}
                 strokeWidth={2}
                 strokeLinecap="round"
+                strokeDasharray={s.dashed !== undefined ? dashFor(s.dashed) : undefined}
               />
             )
           )}
@@ -244,8 +263,8 @@ export function GraphRow({
           {/* Chips are capped — a commit tipped by dozens of stale branches
               must not flood the row. Overflow collapses into a +N pill whose
               tooltip lists everything. */}
-          {refs.length > 0 && (
-            <span className="ref-chips" title={refs.join("\n")}>
+          {chipCount > 0 && (
+            <span className="ref-chips" title={[...refs, ...remoteRefs].join("\n")}>
               {refs.slice(0, MAX_REF_CHIPS).map((name) => {
                 const info = branchInfo?.[name];
                 const wtId = info?.worktreeId;
@@ -282,9 +301,24 @@ export function GraphRow({
                   </span>
                 );
               })}
-              {refs.length > MAX_REF_CHIPS && (
+              {remoteRefs
+                .slice(0, Math.max(0, MAX_REF_CHIPS - refs.length))
+                .map((name) => (
+                  <span
+                    key={`r:${name}`}
+                    className="ref-chip ref-chip--remote"
+                    style={{
+                      color,
+                      borderColor: `color-mix(in srgb, ${color} 45%, transparent)`
+                    }}
+                  >
+                    <BranchGlyph />
+                    {name}
+                  </span>
+                ))}
+              {chipCount > MAX_REF_CHIPS && (
                 <span className="ref-chip ref-chip--more">
-                  +{refs.length - MAX_REF_CHIPS}
+                  +{chipCount - MAX_REF_CHIPS}
                 </span>
               )}
             </span>

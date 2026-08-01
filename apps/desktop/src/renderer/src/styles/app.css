@@ -1805,6 +1805,12 @@ input {
 .ref-chip--more {
   color: var(--text-muted);
 }
+/* Remote-tracking tips (origin/main, upstream/main) — a dashed ring echoing
+ * the dashed not-yet-applied train line; no fill, it's not local state. */
+.ref-chip--remote {
+  border-style: dashed;
+  background: transparent;
+}
 /* A tip chip plus its adornments (PR chip, worktree jump) read as one unit. */
 .ref-group {
   display: inline-flex;
