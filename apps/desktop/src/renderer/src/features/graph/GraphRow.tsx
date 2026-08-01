@@ -260,7 +260,7 @@ export function GraphRow({
                       }}
                     >
                       <BranchGlyph />
-                      {name}
+                      <span className="ref-chip__name">{name}</span>
                     </span>
                     {info?.pr !== undefined && <PrChip pr={info.pr} />}
                     {wtId !== undefined && (

@@ -1787,9 +1787,15 @@ input {
   border: 1px solid var(--border-subtle);
   color: var(--text-secondary);
   font: 600 9.5px/1 var(--font-mono);
+  white-space: nowrap;
+}
+/* Truncation lives on the name span, not the chip: ellipsis doesn't apply to
+   flex containers, and overflow:hidden on the chip would clip the text at the
+   border, eating the right padding. */
+.ref-chip__name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .ref-chip svg {
   flex: 0 0 auto;
