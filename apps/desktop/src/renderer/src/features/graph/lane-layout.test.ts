@@ -82,3 +82,117 @@ describe("layoutLanes", () => {
     expect(rows[0].bottom).toEqual([{ from: 0, to: 0 }]);
   });
 });
+
+describe("layoutLanes with refs (branch-owned lanes)", () => {
+  it("ends the spine at the default tip when a branch stacks on it", () => {
+    // feat (X2..X1) builds directly on main's tip M. main's line must top out
+    // at M — feat gets its own lane converging into M's dot, instead of one
+    // continuous lane that makes M look like mid-branch history.
+    const { rows, laneCount } = layoutLanes(
+      [c("X2", "X1"), c("X1", "M"), c("M", "M1"), c("M1")],
+      {
+        tips: { X2: ["feat"], M: ["main"] },
+        defaultBranch: "main",
+        shownBranches: ["feat"]
+      }
+    );
+    const lanes = Object.fromEntries(
+      rows.map((r, i) => [["X2", "X1", "M", "M1"][i], r.lane])
+    );
+    // Lane 0 stays reserved for the spine; feat rides lane 1 above it.
+    expect(lanes).toEqual({ X2: 1, X1: 1, M: 0, M1: 0 });
+    // feat's line curves into M's dot and ends there…
+    expect(rows[2].top).toEqual([{ from: 1, to: 0 }]);
+    // …and the spine continues below M on its own lane.
+    expect(rows[2].bottom).toEqual([{ from: 0, to: 0 }]);
+    expect(laneCount).toBe(2);
+  });
+
+  it("gives a branch stacked on another branch's tip its own lane", () => {
+    // c2 (C2..C1) builds on d's tip D, which builds on main's tip M.
+    const { rows } = layoutLanes(
+      [c("C2", "C1"), c("C1", "D"), c("D", "M"), c("M", "M1"), c("M1")],
+      {
+        tips: { C2: ["c2"], D: ["d"], M: ["main"] },
+        defaultBranch: "main",
+        shownBranches: ["c2", "d"]
+      }
+    );
+    const lanes = Object.fromEntries(
+      rows.map((r, i) => [["C2", "C1", "D", "M", "M1"][i], r.lane])
+    );
+    // Three distinct lines: c2's lane ends at D's dot, d's lane ends at M's.
+    expect(lanes.C2).toBe(lanes.C1);
+    expect(lanes.D).not.toBe(lanes.C1);
+    expect(lanes).toMatchObject({ M: 0, M1: 0 });
+    const dRow = rows[2];
+    expect(dRow.top).toEqual([{ from: lanes.C1, to: lanes.D }]);
+    const mRow = rows[3];
+    expect(mRow.top).toEqual([{ from: lanes.D, to: 0 }]);
+  });
+
+  it("still converges a fork-point branch into the spine", () => {
+    // feat forks from mid-trunk B — unchanged convergence, but feat can't
+    // occupy the reserved spine lane even though it's processed first.
+    const { rows } = layoutLanes(
+      [c("F", "B"), c("T", "B"), c("B", "A"), c("A")],
+      {
+        tips: { F: ["feat"], T: ["main"] },
+        defaultBranch: "main",
+        shownBranches: ["feat"]
+      }
+    );
+    const lanes = Object.fromEntries(
+      rows.map((r, i) => [["F", "T", "B", "A"][i], r.lane])
+    );
+    expect(lanes).toEqual({ F: 1, T: 0, B: 0, A: 0 });
+    expect(rows[2].top).toEqual(
+      expect.arrayContaining([
+        { from: 0, to: 0 },
+        { from: 1, to: 0 }
+      ])
+    );
+  });
+
+  it("keeps the spine continuous through a tip that is plain trunk history", () => {
+    // old's tip A is an ancestor of main's tip — it renders as a chip on the
+    // spine, not a separate line breaking the trunk.
+    const { rows, laneCount } = layoutLanes(
+      [c("M", "A"), c("A", "R"), c("R")],
+      {
+        tips: { M: ["main"], A: ["old"] },
+        defaultBranch: "main",
+        shownBranches: ["old"]
+      }
+    );
+    expect(rows.map((r) => r.lane)).toEqual([0, 0, 0]);
+    expect(laneCount).toBe(1);
+  });
+
+  it("keeps merge fan-out off the reserved spine lane", () => {
+    // A trunk merge's second-parent connector opens to the right of the spine
+    // and converges back at the shared ancestor.
+    const { rows } = layoutLanes(
+      [c("M", "P1", "P2"), c("P1", "R"), c("P2", "R"), c("R")],
+      { tips: { M: ["main"] }, defaultBranch: "main", shownBranches: [] }
+    );
+    expect(rows.map((r) => r.lane)).toEqual([0, 0, 1, 0]);
+    expect(rows[0].bottom).toEqual(
+      expect.arrayContaining([
+        { from: 0, to: 0 },
+        { from: 0, to: 1 }
+      ])
+    );
+  });
+
+  it("skips the reservation when the default tip is outside the window", () => {
+    // No spine drawn → nothing to protect; lane 0 goes to the first tip.
+    const { rows, laneCount } = layoutLanes([c("F2", "F1"), c("F1", "B")], {
+      tips: { F2: ["feat"] },
+      defaultBranch: "main",
+      shownBranches: ["feat"]
+    });
+    expect(rows.map((r) => r.lane)).toEqual([0, 0]);
+    expect(laneCount).toBe(1);
+  });
+});

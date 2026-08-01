@@ -113,7 +113,14 @@ export function LineageGraph({
   const layout = useMemo(
     () =>
       layoutLanes(
-        (data?.commits ?? []).map((c) => ({ hash: c.hash, parents: c.parents }))
+        (data?.commits ?? []).map((c) => ({ hash: c.hash, parents: c.parents })),
+        data === null
+          ? undefined
+          : {
+              tips: data.tips,
+              defaultBranch: data.defaultBranch,
+              shownBranches: data.shownBranches
+            }
       ),
     [data]
   );
