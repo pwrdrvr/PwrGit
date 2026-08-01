@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -232,6 +232,10 @@ function normalizeLicenseText(text) {
   return normalizeLineEndings(text).trim();
 }
 
+function normalizePathForNotice(path) {
+  return path.split(sep).join("/");
+}
+
 function readEmbeddedGitNoticeRecords() {
   return EMBEDDED_GIT_NOTICE_SOURCES.map((notice) => {
     const path = join(embeddedGitNoticeDir, notice.file);
@@ -243,7 +247,9 @@ function readEmbeddedGitNoticeRecords() {
     const licenseText = normalizeLicenseText(readFileSync(path, "utf8"));
     return {
       ...notice,
-      licenseFile: relative(repoRoot, path),
+      // `THIRD_PARTY_LICENSES` is committed, so its source paths must not
+      // depend on whether it was generated on Windows or POSIX.
+      licenseFile: normalizePathForNotice(relative(repoRoot, path)),
       licenseText,
       licenseTextHash: createHash("sha256").update(licenseText).digest("hex"),
     };
