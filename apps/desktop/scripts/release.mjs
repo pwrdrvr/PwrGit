@@ -233,7 +233,7 @@ if (!signStageOnly) {
   //    copies the package source tree (including out/ if it exists) into the
   //    stage; remove stale copies before our controlled cp to avoid nesting.
   step("seed stage with build output + builder inputs");
-  for (const dir of ["out", "build"]) {
+  for (const dir of ["out", "build", "resources"]) {
     const target = join(stageDir, dir);
     if (existsSync(target)) {
       rmSync(target, { recursive: true, force: true });
@@ -301,6 +301,9 @@ if (win) {
   step("verify packaged asar contents");
   runChecked("node", [join(desktopRoot, "scripts", "verify-asar-contents.mjs"), builtApp]);
 
+  step("verify embedded Git runtime notices");
+  runChecked("node", [join(desktopRoot, "scripts", "verify-embedded-git-notices.mjs"), builtApp]);
+
   step("verify installer artifact + write checksums");
   const checksumPath = writeWindowsChecksums(dist);
   console.log(`  checksum: ${checksumPath}`);
@@ -338,6 +341,9 @@ for (const binary of universalMachO) {
 
 step("verify packaged asar contents");
 runChecked("node", [join(desktopRoot, "scripts", "verify-asar-contents.mjs"), builtApp]);
+
+step("verify embedded Git runtime notices");
+runChecked("node", [join(desktopRoot, "scripts", "verify-embedded-git-notices.mjs"), builtApp]);
 
 step("done");
 console.log(`  artifacts: ${dist}`);

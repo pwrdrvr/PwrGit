@@ -15,6 +15,47 @@ import { fileURLToPath } from "node:url";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outputPath = join(repoRoot, "THIRD_PARTY_LICENSES");
 const desktopFilter = "@pwrgit/desktop";
+const embeddedGitNoticeDir = join(
+  repoRoot,
+  "apps",
+  "desktop",
+  "resources",
+  "embedded-git",
+);
+
+// Dugite downloads and ships this runtime outside npm's package inventory.
+// Keep the versions and source URLs in sync with its embedded-git.json when
+// updating the dugite dependency.
+const EMBEDDED_GIT_NOTICE_SOURCES = [
+  {
+    name: "Git embedded runtime",
+    version: "2.53.0",
+    declaredLicense: "GPL-2.0-only",
+    file: "COPYING",
+    source: "https://github.com/desktop/dugite-native/tree/v2.53.0-3",
+  },
+  {
+    name: "Git LFS embedded runtime",
+    version: "3.7.1",
+    declaredLicense: "MIT",
+    file: "LICENSE.git-lfs",
+    source: "https://github.com/git-lfs/git-lfs/tree/v3.7.1",
+  },
+  {
+    name: "Git Credential Manager embedded runtime",
+    version: "2.7.3",
+    declaredLicense: "MIT",
+    file: "LICENSE.git-credential-manager",
+    source: "https://github.com/git-ecosystem/git-credential-manager/tree/v2.7.3",
+  },
+  {
+    name: "Git Credential Manager notices",
+    version: "2.7.3",
+    declaredLicense: "MIT",
+    file: "NOTICE",
+    source: "https://github.com/git-ecosystem/git-credential-manager/tree/v2.7.3",
+  },
+];
 
 function runPnpmLicenses(args) {
   const result = spawnSync(
@@ -191,6 +232,24 @@ function normalizeLicenseText(text) {
   return normalizeLineEndings(text).trim();
 }
 
+function readEmbeddedGitNoticeRecords() {
+  return EMBEDDED_GIT_NOTICE_SOURCES.map((notice) => {
+    const path = join(embeddedGitNoticeDir, notice.file);
+    if (!existsSync(path)) {
+      throw new Error(
+        `Embedded Git runtime notice is missing at ${relative(repoRoot, path)}.`,
+      );
+    }
+    const licenseText = normalizeLicenseText(readFileSync(path, "utf8"));
+    return {
+      ...notice,
+      licenseFile: relative(repoRoot, path),
+      licenseText,
+      licenseTextHash: createHash("sha256").update(licenseText).digest("hex"),
+    };
+  });
+}
+
 function stableRecordKey(record) {
   return `${record.name}@${record.version}`;
 }
@@ -244,7 +303,10 @@ function main() {
     }
   }
 
-  const records = Array.from(recordsByKey.values()).sort(compareRecords).map(enrichRecord);
+  const records = [
+    ...Array.from(recordsByKey.values()).sort(compareRecords).map(enrichRecord),
+    ...readEmbeddedGitNoticeRecords(),
+  ].sort(compareRecords);
 
   const recordsByLicense = new Map();
   for (const record of records) {
@@ -287,6 +349,9 @@ function main() {
   );
   lines.push(
     "The renderer build emits Geist Sans and Geist Mono webfont assets from @fontsource/geist-sans and @fontsource/geist-mono. Those packages are listed below under OFL-1.1, and their SIL Open Font License text is included in the License Texts section.",
+  );
+  lines.push(
+    "PwrGit also bundles Git, Git LFS, and Git Credential Manager through Dugite outside the npm dependency tree. Their COPYING, LICENSE, and NOTICE files are installed beside the runtime under Resources/git and are included below.",
   );
   lines.push("");
   lines.push("Dependency Summary");
