@@ -1,6 +1,8 @@
 import { join } from "node:path";
 import { app, BrowserWindow } from "electron";
 import { ok, type Profile } from "@pwrgit/shared";
+import { registerAppDocumentHandlers } from "./app-document-handlers";
+import { openAppDocumentWindow } from "./app-document-window";
 import { initAutoUpdater } from "./auto-updater";
 import { CommandBus } from "./command-bus";
 import { registerDialogHandlers } from "./dialog-handlers";
@@ -97,6 +99,7 @@ if (!gotSingleInstanceLock) {
       openLogsWindow();
       return ok(null);
     });
+    registerAppDocumentHandlers(bus);
 
     const db = openDatabase(join(app.getPath("userData"), "pwrgit.db"));
     const settings = new SettingsService(
@@ -189,6 +192,9 @@ if (!gotSingleInstanceLock) {
         onManageProfiles: () => emitEvent("ui:manageProfile", {}),
         onOpenSettings: () => openSettingsWindow(),
         onOpenLogs: () => openLogsWindow(),
+        onOpenLicense: () => openAppDocumentWindow("license"),
+        onOpenThirdPartyNotices: () =>
+          openAppDocumentWindow("third-party-notices"),
         developerMode: settingsSnapshot(settings, diagnosticsOutputRoot).general
           .developerMode
       });

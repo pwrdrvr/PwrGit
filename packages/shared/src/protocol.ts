@@ -52,6 +52,15 @@ export type LogSnapshot = {
   logFilePath: string | null;
 };
 
+/** A first-party or bundled notice document displayed inside the desktop app. */
+export type AppDocumentKind = "license" | "third-party-notices";
+
+export type AppDocument = {
+  kind: AppDocumentKind;
+  title: string;
+  content: string;
+};
+
 export type CreateProfileRequest = {
   name: string;
   email: string;
@@ -339,6 +348,10 @@ export interface Commands {
   // App logs (diagnosability — silent failures must be findable somewhere)
   "logs:read": { req: void; res: LogSnapshot };
   "logs:openWindow": { req: void; res: null };
+
+  // Bundled legal notices (Settings → About and Help menu).
+  "app:readDocument": { req: { kind: AppDocumentKind }; res: AppDocument };
+  "app:openDocumentWindow": { req: { kind: AppDocumentKind }; res: null };
 
   "dialog:pickDirectory": { req: void; res: string | null };
   "dialog:pickDirectories": { req: void; res: string[] };

@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { AppDocumentWindow } from "./features/documents/AppDocumentWindow";
 import { LogsWindow } from "./features/logs/LogsWindow";
 import { SettingsWindow } from "./features/settings/SettingsWindow";
 import "./styles/app.css";
@@ -19,6 +20,10 @@ createRoot(container).render(
       <SettingsWindow />
     ) : hash === "#logs" ? (
       <LogsWindow />
+    ) : hash === "#document-license" ? (
+      <AppDocumentWindow kind="license" />
+    ) : hash === "#document-third-party-notices" ? (
+      <AppDocumentWindow kind="third-party-notices" />
     ) : (
       <App />
     )}

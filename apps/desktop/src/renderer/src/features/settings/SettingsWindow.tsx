@@ -4,6 +4,7 @@ import type {
   AppSettingsSnapshot,
   DiagnosticsSettings as DiagnosticsSettingsShape
 } from "@pwrgit/shared";
+import { AboutSettings } from "./AboutSettings";
 import { DiagnosticsSettings } from "./DiagnosticsSettings";
 import { ExperimentalSettings } from "./ExperimentalSettings";
 import { GeneralSettings } from "./GeneralSettings";
@@ -14,13 +15,15 @@ export type SettingsSection =
   | "general"
   | "profiles"
   | "experimental"
-  | "diagnostics";
+  | "diagnostics"
+  | "about";
 
 const SECTIONS: Array<{ id: SettingsSection; label: string }> = [
   { id: "general", label: "General" },
   { id: "profiles", label: "Profiles" },
   { id: "experimental", label: "Experimental" },
-  { id: "diagnostics", label: "Memory / CPU" }
+  { id: "diagnostics", label: "Memory / CPU" },
+  { id: "about", label: "About" }
 ];
 
 /**
@@ -86,6 +89,10 @@ function SettingsSectionBody(props: {
 
   if (props.section === "profiles") {
     return <ProfilesSettings />;
+  }
+
+  if (props.section === "about") {
+    return <AboutSettings />;
   }
 
   // The remaining panes render from the snapshot.
