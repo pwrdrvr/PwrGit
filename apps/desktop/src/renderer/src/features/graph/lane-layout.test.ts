@@ -238,11 +238,11 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
     );
     expect(rows.map((r) => r.lane)).toEqual([0, 0, 0, 0]);
     expect(laneCount).toBe(1);
-    expect(rows[0].bottom).toEqual([{ from: 0, to: 0, dashed: true }]);
-    expect(rows[1].top).toEqual([{ from: 0, to: 0, dashed: true }]);
-    expect(rows[1].bottom).toEqual([{ from: 0, to: 0, dashed: true }]);
+    expect(rows[0].bottom).toEqual([{ from: 0, to: 0, dashed: 1 }]);
+    expect(rows[1].top).toEqual([{ from: 0, to: 0, dashed: 1 }]);
+    expect(rows[1].bottom).toEqual([{ from: 0, to: 0, dashed: 1 }]);
     // The dash boundary is the local tip's dot: dashed above, solid below.
-    expect(rows[2].top).toEqual([{ from: 0, to: 0, dashed: true }]);
+    expect(rows[2].top).toEqual([{ from: 0, to: 0, dashed: 1 }]);
     expect(rows[2].bottom).toEqual([{ from: 0, to: 0 }]);
     expect(rows[3].top).toEqual([{ from: 0, to: 0 }]);
   });
@@ -265,7 +265,7 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
     // At L: the spine arrives dashed, feat arrives solid, and both converge.
     expect(rows[2].top).toEqual(
       expect.arrayContaining([
-        { from: 0, to: 0, dashed: true },
+        { from: 0, to: 0, dashed: 1 },
         { from: 1, to: 0 }
       ])
     );
@@ -286,9 +286,12 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
     );
     expect(rows.map((r) => r.lane)).toEqual([0, 0, 0, 0]);
     expect(laneCount).toBe(1);
-    expect(rows[0].bottom).toEqual([{ from: 0, to: 0, dashed: true }]);
-    expect(rows[1].bottom).toEqual([{ from: 0, to: 0, dashed: true }]);
-    expect(rows[2].top).toEqual([{ from: 0, to: 0, dashed: true }]);
+    // Tier per stretch: upstream-only history dash-dots (2), origin's plain
+    // dashes (1), and each pattern boundary sits on a tip's dot.
+    expect(rows[0].bottom).toEqual([{ from: 0, to: 0, dashed: 2 }]);
+    expect(rows[1].top).toEqual([{ from: 0, to: 0, dashed: 2 }]);
+    expect(rows[1].bottom).toEqual([{ from: 0, to: 0, dashed: 1 }]);
+    expect(rows[2].top).toEqual([{ from: 0, to: 0, dashed: 1 }]);
     expect(rows[2].bottom).toEqual([{ from: 0, to: 0 }]);
   });
 
@@ -309,11 +312,11 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
       rows.map((r, i) => [["R", "L", "B", "B1"][i], r.lane])
     );
     expect(lanes).toEqual({ R: 1, L: 0, B: 0, B1: 0 });
-    expect(rows[0].bottom).toEqual([{ from: 1, to: 1, dashed: true }]);
+    expect(rows[0].bottom).toEqual([{ from: 1, to: 1, dashed: 1 }]);
     expect(rows[2].top).toEqual(
       expect.arrayContaining([
         { from: 0, to: 0 },
-        { from: 1, to: 0, dashed: true }
+        { from: 1, to: 0, dashed: 1 }
       ])
     );
   });

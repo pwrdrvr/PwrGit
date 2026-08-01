@@ -44,8 +44,10 @@ export type LaneRefs = {
 
 /** A drawn segment within a row cell: `from` lane at one edge → `to` lane at the
  *  row's vertical center (top half), or center → `to` at the bottom edge.
- *  `dashed` marks trunk history the local default branch hasn't applied yet. */
-export type LaneSeg = { from: number; to: number; dashed?: boolean };
+ *  `dashed` marks trunk history the local default branch hasn't applied yet —
+ *  the value is the remote tier (1 = closest remote's stretch, 2 = the next
+ *  remote out, …) so each remote's stretch can carry its own dash pattern. */
+export type LaneSeg = { from: number; to: number; dashed?: number };
 
 export type LaneRow = {
   /** Column the commit's dot sits in. */
@@ -62,8 +64,8 @@ export type LaneLayout = {
   laneCount: number;
 };
 
-const seg = (from: number, to: number, dashed: boolean): LaneSeg =>
-  dashed ? { from, to, dashed: true } : { from, to };
+const seg = (from: number, to: number, tier: number): LaneSeg =>
+  tier > 0 ? { from, to, dashed: tier } : { from, to };
 
 /** commit hash → drawn branch owning it, via prioritized first-parent walks. */
 function computeOwners(
@@ -159,17 +161,27 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
 
   // Trunk commits fetched but not yet in the local default branch (from ANY
   // remote's copy of it): same spine, but drawn dashed above the local tip.
-  let unapplied = new Set<string>();
+  // Each commit carries the TIER of the closest remote that has it — remotes
+  // ranked nearest-to-local first (older tip = later in topo order) — so the
+  // local→origin stretch is tier 1 and an upstream-only stretch is tier 2,
+  // each rendered with its own dash pattern.
+  const unapplied = new Map<string, number>();
   if (refs !== undefined) {
     const localTip = tipOf.get(refs.defaultBranch);
     const remoteTips = (refs.defaultRefTips ?? []).filter(
       (h) => byHash.has(h) && h !== localTip
     );
     if (remoteTips.length > 0 && localTip !== undefined) {
-      for (const rt of remoteTips) {
-        for (const h of reachable(byHash, rt)) unapplied.add(h);
-      }
-      for (const h of reachable(byHash, localTip)) unapplied.delete(h);
+      const topoIndex = new Map(commits.map((c, i) => [c.hash, i]));
+      remoteTips.sort(
+        (a, b) => (topoIndex.get(b) ?? 0) - (topoIndex.get(a) ?? 0)
+      );
+      const applied = reachable(byHash, localTip);
+      remoteTips.forEach((rt, i) => {
+        for (const h of reachable(byHash, rt)) {
+          if (!applied.has(h) && !unapplied.has(h)) unapplied.set(h, i + 1);
+        }
+      });
     }
   }
 
@@ -204,7 +216,7 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
 
   let lanes: (string | null)[] = [];
   let laneOwner: (string | null)[] = [];
-  let laneDashed: boolean[] = [];
+  let laneDashed: number[] = [];
   const rows: LaneRow[] = [];
   let laneCount = 0;
 
@@ -227,7 +239,7 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
     const top: LaneSeg[] = [];
     for (let k = 0; k < before.length; k += 1) {
       if (before[k] === null) continue;
-      top.push(seg(k, before[k] === c.hash ? myLane : k, laneDashed[k] ?? false));
+      top.push(seg(k, before[k] === c.hash ? myLane : k, laneDashed[k] ?? 0));
     }
 
     // Advance to the post-commit lane state.
@@ -237,22 +249,22 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
     while (work.length <= myLane) {
       work.push(null);
       workOwner.push(null);
-      workDashed.push(false);
+      workDashed.push(0);
     }
     for (const k of incoming) {
       if (k !== myLane) {
         work[k] = null;
         workOwner[k] = null;
-        workDashed[k] = false;
+        workDashed[k] = 0;
       }
     }
 
     const fromDot = new Set<number>();
-    const dashedOut = unapplied.has(c.hash);
+    const dashedOut = unapplied.get(c.hash) ?? 0;
     if (c.parents.length === 0) {
       work[myLane] = null;
       workOwner[myLane] = null;
-      workDashed[myLane] = false;
+      workDashed[myLane] = 0;
     } else {
       work[myLane] = c.parents[0] ?? null;
       workOwner[myLane] = co;
@@ -264,7 +276,7 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
         while (work.length <= lane) {
           work.push(null);
           workOwner.push(null);
-          workDashed.push(false);
+          workDashed.push(0);
         }
         work[lane] = p;
         workOwner[lane] = po;
@@ -282,7 +294,7 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
     const bottom: LaneSeg[] = [];
     for (let k = 0; k < work.length; k += 1) {
       if (work[k] === null) continue;
-      bottom.push(seg(fromDot.has(k) ? myLane : k, k, workDashed[k] ?? false));
+      bottom.push(seg(fromDot.has(k) ? myLane : k, k, workDashed[k] ?? 0));
     }
 
     rows.push({ lane: myLane, top, bottom });
