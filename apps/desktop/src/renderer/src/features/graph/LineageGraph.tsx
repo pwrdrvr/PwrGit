@@ -110,34 +110,42 @@ export function LineageGraph({
   }, [flash]);
 
   const email = activeEmail.toLowerCase();
-  const layout = useMemo(
-    () =>
-      layoutLanes(
-        (data?.commits ?? []).map((c) => ({ hash: c.hash, parents: c.parents })),
-        data === null
-          ? undefined
-          : {
-              tips: data.tips,
-              defaultBranch: data.defaultBranch,
-              defaultRefTip:
-                data.defaultRefTip === "" ? undefined : data.defaultRefTip,
-              // This worktree's checked-out branch — pinned to lane 1.
-              headBranch: Object.entries(data.branches).find(
-                ([, info]) => info.worktreeId === worktreeId
-              )?.[0],
-              shownBranches: data.shownBranches
-            }
-      ),
-    [data, worktreeId]
-  );
+  const layout = useMemo(() => {
+    if (data === null) return layoutLanes([]);
+    // Layout tips = local + remote refs, so drawn remote-only branches
+    // (origin/team-x in "all" scope) own their lines too.
+    const tips: Record<string, string[]> = {};
+    for (const [h, ns] of Object.entries(data.tips)) tips[h] = [...ns];
+    for (const [h, ns] of Object.entries(data.remoteTips)) {
+      (tips[h] ??= []).push(...ns);
+    }
+    return layoutLanes(
+      data.commits.map((c) => ({ hash: c.hash, parents: c.parents })),
+      {
+        tips,
+        defaultBranch: data.defaultBranch,
+        defaultRefTips: data.defaultRefTips,
+        // This worktree's checked-out branch — pinned to lane 1.
+        headBranch: Object.entries(data.branches).find(
+          ([, info]) => info.worktreeId === worktreeId
+        )?.[0],
+        shownBranches: data.shownBranches
+      }
+    );
+  }, [data, worktreeId]);
 
   const vms: GraphRowVM[] = useMemo(() => {
     const commits = data?.commits ?? [];
     const tips = data?.tips ?? {};
+    const remoteTips = data?.remoteTips ?? {};
     const defaultBranch = data?.defaultBranch ?? "";
     // Drawn branches (and the default) win the capped chip slots on a commit
     // tipped by many branches; stale hangers-on collapse into the +N pill.
     const drawn = new Set([...(data?.shownBranches ?? []), defaultBranch]);
+    const localTipByName = new Map<string, string>();
+    for (const [h, ns] of Object.entries(tips)) {
+      for (const n of ns) localTipByName.set(n, h);
+    }
     return commits.map((commit, i) => {
       const names = tips[commit.hash] ?? [];
       const refs =
@@ -146,10 +154,24 @@ export function LineageGraph({
               (a, b) => (drawn.has(b) ? 1 : 0) - (drawn.has(a) ? 1 : 0)
             )
           : names;
+      // Remote-tracking refs tipped here. Synced with their local branch:
+      // the trunk's remotes show compactly ("origin"), the rest stay quiet.
+      // Anywhere else (remote ahead/diverged, or no local counterpart) the
+      // full name marks the end of that remote's train.
+      const remoteRefs = (remoteTips[commit.hash] ?? []).flatMap((n) => {
+        const slash = n.indexOf("/");
+        if (slash === -1) return [];
+        const branch = n.slice(slash + 1);
+        if (localTipByName.get(branch) === commit.hash) {
+          return branch === defaultBranch ? [n.slice(0, slash)] : [];
+        }
+        return [n];
+      });
       return {
         commit,
         row: layout.rows[i] ?? { lane: 0, top: [], bottom: [] },
         refs,
+        remoteRefs,
         isHead: commit.hash === head,
         isMine: commit.authorEmail.toLowerCase() === email,
         defaultBranch
@@ -157,11 +179,15 @@ export function LineageGraph({
     });
   }, [data, layout, email, head]);
 
-  // name → tip hash (from the hash → names map) for the branch navigator.
+  // name → tip hash (from the hash → names maps) for the branch navigator;
+  // remote names too, so a drawn origin/x branch is jumpable.
   const tipByName = useMemo(() => {
     const m = new Map<string, string>();
     for (const [hash, names] of Object.entries(data?.tips ?? {})) {
       for (const n of names) m.set(n, hash);
+    }
+    for (const [hash, names] of Object.entries(data?.remoteTips ?? {})) {
+      for (const n of names) if (!m.has(n)) m.set(n, hash);
     }
     return m;
   }, [data]);

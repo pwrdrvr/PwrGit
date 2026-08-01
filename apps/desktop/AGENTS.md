@@ -19,6 +19,13 @@ const { autoUpdater } = electronUpdater;
 normally. When adding a dependency used in `src/main`, check its `type` — if
 `commonjs`, default-import it.
 
+## e2e needs a build first
+
+`pnpm test:e2e` (Playwright) launches the BUILT app at `out/main/index.js` —
+there is no dev-server fallback. On a fresh worktree, or after changing
+`src/main/**`/`src/preload/**`, run `pnpm build` before `pnpm test:e2e` or
+Electron dies with "Unable to find Electron app at .../out/main/index.js".
+
 ## Runtime facts
 
 - IPC goes through the typed command bus (`command-bus.ts` / `ipc.ts`);

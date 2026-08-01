@@ -25,12 +25,14 @@ import type { WorktreeStateService } from "./worktree-state";
 type CachedLanes = {
   commits: Commit[];
   tips: Record<string, string[]>;
+  /** commit hash → remote-tracking refs tipped there (e.g. "origin/main"). */
+  remoteTips: Record<string, string[]>;
   branches: Record<string, LaneBranchInfo>;
   defaultBranch: string;
   /** The resolvable ref for the default branch (e.g. "origin/develop"). */
   defaultRef: string;
-  /** Tip hash of that ref (first commit of the trunk window). */
-  defaultRefTip: string;
+  /** Tips of each remote's copy of the default branch. */
+  defaultRefTips: string[];
   shownBranches: string[];
   matchedBranches: number;
   hiddenBranches: number;
@@ -155,6 +157,22 @@ export function registerGraphHandlers(
         hiddenBranches = Math.max(0, totalOther - shown.length);
       }
 
+      const tips = await branchTips(execGit, wt.path);
+      if (!tips.ok) return tips;
+      // Every remote's copy of the default branch joins the trunk walk, so a
+      // remote-ahead trunk (origin/main, or upstream/main on a fork) is in the
+      // window — the graph draws it as the dashed top of the spine, with the
+      // remote ref's chip at its tip.
+      const remoteDefaultRefs: string[] = [];
+      const defaultRefTips = new Set<string>();
+      for (const [hash, names] of Object.entries(tips.value.remote)) {
+        for (const n of names) {
+          if (n.slice(n.indexOf("/") + 1) !== def.name) continue;
+          remoteDefaultRefs.push(n);
+          defaultRefTips.add(hash);
+        }
+      }
+
       // Compose the log from segments instead of one flat window: a busy trunk
       // would otherwise flood `git log refs -n N` and silently drop every
       // branch tip older than the trunk's newest N commits. Trunk and branch
@@ -163,7 +181,7 @@ export function registerGraphHandlers(
       const trunk = await readLogRefs(
         execGit,
         wt.path,
-        [def.ref],
+        [...new Set([def.ref, ...remoteDefaultRefs])],
         req.limit ?? TRUNK_CAP
       );
       if (!trunk.ok) return trunk;
@@ -175,8 +193,6 @@ export function registerGraphHandlers(
         UNIQUE_CAP
       );
       if (!uniques.ok) return uniques;
-      const tips = await branchTips(execGit, wt.path);
-      if (!tips.ok) return tips;
 
       // Per-branch adornments for the tip chips: PR (from branch_pr) and the
       // worktree the branch is checked out in. Repo-level like everything
@@ -214,11 +230,12 @@ export function registerGraphHandlers(
 
       cached = {
         commits: topoMergeCommits([trunk.value, uniques.value]),
-        tips: tips.value,
+        tips: tips.value.local,
+        remoteTips: tips.value.remote,
         branches: branchInfo,
         defaultBranch: def.name,
         defaultRef: def.ref,
-        defaultRefTip: trunk.value[0]?.hash ?? "",
+        defaultRefTips: [...defaultRefTips],
         shownBranches: shown,
         matchedBranches,
         hiddenBranches,
@@ -280,10 +297,11 @@ export function registerGraphHandlers(
     return ok({
       commits: out.commits,
       tips: out.tips,
+      remoteTips: out.remoteTips,
       branches: out.branches,
       head,
       defaultBranch: out.defaultBranch,
-      defaultRefTip: out.defaultRefTip,
+      defaultRefTips: out.defaultRefTips,
       shownBranches: out.shownBranches,
       matchedBranches: out.matchedBranches,
       hiddenBranches: out.hiddenBranches

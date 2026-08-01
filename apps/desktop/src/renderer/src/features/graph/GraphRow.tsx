@@ -48,6 +48,9 @@ export type GraphRowVM = {
   commit: Commit;
   row: LaneRow;
   refs: string[];
+  /** Remote-tracking refs to chip here — full ("origin/main") when the remote
+   *  sits away from its local branch, collapsed ("origin") when synced. */
+  remoteRefs: string[];
   isHead: boolean;
   isMine: boolean;
   defaultBranch: string;
@@ -89,10 +92,11 @@ export function GraphRow({
   /** Jump to the worktree a tip branch is checked out in. */
   onRevealWorktree?: (worktreeId: string) => void;
 }) {
-  const { commit, row, refs, isHead, isMine } = vm;
+  const { commit, row, refs, remoteRefs, isHead, isMine } = vm;
   const width = Math.max(1, laneCount) * LANE_W;
   const color = laneColor(row.lane);
-  const isTip = refs.length > 0;
+  const chipCount = refs.length + remoteRefs.length;
+  const isTip = chipCount > 0;
   const x = cx(row.lane);
 
   // A lane that runs straight through both halves of the row is drawn as ONE
@@ -254,8 +258,8 @@ export function GraphRow({
           {/* Chips are capped — a commit tipped by dozens of stale branches
               must not flood the row. Overflow collapses into a +N pill whose
               tooltip lists everything. */}
-          {refs.length > 0 && (
-            <span className="ref-chips" title={refs.join("\n")}>
+          {chipCount > 0 && (
+            <span className="ref-chips" title={[...refs, ...remoteRefs].join("\n")}>
               {refs.slice(0, MAX_REF_CHIPS).map((name) => {
                 const info = branchInfo?.[name];
                 const wtId = info?.worktreeId;
@@ -292,9 +296,24 @@ export function GraphRow({
                   </span>
                 );
               })}
-              {refs.length > MAX_REF_CHIPS && (
+              {remoteRefs
+                .slice(0, Math.max(0, MAX_REF_CHIPS - refs.length))
+                .map((name) => (
+                  <span
+                    key={`r:${name}`}
+                    className="ref-chip ref-chip--remote"
+                    style={{
+                      color,
+                      borderColor: `color-mix(in srgb, ${color} 45%, transparent)`
+                    }}
+                  >
+                    <BranchGlyph />
+                    {name}
+                  </span>
+                ))}
+              {chipCount > MAX_REF_CHIPS && (
                 <span className="ref-chip ref-chip--more">
-                  +{refs.length - MAX_REF_CHIPS}
+                  +{chipCount - MAX_REF_CHIPS}
                 </span>
               )}
             </span>

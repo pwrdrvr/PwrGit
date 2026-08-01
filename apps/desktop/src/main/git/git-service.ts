@@ -448,13 +448,20 @@ export async function listLocalBranchNames(
   );
 }
 
-/** hash → branch names whose tip is that commit (graph ref labels). Local
- *  heads plus remote-tracking tips; a remote shadowed by a same-named local
- *  is skipped so synced pairs don't double-label one commit. */
+/** Branch tips for graph ref labels, split by where the ref lives. */
+export type BranchTips = {
+  /** commit hash → local branch names tipped there. */
+  local: Record<string, string[]>;
+  /** commit hash → remote-tracking refs tipped there (e.g. "origin/main").
+   *  Remote HEAD aliases (refs/remotes/&ast;/HEAD) are excluded — the graph
+   *  labels concrete branches, not symrefs. */
+  remote: Record<string, string[]>;
+};
+
 export async function branchTips(
   git: GitExec,
   cwd: string
-): Promise<Result<Record<string, string[]>>> {
+): Promise<Result<BranchTips>> {
   const raw = await git(
     [
       "for-each-ref",
@@ -468,27 +475,19 @@ export async function branchTips(
   const checked = requireExit0(raw.value, ["for-each-ref"]);
   if (!checked.ok) return checked;
 
-  type Tip = { hash: string; name: string; remote: boolean };
-  const tips: Tip[] = [];
-  const locals = new Set<string>();
+  const local: Record<string, string[]> = {};
+  const remote: Record<string, string[]> = {};
   for (const line of checked.value.stdout.split("\n")) {
     if (line.trim() === "") continue;
     const [hash = "", full = "", name = ""] = line.split("\t");
     if (hash === "" || name === "") continue;
     if (full.startsWith("refs/heads/")) {
-      tips.push({ hash, name, remote: false });
-      locals.add(name);
-    } else if (!name.endsWith("/HEAD")) {
-      tips.push({ hash, name, remote: true });
+      (local[hash] ??= []).push(name);
+    } else if (full.startsWith("refs/remotes/") && !full.endsWith("/HEAD")) {
+      (remote[hash] ??= []).push(name);
     }
   }
-
-  const map: Record<string, string[]> = {};
-  for (const t of tips) {
-    if (t.remote && locals.has(t.name.replace(/^[^/]+\//, ""))) continue;
-    (map[t.hash] ??= []).push(t.name);
-  }
-  return ok(map);
+  return ok({ local, remote });
 }
 
 /**

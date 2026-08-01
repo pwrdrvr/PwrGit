@@ -232,7 +232,7 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
       {
         tips: { L: ["main"] },
         defaultBranch: "main",
-        defaultRefTip: "R2",
+        defaultRefTips: ["R2"],
         shownBranches: []
       }
     );
@@ -254,7 +254,7 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
       {
         tips: { L: ["main"], F: ["feat"] },
         defaultBranch: "main",
-        defaultRefTip: "R",
+        defaultRefTips: ["R"],
         shownBranches: ["feat"]
       }
     );
@@ -270,6 +270,52 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
       ])
     );
     expect(rows[2].bottom).toEqual([{ from: 0, to: 0 }]);
+  });
+
+  it("chains multiple remote default tips into one dashed spine", () => {
+    // Fork workflow: upstream/main (U) ahead of origin/main (O) ahead of
+    // local main (L) — one lane-0 line, dashed all the way down to L's dot.
+    const { rows, laneCount } = layoutLanes(
+      [c("U", "O"), c("O", "L"), c("L", "L1"), c("L1")],
+      {
+        tips: { L: ["main"] },
+        defaultBranch: "main",
+        defaultRefTips: ["U", "O"],
+        shownBranches: []
+      }
+    );
+    expect(rows.map((r) => r.lane)).toEqual([0, 0, 0, 0]);
+    expect(laneCount).toBe(1);
+    expect(rows[0].bottom).toEqual([{ from: 0, to: 0, dashed: true }]);
+    expect(rows[1].bottom).toEqual([{ from: 0, to: 0, dashed: true }]);
+    expect(rows[2].top).toEqual([{ from: 0, to: 0, dashed: true }]);
+    expect(rows[2].bottom).toEqual([{ from: 0, to: 0 }]);
+  });
+
+  it("keeps a diverged remote off the spine lane, as a dashed side line", () => {
+    // Local main gained a commit while origin/main did too: origin's segment
+    // can't be the top of the spine — it rides its own lane, dashed, and
+    // converges at the shared base. Local main keeps lane 0.
+    const { rows } = layoutLanes(
+      [c("R", "B"), c("L", "B"), c("B", "B1"), c("B1")],
+      {
+        tips: { L: ["main"] },
+        defaultBranch: "main",
+        defaultRefTips: ["R"],
+        shownBranches: []
+      }
+    );
+    const lanes = Object.fromEntries(
+      rows.map((r, i) => [["R", "L", "B", "B1"][i], r.lane])
+    );
+    expect(lanes).toEqual({ R: 1, L: 0, B: 0, B1: 0 });
+    expect(rows[0].bottom).toEqual([{ from: 1, to: 1, dashed: true }]);
+    expect(rows[2].top).toEqual(
+      expect.arrayContaining([
+        { from: 0, to: 0 },
+        { from: 1, to: 0, dashed: true }
+      ])
+    );
   });
 
   it("doesn't reserve lane 1 for a checked-out branch with no line of its own", () => {

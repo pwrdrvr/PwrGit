@@ -166,14 +166,17 @@ export type LaneGraph = {
   commits: Commit[];
   /** commit hash → local branch names tipped there (for ref labels). */
   tips: Record<string, string[]>;
+  /** commit hash → remote-tracking refs tipped there (e.g. "origin/main"). */
+  remoteTips: Record<string, string[]>;
   /** branch name → PR / worktree adornments for the tip chips. */
   branches: Record<string, LaneBranchInfo>;
   /** Current HEAD commit, to highlight where you are. */
   head: string;
   defaultBranch: string;
-  /** Tip hash of the ref the trunk was drawn from (e.g. origin/main) — lets
-   *  the graph draw fetched-but-unmerged trunk as a dashed spine. */
-  defaultRefTip: string;
+  /** Tips of each remote's copy of the default branch (origin/main,
+   *  upstream/main, …) — the trunk is drawn through them so remote-ahead
+   *  history renders as a dashed spine ending at the remote ref's chip. */
+  defaultRefTips: string[];
   /** Branches drawn besides the default spine. */
   shownBranches: string[];
   /** Branches that qualified for this scope before the draw cap. */

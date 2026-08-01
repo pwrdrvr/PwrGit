@@ -31,11 +31,11 @@ export type LaneCommit = { hash: string; parents: string[] };
 
 /** Ref context that lets lanes follow branches instead of raw parent chains. */
 export type LaneRefs = {
-  /** commit hash → local branch names tipped there. */
+  /** commit hash → branch names tipped there (local, plus drawn remotes). */
   tips: Record<string, string[]>;
   defaultBranch: string;
-  /** Tip hash of the ref the trunk was drawn from (e.g. origin/main). */
-  defaultRefTip?: string | undefined;
+  /** Tips of each remote's copy of the default branch (origin/main, …). */
+  defaultRefTips?: string[] | undefined;
   /** The branch checked out in the viewing worktree — pinned to lane 1. */
   headBranch?: string | undefined;
   /** Branches drawn besides the default spine (most recent first). */
@@ -72,8 +72,9 @@ function computeOwners(
 ): {
   owners: Map<string, string>;
   tipOf: Map<string, string>;
-  /** Where the spine's walk starts: the trunk ref's tip when drawn, else the
-   *  local default tip. */
+  /** Where the spine's walk starts: the newest remote default tip the local
+   *  tip descends from (that whole stretch is ONE line), else the local tip.
+   *  A diverged remote's segment stays an anonymous side line instead. */
   spineStart: string | undefined;
 } {
   const priority = [refs.defaultBranch];
@@ -89,10 +90,23 @@ function computeOwners(
       drawnTips.add(hash);
     }
   }
-  const spineStart =
-    refs.defaultRefTip !== undefined && byHash.has(refs.defaultRefTip)
-      ? refs.defaultRefTip
-      : tipOf.get(refs.defaultBranch);
+
+  const localTip = tipOf.get(refs.defaultBranch);
+  let spineStart: string | undefined;
+  const candidates = new Set(
+    (refs.defaultRefTips ?? []).filter((h) => byHash.has(h))
+  );
+  if (candidates.size > 0) {
+    // byHash preserves the commits' topo order — the first candidate wins.
+    for (const h of byHash.keys()) {
+      if (!candidates.has(h)) continue;
+      if (localTip === undefined || reachable(byHash, h).has(localTip)) {
+        spineStart = h;
+        break;
+      }
+    }
+  }
+  spineStart ??= localTip;
 
   const owners = new Map<string, string>();
   for (const b of drawn) {
@@ -143,19 +157,18 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
         }
       : computeOwners(byHash, refs);
 
-  // Trunk commits fetched but not yet in the local default branch: same spine
-  // line, but drawn dashed above the local tip.
+  // Trunk commits fetched but not yet in the local default branch (from ANY
+  // remote's copy of it): same spine, but drawn dashed above the local tip.
   let unapplied = new Set<string>();
   if (refs !== undefined) {
     const localTip = tipOf.get(refs.defaultBranch);
-    const remoteTip = refs.defaultRefTip;
-    if (
-      remoteTip !== undefined &&
-      localTip !== undefined &&
-      remoteTip !== localTip &&
-      byHash.has(remoteTip)
-    ) {
-      unapplied = reachable(byHash, remoteTip);
+    const remoteTips = (refs.defaultRefTips ?? []).filter(
+      (h) => byHash.has(h) && h !== localTip
+    );
+    if (remoteTips.length > 0 && localTip !== undefined) {
+      for (const rt of remoteTips) {
+        for (const h of reachable(byHash, rt)) unapplied.add(h);
+      }
       for (const h of reachable(byHash, localTip)) unapplied.delete(h);
     }
   }
