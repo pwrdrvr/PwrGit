@@ -100,9 +100,14 @@ function computeOwners(
   );
   if (candidates.size > 0) {
     // byHash preserves the commits' topo order — the first candidate wins.
+    // A local tip that's fallen OUT of the window (further behind than the
+    // trunk cap) counts as descending from any candidate: the drawn trunk is
+    // entirely remote history then, and it must still be the owned, pinned
+    // spine — not free ground for a feature branch's walk to claim.
+    const localInWindow = localTip !== undefined && byHash.has(localTip);
     for (const h of byHash.keys()) {
       if (!candidates.has(h)) continue;
-      if (localTip === undefined || reachable(byHash, h).has(localTip)) {
+      if (!localInWindow || reachable(byHash, h).has(localTip as string)) {
         spineStart = h;
         break;
       }

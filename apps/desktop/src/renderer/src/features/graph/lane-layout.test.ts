@@ -321,6 +321,42 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
     );
   });
 
+  it("keeps the spine owned and pinned when local main is behind the window", () => {
+    // Local main's tip fell off the bottom of the trunk window (>cap behind
+    // origin/main). The drawn trunk is entirely remote history — it must
+    // still be the lane-0 spine, all dashed, with feat converging into it,
+    // NOT free ground for feat's ownership walk to claim.
+    const { rows } = layoutLanes(
+      [c("F", "R2"), c("R3", "R2"), c("R2", "R1"), c("R1", "Lout")],
+      {
+        tips: { F: ["feat"], Lout: ["main"] }, // main's tip is off-window
+        defaultBranch: "main",
+        defaultRefTips: ["R3"],
+        shownBranches: ["feat"]
+      }
+    );
+    const lanes = Object.fromEntries(
+      rows.map((r, i) => [["F", "R3", "R2", "R1"][i], r.lane])
+    );
+    expect(lanes).toEqual({ F: 1, R3: 0, R2: 0, R1: 0 });
+    // The whole drawn trunk is unapplied: dashed, one lane-0 line (feat's
+    // solid lane-1 line passes through R3's row on the way to its fork)…
+    expect(rows[1].bottom).toEqual(
+      expect.arrayContaining([
+        { from: 0, to: 0, dashed: 1 },
+        { from: 1, to: 1 }
+      ])
+    );
+    expect(rows[3].bottom).toEqual([{ from: 0, to: 0, dashed: 1 }]);
+    // …and feat converges into it (solid) instead of continuing through it.
+    expect(rows[2].top).toEqual(
+      expect.arrayContaining([
+        { from: 0, to: 0, dashed: 1 },
+        { from: 1, to: 0 }
+      ])
+    );
+  });
+
   it("doesn't reserve lane 1 for a checked-out branch with no line of its own", () => {
     // mine sits exactly on main's tip (fresh branch, no commits): it has no
     // line, so feat gets lane 1 instead of leaving a phantom empty column.
