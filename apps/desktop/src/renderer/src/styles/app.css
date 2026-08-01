@@ -802,6 +802,18 @@ input {
   font: 500 10px/1 var(--font-mono);
   color: var(--text-muted);
 }
+/* The pin star keeps its slot (no layout shift) but only shows on rows that
+   are pinned, hovered, or keyboard-selected. */
+.overlay-result .pin {
+  width: 20px;
+  height: 20px;
+  opacity: 0;
+}
+.overlay-result:hover .pin,
+.overlay-result.is-selected .pin,
+.overlay-result .pin.is-pinned {
+  opacity: 1;
+}
 /* Lazily-filled per-hit status: fades in as rows are seen (asyncFill). */
 .hit-status {
   flex: 0 0 auto;

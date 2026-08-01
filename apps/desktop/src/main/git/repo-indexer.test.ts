@@ -212,6 +212,39 @@ describe("searchAll (FTS5)", () => {
     ).toBe(false);
   });
 
+  it("carries pin state on hits and browses pinned repos first", async () => {
+    const profile = profileService.get(profileId);
+    if (profile === null) throw new Error("profile missing");
+    await indexer.rescanProfile(profile);
+
+    const repoRow = db
+      .prepare("SELECT id FROM repos WHERE name = 'repoB'")
+      .get() as { id: string };
+    const wtRow = db
+      .prepare("SELECT id FROM worktrees WHERE branch = 'feature'")
+      .get() as { id: string };
+    indexer.setRepoPinned(repoRow.id, true);
+    indexer.setWorktreePinned(wtRow.id, true);
+
+    // Queried hits carry the flag on both kinds.
+    const repoHit = indexer.searchAll("repoB").find((h) => h.kind === "repo");
+    expect(repoHit?.pinned).toBe(true);
+    const wtHit = indexer
+      .searchAll("feature")
+      .find((h) => h.kind === "worktree" && h.name === "feature");
+    expect(wtHit?.pinned).toBe(true);
+    const unpinned = indexer.searchAll("repoA").find((h) => h.kind === "repo");
+    expect(unpinned?.pinned).toBe(false);
+
+    // Empty-query browse floats pinned repos above the alphabetical rest.
+    const browse = indexer.searchAll("");
+    expect(browse[0]?.name).toBe("repoB");
+    expect(browse[0]?.pinned).toBe(true);
+
+    indexer.setRepoPinned(repoRow.id, false);
+    indexer.setWorktreePinned(wtRow.id, false);
+  });
+
   it("emits one hit per entity even when the FTS index holds duplicates", () => {
     // Fossil DBs (pre-PK worktree rows) can double-insert into search_fts via
     // the migration backfill. Duplicate hits become duplicate React keys in

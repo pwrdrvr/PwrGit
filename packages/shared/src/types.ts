@@ -230,6 +230,8 @@ export type RepoSearchHit = {
   profileId: ProfileId;
   profileName: string;
   worktreeCount: number;
+  /** Pin state of the repo — or of the worktree for worktree hits. */
+  pinned: boolean;
   /** The matched worktree (worktree hits only). */
   worktreeId?: WorktreeId;
   /** Owning repo's name, shown as context on worktree hits. */
