@@ -1,0 +1,11 @@
+<svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="PwrGit">
+  <g fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <g opacity="0.55">
+      <path d="M44 75 C44 59 59 50 73 50"></path>
+      <circle cx="84" cy="50" r="10.5"></circle>
+    </g>
+    <path d="M44 48 V80"></path>
+    <circle cx="44" cy="38" r="10.5"></circle>
+    <circle cx="44" cy="90" r="10.5"></circle>
+  </g>
+</svg>
