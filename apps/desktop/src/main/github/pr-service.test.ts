@@ -106,4 +106,48 @@ describe("PrService", () => {
       ["feature/pr-state"]
     ]);
   });
+
+  it("coalesces a focused refresh into an in-flight bulk refresh", async () => {
+    db.prepare(
+      "INSERT INTO worktrees (id, repo_id, branch, path) VALUES ('wt-other', 'repo', 'feature/other', '/repo/other')"
+    ).run();
+
+    let fetchStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      fetchStarted = resolve;
+    });
+    let resolveFetch: ((value: Map<string, PrSummary | null>) => void) | undefined;
+    const fetchResult = new Promise<Map<string, PrSummary | null>>((resolve) => {
+      resolveFetch = resolve;
+    });
+    fetches = [];
+    service = new PrService(db, git, {
+      getGitHubToken: async () => "token",
+      fetchPrsForRepo: async (_token, _owner, _repo, branches) => {
+        fetches.push(branches);
+        fetchStarted?.();
+        return await fetchResult;
+      },
+      now: () => now
+    });
+
+    const bulk = service.refreshRepo("repo");
+    await started;
+    const focused = service.refreshRepo("repo", {
+      branches: ["feature/pr-state"],
+      trigger: "user"
+    });
+
+    expect(fetches).toEqual([["feature/pr-state", "feature/other"]]);
+
+    const latest = new Map<string, PrSummary | null>([
+      ["feature/pr-state", pr({ state: "merged", isDraft: false })],
+      ["feature/other", null]
+    ]);
+    resolveFetch?.(latest);
+
+    await expect(bulk).resolves.toEqual(latest);
+    await expect(focused).resolves.toEqual(latest);
+    expect(fetches).toHaveLength(1);
+  });
 });

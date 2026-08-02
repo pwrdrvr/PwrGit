@@ -34,7 +34,10 @@ export class PrService {
   private readonly getToken: typeof getGitHubToken;
   private readonly fetchPrs: typeof fetchPrsForRepo;
   private readonly now: () => number;
-  private readonly pendingRefreshes = new Map<
+  // A bulk lookup and a focused branch lookup may overlap for the same repo.
+  // They must share one request: otherwise an older bulk response can land
+  // after the focused response and overwrite its newer PR state.
+  private readonly pendingRepoRefreshes = new Map<
     string,
     Promise<Map<string, PrSummary | null>>
   >();
@@ -60,16 +63,15 @@ export class PrService {
   ): Promise<Map<string, PrSummary | null>> {
     const branches = this.branchesToCheck(repoId, opts.branches);
     if (branches.length === 0) return new Map();
-    const key = `${repoId}:${branches.slice().sort().join("\u0000")}`;
-    const pending = this.pendingRefreshes.get(key);
+    const pending = this.pendingRepoRefreshes.get(repoId);
     if (pending !== undefined) return await pending;
 
     const refresh = this.refreshBranches(repoId, branches, opts);
-    this.pendingRefreshes.set(key, refresh);
+    this.pendingRepoRefreshes.set(repoId, refresh);
     try {
       return await refresh;
     } finally {
-      this.pendingRefreshes.delete(key);
+      this.pendingRepoRefreshes.delete(repoId);
     }
   }
 
