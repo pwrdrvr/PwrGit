@@ -106,6 +106,29 @@ test("hovering a lineage row opens its commit context window", async () => {
   await expect(window.getByRole("tooltip")).toHaveText(
     `Copy full SHA ${fullHash}`
   );
+
+  await row.click({ button: "right" });
+  const menu = window.getByRole("menu", { name: "Commit actions" });
+  await expect(menu).toBeVisible();
+  await expect(card).toBeHidden();
+  await expect(menu.getByRole("menuitem", { name: "View changes" })).toBeFocused();
+  await expect(
+    menu.getByRole("menuitem", { name: "Copy short SHA" })
+  ).toBeVisible();
+  await expect(
+    menu.getByRole("menuitem", { name: "Copy full SHA" })
+  ).toBeVisible();
+  await expect(
+    menu.getByRole("menuitem", { name: "Copy commit message" })
+  ).toBeVisible();
+  await expect(
+    menu.getByRole("menuitem", { name: "Copy author email" })
+  ).toBeVisible();
+  await expect(
+    menu.getByRole("menuitem", { name: "Copy viewing branch" })
+  ).toBeVisible();
+  await window.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
 });
 
 test("switching worktrees anchors the lineage on that worktree's HEAD", async () => {

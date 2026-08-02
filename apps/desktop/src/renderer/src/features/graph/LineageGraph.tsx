@@ -7,6 +7,7 @@ import {
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 import { CommitContextCard } from "./CommitContextCard";
+import { CommitContextMenu } from "./CommitContextMenu";
 import {
   GraphRow,
   type GraphRowVM,
@@ -19,6 +20,7 @@ import { shortWhen } from "./graph-view";
 import { layoutLanes } from "./lane-layout";
 
 type Scope = "active" | "all";
+type CommitMenuState = { hash: string; x: number; y: number };
 
 // Experimental setting: open new graph views in the "all branches" scope.
 // Cached per window but kept fresh via settings:changed, so toggling the
@@ -74,6 +76,7 @@ export function LineageGraph({
   const [flash, setFlash] = useState<string | null>(null);
   const [branchesOpen, setBranchesOpen] = useState(false);
   const [hoveredCommit, setHoveredCommit] = useState<string | null>(null);
+  const [commitMenu, setCommitMenu] = useState<CommitMenuState | null>(null);
   const [commitStats, setCommitStats] = useState<
     Record<string, CommitStats | null>
   >({});
@@ -216,6 +219,8 @@ export function LineageGraph({
   );
   const hoveredVm =
     hoveredCommit === null ? undefined : vmByHash.get(hoveredCommit);
+  const menuVm =
+    commitMenu === null ? undefined : vmByHash.get(commitMenu.hash);
 
   // The interactive card owns its delayed dismissal. Clear the associated
   // commit once it is actually gone, rather than as the pointer starts across
@@ -295,6 +300,14 @@ export function LineageGraph({
       />,
       anchor
     );
+  };
+
+  const openCommitMenu = (
+    vm: GraphRowVM,
+    position: { x: number; y: number }
+  ): void => {
+    commitContext.hide();
+    setCommitMenu({ hash: vm.commit.hash, ...position });
   };
 
   const gutterW = gutterWidth(layout.laneCount);
@@ -516,6 +529,7 @@ export function LineageGraph({
                   showCommitContext(target, anchor, vm)
                 }
                 onHideContext={commitContext.scheduleHide}
+                onOpenContextMenu={(position) => openCommitMenu(vm, position)}
                 onRevealWorktree={onRevealWorktree}
               />
             ))}
@@ -539,6 +553,19 @@ export function LineageGraph({
         )}
       </div>
       {commitContext.tooltipNode}
+      {commitMenu !== null && menuVm !== undefined && (
+        <CommitContextMenu
+          x={commitMenu.x}
+          y={commitMenu.y}
+          vm={menuVm}
+          branchInfo={data?.branches ?? {}}
+          viewingBranch={viewingBranch}
+          onViewChanges={() =>
+            onOpenCommit(menuVm.commit.hash, menuVm.commit.subject)
+          }
+          onClose={() => setCommitMenu(null)}
+        />
+      )}
     </>
   );
 }

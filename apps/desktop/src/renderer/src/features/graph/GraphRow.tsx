@@ -84,6 +84,7 @@ export function GraphRow({
   onOpen,
   onShowContext,
   onHideContext,
+  onOpenContextMenu,
   onRevealWorktree
 }: {
   vm: GraphRowVM;
@@ -104,6 +105,7 @@ export function GraphRow({
     anchor: { x: number; y: number }
   ) => void;
   onHideContext: () => void;
+  onOpenContextMenu: (position: { x: number; y: number }) => void;
   /** Jump to the worktree a tip branch is checked out in. */
   onRevealWorktree?: (worktreeId: string) => void;
 }) {
@@ -138,6 +140,11 @@ export function GraphRow({
         onShowContext(e.currentTarget, { x: e.clientX, y: e.clientY })
       }
       onMouseLeave={onHideContext}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onOpenContextMenu({ x: e.clientX, y: e.clientY });
+      }}
       style={{ height: ROW_H }}
     >
       <div className="graph-lanes-clip" style={{ width: gutterWidth(laneCount) }}>
