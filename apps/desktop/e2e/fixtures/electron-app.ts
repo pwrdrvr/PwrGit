@@ -25,7 +25,11 @@ function cleanEnv(extra: Record<string, string>): Record<string, string> {
   for (const [k, v] of Object.entries(process.env)) {
     if (v !== undefined) env[k] = v;
   }
-  return { ...env, ...extra };
+  // A PwrAgent/PwrSnap/PwrGit dev process can be the parent of this test run.
+  // electron-vite's renderer URL belongs to that parent app; allowing it into
+  // the built PwrGit process makes PwrGit main load the other app's renderer.
+  delete env.ELECTRON_RENDERER_URL;
+  return { ...env, NODE_ENV: "production", ...extra };
 }
 
 /**

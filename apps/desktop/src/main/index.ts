@@ -49,6 +49,20 @@ import { rebuildAppMenu } from "./menu";
 import { createProfileWindows } from "./profile-windows";
 import { openSettingsWindow } from "./settings-window";
 
+const APP_NAME = "PwrGit";
+
+// Playwright launches the built main entry directly, so Electron cannot find
+// apps/desktop/package.json and otherwise identifies the process as the generic
+// "Electron" app. Establish PwrGit's runtime identity before userData is
+// derived or the single-instance lock is requested. Packaged builds already
+// carry the product name, but setting it explicitly keeps every launch mode
+// consistent.
+app.setName(APP_NAME);
+app.setAboutPanelOptions({
+  applicationName: APP_NAME,
+  applicationVersion: app.getVersion()
+});
+
 // Packaged builds ship dugite's embedded git under Contents/Resources/git
 // (resources/git on Windows) via electron-builder extraResources, because the
 // distribution's ~150 `git-<builtin> → git` symlinks cannot live inside
