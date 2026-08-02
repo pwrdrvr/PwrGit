@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 
 const VIEWPORT_PADDING = 12;
 const TOOLTIP_GAP = 8;
+const INTERACTIVE_DISMISS_DELAY_MS = 400;
 /** When a pointer is near a graph edge, spill the card into its adjacent pane
  * instead of covering the commit list. */
 const EDGE_SPILL_ZONE = 160;
@@ -24,7 +25,6 @@ export type TooltipRect = {
 
 type TooltipState = {
   content: ReactNode;
-  target: HTMLElement;
   targetRect: TooltipRect;
   anchor?: TooltipAnchor;
   left?: number;
@@ -37,13 +37,18 @@ export type ViewportTooltip = {
     content: ReactNode,
     anchor?: TooltipAnchor
   ) => void;
-  /** Re-anchor an open tooltip at the current pointer position. */
-  move: (target: HTMLElement, anchor: TooltipAnchor) => void;
   /** Replace an open tooltip's content without making it blink. */
   update: (content: ReactNode) => void;
   hide: () => void;
+  /** Delay dismissal long enough to cross from a hover target into a card. */
+  scheduleHide: () => void;
   visible: boolean;
   tooltipNode: ReactNode;
+};
+
+type ViewportTooltipOptions = {
+  /** Interactive cards remain open while the pointer moves from their target. */
+  interactive?: boolean;
 };
 
 type TooltipPlacement = {
@@ -133,18 +138,29 @@ const rectOf = (rect: DOMRect): TooltipRect => ({
 /**
  * A hover/focus tooltip rendered into a portal so it escapes clipping
  * ancestors. Pointer-anchored callers get a card beside the cursor; generic
- * callers retain target-centred placement. Dismisses on window blur or any
- * scroll. Callers own show/hide and render `tooltipNode`. Content can be a
- * structured card, not just a text string.
+ * callers retain target-centred placement. Interactive cards give the pointer
+ * a brief grace period to cross into the card and keep their first placement
+ * through content updates. Dismisses on window blur or any scroll. Callers
+ * own show/hide and render `tooltipNode`. Content can be a structured card,
+ * not just a text string.
  */
-export function useViewportTooltip(className = "viewport-tooltip"): ViewportTooltip {
+export function useViewportTooltip(
+  className = "viewport-tooltip",
+  { interactive = false }: ViewportTooltipOptions = {}
+): ViewportTooltip {
   const tooltipRef = useRef<HTMLDivElement>(null);
+  const dismissTimerRef = useRef<number | undefined>(undefined);
   const [state, setState] = useState<TooltipState | undefined>(undefined);
 
-  // Measure after paint and clamp the tooltip into the viewport. Content
-  // updates re-measure too, allowing a live card to grow or shrink in place.
+  // Measure after paint and clamp the tooltip into the viewport. Generic
+  // tooltips re-measure after content updates; interactive cards stay put.
   useLayoutEffect(() => {
     if (!state) return;
+    // An interactive card should feel anchored when its live data arrives,
+    // rather than jumping as it remeasures under a stationary pointer.
+    if (interactive && state.left !== undefined && state.top !== undefined) {
+      return;
+    }
     const el = tooltipRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
@@ -157,39 +173,51 @@ export function useViewportTooltip(className = "viewport-tooltip"): ViewportTool
     if (state.left !== left || state.top !== top) {
       setState({ ...state, left, top });
     }
-  }, [state]);
+  }, [interactive, state]);
+
+  const cancelScheduledHide = useCallback((): void => {
+    if (dismissTimerRef.current === undefined) return;
+    window.clearTimeout(dismissTimerRef.current);
+    dismissTimerRef.current = undefined;
+  }, []);
+
+  const hide = useCallback((): void => {
+    cancelScheduledHide();
+    setState(undefined);
+  }, [cancelScheduledHide]);
+
+  const scheduleHide = useCallback((): void => {
+    if (!interactive) {
+      hide();
+      return;
+    }
+    cancelScheduledHide();
+    dismissTimerRef.current = window.setTimeout(() => {
+      dismissTimerRef.current = undefined;
+      setState(undefined);
+    }, INTERACTIVE_DISMISS_DELAY_MS);
+  }, [cancelScheduledHide, hide, interactive]);
+
+  useEffect(() => {
+    return () => cancelScheduledHide();
+  }, [cancelScheduledHide]);
 
   const show = useCallback((
     target: HTMLElement,
     content: ReactNode,
     anchor?: TooltipAnchor
   ): void => {
+    cancelScheduledHide();
     setState({
       content,
-      target,
       targetRect: rectOf(target.getBoundingClientRect()),
       ...(anchor === undefined ? {} : { anchor })
     });
-  }, []);
-
-  const move = useCallback((target: HTMLElement, anchor: TooltipAnchor): void => {
-    setState((current) => {
-      if (
-        current === undefined ||
-        current.target !== target ||
-        (current.anchor?.x === anchor.x && current.anchor.y === anchor.y)
-      ) {
-        return current;
-      }
-      return { ...current, anchor };
-    });
-  }, []);
+  }, [cancelScheduledHide]);
 
   const update = useCallback((content: ReactNode): void => {
     setState((current) => (current ? { ...current, content } : current));
   }, []);
-
-  const hide = useCallback((): void => setState(undefined), []);
 
   const visible = state !== undefined;
   useEffect(() => {
@@ -207,7 +235,8 @@ export function useViewportTooltip(className = "viewport-tooltip"): ViewportTool
       ? createPortal(
           <div
             ref={tooltipRef}
-            role="tooltip"
+            role={interactive ? "dialog" : "tooltip"}
+            aria-label={interactive ? "Commit context" : undefined}
             className={className}
             style={{
               position: "fixed",
@@ -215,6 +244,14 @@ export function useViewportTooltip(className = "viewport-tooltip"): ViewportTool
               top: state.top,
               visibility: state.left === undefined ? "hidden" : undefined
             }}
+            {...(interactive
+              ? {
+                  onMouseEnter: cancelScheduledHide,
+                  onMouseLeave: scheduleHide,
+                  onFocusCapture: cancelScheduledHide,
+                  onBlurCapture: scheduleHide
+                }
+              : {})}
           >
             {state.content}
           </div>,
@@ -222,5 +259,5 @@ export function useViewportTooltip(className = "viewport-tooltip"): ViewportTool
         )
       : null;
 
-  return { show, move, update, hide, visible, tooltipNode };
+  return { show, update, hide, scheduleHide, visible, tooltipNode };
 }

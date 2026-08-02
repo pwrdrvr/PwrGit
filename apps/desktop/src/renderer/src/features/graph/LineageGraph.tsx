@@ -78,7 +78,9 @@ export function LineageGraph({
     Record<string, CommitStats | null>
   >({});
   const now = useRelativeClock();
-  const commitContext = useViewportTooltip("commit-context-card");
+  const commitContext = useViewportTooltip("commit-context-card", {
+    interactive: true
+  });
   const scrollerRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const laneBarRef = useRef<HTMLDivElement>(null);
@@ -215,6 +217,13 @@ export function LineageGraph({
   const hoveredVm =
     hoveredCommit === null ? undefined : vmByHash.get(hoveredCommit);
 
+  // The interactive card owns its delayed dismissal. Clear the associated
+  // commit once it is actually gone, rather than as the pointer starts across
+  // the gap from a row to the card.
+  useEffect(() => {
+    if (!commitContext.visible) setHoveredCommit(null);
+  }, [commitContext.visible]);
+
   // Diffstats are intentionally lazy: a graph can contain hundreds of commits,
   // but only the one under the pointer needs a numstat walk. Cache both success
   // and failure for this worktree so repeated hover is instant and quiet.
@@ -286,18 +295,6 @@ export function LineageGraph({
       />,
       anchor
     );
-  };
-
-  const moveCommitContext = (
-    target: HTMLElement,
-    anchor: TooltipAnchor
-  ): void => {
-    commitContext.move(target, anchor);
-  };
-
-  const hideCommitContext = (): void => {
-    setHoveredCommit(null);
-    commitContext.hide();
   };
 
   const gutterW = gutterWidth(layout.laneCount);
@@ -518,8 +515,7 @@ export function LineageGraph({
                 onShowContext={(target, anchor) =>
                   showCommitContext(target, anchor, vm)
                 }
-                onMoveContext={moveCommitContext}
-                onHideContext={hideCommitContext}
+                onHideContext={commitContext.scheduleHide}
                 onRevealWorktree={onRevealWorktree}
               />
             ))}

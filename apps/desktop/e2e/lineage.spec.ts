@@ -72,7 +72,12 @@ test("hovering a lineage row opens its commit context window", async () => {
   await expect(row).toBeVisible({ timeout: 20_000 });
   await row.hover();
 
-  const card = window.getByRole("tooltip");
+  const card = window.getByRole("dialog", { name: "Commit context" });
+  await expect(card).toBeVisible();
+  // Leaving the row for the card must not make the interactive context window
+  // disappear before its copy actions can be reached.
+  await card.hover();
+  await window.waitForTimeout(500);
   await expect(card).toBeVisible();
   await expect(card).toContainText("Commit context");
   await expect(card).toContainText("Someone Else");
@@ -84,6 +89,23 @@ test("hovering a lineage row opens its commit context window", async () => {
   await expect(card).toContainText("Viewing branch");
   await expect(card).toContainText("Base branch");
   await expect(card).toContainText("main");
+  const shortCopy = card.getByRole("button", {
+    name: "Copy short commit hash"
+  });
+  const fullCopy = card.getByRole("button", {
+    name: "Copy full commit hash"
+  });
+  await expect(shortCopy).toBeVisible();
+  await expect(fullCopy).toBeVisible();
+
+  // The card stays compact: its full OID is intentionally revealed only by
+  // the nested copy tooltip, where it remains one pointer move away.
+  const fullHash = s.git(feature, "rev-parse", "HEAD");
+  await expect(card).not.toContainText(fullHash);
+  await fullCopy.hover();
+  await expect(window.getByRole("tooltip")).toHaveText(
+    `Copy full SHA ${fullHash}`
+  );
 });
 
 test("switching worktrees anchors the lineage on that worktree's HEAD", async () => {

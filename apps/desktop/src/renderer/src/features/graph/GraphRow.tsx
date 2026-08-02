@@ -83,7 +83,6 @@ export function GraphRow({
   onToggle,
   onOpen,
   onShowContext,
-  onMoveContext,
   onHideContext,
   onRevealWorktree
 }: {
@@ -101,10 +100,6 @@ export function GraphRow({
   onToggle: () => void;
   onOpen: () => void;
   onShowContext: (
-    target: HTMLElement,
-    anchor: { x: number; y: number }
-  ) => void;
-  onMoveContext: (
     target: HTMLElement,
     anchor: { x: number; y: number }
   ) => void;
@@ -141,9 +136,6 @@ export function GraphRow({
       onClick={onOpen}
       onMouseEnter={(e) =>
         onShowContext(e.currentTarget, { x: e.clientX, y: e.clientY })
-      }
-      onMouseMove={(e) =>
-        onMoveContext(e.currentTarget, { x: e.clientX, y: e.clientY })
       }
       onMouseLeave={onHideContext}
       style={{ height: ROW_H }}
