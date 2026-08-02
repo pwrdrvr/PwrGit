@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  Commit,
   CommitStats,
   GitHubCommitAuthorIdentity,
   GitHubCommitAuthorIdentityLookup,
@@ -39,6 +40,56 @@ export function reusableCommitAuthorIdentity(
     (lookup.cacheState === "fresh" && lookup.refreshState === "idle")
     ? null
     : undefined;
+}
+
+/**
+ * IPC replies and targeted events can cross in either order. Keep the most
+ * complete/newest proof so a delayed cache-only reply cannot erase a local
+ * identity or thumbnail that was already painted by an event.
+ */
+export function mergeCommitAuthorIdentityLookup(
+  current: GitHubCommitAuthorIdentityLookup | undefined,
+  incoming: GitHubCommitAuthorIdentityLookup
+): GitHubCommitAuthorIdentityLookup {
+  if (current === undefined) return incoming;
+
+  if (current.identity !== undefined && incoming.identity === undefined) {
+    return current;
+  }
+  if (current.identity === undefined && incoming.identity !== undefined) {
+    return incoming;
+  }
+  // The normal hover transport responds immediately with this placeholder.
+  // It carries no proof and must never replace an already settled negative
+  // cache result just because the IPC reply beat the repaint event.
+  if (
+    incoming.cacheState === "miss" &&
+    incoming.refreshState === "in-flight" &&
+    current.cacheState === "fresh" &&
+    current.refreshState === "idle"
+  ) {
+    return current;
+  }
+
+  const currentRefreshedAt = current.refreshedAt ?? Number.NEGATIVE_INFINITY;
+  const incomingRefreshedAt = incoming.refreshedAt ?? Number.NEGATIVE_INFINITY;
+  if (incomingRefreshedAt < currentRefreshedAt) return current;
+  if (incomingRefreshedAt > currentRefreshedAt) return incoming;
+
+  const currentAvatarRefreshedAt =
+    current.avatarCache?.refreshedAt ?? Number.NEGATIVE_INFINITY;
+  const incomingAvatarRefreshedAt =
+    incoming.avatarCache?.refreshedAt ?? Number.NEGATIVE_INFINITY;
+  if (incomingAvatarRefreshedAt < currentAvatarRefreshedAt) return current;
+  if (incomingAvatarRefreshedAt > currentAvatarRefreshedAt) return incoming;
+
+  if (
+    current.identity?.avatarUrl !== undefined &&
+    incoming.identity?.avatarUrl === undefined
+  ) {
+    return current;
+  }
+  return incoming;
 }
 
 /** Retry only when the main-process proof/asset cache says another hover can help. */
@@ -91,6 +142,11 @@ function warmCommitAuthorAvatar(lookup: GitHubCommitAuthorIdentityLookup): void 
 }
 
 type CommitMenuState = { hash: string; x: number; y: number };
+type CommitAuthorIdentityWarmRequest = {
+  commit: Commit;
+  worktreeId: string;
+  epoch: number;
+};
 
 // Experimental setting: open new graph views in the "all branches" scope.
 // Cached per window but kept fresh via settings:changed, so toggling the
@@ -165,8 +221,83 @@ export function LineageGraph({
   const scopeTouchedRef = useRef(false);
   const commitStatsRequestsRef = useRef(new Map<string, number>());
   const commitAuthorIdentityRequestsRef = useRef(new Map<string, number>());
+  const commitAuthorIdentityWarmQueueRef = useRef<
+    CommitAuthorIdentityWarmRequest[]
+  >([]);
+  const commitAuthorIdentityWarmRequestedRef = useRef(new Map<string, number>());
+  const activeCommitAuthorIdentityWarmsRef = useRef(0);
+  const drainCommitAuthorIdentityWarmQueueRef = useRef<() => void>(() => {});
   const commitStatsEpochRef = useRef(0);
   const commitAuthorIdentityEpochRef = useRef(0);
+
+  const acceptCommitAuthorIdentityLookup = useCallback((
+    commitHash: string,
+    lookup: GitHubCommitAuthorIdentityLookup
+  ): void => {
+    warmCommitAuthorAvatar(lookup);
+    setCommitAuthorIdentityLookups((current) => {
+      const merged = mergeCommitAuthorIdentityLookup(current[commitHash], lookup);
+      return merged === current[commitHash]
+        ? current
+        : { ...current, [commitHash]: merged };
+    });
+  }, []);
+
+  const drainCommitAuthorIdentityWarmQueue = useCallback((): void => {
+    while (
+      activeCommitAuthorIdentityWarmsRef.current <
+      COMMIT_AUTHOR_IDENTITY_PREFETCH_CONCURRENCY
+    ) {
+      const next = commitAuthorIdentityWarmQueueRef.current.shift();
+      if (next === undefined) return;
+      if (next.epoch !== commitAuthorIdentityEpochRef.current) continue;
+      if (commitAuthorIdentityRequestsRef.current.get(next.commit.hash) === next.epoch) {
+        continue;
+      }
+
+      activeCommitAuthorIdentityWarmsRef.current += 1;
+      commitAuthorIdentityRequestsRef.current.set(next.commit.hash, next.epoch);
+      void dispatch("github:commitAuthorIdentity", {
+        worktreeId: next.worktreeId,
+        commitHash: next.commit.hash,
+        authorName: next.commit.authorName,
+        authorEmail: next.commit.authorEmail,
+        cacheOnly: true
+      })
+        .then((result) => {
+          if (
+            result.ok &&
+            next.epoch === commitAuthorIdentityEpochRef.current
+          ) {
+            // Cache-only requests wait for the completed local proof. Accept
+            // that response as well as the event; events are a repaint path,
+            // not the sole source of renderer state.
+            acceptCommitAuthorIdentityLookup(next.commit.hash, result.value);
+          }
+        })
+        .finally(() => {
+          if (
+            commitAuthorIdentityRequestsRef.current.get(next.commit.hash) ===
+            next.epoch
+          ) {
+            commitAuthorIdentityRequestsRef.current.delete(next.commit.hash);
+          }
+          activeCommitAuthorIdentityWarmsRef.current -= 1;
+          drainCommitAuthorIdentityWarmQueueRef.current();
+        });
+    }
+  }, [acceptCommitAuthorIdentityLookup]);
+  drainCommitAuthorIdentityWarmQueueRef.current = drainCommitAuthorIdentityWarmQueue;
+
+  const warmCommitAuthorIdentity = useCallback((commit: Commit): void => {
+    const epoch = commitAuthorIdentityEpochRef.current;
+    if (commitAuthorIdentityWarmRequestedRef.current.get(commit.hash) === epoch) {
+      return;
+    }
+    commitAuthorIdentityWarmRequestedRef.current.set(commit.hash, epoch);
+    commitAuthorIdentityWarmQueueRef.current.push({ commit, worktreeId, epoch });
+    drainCommitAuthorIdentityWarmQueueRef.current();
+  }, [worktreeId]);
 
   useEffect(() => {
     let active = true;
@@ -339,13 +470,9 @@ export function LineageGraph({
   useEffect(() => {
     return subscribe("github:commitAuthorIdentityChanged", (payload) => {
       if (payload.worktreeId !== worktreeId) return;
-      warmCommitAuthorAvatar(payload.lookup);
-      setCommitAuthorIdentityLookups((current) => ({
-        ...current,
-        [payload.commitHash]: payload.lookup
-      }));
+      acceptCommitAuthorIdentityLookup(payload.commitHash, payload.lookup);
     });
-  }, [worktreeId]);
+  }, [acceptCommitAuthorIdentityLookup, worktreeId]);
 
   // Diffstats are intentionally lazy: a graph can contain hundreds of commits,
   // but only the one under the pointer needs a numstat walk. Cache both success
@@ -355,6 +482,8 @@ export function LineageGraph({
     commitAuthorIdentityEpochRef.current += 1;
     commitStatsRequestsRef.current.clear();
     commitAuthorIdentityRequestsRef.current.clear();
+    commitAuthorIdentityWarmQueueRef.current = [];
+    commitAuthorIdentityWarmRequestedRef.current.clear();
     setCommitStats({});
     setCommitAuthorIdentityLookups({});
   }, [worktreeId]);
@@ -389,56 +518,10 @@ export function LineageGraph({
   useEffect(() => {
     if (data === null) return;
 
-    let cancelled = false;
-    let next = 0;
-    const epoch = commitAuthorIdentityEpochRef.current;
-    const commits = commitAuthorIdentityPrefetchCandidates(data.commits);
-    const worker = async (): Promise<void> => {
-      while (!cancelled) {
-        const commit = commits[next++];
-        if (commit === undefined) return;
-        if (commitAuthorIdentityRequestsRef.current.get(commit.hash) === epoch) {
-          continue;
-        }
-        commitAuthorIdentityRequestsRef.current.set(commit.hash, epoch);
-        try {
-          const result = await dispatch("github:commitAuthorIdentity", {
-            worktreeId,
-            commitHash: commit.hash,
-            authorName: commit.authorName,
-            authorEmail: commit.authorEmail,
-            cacheOnly: true
-          });
-          // The command's normal immediate result is only its optimistic
-          // `miss`/`in-flight` placeholder. Its targeted completion event is
-          // authoritative and can arrive before this IPC promise settles, so
-          // never let this path erase a just-received cache hit.
-          if (
-            !cancelled &&
-            commitAuthorIdentityEpochRef.current === epoch &&
-            result.ok &&
-            result.value.refreshState === "not-eligible"
-          ) {
-            setCommitAuthorIdentityLookups((current) => ({
-              ...current,
-              [commit.hash]: result.value
-            }));
-          }
-        } finally {
-          if (commitAuthorIdentityRequestsRef.current.get(commit.hash) === epoch) {
-            commitAuthorIdentityRequestsRef.current.delete(commit.hash);
-          }
-        }
-      }
-    };
-
-    void Promise.all(
-      Array.from({ length: COMMIT_AUTHOR_IDENTITY_PREFETCH_CONCURRENCY }, worker)
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [data?.commits, worktreeId]);
+    for (const commit of commitAuthorIdentityPrefetchCandidates(data.commits)) {
+      warmCommitAuthorIdentity(commit);
+    }
+  }, [data?.commits, warmCommitAuthorIdentity]);
 
   useEffect(() => {
     if (hoveredVm === undefined) return;
@@ -457,26 +540,28 @@ export function LineageGraph({
       authorName: commit.authorName,
       authorEmail: commit.authorEmail
     }).then((result) => {
-      // See the cache-only queue above: use an immediate value only when it
-      // has no completion event. This prevents an IPC ordering race from
-      // clobbering a just-arrived local identity/thumbnail.
+      // Normal hover replies are optimistic today, but merge them rather than
+      // discarding them. This also keeps the renderer correct if a future
+      // transport can return a local proof directly.
       if (
         !result.ok ||
-        commitAuthorIdentityEpochRef.current !== epoch ||
-        result.value.refreshState !== "not-eligible"
+        commitAuthorIdentityEpochRef.current !== epoch
       ) {
         return;
       }
-      setCommitAuthorIdentityLookups((current) => ({
-        ...current,
-        [commit.hash]: result.value
-      }));
+      acceptCommitAuthorIdentityLookup(commit.hash, result.value);
     }).finally(() => {
       if (commitAuthorIdentityRequestsRef.current.get(commit.hash) === epoch) {
         commitAuthorIdentityRequestsRef.current.delete(commit.hash);
       }
     });
-  }, [commitAuthorIdentityLookups, hoveredVm, now, worktreeId]);
+  }, [
+    acceptCommitAuthorIdentityLookup,
+    commitAuthorIdentityLookups,
+    hoveredVm,
+    now,
+    worktreeId
+  ]);
 
   // The context window remains current while it is open: its age changes with
   // the shared clock, while ref/base information and lazy diffstats update
@@ -764,6 +849,7 @@ export function LineageGraph({
                 }
                 onHideContext={commitContext.scheduleHide}
                 onOpenContextMenu={(position) => openCommitMenu(vm, position)}
+                onVisible={() => warmCommitAuthorIdentity(vm.commit)}
                 onRevealWorktree={onRevealWorktree}
               />
             ))}

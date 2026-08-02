@@ -18,11 +18,12 @@ function card(
   viewingBranch: string | null,
   defaultBranch = "main",
   defaultRef = "origin/main",
-  githubIdentity?: { login: string; avatarUrl?: string }
+  githubIdentity?: { login: string; avatarUrl?: string },
+  cardCommit: Commit = commit
 ): string {
   return renderToStaticMarkup(
     <CommitContextCard
-      commit={commit}
+      commit={cardCommit}
       viewingBranch={viewingBranch}
       defaultBranch={defaultBranch}
       defaultRef={defaultRef}
@@ -87,5 +88,21 @@ describe("CommitContextCard identity", () => {
     expect(markup).toContain("commit-context-card__avatar-image");
     expect(markup).toContain("pwrgit-avatar://thumbnail/");
     expect(markup).toContain('decoding="sync"');
+  });
+
+  it("does not repeat a local author name that already is the GitHub login", () => {
+    const markup = card(
+      null,
+      "main",
+      "origin/main",
+      { login: "huntharo" },
+      { ...commit, authorName: "huntharo" }
+    );
+
+    expect(markup).toContain("huntharo");
+    expect(markup).not.toContain("@huntharo");
+    // Keep a stable three-line identity block while the avatar/log-in data
+    // settles, avoiding a card-height shift on hover.
+    expect(markup).toContain("commit-context-card__github-login--placeholder");
   });
 });

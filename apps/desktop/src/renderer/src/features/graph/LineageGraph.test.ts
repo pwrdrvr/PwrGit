@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   COMMIT_AUTHOR_IDENTITY_PREFETCH_LIMIT,
   commitAuthorIdentityPrefetchCandidates,
+  mergeCommitAuthorIdentityLookup,
   reusableCommitAuthorIdentity,
   shouldRequestCommitAuthorIdentity
 } from "./LineageGraph";
@@ -108,5 +109,88 @@ describe("reusableCommitAuthorIdentity", () => {
         1_000
       )
     ).toBe(true);
+  });
+});
+
+describe("mergeCommitAuthorIdentityLookup", () => {
+  it("accepts a completed cache-only reply when an event is unavailable", () => {
+    expect(
+      mergeCommitAuthorIdentityLookup(undefined, {
+        identity: {
+          login: "huntharo",
+          avatarUrl: "pwrgit-avatar://thumbnail/a?v=1"
+        },
+        cacheState: "fresh",
+        refreshState: "idle",
+        refreshedAt: 1_000
+      })
+    ).toMatchObject({
+      identity: { login: "huntharo" },
+      cacheState: "fresh"
+    });
+  });
+
+  it("does not let an older optimistic reply erase an identity already received", () => {
+    const current = {
+      identity: {
+        login: "huntharo",
+        avatarUrl: "pwrgit-avatar://thumbnail/a?v=2"
+      },
+      cacheState: "fresh" as const,
+      refreshState: "idle" as const,
+      refreshedAt: 2_000
+    };
+
+    expect(
+      mergeCommitAuthorIdentityLookup(current, {
+        cacheState: "miss",
+        refreshState: "in-flight"
+      })
+    ).toBe(current);
+  });
+
+  it("does not let an optimistic reply erase a fresh no-match", () => {
+    const current = { cacheState: "fresh" as const, refreshState: "idle" as const };
+
+    expect(
+      mergeCommitAuthorIdentityLookup(current, {
+        cacheState: "miss",
+        refreshState: "in-flight"
+      })
+    ).toBe(current);
+  });
+
+  it("keeps a newer thumbnail event over an older completed cache reply", () => {
+    const current = {
+      identity: {
+        login: "huntharo",
+        avatarUrl: "pwrgit-avatar://thumbnail/a?v=2"
+      },
+      cacheState: "fresh" as const,
+      refreshState: "idle" as const,
+      refreshedAt: 1_000,
+      avatarCache: {
+        cacheState: "stale" as const,
+        refreshState: "in-flight" as const,
+        refreshedAt: 2_000
+      }
+    };
+
+    expect(
+      mergeCommitAuthorIdentityLookup(current, {
+        identity: {
+          login: "huntharo",
+          avatarUrl: "pwrgit-avatar://thumbnail/a?v=1"
+        },
+        cacheState: "fresh",
+        refreshState: "idle",
+        refreshedAt: 1_000,
+        avatarCache: {
+          cacheState: "stale",
+          refreshState: "in-flight",
+          refreshedAt: 1_000
+        }
+      })
+    ).toBe(current);
   });
 });

@@ -17,6 +17,10 @@ function initials(name: string): string {
     .join("");
 }
 
+function redundantGitHubLogin(authorName: string, login: string): boolean {
+  return authorName.trim().toLocaleLowerCase() === login.trim().toLocaleLowerCase();
+}
+
 function DetailRow({
   label,
   children
@@ -73,6 +77,14 @@ export function CommitContextCard({
   githubIdentity?: GitHubCommitAuthorIdentity | undefined;
 }) {
   const authorName = commit.authorName.trim() || "Unknown author";
+  // Local Git authorship remains primary. When it already is the proven
+  // GitHub handle, reserve the same line for a stable card height but do not
+  // repeat the name as both `huntharo` and `@huntharo`.
+  const githubLogin =
+    githubIdentity === undefined ||
+    redundantGitHubLogin(authorName, githubIdentity.login)
+      ? undefined
+      : githubIdentity.login;
 
   return (
     <>
@@ -126,13 +138,13 @@ export function CommitContextCard({
           <span>{commit.authorEmail}</span>
           <span
             className={
-              githubIdentity === undefined
+              githubLogin === undefined
                 ? "commit-context-card__github-login commit-context-card__github-login--placeholder"
                 : "commit-context-card__github-login"
             }
-            aria-hidden={githubIdentity === undefined}
+            aria-hidden={githubLogin === undefined}
           >
-            {githubIdentity === undefined ? "\u00a0" : `@${githubIdentity.login}`}
+            {githubLogin === undefined ? "\u00a0" : `@${githubLogin}`}
           </span>
         </span>
       </div>
