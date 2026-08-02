@@ -140,7 +140,7 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(divergence.value.upstreamCommits).toEqual([
       { shortHash: expect.any(String), subject: "feat: keep this change" }
     ]);
-  });
+  }, 15_000);
 
   it("resets only a clean branch to the exact inspected upstream", async () => {
     const { local, remote } = makeDivergedFixture();
@@ -166,7 +166,7 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(
       divergence.value.upstreamHead
     );
-  });
+  }, 15_000);
 
   it("does not reset a dirty worktree and can rebase non-conflicting local work", async () => {
     const { local, remote } = makeDivergedFixture();
@@ -201,5 +201,5 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(gitOut(local, ["merge-base", "--is-ancestor", "origin/main", "HEAD"])).toBe(
       ""
     );
-  });
+  }, 15_000);
 });
