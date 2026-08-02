@@ -159,6 +159,35 @@ export type WorktreeState = {
   updatedAt: string;
 };
 
+/** A commit that exists on only one side of a diverged tracked branch. */
+export type DivergenceCommit = {
+  shortHash: string;
+  subject: string;
+};
+
+/**
+ * Fresh comparison of a checked-out branch and its configured upstream after
+ * a fast-forward-only pull cannot proceed. This deliberately reports facts,
+ * rather than prescribing one recovery path.
+ */
+export type RemoteDivergence = {
+  branch: string;
+  /** Full object name of the checked-out local tip shown to the user. */
+  head: string;
+  upstream: string;
+  /** Full object name of the upstream tip shown to the user. */
+  upstreamHead: string;
+  workingTreeClean: boolean;
+  localCommits: DivergenceCommit[];
+  upstreamCommits: DivergenceCommit[];
+  /**
+   * Both sides have the same number of unique commits and their subject lines
+   * match in history order. This is consistent with a remote rebase/force-push,
+   * but is intentionally not a recommendation to discard local history.
+   */
+  matchingCommitSubjects: boolean;
+};
+
 /** A page of commit history plus the branch's divergence point. */
 export type GraphLog = {
   commits: Commit[];

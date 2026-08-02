@@ -40,3 +40,48 @@ test("Pull fast-forwards and clears the ↓behind badge in the sidebar", async (
   await expect(behindBadge).toHaveCount(0, { timeout: 20_000 });
   await expect(folderBadge).toHaveCount(0);
 });
+
+test("a diverged pull explains the comparison and can reset a clean local branch", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepoBehindRemote("rewritten", { behindBy: 1 });
+  // Recreate the remote-only commit with the same patch + subject but a
+  // different identity. This is the shape a remote rebase/force-push leaves:
+  // matching labels, different commit object IDs.
+  box.commitAs(
+    "local-rewrite@pwrgit.dev",
+    repo.path,
+    "remote-0.txt",
+    "remote commit 0"
+  );
+  handle = await launchApp();
+  const { window } = handle;
+
+  await addRootAndExpand(window, handle, box, "rewritten");
+  await window.getByRole("button", { name: /^Pull/ }).click();
+
+  const dialog = window.locator(".pull-divergence");
+  await expect(dialog).toContainText("Branch histories diverged");
+  await expect(dialog).toContainText("Local only");
+  await expect(dialog).toContainText("Remote only");
+  await expect(dialog).toContainText("Working tree");
+  await expect(dialog).toContainText("Clean");
+  await expect(dialog).toContainText(
+    "same number of commits with matching messages"
+  );
+  await expect(dialog).toContainText("remote commit 0");
+  await expect(
+    dialog.getByRole("button", { name: "Rebase local commits" })
+  ).toBeEnabled();
+  await expect(
+    dialog.getByRole("button", { name: "Reset to remote…" })
+  ).toBeEnabled();
+
+  await dialog.getByRole("button", { name: "Reset to remote…" }).click();
+  await expect(dialog).toContainText("Reset local branch to remote?");
+  await dialog.getByRole("button", { name: "Reset to remote" }).click();
+  await expect(dialog).toHaveCount(0, { timeout: 20_000 });
+  await expect.poll(() => box.git(repo.path, "rev-parse", "HEAD")).toBe(
+    box.git(repo.path, "rev-parse", "origin/main")
+  );
+});

@@ -23,6 +23,7 @@ import type {
   ProfileId,
   RebaseCommitRef,
   RebasePlan,
+  RemoteDivergence,
   Repo,
   RepoSearchHit,
   RepoWorktreeRefresh,
@@ -292,6 +293,31 @@ export interface Commands {
     };
   };
   "remote:push": { req: { worktreeId: string }; res: null };
+  /** Fresh branch/upstream comparison after a non-fast-forward pull. */
+  "remote:inspectDivergence": {
+    req: { worktreeId: string };
+    res: RemoteDivergence;
+  };
+  /** Move the inspected clean local branch to the exact upstream tip shown. */
+  "remote:resetToUpstream": {
+    req: {
+      worktreeId: string;
+      branch: string;
+      head: string;
+      upstreamHead: string;
+    };
+    res: null;
+  };
+  /** Replay the inspected clean local commits on the exact upstream tip shown. */
+  "remote:rebaseOntoUpstream": {
+    req: {
+      worktreeId: string;
+      branch: string;
+      head: string;
+      upstreamHead: string;
+    };
+    res: null;
+  };
 
   // Lineage graph (U10)
   "graph:log": {

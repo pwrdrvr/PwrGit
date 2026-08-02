@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   PwrGitError,
   Repo,
+  RemoteDivergence,
   Result,
   Worktree,
   WorktreeState
@@ -11,6 +12,7 @@ import { showErrorToast } from "../../lib/toast";
 import { CopyTarget } from "../shell/CopyTarget";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
 import { BranchSwitcher } from "./BranchSwitcher";
+import { PullDivergenceDialog } from "./PullDivergenceDialog";
 
 type Chip = { text: string; tone: "muted" | "ok" | "warn" };
 
@@ -26,6 +28,7 @@ function baseChip(state: WorktreeState | null): Chip {
 }
 
 type Busy = "fetch" | "pull" | "push" | null;
+type RecoveryBusy = "rebase" | "reset" | null;
 
 /** Compact path label: the last two segments locate a checkout precisely
  *  ("Acme/search-compare", "pwrdrvr/PwrAgnt") without burning a line on
@@ -45,8 +48,24 @@ export function WorktreeHeader({
   state: WorktreeState | null;
 }) {
   const [busy, setBusy] = useState<Busy>(null);
+  const [divergence, setDivergence] = useState<RemoteDivergence | null>(null);
+  const [recoveryBusy, setRecoveryBusy] = useState<RecoveryBusy>(null);
   const [flash, setFlash] = useState<Chip | null>(null);
   const [switching, setSwitching] = useState(false);
+  const activeWorktreeId = useRef(worktree.id);
+  const recoveryInFlight = useRef<string | null>(null);
+  const recoveryOperation = useRef(0);
+
+  // Header instances stay mounted while selection changes, so an operation
+  // started for one worktree must never surface a dialog or flash on another.
+  useEffect(() => {
+    activeWorktreeId.current = worktree.id;
+    recoveryOperation.current += 1;
+    recoveryInFlight.current = null;
+    setBusy(null);
+    setDivergence(null);
+    setRecoveryBusy(null);
+  }, [worktree.id]);
 
   const showFlash = (chip: Chip, ms: number): void => {
     setFlash(chip);
@@ -89,13 +108,31 @@ export function WorktreeHeader({
     );
   };
   const onPull = (): void => {
+    const worktreeId = id;
     setBusy("pull");
-    void dispatch("remote:pull", { worktreeId: id }).then((result) => {
-      setBusy(null);
+    void dispatch("remote:pull", { worktreeId }).then(async (result) => {
       if (!result.ok) {
+        if (
+          result.error.kind === "remote" &&
+          result.error.code === "not_fast_forward"
+        ) {
+          const inspected = await dispatch("remote:inspectDivergence", {
+            worktreeId
+          });
+          if (activeWorktreeId.current !== worktreeId) return;
+          setBusy(null);
+          if (inspected.ok) {
+            setDivergence(inspected.value);
+            return;
+          }
+        }
+        if (activeWorktreeId.current !== worktreeId) return;
+        setBusy(null);
         flashError("Pull", result.error);
         return;
       }
+      if (activeWorktreeId.current !== worktreeId) return;
+      setBusy(null);
       const { stashed, reappliedWithConflicts } = result.value;
       if (reappliedWithConflicts) {
         showFlash(
@@ -108,6 +145,44 @@ export function WorktreeHeader({
         showFlash({ text: "fast-forwarded", tone: "ok" }, 1600);
       }
     });
+  };
+
+  const recover = async (action: Exclude<RecoveryBusy, null>): Promise<void> => {
+    if (divergence === null || recoveryInFlight.current !== null) return;
+    const worktreeId = id;
+    const operation = ++recoveryOperation.current;
+    recoveryInFlight.current = worktreeId;
+    setRecoveryBusy(action);
+    const result = await dispatch(
+      action === "rebase" ? "remote:rebaseOntoUpstream" : "remote:resetToUpstream",
+      {
+        worktreeId,
+        branch: divergence.branch,
+        head: divergence.head,
+        upstreamHead: divergence.upstreamHead
+      }
+    );
+    if (
+      recoveryOperation.current !== operation ||
+      activeWorktreeId.current !== worktreeId
+    ) {
+      return;
+    }
+    recoveryInFlight.current = null;
+    setRecoveryBusy(null);
+    if (!result.ok) {
+      setDivergence(null);
+      flashError(action === "rebase" ? "Rebase" : "Reset", result.error);
+      return;
+    }
+    setDivergence(null);
+    showFlash(
+      {
+        text: action === "rebase" ? "rebased onto remote" : "reset to remote",
+        tone: "ok"
+      },
+      2400
+    );
   };
   const onPush = (): void => {
     void run(
@@ -243,6 +318,15 @@ export function WorktreeHeader({
           worktreeId={worktree.id}
           currentBranch={worktree.branch}
           onClose={() => setSwitching(false)}
+        />
+      )}
+      {divergence !== null && (
+        <PullDivergenceDialog
+          divergence={divergence}
+          busy={recoveryBusy}
+          onClose={() => setDivergence(null)}
+          onRebase={() => void recover("rebase")}
+          onReset={() => void recover("reset")}
         />
       )}
     </div>
