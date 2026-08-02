@@ -57,6 +57,8 @@ export type GraphRowVM = {
    *  sits away from its local branch, collapsed ("origin") when synced. */
   remoteRefs: string[];
   isHead: boolean;
+  /** Reachable from the viewed HEAD but not the default comparison ref. */
+  isHeadOnly: boolean;
   isMine: boolean;
   defaultBranch: string;
 };

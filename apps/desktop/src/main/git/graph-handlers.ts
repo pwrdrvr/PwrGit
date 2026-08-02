@@ -254,6 +254,26 @@ export function registerGraphHandlers(
         ? headSha.value.stdout.trim()
         : "";
 
+    // Unlike the lanes themselves, this is specific to the selected
+    // worktree. It gives the renderer an authoritative answer to "is this
+    // commit beyond the default ref?" without guessing from visual lanes or
+    // from a ref chip. In particular, a detached checkout should not lend its
+    // label to every shared ancestor in the graph.
+    let headOnlyCommits: string[] = [];
+    if (head !== "") {
+      const headOnly = await readUniqueCommits(
+        execGit,
+        wt.path,
+        cached.defaultRef,
+        [head],
+        UNIQUE_CAP
+      );
+      // Context labeling is supplemental. Preserve a usable graph if this
+      // extra rev walk cannot run (for example, a transiently unavailable
+      // worktree); the card simply omits branch context in that case.
+      if (headOnly.ok) headOnlyCommits = headOnly.value.map((commit) => commit.hash);
+    }
+
     // The worktree may sit on a commit no drawn branch reaches — a detached
     // checkout, or a branch the active filter hid (e.g. merged via PR). The
     // graph must still show "you are here", so widen the log with HEAD itself.
@@ -300,7 +320,9 @@ export function registerGraphHandlers(
       remoteTips: out.remoteTips,
       branches: out.branches,
       head,
+      headOnlyCommits,
       defaultBranch: out.defaultBranch,
+      defaultRef: out.defaultRef,
       defaultRefTips: out.defaultRefTips,
       shownBranches: out.shownBranches,
       matchedBranches: out.matchedBranches,

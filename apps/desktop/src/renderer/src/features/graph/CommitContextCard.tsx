@@ -52,12 +52,15 @@ export function CommitContextCard({
   commit,
   viewingBranch,
   defaultBranch,
+  defaultRef,
   now,
   stats
 }: {
   commit: Commit;
-  viewingBranch: string;
+  /** Present only when this commit is exclusive to the viewed HEAD. */
+  viewingBranch: string | null;
   defaultBranch: string;
+  defaultRef: string;
   now: number;
   /** Undefined while the local numstat request is in flight; null on failure. */
   stats: CommitStats | null | undefined;
@@ -117,14 +120,22 @@ export function CommitContextCard({
         </DetailRow>
       </div>
 
-      <div className="commit-context-card__section">
-        <DetailRow label="Viewing branch">
-          <code>{viewingBranch}</code>
-        </DetailRow>
-        <DetailRow label="Base branch">
-          <code>{defaultBranch}</code>
-        </DetailRow>
-      </div>
+      {viewingBranch !== null && (
+        <div className="commit-context-card__section">
+          <DetailRow label="Viewing branch">
+            <code>{viewingBranch}</code>
+          </DetailRow>
+          {viewingBranch === defaultBranch && defaultRef !== defaultBranch ? (
+            <DetailRow label="Base ref">
+              <code>{defaultRef}</code>
+            </DetailRow>
+          ) : (
+            <DetailRow label="Base branch">
+              <code>{defaultBranch}</code>
+            </DetailRow>
+          )}
+        </div>
+      )}
     </>
   );
 }

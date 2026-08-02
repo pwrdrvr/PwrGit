@@ -161,6 +161,7 @@ export function LineageGraph({
     const tips = data?.tips ?? {};
     const remoteTips = data?.remoteTips ?? {};
     const defaultBranch = data?.defaultBranch ?? "";
+    const headOnlyCommits = new Set(data?.headOnlyCommits ?? []);
     // Drawn branches (and the default) win the capped chip slots on a commit
     // tipped by many branches; stale hangers-on collapse into the +N pill.
     const drawn = new Set([...(data?.shownBranches ?? []), defaultBranch]);
@@ -195,6 +196,7 @@ export function LineageGraph({
         refs,
         remoteRefs,
         isHead: commit.hash === head,
+        isHeadOnly: headOnlyCommits.has(commit.hash),
         isMine: commit.authorEmail.toLowerCase() === email,
         defaultBranch
       };
@@ -268,8 +270,9 @@ export function LineageGraph({
     commitContext.update(
       <CommitContextCard
         commit={hoveredVm.commit}
-        viewingBranch={viewingBranch}
+        viewingBranch={hoveredVm.isHeadOnly ? viewingBranch : null}
         defaultBranch={hoveredVm.defaultBranch}
+        defaultRef={data?.defaultRef ?? hoveredVm.defaultBranch}
         now={now}
         stats={commitStats[hoveredVm.commit.hash]}
       />
@@ -293,8 +296,9 @@ export function LineageGraph({
       target,
       <CommitContextCard
         commit={vm.commit}
-        viewingBranch={viewingBranch}
+        viewingBranch={vm.isHeadOnly ? viewingBranch : null}
         defaultBranch={vm.defaultBranch}
+        defaultRef={data?.defaultRef ?? vm.defaultBranch}
         now={now}
         stats={commitStats[vm.commit.hash]}
       />,
