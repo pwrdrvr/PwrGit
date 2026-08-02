@@ -79,6 +79,9 @@ test("hovering a lineage row opens its commit context window", async () => {
   await card.hover();
   await window.waitForTimeout(500);
   await expect(card).toBeVisible();
+  // The pointer is now on the portalled card, not this row. Keep its visual
+  // anchor highlighted until the card has actually dismissed.
+  await expect(row).toHaveClass(/is-context-open/);
   await expect(card).toContainText("Commit context");
   await expect(card).toContainText("Someone Else");
   await expect(card).toContainText("someone@example.com");
@@ -114,6 +117,7 @@ test("hovering a lineage row opens its commit context window", async () => {
   const menu = window.getByRole("menu", { name: "Commit actions" });
   await expect(menu).toBeVisible();
   await expect(card).toBeHidden();
+  await expect(row).not.toHaveClass(/is-context-open/);
   await expect(menu.getByRole("menuitem", { name: "View changes" })).toBeFocused();
   await expect(
     menu.getByRole("menuitem", { name: "Copy short SHA" })

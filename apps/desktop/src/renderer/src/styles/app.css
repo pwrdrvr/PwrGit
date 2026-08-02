@@ -1597,7 +1597,8 @@ input {
   border-bottom: 1px solid rgba(247, 243, 235, 0.05);
   transition: background 120ms ease;
 }
-.graph-row:hover {
+.graph-row:hover,
+.graph-row.is-context-open {
   background: var(--accent-tint);
 }
 .graph-row.is-selected {
@@ -1620,7 +1621,8 @@ input {
   background: rgba(247, 243, 235, 0.07);
   box-shadow: inset 2px 0 0 var(--text-secondary);
 }
-.graph-row.is-focused:hover {
+.graph-row.is-focused:hover,
+.graph-row.is-focused.is-context-open {
   background: rgba(247, 243, 235, 0.1);
 }
 .graph-row.is-flash {
@@ -1788,6 +1790,7 @@ input {
   transition: opacity 120ms ease;
 }
 .graph-row:hover .commit-check,
+.graph-row.is-context-open .commit-check,
 .graph-card.has-selection .commit-check,
 .commit-check.is-checked {
   opacity: 1;

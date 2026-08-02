@@ -525,6 +525,7 @@ export function LineageGraph({
                 now={now}
                 selected={selectedCommits.has(vm.commit.hash)}
                 focused={focusedCommit === vm.commit.hash}
+                contextOpen={hoveredCommit === vm.commit.hash && commitContext.visible}
                 flashing={flash === vm.commit.hash}
                 branchInfo={data?.branches ?? {}}
                 onToggle={() => onToggleCommit(vm.commit.hash)}

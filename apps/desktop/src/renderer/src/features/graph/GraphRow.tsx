@@ -80,6 +80,7 @@ export function GraphRow({
   now,
   selected,
   focused,
+  contextOpen,
   flashing,
   branchInfo,
   onToggle,
@@ -96,6 +97,8 @@ export function GraphRow({
   selected: boolean;
   /** This commit's files are open in the rail (commit focus). */
   focused: boolean;
+  /** Its interactive context card remains open after the pointer leaves. */
+  contextOpen: boolean;
   /** One-shot attention pulse after a locate/worktree switch. */
   flashing: boolean;
   /** branch name → PR / worktree adornments for tip chips. */
@@ -135,7 +138,9 @@ export function GraphRow({
     <div
       className={`graph-row${selected ? " is-selected" : ""}${
         isHead ? " graph-row--head" : ""
-      }${focused ? " is-focused" : ""}${flashing ? " is-flash" : ""}`}
+      }${focused ? " is-focused" : ""}${
+        contextOpen ? " is-context-open" : ""
+      }${flashing ? " is-flash" : ""}`}
       data-hash={commit.hash}
       onClick={onOpen}
       onMouseEnter={(e) =>
