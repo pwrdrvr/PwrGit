@@ -1,5 +1,4 @@
 import type { Commit, LaneBranchInfo } from "@pwrgit/shared";
-import { useEffect, useRef } from "react";
 import { PrChip } from "../sidebar/PrChip";
 import type { LaneRow } from "./lane-layout";
 import { shortWhen } from "./graph-view";
@@ -89,7 +88,6 @@ export function GraphRow({
   onShowContext,
   onHideContext,
   onOpenContextMenu,
-  onVisible,
   onRevealWorktree
 }: {
   vm: GraphRowVM;
@@ -113,8 +111,6 @@ export function GraphRow({
   ) => void;
   onHideContext: () => void;
   onOpenContextMenu: (position: { x: number; y: number }) => void;
-  /** Warm cheap, local-only row data just before it can be hovered. */
-  onVisible?: () => void;
   /** Jump to the worktree a tip branch is checked out in. */
   onRevealWorktree?: (worktreeId: string) => void;
 }) {
@@ -124,38 +120,6 @@ export function GraphRow({
   const chipCount = refs.length + remoteRefs.length;
   const isTip = chipCount > 0;
   const x = cx(row.lane);
-  const rowRef = useRef<HTMLDivElement>(null);
-  const onVisibleRef = useRef(onVisible);
-  const hasOnVisible = onVisible !== undefined;
-
-  useEffect(() => {
-    onVisibleRef.current = onVisible;
-  }, [onVisible]);
-
-  // Use the viewport rather than the scroll element as the observer root: an
-  // IntersectionObserver still applies every overflow clip on the way to the
-  // viewport, and this keeps the row self-contained. The margin buys the
-  // local cache a short head start before the pointer reaches a row.
-  useEffect(() => {
-    const element = rowRef.current;
-    if (
-      element === null ||
-      !hasOnVisible ||
-      typeof IntersectionObserver === "undefined"
-    ) {
-      return;
-    }
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          onVisibleRef.current?.();
-        }
-      },
-      { rootMargin: "192px 0px" }
-    );
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [commit.hash, hasOnVisible]);
 
   // A lane that runs straight through both halves of the row is drawn as ONE
   // full-height line (no half-line seam at the vertical midpoint). Halves with
@@ -172,7 +136,6 @@ export function GraphRow({
 
   return (
     <div
-      ref={rowRef}
       className={`graph-row${selected ? " is-selected" : ""}${
         isHead ? " graph-row--head" : ""
       }${focused ? " is-focused" : ""}${

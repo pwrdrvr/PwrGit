@@ -523,6 +523,37 @@ export function LineageGraph({
     }
   }, [data?.commits, warmCommitAuthorIdentity]);
 
+  // One observer covers the graph card, rather than allocating one observer
+  // per row. As a person scrolls, visible rows get a bounded local-cache warm
+  // before hover; cache misses remain deliberately network-lazy.
+  useEffect(() => {
+    const card = cardRef.current;
+    const scroller = scrollerRef.current;
+    if (
+      card === null ||
+      scroller === null ||
+      typeof IntersectionObserver === "undefined"
+    ) {
+      return;
+    }
+    const commitsByHash = new Map(vms.map((vm) => [vm.commit.hash, vm.commit]));
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const hash = entry.target.getAttribute("data-hash");
+          const commit = hash === null ? undefined : commitsByHash.get(hash);
+          if (commit !== undefined) warmCommitAuthorIdentity(commit);
+        }
+      },
+      { root: scroller, rootMargin: "192px 0px" }
+    );
+    for (const row of card.querySelectorAll<HTMLElement>(".graph-row[data-hash]")) {
+      observer.observe(row);
+    }
+    return () => observer.disconnect();
+  }, [vms, warmCommitAuthorIdentity]);
+
   useEffect(() => {
     if (hoveredVm === undefined) return;
     const commit = hoveredVm.commit;
@@ -849,7 +880,6 @@ export function LineageGraph({
                 }
                 onHideContext={commitContext.scheduleHide}
                 onOpenContextMenu={(position) => openCommitMenu(vm, position)}
-                onVisible={() => warmCommitAuthorIdentity(vm.commit)}
                 onRevealWorktree={onRevealWorktree}
               />
             ))}
