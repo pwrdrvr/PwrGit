@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BranchRef } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
+import { useRelativeClock } from "../../lib/useRelativeClock";
 import { shortWhen } from "./graph-view";
 
 /** The name to hand `git switch` — a remote ref drops its remote prefix so the
@@ -24,6 +25,7 @@ export function BranchSwitcher({
   currentBranch: string;
   onClose: () => void;
 }) {
+  const now = useRelativeClock();
   const [branches, setBranches] = useState<BranchRef[] | null>(null);
   const [query, setQuery] = useState("");
   const [sel, setSel] = useState(0);
@@ -146,7 +148,7 @@ export function BranchSwitcher({
               )}
               {busy !== switchTarget(b) && b.lastCommitAt !== undefined && (
                 <span className="branch-item__meta">
-                  {shortWhen(b.lastCommitAt)}
+                  {shortWhen(b.lastCommitAt, now)}
                 </span>
               )}
             </button>

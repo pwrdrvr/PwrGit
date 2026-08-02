@@ -12,7 +12,7 @@ const VIEWPORT_PADDING = 12;
 const TOOLTIP_GAP = 8;
 
 type TooltipState = {
-  text: string;
+  content: ReactNode;
   targetTop: number;
   targetBottom: number;
   targetCenter: number;
@@ -21,8 +21,11 @@ type TooltipState = {
 };
 
 export type ViewportTooltip = {
-  show: (target: HTMLElement, text: string) => void;
+  show: (target: HTMLElement, content: ReactNode) => void;
+  /** Replace an open tooltip's content without making it blink. */
+  update: (content: ReactNode) => void;
   hide: () => void;
+  visible: boolean;
   tooltipNode: ReactNode;
 };
 
@@ -31,15 +34,17 @@ export type ViewportTooltip = {
  * ancestors. Positions itself above the target, flips below when there isn't
  * room, and clamps to the viewport. Dismisses on window blur or any scroll.
  * Lifted from PwrAgnt's useViewportTooltip. Callers own show/hide (attach to
- * onMouseEnter/onMouseLeave/onFocus/onBlur) and render `tooltipNode`.
+ * onMouseEnter/onMouseLeave/onFocus/onBlur) and render `tooltipNode`. Content
+ * can be a structured card, not just a text string.
  */
 export function useViewportTooltip(className = "viewport-tooltip"): ViewportTooltip {
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<TooltipState | undefined>(undefined);
 
-  // After first paint, measure the tooltip and clamp it into the viewport.
+  // Measure after paint and clamp the tooltip into the viewport. Content
+  // updates re-measure too, allowing a live card to grow or shrink in place.
   useLayoutEffect(() => {
-    if (!state || state.left !== undefined) return;
+    if (!state) return;
     const el = tooltipRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
@@ -52,17 +57,23 @@ export function useViewportTooltip(className = "viewport-tooltip"): ViewportTool
     const top = fitsAbove
       ? state.targetTop - rect.height - TOOLTIP_GAP
       : state.targetBottom + TOOLTIP_GAP;
-    setState({ ...state, left, top });
+    if (state.left !== left || state.top !== top) {
+      setState({ ...state, left, top });
+    }
   }, [state]);
 
-  const show = useCallback((target: HTMLElement, text: string): void => {
+  const show = useCallback((target: HTMLElement, content: ReactNode): void => {
     const rect = target.getBoundingClientRect();
     setState({
-      text,
+      content,
       targetTop: rect.top,
       targetBottom: rect.bottom,
       targetCenter: rect.left + rect.width / 2
     });
+  }, []);
+
+  const update = useCallback((content: ReactNode): void => {
+    setState((current) => (current ? { ...current, content } : current));
   }, []);
 
   const hide = useCallback((): void => setState(undefined), []);
@@ -92,11 +103,11 @@ export function useViewportTooltip(className = "viewport-tooltip"): ViewportTool
               visibility: state.left === undefined ? "hidden" : undefined
             }}
           >
-            {state.text}
+            {state.content}
           </div>,
           document.body
         )
       : null;
 
-  return { show, hide, tooltipNode };
+  return { show, update, hide, visible, tooltipNode };
 }

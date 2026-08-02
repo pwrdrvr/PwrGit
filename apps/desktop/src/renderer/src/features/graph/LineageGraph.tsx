@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LaneGraph } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { useRelativeClock } from "../../lib/useRelativeClock";
+import { useViewportTooltip } from "../../lib/useViewportTooltip";
+import { CommitContextCard } from "./CommitContextCard";
 import {
   GraphRow,
   type GraphRowVM,
@@ -42,6 +45,7 @@ const scrollBehavior = (): ScrollBehavior =>
 
 export function LineageGraph({
   worktreeId,
+  viewingBranch,
   activeEmail,
   selectedCommits,
   focusedCommit,
@@ -50,6 +54,8 @@ export function LineageGraph({
   onRevealWorktree
 }: {
   worktreeId: string;
+  /** Branch checked out in the worktree whose lineage is being viewed. */
+  viewingBranch: string;
   activeEmail: string;
   selectedCommits: Set<string>;
   /** Commit whose files are open in the rail — highlighted even off-branch. */
@@ -64,6 +70,9 @@ export function LineageGraph({
   const [loading, setLoading] = useState(true);
   const [flash, setFlash] = useState<string | null>(null);
   const [branchesOpen, setBranchesOpen] = useState(false);
+  const [hoveredCommit, setHoveredCommit] = useState<string | null>(null);
+  const now = useRelativeClock();
+  const commitContext = useViewportTooltip("commit-context-card");
   const scrollerRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const laneBarRef = useRef<HTMLDivElement>(null);
@@ -195,6 +204,46 @@ export function LineageGraph({
     () => new Map(vms.map((vm) => [vm.commit.hash, vm])),
     [vms]
   );
+  const hoveredVm =
+    hoveredCommit === null ? undefined : vmByHash.get(hoveredCommit);
+
+  // The context window remains current while it is open: its age changes with
+  // the shared clock, while ref/base information updates after a graph reload.
+  useEffect(() => {
+    if (!commitContext.visible || hoveredVm === undefined) return;
+    commitContext.update(
+      <CommitContextCard
+        commit={hoveredVm.commit}
+        viewingBranch={viewingBranch}
+        defaultBranch={hoveredVm.defaultBranch}
+        now={now}
+      />
+    );
+  }, [
+    commitContext.update,
+    commitContext.visible,
+    hoveredVm,
+    now,
+    viewingBranch
+  ]);
+
+  const showCommitContext = (target: HTMLElement, vm: GraphRowVM): void => {
+    setHoveredCommit(vm.commit.hash);
+    commitContext.show(
+      target,
+      <CommitContextCard
+        commit={vm.commit}
+        viewingBranch={viewingBranch}
+        defaultBranch={vm.defaultBranch}
+        now={now}
+      />
+    );
+  };
+
+  const hideCommitContext = (): void => {
+    setHoveredCommit(null);
+    commitContext.hide();
+  };
 
   const gutterW = gutterWidth(layout.laneCount);
   const laneOverflow = layout.laneCount > MAX_GUTTER_LANES;
@@ -328,7 +377,7 @@ export function LineageGraph({
                       {vm !== undefined && (
                         <span className="branch-pop__meta">
                           {vm.isMine ? "you" : vm.commit.authorName} ·{" "}
-                          {shortWhen(vm.commit.committedAt)}
+                          {shortWhen(vm.commit.committedAt, now)}
                         </span>
                       )}
                     </button>
@@ -404,12 +453,15 @@ export function LineageGraph({
                 key={vm.commit.hash}
                 vm={vm}
                 laneCount={layout.laneCount}
+                now={now}
                 selected={selectedCommits.has(vm.commit.hash)}
                 focused={focusedCommit === vm.commit.hash}
                 flashing={flash === vm.commit.hash}
                 branchInfo={data?.branches ?? {}}
                 onToggle={() => onToggleCommit(vm.commit.hash)}
                 onOpen={() => onOpenCommit(vm.commit.hash, vm.commit.subject)}
+                onShowContext={(target) => showCommitContext(target, vm)}
+                onHideContext={hideCommitContext}
                 onRevealWorktree={onRevealWorktree}
               />
             ))}
@@ -432,6 +484,7 @@ export function LineageGraph({
           </div>
         )}
       </div>
+      {commitContext.tooltipNode}
     </>
   );
 }

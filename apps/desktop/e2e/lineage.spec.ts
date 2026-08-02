@@ -51,6 +51,38 @@ test("multi-lane lineage shows active branches and hides merged ones", async () 
   await expect(hint).toBeHidden();
 });
 
+test("hovering a lineage row opens its commit context window", async () => {
+  sandbox = createGitSandbox();
+  const s = sandbox;
+  const repo = s.makeRepo("commit-context");
+  const feature = repo.addWorktree("feat/context");
+  s.commitAs(
+    "someone@example.com",
+    feature,
+    "context.txt",
+    "show commit context"
+  );
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, s, "commit-context");
+  await branchRow(window, "main").first().click();
+
+  const row = window.locator(".graph-row", { hasText: "show commit context" });
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.hover();
+
+  const card = window.getByRole("tooltip");
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("Commit context");
+  await expect(card).toContainText("Someone Else");
+  await expect(card).toContainText("someone@example.com");
+  await expect(card).toContainText("Age");
+  await expect(card).toContainText("Viewing branch");
+  await expect(card).toContainText("Base branch");
+  await expect(card).toContainText("main");
+});
+
 test("switching worktrees anchors the lineage on that worktree's HEAD", async () => {
   sandbox = createGitSandbox();
   const s = sandbox;

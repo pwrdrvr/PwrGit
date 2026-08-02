@@ -279,6 +279,7 @@ export function App() {
               >
                 <LineageGraph
                   worktreeId={selectedWorktree.id}
+                  viewingBranch={selectedWorktree.branch}
                   activeEmail={activeProfile?.email ?? ""}
                   selectedCommits={selectedCommits}
                   focusedCommit={commitFocus?.hash ?? null}
