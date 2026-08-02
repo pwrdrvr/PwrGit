@@ -3,7 +3,14 @@ import type { CommandBus } from "../command-bus";
 import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import { execGit } from "./dugite";
-import { fetchRemote, pullFastForward, pushRemote } from "./git-service";
+import {
+  fetchRemote,
+  inspectRemoteDivergence,
+  pullFastForward,
+  pushRemote,
+  rebaseOntoUpstream,
+  resetToUpstream
+} from "./git-service";
 import type { WorktreeRefresher } from "./worktree-handlers";
 
 const seconds = (startedAt: number): string =>
@@ -66,6 +73,36 @@ export function registerRemoteHandlers(
     if (!result.ok) return result;
     logMain("info", "remote", `pushed ${path} (${seconds(startedAt)})`);
     refresher.refreshWorktree(req.worktreeId);
+    return ok(null);
+  });
+
+  bus.register("remote:inspectDivergence", async (req) => {
+    const path = pathOf(req.worktreeId);
+    if (path === null) return err(notFound);
+    return inspectRemoteDivergence(execGit, path);
+  });
+
+  bus.register("remote:resetToUpstream", async (req) => {
+    const path = pathOf(req.worktreeId);
+    if (path === null) return err(notFound);
+    const startedAt = Date.now();
+    const result = await resetToUpstream(execGit, path, req.upstreamHead);
+    if (!result.ok) return result;
+    logMain("info", "remote", `reset ${path} to upstream (${seconds(startedAt)})`);
+    refresher.refreshWorktree(req.worktreeId);
+    return ok(null);
+  });
+
+  bus.register("remote:rebaseOntoUpstream", async (req) => {
+    const path = pathOf(req.worktreeId);
+    if (path === null) return err(notFound);
+    const startedAt = Date.now();
+    const result = await rebaseOntoUpstream(execGit, path, req.upstreamHead);
+    // A stopped rebase changes the checkout too; refresh so the Changes panel
+    // and sync badges show the conflict state immediately.
+    refresher.refreshWorktree(req.worktreeId);
+    if (!result.ok) return result;
+    logMain("info", "remote", `rebased ${path} onto upstream (${seconds(startedAt)})`);
     return ok(null);
   });
 }

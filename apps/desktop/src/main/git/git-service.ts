@@ -5,6 +5,8 @@ import {
   type Commit,
   type CommitFileChange,
   type CommitStats,
+  type DivergenceCommit,
+  type RemoteDivergence,
   err,
   type FileStatus,
   ok,
@@ -790,6 +792,209 @@ export type PullOutcome = {
   reappliedWithConflicts: boolean;
 };
 
+type UpstreamRef = {
+  name: string;
+  head: string;
+};
+
+const DIVERGENCE_LOG_FORMAT = "%H%x1f%s%x1e";
+
+function parseDivergenceCommits(stdout: string): DivergenceCommit[] {
+  return stdout
+    .split("\x1e")
+    .map((record) => record.trim())
+    .filter((record) => record !== "")
+    .map((record) => {
+      const [hash = "", subject = ""] = record.split("\x1f");
+      return { shortHash: hash.slice(0, 7), subject };
+    })
+    .filter((commit) => commit.shortHash !== "");
+}
+
+async function resolveUpstream(
+  git: GitExec,
+  cwd: string
+): Promise<Result<UpstreamRef>> {
+  const nameRaw = await git(
+    ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+    cwd
+  );
+  if (!nameRaw.ok) return nameRaw;
+  if (nameRaw.value.exitCode !== 0) {
+    return err({
+      kind: "remote",
+      code: "no_upstream",
+      message: "This branch has no configured upstream."
+    });
+  }
+  const name = nameRaw.value.stdout.trim();
+  if (name === "") {
+    return err({
+      kind: "remote",
+      code: "no_upstream",
+      message: "This branch has no configured upstream."
+    });
+  }
+
+  const headRaw = await git(["rev-parse", "--verify", "@{u}"], cwd);
+  if (!headRaw.ok) return headRaw;
+  if (headRaw.value.exitCode !== 0) {
+    return err({
+      kind: "remote",
+      code: "no_upstream",
+      message: "The configured upstream could not be resolved."
+    });
+  }
+  const head = headRaw.value.stdout.trim();
+  if (head === "") {
+    return err({
+      kind: "remote",
+      code: "no_upstream",
+      message: "The configured upstream could not be resolved."
+    });
+  }
+  return ok({ name, head });
+}
+
+async function requireCleanWorktree(
+  git: GitExec,
+  cwd: string
+): Promise<Result<void>> {
+  const statusRaw = await git(["status", "--porcelain"], cwd);
+  if (!statusRaw.ok) return statusRaw;
+  const status = requireExit0(statusRaw.value, ["status"]);
+  if (!status.ok) return status;
+  if (status.value.stdout.trim() !== "") {
+    return err({
+      kind: "remote",
+      code: "dirty",
+      message:
+        "Your working tree has uncommitted changes. Commit, stash, or discard them before choosing a recovery action."
+    });
+  }
+  return ok(undefined);
+}
+
+/**
+ * Compare the current branch against its fetched upstream after a
+ * non-fast-forward pull. Commit subjects are compared only as a signal for
+ * the UI; object identity remains authoritative.
+ */
+export async function inspectRemoteDivergence(
+  git: GitExec,
+  cwd: string
+): Promise<Result<RemoteDivergence>> {
+  const upstream = await resolveUpstream(git, cwd);
+  if (!upstream.ok) return upstream;
+
+  const branchRaw = await git(["branch", "--show-current"], cwd);
+  if (!branchRaw.ok) return branchRaw;
+  const branch = requireExit0(branchRaw.value, ["branch", "--show-current"]);
+  if (!branch.ok) return branch;
+  const name = branch.value.stdout.trim();
+  if (name === "") {
+    return err({
+      kind: "remote",
+      code: "detached_head",
+      message: "This worktree is detached from a local branch."
+    });
+  }
+
+  const [statusRaw, localRaw, upstreamRaw] = await Promise.all([
+    git(["status", "--porcelain"], cwd),
+    git(["log", `--pretty=format:${DIVERGENCE_LOG_FORMAT}`, "@{u}..HEAD"], cwd),
+    git(["log", `--pretty=format:${DIVERGENCE_LOG_FORMAT}`, "HEAD..@{u}"], cwd)
+  ]);
+  if (!statusRaw.ok) return statusRaw;
+  if (!localRaw.ok) return localRaw;
+  if (!upstreamRaw.ok) return upstreamRaw;
+  const status = requireExit0(statusRaw.value, ["status"]);
+  if (!status.ok) return status;
+  const local = requireExit0(localRaw.value, ["log"]);
+  if (!local.ok) return local;
+  const remote = requireExit0(upstreamRaw.value, ["log"]);
+  if (!remote.ok) return remote;
+
+  const localCommits = parseDivergenceCommits(local.value.stdout);
+  const upstreamCommits = parseDivergenceCommits(remote.value.stdout);
+  const matchingCommitSubjects =
+    localCommits.length > 0 &&
+    localCommits.length === upstreamCommits.length &&
+    localCommits.every(
+      (commit, index) => commit.subject === upstreamCommits[index]?.subject
+    );
+
+  return ok({
+    branch: name,
+    upstream: upstream.value.name,
+    upstreamHead: upstream.value.head,
+    workingTreeClean: status.value.stdout.trim() === "",
+    localCommits,
+    upstreamCommits,
+    matchingCommitSubjects
+  });
+}
+
+async function checkedRecoveryUpstream(
+  git: GitExec,
+  cwd: string,
+  expectedUpstreamHead: string
+): Promise<Result<UpstreamRef>> {
+  const clean = await requireCleanWorktree(git, cwd);
+  if (!clean.ok) return clean;
+  const upstream = await resolveUpstream(git, cwd);
+  if (!upstream.ok) return upstream;
+  if (upstream.value.head !== expectedUpstreamHead) {
+    return err({
+      kind: "remote",
+      code: "upstream_changed",
+      message:
+        "The upstream changed while this comparison was open. Pull again to review the latest history."
+    });
+  }
+  return upstream;
+}
+
+/** Reset a clean branch to the exact upstream commit the user reviewed. */
+export async function resetToUpstream(
+  git: GitExec,
+  cwd: string,
+  expectedUpstreamHead: string
+): Promise<Result<void>> {
+  const upstream = await checkedRecoveryUpstream(git, cwd, expectedUpstreamHead);
+  if (!upstream.ok) return upstream;
+  const raw = await git(["reset", "--hard", upstream.value.head], cwd);
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode === 0) return ok(undefined);
+  return err({
+    kind: "remote",
+    code: "reset_failed",
+    message: "Could not reset the local branch to its upstream."
+  });
+}
+
+/** Replay clean local-only commits on the exact upstream commit reviewed. */
+export async function rebaseOntoUpstream(
+  git: GitExec,
+  cwd: string,
+  expectedUpstreamHead: string
+): Promise<Result<void>> {
+  const upstream = await checkedRecoveryUpstream(git, cwd, expectedUpstreamHead);
+  if (!upstream.ok) return upstream;
+  const raw = await git(["rebase", upstream.value.head], cwd);
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode === 0) return ok(undefined);
+  const message = `${raw.value.stdout}\n${raw.value.stderr}`;
+  const conflicted = /conflict|resolve all conflicts|could not apply/i.test(message);
+  return err({
+    kind: "remote",
+    code: conflicted ? "rebase_conflict" : "rebase_failed",
+    message: conflicted
+      ? "Rebase stopped on a conflict. Resolve it, then continue or abort the rebase from a terminal."
+      : "Could not rebase the local commits onto the upstream branch."
+  });
+}
+
 /**
  * Pull = fetch + fast-forward-only merge of the tracked upstream. When the
  * working tree is dirty, local work (tracked + untracked) is auto-stashed so a
@@ -829,8 +1034,8 @@ export async function pullFastForward(
   }
   if (merge.value.exitCode !== 0) {
     await restoreStash();
-    const message = merge.value.stderr.trim();
-    const code = /fast-forward/i.test(message)
+    const message = `${merge.value.stderr}\n${merge.value.stdout}`.trim();
+    const code = /fast-forward|diverg(?:e|ing)/i.test(message)
       ? "not_fast_forward"
       : /upstream|tracking/i.test(message)
         ? "no_upstream"
@@ -838,7 +1043,12 @@ export async function pullFastForward(
     return err({
       kind: "remote",
       code,
-      message: message !== "" ? message : "pull could not fast-forward"
+      message:
+        code === "not_fast_forward"
+          ? "Your local branch and its upstream have diverged."
+          : message !== ""
+            ? message
+            : "pull could not fast-forward"
     });
   }
 
