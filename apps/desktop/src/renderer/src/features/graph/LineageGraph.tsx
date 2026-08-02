@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   CommitStats,
   GitHubCommitAuthorIdentity,
+  GitHubCommitAuthorIdentityLookup,
   LaneGraph
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
@@ -24,6 +25,21 @@ import { shortWhen } from "./graph-view";
 import { layoutLanes } from "./lane-layout";
 
 type Scope = "active" | "all";
+
+/**
+ * Keep only identity results that are stable for this worktree session. An
+ * in-flight or temporarily unavailable lookup must remain retryable on a
+ * later hover; a verified identity and authoritative no-match are reusable.
+ */
+export function reusableCommitAuthorIdentity(
+  lookup: GitHubCommitAuthorIdentityLookup
+): GitHubCommitAuthorIdentity | null | undefined {
+  if (lookup.identity !== undefined) return lookup.identity;
+  return lookup.refreshState === "not-eligible" ||
+    (lookup.cacheState === "fresh" && lookup.refreshState === "idle")
+    ? null
+    : undefined;
+}
 type CommitMenuState = { hash: string; x: number; y: number };
 
 // Experimental setting: open new graph views in the "all branches" scope.
@@ -265,14 +281,17 @@ export function LineageGraph({
   }, [commitContext.visible]);
 
   // Identity verification is lazy like diffstats, but it must never delay a
-  // context card. The service validates the exact GitHub origin/SHA before it
-  // reads a cache row, then sends this targeted repaint event.
+  // context card. Proven results are retained by full commit hash only for the
+  // current worktree view, which resets on a worktree switch. The service
+  // validates the exact GitHub origin/SHA before it emits them.
   useEffect(() => {
     return subscribe("github:commitAuthorIdentityChanged", (payload) => {
       if (payload.worktreeId !== worktreeId) return;
+      const identity = reusableCommitAuthorIdentity(payload.lookup);
+      if (identity === undefined) return;
       setCommitAuthorIdentities((current) => ({
         ...current,
-        [payload.commitHash]: payload.lookup.identity ?? null
+        [payload.commitHash]: identity
       }));
     });
   }, [worktreeId]);
@@ -312,16 +331,12 @@ export function LineageGraph({
   useEffect(() => {
     if (hoveredVm === undefined) return;
     const commit = hoveredVm.commit;
-    // Do not keep a prior presentation result visible while the service
-    // revalidates its proof context for this hover.
-    setCommitAuthorIdentities((current) => {
-      if (!Object.prototype.hasOwnProperty.call(current, commit.hash)) {
-        return current;
-      }
-      const next = { ...current };
-      delete next[commit.hash];
-      return next;
-    });
+    // A result comes only from the main-process exact-commit proof. Keep it
+    // while this worktree is unchanged so repeat hovers do not blink back to
+    // initials or wait on an origin probe.
+    if (Object.prototype.hasOwnProperty.call(commitAuthorIdentities, commit.hash)) {
+      return;
+    }
     void dispatch("github:commitAuthorIdentity", {
       worktreeId,
       commitHash: commit.hash,
@@ -329,12 +344,14 @@ export function LineageGraph({
       authorEmail: commit.authorEmail
     }).then((result) => {
       if (!result.ok) return;
+      const identity = reusableCommitAuthorIdentity(result.value);
+      if (identity === undefined) return;
       setCommitAuthorIdentities((current) => ({
         ...current,
-        [commit.hash]: result.value.identity ?? null
+        [commit.hash]: identity
       }));
     });
-  }, [hoveredVm, worktreeId]);
+  }, [commitAuthorIdentities, hoveredVm, worktreeId]);
 
   // The context window remains current while it is open: its age changes with
   // the shared clock, while ref/base information and lazy diffstats update

@@ -111,6 +111,9 @@ export function CommitContextCard({
               className="commit-context-card__avatar-image"
               src={githubIdentity.avatarUrl}
               alt=""
+              width={28}
+              height={28}
+              decoding="async"
               referrerPolicy="no-referrer"
               onError={(event) => {
                 event.currentTarget.hidden = true;
@@ -121,11 +124,16 @@ export function CommitContextCard({
         <span className="commit-context-card__author">
           <strong>{authorName}</strong>
           <span>{commit.authorEmail}</span>
-          {githubIdentity !== undefined ? (
-            <span className="commit-context-card__github-login">
-              @{githubIdentity.login}
-            </span>
-          ) : null}
+          <span
+            className={
+              githubIdentity === undefined
+                ? "commit-context-card__github-login commit-context-card__github-login--placeholder"
+                : "commit-context-card__github-login"
+            }
+            aria-hidden={githubIdentity === undefined}
+          >
+            {githubIdentity === undefined ? "\u00a0" : `@${githubIdentity.login}`}
+          </span>
         </span>
       </div>
 

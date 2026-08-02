@@ -2387,6 +2387,9 @@ body.is-col-resizing {
   color: var(--accent-bright);
   font: 600 10px/1.2 var(--font-mono);
 }
+.commit-context-card__author .commit-context-card__github-login--placeholder {
+  visibility: hidden;
+}
 .commit-context-card__section {
   display: flex;
   flex-direction: column;

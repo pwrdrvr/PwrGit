@@ -68,7 +68,7 @@ describe("CommitContextCard identity", () => {
 
     expect(markup).toContain("Harold Hunt");
     expect(markup).toContain("harold@example.com");
-    expect(markup).not.toContain("commit-context-card__github-login");
+    expect(markup).toContain("commit-context-card__github-login--placeholder");
     expect(markup).not.toContain("commit-context-card__avatar-image");
   });
 
@@ -82,6 +82,7 @@ describe("CommitContextCard identity", () => {
     expect(markup).toContain("harold@example.com");
     expect(markup).toContain("@harold");
     expect(markup).toContain("commit-context-card__github-login");
+    expect(markup).not.toContain("commit-context-card__github-login--placeholder");
     expect(markup).toContain("commit-context-card__avatar-image");
     expect(markup).toContain("https://avatars.githubusercontent.com/u/1?v=4");
   });
