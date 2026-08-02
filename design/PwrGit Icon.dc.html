@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; background:#000; }
+  a { color:#ff8a1f; text-decoration:none; }
+  a:hover { color:#ffa34d; }
+</style>
+</helmet>
+<div style="min-height:100vh; background:#000; color:#f7f3eb; font-family:Geist,'IBM Plex Sans',system-ui,sans-serif; padding:40px 44px 72px; display:flex; flex-direction:column; gap:36px">
+
+  <div style="display:flex; flex-direction:column; gap:8px">
+    <div style="font:500 10px/1 'IBM Plex Mono',monospace; letter-spacing:.14em; color:#8c857a; text-transform:uppercase">PwrGit · release assets</div>
+    <div style="font:600 24px/1.2 Geist,sans-serif; letter-spacing:-.01em">Lineage mark</div>
+    <div style="font:400 13px/1.6 Geist,sans-serif; color:#a8a094; max-width:560px; text-wrap:pretty">A commit trunk with a node at each end and one branch peeling off to its own node at 55%. Same construction grammar as the sibling marks — one geometric idea, one accent, opacity for depth.</div>
+  </div>
+
+  <div style="display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start">
+    <div style="display:flex; flex-direction:column; gap:10px">
+      <img src="../apps/desktop/build/icon.png?v=4" width="240" height="240" alt="PwrGit app icon" style="border-radius:42px; display:block">
+      <div style="font:500 10px/1 'IBM Plex Mono',monospace; color:#6f685e">icon.png · 1024×1024</div>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:14px; padding:22px 24px; border:1px solid rgba(247,243,235,.10); border-radius:8px; background:#0a0a0a">
+      <div style="font:500 10px/1 'IBM Plex Mono',monospace; letter-spacing:.14em; color:#8c857a; text-transform:uppercase">Size ladder</div>
+      <div style="display:flex; gap:22px; align-items:flex-end">
+        <div style="display:flex; flex-direction:column; gap:8px; align-items:center">
+          <img src="../apps/desktop/build/icon.iconset/icon_128x128@2x.png?v=4" width="128" height="128" alt="256" style="display:block">
+          <div style="font:400 10px/1 'IBM Plex Mono',monospace; color:#6f685e">256</div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:8px; align-items:center">
+          <img src="../apps/desktop/build/icon.iconset/icon_128x128.png?v=4" width="128" height="128" alt="128" style="display:block">
+          <div style="font:400 10px/1 'IBM Plex Mono',monospace; color:#6f685e">128</div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:8px; align-items:center">
+          <img src="../apps/desktop/build/icon.iconset/icon_32x32@2x.png?v=4" width="64" height="64" alt="64" style="display:block">
+          <div style="font:400 10px/1 'IBM Plex Mono',monospace; color:#6f685e">64</div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:8px; align-items:center">
+          <img src="../apps/desktop/build/icon.iconset/icon_32x32.png?v=4" width="32" height="32" alt="32" style="display:block">
+          <div style="font:400 10px/1 'IBM Plex Mono',monospace; color:#6f685e">32</div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:8px; align-items:center">
+          <img src="../apps/desktop/build/icon.iconset/icon_16x16.png?v=4" width="16" height="16" alt="16" style="display:block">
+          <div style="font:400 10px/1 'IBM Plex Mono',monospace; color:#6f685e">16</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start">
+    <div style="display:flex; flex-direction:column; gap:14px; padding:22px 24px; border:1px solid rgba(247,243,235,.10); border-radius:8px; background:#0a0a0a; min-width:360px">
+      <div style="font:500 10px/1 'IBM Plex Mono',monospace; letter-spacing:.14em; color:#8c857a; text-transform:uppercase">Tray · macOS template</div>
+      <div style="display:flex; align-items:center; gap:14px; padding:0 14px; height:26px; border-radius:6px; background:#1c1c1e">
+        <img src="../apps/desktop/build/tray-icon-template@2x.png?v=4" width="16" height="16" alt="tray dark" style="display:block; filter:invert(1)">
+        <div style="font:400 12px/1 Geist,sans-serif; color:#d8d4cc">dark menubar</div>
+      </div>
+      <div style="display:flex; align-items:center; gap:14px; padding:0 14px; height:26px; border-radius:6px; background:#e8e6e1">
+        <img src="../apps/desktop/build/tray-icon-template@2x.png?v=4" width="16" height="16" alt="tray light" style="display:block">
+        <div style="font:400 12px/1 Geist,sans-serif; color:#3a3833">light menubar</div>
+      </div>
+      <div style="display:flex; align-items:center; gap:14px; padding:0 14px; height:26px; border-radius:6px; background:#141414; border:1px solid rgba(247,243,235,.10)">
+        <img src="../apps/desktop/build/tray-icon@2x.png?v=4" width="16" height="16" alt="tray colored" style="display:block">
+        <div style="font:400 12px/1 Geist,sans-serif; color:#d8d4cc">windows / linux · colored</div>
+      </div>
+      <div style="font:400 10px/1.5 'IBM Plex Mono',monospace; color:#6f685e">16 · 32 · 48 px, template + colored</div>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:10px">
+      <img src="../apps/desktop/build/dmg-background.png?v=4" width="495" height="300" alt="DMG background" style="display:block; border:1px solid rgba(247,243,235,.10); border-radius:8px">
+      <div style="font:500 10px/1 'IBM Plex Mono',monospace; color:#6f685e">dmg-background.png · 660×400</div>
+    </div>
+  </div>
+
+</div>
+
+</x-dc>
+</body>
+</html>
