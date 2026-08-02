@@ -144,8 +144,9 @@ export type Commit = {
 export type GitHubCommitAuthorIdentity = {
   login: string;
   /**
-   * Renderer-safe `data:image/...` URL backed by PwrGit's on-disk thumbnail
-   * cache. The GitHub source URL deliberately never crosses IPC.
+   * Renderer-safe, versioned `pwrgit-avatar://thumbnail/...` URL backed by
+   * PwrGit's on-disk thumbnail cache. The GitHub source URL and filesystem
+   * path deliberately never cross IPC; Chromium may retain this local image.
    */
   avatarUrl?: string;
 };

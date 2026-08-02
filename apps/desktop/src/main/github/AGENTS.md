@@ -24,9 +24,12 @@ origin isn't github.com, `gh` isn't logged in, or the network fails.
   login/avatar only after SHA + local Git author name/email match. Exact proof
   metadata lives in SQLite; 64px avatar bytes are deduplicated on disk under
   `userData/cache/github-avatar-thumbnails`, with fetch/access timestamps and
-  stale-while-revalidate on hover. IPC exposes only a local data URL, never the
-  source URL or path; use its update event to repaint a card, never to block
-  hover. Its `gh api` transport deliberately does not share the PR client's
-  token-extraction flow.
+  stale-while-revalidate on hover. IPC exposes only a versioned local
+  `pwrgit-avatar://` URL, never the source URL or path; its protocol handler
+  reads just the opaque local thumbnail and lets Chromium cache it. A
+  `cacheOnly` request may warm already-proven identities without GitHub calls;
+  stale proof and thumbnail refreshes are internally queued two at a time. Use
+  its update event to repaint a card, never to block hover. Its `gh api`
+  transport deliberately does not share the PR client's token-extraction flow.
 - A **merged PR** makes a branch prunable at any age (`isPrunableWorktree`) —
   catches squash/rebase merges the git-ancestry "in default" check can't see.

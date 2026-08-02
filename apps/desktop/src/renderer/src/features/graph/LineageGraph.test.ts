@@ -1,8 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
+  COMMIT_AUTHOR_IDENTITY_PREFETCH_LIMIT,
+  commitAuthorIdentityPrefetchCandidates,
   reusableCommitAuthorIdentity,
   shouldRequestCommitAuthorIdentity
 } from "./LineageGraph";
+
+describe("commitAuthorIdentityPrefetchCandidates", () => {
+  it("bounds cache-only identity warming to the newest graph rows", () => {
+    const commits = Array.from(
+      { length: COMMIT_AUTHOR_IDENTITY_PREFETCH_LIMIT + 3 },
+      (_, index) => `commit-${index}`
+    );
+
+    expect(commitAuthorIdentityPrefetchCandidates(commits)).toEqual(
+      commits.slice(0, COMMIT_AUTHOR_IDENTITY_PREFETCH_LIMIT)
+    );
+  });
+});
 
 describe("reusableCommitAuthorIdentity", () => {
   it("keeps a previously proven identity ready for the next hover", () => {

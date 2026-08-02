@@ -8,9 +8,9 @@ truth.
 
 ## Renderer contract
 
-The shared command is non-blocking and never waits for GitHub networking. It
-first validates the worktree's GitHub `origin` in the background, because the
-persistent cache is scoped to that exact origin and full commit SHA:
+The normal hover command is non-blocking and never waits for GitHub networking.
+It first validates the worktree's GitHub `origin` in the background, because
+the persistent cache is scoped to that exact origin and full commit SHA:
 
 ```ts
 const result = await dispatch("github:commitAuthorIdentity", {
@@ -25,7 +25,7 @@ if (result.ok && result.value.identity !== undefined) {
 }
 ```
 
-The command returns this presentation-neutral value immediately:
+A normal hover command returns this presentation-neutral value immediately:
 
 ```ts
 type GitHubCommitAuthorIdentityLookup = {
@@ -43,15 +43,20 @@ type GitHubCommitAuthorIdentityLookup = {
 };
 ```
 
-`identity.avatarUrl`, when present, is a renderer-safe `data:image/...` URL
-made from PwrGit's local thumbnail file. It is never GitHub's remote avatar
-source URL. A cached login may arrive before its thumbnail; the same targeted
-event then carries the local thumbnail after its best-effort disk/network work
-settles. Consumers should reserve the avatar's dimensions and keep rendering
-the local Git author while either field is absent. `avatarCache` is present
-only while a proven thumbnail is stale, missing, or backing off; a later hover
-should use its retry timestamp without re-fetching a fresh identity on every
-pointer move.
+`identity.avatarUrl`, when present, is a renderer-safe, versioned
+`pwrgit-avatar://thumbnail/<opaque-key>?v=<fetched-at>` URL for PwrGit's local
+thumbnail file. It is never GitHub's remote avatar source URL or a filesystem
+path. The main process serves only an existing opaque cache key with its
+recorded MIME type and size; the response is cacheable by Chromium. Its version
+changes after a successful refresh, so a card keeps the old local image until a
+new local image is ready. A cached login may arrive before its thumbnail; the
+same targeted event then carries the local thumbnail after its best-effort
+disk/network work settles. Consumers should reserve the avatar's dimensions,
+begin loading a returned local URL before it is visible when practical, and
+keep rendering the local Git author while either field is absent. `avatarCache`
+is present only while a proven thumbnail is stale, missing, or backing off; a
+later hover should use its retry timestamp without re-fetching a fresh identity
+on every pointer move.
 
 When origin validation, a proof-scoped cache read, a thumbnail read, or a
 background verification settles, main emits
@@ -105,8 +110,8 @@ exact commit-proof rows. Only trusted GitHub avatar hosts are accepted; the
 main process downloads a bounded (512 KiB) image with no auth header, token,
 or cookies. The normalizer keeps only GitHub's public avatar revision (`v`) and
 the forced 64px size (`s`), dropping any unexpected query parameters before
-SQLite or disk. It passes the cached bytes to the renderer as a data URL, never
-a local path or remote source URL.
+SQLite or disk. It exposes a versioned, opaque local resource to the renderer,
+never a local path, remote source URL, or credential-bearing URL.
 
 Every eligible hover validates the worktree origin before using an exact proof.
 After that, a fresh cached identity and its local thumbnail require no GitHub
@@ -114,6 +119,30 @@ network request. A stale row is returned immediately (including a stale local
 thumbnail when available) and starts revalidation in the background; the next
 event carries any changed login or thumbnail. This is intentional
 stale-while-revalidate behavior, not a relaxation of the exact-commit proof.
+
+The optional `cacheOnly: true` command mode is for a bounded graph warm pass:
+it waits only for local origin/proof/thumbnail work and never calls GitHub for
+a miss. A fresh row supplies its local URL; a stale row supplies its existing
+local URL and queues the normal refresh; a miss returns `miss`/`idle` without a
+GitHub REST call. The lineage graph uses this for its newest 32 rows at two
+concurrent local requests and asks Chromium to decode each returned local URL
+before a context card needs it. A normal hover omits `cacheOnly`, so it starts
+the exact GitHub proof only for a true miss.
+
+Both exact-commit revalidations and avatar downloads have an internal
+two-at-a-time queue. Consequently a graph with many stale cached rows keeps
+showing local images while it refreshes gradually instead of issuing a burst of
+GitHub requests.
+
+```ts
+void dispatch("github:commitAuthorIdentity", {
+  worktreeId,
+  commitHash: commit.hash,
+  authorName: commit.authorName,
+  authorEmail: commit.authorEmail,
+  cacheOnly: true
+});
+```
 
 `fetched_at` is the last successful remote refresh; `last_accessed_at` is
 touched at most once an hour per row to avoid SQLite write churn during pointer

@@ -17,7 +17,8 @@ const AUTHOR = {
   email: "ada@example.test"
 };
 const COMMIT_SHA = "0123456789abcdef0123456789abcdef01234567";
-const CACHED_AVATAR_URL = "data:image/png;base64,cHdyZ2l0LWF2YXRhcg==";
+const CACHED_AVATAR_URL =
+  "pwrgit-avatar://thumbnail/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?v=1000000";
 const PROOF = {
   owner: "octo-org",
   repo: "example-repo",
@@ -35,7 +36,7 @@ let now: number;
 let fetchCalls: number;
 let gitCalls: number;
 let remoteUrl: string;
-let fetchImpl: () => Promise<GitHubCommitAuthorRemoteCommit>;
+let fetchImpl: (proof: GitHubCommitAuthorProof) => Promise<GitHubCommitAuthorRemoteCommit>;
 let requestedProofs: GitHubCommitAuthorProof[];
 let thumbnailSources: string[];
 let thumbnailReads: number;
@@ -144,6 +145,41 @@ describe("GitHubCommitAuthorIdentityService", () => {
       fetched_at: fetchedAt,
       last_accessed_at: now
     });
+  });
+
+  it("warms only an already-proven identity and leaves a true miss for hover", async () => {
+    await requireCompletion(service.request(INPUT).completion);
+    fetchCalls = 0;
+
+    expect(
+      await requireCompletion(
+        service.request({ ...INPUT, cacheOnly: true }).completion
+      )
+    ).toEqual({
+      identity: { login: "ada", avatarUrl: CACHED_AVATAR_URL },
+      cacheState: "fresh",
+      refreshState: "idle",
+      refreshedAt: now
+    });
+    expect(fetchCalls).toBe(0);
+
+    const unseen = {
+      ...INPUT,
+      commitHash: "1111111111111111111111111111111111111111"
+    };
+    expect(
+      await requireCompletion(service.request({ ...unseen, cacheOnly: true }).completion)
+    ).toEqual({ cacheState: "miss", refreshState: "idle" });
+    expect(fetchCalls).toBe(0);
+
+    fetchImpl = async () => ({ ...resolvedRemoteCommit(), sha: unseen.commitHash });
+    expect(await requireCompletion(service.request(unseen).completion)).toEqual({
+      identity: { login: "ada", avatarUrl: CACHED_AVATAR_URL },
+      cacheState: "fresh",
+      refreshState: "idle",
+      refreshedAt: now
+    });
+    expect(fetchCalls).toBe(1);
   });
 
   it("repaints with a local thumbnail after the identity has already settled", async () => {
@@ -297,6 +333,49 @@ describe("GitHubCommitAuthorIdentityService", () => {
     });
   });
 
+  it("queues exact-proof refreshes two at a time", async () => {
+    const commitHashes = [
+      COMMIT_SHA,
+      "1111111111111111111111111111111111111111",
+      "2222222222222222222222222222222222222222"
+    ];
+    let activeFetches = 0;
+    let maxActiveFetches = 0;
+    const releases: Array<() => void> = [];
+    let signalTwoStarted: (() => void) | undefined;
+    let signalThirdStarted: (() => void) | undefined;
+    const twoStarted = new Promise<void>((resolve) => {
+      signalTwoStarted = resolve;
+    });
+    const thirdStarted = new Promise<void>((resolve) => {
+      signalThirdStarted = resolve;
+    });
+    fetchImpl = async (proof) => {
+      activeFetches += 1;
+      maxActiveFetches = Math.max(maxActiveFetches, activeFetches);
+      if (activeFetches === 2) signalTwoStarted?.();
+      if (fetchCalls === 3) signalThirdStarted?.();
+      await new Promise<void>((resolve) => releases.push(resolve));
+      activeFetches -= 1;
+      return { ...resolvedRemoteCommit(), sha: proof.commitSha };
+    };
+
+    const requests = commitHashes.map((commitHash) =>
+      service.request({ ...INPUT, commitHash })
+    );
+    await twoStarted;
+    expect(fetchCalls).toBe(2);
+    expect(maxActiveFetches).toBe(2);
+
+    releases.shift()?.();
+    await thirdStarted;
+    expect(fetchCalls).toBe(3);
+    expect(maxActiveFetches).toBe(2);
+
+    for (const release of releases) release();
+    await Promise.all(requests.map((request) => requireCompletion(request.completion)));
+  });
+
   it("backs off transport failures without rejecting the UI caller", async () => {
     fetchImpl = async () => {
       throw new Error("offline");
@@ -429,7 +508,7 @@ function createService(options?: {
     fetchCommit: async (proof) => {
       fetchCalls += 1;
       requestedProofs.push(proof);
-      return await fetchImpl();
+      return await fetchImpl(proof);
     }
   };
   const thumbnailStore: GitHubAvatarThumbnailStore = {

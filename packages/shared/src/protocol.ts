@@ -250,8 +250,9 @@ export interface Commands {
   };
   /**
    * Return immediately for a known commit and start any eligible exact-commit
-   * verification in the background. Proof-scoped cache results arrive via the
-   * targeted event after the worktree's GitHub origin has been validated.
+   * verification in the background. `cacheOnly` warms an existing proof without
+   * GitHub lookup on a miss. Proof-scoped results arrive via the targeted event
+   * after the worktree's GitHub origin has been validated.
    */
   "github:commitAuthorIdentity": {
     req: {
@@ -259,6 +260,11 @@ export interface Commands {
       commitHash: string;
       authorName: string;
       authorEmail: string;
+      /**
+       * Warm only an already-proven local identity. A cache-only request never
+       * calls GitHub for a miss; a normal hover request may do so.
+       */
+      cacheOnly?: boolean;
     };
     res: GitHubCommitAuthorIdentityLookup;
   };

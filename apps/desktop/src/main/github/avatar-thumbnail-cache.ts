@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { DB } from "../persistence/db";
 
@@ -10,10 +10,19 @@ export const GITHUB_AVATAR_THUMBNAIL_RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
 export const GITHUB_AVATAR_THUMBNAIL_INITIAL_BACKOFF_MS = 60 * 1000;
 export const GITHUB_AVATAR_THUMBNAIL_MAX_BACKOFF_MS = 60 * 60 * 1000;
 export const GITHUB_AVATAR_THUMBNAIL_MAX_BYTES = 512 * 1024;
+/** Keep stale identity warming from opening many simultaneous image downloads. */
+export const GITHUB_AVATAR_THUMBNAIL_MAX_CONCURRENT_DOWNLOADS = 2;
+/** Opaque local resource scheme; the GitHub source URL never reaches Chromium. */
+export const GITHUB_AVATAR_THUMBNAIL_PROTOCOL_SCHEME = "pwrgit-avatar";
 
 const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const ACCESS_TOUCH_INTERVAL_MS = 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 12 * 1000;
+const PROTOCOL_HOST = "thumbnail";
+// The fetched-at query makes a background refresh a new immutable Chromium
+// resource. A card can keep showing the old local bytes until the refresh
+// finishes, then swap to the newly versioned resource without a network image.
+const BROWSER_CACHE_MAX_AGE_SECONDS = 180 * 24 * 60 * 60;
 
 type AvatarMimeType = "image/avif" | "image/jpeg" | "image/png" | "image/webp";
 
@@ -49,7 +58,10 @@ type AvatarCacheEntry = {
 };
 
 export type GitHubAvatarThumbnailRead = {
-  /** Local bytes encoded as a renderer-safe data URL; never the remote source URL. */
+  /**
+   * Stable local `pwrgit-avatar://` resource backed by an opaque on-disk key.
+   * It never contains the remote source URL, filesystem path, or credentials.
+   */
   avatarUrl?: string;
   cacheState: "fresh" | "stale" | "miss";
   refreshState: "idle" | "backing-off";
@@ -84,7 +96,8 @@ export type GitHubAvatarThumbnailCacheOptions = {
 
 /**
  * Downloads public GitHub avatar thumbnails without credentials. The source
- * URL never reaches the renderer: cached bytes are returned as a data URL.
+ * URL never reaches the renderer: cached bytes are served through an opaque,
+ * versioned local protocol URL that Chromium can retain between card mounts.
  */
 export class GitHubAvatarThumbnailCache implements GitHubAvatarThumbnailStore {
   private readonly transport: GitHubAvatarThumbnailTransport;
@@ -94,6 +107,8 @@ export class GitHubAvatarThumbnailCache implements GitHubAvatarThumbnailStore {
   private readonly maxBackoffMs: number;
   private readonly maxBytes: number;
   private readonly inFlight = new Map<string, Promise<GitHubAvatarThumbnailRead>>();
+  private readonly queuedDownloads: Array<() => void> = [];
+  private activeDownloads = 0;
   private lastPrunedAt = Number.NEGATIVE_INFINITY;
 
   constructor(
@@ -129,7 +144,7 @@ export class GitHubAvatarThumbnailCache implements GitHubAvatarThumbnailStore {
     }
 
     this.touch(entry, now);
-    const avatarUrl = await this.readDataUrl(entry);
+    const avatarUrl = await this.readLocalUrl(entry);
     const retryGated = entry.nextRetryAt !== undefined && entry.nextRetryAt > now;
     const cacheState =
       avatarUrl === undefined ? "miss" : entry.expiresAt > now ? "fresh" : "stale";
@@ -155,12 +170,15 @@ export class GitHubAvatarThumbnailCache implements GitHubAvatarThumbnailStore {
     const existing = this.inFlight.get(source.key);
     if (existing !== undefined) return await existing;
 
-    const completion = this.fetchAndStore(source, now)
-      .then(async () => await this.read(source.url, now))
-      .catch(async () => {
+    const completion = this.enqueueDownload(async () => {
+      try {
+        await this.fetchAndStore(source, now);
+        return await this.read(source.url, now);
+      } catch {
         this.recordFailure(source, now);
         return await this.read(source.url, now);
-      })
+      }
+    })
       .finally(() => {
         if (this.inFlight.get(source.key) === completion) {
           this.inFlight.delete(source.key);
@@ -168,6 +186,30 @@ export class GitHubAvatarThumbnailCache implements GitHubAvatarThumbnailStore {
       });
     this.inFlight.set(source.key, completion);
     return await completion;
+  }
+
+  private enqueueDownload<T>(work: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      this.queuedDownloads.push(() => {
+        this.activeDownloads += 1;
+        void Promise.resolve()
+          .then(work)
+          .then(resolve, reject)
+          .finally(() => {
+            this.activeDownloads -= 1;
+            this.startQueuedDownloads();
+          });
+      });
+      this.startQueuedDownloads();
+    });
+  }
+
+  private startQueuedDownloads(): void {
+    while (this.activeDownloads < GITHUB_AVATAR_THUMBNAIL_MAX_CONCURRENT_DOWNLOADS) {
+      const next = this.queuedDownloads.shift();
+      if (next === undefined) return;
+      next();
+    }
   }
 
   async pruneIfDue(now: number): Promise<void> {
@@ -201,7 +243,46 @@ export class GitHubAvatarThumbnailCache implements GitHubAvatarThumbnailStore {
     }
   }
 
-  private async fetchAndStore(source: AvatarSource, now: number): Promise<string> {
+  /**
+   * Resolve a renderer request without exposing a cache path or forwarding it
+   * to the network. Only a known opaque key with a complete local DB row can
+   * read a file, and the byte count/mime type are checked again at the edge.
+   */
+  async respondToRendererUrl(url: string): Promise<Response> {
+    const key = parseGitHubAvatarThumbnailUrl(url);
+    if (key === undefined) return notFoundResponse();
+
+    const entry = this.readEntryByKey(key);
+    if (
+      entry === undefined ||
+      entry.mimeType === undefined ||
+      entry.byteLength <= 0 ||
+      entry.byteLength > this.maxBytes ||
+      buildGitHubAvatarThumbnailUrl(entry.key, entry.fetchedAt) !== url
+    ) {
+      return notFoundResponse();
+    }
+
+    try {
+      const bytes = await readFile(this.thumbnailPath(entry.key));
+      if (bytes.byteLength !== entry.byteLength || bytes.byteLength > this.maxBytes) {
+        return notFoundResponse();
+      }
+      this.touch(entry, Date.now());
+      return new Response(bytes, {
+        headers: {
+          "Content-Type": entry.mimeType,
+          "Content-Length": String(entry.byteLength),
+          "Cache-Control": `public, max-age=${BROWSER_CACHE_MAX_AGE_SECONDS}, immutable`,
+          "X-Content-Type-Options": "nosniff"
+        }
+      });
+    } catch {
+      return notFoundResponse();
+    }
+  }
+
+  private async fetchAndStore(source: AvatarSource, now: number): Promise<void> {
     const response = await this.transport.fetchAvatar(source.url);
     const mimeType = normalizeAvatarMimeType(response.contentType);
     if (mimeType === undefined || response.bytes.byteLength === 0) {
@@ -249,7 +330,6 @@ export class GitHubAvatarThumbnailCache implements GitHubAvatarThumbnailStore {
         now,
         now
       );
-    return toDataUrl(mimeType, response.bytes);
   }
 
   private readEntry(source: AvatarSource): AvatarCacheEntry | undefined {
@@ -268,16 +348,36 @@ export class GitHubAvatarThumbnailCache implements GitHubAvatarThumbnailStore {
     }
   }
 
-  private async readDataUrl(entry: AvatarCacheEntry): Promise<string | undefined> {
+  private readEntryByKey(key: string): AvatarCacheEntry | undefined {
+    try {
+      const row = this.db
+        .prepare(
+          `SELECT avatar_key, source_url, mime_type, byte_length, fetched_at,
+                  expires_at, last_accessed_at, failure_count, next_retry_at, updated_at
+             FROM github_avatar_thumbnail_cache
+            WHERE avatar_key = ?`
+        )
+        .get(key) as AvatarCacheRow | undefined;
+      if (row === undefined) return undefined;
+      const source = prepareAvatarSource(row.source_url);
+      return source === undefined || source.key !== key
+        ? undefined
+        : parseCacheRow(row, source);
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async readLocalUrl(entry: AvatarCacheEntry): Promise<string | undefined> {
     if (entry.mimeType === undefined || entry.byteLength <= 0 || entry.byteLength > this.maxBytes) {
       return undefined;
     }
     try {
-      const bytes = await readFile(this.thumbnailPath(entry.key));
-      if (bytes.byteLength !== entry.byteLength || bytes.byteLength > this.maxBytes) {
+      const file = await stat(this.thumbnailPath(entry.key));
+      if (!file.isFile() || file.size !== entry.byteLength) {
         return undefined;
       }
-      return toDataUrl(entry.mimeType, bytes);
+      return buildGitHubAvatarThumbnailUrl(entry.key, entry.fetchedAt);
     } catch {
       return undefined;
     }
@@ -390,6 +490,48 @@ export function buildGitHubAvatarThumbnailCacheKey(sourceUrl: string): string | 
         .digest("hex");
 }
 
+/**
+ * Renderer-safe local URL for a cached thumbnail. `fetchedAt` versions the
+ * resource so Chromium keeps a fresh in-memory/disk cache entry per refresh.
+ */
+export function buildGitHubAvatarThumbnailUrl(
+  avatarKey: string,
+  fetchedAt: number
+): string | undefined {
+  if (validCacheKey(avatarKey) === undefined || !isTimestamp(fetchedAt) || fetchedAt === 0) {
+    return undefined;
+  }
+  return `${GITHUB_AVATAR_THUMBNAIL_PROTOCOL_SCHEME}://${PROTOCOL_HOST}/${avatarKey}?v=${fetchedAt}`;
+}
+
+/** Parse only PwrGit-generated local thumbnail URLs; arbitrary paths are rejected. */
+export function parseGitHubAvatarThumbnailUrl(url: string): string | undefined {
+  try {
+    const parsed = new URL(url);
+    if (
+      parsed.protocol !== `${GITHUB_AVATAR_THUMBNAIL_PROTOCOL_SCHEME}:` ||
+      parsed.hostname !== PROTOCOL_HOST ||
+      parsed.port !== "" ||
+      parsed.username !== "" ||
+      parsed.password !== "" ||
+      parsed.hash !== "" ||
+      parsed.searchParams.getAll("v").length !== 1 ||
+      [...parsed.searchParams.keys()].some((key) => key !== "v")
+    ) {
+      return undefined;
+    }
+    const version = parsed.searchParams.get("v");
+    if (version === null || !/^\d{1,16}$/.test(version)) return undefined;
+    const fetchedAt = Number(version);
+    const key = parsed.pathname.slice(1);
+    return isTimestamp(fetchedAt) && fetchedAt > 0 && validCacheKey(key) !== undefined
+      ? key
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function normalizeGitHubAvatarSourceUrl(sourceUrl: string): string | undefined {
   try {
     const url = new URL(sourceUrl);
@@ -495,8 +637,11 @@ async function readLimitedBody(response: Response, maxBytes: number): Promise<Ui
   return bytes;
 }
 
-function toDataUrl(mimeType: AvatarMimeType, bytes: Uint8Array): string {
-  return `data:${mimeType};base64,${Buffer.from(bytes).toString("base64")}`;
+function notFoundResponse(): Response {
+  return new Response(null, {
+    status: 404,
+    headers: { "Cache-Control": "no-store" }
+  });
 }
 
 function validCacheKey(value: unknown): string | undefined {

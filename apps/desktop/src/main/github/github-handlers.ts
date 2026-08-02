@@ -55,6 +55,13 @@ export function registerGitHubHandlers(
       initialEmitted = true;
       for (const update of queuedUpdates) emitLookup(update);
     });
+    // A cache-only graph warm must wait for its local origin/proof/thumbnail
+    // read so the renderer's small worker pool is a real concurrency bound.
+    // Normal hover requests still return their optimistic placeholder without
+    // waiting for local or network work.
+    if (req.cacheOnly && request.completion !== undefined) {
+      return request.completion.then((lookup) => ok(lookup));
+    }
     return ok(request.lookup);
   });
 }

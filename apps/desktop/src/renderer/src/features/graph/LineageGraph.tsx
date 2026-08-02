@@ -58,6 +58,38 @@ export function shouldRequestCommitAuthorIdentity(
   return lookup.avatarCache.refreshState === "backing-off" &&
     (lookup.avatarCache.nextRetryAt === undefined || lookup.avatarCache.nextRetryAt <= now);
 }
+
+/** Keep initial graph hydration bounded; a hover remains the miss trigger. */
+export const COMMIT_AUTHOR_IDENTITY_PREFETCH_LIMIT = 32;
+const COMMIT_AUTHOR_IDENTITY_PREFETCH_CONCURRENCY = 2;
+
+export function commitAuthorIdentityPrefetchCandidates<T>(commits: readonly T[]): T[] {
+  return commits.slice(0, COMMIT_AUTHOR_IDENTITY_PREFETCH_LIMIT);
+}
+
+// An exact proof resolves to this opaque local resource. Begin decoding it as
+// soon as the main process announces the proof so a later card mount reuses
+// Chromium's image cache instead of making its first visible render do I/O.
+const warmedCommitAuthorAvatarUrls = new Set<string>();
+function warmCommitAuthorAvatar(lookup: GitHubCommitAuthorIdentityLookup): void {
+  const avatarUrl = lookup.identity?.avatarUrl;
+  if (
+    avatarUrl === undefined ||
+    !avatarUrl.startsWith("pwrgit-avatar://thumbnail/") ||
+    warmedCommitAuthorAvatarUrls.has(avatarUrl) ||
+    typeof Image === "undefined"
+  ) {
+    return;
+  }
+
+  warmedCommitAuthorAvatarUrls.add(avatarUrl);
+  const image = new Image();
+  image.decoding = "sync";
+  image.onerror = () => warmedCommitAuthorAvatarUrls.delete(avatarUrl);
+  image.src = avatarUrl;
+  void image.decode().catch(() => warmedCommitAuthorAvatarUrls.delete(avatarUrl));
+}
+
 type CommitMenuState = { hash: string; x: number; y: number };
 
 // Experimental setting: open new graph views in the "all branches" scope.
@@ -132,8 +164,9 @@ export function LineageGraph({
   const laneBarRef = useRef<HTMLDivElement>(null);
   const scopeTouchedRef = useRef(false);
   const commitStatsRequestsRef = useRef(new Map<string, number>());
-  const commitAuthorIdentityRequestsRef = useRef(new Set<string>());
+  const commitAuthorIdentityRequestsRef = useRef(new Map<string, number>());
   const commitStatsEpochRef = useRef(0);
+  const commitAuthorIdentityEpochRef = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -306,6 +339,7 @@ export function LineageGraph({
   useEffect(() => {
     return subscribe("github:commitAuthorIdentityChanged", (payload) => {
       if (payload.worktreeId !== worktreeId) return;
+      warmCommitAuthorAvatar(payload.lookup);
       setCommitAuthorIdentityLookups((current) => ({
         ...current,
         [payload.commitHash]: payload.lookup
@@ -318,6 +352,7 @@ export function LineageGraph({
   // and failure for this worktree so repeated hover is instant and quiet.
   useEffect(() => {
     commitStatsEpochRef.current += 1;
+    commitAuthorIdentityEpochRef.current += 1;
     commitStatsRequestsRef.current.clear();
     commitAuthorIdentityRequestsRef.current.clear();
     setCommitStats({});
@@ -346,6 +381,65 @@ export function LineageGraph({
       });
   }, [commitStats, hoveredVm, worktreeId]);
 
+  // Make persisted identities feel instant without treating the graph as a
+  // network crawler. This only reads a known exact proof (or refreshes an
+  // already stale one); a cache miss is still fetched only when the user hovers
+  // that commit. The small queue prevents an initial graph load from competing
+  // with ordinary Git work or GitHub's rate limits.
+  useEffect(() => {
+    if (data === null) return;
+
+    let cancelled = false;
+    let next = 0;
+    const epoch = commitAuthorIdentityEpochRef.current;
+    const commits = commitAuthorIdentityPrefetchCandidates(data.commits);
+    const worker = async (): Promise<void> => {
+      while (!cancelled) {
+        const commit = commits[next++];
+        if (commit === undefined) return;
+        if (commitAuthorIdentityRequestsRef.current.get(commit.hash) === epoch) {
+          continue;
+        }
+        commitAuthorIdentityRequestsRef.current.set(commit.hash, epoch);
+        try {
+          const result = await dispatch("github:commitAuthorIdentity", {
+            worktreeId,
+            commitHash: commit.hash,
+            authorName: commit.authorName,
+            authorEmail: commit.authorEmail,
+            cacheOnly: true
+          });
+          // The command's normal immediate result is only its optimistic
+          // `miss`/`in-flight` placeholder. Its targeted completion event is
+          // authoritative and can arrive before this IPC promise settles, so
+          // never let this path erase a just-received cache hit.
+          if (
+            !cancelled &&
+            commitAuthorIdentityEpochRef.current === epoch &&
+            result.ok &&
+            result.value.refreshState === "not-eligible"
+          ) {
+            setCommitAuthorIdentityLookups((current) => ({
+              ...current,
+              [commit.hash]: result.value
+            }));
+          }
+        } finally {
+          if (commitAuthorIdentityRequestsRef.current.get(commit.hash) === epoch) {
+            commitAuthorIdentityRequestsRef.current.delete(commit.hash);
+          }
+        }
+      }
+    };
+
+    void Promise.all(
+      Array.from({ length: COMMIT_AUTHOR_IDENTITY_PREFETCH_CONCURRENCY }, worker)
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [data?.commits, worktreeId]);
+
   useEffect(() => {
     if (hoveredVm === undefined) return;
     const commit = hoveredVm.commit;
@@ -354,21 +448,33 @@ export function LineageGraph({
     // display data while respecting its persisted TTL/backoff metadata, so a
     // later hover can revalidate an old identity without a network image load.
     if (!shouldRequestCommitAuthorIdentity(lookup, now)) return;
-    if (commitAuthorIdentityRequestsRef.current.has(commit.hash)) return;
-    commitAuthorIdentityRequestsRef.current.add(commit.hash);
+    const epoch = commitAuthorIdentityEpochRef.current;
+    if (commitAuthorIdentityRequestsRef.current.get(commit.hash) === epoch) return;
+    commitAuthorIdentityRequestsRef.current.set(commit.hash, epoch);
     void dispatch("github:commitAuthorIdentity", {
       worktreeId,
       commitHash: commit.hash,
       authorName: commit.authorName,
       authorEmail: commit.authorEmail
     }).then((result) => {
-      if (!result.ok) return;
+      // See the cache-only queue above: use an immediate value only when it
+      // has no completion event. This prevents an IPC ordering race from
+      // clobbering a just-arrived local identity/thumbnail.
+      if (
+        !result.ok ||
+        commitAuthorIdentityEpochRef.current !== epoch ||
+        result.value.refreshState !== "not-eligible"
+      ) {
+        return;
+      }
       setCommitAuthorIdentityLookups((current) => ({
         ...current,
         [commit.hash]: result.value
       }));
     }).finally(() => {
-      commitAuthorIdentityRequestsRef.current.delete(commit.hash);
+      if (commitAuthorIdentityRequestsRef.current.get(commit.hash) === epoch) {
+        commitAuthorIdentityRequestsRef.current.delete(commit.hash);
+      }
     });
   }, [commitAuthorIdentityLookups, hoveredVm, now, worktreeId]);
 

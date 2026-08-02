@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { app, BrowserWindow, nativeImage } from "electron";
+import { app, BrowserWindow, nativeImage, protocol } from "electron";
 import { ok, type Profile } from "@pwrgit/shared";
 import { registerAppDocumentHandlers } from "./app-document-handlers";
 import { openAppDocumentWindow } from "./app-document-window";
@@ -21,7 +21,10 @@ import {
 } from "./git/worktree-handlers";
 import { registerWorktreeLifecycleHandlers } from "./git/worktree-lifecycle-handlers";
 import { WorktreeStateService } from "./git/worktree-state";
-import { GitHubAvatarThumbnailCache } from "./github/avatar-thumbnail-cache";
+import {
+  GITHUB_AVATAR_THUMBNAIL_PROTOCOL_SCHEME,
+  GitHubAvatarThumbnailCache
+} from "./github/avatar-thumbnail-cache";
 import { GitHubCommitAuthorIdentityService } from "./github/commit-author-identity";
 import { registerGitHubHandlers } from "./github/github-handlers";
 import { PrService } from "./github/pr-service";
@@ -52,6 +55,16 @@ import { createProfileWindows } from "./profile-windows";
 import { openSettingsWindow } from "./settings-window";
 
 const APP_NAME = "PwrGit";
+
+// The renderer gets only opaque, versioned local thumbnail URLs. Mark the
+// scheme standard + secure before Electron is ready so Chromium can retain
+// image responses between short-lived commit context cards.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: GITHUB_AVATAR_THUMBNAIL_PROTOCOL_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true }
+  }
+]);
 
 // Playwright launches the built main entry directly, so Electron cannot find
 // apps/desktop/package.json and otherwise identifies the process as the generic
@@ -185,14 +198,16 @@ if (!gotSingleInstanceLock) {
     const stateService = new WorktreeStateService(db, execGit);
     const refresher = createWorktreeRefresher(stateService, db);
     const prService = new PrService(db, execGit);
+    const avatarThumbnails = new GitHubAvatarThumbnailCache(db, {
+      cacheDir: join(app.getPath("userData"), "cache", "github-avatar-thumbnails")
+    });
+    protocol.handle(GITHUB_AVATAR_THUMBNAIL_PROTOCOL_SCHEME, (request) =>
+      avatarThumbnails.respondToRendererUrl(request.url)
+    );
     const commitAuthorIdentityService = new GitHubCommitAuthorIdentityService(
       db,
       execGit,
-      {
-        thumbnailStore: new GitHubAvatarThumbnailCache(db, {
-          cacheDir: join(app.getPath("userData"), "cache", "github-avatar-thumbnails")
-        })
-      }
+      { thumbnailStore: avatarThumbnails }
     );
 
     // The worktree the user is currently viewing; refreshed on focus + a gentle

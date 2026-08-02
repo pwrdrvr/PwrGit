@@ -22,6 +22,8 @@ export const GITHUB_COMMIT_AUTHOR_IDENTITY_NEGATIVE_TTL_MS = 24 * 60 * 60 * 1000
 export const GITHUB_COMMIT_AUTHOR_IDENTITY_INITIAL_BACKOFF_MS = 60 * 1000;
 /** Upper bound for exponential retry gates; this service never polls itself. */
 export const GITHUB_COMMIT_AUTHOR_IDENTITY_MAX_BACKOFF_MS = 60 * 60 * 1000;
+/** Keep stale graph warming from fanning out into an API burst. */
+export const GITHUB_COMMIT_AUTHOR_IDENTITY_MAX_CONCURRENT_REFRESHES = 2;
 
 const RESOLVED_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 const NEGATIVE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -155,6 +157,7 @@ type PreparedRequest = {
   worktreeId: string;
   commitSha: string;
   author: NormalizedAuthor;
+  cacheOnly: boolean;
 };
 
 type RemoteOutcome =
@@ -179,6 +182,13 @@ export class GitHubCommitAuthorIdentityService {
     string,
     Promise<GitHubCommitAuthorIdentityLookup>
   >();
+  /** Coalesce only concurrent local `git remote` checks; never cache an origin. */
+  private readonly originLookupsInFlight = new Map<
+    string,
+    Promise<{ owner: string; repo: string } | null | undefined>
+  >();
+  private readonly queuedRevalidations: Array<() => void> = [];
+  private activeRevalidations = 0;
   private readonly revalidationInFlight = new Map<
     string,
     Promise<CacheEntry | undefined>
@@ -228,6 +238,8 @@ export class GitHubCommitAuthorIdentityService {
     commitHash: string;
     authorName: string;
     authorEmail: string;
+    /** Do not make a GitHub commit request when there is no exact local proof. */
+    cacheOnly?: boolean;
   }, onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void): GitHubCommitAuthorIdentityRequest {
     const author = normalizeAuthor({
       name: input.authorName,
@@ -246,7 +258,8 @@ export class GitHubCommitAuthorIdentityService {
     const completion = this.startRefresh({
       worktreeId,
       commitSha,
-      author
+      author,
+      cacheOnly: input.cacheOnly === true
     }, onBackgroundUpdate);
     return {
       lookup: { cacheState: "miss", refreshState: "in-flight" },
@@ -331,6 +344,13 @@ export class GitHubCommitAuthorIdentityService {
         return stale;
       }
 
+      // The graph's bounded warm pass only hydrates identity proofs already in
+      // SQLite. It never turns opening a large history into a burst of GitHub
+      // requests; a hover sends the normal request when a proof is absent.
+      if (prepared.cacheOnly) {
+        return { cacheState: "miss", refreshState: "idle" };
+      }
+
       const refreshed = await this.revalidate(prepared, proof, identityKey);
       const completedAt = this.now();
       return await this.lookupFromCache(
@@ -382,8 +402,8 @@ export class GitHubCommitAuthorIdentityService {
     const existing = this.revalidationInFlight.get(identityKey);
     if (existing !== undefined) return existing;
 
-    const completion = Promise.resolve()
-      .then(async () => {
+    const completion = this.enqueueRevalidation(async () => {
+      try {
         const response = await this.transport.fetchCommit(proof);
         const completedAt = this.now();
         const outcome = evaluateRemoteCommit(response, prepared.author, proof);
@@ -404,11 +424,11 @@ export class GitHubCommitAuthorIdentityService {
           this.recordFailure(identityKey, completedAt);
         }
         return this.readCache(identityKey);
-      })
-      .catch(() => {
+      } catch {
         this.recordFailure(identityKey, this.now());
         return this.readCache(identityKey);
-      });
+      }
+    });
 
     this.revalidationInFlight.set(identityKey, completion);
     void completion.then(() => {
@@ -417,6 +437,32 @@ export class GitHubCommitAuthorIdentityService {
       }
     });
     return completion;
+  }
+
+  private enqueueRevalidation<T>(work: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      this.queuedRevalidations.push(() => {
+        this.activeRevalidations += 1;
+        void Promise.resolve()
+          .then(work)
+          .then(resolve, reject)
+          .finally(() => {
+            this.activeRevalidations -= 1;
+            this.startQueuedRevalidations();
+          });
+      });
+      this.startQueuedRevalidations();
+    });
+  }
+
+  private startQueuedRevalidations(): void {
+    while (
+      this.activeRevalidations < GITHUB_COMMIT_AUTHOR_IDENTITY_MAX_CONCURRENT_REFRESHES
+    ) {
+      const next = this.queuedRevalidations.shift();
+      if (next === undefined) return;
+      next();
+    }
   }
 
   private async lookupFromCache(
@@ -489,12 +535,25 @@ export class GitHubCommitAuthorIdentityService {
   }
 
   /** `null` is a recognized non-GitHub remote; `undefined` is a transient Git failure. */
-  private async originRemote(
+  private originRemote(
     worktreePath: string
   ): Promise<{ owner: string; repo: string } | null | undefined> {
-    const result = await this.git(["remote", "get-url", "origin"], worktreePath);
-    if (!result.ok || result.value.exitCode !== 0) return undefined;
-    return parseGitHubRemote(result.value.stdout);
+    const existing = this.originLookupsInFlight.get(worktreePath);
+    if (existing !== undefined) return existing;
+
+    const completion = Promise.resolve()
+      .then(async () => {
+        const result = await this.git(["remote", "get-url", "origin"], worktreePath);
+        if (!result.ok || result.value.exitCode !== 0) return undefined;
+        return parseGitHubRemote(result.value.stdout);
+      })
+      .finally(() => {
+        if (this.originLookupsInFlight.get(worktreePath) === completion) {
+          this.originLookupsInFlight.delete(worktreePath);
+        }
+      });
+    this.originLookupsInFlight.set(worktreePath, completion);
+    return completion;
   }
 
   private readCache(identityKey: string): CacheEntry | undefined {
@@ -673,7 +732,7 @@ export function buildGitHubCommitAuthorIdentityCacheKey(
 function buildRequestKey(prepared: PreparedRequest): string {
   return createHash("sha256")
     .update(
-      `pwrgit-github-commit-author-request:v1\0${prepared.worktreeId}\0${prepared.commitSha}\0${prepared.author.email}\0${prepared.author.name}`
+      `pwrgit-github-commit-author-request:v2\0${prepared.cacheOnly ? "cache-only" : "lookup"}\0${prepared.worktreeId}\0${prepared.commitSha}\0${prepared.author.email}\0${prepared.author.name}`
     )
     .digest("hex");
 }

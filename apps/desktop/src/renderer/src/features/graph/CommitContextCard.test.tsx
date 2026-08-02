@@ -75,7 +75,8 @@ describe("CommitContextCard identity", () => {
   it("adds a proven GitHub login and avatar without replacing local Git data", () => {
     const markup = card(null, "main", "origin/main", {
       login: "harold",
-      avatarUrl: "data:image/png;base64,cHdyZ2l0LWF2YXRhcg=="
+      avatarUrl:
+        "pwrgit-avatar://thumbnail/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?v=1000000"
     });
 
     expect(markup).toContain("Harold Hunt");
@@ -84,6 +85,7 @@ describe("CommitContextCard identity", () => {
     expect(markup).toContain("commit-context-card__github-login");
     expect(markup).not.toContain("commit-context-card__github-login--placeholder");
     expect(markup).toContain("commit-context-card__avatar-image");
-    expect(markup).toContain("data:image/png;base64,cHdyZ2l0LWF2YXRhcg==");
+    expect(markup).toContain("pwrgit-avatar://thumbnail/");
+    expect(markup).toContain('decoding="sync"');
   });
 });

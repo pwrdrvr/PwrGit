@@ -113,7 +113,7 @@ export function CommitContextCard({
               alt=""
               width={28}
               height={28}
-              decoding="async"
+              decoding="sync"
               referrerPolicy="no-referrer"
               onError={(event) => {
                 event.currentTarget.hidden = true;
