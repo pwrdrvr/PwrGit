@@ -32,11 +32,29 @@ type GitHubCommitAuthorIdentityLookup = {
   identity?: { login: string; avatarUrl?: string };
   cacheState: "fresh" | "stale" | "miss";
   refreshState: "idle" | "in-flight" | "backing-off" | "not-eligible";
+  refreshedAt?: number;
+  nextRetryAt?: number;
+  avatarCache?: {
+    cacheState: "stale" | "miss";
+    refreshState: "in-flight" | "backing-off";
+    refreshedAt?: number;
+    nextRetryAt?: number;
+  };
 };
 ```
 
-When origin validation, a proof-scoped cache read, or a background verification
-settles, main emits
+`identity.avatarUrl`, when present, is a renderer-safe `data:image/...` URL
+made from PwrGit's local thumbnail file. It is never GitHub's remote avatar
+source URL. A cached login may arrive before its thumbnail; the same targeted
+event then carries the local thumbnail after its best-effort disk/network work
+settles. Consumers should reserve the avatar's dimensions and keep rendering
+the local Git author while either field is absent. `avatarCache` is present
+only while a proven thumbnail is stale, missing, or backing off; a later hover
+should use its retry timestamp without re-fetching a fresh identity on every
+pointer move.
+
+When origin validation, a proof-scoped cache read, a thumbnail read, or a
+background verification settles, main emits
 `github:commitAuthorIdentityChanged` with the same lookup plus the worktree ID
 and commit hash. A card can subscribe to that event and repaint only if it is
 still showing that commit. It must not delay opening or replace the local Git
@@ -64,25 +82,60 @@ account (`author: null`) after those checks is an explicit no-match. A malformed
 response, SHA/author mismatch, missing `gh`, bad auth, missing permission, or
 network failure is inconclusive rather than negative.
 
-## Cache and failure behavior
+## Persistent caches and refresh behavior
 
-The persistent SQLite table is `github_commit_author_identity_cache`. Its key
-is a versioned SHA-256 of the normalized local name/email plus the proven
-GitHub owner, repository, and full commit SHA. The service never reads a row
-until it has revalidated that worktree origin and SHA. It stores only that
-opaque key, GitHub login/avatar, timestamps, status, and retry metadata—never
-raw author fields, remote output, or credentials.
+The exact-proof table is `github_commit_author_identity_cache`. Its key is a
+versioned SHA-256 of the normalized local name/email plus the proven GitHub
+owner, repository, and full commit SHA. The service never reads a row until it
+has revalidated that worktree origin and SHA. It stores only that opaque key,
+GitHub login, avatar *source* URL, timestamps, status, and retry metadata—never
+raw author fields or credentials.
+
+`github_avatar_thumbnail_cache` is a second SQLite index keyed by a SHA-256 of
+the normalized GitHub avatar endpoint. It records `fetched_at`, `expires_at`,
+`last_accessed_at`, byte length, MIME type, and retry metadata. Its matching
+64px image bytes live under:
+
+```text
+<Electron userData>/cache/github-avatar-thumbnails/<opaque-sha256>
+```
+
+The thumbnail index deduplicates a GitHub account's image across any number of
+exact commit-proof rows. Only trusted GitHub avatar hosts are accepted; the
+main process downloads a bounded (512 KiB) image with no auth header, token,
+or cookies. The normalizer keeps only GitHub's public avatar revision (`v`) and
+the forced 64px size (`s`), dropping any unexpected query parameters before
+SQLite or disk. It passes the cached bytes to the renderer as a data URL, never
+a local path or remote source URL.
+
+Every eligible hover validates the worktree origin before using an exact proof.
+After that, a fresh cached identity and its local thumbnail require no GitHub
+network request. A stale row is returned immediately (including a stale local
+thumbnail when available) and starts revalidation in the background; the next
+event carries any changed login or thumbnail. This is intentional
+stale-while-revalidate behavior, not a relaxation of the exact-commit proof.
+
+`fetched_at` is the last successful remote refresh; `last_accessed_at` is
+touched at most once an hour per row to avoid SQLite write churn during pointer
+movement. `refreshedAt` and `nextRetryAt` project the relevant proof timestamps
+to a renderer consumer: it can retain a stale identity during an in-flight
+refresh and retry only after the persisted gate has elapsed. These are
+persisted so a later hover, restart, or large-repository session can decide
+whether it needs a background refresh.
 
 | Outcome | Cache behavior |
 | --- | --- |
-| Verified login/avatar | Fresh for 7 days; stale verified data remains usable during refresh |
+| Verified login | Fresh for 7 days; stale verified data remains usable during refresh |
 | Exact commit with no GitHub account | Negative-cached for 24 hours |
 | Git, `gh`, authentication, permission, network, malformed, or mismatch failure | Back off from 1 minute exponentially to 1 hour |
+| Avatar thumbnail | Local 64px file fresh for 30 days; stale file remains displayable while it refreshes |
 
 There is no poller or retry timer. A later context-card request after the gate
-expires starts the next best-effort attempt. Cache cleanup retains stale proven
-mappings for 90 days after expiry, negative rows for 7 days, and unavailable
-rows for 1 day.
+expires starts the next best-effort attempt. Cache cleanup keeps identity rows
+for 90 days (resolved), 7 days (negative), or 1 day (unavailable) after their
+last access; thumbnail files and rows remain for 180 days after their last
+access. That makes dozens, hundreds, or thousands of tiny cached avatars cheap
+to retain without making them permanent.
 
 ## Credential boundary
 

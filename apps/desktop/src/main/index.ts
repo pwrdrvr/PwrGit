@@ -21,6 +21,7 @@ import {
 } from "./git/worktree-handlers";
 import { registerWorktreeLifecycleHandlers } from "./git/worktree-lifecycle-handlers";
 import { WorktreeStateService } from "./git/worktree-state";
+import { GitHubAvatarThumbnailCache } from "./github/avatar-thumbnail-cache";
 import { GitHubCommitAuthorIdentityService } from "./github/commit-author-identity";
 import { registerGitHubHandlers } from "./github/github-handlers";
 import { PrService } from "./github/pr-service";
@@ -186,7 +187,12 @@ if (!gotSingleInstanceLock) {
     const prService = new PrService(db, execGit);
     const commitAuthorIdentityService = new GitHubCommitAuthorIdentityService(
       db,
-      execGit
+      execGit,
+      {
+        thumbnailStore: new GitHubAvatarThumbnailCache(db, {
+          cacheDir: join(app.getPath("userData"), "cache", "github-avatar-thumbnails")
+        })
+      }
     );
 
     // The worktree the user is currently viewing; refreshed on focus + a gentle

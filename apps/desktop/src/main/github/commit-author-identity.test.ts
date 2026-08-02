@@ -10,12 +10,14 @@ import {
   type GitHubCommitAuthorRemoteCommit,
   type GitHubCommitAuthorIdentityTransport
 } from "./commit-author-identity";
+import type { GitHubAvatarThumbnailStore } from "./avatar-thumbnail-cache";
 
 const AUTHOR = {
   name: "Ada Lovelace",
   email: "ada@example.test"
 };
 const COMMIT_SHA = "0123456789abcdef0123456789abcdef01234567";
+const CACHED_AVATAR_URL = "data:image/png;base64,cHdyZ2l0LWF2YXRhcg==";
 const PROOF = {
   owner: "octo-org",
   repo: "example-repo",
@@ -35,6 +37,12 @@ let gitCalls: number;
 let remoteUrl: string;
 let fetchImpl: () => Promise<GitHubCommitAuthorRemoteCommit>;
 let requestedProofs: GitHubCommitAuthorProof[];
+let thumbnailSources: string[];
+let thumbnailReads: number;
+let thumbnailRefreshes: number;
+let thumbnailDataUrl: string | undefined;
+let thumbnailNeedsRefresh: boolean;
+let refreshThumbnailImpl: () => Promise<string | undefined>;
 let service: GitHubCommitAuthorIdentityService;
 
 beforeEach(() => {
@@ -46,6 +54,12 @@ beforeEach(() => {
   remoteUrl = "git@github.com:octo-org/example-repo.git\n";
   fetchImpl = async () => resolvedRemoteCommit();
   requestedProofs = [];
+  thumbnailSources = [];
+  thumbnailReads = 0;
+  thumbnailRefreshes = 0;
+  thumbnailDataUrl = CACHED_AVATAR_URL;
+  thumbnailNeedsRefresh = false;
+  refreshThumbnailImpl = async () => thumbnailDataUrl;
   service = createService();
 });
 
@@ -64,10 +78,11 @@ describe("GitHubCommitAuthorIdentityService", () => {
     expect(await requireCompletion(request.completion)).toEqual({
       identity: {
         login: "ada",
-        avatarUrl: "https://avatars.githubusercontent.com/u/1?v=4"
+        avatarUrl: CACHED_AVATAR_URL
       },
       cacheState: "fresh",
-      refreshState: "idle"
+      refreshState: "idle",
+      refreshedAt: now
     });
     expect(fetchCalls).toBe(1);
     expect(gitCalls).toBe(1);
@@ -82,11 +97,13 @@ describe("GitHubCommitAuthorIdentityService", () => {
       status: "resolved",
       github_login: "ada",
       fetched_at: now,
-      expires_at: now + 7 * 24 * 60 * 60 * 1000
+      expires_at: now + 7 * 24 * 60 * 60 * 1000,
+      last_accessed_at: now
     });
     expect(JSON.stringify(row)).not.toContain(AUTHOR.name);
     expect(JSON.stringify(row)).not.toContain(AUTHOR.email);
     expect(JSON.stringify(row)).not.toContain("gho_");
+    expect(JSON.stringify(row)).toContain("https://avatars.githubusercontent.com/u/1?v=4");
 
     const cached = service.request(INPUT);
     expect(cached).toEqual({
@@ -99,12 +116,74 @@ describe("GitHubCommitAuthorIdentityService", () => {
     expect(await requireCompletion(cached.completion)).toEqual({
       identity: {
         login: "ada",
-        avatarUrl: "https://avatars.githubusercontent.com/u/1?v=4"
+        avatarUrl: CACHED_AVATAR_URL
       },
       cacheState: "fresh",
-      refreshState: "idle"
+      refreshState: "idle",
+      refreshedAt: now
     });
     expect(fetchCalls).toBe(1);
+    expect(thumbnailReads).toBe(2);
+    expect(thumbnailRefreshes).toBe(0);
+  });
+
+  it("records cache access without re-fetching a fresh exact proof", async () => {
+    await requireCompletion(service.request(INPUT).completion);
+    const fetchedAt = cachedRow().fetched_at;
+
+    now += 60 * 60 * 1000;
+    expect(await requireCompletion(service.request(INPUT).completion)).toEqual({
+      identity: { login: "ada", avatarUrl: CACHED_AVATAR_URL },
+      cacheState: "fresh",
+      refreshState: "idle",
+      refreshedAt: fetchedAt
+    });
+
+    expect(fetchCalls).toBe(1);
+    expect(cachedRow()).toMatchObject({
+      fetched_at: fetchedAt,
+      last_accessed_at: now
+    });
+  });
+
+  it("repaints with a local thumbnail after the identity has already settled", async () => {
+    thumbnailDataUrl = undefined;
+    thumbnailNeedsRefresh = true;
+    let releaseThumbnail: ((avatarUrl: string) => void) | undefined;
+    let signalThumbnailStarted: (() => void) | undefined;
+    const thumbnailStarted = new Promise<void>((resolve) => {
+      signalThumbnailStarted = resolve;
+    });
+    refreshThumbnailImpl = async () =>
+      await new Promise<string>((resolve) => {
+        signalThumbnailStarted?.();
+        releaseThumbnail = resolve;
+      });
+
+    let resolveUpdated: ((lookup: unknown) => void) | undefined;
+    const updated = new Promise<unknown>((resolve) => {
+      resolveUpdated = resolve;
+    });
+    const request = service.request(INPUT, (lookup) => resolveUpdated?.(lookup));
+
+    expect(await requireCompletion(request.completion)).toEqual({
+      identity: { login: "ada" },
+      cacheState: "fresh",
+      refreshState: "idle",
+      refreshedAt: now,
+      avatarCache: { cacheState: "miss", refreshState: "in-flight" }
+    });
+    await thumbnailStarted;
+    releaseThumbnail?.(CACHED_AVATAR_URL);
+
+    expect(await updated).toEqual({
+      identity: { login: "ada", avatarUrl: CACHED_AVATAR_URL },
+      cacheState: "fresh",
+      refreshState: "idle",
+      refreshedAt: now
+    });
+    expect(thumbnailRefreshes).toBe(1);
+    expect(thumbnailSources).toContain("https://avatars.githubusercontent.com/u/1?v=4&s=64");
   });
 
   it("requires exact SHA, name, and email matches before accepting an identity", async () => {
@@ -116,7 +195,8 @@ describe("GitHubCommitAuthorIdentityService", () => {
     const request = service.request(INPUT);
     expect(await requireCompletion(request.completion)).toEqual({
       cacheState: "miss",
-      refreshState: "backing-off"
+      refreshState: "backing-off",
+      nextRetryAt: now + 60_000
     });
 
     const row = cachedRow();
@@ -134,7 +214,8 @@ describe("GitHubCommitAuthorIdentityService", () => {
     });
     expect(await requireCompletion(retryGated.completion)).toEqual({
       cacheState: "miss",
-      refreshState: "backing-off"
+      refreshState: "backing-off",
+      nextRetryAt: now + 60_000
     });
     expect(fetchCalls).toBe(1);
   });
@@ -148,18 +229,20 @@ describe("GitHubCommitAuthorIdentityService", () => {
 
     expect(await requireCompletion(service.request(INPUT).completion)).toEqual({
       cacheState: "fresh",
-      refreshState: "idle"
+      refreshState: "idle",
+      refreshedAt: now
     });
     expect(cachedRow().status).toBe("negative");
 
     expect(await requireCompletion(service.request(INPUT).completion)).toEqual({
       cacheState: "fresh",
-      refreshState: "idle"
+      refreshState: "idle",
+      refreshedAt: now
     });
     expect(fetchCalls).toBe(1);
   });
 
-  it("deduplicates a stale exact-commit refresh", async () => {
+  it("serves a stale local identity, then deduplicates its exact-commit refresh", async () => {
     await requireCompletion(service.request(INPUT).completion);
 
     let releaseFetch:
@@ -176,11 +259,22 @@ describe("GitHubCommitAuthorIdentityService", () => {
       });
     now += 7 * 24 * 60 * 60 * 1000 + 1;
 
-    const first = service.request(INPUT);
+    let resolveUpdated: ((lookup: unknown) => void) | undefined;
+    const updated = new Promise<unknown>((resolve) => {
+      resolveUpdated = resolve;
+    });
+    const first = service.request(INPUT, (lookup) => resolveUpdated?.(lookup));
     const duplicate = service.request(INPUT);
     expect(first.lookup).toEqual({ cacheState: "miss", refreshState: "in-flight" });
     expect(duplicate.lookup.refreshState).toBe("in-flight");
     expect(first.completion).toBe(duplicate.completion);
+
+    expect(await requireCompletion(first.completion)).toEqual({
+      identity: { login: "ada", avatarUrl: CACHED_AVATAR_URL },
+      cacheState: "stale",
+      refreshState: "in-flight",
+      refreshedAt: 1_000_000
+    });
 
     await fetchStarted;
     expect(fetchCalls).toBe(2);
@@ -192,13 +286,14 @@ describe("GitHubCommitAuthorIdentityService", () => {
       }
     });
 
-    expect(await requireCompletion(first.completion)).toEqual({
+    expect(await updated).toEqual({
       identity: {
         login: "ada-lovelace",
-        avatarUrl: "https://avatars.githubusercontent.com/u/2?v=4"
+        avatarUrl: CACHED_AVATAR_URL
       },
       cacheState: "fresh",
-      refreshState: "idle"
+      refreshState: "idle",
+      refreshedAt: now
     });
   });
 
@@ -210,7 +305,8 @@ describe("GitHubCommitAuthorIdentityService", () => {
 
     expect(await requireCompletion(service.request(INPUT).completion)).toEqual({
       cacheState: "miss",
-      refreshState: "backing-off"
+      refreshState: "backing-off",
+      nextRetryAt: now + 1_000
     });
     expect(cachedRow().next_retry_at).toBe(now + 1_000);
 
@@ -218,7 +314,8 @@ describe("GitHubCommitAuthorIdentityService", () => {
     const retryGated = service.request(INPUT);
     expect(await requireCompletion(retryGated.completion)).toEqual({
       cacheState: "miss",
-      refreshState: "backing-off"
+      refreshState: "backing-off",
+      nextRetryAt: 1_001_000
     });
     expect(fetchCalls).toBe(1);
 
@@ -263,10 +360,11 @@ describe("GitHubCommitAuthorIdentityService", () => {
     expect(await requireCompletion(otherRepository.completion)).toEqual({
       identity: {
         login: "ada",
-        avatarUrl: "https://avatars.githubusercontent.com/u/1?v=4"
+        avatarUrl: CACHED_AVATAR_URL
       },
       cacheState: "fresh",
-      refreshState: "idle"
+      refreshState: "idle",
+      refreshedAt: now
     });
     expect(fetchCalls).toBe(2);
     expect(requestedProofs).toEqual([PROOF, otherProof]);
@@ -334,8 +432,37 @@ function createService(options?: {
       return await fetchImpl();
     }
   };
+  const thumbnailStore: GitHubAvatarThumbnailStore = {
+    read: async (sourceUrl) => {
+      thumbnailSources.push(sourceUrl);
+      thumbnailReads += 1;
+      return {
+        ...(thumbnailDataUrl === undefined ? {} : { avatarUrl: thumbnailDataUrl }),
+        cacheState: thumbnailDataUrl === undefined ? "miss" : "fresh",
+        refreshState: "idle",
+        ...(thumbnailDataUrl === undefined ? {} : { refreshedAt: now }),
+        needsRefresh: thumbnailNeedsRefresh
+      };
+    },
+    refresh: async (sourceUrl) => {
+      thumbnailSources.push(sourceUrl);
+      thumbnailRefreshes += 1;
+      const avatarUrl = await refreshThumbnailImpl();
+      thumbnailDataUrl = avatarUrl;
+      thumbnailNeedsRefresh = false;
+      return {
+        ...(avatarUrl === undefined ? {} : { avatarUrl }),
+        cacheState: avatarUrl === undefined ? "miss" : "fresh",
+        refreshState: "idle",
+        ...(avatarUrl === undefined ? {} : { refreshedAt: now }),
+        needsRefresh: false
+      };
+    },
+    pruneIfDue: async () => {}
+  };
   return new GitHubCommitAuthorIdentityService(db, git, {
     transport,
+    thumbnailStore,
     now: () => now,
     ...options
   });

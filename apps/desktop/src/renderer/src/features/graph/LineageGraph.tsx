@@ -40,6 +40,24 @@ export function reusableCommitAuthorIdentity(
     ? null
     : undefined;
 }
+
+/** Retry only when the main-process proof/asset cache says another hover can help. */
+export function shouldRequestCommitAuthorIdentity(
+  lookup: GitHubCommitAuthorIdentityLookup | undefined,
+  now: number
+): boolean {
+  if (lookup === undefined) return true;
+  if (lookup.refreshState === "not-eligible" || lookup.refreshState === "in-flight") {
+    return false;
+  }
+  if (lookup.refreshState === "backing-off") {
+    return lookup.nextRetryAt === undefined || lookup.nextRetryAt <= now;
+  }
+  if (lookup.cacheState !== "fresh") return true;
+  if (lookup.avatarCache === undefined) return false;
+  return lookup.avatarCache.refreshState === "backing-off" &&
+    (lookup.avatarCache.nextRetryAt === undefined || lookup.avatarCache.nextRetryAt <= now);
+}
 type CommitMenuState = { hash: string; x: number; y: number };
 
 // Experimental setting: open new graph views in the "all branches" scope.
@@ -102,8 +120,8 @@ export function LineageGraph({
   const [commitStats, setCommitStats] = useState<
     Record<string, CommitStats | null>
   >({});
-  const [commitAuthorIdentities, setCommitAuthorIdentities] = useState<
-    Record<string, GitHubCommitAuthorIdentity | null>
+  const [commitAuthorIdentityLookups, setCommitAuthorIdentityLookups] = useState<
+    Record<string, GitHubCommitAuthorIdentityLookup>
   >({});
   const now = useRelativeClock();
   const commitContext = useViewportTooltip("commit-context-card", {
@@ -114,6 +132,7 @@ export function LineageGraph({
   const laneBarRef = useRef<HTMLDivElement>(null);
   const scopeTouchedRef = useRef(false);
   const commitStatsRequestsRef = useRef(new Map<string, number>());
+  const commitAuthorIdentityRequestsRef = useRef(new Set<string>());
   const commitStatsEpochRef = useRef(0);
 
   useEffect(() => {
@@ -287,11 +306,9 @@ export function LineageGraph({
   useEffect(() => {
     return subscribe("github:commitAuthorIdentityChanged", (payload) => {
       if (payload.worktreeId !== worktreeId) return;
-      const identity = reusableCommitAuthorIdentity(payload.lookup);
-      if (identity === undefined) return;
-      setCommitAuthorIdentities((current) => ({
+      setCommitAuthorIdentityLookups((current) => ({
         ...current,
-        [payload.commitHash]: identity
+        [payload.commitHash]: payload.lookup
       }));
     });
   }, [worktreeId]);
@@ -302,8 +319,9 @@ export function LineageGraph({
   useEffect(() => {
     commitStatsEpochRef.current += 1;
     commitStatsRequestsRef.current.clear();
+    commitAuthorIdentityRequestsRef.current.clear();
     setCommitStats({});
-    setCommitAuthorIdentities({});
+    setCommitAuthorIdentityLookups({});
   }, [worktreeId]);
 
   useEffect(() => {
@@ -331,12 +349,13 @@ export function LineageGraph({
   useEffect(() => {
     if (hoveredVm === undefined) return;
     const commit = hoveredVm.commit;
-    // A result comes only from the main-process exact-commit proof. Keep it
-    // while this worktree is unchanged so repeat hovers do not blink back to
-    // initials or wait on an origin probe.
-    if (Object.prototype.hasOwnProperty.call(commitAuthorIdentities, commit.hash)) {
-      return;
-    }
+    const lookup = commitAuthorIdentityLookups[commit.hash];
+    // A result comes only from the main-process exact-commit proof. Keep the
+    // display data while respecting its persisted TTL/backoff metadata, so a
+    // later hover can revalidate an old identity without a network image load.
+    if (!shouldRequestCommitAuthorIdentity(lookup, now)) return;
+    if (commitAuthorIdentityRequestsRef.current.has(commit.hash)) return;
+    commitAuthorIdentityRequestsRef.current.add(commit.hash);
     void dispatch("github:commitAuthorIdentity", {
       worktreeId,
       commitHash: commit.hash,
@@ -344,14 +363,14 @@ export function LineageGraph({
       authorEmail: commit.authorEmail
     }).then((result) => {
       if (!result.ok) return;
-      const identity = reusableCommitAuthorIdentity(result.value);
-      if (identity === undefined) return;
-      setCommitAuthorIdentities((current) => ({
+      setCommitAuthorIdentityLookups((current) => ({
         ...current,
-        [commit.hash]: identity
+        [commit.hash]: result.value
       }));
+    }).finally(() => {
+      commitAuthorIdentityRequestsRef.current.delete(commit.hash);
     });
-  }, [commitAuthorIdentities, hoveredVm, worktreeId]);
+  }, [commitAuthorIdentityLookups, hoveredVm, now, worktreeId]);
 
   // The context window remains current while it is open: its age changes with
   // the shared clock, while ref/base information and lazy diffstats update
@@ -366,9 +385,12 @@ export function LineageGraph({
         defaultRef={data?.defaultRef ?? hoveredVm.defaultBranch}
         now={now}
         stats={commitStats[hoveredVm.commit.hash]}
-        githubIdentity={
-          commitAuthorIdentities[hoveredVm.commit.hash] ?? undefined
-        }
+        githubIdentity={reusableCommitAuthorIdentity(
+          commitAuthorIdentityLookups[hoveredVm.commit.hash] ?? {
+            cacheState: "miss",
+            refreshState: "in-flight"
+          }
+        ) ?? undefined}
       />
     );
   }, [
@@ -377,7 +399,7 @@ export function LineageGraph({
     hoveredVm,
     now,
     commitStats,
-    commitAuthorIdentities,
+    commitAuthorIdentityLookups,
     viewingBranch
   ]);
 
@@ -396,7 +418,12 @@ export function LineageGraph({
         defaultRef={data?.defaultRef ?? vm.defaultBranch}
         now={now}
         stats={commitStats[vm.commit.hash]}
-        githubIdentity={commitAuthorIdentities[vm.commit.hash] ?? undefined}
+        githubIdentity={reusableCommitAuthorIdentity(
+          commitAuthorIdentityLookups[vm.commit.hash] ?? {
+            cacheState: "miss",
+            refreshState: "in-flight"
+          }
+        ) ?? undefined}
       />,
       anchor
     );

@@ -1,10 +1,16 @@
 import { createHash } from "node:crypto";
 import type {
+  GitHubCommitAuthorAvatarCacheStatus,
   GitHubCommitAuthorIdentity,
   GitHubCommitAuthorIdentityLookup
 } from "@pwrgit/shared";
 import type { GitExec } from "../git/dugite";
 import type { DB } from "../persistence/db";
+import {
+  NoopGitHubAvatarThumbnailStore,
+  normalizeGitHubAvatarSourceUrl,
+  type GitHubAvatarThumbnailStore
+} from "./avatar-thumbnail-cache";
 import { runGh } from "./gh-cli";
 import { parseGitHubRemote } from "./remote";
 
@@ -21,6 +27,7 @@ const RESOLVED_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 const NEGATIVE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const UNAVAILABLE_RETENTION_MS = 24 * 60 * 60 * 1000;
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+const ACCESS_TOUCH_INTERVAL_MS = 60 * 60 * 1000;
 
 export type GitHubCommitAuthorProof = {
   owner: string;
@@ -100,6 +107,8 @@ export type GitHubCommitAuthorIdentityRequest = {
 
 export type GitHubCommitAuthorIdentityServiceOptions = {
   transport?: GitHubCommitAuthorIdentityTransport;
+  /** Persistent, local thumbnail cache. Omit only for isolated/unit use. */
+  thumbnailStore?: GitHubAvatarThumbnailStore;
   now?: () => number;
   resolvedTtlMs?: number;
   negativeTtlMs?: number;
@@ -112,9 +121,11 @@ type CacheStatus = "resolved" | "negative" | "unavailable";
 type CacheEntry = {
   identityKey: string;
   status: CacheStatus;
-  identity?: GitHubCommitAuthorIdentity;
+  /** The remote source URL stays main-process-only; output gets local bytes. */
+  identity?: CachedIdentity;
   fetchedAt: number;
   expiresAt: number;
+  lastAccessedAt: number;
   failureCount: number;
   nextRetryAt?: number;
   updatedAt: number;
@@ -127,12 +138,18 @@ type CacheRow = {
   avatar_url: string | null;
   fetched_at: number;
   expires_at: number;
+  last_accessed_at: number;
   failure_count: number;
   next_retry_at: number | null;
   updated_at: number;
 };
 
 type NormalizedAuthor = { name: string; email: string };
+
+type CachedIdentity = {
+  login: string;
+  avatarSourceUrl?: string;
+};
 
 type PreparedRequest = {
   worktreeId: string;
@@ -141,7 +158,7 @@ type PreparedRequest = {
 };
 
 type RemoteOutcome =
-  | { kind: "resolved"; identity: GitHubCommitAuthorIdentity }
+  | { kind: "resolved"; identity: CachedIdentity }
   | { kind: "negative" }
   | { kind: "inconclusive" };
 
@@ -152,6 +169,7 @@ type RemoteOutcome =
  */
 export class GitHubCommitAuthorIdentityService {
   private readonly transport: GitHubCommitAuthorIdentityTransport;
+  private readonly thumbnails: GitHubAvatarThumbnailStore;
   private readonly now: () => number;
   private readonly resolvedTtlMs: number;
   private readonly negativeTtlMs: number;
@@ -161,6 +179,10 @@ export class GitHubCommitAuthorIdentityService {
     string,
     Promise<GitHubCommitAuthorIdentityLookup>
   >();
+  private readonly revalidationInFlight = new Map<
+    string,
+    Promise<CacheEntry | undefined>
+  >();
   private lastPrunedAt = Number.NEGATIVE_INFINITY;
 
   constructor(
@@ -169,6 +191,7 @@ export class GitHubCommitAuthorIdentityService {
     options: GitHubCommitAuthorIdentityServiceOptions = {}
   ) {
     this.transport = options.transport ?? new GhCliCommitAuthorIdentityTransport();
+    this.thumbnails = options.thumbnailStore ?? new NoopGitHubAvatarThumbnailStore();
     this.now = options.now ?? Date.now;
     this.resolvedTtlMs = positiveDuration(
       options.resolvedTtlMs,
@@ -196,14 +219,16 @@ export class GitHubCommitAuthorIdentityService {
    * resolved before a cache row can be read: cache keys are scoped to owner,
    * repo, and full commit SHA, so they cannot bleed across commits or remotes.
    * Callers must render local Git author data immediately and observe
-   * `completion` only to repaint.
+   * `completion` only to repaint. A stale resolved row is returned promptly
+   * and then revalidated in the background; `onBackgroundUpdate` receives the
+   * resulting targeted repaint without a polling loop.
    */
   request(input: {
     worktreeId: string;
     commitHash: string;
     authorName: string;
     authorEmail: string;
-  }): GitHubCommitAuthorIdentityRequest {
+  }, onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void): GitHubCommitAuthorIdentityRequest {
     const author = normalizeAuthor({
       name: input.authorName,
       email: input.authorEmail
@@ -222,7 +247,7 @@ export class GitHubCommitAuthorIdentityService {
       worktreeId,
       commitSha,
       author
-    });
+    }, onBackgroundUpdate);
     return {
       lookup: { cacheState: "miss", refreshState: "in-flight" },
       completion
@@ -230,14 +255,15 @@ export class GitHubCommitAuthorIdentityService {
   }
 
   private startRefresh(
-    prepared: PreparedRequest
+    prepared: PreparedRequest,
+    onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void
   ): Promise<GitHubCommitAuthorIdentityLookup> {
     const requestKey = buildRequestKey(prepared);
     const existing = this.inFlight.get(requestKey);
     if (existing !== undefined) return existing;
 
     const completion = Promise.resolve()
-      .then(async () => await this.refresh(prepared))
+      .then(async () => await this.refresh(prepared, onBackgroundUpdate))
       .catch(
         (): GitHubCommitAuthorIdentityLookup => ({
           cacheState: "miss",
@@ -255,7 +281,8 @@ export class GitHubCommitAuthorIdentityService {
   }
 
   private async refresh(
-    prepared: PreparedRequest
+    prepared: PreparedRequest,
+    onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void
   ): Promise<GitHubCommitAuthorIdentityLookup> {
     let identityKey: string | undefined;
     try {
@@ -281,41 +308,184 @@ export class GitHubCommitAuthorIdentityService {
 
       const now = this.now();
       const cached = this.readCache(identityKey);
-      if (isFresh(cached, now)) return toLookup(cached, now, "idle");
+      if (cached !== undefined) this.touch(cached, now);
+
+      if (isFresh(cached, now)) {
+        return await this.lookupFromCache(cached, now, "idle", onBackgroundUpdate);
+      }
       if (cached?.nextRetryAt !== undefined && cached.nextRetryAt > now) {
-        return toLookup(cached, now, "backing-off");
+        return await this.lookupFromCache(cached, now, "backing-off", onBackgroundUpdate);
       }
 
-      const response = await this.transport.fetchCommit(proof);
+      // Preserve a known local identity (and its on-disk thumbnail) while the
+      // next exact-commit proof runs. This is stale-while-revalidate, never a
+      // shortcut around the origin/SHA proof that was already established.
+      if (cached?.status === "resolved" || cached?.status === "negative") {
+        const stale = await this.lookupFromCache(
+          cached,
+          now,
+          "in-flight",
+          onBackgroundUpdate
+        );
+        this.scheduleRevalidation(prepared, proof, identityKey, onBackgroundUpdate);
+        return stale;
+      }
+
+      const refreshed = await this.revalidate(prepared, proof, identityKey);
       const completedAt = this.now();
-      const outcome = evaluateRemoteCommit(response, prepared.author, proof);
-      if (outcome.kind === "resolved") {
-        this.writeResolved({
-          identityKey,
-          identity: outcome.identity,
-          fetchedAt: completedAt,
-          expiresAt: completedAt + this.resolvedTtlMs
-        });
-        return toLookup(this.readCache(identityKey), completedAt, "idle");
-      }
-      if (outcome.kind === "negative") {
-        this.writeNegative({
-          identityKey,
-          fetchedAt: completedAt,
-          expiresAt: completedAt + this.negativeTtlMs
-        });
-        return toLookup(this.readCache(identityKey), completedAt, "idle");
-      }
-      this.recordFailure(identityKey, completedAt);
-      return toLookup(this.readCache(identityKey), completedAt, "backing-off");
+      return await this.lookupFromCache(
+        refreshed,
+        completedAt,
+        refreshStateFor(refreshed, completedAt),
+        onBackgroundUpdate
+      );
     } catch {
       const now = this.now();
       if (identityKey === undefined) {
         return { cacheState: "miss", refreshState: "backing-off" };
       }
       this.recordFailure(identityKey, now);
-      return toLookup(this.readCache(identityKey), now, "backing-off");
+      const cached = this.readCache(identityKey);
+      return await this.lookupFromCache(cached, now, "backing-off", onBackgroundUpdate);
     }
+  }
+
+  private scheduleRevalidation(
+    prepared: PreparedRequest,
+    proof: GitHubCommitAuthorProof,
+    identityKey: string,
+    onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void
+  ): void {
+    void this.revalidate(prepared, proof, identityKey)
+      .then(async (entry) => {
+        if (onBackgroundUpdate === undefined) return;
+        const now = this.now();
+        onBackgroundUpdate(
+          await this.lookupFromCache(
+            entry,
+            now,
+            refreshStateFor(entry, now),
+            onBackgroundUpdate
+          )
+        );
+      })
+      .catch(() => {
+        // `revalidate` handles expected failures; never surface a card error.
+      });
+  }
+
+  private revalidate(
+    prepared: PreparedRequest,
+    proof: GitHubCommitAuthorProof,
+    identityKey: string
+  ): Promise<CacheEntry | undefined> {
+    const existing = this.revalidationInFlight.get(identityKey);
+    if (existing !== undefined) return existing;
+
+    const completion = Promise.resolve()
+      .then(async () => {
+        const response = await this.transport.fetchCommit(proof);
+        const completedAt = this.now();
+        const outcome = evaluateRemoteCommit(response, prepared.author, proof);
+        if (outcome.kind === "resolved") {
+          this.writeResolved({
+            identityKey,
+            identity: outcome.identity,
+            fetchedAt: completedAt,
+            expiresAt: completedAt + this.resolvedTtlMs
+          });
+        } else if (outcome.kind === "negative") {
+          this.writeNegative({
+            identityKey,
+            fetchedAt: completedAt,
+            expiresAt: completedAt + this.negativeTtlMs
+          });
+        } else {
+          this.recordFailure(identityKey, completedAt);
+        }
+        return this.readCache(identityKey);
+      })
+      .catch(() => {
+        this.recordFailure(identityKey, this.now());
+        return this.readCache(identityKey);
+      });
+
+    this.revalidationInFlight.set(identityKey, completion);
+    void completion.then(() => {
+      if (this.revalidationInFlight.get(identityKey) === completion) {
+        this.revalidationInFlight.delete(identityKey);
+      }
+    });
+    return completion;
+  }
+
+  private async lookupFromCache(
+    entry: CacheEntry | undefined,
+    now: number,
+    refreshState: GitHubCommitAuthorIdentityLookup["refreshState"],
+    onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void
+  ): Promise<GitHubCommitAuthorIdentityLookup> {
+    if (entry?.identity === undefined) return toLookup(entry, now, refreshState);
+
+    const identity: GitHubCommitAuthorIdentity = { login: entry.identity.login };
+    const sourceUrl = entry.identity.avatarSourceUrl;
+    if (sourceUrl === undefined) return toLookup(entry, now, refreshState, identity);
+
+    try {
+      const thumbnail = await this.thumbnails.read(sourceUrl, now);
+      if (thumbnail.avatarUrl !== undefined) identity.avatarUrl = thumbnail.avatarUrl;
+      const avatarCache = toAvatarCacheStatus(
+        thumbnail,
+        thumbnail.needsRefresh ? "in-flight" : undefined
+      );
+      if (thumbnail.needsRefresh) {
+        this.scheduleThumbnailRefresh(
+          entry,
+          sourceUrl,
+          now,
+          refreshState,
+          identity.avatarUrl,
+          onBackgroundUpdate
+        );
+      }
+      return toLookup(entry, now, refreshState, identity, avatarCache);
+    } catch {
+      // A damaged/missing local thumbnail must not hide a proven login.
+    }
+    return toLookup(entry, now, refreshState, identity);
+  }
+
+  private scheduleThumbnailRefresh(
+    entry: CacheEntry,
+    sourceUrl: string,
+    now: number,
+    refreshState: GitHubCommitAuthorIdentityLookup["refreshState"],
+    previousAvatarUrl: string | undefined,
+    onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void
+  ): void {
+    void this.thumbnails
+      .refresh(sourceUrl, now)
+      .then((thumbnail) => {
+        if (onBackgroundUpdate === undefined) return;
+        const current = this.readCache(entry.identityKey);
+        if (
+          current?.identity === undefined ||
+          current.identity.login !== entry.identity?.login ||
+          current.identity.avatarSourceUrl !== sourceUrl
+        ) {
+          return;
+        }
+        const avatarUrl = thumbnail.avatarUrl ?? previousAvatarUrl;
+        onBackgroundUpdate(
+          toLookup(current, this.now(), refreshState, {
+            login: current.identity.login,
+            ...(avatarUrl === undefined ? {} : { avatarUrl })
+          }, toAvatarCacheStatus(thumbnail))
+        );
+      })
+      .catch(() => {
+        // The thumbnail store has its own persisted backoff; remain silent.
+      });
   }
 
   /** `null` is a recognized non-GitHub remote; `undefined` is a transient Git failure. */
@@ -332,7 +502,7 @@ export class GitHubCommitAuthorIdentityService {
       const row = this.db
         .prepare(
           `SELECT identity_key, status, github_login, avatar_url, fetched_at,
-                  expires_at, failure_count, next_retry_at, updated_at
+                  expires_at, last_accessed_at, failure_count, next_retry_at, updated_at
              FROM github_commit_author_identity_cache
             WHERE identity_key = ?`
         )
@@ -345,7 +515,7 @@ export class GitHubCommitAuthorIdentityService {
 
   private writeResolved(params: {
     identityKey: string;
-    identity: GitHubCommitAuthorIdentity;
+    identity: CachedIdentity;
     fetchedAt: number;
     expiresAt: number;
   }): void {
@@ -353,14 +523,15 @@ export class GitHubCommitAuthorIdentityService {
       .prepare(
         `INSERT INTO github_commit_author_identity_cache(
            identity_key, status, github_login, avatar_url, fetched_at,
-           expires_at, failure_count, next_retry_at, updated_at
-         ) VALUES (?, 'resolved', ?, ?, ?, ?, 0, NULL, ?)
+           expires_at, last_accessed_at, failure_count, next_retry_at, updated_at
+         ) VALUES (?, 'resolved', ?, ?, ?, ?, ?, 0, NULL, ?)
          ON CONFLICT(identity_key) DO UPDATE SET
            status = excluded.status,
            github_login = excluded.github_login,
            avatar_url = excluded.avatar_url,
            fetched_at = excluded.fetched_at,
            expires_at = excluded.expires_at,
+           last_accessed_at = excluded.last_accessed_at,
            failure_count = 0,
            next_retry_at = NULL,
            updated_at = excluded.updated_at
@@ -369,9 +540,10 @@ export class GitHubCommitAuthorIdentityService {
       .run(
         params.identityKey,
         params.identity.login,
-        params.identity.avatarUrl ?? null,
+        params.identity.avatarSourceUrl ?? null,
         params.fetchedAt,
         params.expiresAt,
+        params.fetchedAt,
         params.fetchedAt
       );
   }
@@ -385,20 +557,27 @@ export class GitHubCommitAuthorIdentityService {
       .prepare(
         `INSERT INTO github_commit_author_identity_cache(
            identity_key, status, github_login, avatar_url, fetched_at,
-           expires_at, failure_count, next_retry_at, updated_at
-         ) VALUES (?, 'negative', NULL, NULL, ?, ?, 0, NULL, ?)
+           expires_at, last_accessed_at, failure_count, next_retry_at, updated_at
+         ) VALUES (?, 'negative', NULL, NULL, ?, ?, ?, 0, NULL, ?)
          ON CONFLICT(identity_key) DO UPDATE SET
            status = excluded.status,
            github_login = NULL,
            avatar_url = NULL,
            fetched_at = excluded.fetched_at,
            expires_at = excluded.expires_at,
+           last_accessed_at = excluded.last_accessed_at,
            failure_count = 0,
            next_retry_at = NULL,
            updated_at = excluded.updated_at
          WHERE excluded.updated_at >= github_commit_author_identity_cache.updated_at`
       )
-      .run(params.identityKey, params.fetchedAt, params.expiresAt, params.fetchedAt);
+      .run(
+        params.identityKey,
+        params.fetchedAt,
+        params.expiresAt,
+        params.fetchedAt,
+        params.fetchedAt
+      );
   }
 
   /** Keep stale proven data while a temporary failure is backed off. */
@@ -417,8 +596,8 @@ export class GitHubCommitAuthorIdentityService {
         .prepare(
           `INSERT INTO github_commit_author_identity_cache(
              identity_key, status, github_login, avatar_url, fetched_at,
-             expires_at, failure_count, next_retry_at, updated_at
-           ) VALUES (?, 'unavailable', NULL, NULL, 0, 0, ?, ?, ?)
+             expires_at, last_accessed_at, failure_count, next_retry_at, updated_at
+           ) VALUES (?, 'unavailable', NULL, NULL, 0, 0, ?, ?, ?, ?)
            ON CONFLICT(identity_key) DO UPDATE SET
              failure_count = excluded.failure_count,
              next_retry_at = excluded.next_retry_at,
@@ -429,22 +608,38 @@ export class GitHubCommitAuthorIdentityService {
                OR github_commit_author_identity_cache.expires_at <= excluded.updated_at
              )`
         )
-        .run(identityKey, failureCount, now + retryAfterMs, now);
+        .run(identityKey, now, failureCount, now + retryAfterMs, now);
     } catch {
       // Cache problems never become visible commit-card failures.
+    }
+  }
+
+  private touch(entry: CacheEntry, now: number): void {
+    if (now - entry.lastAccessedAt < ACCESS_TOUCH_INTERVAL_MS) return;
+    try {
+      this.db
+        .prepare(
+          `UPDATE github_commit_author_identity_cache
+              SET last_accessed_at = ?
+            WHERE identity_key = ? AND last_accessed_at <= ?`
+        )
+        .run(now, entry.identityKey, now - ACCESS_TOUCH_INTERVAL_MS);
+    } catch {
+      // A cache read is still useful if the last-access bookkeeping cannot write.
     }
   }
 
   private pruneIfDue(now: number): void {
     if (now - this.lastPrunedAt < PRUNE_INTERVAL_MS) return;
     this.lastPrunedAt = now;
+    void this.thumbnails.pruneIfDue(now);
     try {
       this.db
         .prepare(
           `DELETE FROM github_commit_author_identity_cache
-            WHERE (status = 'resolved' AND expires_at < ?)
-               OR (status = 'negative' AND expires_at < ?)
-               OR (status = 'unavailable' AND updated_at < ?)`
+            WHERE (status = 'resolved' AND last_accessed_at < ?)
+               OR (status = 'negative' AND last_accessed_at < ?)
+               OR (status = 'unavailable' AND last_accessed_at < ?)`
         )
         .run(
           now - RESOLVED_RETENTION_MS,
@@ -535,6 +730,7 @@ function parseCacheRow(row: CacheRow): CacheEntry | undefined {
     !isCacheStatus(row.status) ||
     !isTimestamp(row.fetched_at) ||
     !isTimestamp(row.expires_at) ||
+    !isTimestamp(row.last_accessed_at) ||
     !isTimestamp(row.updated_at) ||
     !Number.isSafeInteger(row.failure_count) ||
     row.failure_count < 0
@@ -546,13 +742,17 @@ function parseCacheRow(row: CacheRow): CacheEntry | undefined {
   if (row.status === "resolved") {
     const login = safeText(row.github_login, 255);
     if (login === undefined) return undefined;
-    const avatarUrl = normalizeAvatarUrl(row.avatar_url);
+    const avatarSourceUrl = normalizeAvatarUrl(row.avatar_url);
     return {
       identityKey: row.identity_key,
       status: row.status,
-      identity: { login, ...(avatarUrl === undefined ? {} : { avatarUrl }) },
+      identity: {
+        login,
+        ...(avatarSourceUrl === undefined ? {} : { avatarSourceUrl })
+      },
       fetchedAt: row.fetched_at,
       expiresAt: row.expires_at,
+      lastAccessedAt: row.last_accessed_at,
       failureCount: row.failure_count,
       ...(nextRetryAt === undefined ? {} : { nextRetryAt }),
       updatedAt: row.updated_at
@@ -564,6 +764,7 @@ function parseCacheRow(row: CacheRow): CacheEntry | undefined {
     status: row.status,
     fetchedAt: row.fetched_at,
     expiresAt: row.expires_at,
+    lastAccessedAt: row.last_accessed_at,
     failureCount: row.failure_count,
     ...(nextRetryAt === undefined ? {} : { nextRetryAt }),
     updatedAt: row.updated_at
@@ -603,31 +804,28 @@ function normalizeGitHubPathSegment(value: unknown): string | undefined {
 
 function normalizeGitHubIdentity(
   value: GitHubCommitAuthorRemoteCommit["githubAuthor"]
-): GitHubCommitAuthorIdentity | undefined {
+): CachedIdentity | undefined {
   if (!isRecord(value)) return undefined;
   const login = safeText(value.login, 255);
   if (login === undefined) return undefined;
-  const avatarUrl = normalizeAvatarUrl(value.avatarUrl);
-  return { login, ...(avatarUrl === undefined ? {} : { avatarUrl }) };
+  const avatarSourceUrl = normalizeAvatarUrl(value.avatarUrl);
+  return {
+    login,
+    ...(avatarSourceUrl === undefined ? {} : { avatarSourceUrl })
+  };
 }
 
 function normalizeAvatarUrl(value: unknown): string | undefined {
   const raw = safeText(value, 2_048);
-  if (raw === undefined) return undefined;
-  try {
-    const url = new URL(raw);
-    return url.protocol === "https:" && url.username === "" && url.password === ""
-      ? url.toString()
-      : undefined;
-  } catch {
-    return undefined;
-  }
+  return raw === undefined ? undefined : normalizeGitHubAvatarSourceUrl(raw);
 }
 
 function toLookup(
   entry: CacheEntry | undefined,
   now: number,
-  refreshState: GitHubCommitAuthorIdentityLookup["refreshState"]
+  refreshState: GitHubCommitAuthorIdentityLookup["refreshState"],
+  identity?: GitHubCommitAuthorIdentity,
+  avatarCache?: GitHubCommitAuthorAvatarCacheStatus
 ): GitHubCommitAuthorIdentityLookup {
   const cacheState =
     entry === undefined || entry.status === "unavailable"
@@ -636,10 +834,43 @@ function toLookup(
         ? "fresh"
         : "stale";
   return {
-    ...(entry?.identity === undefined ? {} : { identity: entry.identity }),
+    ...(identity === undefined ? {} : { identity }),
     cacheState,
-    refreshState
+    refreshState,
+    ...(entry !== undefined && entry.status !== "unavailable" && entry.fetchedAt > 0
+      ? { refreshedAt: entry.fetchedAt }
+      : {}),
+    ...(entry?.nextRetryAt === undefined ? {} : { nextRetryAt: entry.nextRetryAt }),
+    ...(avatarCache === undefined ? {} : { avatarCache })
   };
+}
+
+function toAvatarCacheStatus(
+  thumbnail: Awaited<ReturnType<GitHubAvatarThumbnailStore["read"]>>,
+  refreshState?: "in-flight"
+): GitHubCommitAuthorAvatarCacheStatus | undefined {
+  if (thumbnail.cacheState === "fresh" && thumbnail.refreshState === "idle") {
+    return undefined;
+  }
+  const effectiveRefreshState = refreshState ?? thumbnail.refreshState;
+  if (effectiveRefreshState !== "in-flight" && effectiveRefreshState !== "backing-off") {
+    return undefined;
+  }
+  return {
+    cacheState: thumbnail.cacheState === "stale" ? "stale" : "miss",
+    refreshState: effectiveRefreshState,
+    ...(thumbnail.refreshedAt === undefined ? {} : { refreshedAt: thumbnail.refreshedAt }),
+    ...(thumbnail.nextRetryAt === undefined ? {} : { nextRetryAt: thumbnail.nextRetryAt })
+  };
+}
+
+function refreshStateFor(
+  entry: CacheEntry | undefined,
+  now: number
+): GitHubCommitAuthorIdentityLookup["refreshState"] {
+  return entry === undefined || (entry.nextRetryAt !== undefined && entry.nextRetryAt > now)
+    ? "backing-off"
+    : "idle";
 }
 
 function notEligibleLookup(): GitHubCommitAuthorIdentityLookup {
