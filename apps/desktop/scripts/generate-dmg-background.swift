@@ -4,6 +4,12 @@ import AppKit
 import CoreText
 import Foundation
 
+// Regenerates apps/desktop/build/dmg-background.png for PwrGit.
+// Same composition as the PwrAgent / PwrSnap installers — dark branded pill
+// at the top, a fat tangerine arrow pointing from the app icon to the
+// Applications alias, and a muted instruction line at the bottom — with
+// PwrGit's own wordmark and subtitle.
+
 /// Register a font file from disk so its PostScript name becomes resolvable via
 /// NSFont(name:size:). Returns the resolved PostScript name on success.
 func registerFont(at path: String) -> String? {
@@ -24,7 +30,7 @@ func registerFont(at path: String) -> String? {
   return psName
 }
 
-// PwrGit DMG window and icon layout — keep in sync with electron-builder.yml.
+// DMG window and icon layout — keep in sync with electron-builder.yml dmg section.
 let width = 660
 let height = 400
 let iconSize = 112
@@ -38,14 +44,14 @@ let geistBoldPath = "build/fonts/Geist-Bold.ttf"
 let geistBoldName = registerFont(at: geistBoldPath)
 
 struct Color {
-  static let background = NSColor(deviceRed: 246 / 255.0, green: 246 / 255.0, blue: 246 / 255.0, alpha: 1)
-  static let pillBackground = NSColor(deviceRed: 26 / 255.0, green: 23 / 255.0, blue: 20 / 255.0, alpha: 1)
-  static let text = NSColor(deviceRed: 245 / 255.0, green: 239 / 255.0, blue: 227 / 255.0, alpha: 1)
-  static let muted = NSColor(deviceRed: 138 / 255.0, green: 130 / 255.0, blue: 117 / 255.0, alpha: 1)
-  // PwrGit's tangerine-copper primary accent (#e8743a), pinned in device RGB
-  // so the package artwork and UI use precisely the same hue.
-  static let accent = NSColor(deviceRed: 232 / 255.0, green: 116 / 255.0, blue: 58 / 255.0, alpha: 1)
-  static let arrowShaft = accent
+  static let background = NSColor(calibratedRed: 0.965, green: 0.965, blue: 0.965, alpha: 1)
+  static let pillBackground = NSColor(calibratedRed: 0.12, green: 0.12, blue: 0.12, alpha: 1)
+  static let text = NSColor(calibratedRed: 0.969, green: 0.953, blue: 0.922, alpha: 1)
+  static let muted = NSColor(calibratedRed: 0.549, green: 0.522, blue: 0.478, alpha: 1)
+  // Brand tangerine — design system #ff8a1f. Pinned in deviceRGB so the
+  // rendered pixels land exactly there; calibratedRGB drifts it to #ee894a.
+  static let accent = NSColor(deviceRed: 255 / 255.0, green: 138 / 255.0, blue: 31 / 255.0, alpha: 1)
+  static let arrowShaft = NSColor(deviceRed: 255 / 255.0, green: 138 / 255.0, blue: 31 / 255.0, alpha: 1)
 }
 
 func renderBackground() -> NSBitmapImageRep {
@@ -71,7 +77,6 @@ func renderBackground() -> NSBitmapImageRep {
   let h = CGFloat(height)
   let w = CGFloat(width)
 
-  // Light background
   Color.background.setFill()
   NSRect(x: 0, y: 0, width: w, height: h).fill()
 
@@ -87,8 +92,7 @@ func renderBackground() -> NSBitmapImageRep {
   Color.pillBackground.setFill()
   pill.fill()
 
-  // Logo: "Pwr" + "Git" — Geist Bold (brand display), falling back to
-  // system bold if the vendored font failed to register.
+  // Logo: "Pwr" + "Git" — Geist Bold, falling back to system bold.
   let logoFont: NSFont = {
     if let name = geistBoldName, let f = NSFont(name: name, size: 40) { return f }
     return NSFont.systemFont(ofSize: 40, weight: .bold)
@@ -105,7 +109,7 @@ func renderBackground() -> NSBitmapImageRep {
 
   // Subtitle
   let subtitleFont = NSFont.systemFont(ofSize: 11, weight: .medium)
-  let subtitle = "repos / worktrees"
+  let subtitle = "worktrees / lineage"
   let subtitleAttrs: [NSAttributedString.Key: Any] = [.font: subtitleFont, .foregroundColor: Color.muted]
   let subtitleSize = subtitle.size(withAttributes: subtitleAttrs)
   subtitle.draw(
@@ -119,7 +123,6 @@ func renderBackground() -> NSBitmapImageRep {
   let arrowY = h - CGFloat(iconY)
   let shaftThickness: CGFloat = 18
 
-  // Shaft — rounded rectangle
   let shaft = NSBezierPath(
     roundedRect: NSRect(
       x: arrowStartX,
@@ -133,7 +136,6 @@ func renderBackground() -> NSBitmapImageRep {
   Color.arrowShaft.setFill()
   shaft.fill()
 
-  // Arrowhead — solid orange triangle
   Color.accent.setFill()
   let headHeight: CGFloat = 48
   let headWidth: CGFloat = 32
@@ -159,7 +161,6 @@ func renderBackground() -> NSBitmapImageRep {
   return bitmap
 }
 
-// Single 1x PNG — no multi-resolution TIFF.
 let rep = renderBackground()
 
 guard let pngData = rep.representation(using: .png, properties: [:]) else {

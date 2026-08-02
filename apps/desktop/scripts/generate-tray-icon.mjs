@@ -1,8 +1,15 @@
 #!/usr/bin/env node
-// Generates PwrGit's tray assets from the same provisional commit-graph mark
-// used by generate-app-icon.swift. Keep the output names: Electron's
-// nativeImage selects @2x/@3x siblings automatically, and macOS treats the
-// `-template` family as an alpha-only image it can tint for any menubar.
+// Generates the macOS menubar template PNGs (and the colored Windows/Linux
+// tray PNGs) from the PwrGit brand mark. Output:
+//   apps/desktop/build/tray-icon-template{,@2x,@3x}.png  (alpha-only)
+//   apps/desktop/build/tray-icon{,@2x,@3x}.png           (tangerine)
+//
+// Template PNGs on macOS are alpha-only; the system inverts them to match
+// dark / light / accent menubars. Windows and Linux draw the icon as-is in
+// the notification area, so those carry the tangerine brand accent.
+//
+// Run via:
+//   pnpm --filter @pwrgit/desktop tray-icon
 
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -10,58 +17,51 @@ import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const desktopRoot = resolve(here, "..");
-const buildDir = resolve(desktopRoot, "build");
+const repoRoot = resolve(here, "..");
+const buildDir = resolve(repoRoot, "build");
 mkdirSync(buildDir, { recursive: true });
 
-const COLORS = {
-  main: "#e8743a",
-  branchGreen: "#62c882",
-  branchBlue: "#7aa2f7"
-};
-
-function svgFor(colors) {
+// Lineage mark from the design system (assets/logo-pwrgit.svg), scaled up to
+// fill the menubar tile. The design-system SVG uses ~58% of the 128px
+// viewBox, which reads tiny next to other menubar icons; this variant spans
+// ~88% with a proportionally thicker stroke. The dimmed branch keeps the
+// same 0.55 alpha at every size — in the template PNG that becomes partial
+// alpha, which macOS tints along with the rest. The dim tier uses a GROUP
+// opacity (not per-stroke stroke-opacity) so the arc and the branch ring
+// composite once; per-stroke alpha would double up where they overlap.
+const ACCENT = "#ff8a1f";
+function svgFor(stroke) {
   return `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <g fill="none" stroke-width="11" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M103 35 C84 35 84 64 64 64" stroke="${colors.branchBlue}" />
-    <path d="M25 94 C44 94 44 108 64 108" stroke="${colors.branchGreen}" />
-    <path d="M64 12 V116" stroke="${colors.main}" />
-  </g>
-  <g>
-    <circle cx="64" cy="12" r="10" fill="${colors.main}" />
-    <circle cx="64" cy="64" r="10" fill="${colors.main}" />
-    <circle cx="64" cy="116" r="10" fill="${colors.main}" />
-    <circle cx="103" cy="35" r="10" fill="${colors.branchBlue}" />
-    <circle cx="25" cy="94" r="10" fill="${colors.branchGreen}" />
+  <g fill="none" stroke="${stroke}" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+    <g opacity="0.55">
+      <path d="M36 84 C36 56 56 44 77 44" />
+      <circle cx="92" cy="44" r="15" />
+    </g>
+    <path d="M36 39 V89" />
+    <circle cx="36" cy="24" r="15" />
+    <circle cx="36" cy="104" r="15" />
   </g>
 </svg>
 `.trim();
 }
 
-async function emit(svg, baseName, targetPx, suffix) {
+async function emit(svgStr, baseName, targetPx, suffix) {
   const out = resolve(buildDir, `${baseName}${suffix}.png`);
-  await sharp(Buffer.from(svg), { density: 72 * (targetPx / 16) })
-    .resize(targetPx, targetPx, {
-      fit: "contain",
-      background: { r: 0, g: 0, b: 0, alpha: 0 }
-    })
+  await sharp(Buffer.from(svgStr), { density: 72 * (targetPx / 16) })
+    .resize(targetPx, targetPx, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
     .png({ compressionLevel: 9 })
     .toFile(out);
   console.log(`wrote ${out}`);
 }
 
-const templateColors = { main: "black", branchGreen: "black", branchBlue: "black" };
-const TEMPLATE_SVG = svgFor(templateColors);
-const COLORED_SVG = svgFor(COLORS);
+const TEMPLATE_SVG = svgFor("black");
+const COLORED_SVG = svgFor(ACCENT);
 
 await Promise.all([
-  // macOS menubar template: opaque black contributes only alpha; macOS applies
-  // the actual dark/light/accent tint when the future tray feature loads it.
   emit(TEMPLATE_SVG, "tray-icon-template", 16, ""),
   emit(TEMPLATE_SVG, "tray-icon-template", 32, "@2x"),
   emit(TEMPLATE_SVG, "tray-icon-template", 48, "@3x"),
-  // Windows and Linux have no template tinting, so carry the graph colors.
   emit(COLORED_SVG, "tray-icon", 16, ""),
   emit(COLORED_SVG, "tray-icon", 32, "@2x"),
   emit(COLORED_SVG, "tray-icon", 48, "@3x")

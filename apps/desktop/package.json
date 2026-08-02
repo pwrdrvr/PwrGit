@@ -16,6 +16,7 @@
     "generate:dmg-background": "swift ./scripts/generate-dmg-background.swift ./build/dmg-background.png",
     "generate:tray-icon": "node ./scripts/generate-tray-icon.mjs",
     "generate:branding-assets": "pnpm run generate:app-icon && pnpm run generate:tray-icon && pnpm run generate:dmg-background",
+    "tray-icon": "node ./scripts/generate-tray-icon.mjs",
     "postinstall": "electron-rebuild -f",
     "preview": "electron-vite preview",
     "rebuild:electron-native": "electron-rebuild -f",

@@ -3,20 +3,31 @@
 import AppKit
 import Foundation
 
-// Temporary PwrGit brand mark. This deterministic source is intentionally
-// easy to replace when Claude Design supplies the final artwork: retain the
-// output sizes and packaging contract below, and swap only renderIcon().
+// Regenerates apps/desktop/build/icon.iconset/* and build/icon.png for PwrGit.
+// Mirrors PwrSnap's generate-app-icon.swift: same warm near-black rounded-rect
+// tile and the same deviceRGB accent, with the PwrGit lineage mark (a commit
+// trunk plus one dimmed branch) in place of PwrSnap's stacked frames.
+//
+//   swift scripts/generate-app-icon.swift build/icon.iconset
+//   iconutil -c icns build/icon.iconset -o build/icon.icns
+
 let outputDir = CommandLine.arguments.dropFirst().first ?? "build/icon.iconset"
 
 struct Color {
-  // PwrGit's warm-charcoal application surfaces, interpolated in encoded
-  // device RGB so the generated pixels match the product palette exactly.
-  static let bgTop: (r: Double, g: Double, b: Double) = (26, 23, 20)
+  // Warm near-black vertical gradient shared with PwrAgent / PwrSnap, as
+  // 0-255 device-RGB endpoints (image top = lighter, bottom = near-black).
+  // Interpolated per scanline in encoded space below — NSGradient would
+  // interpolate in linear light and render the upper half too bright.
+  static let bgTop: (r: Double, g: Double, b: Double) = (30, 26, 20)
   static let bgBottom: (r: Double, g: Double, b: Double) = (10, 9, 8)
-  // The graph colors are the first three lanes from PwrGit's commit graph.
-  static let main = NSColor(deviceRed: 232 / 255.0, green: 116 / 255.0, blue: 58 / 255.0, alpha: 1)
-  static let branchGreen = NSColor(deviceRed: 98 / 255.0, green: 200 / 255.0, blue: 130 / 255.0, alpha: 1)
-  static let branchBlue = NSColor(deviceRed: 122 / 255.0, green: 162 / 255.0, blue: 247 / 255.0, alpha: 1)
+  // Accent orange — the sibling app-icon accent, rgb(232,116,58) / #e8743a.
+  // Pinned in deviceRGB so output pixels land on that exact value.
+  static let accent = NSColor(deviceRed: 232 / 255.0, green: 116 / 255.0, blue: 58 / 255.0, alpha: 1)
+  // Dimmed tier for the side branch — the same hue at 55%, matching the
+  // "other people's lanes are greyed" default of the lineage view. Applied as
+  // a transparency-layer alpha, not a per-stroke alpha, so the arc and the
+  // branch ring don't double up where they overlap.
+  static let dimAlpha: CGFloat = 0.55
 }
 
 func renderIcon(size: Int) -> NSBitmapImageRep {
@@ -39,18 +50,17 @@ func renderIcon(size: Int) -> NSBitmapImageRep {
 
   let s = CGFloat(size)
   let scale = s / 1024.0
+  func k(_ v: CGFloat) -> CGFloat { v * scale }
 
-  // A macOS-style rounded icon tile. Fill the gradient one scanline at a
-  // time in device RGB; NSGradient interpolates in linear light and would
-  // otherwise drift from PwrGit's established warm-dark palette.
-  let cornerRadius = 180 * scale
-  let background = NSBezierPath(
-    roundedRect: NSRect(x: 0, y: 0, width: s, height: s),
-    xRadius: cornerRadius,
-    yRadius: cornerRadius
-  )
+  // Rounded-rect background — vertical gradient filled per scanline in
+  // device-RGB (encoded) space so the ramp is linear in the output pixels.
+  // The bitmap context is y-up, so image row 0 (top, lighter) maps to the
+  // highest AppKit y.
+  let cornerRadius = k(180)
+  let bg = NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: s, height: s),
+                        xRadius: cornerRadius, yRadius: cornerRadius)
   NSGraphicsContext.saveGraphicsState()
-  background.addClip()
+  bg.addClip()
   let rows = Int(s)
   for row in 0..<rows {
     let t = rows > 1 ? Double(row) / Double(rows - 1) : 0
@@ -62,73 +72,55 @@ func renderIcon(size: Int) -> NSBitmapImageRep {
   }
   NSGraphicsContext.restoreGraphicsState()
 
-  // Placeholder product mark: a compact, readable git graph. It uses the
-  // same primary, green, and blue lane colors as the graph in the app so the
-  // provisional icon feels native to PwrGit without borrowing another Pwr
-  // product's mark.
-  let strokeWidth = 58 * scale
-  let nodeRadius = 67 * scale
-  let mainX = 492 * scale
-  let topY = 800 * scale
-  let middleY = 512 * scale
-  let bottomY = 232 * scale
+  // PwrGit mark — authored in a 1024 box, AppKit y-up.
+  // Trunk at x=352 with a commit node at each end; one branch peels off the
+  // trunk and rises to its own node at the right, drawn at 55% so the mark
+  // reads "your lane bright, the other lane dimmed".
+  let strokeWidth = k(56)
+  let nodeRadius = k(84)
 
-  func stroke(_ path: NSBezierPath, color: NSColor) {
-    path.lineWidth = strokeWidth
-    path.lineCapStyle = .round
-    path.lineJoinStyle = .round
+  func ring(_ cx: CGFloat, _ cy: CGFloat, _ color: NSColor) {
+    let p = NSBezierPath(ovalIn: NSRect(x: k(cx) - nodeRadius, y: k(cy) - nodeRadius,
+                                        width: nodeRadius * 2, height: nodeRadius * 2))
+    p.lineWidth = strokeWidth
     color.setStroke()
-    path.stroke()
+    p.stroke()
   }
 
-  func node(x: CGFloat, y: CGFloat, color: NSColor) {
-    color.setFill()
-    NSBezierPath(
-      ovalIn: NSRect(
-        x: x - nodeRadius,
-        y: y - nodeRadius,
-        width: nodeRadius * 2,
-        height: nodeRadius * 2
-      )
-    ).fill()
-  }
+  // Branch arc + branch node (dim). Both go into one transparency layer so
+  // the composite is a flat 55% — overlapping strokes inside the layer stay
+  // opaque relative to each other instead of compounding into a darker patch.
+  let cg = NSGraphicsContext.current!.cgContext
+  cg.setAlpha(Color.dimAlpha)
+  cg.beginTransparencyLayer(auxiliaryInfo: nil)
+  let branch = NSBezierPath()
+  branch.move(to: NSPoint(x: k(352), y: k(424)))
+  branch.curve(to: NSPoint(x: k(588), y: k(620)),
+               controlPoint1: NSPoint(x: k(352), y: k(554)),
+               controlPoint2: NSPoint(x: k(470), y: k(620)))
+  branch.lineWidth = strokeWidth
+  branch.lineCapStyle = .round
+  Color.accent.setStroke()
+  branch.stroke()
+  ring(672, 620, Color.accent)
+  cg.endTransparencyLayer()
+  cg.setAlpha(1)
 
-  // Branches are drawn first so the tangerine trunk owns merge junctions.
-  let blueBranch = NSBezierPath()
-  blueBranch.move(to: NSPoint(x: 748 * scale, y: 726 * scale))
-  blueBranch.curve(
-    to: NSPoint(x: mainX, y: middleY),
-    controlPoint1: NSPoint(x: 628 * scale, y: 726 * scale),
-    controlPoint2: NSPoint(x: 650 * scale, y: middleY)
-  )
-  stroke(blueBranch, color: Color.branchBlue)
-
-  let greenBranch = NSBezierPath()
-  greenBranch.move(to: NSPoint(x: 268 * scale, y: 320 * scale))
-  greenBranch.curve(
-    to: NSPoint(x: mainX, y: bottomY),
-    controlPoint1: NSPoint(x: 392 * scale, y: 320 * scale),
-    controlPoint2: NSPoint(x: 352 * scale, y: bottomY)
-  )
-  stroke(greenBranch, color: Color.branchGreen)
-
+  // Trunk (full)
   let trunk = NSBezierPath()
-  trunk.move(to: NSPoint(x: mainX, y: topY))
-  trunk.line(to: NSPoint(x: mainX, y: bottomY))
-  stroke(trunk, color: Color.main)
-
-  node(x: mainX, y: topY, color: Color.main)
-  node(x: mainX, y: middleY, color: Color.main)
-  node(x: mainX, y: bottomY, color: Color.main)
-  node(x: 748 * scale, y: 726 * scale, color: Color.branchBlue)
-  node(x: 268 * scale, y: 320 * scale, color: Color.branchGreen)
+  trunk.move(to: NSPoint(x: k(352), y: k(384)))
+  trunk.line(to: NSPoint(x: k(352), y: k(640)))
+  trunk.lineWidth = strokeWidth
+  trunk.lineCapStyle = .round
+  Color.accent.setStroke()
+  trunk.stroke()
+  ring(352, 724, Color.accent)
+  ring(352, 300, Color.accent)
 
   NSGraphicsContext.restoreGraphicsState()
   return bitmap
 }
 
-// Apple's required iconset names. Keep this complete even though several
-// sizes share pixel dimensions; iconutil uses the names to assign scale.
 let sizes: [(Int, String)] = [
   (16, "icon_16x16.png"),
   (32, "icon_16x16@2x.png"),
@@ -150,8 +142,7 @@ for (size, filename) in sizes {
   guard let pngData = rep.representation(using: .png, properties: [:]) else {
     fatalError("Unable to create PNG for \(filename)")
   }
-  let file = outputURL.appendingPathComponent(filename)
-  try pngData.write(to: file)
+  try pngData.write(to: outputURL.appendingPathComponent(filename))
   print("  \(filename) (\(size)x\(size))")
 }
 
@@ -159,8 +150,7 @@ let dockIconRep = renderIcon(size: 1024)
 guard let dockIconPngData = dockIconRep.representation(using: .png, properties: [:]) else {
   fatalError("Unable to create PNG for icon.png")
 }
-let dockIconFile = outputURL.deletingLastPathComponent().appendingPathComponent("icon.png")
-try dockIconPngData.write(to: dockIconFile)
+try dockIconPngData.write(to: outputURL.deletingLastPathComponent().appendingPathComponent("icon.png"))
 print("  icon.png (1024x1024)")
 
 print("Generated \(sizes.count) icon variants in \(outputDir)")
