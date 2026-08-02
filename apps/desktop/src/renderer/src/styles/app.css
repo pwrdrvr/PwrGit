@@ -2772,28 +2772,32 @@ body.is-col-resizing {
   background: var(--text-muted);
 }
 .pr-chip--open .pr-chip__dot {
-  background: var(--info);
+  /* PwrGit has lifecycle data but not a check rollup. Gray is intentionally
+     neutral; blue would suggest a state the app cannot currently explain. */
+  background: var(--status-suspended);
 }
 .pr-chip--merged .pr-chip__dot {
-  background: var(--success-bright);
+  background: var(--brand-purple);
 }
 .pr-chip--closed .pr-chip__dot {
-  background: var(--text-subtle);
-}
-.pr-chip--merged {
-  color: var(--success-bright);
+  background: var(--status-closed);
+  box-shadow: 0 0 0 1px var(--pr-dot-ring);
 }
 .pr-chip--draft .pr-chip__dot {
-  opacity: 0.7;
+  transform: translateY(-1px);
+}
+.pr-chip--draft .pr-chip__label {
+  transform: translateY(-1px);
 }
 .pr-chip__draft-bar {
   position: absolute;
   bottom: 2px;
-  left: 7px;
-  width: 12px;
+  left: 50%;
+  width: 16px;
   height: 2px;
   border-radius: 999px;
-  background: var(--text-subtle);
+  transform: translateX(-50%);
+  background: var(--status-suspended);
   pointer-events: none;
 }
 

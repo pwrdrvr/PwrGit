@@ -6,6 +6,9 @@ import { dispatch } from "../../lib/pwrgit";
  *  the browser; ⌥-click copies its URL. The tooltip carries the full story —
  *  number, title, state, draft. */
 export function PrChip({ pr }: { pr: PrSummary }) {
+  // GitHub's terminal lifecycle wins over a stale draft bit. This also mirrors
+  // PwrAgnt: the bar is an affordance for open drafts only.
+  const isDraft = pr.state === "open" && pr.isDraft;
   const label =
     pr.state === "merged"
       ? `merged #${pr.number}`
@@ -20,12 +23,12 @@ export function PrChip({ pr }: { pr: PrSummary }) {
 
   return (
     <span
-      className={`pr-chip pr-chip--${pr.state}${pr.isDraft ? " pr-chip--draft" : ""}`}
+      className={`pr-chip pr-chip--${pr.state}${isDraft ? " pr-chip--draft" : ""}`}
       role="button"
       tabIndex={0}
       aria-label={`PR #${pr.number} (${pr.state}) — Enter opens in browser`}
       title={`#${pr.number} — ${pr.title || "untitled"}\n${pr.state}${
-        pr.isDraft ? " · draft" : ""
+        isDraft ? " · draft" : ""
       }\nClick to open · ⌥-click to copy URL`}
       onClick={(e) => {
         e.stopPropagation();
@@ -41,7 +44,7 @@ export function PrChip({ pr }: { pr: PrSummary }) {
     >
       <span className="pr-chip__dot" aria-hidden="true" />
       <span className="pr-chip__label">{label}</span>
-      {pr.isDraft && pr.state === "open" && (
+      {isDraft && (
         <span className="pr-chip__draft-bar" aria-hidden="true" />
       )}
     </span>

@@ -29,6 +29,7 @@ export function RepoRow({
   onContextWorktree,
   onToggleWorktreePin,
   onRemoveWorktree,
+  onRefreshPullRequest,
   onRemoveSelected,
   onClearSelected,
   onCycleSort,
@@ -59,6 +60,7 @@ export function RepoRow({
   ) => void;
   onToggleWorktreePin: (worktreeId: string, pinned: boolean) => void;
   onRemoveWorktree: (worktreeId: string) => void;
+  onRefreshPullRequest: (branch: string) => void;
   onRemoveSelected: () => void;
   onClearSelected: () => void;
   onCycleSort: () => void;
@@ -132,6 +134,12 @@ export function RepoRow({
                 onToggleWorktreePin(primary.id, !primary.pinned)
               }
               onRemove={() => onRemoveWorktree(primary.id)}
+              {...(primary.isDefaultBranch
+                ? {}
+                : {
+                    onRefreshPullRequest: () =>
+                      onRefreshPullRequest(primary.branch)
+                  })}
               onDragStart={() => undefined}
               onDragOver={() => undefined}
               onDrop={() => undefined}
@@ -239,6 +247,11 @@ export function RepoRow({
               onContextMenu={(e) => onContextWorktree(w, e, displayIds)}
               onTogglePin={() => onToggleWorktreePin(w.id, !w.pinned)}
               onRemove={() => onRemoveWorktree(w.id)}
+              {...(w.isDefaultBranch
+                ? {}
+                : {
+                    onRefreshPullRequest: () => onRefreshPullRequest(w.branch)
+                  })}
               onDragStart={() => {
                 dragId.current = w.id;
               }}

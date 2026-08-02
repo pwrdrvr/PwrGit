@@ -7,6 +7,8 @@ import type { PrService } from "./pr-service";
 export function registerGitHubHandlers(bus: CommandBus, prs: PrService): void {
   bus.register("pr:refresh", async (req) => {
     const changed = await prs.refreshRepo(req.repoId, {
+      ...(req.branches !== undefined ? { branches: req.branches } : {}),
+      ...(req.trigger !== undefined ? { trigger: req.trigger } : {}),
       force: req.force ?? false
     });
     if (changed.size > 0) {

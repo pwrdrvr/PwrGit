@@ -58,6 +58,7 @@ export function App() {
     removeWorktrees,
     persistWorktreeOrder,
     computeRepoState,
+    refreshPullRequest,
     refreshRepoWorktrees
   } = useRepoTree(activeProfile?.id ?? null);
 
@@ -211,6 +212,29 @@ export function App() {
   const selectedWorktree =
     selectedRepo?.worktrees.find((w) => w.id === selection?.worktreeId) ?? null;
 
+  // Match PwrAgnt's focused-PR policy without sweeping every repo: selecting a
+  // linked worktree looks up only its branch now and once a minute. Main owns
+  // the per-branch cooldown, cache, and targeted cross-window update.
+  useEffect(() => {
+    if (
+      selectedRepo === null ||
+      selectedWorktree === null ||
+      selectedWorktree.isDefaultBranch
+    ) {
+      return;
+    }
+    const refresh = (): void =>
+      refreshPullRequest(selectedRepo.id, selectedWorktree.branch, "scheduled");
+    refresh();
+    const intervalId = window.setInterval(refresh, 60_000);
+    return () => window.clearInterval(intervalId);
+  }, [
+    refreshPullRequest,
+    selectedRepo?.id,
+    selectedWorktree?.branch,
+    selectedWorktree?.isDefaultBranch
+  ]);
+
   const gridTemplateColumns = `${sidebar.width}px minmax(0, 1fr) ${
     railCollapsed ? "0px" : `${rail.width}px`
   }`;
@@ -241,6 +265,9 @@ export function App() {
           onExpandRepo={computeRepoState}
           refreshingRepoIds={refreshingRepoIds}
           onRefreshRepo={(repo) => void refreshRepoWorktrees(repo)}
+          onRefreshPullRequest={(repoId, branch) =>
+            refreshPullRequest(repoId, branch, "user")
+          }
           onAddFolder={() => void addFolders()}
           onOpenSearch={() => setOverlayOpen(true)}
           onNewProfile={() => setProfileModal({ mode: "create" })}
@@ -278,6 +305,7 @@ export function App() {
                 style={{ display: diffTarget !== null ? "none" : "flex" }}
               >
                 <LineageGraph
+                  repoId={selectedRepo.id}
                   worktreeId={selectedWorktree.id}
                   viewingBranch={selectedWorktree.branch}
                   activeEmail={activeProfile?.email ?? ""}

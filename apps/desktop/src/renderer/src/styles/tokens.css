@@ -54,6 +54,14 @@
   --danger-soft: rgba(232, 90, 58, 0.16);
   --info: #6b9ad8;
 
+  /* Pull-request status colors match PwrAgnt. An open PR has no check result
+     in PwrGit yet, so it uses the suspended gray rather than implying a
+     meaningful blue state. */
+  --status-suspended: #6b6660;
+  --status-closed: #000000;
+  --brand-purple: #8a6dc4;
+  --pr-dot-ring: color-mix(in srgb, var(--text-primary) 32%, transparent);
+
   /* Radii */
   --radius-sm: 5px;
   --radius-md: 7px;
