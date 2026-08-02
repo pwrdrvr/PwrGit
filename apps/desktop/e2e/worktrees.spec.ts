@@ -108,6 +108,12 @@ test("reconciles worktrees changed outside PwrGit", async () => {
     "1 discovered · 1 updated"
   );
 
+  await window.getByRole("button", { name: "Dismiss" }).click();
+  await refresh.click();
+  await expect(window.locator(".app-toast__message")).toHaveText(
+    "Worktree list is up to date."
+  );
+
   // Reconciliation updates the command-palette search index in the same
   // transaction, not only the visible sidebar rows.
   await window.getByRole("button", { name: /Jump to repo/i }).click();

@@ -248,7 +248,7 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
         message:
           changes.length > 0
             ? changes.join(" · ")
-            : "Already reconciled with Git."
+            : "Worktree list is up to date."
       });
     } finally {
       setRefreshingRepoIds((ids) => {
