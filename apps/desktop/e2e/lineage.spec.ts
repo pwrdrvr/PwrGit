@@ -86,9 +86,12 @@ test("hovering a lineage row opens its commit context window", async () => {
   await expect(card).toContainText("Changes");
   await expect(card).toContainText("+1");
   await expect(card).toContainText("−0");
-  await expect(card).toContainText("Viewing branch");
-  await expect(card).toContainText("Base branch");
-  await expect(card).toContainText("main");
+  // This row belongs to the sibling feature branch, not the worktree we are
+  // viewing. Shared/off-head commits must not inherit the selected worktree's
+  // branch context (in particular, a detached checkout must not label them
+  // as detached).
+  await expect(card).not.toContainText("Viewing branch");
+  await expect(card).not.toContainText("Base branch");
   const shortCopy = card.getByRole("button", {
     name: "Copy short commit hash"
   });

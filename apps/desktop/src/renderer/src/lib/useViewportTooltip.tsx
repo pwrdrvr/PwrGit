@@ -150,6 +150,7 @@ export function useViewportTooltip(
 ): ViewportTooltip {
   const tooltipRef = useRef<HTMLDivElement>(null);
   const dismissTimerRef = useRef<number | undefined>(undefined);
+  const pointerInInteractiveTooltipRef = useRef(false);
   const [state, setState] = useState<TooltipState | undefined>(undefined);
 
   // Measure after paint and clamp the tooltip into the viewport. Generic
@@ -183,6 +184,7 @@ export function useViewportTooltip(
 
   const hide = useCallback((): void => {
     cancelScheduledHide();
+    pointerInInteractiveTooltipRef.current = false;
     setState(undefined);
   }, [cancelScheduledHide]);
 
@@ -208,6 +210,7 @@ export function useViewportTooltip(
     anchor?: TooltipAnchor
   ): void => {
     cancelScheduledHide();
+    pointerInInteractiveTooltipRef.current = false;
     setState({
       content,
       targetRect: rectOf(target.getBoundingClientRect()),
@@ -222,13 +225,31 @@ export function useViewportTooltip(
   const visible = state !== undefined;
   useEffect(() => {
     if (!visible) return;
+    const onScroll = (): void => {
+      // Playwright and browsers can emit a scroll while bringing a control in
+      // this card into view. Once the pointer has reached an interactive card,
+      // that mechanical scroll must not make the card run away from its own
+      // controls. A scroll while outside the card still dismisses it normally.
+      if (interactive && pointerInInteractiveTooltipRef.current) return;
+      hide();
+    };
     window.addEventListener("blur", hide);
-    window.addEventListener("scroll", hide, { capture: true });
+    window.addEventListener("scroll", onScroll, { capture: true });
     return () => {
       window.removeEventListener("blur", hide);
-      window.removeEventListener("scroll", hide, { capture: true });
+      window.removeEventListener("scroll", onScroll, { capture: true });
     };
-  }, [visible, hide]);
+  }, [visible, hide, interactive]);
+
+  const enterInteractiveTooltip = useCallback((): void => {
+    pointerInInteractiveTooltipRef.current = true;
+    cancelScheduledHide();
+  }, [cancelScheduledHide]);
+
+  const leaveInteractiveTooltip = useCallback((): void => {
+    pointerInInteractiveTooltipRef.current = false;
+    scheduleHide();
+  }, [scheduleHide]);
 
   const tooltipNode =
     state && typeof document !== "undefined"
@@ -246,8 +267,8 @@ export function useViewportTooltip(
             }}
             {...(interactive
               ? {
-                  onMouseEnter: cancelScheduledHide,
-                  onMouseLeave: scheduleHide,
+                  onMouseEnter: enterInteractiveTooltip,
+                  onMouseLeave: leaveInteractiveTooltip,
                   onFocusCapture: cancelScheduledHide,
                   onBlurCapture: scheduleHide
                 }
