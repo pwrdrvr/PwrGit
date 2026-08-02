@@ -797,6 +797,16 @@ type UpstreamRef = {
   head: string;
 };
 
+type CheckedOutRef = {
+  branch: string;
+  head: string;
+};
+
+type RecoverySnapshot = Pick<
+  RemoteDivergence,
+  "branch" | "head" | "upstreamHead"
+>;
+
 const DIVERGENCE_LOG_FORMAT = "%H%x1f%s%x1e";
 
 function parseDivergenceCommits(stdout: string): DivergenceCommit[] {
@@ -856,6 +866,42 @@ async function resolveUpstream(
   return ok({ name, head });
 }
 
+async function resolveCheckedOutRef(
+  git: GitExec,
+  cwd: string
+): Promise<Result<CheckedOutRef>> {
+  const branchRaw = await git(["branch", "--show-current"], cwd);
+  if (!branchRaw.ok) return branchRaw;
+  const branch = requireExit0(branchRaw.value, ["branch", "--show-current"]);
+  if (!branch.ok) return branch;
+  const name = branch.value.stdout.trim();
+  if (name === "") {
+    return err({
+      kind: "remote",
+      code: "detached_head",
+      message: "This worktree is detached from a local branch."
+    });
+  }
+
+  const headRaw = await git(["rev-parse", "--verify", "HEAD"], cwd);
+  if (!headRaw.ok) return headRaw;
+  const verifiedHead = requireExit0(headRaw.value, [
+    "rev-parse",
+    "--verify",
+    "HEAD"
+  ]);
+  if (!verifiedHead.ok) return verifiedHead;
+  const head = verifiedHead.value.stdout.trim();
+  if (head === "") {
+    return err({
+      kind: "remote",
+      code: "no_head",
+      message: "This worktree has no checked-out commit."
+    });
+  }
+  return ok({ branch: name, head });
+}
+
 async function requireCleanWorktree(
   git: GitExec,
   cwd: string
@@ -884,21 +930,10 @@ export async function inspectRemoteDivergence(
   git: GitExec,
   cwd: string
 ): Promise<Result<RemoteDivergence>> {
+  const checkout = await resolveCheckedOutRef(git, cwd);
+  if (!checkout.ok) return checkout;
   const upstream = await resolveUpstream(git, cwd);
   if (!upstream.ok) return upstream;
-
-  const branchRaw = await git(["branch", "--show-current"], cwd);
-  if (!branchRaw.ok) return branchRaw;
-  const branch = requireExit0(branchRaw.value, ["branch", "--show-current"]);
-  if (!branch.ok) return branch;
-  const name = branch.value.stdout.trim();
-  if (name === "") {
-    return err({
-      kind: "remote",
-      code: "detached_head",
-      message: "This worktree is detached from a local branch."
-    });
-  }
 
   const [statusRaw, localRaw, upstreamRaw] = await Promise.all([
     git(["status", "--porcelain"], cwd),
@@ -925,7 +960,8 @@ export async function inspectRemoteDivergence(
     );
 
   return ok({
-    branch: name,
+    branch: checkout.value.branch,
+    head: checkout.value.head,
     upstream: upstream.value.name,
     upstreamHead: upstream.value.head,
     workingTreeClean: status.value.stdout.trim() === "",
@@ -938,13 +974,26 @@ export async function inspectRemoteDivergence(
 async function checkedRecoveryUpstream(
   git: GitExec,
   cwd: string,
-  expectedUpstreamHead: string
+  expected: RecoverySnapshot
 ): Promise<Result<UpstreamRef>> {
+  const checkout = await resolveCheckedOutRef(git, cwd);
+  if (!checkout.ok) return checkout;
+  if (
+    checkout.value.branch !== expected.branch ||
+    checkout.value.head !== expected.head
+  ) {
+    return err({
+      kind: "remote",
+      code: "checkout_changed",
+      message:
+        "The checked-out branch or commit changed while this comparison was open. Pull again to review the current history."
+    });
+  }
   const clean = await requireCleanWorktree(git, cwd);
   if (!clean.ok) return clean;
   const upstream = await resolveUpstream(git, cwd);
   if (!upstream.ok) return upstream;
-  if (upstream.value.head !== expectedUpstreamHead) {
+  if (upstream.value.head !== expected.upstreamHead) {
     return err({
       kind: "remote",
       code: "upstream_changed",
@@ -959,9 +1008,9 @@ async function checkedRecoveryUpstream(
 export async function resetToUpstream(
   git: GitExec,
   cwd: string,
-  expectedUpstreamHead: string
+  expected: RecoverySnapshot
 ): Promise<Result<void>> {
-  const upstream = await checkedRecoveryUpstream(git, cwd, expectedUpstreamHead);
+  const upstream = await checkedRecoveryUpstream(git, cwd, expected);
   if (!upstream.ok) return upstream;
   const raw = await git(["reset", "--hard", upstream.value.head], cwd);
   if (!raw.ok) return raw;
@@ -977,9 +1026,9 @@ export async function resetToUpstream(
 export async function rebaseOntoUpstream(
   git: GitExec,
   cwd: string,
-  expectedUpstreamHead: string
+  expected: RecoverySnapshot
 ): Promise<Result<void>> {
-  const upstream = await checkedRecoveryUpstream(git, cwd, expectedUpstreamHead);
+  const upstream = await checkedRecoveryUpstream(git, cwd, expected);
   if (!upstream.ok) return upstream;
   const raw = await git(["rebase", upstream.value.head], cwd);
   if (!raw.ok) return raw;

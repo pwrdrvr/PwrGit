@@ -86,7 +86,7 @@ export function registerRemoteHandlers(
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
     const startedAt = Date.now();
-    const result = await resetToUpstream(execGit, path, req.upstreamHead);
+    const result = await resetToUpstream(execGit, path, req);
     if (!result.ok) return result;
     logMain("info", "remote", `reset ${path} to upstream (${seconds(startedAt)})`);
     refresher.refreshWorktree(req.worktreeId);
@@ -97,7 +97,7 @@ export function registerRemoteHandlers(
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
     const startedAt = Date.now();
-    const result = await rebaseOntoUpstream(execGit, path, req.upstreamHead);
+    const result = await rebaseOntoUpstream(execGit, path, req);
     // A stopped rebase changes the checkout too; refresh so the Changes panel
     // and sync badges show the conflict state immediately.
     refresher.refreshWorktree(req.worktreeId);

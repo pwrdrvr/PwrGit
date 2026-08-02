@@ -155,7 +155,12 @@ export function WorktreeHeader({
     setRecoveryBusy(action);
     const result = await dispatch(
       action === "rebase" ? "remote:rebaseOntoUpstream" : "remote:resetToUpstream",
-      { worktreeId, upstreamHead: divergence.upstreamHead }
+      {
+        worktreeId,
+        branch: divergence.branch,
+        head: divergence.head,
+        upstreamHead: divergence.upstreamHead
+      }
     );
     if (
       recoveryOperation.current !== operation ||

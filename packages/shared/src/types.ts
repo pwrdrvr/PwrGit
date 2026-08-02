@@ -172,6 +172,8 @@ export type DivergenceCommit = {
  */
 export type RemoteDivergence = {
   branch: string;
+  /** Full object name of the checked-out local tip shown to the user. */
+  head: string;
   upstream: string;
   /** Full object name of the upstream tip shown to the user. */
   upstreamHead: string;

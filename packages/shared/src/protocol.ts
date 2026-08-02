@@ -289,14 +289,24 @@ export interface Commands {
     req: { worktreeId: string };
     res: RemoteDivergence;
   };
-  /** Move a clean local branch to the exact upstream tip the user inspected. */
+  /** Move the inspected clean local branch to the exact upstream tip shown. */
   "remote:resetToUpstream": {
-    req: { worktreeId: string; upstreamHead: string };
+    req: {
+      worktreeId: string;
+      branch: string;
+      head: string;
+      upstreamHead: string;
+    };
     res: null;
   };
-  /** Replay clean local-only commits on the exact inspected upstream tip. */
+  /** Replay the inspected clean local commits on the exact upstream tip shown. */
   "remote:rebaseOntoUpstream": {
-    req: { worktreeId: string; upstreamHead: string };
+    req: {
+      worktreeId: string;
+      branch: string;
+      head: string;
+      upstreamHead: string;
+    };
     res: null;
   };
 
