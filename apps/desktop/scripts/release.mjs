@@ -208,11 +208,15 @@ if (win && (winPublish || winUnsignedRelease)) {
 }
 
 if (!signStageOnly) {
-  // 1. Build (electron-vite -> apps/desktop/out/).
+  // 1. Check license notices before doing expensive release work.
+  step("license notices check");
+  runChecked("pnpm", ["licenses:check"], { cwd: repoRoot });
+
+  // 2. Build (electron-vite -> apps/desktop/out/).
   step("electron-vite build");
   runChecked("pnpm", ["--filter", "@pwrgit/desktop", "build"], { cwd: repoRoot });
 
-  // 2. Materialize a self-contained, flat node_modules under stage.
+  // 3. Materialize a self-contained, flat node_modules under stage.
   step("pnpm deploy --prod -> release-stage");
   if (existsSync(stageDir)) {
     rmSync(stageDir, { recursive: true, force: true });
@@ -224,12 +228,12 @@ if (!signStageOnly) {
     { cwd: repoRoot },
   );
 
-  // 3. Copy the build output, changelog, and electron-builder inputs into the
+  // 4. Copy the build output, notices, changelog, and electron-builder inputs into the
   //    stage so electron-builder finds them at well-known paths. pnpm deploy
   //    copies the package source tree (including out/ if it exists) into the
   //    stage; remove stale copies before our controlled cp to avoid nesting.
   step("seed stage with build output + builder inputs");
-  for (const dir of ["out", "build"]) {
+  for (const dir of ["out", "build", "resources"]) {
     const target = join(stageDir, dir);
     if (existsSync(target)) {
       rmSync(target, { recursive: true, force: true });
@@ -240,7 +244,9 @@ if (!signStageOnly) {
     join(desktopRoot, "electron-builder.yml"),
     join(stageDir, "electron-builder.yml"),
   );
-  copyFileSync(join(repoRoot, "CHANGELOG.md"), join(stageDir, "CHANGELOG.md"));
+  for (const file of ["LICENSE", "THIRD_PARTY_LICENSES", "CHANGELOG.md"]) {
+    copyFileSync(join(repoRoot, file), join(stageDir, file));
+  }
 
   if (prepareOnly) {
     step("prepared release-stage");
@@ -251,7 +257,7 @@ if (!signStageOnly) {
   throw new Error(`release-stage is missing at ${stageDir}`);
 }
 
-// 4. electron-builder.
+// 5. electron-builder.
 const builderArgs = [];
 if (win) {
   step(
@@ -285,7 +291,7 @@ if (win) {
 const cleanedArgs = builderArgs.filter((arg) => arg !== "");
 runChecked("node", [electronBuilderCli(), ...cleanedArgs], { cwd: stageDir });
 
-// 5. Post-build checks — fail loudly if forbidden files leaked into the asar
+// 6. Post-build checks — fail loudly if forbidden files leaked into the asar
 //    or a native payload came out single-arch.
 const dist = join(stageDir, "dist");
 
@@ -294,6 +300,9 @@ if (win) {
 
   step("verify packaged asar contents");
   runChecked("node", [join(desktopRoot, "scripts", "verify-asar-contents.mjs"), builtApp]);
+
+  step("verify embedded Git runtime notices");
+  runChecked("node", [join(desktopRoot, "scripts", "verify-embedded-git-notices.mjs"), builtApp]);
 
   step("verify installer artifact + write checksums");
   const checksumPath = writeWindowsChecksums(dist);
@@ -332,6 +341,9 @@ for (const binary of universalMachO) {
 
 step("verify packaged asar contents");
 runChecked("node", [join(desktopRoot, "scripts", "verify-asar-contents.mjs"), builtApp]);
+
+step("verify embedded Git runtime notices");
+runChecked("node", [join(desktopRoot, "scripts", "verify-embedded-git-notices.mjs"), builtApp]);
 
 step("done");
 console.log(`  artifacts: ${dist}`);

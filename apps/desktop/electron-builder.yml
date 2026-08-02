@@ -68,6 +68,10 @@ files:
   - "!**/node_modules/dugite/git/**"
 
 extraResources:
+  - from: LICENSE
+    to: LICENSE
+  - from: THIRD_PARTY_LICENSES
+    to: THIRD_PARTY_LICENSES
   - from: CHANGELOG.md
     to: CHANGELOG.md
   # The per-arch git distribution staged by scripts/beforepack-dugite-arch.mjs.
@@ -76,6 +80,16 @@ extraResources:
   # Mach-O binaries and keeps the (identical) symlinks from the x64 tree.
   - from: node_modules/dugite/git
     to: git
+  # Dugite's downloaded Git distribution omits these notice files. Ship them
+  # in the same resource directory as the binaries they govern.
+  - from: resources/embedded-git/COPYING
+    to: git/COPYING
+  - from: resources/embedded-git/LICENSE.git-lfs
+    to: git/LICENSE.git-lfs
+  - from: resources/embedded-git/LICENSE.git-credential-manager
+    to: git/LICENSE.git-credential-manager
+  - from: resources/embedded-git/NOTICE
+    to: git/NOTICE
 
 # Electron fuses — ASAR integrity is NOT on by default in electron-builder.
 # Enable it explicitly so the runtime aborts if the .asar is tampered with.

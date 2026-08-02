@@ -15,6 +15,8 @@ export function rebuildAppMenu(opts: {
   onManageProfiles: () => void;
   onOpenSettings: () => void;
   onOpenLogs: () => void;
+  onOpenLicense: () => void;
+  onOpenThirdPartyNotices: () => void;
   /** Settings → General → Developer Mode: expose Reload / Force Reload /
    *  Toggle Developer Tools (and their shortcuts) in the View menu. */
   developerMode: boolean;
@@ -121,6 +123,15 @@ export function rebuildAppMenu(opts: {
     {
       role: "help",
       submenu: [
+        {
+          label: "View License",
+          click: () => opts.onOpenLicense()
+        },
+        {
+          label: "Third-Party Notices",
+          click: () => opts.onOpenThirdPartyNotices()
+        },
+        { type: "separator" },
         {
           label: "Logs",
           accelerator: "CmdOrCtrl+Shift+L",
