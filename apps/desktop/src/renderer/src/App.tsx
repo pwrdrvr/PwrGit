@@ -51,12 +51,14 @@ export function App() {
     repos,
     loading,
     removalProgress,
+    refreshingRepoIds,
     setRepoPin,
     setWorktreePin,
     createWorktree,
     removeWorktrees,
     persistWorktreeOrder,
-    computeRepoState
+    computeRepoState,
+    refreshRepoWorktrees
   } = useRepoTree(activeProfile?.id ?? null);
 
   // Add one or more folders to the active profile in a single native dialog.
@@ -237,6 +239,8 @@ export function App() {
           onCreateWorktree={createWorktree}
           onPersistOrder={persistWorktreeOrder}
           onExpandRepo={computeRepoState}
+          refreshingRepoIds={refreshingRepoIds}
+          onRefreshRepo={(repo) => void refreshRepoWorktrees(repo)}
           onAddFolder={() => void addFolders()}
           onOpenSearch={() => setOverlayOpen(true)}
           onNewProfile={() => setProfileModal({ mode: "create" })}

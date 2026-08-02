@@ -567,6 +567,39 @@ input {
   font: 600 9.5px/1 var(--font-mono);
   cursor: pointer;
 }
+.wt-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.wt-refresh:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-hover-strong);
+}
+.wt-refresh:focus-visible {
+  outline: 1px solid var(--accent-bright);
+  outline-offset: 1px;
+}
+.wt-refresh:disabled {
+  cursor: default;
+}
+.wt-refresh.is-refreshing svg {
+  animation: wt-refresh-spin 800ms linear infinite;
+}
+@keyframes wt-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 .wt-row {
   position: relative;

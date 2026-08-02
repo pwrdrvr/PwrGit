@@ -9,6 +9,7 @@ import {
   type PrSummary,
   type Repo,
   type RepoSearchHit,
+  type RepoWorktreeRefresh,
   type Result,
   type Worktree
 } from "@pwrgit/shared";
@@ -197,11 +198,19 @@ export class RepoIndexer {
 
   /** Re-list an existing repo's worktrees (after create/remove), preserving
    *  its source, pins, and custom order (syncWorktrees only touches identity). */
-  async refreshRepoWorktrees(repoId: string): Promise<void> {
+  async refreshRepoWorktrees(
+    repoId: string
+  ): Promise<Result<RepoWorktreeRefresh>> {
     const repo = this.getRepo(repoId);
-    if (repo === null) return;
+    if (repo === null) {
+      return err({
+        kind: "repo",
+        code: "not_found",
+        message: "repo not found"
+      });
+    }
     const listed = await listWorktrees(this.git, repo.path);
-    if (!listed.ok) return;
+    if (!listed.ok) return listed;
     const primary = listed.value[0];
     // A repo row whose dir is actually a LINKED worktree of another repo (its
     // listed primary path isn't its own path) is a fossil — older builds could
@@ -210,12 +219,41 @@ export class RepoIndexer {
     // canonical repo reclaims its rows on its own next sync).
     if (primary !== undefined && !primary.bare && primary.path !== repo.path) {
       this.db.prepare("DELETE FROM repos WHERE id = ?").run(repoId);
-      return;
+      return err({
+        kind: "repo",
+        code: "not_canonical",
+        message: "repo path is a linked worktree of another repository"
+      });
     }
     const worktrees = listed.value
       .filter((w) => !w.bare)
       .map((w, i) => worktreeShape(w.path, w.branch, i === 0));
     this.syncWorktrees(repoId, worktrees);
+
+    const refreshed = this.getRepo(repoId);
+    if (refreshed === null) {
+      return err({
+        kind: "repo",
+        code: "refresh_failed",
+        message: "refreshed repo did not persist"
+      });
+    }
+
+    const before = new Map(repo.worktrees.map((w) => [w.id, w]));
+    const after = new Map(refreshed.worktrees.map((w) => [w.id, w]));
+    const added = refreshed.worktrees.filter((w) => !before.has(w.id)).length;
+    const removed = repo.worktrees.filter((w) => !after.has(w.id)).length;
+    const updated = refreshed.worktrees.filter((w) => {
+      const old = before.get(w.id);
+      return (
+        old !== undefined &&
+        (old.branch !== w.branch ||
+          old.path !== w.path ||
+          old.isPrimary !== w.isPrimary)
+      );
+    }).length;
+
+    return ok({ repo: refreshed, added, removed, updated });
   }
 
   /** ⌘F search: repos AND worktrees (by branch/path) across all profiles,

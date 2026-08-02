@@ -132,6 +132,72 @@ describe("RepoIndexer", () => {
     const result = await indexer.indexRepoAt(profileId, notRepo);
     expect(result.ok).toBe(false);
   });
+
+  it("reconciles external worktree additions, removals, and branch switches", async () => {
+    const isolatedRoot = mkdtempSync(join(tmpdir(), "pwrgit-refresh-"));
+    const repoPath = join(isolatedRoot, "repo");
+    const linkedPath = join(isolatedRoot, "linked");
+    const addedPath = join(isolatedRoot, "added");
+    initRepo(repoPath);
+    git(repoPath, ["worktree", "add", linkedPath, "-b", "feature"]);
+
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({
+      name: "Refresh",
+      email: "refresh@example.com",
+      roots: [isolatedRoot]
+    });
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
+    const indexed = (await isolatedIndexer.rescanProfile(profile)).find(
+      (repo) => repo.name === "repo"
+    );
+    if (indexed === undefined) throw new Error("repo missing");
+
+    const originalLinked = indexed.worktrees.find(
+      (w) => w.branch === "feature"
+    );
+    if (originalLinked === undefined) throw new Error("linked worktree missing");
+    isolatedIndexer.setWorktreePinned(originalLinked.id, true);
+    isolatedIndexer.setWorktreeOrder(indexed.id, [originalLinked.id]);
+
+    // These changes happen outside PwrGit. The cached index and search remain
+    // stale until this repo is explicitly reconciled.
+    git(linkedPath, ["switch", "-c", "feat/messaging-rbac-permissions"]);
+    git(repoPath, ["worktree", "add", addedPath, "-b", "external-added"]);
+    expect(isolatedIndexer.searchAll("rbac")).toHaveLength(0);
+    expect(isolatedIndexer.searchAll("external-added")).toHaveLength(0);
+
+    const first = await isolatedIndexer.refreshRepoWorktrees(indexed.id);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.value.added).toBe(1);
+    expect(first.value.removed).toBe(0);
+    expect(first.value.updated).toBe(1);
+    expect(
+      isolatedIndexer
+        .searchAll("rbac")
+        .some((h) => h.name === "feat/messaging-rbac-permissions")
+    ).toBe(true);
+    expect(
+      isolatedIndexer
+        .searchAll("external-added")
+        .some((h) => h.name === "external-added")
+    ).toBe(true);
+
+    const retained = first.value.repo.worktrees.find(
+      (w) => w.id === originalLinked.id
+    );
+    expect(retained?.pinned).toBe(true);
+    expect(retained?.order).toBe(0);
+
+    git(repoPath, ["worktree", "remove", addedPath]);
+    const second = await isolatedIndexer.refreshRepoWorktrees(indexed.id);
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value).toMatchObject({ added: 0, removed: 1, updated: 0 });
+    expect(isolatedIndexer.searchAll("external-added")).toHaveLength(0);
+  });
 });
 
 describe("searchAll (FTS5)", () => {

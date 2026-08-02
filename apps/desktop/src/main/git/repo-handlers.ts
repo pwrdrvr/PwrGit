@@ -31,6 +31,21 @@ export function registerRepoHandlers(
     return ok(repos);
   });
 
+  bus.register("repo:refreshWorktrees", async (req) => {
+    const repo = indexer.getRepo(req.repoId);
+    const result = await indexer.refreshRepoWorktrees(req.repoId);
+    if (!result.ok) {
+      // Refresh removes legacy rows that point at a linked worktree instead of
+      // the canonical repo. That error still represents a persisted change.
+      if (result.error.code === "not_canonical" && repo !== null) {
+        emitEvent("repo:changed", { profileId: repo.profileId });
+      }
+      return result;
+    }
+    emitEvent("repo:changed", { profileId: result.value.repo.profileId });
+    return result;
+  });
+
   bus.register("repo:add", async (req) => {
     const result = await indexer.indexRepoAt(req.profileId, req.path);
     if (result.ok) emitEvent("repo:changed", { profileId: req.profileId });

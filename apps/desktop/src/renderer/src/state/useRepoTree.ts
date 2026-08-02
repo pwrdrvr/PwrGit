@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Repo } from "@pwrgit/shared";
 import { confirmDialog, notifyDialog } from "../features/shell/dialogs";
 import { dispatch, subscribe } from "../lib/pwrgit";
+import { showErrorToast, showInfoToast } from "../lib/toast";
 
 export type RemovalProgress = { done: number; total: number };
 
@@ -10,6 +11,8 @@ export type UseRepoTree = {
   loading: boolean;
   /** Non-null while a batch removal is in flight (for a progress indicator). */
   removalProgress: RemovalProgress | null;
+  /** Repo ids currently being reconciled with `git worktree list`. */
+  refreshingRepoIds: Set<string>;
   setRepoPin: (repoId: string, pinned: boolean) => void;
   setWorktreePin: (worktreeId: string, pinned: boolean) => void;
   createWorktree: (
@@ -20,6 +23,7 @@ export type UseRepoTree = {
   removeWorktrees: (worktreeIds: string[]) => Promise<void>;
   persistWorktreeOrder: (repoId: string, orderedIds: string[]) => void;
   computeRepoState: (repoId: string) => void;
+  refreshRepoWorktrees: (repo: Repo) => Promise<void>;
 };
 
 /** Repos for the active profile, kept in sync with `repo:changed`. */
@@ -28,6 +32,9 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
   const [loading, setLoading] = useState(true);
   const [removalProgress, setRemovalProgress] =
     useState<RemovalProgress | null>(null);
+  const [refreshingRepoIds, setRefreshingRepoIds] = useState<Set<string>>(
+    new Set()
+  );
 
   // Always scope to THIS window's profile — with one window per profile, the
   // global "active" profile changes whenever any window opens.
@@ -216,16 +223,53 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     void dispatch("pr:refresh", { repoId });
   }, []);
 
+  const refreshRepoWorktrees = useCallback(async (repo: Repo) => {
+    setRefreshingRepoIds((ids) => new Set(ids).add(repo.id));
+    try {
+      const result = await dispatch("repo:refreshWorktrees", {
+        repoId: repo.id
+      });
+      if (!result.ok) {
+        showErrorToast({
+          title: `Couldn't refresh ${repo.name}`,
+          message: result.error.message
+        });
+        return;
+      }
+
+      const { added, removed, updated } = result.value;
+      const changes = [
+        added > 0 ? `${added} discovered` : null,
+        updated > 0 ? `${updated} updated` : null,
+        removed > 0 ? `${removed} removed` : null
+      ].filter((part): part is string => part !== null);
+      showInfoToast({
+        title: `${repo.name} worktrees refreshed`,
+        message:
+          changes.length > 0
+            ? changes.join(" · ")
+            : "Worktree list is up to date."
+      });
+    } finally {
+      setRefreshingRepoIds((ids) => {
+        const next = new Set(ids);
+        next.delete(repo.id);
+        return next;
+      });
+    }
+  }, []);
+
   return {
     repos,
     loading,
     removalProgress,
+    refreshingRepoIds,
     setRepoPin,
     setWorktreePin,
     createWorktree,
     removeWorktrees,
     persistWorktreeOrder,
-    computeRepoState
+    computeRepoState,
+    refreshRepoWorktrees
   };
 }
-

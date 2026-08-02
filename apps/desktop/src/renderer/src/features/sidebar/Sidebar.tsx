@@ -40,6 +40,8 @@ export function Sidebar({
   onRemoveWorktrees,
   onCreateWorktree,
   onPersistOrder,
+  refreshingRepoIds,
+  onRefreshRepo,
   onAddFolder,
   onOpenSearch,
   onExpandRepo,
@@ -63,6 +65,8 @@ export function Sidebar({
     newBranch: boolean
   ) => Promise<string | null>;
   onPersistOrder: (repoId: string, orderedIds: string[]) => void;
+  refreshingRepoIds: Set<string>;
+  onRefreshRepo: (repo: Repo) => void;
   onAddFolder: () => void;
   onOpenSearch: () => void;
   onExpandRepo: (repoId: string) => void;
@@ -347,6 +351,8 @@ export function Sidebar({
       customOrder={orderByRepo[repo.id]}
       onToggleExpand={() => toggleExpand(repo)}
       onToggleRepoPin={() => onSetRepoPin(repo.id, !repo.pinned)}
+      refreshing={refreshingRepoIds.has(repo.id)}
+      onRefreshWorktrees={() => onRefreshRepo(repo)}
       onSelectWorktree={(w, e, orderedIds) =>
         handleRowClick(repo, w, e, orderedIds)
       }

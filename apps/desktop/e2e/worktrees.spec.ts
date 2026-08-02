@@ -73,6 +73,56 @@ test("creates a worktree through the New worktree modal", async () => {
   ).toBe(true);
 });
 
+test("reconciles worktrees changed outside PwrGit", async () => {
+  sandbox = createGitSandbox();
+  const repo = sandbox.makeRepo("delta");
+  const linked = repo.addWorktree("feature/old");
+  handle = await launchApp();
+  const { window } = handle;
+
+  await addRootAndExpand(window, handle, sandbox, "delta");
+  await expect(branchRow(window, "feature/old")).toBeVisible();
+
+  // Lives in the Worktrees section head, not the repo row — the repo toolbar
+  // already spends the circular-arrows glyph on Fetch, so this one has to be
+  // positioned where it can only mean "re-list these worktrees".
+  const refresh = window
+    .locator(".wt-section__head")
+    .getByRole("button", { name: "Refresh worktrees for delta" });
+  await refresh.hover();
+  await expect(window.getByRole("tooltip")).toContainText(
+    /re-read Git for worktrees added, removed, or switched outside PwrGit/
+  );
+
+  // Simulate Codex/PwrAgent changing the repository behind PwrGit's back.
+  sandbox.git(linked, "switch", "-c", "feat/messaging-rbac-permissions");
+  repo.addWorktree("external/new");
+
+  await refresh.click();
+  await expect(
+    branchRow(window, "feat/messaging-rbac-permissions")
+  ).toBeVisible();
+  await expect(branchRow(window, "external/new")).toBeVisible();
+  await expect(branchRow(window, "feature/old")).toHaveCount(0);
+  await expect(window.locator(".app-toast__message")).toHaveText(
+    "1 discovered · 1 updated"
+  );
+
+  await window.getByRole("button", { name: "Dismiss" }).click();
+  await refresh.click();
+  await expect(window.locator(".app-toast__message")).toHaveText(
+    "Worktree list is up to date."
+  );
+
+  // Reconciliation updates the command-palette search index in the same
+  // transaction, not only the visible sidebar rows.
+  await window.getByRole("button", { name: /Jump to repo/i }).click();
+  await window.locator(".overlay-search input").fill("rbac");
+  await expect(window.locator(".overlay-result__name")).toHaveText(
+    "feat/messaging-rbac-permissions"
+  );
+});
+
 test("batch-removes worktrees (including a dirty one) via multi-select", async () => {
   sandbox = createGitSandbox();
   const repo = sandbox.makeRepo("gamma");
