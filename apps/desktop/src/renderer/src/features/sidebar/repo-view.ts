@@ -82,30 +82,37 @@ function repoIsPinned(r: Repo): boolean {
   return r.pinned || r.worktrees.some((w) => w.pinned);
 }
 
-function repoHasPrunable(r: Repo): boolean {
-  return r.worktrees.some((w) => isPrunableWorktree(w));
+function repoHasPrunable(r: Repo, now: number): boolean {
+  return r.worktrees.some((w) => isPrunableWorktree(w, now));
 }
 
 /** Counts shown on the lens chips. Recent has no counter (it's the default). */
-export function lensCounts(repos: Repo[]): Record<Lens, number> {
+export function lensCounts(
+  repos: Repo[],
+  now: number = Date.now()
+): Record<Lens, number> {
   return {
     Recent: 0,
     Pinned: repos.filter(repoIsPinned).length,
     Behind: repos.filter((r) => r.worktrees.some((w) => w.behind > 0)).length,
-    Stale: repos.filter(repoHasPrunable).length,
+    Stale: repos.filter((r) => repoHasPrunable(r, now)).length,
     All: repos.length
   };
 }
 
 /** Filter by lens, then float pinned repos to the top (stable otherwise). */
-export function filterReposByLens(repos: Repo[], lens: Lens): Repo[] {
+export function filterReposByLens(
+  repos: Repo[],
+  lens: Lens,
+  now: number = Date.now()
+): Repo[] {
   let list = repos;
   if (lens === "Behind") {
     list = repos.filter((r) => r.worktrees.some((w) => w.behind > 0));
   } else if (lens === "Pinned") {
     list = repos.filter(repoIsPinned);
   } else if (lens === "Stale") {
-    list = repos.filter(repoHasPrunable);
+    list = repos.filter((r) => repoHasPrunable(r, now));
   }
   return [...list].sort(
     (a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)

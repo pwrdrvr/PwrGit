@@ -15,6 +15,7 @@ import type {
   BranchRef,
   ChangeSet,
   CommitFileChange,
+  CommitStats,
   GraphLog,
   LaneGraph,
   PrSummary,
@@ -340,6 +341,11 @@ export interface Commands {
   "commit:files": {
     req: { worktreeId: string; hash: string };
     res: CommitFileChange[];
+  };
+  /** Summed +/− count for a commit, read lazily by the lineage context card. */
+  "commit:stats": {
+    req: { worktreeId: string; hash: string };
+    res: CommitStats;
   };
   /** Unified diff of ONE file within a commit. */
   "diff:commitFile": {

@@ -57,6 +57,8 @@ export type GraphRowVM = {
    *  sits away from its local branch, collapsed ("origin") when synced. */
   remoteRefs: string[];
   isHead: boolean;
+  /** Reachable from the viewed HEAD but not the default comparison ref. */
+  isHeadOnly: boolean;
   isMine: boolean;
   defaultBranch: string;
 };
@@ -75,25 +77,40 @@ function BranchGlyph() {
 export function GraphRow({
   vm,
   laneCount,
+  now,
   selected,
   focused,
+  contextOpen,
   flashing,
   branchInfo,
   onToggle,
   onOpen,
+  onShowContext,
+  onHideContext,
+  onOpenContextMenu,
   onRevealWorktree
 }: {
   vm: GraphRowVM;
   laneCount: number;
+  /** One shared renderer clock, supplied by LineageGraph. */
+  now: number;
   selected: boolean;
   /** This commit's files are open in the rail (commit focus). */
   focused: boolean;
+  /** Its interactive context card remains open after the pointer leaves. */
+  contextOpen: boolean;
   /** One-shot attention pulse after a locate/worktree switch. */
   flashing: boolean;
   /** branch name → PR / worktree adornments for tip chips. */
   branchInfo?: Record<string, LaneBranchInfo>;
   onToggle: () => void;
   onOpen: () => void;
+  onShowContext: (
+    target: HTMLElement,
+    anchor: { x: number; y: number }
+  ) => void;
+  onHideContext: () => void;
+  onOpenContextMenu: (position: { x: number; y: number }) => void;
   /** Jump to the worktree a tip branch is checked out in. */
   onRevealWorktree?: (worktreeId: string) => void;
 }) {
@@ -121,10 +138,20 @@ export function GraphRow({
     <div
       className={`graph-row${selected ? " is-selected" : ""}${
         isHead ? " graph-row--head" : ""
-      }${focused ? " is-focused" : ""}${flashing ? " is-flash" : ""}`}
+      }${focused ? " is-focused" : ""}${
+        contextOpen ? " is-context-open" : ""
+      }${flashing ? " is-flash" : ""}`}
       data-hash={commit.hash}
       onClick={onOpen}
-      title="View this commit's changes"
+      onMouseEnter={(e) =>
+        onShowContext(e.currentTarget, { x: e.clientX, y: e.clientY })
+      }
+      onMouseLeave={onHideContext}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onOpenContextMenu({ x: e.clientX, y: e.clientY });
+      }}
       style={{ height: ROW_H }}
     >
       <div className="graph-lanes-clip" style={{ width: gutterWidth(laneCount) }}>
@@ -256,7 +283,7 @@ export function GraphRow({
           <span className={`commit-msg${isMine ? "" : " is-other"}`}>
             {commit.subject}
           </span>
-          <span className="commit-time">{shortWhen(commit.committedAt)}</span>
+          <span className="commit-time">{shortWhen(commit.committedAt, now)}</span>
         </div>
         <div className="commit-meta">
           {isHead && <span className="commit-tag commit-tag--head">HEAD</span>}

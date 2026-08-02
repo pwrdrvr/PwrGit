@@ -122,6 +122,12 @@ export type CommitFileChange = {
   status: FileStatus;
 };
 
+/** Summed insertions and deletions introduced by one commit. */
+export type CommitStats = {
+  additions: number;
+  deletions: number;
+};
+
 export type Commit = {
   hash: string;
   shortHash: string;
@@ -181,7 +187,14 @@ export type LaneGraph = {
   branches: Record<string, LaneBranchInfo>;
   /** Current HEAD commit, to highlight where you are. */
   head: string;
+  /** Commits reachable from this worktree's HEAD but not its default ref.
+   *  This is per-worktree (unlike the cached lane graph) and lets consumers
+   *  distinguish a branch's own commits from shared/base history. */
+  headOnlyCommits: string[];
   defaultBranch: string;
+  /** The concrete ref used as the default-branch comparison point, usually
+   *  `origin/main` when a remote default is configured. */
+  defaultRef: string;
   /** Tips of each remote's copy of the default branch (origin/main,
    *  upstream/main, …) — the trunk is drawn through them so remote-ahead
    *  history renders as a dashed spine ending at the remote ref's chip. */

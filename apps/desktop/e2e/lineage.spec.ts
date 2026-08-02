@@ -51,6 +51,93 @@ test("multi-lane lineage shows active branches and hides merged ones", async () 
   await expect(hint).toBeHidden();
 });
 
+test("hovering a lineage row opens its commit context window", async () => {
+  sandbox = createGitSandbox();
+  const s = sandbox;
+  const repo = s.makeRepo("commit-context");
+  const feature = repo.addWorktree("feat/context");
+  s.commitAs(
+    "someone@example.com",
+    feature,
+    "context.txt",
+    "show commit context"
+  );
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, s, "commit-context");
+  await branchRow(window, "main").first().click();
+
+  const row = window.locator(".graph-row", { hasText: "show commit context" });
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.hover();
+
+  const card = window.getByRole("dialog", { name: "Commit context" });
+  await expect(card).toBeVisible();
+  // Leaving the row for the card must not make the interactive context window
+  // disappear before its copy actions can be reached.
+  await card.hover();
+  await window.waitForTimeout(500);
+  await expect(card).toBeVisible();
+  // The pointer is now on the portalled card, not this row. Keep its visual
+  // anchor highlighted until the card has actually dismissed.
+  await expect(row).toHaveClass(/is-context-open/);
+  await expect(card).toContainText("Commit context");
+  await expect(card).toContainText("Someone Else");
+  await expect(card).toContainText("someone@example.com");
+  await expect(card).toContainText("Age");
+  await expect(card).toContainText("Changes");
+  await expect(card).toContainText("+1");
+  await expect(card).toContainText("−0");
+  // This row belongs to the sibling feature branch, not the worktree we are
+  // viewing. Shared/off-head commits must not inherit the selected worktree's
+  // branch context (in particular, a detached checkout must not label them
+  // as detached).
+  await expect(card).not.toContainText("Viewing branch");
+  await expect(card).not.toContainText("Base branch");
+  const shortCopy = card.getByRole("button", {
+    name: "Copy short commit hash"
+  });
+  const fullCopy = card.getByRole("button", {
+    name: "Copy full commit hash"
+  });
+  await expect(shortCopy).toBeVisible();
+  await expect(fullCopy).toBeVisible();
+
+  // The card stays compact: its full OID is intentionally revealed only by
+  // the nested copy tooltip, where it remains one pointer move away.
+  const fullHash = s.git(feature, "rev-parse", "HEAD");
+  await expect(card).not.toContainText(fullHash);
+  await fullCopy.hover();
+  await expect(window.getByRole("tooltip")).toHaveText(
+    `Copy full SHA ${fullHash}`
+  );
+
+  await row.click({ button: "right" });
+  const menu = window.getByRole("menu", { name: "Commit actions" });
+  await expect(menu).toBeVisible();
+  await expect(card).toBeHidden();
+  await expect(row).not.toHaveClass(/is-context-open/);
+  await expect(menu.getByRole("menuitem", { name: "View changes" })).toBeFocused();
+  await expect(
+    menu.getByRole("menuitem", { name: "Copy short SHA" })
+  ).toBeVisible();
+  await expect(
+    menu.getByRole("menuitem", { name: "Copy full SHA" })
+  ).toBeVisible();
+  await expect(
+    menu.getByRole("menuitem", { name: "Copy commit message" })
+  ).toBeVisible();
+  await expect(
+    menu.getByRole("menuitem", { name: "Copy author email" })
+  ).toBeVisible();
+  await expect(
+    menu.getByRole("menuitem", { name: "Copy viewing branch" })
+  ).toBeVisible();
+  await window.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+});
+
 test("switching worktrees anchors the lineage on that worktree's HEAD", async () => {
   sandbox = createGitSandbox();
   const s = sandbox;

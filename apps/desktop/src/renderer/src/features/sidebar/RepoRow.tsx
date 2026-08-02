@@ -20,6 +20,7 @@ export function RepoRow({
   selectedIds,
   sort,
   customOrder,
+  now,
   onToggleExpand,
   onToggleRepoPin,
   refreshing,
@@ -41,6 +42,7 @@ export function RepoRow({
   selectedIds: Set<string>;
   sort: WorktreeSort;
   customOrder: string[] | undefined;
+  now: number;
   onToggleExpand: () => void;
   onToggleRepoPin: () => void;
   refreshing: boolean;
@@ -123,6 +125,7 @@ export function RepoRow({
               worktree={primary}
               selected={primary.id === selectedWorktreeId}
               multiSelected={selectedIds.has(primary.id)}
+              now={now}
               onSelect={(e) => onSelectWorktree(primary, e, displayIds)}
               onContextMenu={(e) => onContextWorktree(primary, e, displayIds)}
               onTogglePin={() =>
@@ -231,6 +234,7 @@ export function RepoRow({
               worktree={w}
               selected={w.id === selectedWorktreeId}
               multiSelected={selectedIds.has(w.id)}
+              now={now}
               onSelect={(e) => onSelectWorktree(w, e, displayIds)}
               onContextMenu={(e) => onContextWorktree(w, e, displayIds)}
               onTogglePin={() => onToggleWorktreePin(w.id, !w.pinned)}

@@ -20,12 +20,15 @@ export function ContextMenu({
   x,
   y,
   items,
-  onClose
+  onClose,
+  label
 }: {
   x: number;
   y: number;
   items: MenuItem[];
   onClose: () => void;
+  /** Accessible menu name for callers with more specific actions. */
+  label?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number }>({
@@ -42,6 +45,7 @@ export function ContextMenu({
     if (left + r.width > window.innerWidth - 8) left = window.innerWidth - r.width - 8;
     if (top + r.height > window.innerHeight - 8) top = window.innerHeight - r.height - 8;
     setPos({ left: Math.max(8, left), top: Math.max(8, top) });
+    el.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
   }, [x, y, items.length]);
 
   useEffect(() => {
@@ -70,7 +74,9 @@ export function ContextMenu({
       ref={ref}
       className="pop-menu"
       role="menu"
+      aria-label={label}
       style={{ position: "fixed", left: pos.left, top: pos.top }}
+      onContextMenu={(event) => event.preventDefault()}
     >
       {items.map((it, i) =>
         it.type === "sep" ? (

@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { LaneGraph } from "@pwrgit/shared";
+import type { CommitStats, LaneGraph } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { useRelativeClock } from "../../lib/useRelativeClock";
+import {
+  type TooltipAnchor,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
+import { CommitContextCard } from "./CommitContextCard";
+import { CommitContextMenu } from "./CommitContextMenu";
 import {
   GraphRow,
   type GraphRowVM,
@@ -13,6 +20,7 @@ import { shortWhen } from "./graph-view";
 import { layoutLanes } from "./lane-layout";
 
 type Scope = "active" | "all";
+type CommitMenuState = { hash: string; x: number; y: number };
 
 // Experimental setting: open new graph views in the "all branches" scope.
 // Cached per window but kept fresh via settings:changed, so toggling the
@@ -42,6 +50,7 @@ const scrollBehavior = (): ScrollBehavior =>
 
 export function LineageGraph({
   worktreeId,
+  viewingBranch,
   activeEmail,
   selectedCommits,
   focusedCommit,
@@ -50,6 +59,8 @@ export function LineageGraph({
   onRevealWorktree
 }: {
   worktreeId: string;
+  /** Branch checked out in the worktree whose lineage is being viewed. */
+  viewingBranch: string;
   activeEmail: string;
   selectedCommits: Set<string>;
   /** Commit whose files are open in the rail — highlighted even off-branch. */
@@ -64,10 +75,21 @@ export function LineageGraph({
   const [loading, setLoading] = useState(true);
   const [flash, setFlash] = useState<string | null>(null);
   const [branchesOpen, setBranchesOpen] = useState(false);
+  const [hoveredCommit, setHoveredCommit] = useState<string | null>(null);
+  const [commitMenu, setCommitMenu] = useState<CommitMenuState | null>(null);
+  const [commitStats, setCommitStats] = useState<
+    Record<string, CommitStats | null>
+  >({});
+  const now = useRelativeClock();
+  const commitContext = useViewportTooltip("commit-context-card", {
+    interactive: true
+  });
   const scrollerRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const laneBarRef = useRef<HTMLDivElement>(null);
   const scopeTouchedRef = useRef(false);
+  const commitStatsRequestsRef = useRef(new Map<string, number>());
+  const commitStatsEpochRef = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -139,6 +161,7 @@ export function LineageGraph({
     const tips = data?.tips ?? {};
     const remoteTips = data?.remoteTips ?? {};
     const defaultBranch = data?.defaultBranch ?? "";
+    const headOnlyCommits = new Set(data?.headOnlyCommits ?? []);
     // Drawn branches (and the default) win the capped chip slots on a commit
     // tipped by many branches; stale hangers-on collapse into the +N pill.
     const drawn = new Set([...(data?.shownBranches ?? []), defaultBranch]);
@@ -173,6 +196,7 @@ export function LineageGraph({
         refs,
         remoteRefs,
         isHead: commit.hash === head,
+        isHeadOnly: headOnlyCommits.has(commit.hash),
         isMine: commit.authorEmail.toLowerCase() === email,
         defaultBranch
       };
@@ -195,6 +219,100 @@ export function LineageGraph({
     () => new Map(vms.map((vm) => [vm.commit.hash, vm])),
     [vms]
   );
+  const hoveredVm =
+    hoveredCommit === null ? undefined : vmByHash.get(hoveredCommit);
+  const menuVm =
+    commitMenu === null ? undefined : vmByHash.get(commitMenu.hash);
+
+  // The interactive card owns its delayed dismissal. Clear the associated
+  // commit once it is actually gone, rather than as the pointer starts across
+  // the gap from a row to the card.
+  useEffect(() => {
+    if (!commitContext.visible) setHoveredCommit(null);
+  }, [commitContext.visible]);
+
+  // Diffstats are intentionally lazy: a graph can contain hundreds of commits,
+  // but only the one under the pointer needs a numstat walk. Cache both success
+  // and failure for this worktree so repeated hover is instant and quiet.
+  useEffect(() => {
+    commitStatsEpochRef.current += 1;
+    commitStatsRequestsRef.current.clear();
+    setCommitStats({});
+  }, [worktreeId]);
+
+  useEffect(() => {
+    if (hoveredVm === undefined) return;
+    const hash = hoveredVm.commit.hash;
+    if (commitStats[hash] !== undefined) return;
+    const epoch = commitStatsEpochRef.current;
+    if (commitStatsRequestsRef.current.get(hash) === epoch) return;
+    commitStatsRequestsRef.current.set(hash, epoch);
+    void dispatch("commit:stats", { worktreeId, hash })
+      .then((result) => {
+        if (commitStatsEpochRef.current !== epoch) return;
+        setCommitStats((current) => ({
+          ...current,
+          [hash]: result.ok ? result.value : null
+        }));
+      })
+      .finally(() => {
+        if (commitStatsRequestsRef.current.get(hash) === epoch) {
+          commitStatsRequestsRef.current.delete(hash);
+        }
+      });
+  }, [commitStats, hoveredVm, worktreeId]);
+
+  // The context window remains current while it is open: its age changes with
+  // the shared clock, while ref/base information and lazy diffstats update
+  // after graph refreshes and local Git responses.
+  useEffect(() => {
+    if (!commitContext.visible || hoveredVm === undefined) return;
+    commitContext.update(
+      <CommitContextCard
+        commit={hoveredVm.commit}
+        viewingBranch={hoveredVm.isHeadOnly ? viewingBranch : null}
+        defaultBranch={hoveredVm.defaultBranch}
+        defaultRef={data?.defaultRef ?? hoveredVm.defaultBranch}
+        now={now}
+        stats={commitStats[hoveredVm.commit.hash]}
+      />
+    );
+  }, [
+    commitContext.update,
+    commitContext.visible,
+    hoveredVm,
+    now,
+    commitStats,
+    viewingBranch
+  ]);
+
+  const showCommitContext = (
+    target: HTMLElement,
+    anchor: TooltipAnchor,
+    vm: GraphRowVM
+  ): void => {
+    setHoveredCommit(vm.commit.hash);
+    commitContext.show(
+      target,
+      <CommitContextCard
+        commit={vm.commit}
+        viewingBranch={vm.isHeadOnly ? viewingBranch : null}
+        defaultBranch={vm.defaultBranch}
+        defaultRef={data?.defaultRef ?? vm.defaultBranch}
+        now={now}
+        stats={commitStats[vm.commit.hash]}
+      />,
+      anchor
+    );
+  };
+
+  const openCommitMenu = (
+    vm: GraphRowVM,
+    position: { x: number; y: number }
+  ): void => {
+    commitContext.hide();
+    setCommitMenu({ hash: vm.commit.hash, ...position });
+  };
 
   const gutterW = gutterWidth(layout.laneCount);
   const laneOverflow = layout.laneCount > MAX_GUTTER_LANES;
@@ -328,7 +446,7 @@ export function LineageGraph({
                       {vm !== undefined && (
                         <span className="branch-pop__meta">
                           {vm.isMine ? "you" : vm.commit.authorName} ·{" "}
-                          {shortWhen(vm.commit.committedAt)}
+                          {shortWhen(vm.commit.committedAt, now)}
                         </span>
                       )}
                     </button>
@@ -404,12 +522,19 @@ export function LineageGraph({
                 key={vm.commit.hash}
                 vm={vm}
                 laneCount={layout.laneCount}
+                now={now}
                 selected={selectedCommits.has(vm.commit.hash)}
                 focused={focusedCommit === vm.commit.hash}
+                contextOpen={hoveredCommit === vm.commit.hash && commitContext.visible}
                 flashing={flash === vm.commit.hash}
                 branchInfo={data?.branches ?? {}}
                 onToggle={() => onToggleCommit(vm.commit.hash)}
                 onOpen={() => onOpenCommit(vm.commit.hash, vm.commit.subject)}
+                onShowContext={(target, anchor) =>
+                  showCommitContext(target, anchor, vm)
+                }
+                onHideContext={commitContext.scheduleHide}
+                onOpenContextMenu={(position) => openCommitMenu(vm, position)}
                 onRevealWorktree={onRevealWorktree}
               />
             ))}
@@ -432,6 +557,20 @@ export function LineageGraph({
           </div>
         )}
       </div>
+      {commitContext.tooltipNode}
+      {commitMenu !== null && menuVm !== undefined && (
+        <CommitContextMenu
+          x={commitMenu.x}
+          y={commitMenu.y}
+          vm={menuVm}
+          branchInfo={data?.branches ?? {}}
+          viewingBranch={viewingBranch}
+          onViewChanges={() =>
+            onOpenCommit(menuVm.commit.hash, menuVm.commit.subject)
+          }
+          onClose={() => setCommitMenu(null)}
+        />
+      )}
     </>
   );
 }

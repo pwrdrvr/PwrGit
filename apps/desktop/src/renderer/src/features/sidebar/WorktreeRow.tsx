@@ -8,6 +8,7 @@ export function WorktreeRow({
   worktree,
   selected,
   multiSelected,
+  now,
   onSelect,
   onContextMenu,
   onTogglePin,
@@ -20,6 +21,7 @@ export function WorktreeRow({
   worktree: Worktree;
   selected: boolean;
   multiSelected: boolean;
+  now: number;
   onSelect: (e: ReactMouseEvent) => void;
   onContextMenu: (e: ReactMouseEvent) => void;
   onTogglePin: () => void;
@@ -29,7 +31,7 @@ export function WorktreeRow({
   onDrop: (e: DragEvent) => void;
   onDragEnd: () => void;
 }) {
-  const prunable = isPrunableWorktree(worktree);
+  const prunable = isPrunableWorktree(worktree, now);
   return (
     <div
       className={`wt-row${selected ? " is-selected" : ""}${
@@ -149,7 +151,7 @@ export function WorktreeRow({
       )}
       {worktree.lastActivityAt !== undefined && (
         <span className="wt-age" title={worktree.lastActivityAt}>
-          {relativeAge(worktree.lastActivityAt)}
+          {relativeAge(worktree.lastActivityAt, now)}
         </span>
       )}
       {/* Only the pin star floats over the right edge on hover (it overlays

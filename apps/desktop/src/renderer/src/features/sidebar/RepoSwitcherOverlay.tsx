@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { RepoSearchHit, SearchHitStatus } from "@pwrgit/shared";
 import { createAsyncFill } from "../../lib/asyncFill";
 import { dispatch } from "../../lib/pwrgit";
+import { useRelativeClock } from "../../lib/useRelativeClock";
 import { shortWhen } from "../graph/graph-view";
 import { PrChip } from "./PrChip";
 import { PinIcon } from "./WorktreeRow";
@@ -35,6 +36,7 @@ export function RepoSwitcherOverlay({
   onClose: () => void;
   onPick: (hit: RepoSearchHit) => void;
 }) {
+  const now = useRelativeClock();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<RepoSearchHit[]>([]);
   const [sel, setSel] = useState(0);
@@ -254,7 +256,7 @@ export function RepoSwitcherOverlay({
                         className="hit-status__age"
                         title={`Last commit ${s.lastActivityAt}`}
                       >
-                        {shortWhen(s.lastActivityAt)}
+                        {shortWhen(s.lastActivityAt, now)}
                       </span>
                     )}
                   </span>

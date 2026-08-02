@@ -1597,7 +1597,8 @@ input {
   border-bottom: 1px solid rgba(247, 243, 235, 0.05);
   transition: background 120ms ease;
 }
-.graph-row:hover {
+.graph-row:hover,
+.graph-row.is-context-open {
   background: var(--accent-tint);
 }
 .graph-row.is-selected {
@@ -1620,7 +1621,8 @@ input {
   background: rgba(247, 243, 235, 0.07);
   box-shadow: inset 2px 0 0 var(--text-secondary);
 }
-.graph-row.is-focused:hover {
+.graph-row.is-focused:hover,
+.graph-row.is-focused.is-context-open {
   background: rgba(247, 243, 235, 0.1);
 }
 .graph-row.is-flash {
@@ -1788,6 +1790,7 @@ input {
   transition: opacity 120ms ease;
 }
 .graph-row:hover .commit-check,
+.graph-row.is-context-open .commit-check,
 .graph-card.has-selection .commit-check,
 .commit-check.is-checked {
   opacity: 1;
@@ -2241,7 +2244,7 @@ body.is-col-resizing {
 
 .viewport-tooltip {
   position: fixed;
-  z-index: 130;
+  z-index: 140;
   width: max-content;
   max-width: min(440px, calc(100vw - 32px));
   padding: 7px 10px;
@@ -2254,6 +2257,149 @@ body.is-col-resizing {
   pointer-events: none;
   text-align: left;
   white-space: pre-wrap;
+}
+
+/* Commit rows use the same portalled positioning primitive, but their hover
+   surface is a small context window rather than a one-line tooltip. */
+.commit-context-card {
+  position: fixed;
+  z-index: 130;
+  width: 336px;
+  max-width: calc(100vw - 32px);
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-menu);
+  box-shadow: var(--shadow-popover);
+  color: var(--text-primary);
+  pointer-events: auto;
+  text-align: left;
+}
+.commit-context-card__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.commit-context-card__eyebrow {
+  color: var(--text-muted);
+  font: 600 10px/1 var(--font-sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.commit-context-card__short-hash {
+  color: var(--text-muted);
+  font: 500 10.5px/1 var(--font-mono);
+}
+.commit-context-card__hash-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+}
+.commit-context-card__hash-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 19px;
+  height: 19px;
+  padding: 0;
+  border-radius: 5px;
+  color: var(--text-muted);
+}
+.commit-context-card__hash-copy:hover {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+.commit-context-card__hash-copy--full {
+  width: auto;
+  gap: 3px;
+  padding: 0 4px;
+  font: 600 8px/1 var(--font-sans);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.commit-context-card__subject {
+  display: -webkit-box;
+  margin-top: 7px;
+  overflow: hidden;
+  color: var(--text-primary);
+  font: 600 12px/1.35 var(--font-sans);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.commit-context-card__identity {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 11px;
+}
+.commit-context-card__avatar {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--accent-border);
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+  font: 700 10px/1 var(--font-sans);
+}
+.commit-context-card__author {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.commit-context-card__author strong {
+  overflow: hidden;
+  color: var(--text-primary);
+  font: 600 11.5px/1.2 var(--font-sans);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.commit-context-card__author span {
+  overflow: hidden;
+  color: var(--text-muted);
+  font: 500 10.5px/1.2 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.commit-context-card__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 11px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border-subtle);
+}
+.commit-context-card__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+}
+.commit-context-card__row-label {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font: 500 10.5px/1.25 var(--font-sans);
+}
+.commit-context-card__row-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font: 500 10.5px/1.25 var(--font-mono);
+  text-align: right;
+}
+.commit-context-card__row-value code {
+  color: var(--accent-bright);
+  font: inherit;
+}
+.commit-context-card__pending {
+  color: var(--text-muted);
+  font: 500 10px/1 var(--font-sans);
 }
 
 /* ---- Click-to-copy affordances ---- */

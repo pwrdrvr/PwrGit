@@ -6,6 +6,7 @@ import {
 } from "react";
 import type { Lens, Profile, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
 import { copyText } from "../../lib/copyText";
+import { useRelativeClock } from "../../lib/useRelativeClock";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
 import { revealLabel, revealPath } from "../shell/reveal";
 import { LensFilter } from "./LensFilter";
@@ -73,6 +74,7 @@ export function Sidebar({
   onNewProfile: () => void;
   onManageProfile: () => void;
 }) {
+  const now = useRelativeClock();
   const [lens, setLens] = useState<Lens>("Recent");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [sortByRepo, setSortByRepo] = useState<Record<string, WorktreeSort>>({});
@@ -197,8 +199,8 @@ export function Sidebar({
   const clearSel = (): void =>
     setSel({ repoId: "", ids: EMPTY_IDS, anchor: null });
 
-  const counts = lensCounts(repos);
-  const filtered = filterReposByLens(repos, lens);
+  const counts = lensCounts(repos, now);
+  const filtered = filterReposByLens(repos, lens, now);
 
   const toggleExpand = (repo: Repo): void => {
     const willExpand = !expanded.has(repo.id);
@@ -349,6 +351,7 @@ export function Sidebar({
       selectedIds={sel.repoId === repo.id ? sel.ids : EMPTY_IDS}
       sort={sortByRepo[repo.id] ?? "recent"}
       customOrder={orderByRepo[repo.id]}
+      now={now}
       onToggleExpand={() => toggleExpand(repo)}
       onToggleRepoPin={() => onSetRepoPin(repo.id, !repo.pinned)}
       refreshing={refreshingRepoIds.has(repo.id)}
