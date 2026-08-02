@@ -21,6 +21,7 @@ import {
 } from "./git/worktree-handlers";
 import { registerWorktreeLifecycleHandlers } from "./git/worktree-lifecycle-handlers";
 import { WorktreeStateService } from "./git/worktree-state";
+import { GitHubCommitAuthorIdentityService } from "./github/commit-author-identity";
 import { registerGitHubHandlers } from "./github/github-handlers";
 import { PrService } from "./github/pr-service";
 import { emitEvent, registerIpc } from "./ipc";
@@ -183,6 +184,10 @@ if (!gotSingleInstanceLock) {
     const stateService = new WorktreeStateService(db, execGit);
     const refresher = createWorktreeRefresher(stateService, db);
     const prService = new PrService(db, execGit);
+    const commitAuthorIdentityService = new GitHubCommitAuthorIdentityService(
+      db,
+      execGit
+    );
 
     // The worktree the user is currently viewing; refreshed on focus + a gentle
     // interval instead of via filesystem watchers (which peg fseventd on large
@@ -283,7 +288,7 @@ if (!gotSingleInstanceLock) {
     registerRebaseHandlers(bus, db, refresher);
     registerDialogHandlers(bus);
     registerShellHandlers(bus);
-    registerGitHubHandlers(bus, prService);
+    registerGitHubHandlers(bus, prService, commitAuthorIdentityService);
     registerSearchStatusHandlers(bus, db);
     registerSettingsHandlers(bus, settings, {
       diagnosticsOutputRoot,

@@ -140,6 +140,21 @@ export type Commit = {
   isMerge: boolean;
 };
 
+/** GitHub account presentation fields proven for an exact Git commit author. */
+export type GitHubCommitAuthorIdentity = {
+  login: string;
+  /** HTTPS avatar URL when GitHub returned one; absent is valid. */
+  avatarUrl?: string;
+};
+
+/** Immediate, presentation-neutral result of a commit-author identity lookup. */
+export type GitHubCommitAuthorIdentityLookup = {
+  /** Present only after an exact commit proof has verified the mapping. */
+  identity?: GitHubCommitAuthorIdentity;
+  cacheState: "fresh" | "stale" | "miss";
+  refreshState: "idle" | "in-flight" | "backing-off" | "not-eligible";
+};
+
 /** Cached, watcher-invalidated per-worktree sync/dirty snapshot (U8). */
 export type WorktreeState = {
   worktreeId: WorktreeId;

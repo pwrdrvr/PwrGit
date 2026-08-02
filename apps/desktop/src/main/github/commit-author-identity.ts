@@ -1,0 +1,719 @@
+import { createHash } from "node:crypto";
+import type {
+  GitHubCommitAuthorIdentity,
+  GitHubCommitAuthorIdentityLookup
+} from "@pwrgit/shared";
+import type { GitExec } from "../git/dugite";
+import type { DB } from "../persistence/db";
+import { runGh } from "./gh-cli";
+import { parseGitHubRemote } from "./remote";
+
+/** How long a proven GitHub identity remains fresh before revalidation. */
+export const GITHUB_COMMIT_AUTHOR_IDENTITY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/** How long an exact commit with no GitHub account remains negative-cached. */
+export const GITHUB_COMMIT_AUTHOR_IDENTITY_NEGATIVE_TTL_MS = 24 * 60 * 60 * 1000;
+/** First delay before retrying a failed remote, auth, or network lookup. */
+export const GITHUB_COMMIT_AUTHOR_IDENTITY_INITIAL_BACKOFF_MS = 60 * 1000;
+/** Upper bound for exponential retry gates; this service never polls itself. */
+export const GITHUB_COMMIT_AUTHOR_IDENTITY_MAX_BACKOFF_MS = 60 * 60 * 1000;
+
+const RESOLVED_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+const NEGATIVE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const UNAVAILABLE_RETENTION_MS = 24 * 60 * 60 * 1000;
+const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+
+export type GitHubCommitAuthorProof = {
+  owner: string;
+  repo: string;
+  commitSha: string;
+};
+
+/** Canonical subset of GitHub's REST commit response used for verification. */
+export type GitHubCommitAuthorRemoteCommit = {
+  sha?: string | null;
+  author?: {
+    name?: string | null;
+    email?: string | null;
+  } | null;
+  /** `null` means GitHub authoritatively has no associated account. */
+  githubAuthor?: {
+    login?: string | null;
+    avatarUrl?: string | null;
+  } | null;
+};
+
+/** Credential-opaque seam for fetching one exact GitHub commit. */
+export type GitHubCommitAuthorIdentityTransport = {
+  fetchCommit(proof: GitHubCommitAuthorProof): Promise<GitHubCommitAuthorRemoteCommit>;
+};
+
+export type GhCliCommitAuthorIdentityTransportOptions = {
+  /** Test/non-desktop seam. The production path delegates auth to `gh`. */
+  run?: (args: string[]) => Promise<string>;
+};
+
+/**
+ * Fetches exact commit metadata through `gh api` without extracting a token.
+ *
+ * `gh` reads its own credential store; no token enters this class, the service,
+ * cache, shared protocol, logs, or renderer process.
+ */
+export class GhCliCommitAuthorIdentityTransport
+  implements GitHubCommitAuthorIdentityTransport {
+  private readonly run: (args: string[]) => Promise<string>;
+
+  constructor(options: GhCliCommitAuthorIdentityTransportOptions = {}) {
+    this.run = options.run ?? runGh;
+  }
+
+  async fetchCommit(
+    proof: GitHubCommitAuthorProof
+  ): Promise<GitHubCommitAuthorRemoteCommit> {
+    const endpoint = [
+      "repos",
+      encodeURIComponent(proof.owner),
+      encodeURIComponent(proof.repo),
+      "commits",
+      encodeURIComponent(proof.commitSha)
+    ].join("/");
+    const stdout = await this.run([
+      "api",
+      "--hostname",
+      "github.com",
+      endpoint,
+      "--method",
+      "GET",
+      "--header",
+      "Accept: application/vnd.github+json",
+      "--header",
+      "X-GitHub-Api-Version: 2022-11-28"
+    ]);
+    return parseGitHubCommitResponse(JSON.parse(stdout));
+  }
+}
+
+export type GitHubCommitAuthorIdentityRequest = {
+  lookup: GitHubCommitAuthorIdentityLookup;
+  /** Settles after any best-effort background work and never rejects. */
+  completion?: Promise<GitHubCommitAuthorIdentityLookup>;
+};
+
+export type GitHubCommitAuthorIdentityServiceOptions = {
+  transport?: GitHubCommitAuthorIdentityTransport;
+  now?: () => number;
+  resolvedTtlMs?: number;
+  negativeTtlMs?: number;
+  initialBackoffMs?: number;
+  maxBackoffMs?: number;
+};
+
+type CacheStatus = "resolved" | "negative" | "unavailable";
+
+type CacheEntry = {
+  identityKey: string;
+  status: CacheStatus;
+  identity?: GitHubCommitAuthorIdentity;
+  fetchedAt: number;
+  expiresAt: number;
+  failureCount: number;
+  nextRetryAt?: number;
+  updatedAt: number;
+};
+
+type CacheRow = {
+  identity_key: string;
+  status: string;
+  github_login: string | null;
+  avatar_url: string | null;
+  fetched_at: number;
+  expires_at: number;
+  failure_count: number;
+  next_retry_at: number | null;
+  updated_at: number;
+};
+
+type NormalizedAuthor = { name: string; email: string };
+
+type PreparedRequest = {
+  worktreeId: string;
+  commitSha: string;
+  identityKey: string;
+  author: NormalizedAuthor;
+};
+
+type RemoteOutcome =
+  | { kind: "resolved"; identity: GitHubCommitAuthorIdentity }
+  | { kind: "negative" }
+  | { kind: "inconclusive" };
+
+/**
+ * Persistent, cache-first verification of a local Git commit author's GitHub
+ * account. The local name/email remain the source of truth; this service only
+ * supplies login/avatar fields after proving an exact GitHub commit match.
+ */
+export class GitHubCommitAuthorIdentityService {
+  private readonly transport: GitHubCommitAuthorIdentityTransport;
+  private readonly now: () => number;
+  private readonly resolvedTtlMs: number;
+  private readonly negativeTtlMs: number;
+  private readonly initialBackoffMs: number;
+  private readonly maxBackoffMs: number;
+  private readonly inFlight = new Map<
+    string,
+    Promise<GitHubCommitAuthorIdentityLookup>
+  >();
+  private lastPrunedAt = Number.NEGATIVE_INFINITY;
+
+  constructor(
+    private readonly db: DB,
+    private readonly git: GitExec,
+    options: GitHubCommitAuthorIdentityServiceOptions = {}
+  ) {
+    this.transport = options.transport ?? new GhCliCommitAuthorIdentityTransport();
+    this.now = options.now ?? Date.now;
+    this.resolvedTtlMs = positiveDuration(
+      options.resolvedTtlMs,
+      GITHUB_COMMIT_AUTHOR_IDENTITY_TTL_MS
+    );
+    this.negativeTtlMs = positiveDuration(
+      options.negativeTtlMs,
+      GITHUB_COMMIT_AUTHOR_IDENTITY_NEGATIVE_TTL_MS
+    );
+    this.initialBackoffMs = positiveDuration(
+      options.initialBackoffMs,
+      GITHUB_COMMIT_AUTHOR_IDENTITY_INITIAL_BACKOFF_MS
+    );
+    this.maxBackoffMs = Math.max(
+      this.initialBackoffMs,
+      positiveDuration(
+        options.maxBackoffMs,
+        GITHUB_COMMIT_AUTHOR_IDENTITY_MAX_BACKOFF_MS
+      )
+    );
+  }
+
+  /**
+   * Read local cache state synchronously, then (when eligible) resolve the
+   * worktree remote and GitHub commit in the background. Callers must render
+   * their local Git author immediately and may observe `completion` to repaint.
+   */
+  request(input: {
+    worktreeId: string;
+    commitHash: string;
+    authorName: string;
+    authorEmail: string;
+  }): GitHubCommitAuthorIdentityRequest {
+    const author = normalizeAuthor({
+      name: input.authorName,
+      email: input.authorEmail
+    });
+    if (author === undefined) return { lookup: notEligibleLookup() };
+
+    const identityKey = buildGitHubCommitAuthorIdentityCacheKey(author);
+    if (identityKey === undefined) return { lookup: notEligibleLookup() };
+
+    const now = this.now();
+    this.pruneIfDue(now);
+    const cached = this.readCache(identityKey);
+    if (isFresh(cached, now)) return { lookup: toLookup(cached, now, "idle") };
+
+    const worktreeId = safeText(input.worktreeId, 512);
+    const commitSha = normalizeCommitSha(input.commitHash);
+    if (worktreeId === undefined || commitSha === undefined) {
+      return { lookup: toLookup(cached, now, "not-eligible") };
+    }
+    if (cached?.nextRetryAt !== undefined && cached.nextRetryAt > now) {
+      return { lookup: toLookup(cached, now, "backing-off") };
+    }
+
+    const completion = this.startRefresh({
+      worktreeId,
+      commitSha,
+      identityKey,
+      author
+    });
+    return {
+      lookup: toLookup(cached, now, "in-flight"),
+      completion
+    };
+  }
+
+  private startRefresh(
+    prepared: PreparedRequest
+  ): Promise<GitHubCommitAuthorIdentityLookup> {
+    const requestKey = [
+      prepared.identityKey,
+      prepared.worktreeId,
+      prepared.commitSha
+    ].join("\0");
+    const existing = this.inFlight.get(requestKey);
+    if (existing !== undefined) return existing;
+
+    const completion = Promise.resolve()
+      .then(async () => {
+        const outcome = await this.refresh(prepared);
+        const now = this.now();
+        const cached = this.readCache(prepared.identityKey);
+        return toLookup(
+          cached,
+          now,
+          outcome === "not-eligible"
+            ? "not-eligible"
+            : refreshStateAfterCompletion(cached, now)
+        );
+      })
+      .catch(() => {
+        const now = this.now();
+        this.recordFailure(prepared.identityKey, now);
+        return toLookup(this.readCache(prepared.identityKey), now, "backing-off");
+      });
+
+    this.inFlight.set(requestKey, completion);
+    void completion.then(() => {
+      if (this.inFlight.get(requestKey) === completion) {
+        this.inFlight.delete(requestKey);
+      }
+    });
+    return completion;
+  }
+
+  private async refresh(
+    prepared: PreparedRequest
+  ): Promise<"settled" | "not-eligible"> {
+    try {
+      const worktree = this.db
+        .prepare("SELECT path FROM worktrees WHERE id = ?")
+        .get(prepared.worktreeId) as { path: string } | undefined;
+      if (worktree === undefined) return "not-eligible";
+
+      const remote = await this.originRemote(worktree.path);
+      if (remote === null) return "not-eligible";
+      if (remote === undefined) {
+        this.recordFailure(prepared.identityKey, this.now());
+        return "settled";
+      }
+
+      const response = await this.transport.fetchCommit({
+        owner: remote.owner,
+        repo: remote.repo,
+        commitSha: prepared.commitSha
+      });
+      const completedAt = this.now();
+      const outcome = evaluateRemoteCommit(response, prepared.author, {
+        owner: remote.owner,
+        repo: remote.repo,
+        commitSha: prepared.commitSha
+      });
+      if (outcome.kind === "resolved") {
+        this.writeResolved({
+          identityKey: prepared.identityKey,
+          identity: outcome.identity,
+          fetchedAt: completedAt,
+          expiresAt: completedAt + this.resolvedTtlMs
+        });
+        return "settled";
+      }
+      if (outcome.kind === "negative") {
+        this.writeNegative({
+          identityKey: prepared.identityKey,
+          fetchedAt: completedAt,
+          expiresAt: completedAt + this.negativeTtlMs
+        });
+        return "settled";
+      }
+      this.recordFailure(prepared.identityKey, completedAt);
+      return "settled";
+    } catch {
+      this.recordFailure(prepared.identityKey, this.now());
+      return "settled";
+    }
+  }
+
+  /** `null` is a recognized non-GitHub remote; `undefined` is a transient Git failure. */
+  private async originRemote(
+    worktreePath: string
+  ): Promise<{ owner: string; repo: string } | null | undefined> {
+    const result = await this.git(["remote", "get-url", "origin"], worktreePath);
+    if (!result.ok || result.value.exitCode !== 0) return undefined;
+    return parseGitHubRemote(result.value.stdout);
+  }
+
+  private readCache(identityKey: string): CacheEntry | undefined {
+    try {
+      const row = this.db
+        .prepare(
+          `SELECT identity_key, status, github_login, avatar_url, fetched_at,
+                  expires_at, failure_count, next_retry_at, updated_at
+             FROM github_commit_author_identity_cache
+            WHERE identity_key = ?`
+        )
+        .get(identityKey) as CacheRow | undefined;
+      return row === undefined ? undefined : parseCacheRow(row);
+    } catch {
+      return undefined;
+    }
+  }
+
+  private writeResolved(params: {
+    identityKey: string;
+    identity: GitHubCommitAuthorIdentity;
+    fetchedAt: number;
+    expiresAt: number;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO github_commit_author_identity_cache(
+           identity_key, status, github_login, avatar_url, fetched_at,
+           expires_at, failure_count, next_retry_at, updated_at
+         ) VALUES (?, 'resolved', ?, ?, ?, ?, 0, NULL, ?)
+         ON CONFLICT(identity_key) DO UPDATE SET
+           status = excluded.status,
+           github_login = excluded.github_login,
+           avatar_url = excluded.avatar_url,
+           fetched_at = excluded.fetched_at,
+           expires_at = excluded.expires_at,
+           failure_count = 0,
+           next_retry_at = NULL,
+           updated_at = excluded.updated_at
+         WHERE excluded.updated_at >= github_commit_author_identity_cache.updated_at`
+      )
+      .run(
+        params.identityKey,
+        params.identity.login,
+        params.identity.avatarUrl ?? null,
+        params.fetchedAt,
+        params.expiresAt,
+        params.fetchedAt
+      );
+  }
+
+  private writeNegative(params: {
+    identityKey: string;
+    fetchedAt: number;
+    expiresAt: number;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO github_commit_author_identity_cache(
+           identity_key, status, github_login, avatar_url, fetched_at,
+           expires_at, failure_count, next_retry_at, updated_at
+         ) VALUES (?, 'negative', NULL, NULL, ?, ?, 0, NULL, ?)
+         ON CONFLICT(identity_key) DO UPDATE SET
+           status = excluded.status,
+           github_login = NULL,
+           avatar_url = NULL,
+           fetched_at = excluded.fetched_at,
+           expires_at = excluded.expires_at,
+           failure_count = 0,
+           next_retry_at = NULL,
+           updated_at = excluded.updated_at
+         WHERE excluded.updated_at >= github_commit_author_identity_cache.updated_at`
+      )
+      .run(params.identityKey, params.fetchedAt, params.expiresAt, params.fetchedAt);
+  }
+
+  /** Keep stale proven data while a temporary failure is backed off. */
+  private recordFailure(identityKey: string, now: number): void {
+    const failureCount = Math.min(
+      16,
+      (this.readCache(identityKey)?.failureCount ?? 0) + 1
+    );
+    const retryAfterMs = backoffMs(
+      failureCount,
+      this.initialBackoffMs,
+      this.maxBackoffMs
+    );
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO github_commit_author_identity_cache(
+             identity_key, status, github_login, avatar_url, fetched_at,
+             expires_at, failure_count, next_retry_at, updated_at
+           ) VALUES (?, 'unavailable', NULL, NULL, 0, 0, ?, ?, ?)
+           ON CONFLICT(identity_key) DO UPDATE SET
+             failure_count = excluded.failure_count,
+             next_retry_at = excluded.next_retry_at,
+             updated_at = excluded.updated_at
+           WHERE excluded.updated_at >= github_commit_author_identity_cache.updated_at
+             AND (
+               github_commit_author_identity_cache.status = 'unavailable'
+               OR github_commit_author_identity_cache.expires_at <= excluded.updated_at
+             )`
+        )
+        .run(identityKey, failureCount, now + retryAfterMs, now);
+    } catch {
+      // Cache problems never become visible commit-card failures.
+    }
+  }
+
+  private pruneIfDue(now: number): void {
+    if (now - this.lastPrunedAt < PRUNE_INTERVAL_MS) return;
+    this.lastPrunedAt = now;
+    try {
+      this.db
+        .prepare(
+          `DELETE FROM github_commit_author_identity_cache
+            WHERE (status = 'resolved' AND expires_at < ?)
+               OR (status = 'negative' AND expires_at < ?)
+               OR (status = 'unavailable' AND updated_at < ?)`
+        )
+        .run(
+          now - RESOLVED_RETENTION_MS,
+          now - NEGATIVE_RETENTION_MS,
+          now - UNAVAILABLE_RETENTION_MS
+        );
+    } catch {
+      // A cache cleanup failure must not affect an author lookup.
+    }
+  }
+}
+
+/** Versioned opaque cache key; raw local author fields are never persisted. */
+export function buildGitHubCommitAuthorIdentityCacheKey(author: {
+  name: string;
+  email: string;
+}): string | undefined {
+  const normalized = normalizeAuthor(author);
+  if (normalized === undefined) return undefined;
+  return createHash("sha256")
+    .update(
+      `pwrgit-github-commit-author-identity:v1\0${normalized.email}\0${normalized.name}`
+    )
+    .digest("hex");
+}
+
+function parseGitHubCommitResponse(value: unknown): GitHubCommitAuthorRemoteCommit {
+  const response = asRecord(value);
+  const commit = asRecord(response?.commit);
+  const commitAuthor = asRecord(commit?.author);
+  const githubAuthor = response?.author === null ? null : asRecord(response?.author);
+  const sha = readString(response?.sha);
+  const author =
+    commitAuthor === undefined
+      ? undefined
+      : toRemoteCommitAuthor(commitAuthor);
+  const identity =
+    githubAuthor === null
+      ? null
+      : githubAuthor === undefined
+        ? undefined
+        : toRemoteGitHubAuthor(githubAuthor);
+
+  return {
+    ...(sha === undefined ? {} : { sha }),
+    ...(author === undefined ? {} : { author }),
+    ...(identity === undefined ? {} : { githubAuthor: identity })
+  };
+}
+
+function evaluateRemoteCommit(
+  response: GitHubCommitAuthorRemoteCommit,
+  expectedAuthor: NormalizedAuthor,
+  expectedProof: GitHubCommitAuthorProof
+): RemoteOutcome {
+  if (normalizeCommitSha(response.sha) !== expectedProof.commitSha) {
+    return { kind: "inconclusive" };
+  }
+  const remoteAuthor = normalizeAuthor(response.author);
+  if (
+    remoteAuthor === undefined ||
+    remoteAuthor.name !== expectedAuthor.name ||
+    remoteAuthor.email !== expectedAuthor.email
+  ) {
+    return { kind: "inconclusive" };
+  }
+  if (response.githubAuthor === null) return { kind: "negative" };
+  const identity = normalizeGitHubIdentity(response.githubAuthor);
+  return identity === undefined
+    ? { kind: "inconclusive" }
+    : { kind: "resolved", identity };
+}
+
+function parseCacheRow(row: CacheRow): CacheEntry | undefined {
+  if (
+    !isCacheStatus(row.status) ||
+    !isTimestamp(row.fetched_at) ||
+    !isTimestamp(row.expires_at) ||
+    !isTimestamp(row.updated_at) ||
+    !Number.isSafeInteger(row.failure_count) ||
+    row.failure_count < 0
+  ) {
+    return undefined;
+  }
+
+  const nextRetryAt = isTimestamp(row.next_retry_at) ? row.next_retry_at : undefined;
+  if (row.status === "resolved") {
+    const login = safeText(row.github_login, 255);
+    if (login === undefined) return undefined;
+    const avatarUrl = normalizeAvatarUrl(row.avatar_url);
+    return {
+      identityKey: row.identity_key,
+      status: row.status,
+      identity: { login, ...(avatarUrl === undefined ? {} : { avatarUrl }) },
+      fetchedAt: row.fetched_at,
+      expiresAt: row.expires_at,
+      failureCount: row.failure_count,
+      ...(nextRetryAt === undefined ? {} : { nextRetryAt }),
+      updatedAt: row.updated_at
+    };
+  }
+
+  return {
+    identityKey: row.identity_key,
+    status: row.status,
+    fetchedAt: row.fetched_at,
+    expiresAt: row.expires_at,
+    failureCount: row.failure_count,
+    ...(nextRetryAt === undefined ? {} : { nextRetryAt }),
+    updatedAt: row.updated_at
+  };
+}
+
+function normalizeAuthor(value: unknown): NormalizedAuthor | undefined {
+  if (!isRecord(value)) return undefined;
+  const name = safeText(value.name, 512)?.normalize("NFC");
+  const email = safeText(value.email, 320)?.normalize("NFC").toLowerCase();
+  return name !== undefined && email !== undefined && email.includes("@") && !/\s/.test(email)
+    ? { name, email }
+    : undefined;
+}
+
+function normalizeCommitSha(value: unknown): string | undefined {
+  const sha = safeText(value, 40)?.toLowerCase();
+  return sha !== undefined && /^[a-f0-9]{40}$/.test(sha) ? sha : undefined;
+}
+
+function normalizeGitHubIdentity(
+  value: GitHubCommitAuthorRemoteCommit["githubAuthor"]
+): GitHubCommitAuthorIdentity | undefined {
+  if (!isRecord(value)) return undefined;
+  const login = safeText(value.login, 255);
+  if (login === undefined) return undefined;
+  const avatarUrl = normalizeAvatarUrl(value.avatarUrl);
+  return { login, ...(avatarUrl === undefined ? {} : { avatarUrl }) };
+}
+
+function normalizeAvatarUrl(value: unknown): string | undefined {
+  const raw = safeText(value, 2_048);
+  if (raw === undefined) return undefined;
+  try {
+    const url = new URL(raw);
+    return url.protocol === "https:" && url.username === "" && url.password === ""
+      ? url.toString()
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function toLookup(
+  entry: CacheEntry | undefined,
+  now: number,
+  refreshState: GitHubCommitAuthorIdentityLookup["refreshState"]
+): GitHubCommitAuthorIdentityLookup {
+  const cacheState =
+    entry === undefined || entry.status === "unavailable"
+      ? "miss"
+      : entry.expiresAt > now
+        ? "fresh"
+        : "stale";
+  return {
+    ...(entry?.identity === undefined ? {} : { identity: entry.identity }),
+    cacheState,
+    refreshState
+  };
+}
+
+function notEligibleLookup(): GitHubCommitAuthorIdentityLookup {
+  return { cacheState: "miss", refreshState: "not-eligible" };
+}
+
+function isFresh(entry: CacheEntry | undefined, now: number): boolean {
+  return entry !== undefined && entry.status !== "unavailable" && entry.expiresAt > now;
+}
+
+function refreshStateAfterCompletion(
+  entry: CacheEntry | undefined,
+  now: number
+): GitHubCommitAuthorIdentityLookup["refreshState"] {
+  return entry?.nextRetryAt !== undefined && entry.nextRetryAt > now
+    ? "backing-off"
+    : "idle";
+}
+
+function isCacheStatus(value: string): value is CacheStatus {
+  return value === "resolved" || value === "negative" || value === "unavailable";
+}
+
+function isTimestamp(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function safeText(value: unknown, maxLength: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return normalized !== "" &&
+    normalized.length <= maxLength &&
+    !hasControlCharacter(normalized)
+    ? normalized
+    : undefined;
+}
+
+function hasControlCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return isRecord(value) ? value : undefined;
+}
+
+function toRemoteCommitAuthor(
+  value: Record<string, unknown>
+): NonNullable<GitHubCommitAuthorRemoteCommit["author"]> {
+  const name = readString(value.name);
+  const email = readString(value.email);
+  return {
+    ...(name === undefined ? {} : { name }),
+    ...(email === undefined ? {} : { email })
+  };
+}
+
+function toRemoteGitHubAuthor(
+  value: Record<string, unknown>
+): NonNullable<GitHubCommitAuthorRemoteCommit["githubAuthor"]> {
+  const login = readString(value.login);
+  const avatarUrl = readString(value.avatar_url);
+  return {
+    ...(login === undefined ? {} : { login }),
+    ...(avatarUrl === undefined ? {} : { avatarUrl })
+  };
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function backoffMs(
+  failureCount: number,
+  initialBackoffMs: number,
+  maxBackoffMs: number
+): number {
+  return Math.min(
+    maxBackoffMs,
+    initialBackoffMs * 2 ** Math.max(0, failureCount - 1)
+  );
+}
+
+function positiveDuration(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : fallback;
+}

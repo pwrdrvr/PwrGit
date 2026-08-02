@@ -16,6 +16,7 @@ import type {
   ChangeSet,
   CommitFileChange,
   CommitStats,
+  GitHubCommitAuthorIdentityLookup,
   GraphLog,
   LaneGraph,
   PrSummary,
@@ -247,6 +248,19 @@ export interface Commands {
     req: void;
     res: { installed: boolean; loggedIn: boolean };
   };
+  /**
+   * Return a cache-first GitHub identity snapshot for a known commit and start
+   * any eligible exact-commit verification in the background.
+   */
+  "github:commitAuthorIdentity": {
+    req: {
+      worktreeId: string;
+      commitHash: string;
+      authorName: string;
+      authorEmail: string;
+    };
+    res: GitHubCommitAuthorIdentityLookup;
+  };
   "worktree:setPin": { req: { worktreeId: string; pinned: boolean }; res: null };
 
   // Worktree state (U8)
@@ -426,6 +440,15 @@ export interface Events {
    * branch's PR. Keyed by branch name.
    */
   "pr:changed": { repoId: string; prs: Record<string, PrSummary | null> };
+  /**
+   * A non-blocking exact-commit verification settled. Consumers that requested
+   * this commit can repaint their context without polling or blocking hover.
+   */
+  "github:commitAuthorIdentityChanged": {
+    worktreeId: string;
+    commitHash: string;
+    lookup: GitHubCommitAuthorIdentityLookup;
+  };
   /** Native Profiles-menu actions — handled by whichever window has focus. */
   "ui:newProfile": Record<string, never>;
   "ui:manageProfile": Record<string, never>;

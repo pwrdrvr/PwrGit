@@ -18,5 +18,10 @@ origin isn't github.com, `gh` isn't logged in, or the network fails.
   `force`) emits a targeted `pr:changed { repoId, prs }` delta the renderer
   patches onto the tree in place — no full `repo:list` reload. `listRepos` also
   LEFT JOINs `branch_pr` onto `Worktree.pr` for the initial load.
+- **Commit-author identity**: `github:commitAuthorIdentity` is cache-first and
+  only fetches an exact full commit SHA from a recognized GitHub `origin`. It
+  accepts a login/avatar only after SHA + local Git author name/email match;
+  use its update event to repaint a card, never to block hover. Its `gh api`
+  transport deliberately does not share the PR client's token-extraction flow.
 - A **merged PR** makes a branch prunable at any age (`isPrunableWorktree`) —
   catches squash/rebase merges the git-ancestry "in default" check can't see.
