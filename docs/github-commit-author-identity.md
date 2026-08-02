@@ -8,7 +8,9 @@ truth.
 
 ## Renderer contract
 
-The shared command is cache-first and never waits for GitHub networking:
+The shared command is non-blocking and never waits for GitHub networking. It
+first validates the worktree's GitHub `origin` in the background, because the
+persistent cache is scoped to that exact origin and full commit SHA:
 
 ```ts
 const result = await dispatch("github:commitAuthorIdentity", {
@@ -18,7 +20,7 @@ const result = await dispatch("github:commitAuthorIdentity", {
   authorEmail: commit.authorEmail
 });
 
-if (result.ok) {
+if (result.ok && result.value.identity !== undefined) {
   contextCard.setGitHubIdentity(result.value.identity);
 }
 ```
@@ -33,7 +35,8 @@ type GitHubCommitAuthorIdentityLookup = {
 };
 ```
 
-When a background verification settles, main emits
+When origin validation, a proof-scoped cache read, or a background verification
+settles, main emits
 `github:commitAuthorIdentityChanged` with the same lookup plus the worktree ID
 and commit hash. A card can subscribe to that event and repaint only if it is
 still showing that commit. It must not delay opening or replace the local Git
@@ -64,7 +67,9 @@ network failure is inconclusive rather than negative.
 ## Cache and failure behavior
 
 The persistent SQLite table is `github_commit_author_identity_cache`. Its key
-is a versioned SHA-256 of normalized local name/email. It stores only that
+is a versioned SHA-256 of the normalized local name/email plus the proven
+GitHub owner, repository, and full commit SHA. The service never reads a row
+until it has revalidated that worktree origin and SHA. It stores only that
 opaque key, GitHub login/avatar, timestamps, status, and retry metadata—never
 raw author fields, remote output, or credentials.
 

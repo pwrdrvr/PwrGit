@@ -137,7 +137,6 @@ type NormalizedAuthor = { name: string; email: string };
 type PreparedRequest = {
   worktreeId: string;
   commitSha: string;
-  identityKey: string;
   author: NormalizedAuthor;
 };
 
@@ -147,7 +146,7 @@ type RemoteOutcome =
   | { kind: "inconclusive" };
 
 /**
- * Persistent, cache-first verification of a local Git commit author's GitHub
+ * Persistent exact-proof verification of a local Git commit author's GitHub
  * account. The local name/email remain the source of truth; this service only
  * supplies login/avatar fields after proving an exact GitHub commit match.
  */
@@ -193,9 +192,11 @@ export class GitHubCommitAuthorIdentityService {
   }
 
   /**
-   * Read local cache state synchronously, then (when eligible) resolve the
-   * worktree remote and GitHub commit in the background. Callers must render
-   * their local Git author immediately and may observe `completion` to repaint.
+   * Start an exact-proof lookup in the background. The GitHub remote must be
+   * resolved before a cache row can be read: cache keys are scoped to owner,
+   * repo, and full commit SHA, so they cannot bleed across commits or remotes.
+   * Callers must render local Git author data immediately and observe
+   * `completion` only to repaint.
    */
   request(input: {
     worktreeId: string;
@@ -209,31 +210,21 @@ export class GitHubCommitAuthorIdentityService {
     });
     if (author === undefined) return { lookup: notEligibleLookup() };
 
-    const identityKey = buildGitHubCommitAuthorIdentityCacheKey(author);
-    if (identityKey === undefined) return { lookup: notEligibleLookup() };
-
-    const now = this.now();
-    this.pruneIfDue(now);
-    const cached = this.readCache(identityKey);
-    if (isFresh(cached, now)) return { lookup: toLookup(cached, now, "idle") };
-
     const worktreeId = safeText(input.worktreeId, 512);
     const commitSha = normalizeCommitSha(input.commitHash);
     if (worktreeId === undefined || commitSha === undefined) {
-      return { lookup: toLookup(cached, now, "not-eligible") };
+      return { lookup: notEligibleLookup() };
     }
-    if (cached?.nextRetryAt !== undefined && cached.nextRetryAt > now) {
-      return { lookup: toLookup(cached, now, "backing-off") };
-    }
+
+    this.pruneIfDue(this.now());
 
     const completion = this.startRefresh({
       worktreeId,
       commitSha,
-      identityKey,
       author
     });
     return {
-      lookup: toLookup(cached, now, "in-flight"),
+      lookup: { cacheState: "miss", refreshState: "in-flight" },
       completion
     };
   }
@@ -241,32 +232,18 @@ export class GitHubCommitAuthorIdentityService {
   private startRefresh(
     prepared: PreparedRequest
   ): Promise<GitHubCommitAuthorIdentityLookup> {
-    const requestKey = [
-      prepared.identityKey,
-      prepared.worktreeId,
-      prepared.commitSha
-    ].join("\0");
+    const requestKey = buildRequestKey(prepared);
     const existing = this.inFlight.get(requestKey);
     if (existing !== undefined) return existing;
 
     const completion = Promise.resolve()
-      .then(async () => {
-        const outcome = await this.refresh(prepared);
-        const now = this.now();
-        const cached = this.readCache(prepared.identityKey);
-        return toLookup(
-          cached,
-          now,
-          outcome === "not-eligible"
-            ? "not-eligible"
-            : refreshStateAfterCompletion(cached, now)
-        );
-      })
-      .catch(() => {
-        const now = this.now();
-        this.recordFailure(prepared.identityKey, now);
-        return toLookup(this.readCache(prepared.identityKey), now, "backing-off");
-      });
+      .then(async () => await this.refresh(prepared))
+      .catch(
+        (): GitHubCommitAuthorIdentityLookup => ({
+          cacheState: "miss",
+          refreshState: "backing-off"
+        })
+      );
 
     this.inFlight.set(requestKey, completion);
     void completion.then(() => {
@@ -279,53 +256,65 @@ export class GitHubCommitAuthorIdentityService {
 
   private async refresh(
     prepared: PreparedRequest
-  ): Promise<"settled" | "not-eligible"> {
+  ): Promise<GitHubCommitAuthorIdentityLookup> {
+    let identityKey: string | undefined;
     try {
       const worktree = this.db
         .prepare("SELECT path FROM worktrees WHERE id = ?")
         .get(prepared.worktreeId) as { path: string } | undefined;
-      if (worktree === undefined) return "not-eligible";
+      if (worktree === undefined) return notEligibleLookup();
 
       const remote = await this.originRemote(worktree.path);
-      if (remote === null) return "not-eligible";
+      if (remote === null) return notEligibleLookup();
       if (remote === undefined) {
-        this.recordFailure(prepared.identityKey, this.now());
-        return "settled";
+        return { cacheState: "miss", refreshState: "backing-off" };
       }
 
-      const response = await this.transport.fetchCommit({
+      const proof = normalizeProof({
         owner: remote.owner,
         repo: remote.repo,
         commitSha: prepared.commitSha
       });
+      if (proof === undefined) return notEligibleLookup();
+      identityKey = buildGitHubCommitAuthorIdentityCacheKey(prepared.author, proof);
+      if (identityKey === undefined) return notEligibleLookup();
+
+      const now = this.now();
+      const cached = this.readCache(identityKey);
+      if (isFresh(cached, now)) return toLookup(cached, now, "idle");
+      if (cached?.nextRetryAt !== undefined && cached.nextRetryAt > now) {
+        return toLookup(cached, now, "backing-off");
+      }
+
+      const response = await this.transport.fetchCommit(proof);
       const completedAt = this.now();
-      const outcome = evaluateRemoteCommit(response, prepared.author, {
-        owner: remote.owner,
-        repo: remote.repo,
-        commitSha: prepared.commitSha
-      });
+      const outcome = evaluateRemoteCommit(response, prepared.author, proof);
       if (outcome.kind === "resolved") {
         this.writeResolved({
-          identityKey: prepared.identityKey,
+          identityKey,
           identity: outcome.identity,
           fetchedAt: completedAt,
           expiresAt: completedAt + this.resolvedTtlMs
         });
-        return "settled";
+        return toLookup(this.readCache(identityKey), completedAt, "idle");
       }
       if (outcome.kind === "negative") {
         this.writeNegative({
-          identityKey: prepared.identityKey,
+          identityKey,
           fetchedAt: completedAt,
           expiresAt: completedAt + this.negativeTtlMs
         });
-        return "settled";
+        return toLookup(this.readCache(identityKey), completedAt, "idle");
       }
-      this.recordFailure(prepared.identityKey, completedAt);
-      return "settled";
+      this.recordFailure(identityKey, completedAt);
+      return toLookup(this.readCache(identityKey), completedAt, "backing-off");
     } catch {
-      this.recordFailure(prepared.identityKey, this.now());
-      return "settled";
+      const now = this.now();
+      if (identityKey === undefined) {
+        return { cacheState: "miss", refreshState: "backing-off" };
+      }
+      this.recordFailure(identityKey, now);
+      return toLookup(this.readCache(identityKey), now, "backing-off");
     }
   }
 
@@ -468,16 +457,28 @@ export class GitHubCommitAuthorIdentityService {
   }
 }
 
-/** Versioned opaque cache key; raw local author fields are never persisted. */
-export function buildGitHubCommitAuthorIdentityCacheKey(author: {
-  name: string;
-  email: string;
-}): string | undefined {
+/**
+ * Versioned opaque cache key for one exact, remote-proven commit. Raw author
+ * fields, remote name, and commit SHA are never persisted outside this digest.
+ */
+export function buildGitHubCommitAuthorIdentityCacheKey(
+  author: { name: string; email: string },
+  proof: GitHubCommitAuthorProof
+): string | undefined {
   const normalized = normalizeAuthor(author);
-  if (normalized === undefined) return undefined;
+  const normalizedProof = normalizeProof(proof);
+  if (normalized === undefined || normalizedProof === undefined) return undefined;
   return createHash("sha256")
     .update(
-      `pwrgit-github-commit-author-identity:v1\0${normalized.email}\0${normalized.name}`
+      `pwrgit-github-commit-author-identity:v2\0${normalizedProof.owner}\0${normalizedProof.repo}\0${normalizedProof.commitSha}\0${normalized.email}\0${normalized.name}`
+    )
+    .digest("hex");
+}
+
+function buildRequestKey(prepared: PreparedRequest): string {
+  return createHash("sha256")
+    .update(
+      `pwrgit-github-commit-author-request:v1\0${prepared.worktreeId}\0${prepared.commitSha}\0${prepared.author.email}\0${prepared.author.name}`
     )
     .digest("hex");
 }
@@ -583,6 +584,23 @@ function normalizeCommitSha(value: unknown): string | undefined {
   return sha !== undefined && /^[a-f0-9]{40}$/.test(sha) ? sha : undefined;
 }
 
+function normalizeProof(value: unknown): GitHubCommitAuthorProof | undefined {
+  if (!isRecord(value)) return undefined;
+  const owner = normalizeGitHubPathSegment(value.owner);
+  const repo = normalizeGitHubPathSegment(value.repo);
+  const commitSha = normalizeCommitSha(value.commitSha);
+  return owner === undefined || repo === undefined || commitSha === undefined
+    ? undefined
+    : { owner, repo, commitSha };
+}
+
+function normalizeGitHubPathSegment(value: unknown): string | undefined {
+  const segment = safeText(value, 100);
+  return segment !== undefined && /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(segment)
+    ? segment
+    : undefined;
+}
+
 function normalizeGitHubIdentity(
   value: GitHubCommitAuthorRemoteCommit["githubAuthor"]
 ): GitHubCommitAuthorIdentity | undefined {
@@ -630,15 +648,6 @@ function notEligibleLookup(): GitHubCommitAuthorIdentityLookup {
 
 function isFresh(entry: CacheEntry | undefined, now: number): boolean {
   return entry !== undefined && entry.status !== "unavailable" && entry.expiresAt > now;
-}
-
-function refreshStateAfterCompletion(
-  entry: CacheEntry | undefined,
-  now: number
-): GitHubCommitAuthorIdentityLookup["refreshState"] {
-  return entry?.nextRetryAt !== undefined && entry.nextRetryAt > now
-    ? "backing-off"
-    : "idle";
 }
 
 function isCacheStatus(value: string): value is CacheStatus {

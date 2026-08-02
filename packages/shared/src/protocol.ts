@@ -249,8 +249,9 @@ export interface Commands {
     res: { installed: boolean; loggedIn: boolean };
   };
   /**
-   * Return a cache-first GitHub identity snapshot for a known commit and start
-   * any eligible exact-commit verification in the background.
+   * Return immediately for a known commit and start any eligible exact-commit
+   * verification in the background. Proof-scoped cache results arrive via the
+   * targeted event after the worktree's GitHub origin has been validated.
    */
   "github:commitAuthorIdentity": {
     req: {

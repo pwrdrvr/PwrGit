@@ -6,6 +6,7 @@ import {
   buildGitHubCommitAuthorIdentityCacheKey,
   GhCliCommitAuthorIdentityTransport,
   GitHubCommitAuthorIdentityService,
+  type GitHubCommitAuthorProof,
   type GitHubCommitAuthorRemoteCommit,
   type GitHubCommitAuthorIdentityTransport
 } from "./commit-author-identity";
@@ -15,6 +16,11 @@ const AUTHOR = {
   email: "ada@example.test"
 };
 const COMMIT_SHA = "0123456789abcdef0123456789abcdef01234567";
+const PROOF = {
+  owner: "octo-org",
+  repo: "example-repo",
+  commitSha: COMMIT_SHA
+};
 const INPUT = {
   worktreeId: "worktree-1",
   commitHash: COMMIT_SHA,
@@ -28,6 +34,7 @@ let fetchCalls: number;
 let gitCalls: number;
 let remoteUrl: string;
 let fetchImpl: () => Promise<GitHubCommitAuthorRemoteCommit>;
+let requestedProofs: GitHubCommitAuthorProof[];
 let service: GitHubCommitAuthorIdentityService;
 
 beforeEach(() => {
@@ -38,6 +45,7 @@ beforeEach(() => {
   gitCalls = 0;
   remoteUrl = "git@github.com:octo-org/example-repo.git\n";
   fetchImpl = async () => resolvedRemoteCommit();
+  requestedProofs = [];
   service = createService();
 });
 
@@ -64,7 +72,7 @@ describe("GitHubCommitAuthorIdentityService", () => {
     expect(fetchCalls).toBe(1);
     expect(gitCalls).toBe(1);
 
-    const identityKey = buildGitHubCommitAuthorIdentityCacheKey(AUTHOR)!;
+    const identityKey = buildGitHubCommitAuthorIdentityCacheKey(AUTHOR, PROOF)!;
     const row = db
       .prepare(
         "SELECT * FROM github_commit_author_identity_cache WHERE identity_key = ?"
@@ -80,16 +88,21 @@ describe("GitHubCommitAuthorIdentityService", () => {
     expect(JSON.stringify(row)).not.toContain(AUTHOR.email);
     expect(JSON.stringify(row)).not.toContain("gho_");
 
-    const cached = service.request({ ...INPUT, commitHash: "short-sha" });
+    const cached = service.request(INPUT);
     expect(cached).toEqual({
       lookup: {
-        identity: {
-          login: "ada",
-          avatarUrl: "https://avatars.githubusercontent.com/u/1?v=4"
-        },
-        cacheState: "fresh",
-        refreshState: "idle"
-      }
+        cacheState: "miss",
+        refreshState: "in-flight"
+      },
+      completion: expect.any(Promise)
+    });
+    expect(await requireCompletion(cached.completion)).toEqual({
+      identity: {
+        login: "ada",
+        avatarUrl: "https://avatars.githubusercontent.com/u/1?v=4"
+      },
+      cacheState: "fresh",
+      refreshState: "idle"
     });
     expect(fetchCalls).toBe(1);
   });
@@ -114,8 +127,14 @@ describe("GitHubCommitAuthorIdentityService", () => {
     });
     expect(row.github_login).toBeNull();
 
-    expect(service.request(INPUT)).toEqual({
-      lookup: { cacheState: "miss", refreshState: "backing-off" }
+    const retryGated = service.request(INPUT);
+    expect(retryGated.lookup).toEqual({
+      cacheState: "miss",
+      refreshState: "in-flight"
+    });
+    expect(await requireCompletion(retryGated.completion)).toEqual({
+      cacheState: "miss",
+      refreshState: "backing-off"
     });
     expect(fetchCalls).toBe(1);
   });
@@ -133,13 +152,14 @@ describe("GitHubCommitAuthorIdentityService", () => {
     });
     expect(cachedRow().status).toBe("negative");
 
-    expect(service.request(INPUT)).toEqual({
-      lookup: { cacheState: "fresh", refreshState: "idle" }
+    expect(await requireCompletion(service.request(INPUT).completion)).toEqual({
+      cacheState: "fresh",
+      refreshState: "idle"
     });
     expect(fetchCalls).toBe(1);
   });
 
-  it("keeps stale verified data visible while one refresh is in flight", async () => {
+  it("deduplicates a stale exact-commit refresh", async () => {
     await requireCompletion(service.request(INPUT).completion);
 
     let releaseFetch:
@@ -158,14 +178,7 @@ describe("GitHubCommitAuthorIdentityService", () => {
 
     const first = service.request(INPUT);
     const duplicate = service.request(INPUT);
-    expect(first.lookup).toEqual({
-      identity: {
-        login: "ada",
-        avatarUrl: "https://avatars.githubusercontent.com/u/1?v=4"
-      },
-      cacheState: "stale",
-      refreshState: "in-flight"
-    });
+    expect(first.lookup).toEqual({ cacheState: "miss", refreshState: "in-flight" });
     expect(duplicate.lookup.refreshState).toBe("in-flight");
     expect(first.completion).toBe(duplicate.completion);
 
@@ -202,8 +215,10 @@ describe("GitHubCommitAuthorIdentityService", () => {
     expect(cachedRow().next_retry_at).toBe(now + 1_000);
 
     now += 999;
-    expect(service.request(INPUT)).toEqual({
-      lookup: { cacheState: "miss", refreshState: "backing-off" }
+    const retryGated = service.request(INPUT);
+    expect(await requireCompletion(retryGated.completion)).toEqual({
+      cacheState: "miss",
+      refreshState: "backing-off"
     });
     expect(fetchCalls).toBe(1);
 
@@ -213,22 +228,51 @@ describe("GitHubCommitAuthorIdentityService", () => {
     expect(cachedRow().next_retry_at).toBe(now + 2_000);
   });
 
-  it("does not fetch for a short SHA or a known non-GitHub remote", async () => {
+  it("does not serve a proven mapping outside its exact GitHub commit proof", async () => {
+    await requireCompletion(service.request(INPUT).completion);
+    expect(fetchCalls).toBe(1);
+
     expect(service.request({ ...INPUT, commitHash: COMMIT_SHA.slice(0, 12) })).toEqual({
       lookup: { cacheState: "miss", refreshState: "not-eligible" }
     });
-    expect(gitCalls).toBe(0);
-    expect(fetchCalls).toBe(0);
+    expect(fetchCalls).toBe(1);
 
     remoteUrl = "git@gitlab.com:octo-org/example-repo.git\n";
     const nonGitHub = service.request(INPUT);
+    expect(nonGitHub.lookup).toEqual({
+      cacheState: "miss",
+      refreshState: "in-flight"
+    });
     expect(await requireCompletion(nonGitHub.completion)).toEqual({
       cacheState: "miss",
       refreshState: "not-eligible"
     });
-    expect(gitCalls).toBe(1);
-    expect(fetchCalls).toBe(0);
-    expect(cachedRowOrUndefined()).toBeUndefined();
+    expect(fetchCalls).toBe(1);
+
+    const otherProof = {
+      owner: "other-org",
+      repo: "other-repo",
+      commitSha: COMMIT_SHA
+    };
+    remoteUrl = "git@github.com:other-org/other-repo.git\n";
+    const otherRepository = service.request(INPUT);
+    expect(otherRepository.lookup).toEqual({
+      cacheState: "miss",
+      refreshState: "in-flight"
+    });
+    expect(await requireCompletion(otherRepository.completion)).toEqual({
+      identity: {
+        login: "ada",
+        avatarUrl: "https://avatars.githubusercontent.com/u/1?v=4"
+      },
+      cacheState: "fresh",
+      refreshState: "idle"
+    });
+    expect(fetchCalls).toBe(2);
+    expect(requestedProofs).toEqual([PROOF, otherProof]);
+    expect(cachedRow(PROOF)).toBeDefined();
+    expect(cachedRow(otherProof)).toBeDefined();
+    expect(cacheRowCount()).toBe(2);
   });
 });
 
@@ -284,8 +328,9 @@ function createService(options?: {
     return ok({ stdout: remoteUrl, stderr: "", exitCode: 0 });
   };
   const transport: GitHubCommitAuthorIdentityTransport = {
-    fetchCommit: async () => {
+    fetchCommit: async (proof) => {
       fetchCalls += 1;
+      requestedProofs.push(proof);
       return await fetchImpl();
     }
   };
@@ -319,16 +364,29 @@ function resolvedRemoteCommit(): GitHubCommitAuthorRemoteCommit {
   };
 }
 
-function cachedRow(): Record<string, unknown> {
-  const row = cachedRowOrUndefined();
+function cachedRow(proof: GitHubCommitAuthorProof = PROOF): Record<string, unknown> {
+  const row = cachedRowOrUndefined(proof);
   expect(row).toBeDefined();
   return row!;
 }
 
-function cachedRowOrUndefined(): Record<string, unknown> | undefined {
+function cachedRowOrUndefined(
+  proof: GitHubCommitAuthorProof = PROOF
+): Record<string, unknown> | undefined {
+  const identityKey = buildGitHubCommitAuthorIdentityCacheKey(AUTHOR, proof)!;
   return db
-    .prepare("SELECT * FROM github_commit_author_identity_cache")
-    .get() as Record<string, unknown> | undefined;
+    .prepare(
+      "SELECT * FROM github_commit_author_identity_cache WHERE identity_key = ?"
+    )
+    .get(identityKey) as Record<string, unknown> | undefined;
+}
+
+function cacheRowCount(): number {
+  return (
+    db
+      .prepare("SELECT COUNT(*) AS count FROM github_commit_author_identity_cache")
+      .get() as { count: number }
+  ).count;
 }
 
 async function requireCompletion(

@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CommitStats, LaneGraph } from "@pwrgit/shared";
+import type {
+  CommitStats,
+  GitHubCommitAuthorIdentity,
+  LaneGraph
+} from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import {
@@ -81,6 +85,9 @@ export function LineageGraph({
   const [commitMenu, setCommitMenu] = useState<CommitMenuState | null>(null);
   const [commitStats, setCommitStats] = useState<
     Record<string, CommitStats | null>
+  >({});
+  const [commitAuthorIdentities, setCommitAuthorIdentities] = useState<
+    Record<string, GitHubCommitAuthorIdentity | null>
   >({});
   const now = useRelativeClock();
   const commitContext = useViewportTooltip("commit-context-card", {
@@ -257,6 +264,19 @@ export function LineageGraph({
     if (!commitContext.visible) setHoveredCommit(null);
   }, [commitContext.visible]);
 
+  // Identity verification is lazy like diffstats, but it must never delay a
+  // context card. The service validates the exact GitHub origin/SHA before it
+  // reads a cache row, then sends this targeted repaint event.
+  useEffect(() => {
+    return subscribe("github:commitAuthorIdentityChanged", (payload) => {
+      if (payload.worktreeId !== worktreeId) return;
+      setCommitAuthorIdentities((current) => ({
+        ...current,
+        [payload.commitHash]: payload.lookup.identity ?? null
+      }));
+    });
+  }, [worktreeId]);
+
   // Diffstats are intentionally lazy: a graph can contain hundreds of commits,
   // but only the one under the pointer needs a numstat walk. Cache both success
   // and failure for this worktree so repeated hover is instant and quiet.
@@ -264,6 +284,7 @@ export function LineageGraph({
     commitStatsEpochRef.current += 1;
     commitStatsRequestsRef.current.clear();
     setCommitStats({});
+    setCommitAuthorIdentities({});
   }, [worktreeId]);
 
   useEffect(() => {
@@ -288,6 +309,33 @@ export function LineageGraph({
       });
   }, [commitStats, hoveredVm, worktreeId]);
 
+  useEffect(() => {
+    if (hoveredVm === undefined) return;
+    const commit = hoveredVm.commit;
+    // Do not keep a prior presentation result visible while the service
+    // revalidates its proof context for this hover.
+    setCommitAuthorIdentities((current) => {
+      if (!Object.prototype.hasOwnProperty.call(current, commit.hash)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[commit.hash];
+      return next;
+    });
+    void dispatch("github:commitAuthorIdentity", {
+      worktreeId,
+      commitHash: commit.hash,
+      authorName: commit.authorName,
+      authorEmail: commit.authorEmail
+    }).then((result) => {
+      if (!result.ok) return;
+      setCommitAuthorIdentities((current) => ({
+        ...current,
+        [commit.hash]: result.value.identity ?? null
+      }));
+    });
+  }, [hoveredVm, worktreeId]);
+
   // The context window remains current while it is open: its age changes with
   // the shared clock, while ref/base information and lazy diffstats update
   // after graph refreshes and local Git responses.
@@ -301,6 +349,9 @@ export function LineageGraph({
         defaultRef={data?.defaultRef ?? hoveredVm.defaultBranch}
         now={now}
         stats={commitStats[hoveredVm.commit.hash]}
+        githubIdentity={
+          commitAuthorIdentities[hoveredVm.commit.hash] ?? undefined
+        }
       />
     );
   }, [
@@ -309,6 +360,7 @@ export function LineageGraph({
     hoveredVm,
     now,
     commitStats,
+    commitAuthorIdentities,
     viewingBranch
   ]);
 
@@ -327,6 +379,7 @@ export function LineageGraph({
         defaultRef={data?.defaultRef ?? vm.defaultBranch}
         now={now}
         stats={commitStats[vm.commit.hash]}
+        githubIdentity={commitAuthorIdentities[vm.commit.hash] ?? undefined}
       />,
       anchor
     );

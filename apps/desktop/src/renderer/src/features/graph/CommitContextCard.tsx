@@ -1,4 +1,8 @@
-import type { Commit, CommitStats } from "@pwrgit/shared";
+import type {
+  Commit,
+  CommitStats,
+  GitHubCommitAuthorIdentity
+} from "@pwrgit/shared";
 import type { ReactNode } from "react";
 import { DiffStat } from "../diff/DiffStat";
 import { CopyTarget } from "../shell/CopyTarget";
@@ -47,14 +51,15 @@ function CopyIcon() {
   );
 }
 
-/** Structured, local-Git-only content for the lineage commit hover card. */
+/** Structured local-Git content with optional exact-commit GitHub presentation. */
 export function CommitContextCard({
   commit,
   viewingBranch,
   defaultBranch,
   defaultRef,
   now,
-  stats
+  stats,
+  githubIdentity
 }: {
   commit: Commit;
   /** Present only when this commit is exclusive to the viewed HEAD. */
@@ -64,6 +69,8 @@ export function CommitContextCard({
   now: number;
   /** Undefined while the local numstat request is in flight; null on failure. */
   stats: CommitStats | null | undefined;
+  /** Present only after an exact GitHub commit proof verified it. */
+  githubIdentity?: GitHubCommitAuthorIdentity | undefined;
 }) {
   const authorName = commit.authorName.trim() || "Unknown author";
 
@@ -96,11 +103,29 @@ export function CommitContextCard({
 
       <div className="commit-context-card__identity">
         <span className="commit-context-card__avatar" aria-hidden="true">
-          {initials(authorName)}
+          <span className="commit-context-card__avatar-initials">
+            {initials(authorName)}
+          </span>
+          {githubIdentity?.avatarUrl !== undefined ? (
+            <img
+              className="commit-context-card__avatar-image"
+              src={githubIdentity.avatarUrl}
+              alt=""
+              referrerPolicy="no-referrer"
+              onError={(event) => {
+                event.currentTarget.hidden = true;
+              }}
+            />
+          ) : null}
         </span>
         <span className="commit-context-card__author">
           <strong>{authorName}</strong>
           <span>{commit.authorEmail}</span>
+          {githubIdentity !== undefined ? (
+            <span className="commit-context-card__github-login">
+              @{githubIdentity.login}
+            </span>
+          ) : null}
         </span>
       </div>
 

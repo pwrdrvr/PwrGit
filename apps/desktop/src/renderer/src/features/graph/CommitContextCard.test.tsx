@@ -17,7 +17,8 @@ const commit: Commit = {
 function card(
   viewingBranch: string | null,
   defaultBranch = "main",
-  defaultRef = "origin/main"
+  defaultRef = "origin/main",
+  githubIdentity?: { login: string; avatarUrl?: string }
 ): string {
   return renderToStaticMarkup(
     <CommitContextCard
@@ -27,6 +28,7 @@ function card(
       defaultRef={defaultRef}
       now={new Date("2026-08-01T21:00:00.000Z").getTime()}
       stats={null}
+      githubIdentity={githubIdentity}
     />
   );
 }
@@ -57,5 +59,30 @@ describe("CommitContextCard branch context", () => {
     expect(markup).toContain("Base ref");
     expect(markup).toContain("origin/main");
     expect(markup).not.toContain("Base branch");
+  });
+});
+
+describe("CommitContextCard identity", () => {
+  it("keeps the local Git author as the card identity when GitHub is unknown", () => {
+    const markup = card(null);
+
+    expect(markup).toContain("Harold Hunt");
+    expect(markup).toContain("harold@example.com");
+    expect(markup).not.toContain("commit-context-card__github-login");
+    expect(markup).not.toContain("commit-context-card__avatar-image");
+  });
+
+  it("adds a proven GitHub login and avatar without replacing local Git data", () => {
+    const markup = card(null, "main", "origin/main", {
+      login: "harold",
+      avatarUrl: "https://avatars.githubusercontent.com/u/1?v=4"
+    });
+
+    expect(markup).toContain("Harold Hunt");
+    expect(markup).toContain("harold@example.com");
+    expect(markup).toContain("@harold");
+    expect(markup).toContain("commit-context-card__github-login");
+    expect(markup).toContain("commit-context-card__avatar-image");
+    expect(markup).toContain("https://avatars.githubusercontent.com/u/1?v=4");
   });
 });
