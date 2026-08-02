@@ -31,6 +31,13 @@ export function registerRepoHandlers(
     return ok(repos);
   });
 
+  bus.register("repo:refreshWorktrees", async (req) => {
+    const result = await indexer.refreshRepoWorktrees(req.repoId);
+    if (!result.ok) return result;
+    emitEvent("repo:changed", { profileId: result.value.repo.profileId });
+    return result;
+  });
+
   bus.register("repo:add", async (req) => {
     const result = await indexer.indexRepoAt(req.profileId, req.path);
     if (result.ok) emitEvent("repo:changed", { profileId: req.profileId });

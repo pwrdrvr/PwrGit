@@ -58,21 +58,23 @@ function ToastCard({ toast }: { toast: Toast }) {
             Logs
           </button>
         )}
-        <button
-          className="app-toast__button"
-          type="button"
-          aria-label="Copy error"
-          title="Copy error"
-          onClick={() => {
-            void navigator.clipboard.writeText(
-              [toast.title, toast.message, toast.detail]
-                .filter(Boolean)
-                .join("\n")
-            );
-          }}
-        >
-          Copy
-        </button>
+        {toast.showCopyAction !== false && (
+          <button
+            className="app-toast__button"
+            type="button"
+            aria-label="Copy error"
+            title="Copy error"
+            onClick={() => {
+              void navigator.clipboard.writeText(
+                [toast.title, toast.message, toast.detail]
+                  .filter(Boolean)
+                  .join("\n")
+              );
+            }}
+          >
+            Copy
+          </button>
+        )}
         <button
           className="app-toast__button"
           type="button"

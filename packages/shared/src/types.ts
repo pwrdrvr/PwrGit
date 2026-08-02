@@ -93,6 +93,15 @@ export type Repo = {
   worktrees: Worktree[];
 };
 
+/** Result of reconciling one indexed repo with `git worktree list`. */
+export type RepoWorktreeRefresh = {
+  repo: Repo;
+  added: number;
+  removed: number;
+  /** Existing paths whose branch or primary-checkout identity changed. */
+  updated: number;
+};
+
 /** Porcelain XY status letters, collapsed to a single display code. */
 export type FileStatus = "M" | "A" | "D" | "R" | "C" | "U" | "?";
 

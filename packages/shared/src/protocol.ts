@@ -24,6 +24,7 @@ import type {
   RebasePlan,
   Repo,
   RepoSearchHit,
+  RepoWorktreeRefresh,
   SearchHitStatus,
   WorktreeState
 } from "./types";
@@ -203,6 +204,11 @@ export interface Commands {
   // Repos & discovery (U6)
   "repo:list": { req: { profileId?: ProfileId }; res: Repo[] };
   "repo:rescan": { req: { profileId?: ProfileId }; res: Repo[] };
+  /** Reconcile one repo with Git, discovering external worktree changes. */
+  "repo:refreshWorktrees": {
+    req: { repoId: string };
+    res: RepoWorktreeRefresh;
+  };
   "repo:add": { req: { profileId: ProfileId; path: string }; res: Repo };
   "repo:search": { req: { query: string }; res: RepoSearchHit[] };
   /** Lazy per-hit status for ⌘F results (cached worktree_state when present;

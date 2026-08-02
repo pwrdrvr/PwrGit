@@ -18,6 +18,8 @@ export function RepoRow({
   customOrder,
   onToggleExpand,
   onToggleRepoPin,
+  refreshing,
+  onRefreshWorktrees,
   onSelectWorktree,
   onContextWorktree,
   onToggleWorktreePin,
@@ -37,6 +39,8 @@ export function RepoRow({
   customOrder: string[] | undefined;
   onToggleExpand: () => void;
   onToggleRepoPin: () => void;
+  refreshing: boolean;
+  onRefreshWorktrees: () => void;
   onSelectWorktree: (
     worktree: Worktree,
     e: ReactMouseEvent,
@@ -94,6 +98,35 @@ export function RepoRow({
         <span className="repo-row__wtcount">
           {wtCount} {wtCount === 1 ? "wt" : "wts"}
         </span>
+        <button
+          type="button"
+          className={`repo-refresh${refreshing ? " is-refreshing" : ""}`}
+          title="Refresh worktrees — reconcile with Git to discover new, removed, or changed worktrees"
+          aria-label={`Refresh worktrees for ${repo.name}`}
+          aria-busy={refreshing}
+          disabled={refreshing}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRefreshWorktrees();
+          }}
+        >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M20 7v5h-5" />
+            <path d="M4 17v-5h5" />
+            <path d="M6.1 9a7 7 0 0 1 11.5-2.6L20 8" />
+            <path d="m4 16 2.4 1.6A7 7 0 0 0 17.9 15" />
+          </svg>
+        </button>
         <span
           className={`pin${repo.pinned ? " is-pinned" : ""}`}
           title="Pin repo"
