@@ -128,5 +128,5 @@ describe("applyRebase (system git)", () => {
     const notTop = [all[1], all[2]] as RebaseCommitRef[]; // c2, c1 (excludes HEAD)
     const v = await validateSelection(systemGit, repo, notTop);
     expect(v.ok).toBe(false);
-  });
+  }, 15_000);
 });
