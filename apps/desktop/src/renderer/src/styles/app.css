@@ -488,41 +488,6 @@ input {
   flex: 0 0 auto;
 }
 
-.repo-refresh {
-  flex: 0 0 auto;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-subtle);
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
-}
-.repo-refresh:hover:not(:disabled) {
-  color: var(--text-primary);
-  background: var(--bg-hover-strong);
-}
-.repo-refresh:focus-visible {
-  outline: 1px solid var(--accent-bright);
-  outline-offset: 1px;
-}
-.repo-refresh:disabled {
-  cursor: default;
-}
-.repo-refresh.is-refreshing svg {
-  animation: repo-refresh-spin 800ms linear infinite;
-}
-@keyframes repo-refresh-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 .pin {
   flex: 0 0 auto;
   width: 24px;
@@ -601,6 +566,39 @@ input {
   color: var(--text-muted);
   font: 600 9.5px/1 var(--font-mono);
   cursor: pointer;
+}
+.wt-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.wt-refresh:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-hover-strong);
+}
+.wt-refresh:focus-visible {
+  outline: 1px solid var(--accent-bright);
+  outline-offset: 1px;
+}
+.wt-refresh:disabled {
+  cursor: default;
+}
+.wt-refresh.is-refreshing svg {
+  animation: wt-refresh-spin 800ms linear infinite;
+}
+@keyframes wt-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .wt-row {

@@ -1,5 +1,6 @@
 import { useRef, type MouseEvent as ReactMouseEvent } from "react";
 import type { Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
+import { useViewportTooltip } from "../../lib/useViewportTooltip";
 import {
   orderWorktrees,
   reorder,
@@ -7,6 +8,9 @@ import {
   SORT_LABEL
 } from "./repo-view";
 import { PinIcon, WorktreeRow } from "./WorktreeRow";
+
+const REFRESH_WORKTREES_TOOLTIP =
+  "Refresh this list — re-read Git for worktrees added, removed, or switched outside PwrGit (does not fetch)";
 
 export function RepoRow({
   repo,
@@ -60,6 +64,7 @@ export function RepoRow({
   onNewWorktree: () => void;
 }) {
   const dragId = useRef<string | null>(null);
+  const refreshTooltip = useViewportTooltip();
 
   const behind = repoPrimaryBehind(repo);
   const primary = repo.worktrees.find((w) => w.isPrimary);
@@ -98,35 +103,6 @@ export function RepoRow({
         <span className="repo-row__wtcount">
           {wtCount} {wtCount === 1 ? "wt" : "wts"}
         </span>
-        <button
-          type="button"
-          className={`repo-refresh${refreshing ? " is-refreshing" : ""}`}
-          title="Refresh worktrees — reconcile with Git to discover new, removed, or changed worktrees"
-          aria-label={`Refresh worktrees for ${repo.name}`}
-          aria-busy={refreshing}
-          disabled={refreshing}
-          onClick={(e) => {
-            e.stopPropagation();
-            onRefreshWorktrees();
-          }}
-        >
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M20 7v5h-5" />
-            <path d="M4 17v-5h5" />
-            <path d="M6.1 9a7 7 0 0 1 11.5-2.6L20 8" />
-            <path d="m4 16 2.4 1.6A7 7 0 0 0 17.9 15" />
-          </svg>
-        </button>
         <span
           className={`pin${repo.pinned ? " is-pinned" : ""}`}
           title="Pin repo"
@@ -163,6 +139,53 @@ export function RepoRow({
           <div className="wt-section__head">
             <span className="wt-section__label">Worktrees</span>
             <span style={{ flex: 1 }} />
+            {/* Scoped to this list on purpose: the same circular-arrows glyph
+                means Fetch in the repo toolbar, so keep this one under the
+                Worktrees heading where it can only read as "re-list these". */}
+            <button
+              type="button"
+              className={`wt-refresh${refreshing ? " is-refreshing" : ""}`}
+              aria-label={`Refresh worktrees for ${repo.name}`}
+              aria-busy={refreshing}
+              disabled={refreshing}
+              onMouseEnter={(e) =>
+                refreshTooltip.show(
+                  e.currentTarget,
+                  REFRESH_WORKTREES_TOOLTIP
+                )
+              }
+              onMouseLeave={refreshTooltip.hide}
+              onFocus={(e) =>
+                refreshTooltip.show(
+                  e.currentTarget,
+                  REFRESH_WORKTREES_TOOLTIP
+                )
+              }
+              onBlur={refreshTooltip.hide}
+              onClick={(e) => {
+                e.stopPropagation();
+                refreshTooltip.hide();
+                onRefreshWorktrees();
+              }}
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+                <path d="M21 3v5h-5" />
+                <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+                <path d="M8 16H3v5" />
+              </svg>
+            </button>
+            {refreshTooltip.tooltipNode}
             <button
               className="sort-cycle"
               onClick={(e) => {

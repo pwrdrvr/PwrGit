@@ -83,12 +83,15 @@ test("reconciles worktrees changed outside PwrGit", async () => {
   await addRootAndExpand(window, handle, sandbox, "delta");
   await expect(branchRow(window, "feature/old")).toBeVisible();
 
-  const refresh = window.getByRole("button", {
-    name: "Refresh worktrees for delta"
-  });
-  await expect(refresh).toHaveAttribute(
-    "title",
-    /reconcile with Git to discover new, removed, or changed worktrees/
+  // Lives in the Worktrees section head, not the repo row — the repo toolbar
+  // already spends the circular-arrows glyph on Fetch, so this one has to be
+  // positioned where it can only mean "re-list these worktrees".
+  const refresh = window
+    .locator(".wt-section__head")
+    .getByRole("button", { name: "Refresh worktrees for delta" });
+  await refresh.hover();
+  await expect(window.getByRole("tooltip")).toContainText(
+    /re-read Git for worktrees added, removed, or switched outside PwrGit/
   );
 
   // Simulate Codex/PwrAgent changing the repository behind PwrGit's back.
