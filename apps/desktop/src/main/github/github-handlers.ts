@@ -29,6 +29,41 @@ export function registerGitHubHandlers(
 
   bus.register("github:status", async () => ok(await getGhStatus()));
 
+  bus.register("github:hydrateCommitAuthorIdentities", async (req) => {
+    // Start the whole batch before awaiting any one commit. The identity
+    // service then coalesces the worktree's `git remote get-url origin` proof,
+    // so a large graph performs one origin validation instead of serially
+    // spawning Git once per row. A miss remains strictly local-cache-only.
+    const pending = req.commits.map((commit) => {
+      const emitBackgroundUpdate = (
+        lookup: GitHubCommitAuthorIdentityLookup
+      ): void => {
+        emitEvent("github:commitAuthorIdentityChanged", {
+          worktreeId: req.worktreeId,
+          commitHash: commit.commitHash,
+          lookup
+        });
+      };
+      const request = commitAuthorIdentities.request(
+        {
+          worktreeId: req.worktreeId,
+          commitHash: commit.commitHash,
+          authorName: commit.authorName,
+          authorEmail: commit.authorEmail,
+          cacheOnly: true
+        },
+        emitBackgroundUpdate
+      );
+      return (
+        request.completion?.then(
+          (lookup) => [commit.commitHash, lookup] as const
+        ) ?? Promise.resolve([commit.commitHash, request.lookup] as const)
+      );
+    });
+
+    return ok(Object.fromEntries(await Promise.all(pending)));
+  });
+
   bus.register("github:commitAuthorIdentity", (req) => {
     const emitLookup = (lookup: GitHubCommitAuthorIdentityLookup): void => {
       emitEvent("github:commitAuthorIdentityChanged", {

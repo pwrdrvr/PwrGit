@@ -268,6 +268,22 @@ export interface Commands {
     };
     res: GitHubCommitAuthorIdentityLookup;
   };
+  /**
+   * Hydrate every exact-commit identity already cached for a graph before its
+   * rows become interactive. This is local-cache-only on a miss; stale proofs
+   * may revalidate in the background and publish targeted change events.
+   */
+  "github:hydrateCommitAuthorIdentities": {
+    req: {
+      worktreeId: string;
+      commits: Array<{
+        commitHash: string;
+        authorName: string;
+        authorEmail: string;
+      }>;
+    };
+    res: Record<string, GitHubCommitAuthorIdentityLookup>;
+  };
   "worktree:setPin": { req: { worktreeId: string; pinned: boolean }; res: null };
 
   // Worktree state (U8)

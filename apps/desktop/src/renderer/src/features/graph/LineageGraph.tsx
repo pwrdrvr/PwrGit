@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type {
-  Commit,
   CommitStats,
   GitHubCommitAuthorIdentity,
   GitHubCommitAuthorIdentityLookup,
@@ -110,19 +110,14 @@ export function shouldRequestCommitAuthorIdentity(
     (lookup.avatarCache.nextRetryAt === undefined || lookup.avatarCache.nextRetryAt <= now);
 }
 
-/** Keep initial graph hydration bounded; a hover remains the miss trigger. */
-export const COMMIT_AUTHOR_IDENTITY_PREFETCH_LIMIT = 32;
-const COMMIT_AUTHOR_IDENTITY_PREFETCH_CONCURRENCY = 2;
-
-export function commitAuthorIdentityPrefetchCandidates<T>(commits: readonly T[]): T[] {
-  return commits.slice(0, COMMIT_AUTHOR_IDENTITY_PREFETCH_LIMIT);
-}
-
-// An exact proof resolves to this opaque local resource. Begin decoding it as
-// soon as the main process announces the proof so a later card mount reuses
-// Chromium's image cache instead of making its first visible render do I/O.
+// An exact proof resolves to this opaque local resource. Cache hydration waits
+// for decode before graph rows become interactive, so the first tooltip paint
+// can reuse Chromium's decoded resource instead of visibly filling it later.
 const warmedCommitAuthorAvatarUrls = new Set<string>();
-function warmCommitAuthorAvatar(lookup: GitHubCommitAuthorIdentityLookup): void {
+const warmingCommitAuthorAvatarUrls = new Map<string, Promise<void>>();
+function warmCommitAuthorAvatar(
+  lookup: GitHubCommitAuthorIdentityLookup
+): Promise<void> {
   const avatarUrl = lookup.identity?.avatarUrl;
   if (
     avatarUrl === undefined ||
@@ -130,23 +125,36 @@ function warmCommitAuthorAvatar(lookup: GitHubCommitAuthorIdentityLookup): void 
     warmedCommitAuthorAvatarUrls.has(avatarUrl) ||
     typeof Image === "undefined"
   ) {
-    return;
+    return Promise.resolve();
   }
 
-  warmedCommitAuthorAvatarUrls.add(avatarUrl);
+  const existing = warmingCommitAuthorAvatarUrls.get(avatarUrl);
+  if (existing !== undefined) return existing;
+
   const image = new Image();
   image.decoding = "sync";
-  image.onerror = () => warmedCommitAuthorAvatarUrls.delete(avatarUrl);
   image.src = avatarUrl;
-  void image.decode().catch(() => warmedCommitAuthorAvatarUrls.delete(avatarUrl));
+  const completion = image.decode()
+    .then(() => {
+      warmedCommitAuthorAvatarUrls.add(avatarUrl);
+    })
+    .catch(() => {
+      // A missing/damaged local file still leaves the proven login usable.
+    })
+    .finally(() => {
+      warmingCommitAuthorAvatarUrls.delete(avatarUrl);
+    });
+  warmingCommitAuthorAvatarUrls.set(avatarUrl, completion);
+  return completion;
+}
+
+async function warmCommitAuthorAvatars(
+  lookups: Record<string, GitHubCommitAuthorIdentityLookup>
+): Promise<void> {
+  await Promise.all(Object.values(lookups).map(warmCommitAuthorAvatar));
 }
 
 type CommitMenuState = { hash: string; x: number; y: number };
-type CommitAuthorIdentityWarmRequest = {
-  commit: Commit;
-  worktreeId: string;
-  epoch: number;
-};
 
 // Experimental setting: open new graph views in the "all branches" scope.
 // Cached per window but kept fresh via settings:changed, so toggling the
@@ -221,12 +229,6 @@ export function LineageGraph({
   const scopeTouchedRef = useRef(false);
   const commitStatsRequestsRef = useRef(new Map<string, number>());
   const commitAuthorIdentityRequestsRef = useRef(new Map<string, number>());
-  const commitAuthorIdentityWarmQueueRef = useRef<
-    CommitAuthorIdentityWarmRequest[]
-  >([]);
-  const commitAuthorIdentityWarmRequestedRef = useRef(new Map<string, number>());
-  const activeCommitAuthorIdentityWarmsRef = useRef(0);
-  const drainCommitAuthorIdentityWarmQueueRef = useRef<() => void>(() => {});
   const commitStatsEpochRef = useRef(0);
   const commitAuthorIdentityEpochRef = useRef(0);
 
@@ -234,7 +236,7 @@ export function LineageGraph({
     commitHash: string,
     lookup: GitHubCommitAuthorIdentityLookup
   ): void => {
-    warmCommitAuthorAvatar(lookup);
+    void warmCommitAuthorAvatar(lookup);
     setCommitAuthorIdentityLookups((current) => {
       const merged = mergeCommitAuthorIdentityLookup(current[commitHash], lookup);
       return merged === current[commitHash]
@@ -242,62 +244,6 @@ export function LineageGraph({
         : { ...current, [commitHash]: merged };
     });
   }, []);
-
-  const drainCommitAuthorIdentityWarmQueue = useCallback((): void => {
-    while (
-      activeCommitAuthorIdentityWarmsRef.current <
-      COMMIT_AUTHOR_IDENTITY_PREFETCH_CONCURRENCY
-    ) {
-      const next = commitAuthorIdentityWarmQueueRef.current.shift();
-      if (next === undefined) return;
-      if (next.epoch !== commitAuthorIdentityEpochRef.current) continue;
-      if (commitAuthorIdentityRequestsRef.current.get(next.commit.hash) === next.epoch) {
-        continue;
-      }
-
-      activeCommitAuthorIdentityWarmsRef.current += 1;
-      commitAuthorIdentityRequestsRef.current.set(next.commit.hash, next.epoch);
-      void dispatch("github:commitAuthorIdentity", {
-        worktreeId: next.worktreeId,
-        commitHash: next.commit.hash,
-        authorName: next.commit.authorName,
-        authorEmail: next.commit.authorEmail,
-        cacheOnly: true
-      })
-        .then((result) => {
-          if (
-            result.ok &&
-            next.epoch === commitAuthorIdentityEpochRef.current
-          ) {
-            // Cache-only requests wait for the completed local proof. Accept
-            // that response as well as the event; events are a repaint path,
-            // not the sole source of renderer state.
-            acceptCommitAuthorIdentityLookup(next.commit.hash, result.value);
-          }
-        })
-        .finally(() => {
-          if (
-            commitAuthorIdentityRequestsRef.current.get(next.commit.hash) ===
-            next.epoch
-          ) {
-            commitAuthorIdentityRequestsRef.current.delete(next.commit.hash);
-          }
-          activeCommitAuthorIdentityWarmsRef.current -= 1;
-          drainCommitAuthorIdentityWarmQueueRef.current();
-        });
-    }
-  }, [acceptCommitAuthorIdentityLookup]);
-  drainCommitAuthorIdentityWarmQueueRef.current = drainCommitAuthorIdentityWarmQueue;
-
-  const warmCommitAuthorIdentity = useCallback((commit: Commit): void => {
-    const epoch = commitAuthorIdentityEpochRef.current;
-    if (commitAuthorIdentityWarmRequestedRef.current.get(commit.hash) === epoch) {
-      return;
-    }
-    commitAuthorIdentityWarmRequestedRef.current.set(commit.hash, epoch);
-    commitAuthorIdentityWarmQueueRef.current.push({ commit, worktreeId, epoch });
-    drainCommitAuthorIdentityWarmQueueRef.current();
-  }, [worktreeId]);
 
   useEffect(() => {
     let active = true;
@@ -311,11 +257,55 @@ export function LineageGraph({
 
   useEffect(() => {
     let active = true;
+    let loadSequence = 0;
     const load = (force: boolean): void => {
+      const sequence = ++loadSequence;
       void dispatch("graph:lanes", { worktreeId, scope, force }).then((r) => {
-        if (!active) return;
-        if (r.ok) setData(r.value);
-        setLoading(false);
+        if (!active || sequence !== loadSequence) return;
+        if (!r.ok) {
+          setLoading(false);
+          return;
+        }
+
+        const graph = r.value;
+        void dispatch("github:hydrateCommitAuthorIdentities", {
+          worktreeId,
+          commits: graph.commits.map((commit) => ({
+            commitHash: commit.hash,
+            authorName: commit.authorName,
+            authorEmail: commit.authorEmail
+          }))
+        }).then(async (hydrated) => {
+          if (!active || sequence !== loadSequence) return;
+          if (hydrated.ok) {
+            await warmCommitAuthorAvatars(hydrated.value);
+            if (!active || sequence !== loadSequence) return;
+          }
+          // Publish graph rows only after every available local avatar is
+          // decoded. Flush both state changes in one commit so a fresh cache
+          // hit is the tooltip's first and final rendered identity even if
+          // React's ambient async batching behavior changes.
+          flushSync(() => {
+            if (hydrated.ok) {
+              setCommitAuthorIdentityLookups((current) => {
+                let next = current;
+                for (const [hash, lookup] of Object.entries(hydrated.value)) {
+                  const merged = mergeCommitAuthorIdentityLookup(next[hash], lookup);
+                  if (merged === next[hash]) continue;
+                  if (next === current) next = { ...current };
+                  next[hash] = merged;
+                }
+                return next;
+              });
+            }
+            setData(graph);
+            setLoading(false);
+          });
+        }).catch(() => {
+          if (!active || sequence !== loadSequence) return;
+          setData(graph);
+          setLoading(false);
+        });
       });
     };
     setLoading(true);
@@ -482,8 +472,6 @@ export function LineageGraph({
     commitAuthorIdentityEpochRef.current += 1;
     commitStatsRequestsRef.current.clear();
     commitAuthorIdentityRequestsRef.current.clear();
-    commitAuthorIdentityWarmQueueRef.current = [];
-    commitAuthorIdentityWarmRequestedRef.current.clear();
     setCommitStats({});
     setCommitAuthorIdentityLookups({});
   }, [worktreeId]);
@@ -509,50 +497,6 @@ export function LineageGraph({
         }
       });
   }, [commitStats, hoveredVm, worktreeId]);
-
-  // Make persisted identities feel instant without treating the graph as a
-  // network crawler. This only reads a known exact proof (or refreshes an
-  // already stale one); a cache miss is still fetched only when the user hovers
-  // that commit. The small queue prevents an initial graph load from competing
-  // with ordinary Git work or GitHub's rate limits.
-  useEffect(() => {
-    if (data === null) return;
-
-    for (const commit of commitAuthorIdentityPrefetchCandidates(data.commits)) {
-      warmCommitAuthorIdentity(commit);
-    }
-  }, [data?.commits, warmCommitAuthorIdentity]);
-
-  // One observer covers the graph card, rather than allocating one observer
-  // per row. As a person scrolls, visible rows get a bounded local-cache warm
-  // before hover; cache misses remain deliberately network-lazy.
-  useEffect(() => {
-    const card = cardRef.current;
-    const scroller = scrollerRef.current;
-    if (
-      card === null ||
-      scroller === null ||
-      typeof IntersectionObserver === "undefined"
-    ) {
-      return;
-    }
-    const commitsByHash = new Map(vms.map((vm) => [vm.commit.hash, vm.commit]));
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (!entry.isIntersecting) continue;
-          const hash = entry.target.getAttribute("data-hash");
-          const commit = hash === null ? undefined : commitsByHash.get(hash);
-          if (commit !== undefined) warmCommitAuthorIdentity(commit);
-        }
-      },
-      { root: scroller, rootMargin: "192px 0px" }
-    );
-    for (const row of card.querySelectorAll<HTMLElement>(".graph-row[data-hash]")) {
-      observer.observe(row);
-    }
-    return () => observer.disconnect();
-  }, [vms, warmCommitAuthorIdentity]);
 
   useEffect(() => {
     if (hoveredVm === undefined) return;

@@ -182,6 +182,27 @@ describe("GitHubCommitAuthorIdentityService", () => {
     expect(fetchCalls).toBe(1);
   });
 
+  it("coalesces origin validation when a graph hydrates cached commits as one batch", async () => {
+    const completions = Array.from({ length: 40 }, (_, index) =>
+      requireCompletion(
+        service.request({
+          ...INPUT,
+          commitHash: index.toString(16).padStart(40, "0"),
+          cacheOnly: true
+        }).completion
+      )
+    );
+
+    await expect(Promise.all(completions)).resolves.toEqual(
+      Array.from({ length: 40 }, () => ({
+        cacheState: "miss",
+        refreshState: "idle"
+      }))
+    );
+    expect(gitCalls).toBe(1);
+    expect(fetchCalls).toBe(0);
+  });
+
   it("repaints with a local thumbnail after the identity has already settled", async () => {
     thumbnailDataUrl = undefined;
     thumbnailNeedsRefresh = true;
