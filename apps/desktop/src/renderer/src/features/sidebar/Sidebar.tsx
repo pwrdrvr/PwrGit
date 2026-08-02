@@ -43,6 +43,7 @@ export function Sidebar({
   onPersistOrder,
   refreshingRepoIds,
   onRefreshRepo,
+  onRefreshPullRequest,
   onAddFolder,
   onOpenSearch,
   onExpandRepo,
@@ -68,6 +69,7 @@ export function Sidebar({
   onPersistOrder: (repoId: string, orderedIds: string[]) => void;
   refreshingRepoIds: Set<string>;
   onRefreshRepo: (repo: Repo) => void;
+  onRefreshPullRequest: (repoId: string, branch: string) => void;
   onAddFolder: () => void;
   onOpenSearch: () => void;
   onExpandRepo: (repoId: string) => void;
@@ -356,6 +358,7 @@ export function Sidebar({
       onToggleRepoPin={() => onSetRepoPin(repo.id, !repo.pinned)}
       refreshing={refreshingRepoIds.has(repo.id)}
       onRefreshWorktrees={() => onRefreshRepo(repo)}
+      onRefreshPullRequest={(branch) => onRefreshPullRequest(repo.id, branch)}
       onSelectWorktree={(w, e, orderedIds) =>
         handleRowClick(repo, w, e, orderedIds)
       }

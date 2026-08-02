@@ -49,6 +49,7 @@ const scrollBehavior = (): ScrollBehavior =>
     : "smooth";
 
 export function LineageGraph({
+  repoId,
   worktreeId,
   viewingBranch,
   activeEmail,
@@ -58,6 +59,7 @@ export function LineageGraph({
   onOpenCommit,
   onRevealWorktree
 }: {
+  repoId: string;
   worktreeId: string;
   /** Branch checked out in the worktree whose lineage is being viewed. */
   viewingBranch: string;
@@ -122,6 +124,30 @@ export function LineageGraph({
       off();
     };
   }, [worktreeId, scope]);
+
+  // The sidebar and graph keep separate view models. Apply the same targeted
+  // PR delta to the graph cache so a hover/focused refresh updates both
+  // surfaces without re-running this repository's expensive lane query.
+  useEffect(() => {
+    return subscribe("pr:changed", (event) => {
+      if (event.repoId !== repoId) return;
+      setData((current) => {
+        if (current === null) return current;
+        let changed = false;
+        const branches = { ...current.branches };
+        for (const [branch, pr] of Object.entries(event.prs)) {
+          const info = branches[branch];
+          if (info === undefined) continue;
+          const next = { ...info };
+          if (pr === null) delete next.pr;
+          else next.pr = pr;
+          branches[branch] = next;
+          changed = true;
+        }
+        return changed ? { ...current, branches } : current;
+      });
+    });
+  }, [repoId]);
 
   const head = data?.head ?? "";
 

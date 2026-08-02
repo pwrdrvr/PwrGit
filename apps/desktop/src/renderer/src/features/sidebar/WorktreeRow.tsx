@@ -1,8 +1,15 @@
-import type { DragEvent, MouseEvent as ReactMouseEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  type DragEvent,
+  type MouseEvent as ReactMouseEvent
+} from "react";
 import type { Worktree } from "@pwrgit/shared";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
 import { PrChip } from "./PrChip";
 import { isPrunableWorktree, relativeAge } from "./repo-view";
+
+const PR_HOVER_PREFETCH_DELAY_MS = 750;
 
 export function WorktreeRow({
   worktree,
@@ -13,6 +20,7 @@ export function WorktreeRow({
   onContextMenu,
   onTogglePin,
   onRemove,
+  onRefreshPullRequest,
   onDragStart,
   onDragOver,
   onDrop,
@@ -26,12 +34,30 @@ export function WorktreeRow({
   onContextMenu: (e: ReactMouseEvent) => void;
   onTogglePin: () => void;
   onRemove: () => void;
+  /** Refresh this branch's PR after deliberate row hover. */
+  onRefreshPullRequest?: () => void;
   onDragStart: (e: DragEvent) => void;
   onDragOver: (e: DragEvent) => void;
   onDrop: (e: DragEvent) => void;
   onDragEnd: () => void;
 }) {
   const prunable = isPrunableWorktree(worktree, now);
+  const prHoverTimer = useRef<number | undefined>(undefined);
+  const clearPrHoverTimer = (): void => {
+    if (prHoverTimer.current !== undefined) {
+      window.clearTimeout(prHoverTimer.current);
+      prHoverTimer.current = undefined;
+    }
+  };
+  const prefetchPullRequest = (): void => {
+    if (onRefreshPullRequest === undefined) return;
+    clearPrHoverTimer();
+    prHoverTimer.current = window.setTimeout(() => {
+      prHoverTimer.current = undefined;
+      onRefreshPullRequest();
+    }, PR_HOVER_PREFETCH_DELAY_MS);
+  };
+  useEffect(() => clearPrHoverTimer, []);
   return (
     <div
       className={`wt-row${selected ? " is-selected" : ""}${
@@ -45,6 +71,8 @@ export function WorktreeRow({
       onDragEnd={onDragEnd}
       onClick={onSelect}
       onContextMenu={onContextMenu}
+      onMouseEnter={prefetchPullRequest}
+      onMouseLeave={clearPrHoverTimer}
     >
       {/* The local checkout is fixed at the top — no drag handle. */}
       <span

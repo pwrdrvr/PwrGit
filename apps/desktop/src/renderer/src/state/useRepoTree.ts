@@ -23,6 +23,11 @@ export type UseRepoTree = {
   removeWorktrees: (worktreeIds: string[]) => Promise<void>;
   persistWorktreeOrder: (repoId: string, orderedIds: string[]) => void;
   computeRepoState: (repoId: string) => void;
+  refreshPullRequest: (
+    repoId: string,
+    branch: string,
+    trigger: "scheduled" | "user"
+  ) => void;
   refreshRepoWorktrees: (repo: Repo) => Promise<void>;
 };
 
@@ -223,6 +228,13 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     void dispatch("pr:refresh", { repoId });
   }, []);
 
+  const refreshPullRequest = useCallback(
+    (repoId: string, branch: string, trigger: "scheduled" | "user") => {
+      void dispatch("pr:refresh", { repoId, branches: [branch], trigger });
+    },
+    []
+  );
+
   const refreshRepoWorktrees = useCallback(async (repo: Repo) => {
     setRefreshingRepoIds((ids) => new Set(ids).add(repo.id));
     try {
@@ -270,6 +282,7 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     removeWorktrees,
     persistWorktreeOrder,
     computeRepoState,
+    refreshPullRequest,
     refreshRepoWorktrees
   };
 }

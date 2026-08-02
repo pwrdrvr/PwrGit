@@ -231,8 +231,17 @@ export interface Commands {
   "repo:setPin": { req: { repoId: string; pinned: boolean }; res: null };
   "repo:computeState": { req: { repoId: string }; res: null };
 
-  // GitHub PR status (bulk, cached)
-  "pr:refresh": { req: { repoId: string; force?: boolean }; res: null };
+  // GitHub PR status. Repo expansion uses the bulk cached lookup; focused
+  // worktrees and deliberate hover prefetches target one branch instead.
+  "pr:refresh": {
+    req: {
+      repoId: string;
+      branches?: string[];
+      trigger?: "scheduled" | "user";
+      force?: boolean;
+    };
+    res: null;
+  };
   "github:status": {
     req: void;
     res: { installed: boolean; loggedIn: boolean };
