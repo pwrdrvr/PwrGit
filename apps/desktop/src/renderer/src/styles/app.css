@@ -2366,6 +2366,10 @@ body.is-col-resizing {
   color: var(--accent-bright);
   font: inherit;
 }
+.commit-context-card__pending {
+  color: var(--text-muted);
+  font: 500 10px/1 var(--font-sans);
+}
 
 /* ---- Click-to-copy affordances ---- */
 

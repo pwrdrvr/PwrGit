@@ -1,5 +1,6 @@
-import type { Commit } from "@pwrgit/shared";
+import type { Commit, CommitStats } from "@pwrgit/shared";
 import type { ReactNode } from "react";
+import { DiffStat } from "../diff/DiffStat";
 import { localWhen, longWhen } from "./graph-view";
 
 function initials(name: string): string {
@@ -31,12 +32,15 @@ export function CommitContextCard({
   commit,
   viewingBranch,
   defaultBranch,
-  now
+  now,
+  stats
 }: {
   commit: Commit;
   viewingBranch: string;
   defaultBranch: string;
   now: number;
+  /** Undefined while the local numstat request is in flight; null on failure. */
+  stats: CommitStats | null | undefined;
 }) {
   const authorName = commit.authorName.trim() || "Unknown author";
 
@@ -63,6 +67,15 @@ export function CommitContextCard({
           <time dateTime={commit.committedAt}>{localWhen(commit.committedAt)}</time>
         </DetailRow>
         <DetailRow label="Age">{longWhen(commit.committedAt, now)}</DetailRow>
+        <DetailRow label="Changes">
+          {stats === undefined ? (
+            <span className="commit-context-card__pending">Loading…</span>
+          ) : stats === null ? (
+            <span className="commit-context-card__pending">Unavailable</span>
+          ) : (
+            <DiffStat additions={stats.additions} deletions={stats.deletions} />
+          )}
+        </DetailRow>
       </div>
 
       <div className="commit-context-card__section">

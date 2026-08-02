@@ -122,6 +122,12 @@ export type CommitFileChange = {
   status: FileStatus;
 };
 
+/** Summed insertions and deletions introduced by one commit. */
+export type CommitStats = {
+  additions: number;
+  deletions: number;
+};
+
 export type Commit = {
   hash: string;
   shortHash: string;

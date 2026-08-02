@@ -83,6 +83,7 @@ export function GraphRow({
   onToggle,
   onOpen,
   onShowContext,
+  onMoveContext,
   onHideContext,
   onRevealWorktree
 }: {
@@ -99,7 +100,14 @@ export function GraphRow({
   branchInfo?: Record<string, LaneBranchInfo>;
   onToggle: () => void;
   onOpen: () => void;
-  onShowContext: (target: HTMLElement) => void;
+  onShowContext: (
+    target: HTMLElement,
+    anchor: { x: number; y: number }
+  ) => void;
+  onMoveContext: (
+    target: HTMLElement,
+    anchor: { x: number; y: number }
+  ) => void;
   onHideContext: () => void;
   /** Jump to the worktree a tip branch is checked out in. */
   onRevealWorktree?: (worktreeId: string) => void;
@@ -131,7 +139,12 @@ export function GraphRow({
       }${focused ? " is-focused" : ""}${flashing ? " is-flash" : ""}`}
       data-hash={commit.hash}
       onClick={onOpen}
-      onMouseEnter={(e) => onShowContext(e.currentTarget)}
+      onMouseEnter={(e) =>
+        onShowContext(e.currentTarget, { x: e.clientX, y: e.clientY })
+      }
+      onMouseMove={(e) =>
+        onMoveContext(e.currentTarget, { x: e.clientX, y: e.clientY })
+      }
       onMouseLeave={onHideContext}
       style={{ height: ROW_H }}
     >

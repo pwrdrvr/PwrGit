@@ -4,6 +4,7 @@ import {
   type ChangeSet,
   type Commit,
   type CommitFileChange,
+  type CommitStats,
   err,
   type FileStatus,
   ok,
@@ -171,6 +172,39 @@ export async function commitFiles(
   const checked = requireExit0(raw.value, ["show"]);
   if (!checked.ok) return checked;
   return ok(parseNameStatus(checked.value.stdout));
+}
+
+/** Sum Git's tab-delimited numstat output. Binary entries are represented by
+ * dashes and deliberately contribute neither additions nor deletions. */
+export function parseNumstat(stdout: string): CommitStats {
+  let additions = 0;
+  let deletions = 0;
+  for (const line of stdout.split("\n")) {
+    if (line === "") continue;
+    const [added = "", removed = ""] = line.split("\t", 3);
+    const addedCount = Number.parseInt(added, 10);
+    const removedCount = Number.parseInt(removed, 10);
+    if (Number.isFinite(addedCount)) additions += addedCount;
+    if (Number.isFinite(removedCount)) deletions += removedCount;
+  }
+  return { additions, deletions };
+}
+
+/** Diffstat for one commit. Merge commits use their first parent, the same
+ * comparison that makes a single-commit diff useful in the UI. */
+export async function commitStats(
+  git: GitExec,
+  cwd: string,
+  hash: string
+): Promise<Result<CommitStats>> {
+  const raw = await git(
+    ["show", "--format=", "--numstat", "--diff-merges=first-parent", hash],
+    cwd
+  );
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["show"]);
+  if (!checked.ok) return checked;
+  return ok(parseNumstat(checked.value.stdout));
 }
 
 /** Unified diff of ONE file within a commit. */

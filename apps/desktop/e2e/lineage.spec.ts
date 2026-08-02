@@ -78,6 +78,9 @@ test("hovering a lineage row opens its commit context window", async () => {
   await expect(card).toContainText("Someone Else");
   await expect(card).toContainText("someone@example.com");
   await expect(card).toContainText("Age");
+  await expect(card).toContainText("Changes");
+  await expect(card).toContainText("+1");
+  await expect(card).toContainText("−0");
   await expect(card).toContainText("Viewing branch");
   await expect(card).toContainText("Base branch");
   await expect(card).toContainText("main");

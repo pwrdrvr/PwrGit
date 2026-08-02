@@ -8,6 +8,7 @@ import {
   commitDiff,
   commitFileDiff,
   commitFiles,
+  commitStats,
   type CommitIdentity,
   discardPath,
   fileDiff,
@@ -126,6 +127,12 @@ export function registerChangesHandlers(
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
     return commitFiles(execGit, path, req.hash);
+  });
+
+  bus.register("commit:stats", async (req) => {
+    const path = pathOf(req.worktreeId);
+    if (path === null) return err(notFound);
+    return commitStats(execGit, path, req.hash);
   });
 
   bus.register("diff:commitFile", async (req) => {

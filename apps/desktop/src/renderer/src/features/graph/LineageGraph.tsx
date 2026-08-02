@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { LaneGraph } from "@pwrgit/shared";
+import type { CommitStats, LaneGraph } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { useRelativeClock } from "../../lib/useRelativeClock";
-import { useViewportTooltip } from "../../lib/useViewportTooltip";
+import {
+  type TooltipAnchor,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 import { CommitContextCard } from "./CommitContextCard";
 import {
   GraphRow,
@@ -71,12 +74,17 @@ export function LineageGraph({
   const [flash, setFlash] = useState<string | null>(null);
   const [branchesOpen, setBranchesOpen] = useState(false);
   const [hoveredCommit, setHoveredCommit] = useState<string | null>(null);
+  const [commitStats, setCommitStats] = useState<
+    Record<string, CommitStats | null>
+  >({});
   const now = useRelativeClock();
   const commitContext = useViewportTooltip("commit-context-card");
   const scrollerRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const laneBarRef = useRef<HTMLDivElement>(null);
   const scopeTouchedRef = useRef(false);
+  const commitStatsRequestsRef = useRef(new Map<string, number>());
+  const commitStatsEpochRef = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -207,8 +215,40 @@ export function LineageGraph({
   const hoveredVm =
     hoveredCommit === null ? undefined : vmByHash.get(hoveredCommit);
 
+  // Diffstats are intentionally lazy: a graph can contain hundreds of commits,
+  // but only the one under the pointer needs a numstat walk. Cache both success
+  // and failure for this worktree so repeated hover is instant and quiet.
+  useEffect(() => {
+    commitStatsEpochRef.current += 1;
+    commitStatsRequestsRef.current.clear();
+    setCommitStats({});
+  }, [worktreeId]);
+
+  useEffect(() => {
+    if (hoveredVm === undefined) return;
+    const hash = hoveredVm.commit.hash;
+    if (commitStats[hash] !== undefined) return;
+    const epoch = commitStatsEpochRef.current;
+    if (commitStatsRequestsRef.current.get(hash) === epoch) return;
+    commitStatsRequestsRef.current.set(hash, epoch);
+    void dispatch("commit:stats", { worktreeId, hash })
+      .then((result) => {
+        if (commitStatsEpochRef.current !== epoch) return;
+        setCommitStats((current) => ({
+          ...current,
+          [hash]: result.ok ? result.value : null
+        }));
+      })
+      .finally(() => {
+        if (commitStatsRequestsRef.current.get(hash) === epoch) {
+          commitStatsRequestsRef.current.delete(hash);
+        }
+      });
+  }, [commitStats, hoveredVm, worktreeId]);
+
   // The context window remains current while it is open: its age changes with
-  // the shared clock, while ref/base information updates after a graph reload.
+  // the shared clock, while ref/base information and lazy diffstats update
+  // after graph refreshes and local Git responses.
   useEffect(() => {
     if (!commitContext.visible || hoveredVm === undefined) return;
     commitContext.update(
@@ -217,6 +257,7 @@ export function LineageGraph({
         viewingBranch={viewingBranch}
         defaultBranch={hoveredVm.defaultBranch}
         now={now}
+        stats={commitStats[hoveredVm.commit.hash]}
       />
     );
   }, [
@@ -224,10 +265,15 @@ export function LineageGraph({
     commitContext.visible,
     hoveredVm,
     now,
+    commitStats,
     viewingBranch
   ]);
 
-  const showCommitContext = (target: HTMLElement, vm: GraphRowVM): void => {
+  const showCommitContext = (
+    target: HTMLElement,
+    anchor: TooltipAnchor,
+    vm: GraphRowVM
+  ): void => {
     setHoveredCommit(vm.commit.hash);
     commitContext.show(
       target,
@@ -236,8 +282,17 @@ export function LineageGraph({
         viewingBranch={viewingBranch}
         defaultBranch={vm.defaultBranch}
         now={now}
-      />
+        stats={commitStats[vm.commit.hash]}
+      />,
+      anchor
     );
+  };
+
+  const moveCommitContext = (
+    target: HTMLElement,
+    anchor: TooltipAnchor
+  ): void => {
+    commitContext.move(target, anchor);
   };
 
   const hideCommitContext = (): void => {
@@ -460,7 +515,10 @@ export function LineageGraph({
                 branchInfo={data?.branches ?? {}}
                 onToggle={() => onToggleCommit(vm.commit.hash)}
                 onOpen={() => onOpenCommit(vm.commit.hash, vm.commit.subject)}
-                onShowContext={(target) => showCommitContext(target, vm)}
+                onShowContext={(target, anchor) =>
+                  showCommitContext(target, anchor, vm)
+                }
+                onMoveContext={moveCommitContext}
                 onHideContext={hideCommitContext}
                 onRevealWorktree={onRevealWorktree}
               />

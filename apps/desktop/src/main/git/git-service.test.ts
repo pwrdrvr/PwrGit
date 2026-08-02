@@ -5,6 +5,7 @@ import {
   parseChanges,
   parseLog,
   parseNameStatus,
+  parseNumstat,
   parseWorktreeList,
   topoMergeCommits
 } from "./git-service";
@@ -26,6 +27,21 @@ describe("parseNameStatus", () => {
       { path: "old/file.txt", status: "D" },
       { path: "src/after.ts", status: "R" }
     ]);
+  });
+});
+
+describe("parseNumstat", () => {
+  it("sums text changes and ignores binary placeholders", () => {
+    expect(
+      parseNumstat(
+        [
+          "12\t3\tsrc/app.ts",
+          "0\t4\tdeleted.txt",
+          "-\t-\timages/logo.png",
+          ""
+        ].join("\n")
+      )
+    ).toEqual({ additions: 12, deletions: 7 });
   });
 });
 
