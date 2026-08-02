@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, nativeImage } from "electron";
 import { ok, type Profile } from "@pwrgit/shared";
 import { registerAppDocumentHandlers } from "./app-document-handlers";
 import { openAppDocumentWindow } from "./app-document-window";
@@ -86,6 +86,22 @@ if (dataDirOverride !== undefined && dataDirOverride !== "") {
 const bus = new CommandBus();
 bus.register("ping", () => ok("pong"));
 
+// Development launches do not pass through electron-builder, so macOS would
+// otherwise show the generic Electron tile in the Dock. Packaged builds use
+// build/icon.icns through electron-builder instead.
+function installDevelopmentDockIcon(): void {
+  if (process.platform !== "darwin" || app.isPackaged) return;
+
+  const iconPath = join(app.getAppPath(), "build", "icon.png");
+  const icon = nativeImage.createFromPath(iconPath);
+  if (icon.isEmpty()) {
+    logMain("warn", "app", "failed to load development Dock icon", { iconPath });
+    return;
+  }
+
+  app.dock?.setIcon(icon);
+}
+
 /**
  * Single-instance: PwrGit is a single-instance app — one window per profile
  * inside it. A second launch focuses an existing window instead of spawning
@@ -108,6 +124,7 @@ if (!gotSingleInstanceLock) {
     initLogFile(join(app.getPath("userData"), "pwrgit-main.log"));
     subscribeLogEntries((entry) => emitEvent("logs:entry", entry));
     logMain("info", "app", `PwrGit ${app.getVersion()} starting`);
+    installDevelopmentDockIcon();
     bus.register("logs:read", () => ok(readLogSnapshot()));
     bus.register("logs:openWindow", () => {
       openLogsWindow();

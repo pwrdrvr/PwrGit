@@ -33,7 +33,8 @@
       "dugite",
       "electron",
       "electron-winstaller",
-      "esbuild"
+      "esbuild",
+      "sharp"
     ]
   }
 }
