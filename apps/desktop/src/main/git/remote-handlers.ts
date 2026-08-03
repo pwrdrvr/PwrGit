@@ -4,12 +4,19 @@ import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import { execGit } from "./dugite";
 import {
+  addRemote,
+  fetchAllRemotes,
+  fetchNamedRemote,
   fetchRemote,
   inspectRemoteDivergence,
   pullFastForward,
+  planPushRefs,
+  pushPlannedRefs,
   pushRemote,
   rebaseOntoUpstream,
-  resetToUpstream
+  removeRemote,
+  resetToUpstream,
+  updateRemote
 } from "./git-service";
 import type { WorktreeRefresher } from "./worktree-handlers";
 
@@ -34,6 +41,13 @@ export function registerRemoteHandlers(
         | undefined
     )?.path ?? null;
 
+  const repoOf = (repoId: string): { path: string } | null => {
+    const row = db
+      .prepare("SELECT path FROM repos WHERE id = ?")
+      .get(repoId) as { path: string } | undefined;
+    return row === undefined ? null : { path: row.path };
+  };
+
   // Successes log at info with path + duration; failures are already logged
   // by the command bus — together the Logs window tells the whole sync story.
   bus.register("remote:fetch", async (req) => {
@@ -45,6 +59,87 @@ export function registerRemoteHandlers(
     logMain("info", "remote", `fetched ${path} (${seconds(startedAt)})`);
     refresher.refreshWorktree(req.worktreeId);
     return ok(null);
+  });
+
+  bus.register("remote:fetchRepo", async (req) => {
+    const repo = repoOf(req.repoId);
+    if (repo === null) return err({ ...notFound, message: "repo not found" });
+    const startedAt = Date.now();
+    const result =
+      req.remote === undefined
+        ? await fetchAllRemotes(execGit, repo.path)
+        : await fetchNamedRemote(execGit, repo.path, req.remote);
+    if (!result.ok) return result;
+    logMain(
+      "info",
+      "remote",
+      `fetched ${req.remote ?? "all remotes"} for ${repo.path} (${seconds(startedAt)})`
+    );
+    refresher.refreshRepoWorktrees(req.repoId);
+    return ok(null);
+  });
+
+  bus.register("remote:add", async (req) => {
+    const repo = repoOf(req.repoId);
+    if (repo === null) return err({ ...notFound, message: "repo not found" });
+    const result = await addRemote(execGit, repo.path, req);
+    if (!result.ok) return result;
+    logMain("info", "remote", `added remote ${req.name} to ${repo.path}`);
+    refresher.refreshRepoWorktrees(req.repoId);
+    return ok(null);
+  });
+
+  bus.register("remote:update", async (req) => {
+    const repo = repoOf(req.repoId);
+    if (repo === null) return err({ ...notFound, message: "repo not found" });
+    const result = await updateRemote(execGit, repo.path, req);
+    if (!result.ok) return result;
+    logMain(
+      "info",
+      "remote",
+      `updated remote ${req.originalName} as ${req.name} in ${repo.path}`
+    );
+    refresher.refreshRepoWorktrees(req.repoId);
+    return ok(null);
+  });
+
+  bus.register("remote:remove", async (req) => {
+    const repo = repoOf(req.repoId);
+    if (repo === null) return err({ ...notFound, message: "repo not found" });
+    const result = await removeRemote(execGit, repo.path, req.remote);
+    if (!result.ok) return result;
+    logMain("info", "remote", `removed remote ${req.remote} from ${repo.path}`);
+    refresher.refreshRepoWorktrees(req.repoId);
+    return ok(null);
+  });
+
+  bus.register("remote:planPushRefs", async (req) => {
+    const repo = repoOf(req.repoId);
+    if (repo === null) return err({ ...notFound, message: "repo not found" });
+    const result = await planPushRefs(
+      execGit,
+      repo.path,
+      req.sourceRef,
+      req.destinations
+    );
+    refresher.refreshRepoWorktrees(req.repoId);
+    return result;
+  });
+
+  bus.register("remote:pushRefs", async (req) => {
+    const repo = repoOf(req.repoId);
+    if (repo === null) return err({ ...notFound, message: "repo not found" });
+    const startedAt = Date.now();
+    const result = await pushPlannedRefs(execGit, repo.path, req.plans);
+    refresher.refreshRepoWorktrees(req.repoId);
+    if (!result.ok) return result;
+    const pushed = result.value.filter((item) => item.outcome === "pushed").length;
+    logMain(
+      "info",
+      "remote",
+      `pushed ${pushed}/${result.value.length} reviewed refs for ${repo.path} (${seconds(startedAt)})`
+    );
+    return result;
   });
 
   bus.register("remote:pull", async (req) => {

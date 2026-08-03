@@ -33,7 +33,7 @@ test("scans a folder and lists a repo with its worktrees", async () => {
   await expect(branchRow(window, "feature/login")).toBeVisible();
   await expect(branchRow(window, "chore/cleanup")).toBeVisible();
 
-  // The primary checkout is marked "local" and sits above the worktrees.
+  // The primary checkout is marked "primary" inside the Worktrees group.
   const firstRow = window.locator(".wt-row").first();
   await expect(firstRow.locator(".wt-row__branch")).toHaveText("main");
   await expect(firstRow.locator(".wt-tag--local")).toBeVisible();

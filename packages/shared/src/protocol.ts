@@ -13,6 +13,8 @@
 import type {
   AgentStatus,
   BranchRef,
+  PushRefPlan,
+  PushRefResult,
   ChangeSet,
   CommitFileChange,
   CommitStats,
@@ -26,6 +28,7 @@ import type {
   RebasePlan,
   RemoteDivergence,
   Repo,
+  RepoRefs,
   RepoSearchHit,
   RepoWorktreeRefresh,
   SearchHitStatus,
@@ -295,7 +298,13 @@ export interface Commands {
 
   // Worktree lifecycle (U14)
   "worktree:create": {
-    req: { repoId: string; branch: string; newBranch: boolean };
+    req: {
+      repoId: string;
+      branch: string;
+      newBranch: boolean;
+      /** Optional remote/local ref used as the starting point of a new branch. */
+      startPoint?: string;
+    };
     res: null;
   };
   "worktree:removeMany": {
@@ -316,9 +325,45 @@ export interface Commands {
   // Branch switching — list local + remote branches, check one out in place
   "branch:list": { req: { worktreeId: string }; res: BranchRef[] };
   "branch:switch": { req: { worktreeId: string; branch: string }; res: null };
+  /** Repository-wide local branches and configured remote-tracking refs. */
+  "repo:refs": { req: { repoId: string }; res: RepoRefs };
 
   // Remotes (U9 / U13)
   "remote:fetch": { req: { worktreeId: string }; res: null };
+  /** Fetch one named remote, or every non-skipped remote when omitted. */
+  "remote:fetchRepo": {
+    req: { repoId: string; remote?: string };
+    res: null;
+  };
+  "remote:add": {
+    req: { repoId: string; name: string; fetchUrl: string; pushUrl?: string };
+    res: null;
+  };
+  "remote:update": {
+    req: {
+      repoId: string;
+      originalName: string;
+      name: string;
+      fetchUrl: string;
+      pushUrl?: string;
+    };
+    res: null;
+  };
+  "remote:remove": { req: { repoId: string; remote: string }; res: null };
+  /** Fetch current tips and classify a source ref against push destinations. */
+  "remote:planPushRefs": {
+    req: {
+      repoId: string;
+      sourceRef: string;
+      destinations: { remote: string; branch: string }[];
+    };
+    res: PushRefPlan[];
+  };
+  /** Execute only still-safe create/fast-forward plans; each target is isolated. */
+  "remote:pushRefs": {
+    req: { repoId: string; plans: PushRefPlan[] };
+    res: PushRefResult[];
+  };
   "remote:pull": {
     req: { worktreeId: string };
     res: {

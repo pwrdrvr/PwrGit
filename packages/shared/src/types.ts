@@ -73,6 +73,82 @@ export type BranchRef = {
   subject?: string;
 };
 
+export type BranchTrackingStatus =
+  | "up_to_date"
+  | "ahead"
+  | "behind"
+  | "diverged"
+  | "unpublished"
+  | "upstream_missing";
+
+/** A local `refs/heads/*` branch in the repository-wide branch browser. */
+export type LocalBranchSummary = {
+  name: string;
+  fullName: string;
+  head: string;
+  upstream?: string;
+  ahead: number;
+  behind: number;
+  tracking: BranchTrackingStatus;
+  /** Worktrees currently holding this branch. Empty means it can be switched to. */
+  checkedOutWorktreeIds: WorktreeId[];
+  lastCommitAt?: string;
+  subject?: string;
+};
+
+/** A fetched snapshot of one branch on a named remote. */
+export type RemoteBranchSummary = {
+  /** Branch name relative to its remote, e.g. `main`, not `origin/main`. */
+  name: string;
+  /** Display-qualified name, e.g. `origin/main`. */
+  qualifiedName: string;
+  fullName: string;
+  head: string;
+  lastCommitAt?: string;
+  subject?: string;
+};
+
+export type RemoteSummary = {
+  name: string;
+  fetchUrl: string;
+  pushUrl: string;
+  /** Branch name relative to the remote, when its symbolic HEAD is known. */
+  defaultBranch?: string;
+  skipFetchAll: boolean;
+  branches: RemoteBranchSummary[];
+};
+
+/** Repository-wide refs and configured remote endpoints. */
+export type RepoRefs = {
+  branches: LocalBranchSummary[];
+  remotes: RemoteSummary[];
+};
+
+export type PushRefRelation =
+  | "create"
+  | "equal"
+  | "fast_forward"
+  | "destination_ahead"
+  | "diverged";
+
+/** Reviewed source/destination snapshot used by the guarded multi-remote push. */
+export type PushRefPlan = {
+  sourceRef: string;
+  sourceLabel: string;
+  sourceHead: string;
+  destinationRemote: string;
+  destinationBranch: string;
+  destinationHead?: string;
+  relation: PushRefRelation;
+};
+
+export type PushRefResult = {
+  destinationRemote: string;
+  destinationBranch: string;
+  outcome: "pushed" | "up_to_date" | "failed";
+  message?: string;
+};
+
 /** Lifecycle of a pull request — the only status we track in the first cut. */
 export type PrLifecycle = "open" | "merged" | "closed";
 

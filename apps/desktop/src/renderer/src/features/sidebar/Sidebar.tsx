@@ -26,6 +26,12 @@ const EMPTY_IDS: Set<string> = new Set();
 // ordering). `anchor` is the pivot for shift-click ranges.
 type Selection = { repoId: string; ids: Set<string>; anchor: string | null };
 type ContextState = { x: number; y: number; targets: Worktree[] };
+type NewWorktreeState = {
+  repo: Repo;
+  initialBranch?: string;
+  initialNewBranch?: boolean;
+  startPoint?: string;
+};
 
 export function Sidebar({
   profiles,
@@ -64,7 +70,8 @@ export function Sidebar({
   onCreateWorktree: (
     repoId: string,
     branch: string,
-    newBranch: boolean
+    newBranch: boolean,
+    startPoint?: string
   ) => Promise<string | null>;
   onPersistOrder: (repoId: string, orderedIds: string[]) => void;
   refreshingRepoIds: Set<string>;
@@ -81,7 +88,7 @@ export function Sidebar({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [sortByRepo, setSortByRepo] = useState<Record<string, WorktreeSort>>({});
   const [orderByRepo, setOrderByRepo] = useState<Record<string, string[]>>({});
-  const [newWorktreeRepo, setNewWorktreeRepo] = useState<Repo | null>(null);
+  const [newWorktree, setNewWorktree] = useState<NewWorktreeState | null>(null);
   const [sel, setSel] = useState<Selection>({
     repoId: "",
     ids: EMPTY_IDS,
@@ -374,7 +381,21 @@ export function Sidebar({
         setOrderByRepo((prev) => ({ ...prev, [repo.id]: ids }));
         onPersistOrder(repo.id, ids);
       }}
-      onNewWorktree={() => setNewWorktreeRepo(repo)}
+      onNewWorktree={() => setNewWorktree({ repo })}
+      onRevealWorktree={(worktreeId) => {
+        const worktree = repo.worktrees.find((candidate) => candidate.id === worktreeId);
+        if (worktree === undefined) return;
+        clearSel();
+        onSelectWorktree(repo, worktree);
+      }}
+      onCreateWorktreeFromRef={(branch, newBranch, startPoint) =>
+        setNewWorktree({
+          repo,
+          initialBranch: branch,
+          initialNewBranch: newBranch,
+          ...(startPoint === undefined ? {} : { startPoint })
+        })
+      }
     />
   );
 
@@ -465,13 +486,22 @@ export function Sidebar({
         </button>
       </div>
 
-      {newWorktreeRepo !== null && (
+      {newWorktree !== null && (
         <NewWorktreeModal
-          repo={newWorktreeRepo}
-          onCreate={(branch, newBranch) =>
-            onCreateWorktree(newWorktreeRepo.id, branch, newBranch)
+          repo={newWorktree.repo}
+          {...(newWorktree.initialBranch === undefined
+            ? {}
+            : { initialBranch: newWorktree.initialBranch })}
+          {...(newWorktree.initialNewBranch === undefined
+            ? {}
+            : { initialNewBranch: newWorktree.initialNewBranch })}
+          {...(newWorktree.startPoint === undefined
+            ? {}
+            : { startPoint: newWorktree.startPoint })}
+          onCreate={(branch, newBranch, startPoint) =>
+            onCreateWorktree(newWorktree.repo.id, branch, newBranch, startPoint)
           }
-          onClose={() => setNewWorktreeRepo(null)}
+          onClose={() => setNewWorktree(null)}
         />
       )}
 

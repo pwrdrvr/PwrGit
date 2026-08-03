@@ -6,6 +6,7 @@ import {
   parseLog,
   parseNameStatus,
   parseNumstat,
+  parseRepoRefRows,
   parseWorktreeList,
   topoMergeCommits
 } from "./git-service";
@@ -146,6 +147,33 @@ describe("parseBranchRefs", () => {
     );
     expect(out).toHaveLength(1);
     expect(out[0].name).toBe("origin/main");
+  });
+});
+
+describe("parseRepoRefRows", () => {
+  it("keeps upstream tracking metadata and tabbed subjects", () => {
+    const rows = parseRepoRefRows(
+      [
+        "refs/heads/main",
+        "main",
+        "a".repeat(40),
+        "origin/main",
+        "[ahead 2, behind 3]",
+        "2026-08-03T12:00:00-04:00",
+        "subject\twith tab"
+      ].join("\t")
+    );
+    expect(rows).toEqual([
+      {
+        fullName: "refs/heads/main",
+        shortName: "main",
+        head: "a".repeat(40),
+        upstream: "origin/main",
+        track: "[ahead 2, behind 3]",
+        lastCommitAt: "2026-08-03T12:00:00-04:00",
+        subject: "subject\twith tab"
+      }
+    ]);
   });
 });
 
