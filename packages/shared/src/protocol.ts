@@ -16,6 +16,7 @@ import type {
   ChangeSet,
   CommitFileChange,
   CommitStats,
+  GitHubCommitAuthorIdentityLookup,
   GraphLog,
   LaneGraph,
   PrSummary,
@@ -247,6 +248,42 @@ export interface Commands {
     req: void;
     res: { installed: boolean; loggedIn: boolean };
   };
+  /**
+   * Return immediately for a known commit and start any eligible exact-commit
+   * verification in the background. `cacheOnly` warms an existing proof without
+   * GitHub lookup on a miss. Proof-scoped results arrive via the targeted event
+   * after the worktree's GitHub origin has been validated.
+   */
+  "github:commitAuthorIdentity": {
+    req: {
+      worktreeId: string;
+      commitHash: string;
+      authorName: string;
+      authorEmail: string;
+      /**
+       * Warm only an already-proven local identity. A cache-only request never
+       * calls GitHub for a miss; a normal hover request may do so.
+       */
+      cacheOnly?: boolean;
+    };
+    res: GitHubCommitAuthorIdentityLookup;
+  };
+  /**
+   * Hydrate every exact-commit identity already cached for a graph before its
+   * rows become interactive. This is local-cache-only on a miss; stale proofs
+   * may revalidate in the background and publish targeted change events.
+   */
+  "github:hydrateCommitAuthorIdentities": {
+    req: {
+      worktreeId: string;
+      commits: Array<{
+        commitHash: string;
+        authorName: string;
+        authorEmail: string;
+      }>;
+    };
+    res: Record<string, GitHubCommitAuthorIdentityLookup>;
+  };
   "worktree:setPin": { req: { worktreeId: string; pinned: boolean }; res: null };
 
   // Worktree state (U8)
@@ -426,6 +463,15 @@ export interface Events {
    * branch's PR. Keyed by branch name.
    */
   "pr:changed": { repoId: string; prs: Record<string, PrSummary | null> };
+  /**
+   * A non-blocking exact-commit verification settled. Consumers that requested
+   * this commit can repaint their context without polling or blocking hover.
+   */
+  "github:commitAuthorIdentityChanged": {
+    worktreeId: string;
+    commitHash: string;
+    lookup: GitHubCommitAuthorIdentityLookup;
+  };
   /** Native Profiles-menu actions — handled by whichever window has focus. */
   "ui:newProfile": Record<string, never>;
   "ui:manageProfile": Record<string, never>;

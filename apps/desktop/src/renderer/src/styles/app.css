@@ -2336,16 +2336,32 @@ body.is-col-resizing {
 }
 .commit-context-card__avatar {
   display: inline-flex;
+  position: relative;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   width: 28px;
   height: 28px;
+  overflow: hidden;
   border: 1px solid var(--accent-border);
   border-radius: 50%;
   background: var(--accent-soft);
   color: var(--accent-bright);
   font: 700 10px/1 var(--font-sans);
+}
+.commit-context-card__avatar-initials {
+  display: inline-flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+}
+.commit-context-card__avatar-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .commit-context-card__author {
   display: flex;
@@ -2366,6 +2382,13 @@ body.is-col-resizing {
   font: 500 10.5px/1.2 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.commit-context-card__author .commit-context-card__github-login {
+  color: var(--accent-bright);
+  font: 600 10px/1.2 var(--font-mono);
+}
+.commit-context-card__author .commit-context-card__github-login--placeholder {
+  visibility: hidden;
 }
 .commit-context-card__section {
   display: flex;

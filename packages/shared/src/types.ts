@@ -155,6 +155,41 @@ export type Commit = {
   isMerge: boolean;
 };
 
+/** GitHub account presentation fields proven for an exact Git commit author. */
+export type GitHubCommitAuthorIdentity = {
+  login: string;
+  /**
+   * Renderer-safe, versioned `pwrgit-avatar://thumbnail/...` URL backed by
+   * PwrGit's on-disk thumbnail cache. The GitHub source URL and filesystem
+   * path deliberately never cross IPC; Chromium may retain this local image.
+   */
+  avatarUrl?: string;
+};
+
+/** Thumbnail work still pending for an otherwise proven GitHub identity. */
+export type GitHubCommitAuthorAvatarCacheStatus = {
+  cacheState: "stale" | "miss";
+  refreshState: "in-flight" | "backing-off";
+  /** Epoch milliseconds of the thumbnail's last successful disk/network refresh. */
+  refreshedAt?: number;
+  /** Epoch milliseconds before a later hover should retry a failed thumbnail refresh. */
+  nextRetryAt?: number;
+};
+
+/** Immediate, presentation-neutral result of a commit-author identity lookup. */
+export type GitHubCommitAuthorIdentityLookup = {
+  /** Present only after an exact commit proof has verified the mapping. */
+  identity?: GitHubCommitAuthorIdentity;
+  cacheState: "fresh" | "stale" | "miss";
+  refreshState: "idle" | "in-flight" | "backing-off" | "not-eligible";
+  /** Epoch milliseconds of the last successful exact-commit proof, when known. */
+  refreshedAt?: number;
+  /** Epoch milliseconds before which another hover should not retry a failure. */
+  nextRetryAt?: number;
+  /** Present only while a proven avatar's local thumbnail needs later hover work. */
+  avatarCache?: GitHubCommitAuthorAvatarCacheStatus;
+};
+
 /** Cached, watcher-invalidated per-worktree sync/dirty snapshot (U8). */
 export type WorktreeState = {
   worktreeId: WorktreeId;

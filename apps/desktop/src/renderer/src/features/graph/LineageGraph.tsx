@@ -1,5 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { CommitStats, LaneGraph } from "@pwrgit/shared";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import type {
+  CommitStats,
+  GitHubCommitAuthorIdentity,
+  GitHubCommitAuthorIdentityLookup,
+  LaneGraph
+} from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import {
@@ -20,6 +26,134 @@ import { shortWhen } from "./graph-view";
 import { layoutLanes } from "./lane-layout";
 
 type Scope = "active" | "all";
+
+/**
+ * Keep only identity results that are stable for this worktree session. An
+ * in-flight or temporarily unavailable lookup must remain retryable on a
+ * later hover; a verified identity and authoritative no-match are reusable.
+ */
+export function reusableCommitAuthorIdentity(
+  lookup: GitHubCommitAuthorIdentityLookup
+): GitHubCommitAuthorIdentity | null | undefined {
+  if (lookup.identity !== undefined) return lookup.identity;
+  return lookup.refreshState === "not-eligible" ||
+    (lookup.cacheState === "fresh" && lookup.refreshState === "idle")
+    ? null
+    : undefined;
+}
+
+/**
+ * IPC replies and targeted events can cross in either order. Keep the most
+ * complete/newest proof so a delayed cache-only reply cannot erase a local
+ * identity or thumbnail that was already painted by an event.
+ */
+export function mergeCommitAuthorIdentityLookup(
+  current: GitHubCommitAuthorIdentityLookup | undefined,
+  incoming: GitHubCommitAuthorIdentityLookup
+): GitHubCommitAuthorIdentityLookup {
+  if (current === undefined) return incoming;
+
+  if (current.identity !== undefined && incoming.identity === undefined) {
+    return current;
+  }
+  if (current.identity === undefined && incoming.identity !== undefined) {
+    return incoming;
+  }
+  // The normal hover transport responds immediately with this placeholder.
+  // It carries no proof and must never replace an already settled negative
+  // cache result just because the IPC reply beat the repaint event.
+  if (
+    incoming.cacheState === "miss" &&
+    incoming.refreshState === "in-flight" &&
+    current.cacheState === "fresh" &&
+    current.refreshState === "idle"
+  ) {
+    return current;
+  }
+
+  const currentRefreshedAt = current.refreshedAt ?? Number.NEGATIVE_INFINITY;
+  const incomingRefreshedAt = incoming.refreshedAt ?? Number.NEGATIVE_INFINITY;
+  if (incomingRefreshedAt < currentRefreshedAt) return current;
+  if (incomingRefreshedAt > currentRefreshedAt) return incoming;
+
+  const currentAvatarRefreshedAt =
+    current.avatarCache?.refreshedAt ?? Number.NEGATIVE_INFINITY;
+  const incomingAvatarRefreshedAt =
+    incoming.avatarCache?.refreshedAt ?? Number.NEGATIVE_INFINITY;
+  if (incomingAvatarRefreshedAt < currentAvatarRefreshedAt) return current;
+  if (incomingAvatarRefreshedAt > currentAvatarRefreshedAt) return incoming;
+
+  if (
+    current.identity?.avatarUrl !== undefined &&
+    incoming.identity?.avatarUrl === undefined
+  ) {
+    return current;
+  }
+  return incoming;
+}
+
+/** Retry only when the main-process proof/asset cache says another hover can help. */
+export function shouldRequestCommitAuthorIdentity(
+  lookup: GitHubCommitAuthorIdentityLookup | undefined,
+  now: number
+): boolean {
+  if (lookup === undefined) return true;
+  if (lookup.refreshState === "not-eligible" || lookup.refreshState === "in-flight") {
+    return false;
+  }
+  if (lookup.refreshState === "backing-off") {
+    return lookup.nextRetryAt === undefined || lookup.nextRetryAt <= now;
+  }
+  if (lookup.cacheState !== "fresh") return true;
+  if (lookup.avatarCache === undefined) return false;
+  return lookup.avatarCache.refreshState === "backing-off" &&
+    (lookup.avatarCache.nextRetryAt === undefined || lookup.avatarCache.nextRetryAt <= now);
+}
+
+// An exact proof resolves to this opaque local resource. Cache hydration waits
+// for decode before graph rows become interactive, so the first tooltip paint
+// can reuse Chromium's decoded resource instead of visibly filling it later.
+const warmedCommitAuthorAvatarUrls = new Set<string>();
+const warmingCommitAuthorAvatarUrls = new Map<string, Promise<void>>();
+function warmCommitAuthorAvatar(
+  lookup: GitHubCommitAuthorIdentityLookup
+): Promise<void> {
+  const avatarUrl = lookup.identity?.avatarUrl;
+  if (
+    avatarUrl === undefined ||
+    !avatarUrl.startsWith("pwrgit-avatar://thumbnail/") ||
+    warmedCommitAuthorAvatarUrls.has(avatarUrl) ||
+    typeof Image === "undefined"
+  ) {
+    return Promise.resolve();
+  }
+
+  const existing = warmingCommitAuthorAvatarUrls.get(avatarUrl);
+  if (existing !== undefined) return existing;
+
+  const image = new Image();
+  image.decoding = "sync";
+  image.src = avatarUrl;
+  const completion = image.decode()
+    .then(() => {
+      warmedCommitAuthorAvatarUrls.add(avatarUrl);
+    })
+    .catch(() => {
+      // A missing/damaged local file still leaves the proven login usable.
+    })
+    .finally(() => {
+      warmingCommitAuthorAvatarUrls.delete(avatarUrl);
+    });
+  warmingCommitAuthorAvatarUrls.set(avatarUrl, completion);
+  return completion;
+}
+
+async function warmCommitAuthorAvatars(
+  lookups: Record<string, GitHubCommitAuthorIdentityLookup>
+): Promise<void> {
+  await Promise.all(Object.values(lookups).map(warmCommitAuthorAvatar));
+}
+
 type CommitMenuState = { hash: string; x: number; y: number };
 
 // Experimental setting: open new graph views in the "all branches" scope.
@@ -82,6 +216,9 @@ export function LineageGraph({
   const [commitStats, setCommitStats] = useState<
     Record<string, CommitStats | null>
   >({});
+  const [commitAuthorIdentityLookups, setCommitAuthorIdentityLookups] = useState<
+    Record<string, GitHubCommitAuthorIdentityLookup>
+  >({});
   const now = useRelativeClock();
   const commitContext = useViewportTooltip("commit-context-card", {
     interactive: true
@@ -91,7 +228,22 @@ export function LineageGraph({
   const laneBarRef = useRef<HTMLDivElement>(null);
   const scopeTouchedRef = useRef(false);
   const commitStatsRequestsRef = useRef(new Map<string, number>());
+  const commitAuthorIdentityRequestsRef = useRef(new Map<string, number>());
   const commitStatsEpochRef = useRef(0);
+  const commitAuthorIdentityEpochRef = useRef(0);
+
+  const acceptCommitAuthorIdentityLookup = useCallback((
+    commitHash: string,
+    lookup: GitHubCommitAuthorIdentityLookup
+  ): void => {
+    void warmCommitAuthorAvatar(lookup);
+    setCommitAuthorIdentityLookups((current) => {
+      const merged = mergeCommitAuthorIdentityLookup(current[commitHash], lookup);
+      return merged === current[commitHash]
+        ? current
+        : { ...current, [commitHash]: merged };
+    });
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -105,11 +257,55 @@ export function LineageGraph({
 
   useEffect(() => {
     let active = true;
+    let loadSequence = 0;
     const load = (force: boolean): void => {
+      const sequence = ++loadSequence;
       void dispatch("graph:lanes", { worktreeId, scope, force }).then((r) => {
-        if (!active) return;
-        if (r.ok) setData(r.value);
-        setLoading(false);
+        if (!active || sequence !== loadSequence) return;
+        if (!r.ok) {
+          setLoading(false);
+          return;
+        }
+
+        const graph = r.value;
+        void dispatch("github:hydrateCommitAuthorIdentities", {
+          worktreeId,
+          commits: graph.commits.map((commit) => ({
+            commitHash: commit.hash,
+            authorName: commit.authorName,
+            authorEmail: commit.authorEmail
+          }))
+        }).then(async (hydrated) => {
+          if (!active || sequence !== loadSequence) return;
+          if (hydrated.ok) {
+            await warmCommitAuthorAvatars(hydrated.value);
+            if (!active || sequence !== loadSequence) return;
+          }
+          // Publish graph rows only after every available local avatar is
+          // decoded. Flush both state changes in one commit so a fresh cache
+          // hit is the tooltip's first and final rendered identity even if
+          // React's ambient async batching behavior changes.
+          flushSync(() => {
+            if (hydrated.ok) {
+              setCommitAuthorIdentityLookups((current) => {
+                let next = current;
+                for (const [hash, lookup] of Object.entries(hydrated.value)) {
+                  const merged = mergeCommitAuthorIdentityLookup(next[hash], lookup);
+                  if (merged === next[hash]) continue;
+                  if (next === current) next = { ...current };
+                  next[hash] = merged;
+                }
+                return next;
+              });
+            }
+            setData(graph);
+            setLoading(false);
+          });
+        }).catch(() => {
+          if (!active || sequence !== loadSequence) return;
+          setData(graph);
+          setLoading(false);
+        });
       });
     };
     setLoading(true);
@@ -257,13 +453,27 @@ export function LineageGraph({
     if (!commitContext.visible) setHoveredCommit(null);
   }, [commitContext.visible]);
 
+  // Identity verification is lazy like diffstats, but it must never delay a
+  // context card. Proven results are retained by full commit hash only for the
+  // current worktree view, which resets on a worktree switch. The service
+  // validates the exact GitHub origin/SHA before it emits them.
+  useEffect(() => {
+    return subscribe("github:commitAuthorIdentityChanged", (payload) => {
+      if (payload.worktreeId !== worktreeId) return;
+      acceptCommitAuthorIdentityLookup(payload.commitHash, payload.lookup);
+    });
+  }, [acceptCommitAuthorIdentityLookup, worktreeId]);
+
   // Diffstats are intentionally lazy: a graph can contain hundreds of commits,
   // but only the one under the pointer needs a numstat walk. Cache both success
   // and failure for this worktree so repeated hover is instant and quiet.
   useEffect(() => {
     commitStatsEpochRef.current += 1;
+    commitAuthorIdentityEpochRef.current += 1;
     commitStatsRequestsRef.current.clear();
+    commitAuthorIdentityRequestsRef.current.clear();
     setCommitStats({});
+    setCommitAuthorIdentityLookups({});
   }, [worktreeId]);
 
   useEffect(() => {
@@ -288,6 +498,46 @@ export function LineageGraph({
       });
   }, [commitStats, hoveredVm, worktreeId]);
 
+  useEffect(() => {
+    if (hoveredVm === undefined) return;
+    const commit = hoveredVm.commit;
+    const lookup = commitAuthorIdentityLookups[commit.hash];
+    // A result comes only from the main-process exact-commit proof. Keep the
+    // display data while respecting its persisted TTL/backoff metadata, so a
+    // later hover can revalidate an old identity without a network image load.
+    if (!shouldRequestCommitAuthorIdentity(lookup, now)) return;
+    const epoch = commitAuthorIdentityEpochRef.current;
+    if (commitAuthorIdentityRequestsRef.current.get(commit.hash) === epoch) return;
+    commitAuthorIdentityRequestsRef.current.set(commit.hash, epoch);
+    void dispatch("github:commitAuthorIdentity", {
+      worktreeId,
+      commitHash: commit.hash,
+      authorName: commit.authorName,
+      authorEmail: commit.authorEmail
+    }).then((result) => {
+      // Normal hover replies are optimistic today, but merge them rather than
+      // discarding them. This also keeps the renderer correct if a future
+      // transport can return a local proof directly.
+      if (
+        !result.ok ||
+        commitAuthorIdentityEpochRef.current !== epoch
+      ) {
+        return;
+      }
+      acceptCommitAuthorIdentityLookup(commit.hash, result.value);
+    }).finally(() => {
+      if (commitAuthorIdentityRequestsRef.current.get(commit.hash) === epoch) {
+        commitAuthorIdentityRequestsRef.current.delete(commit.hash);
+      }
+    });
+  }, [
+    acceptCommitAuthorIdentityLookup,
+    commitAuthorIdentityLookups,
+    hoveredVm,
+    now,
+    worktreeId
+  ]);
+
   // The context window remains current while it is open: its age changes with
   // the shared clock, while ref/base information and lazy diffstats update
   // after graph refreshes and local Git responses.
@@ -301,6 +551,12 @@ export function LineageGraph({
         defaultRef={data?.defaultRef ?? hoveredVm.defaultBranch}
         now={now}
         stats={commitStats[hoveredVm.commit.hash]}
+        githubIdentity={reusableCommitAuthorIdentity(
+          commitAuthorIdentityLookups[hoveredVm.commit.hash] ?? {
+            cacheState: "miss",
+            refreshState: "in-flight"
+          }
+        ) ?? undefined}
       />
     );
   }, [
@@ -309,6 +565,7 @@ export function LineageGraph({
     hoveredVm,
     now,
     commitStats,
+    commitAuthorIdentityLookups,
     viewingBranch
   ]);
 
@@ -327,6 +584,12 @@ export function LineageGraph({
         defaultRef={data?.defaultRef ?? vm.defaultBranch}
         now={now}
         stats={commitStats[vm.commit.hash]}
+        githubIdentity={reusableCommitAuthorIdentity(
+          commitAuthorIdentityLookups[vm.commit.hash] ?? {
+            cacheState: "miss",
+            refreshState: "in-flight"
+          }
+        ) ?? undefined}
       />,
       anchor
     );

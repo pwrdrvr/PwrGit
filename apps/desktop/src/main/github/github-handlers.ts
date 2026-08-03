@@ -1,10 +1,15 @@
-import { ok } from "@pwrgit/shared";
+import { ok, type GitHubCommitAuthorIdentityLookup } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
+import type { GitHubCommitAuthorIdentityService } from "./commit-author-identity";
 import { getGhStatus } from "./pr-client";
 import type { PrService } from "./pr-service";
 
-export function registerGitHubHandlers(bus: CommandBus, prs: PrService): void {
+export function registerGitHubHandlers(
+  bus: CommandBus,
+  prs: PrService,
+  commitAuthorIdentities: GitHubCommitAuthorIdentityService
+): void {
   bus.register("pr:refresh", async (req) => {
     const changed = await prs.refreshRepo(req.repoId, {
       ...(req.branches !== undefined ? { branches: req.branches } : {}),
@@ -23,4 +28,75 @@ export function registerGitHubHandlers(bus: CommandBus, prs: PrService): void {
   });
 
   bus.register("github:status", async () => ok(await getGhStatus()));
+
+  bus.register("github:hydrateCommitAuthorIdentities", async (req) => {
+    // Start the whole batch before awaiting any one commit. The identity
+    // service then coalesces the worktree's `git remote get-url origin` proof,
+    // so a large graph performs one origin validation instead of serially
+    // spawning Git once per row. A miss remains strictly local-cache-only.
+    const pending = req.commits.map((commit) => {
+      const emitBackgroundUpdate = (
+        lookup: GitHubCommitAuthorIdentityLookup
+      ): void => {
+        emitEvent("github:commitAuthorIdentityChanged", {
+          worktreeId: req.worktreeId,
+          commitHash: commit.commitHash,
+          lookup
+        });
+      };
+      const request = commitAuthorIdentities.request(
+        {
+          worktreeId: req.worktreeId,
+          commitHash: commit.commitHash,
+          authorName: commit.authorName,
+          authorEmail: commit.authorEmail,
+          cacheOnly: true
+        },
+        emitBackgroundUpdate
+      );
+      return (
+        request.completion?.then(
+          (lookup) => [commit.commitHash, lookup] as const
+        ) ?? Promise.resolve([commit.commitHash, request.lookup] as const)
+      );
+    });
+
+    return ok(Object.fromEntries(await Promise.all(pending)));
+  });
+
+  bus.register("github:commitAuthorIdentity", (req) => {
+    const emitLookup = (lookup: GitHubCommitAuthorIdentityLookup): void => {
+      emitEvent("github:commitAuthorIdentityChanged", {
+        worktreeId: req.worktreeId,
+        commitHash: req.commitHash,
+        lookup
+      });
+    };
+    // A very fast stale revalidation must not overtake the first cache event:
+    // renderers need to see the current local thumbnail before any refreshed
+    // replacement. Queue background deltas until that initial event emits.
+    let initialEmitted = false;
+    const queuedUpdates: GitHubCommitAuthorIdentityLookup[] = [];
+    const emitBackgroundUpdate = (lookup: GitHubCommitAuthorIdentityLookup): void => {
+      if (!initialEmitted) {
+        queuedUpdates.push(lookup);
+        return;
+      }
+      emitLookup(lookup);
+    };
+    const request = commitAuthorIdentities.request(req, emitBackgroundUpdate);
+    void request.completion?.then((lookup) => {
+      emitLookup(lookup);
+      initialEmitted = true;
+      for (const update of queuedUpdates) emitLookup(update);
+    });
+    // A cache-only graph warm must wait for its local origin/proof/thumbnail
+    // read so the renderer's small worker pool is a real concurrency bound.
+    // Normal hover requests still return their optimistic placeholder without
+    // waiting for local or network work.
+    if (req.cacheOnly && request.completion !== undefined) {
+      return request.completion.then((lookup) => ok(lookup));
+    }
+    return ok(request.lookup);
+  });
 }
