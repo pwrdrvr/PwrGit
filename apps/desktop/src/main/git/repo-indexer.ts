@@ -216,12 +216,19 @@ export class RepoIndexer {
     // listed primary path isn't its own path) is a fossil — older builds could
     // index one. Syncing it would steal the whole family back and forth with
     // the canonical repo; delete it instead (worktrees cascade, and the
-    // canonical repo reclaims its rows on its own next sync). Dropping the row
-    // is the completed refresh, so report it as one — an error here reaches the
-    // renderer as "Couldn't refresh …" while the row visibly disappears.
+    // canonical repo reclaims its rows whenever a scan reaches it). Dropping
+    // the row is the completed refresh, so report it as one — an error here
+    // reaches the renderer as "Couldn't refresh …" while the row visibly
+    // disappears. Hand back the owning path too: reclaim needs that repo to be
+    // under a scan root, which we cannot promise, so the UI names where the
+    // worktree went instead of asserting it is already listed.
     if (primary !== undefined && !primary.bare && primary.path !== repo.path) {
       this.db.prepare("DELETE FROM repos WHERE id = ?").run(repoId);
-      return ok({ outcome: "deindexed", profileId: repo.profileId });
+      return ok({
+        outcome: "deindexed",
+        profileId: repo.profileId,
+        ownerPath: primary.path
+      });
     }
     const worktrees = listed.value
       .filter((w) => !w.bare)

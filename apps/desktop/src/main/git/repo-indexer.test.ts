@@ -1,5 +1,10 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -231,19 +236,27 @@ describe("RepoIndexer", () => {
       )
       .run("fossil", profile.id, "linked", linkedPath);
     expect(isolatedIndexer.getRepo("fossil")).not.toBeNull();
+    expect(isolatedIndexer.searchAll("linked")).not.toHaveLength(0);
 
     const result = await isolatedIndexer.refreshRepoWorktrees("fossil");
 
-    // Dropping the row is what SHOULD happen — the canonical repo already
-    // lists that worktree. Reporting it as an error makes the UI tell the user
-    // the refresh failed while they watch it visibly succeed.
+    // Dropping the row is what SHOULD happen — that worktree belongs to the
+    // canonical repo. Reporting it as an error makes the UI tell the user the
+    // refresh failed while they watch it visibly succeed.
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value).toEqual({
       outcome: "deindexed",
-      profileId: profile.id
+      profileId: profile.id,
+      // git reports the resolved path, and on macOS the temp dir arrives via
+      // the /var → /private/var symlink.
+      ownerPath: realpathSync(repoPath)
     });
     expect(isolatedIndexer.getRepo("fossil")).toBeNull();
+
+    // The delete goes through raw SQL, so ⌘F only stays correct as long as the
+    // FTS triggers (and the worktree cascade behind them) keep firing.
+    expect(isolatedIndexer.searchAll("linked")).toHaveLength(0);
   });
 });
 

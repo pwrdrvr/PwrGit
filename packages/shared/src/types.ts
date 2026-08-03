@@ -108,9 +108,13 @@ export type RepoWorktreeRefresh =
     }
   | {
       /** The row pointed at a linked worktree rather than a repo, so it was
-       *  removed from the index; the canonical repo already lists it. */
+       *  removed from the index. */
       outcome: "deindexed";
       profileId: ProfileId;
+      /** The repo that actually owns that worktree, straight from
+       *  `git worktree list`. It is NOT necessarily indexed itself — say where
+       *  the worktree belongs rather than claiming it is already on screen. */
+      ownerPath: string;
     };
 
 /** Porcelain XY status letters, collapsed to a single display code. */

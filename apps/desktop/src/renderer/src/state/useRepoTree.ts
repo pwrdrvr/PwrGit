@@ -250,12 +250,12 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
       }
 
       // The row's path turned out to be a linked worktree, so it's gone from
-      // the sidebar. Say why, in terms of what the user can see happening.
+      // the sidebar. Name the repo that owns it rather than claiming that repo
+      // is already listed — it only gets indexed if a scan root reaches it.
       if (result.value.outcome === "deindexed") {
         showInfoToast({
           title: `Removed ${repo.name} from the list`,
-          message:
-            "It's a worktree of another repo, which already lists it here."
+          message: `It's a worktree of ${result.value.ownerPath}, not a repo of its own.`
         });
         return;
       }
