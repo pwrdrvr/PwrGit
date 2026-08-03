@@ -40,6 +40,29 @@ pnpm test       # vitest across the workspace (needs a Node-ABI native build)
 pnpm typecheck  # tsc across packages
 ```
 
+## Launch the dev app
+
+Prefer the **Dev** action from `.codex/environments/environment.toml`. It is the
+canonical launch path: from the repository root it runs `nvm use --silent`,
+enables Corepack, and then runs the root `pnpm dev` script.
+
+Agent shells hosted by another Electron Pwr app can inherit that parent's
+`ELECTRON_EXEC_PATH`, `ELECTRON_CLI_ARGS`, or `ELECTRON_MAJOR_VER`. Running
+Electron with those overrides can silently launch PwrGit through a sibling
+app's Electron installation. If the Dev action is unavailable, mirror it while
+clearing only those launch overrides:
+
+```bash
+nvm use --silent
+corepack enable
+env -u ELECTRON_EXEC_PATH -u ELECTRON_CLI_ARGS -u ELECTRON_MAJOR_VER pnpm dev
+```
+
+The resulting Electron executable must come from this PwrGit worktree's
+`node_modules`, and its user-data directory must be PwrGit's—not PwrAgent's or
+another sibling app's. If either is wrong, stop the process you just started
+and relaunch with the canonical action or clean command above.
+
 ## Packaging & releases
 
 Packaging goes through `apps/desktop/scripts/release.mjs` (pnpm-deploy stage →
