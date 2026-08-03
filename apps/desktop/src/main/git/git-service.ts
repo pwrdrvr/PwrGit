@@ -1,12 +1,18 @@
 import { rmSync } from "node:fs";
 import {
   type BranchRef,
+  type BranchTrackingStatus,
   type ChangeSet,
   type Commit,
   type CommitFileChange,
   type CommitStats,
   type DivergenceCommit,
+  type LocalBranchSummary,
+  type PushRefPlan,
+  type PushRefResult,
   type RemoteDivergence,
+  type RemoteSummary,
+  type RepoRefs,
   err,
   type FileStatus,
   ok,
@@ -688,10 +694,17 @@ export async function worktreeAdd(
   repoPath: string,
   worktreePath: string,
   branch: string,
-  options: { newBranch: boolean }
+  options: { newBranch: boolean; startPoint?: string }
 ): Promise<Result<void>> {
   const args = options.newBranch
-    ? ["worktree", "add", "-b", branch, worktreePath]
+    ? [
+        "worktree",
+        "add",
+        "-b",
+        branch,
+        worktreePath,
+        ...(options.startPoint === undefined ? [] : [options.startPoint])
+      ]
     : ["worktree", "add", worktreePath, branch];
   const raw = await git(args, repoPath);
   if (!raw.ok) return raw;
@@ -773,7 +786,7 @@ export async function worktreeRemove(
   }
 }
 
-/** Fetch all remotes and prune deleted remote branches. */
+/** Fetch the checked-out branch's configured remote (or origin) and prune. */
 export async function fetchRemote(
   git: GitExec,
   cwd: string
@@ -782,6 +795,129 @@ export async function fetchRemote(
   if (!raw.ok) return raw;
   const checked = requireExit0(raw.value, ["fetch"]);
   return checked.ok ? ok(undefined) : checked;
+}
+
+/** Fetch one explicit remote and prune its deleted remote-tracking branches. */
+export async function fetchNamedRemote(
+  git: GitExec,
+  cwd: string,
+  remote: string
+): Promise<Result<void>> {
+  const raw = await git(["fetch", "--prune", remote], cwd);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["fetch", "--prune", remote]);
+  return checked.ok ? ok(undefined) : checked;
+}
+
+/** Fetch every configured remote except those opted out with skipFetchAll. */
+export async function fetchAllRemotes(
+  git: GitExec,
+  cwd: string
+): Promise<Result<void>> {
+  const raw = await git(["fetch", "--all", "--prune"], cwd);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["fetch", "--all", "--prune"]);
+  return checked.ok ? ok(undefined) : checked;
+}
+
+async function checkedRemoteMutation(
+  git: GitExec,
+  cwd: string,
+  args: string[],
+  fallback: string
+): Promise<Result<void>> {
+  const raw = await git(args, cwd);
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode === 0) return ok(undefined);
+  return err({
+    kind: "remote",
+    code: "remote_config_failed",
+    message: raw.value.stderr.trim() || fallback
+  });
+}
+
+async function setRemotePushUrl(
+  git: GitExec,
+  cwd: string,
+  name: string,
+  pushUrl: string | undefined
+): Promise<Result<void>> {
+  if (pushUrl === undefined || pushUrl.trim() === "") {
+    const raw = await git(["config", "--unset-all", `remote.${name}.pushurl`], cwd);
+    if (!raw.ok) return raw;
+    // Exit 5 means there was no explicit push URL, which is already desired.
+    if (raw.value.exitCode === 0 || raw.value.exitCode === 5) return ok(undefined);
+    return err({
+      kind: "remote",
+      code: "remote_config_failed",
+      message: raw.value.stderr.trim() || "Could not clear the remote push URL."
+    });
+  }
+  return checkedRemoteMutation(
+    git,
+    cwd,
+    ["config", "--replace-all", `remote.${name}.pushurl`, pushUrl.trim()],
+    "Could not set the remote push URL."
+  );
+}
+
+export async function addRemote(
+  git: GitExec,
+  cwd: string,
+  input: { name: string; fetchUrl: string; pushUrl?: string }
+): Promise<Result<void>> {
+  const added = await checkedRemoteMutation(
+    git,
+    cwd,
+    ["remote", "add", input.name.trim(), input.fetchUrl.trim()],
+    "Could not add the remote."
+  );
+  if (!added.ok) return added;
+  return setRemotePushUrl(git, cwd, input.name.trim(), input.pushUrl);
+}
+
+export async function updateRemote(
+  git: GitExec,
+  cwd: string,
+  input: {
+    originalName: string;
+    name: string;
+    fetchUrl: string;
+    pushUrl?: string;
+  }
+): Promise<Result<void>> {
+  const originalName = input.originalName.trim();
+  const name = input.name.trim();
+  if (originalName !== name) {
+    const renamed = await checkedRemoteMutation(
+      git,
+      cwd,
+      ["remote", "rename", originalName, name],
+      "Could not rename the remote."
+    );
+    if (!renamed.ok) return renamed;
+  }
+  const updated = await checkedRemoteMutation(
+    git,
+    cwd,
+    ["remote", "set-url", name, input.fetchUrl.trim()],
+    "Could not update the remote URL."
+  );
+  if (!updated.ok) return updated;
+  return setRemotePushUrl(git, cwd, name, input.pushUrl);
+}
+
+export async function removeRemote(
+  git: GitExec,
+  cwd: string,
+  remote: string
+): Promise<Result<void>> {
+  return checkedRemoteMutation(
+    git,
+    cwd,
+    ["remote", "remove", remote],
+    "Could not remove the remote."
+  );
 }
 
 export type PullOutcome = {
@@ -1199,6 +1335,194 @@ export async function listBranches(
   return ok(parseBranchRefs(checked.value.stdout));
 }
 
+const REPO_REFS_FORMAT = [
+  "%(refname)",
+  "%(refname:short)",
+  "%(objectname)",
+  "%(upstream:short)",
+  "%(upstream:track)",
+  "%(committerdate:iso8601-strict)",
+  "%(contents:subject)"
+].join("%09");
+
+type RepoRefRow = {
+  fullName: string;
+  shortName: string;
+  head: string;
+  upstream: string;
+  track: string;
+  lastCommitAt: string;
+  subject: string;
+};
+
+/** Parse repository ref rows separately from remote configuration metadata. */
+export function parseRepoRefRows(stdout: string): RepoRefRow[] {
+  const rows: RepoRefRow[] = [];
+  for (const line of stdout.split("\n")) {
+    if (line.trim() === "") continue;
+    const fields = line.split("\t");
+    const [
+      fullName = "",
+      shortName = "",
+      head = "",
+      upstream = "",
+      track = "",
+      lastCommitAt = ""
+    ] = fields;
+    if (fullName === "" || shortName === "" || head === "") continue;
+    rows.push({
+      fullName,
+      shortName,
+      head,
+      upstream,
+      track,
+      lastCommitAt,
+      subject: fields.slice(6).join("\t")
+    });
+  }
+  return rows;
+}
+
+function trackingStatus(
+  upstream: string,
+  track: string
+): Pick<LocalBranchSummary, "ahead" | "behind" | "tracking"> {
+  if (upstream === "") {
+    return { ahead: 0, behind: 0, tracking: "unpublished" };
+  }
+  if (/gone/i.test(track)) {
+    return { ahead: 0, behind: 0, tracking: "upstream_missing" };
+  }
+  const ahead = Number(/ahead\s+(\d+)/i.exec(track)?.[1] ?? 0);
+  const behind = Number(/behind\s+(\d+)/i.exec(track)?.[1] ?? 0);
+  let tracking: BranchTrackingStatus = "up_to_date";
+  if (ahead > 0 && behind > 0) tracking = "diverged";
+  else if (ahead > 0) tracking = "ahead";
+  else if (behind > 0) tracking = "behind";
+  return { ahead, behind, tracking };
+}
+
+async function configuredRemoteNames(
+  git: GitExec,
+  cwd: string
+): Promise<Result<string[]>> {
+  const raw = await git(["remote"], cwd);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["remote"]);
+  if (!checked.ok) return checked;
+  return ok(
+    checked.value.stdout
+      .split("\n")
+      .map((name) => name.trim())
+      .filter((name) => name !== "")
+  );
+}
+
+async function remoteValue(
+  git: GitExec,
+  cwd: string,
+  args: string[]
+): Promise<string> {
+  const raw = await git(args, cwd);
+  return raw.ok && raw.value.exitCode === 0 ? raw.value.stdout.trim() : "";
+}
+
+async function remoteSummary(
+  git: GitExec,
+  cwd: string,
+  name: string,
+  rows: RepoRefRow[]
+): Promise<RemoteSummary> {
+  const [fetchUrl, pushUrl, symbolicHead, skipFetchAll] = await Promise.all([
+    remoteValue(git, cwd, ["remote", "get-url", name]),
+    remoteValue(git, cwd, ["remote", "get-url", "--push", name]),
+    remoteValue(git, cwd, [
+      "symbolic-ref",
+      "--quiet",
+      `refs/remotes/${name}/HEAD`
+    ]),
+    remoteValue(git, cwd, [
+      "config",
+      "--bool",
+      "--get",
+      `remote.${name}.skipFetchAll`
+    ])
+  ]);
+  const prefix = `refs/remotes/${name}/`;
+  const branches = rows
+    .filter(
+      (row) => row.fullName.startsWith(prefix) && !row.fullName.endsWith("/HEAD")
+    )
+    .map((row) => ({
+      name: row.fullName.slice(prefix.length),
+      qualifiedName: row.shortName,
+      fullName: row.fullName,
+      head: row.head,
+      ...(row.lastCommitAt === "" ? {} : { lastCommitAt: row.lastCommitAt }),
+      ...(row.subject === "" ? {} : { subject: row.subject })
+    }));
+  const headPrefix = `refs/remotes/${name}/`;
+  return {
+    name,
+    fetchUrl,
+    pushUrl: pushUrl || fetchUrl,
+    ...(symbolicHead.startsWith(headPrefix)
+      ? { defaultBranch: symbolicHead.slice(headPrefix.length) }
+      : {}),
+    skipFetchAll: skipFetchAll === "true",
+    branches
+  };
+}
+
+/**
+ * Repository-wide local branch relationships and fetched remote snapshots.
+ * One `for-each-ref` keeps branch-heavy repositories cheap; remote metadata
+ * costs a few bounded configuration probes per configured endpoint.
+ */
+export async function listRepoRefs(
+  git: GitExec,
+  cwd: string,
+  checkedOutByBranch: ReadonlyMap<string, string[]> = new Map()
+): Promise<Result<RepoRefs>> {
+  const [names, raw] = await Promise.all([
+    configuredRemoteNames(git, cwd),
+    git(
+      [
+        "for-each-ref",
+        "--sort=-committerdate",
+        `--format=${REPO_REFS_FORMAT}`,
+        "refs/heads",
+        "refs/remotes"
+      ],
+      cwd
+    )
+  ]);
+  if (!names.ok) return names;
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["for-each-ref"]);
+  if (!checked.ok) return checked;
+  const rows = parseRepoRefRows(checked.value.stdout);
+  const branches = rows
+    .filter((row) => row.fullName.startsWith("refs/heads/"))
+    .map((row): LocalBranchSummary => {
+      const status = trackingStatus(row.upstream, row.track);
+      return {
+        name: row.shortName,
+        fullName: row.fullName,
+        head: row.head,
+        ...(row.upstream === "" ? {} : { upstream: row.upstream }),
+        ...status,
+        checkedOutWorktreeIds: checkedOutByBranch.get(row.shortName) ?? [],
+        ...(row.lastCommitAt === "" ? {} : { lastCommitAt: row.lastCommitAt }),
+        ...(row.subject === "" ? {} : { subject: row.subject })
+      };
+    });
+  const remotes = await Promise.all(
+    names.value.map((name) => remoteSummary(git, cwd, name, rows))
+  );
+  return ok({ branches, remotes });
+}
+
 /**
  * Check out `branch` in this worktree. `git switch` DWIMs a bare remote name
  * (e.g. "main" when only origin/main exists) into a new tracking branch, so
@@ -1225,6 +1549,318 @@ export async function switchBranch(
     });
   }
   return ok(undefined);
+}
+
+async function checkedDestinationBranch(
+  git: GitExec,
+  cwd: string,
+  branch: string
+): Promise<Result<void>> {
+  const raw = await git(["check-ref-format", `refs/heads/${branch}`], cwd);
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode === 0) return ok(undefined);
+  return err({
+    kind: "remote",
+    code: "invalid_branch",
+    message: `\"${branch}\" is not a valid remote branch name.`
+  });
+}
+
+async function resolveCommit(
+  git: GitExec,
+  cwd: string,
+  ref: string
+): Promise<Result<string>> {
+  if (
+    !ref.startsWith("refs/heads/") &&
+    !ref.startsWith("refs/remotes/")
+  ) {
+    return err({
+      kind: "remote",
+      code: "invalid_source",
+      message: "The push source must be a local or fetched remote branch."
+    });
+  }
+  const raw = await git(["rev-parse", "--verify", `${ref}^{commit}`], cwd);
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode === 0) return ok(raw.value.stdout.trim());
+  return err({
+    kind: "remote",
+    code: "source_missing",
+    message: "The selected source branch no longer exists. Refresh and try again."
+  });
+}
+
+async function remoteHead(
+  git: GitExec,
+  cwd: string,
+  remote: string,
+  branch: string
+): Promise<Result<string | undefined>> {
+  const raw = await git(
+    ["ls-remote", "--heads", remote, `refs/heads/${branch}`],
+    cwd
+  );
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode !== 0) {
+    return err({
+      kind: "remote",
+      code: "inspect_failed",
+      message: raw.value.stderr.trim() || `Could not inspect ${remote}.`
+    });
+  }
+  const head = raw.value.stdout.trim().split(/\s+/)[0];
+  return ok(head === "" || head === undefined ? undefined : head);
+}
+
+async function ensureCommitObject(
+  git: GitExec,
+  cwd: string,
+  remote: string,
+  branch: string,
+  head: string
+): Promise<Result<void>> {
+  const have = await git(["cat-file", "-e", `${head}^{commit}`], cwd);
+  if (!have.ok) return have;
+  if (have.value.exitCode === 0) return ok(undefined);
+  const fetched = await git(["fetch", remote, `refs/heads/${branch}`], cwd);
+  if (!fetched.ok) return fetched;
+  const checked = requireExit0(fetched.value, [
+    "fetch",
+    remote,
+    `refs/heads/${branch}`
+  ]);
+  return checked.ok ? ok(undefined) : checked;
+}
+
+async function pushRelation(
+  git: GitExec,
+  cwd: string,
+  sourceHead: string,
+  destinationHead: string | undefined
+): Promise<Result<PushRefPlan["relation"]>> {
+  if (destinationHead === undefined) return ok("create");
+  if (sourceHead === destinationHead) return ok("equal");
+  const canFastForward = await git(
+    ["merge-base", "--is-ancestor", destinationHead, sourceHead],
+    cwd
+  );
+  if (!canFastForward.ok) return canFastForward;
+  if (canFastForward.value.exitCode === 0) return ok("fast_forward");
+  const destinationAhead = await git(
+    ["merge-base", "--is-ancestor", sourceHead, destinationHead],
+    cwd
+  );
+  if (!destinationAhead.ok) return destinationAhead;
+  return ok(
+    destinationAhead.value.exitCode === 0 ? "destination_ahead" : "diverged"
+  );
+}
+
+function sourceRemote(
+  sourceRef: string,
+  remoteNames: string[]
+): string | undefined {
+  return remoteNames
+    .slice()
+    .sort((a, b) => b.length - a.length)
+    .find((name) => sourceRef.startsWith(`refs/remotes/${name}/`));
+}
+
+/**
+ * Refresh all endpoints involved in a proposed push and return an exact,
+ * reviewable relationship snapshot for each destination.
+ */
+export async function planPushRefs(
+  git: GitExec,
+  cwd: string,
+  sourceRef: string,
+  destinations: { remote: string; branch: string }[]
+): Promise<Result<PushRefPlan[]>> {
+  if (destinations.length === 0) {
+    return err({
+      kind: "remote",
+      code: "no_destination",
+      message: "Choose at least one destination remote."
+    });
+  }
+  const names = await configuredRemoteNames(git, cwd);
+  if (!names.ok) return names;
+  const known = new Set(names.value);
+  for (const destination of destinations) {
+    if (!known.has(destination.remote)) {
+      return err({
+        kind: "remote",
+        code: "remote_missing",
+        message: `Remote \"${destination.remote}\" no longer exists.`
+      });
+    }
+    const valid = await checkedDestinationBranch(
+      git,
+      cwd,
+      destination.branch
+    );
+    if (!valid.ok) return valid;
+  }
+
+  const refreshNames = new Set(destinations.map((d) => d.remote));
+  const sourceRemoteName = sourceRemote(sourceRef, names.value);
+  if (sourceRemoteName !== undefined) refreshNames.add(sourceRemoteName);
+  for (const remote of refreshNames) {
+    const fetched = await fetchNamedRemote(git, cwd, remote);
+    if (!fetched.ok) return fetched;
+  }
+
+  const source = await resolveCommit(git, cwd, sourceRef);
+  if (!source.ok) return source;
+  const sourceLabel = sourceRef
+    .replace(/^refs\/heads\//, "")
+    .replace(/^refs\/remotes\//, "");
+  const plans: PushRefPlan[] = [];
+  const seen = new Set<string>();
+  for (const destination of destinations) {
+    const key = `${destination.remote}\0${destination.branch}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const destinationHead = await remoteHead(
+      git,
+      cwd,
+      destination.remote,
+      destination.branch
+    );
+    if (!destinationHead.ok) return destinationHead;
+    if (destinationHead.value !== undefined) {
+      const have = await ensureCommitObject(
+        git,
+        cwd,
+        destination.remote,
+        destination.branch,
+        destinationHead.value
+      );
+      if (!have.ok) return have;
+    }
+    const relation = await pushRelation(
+      git,
+      cwd,
+      source.value,
+      destinationHead.value
+    );
+    if (!relation.ok) return relation;
+    plans.push({
+      sourceRef,
+      sourceLabel,
+      sourceHead: source.value,
+      destinationRemote: destination.remote,
+      destinationBranch: destination.branch,
+      ...(destinationHead.value === undefined
+        ? {}
+        : { destinationHead: destinationHead.value }),
+      relation: relation.value
+    });
+  }
+  return ok(plans);
+}
+
+/** Execute reviewed pushes with a lease and a fresh ancestry check per target. */
+export async function pushPlannedRefs(
+  git: GitExec,
+  cwd: string,
+  plans: PushRefPlan[]
+): Promise<Result<PushRefResult[]>> {
+  const results: PushRefResult[] = [];
+  const refreshed = new Set<string>();
+  for (const plan of plans) {
+    const base = {
+      destinationRemote: plan.destinationRemote,
+      destinationBranch: plan.destinationBranch
+    };
+    const source = await resolveCommit(git, cwd, plan.sourceRef);
+    if (!source.ok || source.value !== plan.sourceHead) {
+      results.push({
+        ...base,
+        outcome: "failed",
+        message: "The source branch changed after review. Refresh the plan."
+      });
+      continue;
+    }
+    const actual = await remoteHead(
+      git,
+      cwd,
+      plan.destinationRemote,
+      plan.destinationBranch
+    );
+    if (!actual.ok || actual.value !== plan.destinationHead) {
+      results.push({
+        ...base,
+        outcome: "failed",
+        message: "The destination changed after review. Refresh the plan."
+      });
+      continue;
+    }
+    if (actual.value !== undefined) {
+      const have = await ensureCommitObject(
+        git,
+        cwd,
+        plan.destinationRemote,
+        plan.destinationBranch,
+        actual.value
+      );
+      if (!have.ok) {
+        results.push({ ...base, outcome: "failed", message: have.error.message });
+        continue;
+      }
+    }
+    const relation = await pushRelation(git, cwd, source.value, actual.value);
+    if (!relation.ok) {
+      results.push({
+        ...base,
+        outcome: "failed",
+        message: relation.error.message
+      });
+      continue;
+    }
+    if (relation.value === "equal") {
+      results.push({ ...base, outcome: "up_to_date" });
+      continue;
+    }
+    if (relation.value !== "create" && relation.value !== "fast_forward") {
+      results.push({
+        ...base,
+        outcome: "failed",
+        message:
+          relation.value === "destination_ahead"
+            ? "The destination contains commits missing from the source."
+            : "The source and destination have diverged."
+      });
+      continue;
+    }
+    const expected = actual.value ?? "";
+    const destinationRef = `refs/heads/${plan.destinationBranch}`;
+    const raw = await git(
+      [
+        "push",
+        `--force-with-lease=${destinationRef}:${expected}`,
+        plan.destinationRemote,
+        `${plan.sourceRef}:${destinationRef}`
+      ],
+      cwd
+    );
+    if (!raw.ok || raw.value.exitCode !== 0) {
+      results.push({
+        ...base,
+        outcome: "failed",
+        message:
+          raw.ok
+            ? raw.value.stderr.trim() || "Push failed."
+            : raw.error.message
+      });
+      continue;
+    }
+    results.push({ ...base, outcome: "pushed" });
+    refreshed.add(plan.destinationRemote);
+  }
+  for (const remote of refreshed) await fetchNamedRemote(git, cwd, remote);
+  return ok(results);
 }
 
 /** Push the current branch to its upstream. */

@@ -33,7 +33,8 @@ export function registerWorktreeLifecycleHandlers(
     }
     const wtPath = join(worktreeRoot(), repo.name, slugBranch(req.branch));
     const added = await worktreeAdd(execGit, repo.path, wtPath, req.branch, {
-      newBranch: req.newBranch
+      newBranch: req.newBranch,
+      ...(req.startPoint === undefined ? {} : { startPoint: req.startPoint })
     });
     if (!added.ok) return added;
     await indexer.refreshRepoWorktrees(repo.id);

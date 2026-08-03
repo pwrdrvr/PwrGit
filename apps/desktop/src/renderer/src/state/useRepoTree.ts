@@ -18,7 +18,8 @@ export type UseRepoTree = {
   createWorktree: (
     repoId: string,
     branch: string,
-    newBranch: boolean
+    newBranch: boolean,
+    startPoint?: string
   ) => Promise<string | null>;
   removeWorktrees: (worktreeIds: string[]) => Promise<void>;
   persistWorktreeOrder: (repoId: string, orderedIds: string[]) => void;
@@ -126,11 +127,17 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
   }, []);
 
   const createWorktree = useCallback(
-    async (repoId: string, branch: string, newBranch: boolean) => {
+    async (
+      repoId: string,
+      branch: string,
+      newBranch: boolean,
+      startPoint?: string
+    ) => {
       const r = await dispatch("worktree:create", {
         repoId,
         branch,
-        newBranch
+        newBranch,
+        ...(startPoint === undefined ? {} : { startPoint })
       });
       return r.ok ? null : r.error.message;
     },

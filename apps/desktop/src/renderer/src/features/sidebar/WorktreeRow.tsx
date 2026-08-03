@@ -74,7 +74,7 @@ export function WorktreeRow({
       onMouseEnter={prefetchPullRequest}
       onMouseLeave={clearPrHoverTimer}
     >
-      {/* The local checkout is fixed at the top — no drag handle. */}
+      {/* The primary checkout is fixed at the top — no drag handle. */}
       <span
         className="wt-row__handle"
         title={worktree.isPrimary ? undefined : "Drag to reorder"}
@@ -101,7 +101,7 @@ export function WorktreeRow({
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          aria-label="Local checkout"
+          aria-label="Primary checkout"
         >
           <path d="M3 10.5 12 3l9 7.5" />
           <path d="M5 9.5V20h14V9.5" />
@@ -130,9 +130,9 @@ export function WorktreeRow({
       {worktree.isPrimary && (
         <span
           className="wt-tag wt-tag--local"
-          title="The repo's local checkout (primary working tree)"
+          title="The repository's primary working tree"
         >
-          local
+          primary
         </span>
       )}
       {worktree.dirty > 0 && (

@@ -4,7 +4,7 @@ import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import { execGit } from "./dugite";
-import { listBranches, switchBranch } from "./git-service";
+import { listBranches, listRepoRefs, switchBranch } from "./git-service";
 import type { RepoIndexer } from "./repo-indexer";
 import type { WorktreeRefresher } from "./worktree-handlers";
 
@@ -35,6 +35,25 @@ export function registerBranchHandlers(
     const row = rowOf(req.worktreeId);
     if (row === undefined) return err(notFound);
     return listBranches(execGit, row.path);
+  });
+
+  bus.register("repo:refs", async (req) => {
+    const repo = db
+      .prepare("SELECT path FROM repos WHERE id = ?")
+      .get(req.repoId) as { path: string } | undefined;
+    if (repo === undefined) {
+      return err({ ...notFound, message: "repo not found" });
+    }
+    const worktrees = db
+      .prepare("SELECT id, branch FROM worktrees WHERE repo_id = ?")
+      .all(req.repoId) as { id: string; branch: string }[];
+    const checkedOut = new Map<string, string[]>();
+    for (const worktree of worktrees) {
+      const ids = checkedOut.get(worktree.branch) ?? [];
+      ids.push(worktree.id);
+      checkedOut.set(worktree.branch, ids);
+    }
+    return listRepoRefs(execGit, repo.path, checkedOut);
   });
 
   bus.register("branch:switch", async (req) => {

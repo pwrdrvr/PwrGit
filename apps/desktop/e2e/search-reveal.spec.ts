@@ -15,7 +15,7 @@ test.afterEach(async () => {
   sandbox = null;
 });
 
-test("⌘F search pick expands the repo, selects Local, and scrolls it into view", async () => {
+test("⌘F search pick expands the repo, selects Primary, and scrolls it into view", async () => {
   sandbox = createGitSandbox();
   // A branch-heavy repo that sorts FIRST — expanded, its worktrees push
   // everything below it out of the sidebar viewport.

@@ -6,12 +6,18 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { err, ok, type RemoteDivergence, type Result } from "@pwrgit/shared";
 import type { GitExec, GitOutput } from "./dugite";
 import {
+  addRemote,
   fetchRemote,
   inspectRemoteDivergence,
+  listRepoRefs,
+  planPushRefs,
   pullFastForward,
+  pushPlannedRefs,
   pushRemote,
   rebaseOntoUpstream,
-  resetToUpstream
+  removeRemote,
+  resetToUpstream,
+  updateRemote
 } from "./git-service";
 
 const systemGit: GitExec = (args, cwd) =>
@@ -90,6 +96,114 @@ beforeAll(() => {
 });
 
 describe("remote ops (bare-remote fixture)", () => {
+  it("adds, edits, renames, and removes arbitrary remotes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-remote-config-"));
+    git(root, ["init", "--bare", "-b", "main", "fetch.git"]);
+    git(root, ["init", "--bare", "-b", "main", "push.git"]);
+    const local = join(root, "local");
+    git(root, ["init", "-b", "main", "local"]);
+
+    const added = await addRemote(systemGit, local, {
+      name: "mac-tests",
+      fetchUrl: join(root, "fetch.git"),
+      pushUrl: join(root, "push.git")
+    });
+    expect(added.ok).toBe(true);
+    expect(gitOut(local, ["remote", "get-url", "mac-tests"])).toBe(
+      join(root, "fetch.git")
+    );
+    expect(gitOut(local, ["remote", "get-url", "--push", "mac-tests"])).toBe(
+      join(root, "push.git")
+    );
+
+    const updated = await updateRemote(systemGit, local, {
+      originalName: "mac-tests",
+      name: "mac-arm-tests",
+      fetchUrl: join(root, "push.git")
+    });
+    expect(updated.ok).toBe(true);
+    expect(gitOut(local, ["remote"])).toBe("mac-arm-tests");
+    expect(gitOut(local, ["remote", "get-url", "mac-arm-tests"])).toBe(
+      join(root, "push.git")
+    );
+
+    const removed = await removeRemote(systemGit, local, "mac-arm-tests");
+    expect(removed.ok).toBe(true);
+    expect(gitOut(local, ["remote"])).toBe("");
+  });
+
+  it("lists multiple remotes and safely pushes one source to multiple targets", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-multi-remote-"));
+    for (const remote of ["origin", "upstream", "mac-tests"]) {
+      git(root, ["init", "--bare", "-b", "main", `${remote}.git`]);
+    }
+    const local = join(root, "local");
+    git(root, ["init", "-b", "main", "local"]);
+    configure(local, "local");
+    commit(local, "base.txt", "base");
+    for (const remote of ["origin", "upstream", "mac-tests"]) {
+      git(local, ["remote", "add", remote, join(root, `${remote}.git`)]);
+    }
+    git(local, ["push", "-u", "origin", "main"]);
+    git(local, ["push", "upstream", "main"]);
+    commit(local, "upstream.txt", "advance upstream");
+    git(local, ["push", "upstream", "main"]);
+    git(local, ["fetch", "--all"]);
+
+    const refs = await listRepoRefs(
+      systemGit,
+      local,
+      new Map([["main", ["primary"]]])
+    );
+    expect(refs.ok).toBe(true);
+    if (!refs.ok) return;
+    expect(refs.value.remotes.map((remote) => remote.name)).toEqual([
+      "mac-tests",
+      "origin",
+      "upstream"
+    ]);
+    expect(refs.value.branches[0]).toMatchObject({
+      name: "main",
+      checkedOutWorktreeIds: ["primary"]
+    });
+
+    const planned = await planPushRefs(
+      systemGit,
+      local,
+      "refs/remotes/upstream/main",
+      [
+        { remote: "origin", branch: "main" },
+        { remote: "mac-tests", branch: "playwright/main" }
+      ]
+    );
+    expect(planned.ok).toBe(true);
+    if (!planned.ok) return;
+    expect(planned.value.map((plan) => plan.relation)).toEqual([
+      "fast_forward",
+      "create"
+    ]);
+
+    const pushed = await pushPlannedRefs(systemGit, local, planned.value);
+    expect(pushed.ok).toBe(true);
+    if (!pushed.ok) return;
+    expect(pushed.value.map((result) => result.outcome)).toEqual([
+      "pushed",
+      "pushed"
+    ]);
+    const upstreamHead = gitOut(local, ["rev-parse", "upstream/main"]);
+    expect(
+      gitOut(root, ["--git-dir", "origin.git", "rev-parse", "refs/heads/main"])
+    ).toBe(upstreamHead);
+    expect(
+      gitOut(root, [
+        "--git-dir",
+        "mac-tests.git",
+        "rev-parse",
+        "refs/heads/playwright/main"
+      ])
+    ).toBe(upstreamHead);
+  }, 20_000);
+
   it("push sends a new commit to the remote", async () => {
     commit(cloneB, "g.txt", "c2 from B");
     const result = await pushRemote(systemGit, cloneB);
