@@ -86,6 +86,15 @@ test("hovering an aligned commit SHA chip opens its context window", async () =>
 
   const shaChip = row.locator(".commit-sha-chip");
   await expect(shaChip).toHaveText(/^[0-9a-f]{7}$/);
+  const lineStarts = await row.evaluate((element) => ({
+    sha: Math.round(
+      element.querySelector(".commit-sha-chip")!.getBoundingClientRect().left
+    ),
+    meta: Math.round(
+      element.querySelector(".commit-meta")!.getBoundingClientRect().left
+    )
+  }));
+  expect(lineStarts.meta).toBe(lineStarts.sha);
   await shaChip.hover();
   await expect(card).toBeVisible();
   // Leaving the row for the card must not make the interactive context window

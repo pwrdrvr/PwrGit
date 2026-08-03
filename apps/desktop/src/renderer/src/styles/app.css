@@ -1568,9 +1568,8 @@ input {
 }
 .commit-sha-chip {
   flex: 0 0 58px;
-  align-self: flex-start;
+  align-self: center;
   height: 20px;
-  margin-top: 10px;
   padding: 0 6px;
   border: 1px solid var(--border-subtle);
   border-radius: 999px;

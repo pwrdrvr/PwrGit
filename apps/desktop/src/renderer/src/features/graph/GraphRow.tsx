@@ -283,31 +283,30 @@ export function GraphRow({
         )}
       </span>
 
-      <button
-        type="button"
-        className="commit-sha-chip"
-        aria-label={`Show context for commit ${commit.shortHash}`}
-        onMouseEnter={(e) => showContextFor(e.currentTarget)}
-        onMouseLeave={onHideContext}
-        onFocus={(e) => showContextFor(e.currentTarget)}
-        onBlur={onHideContext}
-        onKeyDown={(e) => {
-          if (e.key === "Tab" && !e.shiftKey && onFocusContext()) {
-            e.preventDefault();
-          }
-        }}
-        onClick={(e) => {
-          e.stopPropagation();
-          showContextFor(e.currentTarget);
-        }}
-      >
-        {commit.shortHash}
-      </button>
-
       <div className="commit-body">
-        {/* Line 1 belongs to the subject — branch chips and authorship live on
-            the meta line so long messages aren't pushed off the edge. */}
+        {/* The SHA scopes only the title line. Branch chips and authorship keep
+            their original left edge on the meta line below. */}
         <div className="commit-line">
+          <button
+            type="button"
+            className="commit-sha-chip"
+            aria-label={`Show context for commit ${commit.shortHash}`}
+            onMouseEnter={(e) => showContextFor(e.currentTarget)}
+            onMouseLeave={onHideContext}
+            onFocus={(e) => showContextFor(e.currentTarget)}
+            onBlur={onHideContext}
+            onKeyDown={(e) => {
+              if (e.key === "Tab" && !e.shiftKey && onFocusContext()) {
+                e.preventDefault();
+              }
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              showContextFor(e.currentTarget);
+            }}
+          >
+            {commit.shortHash}
+          </button>
           <span className={`commit-msg${isMine ? "" : " is-other"}`}>
             {commit.subject}
           </span>
