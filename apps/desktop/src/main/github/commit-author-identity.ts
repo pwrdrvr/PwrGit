@@ -24,10 +24,13 @@ export const GITHUB_COMMIT_AUTHOR_IDENTITY_INITIAL_BACKOFF_MS = 60 * 1000;
 export const GITHUB_COMMIT_AUTHOR_IDENTITY_MAX_BACKOFF_MS = 60 * 60 * 1000;
 /** Keep stale graph warming from fanning out into an API burst. */
 export const GITHUB_COMMIT_AUTHOR_IDENTITY_MAX_CONCURRENT_REFRESHES = 2;
+/** GitHub's email-to-account association is reusable across repositories. */
+export const GITHUB_COMMIT_AUTHOR_ACCOUNT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 const RESOLVED_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 const NEGATIVE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const UNAVAILABLE_RETENTION_MS = 24 * 60 * 60 * 1000;
+const ACCOUNT_RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 const ACCESS_TOUCH_INTERVAL_MS = 60 * 60 * 1000;
 
@@ -46,12 +49,14 @@ export type GitHubCommitAuthorRemoteCommit = {
   } | null;
   /** `null` means GitHub authoritatively has no associated account. */
   githubAuthor?: {
+    id?: number | null;
     login?: string | null;
     avatarUrl?: string | null;
   } | null;
 };
 
 type GitHubAccountProfile = {
+  id?: number;
   login: string;
   name?: string;
   avatarUrl?: string;
@@ -144,6 +149,7 @@ export class GhCliCommitAuthorIdentityTransport
     const pullAuthor = pulls[0]!;
     return associatedPullAuthorMatches(pullAuthor, author)
       ? {
+          ...(pullAuthor.id === undefined ? {} : { id: pullAuthor.id }),
           login: pullAuthor.login,
           ...(pullAuthor.avatarUrl === undefined
             ? {}
@@ -189,6 +195,7 @@ type CacheRow = {
   identity_key: string;
   status: string;
   github_login: string | null;
+  github_user_id: number | null;
   avatar_url: string | null;
   fetched_at: number;
   expires_at: number;
@@ -198,9 +205,22 @@ type CacheRow = {
   updated_at: number;
 };
 
+type AccountRow = {
+  author_key: string;
+  status: string;
+  github_user_id: number | null;
+  github_login: string | null;
+  avatar_url: string | null;
+  fetched_at: number;
+  expires_at: number;
+  last_accessed_at: number;
+  updated_at: number;
+};
+
 type NormalizedAuthor = { name: string; email: string };
 
 type CachedIdentity = {
+  userId?: number;
   login: string;
   avatarSourceUrl?: string;
 };
@@ -218,9 +238,9 @@ type RemoteOutcome =
   | { kind: "inconclusive" };
 
 /**
- * Persistent exact-proof verification of a local Git commit author's GitHub
- * account. The local name/email remain the source of truth; this service only
- * supplies login/avatar fields after proving an exact GitHub commit match.
+ * Persistent verification of a local Git commit author's GitHub account. An
+ * exact GitHub commit is the proof source; its email-to-account association is
+ * then reusable for the same hashed author email on other GitHub commits.
  */
 export class GitHubCommitAuthorIdentityService {
   private readonly transport: GitHubCommitAuthorIdentityTransport;
@@ -277,9 +297,8 @@ export class GitHubCommitAuthorIdentityService {
   }
 
   /**
-   * Start an exact-proof lookup in the background. The GitHub remote must be
-   * resolved before a cache row can be read: cache keys are scoped to owner,
-   * repo, and full commit SHA, so they cannot bleed across commits or remotes.
+   * Start an identity lookup in the background. The GitHub remote is validated
+   * before either the exact-SHA cache or reusable author-account cache is read.
    * Callers must render local Git author data immediately and observe
    * `completion` only to repaint. A stale resolved row is returned promptly
    * and then revalidated in the background; `onBackgroundUpdate` receives the
@@ -290,7 +309,7 @@ export class GitHubCommitAuthorIdentityService {
     commitHash: string;
     authorName: string;
     authorEmail: string;
-    /** Do not make a GitHub commit request when there is no exact local proof. */
+    /** Read only already-proven exact or author-account data. */
     cacheOnly?: boolean;
   }, onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void): GitHubCommitAuthorIdentityRequest {
     const author = normalizeAuthor({
@@ -350,6 +369,7 @@ export class GitHubCommitAuthorIdentityService {
     onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void
   ): Promise<GitHubCommitAuthorIdentityLookup> {
     let identityKey: string | undefined;
+    let authorKey: string | undefined;
     try {
       const worktree = this.db
         .prepare("SELECT path FROM worktrees WHERE id = ?")
@@ -369,11 +389,72 @@ export class GitHubCommitAuthorIdentityService {
       });
       if (proof === undefined) return notEligibleLookup();
       identityKey = buildGitHubCommitAuthorIdentityCacheKey(prepared.author, proof);
-      if (identityKey === undefined) return notEligibleLookup();
+      authorKey = buildGitHubCommitAuthorAccountCacheKey(prepared.author);
+      if (identityKey === undefined || authorKey === undefined) return notEligibleLookup();
 
       const now = this.now();
       const cached = this.readCache(identityKey);
       if (cached !== undefined) this.touch(cached, now);
+      if (cached?.identity !== undefined) {
+        // Backfill the reusable author account from exact proofs written by
+        // versions that only cached one SHA at a time.
+        this.writeAuthorAccount(
+          authorKey,
+          cached.identity,
+          cached.fetchedAt,
+          Math.max(cached.expiresAt, now + GITHUB_COMMIT_AUTHOR_ACCOUNT_TTL_MS)
+        );
+      }
+
+      if (cached?.identity !== undefined && isFresh(cached, now)) {
+        return await this.lookupFromCache(cached, now, "idle", onBackgroundUpdate);
+      }
+      if (
+        cached?.identity !== undefined &&
+        cached.nextRetryAt !== undefined &&
+        cached.nextRetryAt > now
+      ) {
+        return await this.lookupFromCache(cached, now, "backing-off", onBackgroundUpdate);
+      }
+
+      // Preserve a known local identity (and its on-disk thumbnail) while the
+      // next exact-commit proof runs. This is stale-while-revalidate, never a
+      // shortcut around the origin/SHA proof that was already established.
+      if (cached?.status === "resolved") {
+        const stale = await this.lookupFromCache(
+          cached,
+          now,
+          "in-flight",
+          onBackgroundUpdate
+        );
+        this.scheduleRevalidation(prepared, proof, identityKey, onBackgroundUpdate);
+        return stale;
+      }
+
+      // GitHub associates command-line commits with accounts by author email.
+      // Once an exact response proves that association, reuse the same hashed
+      // author account across SHAs and repositories. Conflicts become
+      // ambiguous and are never served.
+      const account = this.readAuthorAccount(authorKey);
+      if (account !== undefined) {
+        this.touchAuthorAccount(account, now);
+        if (isFresh(account, now) || prepared.cacheOnly) {
+          return await this.lookupFromAuthorAccount(
+            account,
+            now,
+            "idle",
+            onBackgroundUpdate
+          );
+        }
+        const stale = await this.lookupFromAuthorAccount(
+          account,
+          now,
+          "in-flight",
+          onBackgroundUpdate
+        );
+        this.scheduleRevalidation(prepared, proof, identityKey, onBackgroundUpdate);
+        return stale;
+      }
 
       if (isFresh(cached, now)) {
         return await this.lookupFromCache(cached, now, "idle", onBackgroundUpdate);
@@ -381,11 +462,7 @@ export class GitHubCommitAuthorIdentityService {
       if (cached?.nextRetryAt !== undefined && cached.nextRetryAt > now) {
         return await this.lookupFromCache(cached, now, "backing-off", onBackgroundUpdate);
       }
-
-      // Preserve a known local identity (and its on-disk thumbnail) while the
-      // next exact-commit proof runs. This is stale-while-revalidate, never a
-      // shortcut around the origin/SHA proof that was already established.
-      if (cached?.status === "resolved" || cached?.status === "negative") {
+      if (cached?.status === "negative") {
         const stale = await this.lookupFromCache(
           cached,
           now,
@@ -405,7 +482,8 @@ export class GitHubCommitAuthorIdentityService {
 
       const refreshed = await this.revalidate(prepared, proof, identityKey);
       const completedAt = this.now();
-      return await this.lookupFromCache(
+      return await this.lookupBestAvailable(
+        prepared.author,
         refreshed,
         completedAt,
         refreshStateFor(refreshed, completedAt),
@@ -418,7 +496,13 @@ export class GitHubCommitAuthorIdentityService {
       }
       this.recordFailure(identityKey, now);
       const cached = this.readCache(identityKey);
-      return await this.lookupFromCache(cached, now, "backing-off", onBackgroundUpdate);
+      return await this.lookupBestAvailable(
+        prepared.author,
+        cached,
+        now,
+        "backing-off",
+        onBackgroundUpdate
+      );
     }
   }
 
@@ -433,7 +517,8 @@ export class GitHubCommitAuthorIdentityService {
         if (onBackgroundUpdate === undefined) return;
         const now = this.now();
         onBackgroundUpdate(
-          await this.lookupFromCache(
+          await this.lookupBestAvailable(
+            prepared.author,
             entry,
             now,
             refreshStateFor(entry, now),
@@ -466,6 +551,15 @@ export class GitHubCommitAuthorIdentityService {
             fetchedAt: completedAt,
             expiresAt: completedAt + this.resolvedTtlMs
           });
+          const authorKey = buildGitHubCommitAuthorAccountCacheKey(prepared.author);
+          if (authorKey !== undefined) {
+            this.writeAuthorAccount(
+              authorKey,
+              outcome.identity,
+              completedAt,
+              completedAt + GITHUB_COMMIT_AUTHOR_ACCOUNT_TTL_MS
+            );
+          }
         } else if (outcome.kind === "negative") {
           this.writeNegative({
             identityKey,
@@ -521,7 +615,9 @@ export class GitHubCommitAuthorIdentityService {
     entry: CacheEntry | undefined,
     now: number,
     refreshState: GitHubCommitAuthorIdentityLookup["refreshState"],
-    onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void
+    onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void,
+    readCurrent: (key: string) => CacheEntry | undefined = (key) =>
+      this.readCache(key)
   ): Promise<GitHubCommitAuthorIdentityLookup> {
     if (entry?.identity === undefined) return toLookup(entry, now, refreshState);
 
@@ -543,7 +639,8 @@ export class GitHubCommitAuthorIdentityService {
           now,
           refreshState,
           identity.avatarUrl,
-          onBackgroundUpdate
+          onBackgroundUpdate,
+          readCurrent
         );
       }
       return toLookup(entry, now, refreshState, identity, avatarCache);
@@ -553,19 +650,60 @@ export class GitHubCommitAuthorIdentityService {
     return toLookup(entry, now, refreshState, identity);
   }
 
+  private lookupFromAuthorAccount(
+    entry: CacheEntry,
+    now: number,
+    refreshState: GitHubCommitAuthorIdentityLookup["refreshState"],
+    onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void
+  ): Promise<GitHubCommitAuthorIdentityLookup> {
+    return this.lookupFromCache(
+      entry,
+      now,
+      refreshState,
+      onBackgroundUpdate,
+      (key) => this.readAuthorAccount(key)
+    );
+  }
+
+  private async lookupBestAvailable(
+    author: NormalizedAuthor,
+    exact: CacheEntry | undefined,
+    now: number,
+    refreshState: GitHubCommitAuthorIdentityLookup["refreshState"],
+    onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void
+  ): Promise<GitHubCommitAuthorIdentityLookup> {
+    if (exact?.identity !== undefined) {
+      return await this.lookupFromCache(exact, now, refreshState, onBackgroundUpdate);
+    }
+    const authorKey = buildGitHubCommitAuthorAccountCacheKey(author);
+    const account = authorKey === undefined
+      ? undefined
+      : this.readAuthorAccount(authorKey);
+    return account === undefined
+      ? await this.lookupFromCache(exact, now, refreshState, onBackgroundUpdate)
+      : await this.lookupFromAuthorAccount(
+          account,
+          now,
+          isFresh(account, now) ? "idle" : refreshState,
+          onBackgroundUpdate
+        );
+  }
+
   private scheduleThumbnailRefresh(
     entry: CacheEntry,
     sourceUrl: string,
     now: number,
     refreshState: GitHubCommitAuthorIdentityLookup["refreshState"],
     previousAvatarUrl: string | undefined,
-    onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void
+    onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void,
+    readCurrent: (key: string) => CacheEntry | undefined = (key) =>
+      this.readCache(key)
   ): void {
     void this.thumbnails
       .refresh(sourceUrl, now)
       .then((thumbnail) => {
         if (onBackgroundUpdate === undefined) return;
-        const current = this.readCache(entry.identityKey);
+        const current = readCurrent(entry.identityKey);
         if (
           current?.identity === undefined ||
           current.identity.login !== entry.identity?.login ||
@@ -612,7 +750,7 @@ export class GitHubCommitAuthorIdentityService {
     try {
       const row = this.db
         .prepare(
-          `SELECT identity_key, status, github_login, avatar_url, fetched_at,
+          `SELECT identity_key, status, github_user_id, github_login, avatar_url, fetched_at,
                   expires_at, last_accessed_at, failure_count, next_retry_at, updated_at
              FROM github_commit_author_identity_cache
             WHERE identity_key = ?`
@@ -621,6 +759,137 @@ export class GitHubCommitAuthorIdentityService {
       return row === undefined ? undefined : parseCacheRow(row);
     } catch {
       return undefined;
+    }
+  }
+
+  private readAuthorAccount(authorKey: string): CacheEntry | undefined {
+    try {
+      const row = this.db
+        .prepare(
+          `SELECT author_key, status, github_user_id, github_login, avatar_url,
+                  fetched_at, expires_at, last_accessed_at, updated_at
+             FROM github_commit_author_account_cache
+            WHERE author_key = ?`
+        )
+        .get(authorKey) as AccountRow | undefined;
+      if (
+        row === undefined ||
+        row.status !== "resolved" ||
+        !isTimestamp(row.fetched_at) ||
+        !isTimestamp(row.expires_at) ||
+        !isTimestamp(row.last_accessed_at) ||
+        !isTimestamp(row.updated_at)
+      ) {
+        return undefined;
+      }
+      const login = safeText(row.github_login, 255);
+      if (login === undefined) return undefined;
+      const userId = readSafeInteger(row.github_user_id);
+      const avatarSourceUrl = normalizeAvatarUrl(row.avatar_url);
+      return {
+        identityKey: row.author_key,
+        status: "resolved",
+        identity: {
+          ...(userId === undefined ? {} : { userId }),
+          login,
+          ...(avatarSourceUrl === undefined ? {} : { avatarSourceUrl })
+        },
+        fetchedAt: row.fetched_at,
+        expiresAt: row.expires_at,
+        lastAccessedAt: row.last_accessed_at,
+        failureCount: 0,
+        updatedAt: row.updated_at
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  private writeAuthorAccount(
+    authorKey: string,
+    identity: CachedIdentity,
+    fetchedAt: number,
+    expiresAt: number
+  ): void {
+    try {
+      this.db.prepare(
+        `INSERT INTO github_commit_author_account_cache(
+           author_key, status, github_user_id, github_login, avatar_url,
+           fetched_at, expires_at, last_accessed_at, updated_at
+         ) VALUES (?, 'resolved', ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(author_key) DO UPDATE SET
+           status = CASE
+             WHEN github_commit_author_account_cache.status = 'resolved'
+              AND (
+                (github_commit_author_account_cache.github_user_id IS NOT NULL
+                 AND excluded.github_user_id IS NOT NULL
+                 AND github_commit_author_account_cache.github_user_id = excluded.github_user_id)
+                OR ((github_commit_author_account_cache.github_user_id IS NULL
+                     OR excluded.github_user_id IS NULL)
+                    AND lower(github_commit_author_account_cache.github_login) = lower(excluded.github_login))
+              )
+             THEN 'resolved' ELSE 'ambiguous' END,
+           github_user_id = CASE
+             WHEN github_commit_author_account_cache.status = 'resolved'
+              AND (
+                (github_commit_author_account_cache.github_user_id IS NOT NULL
+                 AND excluded.github_user_id IS NOT NULL
+                 AND github_commit_author_account_cache.github_user_id = excluded.github_user_id)
+                OR ((github_commit_author_account_cache.github_user_id IS NULL
+                     OR excluded.github_user_id IS NULL)
+                    AND lower(github_commit_author_account_cache.github_login) = lower(excluded.github_login))
+              )
+             THEN COALESCE(github_commit_author_account_cache.github_user_id, excluded.github_user_id)
+             ELSE NULL END,
+           github_login = CASE
+             WHEN github_commit_author_account_cache.status = 'resolved'
+              AND (
+                (github_commit_author_account_cache.github_user_id IS NOT NULL
+                 AND excluded.github_user_id IS NOT NULL
+                 AND github_commit_author_account_cache.github_user_id = excluded.github_user_id)
+                OR ((github_commit_author_account_cache.github_user_id IS NULL
+                     OR excluded.github_user_id IS NULL)
+                    AND lower(github_commit_author_account_cache.github_login) = lower(excluded.github_login))
+              )
+             THEN CASE
+               WHEN excluded.updated_at >= github_commit_author_account_cache.updated_at
+               THEN excluded.github_login
+               ELSE github_commit_author_account_cache.github_login
+             END ELSE NULL END,
+           avatar_url = CASE
+             WHEN github_commit_author_account_cache.status = 'resolved'
+              AND (
+                (github_commit_author_account_cache.github_user_id IS NOT NULL
+                 AND excluded.github_user_id IS NOT NULL
+                 AND github_commit_author_account_cache.github_user_id = excluded.github_user_id)
+                OR ((github_commit_author_account_cache.github_user_id IS NULL
+                     OR excluded.github_user_id IS NULL)
+                    AND lower(github_commit_author_account_cache.github_login) = lower(excluded.github_login))
+              )
+             THEN CASE
+               WHEN excluded.updated_at >= github_commit_author_account_cache.updated_at
+               THEN COALESCE(excluded.avatar_url, github_commit_author_account_cache.avatar_url)
+               ELSE github_commit_author_account_cache.avatar_url
+             END ELSE NULL END,
+           fetched_at = MAX(github_commit_author_account_cache.fetched_at, excluded.fetched_at),
+           expires_at = MAX(github_commit_author_account_cache.expires_at, excluded.expires_at),
+           last_accessed_at = MAX(
+             github_commit_author_account_cache.last_accessed_at,
+             excluded.last_accessed_at
+           ),
+           updated_at = MAX(github_commit_author_account_cache.updated_at, excluded.updated_at)`
+      ).run(
+        authorKey,
+        identity.userId ?? null,
+        identity.login,
+        identity.avatarSourceUrl ?? null,
+        fetchedAt,
+        expiresAt,
+        fetchedAt,
+        fetchedAt
+      );
+    } catch {
+      // A reusable author optimization must never affect exact verification.
     }
   }
 
@@ -633,11 +902,12 @@ export class GitHubCommitAuthorIdentityService {
     this.db
       .prepare(
         `INSERT INTO github_commit_author_identity_cache(
-           identity_key, status, github_login, avatar_url, fetched_at,
+           identity_key, status, github_user_id, github_login, avatar_url, fetched_at,
            expires_at, last_accessed_at, failure_count, next_retry_at, updated_at
-         ) VALUES (?, 'resolved', ?, ?, ?, ?, ?, 0, NULL, ?)
+         ) VALUES (?, 'resolved', ?, ?, ?, ?, ?, ?, 0, NULL, ?)
          ON CONFLICT(identity_key) DO UPDATE SET
            status = excluded.status,
+           github_user_id = excluded.github_user_id,
            github_login = excluded.github_login,
            avatar_url = excluded.avatar_url,
            fetched_at = excluded.fetched_at,
@@ -650,6 +920,7 @@ export class GitHubCommitAuthorIdentityService {
       )
       .run(
         params.identityKey,
+        params.identity.userId ?? null,
         params.identity.login,
         params.identity.avatarSourceUrl ?? null,
         params.fetchedAt,
@@ -672,6 +943,7 @@ export class GitHubCommitAuthorIdentityService {
          ) VALUES (?, 'negative', NULL, NULL, ?, ?, ?, 0, NULL, ?)
          ON CONFLICT(identity_key) DO UPDATE SET
            status = excluded.status,
+           github_user_id = NULL,
            github_login = NULL,
            avatar_url = NULL,
            fetched_at = excluded.fetched_at,
@@ -740,6 +1012,21 @@ export class GitHubCommitAuthorIdentityService {
     }
   }
 
+  private touchAuthorAccount(entry: CacheEntry, now: number): void {
+    if (now - entry.lastAccessedAt < ACCESS_TOUCH_INTERVAL_MS) return;
+    try {
+      this.db
+        .prepare(
+          `UPDATE github_commit_author_account_cache
+              SET last_accessed_at = ?
+            WHERE author_key = ? AND last_accessed_at <= ?`
+        )
+        .run(now, entry.identityKey, now - ACCESS_TOUCH_INTERVAL_MS);
+    } catch {
+      // The local identity remains reusable if access bookkeeping cannot write.
+    }
+  }
+
   private pruneIfDue(now: number): void {
     if (now - this.lastPrunedAt < PRUNE_INTERVAL_MS) return;
     this.lastPrunedAt = now;
@@ -757,6 +1044,12 @@ export class GitHubCommitAuthorIdentityService {
           now - NEGATIVE_RETENTION_MS,
           now - UNAVAILABLE_RETENTION_MS
         );
+      this.db
+        .prepare(
+          `DELETE FROM github_commit_author_account_cache
+            WHERE last_accessed_at < ?`
+        )
+        .run(now - ACCOUNT_RETENTION_MS);
     } catch {
       // A cache cleanup failure must not affect an author lookup.
     }
@@ -778,6 +1071,21 @@ export function buildGitHubCommitAuthorIdentityCacheKey(
     .update(
       `pwrgit-github-commit-author-identity:v2\0${normalizedProof.owner}\0${normalizedProof.repo}\0${normalizedProof.commitSha}\0${normalized.email}\0${normalized.name}`
     )
+    .digest("hex");
+}
+
+/**
+ * Opaque global key for GitHub's author-email account association. Git author
+ * names may vary (`huntharo` vs `Harold Hunt`), while the normalized email is
+ * the field GitHub itself uses to associate command-line commits.
+ */
+export function buildGitHubCommitAuthorAccountCacheKey(
+  author: { name: string; email: string }
+): string | undefined {
+  const normalized = normalizeAuthor(author);
+  if (normalized === undefined) return undefined;
+  return createHash("sha256")
+    .update(`pwrgit-github-commit-author-account:v1\0${normalized.email}`)
     .digest("hex");
 }
 
@@ -820,8 +1128,10 @@ function parseAssociatedPullAuthors(value: unknown): GitHubAccountProfile[] {
     const user = asRecord(asRecord(item)?.user);
     const login = readString(user?.login);
     if (login === undefined) continue;
+    const id = readSafeInteger(user?.id);
     const avatarUrl = readString(user?.avatar_url);
     authors.set(login.toLowerCase(), {
+      ...(id === undefined ? {} : { id }),
       login,
       ...(avatarUrl === undefined ? {} : { avatarUrl })
     });
@@ -888,11 +1198,13 @@ function parseCacheRow(row: CacheRow): CacheEntry | undefined {
   if (row.status === "resolved") {
     const login = safeText(row.github_login, 255);
     if (login === undefined) return undefined;
+    const userId = readSafeInteger(row.github_user_id);
     const avatarSourceUrl = normalizeAvatarUrl(row.avatar_url);
     return {
       identityKey: row.identity_key,
       status: row.status,
       identity: {
+        ...(userId === undefined ? {} : { userId }),
         login,
         ...(avatarSourceUrl === undefined ? {} : { avatarSourceUrl })
       },
@@ -954,8 +1266,10 @@ function normalizeGitHubIdentity(
   if (!isRecord(value)) return undefined;
   const login = safeText(value.login, 255);
   if (login === undefined) return undefined;
+  const userId = readSafeInteger(value.id);
   const avatarSourceUrl = normalizeAvatarUrl(value.avatarUrl);
   return {
+    ...(userId === undefined ? {} : { userId }),
     login,
     ...(avatarSourceUrl === undefined ? {} : { avatarSourceUrl })
   };
@@ -1075,9 +1389,11 @@ function toRemoteCommitAuthor(
 function toRemoteGitHubAuthor(
   value: Record<string, unknown>
 ): NonNullable<GitHubCommitAuthorRemoteCommit["githubAuthor"]> {
+  const id = readSafeInteger(value.id);
   const login = readString(value.login);
   const avatarUrl = readString(value.avatar_url);
   return {
+    ...(id === undefined ? {} : { id }),
     ...(login === undefined ? {} : { login }),
     ...(avatarUrl === undefined ? {} : { avatarUrl })
   };
@@ -1085,6 +1401,12 @@ function toRemoteGitHubAuthor(
 
 function readString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function readSafeInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? value
+    : undefined;
 }
 
 function backoffMs(

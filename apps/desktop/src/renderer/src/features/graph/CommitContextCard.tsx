@@ -69,7 +69,7 @@ export function CommitContextCard({
   now: number;
   /** Undefined while the local numstat request is in flight; null on failure. */
   stats: CommitStats | null | undefined;
-  /** Present only after an exact GitHub commit proof verified it. */
+  /** Present only from an exact or exact-proof-backed GitHub identity cache. */
   githubIdentity?: GitHubCommitAuthorIdentity | undefined;
 }) {
   const authorName = commit.authorName.trim() || "Unknown author";

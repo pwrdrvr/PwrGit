@@ -34,34 +34,48 @@ export function registerGitHubHandlers(
     // service then coalesces the worktree's `git remote get-url origin` proof,
     // so a large graph performs one origin validation instead of serially
     // spawning Git once per row. A miss remains strictly local-cache-only.
-    const pending = req.commits.map((commit) => {
-      const emitBackgroundUpdate = (
-        lookup: GitHubCommitAuthorIdentityLookup
-      ): void => {
-        emitEvent("github:commitAuthorIdentityChanged", {
-          worktreeId: req.worktreeId,
-          commitHash: commit.commitHash,
-          lookup
-        });
-      };
-      const request = commitAuthorIdentities.request(
-        {
-          worktreeId: req.worktreeId,
-          commitHash: commit.commitHash,
-          authorName: commit.authorName,
-          authorEmail: commit.authorEmail,
-          cacheOnly: true
-        },
-        emitBackgroundUpdate
-      );
-      return (
-        request.completion?.then(
-          (lookup) => [commit.commitHash, lookup] as const
-        ) ?? Promise.resolve([commit.commitHash, request.lookup] as const)
-      );
-    });
+    const hydrate = async (
+      commits: typeof req.commits
+    ): Promise<Record<string, GitHubCommitAuthorIdentityLookup>> =>
+      Object.fromEntries(await Promise.all(commits.map((commit) => {
+        const emitBackgroundUpdate = (
+          lookup: GitHubCommitAuthorIdentityLookup
+        ): void => {
+          emitEvent("github:commitAuthorIdentityChanged", {
+            worktreeId: req.worktreeId,
+            commitHash: commit.commitHash,
+            lookup
+          });
+        };
+        const request = commitAuthorIdentities.request(
+          {
+            worktreeId: req.worktreeId,
+            commitHash: commit.commitHash,
+            authorName: commit.authorName,
+            authorEmail: commit.authorEmail,
+            cacheOnly: true
+          },
+          emitBackgroundUpdate
+        );
+        return (
+          request.completion?.then(
+            (lookup) => [commit.commitHash, lookup] as const
+          ) ?? Promise.resolve([commit.commitHash, request.lookup] as const)
+        );
+      })));
 
-    return ok(Object.fromEntries(await Promise.all(pending)));
+    const lookups = await hydrate(req.commits);
+    // Exact rows encountered anywhere in the first pass backfill reusable
+    // author accounts. Retry local misses once so a newly landed SHA by that
+    // author is complete before graph rows become interactive.
+    const unresolved = req.commits.filter((commit) => {
+      const lookup = lookups[commit.commitHash];
+      return lookup?.identity === undefined &&
+        lookup?.cacheState === "miss" &&
+        lookup.refreshState === "idle";
+    });
+    if (unresolved.length > 0) Object.assign(lookups, await hydrate(unresolved));
+    return ok(lookups);
   });
 
   bus.register("github:commitAuthorIdentity", (req) => {

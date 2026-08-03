@@ -49,14 +49,19 @@ enables Corepack, and then runs the root `pnpm dev` script.
 Agent shells hosted by another Electron Pwr app can inherit that parent's
 `ELECTRON_EXEC_PATH`, `ELECTRON_CLI_ARGS`, or `ELECTRON_MAJOR_VER`. Running
 Electron with those overrides can silently launch PwrGit through a sibling
-app's Electron installation. If the Dev action is unavailable, mirror it while
-clearing only those launch overrides:
+app's Electron installation. If the Dev action is unavailable, first confirm
+that the active `node` matches `.nvmrc`. Do not assume `nvm` is initialized in a
+non-interactive agent shell. With the correct Node already active, mirror the
+rest of the action while clearing only those launch overrides:
 
 ```bash
-nvm use --silent
+node --version # must match .nvmrc
 corepack enable
 env -u ELECTRON_EXEC_PATH -u ELECTRON_CLI_ARGS -u ELECTRON_MAJOR_VER pnpm dev
 ```
+
+If the Node version is wrong and `nvm` is unavailable, use the canonical Dev
+action instead of improvising another Electron launch path.
 
 The resulting Electron executable must come from this PwrGit worktree's
 `node_modules`, and its user-data directory must be PwrGit's—not PwrAgent's or
