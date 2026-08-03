@@ -93,14 +93,29 @@ export type Repo = {
   worktrees: Worktree[];
 };
 
-/** Result of reconciling one indexed repo with `git worktree list`. */
-export type RepoWorktreeRefresh = {
-  repo: Repo;
-  added: number;
-  removed: number;
-  /** Existing paths whose branch or primary-checkout identity changed. */
-  updated: number;
-};
+/** Result of reconciling one indexed repo with `git worktree list`. Both
+ *  outcomes are successes: a repo row whose path turns out to be a linked
+ *  worktree of another repo is dropped on purpose, and that is a completed
+ *  refresh, not a failed one. */
+export type RepoWorktreeRefresh =
+  | {
+      outcome: "reconciled";
+      repo: Repo;
+      added: number;
+      removed: number;
+      /** Existing paths whose branch or primary-checkout identity changed. */
+      updated: number;
+    }
+  | {
+      /** The row pointed at a linked worktree rather than a repo, so it was
+       *  removed from the index. */
+      outcome: "deindexed";
+      profileId: ProfileId;
+      /** The repo that actually owns that worktree, straight from
+       *  `git worktree list`. It is NOT necessarily indexed itself — say where
+       *  the worktree belongs rather than claiming it is already on screen. */
+      ownerPath: string;
+    };
 
 /** Porcelain XY status letters, collapsed to a single display code. */
 export type FileStatus = "M" | "A" | "D" | "R" | "C" | "U" | "?";

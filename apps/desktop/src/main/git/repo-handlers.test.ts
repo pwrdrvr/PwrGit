@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { err, type Repo } from "@pwrgit/shared";
+import { ok, type Repo } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import type { ProfileService } from "../profiles/profile-service";
@@ -20,19 +20,29 @@ const fossilRepo: Repo = {
   worktrees: []
 };
 
+const canonicalRepo: Repo = {
+  id: "canonical-repo",
+  name: "canonical",
+  path: "/repos/canonical",
+  profileId: "profile-1",
+  pinned: false,
+  worktrees: []
+};
+
 describe("repo handlers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("notifies the renderer when refresh deletes a non-canonical repo", async () => {
+  it("passes a deindexed fossil repo back as a success and refreshes the tree", async () => {
+    const getRepo = vi.fn(() => fossilRepo);
     const indexer = {
-      getRepo: vi.fn(() => fossilRepo),
+      getRepo,
       refreshRepoWorktrees: vi.fn(async () =>
-        err({
-          kind: "repo",
-          code: "not_canonical",
-          message: "repo path is a linked worktree of another repository"
+        ok({
+          outcome: "deindexed" as const,
+          profileId: fossilRepo.profileId,
+          ownerPath: canonicalRepo.path
         })
       )
     } as unknown as RepoIndexer;
@@ -43,9 +53,46 @@ describe("repo handlers", () => {
       repoId: fossilRepo.id
     });
 
-    expect(result.ok).toBe(false);
+    // The row is gone and that is the correct outcome — the renderer must not
+    // be handed an error it would render as "Couldn't refresh …".
+    expect(result).toEqual(
+      ok({
+        outcome: "deindexed",
+        profileId: fossilRepo.profileId,
+        ownerPath: canonicalRepo.path
+      })
+    );
     expect(emitEvent).toHaveBeenCalledExactlyOnceWith("repo:changed", {
       profileId: fossilRepo.profileId
+    });
+    // profileId rides on the outcome, so the handler no longer has to read the
+    // repo before deleting it just to learn where to send the event.
+    expect(getRepo).not.toHaveBeenCalled();
+  });
+
+  it("refreshes the tree after an ordinary reconcile", async () => {
+    const indexer = {
+      getRepo: vi.fn(() => canonicalRepo),
+      refreshRepoWorktrees: vi.fn(async () =>
+        ok({
+          outcome: "reconciled" as const,
+          repo: canonicalRepo,
+          added: 1,
+          removed: 0,
+          updated: 0
+        })
+      )
+    } as unknown as RepoIndexer;
+    const bus = new CommandBus();
+    registerRepoHandlers(bus, indexer, {} as ProfileService);
+
+    const result = await bus.dispatch("repo:refreshWorktrees", {
+      repoId: canonicalRepo.id
+    });
+
+    expect(result.ok).toBe(true);
+    expect(emitEvent).toHaveBeenCalledExactlyOnceWith("repo:changed", {
+      profileId: canonicalRepo.profileId
     });
   });
 });

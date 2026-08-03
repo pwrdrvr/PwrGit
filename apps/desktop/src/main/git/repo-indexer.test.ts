@@ -171,6 +171,8 @@ describe("RepoIndexer", () => {
     const first = await isolatedIndexer.refreshRepoWorktrees(indexed.id);
     expect(first.ok).toBe(true);
     if (!first.ok) return;
+    expect(first.value.outcome).toBe("reconciled");
+    if (first.value.outcome !== "reconciled") return;
     expect(first.value.added).toBe(1);
     expect(first.value.removed).toBe(0);
     expect(first.value.updated).toBe(1);
@@ -195,8 +197,71 @@ describe("RepoIndexer", () => {
     const second = await isolatedIndexer.refreshRepoWorktrees(indexed.id);
     expect(second.ok).toBe(true);
     if (!second.ok) return;
-    expect(second.value).toMatchObject({ added: 0, removed: 1, updated: 0 });
+    expect(second.value).toMatchObject({
+      outcome: "reconciled",
+      added: 0,
+      removed: 1,
+      updated: 0
+    });
     expect(isolatedIndexer.searchAll("external-added")).toHaveLength(0);
+  });
+
+  it("reports dropping a fossil repo row as a success, not a failure", async () => {
+    const isolatedRoot = mkdtempSync(join(tmpdir(), "pwrgit-fossil-"));
+    const repoPath = join(isolatedRoot, "repo");
+    const linkedPath = join(isolatedRoot, "linked");
+    initRepo(repoPath);
+    git(repoPath, ["worktree", "add", linkedPath, "-b", "feature"]);
+
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({
+      name: "Fossil",
+      email: "fossil@example.com",
+      roots: [isolatedRoot]
+    });
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
+    const canonical = (await isolatedIndexer.rescanProfile(profile)).find(
+      (repo) => repo.name === "repo"
+    );
+    if (canonical === undefined) throw new Error("canonical repo missing");
+
+    // Older builds could index a LINKED worktree dir as a repo in its own
+    // right; discovery canonicalises now, so forge the legacy row directly.
+    // 'manual' because pruneScannedRepos would drop a stale 'scan' row at the
+    // next startup rescan — only manual rows survive to reach this path.
+    isolatedDb
+      .prepare(
+        `INSERT INTO repos (id, profile_id, name, path, source)
+         VALUES (?, ?, ?, ?, 'manual')`
+      )
+      .run("fossil", profile.id, "fossilrow", linkedPath);
+    expect(isolatedIndexer.getRepo("fossil")).not.toBeNull();
+    expect(isolatedIndexer.searchAll("fossilrow")).not.toHaveLength(0);
+
+    const result = await isolatedIndexer.refreshRepoWorktrees("fossil");
+
+    // Dropping the row is what SHOULD happen — that worktree belongs to the
+    // canonical repo. Reporting it as an error makes the UI tell the user the
+    // refresh failed while they watch it visibly succeed.
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Compare against the indexed repo's path, not a locally joined one: git
+    // reports its own normalisation (POSIX separators on Windows, /private/var
+    // for macOS temp dirs, long names rather than 8.3), which no amount of
+    // node:path/realpathSync reconstruction reliably reproduces.
+    expect(result.value).toEqual({
+      outcome: "deindexed",
+      profileId: profile.id,
+      ownerPath: canonical.path
+    });
+    expect(isolatedIndexer.getRepo("fossil")).toBeNull();
+
+    // The delete goes through raw SQL, so ⌘F only stays correct as long as the
+    // FTS triggers (and the worktree cascade behind them) keep firing.
+    expect(isolatedIndexer.searchAll("fossilrow")).toHaveLength(0);
+    // The canonical repo keeps its own rows — the fossil's cleanup is scoped.
+    expect(isolatedIndexer.getRepo(canonical.id)?.worktrees).toHaveLength(2);
   });
 });
 

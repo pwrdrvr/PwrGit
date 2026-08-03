@@ -32,17 +32,16 @@ export function registerRepoHandlers(
   });
 
   bus.register("repo:refreshWorktrees", async (req) => {
-    const repo = indexer.getRepo(req.repoId);
     const result = await indexer.refreshRepoWorktrees(req.repoId);
-    if (!result.ok) {
-      // Refresh removes legacy rows that point at a linked worktree instead of
-      // the canonical repo. That error still represents a persisted change.
-      if (result.error.code === "not_canonical" && repo !== null) {
-        emitEvent("repo:changed", { profileId: repo.profileId });
-      }
-      return result;
-    }
-    emitEvent("repo:changed", { profileId: result.value.repo.profileId });
+    if (!result.ok) return result;
+    // Both outcomes persist a change — a reconcile rewrites the worktree rows,
+    // a deindex drops the repo row — so both need the tree re-read.
+    emitEvent("repo:changed", {
+      profileId:
+        result.value.outcome === "reconciled"
+          ? result.value.repo.profileId
+          : result.value.profileId
+    });
     return result;
   });
 
