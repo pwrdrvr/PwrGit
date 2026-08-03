@@ -830,6 +830,7 @@ export function LineageGraph({
                   showCommitContext(target, anchor, vm)
                 }
                 onHideContext={commitContext.scheduleHide}
+                onFocusContext={commitContext.focusFirst}
                 onOpenContextMenu={(position) => openCommitMenu(vm, position)}
                 onRevealWorktree={onRevealWorktree}
               />

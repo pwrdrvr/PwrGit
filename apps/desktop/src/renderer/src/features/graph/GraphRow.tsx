@@ -87,6 +87,7 @@ export function GraphRow({
   onOpen,
   onShowContext,
   onHideContext,
+  onFocusContext,
   onOpenContextMenu,
   onRevealWorktree
 }: {
@@ -110,6 +111,8 @@ export function GraphRow({
     anchor: { x: number; y: number }
   ) => void;
   onHideContext: () => void;
+  /** Move keyboard focus from the SHA trigger into the open context card. */
+  onFocusContext: () => boolean;
   onOpenContextMenu: (position: { x: number; y: number }) => void;
   /** Jump to the worktree a tip branch is checked out in. */
   onRevealWorktree?: (worktreeId: string) => void;
@@ -120,6 +123,14 @@ export function GraphRow({
   const chipCount = refs.length + remoteRefs.length;
   const isTip = chipCount > 0;
   const x = cx(row.lane);
+
+  const showContextFor = (target: HTMLElement): void => {
+    const rect = target.getBoundingClientRect();
+    onShowContext(target, {
+      x: (rect.left + rect.right) / 2,
+      y: (rect.top + rect.bottom) / 2
+    });
+  };
 
   // A lane that runs straight through both halves of the row is drawn as ONE
   // full-height line (no half-line seam at the vertical midpoint). Halves with
@@ -143,10 +154,6 @@ export function GraphRow({
       }${flashing ? " is-flash" : ""}`}
       data-hash={commit.hash}
       onClick={onOpen}
-      onMouseEnter={(e) =>
-        onShowContext(e.currentTarget, { x: e.clientX, y: e.clientY })
-      }
-      onMouseLeave={onHideContext}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -277,9 +284,29 @@ export function GraphRow({
       </span>
 
       <div className="commit-body">
-        {/* Line 1 belongs to the subject — branch chips and authorship live on
-            the meta line so long messages aren't pushed off the edge. */}
+        {/* The SHA scopes only the title line. Branch chips and authorship keep
+            their original left edge on the meta line below. */}
         <div className="commit-line">
+          <button
+            type="button"
+            className="commit-sha-chip"
+            aria-label={`Show context for commit ${commit.shortHash}`}
+            onMouseEnter={(e) => showContextFor(e.currentTarget)}
+            onMouseLeave={onHideContext}
+            onFocus={(e) => showContextFor(e.currentTarget)}
+            onBlur={onHideContext}
+            onKeyDown={(e) => {
+              if (e.key === "Tab" && !e.shiftKey && onFocusContext()) {
+                e.preventDefault();
+              }
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              showContextFor(e.currentTarget);
+            }}
+          >
+            {commit.shortHash}
+          </button>
           <span className={`commit-msg${isMine ? "" : " is-other"}`}>
             {commit.subject}
           </span>
@@ -353,7 +380,6 @@ export function GraphRow({
           <span className={`commit-author${isMine ? "" : " is-other"}`}>
             {isMine ? "you" : commit.authorName}
           </span>
-          <span className="commit-hash">{commit.shortHash}</span>
           {commit.isMerge && <span className="commit-tag">merge</span>}
         </div>
       </div>
