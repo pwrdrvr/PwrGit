@@ -332,7 +332,11 @@ if (!gotSingleInstanceLock) {
     registerRebaseHandlers(bus, db, refresher);
     registerDialogHandlers(bus);
     registerShellHandlers(bus);
-    registerGitHubHandlers(bus, prService, commitAuthorIdentityService);
+    const githubHandlers = registerGitHubHandlers(
+      bus,
+      prService,
+      commitAuthorIdentityService
+    );
     registerSearchStatusHandlers(bus, db);
     registerSettingsHandlers(bus, settings, {
       diagnosticsOutputRoot,
@@ -344,7 +348,9 @@ if (!gotSingleInstanceLock) {
     });
     diagnostics.sync(); // start any settings-enabled monitors at boot
 
-    registerIpc(bus);
+    registerIpc(bus, {
+      onWebContentsDestroyed: githubHandlers.releaseWebContents
+    });
     initAutoUpdater();
 
     const refreshActive = (): void => {
@@ -357,7 +363,10 @@ if (!gotSingleInstanceLock) {
     const activeStatePoll = setInterval(() => {
       if (BrowserWindow.getFocusedWindow() !== null) refreshActive();
     }, 15_000);
-    app.on("before-quit", () => clearInterval(activeStatePoll));
+    app.on("before-quit", () => {
+      clearInterval(activeStatePoll);
+      githubHandlers.stop();
+    });
 
     // Drain diagnostics before quitting so final monitor-stopped events and
     // manifest writes land on disk. Bounded and fail-safe: the drain races a

@@ -18,6 +18,11 @@ origin isn't github.com, `gh` isn't logged in, or the network fails.
   `force`) emits a targeted `pr:changed { repoId, prs }` delta the renderer
   patches onto the tree in place — no full `repo:list` reload. `listRepos` also
   LEFT JOINs `branch_pr` onto `Worktree.pr` for the initial load.
+- **Commit PR monitoring**: exact visible SHAs are association-cached in
+  `commit_pr`; never enroll an entire history window. Renderers debounce one
+  atomic visible-set replacement. Main keeps unknown visible associations in a
+  SHA monitor, moves discoveries into the shared repo+PR-number monitor, and
+  unions commit-list and selected-worktree reasons before polling.
 - **Commit-author identity**: `github:commitAuthorIdentity` only fetches an
   exact full commit SHA from a recognized GitHub `origin`. It accepts a
   login/avatar only after SHA + local Git author name/email match. Exact proof

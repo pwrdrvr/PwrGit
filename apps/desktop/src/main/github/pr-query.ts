@@ -73,3 +73,88 @@ function toSummary(node: PrNode): PrSummary {
     isDraft: Boolean(node.isDraft)
   };
 }
+
+/** One GraphQL query asking for the PR associated with many exact commit SHAs. */
+export function buildCommitPrQuery(
+  owner: string,
+  repo: string,
+  commitHashes: string[]
+): { query: string; variables: Record<string, string> } {
+  const variables: Record<string, string> = { owner, name: repo };
+  const decls = ["$owner: String!", "$name: String!"];
+  const aliases: string[] = [];
+  commitHashes.forEach((hash, i) => {
+    variables[`c${i}`] = hash;
+    decls.push(`$c${i}: GitObjectID!`);
+    aliases.push(
+      `c${i}: object(oid: $c${i}) { ... on Commit { ` +
+        `associatedPullRequests(first: 10) { ${PR_FIELDS} } } }`
+    );
+  });
+  const query = `query (${decls.join(", ")}) {
+  repository(owner: $owner, name: $name) {
+    ${aliases.join("\n    ")}
+  }
+}`;
+  return { query, variables };
+}
+
+/** Map exact commit SHA → best associated PR (live first, newest otherwise). */
+export function parseCommitPrResponse(
+  commitHashes: string[],
+  data: unknown
+): Map<string, PrSummary | null> {
+  const repo =
+    (data as {
+      repository?: Record<
+        string,
+        { associatedPullRequests?: { nodes?: PrNode[] } }
+      >;
+    } | null)?.repository ?? {};
+  const out = new Map<string, PrSummary | null>();
+  commitHashes.forEach((hash, i) => {
+    const nodes = repo[`c${i}`]?.associatedPullRequests?.nodes ?? [];
+    const node = [...nodes].sort((left, right) => {
+      const leftLive = left.state === "OPEN" ? 1 : 0;
+      const rightLive = right.state === "OPEN" ? 1 : 0;
+      return rightLive - leftLive || right.number - left.number;
+    })[0];
+    out.set(hash, node === undefined ? null : toSummary(node));
+  });
+  return out;
+}
+
+/** One aliased query for the current status of exact PR numbers. */
+export function buildPrNumberQuery(
+  owner: string,
+  repo: string,
+  numbers: number[]
+): { query: string; variables: Record<string, string | number> } {
+  const variables: Record<string, string | number> = { owner, name: repo };
+  const decls = ["$owner: String!", "$name: String!"];
+  const aliases: string[] = [];
+  numbers.forEach((number, i) => {
+    variables[`n${i}`] = number;
+    decls.push(`$n${i}: Int!`);
+    aliases.push(`n${i}: pullRequest(number: $n${i}) { number title url state isDraft }`);
+  });
+  const query = `query (${decls.join(", ")}) {
+  repository(owner: $owner, name: $name) {
+    ${aliases.join("\n    ")}
+  }
+}`;
+  return { query, variables };
+}
+
+/** Map PR number → current status (null only if GitHub returned no node). */
+export function parsePrNumberResponse(
+  numbers: number[],
+  data: unknown
+): Map<number, PrSummary | null> {
+  const repo =
+    (data as { repository?: Record<string, PrNode | null> } | null)?.repository ?? {};
+  return new Map(numbers.map((number, i) => {
+    const node = repo[`n${i}`];
+    return [number, node == null ? null : toSummary(node)] as const;
+  }));
+}

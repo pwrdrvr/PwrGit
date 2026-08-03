@@ -7,7 +7,18 @@ import { useViewportTooltip } from "../../lib/useViewportTooltip";
 /** A compact PR-status chip: colored dot + #number. Click opens the PR in
  *  the browser; ⌥-click copies its URL. The tooltip carries the full story —
  *  number, title, state, draft. */
-export function PrChip({ pr }: { pr: PrSummary }) {
+export function PrChip({
+  pr,
+  onShowContext,
+  onHideContext,
+  onFocusContext
+}: {
+  pr: PrSummary;
+  /** Commit rows can replace the small text tooltip with their shared card. */
+  onShowContext?: (target: HTMLElement) => void;
+  onHideContext?: () => void;
+  onFocusContext?: () => boolean;
+}) {
   const {
     show: showTooltip,
     hide: hideTooltip,
@@ -31,6 +42,14 @@ export function PrChip({ pr }: { pr: PrSummary }) {
     if (altKey) void copyText(pr.url);
     else open();
   };
+  const show = (target: HTMLElement): void => {
+    if (onShowContext !== undefined) onShowContext(target);
+    else showTooltip(target, tooltipText);
+  };
+  const hide = (): void => {
+    if (onHideContext !== undefined) onHideContext();
+    else hideTooltip();
+  };
 
   // Keep an already-visible tooltip accurate when a targeted PR refresh lands.
   useEffect(() => {
@@ -44,21 +63,29 @@ export function PrChip({ pr }: { pr: PrSummary }) {
         role="button"
         tabIndex={0}
         aria-label={`PR #${pr.number} (${pr.state}) — Enter opens in browser`}
-        onMouseEnter={(e) => showTooltip(e.currentTarget, tooltipText)}
-        onMouseLeave={hideTooltip}
-        onFocus={(e) => showTooltip(e.currentTarget, tooltipText)}
-        onBlur={hideTooltip}
+        onMouseEnter={(e) => show(e.currentTarget)}
+        onMouseLeave={hide}
+        onFocus={(e) => show(e.currentTarget)}
+        onBlur={hide}
         onClick={(e) => {
           e.stopPropagation();
           activate(e.altKey);
-          hideTooltip();
+          hide();
         }}
         onKeyDown={(e) => {
+          if (
+            e.key === "Tab" &&
+            !e.shiftKey &&
+            onFocusContext?.() === true
+          ) {
+            e.preventDefault();
+            return;
+          }
           if (e.key === "Enter" || e.key === " ") {
             e.stopPropagation();
             e.preventDefault();
             activate(e.altKey);
-            hideTooltip();
+            hide();
           }
         }}
       >
@@ -68,7 +95,7 @@ export function PrChip({ pr }: { pr: PrSummary }) {
           <span className="pr-chip__draft-bar" aria-hidden="true" />
         )}
       </span>
-      {tooltipNode}
+      {onShowContext === undefined ? tooltipNode : null}
     </>
   );
 }

@@ -1,4 +1,4 @@
-import type { Commit, LaneBranchInfo } from "@pwrgit/shared";
+import type { Commit, LaneBranchInfo, PrSummary } from "@pwrgit/shared";
 import { PrChip } from "../sidebar/PrChip";
 import type { LaneRow } from "./lane-layout";
 import { shortWhen } from "./graph-view";
@@ -61,6 +61,8 @@ export type GraphRowVM = {
   isHeadOnly: boolean;
   isMine: boolean;
   defaultBranch: string;
+  /** Best pull request associated with this exact commit, when known. */
+  pullRequest?: PrSummary;
 };
 
 function BranchGlyph() {
@@ -117,7 +119,15 @@ export function GraphRow({
   /** Jump to the worktree a tip branch is checked out in. */
   onRevealWorktree?: (worktreeId: string) => void;
 }) {
-  const { commit, row, refs, remoteRefs, isHead, isMine } = vm;
+  const {
+    commit,
+    row,
+    refs,
+    remoteRefs,
+    isHead,
+    isMine,
+    pullRequest
+  } = vm;
   const width = Math.max(1, laneCount) * LANE_W;
   const color = laneColor(row.lane);
   const chipCount = refs.length + remoteRefs.length;
@@ -313,6 +323,14 @@ export function GraphRow({
           <span className="commit-time">{shortWhen(commit.committedAt, now)}</span>
         </div>
         <div className="commit-meta">
+          {pullRequest !== undefined && (
+            <PrChip
+              pr={pullRequest}
+              onShowContext={showContextFor}
+              onHideContext={onHideContext}
+              onFocusContext={onFocusContext}
+            />
+          )}
           {isHead && <span className="commit-tag commit-tag--head">HEAD</span>}
           {/* Chips are capped — a commit tipped by dozens of stale branches
               must not flood the row. Overflow collapses into a +N pill whose
@@ -335,7 +353,10 @@ export function GraphRow({
                       <BranchGlyph />
                       <span className="ref-chip__name">{name}</span>
                     </span>
-                    {info?.pr !== undefined && <PrChip pr={info.pr} />}
+                    {info?.pr !== undefined &&
+                      info.pr.number !== pullRequest?.number && (
+                        <PrChip pr={info.pr} />
+                      )}
                     {wtId !== undefined && (
                       <button
                         className="ref-wt"

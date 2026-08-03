@@ -1,11 +1,13 @@
 import type {
   Commit,
   CommitStats,
-  GitHubCommitAuthorIdentity
+  GitHubCommitAuthorIdentity,
+  PrSummary
 } from "@pwrgit/shared";
 import type { ReactNode } from "react";
 import { DiffStat } from "../diff/DiffStat";
 import { CopyTarget } from "../shell/CopyTarget";
+import { PrChip } from "../sidebar/PrChip";
 import { localWhen, longWhen } from "./graph-view";
 
 function initials(name: string): string {
@@ -59,7 +61,8 @@ export function CommitContextCard({
   defaultRef,
   now,
   stats,
-  githubIdentity
+  githubIdentity,
+  pullRequest
 }: {
   commit: Commit;
   /** Present only when this commit is exclusive to the viewed HEAD. */
@@ -71,6 +74,8 @@ export function CommitContextCard({
   stats: CommitStats | null | undefined;
   /** Present only from an exact or exact-proof-backed GitHub identity cache. */
   githubIdentity?: GitHubCommitAuthorIdentity | undefined;
+  /** Best pull request associated with this exact commit, when known. */
+  pullRequest?: PrSummary | undefined;
 }) {
   const authorName = commit.authorName.trim() || "Unknown author";
   // Local Git authorship remains primary, while the proven GitHub handle is
@@ -103,7 +108,10 @@ export function CommitContextCard({
           </CopyTarget>
         </span>
       </div>
-      <div className="commit-context-card__subject">{commit.subject}</div>
+      <div className="commit-context-card__subject-row">
+        <div className="commit-context-card__subject">{commit.subject}</div>
+        {pullRequest !== undefined && <PrChip pr={pullRequest} />}
+      </div>
 
       <div className="commit-context-card__identity">
         <span className="commit-context-card__avatar" aria-hidden="true">

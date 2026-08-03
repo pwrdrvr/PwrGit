@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CommandBus } from "../command-bus";
 import type { GitHubCommitAuthorIdentityService } from "./commit-author-identity";
 import { registerGitHubHandlers } from "./github-handlers";
+import { PR_STATUS_POLL_INTERVAL_MS } from "./pr-status-monitor";
 import type { PrService } from "./pr-service";
 
 const { emitEvent } = vi.hoisted(() => ({ emitEvent: vi.fn() }));
@@ -16,6 +17,7 @@ const request = {
 
 beforeEach(() => {
   emitEvent.mockClear();
+  vi.useRealTimers();
 });
 
 describe("github:commitAuthorIdentity handler", () => {
@@ -234,5 +236,56 @@ describe("github:commitAuthorIdentity handler", () => {
         lookup: { cacheState: "fresh", refreshState: "idle" }
       });
     });
+  });
+});
+
+describe("PR monitor renderer ownership", () => {
+  it("keeps another window's reason and releases the final reason on destruction", async () => {
+    vi.useFakeTimers();
+    const hash = "0123456789abcdef0123456789abcdef01234567";
+    const pullRequest = {
+      number: 30,
+      url: "https://github.com/pwrdrvr/PwrGit/pull/30",
+      title: "Visible commit PRs",
+      state: "open" as const,
+      isDraft: true
+    };
+    const refreshPrNumbers = vi.fn(async () => ({
+      branches: new Map(),
+      commits: new Map()
+    }));
+    const prs = {
+      ownsWorktree: () => true,
+      cachedCommitPrs: (_repoId: string, hashes: string[]) =>
+        new Map(hashes.map((commitHash) => [commitHash, pullRequest])),
+      refreshCommits: async () => new Map(),
+      refreshPrNumbers
+    } as unknown as PrService;
+    const identities = { request: vi.fn() } as unknown as
+      GitHubCommitAuthorIdentityService;
+    const bus = new CommandBus();
+    const handlers = registerGitHubHandlers(bus, prs, identities);
+    const request = {
+      repoId: "repo",
+      worktreeId: "worktree",
+      monitorId: "same-renderer-monitor-id",
+      commitHashes: [hash]
+    };
+
+    await bus.dispatch("pr:replaceVisibleCommits", request, { webContentsId: 11 });
+    await bus.dispatch("pr:replaceVisibleCommits", request, { webContentsId: 22 });
+    await vi.advanceTimersByTimeAsync(PR_STATUS_POLL_INTERVAL_MS);
+    expect(refreshPrNumbers).toHaveBeenCalledOnce();
+
+    handlers.releaseWebContents(11);
+    refreshPrNumbers.mockClear();
+    await vi.advanceTimersByTimeAsync(PR_STATUS_POLL_INTERVAL_MS);
+    expect(refreshPrNumbers).toHaveBeenCalledOnce();
+
+    handlers.releaseWebContents(22);
+    refreshPrNumbers.mockClear();
+    await vi.advanceTimersByTimeAsync(PR_STATUS_POLL_INTERVAL_MS);
+    expect(refreshPrNumbers).not.toHaveBeenCalled();
+    handlers.stop();
   });
 });

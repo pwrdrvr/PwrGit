@@ -247,6 +247,37 @@ export interface Commands {
     };
     res: null;
   };
+  /**
+   * Atomically replace one graph's visible-commit monitoring reason. The main
+   * process polls only the union of active reasons; an empty list removes it.
+   */
+  "pr:replaceVisibleCommits": {
+    req: {
+      repoId: string;
+      worktreeId: string;
+      /** Stable for one mounted graph, so parallel windows remain cumulative. */
+      monitorId: string;
+      commitHashes: string[];
+    };
+    res: Record<string, PrSummary | null>;
+  };
+  /** Deliberate hover refresh for one or more commits without monitoring them. */
+  "pr:refreshCommits": {
+    req: {
+      repoId: string;
+      commitHashes: string[];
+      trigger?: "scheduled" | "user";
+    };
+    res: Record<string, PrSummary | null>;
+  };
+  /** Replace this window's durable selected-worktree PR monitoring reason. */
+  "pr:replaceWorktreeMonitor": {
+    req: {
+      monitorId: string;
+      target?: { repoId: string; worktreeId: string; branch: string };
+    };
+    res: null;
+  };
   "github:status": {
     req: void;
     res: { installed: boolean; loggedIn: boolean };
@@ -508,6 +539,11 @@ export interface Events {
    * branch's PR. Keyed by branch name.
    */
   "pr:changed": { repoId: string; prs: Record<string, PrSummary | null> };
+  /** Commit SHA → associated PR delta (null is an authoritative no-PR result). */
+  "pr:commitChanged": {
+    repoId: string;
+    prs: Record<string, PrSummary | null>;
+  };
   /**
    * A non-blocking proof-backed identity lookup settled. Consumers that
    * requested this commit can repaint without polling or blocking hover.

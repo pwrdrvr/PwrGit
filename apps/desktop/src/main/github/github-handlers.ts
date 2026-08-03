@@ -1,33 +1,238 @@
-import { ok, type GitHubCommitAuthorIdentityLookup } from "@pwrgit/shared";
-import type { CommandBus } from "../command-bus";
+import {
+  ok,
+  type GitHubCommitAuthorIdentityLookup,
+  type PrSummary
+} from "@pwrgit/shared";
+import type { CommandBus, CommandContext } from "../command-bus";
 import { emitEvent } from "../ipc";
 import type { GitHubCommitAuthorIdentityService } from "./commit-author-identity";
+import { CommitAssociationMonitor } from "./commit-association-monitor";
 import { getGhStatus } from "./pr-client";
-import type { PrService } from "./pr-service";
+import { PrStatusMonitor, type PrMonitorTarget } from "./pr-status-monitor";
+import type { PrService, PrStatusDeltas } from "./pr-service";
+
+const MAX_VISIBLE_COMMIT_MONITORS = 200;
+
+function boundedCommitHashes(hashes: string[]): string[] {
+  return [...new Set(hashes.map((hash) => hash.trim().toLowerCase()))]
+    .filter((hash) => /^[0-9a-f]{40}$/.test(hash))
+    .slice(0, MAX_VISIBLE_COMMIT_MONITORS);
+}
 
 export function registerGitHubHandlers(
   bus: CommandBus,
   prs: PrService,
   commitAuthorIdentities: GitHubCommitAuthorIdentityService
-): void {
+): {
+  stop: () => void;
+  releaseWebContents: (webContentsId: number) => void;
+} {
+  const publishBranchPrs = (
+    repoId: string,
+    changed: Map<string, PrSummary | null>
+  ): void => {
+    if (changed.size === 0) return;
+    emitEvent("pr:changed", { repoId, prs: Object.fromEntries(changed) });
+  };
+  const publishCommitPrs = (
+    repoId: string,
+    changed: Map<string, PrSummary | null>
+  ): void => {
+    if (changed.size === 0) return;
+    emitEvent("pr:commitChanged", {
+      repoId,
+      prs: Object.fromEntries(changed)
+    });
+  };
+  const publishStatusDeltas = (repoId: string, deltas: PrStatusDeltas): void => {
+    publishBranchPrs(repoId, deltas.branches);
+    publishCommitPrs(repoId, deltas.commits);
+  };
+  const prStatusMonitor = new PrStatusMonitor({
+    refresh: async (repoId, numbers) => {
+      publishStatusDeltas(repoId, await prs.refreshPrNumbers(repoId, numbers));
+    }
+  });
+  const reasonGenerations = new Map<string, number>();
+  const reasonsByWebContents = new Map<number, Set<string>>();
+  const ownedReason = (
+    kind: "commit-list" | "worktree",
+    monitorId: string,
+    ctx: CommandContext
+  ): string | null => {
+    const webContentsId = ctx.webContentsId;
+    if (webContentsId === undefined) return null;
+    const reasonId = `${kind}:webContents:${webContentsId}:${monitorId}`;
+    const reasons = reasonsByWebContents.get(webContentsId) ?? new Set<string>();
+    reasons.add(reasonId);
+    reasonsByWebContents.set(webContentsId, reasons);
+    return reasonId;
+  };
+  const replaceReason = (
+    reasonId: string,
+    targets: PrMonitorTarget[]
+  ): number => {
+    const generation = (reasonGenerations.get(reasonId) ?? 0) + 1;
+    reasonGenerations.set(reasonId, generation);
+    prStatusMonitor.replace(reasonId, targets);
+    return generation;
+  };
+  const replaceReasonIfCurrent = (
+    reasonId: string,
+    generation: number,
+    targets: PrMonitorTarget[]
+  ): void => {
+    if (reasonGenerations.get(reasonId) === generation) {
+      prStatusMonitor.replace(reasonId, targets);
+    }
+  };
+  const targetsForCommitCache = (
+    repoId: string,
+    cached: Map<string, PrSummary | null>
+  ): PrMonitorTarget[] => {
+    const targets = new Map<number, PrMonitorTarget>();
+    for (const pr of cached.values()) {
+      if (pr !== null) targets.set(pr.number, { repoId, number: pr.number });
+    }
+    return [...targets.values()];
+  };
+  const visibleCommitReasons = new Map<
+    string,
+    { repoId: string; hashes: string[]; generation: number }
+  >();
+  let commitAssociationMonitor: CommitAssociationMonitor;
+  const syncVisibleReason = (reasonId: string): void => {
+    const reason = visibleCommitReasons.get(reasonId);
+    if (
+      reason === undefined ||
+      reasonGenerations.get(reasonId) !== reason.generation
+    ) {
+      return;
+    }
+    const cached = prs.cachedCommitPrs(reason.repoId, reason.hashes);
+    prStatusMonitor.replace(
+      reasonId,
+      targetsForCommitCache(reason.repoId, cached)
+    );
+    commitAssociationMonitor.replace(
+      reasonId,
+      reason.repoId,
+      reason.hashes.filter((hash) => cached.get(hash) == null)
+    );
+  };
+  const syncVisibleReasonsForRepo = (repoId: string): void => {
+    for (const [reasonId, reason] of visibleCommitReasons) {
+      if (reason.repoId === repoId) syncVisibleReason(reasonId);
+    }
+  };
+  const clearVisibleReason = (reasonId: string, repoId: string): void => {
+    visibleCommitReasons.delete(reasonId);
+    replaceReason(reasonId, []);
+    commitAssociationMonitor.replace(reasonId, repoId, []);
+  };
+  commitAssociationMonitor = new CommitAssociationMonitor({
+    refresh: async (repoId, hashes) => {
+      publishCommitPrs(
+        repoId,
+        await prs.refreshCommits(repoId, hashes, { trigger: "scheduled" })
+      );
+      syncVisibleReasonsForRepo(repoId);
+    }
+  });
+
   bus.register("pr:refresh", async (req) => {
     const changed = await prs.refreshRepo(req.repoId, {
       ...(req.branches !== undefined ? { branches: req.branches } : {}),
       ...(req.trigger !== undefined ? { trigger: req.trigger } : {}),
       force: req.force ?? false
     });
-    if (changed.size > 0) {
-      // Targeted delta — the renderer patches these branches' PRs onto the tree
-      // in place, no full repo:list reload.
-      emitEvent("pr:changed", {
-        repoId: req.repoId,
-        prs: Object.fromEntries(changed)
-      });
-    }
+    // Targeted delta — the renderer patches these branches' PRs onto the tree
+    // in place, no full repo:list reload.
+    publishBranchPrs(req.repoId, changed);
     return ok(null);
   });
 
   bus.register("github:status", async () => ok(await getGhStatus()));
+
+  bus.register("pr:replaceVisibleCommits", async (req, ctx) => {
+    const hashes = boundedCommitHashes(req.commitHashes);
+    const monitorId = req.monitorId.trim().slice(0, 128);
+    if (monitorId === "") return ok({});
+    const reasonId = ownedReason("commit-list", monitorId, ctx);
+    if (reasonId === null) return ok({});
+    if (hashes.length === 0) {
+      clearVisibleReason(reasonId, req.repoId);
+      return ok({});
+    }
+    if (!prs.ownsWorktree(req.repoId, req.worktreeId)) {
+      clearVisibleReason(reasonId, req.repoId);
+      return ok({});
+    }
+
+    // Install the replacement synchronously from cache before any network
+    // work. Unknown associations remain in a visible-only discovery monitor;
+    // known associations move into the PR-number status monitor.
+    const generation = (reasonGenerations.get(reasonId) ?? 0) + 1;
+    reasonGenerations.set(reasonId, generation);
+    visibleCommitReasons.set(reasonId, {
+      repoId: req.repoId,
+      hashes,
+      generation
+    });
+    syncVisibleReason(reasonId);
+    publishCommitPrs(
+      req.repoId,
+      await prs.refreshCommits(req.repoId, hashes, { trigger: "scheduled" })
+    );
+    syncVisibleReason(reasonId);
+    const cached = prs.cachedCommitPrs(req.repoId, hashes);
+    return ok(Object.fromEntries(cached));
+  });
+
+  bus.register("pr:refreshCommits", async (req) => {
+    const hashes = boundedCommitHashes(req.commitHashes);
+    const changed = await prs.refreshCommits(req.repoId, hashes, {
+      trigger: req.trigger ?? "user"
+    });
+    publishCommitPrs(req.repoId, changed);
+    syncVisibleReasonsForRepo(req.repoId);
+    return ok(Object.fromEntries(prs.cachedCommitPrs(req.repoId, hashes)));
+  });
+
+  bus.register("pr:replaceWorktreeMonitor", async (req, ctx) => {
+    const monitorId = req.monitorId.trim().slice(0, 128);
+    if (monitorId === "") return ok(null);
+    const reasonId = ownedReason("worktree", monitorId, ctx);
+    if (reasonId === null) return ok(null);
+    const target = req.target;
+    if (target === undefined) {
+      replaceReason(reasonId, []);
+      return ok(null);
+    }
+    if (!prs.ownsWorktreeBranch(target.repoId, target.worktreeId, target.branch)) {
+      replaceReason(reasonId, []);
+      return ok(null);
+    }
+    let pr = prs.cachedBranchPr(target.repoId, target.branch);
+    const generation = replaceReason(
+      reasonId,
+      pr == null ? [] : [{ repoId: target.repoId, number: pr.number }]
+    );
+    publishBranchPrs(
+      target.repoId,
+      await prs.refreshRepo(target.repoId, {
+        branches: [target.branch],
+        trigger: "scheduled"
+      })
+    );
+    pr = prs.cachedBranchPr(target.repoId, target.branch);
+    replaceReasonIfCurrent(
+      reasonId,
+      generation,
+      pr == null ? [] : [{ repoId: target.repoId, number: pr.number }]
+    );
+    return ok(null);
+  });
 
   bus.register("github:hydrateCommitAuthorIdentities", async (req) => {
     // Start the whole batch before awaiting any one commit. The identity
@@ -113,4 +318,29 @@ export function registerGitHubHandlers(
     }
     return ok(request.lookup);
   });
+
+  const releaseWebContents = (webContentsId: number): void => {
+    const reasons = reasonsByWebContents.get(webContentsId);
+    if (reasons === undefined) return;
+    for (const reasonId of reasons) {
+      const visible = visibleCommitReasons.get(reasonId);
+      if (visible !== undefined) {
+        commitAssociationMonitor.replace(reasonId, visible.repoId, []);
+        visibleCommitReasons.delete(reasonId);
+      }
+      prStatusMonitor.replace(reasonId, []);
+      reasonGenerations.delete(reasonId);
+    }
+    reasonsByWebContents.delete(webContentsId);
+  };
+
+  const stop = (): void => {
+    visibleCommitReasons.clear();
+    reasonGenerations.clear();
+    reasonsByWebContents.clear();
+    commitAssociationMonitor.stop();
+    prStatusMonitor.stop();
+  };
+
+  return { stop, releaseWebContents };
 }

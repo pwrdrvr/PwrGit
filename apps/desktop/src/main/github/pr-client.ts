@@ -1,7 +1,14 @@
 import { graphql, GraphqlResponseError } from "@octokit/graphql";
 import type { PrSummary } from "@pwrgit/shared";
 import { runGh } from "./gh-cli";
-import { buildPrQuery, parsePrResponse } from "./pr-query";
+import {
+  buildCommitPrQuery,
+  buildPrQuery,
+  buildPrNumberQuery,
+  parseCommitPrResponse,
+  parsePrNumberResponse,
+  parsePrResponse
+} from "./pr-query";
 async function gh(args: string[]): Promise<string> {
   return runGh(args);
 }
@@ -74,7 +81,7 @@ function retryDelayMs(error: unknown, attempt: number): number | null {
 async function runQuery(
   token: string,
   query: string,
-  variables: Record<string, string>
+  variables: Record<string, string | number>
 ): Promise<unknown> {
   const client = graphql.defaults({
     headers: { authorization: `token ${token}` }
@@ -111,6 +118,44 @@ export async function fetchPrsForRepo(
     const data = await runQuery(token, query, variables);
     for (const [branch, pr] of parsePrResponse(chunk, data)) {
       result.set(branch, pr);
+    }
+  }
+  return result;
+}
+
+/** Fetch the best PR associated with each exact commit in batched GraphQL calls. */
+export async function fetchPrsForCommits(
+  token: string,
+  owner: string,
+  repo: string,
+  commitHashes: string[]
+): Promise<Map<string, PrSummary | null>> {
+  const result = new Map<string, PrSummary | null>();
+  for (let i = 0; i < commitHashes.length; i += BATCH) {
+    const chunk = commitHashes.slice(i, i + BATCH);
+    const { query, variables } = buildCommitPrQuery(owner, repo, chunk);
+    const data = await runQuery(token, query, variables);
+    for (const [hash, pr] of parseCommitPrResponse(chunk, data)) {
+      result.set(hash, pr);
+    }
+  }
+  return result;
+}
+
+/** Refresh already-discovered PRs once per unique number. */
+export async function fetchPrsByNumbers(
+  token: string,
+  owner: string,
+  repo: string,
+  numbers: number[]
+): Promise<Map<number, PrSummary | null>> {
+  const result = new Map<number, PrSummary | null>();
+  for (let i = 0; i < numbers.length; i += BATCH) {
+    const chunk = numbers.slice(i, i + BATCH);
+    const { query, variables } = buildPrNumberQuery(owner, repo, chunk);
+    const data = await runQuery(token, query, variables);
+    for (const [number, pr] of parsePrNumberResponse(chunk, data)) {
+      result.set(number, pr);
     }
   }
   return result;

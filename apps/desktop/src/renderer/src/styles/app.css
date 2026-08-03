@@ -3069,6 +3069,19 @@ body.is-col-resizing {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
+.commit-context-card__subject-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.commit-context-card__subject-row .commit-context-card__subject {
+  flex: 1;
+  min-width: 0;
+}
+.commit-context-card__subject-row .pr-chip {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
 .commit-context-card__identity {
   display: flex;
   align-items: center;
