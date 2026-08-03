@@ -326,6 +326,71 @@ describe("GitHubCommitAuthorIdentityService", () => {
     expect(fetchCalls).toBe(1);
   });
 
+  it("lets an exact negative suppress a reusable author account", async () => {
+    await requireCompletion(service.request(INPUT).completion);
+    now += 30 * 24 * 60 * 60 * 1000 + 1;
+
+    const negativeHash = "1111111111111111111111111111111111111111";
+    const negativeInput = { ...INPUT, commitHash: negativeHash };
+    fetchImpl = async () => ({
+      sha: negativeHash,
+      author: AUTHOR,
+      githubAuthor: null
+    });
+    let resolveUpdated: ((lookup: unknown) => void) | undefined;
+    const updated = new Promise<unknown>((resolve) => {
+      resolveUpdated = resolve;
+    });
+    const first = service.request(
+      negativeInput,
+      (lookup) => resolveUpdated?.(lookup)
+    );
+
+    expect(await requireCompletion(first.completion)).toMatchObject({
+      identity: { login: "ada" },
+      cacheState: "stale",
+      refreshState: "in-flight"
+    });
+    expect(await updated).toEqual({
+      cacheState: "fresh",
+      refreshState: "idle",
+      refreshedAt: now
+    });
+    expect(fetchCalls).toBe(2);
+
+    expect(await requireCompletion(service.request({
+      ...negativeInput,
+      cacheOnly: true
+    }).completion)).toEqual({
+      cacheState: "fresh",
+      refreshState: "idle",
+      refreshedAt: now
+    });
+    expect(fetchCalls).toBe(2);
+
+    const negativeFetchedAt = now;
+    now += 24 * 60 * 60 * 1000 + 1;
+    let resolveRefreshed: ((lookup: unknown) => void) | undefined;
+    const refreshed = new Promise<unknown>((resolve) => {
+      resolveRefreshed = resolve;
+    });
+    const stale = service.request(
+      negativeInput,
+      (lookup) => resolveRefreshed?.(lookup)
+    );
+    expect(await requireCompletion(stale.completion)).toEqual({
+      cacheState: "stale",
+      refreshState: "in-flight",
+      refreshedAt: negativeFetchedAt
+    });
+    expect(await refreshed).toEqual({
+      cacheState: "fresh",
+      refreshState: "idle",
+      refreshedAt: now
+    });
+    expect(fetchCalls).toBe(3);
+  });
+
   it("serves a stale local identity, then deduplicates its exact-commit refresh", async () => {
     await requireCompletion(service.request(INPUT).completion);
 

@@ -431,6 +431,31 @@ export class GitHubCommitAuthorIdentityService {
         return stale;
       }
 
+      // An exact negative is authoritative for this SHA and must suppress a
+      // broader author-email association. Preserve that decision while stale
+      // and revalidate it, just as we do for an exact resolved identity.
+      if (cached?.status === "negative") {
+        if (isFresh(cached, now)) {
+          return await this.lookupFromCache(cached, now, "idle", onBackgroundUpdate);
+        }
+        if (cached.nextRetryAt !== undefined && cached.nextRetryAt > now) {
+          return await this.lookupFromCache(
+            cached,
+            now,
+            "backing-off",
+            onBackgroundUpdate
+          );
+        }
+        const stale = await this.lookupFromCache(
+          cached,
+          now,
+          "in-flight",
+          onBackgroundUpdate
+        );
+        this.scheduleRevalidation(prepared, proof, identityKey, onBackgroundUpdate);
+        return stale;
+      }
+
       // GitHub associates command-line commits with accounts by author email.
       // Once an exact response proves that association, reuse the same hashed
       // author account across SHAs and repositories. Conflicts become
@@ -456,21 +481,8 @@ export class GitHubCommitAuthorIdentityService {
         return stale;
       }
 
-      if (isFresh(cached, now)) {
-        return await this.lookupFromCache(cached, now, "idle", onBackgroundUpdate);
-      }
       if (cached?.nextRetryAt !== undefined && cached.nextRetryAt > now) {
         return await this.lookupFromCache(cached, now, "backing-off", onBackgroundUpdate);
-      }
-      if (cached?.status === "negative") {
-        const stale = await this.lookupFromCache(
-          cached,
-          now,
-          "in-flight",
-          onBackgroundUpdate
-        );
-        this.scheduleRevalidation(prepared, proof, identityKey, onBackgroundUpdate);
-        return stale;
       }
 
       // The graph's bounded warm pass only hydrates identity proofs already in
@@ -672,7 +684,9 @@ export class GitHubCommitAuthorIdentityService {
     refreshState: GitHubCommitAuthorIdentityLookup["refreshState"],
     onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void
   ): Promise<GitHubCommitAuthorIdentityLookup> {
-    if (exact?.identity !== undefined) {
+    // Exact positive and negative results both outrank the reusable account.
+    // Only a true miss or transient unavailable row may fall back to it.
+    if (exact?.status === "resolved" || exact?.status === "negative") {
       return await this.lookupFromCache(exact, now, refreshState, onBackgroundUpdate);
     }
     const authorKey = buildGitHubCommitAuthorAccountCacheKey(author);
