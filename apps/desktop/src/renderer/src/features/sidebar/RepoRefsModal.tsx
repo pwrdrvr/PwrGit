@@ -10,6 +10,7 @@ import { shortWhen } from "../graph/graph-view";
 import { confirmDialog } from "../shell/dialogs";
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast } from "../../lib/toast";
+import { CopyTarget } from "../shell/CopyTarget";
 import { PushRefsDialog } from "./PushRefsDialog";
 import { RemoteEditorDialog } from "./RemoteEditorDialog";
 
@@ -193,13 +194,29 @@ export function RepoRefsModal({
                   <div className="refs-table__identity">
                     <span className="refs-branch-icon">⑂</span>
                     <div>
-                      <strong>{branch.name}</strong>
+                      <CopyTarget
+                        value={branch.name}
+                        label={`Copy branch name ${branch.name}`}
+                        hint={`${branch.name}\nClick to copy branch name`}
+                        className="refs-copyable-name copyable"
+                      >
+                        <strong>{branch.name}</strong>
+                      </CopyTarget>
                       {branch.subject !== undefined && <small>{branch.subject}</small>}
                     </div>
                   </div>
-                  <span className="refs-table__muted">
-                    {branch.upstream ?? "—"}
-                  </span>
+                  {branch.upstream === undefined ? (
+                    <span className="refs-table__muted">—</span>
+                  ) : (
+                    <CopyTarget
+                      value={branch.upstream}
+                      label={`Copy upstream branch ${branch.upstream}`}
+                      hint={`${branch.upstream}\nClick to copy upstream branch`}
+                      className="refs-table__muted refs-copyable-upstream copyable"
+                    >
+                      {branch.upstream}
+                    </CopyTarget>
+                  )}
                   <span className={`refs-status refs-status--${branch.tracking}`}>
                     {trackingLabel(branch)}
                   </span>
@@ -277,7 +294,14 @@ export function RepoRefsModal({
                       <div className="refs-remote-branch" key={branch.fullName}>
                         <span className="refs-branch-icon">⑂</span>
                         <div>
-                          <strong>{branch.name}</strong>
+                          <CopyTarget
+                            value={branch.name}
+                            label={`Copy branch name ${branch.name}`}
+                            hint={`${branch.qualifiedName}\nClick to copy branch name`}
+                            className="refs-copyable-name copyable"
+                          >
+                            <strong>{branch.name}</strong>
+                          </CopyTarget>
                           {branch.subject !== undefined && <small>{branch.subject}</small>}
                         </div>
                         <span className="refs-table__muted">

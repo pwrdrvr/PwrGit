@@ -6,6 +6,7 @@ import type {
   RepoRefs
 } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
+import { CopyTarget } from "../shell/CopyTarget";
 
 function sourceBranchName(sourceRef: string, refs: RepoRefs): string {
   const local = refs.branches.find((branch) => branch.fullName === sourceRef);
@@ -38,6 +39,10 @@ function isSafe(plan: PushRefPlan): boolean {
     plan.relation === "equal" ||
     plan.relation === "fast_forward"
   );
+}
+
+function shortHead(head: string | undefined): string {
+  return head === undefined ? "new" : head.slice(0, 7);
 }
 
 export function PushRefsDialog({
@@ -104,9 +109,14 @@ export function PushRefsDialog({
 
   const push = async (): Promise<void> => {
     if (plans === null || plans.some((plan) => !isSafe(plan))) return;
+    const actionablePlans = plans.filter((plan) => plan.relation !== "equal");
+    if (actionablePlans.length === 0) return;
     setBusy("push");
     setError(null);
-    const result = await dispatch("remote:pushRefs", { repoId: repo.id, plans });
+    const result = await dispatch("remote:pushRefs", {
+      repoId: repo.id,
+      plans: actionablePlans
+    });
     setBusy(null);
     if (!result.ok) {
       setError(result.error.message.split("\n")[0]);
@@ -117,6 +127,9 @@ export function PushRefsDialog({
   };
 
   const safe = plans !== null && plans.every(isSafe);
+  const actionableCount =
+    plans?.filter((plan) => plan.relation !== "equal").length ?? 0;
+  const equalCount = plans?.filter((plan) => plan.relation === "equal").length ?? 0;
   const pushedCount = results?.filter((result) => result.outcome === "pushed").length;
 
   return (
@@ -183,17 +196,52 @@ export function PushRefsDialog({
 
         {plans !== null && (
           <div className="refs-plan" aria-label="Push review">
+            {plans[0] !== undefined && (
+              <div className="refs-plan__notice">
+                <span>Source</span>
+                <CopyTarget
+                  value={plans[0].sourceLabel}
+                  label={`Copy source branch ${plans[0].sourceLabel}`}
+                  hint={`${plans[0].sourceLabel}\nClick to copy source branch`}
+                  className="refs-plan__copy copyable"
+                >
+                  {plans[0].sourceLabel}
+                </CopyTarget>
+                <code>{shortHead(plans[0].sourceHead)}</code>
+                <small>
+                  Fetched moments ago. Push uses a lease and stops if the source or
+                  destination changes after this review.
+                </small>
+              </div>
+            )}
             {plans.map((plan) => (
               <div
                 className={`refs-plan__row refs-plan__row--${plan.relation}`}
                 key={`${plan.destinationRemote}/${plan.destinationBranch}`}
               >
-                <span>
-                  {plan.destinationRemote}/{plan.destinationBranch}
-                </span>
+                <div className="refs-plan__target">
+                  <CopyTarget
+                    value={plan.destinationBranch}
+                    label={`Copy destination branch ${plan.destinationBranch}`}
+                    hint={`${plan.destinationRemote}/${plan.destinationBranch}\nClick to copy branch name`}
+                    className="refs-plan__copy copyable"
+                  >
+                    {plan.destinationRemote}/{plan.destinationBranch}
+                  </CopyTarget>
+                  <small>
+                    {shortHead(plan.destinationHead)} → {shortHead(plan.sourceHead)}
+                  </small>
+                </div>
                 <span>{relationLabel(plan)}</span>
               </div>
             ))}
+            {safe && equalCount > 0 && (
+              <div className="refs-plan__hint">
+                {actionableCount === 0
+                  ? "All selected destinations already match the source."
+                  : `${equalCount} up-to-date destination${equalCount === 1 ? "" : "s"} will be skipped.`}
+              </div>
+            )}
             {!safe && (
               <div className="modal__error">
                 Every destination must be a create, fast-forward, or already equal.
@@ -249,12 +297,14 @@ export function PushRefsDialog({
               </button>
               <button
                 className="modal__create"
-                disabled={busy !== null || !safe}
+                disabled={busy !== null || !safe || actionableCount === 0}
                 onClick={() => void push()}
               >
                 {busy === "push"
                   ? "Pushing…"
-                  : `Push to ${plans.length} remote${plans.length === 1 ? "" : "s"}`}
+                  : actionableCount === 0
+                    ? "Nothing to push"
+                    : `Push to ${actionableCount} remote${actionableCount === 1 ? "" : "s"}`}
               </button>
             </>
           )}

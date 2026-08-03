@@ -56,16 +56,35 @@ test("browses local branches and nested remotes, then pushes to a test target", 
     name: "refsrepo branches and remotes"
   });
   await expect(browser).toBeVisible();
+
+  await browser.getByRole("button", { name: /^Branches/ }).click();
+  await browser
+    .getByRole("button", { name: "Copy branch name feat/local-only" })
+    .click();
+  await expect
+    .poll(() => window.evaluate(() => navigator.clipboard.readText()))
+    .toBe("feat/local-only");
+  await browser.getByRole("button", { name: /^Remotes/ }).click();
   await browser.getByRole("button", { name: "Push to remotes…" }).click();
 
   const push = window.getByRole("dialog", {
     name: "Push refsrepo branch to remotes"
   });
   await expect(push).toBeVisible();
+  await push.getByRole("combobox", { name: "Source" }).selectOption({
+    label: "main · Local"
+  });
   await push.locator(".refs-destination", { hasText: "mac-tests" }).click();
   await push.locator(".refs-field input").fill("playwright/main");
   await push.getByRole("button", { name: "Review push" }).click();
   await expect(push.getByText("Will create")).toBeVisible({ timeout: 20_000 });
+  await expect(push.getByText(/Push uses a lease/)).toBeVisible();
+  await push
+    .getByRole("button", { name: "Copy source branch main" })
+    .click();
+  await expect
+    .poll(() => window.evaluate(() => navigator.clipboard.readText()))
+    .toBe("main");
   await push.getByRole("button", { name: "Push to 1 remote" }).click();
   await expect(push.getByText("1 destination updated.")).toBeVisible({
     timeout: 20_000
@@ -78,6 +97,25 @@ test("browses local branches and nested remotes, then pushes to a test target", 
     .not.toBe("");
 
   await push.getByRole("button", { name: "Close" }).click();
+  await browser.getByRole("button", { name: "Push to remotes…" }).click();
+  const equalPush = window.getByRole("dialog", {
+    name: "Push refsrepo branch to remotes"
+  });
+  await equalPush.getByRole("combobox", { name: "Source" }).selectOption({
+    label: "main · Local"
+  });
+  await equalPush.locator(".refs-destination", { hasText: "mac-tests" }).click();
+  await equalPush.locator(".refs-field input").fill("playwright/main");
+  await equalPush.getByRole("button", { name: "Review push" }).click();
+  await expect(equalPush.getByText("Up to date")).toBeVisible({ timeout: 20_000 });
+  await expect(
+    equalPush.getByRole("button", { name: "Nothing to push" })
+  ).toBeDisabled();
+  await expect(
+    equalPush.getByText("All selected destinations already match the source.")
+  ).toBeVisible();
+  await equalPush.getByRole("button", { name: "Cancel" }).click();
+
   await browser.getByRole("button", { name: "Add remote…" }).click();
   const editor = window.getByRole("dialog", { name: "Add remote" });
   const fields = editor.locator(".refs-field input");

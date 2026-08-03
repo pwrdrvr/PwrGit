@@ -2,12 +2,26 @@ import { useCallback, useEffect, useState } from "react";
 import type { Repo, RepoRefs } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
+import { CopyTarget } from "../shell/CopyTarget";
 import { RepoRefsModal, trackingLabel } from "./RepoRefsModal";
 
 type RefSection = "branches" | "remotes";
 
 function SectionChevron({ open }: { open: boolean }) {
   return <span className={`ref-section__chev${open ? " is-open" : ""}`} />;
+}
+
+function compactTrackingLabel(tracking: ReturnType<typeof trackingLabel>): string {
+  switch (tracking) {
+    case "Up to date":
+      return "Synced";
+    case "No upstream":
+      return "Local only";
+    case "Upstream missing":
+      return "Missing";
+    default:
+      return tracking;
+  }
 }
 
 export function RepoRefsSections({
@@ -110,11 +124,19 @@ export function RepoRefsSections({
             {visibleBranches.map((branch) => (
               <div className="ref-branch-row" key={branch.fullName}>
                 <span className="refs-branch-icon">⑂</span>
-                <span className="ref-branch-row__name" title={branch.name}>
+                <CopyTarget
+                  value={branch.name}
+                  label={`Copy branch name ${branch.name}`}
+                  hint={`${branch.name}\nClick to copy branch name`}
+                  className="ref-branch-row__name refs-copyable-name copyable"
+                >
                   {branch.name}
-                </span>
-                <span className={`ref-branch-row__status is-${branch.tracking}`}>
-                  {trackingLabel(branch)}
+                </CopyTarget>
+                <span
+                  className={`ref-branch-row__status is-${branch.tracking}`}
+                  title={trackingLabel(branch)}
+                >
+                  {compactTrackingLabel(trackingLabel(branch))}
                 </span>
                 {branch.checkedOutWorktreeIds.length > 0 ? (
                   <button
@@ -238,7 +260,14 @@ export function RepoRefsSections({
                       {remote.branches.slice(0, 6).map((branch) => (
                         <div className="ref-remote-branch-row" key={branch.fullName}>
                           <span className="refs-branch-icon">⑂</span>
-                          <span title={branch.qualifiedName}>{branch.name}</span>
+                          <CopyTarget
+                            value={branch.name}
+                            label={`Copy branch name ${branch.name}`}
+                            hint={`${branch.qualifiedName}\nClick to copy branch name`}
+                            className="refs-copyable-name copyable"
+                          >
+                            {branch.name}
+                          </CopyTarget>
                           {branch.name === remote.defaultBranch && <small>default</small>}
                           <button
                             className="ref-mini-action"
