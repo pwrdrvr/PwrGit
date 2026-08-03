@@ -79,6 +79,7 @@ jobs:
             scripts/check-desktop-release-metadata.mjs \
             apps/desktop/package.json \
             apps/desktop/electron-builder.yml \
+            apps/desktop/resources \
             apps/desktop/release-stage \
             apps/desktop/scripts/release.mjs \
             apps/desktop/scripts/beforepack-dugite-arch.mjs \
