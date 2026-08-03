@@ -31,6 +31,13 @@ export function trackingLabel(branch: LocalBranchSummary): string {
   }
 }
 
+export function localBranchForRemote(
+  refs: RepoRefs,
+  branch: RemoteBranchSummary
+): LocalBranchSummary | undefined {
+  return refs.branches.find((candidate) => candidate.name === branch.name);
+}
+
 export function RepoRefsModal({
   repo,
   refs,
@@ -97,7 +104,11 @@ export function RepoRefsModal({
   );
 
   const createRemoteWorktree = (branch: RemoteBranchSummary): void => {
-    onCreateWorktree(branch.name, true, branch.fullName);
+    const local = localBranchForRemote(refs, branch);
+    const checkedOutId = local?.checkedOutWorktreeIds[0];
+    if (checkedOutId !== undefined) onRevealWorktree(checkedOutId);
+    else if (local !== undefined) onCreateWorktree(local.name, false);
+    else onCreateWorktree(branch.name, true, branch.fullName);
     onClose();
   };
 
@@ -290,33 +301,40 @@ export function RepoRefsModal({
                     <code>{remote.defaultBranch ?? "Unknown"}</code>
                   </div>
                   <div className="refs-remote-branches">
-                    {remote.branches.map((branch) => (
-                      <div className="refs-remote-branch" key={branch.fullName}>
-                        <span className="refs-branch-icon">⑂</span>
-                        <div>
-                          <CopyTarget
-                            value={branch.name}
-                            label={`Copy branch name ${branch.name}`}
-                            hint={`${branch.qualifiedName}\nClick to copy branch name`}
-                            className="refs-copyable-name copyable"
+                    {remote.branches.map((branch) => {
+                      const local = localBranchForRemote(refs, branch);
+                      const checkedOut =
+                        (local?.checkedOutWorktreeIds.length ?? 0) > 0;
+                      return (
+                        <div className="refs-remote-branch" key={branch.fullName}>
+                          <span className="refs-branch-icon">⑂</span>
+                          <div>
+                            <CopyTarget
+                              value={branch.name}
+                              label={`Copy branch name ${branch.name}`}
+                              hint={`${branch.qualifiedName}\nClick to copy branch name`}
+                              className="refs-copyable-name copyable"
+                            >
+                              <strong>{branch.name}</strong>
+                            </CopyTarget>
+                            {branch.subject !== undefined && (
+                              <small>{branch.subject}</small>
+                            )}
+                          </div>
+                          <span className="refs-table__muted">
+                            {branch.lastCommitAt === undefined
+                              ? "—"
+                              : shortWhen(branch.lastCommitAt, now)}
+                          </span>
+                          <button
+                            className="refs-row-action"
+                            onClick={() => createRemoteWorktree(branch)}
                           >
-                            <strong>{branch.name}</strong>
-                          </CopyTarget>
-                          {branch.subject !== undefined && <small>{branch.subject}</small>}
+                            {checkedOut ? "Show worktree" : "New worktree"}
+                          </button>
                         </div>
-                        <span className="refs-table__muted">
-                          {branch.lastCommitAt === undefined
-                            ? "—"
-                            : shortWhen(branch.lastCommitAt, now)}
-                        </span>
-                        <button
-                          className="refs-row-action"
-                          onClick={() => createRemoteWorktree(branch)}
-                        >
-                          New worktree
-                        </button>
-                      </div>
-                    ))}
+                      );
+                    })}
                     {remote.branches.length === 0 && (
                       <div className="refs-browser__empty">
                         No fetched branches match this filter.

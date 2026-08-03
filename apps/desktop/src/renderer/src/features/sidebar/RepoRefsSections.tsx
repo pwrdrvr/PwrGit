@@ -3,7 +3,11 @@ import type { Repo, RepoRefs } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { CopyTarget } from "../shell/CopyTarget";
-import { RepoRefsModal, trackingLabel } from "./RepoRefsModal";
+import {
+  localBranchForRemote,
+  RepoRefsModal,
+  trackingLabel
+} from "./RepoRefsModal";
 
 type RefSection = "branches" | "remotes";
 
@@ -58,7 +62,7 @@ export function RepoRefsSections({
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, repo]);
 
   const toggleSection = (section: RefSection): void => {
     setOpenSections((previous) => {
@@ -257,30 +261,55 @@ export function RepoRefsSections({
                   </div>
                   {open && (
                     <div className="ref-remote__branches">
-                      {remote.branches.slice(0, 6).map((branch) => (
-                        <div className="ref-remote-branch-row" key={branch.fullName}>
-                          <span className="refs-branch-icon">⑂</span>
-                          <CopyTarget
-                            value={branch.name}
-                            label={`Copy branch name ${branch.name}`}
-                            hint={`${branch.qualifiedName}\nClick to copy branch name`}
-                            className="refs-copyable-name copyable"
+                      {remote.branches.slice(0, 6).map((branch) => {
+                        const local = localBranchForRemote(refs, branch);
+                        const checkedOutId = local?.checkedOutWorktreeIds[0];
+                        return (
+                          <div
+                            className="ref-remote-branch-row"
+                            key={branch.fullName}
                           >
-                            {branch.name}
-                          </CopyTarget>
-                          {branch.name === remote.defaultBranch && <small>default</small>}
-                          <button
-                            className="ref-mini-action"
-                            title="Create a local branch in a new worktree"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onCreateWorktree(branch.name, true, branch.fullName);
-                            }}
-                          >
-                            +
-                          </button>
-                        </div>
-                      ))}
+                            <span className="refs-branch-icon">⑂</span>
+                            <CopyTarget
+                              value={branch.name}
+                              label={`Copy branch name ${branch.name}`}
+                              hint={`${branch.qualifiedName}\nClick to copy branch name`}
+                              className="refs-copyable-name copyable"
+                            >
+                              {branch.name}
+                            </CopyTarget>
+                            {branch.name === remote.defaultBranch && (
+                              <small>default</small>
+                            )}
+                            <button
+                              className="ref-mini-action"
+                              title={
+                                checkedOutId !== undefined
+                                  ? "Show checked-out worktree"
+                                  : local !== undefined
+                                    ? "Create worktree from local branch"
+                                    : "Create a local branch in a new worktree"
+                              }
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                if (checkedOutId !== undefined) {
+                                  onRevealWorktree(checkedOutId);
+                                } else if (local !== undefined) {
+                                  onCreateWorktree(local.name, false);
+                                } else {
+                                  onCreateWorktree(
+                                    branch.name,
+                                    true,
+                                    branch.fullName
+                                  );
+                                }
+                              }}
+                            >
+                              {checkedOutId === undefined ? "+" : "●"}
+                            </button>
+                          </div>
+                        );
+                      })}
                       {remote.branches.length === 0 && (
                         <div className="ref-section__empty">No fetched branches.</div>
                       )}

@@ -204,6 +204,101 @@ describe("remote ops (bare-remote fixture)", () => {
     ).toBe(upstreamHead);
   }, 20_000);
 
+  it("plans and pushes against a remote's configured push URL", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-push-url-"));
+    git(root, ["init", "--bare", "-b", "main", "fetch.git"]);
+    git(root, ["init", "--bare", "-b", "main", "push.git"]);
+    const local = join(root, "local");
+    git(root, ["init", "-b", "main", "local"]);
+    configure(local, "local");
+    commit(local, "base.txt", "base");
+    git(local, ["remote", "add", "target", join(root, "fetch.git")]);
+    git(local, [
+      "remote",
+      "set-url",
+      "--add",
+      "--push",
+      "target",
+      join(root, "push.git")
+    ]);
+    git(local, ["push", join(root, "fetch.git"), "main"]);
+
+    const planned = await planPushRefs(systemGit, local, "refs/heads/main", [
+      { remote: "target", branch: "main" }
+    ]);
+    expect(planned.ok).toBe(true);
+    if (!planned.ok) return;
+    expect(planned.value[0]?.relation).toBe("create");
+
+    const pushed = await pushPlannedRefs(systemGit, local, planned.value);
+    expect(pushed.ok).toBe(true);
+    if (!pushed.ok) return;
+    expect(pushed.value[0]?.outcome).toBe("pushed");
+    expect(
+      gitOut(root, ["--git-dir", "push.git", "rev-parse", "refs/heads/main"])
+    ).toBe(planned.value[0]?.sourceHead);
+  });
+
+  it(
+    "pushes the reviewed object if the source ref changes during execution",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "pwrgit-reviewed-source-"));
+      git(root, ["init", "--bare", "-b", "main", "target.git"]);
+      const local = join(root, "local");
+      git(root, ["init", "-b", "main", "local"]);
+      configure(local, "local");
+      commit(local, "base.txt", "reviewed");
+      git(local, ["remote", "add", "target", join(root, "target.git")]);
+
+      const planned = await planPushRefs(systemGit, local, "refs/heads/main", [
+        { remote: "target", branch: "main" }
+      ]);
+      expect(planned.ok).toBe(true);
+      if (!planned.ok) return;
+      const reviewedHead = planned.value[0]?.sourceHead;
+      expect(reviewedHead).toBeDefined();
+      if (reviewedHead === undefined) return;
+      const tree = gitOut(local, ["rev-parse", `${reviewedHead}^{tree}`]);
+      const unreviewedHead = gitOut(local, [
+        "commit-tree",
+        tree,
+        "-p",
+        reviewedHead,
+        "-m",
+        "unreviewed"
+      ]);
+      let sourceMoved = false;
+      const moveSourceDuringInspection: GitExec = async (args, cwd) => {
+        if (!sourceMoved && args[0] === "ls-remote") {
+          sourceMoved = true;
+          git(local, ["update-ref", "refs/heads/main", unreviewedHead]);
+        }
+        return systemGit(args, cwd);
+      };
+
+      const pushed = await pushPlannedRefs(
+        moveSourceDuringInspection,
+        local,
+        planned.value
+      );
+      expect(sourceMoved).toBe(true);
+      expect(pushed.ok).toBe(true);
+      if (!pushed.ok) return;
+      expect(pushed.value[0]?.outcome).toBe("pushed");
+      expect(gitOut(local, ["rev-parse", "refs/heads/main"])).toBe(
+        unreviewedHead
+      );
+      expect(
+        gitOut(root, [
+          "--git-dir",
+          "target.git",
+          "rev-parse",
+          "refs/heads/main"
+        ])
+      ).toBe(reviewedHead);
+    }
+  );
+
   it("push sends a new commit to the remote", async () => {
     commit(cloneB, "g.txt", "c2 from B");
     const result = await pushRemote(systemGit, cloneB);

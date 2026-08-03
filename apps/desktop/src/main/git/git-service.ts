@@ -1591,14 +1591,39 @@ async function resolveCommit(
   });
 }
 
+async function remotePushUrl(
+  git: GitExec,
+  cwd: string,
+  remote: string
+): Promise<Result<string>> {
+  const raw = await git(["remote", "get-url", "--push", remote], cwd);
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode !== 0) {
+    return err({
+      kind: "remote",
+      code: "inspect_failed",
+      message:
+        raw.value.stderr.trim() || `Could not resolve the push URL for ${remote}.`
+    });
+  }
+  const url = raw.value.stdout.trim();
+  return url === ""
+    ? err({
+        kind: "remote",
+        code: "inspect_failed",
+        message: `Could not resolve the push URL for ${remote}.`
+      })
+    : ok(url);
+}
+
 async function remoteHead(
   git: GitExec,
   cwd: string,
-  remote: string,
+  pushUrl: string,
   branch: string
 ): Promise<Result<string | undefined>> {
   const raw = await git(
-    ["ls-remote", "--heads", remote, `refs/heads/${branch}`],
+    ["ls-remote", "--heads", pushUrl, `refs/heads/${branch}`],
     cwd
   );
   if (!raw.ok) return raw;
@@ -1606,7 +1631,7 @@ async function remoteHead(
     return err({
       kind: "remote",
       code: "inspect_failed",
-      message: raw.value.stderr.trim() || `Could not inspect ${remote}.`
+      message: raw.value.stderr.trim() || "Could not inspect the push endpoint."
     });
   }
   const head = raw.value.stdout.trim().split(/\s+/)[0];
@@ -1616,18 +1641,18 @@ async function remoteHead(
 async function ensureCommitObject(
   git: GitExec,
   cwd: string,
-  remote: string,
+  pushUrl: string,
   branch: string,
   head: string
 ): Promise<Result<void>> {
   const have = await git(["cat-file", "-e", `${head}^{commit}`], cwd);
   if (!have.ok) return have;
   if (have.value.exitCode === 0) return ok(undefined);
-  const fetched = await git(["fetch", remote, `refs/heads/${branch}`], cwd);
+  const fetched = await git(["fetch", pushUrl, `refs/heads/${branch}`], cwd);
   if (!fetched.ok) return fetched;
   const checked = requireExit0(fetched.value, [
     "fetch",
-    remote,
+    pushUrl,
     `refs/heads/${branch}`
   ]);
   return checked.ok ? ok(undefined) : checked;
@@ -1722,10 +1747,12 @@ export async function planPushRefs(
     const key = `${destination.remote}\0${destination.branch}`;
     if (seen.has(key)) continue;
     seen.add(key);
+    const pushUrl = await remotePushUrl(git, cwd, destination.remote);
+    if (!pushUrl.ok) return pushUrl;
     const destinationHead = await remoteHead(
       git,
       cwd,
-      destination.remote,
+      pushUrl.value,
       destination.branch
     );
     if (!destinationHead.ok) return destinationHead;
@@ -1733,7 +1760,7 @@ export async function planPushRefs(
       const have = await ensureCommitObject(
         git,
         cwd,
-        destination.remote,
+        pushUrl.value,
         destination.branch,
         destinationHead.value
       );
@@ -1783,10 +1810,19 @@ export async function pushPlannedRefs(
       });
       continue;
     }
+    const pushUrl = await remotePushUrl(git, cwd, plan.destinationRemote);
+    if (!pushUrl.ok) {
+      results.push({
+        ...base,
+        outcome: "failed",
+        message: pushUrl.error.message
+      });
+      continue;
+    }
     const actual = await remoteHead(
       git,
       cwd,
-      plan.destinationRemote,
+      pushUrl.value,
       plan.destinationBranch
     );
     if (!actual.ok || actual.value !== plan.destinationHead) {
@@ -1801,7 +1837,7 @@ export async function pushPlannedRefs(
       const have = await ensureCommitObject(
         git,
         cwd,
-        plan.destinationRemote,
+        pushUrl.value,
         plan.destinationBranch,
         actual.value
       );
@@ -1810,7 +1846,7 @@ export async function pushPlannedRefs(
         continue;
       }
     }
-    const relation = await pushRelation(git, cwd, source.value, actual.value);
+    const relation = await pushRelation(git, cwd, plan.sourceHead, actual.value);
     if (!relation.ok) {
       results.push({
         ...base,
@@ -1840,8 +1876,8 @@ export async function pushPlannedRefs(
       [
         "push",
         `--force-with-lease=${destinationRef}:${expected}`,
-        plan.destinationRemote,
-        `${plan.sourceRef}:${destinationRef}`
+        pushUrl.value,
+        `${plan.sourceHead}:${destinationRef}`
       ],
       cwd
     );

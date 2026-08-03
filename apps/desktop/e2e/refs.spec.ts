@@ -25,7 +25,7 @@ test("browses local branches and nested remotes, then pushes to a test target", 
   box.git(repo.path, "remote", "add", "mac-tests", remoteUrl);
   box.git(repo.path, "fetch", "--all");
 
-  handle = await launchApp();
+  handle = await launchApp({ worktreeRoot: box.worktreeRoot });
   const { window } = handle;
   await addRootAndExpand(window, handle, box, "refsrepo");
 
@@ -48,6 +48,15 @@ test("browses local branches and nested remotes, then pushes to a test target", 
   await expect(
     window.locator(".ref-remote__main", { hasText: "mac-tests" })
   ).toBeVisible();
+  const compactOrigin = window.locator(".ref-remote", {
+    has: window.locator(".ref-remote__main", { hasText: "origin" })
+  });
+  await compactOrigin.locator(".ref-remote__main").click();
+  await expect(
+    compactOrigin
+      .locator(".ref-remote-branch-row", { hasText: "main" })
+      .getByTitle("Show checked-out worktree")
+  ).toHaveText("●");
 
   await window
     .getByRole("button", { name: "Manage remotes and remote branches…" })
@@ -65,6 +74,13 @@ test("browses local branches and nested remotes, then pushes to a test target", 
     .poll(() => window.evaluate(() => navigator.clipboard.readText()))
     .toBe("feat/local-only");
   await browser.getByRole("button", { name: /^Remotes/ }).click();
+  const originMain = browser
+    .locator(".refs-remote-card", { hasText: "origin" })
+    .locator(".refs-remote-branch", { hasText: "main" })
+    .first();
+  await expect(
+    originMain.getByRole("button", { name: "Show worktree" })
+  ).toBeVisible();
   await browser.getByRole("button", { name: "Push to remotes…" }).click();
 
   const push = window.getByRole("dialog", {
@@ -128,4 +144,15 @@ test("browses local branches and nested remotes, then pushes to a test target", 
   await backup.getByRole("button", { name: "Remove" }).click();
   await window.getByRole("button", { name: "Remove remote" }).click();
   await expect(backup).toHaveCount(0);
+
+  await browser.getByRole("button", { name: "Close" }).click();
+  const localOnly = window.locator(".ref-branch-row", {
+    hasText: "feat/local-only"
+  });
+  await localOnly.getByTitle("Create worktree").click();
+  const newWorktree = window.locator(".modal", { hasText: "New worktree" });
+  await newWorktree.getByRole("button", { name: "Create" }).click();
+  await expect(
+    localOnly.getByTitle("Show checked-out worktree")
+  ).toBeVisible({ timeout: 20_000 });
 });

@@ -75,6 +75,7 @@ export function registerRemoteHandlers(
       "remote",
       `fetched ${req.remote ?? "all remotes"} for ${repo.path} (${seconds(startedAt)})`
     );
+    refresher.refreshRepoWorktrees(req.repoId);
     return ok(null);
   });
 
@@ -84,6 +85,7 @@ export function registerRemoteHandlers(
     const result = await addRemote(execGit, repo.path, req);
     if (!result.ok) return result;
     logMain("info", "remote", `added remote ${req.name} to ${repo.path}`);
+    refresher.refreshRepoWorktrees(req.repoId);
     return ok(null);
   });
 
@@ -97,6 +99,7 @@ export function registerRemoteHandlers(
       "remote",
       `updated remote ${req.originalName} as ${req.name} in ${repo.path}`
     );
+    refresher.refreshRepoWorktrees(req.repoId);
     return ok(null);
   });
 
@@ -106,18 +109,21 @@ export function registerRemoteHandlers(
     const result = await removeRemote(execGit, repo.path, req.remote);
     if (!result.ok) return result;
     logMain("info", "remote", `removed remote ${req.remote} from ${repo.path}`);
+    refresher.refreshRepoWorktrees(req.repoId);
     return ok(null);
   });
 
   bus.register("remote:planPushRefs", async (req) => {
     const repo = repoOf(req.repoId);
     if (repo === null) return err({ ...notFound, message: "repo not found" });
-    return planPushRefs(
+    const result = await planPushRefs(
       execGit,
       repo.path,
       req.sourceRef,
       req.destinations
     );
+    refresher.refreshRepoWorktrees(req.repoId);
+    return result;
   });
 
   bus.register("remote:pushRefs", async (req) => {
@@ -125,6 +131,7 @@ export function registerRemoteHandlers(
     if (repo === null) return err({ ...notFound, message: "repo not found" });
     const startedAt = Date.now();
     const result = await pushPlannedRefs(execGit, repo.path, req.plans);
+    refresher.refreshRepoWorktrees(req.repoId);
     if (!result.ok) return result;
     const pushed = result.value.filter((item) => item.outcome === "pushed").length;
     logMain(
