@@ -249,6 +249,17 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
         return;
       }
 
+      // The row's path turned out to be a linked worktree, so it's gone from
+      // the sidebar. Say why, in terms of what the user can see happening.
+      if (result.value.outcome === "deindexed") {
+        showInfoToast({
+          title: `Removed ${repo.name} from the list`,
+          message:
+            "It's a worktree of another repo, which already lists it here."
+        });
+        return;
+      }
+
       const { added, removed, updated } = result.value;
       const changes = [
         added > 0 ? `${added} discovered` : null,

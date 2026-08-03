@@ -171,6 +171,8 @@ describe("RepoIndexer", () => {
     const first = await isolatedIndexer.refreshRepoWorktrees(indexed.id);
     expect(first.ok).toBe(true);
     if (!first.ok) return;
+    expect(first.value.outcome).toBe("reconciled");
+    if (first.value.outcome !== "reconciled") return;
     expect(first.value.added).toBe(1);
     expect(first.value.removed).toBe(0);
     expect(first.value.updated).toBe(1);
@@ -195,8 +197,53 @@ describe("RepoIndexer", () => {
     const second = await isolatedIndexer.refreshRepoWorktrees(indexed.id);
     expect(second.ok).toBe(true);
     if (!second.ok) return;
-    expect(second.value).toMatchObject({ added: 0, removed: 1, updated: 0 });
+    expect(second.value).toMatchObject({
+      outcome: "reconciled",
+      added: 0,
+      removed: 1,
+      updated: 0
+    });
     expect(isolatedIndexer.searchAll("external-added")).toHaveLength(0);
+  });
+
+  it("reports dropping a fossil repo row as a success, not a failure", async () => {
+    const isolatedRoot = mkdtempSync(join(tmpdir(), "pwrgit-fossil-"));
+    const repoPath = join(isolatedRoot, "repo");
+    const linkedPath = join(isolatedRoot, "linked");
+    initRepo(repoPath);
+    git(repoPath, ["worktree", "add", linkedPath, "-b", "feature"]);
+
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({
+      name: "Fossil",
+      email: "fossil@example.com",
+      roots: [isolatedRoot]
+    });
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
+
+    // Older builds could index a LINKED worktree dir as a repo in its own
+    // right; discovery canonicalises now, so forge the legacy row directly.
+    isolatedDb
+      .prepare(
+        `INSERT INTO repos (id, profile_id, name, path, source)
+         VALUES (?, ?, ?, ?, 'scan')`
+      )
+      .run("fossil", profile.id, "linked", linkedPath);
+    expect(isolatedIndexer.getRepo("fossil")).not.toBeNull();
+
+    const result = await isolatedIndexer.refreshRepoWorktrees("fossil");
+
+    // Dropping the row is what SHOULD happen — the canonical repo already
+    // lists that worktree. Reporting it as an error makes the UI tell the user
+    // the refresh failed while they watch it visibly succeed.
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toEqual({
+      outcome: "deindexed",
+      profileId: profile.id
+    });
+    expect(isolatedIndexer.getRepo("fossil")).toBeNull();
   });
 });
 

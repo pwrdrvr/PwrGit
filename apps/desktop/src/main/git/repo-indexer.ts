@@ -216,14 +216,12 @@ export class RepoIndexer {
     // listed primary path isn't its own path) is a fossil — older builds could
     // index one. Syncing it would steal the whole family back and forth with
     // the canonical repo; delete it instead (worktrees cascade, and the
-    // canonical repo reclaims its rows on its own next sync).
+    // canonical repo reclaims its rows on its own next sync). Dropping the row
+    // is the completed refresh, so report it as one — an error here reaches the
+    // renderer as "Couldn't refresh …" while the row visibly disappears.
     if (primary !== undefined && !primary.bare && primary.path !== repo.path) {
       this.db.prepare("DELETE FROM repos WHERE id = ?").run(repoId);
-      return err({
-        kind: "repo",
-        code: "not_canonical",
-        message: "repo path is a linked worktree of another repository"
-      });
+      return ok({ outcome: "deindexed", profileId: repo.profileId });
     }
     const worktrees = listed.value
       .filter((w) => !w.bare)
@@ -253,7 +251,13 @@ export class RepoIndexer {
       );
     }).length;
 
-    return ok({ repo: refreshed, added, removed, updated });
+    return ok({
+      outcome: "reconciled",
+      repo: refreshed,
+      added,
+      removed,
+      updated
+    });
   }
 
   /** ⌘F search: repos AND worktrees (by branch/path) across all profiles,
