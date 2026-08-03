@@ -12,6 +12,8 @@ import type {
 export type AppSettings = {
   /** Root under which PwrGit-managed worktrees are created (U14). */
   worktreeRoot?: string;
+  /** The macOS Safe Storage prompt has been explained before it can appear. */
+  macKeychainAccessExplained?: boolean;
   general?: Partial<GeneralSettings>;
   experimental?: Partial<ExperimentalSettings>;
   diagnostics?: Partial<DiagnosticsSettings>;

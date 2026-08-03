@@ -1,5 +1,12 @@
 import { join } from "node:path";
-import { app, BrowserWindow, nativeImage, protocol } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  nativeImage,
+  protocol,
+  safeStorage
+} from "electron";
 import { ok, type Profile } from "@pwrgit/shared";
 import { registerAppDocumentHandlers } from "./app-document-handlers";
 import { openAppDocumentWindow } from "./app-document-window";
@@ -36,6 +43,7 @@ import {
   subscribeLogEntries
 } from "./logs";
 import { openLogsWindow } from "./logs-window";
+import { ensureMacKeychainAccess } from "./mac-keychain-access";
 import { openDatabase } from "./persistence/db";
 import { readGitIdentityDefaults } from "./profiles/git-identity";
 import { registerProfileHandlers } from "./profiles/profile-handlers";
@@ -147,10 +155,25 @@ if (!gotSingleInstanceLock) {
     });
     registerAppDocumentHandlers(bus);
 
-    const db = openDatabase(join(app.getPath("userData"), "pwrgit.db"));
     const settings = new SettingsService(
       join(app.getPath("userData"), "settings.json")
     );
+    const keychainReady = await ensureMacKeychainAccess({
+      platform: process.platform,
+      packaged: app.isPackaged,
+      settings,
+      showMessageBox: (options) => dialog.showMessageBox(options),
+      encryptString: (plainText) => safeStorage.encryptString(plainText),
+      onAccessDenied: () =>
+        logMain("warn", "keychain", "macOS Keychain access was not granted")
+    });
+    if (!keychainReady) {
+      logMain("info", "keychain", "startup canceled before opening a window");
+      app.quit();
+      return;
+    }
+
+    const db = openDatabase(join(app.getPath("userData"), "pwrgit.db"));
     const diagnosticsOutputRoot = join(app.getPath("userData"), "diagnostics");
     const diagnostics = new DiagnosticsManager({
       outputRoot: diagnosticsOutputRoot,
