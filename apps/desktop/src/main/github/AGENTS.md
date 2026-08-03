@@ -22,6 +22,9 @@ origin isn't github.com, `gh` isn't logged in, or the network fails.
   exact full commit SHA from a recognized GitHub `origin`; its cache is scoped
   to that origin and SHA and is read only after validating them. It accepts a
   login/avatar only after SHA + local Git author name/email match. Exact proof
+  normally comes from GitHub's commit `author`; when that field is null, a
+  unique PR associated with that exact SHA may supply the account only if its
+  login matches the Git author name or email local part. Exact proof
   metadata lives in SQLite; 64px avatar bytes are deduplicated on disk under
   `userData/cache/github-avatar-thumbnails`, with fetch/access timestamps and
   stale-while-revalidate on hover. IPC exposes only a versioned local

@@ -51,6 +51,12 @@ export type GitHubCommitAuthorRemoteCommit = {
   } | null;
 };
 
+type GitHubAccountProfile = {
+  login: string;
+  name?: string;
+  avatarUrl?: string;
+};
+
 /** Credential-opaque seam for fetching one exact GitHub commit. */
 export type GitHubCommitAuthorIdentityTransport = {
   fetchCommit(proof: GitHubCommitAuthorProof): Promise<GitHubCommitAuthorRemoteCommit>;
@@ -78,7 +84,7 @@ export class GhCliCommitAuthorIdentityTransport
   async fetchCommit(
     proof: GitHubCommitAuthorProof
   ): Promise<GitHubCommitAuthorRemoteCommit> {
-    const endpoint = [
+    const commitEndpoint = [
       "repos",
       encodeURIComponent(proof.owner),
       encodeURIComponent(proof.repo),
@@ -89,7 +95,7 @@ export class GhCliCommitAuthorIdentityTransport
       "api",
       "--hostname",
       "github.com",
-      endpoint,
+      commitEndpoint,
       "--method",
       "GET",
       "--header",
@@ -97,7 +103,53 @@ export class GhCliCommitAuthorIdentityTransport
       "--header",
       "X-GitHub-Api-Version: 2022-11-28"
     ]);
-    return parseGitHubCommitResponse(JSON.parse(stdout));
+    const commit = parseGitHubCommitResponse(JSON.parse(stdout));
+    if (commit.githubAuthor !== null || commit.author == null) return commit;
+
+    const fallback = await this.fetchAssociatedPullAuthor(proof, commit.author);
+    return fallback === undefined ? commit : { ...commit, githubAuthor: fallback };
+  }
+
+  /**
+   * GitHub links ordinary command-line commits by account email. For a custom
+   * unlinked email, accept a unique associated-PR author only when its handle
+   * matches the exact commit author's Git name or email local part.
+   */
+  private async fetchAssociatedPullAuthor(
+    proof: GitHubCommitAuthorProof,
+    author: NonNullable<GitHubCommitAuthorRemoteCommit["author"]>
+  ): Promise<GitHubCommitAuthorRemoteCommit["githubAuthor"] | undefined> {
+    const pullsEndpoint = [
+      "repos",
+      encodeURIComponent(proof.owner),
+      encodeURIComponent(proof.repo),
+      "commits",
+      encodeURIComponent(proof.commitSha),
+      "pulls"
+    ].join("/");
+    const pulls = parseAssociatedPullAuthors(JSON.parse(await this.run([
+      "api",
+      "--hostname",
+      "github.com",
+      pullsEndpoint,
+      "--method",
+      "GET",
+      "--header",
+      "Accept: application/vnd.github+json",
+      "--header",
+      "X-GitHub-Api-Version: 2022-11-28"
+    ])));
+    if (pulls.length !== 1) return undefined;
+
+    const pullAuthor = pulls[0]!;
+    return associatedPullAuthorMatches(pullAuthor, author)
+      ? {
+          login: pullAuthor.login,
+          ...(pullAuthor.avatarUrl === undefined
+            ? {}
+            : { avatarUrl: pullAuthor.avatarUrl })
+        }
+      : undefined;
   }
 }
 
@@ -759,6 +811,41 @@ function parseGitHubCommitResponse(value: unknown): GitHubCommitAuthorRemoteComm
     ...(author === undefined ? {} : { author }),
     ...(identity === undefined ? {} : { githubAuthor: identity })
   };
+}
+
+function parseAssociatedPullAuthors(value: unknown): GitHubAccountProfile[] {
+  if (!Array.isArray(value)) return [];
+  const authors = new Map<string, GitHubAccountProfile>();
+  for (const item of value) {
+    const user = asRecord(asRecord(item)?.user);
+    const login = readString(user?.login);
+    if (login === undefined) continue;
+    const avatarUrl = readString(user?.avatar_url);
+    authors.set(login.toLowerCase(), {
+      login,
+      ...(avatarUrl === undefined ? {} : { avatarUrl })
+    });
+  }
+  return [...authors.values()];
+}
+
+/** Strong fallback for GitHub commits whose custom email is not account-linked. */
+export function associatedPullAuthorMatches(
+  profile: GitHubAccountProfile,
+  author: { name?: string | null; email?: string | null }
+): boolean {
+  const login = safeText(profile.login, 255)?.toLowerCase();
+  const authorName = safeText(author.name, 512)?.normalize("NFC").toLowerCase();
+  const authorEmail = safeText(author.email, 320)?.normalize("NFC").toLowerCase();
+  if (login === undefined || authorName === undefined || authorEmail === undefined) {
+    return false;
+  }
+  if (authorName === login) return true;
+
+  const separator = authorEmail.indexOf("@");
+  if (separator <= 0) return false;
+  const emailLocalPart = authorEmail.slice(0, separator);
+  return emailLocalPart === login;
 }
 
 function evaluateRemoteCommit(

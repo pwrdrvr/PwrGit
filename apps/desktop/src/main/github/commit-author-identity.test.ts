@@ -3,6 +3,7 @@ import { ok } from "@pwrgit/shared";
 import type { GitExec } from "../git/dugite";
 import { openDatabase, type DB } from "../persistence/db";
 import {
+  associatedPullAuthorMatches,
   buildGitHubCommitAuthorIdentityCacheKey,
   GhCliCommitAuthorIdentityTransport,
   GitHubCommitAuthorIdentityService,
@@ -514,6 +515,68 @@ describe("GhCliCommitAuthorIdentityTransport", () => {
     ]);
     expect(calls[0]).not.toContain("auth");
     expect(calls[0]).not.toContain("token");
+  });
+
+  it("corroborates a unique associated-PR author when GitHub leaves author null", async () => {
+    const calls: string[][] = [];
+    const transport = new GhCliCommitAuthorIdentityTransport({
+      run: async (args) => {
+        calls.push(args);
+        const endpoint = args[3];
+        if (endpoint === `repos/openclaw/openclaw/commits/${COMMIT_SHA}`) {
+          return JSON.stringify({
+            sha: COMMIT_SHA,
+            commit: {
+              author: { name: "Peter Steinberger", email: "steipete@macos.shared" }
+            },
+            author: null
+          });
+        }
+        if (endpoint === `repos/openclaw/openclaw/commits/${COMMIT_SHA}/pulls`) {
+          return JSON.stringify([{ user: {
+            login: "steipete",
+            avatar_url: "https://avatars.githubusercontent.com/u/58493?v=4"
+          } }]);
+        }
+        throw new Error(`Unexpected endpoint: ${endpoint}`);
+      }
+    });
+
+    await expect(transport.fetchCommit({
+      owner: "openclaw",
+      repo: "openclaw",
+      commitSha: COMMIT_SHA
+    })).resolves.toEqual({
+      sha: COMMIT_SHA,
+      author: { name: "Peter Steinberger", email: "steipete@macos.shared" },
+      githubAuthor: {
+        login: "steipete",
+        avatarUrl: "https://avatars.githubusercontent.com/u/58493?v=4"
+      }
+    });
+    expect(calls).toHaveLength(2);
+    expect(calls.flat()).not.toContain("token");
+  });
+});
+
+describe("associatedPullAuthorMatches", () => {
+  it("requires the Git name or email local part to match the PR login", () => {
+    expect(associatedPullAuthorMatches(
+      { login: "steipete", name: "Peter Steinberger" },
+      { name: "Peter Steinberger", email: "steipete@macos.shared" }
+    )).toBe(true);
+    expect(associatedPullAuthorMatches(
+      { login: "somebody-else", name: "Peter Steinberger" },
+      { name: "Peter Steinberger", email: "steipete@macos.shared" }
+    )).toBe(false);
+    expect(associatedPullAuthorMatches(
+      { login: "steipete", name: "Different Person" },
+      { name: "Peter Steinberger", email: "different@macos.shared" }
+    )).toBe(false);
+    expect(associatedPullAuthorMatches(
+      { login: "steipete" },
+      { name: "steipete", email: "different@macos.shared" }
+    )).toBe(true);
   });
 });
 

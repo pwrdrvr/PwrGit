@@ -90,7 +90,7 @@ describe("CommitContextCard identity", () => {
     expect(markup).toContain('decoding="sync"');
   });
 
-  it("does not repeat a local author name that already is the GitHub login", () => {
+  it("always labels a proven GitHub login even when the local name matches", () => {
     const markup = card(
       null,
       "main",
@@ -100,9 +100,7 @@ describe("CommitContextCard identity", () => {
     );
 
     expect(markup).toContain("huntharo");
-    expect(markup).not.toContain("@huntharo");
-    // Keep a stable three-line identity block while the avatar/log-in data
-    // settles, avoiding a card-height shift on hover.
-    expect(markup).toContain("commit-context-card__github-login--placeholder");
+    expect(markup).toContain("@huntharo");
+    expect(markup).not.toContain("commit-context-card__github-login--placeholder");
   });
 });
