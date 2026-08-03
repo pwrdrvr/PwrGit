@@ -87,6 +87,7 @@ export function GraphRow({
   onOpen,
   onShowContext,
   onHideContext,
+  onFocusContext,
   onOpenContextMenu,
   onRevealWorktree
 }: {
@@ -110,6 +111,8 @@ export function GraphRow({
     anchor: { x: number; y: number }
   ) => void;
   onHideContext: () => void;
+  /** Move keyboard focus from the SHA trigger into the open context card. */
+  onFocusContext: () => boolean;
   onOpenContextMenu: (position: { x: number; y: number }) => void;
   /** Jump to the worktree a tip branch is checked out in. */
   onRevealWorktree?: (worktreeId: string) => void;
@@ -288,6 +291,11 @@ export function GraphRow({
         onMouseLeave={onHideContext}
         onFocus={(e) => showContextFor(e.currentTarget)}
         onBlur={onHideContext}
+        onKeyDown={(e) => {
+          if (e.key === "Tab" && !e.shiftKey && onFocusContext()) {
+            e.preventDefault();
+          }
+        }}
         onClick={(e) => {
           e.stopPropagation();
           showContextFor(e.currentTarget);

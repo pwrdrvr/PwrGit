@@ -42,6 +42,8 @@ export type ViewportTooltip = {
   hide: () => void;
   /** Delay dismissal long enough to cross from a hover target into a card. */
   scheduleHide: () => void;
+  /** Move keyboard focus into the first control in an open tooltip. */
+  focusFirst: () => boolean;
   visible: boolean;
   tooltipNode: ReactNode;
 };
@@ -251,6 +253,15 @@ export function useViewportTooltip(
     scheduleHide();
   }, [scheduleHide]);
 
+  const focusFirst = useCallback((): boolean => {
+    const firstControl = tooltipRef.current?.querySelector<HTMLElement>(
+      "button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])"
+    );
+    if (firstControl === undefined || firstControl === null) return false;
+    firstControl.focus();
+    return true;
+  }, []);
+
   const tooltipNode =
     state && typeof document !== "undefined"
       ? createPortal(
@@ -280,5 +291,13 @@ export function useViewportTooltip(
         )
       : null;
 
-  return { show, update, hide, scheduleHide, visible, tooltipNode };
+  return {
+    show,
+    update,
+    hide,
+    scheduleHide,
+    focusFirst,
+    visible,
+    tooltipNode
+  };
 }

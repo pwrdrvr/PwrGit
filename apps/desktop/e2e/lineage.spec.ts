@@ -118,14 +118,24 @@ test("hovering an aligned commit SHA chip opens its context window", async () =>
   await expect(shortCopy).toBeVisible();
   await expect(fullCopy).toBeVisible();
 
+  // Keyboard users enter the portalled card instead of tabbing past it and
+  // leaving its controls to disappear behind the delayed dismissal.
+  await shaChip.focus();
+  await window.keyboard.press("Tab");
+  await expect(shortCopy).toBeFocused();
+  await window.waitForTimeout(500);
+  await expect(card).toBeVisible();
+  await window.keyboard.press("Tab");
+  await expect(fullCopy).toBeFocused();
+
   // The card stays compact: its full OID is intentionally revealed only by
   // the nested copy tooltip, where it remains one pointer move away.
   const fullHash = s.git(feature, "rev-parse", "HEAD");
   await expect(card).not.toContainText(fullHash);
   await fullCopy.hover();
-  await expect(window.getByRole("tooltip")).toHaveText(
-    `Copy full SHA ${fullHash}`
-  );
+  await expect(
+    window.getByRole("tooltip", { name: `Copy full SHA ${fullHash}` })
+  ).toBeVisible();
 
   await row.click({ button: "right" });
   const menu = window.getByRole("menu", { name: "Commit actions" });
