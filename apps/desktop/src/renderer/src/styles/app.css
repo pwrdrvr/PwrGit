@@ -1563,9 +1563,27 @@ input {
 .commit-author.is-other {
   color: var(--text-muted);
 }
-.commit-hash {
-  font: 500 10px/1 var(--font-mono);
-  color: var(--text-subtle);
+.commit-sha-chip {
+  flex: 0 0 58px;
+  align-self: flex-start;
+  height: 20px;
+  margin-top: 10px;
+  padding: 0 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font: 600 9.5px/1 var(--font-mono);
+  cursor: help;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.commit-sha-chip:hover,
+.commit-sha-chip:focus-visible,
+.graph-row.is-context-open .commit-sha-chip {
+  color: var(--accent-bright);
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  outline: none;
 }
 .commit-tag {
   display: inline-flex;

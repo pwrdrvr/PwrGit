@@ -121,6 +121,14 @@ export function GraphRow({
   const isTip = chipCount > 0;
   const x = cx(row.lane);
 
+  const showContextFor = (target: HTMLElement): void => {
+    const rect = target.getBoundingClientRect();
+    onShowContext(target, {
+      x: (rect.left + rect.right) / 2,
+      y: (rect.top + rect.bottom) / 2
+    });
+  };
+
   // A lane that runs straight through both halves of the row is drawn as ONE
   // full-height line (no half-line seam at the vertical midpoint). Halves with
   // different dash tiers (a local or remote tip row on the spine) stay
@@ -143,10 +151,6 @@ export function GraphRow({
       }${flashing ? " is-flash" : ""}`}
       data-hash={commit.hash}
       onClick={onOpen}
-      onMouseEnter={(e) =>
-        onShowContext(e.currentTarget, { x: e.clientX, y: e.clientY })
-      }
-      onMouseLeave={onHideContext}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -276,6 +280,22 @@ export function GraphRow({
         )}
       </span>
 
+      <button
+        type="button"
+        className="commit-sha-chip"
+        aria-label={`Show context for commit ${commit.shortHash}`}
+        onMouseEnter={(e) => showContextFor(e.currentTarget)}
+        onMouseLeave={onHideContext}
+        onFocus={(e) => showContextFor(e.currentTarget)}
+        onBlur={onHideContext}
+        onClick={(e) => {
+          e.stopPropagation();
+          showContextFor(e.currentTarget);
+        }}
+      >
+        {commit.shortHash}
+      </button>
+
       <div className="commit-body">
         {/* Line 1 belongs to the subject — branch chips and authorship live on
             the meta line so long messages aren't pushed off the edge. */}
@@ -353,7 +373,6 @@ export function GraphRow({
           <span className={`commit-author${isMine ? "" : " is-other"}`}>
             {isMine ? "you" : commit.authorName}
           </span>
-          <span className="commit-hash">{commit.shortHash}</span>
           {commit.isMerge && <span className="commit-tag">merge</span>}
         </div>
       </div>
