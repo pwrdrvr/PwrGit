@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Profile, Repo, RepoSearchHit, Worktree } from "@pwrgit/shared";
 import { DiffPane, type DiffTarget } from "./features/diff/DiffPane";
 import { LineageGraph } from "./features/graph/LineageGraph";
@@ -28,6 +28,7 @@ export function App() {
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [overlayOpen, setOverlayOpen] = useState(false);
   const [selection, setSelection] = useState<Selection | null>(null);
+  const worktreePrMonitorIdRef = useRef(crypto.randomUUID());
   // A queued "jump to this repo (and optionally this worktree)" — from ⌘F
   // picks and cross-window reveals — resolved once the repo list has it.
   const [pendingReveal, setPendingReveal] = useState<{
@@ -212,27 +213,58 @@ export function App() {
   const selectedWorktree =
     selectedRepo?.worktrees.find((w) => w.id === selection?.worktreeId) ?? null;
 
-  // Match PwrAgnt's focused-PR policy without sweeping every repo: selecting a
-  // linked worktree looks up only its branch now and once a minute. Main owns
-  // the per-branch cooldown, cache, and targeted cross-window update.
+  // A selected linked worktree contributes a durable reason to the same
+  // main-process PR monitor used by visible commits. Replacing or unmounting
+  // this reason cannot stop a PR that another surface still needs.
+  useEffect(() => {
+    const target =
+      selectedRepo === null ||
+      selectedWorktree === null ||
+      selectedWorktree.isDefaultBranch
+        ? undefined
+        : {
+            repoId: selectedRepo.id,
+            worktreeId: selectedWorktree.id,
+            branch: selectedWorktree.branch
+          };
+    void dispatch("pr:replaceWorktreeMonitor", {
+      monitorId: worktreePrMonitorIdRef.current,
+      ...(target === undefined ? {} : { target })
+    });
+    return () => {
+      void dispatch("pr:replaceWorktreeMonitor", {
+        monitorId: worktreePrMonitorIdRef.current
+      });
+    };
+  }, [
+    selectedRepo?.id,
+    selectedWorktree?.branch,
+    selectedWorktree?.id,
+    selectedWorktree?.isDefaultBranch
+  ]);
+
+  // A negative branch association has no PR number to status-poll yet. Keep
+  // the old focused discovery cadence until a PR appears; once it does, the
+  // shared main-process monitor above owns its single deduplicated poll.
   useEffect(() => {
     if (
       selectedRepo === null ||
       selectedWorktree === null ||
-      selectedWorktree.isDefaultBranch
+      selectedWorktree.isDefaultBranch ||
+      selectedWorktree.pr !== undefined
     ) {
       return;
     }
-    const refresh = (): void =>
+    const intervalId = window.setInterval(() => {
       refreshPullRequest(selectedRepo.id, selectedWorktree.branch, "scheduled");
-    refresh();
-    const intervalId = window.setInterval(refresh, 60_000);
+    }, 60_000);
     return () => window.clearInterval(intervalId);
   }, [
     refreshPullRequest,
     selectedRepo?.id,
     selectedWorktree?.branch,
-    selectedWorktree?.isDefaultBranch
+    selectedWorktree?.isDefaultBranch,
+    selectedWorktree?.pr
   ]);
 
   const gridTemplateColumns = `${sidebar.width}px minmax(0, 1fr) ${

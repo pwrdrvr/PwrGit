@@ -4,7 +4,8 @@ import type {
   CommitStats,
   GitHubCommitAuthorIdentity,
   GitHubCommitAuthorIdentityLookup,
-  LaneGraph
+  LaneGraph,
+  PrSummary
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { useRelativeClock } from "../../lib/useRelativeClock";
@@ -26,6 +27,7 @@ import { shortWhen } from "./graph-view";
 import { layoutLanes } from "./lane-layout";
 
 type Scope = "active" | "all";
+const VISIBLE_COMMIT_PR_IDLE_MS = 500;
 
 /**
  * Keep only identity results that are stable for this worktree session. An
@@ -223,6 +225,9 @@ export function LineageGraph({
   const [commitStats, setCommitStats] = useState<
     Record<string, CommitStats | null>
   >({});
+  const [commitPullRequests, setCommitPullRequests] = useState<
+    Record<string, PrSummary | null>
+  >({});
   const [commitAuthorIdentityLookups, setCommitAuthorIdentityLookups] = useState<
     Record<string, GitHubCommitAuthorIdentityLookup>
   >({});
@@ -238,6 +243,15 @@ export function LineageGraph({
   const commitAuthorIdentityRequestsRef = useRef(new Map<string, number>());
   const commitStatsEpochRef = useRef(0);
   const commitAuthorIdentityEpochRef = useRef(0);
+  const commitPrMonitorIdRef = useRef(crypto.randomUUID());
+
+  const acceptCommitPullRequests = useCallback(
+    (prs: Record<string, PrSummary | null>): void => {
+      if (Object.keys(prs).length === 0) return;
+      setCommitPullRequests((current) => ({ ...current, ...prs }));
+    },
+    []
+  );
 
   const acceptCommitAuthorIdentityLookup = useCallback((
     commitHash: string,
@@ -352,6 +366,12 @@ export function LineageGraph({
     });
   }, [repoId]);
 
+  useEffect(() => {
+    return subscribe("pr:commitChanged", (event) => {
+      if (event.repoId === repoId) acceptCommitPullRequests(event.prs);
+    });
+  }, [acceptCommitPullRequests, repoId]);
+
   const head = data?.head ?? "";
 
   useEffect(() => {
@@ -399,6 +419,7 @@ export function LineageGraph({
       for (const n of ns) localTipByName.set(n, h);
     }
     return commits.map((commit, i) => {
+      const pullRequest = commitPullRequests[commit.hash];
       const names = tips[commit.hash] ?? [];
       const refs =
         names.length > 1
@@ -427,10 +448,16 @@ export function LineageGraph({
         isHead: commit.hash === head,
         isHeadOnly: headOnlyCommits.has(commit.hash),
         isMine: commit.authorEmail.toLowerCase() === email,
-        defaultBranch
+        defaultBranch,
+        ...(pullRequest == null ? {} : { pullRequest })
       };
     });
-  }, [data, layout, email, head]);
+  }, [commitPullRequests, data, layout, email, head]);
+
+  const graphCommitKey = useMemo(
+    () => (data?.commits ?? []).map((commit) => commit.hash).join("\n"),
+    [data?.commits]
+  );
 
   // name → tip hash (from the hash → names maps) for the branch navigator;
   // remote names too, so a drawn origin/x branch is jumpable.
@@ -482,6 +509,10 @@ export function LineageGraph({
     setCommitStats({});
     setCommitAuthorIdentityLookups({});
   }, [worktreeId]);
+
+  useEffect(() => {
+    setCommitPullRequests({});
+  }, [repoId, worktreeId]);
 
   useEffect(() => {
     if (hoveredVm === undefined) return;
@@ -564,6 +595,7 @@ export function LineageGraph({
             refreshState: "in-flight"
           }
         ) ?? undefined}
+        pullRequest={commitPullRequests[hoveredVm.commit.hash] ?? undefined}
       />
     );
   }, [
@@ -572,6 +604,7 @@ export function LineageGraph({
     hoveredVm,
     now,
     commitStats,
+    commitPullRequests,
     commitAuthorIdentityLookups,
     viewingBranch
   ]);
@@ -582,6 +615,13 @@ export function LineageGraph({
     vm: GraphRowVM
   ): void => {
     setHoveredCommit(vm.commit.hash);
+    void dispatch("pr:refreshCommits", {
+      repoId,
+      commitHashes: [vm.commit.hash],
+      trigger: "user"
+    }).then((result) => {
+      if (result.ok) acceptCommitPullRequests(result.value);
+    });
     commitContext.show(
       target,
       <CommitContextCard
@@ -597,6 +637,7 @@ export function LineageGraph({
             refreshState: "in-flight"
           }
         ) ?? undefined}
+        pullRequest={commitPullRequests[vm.commit.hash] ?? undefined}
       />,
       anchor
     );
@@ -648,6 +689,66 @@ export function LineageGraph({
   useEffect(() => {
     if (!laneOverflow) cardRef.current?.style.setProperty("--lane-scroll", "0px");
   }, [laneOverflow]);
+
+  // Commit history can be enormous, so the main process must never infer its
+  // monitor set from every rendered graph row. Observe only rows intersecting
+  // the scroll viewport, then replace this view's complete reason set once the
+  // user has been idle for 500 ms. The main-process replacement is atomic and
+  // unions this reason with every other active monitoring reason.
+  useEffect(() => {
+    const root = scrollerRef.current;
+    const card = cardRef.current;
+    if (root === null || card === null || graphCommitKey === "") return;
+
+    let active = true;
+    let idleTimer: number | null = null;
+    const visible = new Set<string>();
+    const publish = (): void => {
+      idleTimer = null;
+      const commitHashes = [...visible];
+      void dispatch("pr:replaceVisibleCommits", {
+        repoId,
+        worktreeId,
+        monitorId: commitPrMonitorIdRef.current,
+        commitHashes
+      }).then((result) => {
+        if (active && result.ok) acceptCommitPullRequests(result.value);
+      });
+    };
+    const schedulePublish = (): void => {
+      if (idleTimer !== null) window.clearTimeout(idleTimer);
+      idleTimer = window.setTimeout(publish, VISIBLE_COMMIT_PR_IDLE_MS);
+    };
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const hash = (entry.target as HTMLElement).dataset.hash;
+          if (hash === undefined) continue;
+          if (entry.isIntersecting) visible.add(hash);
+          else visible.delete(hash);
+        }
+        schedulePublish();
+      },
+      { root, threshold: 0.01 }
+    );
+    for (const row of card.querySelectorAll<HTMLElement>(".graph-row[data-hash]")) {
+      observer.observe(row);
+    }
+
+    return () => {
+      active = false;
+      observer.disconnect();
+      if (idleTimer !== null) window.clearTimeout(idleTimer);
+      // Unmount/scope changes should release the reason immediately. A new
+      // view publishes its replacement after its own quiet period.
+      void dispatch("pr:replaceVisibleCommits", {
+        repoId,
+        worktreeId,
+        monitorId: commitPrMonitorIdRef.current,
+        commitHashes: []
+      });
+    };
+  }, [acceptCommitPullRequests, graphCommitKey, repoId, worktreeId]);
 
   // Horizontal trackpad/wheel over the LANE GUTTER pans the lanes (via the
   // shared scrollbar) without touching the commit list; vertical deltas pass

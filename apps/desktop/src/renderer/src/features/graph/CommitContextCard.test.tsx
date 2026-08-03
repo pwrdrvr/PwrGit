@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { Commit } from "@pwrgit/shared";
+import type { Commit, PrSummary } from "@pwrgit/shared";
 import { CommitContextCard } from "./CommitContextCard";
 
 const commit: Commit = {
@@ -19,7 +19,8 @@ function card(
   defaultBranch = "main",
   defaultRef = "origin/main",
   githubIdentity?: { login: string; avatarUrl?: string },
-  cardCommit: Commit = commit
+  cardCommit: Commit = commit,
+  pullRequest?: PrSummary
 ): string {
   return renderToStaticMarkup(
     <CommitContextCard
@@ -30,6 +31,7 @@ function card(
       now={new Date("2026-08-01T21:00:00.000Z").getTime()}
       stats={null}
       githubIdentity={githubIdentity}
+      pullRequest={pullRequest}
     />
   );
 }
@@ -102,5 +104,28 @@ describe("CommitContextCard identity", () => {
     expect(markup).toContain("huntharo");
     expect(markup).toContain("@huntharo");
     expect(markup).not.toContain("commit-context-card__github-login--placeholder");
+  });
+});
+
+describe("CommitContextCard pull request", () => {
+  it("shows the same clickable PR chip inside commit context", () => {
+    const markup = card(
+      null,
+      "main",
+      "origin/main",
+      undefined,
+      commit,
+      {
+        number: 29,
+        url: "https://github.com/pwrdrvr/PwrGit/pull/29",
+        title: "Anchor commit context",
+        state: "merged",
+        isDraft: false
+      }
+    );
+
+    expect(markup).toContain("pr-chip--merged");
+    expect(markup).toContain("merged #29");
+    expect(markup).toContain("PR #29 (merged)");
   });
 });

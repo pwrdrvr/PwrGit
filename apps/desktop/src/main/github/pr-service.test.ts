@@ -25,6 +25,10 @@ describe("PrService", () => {
   let now: number;
   let response: Map<string, PrSummary | null>;
   let fetches: string[][];
+  let commitResponse: Map<string, PrSummary | null>;
+  let commitFetches: string[][];
+  let statusResponse: Map<number, PrSummary | null>;
+  let statusFetches: number[][];
   let service: PrService;
 
   beforeEach(() => {
@@ -42,11 +46,29 @@ describe("PrService", () => {
     now = 1_000_000;
     response = new Map([["feature/pr-state", pr()]]);
     fetches = [];
+    commitResponse = new Map();
+    commitFetches = [];
+    statusResponse = new Map();
+    statusFetches = [];
     service = new PrService(db, git, {
       getGitHubToken: async () => "token",
       fetchPrsForRepo: async (_token, _owner, _repo, branches) => {
         fetches.push(branches);
         return response;
+      },
+      fetchPrsForCommits: async (_token, _owner, _repo, commitHashes) => {
+        commitFetches.push(commitHashes);
+        return new Map(commitHashes.map((hash) => [
+          hash,
+          commitResponse.get(hash) ?? null
+        ]));
+      },
+      fetchPrsByNumbers: async (_token, _owner, _repo, numbers) => {
+        statusFetches.push(numbers);
+        return new Map(numbers.map((number) => [
+          number,
+          statusResponse.get(number) ?? null
+        ]));
       },
       now: () => now
     });
@@ -147,7 +169,66 @@ describe("PrService", () => {
     resolveFetch?.(latest);
 
     await expect(bulk).resolves.toEqual(latest);
-    await expect(focused).resolves.toEqual(latest);
+    await expect(focused).resolves.toEqual(new Map());
     expect(fetches).toHaveLength(1);
+  });
+
+  it("looks up and caches only the exact visible commit set", async () => {
+    const first = "0123456789abcdef0123456789abcdef01234567";
+    const second = "fedcba9876543210fedcba9876543210fedcba98";
+    const neverVisible = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    commitResponse = new Map([[first, pr({ number: 84 })]]);
+
+    const changed = await service.refreshCommits("repo", [first, second], {
+      trigger: "scheduled"
+    });
+
+    expect(commitFetches).toEqual([[first, second]]);
+    expect(changed.get(first)?.number).toBe(84);
+    expect(changed.get(second)).toBeNull();
+    expect(service.cachedCommitPrs("repo", [first, second, neverVisible])).toEqual(
+      new Map([
+        [first, pr({ number: 84 })],
+        [second, null]
+      ])
+    );
+  });
+
+  it("debounces repeated hover lookups with the focused refresh TTL", async () => {
+    const hash = "0123456789abcdef0123456789abcdef01234567";
+    commitResponse = new Map([[hash, pr()]]);
+
+    await service.refreshCommits("repo", [hash], { trigger: "user" });
+    await service.refreshCommits("repo", [hash], { trigger: "user" });
+    expect(commitFetches).toEqual([[hash]]);
+
+    now += 10_000;
+    await service.refreshCommits("repo", [hash], { trigger: "user" });
+    expect(commitFetches).toEqual([[hash], [hash]]);
+  });
+
+  it("polls a discovered PR once and fans status changes to branch and commit caches", async () => {
+    const hash = "0123456789abcdef0123456789abcdef01234567";
+    commitResponse = new Map([[hash, pr()]]);
+    await service.refreshRepo("repo", {
+      branches: ["feature/pr-state"],
+      trigger: "scheduled"
+    });
+    await service.refreshCommits("repo", [hash], { trigger: "scheduled" });
+
+    statusResponse = new Map([[42, pr({ state: "merged", isDraft: false })]]);
+    const changed = await service.refreshPrNumbers("repo", [42, 42]);
+
+    expect(statusFetches).toEqual([[42]]);
+    expect(changed.branches.get("feature/pr-state")).toMatchObject({
+      number: 42,
+      state: "merged"
+    });
+    expect(changed.commits.get(hash)).toMatchObject({
+      number: 42,
+      state: "merged"
+    });
+    expect(service.cachedBranchPr("repo", "feature/pr-state")?.state).toBe("merged");
+    expect(service.cachedCommitPrs("repo", [hash]).get(hash)?.state).toBe("merged");
   });
 });
