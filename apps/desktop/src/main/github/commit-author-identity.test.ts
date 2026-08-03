@@ -4,6 +4,7 @@ import type { GitExec } from "../git/dugite";
 import { openDatabase, type DB } from "../persistence/db";
 import {
   associatedPullAuthorMatches,
+  buildGitHubCommitAuthorAccountCacheKey,
   buildGitHubCommitAuthorIdentityCacheKey,
   GhCliCommitAuthorIdentityTransport,
   GitHubCommitAuthorIdentityService,
@@ -97,6 +98,7 @@ describe("GitHubCommitAuthorIdentityService", () => {
       .get(identityKey) as Record<string, unknown>;
     expect(row).toMatchObject({
       status: "resolved",
+      github_user_id: 1,
       github_login: "ada",
       fetched_at: now,
       expires_at: now + 7 * 24 * 60 * 60 * 1000,
@@ -106,6 +108,20 @@ describe("GitHubCommitAuthorIdentityService", () => {
     expect(JSON.stringify(row)).not.toContain(AUTHOR.email);
     expect(JSON.stringify(row)).not.toContain("gho_");
     expect(JSON.stringify(row)).toContain("https://avatars.githubusercontent.com/u/1?v=4");
+
+    const authorKey = buildGitHubCommitAuthorAccountCacheKey(AUTHOR)!;
+    const account = db
+      .prepare("SELECT * FROM github_commit_author_account_cache WHERE author_key = ?")
+      .get(authorKey) as Record<string, unknown>;
+    expect(account).toMatchObject({
+      status: "resolved",
+      github_user_id: 1,
+      github_login: "ada",
+      fetched_at: now,
+      expires_at: now + 30 * 24 * 60 * 60 * 1000
+    });
+    expect(JSON.stringify(account)).not.toContain(AUTHOR.name);
+    expect(JSON.stringify(account)).not.toContain(AUTHOR.email);
 
     const cached = service.request(INPUT);
     expect(cached).toEqual({
@@ -148,7 +164,7 @@ describe("GitHubCommitAuthorIdentityService", () => {
     });
   });
 
-  it("warms only an already-proven identity and leaves a true miss for hover", async () => {
+  it("warms new SHAs from an already-proven author account", async () => {
     await requireCompletion(service.request(INPUT).completion);
     fetchCalls = 0;
 
@@ -170,17 +186,27 @@ describe("GitHubCommitAuthorIdentityService", () => {
     };
     expect(
       await requireCompletion(service.request({ ...unseen, cacheOnly: true }).completion)
-    ).toEqual({ cacheState: "miss", refreshState: "idle" });
-    expect(fetchCalls).toBe(0);
-
-    fetchImpl = async () => ({ ...resolvedRemoteCommit(), sha: unseen.commitHash });
-    expect(await requireCompletion(service.request(unseen).completion)).toEqual({
+    ).toEqual({
       identity: { login: "ada", avatarUrl: CACHED_AVATAR_URL },
       cacheState: "fresh",
       refreshState: "idle",
       refreshedAt: now
     });
-    expect(fetchCalls).toBe(1);
+    expect(fetchCalls).toBe(0);
+
+    const renamed = {
+      ...unseen,
+      commitHash: "2222222222222222222222222222222222222222",
+      authorName: "A. Lovelace",
+      cacheOnly: true
+    };
+    expect(await requireCompletion(service.request(renamed).completion)).toEqual({
+      identity: { login: "ada", avatarUrl: CACHED_AVATAR_URL },
+      cacheState: "fresh",
+      refreshState: "idle",
+      refreshedAt: now
+    });
+    expect(fetchCalls).toBe(0);
   });
 
   it("coalesces origin validation when a graph hydrates cached commits as one batch", async () => {
@@ -300,6 +326,71 @@ describe("GitHubCommitAuthorIdentityService", () => {
     expect(fetchCalls).toBe(1);
   });
 
+  it("lets an exact negative suppress a reusable author account", async () => {
+    await requireCompletion(service.request(INPUT).completion);
+    now += 30 * 24 * 60 * 60 * 1000 + 1;
+
+    const negativeHash = "1111111111111111111111111111111111111111";
+    const negativeInput = { ...INPUT, commitHash: negativeHash };
+    fetchImpl = async () => ({
+      sha: negativeHash,
+      author: AUTHOR,
+      githubAuthor: null
+    });
+    let resolveUpdated: ((lookup: unknown) => void) | undefined;
+    const updated = new Promise<unknown>((resolve) => {
+      resolveUpdated = resolve;
+    });
+    const first = service.request(
+      negativeInput,
+      (lookup) => resolveUpdated?.(lookup)
+    );
+
+    expect(await requireCompletion(first.completion)).toMatchObject({
+      identity: { login: "ada" },
+      cacheState: "stale",
+      refreshState: "in-flight"
+    });
+    expect(await updated).toEqual({
+      cacheState: "fresh",
+      refreshState: "idle",
+      refreshedAt: now
+    });
+    expect(fetchCalls).toBe(2);
+
+    expect(await requireCompletion(service.request({
+      ...negativeInput,
+      cacheOnly: true
+    }).completion)).toEqual({
+      cacheState: "fresh",
+      refreshState: "idle",
+      refreshedAt: now
+    });
+    expect(fetchCalls).toBe(2);
+
+    const negativeFetchedAt = now;
+    now += 24 * 60 * 60 * 1000 + 1;
+    let resolveRefreshed: ((lookup: unknown) => void) | undefined;
+    const refreshed = new Promise<unknown>((resolve) => {
+      resolveRefreshed = resolve;
+    });
+    const stale = service.request(
+      negativeInput,
+      (lookup) => resolveRefreshed?.(lookup)
+    );
+    expect(await requireCompletion(stale.completion)).toEqual({
+      cacheState: "stale",
+      refreshState: "in-flight",
+      refreshedAt: negativeFetchedAt
+    });
+    expect(await refreshed).toEqual({
+      cacheState: "fresh",
+      refreshState: "idle",
+      refreshedAt: now
+    });
+    expect(fetchCalls).toBe(3);
+  });
+
   it("serves a stale local identity, then deduplicates its exact-commit refresh", async () => {
     await requireCompletion(service.request(INPUT).completion);
 
@@ -339,6 +430,7 @@ describe("GitHubCommitAuthorIdentityService", () => {
     releaseFetch?.({
       ...resolvedRemoteCommit(),
       githubAuthor: {
+        id: 1,
         login: "ada-lovelace",
         avatarUrl: "https://avatars.githubusercontent.com/u/2?v=4"
       }
@@ -352,6 +444,91 @@ describe("GitHubCommitAuthorIdentityService", () => {
       cacheState: "fresh",
       refreshState: "idle",
       refreshedAt: now
+    });
+  });
+
+  it("marks a reused author ambiguous when a later exact proof identifies another account", async () => {
+    await requireCompletion(service.request(INPUT).completion);
+    now += 30 * 24 * 60 * 60 * 1000 + 1;
+
+    const conflictingHash = "1111111111111111111111111111111111111111";
+    fetchImpl = async () => ({
+      ...resolvedRemoteCommit(),
+      sha: conflictingHash,
+      githubAuthor: {
+        id: 2,
+        login: "different-account",
+        avatarUrl: "https://avatars.githubusercontent.com/u/2?v=4"
+      }
+    });
+    let resolveUpdated: ((lookup: unknown) => void) | undefined;
+    const updated = new Promise<unknown>((resolve) => {
+      resolveUpdated = resolve;
+    });
+    const request = service.request(
+      { ...INPUT, commitHash: conflictingHash },
+      (lookup) => resolveUpdated?.(lookup)
+    );
+
+    expect(await requireCompletion(request.completion)).toMatchObject({
+      identity: { login: "ada" },
+      cacheState: "stale",
+      refreshState: "in-flight"
+    });
+    expect(await updated).toMatchObject({
+      identity: { login: "different-account" },
+      cacheState: "fresh"
+    });
+
+    const authorKey = buildGitHubCommitAuthorAccountCacheKey(AUTHOR)!;
+    expect(db.prepare(
+      "SELECT status, github_user_id, github_login FROM github_commit_author_account_cache WHERE author_key = ?"
+    ).get(authorKey)).toEqual({
+      status: "ambiguous",
+      github_user_id: null,
+      github_login: null
+    });
+    expect(await requireCompletion(service.request({
+      ...INPUT,
+      commitHash: "2222222222222222222222222222222222222222",
+      cacheOnly: true
+    }).completion)).toEqual({ cacheState: "miss", refreshState: "idle" });
+  });
+
+  it("marks an older conflicting exact proof ambiguous regardless of hydration order", async () => {
+    now = 2_000_000;
+    await requireCompletion(service.request(INPUT).completion);
+
+    const conflictingHash = "1111111111111111111111111111111111111111";
+    const conflictingProof = { ...PROOF, commitSha: conflictingHash };
+    const conflictingKey = buildGitHubCommitAuthorIdentityCacheKey(
+      AUTHOR,
+      conflictingProof
+    )!;
+    db.prepare(
+      `INSERT INTO github_commit_author_identity_cache(
+         identity_key, status, github_user_id, github_login, avatar_url,
+         fetched_at, expires_at, last_accessed_at, failure_count,
+         next_retry_at, updated_at
+       ) VALUES (?, 'resolved', 2, 'different-account', NULL, ?, ?, ?, 0, NULL, ?)`
+    ).run(conflictingKey, 1_000_000, 3_000_000, 1_000_000, 1_000_000);
+
+    expect(await requireCompletion(service.request({
+      ...INPUT,
+      commitHash: conflictingHash,
+      cacheOnly: true
+    }).completion)).toMatchObject({
+      identity: { login: "different-account" },
+      cacheState: "fresh"
+    });
+
+    const authorKey = buildGitHubCommitAuthorAccountCacheKey(AUTHOR)!;
+    expect(db.prepare(
+      "SELECT status, github_user_id, github_login FROM github_commit_author_account_cache WHERE author_key = ?"
+    ).get(authorKey)).toEqual({
+      status: "ambiguous",
+      github_user_id: null,
+      github_login: null
     });
   });
 
@@ -426,7 +603,7 @@ describe("GitHubCommitAuthorIdentityService", () => {
     expect(cachedRow().next_retry_at).toBe(now + 2_000);
   });
 
-  it("does not serve a proven mapping outside its exact GitHub commit proof", async () => {
+  it("reuses a proven author across GitHub repos but never on a non-GitHub remote", async () => {
     await requireCompletion(service.request(INPUT).completion);
     expect(fetchCalls).toBe(1);
 
@@ -467,11 +644,11 @@ describe("GitHubCommitAuthorIdentityService", () => {
       refreshState: "idle",
       refreshedAt: now
     });
-    expect(fetchCalls).toBe(2);
-    expect(requestedProofs).toEqual([PROOF, otherProof]);
+    expect(fetchCalls).toBe(1);
+    expect(requestedProofs).toEqual([PROOF]);
     expect(cachedRow(PROOF)).toBeDefined();
-    expect(cachedRow(otherProof)).toBeDefined();
-    expect(cacheRowCount()).toBe(2);
+    expect(cachedRowOrUndefined(otherProof)).toBeUndefined();
+    expect(cacheRowCount()).toBe(1);
   });
 });
 
@@ -485,6 +662,7 @@ describe("GhCliCommitAuthorIdentityTransport", () => {
           sha: COMMIT_SHA,
           commit: { author: AUTHOR },
           author: {
+            id: 1,
             login: "ada",
             avatar_url: "https://avatars.githubusercontent.com/u/1?v=4"
           }
@@ -534,6 +712,7 @@ describe("GhCliCommitAuthorIdentityTransport", () => {
         }
         if (endpoint === `repos/openclaw/openclaw/commits/${COMMIT_SHA}/pulls`) {
           return JSON.stringify([{ user: {
+            id: 58493,
             login: "steipete",
             avatar_url: "https://avatars.githubusercontent.com/u/58493?v=4"
           } }]);
@@ -550,6 +729,7 @@ describe("GhCliCommitAuthorIdentityTransport", () => {
       sha: COMMIT_SHA,
       author: { name: "Peter Steinberger", email: "steipete@macos.shared" },
       githubAuthor: {
+        id: 58493,
         login: "steipete",
         avatarUrl: "https://avatars.githubusercontent.com/u/58493?v=4"
       }
@@ -648,6 +828,7 @@ function resolvedRemoteCommit(): GitHubCommitAuthorRemoteCommit {
     sha: COMMIT_SHA,
     author: AUTHOR,
     githubAuthor: {
+      id: 1,
       login: "ada",
       avatarUrl: "https://avatars.githubusercontent.com/u/1?v=4"
     }

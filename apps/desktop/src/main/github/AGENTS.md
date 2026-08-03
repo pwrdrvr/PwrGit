@@ -19,13 +19,14 @@ origin isn't github.com, `gh` isn't logged in, or the network fails.
   patches onto the tree in place — no full `repo:list` reload. `listRepos` also
   LEFT JOINs `branch_pr` onto `Worktree.pr` for the initial load.
 - **Commit-author identity**: `github:commitAuthorIdentity` only fetches an
-  exact full commit SHA from a recognized GitHub `origin`; its cache is scoped
-  to that origin and SHA and is read only after validating them. It accepts a
+  exact full commit SHA from a recognized GitHub `origin`. It accepts a
   login/avatar only after SHA + local Git author name/email match. Exact proof
   normally comes from GitHub's commit `author`; when that field is null, a
   unique PR associated with that exact SHA may supply the account only if its
-  login matches the Git author name or email local part. Exact proof
-  metadata lives in SQLite; 64px avatar bytes are deduplicated on disk under
+  login matches the Git author name or email local part. The exact proof and a
+  conflict-safe hashed email→account association live in SQLite, so another
+  GitHub commit by the same proven author paints immediately across repos.
+  64px avatar bytes are deduplicated on disk under
   `userData/cache/github-avatar-thumbnails`, with fetch/access timestamps and
   stale-while-revalidate on hover. IPC exposes only a versioned local
   `pwrgit-avatar://` URL, never the source URL or path; its protocol handler

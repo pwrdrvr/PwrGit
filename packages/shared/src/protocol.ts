@@ -249,9 +249,9 @@ export interface Commands {
     res: { installed: boolean; loggedIn: boolean };
   };
   /**
-   * Return immediately for a known commit and start any eligible exact-commit
-   * verification in the background. `cacheOnly` warms an existing proof without
-   * GitHub lookup on a miss. Proof-scoped results arrive via the targeted event
+   * Return immediately and start any eligible identity verification in the
+   * background. `cacheOnly` warms an existing exact or author-account proof
+   * without GitHub lookup on a miss. Results arrive via the targeted event
    * after the worktree's GitHub origin has been validated.
    */
   "github:commitAuthorIdentity": {
@@ -261,17 +261,17 @@ export interface Commands {
       authorName: string;
       authorEmail: string;
       /**
-       * Warm only an already-proven local identity. A cache-only request never
-       * calls GitHub for a miss; a normal hover request may do so.
+       * Warm only already-proven exact or author-account data. A cache-only
+       * request never calls GitHub for a miss; a normal hover request may.
        */
       cacheOnly?: boolean;
     };
     res: GitHubCommitAuthorIdentityLookup;
   };
   /**
-   * Hydrate every exact-commit identity already cached for a graph before its
-   * rows become interactive. This is local-cache-only on a miss; stale proofs
-   * may revalidate in the background and publish targeted change events.
+   * Hydrate every locally proven commit/author identity before graph rows are
+   * interactive. This is local-cache-only on a miss; stale proofs may publish
+   * targeted refresh events later.
    */
   "github:hydrateCommitAuthorIdentities": {
     req: {
@@ -464,8 +464,8 @@ export interface Events {
    */
   "pr:changed": { repoId: string; prs: Record<string, PrSummary | null> };
   /**
-   * A non-blocking exact-commit verification settled. Consumers that requested
-   * this commit can repaint their context without polling or blocking hover.
+   * A non-blocking proof-backed identity lookup settled. Consumers that
+   * requested this commit can repaint without polling or blocking hover.
    */
   "github:commitAuthorIdentityChanged": {
     worktreeId: string;

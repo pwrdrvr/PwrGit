@@ -110,10 +110,13 @@ export function shouldRequestCommitAuthorIdentity(
     (lookup.avatarCache.nextRetryAt === undefined || lookup.avatarCache.nextRetryAt <= now);
 }
 
-// An exact proof resolves to this opaque local resource. Cache hydration waits
-// for decode before graph rows become interactive, so the first tooltip paint
-// can reuse Chromium's decoded resource instead of visibly filling it later.
-const warmedCommitAuthorAvatarUrls = new Set<string>();
+// A proof-backed identity resolves to this opaque local resource. Cache
+// hydration waits for decode before graph rows become interactive and retains
+// the decoded image for the graph session. Keeping the element alive matters
+// for custom protocols: Chromium may otherwise discard its decoded surface
+// before a tooltip creates its own image element, causing one initials frame.
+const MAX_RETAINED_COMMIT_AUTHOR_AVATARS = 256;
+const warmedCommitAuthorAvatars = new Map<string, HTMLImageElement>();
 const warmingCommitAuthorAvatarUrls = new Map<string, Promise<void>>();
 function warmCommitAuthorAvatar(
   lookup: GitHubCommitAuthorIdentityLookup
@@ -122,7 +125,7 @@ function warmCommitAuthorAvatar(
   if (
     avatarUrl === undefined ||
     !avatarUrl.startsWith("pwrgit-avatar://thumbnail/") ||
-    warmedCommitAuthorAvatarUrls.has(avatarUrl) ||
+    warmedCommitAuthorAvatars.has(avatarUrl) ||
     typeof Image === "undefined"
   ) {
     return Promise.resolve();
@@ -136,7 +139,11 @@ function warmCommitAuthorAvatar(
   image.src = avatarUrl;
   const completion = image.decode()
     .then(() => {
-      warmedCommitAuthorAvatarUrls.add(avatarUrl);
+      if (warmedCommitAuthorAvatars.size >= MAX_RETAINED_COMMIT_AUTHOR_AVATARS) {
+        const oldest = warmedCommitAuthorAvatars.keys().next().value;
+        if (oldest !== undefined) warmedCommitAuthorAvatars.delete(oldest);
+      }
+      warmedCommitAuthorAvatars.set(avatarUrl, image);
     })
     .catch(() => {
       // A missing/damaged local file still leaves the proven login usable.
@@ -454,9 +461,9 @@ export function LineageGraph({
   }, [commitContext.visible]);
 
   // Identity verification is lazy like diffstats, but it must never delay a
-  // context card. Proven results are retained by full commit hash only for the
-  // current worktree view, which resets on a worktree switch. The service
-  // validates the exact GitHub origin/SHA before it emits them.
+  // context card. Renderer results are retained by full commit hash for the
+  // current worktree view; the main process may reuse an author account that
+  // was established by an exact GitHub commit proof.
   useEffect(() => {
     return subscribe("github:commitAuthorIdentityChanged", (payload) => {
       if (payload.worktreeId !== worktreeId) return;
@@ -502,7 +509,7 @@ export function LineageGraph({
     if (hoveredVm === undefined) return;
     const commit = hoveredVm.commit;
     const lookup = commitAuthorIdentityLookups[commit.hash];
-    // A result comes only from the main-process exact-commit proof. Keep the
+    // A result comes only from a main-process proof-backed cache. Keep the
     // display data while respecting its persisted TTL/backoff metadata, so a
     // later hover can revalidate an old identity without a network image load.
     if (!shouldRequestCommitAuthorIdentity(lookup, now)) return;

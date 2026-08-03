@@ -99,6 +99,70 @@ describe("github:commitAuthorIdentity handler", () => {
     });
   });
 
+  it("retries local misses after exact rows seed reusable author accounts", async () => {
+    const secondHash = "fedcba9876543210fedcba9876543210fedcba98";
+    let secondReads = 0;
+    const identities = {
+      request: vi.fn((input: { commitHash: string }) => {
+        if (input.commitHash === request.commitHash) {
+          return {
+            lookup: { cacheState: "miss" as const, refreshState: "in-flight" as const },
+            completion: Promise.resolve({
+              identity: { login: "ada" },
+              cacheState: "fresh" as const,
+              refreshState: "idle" as const
+            })
+          };
+        }
+        secondReads += 1;
+        return {
+          lookup: { cacheState: "miss" as const, refreshState: "in-flight" as const },
+          completion: Promise.resolve(secondReads === 1
+            ? { cacheState: "miss" as const, refreshState: "idle" as const }
+            : {
+                identity: { login: "ada" },
+                cacheState: "fresh" as const,
+                refreshState: "idle" as const
+              })
+        };
+      })
+    } as unknown as GitHubCommitAuthorIdentityService;
+    const bus = new CommandBus();
+    registerGitHubHandlers(bus, {} as PrService, identities);
+
+    await expect(bus.dispatch("github:hydrateCommitAuthorIdentities", {
+      worktreeId: request.worktreeId,
+      commits: [
+        {
+          commitHash: request.commitHash,
+          authorName: request.authorName,
+          authorEmail: request.authorEmail
+        },
+        {
+          commitHash: secondHash,
+          authorName: "A. Lovelace",
+          authorEmail: request.authorEmail
+        }
+      ]
+    })).resolves.toEqual({
+      ok: true,
+      value: {
+        [request.commitHash]: {
+          identity: { login: "ada" },
+          cacheState: "fresh",
+          refreshState: "idle"
+        },
+        [secondHash]: {
+          identity: { login: "ada" },
+          cacheState: "fresh",
+          refreshState: "idle"
+        }
+      }
+    });
+    expect(identities.request).toHaveBeenCalledTimes(3);
+    expect(secondReads).toBe(2);
+  });
+
   it("waits for a cache-only local read", async () => {
     let complete:
       | ((value: { cacheState: "fresh"; refreshState: "idle" }) => void)
