@@ -26,7 +26,7 @@ describe("rebase tool copy", () => {
     const copy = `${panel} ${selection}`;
 
     expect(copy).toContain("Rebase tool");
-    expect(copy).toContain("Isolated check required before apply");
+    expect(copy).toContain("Isolated check · hooks and signing disabled");
     expect(copy).toContain("Open rebase tool");
     expect(copy).not.toMatch(/Codex|\bAI\b|ACP|assistant|Ask agent/i);
   });

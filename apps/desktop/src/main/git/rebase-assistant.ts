@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,7 +14,16 @@ import {
 import type { GitExec } from "./dugite";
 import type { CommitIdentity } from "./git-service";
 
-export type RebaseDryRunSuccess = { sourceHead: string };
+export type RebaseSourceState = {
+  head: string;
+  /** Full symbolic ref, or null when HEAD is detached. */
+  headRef: string | null;
+};
+
+export type RebaseDryRunSuccess = {
+  sourceHead: string;
+  sourceRef: string | null;
+};
 
 export type RebaseDryRunOptions = {
   /** Test seam; production checks use the operating system temp directory. */
@@ -113,25 +123,46 @@ export async function validateSelection(
   return ok({ oldest, base: baseRaw.value.stdout.trim() });
 }
 
-async function readHead(git: GitExec, cwd: string): Promise<Result<string>> {
-  const raw = await git(["rev-parse", "HEAD"], cwd);
-  if (!raw.ok) return raw;
-  if (raw.value.exitCode !== 0 || raw.value.stdout.trim() === "") {
+async function readSourceState(
+  git: GitExec,
+  cwd: string
+): Promise<Result<RebaseSourceState>> {
+  const head = await git(["rev-parse", "HEAD"], cwd);
+  if (!head.ok) return head;
+  if (head.value.exitCode !== 0 || head.value.stdout.trim() === "") {
     return err({
       kind: "rebase",
       code: "head_unavailable",
       message: "Could not read the current commit."
     });
   }
-  return ok(raw.value.stdout.trim());
+
+  const symbolic = await git(["symbolic-ref", "--quiet", "HEAD"], cwd);
+  if (!symbolic.ok) return symbolic;
+  if (symbolic.value.exitCode !== 0 && symbolic.value.exitCode !== 1) {
+    return err({
+      kind: "rebase",
+      code: "head_ref_unavailable",
+      message: "Could not identify the checked-out branch."
+    });
+  }
+  return ok({
+    head: head.value.stdout.trim(),
+    headRef:
+      symbolic.value.exitCode === 0 ? symbolic.value.stdout.trim() : null
+  });
+}
+
+function sameSource(a: RebaseSourceState, b: RebaseSourceState): boolean {
+  return a.head === b.head && a.headRef === b.headRef;
 }
 
 async function preflightRebase(
   git: GitExec,
   cwd: string,
   commits: RebaseCommitRef[],
-  expectedHead?: string
-): Promise<Result<{ base: string; head: string }>> {
+  expectedSource?: RebaseSourceState
+): Promise<Result<{ base: string; source: RebaseSourceState }>> {
   const status = await git(["status", "--porcelain"], cwd);
   if (!status.ok) return status;
   if (status.value.exitCode !== 0) {
@@ -149,39 +180,49 @@ async function preflightRebase(
     });
   }
 
-  const before = await readHead(git, cwd);
+  const before = await readSourceState(git, cwd);
   if (!before.ok) return before;
-  if (expectedHead !== undefined && before.value !== expectedHead) {
+  if (
+    expectedSource !== undefined &&
+    !sameSource(before.value, expectedSource)
+  ) {
     return err({
       kind: "rebase",
       code: "dry_run_stale",
-      message: "The branch changed since the last check. Run the check again."
+      message:
+        "The checked-out branch or commit changed since the last check. Run the check again."
     });
   }
 
   const validated = await validateSelection(git, cwd, commits);
   if (!validated.ok) return validated;
-  const after = await readHead(git, cwd);
+  const after = await readSourceState(git, cwd);
   if (!after.ok) return after;
-  if (after.value !== before.value) {
+  if (!sameSource(after.value, before.value)) {
     return err({
       kind: "rebase",
       code: "source_changed",
-      message: "The branch changed while it was being checked. Try again."
+      message:
+        "The checked-out branch or commit changed while it was being checked. Try again."
     });
   }
-  return ok({ base: validated.value.base, head: after.value });
+  return ok({ base: validated.value.base, source: after.value });
 }
 
 function gitConfigArgs(
   identity: CommitIdentity,
-  hooksPath?: string
+  hooksPath: string
 ): string[] {
-  const args: string[] = [];
-  if (hooksPath !== undefined) {
-    args.push("-c", `core.hooksPath=${hooksPath}`);
-  }
-  args.push("-c", `user.email=${identity.email}`);
+  const args = [
+    "-c",
+    `core.hooksPath=${hooksPath}`,
+    "-c",
+    "commit.gpgSign=false",
+    "-c",
+    "rerere.enabled=false",
+    "-c",
+    `user.email=${identity.email}`
+  ];
   if (identity.name !== undefined && identity.name !== "") {
     args.push("-c", `user.name=${identity.name}`);
   }
@@ -196,7 +237,10 @@ async function rewriteSelectedCommits(
   identity: CommitIdentity,
   base: string,
   restoreHead?: string,
-  hooksPath?: string
+  hooksPath: string = join(
+    tmpdir(),
+    `pwrgit-disabled-hooks-${randomUUID()}`
+  )
 ): Promise<Result<void>> {
   const configArgs = gitConfigArgs(identity, hooksPath);
   const restore = async (): Promise<void> => {
@@ -253,46 +297,53 @@ async function rewriteSelectedCommits(
   return ok(undefined);
 }
 
-async function simulateInClone(
+async function simulateInTemporaryRepository(
   git: GitExec,
   sourceCwd: string,
   cloneRoot: string,
   commits: RebaseCommitRef[],
   op: RebaseOperation,
   identity: CommitIdentity,
-  sourceHead: string
+  source: RebaseSourceState
 ): Promise<Result<void>> {
-  const clonePath = join(cloneRoot, "repo");
+  const repositoryPath = join(cloneRoot, "repo");
   const hooksPath = join(cloneRoot, "disabled-hooks");
   await mkdir(hooksPath);
 
-  // --no-local prevents hardlinks and direct object copying from coupling the
-  // disposable repository to the source repository's object storage.
-  const clone = await git(
-    [
-      "-c",
-      `core.hooksPath=${hooksPath}`,
-      "clone",
-      "--no-checkout",
-      "--no-local",
-      "--no-hardlinks",
-      "--",
-      sourceCwd,
-      clonePath
-    ],
-    cloneRoot
-  );
-  if (!clone.ok || clone.value.exitCode !== 0) {
+  const init = await git(["init", "--quiet", repositoryPath], cloneRoot);
+  if (!init.ok || init.value.exitCode !== 0) {
     return err({
       kind: "rebase",
-      code: "clone_failed",
+      code: "init_failed",
       message: "Could not create an isolated repository for the check."
     });
   }
 
+  // Fetch only the checked ref, selected commits, and their base. Starting
+  // from an empty repo prevents unrelated branches and tags from being copied.
+  const fetch = await git(
+    [
+      "fetch",
+      "--no-tags",
+      "--no-recurse-submodules",
+      `--depth=${commits.length + 1}`,
+      "--",
+      sourceCwd,
+      source.headRef ?? "HEAD"
+    ],
+    repositoryPath
+  );
+  if (!fetch.ok || fetch.value.exitCode !== 0) {
+    return err({
+      kind: "rebase",
+      code: "fetch_failed",
+      message: "Could not copy the selected history into the isolated repository."
+    });
+  }
+
   const checkout = await git(
-    ["-c", `core.hooksPath=${hooksPath}`, "checkout", "--detach", sourceHead],
-    clonePath
+    ["-c", `core.hooksPath=${hooksPath}`, "checkout", "--detach", source.head],
+    repositoryPath
   );
   if (!checkout.ok || checkout.value.exitCode !== 0) {
     return err({
@@ -302,11 +353,11 @@ async function simulateInClone(
     });
   }
 
-  const validated = await validateSelection(git, clonePath, commits);
+  const validated = await validateSelection(git, repositoryPath, commits);
   if (!validated.ok) return validated;
   return rewriteSelectedCommits(
     git,
-    clonePath,
+    repositoryPath,
     commits,
     op,
     identity,
@@ -334,7 +385,7 @@ async function dryRunIdentity(
 }
 
 /**
- * Check the exact rewrite in a disposable local clone. The source worktree is
+ * Check the exact rewrite in a disposable local repository. The source worktree is
  * only read: every checkout, reset, stage, commit, and cherry-pick runs in the
  * temporary clone, which is removed before this function returns.
  */
@@ -367,14 +418,14 @@ export async function dryRunRebase(
   let cleanupFailure: unknown;
   try {
     try {
-      simulation = await simulateInClone(
+      simulation = await simulateInTemporaryRepository(
         git,
         sourceCwd,
         cloneRoot,
         commits,
         op,
         await dryRunIdentity(git, sourceCwd, identity),
-        preflight.value.head
+        preflight.value.source
       );
     } catch (cause) {
       simulation = err({
@@ -412,7 +463,10 @@ export async function dryRunRebase(
     const error: PwrGitError = { ...simulation.error, message };
     return err(error);
   }
-  return ok({ sourceHead: preflight.value.head });
+  return ok({
+    sourceHead: preflight.value.source.head,
+    sourceRef: preflight.value.source.headRef
+  });
 }
 
 /** Apply the rebase locally with clean-tree checks and rollback. Never pushes. */
@@ -422,9 +476,9 @@ export async function applyRebase(
   commits: RebaseCommitRef[],
   op: RebaseOperation,
   identity: CommitIdentity,
-  expectedHead?: string
+  expectedSource?: RebaseSourceState
 ): Promise<Result<void>> {
-  const preflight = await preflightRebase(git, cwd, commits, expectedHead);
+  const preflight = await preflightRebase(git, cwd, commits, expectedSource);
   if (!preflight.ok) return preflight;
   const result = await rewriteSelectedCommits(
     git,
@@ -433,7 +487,7 @@ export async function applyRebase(
     op,
     identity,
     preflight.value.base,
-    preflight.value.head
+    preflight.value.source.head
   );
   if (!result.ok && result.error.code === "conflict") {
     return err({

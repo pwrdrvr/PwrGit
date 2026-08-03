@@ -27,6 +27,7 @@ type Approval = {
   worktreeId: string;
   path: string;
   sourceHead: string;
+  sourceRef: string | null;
   commits: RebaseCommitRef[];
   op: RebaseOperation;
 };
@@ -151,6 +152,7 @@ export function registerRebaseHandlers(
       worktreeId: req.worktreeId,
       path: row.path,
       sourceHead: checked.value.sourceHead,
+      sourceRef: checked.value.sourceRef,
       commits: req.commits.map((commit) => ({ ...commit })),
       op: req.op
     });
@@ -158,7 +160,8 @@ export function registerRebaseHandlers(
       status: "clean" as const,
       approvalToken,
       sourceHead: checked.value.sourceHead,
-      message: "Check passed. This rebase applies cleanly in an isolated copy."
+      message:
+        "Check passed under PwrGit's no-hooks, no-signing policy. Other repo-local Git settings can still affect Apply."
     });
   });
 
@@ -202,7 +205,7 @@ export function registerRebaseHandlers(
       req.commits,
       req.op,
       identityFor(row),
-      approval.sourceHead
+      { head: approval.sourceHead, headRef: approval.sourceRef }
     );
     if (!result.ok) return result;
     refresher.refreshWorktree(req.worktreeId);

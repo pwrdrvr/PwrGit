@@ -131,7 +131,7 @@ export function RebaseTab({
         <div>
           <div className="rebase-head__title">Rebase tool</div>
           <div className="rebase-head__sub">
-            Isolated check required before apply
+            Isolated check · hooks and signing disabled
           </div>
         </div>
       </div>
@@ -185,7 +185,7 @@ export function RebaseTab({
           {check === "checking" && (
             <div className="rebase-check-result" role="status">
               <span>Checking</span>
-              Running the exact rebase in a disposable local clone…
+              Running the exact rebase in a disposable local repository…
             </div>
           )}
           {check !== "idle" && check !== "checking" && (
@@ -218,8 +218,9 @@ export function RebaseTab({
             </button>
           </div>
           <div className="rebase-note">
-            Check uses a disposable local clone. Apply rewrites this worktree.
-            Nothing is pushed.
+            Hooks, signing, and rerere are disabled for both check and apply.
+            Other repo-local Git settings can still affect Apply. Nothing is
+            pushed.
           </div>
         </>
       )}

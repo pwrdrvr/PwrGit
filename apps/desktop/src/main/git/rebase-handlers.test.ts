@@ -39,8 +39,8 @@ function setup() {
   const dryRun = vi.fn(
     async (
       ..._args: Parameters<RebaseHandlerDependencies["dryRun"]>
-    ): Promise<Result<{ sourceHead: string }>> =>
-      ok({ sourceHead: "head-at-check" })
+    ): Promise<Result<{ sourceHead: string; sourceRef: string | null }>> =>
+      ok({ sourceHead: "head-at-check", sourceRef: "refs/heads/feature" })
   );
   const refresher = {
     refreshWorktree: vi.fn()
@@ -75,6 +75,11 @@ describe("rebase handler approval gate", () => {
       op: "squash"
     });
     expect(checked.ok && checked.value.status).toBe("clean");
+    if (checked.ok && checked.value.status === "clean") {
+      expect(checked.value.message).toContain(
+        "Other repo-local Git settings can still affect Apply"
+      );
+    }
 
     const result = await bus.dispatch("rebase:apply", {
       worktreeId: "wt-1",
@@ -129,7 +134,10 @@ describe("rebase handler approval gate", () => {
     });
     expect(result.ok).toBe(false);
     expect(apply).toHaveBeenCalledOnce();
-    expect(apply.mock.calls[0]?.[5]).toBe("head-at-check");
+    expect(apply.mock.calls[0]?.[5]).toEqual({
+      head: "head-at-check",
+      headRef: "refs/heads/feature"
+    });
   });
 
   it("returns a typed snag and issues no approval when the check fails", async () => {
