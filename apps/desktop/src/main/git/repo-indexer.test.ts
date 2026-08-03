@@ -1,10 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import {
-  mkdirSync,
-  mkdtempSync,
-  realpathSync,
-  writeFileSync
-} from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -226,17 +221,23 @@ describe("RepoIndexer", () => {
       roots: [isolatedRoot]
     });
     const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
+    const canonical = (await isolatedIndexer.rescanProfile(profile)).find(
+      (repo) => repo.name === "repo"
+    );
+    if (canonical === undefined) throw new Error("canonical repo missing");
 
     // Older builds could index a LINKED worktree dir as a repo in its own
     // right; discovery canonicalises now, so forge the legacy row directly.
+    // 'manual' because pruneScannedRepos would drop a stale 'scan' row at the
+    // next startup rescan — only manual rows survive to reach this path.
     isolatedDb
       .prepare(
         `INSERT INTO repos (id, profile_id, name, path, source)
-         VALUES (?, ?, ?, ?, 'scan')`
+         VALUES (?, ?, ?, ?, 'manual')`
       )
-      .run("fossil", profile.id, "linked", linkedPath);
+      .run("fossil", profile.id, "fossilrow", linkedPath);
     expect(isolatedIndexer.getRepo("fossil")).not.toBeNull();
-    expect(isolatedIndexer.searchAll("linked")).not.toHaveLength(0);
+    expect(isolatedIndexer.searchAll("fossilrow")).not.toHaveLength(0);
 
     const result = await isolatedIndexer.refreshRepoWorktrees("fossil");
 
@@ -245,18 +246,22 @@ describe("RepoIndexer", () => {
     // refresh failed while they watch it visibly succeed.
     expect(result.ok).toBe(true);
     if (!result.ok) return;
+    // Compare against the indexed repo's path, not a locally joined one: git
+    // reports its own normalisation (POSIX separators on Windows, /private/var
+    // for macOS temp dirs, long names rather than 8.3), which no amount of
+    // node:path/realpathSync reconstruction reliably reproduces.
     expect(result.value).toEqual({
       outcome: "deindexed",
       profileId: profile.id,
-      // git reports the resolved path, and on macOS the temp dir arrives via
-      // the /var → /private/var symlink.
-      ownerPath: realpathSync(repoPath)
+      ownerPath: canonical.path
     });
     expect(isolatedIndexer.getRepo("fossil")).toBeNull();
 
     // The delete goes through raw SQL, so ⌘F only stays correct as long as the
     // FTS triggers (and the worktree cascade behind them) keep firing.
-    expect(isolatedIndexer.searchAll("linked")).toHaveLength(0);
+    expect(isolatedIndexer.searchAll("fossilrow")).toHaveLength(0);
+    // The canonical repo keeps its own rows — the fossil's cleanup is scoped.
+    expect(isolatedIndexer.getRepo(canonical.id)?.worktrees).toHaveLength(2);
   });
 });
 
