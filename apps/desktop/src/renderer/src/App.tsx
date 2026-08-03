@@ -243,15 +243,15 @@ export function App() {
     selectedWorktree?.isDefaultBranch
   ]);
 
-  // A negative branch association has no PR number to status-poll yet. Keep
-  // the old focused discovery cadence until a PR appears; once it does, the
-  // shared main-process monitor above owns its single deduplicated poll.
+  // No PR and terminal PRs need an independent branch-name lookup: a branch
+  // can be reused for a later PR that exact-number status polling cannot find.
+  // Open PRs use only the shared status monitor until they become terminal.
   useEffect(() => {
     if (
       selectedRepo === null ||
       selectedWorktree === null ||
       selectedWorktree.isDefaultBranch ||
-      selectedWorktree.pr !== undefined
+      selectedWorktree.pr?.state === "open"
     ) {
       return;
     }

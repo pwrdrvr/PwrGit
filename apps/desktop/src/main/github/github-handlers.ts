@@ -3,7 +3,7 @@ import {
   type GitHubCommitAuthorIdentityLookup,
   type PrSummary
 } from "@pwrgit/shared";
-import type { CommandBus } from "../command-bus";
+import type { CommandBus, CommandContext } from "../command-bus";
 import { emitEvent } from "../ipc";
 import type { GitHubCommitAuthorIdentityService } from "./commit-author-identity";
 import { CommitAssociationMonitor } from "./commit-association-monitor";
@@ -23,7 +23,10 @@ export function registerGitHubHandlers(
   bus: CommandBus,
   prs: PrService,
   commitAuthorIdentities: GitHubCommitAuthorIdentityService
-): () => void {
+): {
+  stop: () => void;
+  releaseWebContents: (webContentsId: number) => void;
+} {
   const publishBranchPrs = (
     repoId: string,
     changed: Map<string, PrSummary | null>
@@ -51,6 +54,20 @@ export function registerGitHubHandlers(
     }
   });
   const reasonGenerations = new Map<string, number>();
+  const reasonsByWebContents = new Map<number, Set<string>>();
+  const ownedReason = (
+    kind: "commit-list" | "worktree",
+    monitorId: string,
+    ctx: CommandContext
+  ): string | null => {
+    const webContentsId = ctx.webContentsId;
+    if (webContentsId === undefined) return null;
+    const reasonId = `${kind}:webContents:${webContentsId}:${monitorId}`;
+    const reasons = reasonsByWebContents.get(webContentsId) ?? new Set<string>();
+    reasons.add(reasonId);
+    reasonsByWebContents.set(webContentsId, reasons);
+    return reasonId;
+  };
   const replaceReason = (
     reasonId: string,
     targets: PrMonitorTarget[]
@@ -137,11 +154,12 @@ export function registerGitHubHandlers(
 
   bus.register("github:status", async () => ok(await getGhStatus()));
 
-  bus.register("pr:replaceVisibleCommits", async (req) => {
+  bus.register("pr:replaceVisibleCommits", async (req, ctx) => {
     const hashes = boundedCommitHashes(req.commitHashes);
     const monitorId = req.monitorId.trim().slice(0, 128);
     if (monitorId === "") return ok({});
-    const reasonId = `commit-list:${req.worktreeId}:${monitorId}`;
+    const reasonId = ownedReason("commit-list", monitorId, ctx);
+    if (reasonId === null) return ok({});
     if (hashes.length === 0) {
       clearVisibleReason(reasonId, req.repoId);
       return ok({});
@@ -181,10 +199,11 @@ export function registerGitHubHandlers(
     return ok(Object.fromEntries(prs.cachedCommitPrs(req.repoId, hashes)));
   });
 
-  bus.register("pr:replaceWorktreeMonitor", async (req) => {
+  bus.register("pr:replaceWorktreeMonitor", async (req, ctx) => {
     const monitorId = req.monitorId.trim().slice(0, 128);
     if (monitorId === "") return ok(null);
-    const reasonId = `worktree:${monitorId}`;
+    const reasonId = ownedReason("worktree", monitorId, ctx);
+    if (reasonId === null) return ok(null);
     const target = req.target;
     if (target === undefined) {
       replaceReason(reasonId, []);
@@ -300,10 +319,28 @@ export function registerGitHubHandlers(
     return ok(request.lookup);
   });
 
-  return () => {
+  const releaseWebContents = (webContentsId: number): void => {
+    const reasons = reasonsByWebContents.get(webContentsId);
+    if (reasons === undefined) return;
+    for (const reasonId of reasons) {
+      const visible = visibleCommitReasons.get(reasonId);
+      if (visible !== undefined) {
+        commitAssociationMonitor.replace(reasonId, visible.repoId, []);
+        visibleCommitReasons.delete(reasonId);
+      }
+      prStatusMonitor.replace(reasonId, []);
+      reasonGenerations.delete(reasonId);
+    }
+    reasonsByWebContents.delete(webContentsId);
+  };
+
+  const stop = (): void => {
     visibleCommitReasons.clear();
     reasonGenerations.clear();
+    reasonsByWebContents.clear();
     commitAssociationMonitor.stop();
     prStatusMonitor.stop();
   };
+
+  return { stop, releaseWebContents };
 }

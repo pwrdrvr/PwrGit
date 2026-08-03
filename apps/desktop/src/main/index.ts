@@ -332,7 +332,7 @@ if (!gotSingleInstanceLock) {
     registerRebaseHandlers(bus, db, refresher);
     registerDialogHandlers(bus);
     registerShellHandlers(bus);
-    const stopGitHubHandlers = registerGitHubHandlers(
+    const githubHandlers = registerGitHubHandlers(
       bus,
       prService,
       commitAuthorIdentityService
@@ -348,7 +348,9 @@ if (!gotSingleInstanceLock) {
     });
     diagnostics.sync(); // start any settings-enabled monitors at boot
 
-    registerIpc(bus);
+    registerIpc(bus, {
+      onWebContentsDestroyed: githubHandlers.releaseWebContents
+    });
     initAutoUpdater();
 
     const refreshActive = (): void => {
@@ -363,7 +365,7 @@ if (!gotSingleInstanceLock) {
     }, 15_000);
     app.on("before-quit", () => {
       clearInterval(activeStatePoll);
-      stopGitHubHandlers();
+      githubHandlers.stop();
     });
 
     // Drain diagnostics before quitting so final monitor-stopped events and

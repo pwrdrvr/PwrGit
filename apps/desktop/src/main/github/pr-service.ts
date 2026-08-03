@@ -524,16 +524,15 @@ export class PrService {
       })[];
     const updateBranch = this.db.prepare(
       `UPDATE branch_pr SET url = @url, title = @title, state = @state,
-         is_draft = @is_draft, fetched_at = @fetched_at
+         is_draft = @is_draft
        WHERE repo_id = @repo_id AND branch = @key`
     );
     const updateCommit = this.db.prepare(
       `UPDATE commit_pr SET url = @url, title = @title, state = @state,
-         is_draft = @is_draft, fetched_at = @fetched_at
+         is_draft = @is_draft
        WHERE repo_id = @repo_id AND commit_sha = @key`
     );
     const changed = emptyPrStatusDeltas();
-    const fetchedAt = new Date(this.now()).toISOString();
     this.db.transaction(() => {
       const apply = (
         rows: Array<CachedPr & { number: number }>,
@@ -547,7 +546,7 @@ export class PrService {
           const next = cachedFromSummary(pr);
           const key = keyOf(row);
           if (!sameCachedPr(row, next)) output.set(key, pr);
-          update.run({ repo_id: repoId, key, ...next, fetched_at: fetchedAt });
+          update.run({ repo_id: repoId, key, ...next });
         }
       };
       apply(

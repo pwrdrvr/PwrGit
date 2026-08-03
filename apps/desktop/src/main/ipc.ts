@@ -10,11 +10,24 @@ import {
 import type { CommandBus } from "./command-bus";
 
 /** Bridge the command bus onto ipcMain. Call once, after `app.whenReady`. */
-export function registerIpc(bus: CommandBus): void {
+export function registerIpc(
+  bus: CommandBus,
+  lifecycle: { onWebContentsDestroyed?: (webContentsId: number) => void } = {}
+): void {
+  const trackedWebContents = new Set<number>();
   ipcMain.handle(
     IPC_DISPATCH_CHANNEL,
-    (_event, name: CommandName, req: unknown) =>
-      bus.dispatch(name, req as Req<CommandName>)
+    (event, name: CommandName, req: unknown) => {
+      const webContentsId = event.sender.id;
+      if (!trackedWebContents.has(webContentsId)) {
+        trackedWebContents.add(webContentsId);
+        event.sender.once("destroyed", () => {
+          trackedWebContents.delete(webContentsId);
+          lifecycle.onWebContentsDestroyed?.(webContentsId);
+        });
+      }
+      return bus.dispatch(name, req as Req<CommandName>, { webContentsId });
+    }
   );
 }
 

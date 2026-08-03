@@ -231,4 +231,47 @@ describe("PrService", () => {
     expect(service.cachedBranchPr("repo", "feature/pr-state")?.state).toBe("merged");
     expect(service.cachedCommitPrs("repo", [hash]).get(hash)?.state).toBe("merged");
   });
+
+  it("does not let terminal status polls hide a later PR on a reused branch", async () => {
+    response = new Map([[
+      "feature/pr-state",
+      pr({ state: "merged", isDraft: false })
+    ]]);
+    await service.refreshRepo("repo", {
+      branches: ["feature/pr-state"],
+      trigger: "scheduled"
+    });
+    const associationFetchedAt = (
+      db.prepare(
+        "SELECT fetched_at FROM branch_pr WHERE repo_id = 'repo' AND branch = 'feature/pr-state'"
+      ).get() as { fetched_at: string }
+    ).fetched_at;
+
+    now += 60_000;
+    statusResponse = new Map([[
+      42,
+      pr({ state: "merged", isDraft: false, title: "Updated old PR" })
+    ]]);
+    await service.refreshPrNumbers("repo", [42]);
+    expect((
+      db.prepare(
+        "SELECT fetched_at FROM branch_pr WHERE repo_id = 'repo' AND branch = 'feature/pr-state'"
+      ).get() as { fetched_at: string }
+    ).fetched_at).toBe(associationFetchedAt);
+
+    response = new Map([[
+      "feature/pr-state",
+      pr({ number: 43, state: "open", isDraft: false })
+    ]]);
+    await service.refreshRepo("repo", {
+      branches: ["feature/pr-state"],
+      trigger: "scheduled"
+    });
+
+    expect(fetches).toEqual([
+      ["feature/pr-state"],
+      ["feature/pr-state"]
+    ]);
+    expect(service.cachedBranchPr("repo", "feature/pr-state")?.number).toBe(43);
+  });
 });
