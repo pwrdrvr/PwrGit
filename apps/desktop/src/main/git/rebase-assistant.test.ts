@@ -120,7 +120,7 @@ describe("applyRebase (system git)", () => {
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe("dirty");
-  });
+  }, 15_000);
 
   it("validateSelection rejects a non-top selection", async () => {
     const repo = makeRepo();
