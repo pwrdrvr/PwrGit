@@ -65,6 +65,29 @@ test("creating a profile opens its own window with repos from all roots", async 
     acmeWindow.locator(".repo-row__name", { hasText: "pwr-svc" })
   ).toBeVisible();
 
+  // At the supported minimum sidebar width, every lens label remains intact
+  // beside the display-options trigger.
+  const sidebarResizer = acmeWindow.getByRole("separator", {
+    name: "Resize sidebar"
+  });
+  await sidebarResizer.focus();
+  for (let i = 0; i < 5; i += 1) {
+    await sidebarResizer.press("ArrowLeft");
+  }
+  await expect(sidebarResizer).toHaveAttribute("aria-valuenow", "240");
+  const lensWidths = await acmeWindow.locator(".lens-chip").evaluateAll((chips) =>
+    chips.map((chip) => ({
+      label: chip.textContent?.trim() ?? "unknown",
+      available: chip.clientWidth,
+      required: chip.scrollWidth
+    }))
+  );
+  for (const width of lensWidths) {
+    expect(width.required, `${width.label} lens width`).toBeLessThanOrEqual(
+      width.available
+    );
+  }
+
   // Group-by-folder is the default, and its folder headers stay pinned to the
   // sidebar scrollport while repositories pass underneath.
   await expect(acmeWindow.locator(".repo-group")).toHaveCount(2);
@@ -86,9 +109,18 @@ test("creating a profile opens its own window with repos from all roots", async 
     .toBe(0);
 
   // The grouping preference moved into the compact kebab beside the lenses.
-  await acmeWindow
-    .getByRole("button", { name: "Sidebar display options" })
-    .click();
+  const optionsButton = acmeWindow.getByRole("button", {
+    name: "Sidebar display options"
+  });
+  await optionsButton.click();
+  await expect(optionsButton).toHaveAttribute("aria-expanded", "true");
+  await optionsButton.click();
+  await expect(optionsButton).toHaveAttribute("aria-expanded", "false");
+  await expect(
+    acmeWindow.getByRole("menu", { name: "Sidebar display options" })
+  ).toHaveCount(0);
+
+  await optionsButton.click();
   await acmeWindow.getByRole("menuitem", { name: /Group by folder/ }).click();
   await expect(acmeWindow.locator(".repo-group")).toHaveCount(0);
 

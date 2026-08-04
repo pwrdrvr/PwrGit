@@ -1,4 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type RefObject
+} from "react";
 import { createPortal } from "react-dom";
 
 export type MenuItem =
@@ -21,7 +27,8 @@ export function ContextMenu({
   y,
   items,
   onClose,
-  label
+  label,
+  triggerRef
 }: {
   x: number;
   y: number;
@@ -29,6 +36,8 @@ export function ContextMenu({
   onClose: () => void;
   /** Accessible menu name for callers with more specific actions. */
   label?: string;
+  /** A trigger click toggles the menu instead of counting as an outside click. */
+  triggerRef?: RefObject<HTMLElement | null>;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number }>({
@@ -50,7 +59,14 @@ export function ContextMenu({
 
   useEffect(() => {
     const onDown = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+      const target = e.target as Node;
+      if (
+        ref.current &&
+        !ref.current.contains(target) &&
+        !triggerRef?.current?.contains(target)
+      ) {
+        onClose();
+      }
     };
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === "Escape") onClose();
@@ -67,7 +83,7 @@ export function ContextMenu({
       window.removeEventListener("scroll", onClose, true);
       window.removeEventListener("resize", onClose);
     };
-  }, [onClose]);
+  }, [onClose, triggerRef]);
 
   return createPortal(
     <div

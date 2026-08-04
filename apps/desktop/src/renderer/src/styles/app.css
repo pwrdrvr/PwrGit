@@ -400,6 +400,7 @@ input {
   align-items: center;
   justify-content: center;
   gap: 4px;
+  padding: 0;
   border-radius: 7px;
   border: 1px solid transparent;
   background: transparent;
@@ -442,8 +443,23 @@ input {
   outline-offset: 1px;
 }
 @container (max-width: 310px) {
+  .sidebar__lens {
+    gap: 4px;
+    padding-inline: 8px;
+  }
+  .lens-filter {
+    gap: 0;
+    padding-inline: 2px;
+  }
+  .lens-chip {
+    font-size: 10px;
+  }
   .lens-chip__count {
     display: none;
+  }
+  .sidebar-options {
+    width: 28px;
+    flex-basis: 28px;
   }
 }
 

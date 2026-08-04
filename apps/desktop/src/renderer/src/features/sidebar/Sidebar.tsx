@@ -99,6 +99,7 @@ export function Sidebar({
   });
   const [ctx, setCtx] = useState<ContextState | null>(null);
   const [options, setOptions] = useState<OptionsState | null>(null);
+  const optionsTriggerRef = useRef<HTMLButtonElement>(null);
   const [groupByFolder, setGroupByFolder] = useState<boolean>(() => {
     try {
       return window.localStorage.getItem("pwrgit.groupByFolder") !== "0";
@@ -458,6 +459,7 @@ export function Sidebar({
         <LensFilter lens={lens} counts={counts} onChange={setLens} />
         {canGroup && (
           <button
+            ref={optionsTriggerRef}
             type="button"
             className="sidebar-options"
             aria-label="Sidebar display options"
@@ -549,6 +551,7 @@ export function Sidebar({
           x={options.x}
           y={options.y}
           label="Sidebar display options"
+          triggerRef={optionsTriggerRef}
           items={[
             {
               type: "item",
