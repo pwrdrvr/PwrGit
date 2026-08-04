@@ -7,7 +7,7 @@ import {
 import type { Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
 import { useViewportTooltip } from "../../lib/useViewportTooltip";
 import {
-  orderWorktrees,
+  groupWorktreesForNavigation,
   reorder,
   repoPrimaryBehind,
   SORT_LABEL
@@ -83,17 +83,23 @@ export function RepoRow({
 }) {
   const dragId = useRef<string | null>(null);
   const refreshTooltip = useViewportTooltip();
+  const { primary, pinned, remaining, displayIds } =
+    groupWorktreesForNavigation(repo.worktrees, sort, customOrder);
+  const orderedIds = [...pinned, ...remaining].map((worktree) => worktree.id);
   const [worktreesOpen, setWorktreesOpen] = useState(() => {
     try {
-      return window.localStorage.getItem(`pwrgit.worktreesOpen.${repo.id}`) !== "0";
+      const stored = window.localStorage.getItem(
+        `pwrgit.unpinnedWorktreesOpen.${repo.id}`
+      );
+      return stored === null ? pinned.length === 0 : stored !== "0";
     } catch {
-      return true;
+      return pinned.length === 0;
     }
   });
   useEffect(() => {
     try {
       window.localStorage.setItem(
-        `pwrgit.worktreesOpen.${repo.id}`,
+        `pwrgit.unpinnedWorktreesOpen.${repo.id}`,
         worktreesOpen ? "1" : "0"
       );
     } catch {
@@ -101,17 +107,67 @@ export function RepoRow({
     }
   }, [repo.id, worktreesOpen]);
 
+  const lastSelectedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (selectedWorktreeId === null) {
+      lastSelectedRef.current = null;
+      return;
+    }
+    if (!remaining.some((worktree) => worktree.id === selectedWorktreeId)) {
+      lastSelectedRef.current = null;
+      return;
+    }
+    if (selectedWorktreeId === lastSelectedRef.current) return;
+    lastSelectedRef.current = selectedWorktreeId;
+    setWorktreesOpen(true);
+  }, [remaining, selectedWorktreeId]);
+
   const behind = repoPrimaryBehind(repo);
-  const primary = repo.worktrees.find((w) => w.isPrimary);
-  const linked = repo.worktrees.filter((w) => !w.isPrimary);
-  const ordered = orderWorktrees(linked, sort, customOrder);
-  const orderedIds = ordered.map((w) => w.id);
-  // Selection ranges (⇧-click) span the local checkout + worktrees in display
-  // order; drag reordering only touches the linked worktrees (orderedIds).
-  const displayIds =
-    primary === undefined ? orderedIds : [primary.id, ...orderedIds];
   const wtCount = repo.worktrees.length;
   const activeCollapsed = containsSelection && !expanded;
+
+  const renderWorktree = (worktree: Worktree) => (
+    <WorktreeRow
+      key={worktree.id}
+      worktree={worktree}
+      selected={worktree.id === selectedWorktreeId}
+      multiSelected={selectedIds.has(worktree.id)}
+      now={now}
+      onSelect={(event) => onSelectWorktree(worktree, event, displayIds)}
+      onContextMenu={(event) =>
+        onContextWorktree(worktree, event, displayIds)
+      }
+      onTogglePin={() =>
+        onToggleWorktreePin(worktree.id, !worktree.pinned)
+      }
+      onRemove={() => onRemoveWorktree(worktree.id)}
+      {...(worktree.isDefaultBranch
+        ? {}
+        : {
+            onRefreshPullRequest: () =>
+              onRefreshPullRequest(worktree.branch)
+          })}
+      onDragStart={() => {
+        if (!worktree.isPrimary) dragId.current = worktree.id;
+      }}
+      onDragOver={(event) => {
+        if (!worktree.isPrimary) event.preventDefault();
+      }}
+      onDrop={(event) => {
+        if (worktree.isPrimary) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const dragged = dragId.current;
+        if (dragged !== null) {
+          onReorder(reorder(orderedIds, dragged, worktree.id));
+        }
+        dragId.current = null;
+      }}
+      onDragEnd={() => {
+        dragId.current = null;
+      }}
+    />
+  );
 
   return (
     <div className="repo-block">
@@ -152,9 +208,42 @@ export function RepoRow({
 
       {expanded && (
         <div className="wt-section">
+          <div className="wt-section__elevated">
+            {primary !== undefined && renderWorktree(primary)}
+            {pinned.map(renderWorktree)}
+          </div>
+
+          {selectedIds.size > 1 && (
+            <div className="wt-selbar">
+              <span className="wt-selbar__count">
+                {selectedIds.size} selected
+              </span>
+              <span style={{ flex: 1 }} />
+              <button
+                className="wt-selbar__btn wt-selbar__btn--danger"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onRemoveSelected();
+                }}
+              >
+                Remove
+              </button>
+              <button
+                className="wt-selbar__btn"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onClearSelected();
+                }}
+              >
+                Clear
+              </button>
+            </div>
+          )}
+
           <div className="wt-section__head">
             <button
               className="wt-section__toggle"
+              aria-expanded={worktreesOpen}
               onClick={(event) => {
                 event.stopPropagation();
                 setWorktreesOpen((open) => !open);
@@ -162,7 +251,7 @@ export function RepoRow({
             >
               <span className={`ref-section__chev${worktreesOpen ? " is-open" : ""}`} />
               <span className="wt-section__label">Worktrees</span>
-              <span className="ref-section__count">{wtCount}</span>
+              <span className="ref-section__count">{remaining.length}</span>
             </button>
             <span style={{ flex: 1 }} />
             {/* Scoped to this list on purpose: the same circular-arrows glyph
@@ -226,91 +315,7 @@ export function RepoRow({
 
           {worktreesOpen && (
             <div className="wt-section__body">
-              {primary !== undefined && (
-                <WorktreeRow
-                  key={primary.id}
-                  worktree={primary}
-                  selected={primary.id === selectedWorktreeId}
-                  multiSelected={selectedIds.has(primary.id)}
-                  now={now}
-                  onSelect={(e) => onSelectWorktree(primary, e, displayIds)}
-                  onContextMenu={(e) => onContextWorktree(primary, e, displayIds)}
-                  onTogglePin={() =>
-                    onToggleWorktreePin(primary.id, !primary.pinned)
-                  }
-                  onRemove={() => onRemoveWorktree(primary.id)}
-                  {...(primary.isDefaultBranch
-                    ? {}
-                    : {
-                        onRefreshPullRequest: () =>
-                          onRefreshPullRequest(primary.branch)
-                      })}
-                  onDragStart={() => undefined}
-                  onDragOver={() => undefined}
-                  onDrop={() => undefined}
-                  onDragEnd={() => undefined}
-                />
-              )}
-
-              {selectedIds.size > 1 && (
-                <div className="wt-selbar">
-                  <span className="wt-selbar__count">
-                    {selectedIds.size} selected
-                  </span>
-                  <span style={{ flex: 1 }} />
-                  <button
-                    className="wt-selbar__btn wt-selbar__btn--danger"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRemoveSelected();
-                    }}
-                  >
-                    Remove
-                  </button>
-                  <button
-                    className="wt-selbar__btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onClearSelected();
-                    }}
-                  >
-                    Clear
-                  </button>
-                </div>
-              )}
-
-              {ordered.map((w) => (
-                <WorktreeRow
-                  key={w.id}
-                  worktree={w}
-                  selected={w.id === selectedWorktreeId}
-                  multiSelected={selectedIds.has(w.id)}
-                  now={now}
-                  onSelect={(e) => onSelectWorktree(w, e, displayIds)}
-                  onContextMenu={(e) => onContextWorktree(w, e, displayIds)}
-                  onTogglePin={() => onToggleWorktreePin(w.id, !w.pinned)}
-                  onRemove={() => onRemoveWorktree(w.id)}
-                  {...(w.isDefaultBranch
-                    ? {}
-                    : {
-                        onRefreshPullRequest: () => onRefreshPullRequest(w.branch)
-                      })}
-                  onDragStart={() => {
-                    dragId.current = w.id;
-                  }}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const d = dragId.current;
-                    if (d !== null) onReorder(reorder(orderedIds, d, w.id));
-                    dragId.current = null;
-                  }}
-                  onDragEnd={() => {
-                    dragId.current = null;
-                  }}
-                />
-              ))}
+              {remaining.map(renderWorktree)}
 
               <button
                 className="new-wt"

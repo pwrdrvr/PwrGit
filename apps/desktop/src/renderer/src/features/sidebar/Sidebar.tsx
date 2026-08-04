@@ -26,6 +26,7 @@ const EMPTY_IDS: Set<string> = new Set();
 // ordering). `anchor` is the pivot for shift-click ranges.
 type Selection = { repoId: string; ids: Set<string>; anchor: string | null };
 type ContextState = { x: number; y: number; targets: Worktree[] };
+type OptionsState = { x: number; y: number };
 type NewWorktreeState = {
   repo: Repo;
   initialBranch?: string;
@@ -97,11 +98,12 @@ export function Sidebar({
     anchor: null
   });
   const [ctx, setCtx] = useState<ContextState | null>(null);
+  const [options, setOptions] = useState<OptionsState | null>(null);
   const [groupByFolder, setGroupByFolder] = useState<boolean>(() => {
     try {
-      return window.localStorage.getItem("pwrgit.groupByFolder") === "1";
+      return window.localStorage.getItem("pwrgit.groupByFolder") !== "0";
     } catch {
-      return false;
+      return true;
     }
   });
   useEffect(() => {
@@ -454,20 +456,34 @@ export function Sidebar({
 
       <div className="sidebar__lens">
         <LensFilter lens={lens} counts={counts} onChange={setLens} />
-      </div>
-
-      {canGroup && (
-        <div className="sidebar__group">
+        {canGroup && (
           <button
-            className={`group-toggle${groupByFolder ? " is-on" : ""}`}
-            onClick={() => setGroupByFolder((v) => !v)}
-            title="Group repos by the folder they were found in"
+            type="button"
+            className="sidebar-options"
+            aria-label="Sidebar display options"
+            aria-haspopup="menu"
+            aria-expanded={options !== null}
+            title="Sidebar display options"
+            onClick={(event) => {
+              const rect = event.currentTarget.getBoundingClientRect();
+              setOptions((current) =>
+                current === null
+                  ? {
+                      x: Math.max(8, rect.right - 190),
+                      y: rect.bottom + 4
+                    }
+                  : null
+              );
+            }}
           >
-            <span className="group-toggle__box" />
-            Group by folder
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="12" cy="5" r="2" />
+              <circle cx="12" cy="12" r="2" />
+              <circle cx="12" cy="19" r="2" />
+            </svg>
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
       <div className="sidebar__list">
         {grouped
@@ -525,6 +541,22 @@ export function Sidebar({
           y={ctx.y}
           items={contextItems(ctx.targets)}
           onClose={() => setCtx(null)}
+        />
+      )}
+
+      {options !== null && (
+        <ContextMenu
+          x={options.x}
+          y={options.y}
+          label="Sidebar display options"
+          items={[
+            {
+              type: "item",
+              label: `${groupByFolder ? "✓ " : ""}Group by folder`,
+              onSelect: () => setGroupByFolder((value) => !value)
+            }
+          ]}
+          onClose={() => setOptions(null)}
         />
       )}
     </aside>

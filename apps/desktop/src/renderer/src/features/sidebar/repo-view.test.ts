@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Repo, Worktree } from "@pwrgit/shared";
 import {
   filterReposByLens,
+  groupWorktreesForNavigation,
   groupReposByRoot,
   isPrunableWorktree,
   lensCounts,
@@ -115,6 +116,58 @@ describe("orderWorktrees", () => {
   it("custom order overrides the sort mode", () => {
     const ordered = orderWorktrees(worktrees, "az", ["2", "3", "1"]);
     expect(ordered.map((w) => w.id)).toEqual(["2", "3", "1"]);
+  });
+});
+
+describe("groupWorktreesForNavigation", () => {
+  it("elevates the primary checkout and pinned worktrees above the remaining list", () => {
+    const worktrees = [
+      wt({ id: "primary", branch: "main", isPrimary: true }),
+      wt({
+        id: "recent",
+        branch: "recent",
+        lastActivityAt: "2026-07-10T00:00:00Z"
+      }),
+      wt({
+        id: "favorite",
+        branch: "favorite",
+        pinned: true,
+        lastActivityAt: "2026-06-01T00:00:00Z"
+      })
+    ];
+
+    const grouped = groupWorktreesForNavigation(worktrees, "recent");
+
+    expect(grouped.primary?.id).toBe("primary");
+    expect(grouped.pinned.map((worktree) => worktree.id)).toEqual(["favorite"]);
+    expect(grouped.remaining.map((worktree) => worktree.id)).toEqual(["recent"]);
+    expect(grouped.displayIds).toEqual(["primary", "favorite", "recent"]);
+  });
+
+  it("preserves custom ordering within the elevated and remaining groups", () => {
+    const worktrees = [
+      wt({ id: "primary", branch: "main", isPrimary: true }),
+      wt({ id: "pinned-a", branch: "pinned-a", pinned: true }),
+      wt({ id: "pinned-b", branch: "pinned-b", pinned: true }),
+      wt({ id: "other-a", branch: "other-a" }),
+      wt({ id: "other-b", branch: "other-b" })
+    ];
+
+    const grouped = groupWorktreesForNavigation(worktrees, "recent", [
+      "other-b",
+      "pinned-b",
+      "other-a",
+      "pinned-a"
+    ]);
+
+    expect(grouped.pinned.map((worktree) => worktree.id)).toEqual([
+      "pinned-b",
+      "pinned-a"
+    ]);
+    expect(grouped.remaining.map((worktree) => worktree.id)).toEqual([
+      "other-b",
+      "other-a"
+    ]);
   });
 });
 
