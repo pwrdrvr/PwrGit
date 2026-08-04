@@ -482,7 +482,10 @@ export class CloneService {
          ON CONFLICT(profile_id, path) DO UPDATE SET last_used_at = datetime('now')`
       )
       .run(input.profileId, parentPath);
-    return indexed;
+    return ok({
+      ...indexed.value,
+      path: canonicalExistingPath(indexed.value.path)
+    });
   }
 
   private async repositoriesForOwner(owner: string): Promise<CloneRepository[]> {
@@ -533,7 +536,8 @@ export class CloneService {
           owners.push(parsed.owner);
         }
         const paths = pathsByRepo.get(key) ?? [];
-        if (!paths.includes(repo.path)) paths.push(repo.path);
+        const path = canonicalExistingPath(repo.path);
+        if (!paths.includes(path)) paths.push(path);
         pathsByRepo.set(key, paths);
       }
     });
