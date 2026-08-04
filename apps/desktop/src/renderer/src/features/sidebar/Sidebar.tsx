@@ -50,6 +50,7 @@ export function Sidebar({
   refreshingRepoIds,
   onRefreshRepo,
   onRefreshPullRequest,
+  onCloneRepo,
   onAddFolder,
   onOpenSearch,
   onExpandRepo,
@@ -77,6 +78,7 @@ export function Sidebar({
   refreshingRepoIds: Set<string>;
   onRefreshRepo: (repo: Repo) => void;
   onRefreshPullRequest: (repoId: string, branch: string) => void;
+  onCloneRepo: () => void;
   onAddFolder: () => void;
   onOpenSearch: () => void;
   onExpandRepo: (repoId: string) => void;
@@ -435,6 +437,18 @@ export function Sidebar({
           <span className="kbd" title="⌘F or ⌘K">
             ⌘F
           </span>
+        </button>
+        <button
+          className="clone-repo"
+          onClick={onCloneRepo}
+          disabled={activeProfile === null || activeProfile.roots.length === 0}
+          title={
+            activeProfile !== null && activeProfile.roots.length === 0
+              ? "Add a repo folder before cloning"
+              : "Clone a GitHub repository"
+          }
+        >
+          <span className="new-wt__plus">↓</span> Clone repository…
         </button>
       </div>
 
