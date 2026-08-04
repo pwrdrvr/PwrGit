@@ -46,6 +46,17 @@ Prefer the **Dev** action from `.codex/environments/environment.toml`. It is the
 canonical launch path: from the repository root it runs `nvm use --silent`,
 enables Corepack, and then runs the root `pnpm dev` script.
 
+Before launching, check whether a window titled `PwrGit` already exists and
+reuse it when suitable. Do not launch an Electron binary directly or start a
+second isolated PwrGit instance for ordinary visual verification; if a launch
+is required, use the canonical path above or the fallback below.
+
+For Computer Use, never target the generic `Electron` display name or shared
+`com.github.Electron` bundle ID. Resolve the running PwrGit window and process,
+then target its exact Electron app path. Confirm that executable belongs to
+PwrGit—not PwrAgent, PwrSnap, `trading-system`, or another checkout or project.
+If it cannot be identified unambiguously, stop instead of guessing.
+
 Agent shells hosted by another Electron Pwr app can inherit that parent's
 `ELECTRON_EXEC_PATH`, `ELECTRON_CLI_ARGS`, or `ELECTRON_MAJOR_VER`. Running
 Electron with those overrides can silently launch PwrGit through a sibling
