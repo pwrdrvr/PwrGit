@@ -444,12 +444,12 @@ input {
 }
 @container (max-width: 310px) {
   .sidebar__lens {
-    gap: 4px;
-    padding-inline: 8px;
+    gap: 2px;
+    padding-inline: 6px;
   }
   .lens-filter {
     gap: 0;
-    padding-inline: 2px;
+    padding-inline: 0;
   }
   .lens-chip {
     font-size: 10px;
@@ -458,8 +458,8 @@ input {
     display: none;
   }
   .sidebar-options {
-    width: 28px;
-    flex-basis: 28px;
+    width: 26px;
+    flex-basis: 26px;
   }
 }
 
