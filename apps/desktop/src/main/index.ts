@@ -15,6 +15,8 @@ import { CommandBus } from "./command-bus";
 import { registerDialogHandlers } from "./dialog-handlers";
 import { execGit } from "./git/dugite";
 import { registerBranchHandlers } from "./git/branch-handlers";
+import { registerCloneHandlers } from "./git/clone-handlers";
+import { CloneService } from "./git/clone-service";
 import { registerChangesHandlers } from "./git/changes-handlers";
 import { registerGraphHandlers } from "./git/graph-handlers";
 import { registerRebaseHandlers } from "./git/rebase-handlers";
@@ -218,6 +220,7 @@ if (!gotSingleInstanceLock) {
       roots: []
     });
     const indexer = new RepoIndexer(db, execGit);
+    const cloneService = new CloneService(db, execGit, indexer, profiles);
     const stateService = new WorktreeStateService(db, execGit);
     const refresher = createWorktreeRefresher(stateService, db);
     const prService = new PrService(db, execGit);
@@ -321,6 +324,7 @@ if (!gotSingleInstanceLock) {
       }
     });
     registerRepoHandlers(bus, indexer, profiles);
+    registerCloneHandlers(bus, cloneService);
     registerWorktreeHandlers(bus, stateService, db, refresher, (id) => {
       activeWorktreeId = id;
     });

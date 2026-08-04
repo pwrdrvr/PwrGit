@@ -12,6 +12,9 @@
 
 import type {
   BranchRef,
+  CloneCatalog,
+  CloneProtocol,
+  CloneRepository,
   PushRefPlan,
   PushRefResult,
   ChangeSet,
@@ -226,6 +229,23 @@ export interface Commands {
     res: RepoWorktreeRefresh;
   };
   "repo:add": { req: { profileId: ProfileId; path: string }; res: Repo };
+  /** Repositories and registered/nested destinations shown by the clone dialog. */
+  "repo:cloneCatalog": { req: { profileId: ProfileId }; res: CloneCatalog };
+  /** Verify an exact `owner/name` that was not in the loaded owner catalogs. */
+  "repo:checkCloneSource": {
+    req: { profileId: ProfileId; nameWithOwner: string };
+    res: CloneRepository;
+  };
+  /** Clone into a registered profile root/prefix and index the new checkout. */
+  "repo:clone": {
+    req: {
+      profileId: ProfileId;
+      nameWithOwner: string;
+      protocol: CloneProtocol;
+      parentPath: string;
+    };
+    res: Repo;
+  };
   "repo:search": { req: { query: string }; res: RepoSearchHit[] };
   /** Lazy per-hit status for ⌘F results (cached worktree_state when present;
    *  else one cheap `git log -1` for tip age). Called one hit at a time — the

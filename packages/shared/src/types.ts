@@ -169,6 +169,46 @@ export type Repo = {
   worktrees: Worktree[];
 };
 
+/** Ways the clone dialog can hand a GitHub repository to the local machine. */
+export type CloneProtocol = "ssh" | "https" | "gh_cli";
+
+/** GitHub repository metadata used by the clone autocomplete. */
+export type CloneRepository = {
+  name: string;
+  owner: string;
+  nameWithOwner: string;
+  description?: string;
+  isPrivate: boolean;
+  sshUrl: string;
+  httpsUrl: string;
+  updatedAt?: string;
+  /** Existing indexed checkouts, if this repository is already on the machine. */
+  localPaths: string[];
+};
+
+/** A registered root or a nested prefix directory inferred from local repos. */
+export type CloneDestination = {
+  /** Absolute directory that will contain the new repository folder. */
+  path: string;
+  /** Registered profile root this suggestion belongs to. */
+  root: string;
+  /** Root-relative path. Empty means the registered root itself. */
+  relativePath: string;
+  /** Repositories currently nested beneath this directory. */
+  repoCount: number;
+  /** Explicit use by the clone flow, newest first when present. */
+  lastUsedAt?: string;
+};
+
+export type CloneCatalog = {
+  owners: string[];
+  repositories: CloneRepository[];
+  destinations: CloneDestination[];
+  github: { installed: boolean; loggedIn: boolean };
+  /** Owner catalogs that could not be loaded; other results remain usable. */
+  warning?: string;
+};
+
 /** Result of reconciling one indexed repo with `git worktree list`. Both
  *  outcomes are successes: a repo row whose path turns out to be a linked
  *  worktree of another repo is dropped on purpose, and that is a completed

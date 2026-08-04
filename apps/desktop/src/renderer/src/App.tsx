@@ -9,6 +9,7 @@ import { PaneResizer } from "./features/shell/PaneResizer";
 import { ToastHost } from "./features/shell/ToastHost";
 import { Rail } from "./features/rail/Rail";
 import { ProfileModal } from "./features/sidebar/ProfileModal";
+import { CloneRepoDialog } from "./features/sidebar/CloneRepoDialog";
 import { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
 import { Sidebar } from "./features/sidebar/Sidebar";
 import { profileWindowTitle } from "./lib/profileTitle";
@@ -27,6 +28,7 @@ export function App() {
   const rail = useColumnResize("pwrgit.railWidth", 344, 280, 560, "right");
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [overlayOpen, setOverlayOpen] = useState(false);
+  const [cloneOpen, setCloneOpen] = useState(false);
   const [selection, setSelection] = useState<Selection | null>(null);
   const worktreePrMonitorIdRef = useRef(crypto.randomUUID());
   // A queued "jump to this repo (and optionally this worktree)" — from ⌘F
@@ -300,6 +302,7 @@ export function App() {
           onRefreshPullRequest={(repoId, branch) =>
             refreshPullRequest(repoId, branch, "user")
           }
+          onCloneRepo={() => setCloneOpen(true)}
           onAddFolder={() => void addFolders()}
           onOpenSearch={() => setOverlayOpen(true)}
           onNewProfile={() => setProfileModal({ mode: "create" })}
@@ -445,6 +448,17 @@ export function App() {
         <RepoSwitcherOverlay
           onClose={() => setOverlayOpen(false)}
           onPick={onPickSearch}
+        />
+      )}
+
+      {cloneOpen && activeProfile !== null && (
+        <CloneRepoDialog
+          profile={activeProfile}
+          onCloned={(repo) => {
+            setCloneOpen(false);
+            setPendingReveal({ repoId: repo.id, worktreeId: null });
+          }}
+          onClose={() => setCloneOpen(false)}
         />
       )}
 
