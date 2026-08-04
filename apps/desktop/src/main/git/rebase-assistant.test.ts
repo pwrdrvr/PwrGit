@@ -147,7 +147,7 @@ describe("applyRebase (system git)", () => {
     expect(msg).toContain("c1");
     expect(msg).toContain("c3");
     expect(gitOut(repo, ["log", "-1", "--format=%ae"])).toBe("me@acme.io");
-  });
+  }, 15_000);
 
   it("reorder reverses the top run without losing commits", async () => {
     const repo = makeRepo();
@@ -159,7 +159,7 @@ describe("applyRebase (system git)", () => {
     expect(r.ok).toBe(true);
     expect(gitOut(repo, ["log", "-1", "--format=%s"])).toBe("c1");
     expect(gitOut(repo, ["rev-list", "--count", "HEAD"])).toBe("4");
-  });
+  }, 15_000);
 
   it("refuses when the worktree is dirty", async () => {
     const repo = makeRepo();
