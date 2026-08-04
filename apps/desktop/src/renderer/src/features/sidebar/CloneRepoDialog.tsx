@@ -12,7 +12,9 @@ import {
   cloneDestinationLabel,
   exactGitHubRepository,
   filterCloneDestinations,
-  filterCloneRepositories
+  filterCloneRepositories,
+  moveCloneSelection,
+  unverifiedCloneRepository
 } from "./clone-dialog";
 
 const PROTOCOLS: Array<{
@@ -132,11 +134,8 @@ export function CloneRepoDialog({
       return;
     }
     if (!catalog.github.installed || !catalog.github.loggedIn) {
-      setCheckError(
-        catalog.github.installed
-          ? "Sign in with GitHub CLI to check this repository."
-          : "Install GitHub CLI to check this repository."
-      );
+      setChecking(false);
+      setCheckedRepository(unverifiedCloneRepository(exact));
       return;
     }
 
@@ -273,12 +272,12 @@ export function CloneRepoDialog({
                   if (event.key === "ArrowDown") {
                     event.preventDefault();
                     setSourceSelection((selection) =>
-                      Math.min(selection + 1, sourceResults.length - 1)
+                      moveCloneSelection(selection, 1, sourceResults.length)
                     );
                   } else if (event.key === "ArrowUp") {
                     event.preventDefault();
                     setSourceSelection((selection) =>
-                      Math.max(selection - 1, 0)
+                      moveCloneSelection(selection, -1, sourceResults.length)
                     );
                   } else if (event.key === "Enter") {
                     const repository = sourceResults[sourceSelection];
@@ -426,12 +425,20 @@ export function CloneRepoDialog({
                   if (event.key === "ArrowDown") {
                     event.preventDefault();
                     setDestinationSelection((selection) =>
-                      Math.min(selection + 1, destinationResults.length - 1)
+                      moveCloneSelection(
+                        selection,
+                        1,
+                        destinationResults.length
+                      )
                     );
                   } else if (event.key === "ArrowUp") {
                     event.preventDefault();
                     setDestinationSelection((selection) =>
-                      Math.max(selection - 1, 0)
+                      moveCloneSelection(
+                        selection,
+                        -1,
+                        destinationResults.length
+                      )
                     );
                   } else if (event.key === "Enter") {
                     const destination =

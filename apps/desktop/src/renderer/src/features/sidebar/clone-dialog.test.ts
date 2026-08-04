@@ -4,7 +4,9 @@ import {
   cloneDestinationLabel,
   exactGitHubRepository,
   filterCloneDestinations,
-  filterCloneRepositories
+  filterCloneRepositories,
+  moveCloneSelection,
+  unverifiedCloneRepository
 } from "./clone-dialog";
 
 const repositories: CloneRepository[] = [
@@ -70,5 +72,25 @@ describe("clone dialog filtering", () => {
       "huntharo/x-code-clone"
     );
     expect(exactGitHubRepository("huntharo/")).toBeNull();
+  });
+
+  it("builds direct clone metadata without a GitHub CLI lookup", () => {
+    expect(unverifiedCloneRepository("huntharo/x-code-clone")).toEqual({
+      name: "x-code-clone",
+      owner: "huntharo",
+      nameWithOwner: "huntharo/x-code-clone",
+      description: "Not verified — clone with SSH or HTTPS",
+      isPrivate: false,
+      sshUrl: "git@github.com:huntharo/x-code-clone.git",
+      httpsUrl: "https://github.com/huntharo/x-code-clone.git",
+      localPaths: []
+    });
+  });
+
+  it("keeps keyboard selection valid when results are empty", () => {
+    expect(moveCloneSelection(0, 1, 0)).toBe(0);
+    expect(moveCloneSelection(0, 1, 2)).toBe(1);
+    expect(moveCloneSelection(1, 1, 2)).toBe(1);
+    expect(moveCloneSelection(0, -1, 2)).toBe(0);
   });
 });

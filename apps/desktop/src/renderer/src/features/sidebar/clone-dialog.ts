@@ -73,3 +73,32 @@ export function exactGitHubRepository(input: string): string | null {
     ? normalized
     : null;
 }
+
+export function unverifiedCloneRepository(
+  input: string
+): CloneRepository | null {
+  const nameWithOwner = exactGitHubRepository(input);
+  if (nameWithOwner === null) return null;
+  const slash = nameWithOwner.indexOf("/");
+  const owner = nameWithOwner.slice(0, slash);
+  const name = nameWithOwner.slice(slash + 1);
+  return {
+    name,
+    owner,
+    nameWithOwner,
+    description: "Not verified — clone with SSH or HTTPS",
+    isPrivate: false,
+    sshUrl: `git@github.com:${nameWithOwner}.git`,
+    httpsUrl: `https://github.com/${nameWithOwner}.git`,
+    localPaths: []
+  };
+}
+
+export function moveCloneSelection(
+  current: number,
+  direction: -1 | 1,
+  resultCount: number
+): number {
+  if (resultCount === 0) return 0;
+  return Math.min(Math.max(current + direction, 0), resultCount - 1);
+}
