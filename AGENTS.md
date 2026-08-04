@@ -54,7 +54,7 @@ is required, use the canonical path above or the fallback below.
 For Computer Use, never target the generic `Electron` display name or shared
 `com.github.Electron` bundle ID. Resolve the running PwrGit window and process,
 then target its exact Electron app path. Confirm that executable belongs to
-PwrGit—not PwrAgent, PwrSnap, `trading-system`, or another checkout or project.
+PwrGit—not PwrAgent, PwrSnap, or another checkout or project.
 If it cannot be identified unambiguously, stop instead of guessing.
 
 Agent shells hosted by another Electron Pwr app can inherit that parent's
