@@ -448,6 +448,7 @@ input {
     padding-inline: 6px;
   }
   .lens-filter {
+    grid-template-columns: 1.15fr 1.15fr 1.15fr 0.8fr 0.75fr;
     gap: 0;
     padding-inline: 0;
   }
