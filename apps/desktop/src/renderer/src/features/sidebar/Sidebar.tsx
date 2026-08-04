@@ -438,6 +438,18 @@ export function Sidebar({
             ⌘F
           </span>
         </button>
+        <button
+          className="clone-repo"
+          onClick={onCloneRepo}
+          disabled={activeProfile === null || activeProfile.roots.length === 0}
+          title={
+            activeProfile !== null && activeProfile.roots.length === 0
+              ? "Add a repo folder before cloning"
+              : "Clone a GitHub repository"
+          }
+        >
+          <span className="new-wt__plus">↓</span> Clone repository…
+        </button>
       </div>
 
       <div className="sidebar__lens">
@@ -483,18 +495,6 @@ export function Sidebar({
           </div>
         )}
 
-        <button
-          className="clone-repo"
-          onClick={onCloneRepo}
-          disabled={activeProfile === null || activeProfile.roots.length === 0}
-          title={
-            activeProfile !== null && activeProfile.roots.length === 0
-              ? "Add a repo folder before cloning"
-              : "Clone a GitHub repository"
-          }
-        >
-          <span className="new-wt__plus">↓</span> Clone repository…
-        </button>
         <button className="add-folder" onClick={onAddFolder}>
           <span className="new-wt__plus">+</span> Add folders…
         </button>
