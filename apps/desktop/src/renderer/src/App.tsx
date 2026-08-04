@@ -74,9 +74,9 @@ export function App() {
   const [selectedCommits, setSelectedCommits] = useState<Set<string>>(
     new Set()
   );
-  const [agentAction, setAgentAction] = useState<"squash" | "reorder" | null>(
-    null
-  );
+  const [rebaseAction, setRebaseAction] = useState<
+    "squash" | "reorder" | null
+  >(null);
   const [diffTarget, setDiffTarget] = useState<DiffTarget | null>(null);
   // A commit clicked in the lineage — the rail shows its file list, scoped
   // like the WIP Changes tab; files open one-file diffs in the main pane.
@@ -88,7 +88,7 @@ export function App() {
   // Clear commit selection + any open diff when the worktree changes.
   useEffect(() => {
     setSelectedCommits(new Set());
-    setAgentAction(null);
+    setRebaseAction(null);
     setDiffTarget(null);
     setCommitFocus(null);
   }, [selection?.worktreeId]);
@@ -104,11 +104,11 @@ export function App() {
 
   const clearSelection = useCallback(() => {
     setSelectedCommits(new Set());
-    setAgentAction(null);
+    setRebaseAction(null);
   }, []);
 
-  const startAgent = useCallback((op: "squash" | "reorder") => {
-    setAgentAction(op);
+  const startRebase = useCallback((op: "squash" | "reorder") => {
+    setRebaseAction(op);
     setRailCollapsed(false);
   }, []);
 
@@ -360,9 +360,11 @@ export function App() {
                 {selectedCommits.size > 0 && (
                   <SelectionBar
                     count={selectedCommits.size}
-                    onSquash={() => startAgent("squash")}
-                    onReorder={() => startAgent("reorder")}
-                    onAskAgent={() => startAgent(agentAction ?? "squash")}
+                    onSquash={() => startRebase("squash")}
+                    onReorder={() => startRebase("reorder")}
+                    onOpenRebaseTool={() =>
+                      startRebase(rebaseAction ?? "squash")
+                    }
                     onClear={clearSelection}
                   />
                 )}
@@ -402,7 +404,7 @@ export function App() {
             state={worktreeState}
             activeEmail={activeProfile?.email ?? ""}
             selectedHashes={Array.from(selectedCommits)}
-            agentAction={agentAction}
+            rebaseAction={rebaseAction}
             commitFocus={commitFocus}
             onCloseCommit={() => setCommitFocus(null)}
             onOpenCommitFile={(path) => {

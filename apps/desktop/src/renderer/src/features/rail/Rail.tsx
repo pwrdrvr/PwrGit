@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import type { Worktree, WorktreeState } from "@pwrgit/shared";
-import { AgentTab } from "./AgentTab";
+import { RebaseTab } from "./RebaseTab";
 import { ChangesTab } from "./ChangesTab";
 import { CommitTab } from "./CommitTab";
 
-type RailTab = "changes" | "agent";
+type RailTab = "changes" | "rebase";
 
 export type CommitFocus = { hash: string; subject: string };
 
@@ -13,7 +13,7 @@ export function Rail({
   state,
   activeEmail,
   selectedHashes,
-  agentAction,
+  rebaseAction,
   commitFocus,
   onCloseCommit,
   onOpenCommitFile,
@@ -26,7 +26,7 @@ export function Rail({
   state: WorktreeState | null;
   activeEmail: string;
   selectedHashes: string[];
-  agentAction: "squash" | "reorder" | null;
+  rebaseAction: "squash" | "reorder" | null;
   /** A commit clicked in the lineage — the Changes tab shows ITS files. */
   commitFocus: CommitFocus | null;
   onCloseCommit: () => void;
@@ -40,8 +40,8 @@ export function Rail({
   const dirty = state?.dirty ?? worktree?.dirty ?? 0;
 
   useEffect(() => {
-    if (agentAction !== null) setTab("agent");
-  }, [agentAction]);
+    if (rebaseAction !== null) setTab("rebase");
+  }, [rebaseAction]);
 
   // Clicking a commit pulls the rail to the (commit-scoped) changes view.
   useEffect(() => {
@@ -61,10 +61,10 @@ export function Rail({
           )}
         </button>
         <button
-          className={`rail-tab${tab === "agent" ? " is-active" : ""}`}
-          onClick={() => setTab("agent")}
+          className={`rail-tab${tab === "rebase" ? " is-active" : ""}`}
+          onClick={() => setTab("rebase")}
         >
-          Agent
+          Rebase
           {selectedHashes.length > 0 && (
             <span className="rail-tab__badge">{selectedHashes.length}</span>
           )}
@@ -98,10 +98,11 @@ export function Rail({
           />
         )
       ) : (
-        <AgentTab
+        <RebaseTab
           worktreeId={worktree?.id ?? null}
+          sourceHead={state?.head ?? null}
           selectedHashes={selectedHashes}
-          op={agentAction}
+          op={rebaseAction}
           onClear={onClearSelection}
         />
       )}

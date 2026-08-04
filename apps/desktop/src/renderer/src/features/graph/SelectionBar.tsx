@@ -2,13 +2,13 @@ export function SelectionBar({
   count,
   onSquash,
   onReorder,
-  onAskAgent,
+  onOpenRebaseTool,
   onClear
 }: {
   count: number;
   onSquash: () => void;
   onReorder: () => void;
-  onAskAgent: () => void;
+  onOpenRebaseTool: () => void;
   onClear: () => void;
 }) {
   return (
@@ -24,8 +24,8 @@ export function SelectionBar({
         Reorder
       </button>
       <span style={{ flex: 1 }} />
-      <button className="selection-bar__agent" onClick={onAskAgent}>
-        Ask agent →
+      <button className="selection-bar__rebase" onClick={onOpenRebaseTool}>
+        Open rebase tool →
       </button>
       <button className="selection-bar__x" onClick={onClear} aria-label="Clear">
         ×

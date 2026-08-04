@@ -23,7 +23,7 @@ export type PwrGitErrorKind =
   | "git" // git process failed (non-zero exit, parse error)
   | "repo" // repo/worktree discovery or lifecycle
   | "remote" // fetch/pull/push (network, credentials, non-fast-forward)
-  | "rebase" // history-editing / rebase assistant
+  | "rebase" // local history-editing / rebase tool
   | "agent" // agent-kit / Codex / ACP
   | "profile"
   | "settings"

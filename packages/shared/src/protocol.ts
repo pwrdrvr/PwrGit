@@ -11,7 +11,6 @@
 // graph, and rebase entries.
 
 import type {
-  AgentStatus,
   BranchRef,
   PushRefPlan,
   PushRefResult,
@@ -25,6 +24,8 @@ import type {
   Profile,
   ProfileId,
   RebaseCommitRef,
+  RebaseCheckResult,
+  RebaseOperation,
   RebasePlan,
   RemoteDivergence,
   Repo,
@@ -449,21 +450,29 @@ export interface Commands {
     res: LaneGraph;
   };
 
-  // Agent + rebase assistant (U15 / U16)
-  "agent:status": { req: void; res: AgentStatus };
+  // Local rebase planning, isolated checking, and guarded apply (U15 / U16)
   "rebase:draft": {
     req: {
       worktreeId: string;
       commits: RebaseCommitRef[];
-      op: "squash" | "reorder";
+      op: RebaseOperation;
     };
     res: RebasePlan;
+  };
+  "rebase:check": {
+    req: {
+      worktreeId: string;
+      commits: RebaseCommitRef[];
+      op: RebaseOperation;
+    };
+    res: RebaseCheckResult;
   };
   "rebase:apply": {
     req: {
       worktreeId: string;
       commits: RebaseCommitRef[];
-      op: "squash" | "reorder";
+      op: RebaseOperation;
+      approvalToken: string;
     };
     res: null;
   };

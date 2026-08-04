@@ -368,8 +368,10 @@ export type RebaseStep = {
   subject: string;
 };
 
+export type RebaseOperation = "squash" | "reorder";
+
 export type RebasePlan = {
-  op: "squash" | "reorder";
+  op: RebaseOperation;
   steps: RebaseStep[];
   summary: string;
   /** False when the selection can't be rebased (e.g. not the most-recent run). */
@@ -379,11 +381,14 @@ export type RebasePlan = {
 
 export type RebaseCommitRef = { hash: string; subject: string };
 
-export type AgentStatus = {
-  available: boolean;
-  home?: string;
-  reason?: string;
-};
+export type RebaseCheckResult =
+  | {
+      status: "clean";
+      approvalToken: string;
+      sourceHead: string;
+      message: string;
+    }
+  | { status: "snag"; code: string; message: string };
 
 export type Lens = "Recent" | "Pinned" | "Behind" | "Stale" | "All";
 export type WorktreeSort = "recent" | "pinned" | "az" | "active" | "custom";
