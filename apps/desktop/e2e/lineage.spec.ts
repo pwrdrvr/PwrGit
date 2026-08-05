@@ -261,7 +261,13 @@ test("caps drawn branches and clips the lane gutter on branch-heavy repos", asyn
   }
 
   handle = await launchApp();
-  const { window } = handle;
+  const { app, window } = handle;
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.setSize(940, 700);
+  });
+  await expect
+    .poll(() => window.evaluate(() => document.documentElement.clientWidth))
+    .toBeLessThanOrEqual(940);
   await addRootAndExpand(window, handle, s, "many");
   await branchRow(window, "main").first().click();
 
@@ -275,13 +281,18 @@ test("caps drawn branches and clips the lane gutter on branch-heavy repos", asyn
   await window.keyboard.press("Escape");
   await window.locator(".branch-pop__backdrop").click({ force: true }).catch(() => undefined);
 
-  // Gutter is clipped to 10 lanes (160px) with its own scrollbar. At the
-  // narrowest supported widths the subject may fully ellipsize, but the row
-  // and its duration must remain present and visible.
-  await expect(window.locator(".graph-lanes-clip").first()).toHaveCSS(
-    "width",
-    "160px"
-  );
+  // At the supported minimum window width, the gutter yields room to the
+  // fixed SHA + age instead of pushing the age through the row's right edge.
+  const mainWidth = await window
+    .getByTestId("main")
+    .evaluate((element) => element.getBoundingClientRect().width);
+  expect(mainWidth).toBeLessThan(300);
+  const laneViewportWidth = await window
+    .locator(".graph-lanes-clip")
+    .first()
+    .evaluate((element) => element.getBoundingClientRect().width);
+  expect(laneViewportWidth).toBeGreaterThanOrEqual(16);
+  expect(laneViewportWidth).toBeLessThan(160);
   await expect(window.locator(".lane-scrollbar")).toBeVisible();
   const newestBranchRow = window.locator(".graph-row", {
     hasText: "work on b30"
