@@ -35,6 +35,7 @@ describe("rewritten PR landings", () => {
       findPrLandingLinks(
         commits,
         { S: ["main"], H: ["feature"] },
+        {},
         "main",
         [],
         { S: merged(1), H: merged(1) }
@@ -48,6 +49,7 @@ describe("rewritten PR landings", () => {
       findPrLandingLinks(
         commits,
         { M: ["main"], H: ["feature"] },
+        {},
         "main",
         ["M"],
         { M: merged(2), H: merged(2) }
@@ -67,6 +69,7 @@ describe("rewritten PR landings", () => {
       findPrLandingLinks(
         commits,
         { L: ["main"], H: ["feature"] },
+        {},
         "main",
         ["R"],
         { R: merged(3), H: merged(3) }
@@ -80,11 +83,31 @@ describe("rewritten PR landings", () => {
       findPrLandingLinks(
         commits,
         { H: ["feature"] },
+        {},
         "main",
         ["R"],
         { R: merged(4), H: merged(4) }
       )
     ).toEqual([{ number: 4, landingHash: "R", sourceHash: "H" }]);
+  });
+
+  it("links a squash result to a remote-only source tip", () => {
+    const commits = [
+      commit("S", "B"),
+      commit("H", "F"),
+      commit("F", "B"),
+      commit("B")
+    ];
+    expect(
+      findPrLandingLinks(
+        commits,
+        { S: ["main"] },
+        { H: ["origin/feature"] },
+        "main",
+        [],
+        { S: merged(5), H: merged(5) }
+      )
+    ).toEqual([{ number: 5, landingHash: "S", sourceHash: "H" }]);
   });
 
   it("routes a dotted rail through every intervening row", () => {

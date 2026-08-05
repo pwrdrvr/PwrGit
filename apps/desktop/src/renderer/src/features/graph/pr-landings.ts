@@ -79,6 +79,7 @@ function defaultSpine(
 export function findPrLandingLinks(
   commits: Commit[],
   tips: Record<string, string[]>,
+  remoteTips: Record<string, string[]>,
   defaultBranch: string,
   defaultRefTips: string[],
   prs: Record<string, PrSummary | null>
@@ -98,7 +99,10 @@ export function findPrLandingLinks(
   // Topological commit order makes the newest drawn tip win if stale alias
   // branches happen to point at more than one commit from the same PR.
   for (const { hash: sourceHash } of commits) {
-    const names = tips[sourceHash] ?? [];
+    const names = [
+      ...(tips[sourceHash] ?? []),
+      ...(remoteTips[sourceHash] ?? [])
+    ];
     if (names.length === 0) continue;
     if (names.every((name) => name === defaultBranch)) continue;
     const pr = prs[sourceHash];
