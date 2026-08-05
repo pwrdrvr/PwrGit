@@ -34,9 +34,10 @@ const cx = (lane: number): number => lane * LANE_W + LANE_W / 2;
 
 // Fetched-but-unapplied trunk, one pattern per remote tier: the closest remote
 // seeds plain dashes, the next remote out seeds dash-dot, then dash-dot-dot
-// (cycling beyond that). A continuous lane retains its strongest pattern.
-// Every pattern's period divides ROW_H and MID, so the dash phase lines up
-// across row seams and straight runs read as one continuous line.
+// (cycling beyond that). A continuous remote-only stretch retains its strongest
+// pattern until the local tip starts solid history. Every pattern's period
+// divides ROW_H and MID, so the dash phase lines up across row seams and
+// straight runs read as one continuous line.
 const DASHES = ["4 4", "4 2 1 1", "6 3 1 2 1 3"];
 const dashFor = (tier: number): string =>
   DASHES[(tier - 1) % DASHES.length] ?? "4 4";

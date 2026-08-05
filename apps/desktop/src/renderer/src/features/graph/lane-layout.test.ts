@@ -224,9 +224,10 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
     expect(rows[2].top).toEqual([{ from: 2, to: 0 }]);
   });
 
-  it("keeps a remote-ahead trunk dashed along the same spine lane", () => {
+  it("ends a remote-ahead dash at the local main tip", () => {
     // origin/main (R2..R1) is ahead of local main (L). One lane-0 line — the
-    // remote stretch seeds a dash that the continuous lineage retains.
+    // remote stretch stays dashed through L's incoming edge, then known-local
+    // history starts solid below L's dot.
     const { rows, laneCount } = layoutLanes(
       [c("R2", "R1"), c("R1", "L"), c("L", "L1"), c("L1")],
       {
@@ -241,15 +242,15 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
     expect(rows[0].bottom).toEqual([{ from: 0, to: 0, dashed: 1 }]);
     expect(rows[1].top).toEqual([{ from: 0, to: 0, dashed: 1 }]);
     expect(rows[1].bottom).toEqual([{ from: 0, to: 0, dashed: 1 }]);
-    // Crossing the local tip does not change the style of the same-color lane.
+    // The local tip is the semantic boundary between remote-only and local.
     expect(rows[2].top).toEqual([{ from: 0, to: 0, dashed: 1 }]);
-    expect(rows[2].bottom).toEqual([{ from: 0, to: 0, dashed: 1 }]);
-    expect(rows[3].top).toEqual([{ from: 0, to: 0, dashed: 1 }]);
+    expect(rows[2].bottom).toEqual([{ from: 0, to: 0 }]);
+    expect(rows[3].top).toEqual([{ from: 0, to: 0 }]);
   });
 
   it("keeps branch lines solid alongside a dashed remote-ahead spine", () => {
     // feat forked from local main's tip L; its separate line stays solid while
-    // the remote-originated spine remains dashed through L.
+    // the remote-originated spine becomes solid after reaching L.
     const { rows } = layoutLanes(
       [c("R", "L"), c("F", "L"), c("L", "L1"), c("L1")],
       {
@@ -270,7 +271,7 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
         { from: 1, to: 0 }
       ])
     );
-    expect(rows[2].bottom).toEqual([{ from: 0, to: 0, dashed: 1 }]);
+    expect(rows[2].bottom).toEqual([{ from: 0, to: 0 }]);
   });
 
   it("chains multiple remote default tips into one dashed spine", () => {
@@ -293,13 +294,13 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
     expect(rows[1].top).toEqual([{ from: 0, to: 0, dashed: 2 }]);
     expect(rows[1].bottom).toEqual([{ from: 0, to: 0, dashed: 2 }]);
     expect(rows[2].top).toEqual([{ from: 0, to: 0, dashed: 2 }]);
-    expect(rows[2].bottom).toEqual([{ from: 0, to: 0, dashed: 2 }]);
+    expect(rows[2].bottom).toEqual([{ from: 0, to: 0 }]);
   });
 
-  it("does not pass an inherited dash to a historical merge side lane", () => {
+  it("keeps every historical merge lane solid below the local tip", () => {
     // R is remote-only, while L and the merge M are already on local main.
-    // The continuing lane stays dashed through M, but M's applied second-parent
-    // lineage S is a separate color and must remain solid until it converges.
+    // Both M's first-parent history and its separate second-parent lineage S
+    // are known-local and must remain solid.
     const { rows } = layoutLanes(
       [
         c("R", "L"),
@@ -317,26 +318,56 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
       }
     );
 
-    // M's first-parent lane inherits the dash; its new side lane does not.
+    // Neither of M's outgoing lanes inherits the remote-only dash from above L.
     expect(rows[2].bottom).toEqual(
       expect.arrayContaining([
-        { from: 0, to: 0, dashed: 1 },
+        { from: 0, to: 0 },
         { from: 0, to: 1 }
       ])
     );
     // Both styles remain independent while the two lanes overlap.
     expect(rows[3].top).toEqual(
       expect.arrayContaining([
-        { from: 0, to: 0, dashed: 1 },
+        { from: 0, to: 0 },
         { from: 1, to: 1 }
       ])
     );
     expect(rows[4].top).toEqual(
       expect.arrayContaining([
-        { from: 0, to: 0, dashed: 1 },
+        { from: 0, to: 0 },
         { from: 1, to: 1 }
       ])
     );
+  });
+
+  it("starts a solid local segment when history ends at the local tip", () => {
+    // The loaded window stops immediately after L. Its parent exists in Git
+    // but was not loaded, so the bottom edge is the only visible local segment.
+    const { rows, laneCount } = layoutLanes(
+      [c("R2", "R1"), c("R1", "L"), c("L", "Lout")],
+      {
+        tips: { L: ["main"] },
+        defaultBranch: "main",
+        defaultRefTips: ["R2"],
+        shownBranches: []
+      }
+    );
+
+    expect(laneCount).toBe(1);
+    expect(rows[2].top).toEqual([{ from: 0, to: 0, dashed: 1 }]);
+    expect(rows[2].bottom).toEqual([{ from: 0, to: 0 }]);
+  });
+
+  it("keeps a local-only window solid when the remote tip is not loaded", () => {
+    const { rows } = layoutLanes([c("L", "L1"), c("L1")], {
+      tips: { L: ["main"] },
+      defaultBranch: "main",
+      defaultRefTips: ["Rout"],
+      shownBranches: []
+    });
+
+    expect(rows[0].bottom).toEqual([{ from: 0, to: 0 }]);
+    expect(rows[1].top).toEqual([{ from: 0, to: 0 }]);
   });
 
   it("keeps a diverged remote off the spine lane, as a dashed side line", () => {
