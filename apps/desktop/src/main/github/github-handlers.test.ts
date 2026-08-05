@@ -240,6 +240,48 @@ describe("github:commitAuthorIdentity handler", () => {
 });
 
 describe("PR monitor renderer ownership", () => {
+  it("returns cached visible PRs before a background association refresh", async () => {
+    const hash = "0123456789abcdef0123456789abcdef01234567";
+    const pullRequest = {
+      number: 44,
+      url: "https://github.com/pwrdrvr/PwrGit/pull/44",
+      title: "Show rewritten PR landings",
+      state: "merged" as const,
+      isDraft: false
+    };
+    let finishRefresh: ((value: Map<string, typeof pullRequest>) => void) | undefined;
+    const refresh = new Promise<Map<string, typeof pullRequest>>((resolve) => {
+      finishRefresh = resolve;
+    });
+    const prs = {
+      ownsWorktree: () => true,
+      cachedCommitPrs: (_repoId: string, hashes: string[]) =>
+        new Map(hashes.map((commitHash) => [commitHash, pullRequest])),
+      refreshCommits: vi.fn(() => refresh)
+    } as unknown as PrService;
+    const identities = { request: vi.fn() } as unknown as
+      GitHubCommitAuthorIdentityService;
+    const bus = new CommandBus();
+    const handlers = registerGitHubHandlers(bus, prs, identities);
+
+    await expect(
+      bus.dispatch(
+        "pr:replaceVisibleCommits",
+        {
+          repoId: "repo",
+          worktreeId: "worktree",
+          monitorId: "visible",
+          commitHashes: [hash]
+        },
+        { webContentsId: 11 }
+      )
+    ).resolves.toEqual({ ok: true, value: { [hash]: pullRequest } });
+
+    finishRefresh?.(new Map());
+    await refresh;
+    handlers.stop();
+  });
+
   it("keeps another window's reason and releases the final reason on destruction", async () => {
     vi.useFakeTimers();
     const hash = "0123456789abcdef0123456789abcdef01234567";

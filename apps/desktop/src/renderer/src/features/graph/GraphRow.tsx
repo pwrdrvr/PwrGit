@@ -1,6 +1,7 @@
 import type { Commit, LaneBranchInfo, PrSummary } from "@pwrgit/shared";
 import { PrChip } from "../sidebar/PrChip";
 import type { LaneRow } from "./lane-layout";
+import type { PrLandingSeg } from "./pr-landings";
 import { shortWhen } from "./graph-view";
 
 export const LANE_W = 16;
@@ -80,6 +81,7 @@ function BranchGlyph() {
 export function GraphRow({
   vm,
   laneCount,
+  prLanding,
   now,
   selected,
   focused,
@@ -96,6 +98,8 @@ export function GraphRow({
 }: {
   vm: GraphRowVM;
   laneCount: number;
+  /** Dotted semantic PR landing segments; never part of Git ancestry. */
+  prLanding?: { top: PrLandingSeg[]; bottom: PrLandingSeg[] };
   /** One shared renderer clock, supplied by LineageGraph. */
   now: number;
   selected: boolean;
@@ -179,6 +183,34 @@ export function GraphRow({
           height={ROW_H}
           viewBox={`0 0 ${width} ${ROW_H}`}
         >
+        {prLanding?.top.map((s, i) => (
+          <path
+            key={`plt${i}`}
+            d={curveTop(s.from, s.to)}
+            fill="none"
+            stroke="var(--brand-purple)"
+            strokeWidth={1.5}
+            strokeLinecap="round"
+            strokeDasharray="2 2"
+            opacity={0.9}
+          >
+            <title>{`PR #${s.number} landed without a Git parent edge`}</title>
+          </path>
+        ))}
+        {prLanding?.bottom.map((s, i) => (
+          <path
+            key={`plb${i}`}
+            d={curveBottom(s.from, s.to)}
+            fill="none"
+            stroke="var(--brand-purple)"
+            strokeWidth={1.5}
+            strokeLinecap="round"
+            strokeDasharray="2 2"
+            opacity={0.9}
+          >
+            <title>{`PR #${s.number} landed without a Git parent edge`}</title>
+          </path>
+        ))}
         {[...passThrough].map(([k, dashed]) => (
           <line
             key={`p${k}`}

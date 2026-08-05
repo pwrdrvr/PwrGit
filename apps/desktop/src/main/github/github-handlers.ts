@@ -180,12 +180,17 @@ export function registerGitHubHandlers(
       generation
     });
     syncVisibleReason(reasonId);
-    publishCommitPrs(
-      req.repoId,
-      await prs.refreshCommits(req.repoId, hashes, { trigger: "scheduled" })
-    );
-    syncVisibleReason(reasonId);
     const cached = prs.cachedCommitPrs(req.repoId, hashes);
+    // Return the cache without waiting for GitHub. Fresh discoveries arrive on
+    // the existing event channel, so a scope switch can paint known PRs in the
+    // same frame while uncached rows continue resolving in the background.
+    void prs
+      .refreshCommits(req.repoId, hashes, { trigger: "scheduled" })
+      .then((changed) => {
+        publishCommitPrs(req.repoId, changed);
+        syncVisibleReason(reasonId);
+      })
+      .catch(() => undefined);
     return ok(Object.fromEntries(cached));
   });
 
