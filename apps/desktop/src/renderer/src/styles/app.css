@@ -2702,9 +2702,9 @@ input {
 .commit-time {
   font: 500 10.5px/1 var(--font-sans);
   color: var(--text-subtle);
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
+  /* The subject is the flexible, ellipsized part of this line. Keep the age
+     atomic so pressure can never shave characters off the row's right edge. */
+  flex: 0 0 auto;
   white-space: nowrap;
 }
 .commit-meta {
@@ -2912,13 +2912,16 @@ input {
   color: var(--text-subtle);
 }
 /* The gutter viewport clips at MAX_GUTTER_LANES; wider graphs pan inside it
-   via --lane-scroll (driven by the shared .lane-scrollbar), so commit text
-   stays pinned in place no matter how many lanes exist. */
+   via --lane-scroll (driven by the shared .lane-scrollbar). At constrained
+   main-pane widths it yields enough room for the fixed SHA + age before the
+   row can overflow. The app's 940px minimum leaves a 276px main pane with the
+   default side panels, where this still exposes roughly three lanes. */
 .graph-lanes-clip {
   flex: 0 0 auto;
   align-self: stretch;
   display: flex;
   align-items: center;
+  max-width: clamp(16px, calc(100cqi - 230px), 160px);
   overflow: hidden;
 }
 .graph-lanes {
@@ -2933,6 +2936,7 @@ input {
   overflow-x: auto;
   overflow-y: hidden;
   height: 12px;
+  max-width: clamp(16px, calc(100cqi - 230px), 160px);
   margin: 0 0 4px 9px;
 }
 .lane-scrollbar::-webkit-scrollbar {

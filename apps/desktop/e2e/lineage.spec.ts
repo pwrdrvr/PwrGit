@@ -261,7 +261,13 @@ test("caps drawn branches and clips the lane gutter on branch-heavy repos", asyn
   }
 
   handle = await launchApp();
-  const { window } = handle;
+  const { app, window } = handle;
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.setSize(940, 700);
+  });
+  await expect
+    .poll(() => window.evaluate(() => document.documentElement.clientWidth))
+    .toBeLessThanOrEqual(940);
   await addRootAndExpand(window, handle, s, "many");
   await branchRow(window, "main").first().click();
 
@@ -275,16 +281,49 @@ test("caps drawn branches and clips the lane gutter on branch-heavy repos", asyn
   await window.keyboard.press("Escape");
   await window.locator(".branch-pop__backdrop").click({ force: true }).catch(() => undefined);
 
-  // Gutter is clipped to 10 lanes (160px) with its own scrollbar — commit text
-  // is NOT pushed off-screen by 30+ lanes.
-  await expect(window.locator(".graph-lanes-clip").first()).toHaveCSS(
-    "width",
-    "160px"
-  );
+  // At the supported minimum window width, the gutter yields room to the
+  // fixed SHA + age instead of pushing the age through the row's right edge.
+  const mainWidth = await window
+    .getByTestId("main")
+    .evaluate((element) => element.getBoundingClientRect().width);
+  expect(mainWidth).toBeLessThan(300);
+  const laneViewportWidth = await window
+    .locator(".graph-lanes-clip")
+    .first()
+    .evaluate((element) => element.getBoundingClientRect().width);
+  expect(laneViewportWidth).toBeGreaterThanOrEqual(16);
+  expect(laneViewportWidth).toBeLessThan(160);
   await expect(window.locator(".lane-scrollbar")).toBeVisible();
-  await expect(
-    window.locator(".graph-row .commit-msg", { hasText: "work on b30" })
-  ).toBeVisible();
+  const newestBranchRow = window.locator(".graph-row", {
+    hasText: "work on b30"
+  });
+  await expect(newestBranchRow).toHaveCount(1);
+  await expect(newestBranchRow.locator(".commit-time")).toBeVisible();
+
+  // Row pressure is absorbed by the ellipsized subject, never the age. Every
+  // duration must remain whole and within the row's padded content box.
+  const durationLayout = await window.locator(".graph-row").evaluateAll((rows) =>
+    rows.map((row) => {
+      const duration = row.querySelector<HTMLElement>(".commit-time")!;
+      const durationBox = duration.getBoundingClientRect();
+      const rowBox = row.getBoundingClientRect();
+      const rowStyle = getComputedStyle(row);
+      return {
+        flexShrink: getComputedStyle(duration).flexShrink,
+        fullyRendered: duration.scrollWidth <= duration.clientWidth,
+        insideRightPadding:
+          durationBox.right <= rowBox.right - parseFloat(rowStyle.paddingRight)
+      };
+    })
+  );
+  expect(durationLayout.length).toBeGreaterThan(0);
+  expect(durationLayout).toEqual(
+    durationLayout.map(() => ({
+      flexShrink: "0",
+      fullyRendered: true,
+      insideRightPadding: true
+    }))
+  );
 });
 
 test("a commit tipped by many branches caps its chips instead of flooding", async () => {
