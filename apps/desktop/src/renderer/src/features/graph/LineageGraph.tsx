@@ -447,6 +447,7 @@ export function LineageGraph({
     const links = findPrLandingLinks(
       commits,
       data?.tips ?? {},
+      data?.remoteTips ?? {},
       data?.defaultBranch ?? "",
       data?.defaultRefTips ?? [],
       commitPullRequests
