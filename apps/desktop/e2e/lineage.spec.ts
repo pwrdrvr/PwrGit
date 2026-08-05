@@ -285,6 +285,31 @@ test("caps drawn branches and clips the lane gutter on branch-heavy repos", asyn
   await expect(
     window.locator(".graph-row .commit-msg", { hasText: "work on b30" })
   ).toBeVisible();
+
+  // Row pressure is absorbed by the ellipsized subject, never the age. Every
+  // duration must remain whole and within the row's padded content box.
+  const durationLayout = await window.locator(".graph-row").evaluateAll((rows) =>
+    rows.map((row) => {
+      const duration = row.querySelector<HTMLElement>(".commit-time")!;
+      const durationBox = duration.getBoundingClientRect();
+      const rowBox = row.getBoundingClientRect();
+      const rowStyle = getComputedStyle(row);
+      return {
+        flexShrink: getComputedStyle(duration).flexShrink,
+        fullyRendered: duration.scrollWidth <= duration.clientWidth,
+        insideRightPadding:
+          durationBox.right <= rowBox.right - parseFloat(rowStyle.paddingRight)
+      };
+    })
+  );
+  expect(durationLayout.length).toBeGreaterThan(0);
+  expect(durationLayout).toEqual(
+    durationLayout.map(() => ({
+      flexShrink: "0",
+      fullyRendered: true,
+      insideRightPadding: true
+    }))
+  );
 });
 
 test("a commit tipped by many branches caps its chips instead of flooding", async () => {
