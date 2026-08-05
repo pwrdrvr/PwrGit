@@ -102,4 +102,22 @@ describe("rewritten PR landings", () => {
     expect(routed.rows[1]?.bottom).toHaveLength(1);
     expect(routed.rows[2]?.top).toHaveLength(1);
   });
+
+  it("connects adjacent landing rows directly without allocating a rail", () => {
+    const commits = [commit("S", "B"), commit("H", "B"), commit("B")];
+    const layout = layoutLanes(commits.map(({ hash, parents }) => ({ hash, parents })));
+    const routed = layoutPrLandingLinks(
+      [{ number: 8, landingHash: "S", sourceHash: "H" }],
+      commits,
+      layout
+    );
+
+    expect(routed.laneCount).toBe(layout.laneCount);
+    expect(routed.rows[0]?.bottom).toEqual([
+      { from: 0, to: 0.5, number: 8 }
+    ]);
+    expect(routed.rows[1]?.top).toEqual([
+      { from: 0.5, to: 1, number: 8 }
+    ]);
+  });
 });

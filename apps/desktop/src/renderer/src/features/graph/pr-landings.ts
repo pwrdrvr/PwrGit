@@ -147,6 +147,24 @@ export function layoutPrLandingLinks(
     const endLane = layout.rows[endIndex]?.lane;
     if (startLane === undefined || endLane === undefined) continue;
 
+    // Adjacent commits have no intervening history to route around. Meet at a
+    // midpoint between their lanes so the two half-row curves form one direct,
+    // smooth connector without widening the gutter for a temporary rail.
+    if (endIndex === startIndex + 1) {
+      const junction = (startLane + endLane) / 2;
+      rows[startIndex]?.bottom.push({
+        from: startLane,
+        to: junction,
+        number: link.number
+      });
+      rows[endIndex]?.top.push({
+        from: junction,
+        to: endLane,
+        number: link.number
+      });
+      continue;
+    }
+
     const rail = layout.laneCount + used;
     used += 1;
     rows[startIndex]?.bottom.push({
