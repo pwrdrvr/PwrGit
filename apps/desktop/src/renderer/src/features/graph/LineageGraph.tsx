@@ -728,6 +728,7 @@ export function LineageGraph({
 
     let active = true;
     let idleTimer: number | null = null;
+    let publishedInitial = false;
     const visible = new Set<string>();
     const publish = (): void => {
       idleTimer = null;
@@ -753,7 +754,12 @@ export function LineageGraph({
           if (entry.isIntersecting) visible.add(hash);
           else visible.delete(hash);
         }
-        schedulePublish();
+        if (!publishedInitial) {
+          publishedInitial = true;
+          publish();
+        } else {
+          schedulePublish();
+        }
       },
       { root, threshold: 0.01 }
     );
@@ -766,7 +772,7 @@ export function LineageGraph({
       observer.disconnect();
       if (idleTimer !== null) window.clearTimeout(idleTimer);
       // Unmount/scope changes should release the reason immediately. A new
-      // view publishes its replacement after its own quiet period.
+      // view publishes its initial visible set immediately from cache.
       void dispatch("pr:replaceVisibleCommits", {
         repoId,
         worktreeId,
