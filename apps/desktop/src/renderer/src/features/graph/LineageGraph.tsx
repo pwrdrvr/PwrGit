@@ -30,6 +30,18 @@ import { findPrLandingLinks, layoutPrLandingLinks } from "./pr-landings";
 type Scope = "active" | "all";
 const VISIBLE_COMMIT_PR_IDLE_MS = 500;
 
+export function consumeBranchPrInvalidation(
+  scope: Scope,
+  generation: number,
+  consumedGeneration: number
+): { force: boolean; consumedGeneration: number } {
+  const force = scope === "active" && generation !== consumedGeneration;
+  return {
+    force,
+    consumedGeneration: force ? generation : consumedGeneration
+  };
+}
+
 /**
  * Keep only identity results that are stable for this worktree session. An
  * in-flight or temporarily unavailable lookup must remain retryable on a
@@ -246,6 +258,7 @@ export function LineageGraph({
   const commitStatsEpochRef = useRef(0);
   const commitAuthorIdentityEpochRef = useRef(0);
   const commitPrMonitorIdRef = useRef(crypto.randomUUID());
+  const consumedBranchPrGenerationRef = useRef(0);
 
   const acceptCommitPullRequests = useCallback(
     (prs: Record<string, PrSummary | null>): void => {
@@ -341,7 +354,16 @@ export function LineageGraph({
     setLoading(true);
     // A plain worktree/scope switch reuses the repo's cached lanes (fast); an
     // actual change to this worktree forces a recompute.
-    load(branchPrGeneration > 0);
+    // A PR delta observed in All remains unconsumed until Active is requested.
+    // Once that forced Active load starts, ordinary scope/worktree switches
+    // return to the repo-level lane cache.
+    const prInvalidation = consumeBranchPrInvalidation(
+      scope,
+      branchPrGeneration,
+      consumedBranchPrGenerationRef.current
+    );
+    consumedBranchPrGenerationRef.current = prInvalidation.consumedGeneration;
+    load(prInvalidation.force);
     const off = subscribe("worktree:changed", (p) => {
       if (p.worktreeId === worktreeId) load(true);
     });
@@ -360,7 +382,7 @@ export function LineageGraph({
       // Active membership depends on merged PR state for squash/rebase branches.
       // Re-run the branch query after a fresh association lands so a branch
       // cannot remain drawn merely because it lacks an ancestry merge edge.
-      if (scope === "active" && Object.keys(event.prs).length > 0) {
+      if (Object.keys(event.prs).length > 0) {
         setBranchPrGeneration((generation) => generation + 1);
       }
       setData((current) => {
@@ -379,7 +401,7 @@ export function LineageGraph({
         return changed ? { ...current, branches } : current;
       });
     });
-  }, [repoId, scope]);
+  }, [repoId]);
 
   useEffect(() => {
     return subscribe("pr:commitChanged", (event) => {
@@ -426,6 +448,7 @@ export function LineageGraph({
       commits,
       data?.tips ?? {},
       data?.defaultBranch ?? "",
+      data?.defaultRefTips ?? [],
       commitPullRequests
     );
     return layoutPrLandingLinks(links, commits, layout);

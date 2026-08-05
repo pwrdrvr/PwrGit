@@ -1,9 +1,34 @@
 import { describe, expect, it } from "vitest";
 import {
+  consumeBranchPrInvalidation,
   mergeCommitAuthorIdentityLookup,
   reusableCommitAuthorIdentity,
   shouldRequestCommitAuthorIdentity
 } from "./LineageGraph";
+
+describe("active lane PR invalidation", () => {
+  it("defers an invalidation observed in all scope until active is loaded", () => {
+    expect(consumeBranchPrInvalidation("all", 1, 0)).toEqual({
+      force: false,
+      consumedGeneration: 0
+    });
+    expect(consumeBranchPrInvalidation("active", 1, 0)).toEqual({
+      force: true,
+      consumedGeneration: 1
+    });
+  });
+
+  it("consumes an active invalidation exactly once", () => {
+    expect(consumeBranchPrInvalidation("active", 2, 1)).toEqual({
+      force: true,
+      consumedGeneration: 2
+    });
+    expect(consumeBranchPrInvalidation("active", 2, 2)).toEqual({
+      force: false,
+      consumedGeneration: 2
+    });
+  });
+});
 
 describe("reusableCommitAuthorIdentity", () => {
   it("keeps a previously proven identity ready for the next hover", () => {

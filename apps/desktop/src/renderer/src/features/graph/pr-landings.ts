@@ -37,11 +37,27 @@ function reaches(
 function defaultSpine(
   commits: Map<string, Commit>,
   tips: Record<string, string[]>,
-  defaultBranch: string
+  defaultBranch: string,
+  defaultRefTips: string[]
 ): string[] {
-  const tip = Object.entries(tips).find(([, names]) =>
+  const localTip = Object.entries(tips).find(([, names]) =>
     names.includes(defaultBranch)
   )?.[0];
+  const candidates = new Set(defaultRefTips.filter((hash) => commits.has(hash)));
+  let tip: string | undefined;
+  if (candidates.size > 0) {
+    const localInWindow = localTip !== undefined && commits.has(localTip);
+    // Map insertion order is the graph's topological order, matching the lane
+    // owner's resolved-default-spine selection.
+    for (const hash of commits.keys()) {
+      if (!candidates.has(hash)) continue;
+      if (!localInWindow || reaches(commits, hash, localTip as string)) {
+        tip = hash;
+        break;
+      }
+    }
+  }
+  tip ??= localTip;
   if (tip === undefined) return [];
   const spine: string[] = [];
   let hash: string | undefined = tip;
@@ -64,10 +80,11 @@ export function findPrLandingLinks(
   commits: Commit[],
   tips: Record<string, string[]>,
   defaultBranch: string,
+  defaultRefTips: string[],
   prs: Record<string, PrSummary | null>
 ): PrLandingLink[] {
   const byHash = new Map(commits.map((commit) => [commit.hash, commit]));
-  const spine = defaultSpine(byHash, tips, defaultBranch);
+  const spine = defaultSpine(byHash, tips, defaultBranch, defaultRefTips);
   const landingByPr = new Map<number, string>();
   for (const hash of spine) {
     const pr = prs[hash];

@@ -36,6 +36,7 @@ describe("rewritten PR landings", () => {
         commits,
         { S: ["main"], H: ["feature"] },
         "main",
+        [],
         { S: merged(1), H: merged(1) }
       )
     ).toEqual([{ number: 1, landingHash: "S", sourceHash: "H" }]);
@@ -48,9 +49,42 @@ describe("rewritten PR landings", () => {
         commits,
         { M: ["main"], H: ["feature"] },
         "main",
+        ["M"],
         { M: merged(2), H: merged(2) }
       )
     ).toEqual([]);
+  });
+
+  it("starts at a remote default tip when local main is behind", () => {
+    const commits = [
+      commit("R", "L"),
+      commit("H", "F", "L"),
+      commit("F", "B"),
+      commit("L", "B"),
+      commit("B")
+    ];
+    expect(
+      findPrLandingLinks(
+        commits,
+        { L: ["main"], H: ["feature"] },
+        "main",
+        ["R"],
+        { R: merged(3), H: merged(3) }
+      )
+    ).toEqual([{ number: 3, landingHash: "R", sourceHash: "H" }]);
+  });
+
+  it("starts at the resolved remote default tip when local main is absent", () => {
+    const commits = [commit("R", "B"), commit("H", "B"), commit("B")];
+    expect(
+      findPrLandingLinks(
+        commits,
+        { H: ["feature"] },
+        "main",
+        ["R"],
+        { R: merged(4), H: merged(4) }
+      )
+    ).toEqual([{ number: 4, landingHash: "R", sourceHash: "H" }]);
   });
 
   it("routes a dotted rail through every intervening row", () => {
