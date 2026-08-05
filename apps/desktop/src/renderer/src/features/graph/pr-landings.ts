@@ -14,6 +14,8 @@ export type PrLandingRows = {
   rows: Array<{ top: PrLandingSeg[]; bottom: PrLandingSeg[] }>;
 };
 
+type RailReservation = { lane: number; start: number; end: number };
+
 /** True when `target` is reachable from `start` through real Git parents. */
 function reaches(
   commits: Map<string, Commit>,
@@ -31,6 +33,64 @@ function reaches(
     if (commit !== undefined) pending.push(...commit.parents);
   }
   return false;
+}
+
+function segmentCrossesLane(segment: LaneSeg, lane: number): boolean {
+  return (
+    lane >= Math.min(segment.from, segment.to) &&
+    lane <= Math.max(segment.from, segment.to)
+  );
+}
+
+function clearExistingRail(
+  layout: LaneLayout,
+  start: number,
+  end: number,
+  lane: number,
+  reservations: RailReservation[]
+): boolean {
+  if (
+    reservations.some(
+      (reservation) =>
+        reservation.lane === lane &&
+        reservation.start <= end &&
+        start <= reservation.end
+    )
+  ) {
+    return false;
+  }
+
+  for (let row = start; row <= end; row += 1) {
+    const laneRow = layout.rows[row];
+    if (laneRow === undefined) return false;
+    const segments =
+      row === start
+        ? laneRow.bottom
+        : row === end
+          ? laneRow.top
+          : [...laneRow.top, ...laneRow.bottom];
+    if (segments.some((segment) => segmentCrossesLane(segment, lane))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function nearestExistingRail(
+  layout: LaneLayout,
+  start: number,
+  end: number,
+  preferredLane: number,
+  reservations: RailReservation[]
+): number | undefined {
+  const candidates = Array.from({ length: layout.laneCount }, (_, lane) => lane);
+  candidates.sort(
+    (a, b) =>
+      Math.abs(a - preferredLane) - Math.abs(b - preferredLane) || a - b
+  );
+  return candidates.find((lane) =>
+    clearExistingRail(layout, start, end, lane, reservations)
+  );
 }
 
 /** Commits on the default branch's first-parent spine, newest first. */
@@ -123,9 +183,10 @@ export function findPrLandingLinks(
 }
 
 /**
- * Route each semantic landing through a temporary dotted rail. Segmenting it
- * per row lets the existing clipped/pannable gutter render it without a second
- * graph coordinate system.
+ * Route each semantic landing through the nearest clear dotted rail, falling
+ * back beyond the graph only when every existing lane is occupied over the
+ * link's row interval. Segmenting it per row lets the existing clipped/pannable
+ * gutter render it without a second graph coordinate system.
  */
 export function layoutPrLandingLinks(
   links: PrLandingLink[],
@@ -137,6 +198,7 @@ export function layoutPrLandingLinks(
     bottom: [] as PrLandingSeg[]
   }));
   const index = new Map(commits.map((commit, i) => [commit.hash, i]));
+  const reservations: RailReservation[] = [];
   let used = 0;
 
   for (const link of links) {
@@ -149,7 +211,14 @@ export function layoutPrLandingLinks(
     const endIndex = Math.max(landingIndex, sourceIndex);
     const startLane = layout.rows[startIndex]?.lane;
     const endLane = layout.rows[endIndex]?.lane;
-    if (startLane === undefined || endLane === undefined) continue;
+    const sourceLane = layout.rows[sourceIndex]?.lane;
+    if (
+      startLane === undefined ||
+      endLane === undefined ||
+      sourceLane === undefined
+    ) {
+      continue;
+    }
 
     // Adjacent commits have no intervening history to route around. Meet at a
     // midpoint between their lanes so the two half-row curves form one direct,
@@ -169,8 +238,16 @@ export function layoutPrLandingLinks(
       continue;
     }
 
-    const rail = layout.laneCount + used;
-    used += 1;
+    const existingRail = nearestExistingRail(
+      layout,
+      startIndex,
+      endIndex,
+      sourceLane,
+      reservations
+    );
+    const rail = existingRail ?? layout.laneCount + used;
+    if (existingRail === undefined) used += 1;
+    reservations.push({ lane: rail, start: startIndex, end: endIndex });
     rows[startIndex]?.bottom.push({
       from: startLane,
       to: rail,

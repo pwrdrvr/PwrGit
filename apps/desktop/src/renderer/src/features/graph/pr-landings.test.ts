@@ -119,11 +119,71 @@ describe("rewritten PR landings", () => {
       layout
     );
 
-    expect(routed.laneCount).toBe(layout.laneCount + 1);
+    expect(routed.laneCount).toBe(layout.laneCount);
     expect(routed.rows[0]?.bottom).toHaveLength(1);
     expect(routed.rows[1]?.top).toHaveLength(1);
     expect(routed.rows[1]?.bottom).toHaveLength(1);
     expect(routed.rows[2]?.top).toHaveLength(1);
+  });
+
+  it("allocates an outer rail when every existing lane is blocked", () => {
+    const commits = [commit("S", "B"), commit("X", "B"), commit("H", "B")];
+    const bothLanes = [
+      { from: 0, to: 0 },
+      { from: 1, to: 1 }
+    ];
+    const layout = {
+      laneCount: 2,
+      rows: [
+        { lane: 0, top: [], bottom: bothLanes },
+        { lane: 0, top: bothLanes, bottom: bothLanes },
+        { lane: 1, top: bothLanes, bottom: [] }
+      ]
+    };
+    const routed = layoutPrLandingLinks(
+      [{ number: 8, landingHash: "S", sourceHash: "H" }],
+      commits,
+      layout
+    );
+
+    expect(routed.laneCount).toBe(3);
+    expect(routed.rows[0]?.bottom).toEqual([{ from: 0, to: 2, number: 8 }]);
+    expect(routed.rows[2]?.top).toEqual([{ from: 2, to: 1, number: 8 }]);
+  });
+
+  it("uses the clear source lane instead of a distant global outer rail", () => {
+    const commits = [
+      commit("S", "B"),
+      commit("X4", "B"),
+      commit("X3", "B"),
+      commit("X2", "B"),
+      commit("X1", "B"),
+      commit("H", "B"),
+      commit("B")
+    ];
+    const main = { from: 0, to: 0 };
+    const layout = {
+      // Other history needed seven lanes, but only main occupies this interval.
+      laneCount: 7,
+      rows: commits.map((_, row) => ({
+        lane: row === 5 ? 1 : 0,
+        top: row === 0 ? [] : [{ ...main }],
+        bottom: row === 5 ? [{ from: 1, to: 0 }] : [{ ...main }]
+      }))
+    };
+    const routed = layoutPrLandingLinks(
+      [{ number: 10, landingHash: "S", sourceHash: "H" }],
+      commits,
+      layout
+    );
+
+    expect(routed.laneCount).toBe(layout.laneCount);
+    expect(routed.rows[0]?.bottom).toEqual([{ from: 0, to: 1, number: 10 }]);
+    for (let row = 1; row < 5; row += 1) {
+      expect(routed.rows[row]?.top).toEqual([{ from: 1, to: 1, number: 10 }]);
+      expect(routed.rows[row]?.bottom).toEqual([{ from: 1, to: 1, number: 10 }]);
+    }
+    expect(routed.rows[5]?.top).toEqual([{ from: 1, to: 1, number: 10 }]);
   });
 
   it("connects adjacent landing rows directly without allocating a rail", () => {
