@@ -1,6 +1,7 @@
 # github — AGENTS.md
 
-Bulk GitHub PR status for worktree branches. Best-effort: silently no-ops when
+Bulk GitHub PR status for local branches (including non-worktree refs needed by
+the lineage graph). Best-effort: silently no-ops when
 origin isn't github.com, `gh` isn't logged in, or the network fails.
 
 - **Auth**: `getGitHubToken()` prefers `GITHUB_TOKEN`, else `gh auth token`

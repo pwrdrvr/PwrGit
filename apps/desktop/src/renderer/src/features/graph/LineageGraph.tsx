@@ -25,6 +25,7 @@ import {
 } from "./GraphRow";
 import { shortWhen } from "./graph-view";
 import { layoutLanes } from "./lane-layout";
+import { findPrLandingLinks, layoutPrLandingLinks } from "./pr-landings";
 
 type Scope = "active" | "all";
 const VISIBLE_COMMIT_PR_IDLE_MS = 500;
@@ -218,6 +219,7 @@ export function LineageGraph({
   const [data, setData] = useState<LaneGraph | null>(null);
   const [scope, setScope] = useState<Scope>("active");
   const [loading, setLoading] = useState(true);
+  const [branchPrGeneration, setBranchPrGeneration] = useState(0);
   const [flash, setFlash] = useState<string | null>(null);
   const [branchesOpen, setBranchesOpen] = useState(false);
   const [hoveredCommit, setHoveredCommit] = useState<string | null>(null);
@@ -276,6 +278,13 @@ export function LineageGraph({
     };
   }, []);
 
+  // Active membership needs PR state for every local branch, including refs
+  // that are not checked out in a worktree. The service coalesces this with the
+  // sidebar's repo refresh when both surfaces open together.
+  useEffect(() => {
+    void dispatch("pr:refresh", { repoId });
+  }, [repoId]);
+
   useEffect(() => {
     let active = true;
     let loadSequence = 0;
@@ -332,7 +341,7 @@ export function LineageGraph({
     setLoading(true);
     // A plain worktree/scope switch reuses the repo's cached lanes (fast); an
     // actual change to this worktree forces a recompute.
-    load(false);
+    load(branchPrGeneration > 0);
     const off = subscribe("worktree:changed", (p) => {
       if (p.worktreeId === worktreeId) load(true);
     });
@@ -340,7 +349,7 @@ export function LineageGraph({
       active = false;
       off();
     };
-  }, [worktreeId, scope]);
+  }, [branchPrGeneration, worktreeId, scope]);
 
   // The sidebar and graph keep separate view models. Apply the same targeted
   // PR delta to the graph cache so a hover/focused refresh updates both
@@ -348,6 +357,12 @@ export function LineageGraph({
   useEffect(() => {
     return subscribe("pr:changed", (event) => {
       if (event.repoId !== repoId) return;
+      // Active membership depends on merged PR state for squash/rebase branches.
+      // Re-run the branch query after a fresh association lands so a branch
+      // cannot remain drawn merely because it lacks an ancestry merge edge.
+      if (scope === "active" && Object.keys(event.prs).length > 0) {
+        setBranchPrGeneration((generation) => generation + 1);
+      }
       setData((current) => {
         if (current === null) return current;
         let changed = false;
@@ -364,7 +379,7 @@ export function LineageGraph({
         return changed ? { ...current, branches } : current;
       });
     });
-  }, [repoId]);
+  }, [repoId, scope]);
 
   useEffect(() => {
     return subscribe("pr:commitChanged", (event) => {
@@ -404,6 +419,17 @@ export function LineageGraph({
       }
     );
   }, [data, worktreeId]);
+
+  const prLandingLayout = useMemo(() => {
+    const commits = data?.commits ?? [];
+    const links = findPrLandingLinks(
+      commits,
+      data?.tips ?? {},
+      data?.defaultBranch ?? "",
+      commitPullRequests
+    );
+    return layoutPrLandingLinks(links, commits, layout);
+  }, [commitPullRequests, data, layout]);
 
   const vms: GraphRowVM[] = useMemo(() => {
     const commits = data?.commits ?? [];
@@ -651,8 +677,8 @@ export function LineageGraph({
     setCommitMenu({ hash: vm.commit.hash, ...position });
   };
 
-  const gutterW = gutterWidth(layout.laneCount);
-  const laneOverflow = layout.laneCount > MAX_GUTTER_LANES;
+  const gutterW = gutterWidth(prLandingLayout.laneCount);
+  const laneOverflow = prLandingLayout.laneCount > MAX_GUTTER_LANES;
 
   // Horizontally reveal a lane inside the clipped gutter (no-op when the
   // gutter isn't overflowing). Scrolling the bar drives a CSS var on the card.
@@ -906,7 +932,7 @@ export function LineageGraph({
               );
             }}
           >
-            <div style={{ width: layout.laneCount * LANE_W, height: 1 }} />
+            <div style={{ width: prLandingLayout.laneCount * LANE_W, height: 1 }} />
           </div>
         )}
         {vms.length > 0 ? (
@@ -914,11 +940,12 @@ export function LineageGraph({
             ref={cardRef}
             className={`graph-card${selectedCommits.size > 0 ? " has-selection" : ""}`}
           >
-            {vms.map((vm) => (
+            {vms.map((vm, i) => (
               <GraphRow
                 key={vm.commit.hash}
                 vm={vm}
-                laneCount={layout.laneCount}
+                laneCount={prLandingLayout.laneCount}
+                prLanding={prLandingLayout.rows[i] ?? { top: [], bottom: [] }}
                 now={now}
                 selected={selectedCommits.has(vm.commit.hash)}
                 focused={focusedCommit === vm.commit.hash}

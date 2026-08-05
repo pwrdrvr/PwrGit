@@ -272,7 +272,7 @@ export class PrService {
       force?: boolean;
     } = {}
   ): Promise<Map<string, PrSummary | null>> {
-    const branches = this.branchesToCheck(repoId, opts.branches);
+    const branches = await this.branchesToCheck(repoId, opts.branches);
     if (branches.length === 0) return new Map();
     const pendingStatus = this.pendingPrNumberRefreshes.get(repoId);
     if (pendingStatus !== undefined) {
@@ -386,13 +386,37 @@ export class PrService {
     return parseGitHubRemote(out.value.stdout);
   }
 
-  private branchesToCheck(repoId: string, requested?: string[]): string[] {
+  private async branchesToCheck(
+    repoId: string,
+    requested?: string[]
+  ): Promise<string[]> {
     const rows = this.db
       .prepare("SELECT DISTINCT branch FROM worktrees WHERE repo_id = ?")
       .all(repoId) as { branch: string }[];
-    const branches = rows
+    const worktreeBranches = rows
       .map((r) => r.branch)
       .filter((b) => b !== "" && b !== "HEAD" && !b.startsWith("detached@"));
+    const repo = this.db
+      .prepare("SELECT path FROM repos WHERE id = ?")
+      .get(repoId) as { path: string } | undefined;
+    let localBranches: string[] = [];
+    if (repo !== undefined) {
+      const refs = await this.git(
+        ["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+        repo.path
+      );
+      if (refs.ok && refs.value.exitCode === 0) {
+        localBranches = refs.value.stdout
+          .split("\n")
+          .map((branch) => branch.trim())
+          .filter((branch) => branch !== "");
+      }
+    }
+    // Worktree rows remain a fallback when ref discovery fails, and also cover
+    // a branch checked out in a linked worktree whose ref view is momentarily
+    // changing. Local non-worktree branches matter because squash/rebase merges
+    // cannot be recognized by ancestry alone in the Active graph.
+    const branches = [...new Set([...worktreeBranches, ...localBranches])];
     if (requested === undefined) return branches;
     const available = new Set(branches);
     return [...new Set(requested)].filter((branch) => available.has(branch));

@@ -6,8 +6,12 @@ import { PrService } from "./pr-service";
 
 const REMOTE = "git@github.com:pwrdrvr/PwrGit.git\n";
 
-const git: GitExec = async () =>
-  ok({ stdout: REMOTE, stderr: "", exitCode: 0 });
+const git: GitExec = async (args) =>
+  ok({
+    stdout: args[0] === "for-each-ref" ? "feature/pr-state\n" : REMOTE,
+    stderr: "",
+    exitCode: 0
+  });
 
 function pr(overrides: Partial<PrSummary> = {}): PrSummary {
   return {
@@ -171,6 +175,37 @@ describe("PrService", () => {
     await expect(bulk).resolves.toEqual(latest);
     await expect(focused).resolves.toEqual(new Map());
     expect(fetches).toHaveLength(1);
+  });
+
+  it("discovers PRs for local branches that are not checked out in worktrees", async () => {
+    const localGit: GitExec = async (args) =>
+      ok({
+        stdout:
+          args[0] === "for-each-ref"
+            ? "feature/pr-state\nfeature/squashed\n"
+            : REMOTE,
+        stderr: "",
+        exitCode: 0
+      });
+    response = new Map([
+      ["feature/pr-state", pr()],
+      ["feature/squashed", pr({ state: "merged", isDraft: false })]
+    ]);
+    service = new PrService(db, localGit, {
+      getGitHubToken: async () => "token",
+      fetchPrsForRepo: async (_token, _owner, _repo, branches) => {
+        fetches.push(branches);
+        return new Map(branches.map((branch) => [branch, response.get(branch) ?? null]));
+      },
+      now: () => now
+    });
+
+    await service.refreshRepo("repo");
+
+    expect(fetches).toEqual([["feature/pr-state", "feature/squashed"]]);
+    expect(service.cachedBranchPr("repo", "feature/squashed")?.state).toBe(
+      "merged"
+    );
   });
 
   it("looks up and caches only the exact visible commit set", async () => {
