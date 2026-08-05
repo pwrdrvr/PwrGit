@@ -224,9 +224,9 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
     expect(rows[2].top).toEqual([{ from: 2, to: 0 }]);
   });
 
-  it("draws remote-ahead trunk as the same spine lane, dashed above the local tip", () => {
+  it("keeps a remote-ahead trunk dashed along the same spine lane", () => {
     // origin/main (R2..R1) is ahead of local main (L). One lane-0 line — the
-    // unapplied stretch is dashed, turning solid exactly at L's dot.
+    // remote stretch seeds a dash that the continuous lineage retains.
     const { rows, laneCount } = layoutLanes(
       [c("R2", "R1"), c("R1", "L"), c("L", "L1"), c("L1")],
       {
@@ -241,14 +241,15 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
     expect(rows[0].bottom).toEqual([{ from: 0, to: 0, dashed: 1 }]);
     expect(rows[1].top).toEqual([{ from: 0, to: 0, dashed: 1 }]);
     expect(rows[1].bottom).toEqual([{ from: 0, to: 0, dashed: 1 }]);
-    // The dash boundary is the local tip's dot: dashed above, solid below.
+    // Crossing the local tip does not change the style of the same-color lane.
     expect(rows[2].top).toEqual([{ from: 0, to: 0, dashed: 1 }]);
-    expect(rows[2].bottom).toEqual([{ from: 0, to: 0 }]);
-    expect(rows[3].top).toEqual([{ from: 0, to: 0 }]);
+    expect(rows[2].bottom).toEqual([{ from: 0, to: 0, dashed: 1 }]);
+    expect(rows[3].top).toEqual([{ from: 0, to: 0, dashed: 1 }]);
   });
 
   it("keeps branch lines solid alongside a dashed remote-ahead spine", () => {
-    // feat forked from local main's tip L; only the R→L stretch is dashed.
+    // feat forked from local main's tip L; its separate line stays solid while
+    // the remote-originated spine remains dashed through L.
     const { rows } = layoutLanes(
       [c("R", "L"), c("F", "L"), c("L", "L1"), c("L1")],
       {
@@ -269,12 +270,12 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
         { from: 1, to: 0 }
       ])
     );
-    expect(rows[2].bottom).toEqual([{ from: 0, to: 0 }]);
+    expect(rows[2].bottom).toEqual([{ from: 0, to: 0, dashed: 1 }]);
   });
 
   it("chains multiple remote default tips into one dashed spine", () => {
     // Fork workflow: upstream/main (U) ahead of origin/main (O) ahead of
-    // local main (L) — one lane-0 line, dashed all the way down to L's dot.
+    // local main (L) — one lane-0 line whose dash remains continuous past L.
     const { rows, laneCount } = layoutLanes(
       [c("U", "O"), c("O", "L"), c("L", "L1"), c("L1")],
       {
@@ -286,13 +287,56 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
     );
     expect(rows.map((r) => r.lane)).toEqual([0, 0, 0, 0]);
     expect(laneCount).toBe(1);
-    // Tier per stretch: upstream-only history dash-dots (2), origin's plain
-    // dashes (1), and each pattern boundary sits on a tip's dot.
+    // The upstream tier is stronger, so the same lane cannot weaken back to
+    // origin's tier-1 pattern when it crosses O.
     expect(rows[0].bottom).toEqual([{ from: 0, to: 0, dashed: 2 }]);
     expect(rows[1].top).toEqual([{ from: 0, to: 0, dashed: 2 }]);
-    expect(rows[1].bottom).toEqual([{ from: 0, to: 0, dashed: 1 }]);
-    expect(rows[2].top).toEqual([{ from: 0, to: 0, dashed: 1 }]);
-    expect(rows[2].bottom).toEqual([{ from: 0, to: 0 }]);
+    expect(rows[1].bottom).toEqual([{ from: 0, to: 0, dashed: 2 }]);
+    expect(rows[2].top).toEqual([{ from: 0, to: 0, dashed: 2 }]);
+    expect(rows[2].bottom).toEqual([{ from: 0, to: 0, dashed: 2 }]);
+  });
+
+  it("does not pass an inherited dash to a historical merge side lane", () => {
+    // R is remote-only, while L and the merge M are already on local main.
+    // The continuing lane stays dashed through M, but M's applied second-parent
+    // lineage S is a separate color and must remain solid until it converges.
+    const { rows } = layoutLanes(
+      [
+        c("R", "L"),
+        c("L", "M"),
+        c("M", "A", "S"),
+        c("A", "B"),
+        c("S", "B"),
+        c("B")
+      ],
+      {
+        tips: { L: ["main"] },
+        defaultBranch: "main",
+        defaultRefTips: ["R"],
+        shownBranches: []
+      }
+    );
+
+    // M's first-parent lane inherits the dash; its new side lane does not.
+    expect(rows[2].bottom).toEqual(
+      expect.arrayContaining([
+        { from: 0, to: 0, dashed: 1 },
+        { from: 0, to: 1 }
+      ])
+    );
+    // Both styles remain independent while the two lanes overlap.
+    expect(rows[3].top).toEqual(
+      expect.arrayContaining([
+        { from: 0, to: 0, dashed: 1 },
+        { from: 1, to: 1 }
+      ])
+    );
+    expect(rows[4].top).toEqual(
+      expect.arrayContaining([
+        { from: 0, to: 0, dashed: 1 },
+        { from: 1, to: 1 }
+      ])
+    );
   });
 
   it("keeps a diverged remote off the spine lane, as a dashed side line", () => {
