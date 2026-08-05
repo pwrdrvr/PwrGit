@@ -23,9 +23,9 @@
 // stops at commits a higher-priority branch claimed and at other drawn tips.
 // The spine's walk starts at the REF the trunk was drawn from (e.g.
 // origin/main) when given, so fetched-but-unmerged trunk commits stay on the
-// spine's own lane — drawn as one continuous dashed lineage rather than as a
-// separate anonymous line. Without `refs`, every commit is unowned and the
-// layout degrades to the plain parent-driven sweep.
+// spine's own lane — drawn as one continuous dashed lineage down to the local
+// tip, where known-local history starts solid. Without `refs`, every commit is
+// unowned and the layout degrades to the plain parent-driven sweep.
 
 export type LaneCommit = { hash: string; parents: string[] };
 
@@ -47,8 +47,8 @@ export type LaneRefs = {
  *  `dashed` marks a lineage originating in remote trunk history the local
  *  default branch hasn't applied yet. The value is the remote tier (1 =
  *  closest remote, 2 = the next remote out, …); once dashed, a continuous
- *  lane inherits the strongest pattern it has seen so it never becomes less
- *  dashed in the same color. */
+ *  lane inherits the strongest pattern it has seen until the local tip starts
+ *  the known-local, solid portion of that spine. */
 export type LaneSeg = { from: number; to: number; dashed?: number };
 
 export type LaneRow = {
@@ -165,16 +165,18 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
           spineStart: undefined
         }
       : computeOwners(byHash, refs);
+  const localTip =
+    refs === undefined ? undefined : tipOf.get(refs.defaultBranch);
 
   // Trunk commits fetched but not yet in the local default branch (from ANY
   // remote's copy of it) seed a dashed spine. Each commit carries the TIER of
   // the closest remote that has it — remotes ranked nearest-to-local first
   // (older tip = later in topo order) — so an upstream-only stretch can use a
-  // different pattern. Once seeded, the strongest dash is inherited by the
-  // continuing lane: one colored lineage must not silently become less dashed.
+  // different pattern. The strongest dash is inherited within the remote-only
+  // stretch, then explicitly ends at the local tip so known-local history does
+  // not become dashed when the loaded window continues farther back.
   const dashSeeds = new Map<string, number>();
   if (refs !== undefined) {
-    const localTip = tipOf.get(refs.defaultBranch);
     const remoteTips = (refs.defaultRefTips ?? []).filter(
       (h) => byHash.has(h) && h !== localTip
     );
@@ -268,7 +270,12 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
 
     const fromDot = new Set<number>();
     const seedDash = dashSeeds.get(c.hash) ?? 0;
-    const dashedOut = Math.max(seedDash, laneDashed[myLane] ?? 0);
+    // The edge arriving at the local tip still belongs to remote-only history,
+    // but every edge leaving that dot is known to be reachable from local main.
+    const dashedOut =
+      c.hash === localTip
+        ? 0
+        : Math.max(seedDash, laneDashed[myLane] ?? 0);
     if (c.parents.length === 0) {
       work[myLane] = null;
       workOwner[myLane] = null;
