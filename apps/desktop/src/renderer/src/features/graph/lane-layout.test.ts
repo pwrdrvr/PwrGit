@@ -287,13 +287,56 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
     );
     expect(rows.map((r) => r.lane)).toEqual([0, 0, 0, 0]);
     expect(laneCount).toBe(1);
-    // Tier per stretch: upstream-only history dash-dots (2), origin's plain
-    // dashes (1), and each pattern boundary sits on a tip's dot.
+    // The upstream tier is stronger, so the same lane cannot weaken back to
+    // origin's tier-1 pattern when it crosses O.
     expect(rows[0].bottom).toEqual([{ from: 0, to: 0, dashed: 2 }]);
     expect(rows[1].top).toEqual([{ from: 0, to: 0, dashed: 2 }]);
-    expect(rows[1].bottom).toEqual([{ from: 0, to: 0, dashed: 1 }]);
-    expect(rows[2].top).toEqual([{ from: 0, to: 0, dashed: 1 }]);
-    expect(rows[2].bottom).toEqual([{ from: 0, to: 0, dashed: 1 }]);
+    expect(rows[1].bottom).toEqual([{ from: 0, to: 0, dashed: 2 }]);
+    expect(rows[2].top).toEqual([{ from: 0, to: 0, dashed: 2 }]);
+    expect(rows[2].bottom).toEqual([{ from: 0, to: 0, dashed: 2 }]);
+  });
+
+  it("does not pass an inherited dash to a historical merge side lane", () => {
+    // R is remote-only, while L and the merge M are already on local main.
+    // The continuing lane stays dashed through M, but M's applied second-parent
+    // lineage S is a separate color and must remain solid until it converges.
+    const { rows } = layoutLanes(
+      [
+        c("R", "L"),
+        c("L", "M"),
+        c("M", "A", "S"),
+        c("A", "B"),
+        c("S", "B"),
+        c("B")
+      ],
+      {
+        tips: { L: ["main"] },
+        defaultBranch: "main",
+        defaultRefTips: ["R"],
+        shownBranches: []
+      }
+    );
+
+    // M's first-parent lane inherits the dash; its new side lane does not.
+    expect(rows[2].bottom).toEqual(
+      expect.arrayContaining([
+        { from: 0, to: 0, dashed: 1 },
+        { from: 0, to: 1 }
+      ])
+    );
+    // Both styles remain independent while the two lanes overlap.
+    expect(rows[3].top).toEqual(
+      expect.arrayContaining([
+        { from: 0, to: 0, dashed: 1 },
+        { from: 1, to: 1 }
+      ])
+    );
+    expect(rows[4].top).toEqual(
+      expect.arrayContaining([
+        { from: 0, to: 0, dashed: 1 },
+        { from: 1, to: 1 }
+      ])
+    );
   });
 
   it("keeps a diverged remote off the spine lane, as a dashed side line", () => {

@@ -47,7 +47,8 @@ export type LaneRefs = {
  *  `dashed` marks a lineage originating in remote trunk history the local
  *  default branch hasn't applied yet. The value is the remote tier (1 =
  *  closest remote, 2 = the next remote out, …); once dashed, a continuous
- *  lane inherits the pattern so it never changes to solid in the same color. */
+ *  lane inherits the strongest pattern it has seen so it never becomes less
+ *  dashed in the same color. */
 export type LaneSeg = { from: number; to: number; dashed?: number };
 
 export type LaneRow = {
@@ -169,8 +170,8 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
   // remote's copy of it) seed a dashed spine. Each commit carries the TIER of
   // the closest remote that has it — remotes ranked nearest-to-local first
   // (older tip = later in topo order) — so an upstream-only stretch can use a
-  // different pattern. Once seeded, the dash is inherited by the continuing
-  // lane: one colored lineage must not silently change from dashed to solid.
+  // different pattern. Once seeded, the strongest dash is inherited by the
+  // continuing lane: one colored lineage must not silently become less dashed.
   const dashSeeds = new Map<string, number>();
   if (refs !== undefined) {
     const localTip = tipOf.get(refs.defaultBranch);
@@ -266,7 +267,8 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
     }
 
     const fromDot = new Set<number>();
-    const dashedOut = dashSeeds.get(c.hash) ?? laneDashed[myLane] ?? 0;
+    const seedDash = dashSeeds.get(c.hash) ?? 0;
+    const dashedOut = Math.max(seedDash, laneDashed[myLane] ?? 0);
     if (c.parents.length === 0) {
       work[myLane] = null;
       workOwner[myLane] = null;
@@ -286,7 +288,9 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
         }
         work[lane] = p;
         workOwner[lane] = po;
-        workDashed[lane] = dashedOut;
+        // A merge's side lineage is a different lane/color. Seed it from its
+        // own parent, never from dash state carried by the continuing lane.
+        workDashed[lane] = dashSeeds.get(p) ?? 0;
         fromDot.add(lane);
       }
     }
