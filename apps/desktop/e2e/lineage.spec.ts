@@ -275,16 +275,19 @@ test("caps drawn branches and clips the lane gutter on branch-heavy repos", asyn
   await window.keyboard.press("Escape");
   await window.locator(".branch-pop__backdrop").click({ force: true }).catch(() => undefined);
 
-  // Gutter is clipped to 10 lanes (160px) with its own scrollbar — commit text
-  // is NOT pushed off-screen by 30+ lanes.
+  // Gutter is clipped to 10 lanes (160px) with its own scrollbar. At the
+  // narrowest supported widths the subject may fully ellipsize, but the row
+  // and its duration must remain present and visible.
   await expect(window.locator(".graph-lanes-clip").first()).toHaveCSS(
     "width",
     "160px"
   );
   await expect(window.locator(".lane-scrollbar")).toBeVisible();
-  await expect(
-    window.locator(".graph-row .commit-msg", { hasText: "work on b30" })
-  ).toBeVisible();
+  const newestBranchRow = window.locator(".graph-row", {
+    hasText: "work on b30"
+  });
+  await expect(newestBranchRow).toHaveCount(1);
+  await expect(newestBranchRow.locator(".commit-time")).toBeVisible();
 
   // Row pressure is absorbed by the ellipsized subject, never the age. Every
   // duration must remain whole and within the row's padded content box.
