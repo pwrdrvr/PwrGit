@@ -135,9 +135,8 @@ export const SORT_LABEL: Record<WorktreeSort, string> = {
 };
 
 /**
- * Order a repo's worktrees. A user drag-order (customOrder) wins; otherwise the
- * sort mode applies. The incoming list is primary-first (from the indexer), so
- * "pinned" keeps primary near the top while floating pinned worktrees up.
+ * Order a worktree list. A user drag-order (customOrder) wins; otherwise the
+ * selected sort mode applies.
  */
 export function orderWorktrees(
   worktrees: Worktree[],
@@ -180,6 +179,41 @@ export function orderWorktrees(
   }
   // "pinned"
   return list.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+}
+
+/**
+ * Keep the primary checkout and pinned linked worktrees in the always-visible
+ * part of an expanded repo. The remaining linked worktrees retain the user's
+ * chosen ordering behind the Worktrees disclosure.
+ */
+export function groupWorktreesForNavigation(
+  worktrees: Worktree[],
+  sort: WorktreeSort,
+  customOrder?: string[]
+): {
+  primary: Worktree | undefined;
+  pinned: Worktree[];
+  remaining: Worktree[];
+  displayIds: string[];
+} {
+  const primary = worktrees.find((worktree) => worktree.isPrimary);
+  const ordered = orderWorktrees(
+    worktrees.filter((worktree) => !worktree.isPrimary),
+    sort,
+    customOrder
+  );
+  const pinned = ordered.filter((worktree) => worktree.pinned);
+  const remaining = ordered.filter((worktree) => !worktree.pinned);
+  return {
+    primary,
+    pinned,
+    remaining,
+    displayIds: [
+      ...(primary === undefined ? [] : [primary.id]),
+      ...pinned.map((worktree) => worktree.id),
+      ...remaining.map((worktree) => worktree.id)
+    ]
+  };
 }
 
 /** Short relative age label for a last-activity timestamp. */

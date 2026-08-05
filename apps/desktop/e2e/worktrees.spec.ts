@@ -52,6 +52,37 @@ test("scans a folder and lists a repo with its worktrees", async () => {
   }).toPass({ timeout: 10_000 });
 });
 
+test("keeps the primary and pinned worktrees visible when the remaining list is collapsed", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepo("navigation", {
+    worktrees: ["feature/favorite", "feature/other"]
+  });
+  handle = await launchApp();
+  const { window } = handle;
+
+  await addRootAndExpand(window, handle, sandbox, "navigation");
+
+  const favorite = branchRow(window, "feature/favorite");
+  await favorite.hover();
+  await favorite.getByRole("button", { name: "Pin worktree" }).click();
+  await expect(
+    window.locator(".wt-section__elevated").filter({
+      has: window.locator(".wt-row__branch", { hasText: "feature/favorite" })
+    })
+  ).toBeVisible();
+
+  const worktreesToggle = window.locator(".wt-section__toggle");
+  await worktreesToggle.click();
+
+  await expect(worktreesToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(
+    worktreesToggle.locator(".ref-section__count")
+  ).toHaveText("1");
+  await expect(branchRow(window, "main")).toBeVisible();
+  await expect(branchRow(window, "feature/favorite")).toBeVisible();
+  await expect(branchRow(window, "feature/other")).toHaveCount(0);
+});
+
 test("creates a worktree through the New worktree modal", async () => {
   sandbox = createGitSandbox();
   sandbox.makeRepo("beta");

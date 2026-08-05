@@ -29,8 +29,9 @@ test("browses local branches and nested remotes, then pushes to a test target", 
   const { window } = handle;
   await addRootAndExpand(window, handle, box, "refsrepo");
 
-  // The primary checkout now belongs inside the collapsible Worktrees group.
-  const worktrees = window.getByRole("button", { name: /^Worktrees 1/ });
+  // The primary checkout remains visible above the collapsible linked-worktree
+  // list, so a repo with only its primary has zero rows behind the disclosure.
+  const worktrees = window.getByRole("button", { name: /^Worktrees 0/ });
   await expect(worktrees).toBeVisible();
   await expect(window.locator(".wt-tag--local")).toHaveText("primary");
 

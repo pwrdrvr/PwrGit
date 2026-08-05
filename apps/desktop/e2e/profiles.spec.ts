@@ -65,9 +65,64 @@ test("creating a profile opens its own window with repos from all roots", async 
     acmeWindow.locator(".repo-row__name", { hasText: "pwr-svc" })
   ).toBeVisible();
 
-  // Group-by-folder splits them into one section per root.
-  await acmeWindow.locator(".group-toggle").click();
+  // At the supported minimum sidebar width, every lens label remains intact
+  // beside the display-options trigger.
+  const sidebarResizer = acmeWindow.getByRole("separator", {
+    name: "Resize sidebar"
+  });
+  await sidebarResizer.focus();
+  for (let i = 0; i < 5; i += 1) {
+    await sidebarResizer.press("ArrowLeft");
+  }
+  await expect(sidebarResizer).toHaveAttribute("aria-valuenow", "240");
+  const lensWidths = await acmeWindow.locator(".lens-chip").evaluateAll((chips) =>
+    chips.map((chip) => ({
+      label: chip.textContent?.trim() ?? "unknown",
+      available: chip.clientWidth,
+      required: chip.scrollWidth
+    }))
+  );
+  for (const width of lensWidths) {
+    expect(width.required, `${width.label} lens width`).toBeLessThanOrEqual(
+      width.available
+    );
+  }
+
+  // Group-by-folder is the default, and its folder headers stay pinned to the
+  // sidebar scrollport while repositories pass underneath.
   await expect(acmeWindow.locator(".repo-group")).toHaveCount(2);
+  const firstGroupHead = acmeWindow.locator(".repo-group__head").first();
+  await expect(firstGroupHead).toHaveCSS("position", "sticky");
+
+  const sidebarList = acmeWindow.locator(".sidebar__list");
+  await sidebarList.evaluate((element) => {
+    element.style.flex = "0 0 72px";
+    element.scrollTop = 20;
+  });
+  await expect
+    .poll(async () => {
+      const listBox = await sidebarList.boundingBox();
+      const headBox = await firstGroupHead.boundingBox();
+      if (listBox === null || headBox === null) return Number.NaN;
+      return Math.round(headBox.y - listBox.y);
+    })
+    .toBe(0);
+
+  // The grouping preference moved into the compact kebab beside the lenses.
+  const optionsButton = acmeWindow.getByRole("button", {
+    name: "Sidebar display options"
+  });
+  await optionsButton.click();
+  await expect(optionsButton).toHaveAttribute("aria-expanded", "true");
+  await optionsButton.click();
+  await expect(optionsButton).toHaveAttribute("aria-expanded", "false");
+  await expect(
+    acmeWindow.getByRole("menu", { name: "Sidebar display options" })
+  ).toHaveCount(0);
+
+  await optionsButton.click();
+  await acmeWindow.getByRole("menuitem", { name: /Group by folder/ }).click();
+  await expect(acmeWindow.locator(".repo-group")).toHaveCount(0);
 
   // Picking the profile again anywhere focuses the existing window — never a
   // third one. (Drive it from the original window's menu.)
