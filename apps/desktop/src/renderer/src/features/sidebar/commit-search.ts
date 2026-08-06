@@ -7,7 +7,7 @@ const normalize = (value: string): string =>
     .normalize("NFKD")
     .replace(/\p{M}/gu, "")
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
 
 function scoreCommit(commit: Commit, normalizedQuery: string): number | null {

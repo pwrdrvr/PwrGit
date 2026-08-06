@@ -39,6 +39,23 @@ describe("searchCommits", () => {
     expect(searchCommits(commits, "renee@example.com")).toEqual([commits[2]]);
   });
 
+  it("preserves non-Latin letters in subjects and author names", () => {
+    const unicodeCommits = [
+      commit("d4", "исправление: поиск коммитов"),
+      commit("e5", "検索履歴を追加", "李雷", "lilei@example.com"),
+      commit("f6", "إصلاح البحث")
+    ];
+    expect(searchCommits(unicodeCommits, "поиск коммитов")).toEqual([
+      unicodeCommits[0]
+    ]);
+    expect(searchCommits(unicodeCommits, "李雷")).toEqual([
+      unicodeCommits[1]
+    ]);
+    expect(searchCommits(unicodeCommits, "إصلاح")).toEqual([
+      unicodeCommits[2]
+    ]);
+  });
+
   it("does not populate commit results until a query is entered", () => {
     expect(searchCommits(commits, "  ")).toEqual([]);
   });

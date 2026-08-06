@@ -154,6 +154,37 @@ test("reconciles worktrees changed outside PwrGit", async () => {
   );
 });
 
+test("removing the selected worktree clears its commits from search", async () => {
+  sandbox = createGitSandbox();
+  const repo = sandbox.makeRepo("vanished-timeline");
+  const linked = repo.addWorktree("feature/gone");
+  sandbox.commit(linked, "gone.txt", "vanishing timeline commit");
+  handle = await launchApp();
+  const { window } = handle;
+
+  await addRootAndExpand(window, handle, sandbox, "vanished-timeline");
+  await branchRow(window, "feature/gone").click();
+  await expect(
+    window.locator(".graph-row", { hasText: "vanishing timeline commit" })
+  ).toBeVisible({ timeout: 20_000 });
+
+  sandbox.git(repo.path, "worktree", "remove", "--force", linked);
+  await window
+    .locator(".wt-section__head")
+    .getByRole("button", { name: "Refresh worktrees for vanished-timeline" })
+    .click();
+  await expect(branchRow(window, "feature/gone")).toHaveCount(0);
+
+  await window.getByRole("button", { name: /Jump to repo/i }).click();
+  await window.locator(".overlay-search input").fill("vanishing timeline commit");
+  await expect(
+    window.locator(".overlay-result", { hasText: "vanishing timeline commit" })
+  ).toHaveCount(0);
+  await expect(window.locator(".overlay-empty")).toContainText(
+    "Nothing matches"
+  );
+});
+
 test("batch-removes worktrees (including a dirty one) via multi-select", async () => {
   sandbox = createGitSandbox();
   const repo = sandbox.makeRepo("gamma");

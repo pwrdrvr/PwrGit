@@ -239,6 +239,15 @@ export function App() {
   const selectedWorktree =
     selectedRepo?.worktrees.find((w) => w.id === selection?.worktreeId) ?? null;
 
+  // Reconciliation can remove the selected worktree without changing its
+  // persisted selection id. Do not leave that vanished timeline searchable.
+  useEffect(() => {
+    if (selectedWorktree !== null) return;
+    setSearchableCommits([]);
+    setCommitReveal(null);
+    setCommitFocus(null);
+  }, [selectedWorktree]);
+
   // A selected linked worktree contributes a durable reason to the same
   // main-process PR monitor used by visible commits. Replacing or unmounting
   // this reason cannot stop a PR that another surface still needs.
