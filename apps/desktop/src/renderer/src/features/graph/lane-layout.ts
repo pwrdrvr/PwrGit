@@ -237,15 +237,17 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
       if (before[k] === c.hash) incoming.push(k);
     }
     // Prefer this branch's own incoming lane. With no such lane, a single
-    // foreign arrival at a non-default tip is a conflict-free linear ownership
-    // handoff; inherit it in place. Multiple arrivals represent a real fork and
-    // must converge into a separately selected owner lane.
+    // foreign arrival at an unreserved non-default tip is a conflict-free
+    // linear ownership handoff; inherit it in place. The checked-out tip must
+    // still bend into reserved lane 1. Multiple arrivals represent a real fork
+    // and must converge into a separately selected owner lane.
     const continuable = incoming.filter((k) => laneOwner[k] === co);
     const inheritedLane =
       continuable.length === 0 &&
       incoming.length === 1 &&
       co !== null &&
-      co !== refs?.defaultBranch
+      co !== refs?.defaultBranch &&
+      co !== refs?.headBranch
         ? incoming[0]
         : undefined;
     const myLane =

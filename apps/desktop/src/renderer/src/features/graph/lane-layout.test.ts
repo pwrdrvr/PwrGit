@@ -237,6 +237,23 @@ describe("layoutLanes with refs (branch-aware lanes)", () => {
     expect(lanes).toEqual({ N1: 2, H1: 1, T1: 0, T2: 0 });
   });
 
+  it("bends a stacked child into the checked-out tip's reserved lane", () => {
+    // child builds on checked-out h. child must avoid h's lane-1 reservation,
+    // while H itself must land in lane 1 rather than inheriting child's lane 2.
+    const { rows } = layoutLanes(
+      [c("C", "H"), c("H", "M"), c("M")],
+      {
+        tips: { C: ["child"], H: ["h"], M: ["main"] },
+        defaultBranch: "main",
+        headBranch: "h",
+        shownBranches: ["child", "h"]
+      }
+    );
+    expect(rows.map((row) => row.lane)).toEqual([2, 1, 0]);
+    expect(rows[1].top).toEqual([{ from: 2, to: 1 }]);
+    expect(rows[2].top).toEqual([{ from: 1, to: 0 }]);
+  });
+
   it("keeps a checked-out linear stack on lane 1", () => {
     // h builds on d's tip; the ancestry stays in h's pinned lane until the
     // stack reaches main.
