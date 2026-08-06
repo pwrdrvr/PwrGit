@@ -511,4 +511,21 @@ describe("layoutLanes with refs (branch-aware lanes)", () => {
     expect(rows.map((r) => r.lane)).toEqual([0, 0]);
     expect(laneCount).toBe(1);
   });
+
+  it("compacts through HEAD when its lane-1 reservation was not installed", () => {
+    // main's tip is outside the window, so no spine or HEAD pin exists. The
+    // linear child -> HEAD -> ancestor train should stay in the first lane.
+    const { rows, laneCount } = layoutLanes(
+      [c("C", "H"), c("H", "A"), c("A")],
+      {
+        tips: { C: ["child"], H: ["h"], Mout: ["main"] },
+        defaultBranch: "main",
+        headBranch: "h",
+        shownBranches: ["child", "h"]
+      }
+    );
+    expect(rows.map((row) => row.lane)).toEqual([0, 0, 0]);
+    expect(rows[1].top).toEqual([{ from: 0, to: 0 }]);
+    expect(laneCount).toBe(1);
+  });
 });
