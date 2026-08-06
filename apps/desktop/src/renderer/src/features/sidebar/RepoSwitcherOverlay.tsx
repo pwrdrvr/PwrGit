@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { RepoSearchHit, SearchHitStatus } from "@pwrgit/shared";
+import type { Commit, RepoSearchHit, SearchHitStatus } from "@pwrgit/shared";
 import { createAsyncFill } from "../../lib/asyncFill";
 import { dispatch } from "../../lib/pwrgit";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import { shortWhen } from "../graph/graph-view";
+import { searchCommits } from "./commit-search";
 import { PrChip } from "./PrChip";
 import { PinIcon } from "./WorktreeRow";
 
@@ -11,6 +12,10 @@ const isMac = navigator.platform.startsWith("Mac");
 
 const hitKey = (hit: RepoSearchHit): string =>
   `${hit.kind}:${hit.worktreeId ?? hit.repoId}`;
+
+type PaletteItem =
+  | { kind: "commit"; commit: Commit }
+  | { kind: "repo"; hit: RepoSearchHit };
 
 function SearchIcon() {
   return (
@@ -29,12 +34,35 @@ function SearchIcon() {
   );
 }
 
+function CommitIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+    >
+      <path d="M3 12h6M15 12h6" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
 export function RepoSwitcherOverlay({
+  commits,
+  commitContext,
   onClose,
-  onPick
+  onPick,
+  onPickCommit
 }: {
+  commits: Commit[];
+  commitContext: { repoName: string; branch: string } | null;
   onClose: () => void;
   onPick: (hit: RepoSearchHit) => void;
+  onPickCommit: (commit: Commit) => void;
 }) {
   const now = useRelativeClock();
   const [query, setQuery] = useState("");
@@ -45,6 +73,17 @@ export function RepoSwitcherOverlay({
   );
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
+  const commitResults = useMemo(
+    () => searchCommits(commits, query),
+    [commits, query]
+  );
+  const items = useMemo<PaletteItem[]>(
+    () => [
+      ...commitResults.map((commit) => ({ kind: "commit" as const, commit })),
+      ...results.map((hit) => ({ kind: "repo" as const, hit }))
+    ],
+    [commitResults, results]
+  );
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -70,13 +109,22 @@ export function RepoSwitcherOverlay({
     void dispatch("repo:search", { query }).then((r) => {
       if (active && r.ok) {
         setResults(r.value);
-        setSel(0);
       }
     });
     return () => {
       active = false;
     };
   }, [query]);
+
+  useEffect(() => setSel(0), [query]);
+  useEffect(() => {
+    setSel((current) => Math.min(current, Math.max(0, items.length - 1)));
+  }, [items.length]);
+
+  const pickItem = (item: PaletteItem | undefined): void => {
+    if (item?.kind === "commit") onPickCommit(item.commit);
+    else if (item?.kind === "repo") onPick(item.hit);
+  };
 
   // Lazily fill per-hit status (tip age + dirty/ahead/behind when cached) as
   // rows become VISIBLE — debounced so a fast scroll doesn't rip through the
@@ -135,25 +183,26 @@ export function RepoSwitcherOverlay({
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search repos & branches across all profiles…"
+            placeholder="Search repos, branches & current commits…"
             onKeyDown={(e) => {
               if (e.key === "ArrowDown") {
                 e.preventDefault();
-                setSel((s) => Math.min(s + 1, results.length - 1));
+                setSel((s) =>
+                  Math.min(s + 1, Math.max(0, items.length - 1))
+                );
               } else if (e.key === "ArrowUp") {
                 e.preventDefault();
                 setSel((s) => Math.max(s - 1, 0));
               } else if (e.key === "Enter") {
-                const hit = results[sel];
-                if (hit !== undefined) onPick(hit);
+                pickItem(items[sel]);
               } else if (
                 (e.metaKey || e.ctrlKey) &&
                 !e.shiftKey &&
                 e.key.toLowerCase() === "p"
               ) {
                 e.preventDefault();
-                const hit = results[sel];
-                if (hit !== undefined) togglePin(hit);
+                const item = items[sel];
+                if (item?.kind === "repo") togglePin(item.hit);
               } else if (e.key === "Escape") {
                 onClose();
               }
@@ -163,21 +212,51 @@ export function RepoSwitcherOverlay({
         </div>
 
         <div className="overlay-results" role="listbox" ref={resultsRef}>
-          {results.map((r, i) => (
-            // A div, not a button: the pin star inside is a real <button>,
-            // and buttons can't nest.
-            <div
-              // Kind-prefixed: a repo and its PRIMARY worktree share the same
-              // hash-of-path id, and duplicate keys strand ghost rows in the
-              // DOM across re-renders.
-              key={hitKey(r)}
-              data-hit-key={hitKey(r)}
-              role="option"
-              aria-selected={i === sel}
-              className={`overlay-result${i === sel ? " is-selected" : ""}`}
-              onMouseEnter={() => setSel(i)}
-              onClick={() => onPick(r)}
-            >
+          {items.map((item, i) => {
+            if (item.kind === "commit") {
+              const commit = item.commit;
+              return (
+                <div
+                  key={`commit:${commit.hash}`}
+                  role="option"
+                  aria-selected={i === sel}
+                  className={`overlay-result${i === sel ? " is-selected" : ""}`}
+                  title={
+                    commitContext === null
+                      ? commit.hash
+                      : `${commitContext.repoName} · ${commitContext.branch} · ${commit.hash}`
+                  }
+                  onMouseEnter={() => setSel(i)}
+                  onClick={() => onPickCommit(commit)}
+                >
+                  <CommitIcon />
+                  <span className="overlay-result__name">{commit.subject}</span>
+                  <span className="overlay-result__meta">{commit.authorName}</span>
+                  <span className="hit-status__age">
+                    {shortWhen(commit.committedAt, now)}
+                  </span>
+                  <span className="overlay-result__profile">
+                    {commit.shortHash}
+                  </span>
+                </div>
+              );
+            }
+            const r = item.hit;
+            return (
+              // A div, not a button: the pin star inside is a real <button>,
+              // and buttons can't nest.
+              <div
+                // Kind-prefixed: a repo and its PRIMARY worktree share the same
+                // hash-of-path id, and duplicate keys strand ghost rows in the
+                // DOM across re-renders.
+                key={hitKey(r)}
+                data-hit-key={hitKey(r)}
+                role="option"
+                aria-selected={i === sel}
+                className={`overlay-result${i === sel ? " is-selected" : ""}`}
+                onMouseEnter={() => setSel(i)}
+                onClick={() => onPick(r)}
+              >
               {r.kind === "worktree" ? (
                 <svg
                   width="15"
@@ -268,9 +347,10 @@ export function RepoSwitcherOverlay({
                   : `${r.worktreeCount} ${r.worktreeCount === 1 ? "wt" : "wts"}`}
               </span>
               <span className="overlay-result__profile">{r.profileName}</span>
-            </div>
-          ))}
-          {results.length === 0 && (
+              </div>
+            );
+          })}
+          {items.length === 0 && (
             <div className="overlay-empty">
               {query.trim() === ""
                 ? "No repos indexed yet"
@@ -282,10 +362,12 @@ export function RepoSwitcherOverlay({
         <div className="overlay-foot">
           <span>↑↓ navigate</span>
           <span>↵ open</span>
-          <span>{isMac ? "⌘P" : "ctrl+P"} pin</span>
+          {items[sel]?.kind === "repo" && (
+            <span>{isMac ? "⌘P" : "ctrl+P"} pin</span>
+          )}
           <span style={{ flex: 1 }} />
           <span>
-            {results.length} {results.length === 1 ? "result" : "results"}
+            {items.length} {items.length === 1 ? "result" : "results"}
           </span>
         </div>
       </div>

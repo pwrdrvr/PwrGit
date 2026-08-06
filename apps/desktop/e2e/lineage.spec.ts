@@ -51,6 +51,41 @@ test("multi-lane lineage shows active branches and hides merged ones", async () 
   await expect(hint).toBeHidden();
 });
 
+test("command palette finds and opens commits from the current timeline", async () => {
+  sandbox = createGitSandbox();
+  const s = sandbox;
+  const repo = s.makeRepo("commit-search");
+  s.commit(repo.path, "terminal.txt", "feat: searchable remote terminals");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, s, "commit-search");
+  await branchRow(window, "main").first().click();
+
+  const targetRow = window.locator(".graph-row", {
+    hasText: "feat: searchable remote terminals"
+  });
+  await expect(targetRow).toBeVisible({ timeout: 20_000 });
+  const shortHash = await targetRow.locator(".commit-sha-chip").textContent();
+
+  await window.keyboard.press("Control+K");
+  await window.locator(".overlay-search input").fill("remote terminals");
+  const hit = window.locator(".overlay-result", {
+    hasText: "feat: searchable remote terminals"
+  });
+  await expect(hit).toBeVisible();
+  await expect(hit.locator(".overlay-result__profile")).toHaveText(
+    shortHash ?? ""
+  );
+
+  await hit.click();
+  await expect(window.locator(".overlay-panel")).toBeHidden();
+  await expect(targetRow).toHaveClass(/is-focused/);
+  await expect(window.locator(".commit-tab__subject")).toHaveText(
+    "feat: searchable remote terminals"
+  );
+});
+
 test("remote-only branches use dashed lineage and ellipsized ref chips", async () => {
   sandbox = createGitSandbox();
   const s = sandbox;
