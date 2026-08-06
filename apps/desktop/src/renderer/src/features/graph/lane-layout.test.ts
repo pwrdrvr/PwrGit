@@ -396,6 +396,70 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
     );
   });
 
+  it("dashes a remote-only branch until it reaches locally reachable history", () => {
+    const { rows } = layoutLanes(
+      [
+        c("R2", "R1"),
+        c("R1", "B"),
+        c("L", "B"),
+        c("B", "A"),
+        c("A")
+      ],
+      {
+        tips: { R2: ["origin/agent/remote-only"], L: ["main"] },
+        defaultBranch: "main",
+        localRefTips: ["L"],
+        remoteBranches: ["origin/agent/remote-only"],
+        shownBranches: ["origin/agent/remote-only"]
+      }
+    );
+
+    expect(rows[0].bottom).toEqual([{ from: 1, to: 1, dashed: 1 }]);
+    expect(rows[1].top).toEqual([{ from: 1, to: 1, dashed: 1 }]);
+    expect(rows[1].bottom).toEqual([{ from: 1, to: 1, dashed: 1 }]);
+    expect(rows[2].bottom).toEqual(
+      expect.arrayContaining([
+        { from: 0, to: 0 },
+        { from: 1, to: 1, dashed: 1 }
+      ])
+    );
+    expect(rows[3].top).toEqual(
+      expect.arrayContaining([
+        { from: 0, to: 0 },
+        { from: 1, to: 0, dashed: 1 }
+      ])
+    );
+    expect(rows[3].bottom).toEqual([{ from: 0, to: 0 }]);
+  });
+
+  it("ends a remote-only dash at history reachable from another local ref", () => {
+    const { rows } = layoutLanes(
+      [
+        c("R2", "R1"),
+        c("L", "R1"),
+        c("R1", "B"),
+        c("M", "B"),
+        c("B")
+      ],
+      {
+        tips: {
+          R2: ["origin/agent/remote-only"],
+          L: ["local-copy"],
+          M: ["main"]
+        },
+        defaultBranch: "main",
+        localRefTips: ["L", "M"],
+        remoteBranches: ["origin/agent/remote-only"],
+        shownBranches: ["origin/agent/remote-only"]
+      }
+    );
+
+    expect(rows[2].top).toEqual(
+      expect.arrayContaining([{ from: 1, to: 1, dashed: 1 }])
+    );
+    expect(rows[2].bottom).toContainEqual({ from: 1, to: 1 });
+  });
+
   it("keeps the spine owned and pinned when local main is behind the window", () => {
     // Local main's tip fell off the bottom of the trunk window (>cap behind
     // origin/main). The drawn trunk is entirely remote history — it must

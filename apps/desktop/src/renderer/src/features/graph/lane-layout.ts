@@ -36,6 +36,11 @@ export type LaneRefs = {
   defaultBranch: string;
   /** Tips of each remote's copy of the default branch (origin/main, …). */
   defaultRefTips?: string[] | undefined;
+  /** Tips of all local branches, used to stop remote-only dashes where their
+   *  history becomes reachable from a local ref. */
+  localRefTips?: string[] | undefined;
+  /** Drawn branch names that exist only as remote-tracking refs. */
+  remoteBranches?: string[] | undefined;
   /** The branch checked out in the viewing worktree — pinned to lane 1. */
   headBranch?: string | undefined;
   /** Branches drawn besides the default spine (most recent first). */
@@ -44,11 +49,10 @@ export type LaneRefs = {
 
 /** A drawn segment within a row cell: `from` lane at one edge → `to` lane at the
  *  row's vertical center (top half), or center → `to` at the bottom edge.
- *  `dashed` marks a lineage originating in remote trunk history the local
- *  default branch hasn't applied yet. The value is the remote tier (1 =
- *  closest remote, 2 = the next remote out, …); once dashed, a continuous
- *  lane inherits the strongest pattern it has seen until the local tip starts
- *  the known-local, solid portion of that spine. */
+ *  `dashed` marks lineage that exists only behind a remote-tracking ref. The
+ *  value is the remote tier (1 = closest remote, 2 = the next remote out, …);
+ *  once dashed, a continuous lane inherits the strongest pattern it has seen
+ *  until it reaches history available from a local ref. */
 export type LaneSeg = { from: number; to: number; dashed?: number };
 
 export type LaneRow = {
@@ -168,15 +172,19 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
   const localTip =
     refs === undefined ? undefined : tipOf.get(refs.defaultBranch);
 
-  // Trunk commits fetched but not yet in the local default branch (from ANY
-  // remote's copy of it) seed a dashed spine. Each commit carries the TIER of
-  // the closest remote that has it — remotes ranked nearest-to-local first
-  // (older tip = later in topo order) — so an upstream-only stretch can use a
-  // different pattern. The strongest dash is inherited within the remote-only
-  // stretch, then explicitly ends at the local tip so known-local history does
-  // not become dashed when the loaded window continues farther back.
+  // Commits fetched but not yet reachable from a local ref seed dashed lines.
+  // Default-branch remotes carry distinct tiers; remote-only feature branches
+  // use the closest-remote pattern. The strongest dash is inherited within a
+  // remote-only stretch and ends where history becomes locally reachable.
   const dashSeeds = new Map<string, number>();
+  const locallyReachable = new Set<string>();
   if (refs !== undefined) {
+    const localTips = new Set(refs.localRefTips ?? []);
+    if (localTip !== undefined) localTips.add(localTip);
+    for (const tip of localTips) {
+      for (const h of reachable(byHash, tip)) locallyReachable.add(h);
+    }
+
     const remoteTips = (refs.defaultRefTips ?? []).filter(
       (h) => byHash.has(h) && h !== localTip
     );
@@ -191,6 +199,15 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
           if (!applied.has(h) && !dashSeeds.has(h)) dashSeeds.set(h, i + 1);
         }
       });
+    }
+
+    for (const branch of refs.remoteBranches ?? []) {
+      const tip = tipOf.get(branch);
+      for (const h of reachable(byHash, tip)) {
+        if (!locallyReachable.has(h) && !dashSeeds.has(h)) {
+          dashSeeds.set(h, 1);
+        }
+      }
     }
   }
 
@@ -270,10 +287,10 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
 
     const fromDot = new Set<number>();
     const seedDash = dashSeeds.get(c.hash) ?? 0;
-    // The edge arriving at the local tip still belongs to remote-only history,
-    // but every edge leaving that dot is known to be reachable from local main.
+    // The edge arriving at a locally reachable commit can still belong to
+    // remote-only history, but every edge leaving that dot is local history.
     const dashedOut =
-      c.hash === localTip
+      locallyReachable.has(c.hash)
         ? 0
         : Math.max(seedDash, laneDashed[myLane] ?? 0);
     if (c.parents.length === 0) {
