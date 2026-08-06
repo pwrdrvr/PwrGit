@@ -51,6 +51,52 @@ test("multi-lane lineage shows active branches and hides merged ones", async () 
   await expect(hint).toBeHidden();
 });
 
+test("remote-only branches use dashed lineage and ellipsized ref chips", async () => {
+  sandbox = createGitSandbox();
+  const s = sandbox;
+  const repo = s.makeRepo("remote-only-lineage");
+  const branch =
+    "agent/messaging-response-identity-labels-with-a-long-remote-name";
+
+  // Model another machine's branch: its commit and origin/* tracking ref were
+  // fetched, but no local refs/heads/* counterpart exists in this checkout.
+  s.git(repo.path, "checkout", "-q", "-b", "remote-source");
+  s.commit(repo.path, "remote.txt", "remote-only branch work");
+  const remoteTip = s.git(repo.path, "rev-parse", "HEAD");
+  s.git(repo.path, "checkout", "-q", "main");
+  s.git(repo.path, "update-ref", `refs/remotes/origin/${branch}`, remoteTip);
+  s.git(repo.path, "branch", "-D", "remote-source");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, s, "remote-only-lineage");
+  await branchRow(window, "main").first().click();
+  await window.locator(".only-me").click();
+  await expect(window.locator(".only-me")).toHaveText("All branches");
+
+  const fullName = `origin/${branch}`;
+  const row = window.locator(".graph-row", {
+    hasText: "remote-only branch work"
+  });
+  const chip = row.locator(".ref-chip--remote", { hasText: fullName });
+  await expect(chip).toBeVisible({ timeout: 20_000 });
+  await expect(row.locator('[stroke-dasharray="4 4"]')).toHaveCount(1);
+
+  const truncation = await chip.locator(".ref-chip__name").evaluate((name) => {
+    const style = getComputedStyle(name);
+    return {
+      overflow: style.overflow,
+      textOverflow: style.textOverflow,
+      truncated: name.scrollWidth > name.clientWidth
+    };
+  });
+  expect(truncation).toEqual({
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    truncated: true
+  });
+});
+
 test("hovering an aligned commit SHA chip opens its context window", async () => {
   sandbox = createGitSandbox();
   const s = sandbox;

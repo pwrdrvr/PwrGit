@@ -427,12 +427,17 @@ export function LineageGraph({
     for (const [h, ns] of Object.entries(data.remoteTips)) {
       (tips[h] ??= []).push(...ns);
     }
+    const remoteNames = new Set(Object.values(data.remoteTips).flat());
     return layoutLanes(
       data.commits.map((c) => ({ hash: c.hash, parents: c.parents })),
       {
         tips,
         defaultBranch: data.defaultBranch,
         defaultRefTips: data.defaultRefTips,
+        localRefTips: Object.keys(data.tips),
+        remoteBranches: data.shownBranches.filter((name) =>
+          remoteNames.has(name)
+        ),
         // This worktree's checked-out branch — pinned to lane 1.
         headBranch: Object.entries(data.branches).find(
           ([, info]) => info.worktreeId === worktreeId

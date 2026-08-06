@@ -421,7 +421,7 @@ export function GraphRow({
                     }}
                   >
                     <BranchGlyph />
-                    {name}
+                    <span className="ref-chip__name">{name}</span>
                   </span>
                 ))}
               {chipCount > MAX_REF_CHIPS && (
