@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type {
+  Commit,
   CommitStats,
   GitHubCommitAuthorIdentity,
   GitHubCommitAuthorIdentityLookup,
@@ -211,7 +212,9 @@ export function LineageGraph({
   activeEmail,
   selectedCommits,
   focusedCommit,
+  revealCommit,
   onToggleCommit,
+  onCommitsChange,
   onOpenCommit,
   onRevealWorktree
 }: {
@@ -223,7 +226,11 @@ export function LineageGraph({
   selectedCommits: Set<string>;
   /** Commit whose files are open in the rail — highlighted even off-branch. */
   focusedCommit: string | null;
+  /** A command-palette request to center and flash a loaded commit. */
+  revealCommit: { hash: string; requestId: number } | null;
   onToggleCommit: (hash: string) => void;
+  /** Publishes the currently loaded timeline for command-palette search. */
+  onCommitsChange: (commits: Commit[]) => void;
   onOpenCommit: (hash: string, subject: string) => void;
   /** Jump to a worktree from a tip chip's worktree button. */
   onRevealWorktree: (worktreeId: string) => void;
@@ -311,6 +318,7 @@ export function LineageGraph({
         }
 
         const graph = r.value;
+        onCommitsChange(graph.commits);
         void dispatch("github:hydrateCommitAuthorIdentities", {
           worktreeId,
           commits: graph.commits.map((commit) => ({
@@ -371,7 +379,7 @@ export function LineageGraph({
       active = false;
       off();
     };
-  }, [branchPrGeneration, worktreeId, scope]);
+  }, [branchPrGeneration, onCommitsChange, worktreeId, scope]);
 
   // The sidebar and graph keep separate view models. Apply the same targeted
   // PR delta to the graph cache so a hover/focused refresh updates both
@@ -730,6 +738,14 @@ export function LineageGraph({
     });
     setFlash(hash);
   };
+
+  useEffect(() => {
+    if (revealCommit === null || !vmByHash.has(revealCommit.hash)) return;
+    const raf = requestAnimationFrame(() => locateHash(revealCommit.hash));
+    return () => cancelAnimationFrame(raf);
+    // locateHash intentionally tracks the rendered graph through graphCommitKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graphCommitKey, revealCommit]);
 
   // Selecting a worktree takes you to its HEAD: center it and flash it. Also
   // re-centers when HEAD itself moves (commit, pull, switch branch).

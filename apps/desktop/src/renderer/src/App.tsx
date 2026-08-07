@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Profile, Repo, RepoSearchHit, Worktree } from "@pwrgit/shared";
+import type {
+  Commit,
+  Profile,
+  Repo,
+  RepoSearchHit,
+  Worktree
+} from "@pwrgit/shared";
 import { DiffPane, type DiffTarget } from "./features/diff/DiffPane";
 import { LineageGraph } from "./features/graph/LineageGraph";
 import { SelectionBar } from "./features/graph/SelectionBar";
@@ -86,6 +92,11 @@ export function App() {
     hash: string;
     subject: string;
   } | null>(null);
+  const [searchableCommits, setSearchableCommits] = useState<Commit[]>([]);
+  const [commitReveal, setCommitReveal] = useState<{
+    hash: string;
+    requestId: number;
+  } | null>(null);
 
   // Clear commit selection + any open diff when the worktree changes.
   useEffect(() => {
@@ -93,6 +104,8 @@ export function App() {
     setRebaseAction(null);
     setDiffTarget(null);
     setCommitFocus(null);
+    setSearchableCommits([]);
+    setCommitReveal(null);
   }, [selection?.worktreeId]);
 
   const toggleCommit = useCallback((hash: string) => {
@@ -208,12 +221,32 @@ export function App() {
     [activeProfile, openProfile]
   );
 
+  const onPickCommitSearch = useCallback((commit: Commit) => {
+    setOverlayOpen(false);
+    setDiffTarget(null);
+    setCommitFocus({ hash: commit.hash, subject: commit.subject });
+    setRailCollapsed(false);
+    setCommitReveal((current) => ({
+      hash: commit.hash,
+      requestId: (current?.requestId ?? 0) + 1
+    }));
+  }, []);
+
   const selectedRepo = useMemo(
     () => repos.find((r) => r.id === selection?.repoId) ?? null,
     [repos, selection]
   );
   const selectedWorktree =
     selectedRepo?.worktrees.find((w) => w.id === selection?.worktreeId) ?? null;
+
+  // Reconciliation can remove the selected worktree without changing its
+  // persisted selection id. Do not leave that vanished timeline searchable.
+  useEffect(() => {
+    if (selectedWorktree !== null) return;
+    setSearchableCommits([]);
+    setCommitReveal(null);
+    setCommitFocus(null);
+  }, [selectedWorktree]);
 
   // A selected linked worktree contributes a durable reason to the same
   // main-process PR monitor used by visible commits. Replacing or unmounting
@@ -346,7 +379,9 @@ export function App() {
                   activeEmail={activeProfile?.email ?? ""}
                   selectedCommits={selectedCommits}
                   focusedCommit={commitFocus?.hash ?? null}
+                  revealCommit={commitReveal}
                   onToggleCommit={toggleCommit}
+                  onCommitsChange={setSearchableCommits}
                   onOpenCommit={(hash, subject) => {
                     setCommitFocus({ hash, subject });
                     setRailCollapsed(false);
@@ -446,8 +481,18 @@ export function App() {
 
       {overlayOpen && (
         <RepoSwitcherOverlay
+          commits={searchableCommits}
+          commitContext={
+            selectedRepo === null || selectedWorktree === null
+              ? null
+              : {
+                  repoName: selectedRepo.name,
+                  branch: selectedWorktree.branch
+                }
+          }
           onClose={() => setOverlayOpen(false)}
           onPick={onPickSearch}
+          onPickCommit={onPickCommitSearch}
         />
       )}
 
