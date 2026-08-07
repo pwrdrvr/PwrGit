@@ -347,6 +347,80 @@ describe("layoutLanes with refs (branch-aware lanes)", () => {
     expect(rows[2].bottom).toEqual([{ from: 0, to: 0 }]);
   });
 
+  it("keeps the remote-ahead spine dashed where a feature branch shares it", () => {
+    // The common busy-repo shape: origin/main is three commits ahead of local
+    // main (R2..R0), and a local feature branch BR is based on R1 — so R1 and
+    // R0 ARE reachable from a local ref, but they are still NOT in local main.
+    // The spine's dash means "not applied to local main", so it must survive
+    // all the way down to main's dot; BR's own line stays solid throughout.
+    const { rows } = layoutLanes(
+      [
+        c("R2", "R1"),
+        c("BR", "R1"),
+        c("R1", "R0"),
+        c("R0", "L"),
+        c("L", "P"),
+        c("P")
+      ],
+      {
+        tips: { R2: ["origin/main"], BR: ["feat"], L: ["main"] },
+        defaultBranch: "main",
+        defaultRefTips: ["R2"],
+        localRefTips: ["BR", "L"],
+        headBranch: "main",
+        shownBranches: ["feat"]
+      }
+    );
+    const lanes = Object.fromEntries(
+      rows.map((r, i) => [["R2", "BR", "R1", "R0", "L", "P"][i], r.lane])
+    );
+    expect(lanes).toEqual({ R2: 0, BR: 1, R1: 0, R0: 0, L: 0, P: 0 });
+
+    // The spine is dashed from origin/main's tip down to local main's dot…
+    expect(rows[0].bottom).toEqual([{ from: 0, to: 0, dashed: 1 }]);
+    expect(rows[2].bottom).toEqual([{ from: 0, to: 0, dashed: 1 }]);
+    expect(rows[3].bottom).toEqual([{ from: 0, to: 0, dashed: 1 }]);
+    expect(rows[4].top).toEqual([{ from: 0, to: 0, dashed: 1 }]);
+    // …and solid below it.
+    expect(rows[4].bottom).toEqual([{ from: 0, to: 0 }]);
+
+    // A solid branch line may be based on a dashed trunk commit: BR's line is
+    // solid beside the dashed spine and converges into R1 solid.
+    expect(rows[1].bottom).toEqual(
+      expect.arrayContaining([
+        { from: 0, to: 0, dashed: 1 },
+        { from: 1, to: 1 }
+      ])
+    );
+    expect(rows[2].top).toEqual(
+      expect.arrayContaining([
+        { from: 0, to: 0, dashed: 1 },
+        { from: 1, to: 0 }
+      ])
+    );
+  });
+
+  it("keeps the remote-ahead spine dashed when a local branch holds all of it", () => {
+    // A local branch sits exactly on origin/main, so every remote-ahead commit
+    // is reachable from a local ref. That still says nothing about local main,
+    // which is behind — the whole stretch above main's dot stays dashed.
+    const { rows } = layoutLanes(
+      [c("R2", "R1"), c("R1", "L"), c("L", "P"), c("P")],
+      {
+        tips: { R2: ["origin/main", "feat"], L: ["main"] },
+        defaultBranch: "main",
+        defaultRefTips: ["R2"],
+        localRefTips: ["R2", "L"],
+        shownBranches: ["feat"]
+      }
+    );
+    expect(rows.map((r) => r.lane)).toEqual([0, 0, 0, 0]);
+    expect(rows[0].bottom).toEqual([{ from: 0, to: 0, dashed: 1 }]);
+    expect(rows[1].bottom).toEqual([{ from: 0, to: 0, dashed: 1 }]);
+    expect(rows[2].top).toEqual([{ from: 0, to: 0, dashed: 1 }]);
+    expect(rows[2].bottom).toEqual([{ from: 0, to: 0 }]);
+  });
+
   it("keeps every historical merge lane solid below the local tip", () => {
     // R is remote-only, while L and the merge M are already on local main.
     // Both M's first-parent history and its separate second-parent lineage S
