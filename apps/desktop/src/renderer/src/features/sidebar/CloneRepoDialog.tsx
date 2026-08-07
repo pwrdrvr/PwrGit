@@ -10,6 +10,7 @@ import type {
 import { dispatch } from "../../lib/pwrgit";
 import {
   cloneDestinationLabel,
+  cloneRepositoryAtSelection,
   cloneSourceQuery,
   filterCloneDestinations,
   moveCloneSelection,
@@ -122,8 +123,9 @@ export function CloneRepoDialog({
   const catalogMatches =
     parsedSourceQuery.kind === "search" ? parsedSourceQuery.repositories : [];
 
+  useEffect(() => setSourceSelection(0), [sourceQuery]);
+
   useEffect(() => {
-    setSourceSelection(0);
     setCheckedRepository(null);
     setCheckError(null);
     if (exactNameWithOwner === null) {
@@ -279,14 +281,21 @@ export function CloneRepoDialog({
                       moveCloneSelection(selection, -1, sourceResults.length)
                     );
                   } else if (event.key === "Enter") {
-                    const repository = sourceResults[sourceSelection];
+                    const repository = cloneRepositoryAtSelection(
+                      sourceResults,
+                      sourceSelection
+                    );
                     if (repository !== undefined) {
                       event.preventDefault();
                       chooseRepository(repository);
                     }
                   } else if (event.key === "Tab" && !event.shiftKey) {
                     const repository =
-                      selectedRepository ?? sourceResults[sourceSelection];
+                      selectedRepository ??
+                      cloneRepositoryAtSelection(
+                        sourceResults,
+                        sourceSelection
+                      );
                     if (repository !== undefined) {
                       event.preventDefault();
                       chooseRepository(repository);

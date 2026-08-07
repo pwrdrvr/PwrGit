@@ -145,3 +145,10 @@ export function moveCloneSelection(
   if (resultCount === 0) return 0;
   return Math.min(Math.max(current + direction, 0), resultCount - 1);
 }
+
+export function cloneRepositoryAtSelection(
+  repositories: CloneRepository[],
+  selection: number
+): CloneRepository | undefined {
+  return repositories[selection] ?? repositories[0];
+}

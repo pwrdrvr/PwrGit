@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { CloneDestination, CloneRepository } from "@pwrgit/shared";
 import {
   cloneDestinationLabel,
+  cloneRepositoryAtSelection,
   cloneSourceQuery,
   exactGitHubRepository,
   filterCloneDestinations,
@@ -145,5 +146,11 @@ describe("clone dialog filtering", () => {
     expect(moveCloneSelection(0, 1, 2)).toBe(1);
     expect(moveCloneSelection(1, 1, 2)).toBe(1);
     expect(moveCloneSelection(0, -1, 2)).toBe(0);
+  });
+
+  it("falls back to the first result when a refined search makes the selection stale", () => {
+    expect(cloneRepositoryAtSelection([repositories[0]!], 1)).toBe(
+      repositories[0]
+    );
   });
 });
