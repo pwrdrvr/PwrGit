@@ -3,20 +3,18 @@
 // topological order (newest first, every commit before its parents).
 //
 // The sweep tracks, per lane, the hash that lane is "flowing toward" (the next
-// commit expected in it) and the branch that owns the line. A commit continues
-// the lowest incoming lane owned by ITS OWN branch; incoming lanes owned by a
-// different branch converge into the dot and end there — a lane never spans
-// two branches, so a branch's HEAD is always the top terminus of its line (a
-// branch stacked on another branch's tip gets its own lane rather than making
-// the tip look mid-line). A commit with no continuable lane opens the lowest
-// free lane, subject to pinning: lane 0 is reserved for the default-branch
-// spine while its tip is in the window, and lane 1 for the worktree's
-// checked-out branch when that branch has a line of its own (its line never
-// overlaps its base branch's line — the stack converges into the base's tip —
-// so it can always sit second). Freed lanes are still reused by later,
-// non-overlapping lines. Each additional parent of a merge opens a fresh lane
-// owned by the merged-in branch; those converge naturally at the shared
-// ancestor.
+// commit expected in it) and the branch that owns the line. A commit normally
+// continues the lowest incoming lane owned by ITS OWN branch. At a strictly
+// linear boundary between two non-default branches, a lone incoming lane hands
+// off ownership in place, so stacked refs share one ancestry train instead of
+// zig-zagging between columns. A real fork still has multiple incoming lanes;
+// the owner-matched lane continues and the others converge. The default branch
+// never inherits a foreign lane: lane 0 begins at its real tip and remains an
+// honest spine. Lane 1 is reserved for the worktree's checked-out branch tip;
+// its linear ancestor stack may inherit that lane below the tip. Freed lanes
+// are reused by later, non-overlapping lines. Each additional parent of a merge
+// opens a fresh lane owned by the merged-in branch; those converge naturally at
+// the shared ancestor.
 //
 // Ownership: each drawn branch claims the commits on its first-parent chain —
 // default branch, then the head branch, then shown order (recency). A walk
@@ -129,9 +127,10 @@ function computeOwners(
       const commit = byHash.get(cur);
       if (commit === undefined) break; // outside the loaded window
       if (owners.has(cur)) break; // a higher-priority branch's history
-      // Another drawn branch's tip: that's the top of ITS line — a branch
-      // stacked above it must not claim through it. (The default branch may:
-      // a tip that is plain trunk history renders as a chip on the spine.)
+      // Another drawn branch's tip is an ownership boundary. Layout may hand a
+      // conflict-free lane across it later, but ownership remains distinct so
+      // genuine forks still choose the correct continuing path. (The default
+      // branch may claim through a plain trunk-history tip.)
       if (b !== refs.defaultBranch && cur !== start && drawnTips.has(cur)) break;
       owners.set(cur, b);
       cur = commit.parents[0];
@@ -216,7 +215,8 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
   // to the worktree's checked-out branch so "your" line reads second. The
   // head pin requires the branch to actually OWN its tip: a branch sitting
   // exactly on the trunk (or inside it) has no line, and reserving a column
-  // for it would leave a phantom empty lane.
+  // for it would leave a phantom empty lane. Linear ancestor branches may
+  // inherit lane 1 after the head tip; they never overlap it vertically.
   const laneReservedFor: (string | undefined)[] = [];
   if (spineStart !== undefined && byHash.has(spineStart)) {
     laneReservedFor[0] = refs?.defaultBranch;
@@ -253,13 +253,24 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
     for (let k = 0; k < before.length; k += 1) {
       if (before[k] === c.hash) incoming.push(k);
     }
-    // Only a lane of this commit's own branch continues through the dot;
-    // foreign lanes converge into it and end (drawn below via `top`).
+    // Prefer this branch's own incoming lane. With no such lane, a single
+    // foreign arrival at an unreserved non-default tip is a conflict-free
+    // linear ownership handoff; inherit it in place. An owner actually pinned
+    // to lane 1 must still bend into that reservation. Multiple arrivals
+    // represent a real fork and converge into a separately selected owner lane.
     const continuable = incoming.filter((k) => laneOwner[k] === co);
+    const inheritedLane =
+      continuable.length === 0 &&
+      incoming.length === 1 &&
+      co !== null &&
+      co !== refs?.defaultBranch &&
+      co !== laneReservedFor[1]
+        ? incoming[0]
+        : undefined;
     const myLane =
       continuable.length > 0
         ? Math.min(...continuable)
-        : firstFreeFor(before, co);
+        : (inheritedLane ?? firstFreeFor(before, co));
 
     // Top half: every lane entering this row from above.
     const top: LaneSeg[] = [];

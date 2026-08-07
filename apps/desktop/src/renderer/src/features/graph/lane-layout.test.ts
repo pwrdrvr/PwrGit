@@ -83,7 +83,7 @@ describe("layoutLanes", () => {
   });
 });
 
-describe("layoutLanes with refs (branch-owned lanes)", () => {
+describe("layoutLanes with refs (branch-aware lanes)", () => {
   it("ends the spine at the default tip when a branch stacks on it", () => {
     // feat (X2..X1) builds directly on main's tip M. main's line must top out
     // at M — feat gets its own lane converging into M's dot, instead of one
@@ -108,27 +108,61 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
     expect(laneCount).toBe(2);
   });
 
-  it("gives a branch stacked on another branch's tip its own lane", () => {
-    // c2 (C2..C1) builds on d's tip D, which builds on main's tip M.
-    const { rows } = layoutLanes(
-      [c("C2", "C1"), c("C1", "D"), c("D", "M"), c("M", "M1"), c("M1")],
+  it("keeps a linear stack of non-default branches in one lane", () => {
+    // Four branch tips form one ancestry train above main. Branch boundaries
+    // are marked by their ref chips; the lineage itself never forks.
+    const hashes = ["S4", "S3", "S2", "S1", "M", "M1"];
+    const { rows, laneCount } = layoutLanes(
+      [
+        c("S4", "S3"),
+        c("S3", "S2"),
+        c("S2", "S1"),
+        c("S1", "M"),
+        c("M", "M1"),
+        c("M1")
+      ],
       {
-        tips: { C2: ["c2"], D: ["d"], M: ["main"] },
+        tips: {
+          S4: ["stack-4"],
+          S3: ["stack-3"],
+          S2: ["stack-2"],
+          S1: ["stack-1"],
+          M: ["main"]
+        },
         defaultBranch: "main",
-        shownBranches: ["c2", "d"]
+        shownBranches: ["stack-4", "stack-3", "stack-2", "stack-1"]
       }
     );
-    const lanes = Object.fromEntries(
-      rows.map((r, i) => [["C2", "C1", "D", "M", "M1"][i], r.lane])
+    const lanes = Object.fromEntries(rows.map((row, i) => [hashes[i], row.lane]));
+    expect(lanes).toEqual({ S4: 1, S3: 1, S2: 1, S1: 1, M: 0, M1: 0 });
+    expect(rows[1].top).toEqual([{ from: 1, to: 1 }]);
+    expect(rows[2].top).toEqual([{ from: 1, to: 1 }]);
+    expect(rows[3].top).toEqual([{ from: 1, to: 1 }]);
+    expect(rows[4].top).toEqual([{ from: 1, to: 0 }]);
+    expect(laneCount).toBe(2);
+  });
+
+  it("splits a stack when a middle branch gains a divergent commit", () => {
+    // stack-1 gained F after stack-2 was already based on its old tip B. The
+    // updated branch keeps its lane; the now-divergent upper stack peels away.
+    const hashes = ["F", "S2", "B", "M"];
+    const { rows, laneCount } = layoutLanes(
+      [c("F", "B"), c("S2", "B"), c("B", "M"), c("M")],
+      {
+        tips: { F: ["stack-1"], S2: ["stack-2"], M: ["main"] },
+        defaultBranch: "main",
+        shownBranches: ["stack-1", "stack-2"]
+      }
     );
-    // Three distinct lines: c2's lane ends at D's dot, d's lane ends at M's.
-    expect(lanes.C2).toBe(lanes.C1);
-    expect(lanes.D).not.toBe(lanes.C1);
-    expect(lanes).toMatchObject({ M: 0, M1: 0 });
-    const dRow = rows[2];
-    expect(dRow.top).toEqual([{ from: lanes.C1, to: lanes.D }]);
-    const mRow = rows[3];
-    expect(mRow.top).toEqual([{ from: lanes.D, to: 0 }]);
+    const lanes = Object.fromEntries(rows.map((row, i) => [hashes[i], row.lane]));
+    expect(lanes).toEqual({ F: 1, S2: 2, B: 1, M: 0 });
+    expect(rows[2].top).toEqual(
+      expect.arrayContaining([
+        { from: 1, to: 1 },
+        { from: 2, to: 1 }
+      ])
+    );
+    expect(laneCount).toBe(3);
   });
 
   it("still converges a fork-point branch into the spine", () => {
@@ -203,9 +237,26 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
     expect(lanes).toEqual({ N1: 2, H1: 1, T1: 0, T2: 0 });
   });
 
-  it("keeps the checked-out branch on lane 1 even when stacked on another branch", () => {
-    // h builds on d's tip; its line converges into D's dot, so the lanes never
-    // overlap vertically and h can still sit second, with d further right.
+  it("bends a stacked child into the checked-out tip's reserved lane", () => {
+    // child builds on checked-out h. child must avoid h's lane-1 reservation,
+    // while H itself must land in lane 1 rather than inheriting child's lane 2.
+    const { rows } = layoutLanes(
+      [c("C", "H"), c("H", "M"), c("M")],
+      {
+        tips: { C: ["child"], H: ["h"], M: ["main"] },
+        defaultBranch: "main",
+        headBranch: "h",
+        shownBranches: ["child", "h"]
+      }
+    );
+    expect(rows.map((row) => row.lane)).toEqual([2, 1, 0]);
+    expect(rows[1].top).toEqual([{ from: 2, to: 1 }]);
+    expect(rows[2].top).toEqual([{ from: 1, to: 0 }]);
+  });
+
+  it("keeps a checked-out linear stack on lane 1", () => {
+    // h builds on d's tip; the ancestry stays in h's pinned lane until the
+    // stack reaches main.
     const { rows } = layoutLanes(
       [c("H1", "D"), c("D", "M"), c("M")],
       {
@@ -218,10 +269,9 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
     const lanes = Object.fromEntries(
       rows.map((r, i) => [["H1", "D", "M"][i], r.lane])
     );
-    expect(lanes).toEqual({ H1: 1, D: 2, M: 0 });
-    // h's line ends at D's dot; d's line ends at M's dot.
-    expect(rows[1].top).toEqual([{ from: 1, to: 2 }]);
-    expect(rows[2].top).toEqual([{ from: 2, to: 0 }]);
+    expect(lanes).toEqual({ H1: 1, D: 1, M: 0 });
+    expect(rows[1].top).toEqual([{ from: 1, to: 1 }]);
+    expect(rows[2].top).toEqual([{ from: 1, to: 0 }]);
   });
 
   it("ends a remote-ahead dash at the local main tip", () => {
@@ -523,6 +573,23 @@ describe("layoutLanes with refs (branch-owned lanes)", () => {
       shownBranches: ["feat"]
     });
     expect(rows.map((r) => r.lane)).toEqual([0, 0]);
+    expect(laneCount).toBe(1);
+  });
+
+  it("compacts through HEAD when its lane-1 reservation was not installed", () => {
+    // main's tip is outside the window, so no spine or HEAD pin exists. The
+    // linear child -> HEAD -> ancestor train should stay in the first lane.
+    const { rows, laneCount } = layoutLanes(
+      [c("C", "H"), c("H", "A"), c("A")],
+      {
+        tips: { C: ["child"], H: ["h"], Mout: ["main"] },
+        defaultBranch: "main",
+        headBranch: "h",
+        shownBranches: ["child", "h"]
+      }
+    );
+    expect(rows.map((row) => row.lane)).toEqual([0, 0, 0]);
+    expect(rows[1].top).toEqual([{ from: 0, to: 0 }]);
     expect(laneCount).toBe(1);
   });
 });
