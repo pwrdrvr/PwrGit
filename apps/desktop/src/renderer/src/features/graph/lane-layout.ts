@@ -34,8 +34,9 @@ export type LaneRefs = {
   defaultBranch: string;
   /** Tips of each remote's copy of the default branch (origin/main, …). */
   defaultRefTips?: string[] | undefined;
-  /** Tips of all local branches, used to stop remote-only dashes where their
-   *  history becomes reachable from a local ref. */
+  /** Tips of all local branches, used to stop a REMOTE-ONLY BRANCH's dash where
+   *  its history becomes reachable from a local ref. The trunk's dash is not
+   *  measured against these — it ends only at local main's own tip. */
   localRefTips?: string[] | undefined;
   /** Drawn branch names that exist only as remote-tracking refs. */
   remoteBranches?: string[] | undefined;
@@ -171,10 +172,16 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
   const localTip =
     refs === undefined ? undefined : tipOf.get(refs.defaultBranch);
 
-  // Commits fetched but not yet reachable from a local ref seed dashed lines.
-  // Default-branch remotes carry distinct tiers; remote-only feature branches
-  // use the closest-remote pattern. The strongest dash is inherited within a
-  // remote-only stretch and ends where history becomes locally reachable.
+  // Dashed means FETCHED BUT NOT APPLIED — never "not fetched", since every
+  // drawn commit is already a local object. "Applied" is measured against the
+  // ref the line belongs to, and the two kinds of line differ:
+  //   • the trunk — unapplied until it is reachable from LOCAL MAIN's tip. A
+  //     feature branch based on a fetched-but-unmerged trunk commit does not
+  //     make that commit part of your local main, so it stays dashed.
+  //   • a remote-only branch (no local counterpart) — there is no local ref of
+  //     its own to measure against, so it ends where ANY local ref covers it.
+  // Default-branch remotes carry distinct tiers; remote-only branches use the
+  // closest-remote pattern. The strongest dash is inherited within a stretch.
   const dashSeeds = new Map<string, number>();
   const locallyReachable = new Set<string>();
   if (refs !== undefined) {
@@ -298,12 +305,16 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
 
     const fromDot = new Set<number>();
     const seedDash = dashSeeds.get(c.hash) ?? 0;
-    // The edge arriving at a locally reachable commit can still belong to
-    // remote-only history, but every edge leaving that dot is local history.
+    // A seed marks a commit as unapplied for its own dash's boundary — local
+    // main for the trunk, any local ref for a remote-only branch — so an
+    // unseeded commit ENDS the dash: the edge arriving at it may be remote-only
+    // history, but every edge leaving it is applied. Inheritance only
+    // strengthens the tier within a still-unapplied stretch; it never extends a
+    // dash past its boundary. Gating on "reachable from any local ref" instead
+    // would wrongly solidify the spine wherever a feature branch happens to be
+    // based on a fetched-but-unmerged trunk commit.
     const dashedOut =
-      locallyReachable.has(c.hash)
-        ? 0
-        : Math.max(seedDash, laneDashed[myLane] ?? 0);
+      seedDash === 0 ? 0 : Math.max(seedDash, laneDashed[myLane] ?? 0);
     if (c.parents.length === 0) {
       work[myLane] = null;
       workOwner[myLane] = null;
