@@ -3,6 +3,23 @@ import type { CloneDestination, CloneRepository } from "@pwrgit/shared";
 const repoText = (repository: CloneRepository): string =>
   `${repository.nameWithOwner} ${repository.description ?? ""}`.toLowerCase();
 
+const REPOSITORY_PART = "[A-Za-z0-9_.-]+";
+const NAME_WITH_OWNER = `${REPOSITORY_PART}/${REPOSITORY_PART}`;
+const EXACT_REPOSITORY = new RegExp(`^${NAME_WITH_OWNER}$`);
+const PLAIN_REPOSITORY = new RegExp(`^(${NAME_WITH_OWNER})(?:\\.git)?$`);
+const SCP_REPOSITORY = new RegExp(
+  `^git@github\\.com:(${NAME_WITH_OWNER})(?:\\.git)?$`,
+  "i"
+);
+const SSH_REPOSITORY = new RegExp(
+  `^ssh://git@github\\.com/(${NAME_WITH_OWNER})(?:\\.git)?/?$`,
+  "i"
+);
+const HTTPS_REPOSITORY = new RegExp(
+  `^https://github\\.com/(${NAME_WITH_OWNER})(?:\\.git)?/?$`,
+  "i"
+);
+
 export function filterCloneRepositories(
   repositories: CloneRepository[],
   query: string,
@@ -68,10 +85,36 @@ export function filterCloneDestinations(
 }
 
 export function exactGitHubRepository(input: string): string | null {
-  const normalized = input.trim().replace(/\.git$/i, "");
-  return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(normalized)
+  const trimmed = input.trim();
+  const ghClone = /^gh\s+repo\s+clone\s+(\S+)$/i.exec(trimmed);
+  const candidate = ghClone?.[1] ?? trimmed;
+  const nameWithOwner =
+    PLAIN_REPOSITORY.exec(candidate)?.[1] ??
+    SCP_REPOSITORY.exec(candidate)?.[1] ??
+    SSH_REPOSITORY.exec(candidate)?.[1] ??
+    HTTPS_REPOSITORY.exec(candidate)?.[1] ??
+    null;
+  const normalized = nameWithOwner?.replace(/\.git$/i, "") ?? null;
+  return normalized !== null && EXACT_REPOSITORY.test(normalized)
     ? normalized
     : null;
+}
+
+export type CloneSourceQuery =
+  | { kind: "exact"; nameWithOwner: string }
+  | { kind: "search"; repositories: CloneRepository[] };
+
+export function cloneSourceQuery(
+  repositories: CloneRepository[],
+  input: string
+): CloneSourceQuery {
+  const exact = exactGitHubRepository(input);
+  return exact === null
+    ? {
+        kind: "search",
+        repositories: filterCloneRepositories(repositories, input)
+      }
+    : { kind: "exact", nameWithOwner: exact };
 }
 
 export function unverifiedCloneRepository(
@@ -101,4 +144,11 @@ export function moveCloneSelection(
 ): number {
   if (resultCount === 0) return 0;
   return Math.min(Math.max(current + direction, 0), resultCount - 1);
+}
+
+export function cloneRepositoryAtSelection(
+  repositories: CloneRepository[],
+  selection: number
+): CloneRepository | undefined {
+  return repositories[selection] ?? repositories[0];
 }

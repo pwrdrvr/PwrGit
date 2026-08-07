@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { CloneDestination, CloneRepository } from "@pwrgit/shared";
 import {
   cloneDestinationLabel,
+  cloneRepositoryAtSelection,
+  cloneSourceQuery,
   exactGitHubRepository,
   filterCloneDestinations,
   filterCloneRepositories,
@@ -67,11 +69,63 @@ describe("clone dialog filtering", () => {
     expect(cloneDestinationLabel(destinations[1]!)).toBe("pwrdrvr/services/");
   });
 
-  it("recognizes only complete owner/name lookups", () => {
-    expect(exactGitHubRepository("huntharo/x-code-clone")).toBe(
+  it.each([
+    ["huntharo/x-code-clone", "huntharo/x-code-clone"],
+    ["git@github.com:huntharo/x-code-clone.git", "huntharo/x-code-clone"],
+    [
+      "ssh://git@github.com/huntharo/x-code-clone.git",
       "huntharo/x-code-clone"
+    ],
+    [
+      "https://github.com/huntharo/x-code-clone.git",
+      "huntharo/x-code-clone"
+    ],
+    ["gh repo clone huntharo/x-code-clone", "huntharo/x-code-clone"],
+    [
+      "gh repo clone git@github.com:huntharo/x-code-clone.git",
+      "huntharo/x-code-clone"
+    ],
+    [
+      "gh repo clone https://github.com/huntharo/x-code-clone.git",
+      "huntharo/x-code-clone"
+    ]
+  ])("parses an exact GitHub repository from %s", (input, expected) => {
+    expect(exactGitHubRepository(input)).toBe(expected);
+  });
+
+  it.each([
+    "huntharo/",
+    "x-code-clone",
+    "https://gitlab.com/huntharo/x-code-clone",
+    "https://github.com/huntharo/x-code-clone/issues",
+    "git clone https://github.com/huntharo/x-code-clone.git",
+    "gh repo clone huntharo/x-code-clone ./destination"
+  ])("does not treat %s as an exact GitHub repository", (input) => {
+    expect(exactGitHubRepository(input)).toBeNull();
+  });
+
+  it("bypasses catalog search for every exact input form", () => {
+    expect(
+      [
+        "huntharo/x-code-clone",
+        "git@github.com:huntharo/x-code-clone.git",
+        "ssh://git@github.com/huntharo/x-code-clone.git",
+        "https://github.com/huntharo/x-code-clone",
+        "gh repo clone huntharo/x-code-clone"
+      ].map((input) => cloneSourceQuery(repositories, input))
+    ).toEqual(
+      Array.from({ length: 5 }, () => ({
+        kind: "exact",
+        nameWithOwner: "huntharo/x-code-clone"
+      }))
     );
-    expect(exactGitHubRepository("huntharo/")).toBeNull();
+  });
+
+  it("uses catalog search for non-exact input", () => {
+    expect(cloneSourceQuery(repositories, "payments")).toEqual({
+      kind: "search",
+      repositories: [repositories[0]]
+    });
   });
 
   it("builds direct clone metadata without a GitHub CLI lookup", () => {
@@ -92,5 +146,11 @@ describe("clone dialog filtering", () => {
     expect(moveCloneSelection(0, 1, 2)).toBe(1);
     expect(moveCloneSelection(1, 1, 2)).toBe(1);
     expect(moveCloneSelection(0, -1, 2)).toBe(0);
+  });
+
+  it("falls back to the first result when a refined search makes the selection stale", () => {
+    expect(cloneRepositoryAtSelection([repositories[0]!], 1)).toBe(
+      repositories[0]
+    );
   });
 });

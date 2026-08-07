@@ -10,9 +10,9 @@ import type {
 import { dispatch } from "../../lib/pwrgit";
 import {
   cloneDestinationLabel,
-  exactGitHubRepository,
+  cloneRepositoryAtSelection,
+  cloneSourceQuery,
   filterCloneDestinations,
-  filterCloneRepositories,
   moveCloneSelection,
   unverifiedCloneRepository
 } from "./clone-dialog";
@@ -112,30 +112,24 @@ export function CloneRepoDialog({
     };
   }, [profile.id]);
 
-  const catalogMatches = useMemo(
-    () => filterCloneRepositories(catalog?.repositories ?? [], sourceQuery),
+  const parsedSourceQuery = useMemo(
+    () => cloneSourceQuery(catalog?.repositories ?? [], sourceQuery),
     [catalog?.repositories, sourceQuery]
   );
+  const exactNameWithOwner =
+    parsedSourceQuery.kind === "exact"
+      ? parsedSourceQuery.nameWithOwner
+      : null;
+  const catalogMatches =
+    parsedSourceQuery.kind === "search" ? parsedSourceQuery.repositories : [];
+
+  useEffect(() => setSourceSelection(0), [sourceQuery]);
 
   useEffect(() => {
-    setSourceSelection(0);
     setCheckedRepository(null);
     setCheckError(null);
-    const exact = exactGitHubRepository(sourceQuery);
-    if (
-      catalog === null ||
-      exact === null ||
-      catalogMatches.some(
-        (repository) =>
-          repository.nameWithOwner.toLowerCase() === exact.toLowerCase()
-      )
-    ) {
+    if (exactNameWithOwner === null) {
       setChecking(false);
-      return;
-    }
-    if (!catalog.github.installed || !catalog.github.loggedIn) {
-      setChecking(false);
-      setCheckedRepository(unverifiedCloneRepository(exact));
       return;
     }
 
@@ -144,19 +138,26 @@ export function CloneRepoDialog({
     const timeout = window.setTimeout(() => {
       void dispatch("repo:checkCloneSource", {
         profileId: profile.id,
-        nameWithOwner: exact
+        nameWithOwner: exactNameWithOwner
       }).then((result) => {
         if (!active) return;
         setChecking(false);
         if (result.ok) setCheckedRepository(result.value);
-        else setCheckError(result.error.message);
+        else if (
+          result.error.code === "github_cli_missing" ||
+          result.error.code === "github_login_required"
+        ) {
+          setCheckedRepository(unverifiedCloneRepository(exactNameWithOwner));
+        } else {
+          setCheckError(result.error.message);
+        }
       });
     }, 300);
     return () => {
       active = false;
       window.clearTimeout(timeout);
     };
-  }, [catalog, catalogMatches, profile.id, sourceQuery]);
+  }, [exactNameWithOwner, profile.id]);
 
   const sourceResults = useMemo(() => {
     const rows = checkedRepository
@@ -280,14 +281,21 @@ export function CloneRepoDialog({
                       moveCloneSelection(selection, -1, sourceResults.length)
                     );
                   } else if (event.key === "Enter") {
-                    const repository = sourceResults[sourceSelection];
+                    const repository = cloneRepositoryAtSelection(
+                      sourceResults,
+                      sourceSelection
+                    );
                     if (repository !== undefined) {
                       event.preventDefault();
                       chooseRepository(repository);
                     }
                   } else if (event.key === "Tab" && !event.shiftKey) {
                     const repository =
-                      selectedRepository ?? sourceResults[sourceSelection];
+                      selectedRepository ??
+                      cloneRepositoryAtSelection(
+                        sourceResults,
+                        sourceSelection
+                      );
                     if (repository !== undefined) {
                       event.preventDefault();
                       chooseRepository(repository);
@@ -336,23 +344,37 @@ export function CloneRepoDialog({
                   )}
                 </button>
               ))}
-              {catalog === null && catalogError === null && (
-                <div className="clone-empty">Loading repositories…</div>
-              )}
+              {parsedSourceQuery.kind === "search" &&
+                catalog === null &&
+                catalogError === null && (
+                  <div className="clone-empty">Loading repositories…</div>
+                )}
               {catalogError !== null && (
                 <div className="clone-empty clone-empty--error">
                   {catalogError}
                 </div>
               )}
-              {catalog !== null && sourceResults.length === 0 && !checking && (
-                <div className="clone-empty">
-                  {sourceQuery.trim() === ""
-                    ? catalog.owners.length === 0
-                      ? "Add a default org to this profile or index a repo with a GitHub remote."
-                      : "No repositories found for the known owners."
-                    : checkError ?? `No repositories match “${sourceQuery}”.`}
-                </div>
-              )}
+              {parsedSourceQuery.kind === "exact" &&
+                sourceResults.length === 0 &&
+                !checking &&
+                checkError !== null && (
+                  <div className="clone-empty clone-empty--error">
+                    {checkError}
+                  </div>
+                )}
+              {parsedSourceQuery.kind === "search" &&
+                catalog !== null &&
+                sourceResults.length === 0 &&
+                !checking && (
+                  <div className="clone-empty">
+                    {sourceQuery.trim() === ""
+                      ? catalog.owners.length === 0
+                        ? "Add a default org to this profile or index a repo with a GitHub remote."
+                        : "No repositories found for the known owners."
+                      : checkError ??
+                        `No repositories match “${sourceQuery}”.`}
+                  </div>
+                )}
             </div>
             {catalog?.warning !== undefined && (
               <div className="clone-note">{catalog.warning}</div>
