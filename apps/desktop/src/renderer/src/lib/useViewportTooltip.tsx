@@ -153,6 +153,9 @@ export function useViewportTooltip(
   const tooltipRef = useRef<HTMLDivElement>(null);
   /** The element this tooltip was opened from, for returning focus. */
   const targetRef = useRef<HTMLElement | null>(null);
+  /** A trigger whose tooltip Escape dismissed, until the pointer or focus
+   * leaves it. Without this the card reopens the instant focus returns. */
+  const dismissedTargetRef = useRef<HTMLElement | null>(null);
   const dismissTimerRef = useRef<number | undefined>(undefined);
   const pointerInInteractiveTooltipRef = useRef(false);
   const [state, setState] = useState<TooltipState | undefined>(undefined);
@@ -213,6 +216,10 @@ export function useViewportTooltip(
     content: ReactNode,
     anchor?: TooltipAnchor
   ): void => {
+    // Escape dismissed this exact trigger and the user has not left it yet.
+    // Returning focus to the trigger re-fires its focus handler, which would
+    // otherwise reopen what they just dismissed.
+    if (dismissedTargetRef.current === target) return;
     cancelScheduledHide();
     pointerInInteractiveTooltipRef.current = false;
     targetRef.current = target;
@@ -250,8 +257,24 @@ export function useViewportTooltip(
       const card = tooltipRef.current;
       const leavingFocusBehind =
         card !== null && card.contains(document.activeElement);
+      const trigger = targetRef.current;
       hide();
-      if (leavingFocusBehind) targetRef.current?.focus();
+      // The dismissal is released by the trigger's own exit, listened for
+      // here rather than folded into hide()/scheduleHide(): restoring focus
+      // below blurs a control inside the card, and the card's blur handler
+      // schedules a hide — which would drop the flag a moment before the
+      // trigger's focus handler reads it, reopening what was just dismissed.
+      if (trigger !== null) {
+        dismissedTargetRef.current = trigger;
+        const release = (): void => {
+          dismissedTargetRef.current = null;
+          trigger.removeEventListener("mouseleave", release);
+          trigger.removeEventListener("blur", release);
+        };
+        trigger.addEventListener("mouseleave", release);
+        trigger.addEventListener("blur", release);
+      }
+      if (leavingFocusBehind) trigger?.focus();
     };
     window.addEventListener("blur", hide);
     window.addEventListener("scroll", onScroll, { capture: true });
