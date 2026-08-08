@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 /** A cold trigger must be dwelled on before its card appears. */
 export const HOVER_INTENT_DWELL_MS = 300;
@@ -120,6 +120,13 @@ export class HoverIntentGate {
     this.armedAt = undefined;
     this.opened = false;
   }
+
+  /** A card left the screen. An interactive card outlives the hover that
+   * opened it — the user is still browsing while they read it, so warmth runs
+   * from here, not from the moment the pointer left the trigger. */
+  markCardClosed(now: number): void {
+    this.wentColdAt = now;
+  }
 }
 
 /** One gate for the whole window: warmth is a property of the user's pass
@@ -154,7 +161,47 @@ export type HoverIntent = {
   cancel: () => void;
   /** Open right now (focus, click) and keep the gate warm. */
   immediate: (open: () => void) => void;
+  /** Report that a card left the screen, so warmth measures from there. */
+  cardClosed: () => void;
 };
+
+/** The pointer/keyboard handlers a gated hover trigger needs. Both the SHA
+ * chip and the PR chip wire exactly this, so the routing — hover defers, focus
+ * and click do not, leaving always cancels — is written and tested once. */
+export function hoverIntentHandlers({
+  intent,
+  show,
+  hide
+}: {
+  intent: HoverIntent;
+  show: (target: HTMLElement) => void;
+  hide: () => void;
+}): {
+  onMouseEnter: (target: HTMLElement) => void;
+  onMouseLeave: () => void;
+  onFocus: (target: HTMLElement) => void;
+  onBlur: () => void;
+  /** Bypass the gate — for a click whose own action is to reveal the popup. */
+  showNow: (target: HTMLElement) => void;
+  /** Drop any pending open and dismiss — for a click that does something else
+   *  (opening a PR in the browser) and should take its tooltip with it. */
+  leave: () => void;
+} {
+  const showNow = (target: HTMLElement): void =>
+    intent.immediate(() => show(target));
+  const leave = (): void => {
+    intent.cancel();
+    hide();
+  };
+  return {
+    onMouseEnter: (target) => intent.arm(() => show(target)),
+    onMouseLeave: leave,
+    onFocus: showNow,
+    onBlur: leave,
+    showNow,
+    leave
+  };
+}
 
 /**
  * Gate a hover-triggered popup on intent, so a pointer thrown across the
@@ -191,6 +238,10 @@ export function useHoverIntent(gate: HoverIntentGate = sharedGate): HoverIntent 
     open();
   }, [gate, stopPolling]);
 
+  const cardClosed = useCallback((): void => {
+    gate.markCardClosed(Date.now());
+  }, [gate]);
+
   useEffect(() => {
     const untrack = trackPointer();
     return () => {
@@ -199,5 +250,10 @@ export function useHoverIntent(gate: HoverIntentGate = sharedGate): HoverIntent 
     };
   }, [stopPolling]);
 
-  return { arm, cancel, immediate };
+  // Stable identity: callers put this in effect dependencies, and a fresh
+  // object each render would re-run those effects on every clock tick.
+  return useMemo(
+    () => ({ arm, cancel, immediate, cardClosed }),
+    [arm, cancel, immediate, cardClosed]
+  );
 }

@@ -316,6 +316,29 @@ test("a pointer whipped down the SHA column leaves no context cards behind", asy
 
   const card = window.getByRole("dialog", { name: "Commit context" });
   const last = centres[centres.length - 1]!;
+
+  // Record every card that reaches the DOM during the sweep. Polling between
+  // moves would be self-defeating — each round trip parks the pointer on a
+  // chip long enough to be a deliberate hover — and a single assertion after
+  // the sweep silently stops catching the regression on any machine slow
+  // enough to outlast the card's 400ms dismissal delay.
+  await window.evaluate(() => {
+    const probe = window as unknown as { __cardsSeen: number };
+    probe.__cardsSeen = 0;
+    new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (
+            node instanceof HTMLElement &&
+            node.classList.contains("commit-context-card")
+          ) {
+            probe.__cardsSeen += 1;
+          }
+        }
+      }
+    }).observe(document.body, { childList: true });
+  });
+
   // The SHA chips share one column, so anything travelling down the graph
   // crosses every trigger on the way to wherever it was actually going.
   await window.mouse.move(centres[0]!.x, centres[0]!.y - 200);
@@ -324,9 +347,10 @@ test("a pointer whipped down the SHA column leaves no context cards behind", asy
   }
   await window.mouse.move(last.x + 320, last.y + 40);
 
-  // Asserted without retries: an ungated hover has already opened a card by
-  // now, and would only disappear after its dismissal delay.
-  expect(await card.count()).toBe(0);
+  const cardsSeen = await window.evaluate(
+    () => (window as unknown as { __cardsSeen: number }).__cardsSeen
+  );
+  expect(cardsSeen).toBe(0);
   await window.waitForTimeout(600);
   await expect(card).toBeHidden();
 

@@ -8,6 +8,7 @@ import type {
   LaneGraph,
   PrSummary
 } from "@pwrgit/shared";
+import { useHoverIntent } from "../../lib/hoverIntent";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import {
@@ -256,6 +257,9 @@ export function LineageGraph({
   const commitContext = useViewportTooltip("commit-context-card", {
     interactive: true
   });
+  // One gate for every row: only one trigger is hovered at a time, and this
+  // keeps hundreds of rows from each mounting their own listener bookkeeping.
+  const hoverIntent = useHoverIntent();
   const scrollerRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const laneBarRef = useRef<HTMLDivElement>(null);
@@ -546,9 +550,21 @@ export function LineageGraph({
   // The interactive card owns its delayed dismissal. Clear the associated
   // commit once it is actually gone, rather than as the pointer starts across
   // the gap from a row to the card.
+  const contextWasVisible = useRef(false);
   useEffect(() => {
-    if (!commitContext.visible) setHoveredCommit(null);
-  }, [commitContext.visible]);
+    if (commitContext.visible) {
+      contextWasVisible.current = true;
+      return;
+    }
+    setHoveredCommit(null);
+    // Only a card that was actually on screen leaves the user mid-browse —
+    // the initial hidden state must not start the warm window. An interactive
+    // card outlives the hover that opened it, so warmth runs from its
+    // dismissal rather than from the moment the pointer left the trigger.
+    if (!contextWasVisible.current) return;
+    contextWasVisible.current = false;
+    hoverIntent.cardClosed();
+  }, [commitContext.visible, hoverIntent]);
 
   // Identity verification is lazy like diffstats, but it must never delay a
   // context card. Renderer results are retained by full commit hash for the
@@ -1003,6 +1019,7 @@ export function LineageGraph({
                 contextOpen={hoveredCommit === vm.commit.hash && commitContext.visible}
                 flashing={flash === vm.commit.hash}
                 branchInfo={data?.branches ?? {}}
+                hoverIntent={hoverIntent}
                 onToggle={() => onToggleCommit(vm.commit.hash)}
                 onOpen={() => onOpenCommit(vm.commit.hash, vm.commit.subject)}
                 onShowContext={(target, anchor) =>

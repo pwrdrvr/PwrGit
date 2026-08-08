@@ -1,5 +1,5 @@
 import type { Commit, LaneBranchInfo, PrSummary } from "@pwrgit/shared";
-import { useHoverIntent } from "../../lib/hoverIntent";
+import { hoverIntentHandlers, type HoverIntent } from "../../lib/hoverIntent";
 import { PrChip } from "../sidebar/PrChip";
 import type { LaneRow } from "./lane-layout";
 import type { PrLandingSeg } from "./pr-landings";
@@ -89,6 +89,7 @@ export function GraphRow({
   contextOpen,
   flashing,
   branchInfo,
+  hoverIntent,
   onToggle,
   onOpen,
   onShowContext,
@@ -112,6 +113,9 @@ export function GraphRow({
   flashing: boolean;
   /** branch name → PR / worktree adornments for tip chips. */
   branchInfo?: Record<string, LaneBranchInfo>;
+  /** Shared hover-intent gate, owned by LineageGraph so hundreds of rows do
+   *  not each mount their own. */
+  hoverIntent: HoverIntent;
   onToggle: () => void;
   onOpen: () => void;
   onShowContext: (
@@ -134,7 +138,6 @@ export function GraphRow({
     isMine,
     pullRequest
   } = vm;
-  const hoverIntent = useHoverIntent();
   const width = Math.max(1, laneCount) * LANE_W;
   const color = laneColor(row.lane);
   const chipCount = refs.length + remoteRefs.length;
@@ -150,14 +153,11 @@ export function GraphRow({
   };
   // A pointer thrown across the window crosses many rows. Only a deliberate
   // hover should open a card; focus and click stay instant.
-  const hoverContextFor = (target: HTMLElement): void =>
-    hoverIntent.arm(() => showContextFor(target));
-  const openContextFor = (target: HTMLElement): void =>
-    hoverIntent.immediate(() => showContextFor(target));
-  const leaveContext = (): void => {
-    hoverIntent.cancel();
-    onHideContext();
-  };
+  const context = hoverIntentHandlers({
+    intent: hoverIntent,
+    show: showContextFor,
+    hide: onHideContext
+  });
 
   // A lane that runs straight through both halves of the row is drawn as ONE
   // full-height line (no half-line seam at the vertical midpoint). Halves with
@@ -346,10 +346,10 @@ export function GraphRow({
             type="button"
             className="commit-sha-chip"
             aria-label={`Show context for commit ${commit.shortHash}`}
-            onMouseEnter={(e) => hoverContextFor(e.currentTarget)}
-            onMouseLeave={leaveContext}
-            onFocus={(e) => openContextFor(e.currentTarget)}
-            onBlur={leaveContext}
+            onMouseEnter={(e) => context.onMouseEnter(e.currentTarget)}
+            onMouseLeave={context.onMouseLeave}
+            onFocus={(e) => context.onFocus(e.currentTarget)}
+            onBlur={context.onBlur}
             onKeyDown={(e) => {
               if (e.key === "Tab" && !e.shiftKey && onFocusContext()) {
                 e.preventDefault();
@@ -357,7 +357,7 @@ export function GraphRow({
             }}
             onClick={(e) => {
               e.stopPropagation();
-              openContextFor(e.currentTarget);
+              context.showNow(e.currentTarget);
             }}
           >
             {commit.shortHash}
@@ -371,6 +371,7 @@ export function GraphRow({
           {pullRequest !== undefined && (
             <PrChip
               pr={pullRequest}
+              hoverIntent={hoverIntent}
               onShowContext={showContextFor}
               onHideContext={onHideContext}
               onFocusContext={onFocusContext}
