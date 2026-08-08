@@ -1,4 +1,5 @@
 import type { Commit, LaneBranchInfo, PrSummary } from "@pwrgit/shared";
+import { useHoverIntent } from "../../lib/hoverIntent";
 import { PrChip } from "../sidebar/PrChip";
 import type { LaneRow } from "./lane-layout";
 import type { PrLandingSeg } from "./pr-landings";
@@ -133,6 +134,7 @@ export function GraphRow({
     isMine,
     pullRequest
   } = vm;
+  const hoverIntent = useHoverIntent();
   const width = Math.max(1, laneCount) * LANE_W;
   const color = laneColor(row.lane);
   const chipCount = refs.length + remoteRefs.length;
@@ -145,6 +147,16 @@ export function GraphRow({
       x: (rect.left + rect.right) / 2,
       y: (rect.top + rect.bottom) / 2
     });
+  };
+  // A pointer thrown across the window crosses many rows. Only a deliberate
+  // hover should open a card; focus and click stay instant.
+  const hoverContextFor = (target: HTMLElement): void =>
+    hoverIntent.arm(() => showContextFor(target));
+  const openContextFor = (target: HTMLElement): void =>
+    hoverIntent.immediate(() => showContextFor(target));
+  const leaveContext = (): void => {
+    hoverIntent.cancel();
+    onHideContext();
   };
 
   // A lane that runs straight through both halves of the row is drawn as ONE
@@ -334,10 +346,10 @@ export function GraphRow({
             type="button"
             className="commit-sha-chip"
             aria-label={`Show context for commit ${commit.shortHash}`}
-            onMouseEnter={(e) => showContextFor(e.currentTarget)}
-            onMouseLeave={onHideContext}
-            onFocus={(e) => showContextFor(e.currentTarget)}
-            onBlur={onHideContext}
+            onMouseEnter={(e) => hoverContextFor(e.currentTarget)}
+            onMouseLeave={leaveContext}
+            onFocus={(e) => openContextFor(e.currentTarget)}
+            onBlur={leaveContext}
             onKeyDown={(e) => {
               if (e.key === "Tab" && !e.shiftKey && onFocusContext()) {
                 e.preventDefault();
@@ -345,7 +357,7 @@ export function GraphRow({
             }}
             onClick={(e) => {
               e.stopPropagation();
-              showContextFor(e.currentTarget);
+              openContextFor(e.currentTarget);
             }}
           >
             {commit.shortHash}

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import type { PrSummary } from "@pwrgit/shared";
 import { copyText } from "../../lib/copyText";
+import { useHoverIntent } from "../../lib/hoverIntent";
 import { dispatch } from "../../lib/pwrgit";
 import { useViewportTooltip } from "../../lib/useViewportTooltip";
 
@@ -25,6 +26,7 @@ export function PrChip({
     update: updateTooltip,
     tooltipNode
   } = useViewportTooltip();
+  const hoverIntent = useHoverIntent();
   // GitHub's terminal lifecycle wins over a stale draft bit. This also mirrors
   // PwrAgnt: the bar is an affordance for open drafts only.
   const isDraft = pr.state === "open" && pr.isDraft;
@@ -50,6 +52,16 @@ export function PrChip({
     if (onHideContext !== undefined) onHideContext();
     else hideTooltip();
   };
+  // Sweeping the pointer past a row of chips must not leave popups in its
+  // wake; keyboard focus and clicks still act at once.
+  const hoverShow = (target: HTMLElement): void =>
+    hoverIntent.arm(() => show(target));
+  const showNow = (target: HTMLElement): void =>
+    hoverIntent.immediate(() => show(target));
+  const leave = (): void => {
+    hoverIntent.cancel();
+    hide();
+  };
 
   // Keep an already-visible tooltip accurate when a targeted PR refresh lands.
   useEffect(() => {
@@ -63,14 +75,14 @@ export function PrChip({
         role="button"
         tabIndex={0}
         aria-label={`PR #${pr.number} (${pr.state}) — Enter opens in browser`}
-        onMouseEnter={(e) => show(e.currentTarget)}
-        onMouseLeave={hide}
-        onFocus={(e) => show(e.currentTarget)}
-        onBlur={hide}
+        onMouseEnter={(e) => hoverShow(e.currentTarget)}
+        onMouseLeave={leave}
+        onFocus={(e) => showNow(e.currentTarget)}
+        onBlur={leave}
         onClick={(e) => {
           e.stopPropagation();
           activate(e.altKey);
-          hide();
+          leave();
         }}
         onKeyDown={(e) => {
           if (
@@ -85,7 +97,7 @@ export function PrChip({
             e.stopPropagation();
             e.preventDefault();
             activate(e.altKey);
-            hide();
+            leave();
           }
         }}
       >

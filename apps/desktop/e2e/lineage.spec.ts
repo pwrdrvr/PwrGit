@@ -291,6 +291,50 @@ test("hovering an aligned commit SHA chip opens its context window", async () =>
   await expect(menu).toBeHidden();
 });
 
+test("a pointer whipped down the SHA column leaves no context cards behind", async () => {
+  sandbox = createGitSandbox();
+  const s = sandbox;
+  const repo = s.makeRepo("hover-intent");
+  for (let i = 0; i < 4; i += 1) {
+    s.commit(repo.path, `f${i}.txt`, `passing commit ${i}`);
+  }
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, s, "hover-intent");
+  await branchRow(window, "main").first().click();
+
+  const chips = window.locator(".commit-sha-chip");
+  await expect(chips.first()).toBeVisible({ timeout: 20_000 });
+  const centres = await chips.evaluateAll((elements) =>
+    elements.map((element) => {
+      const rect = element.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    })
+  );
+  expect(centres.length).toBeGreaterThan(3);
+
+  const card = window.getByRole("dialog", { name: "Commit context" });
+  const last = centres[centres.length - 1]!;
+  // The SHA chips share one column, so anything travelling down the graph
+  // crosses every trigger on the way to wherever it was actually going.
+  await window.mouse.move(centres[0]!.x, centres[0]!.y - 200);
+  for (const centre of centres) {
+    await window.mouse.move(centre.x, centre.y);
+  }
+  await window.mouse.move(last.x + 320, last.y + 40);
+
+  // Asserted without retries: an ungated hover has already opened a card by
+  // now, and would only disappear after its dismissal delay.
+  expect(await card.count()).toBe(0);
+  await window.waitForTimeout(600);
+  await expect(card).toBeHidden();
+
+  // Stopping on a chip is what a card is for, and still works.
+  await window.mouse.move(centres[1]!.x, centres[1]!.y);
+  await expect(card).toBeVisible();
+});
+
 test("switching worktrees anchors the lineage on that worktree's HEAD", async () => {
   sandbox = createGitSandbox();
   const s = sandbox;
