@@ -2337,8 +2337,18 @@ input {
   min-width: 0;
 }
 .wt-header__repo {
-  font: 700 15px/1 var(--font-sans);
-  color: var(--accent-bright);
+  /* --accent, not --accent-bright: this is the leading breadcrumb crumb, and
+     PwrAgnt paints the same role (`.thread-header__eyebrow`) with the base
+     accent. --accent-bright is the top of the ramp and reads as a separate,
+     duller copper next to the tangerine used everywhere else in the header. */
+  color: var(--accent);
+  /* line-height 1 was clipping descenders (the g in "PwrAgnt") — the em-box
+     doesn't include the descender region, and the overflow: hidden below
+     (needed for the text-overflow: ellipsis path) chopped anything under the
+     baseline. 1.3 gives them room; the flex parent's align-items: center keeps
+     the visual baseline aligned with the separator and chips beside it. Same
+     fix, same reason, as PwrAgnt's `.activity-titlebar__current`. */
+  font: 700 15px/1.3 var(--font-sans);
   /* Never wraps — it shares the line with the branch + path chips. Sized to
      its content at rest; gives way only after the path chip has fully
      collapsed (shrink 1 vs the path's 999), flooring at a readable prefix. */
