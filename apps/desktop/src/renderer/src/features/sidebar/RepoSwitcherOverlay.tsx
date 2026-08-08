@@ -4,7 +4,7 @@ import { createAsyncFill } from "../../lib/asyncFill";
 import { dispatch } from "../../lib/pwrgit";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import { shortWhen } from "../graph/graph-view";
-import { searchCommits } from "./commit-search";
+import { commitHashQuery, searchCommits } from "./commit-search";
 import { PrChip } from "./PrChip";
 import { PinIcon } from "./WorktreeRow";
 
@@ -59,7 +59,11 @@ export function RepoSwitcherOverlay({
   onPickCommit
 }: {
   commits: Commit[];
-  commitContext: { repoName: string; branch: string } | null;
+  commitContext: {
+    repoName: string;
+    branch: string;
+    worktreeId: string;
+  } | null;
   onClose: () => void;
   onPick: (hit: RepoSearchHit) => void;
   onPickCommit: (commit: Commit) => void;
@@ -71,18 +75,36 @@ export function RepoSwitcherOverlay({
   const [statuses, setStatuses] = useState<Map<string, SearchHitStatus>>(
     () => new Map()
   );
+  const [lookedUpCommit, setLookedUpCommit] = useState<{
+    query: string;
+    commit: Commit | null;
+  } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
+  const commitWorktreeId = commitContext?.worktreeId ?? null;
   const commitResults = useMemo(
     () => searchCommits(commits, query),
     [commits, query]
   );
+  const hashQuery = commitHashQuery(query);
+  const directCommit =
+    hashQuery !== null && lookedUpCommit?.query === hashQuery
+      ? lookedUpCommit.commit
+      : null;
+  const allCommitResults = useMemo(
+    () =>
+      directCommit === null ||
+      commitResults.some((commit) => commit.hash === directCommit.hash)
+        ? commitResults
+        : [directCommit, ...commitResults],
+    [commitResults, directCommit]
+  );
   const items = useMemo<PaletteItem[]>(
     () => [
-      ...commitResults.map((commit) => ({ kind: "commit" as const, commit })),
+      ...allCommitResults.map((commit) => ({ kind: "commit" as const, commit })),
       ...results.map((hit) => ({ kind: "repo" as const, hit }))
     ],
-    [commitResults, results]
+    [allCommitResults, results]
   );
 
   useEffect(() => {
@@ -115,6 +137,31 @@ export function RepoSwitcherOverlay({
       active = false;
     };
   }, [query]);
+
+  useEffect(() => {
+    if (hashQuery === null || commitWorktreeId === null) {
+      setLookedUpCommit(null);
+      return;
+    }
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void dispatch("commit:lookup", {
+        worktreeId: commitWorktreeId,
+        hash: hashQuery
+      }).then((result) => {
+        if (active) {
+          setLookedUpCommit({
+            query: hashQuery,
+            commit: result.ok ? result.value : null
+          });
+        }
+      });
+    }, 120);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [commitWorktreeId, hashQuery]);
 
   useEffect(() => setSel(0), [query]);
   useEffect(() => {
@@ -183,7 +230,7 @@ export function RepoSwitcherOverlay({
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search repos, branches & current commits…"
+            placeholder="Search repos, branches & current repo commits…"
             onKeyDown={(e) => {
               if (e.key === "ArrowDown") {
                 e.preventDefault();

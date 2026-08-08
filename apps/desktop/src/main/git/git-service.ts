@@ -292,6 +292,43 @@ export function parseLog(stdout: string): Commit[] {
     });
 }
 
+/** Resolve one full or abbreviated SHA without walking the visible graph. */
+export async function readCommit(
+  git: GitExec,
+  cwd: string,
+  hash: string
+): Promise<Result<Commit | null>> {
+  const candidate = hash.trim();
+  // Besides avoiding revision-option injection, this keeps ordinary palette
+  // text from spawning Git probes. Four characters is Git's practical floor
+  // for an abbreviated object ID; SHA-1 and SHA-256 repositories are covered.
+  if (!/^[0-9a-f]{4,64}$/i.test(candidate)) return ok(null);
+
+  const raw = await git(
+    [
+      "show",
+      "--no-patch",
+      `--pretty=format:${LOG_FORMAT}`,
+      `${candidate}^{commit}`
+    ],
+    cwd
+  );
+  if (!raw.ok) return raw;
+  // Missing and ambiguous abbreviations are normal search misses.
+  if (raw.value.exitCode !== 0) return ok(null);
+  const commit = parseLog(raw.value.stdout)[0];
+  // Git's revision parser prefers an exact all-hex ref name over interpreting
+  // it as an object-ID prefix. Reject that ref resolution unless its target is
+  // also genuinely identified by the entered SHA.
+  if (
+    commit === undefined ||
+    !commit.hash.toLowerCase().startsWith(candidate.toLowerCase())
+  ) {
+    return ok(null);
+  }
+  return ok(commit);
+}
+
 /** Read a page of commit history for a worktree (HEAD-first). */
 export async function readLog(
   git: GitExec,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Commit } from "@pwrgit/shared";
+import { ok, type Commit } from "@pwrgit/shared";
 import {
   parseBranchRefs,
   parseChanges,
@@ -8,8 +8,10 @@ import {
   parseNumstat,
   parseRepoRefRows,
   parseWorktreeList,
+  readCommit,
   topoMergeCommits
 } from "./git-service";
+import type { GitExec } from "./dugite";
 
 describe("parseNameStatus", () => {
   it("parses modified/added/deleted and takes the NEW path for renames", () => {
@@ -237,6 +239,69 @@ describe("parseLog", () => {
       shortHash: "h2abcde",
       parents: [],
       isMerge: false
+    });
+  });
+});
+
+describe("readCommit", () => {
+  it("resolves an abbreviated SHA to one parsed commit", async () => {
+    const hash = "a".repeat(40);
+    const git: GitExec = async () =>
+      ok({
+        stdout: [
+          hash,
+          "b".repeat(40),
+          "Harold",
+          "harold@example.com",
+          "2026-08-07T12:00:00Z",
+          "feat: found outside graph"
+        ].join("\x1f") + "\x1e",
+        stderr: "",
+        exitCode: 0
+      });
+
+    await expect(readCommit(git, "/repo", "aaaaaaa")).resolves.toEqual({
+      ok: true,
+      value: expect.objectContaining({ hash, shortHash: "aaaaaaa" })
+    });
+  });
+
+  it("treats missing, ambiguous, and non-SHA queries as misses", async () => {
+    let calls = 0;
+    const git: GitExec = async () => {
+      calls += 1;
+      return ok({ stdout: "", stderr: "not a unique object", exitCode: 128 });
+    };
+
+    await expect(readCommit(git, "/repo", "deadbee")).resolves.toEqual({
+      ok: true,
+      value: null
+    });
+    await expect(readCommit(git, "/repo", "not-a-sha")).resolves.toEqual({
+      ok: true,
+      value: null
+    });
+    expect(calls).toBe(1);
+  });
+
+  it("rejects an all-hex ref whose target does not match the SHA prefix", async () => {
+    const git: GitExec = async () =>
+      ok({
+        stdout: [
+          "a".repeat(40),
+          "",
+          "Harold",
+          "harold@example.com",
+          "2026-08-07T12:00:00Z",
+          "tip of the deadbeef branch"
+        ].join("\x1f") + "\x1e",
+        stderr: "",
+        exitCode: 0
+      });
+
+    await expect(readCommit(git, "/repo", "deadbeef")).resolves.toEqual({
+      ok: true,
+      value: null
     });
   });
 });

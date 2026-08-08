@@ -18,6 +18,7 @@ import type {
   PushRefPlan,
   PushRefResult,
   ChangeSet,
+  Commit,
   CommitFileChange,
   CommitStats,
   GitHubCommitAuthorIdentityLookup,
@@ -514,6 +515,11 @@ export interface Commands {
   };
   /** Unified diff of the changes a commit introduced. */
   "diff:commit": { req: { worktreeId: string; hash: string }; res: string };
+  /** Resolve a full or abbreviated object ID in the selected repository. */
+  "commit:lookup": {
+    req: { worktreeId: string; hash: string };
+    res: Commit | null;
+  };
   /** The files a commit touched (rail's commit-scoped list). */
   "commit:files": {
     req: { worktreeId: string; hash: string };

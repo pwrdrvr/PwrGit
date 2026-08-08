@@ -487,7 +487,8 @@ export function App() {
               ? null
               : {
                   repoName: selectedRepo.name,
-                  branch: selectedWorktree.branch
+                  branch: selectedWorktree.branch,
+                  worktreeId: selectedWorktree.id
                 }
           }
           onClose={() => setOverlayOpen(false)}

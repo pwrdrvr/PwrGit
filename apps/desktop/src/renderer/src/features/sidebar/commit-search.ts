@@ -10,6 +10,12 @@ const normalize = (value: string): string =>
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
 
+/** A plausible full or abbreviated Git object ID for direct repository lookup. */
+export function commitHashQuery(query: string): string | null {
+  const candidate = query.trim().toLowerCase();
+  return /^[0-9a-f]{4,64}$/.test(candidate) ? candidate : null;
+}
+
 function scoreCommit(commit: Commit, normalizedQuery: string): number | null {
   const hashQuery = normalizedQuery.replaceAll(" ", "");
   if (
