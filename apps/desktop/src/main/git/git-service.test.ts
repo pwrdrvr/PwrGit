@@ -283,6 +283,27 @@ describe("readCommit", () => {
     });
     expect(calls).toBe(1);
   });
+
+  it("rejects an all-hex ref whose target does not match the SHA prefix", async () => {
+    const git: GitExec = async () =>
+      ok({
+        stdout: [
+          "a".repeat(40),
+          "",
+          "Harold",
+          "harold@example.com",
+          "2026-08-07T12:00:00Z",
+          "tip of the deadbeef branch"
+        ].join("\x1f") + "\x1e",
+        stderr: "",
+        exitCode: 0
+      });
+
+    await expect(readCommit(git, "/repo", "deadbeef")).resolves.toEqual({
+      ok: true,
+      value: null
+    });
+  });
 });
 
 describe("parseChanges", () => {

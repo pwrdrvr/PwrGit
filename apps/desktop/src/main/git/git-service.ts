@@ -316,7 +316,17 @@ export async function readCommit(
   if (!raw.ok) return raw;
   // Missing and ambiguous abbreviations are normal search misses.
   if (raw.value.exitCode !== 0) return ok(null);
-  return ok(parseLog(raw.value.stdout)[0] ?? null);
+  const commit = parseLog(raw.value.stdout)[0];
+  // Git's revision parser prefers an exact all-hex ref name over interpreting
+  // it as an object-ID prefix. Reject that ref resolution unless its target is
+  // also genuinely identified by the entered SHA.
+  if (
+    commit === undefined ||
+    !commit.hash.toLowerCase().startsWith(candidate.toLowerCase())
+  ) {
+    return ok(null);
+  }
+  return ok(commit);
 }
 
 /** Read a page of commit history for a worktree (HEAD-first). */
