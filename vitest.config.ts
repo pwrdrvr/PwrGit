@@ -6,6 +6,13 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     environment: "node",
+    // Nine main-process suites drive real `git` subprocesses against temp
+    // repos, and every operation pays full process-spawn cost. That is well
+    // outside what Vitest's 5s default is sized for: on Windows CI runners,
+    // where spawning is dearest, `rebase-assistant.test.ts` alone has run
+    // 14s and 24s for its 14 tests on identical code. A genuinely hung test
+    // still fails here — just not before a slow-but-healthy one has finished.
+    testTimeout: 20_000,
     include: [
       "packages/*/src/**/*.test.ts",
       "apps/desktop/src/**/*.test.{ts,tsx}"

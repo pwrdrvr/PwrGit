@@ -289,6 +289,85 @@ test("hovering an aligned commit SHA chip opens its context window", async () =>
   ).toBeVisible();
   await window.keyboard.press("Escape");
   await expect(menu).toBeHidden();
+
+  // WCAG 2.1 SC 1.4.13: content shown on hover has to be dismissible without
+  // moving the pointer or focus. Dismissing from inside the card must also
+  // not strand a keyboard user at the top of the document.
+  await shaChip.focus();
+  await expect(card).toBeVisible();
+  await window.keyboard.press("Tab");
+  await expect(shortCopy).toBeFocused();
+  await window.keyboard.press("Escape");
+  await expect(card).toBeHidden();
+  await expect(shaChip).toBeFocused();
+});
+
+test("a pointer whipped down the SHA column leaves no context cards behind", async () => {
+  sandbox = createGitSandbox();
+  const s = sandbox;
+  const repo = s.makeRepo("hover-intent");
+  for (let i = 0; i < 4; i += 1) {
+    s.commit(repo.path, `f${i}.txt`, `passing commit ${i}`);
+  }
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, s, "hover-intent");
+  await branchRow(window, "main").first().click();
+
+  const chips = window.locator(".commit-sha-chip");
+  await expect(chips.first()).toBeVisible({ timeout: 20_000 });
+  const centres = await chips.evaluateAll((elements) =>
+    elements.map((element) => {
+      const rect = element.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    })
+  );
+  expect(centres.length).toBeGreaterThan(3);
+
+  const card = window.getByRole("dialog", { name: "Commit context" });
+  const last = centres[centres.length - 1]!;
+
+  // Record every card that reaches the DOM during the sweep. Polling between
+  // moves would be self-defeating — each round trip parks the pointer on a
+  // chip long enough to be a deliberate hover — and a single assertion after
+  // the sweep silently stops catching the regression on any machine slow
+  // enough to outlast the card's 400ms dismissal delay.
+  await window.evaluate(() => {
+    const probe = window as unknown as { __cardsSeen: number };
+    probe.__cardsSeen = 0;
+    new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (
+            node instanceof HTMLElement &&
+            node.classList.contains("commit-context-card")
+          ) {
+            probe.__cardsSeen += 1;
+          }
+        }
+      }
+    }).observe(document.body, { childList: true });
+  });
+
+  // The SHA chips share one column, so anything travelling down the graph
+  // crosses every trigger on the way to wherever it was actually going.
+  await window.mouse.move(centres[0]!.x, centres[0]!.y - 200);
+  for (const centre of centres) {
+    await window.mouse.move(centre.x, centre.y);
+  }
+  await window.mouse.move(last.x + 320, last.y + 40);
+
+  const cardsSeen = await window.evaluate(
+    () => (window as unknown as { __cardsSeen: number }).__cardsSeen
+  );
+  expect(cardsSeen).toBe(0);
+  await window.waitForTimeout(600);
+  await expect(card).toBeHidden();
+
+  // Stopping on a chip is what a card is for, and still works.
+  await window.mouse.move(centres[1]!.x, centres[1]!.y);
+  await expect(card).toBeVisible();
 });
 
 test("switching worktrees anchors the lineage on that worktree's HEAD", async () => {

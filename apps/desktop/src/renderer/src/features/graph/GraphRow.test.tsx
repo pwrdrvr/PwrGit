@@ -30,6 +30,12 @@ describe("GraphRow remote ref chips", () => {
           defaultBranch: "main"
         }}
         laneCount={2}
+        hoverIntent={{
+          arm: () => undefined,
+          cancel: () => undefined,
+          immediate: () => undefined,
+          cardClosed: () => undefined
+        }}
         now={new Date("2026-08-06T12:01:00.000Z").getTime()}
         selected={false}
         focused={false}

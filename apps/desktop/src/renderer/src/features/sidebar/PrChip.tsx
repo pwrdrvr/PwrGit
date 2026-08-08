@@ -1,6 +1,11 @@
 import { useEffect } from "react";
 import type { PrSummary } from "@pwrgit/shared";
 import { copyText } from "../../lib/copyText";
+import {
+  hoverIntentHandlers,
+  useHoverIntent,
+  type HoverIntent
+} from "../../lib/hoverIntent";
 import { dispatch } from "../../lib/pwrgit";
 import { useViewportTooltip } from "../../lib/useViewportTooltip";
 
@@ -9,11 +14,15 @@ import { useViewportTooltip } from "../../lib/useViewportTooltip";
  *  number, title, state, draft. */
 export function PrChip({
   pr,
+  hoverIntent: sharedIntent,
   onShowContext,
   onHideContext,
   onFocusContext
 }: {
   pr: PrSummary;
+  /** Callers rendering many chips (commit rows) pass their own gate; a lone
+   *  sidebar chip falls back to its own. */
+  hoverIntent?: HoverIntent;
   /** Commit rows can replace the small text tooltip with their shared card. */
   onShowContext?: (target: HTMLElement) => void;
   onHideContext?: () => void;
@@ -25,6 +34,10 @@ export function PrChip({
     update: updateTooltip,
     tooltipNode
   } = useViewportTooltip();
+  // The hook is cheap and must be called unconditionally; a caller-supplied
+  // gate simply wins over this instance's own.
+  const ownIntent = useHoverIntent();
+  const hoverIntent = sharedIntent ?? ownIntent;
   // GitHub's terminal lifecycle wins over a stale draft bit. This also mirrors
   // PwrAgnt: the bar is an affordance for open drafts only.
   const isDraft = pr.state === "open" && pr.isDraft;
@@ -50,6 +63,10 @@ export function PrChip({
     if (onHideContext !== undefined) onHideContext();
     else hideTooltip();
   };
+  // Sweeping the pointer past a row of chips must not leave popups in its
+  // wake; keyboard focus still acts at once, and a click takes its tooltip
+  // with it on the way to the browser.
+  const chip = hoverIntentHandlers({ intent: hoverIntent, show, hide });
 
   // Keep an already-visible tooltip accurate when a targeted PR refresh lands.
   useEffect(() => {
@@ -63,14 +80,14 @@ export function PrChip({
         role="button"
         tabIndex={0}
         aria-label={`PR #${pr.number} (${pr.state}) — Enter opens in browser`}
-        onMouseEnter={(e) => show(e.currentTarget)}
-        onMouseLeave={hide}
-        onFocus={(e) => show(e.currentTarget)}
-        onBlur={hide}
+        onMouseEnter={(e) => chip.onMouseEnter(e.currentTarget)}
+        onMouseLeave={chip.onMouseLeave}
+        onFocus={(e) => chip.onFocus(e.currentTarget)}
+        onBlur={chip.onBlur}
         onClick={(e) => {
           e.stopPropagation();
           activate(e.altKey);
-          hide();
+          chip.leave();
         }}
         onKeyDown={(e) => {
           if (
@@ -85,7 +102,7 @@ export function PrChip({
             e.stopPropagation();
             e.preventDefault();
             activate(e.altKey);
-            hide();
+            chip.leave();
           }
         }}
       >
