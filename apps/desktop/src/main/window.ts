@@ -14,14 +14,14 @@ export function createMainWindow(profileId: string): BrowserWindow {
     minWidth: 940,
     minHeight: 600,
     show: false,
-    backgroundColor: "#0a0908",
+    backgroundColor: "#000000",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
     trafficLightPosition: { x: 12, y: 10 },
     ...(process.platform === "win32"
       ? {
           titleBarOverlay: {
-            color: "#050403",
-            symbolColor: "#b8b0a4",
+            color: "#050505",
+            symbolColor: "#b8b0a5",
             height: 32
           }
         }

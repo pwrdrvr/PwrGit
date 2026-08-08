@@ -47,6 +47,9 @@ jobs:
       - name: Check package license policy and third-party notices
         run: pnpm licenses:check
 
+      - name: Check for raw color literals in renderer CSS
+        run: pnpm lint:colors
+
       - name: Type check
         run: pnpm typecheck
 

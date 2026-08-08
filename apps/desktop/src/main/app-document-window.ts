@@ -28,7 +28,7 @@ export function openAppDocumentWindow(kind: AppDocumentKind): void {
     minHeight: 480,
     show: false,
     title: titleFor(kind),
-    backgroundColor: "#0a0908",
+    backgroundColor: "#000000",
     webPreferences: {
       preload: join(__dirname, "../preload/index.cjs"),
       contextIsolation: true,

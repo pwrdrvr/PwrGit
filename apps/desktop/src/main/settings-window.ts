@@ -24,7 +24,7 @@ export function openSettingsWindow(): void {
     minHeight: 520,
     show: false,
     title: "PwrGit Settings",
-    backgroundColor: "#0a0908",
+    backgroundColor: "#000000",
     webPreferences: {
       preload: join(__dirname, "../preload/index.cjs"),
       contextIsolation: true,

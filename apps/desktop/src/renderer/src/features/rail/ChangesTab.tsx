@@ -154,7 +154,7 @@ export function ChangesTab({
     return (
       <div className="changes-clean">
         <div className="changes-clean__icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6dba7e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-ok)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="m20 6-11 11-5-5" />
           </svg>
         </div>

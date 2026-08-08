@@ -30,7 +30,7 @@ input {
   height: 9px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(140, 133, 122, 0.4);
+  background: var(--scrollbar-thumb);
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: padding-box;
@@ -179,7 +179,7 @@ input {
   padding: 0 12px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-default);
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
   color: var(--text-secondary);
   font: 600 12px/1 var(--font-sans);
   cursor: pointer;
@@ -208,7 +208,7 @@ input {
   align-items: center;
   justify-content: center;
   font: 800 14px/1 var(--font-sans);
-  background: var(--bg-active);
+  background: var(--bg-row-active);
   color: var(--accent-bright);
 }
 .mono-tile--sm {
@@ -314,7 +314,7 @@ input {
 }
 .profile-menu__item.is-active {
   border-color: var(--accent-border);
-  background: var(--bg-active);
+  background: var(--bg-row-active);
 }
 .profile-menu__item.is-active .mono-tile--sm {
   background: var(--bg-active-strong);
@@ -328,7 +328,7 @@ input {
   width: 6px;
   height: 6px;
   border-radius: 999px;
-  background: var(--success);
+  background: var(--status-ok);
   flex: 0 0 auto;
 }
 .profile-menu__sep {
@@ -411,7 +411,7 @@ input {
 }
 .lens-chip.is-active {
   border-color: var(--accent-border);
-  background: var(--bg-active);
+  background: var(--bg-row-active);
   color: var(--accent-bright);
 }
 .lens-chip__count {
@@ -499,7 +499,7 @@ input {
   transition: background 140ms ease;
 }
 .repo-row:hover {
-  background: var(--bg-row-hover);
+  background: var(--bg-panel-hover);
 }
 .repo-row.is-active {
   background: var(--bg-hover-strong);
@@ -573,17 +573,17 @@ input {
 }
 .badge--warn {
   background: var(--warn-soft);
-  color: var(--warn);
+  color: var(--status-warning);
 }
 .badge-text {
   font: 600 10px/1 var(--font-mono);
   flex: 0 0 auto;
 }
 .badge-text--ok {
-  color: var(--success-bright);
+  color: var(--success-text);
 }
 .badge-text--warn {
-  color: var(--warn);
+  color: var(--status-warning);
 }
 
 .wt-section {
@@ -694,7 +694,7 @@ input {
 .ref-section__head:hover,
 .ref-remote__main:hover {
   color: var(--text-primary);
-  background: var(--bg-row-hover);
+  background: var(--bg-panel-hover);
 }
 .ref-section__chev {
   width: 6px;
@@ -721,7 +721,7 @@ input {
 .ref-section__summary {
   margin-left: auto;
   font: 600 9px/1 var(--font-mono);
-  color: var(--warn);
+  color: var(--status-warning);
 }
 .ref-section__body {
   padding: 1px 3px 6px;
@@ -739,7 +739,7 @@ input {
 }
 .ref-branch-row:hover,
 .ref-remote-branch-row:hover {
-  background: var(--bg-row-hover);
+  background: var(--bg-panel-hover);
 }
 .refs-branch-icon {
   flex: 0 0 auto;
@@ -767,12 +767,12 @@ input {
   color: var(--text-muted);
 }
 .ref-branch-row__status.is-ahead {
-  color: var(--success-bright);
+  color: var(--success-text);
 }
 .ref-branch-row__status.is-behind,
 .ref-branch-row__status.is-diverged,
 .ref-branch-row__status.is-upstream_missing {
-  color: var(--warn);
+  color: var(--status-warning);
 }
 .ref-mini-action,
 .ref-fetch-all {
@@ -826,7 +826,7 @@ input {
   color: var(--text-subtle);
 }
 .ref-section__error {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 .ref-remote__row {
   display: flex;
@@ -878,7 +878,7 @@ input {
   user-select: none;
 }
 .wt-row:hover {
-  background: var(--bg-row-hover);
+  background: var(--bg-panel-hover);
 }
 .wt-row.is-selected {
   /* Keep the active worktree pinned just below the folder header so it doesn't
@@ -887,7 +887,7 @@ input {
   top: 36px;
   z-index: 2;
   border-color: var(--accent-border);
-  background: var(--bg-active);
+  background: var(--bg-row-active);
 }
 /* Batch-selected (⌘/Shift-click) — a left accent bar + tint, distinct from the
    single "active" (main-pane) selection above. */
@@ -898,7 +898,7 @@ input {
 /* The viewed row (main pane) is also part of the selection after a plain click;
    keep its stronger "active" look and drop the redundant multi-select bar. */
 .wt-row.is-selected.is-multiselected {
-  background: var(--bg-active);
+  background: var(--bg-row-active);
   box-shadow: none;
 }
 .wt-row.is-multiselected .wt-row__menu {
@@ -925,7 +925,7 @@ input {
   padding: 0 9px;
   border-radius: 6px;
   border: 1px solid var(--border-default);
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
   color: var(--text-secondary);
   font: 600 11px/1 var(--font-sans);
   cursor: pointer;
@@ -933,7 +933,7 @@ input {
 .wt-selbar__btn--danger {
   border-color: transparent;
   background: var(--danger-soft);
-  color: var(--danger);
+  color: var(--danger-text);
 }
 .wt-row__handle {
   flex: 0 0 auto;
@@ -977,15 +977,15 @@ input {
 }
 .wt-tag--merged {
   background: var(--success-soft);
-  color: var(--success-bright);
+  color: var(--success-text);
 }
 .wt-tag--behind {
   background: var(--warn-soft);
-  color: var(--warn);
+  color: var(--status-warning);
 }
 .wt-tag--diverged {
   background: var(--danger-soft);
-  color: var(--danger);
+  color: var(--danger-text);
 }
 .wt-tag--local {
   background: var(--accent-soft);
@@ -1100,7 +1100,7 @@ input {
   cursor: pointer;
 }
 .overlay-result.is-selected {
-  background: var(--bg-active);
+  background: var(--bg-row-active);
 }
 .overlay-result__name {
   flex: 1;
@@ -1140,10 +1140,10 @@ input {
   font: 600 9.5px/1 var(--font-mono);
 }
 .hit-status__b--warn {
-  color: var(--warn);
+  color: var(--status-warning);
 }
 .hit-status__b--ok {
-  color: var(--success-bright);
+  color: var(--success-text);
 }
 .hit-status__age {
   font: 500 9.5px/1 var(--font-mono);
@@ -1304,7 +1304,7 @@ input {
   overflow-y: auto;
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
-  background: rgba(0, 0, 0, 0.08);
+  background: color-mix(in srgb, var(--shadow-base) 8%, transparent);
 }
 .clone-source-row,
 .clone-destination-row {
@@ -1325,7 +1325,7 @@ input {
 .clone-source-row.is-selected,
 .clone-destination-row:hover:not(:disabled),
 .clone-destination-row.is-selected {
-  background: var(--bg-active);
+  background: var(--bg-row-active);
 }
 .clone-source-row.is-picked,
 .clone-destination-row.is-picked {
@@ -1391,11 +1391,11 @@ input {
 }
 .clone-empty--error,
 .clone-submit-error {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 .clone-note {
   padding: 6px 3px 0;
-  color: var(--warn);
+  color: var(--status-warning);
   font: 500 9.5px/1.35 var(--font-sans);
 }
 .clone-protocols {
@@ -1460,7 +1460,7 @@ input {
 .clone-submit-error {
   margin-top: 12px;
   padding: 9px 11px;
-  border: 1px solid rgba(239, 106, 106, 0.24);
+  border: 1px solid var(--danger-border);
   border-radius: 8px;
   background: var(--danger-soft);
   font: 500 10.5px/1.4 var(--font-sans);
@@ -1560,7 +1560,7 @@ input {
   width: 26px;
   height: 26px;
   border-radius: 7px;
-  background: var(--bg-active);
+  background: var(--bg-row-active);
   border: 1px solid var(--accent-border);
   display: flex;
   align-items: center;
@@ -1606,7 +1606,7 @@ input {
   align-items: center;
   gap: 8px;
   padding: 9px 11px;
-  border-bottom: 1px solid rgba(247, 243, 235, 0.06);
+  border-bottom: 1px solid var(--border-faint);
 }
 .rebase-commit__dot {
   width: 6px;
@@ -1649,7 +1649,7 @@ input {
 }
 .rebase-plan__invalid {
   font: 500 11.5px/1.5 var(--font-sans);
-  color: var(--warn);
+  color: var(--status-warning);
 }
 .rebase-check-result {
   display: grid;
@@ -1666,16 +1666,16 @@ input {
   font-weight: 700;
 }
 .rebase-check-result--clean {
-  border-color: color-mix(in srgb, var(--success-bright) 35%, transparent);
+  border-color: color-mix(in srgb, var(--success-text) 35%, transparent);
 }
 .rebase-check-result--clean > span {
-  color: var(--success-bright);
+  color: var(--success-text);
 }
 .rebase-check-result--snag {
-  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+  border-color: color-mix(in srgb, var(--status-warning) 40%, transparent);
 }
 .rebase-check-result--snag > span {
-  color: var(--warn);
+  color: var(--status-warning);
 }
 .rebase-actions {
   display: flex;
@@ -1694,7 +1694,7 @@ input {
   cursor: pointer;
 }
 .rebase-check {
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
   border: 1px solid var(--accent-border);
   color: var(--accent-bright);
 }
@@ -1712,7 +1712,7 @@ input {
   padding: 0 14px;
   border-radius: 7px;
   border: 1px solid var(--border-default);
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
   color: var(--text-secondary);
   font: 600 12px/1 var(--font-sans);
   cursor: pointer;
@@ -1764,7 +1764,7 @@ input {
 .modal__error {
   margin-top: 10px;
   font: 500 11px/1.4 var(--font-mono);
-  color: var(--danger);
+  color: var(--danger-text);
 }
 .modal__hint {
   margin-top: 9px;
@@ -1881,7 +1881,7 @@ input {
   cursor: pointer;
 }
 .refs-tabs button.is-active {
-  background: var(--bg-active);
+  background: var(--bg-row-active);
   color: var(--accent-bright);
 }
 .refs-tabs span {
@@ -1949,7 +1949,7 @@ input {
   border-top: 1px solid var(--border-subtle);
 }
 .refs-table__row:hover {
-  background: var(--bg-row-hover);
+  background: var(--bg-panel-hover);
 }
 .refs-table__identity,
 .refs-remote-branch {
@@ -2041,12 +2041,12 @@ input {
   color: var(--text-muted);
 }
 .refs-status--ahead {
-  color: var(--success-bright);
+  color: var(--success-text);
 }
 .refs-status--behind,
 .refs-status--diverged,
 .refs-status--upstream_missing {
-  color: var(--warn);
+  color: var(--status-warning);
 }
 .refs-row-action {
   border-color: var(--border-default);
@@ -2102,7 +2102,7 @@ input {
   cursor: pointer;
 }
 .refs-remote-card__actions button.is-danger {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 .refs-remote-role {
   margin-left: 8px;
@@ -2276,12 +2276,12 @@ input {
 .refs-plan__row--create,
 .refs-plan__row--fast_forward,
 .refs-plan__row--pushed {
-  color: var(--success-bright);
+  color: var(--success-text);
 }
 .refs-plan__row--destination_ahead,
 .refs-plan__row--diverged,
 .refs-plan__row--failed {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 .refs-plan__row small {
   grid-column: 1 / -1;
@@ -2289,7 +2289,7 @@ input {
 }
 .refs-push .modal__create:disabled {
   border: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
   color: var(--text-subtle);
   opacity: 1;
 }
@@ -2489,7 +2489,7 @@ input {
   color: var(--text-subtle);
 }
 .overlay-foot--error {
-  color: var(--warn, #e8c890);
+  color: var(--status-warning);
   font-family: var(--font-sans);
   font-size: 11.5px;
 }
@@ -2508,11 +2508,11 @@ input {
 }
 .sync-chip--ok {
   background: var(--success-soft);
-  color: var(--success-bright);
+  color: var(--success-text);
 }
 .sync-chip--warn {
   background: var(--warn-soft);
-  color: var(--warn);
+  color: var(--status-warning);
 }
 
 .wt-actions {
@@ -2526,7 +2526,7 @@ input {
   padding: 0 12px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-default);
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
   color: var(--text-primary);
   font: 600 12px/1 var(--font-sans);
   cursor: pointer;
@@ -2545,7 +2545,7 @@ input {
   font-weight: 700;
 }
 .wt-btn--pull.is-behind {
-  background: var(--bg-active);
+  background: var(--bg-row-active);
 }
 
 /* Collapse button labels + sync chip when the main pane is tight. */
@@ -2597,7 +2597,7 @@ input {
 }
 .only-me.is-on {
   border-color: var(--accent-border);
-  background: var(--bg-active);
+  background: var(--bg-row-active);
   color: var(--accent-bright);
 }
 .only-me__dot {
@@ -2644,7 +2644,7 @@ input {
   padding: 0 12px 0 4px;
   min-height: 66px;
   cursor: pointer;
-  border-bottom: 1px solid rgba(247, 243, 235, 0.05);
+  border-bottom: 1px solid var(--border-faint);
   transition: background 120ms ease;
 }
 .commit-row:hover {
@@ -2729,7 +2729,7 @@ input {
   padding: 0 6px;
   border: 1px solid var(--border-subtle);
   border-radius: 999px;
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
   color: var(--text-muted);
   font: 600 9.5px/1 var(--font-mono);
   cursor: pointer;
@@ -2749,7 +2749,7 @@ input {
   height: 16px;
   padding: 0 6px;
   border-radius: 999px;
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
   color: var(--text-muted);
   font: 600 9px/1 var(--font-mono);
 }
@@ -2759,7 +2759,7 @@ input {
 }
 .commit-tag--head {
   background: var(--accent);
-  color: #1a0d05;
+  color: var(--accent-on);
 }
 
 /* Multi-lane graph rows — the lane gutter is an SVG whose width scales with the
@@ -2770,7 +2770,7 @@ input {
   gap: 8px;
   padding: 0 12px 0 8px;
   cursor: pointer;
-  border-bottom: 1px solid rgba(247, 243, 235, 0.05);
+  border-bottom: 1px solid var(--border-faint);
   transition: background 120ms ease;
 }
 .graph-row:hover,
@@ -2783,7 +2783,7 @@ input {
 /* "You are here" — the selected worktree's HEAD commit stays visibly anchored,
    and pulses once when the view jumps to it (worktree switch / locate). */
 .graph-row--head {
-  background: rgba(232, 116, 58, 0.06);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
   box-shadow: inset 2px 0 0 var(--accent);
 }
 .graph-row--head:hover {
@@ -2794,22 +2794,22 @@ input {
    after --head so it wins when the focused commit IS the head. Works on any
    branch — focus isn't limited to the checked-out lane. */
 .graph-row.is-focused {
-  background: rgba(247, 243, 235, 0.07);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
   box-shadow: inset 2px 0 0 var(--text-secondary);
 }
 .graph-row.is-focused:hover,
 .graph-row.is-focused.is-context-open {
-  background: rgba(247, 243, 235, 0.1);
+  background: color-mix(in srgb, var(--text-primary) 10%, transparent);
 }
 .graph-row.is-flash {
   animation: head-flash 1.6s ease-out;
 }
 @keyframes head-flash {
   0% {
-    background: rgba(232, 116, 58, 0.32);
+    background: color-mix(in srgb, var(--accent) 32%, transparent);
   }
   100% {
-    background: rgba(232, 116, 58, 0.06);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
   }
 }
 .graph-locate,
@@ -2854,10 +2854,10 @@ input {
   max-height: 340px;
   overflow-y: auto;
   padding: 6px;
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
   border: 1px solid var(--border-default);
   border-radius: 10px;
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 14px 36px color-mix(in srgb, var(--shadow-base) 50%, transparent);
 }
 .branch-pop__item {
   width: 100%;
@@ -2871,7 +2871,7 @@ input {
   cursor: pointer;
 }
 .branch-pop__item:hover:not(:disabled) {
-  background: var(--bg-row-hover);
+  background: var(--bg-panel-hover);
 }
 .branch-pop__item:disabled {
   opacity: 0.45;
@@ -3011,7 +3011,7 @@ input {
   max-width: 180px;
   padding: 0 8px;
   border-radius: 999px;
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
   border: 1px solid var(--border-subtle);
   color: var(--text-secondary);
   font: 600 9.5px/1 var(--font-mono);
@@ -3056,7 +3056,7 @@ input {
   justify-content: center;
   border-radius: 999px;
   border: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
   color: var(--text-muted);
   cursor: pointer;
   transition: color 120ms ease, border-color 120ms ease;
@@ -3091,11 +3091,11 @@ input {
   padding: 10px 14px;
   border: 1px solid var(--accent-border);
   border-radius: var(--radius-lg);
-  background: var(--bg-active);
+  background: var(--bg-row-active);
   display: flex;
   align-items: center;
   gap: 12px;
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.36);
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--shadow-base) 36%, transparent);
   animation: pg-fade 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .selection-bar__count {
@@ -3112,7 +3112,7 @@ input {
   padding: 0 11px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-default);
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
   color: var(--text-primary);
   font: 600 11.5px/1 var(--font-sans);
   cursor: pointer;
@@ -3155,7 +3155,7 @@ input {
 }
 .rail-tab.is-active {
   border-color: var(--accent-border);
-  background: var(--bg-active);
+  background: var(--bg-row-active);
   color: var(--accent-bright);
 }
 .rail-tab__badge {
@@ -3167,7 +3167,7 @@ input {
   padding: 0 4px;
   border-radius: 999px;
   background: var(--warn-soft);
-  color: var(--warn);
+  color: var(--status-warning);
   font: 600 9px/1 var(--font-mono);
 }
 .rail-empty {
@@ -3211,20 +3211,20 @@ input {
   font: 700 10px/1 var(--font-mono);
 }
 .file-status--warn {
-  color: var(--warn);
+  color: var(--status-warning);
   background: var(--warn-soft);
 }
 .file-status--ok {
-  color: var(--success-bright);
+  color: var(--success-text);
   background: var(--success-soft);
 }
 .file-status--danger {
-  color: var(--danger);
+  color: var(--danger-text);
   background: var(--danger-soft);
 }
 .file-status--muted {
   color: var(--text-muted);
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
 }
 .file-path {
   flex: 1;
@@ -3283,7 +3283,7 @@ input {
 .file-discard:hover,
 .file-discard:focus-visible {
   outline: none;
-  color: var(--danger);
+  color: var(--danger-text);
   background: var(--danger-soft);
   border-color: transparent;
 }
@@ -3324,8 +3324,8 @@ input {
   cursor: pointer;
 }
 .commit-btn:disabled {
-  background: var(--bg-active);
-  color: #8a5a3a;
+  background: var(--bg-row-active);
+  color: var(--text-muted);
   cursor: not-allowed;
 }
 .amend-btn {
@@ -3333,7 +3333,7 @@ input {
   padding: 0 12px;
   border-radius: 7px;
   border: 1px solid var(--border-default);
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
   color: var(--text-secondary);
   font: 600 12px/1 var(--font-sans);
   cursor: pointer;
@@ -3699,11 +3699,11 @@ body.is-col-resizing {
   cursor: default;
 }
 .pop-menu__item--danger {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 .pop-menu__item--danger:hover:not(:disabled) {
   background: var(--danger-soft);
-  color: var(--danger);
+  color: var(--danger-text);
 }
 .pop-menu__sep {
   height: 1px;
@@ -3834,7 +3834,7 @@ body.is-col-resizing {
 }
 .rootlist__x:hover {
   background: var(--danger-soft);
-  color: var(--danger);
+  color: var(--danger-text);
 }
 .rootlist__add {
   display: inline-flex;
@@ -3929,8 +3929,8 @@ body.is-col-resizing {
   white-space: pre-wrap;
 }
 .modal__create--danger {
-  background: var(--danger);
-  color: #2a0d08;
+  background: var(--danger-text);
+  color: var(--danger-on);
 }
 
 /* ---- Diverged-pull recovery ---- */
@@ -3984,10 +3984,10 @@ body.is-col-resizing {
   white-space: nowrap;
 }
 .pull-divergence__facts strong.is-clean {
-  color: var(--success-bright);
+  color: var(--success-text);
 }
 .pull-divergence__facts strong.is-dirty {
-  color: var(--warn);
+  color: var(--status-warning);
 }
 .pull-divergence__signal,
 .pull-divergence__warning {
@@ -4002,9 +4002,9 @@ body.is-col-resizing {
   background: var(--accent-soft);
 }
 .pull-divergence__warning {
-  border: 1px solid color-mix(in srgb, var(--warn) 42%, transparent);
+  border: 1px solid color-mix(in srgb, var(--status-warning) 42%, transparent);
   background: var(--warn-soft);
-  color: var(--warn);
+  color: var(--status-warning);
 }
 .pull-divergence__commit-grid {
   display: grid;
@@ -4073,7 +4073,7 @@ body.is-col-resizing {
   padding: 11px;
   border: 1px solid var(--border-default);
   border-radius: 9px;
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
 }
 .pull-divergence__options section > div {
   flex: 1;
@@ -4089,7 +4089,7 @@ body.is-col-resizing {
   font: 500 10.5px/1.4 var(--font-sans);
 }
 .pull-divergence__options .pull-divergence__option--danger {
-  border-color: color-mix(in srgb, var(--danger) 42%, var(--border-default));
+  border-color: color-mix(in srgb, var(--danger-text) 42%, var(--border-default));
 }
 .pull-divergence__action {
   flex: 0 0 auto;
@@ -4103,9 +4103,9 @@ body.is-col-resizing {
   cursor: pointer;
 }
 .pull-divergence__action--danger {
-  border-color: color-mix(in srgb, var(--danger) 60%, var(--border-default));
+  border-color: color-mix(in srgb, var(--danger-text) 60%, var(--border-default));
   background: var(--danger-soft);
-  color: var(--danger);
+  color: var(--danger-text);
 }
 .pull-divergence__action:disabled {
   opacity: 0.48;
@@ -4199,13 +4199,13 @@ body.is-col-resizing {
   font: 600 10px/1 var(--font-sans);
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--warn);
+  color: var(--status-warning);
 }
 .changes-wip__dot {
   width: 7px;
   height: 7px;
   border-radius: 999px;
-  background: var(--warn);
+  background: var(--status-warning);
 }
 /* Commit-scoped rail view (mirror of the Changes tab for a clicked commit). */
 .commit-tab__head {
@@ -4263,7 +4263,7 @@ body.is-col-resizing {
   transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
 }
 .changes-wip__discard:hover {
-  color: var(--danger);
+  color: var(--danger-text);
   background: var(--danger-soft);
   border-color: transparent;
 }
@@ -4271,7 +4271,7 @@ body.is-col-resizing {
   cursor: pointer;
 }
 .file-row.is-clickable:hover {
-  background: var(--bg-row-hover);
+  background: var(--bg-panel-hover);
 }
 .commit-check {
   cursor: pointer;
@@ -4302,7 +4302,7 @@ body.is-col-resizing {
   flex: 0 0 auto;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-default);
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
   color: var(--text-secondary);
   font: 600 11.5px/1 var(--font-sans);
   cursor: pointer;
@@ -4363,18 +4363,18 @@ body.is-col-resizing {
 }
 .diff-file__status--added {
   background: var(--success-soft);
-  color: var(--success-bright);
+  color: var(--success-text);
 }
 .diff-file__status--deleted {
   background: var(--danger-soft);
-  color: var(--danger);
+  color: var(--danger-text);
 }
 .diff-file__status--renamed {
   background: var(--warn-soft);
-  color: var(--warn);
+  color: var(--status-warning);
 }
 .diff-file__status--modified {
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
   color: var(--text-muted);
 }
 .diff-file__path {
@@ -4402,10 +4402,10 @@ body.is-col-resizing {
   font: 500 11.5px/1.55 var(--font-mono);
 }
 .diff-row--add {
-  background: rgba(109, 186, 126, 0.1);
+  background: color-mix(in srgb, var(--status-ok) 10%, transparent);
 }
 .diff-row--del {
-  background: rgba(232, 90, 58, 0.11);
+  background: color-mix(in srgb, var(--danger-base) 11%, transparent);
 }
 .diff-gutter {
   text-align: right;
@@ -4419,11 +4419,11 @@ body.is-col-resizing {
 }
 .diff-row--add .diff-sym,
 .diff-row--add .diff-text {
-  color: var(--success-bright);
+  color: var(--success-text);
 }
 .diff-row--del .diff-sym,
 .diff-row--del .diff-text {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 .diff-text {
   white-space: pre-wrap;
@@ -4438,10 +4438,10 @@ body.is-col-resizing {
   font: 600 10.5px/1 var(--font-mono);
 }
 .diff-stat__add {
-  color: var(--success-bright);
+  color: var(--success-text);
 }
 .diff-stat__del {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 /* ---- Settings window (#settings aux window) ---- */
@@ -4495,11 +4495,11 @@ body.is-col-resizing {
   cursor: pointer;
 }
 .settings-nav__button:hover {
-  background: var(--bg-row-hover);
+  background: var(--bg-panel-hover);
   color: var(--text-primary);
 }
 .settings-nav__button.is-active {
-  background: var(--bg-active);
+  background: var(--bg-row-active);
   color: var(--accent-bright);
 }
 
@@ -4617,23 +4617,23 @@ body.is-col-resizing {
   font: 600 10.5px/1 var(--font-sans);
   letter-spacing: 0.03em;
   color: var(--text-muted);
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: 999px;
   padding: 4px 9px;
 }
 .settings-card__chip--ok {
-  color: var(--success-bright);
+  color: var(--success-text);
   background: var(--success-soft);
   border-color: transparent;
 }
 .settings-card__chip--warn {
-  color: var(--warn);
+  color: var(--status-warning);
   background: var(--warn-soft);
   border-color: transparent;
 }
 .settings-card__chip--err {
-  color: var(--danger);
+  color: var(--danger-text);
   background: var(--danger-soft);
   border-color: transparent;
 }
@@ -4680,7 +4680,7 @@ body.is-col-resizing {
 .settings-field__error {
   margin: 0;
   font: 500 11.5px/1.4 var(--font-sans);
-  color: var(--danger);
+  color: var(--danger-text);
 }
 .settings-empty {
   margin: 4px 0;
@@ -4712,7 +4712,7 @@ body.is-col-resizing {
   height: 19px;
   padding: 2px;
   border-radius: 999px;
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
   border: 1px solid var(--border-default);
   transition: background 120ms ease, border-color 120ms ease;
 }
@@ -4763,7 +4763,7 @@ body.is-col-resizing {
   color: var(--text-primary);
 }
 .settings-segmented__button.is-active {
-  background: var(--bg-active);
+  background: var(--bg-row-active);
   color: var(--accent-bright);
 }
 .settings-segmented__button:disabled {
@@ -4782,7 +4782,7 @@ body.is-col-resizing {
 .settings-button {
   appearance: none;
   border: 1px solid var(--border-default);
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
   color: var(--text-primary);
   font: 550 12px/1 var(--font-sans);
   padding: 7px 12px;
@@ -4846,7 +4846,7 @@ body.is-col-resizing {
   flex: 0 0 30px;
   height: 30px;
   border-radius: var(--radius-sm);
-  background: var(--bg-active);
+  background: var(--bg-row-active);
   color: var(--accent-bright);
   font: 700 11px/1 var(--font-sans);
   text-transform: uppercase;
@@ -4915,7 +4915,7 @@ body.is-col-resizing {
   padding: 12px 14px;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
   box-shadow: var(--shadow-popover);
   animation: app-toast-enter 160ms ease-out;
 }
@@ -4930,7 +4930,7 @@ body.is-col-resizing {
   font: 700 10.5px/1.2 var(--font-sans);
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .app-toast__message {
@@ -5089,7 +5089,7 @@ body.is-col-resizing {
   overflow: hidden;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
 }
 
 .log-window__level-option {
@@ -5138,7 +5138,7 @@ body.is-col-resizing {
   padding: 0 12px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
   color: var(--text-secondary);
   font: 600 12px/1 var(--font-sans);
   cursor: pointer;
@@ -5170,7 +5170,7 @@ body.is-col-resizing {
   padding: 6px 8px 6px 10px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
 }
 
 .log-window__file-label {
@@ -5230,14 +5230,14 @@ body.is-col-resizing {
 
 .log-window__status-note {
   flex: 0 0 auto;
-  color: var(--warn);
+  color: var(--status-warning);
   font: 600 11px/1 var(--font-sans);
   text-transform: uppercase;
 }
 
 .log-window__error {
   margin: 0;
-  color: var(--danger);
+  color: var(--danger-text);
   font: 500 12.5px/1.35 var(--font-sans);
 }
 
@@ -5274,11 +5274,11 @@ body.is-col-resizing {
 }
 
 .log-window__line:hover {
-  background: var(--bg-row-hover);
+  background: var(--bg-panel-hover);
 }
 
 .log-window__line--warn {
-  background: rgba(216, 168, 90, 0.06);
+  background: color-mix(in srgb, var(--status-warning) 6%, transparent);
 }
 
 .log-window__line--warn:hover {
@@ -5286,7 +5286,7 @@ body.is-col-resizing {
 }
 
 .log-window__line--error {
-  background: rgba(232, 90, 58, 0.07);
+  background: color-mix(in srgb, var(--danger-base) 7%, transparent);
 }
 
 .log-window__line--error:hover {
@@ -5313,11 +5313,11 @@ body.is-col-resizing {
 }
 
 .log-window__part--timestamp {
-  color: var(--info);
+  color: var(--info-text);
 }
 
 .log-window__part--scope {
-  color: var(--success);
+  color: var(--status-ok);
   font-weight: 600;
 }
 
@@ -5330,12 +5330,12 @@ body.is-col-resizing {
 }
 
 .log-window__part--level-warn {
-  color: var(--warn);
+  color: var(--status-warning);
   font-weight: 700;
 }
 
 .log-window__part--level-error {
-  color: var(--danger);
+  color: var(--danger-text);
   font-weight: 700;
 }
 
@@ -5395,7 +5395,7 @@ body.is-col-resizing {
   color: var(--text-muted);
 }
 .document-window__error {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 /* Settings: inline callout (e.g. heap-monitor / hot-CPU contention note) */
@@ -5405,11 +5405,11 @@ body.is-col-resizing {
   font: 450 12px/1.5 var(--font-sans);
   border-radius: var(--radius-md);
   border: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
+  background: var(--bg-panel-elevated);
   color: var(--text-secondary);
 }
 .settings-callout--warn {
-  border-color: rgba(216, 168, 90, 0.35);
+  border-color: color-mix(in srgb, var(--status-warning) 35%, transparent);
   background: var(--warn-soft);
-  color: var(--warn);
+  color: var(--status-warning);
 }
