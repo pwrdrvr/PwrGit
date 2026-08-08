@@ -386,7 +386,17 @@ input {
 .lens-filter {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  /* Five equal tracks can't hold five unequal labels: "All 109" wastes room
+     while "Behind 3" overruns its share, and because .lens-chip centers its
+     content under overflow: hidden, the overrun is clipped off BOTH edges —
+     "Pinned 1" rendered as a headless "inned 1" at the default 320px sidebar.
+     minmax(min-content, …) floors every track at its own content width, so
+     nothing is ever cut mid-glyph; the tracks still share the surplus evenly,
+     so the row keeps reading as a segmented control rather than ragged chips.
+     Total min-content is ~225px against ~242px available at 320px, so it fits
+     with room to spare; below that the max-width: 310px block drops the counts
+     long before the labels are under pressure. */
+  grid-template-columns: repeat(5, minmax(min-content, 1fr));
   gap: 2px;
   padding: 3px;
   border: 1px solid var(--border-subtle);
@@ -415,6 +425,9 @@ input {
   color: var(--accent-bright);
 }
 .lens-chip__count {
+  /* Never the thing that gives: a half-eaten count reads as a different
+     number ("109" clipped to "10" is wrong, not just ugly). */
+  flex: 0 0 auto;
   font: 600 9px/1 var(--font-mono);
   opacity: 0.9;
 }
