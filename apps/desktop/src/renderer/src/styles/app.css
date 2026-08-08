@@ -237,8 +237,12 @@ input {
   align-items: center;
   justify-content: center;
   font: 800 14px/1 var(--font-sans);
-  background: var(--bg-row-active);
-  color: var(--accent-bright);
+  /* Identity chrome, not a signal — whose profile this is doesn't change and
+     doesn't need the eye. The --sm variant below was already neutral; this
+     matches it. Accent stays on the profile MENU's selected row, which is a
+     real state. */
+  background: var(--bg-panel-elevated);
+  color: var(--text-secondary);
 }
 .mono-tile--sm {
   background: var(--bg-panel);
@@ -1051,10 +1055,15 @@ input {
 .clone-repo {
   height: 32px;
   margin-top: 8px;
+  /* Was an accent-bordered, accent-filled bar. Cloning is a secondary action
+     — the sidebar's primary job is picking among repos you already have — and
+     PwrAgnt's theme doc rules out large accent panels outright. Solid-bordered
+     ghost: still clearly a button, no longer competing with the selected row
+     two elements below it. */
   border-style: solid;
-  border-color: var(--accent-border);
-  background: var(--accent-soft);
-  color: var(--accent-bright);
+  border-color: var(--border-default);
+  background: var(--bg-panel-elevated);
+  color: var(--text-secondary);
   font-weight: 600;
 }
 .clone-repo:hover:not(:disabled),
@@ -2575,13 +2584,16 @@ input {
   opacity: 0.6;
   cursor: wait;
 }
+/* Pull is one of four peer actions, so at rest it looks like its neighbours.
+   The accent belongs to `.is-behind` — the state where pulling actually has
+   something to do — and lands on a tint there, so it takes the bright rung. */
 .wt-btn--pull {
-  border-color: var(--accent-border);
-  color: var(--accent);
   font-weight: 700;
 }
 .wt-btn--pull.is-behind {
+  border-color: var(--accent-border);
   background: var(--bg-row-active);
+  color: var(--accent-bright);
 }
 
 /* Collapse button labels + sync chip when the main pane is tight. */
@@ -2610,7 +2622,9 @@ input {
 }
 .graph-toolbar__label {
   font: 600 11px/1 var(--font-sans);
-  color: var(--accent);
+  /* A section header is generic metadata — the doc's own example of what the
+     accent is NOT for. The uppercase + letter-spacing already carry it. */
+  color: var(--text-muted);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
