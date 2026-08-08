@@ -12,6 +12,7 @@ import {
   type CommitIdentity,
   discardPath,
   fileDiff,
+  readCommit,
   readChanges,
   stagePath,
   unstagePath
@@ -121,6 +122,12 @@ export function registerChangesHandlers(
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
     return commitDiff(execGit, path, req.hash);
+  });
+
+  bus.register("commit:lookup", async (req) => {
+    const path = pathOf(req.worktreeId);
+    if (path === null) return err(notFound);
+    return readCommit(execGit, path, req.hash);
   });
 
   bus.register("commit:files", async (req) => {

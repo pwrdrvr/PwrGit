@@ -86,6 +86,45 @@ test("command palette finds and opens commits from the current timeline", async 
   );
 });
 
+test("command palette resolves full and short SHAs outside the loaded timeline", async () => {
+  sandbox = createGitSandbox();
+  const s = sandbox;
+  const repo = s.makeRepo("commit-sha-search");
+
+  // Leave the object in the repository but remove every ref that would put it
+  // into the lineage graph. Direct SHA lookup must not depend on graph scope.
+  s.git(repo.path, "checkout", "-q", "-b", "hidden-object");
+  s.commit(repo.path, "hidden.txt", "feat: find this dangling commit");
+  const fullHash = s.git(repo.path, "rev-parse", "HEAD");
+  s.git(repo.path, "checkout", "-q", "main");
+  s.git(repo.path, "branch", "-D", "hidden-object");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, s, "commit-sha-search");
+  await branchRow(window, "main").first().click();
+  await expect(window.locator(".graph-row").first()).toBeVisible({
+    timeout: 20_000
+  });
+
+  await window.keyboard.press("Control+K");
+  const input = window.locator(".overlay-search input");
+  const hiddenHit = window.locator(".overlay-result", {
+    hasText: "feat: find this dangling commit"
+  });
+
+  await input.fill(fullHash);
+  await expect(hiddenHit).toBeVisible();
+  await input.fill(fullHash.slice(0, 7));
+  await expect(hiddenHit).toBeVisible();
+
+  await hiddenHit.click();
+  await expect(window.locator(".overlay-panel")).toBeHidden();
+  await expect(window.locator(".commit-tab__subject")).toHaveText(
+    "feat: find this dangling commit"
+  );
+});
+
 test("remote-only branches use dashed lineage and ellipsized ref chips", async () => {
   sandbox = createGitSandbox();
   const s = sandbox;

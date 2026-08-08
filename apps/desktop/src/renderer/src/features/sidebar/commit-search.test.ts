@@ -1,6 +1,6 @@
 import type { Commit } from "@pwrgit/shared";
 import { describe, expect, it } from "vitest";
-import { searchCommits } from "./commit-search";
+import { commitHashQuery, searchCommits } from "./commit-search";
 
 const commit = (
   hash: string,
@@ -71,5 +71,17 @@ describe("searchCommits", () => {
       ranked[2],
       ranked[1]
     ]);
+  });
+});
+
+describe("commitHashQuery", () => {
+  it("accepts short and full SHAs regardless of case", () => {
+    expect(commitHashQuery(" B200 ")).toBe("b200");
+    expect(commitHashQuery("A".repeat(40))).toBe("a".repeat(40));
+  });
+
+  it("rejects ordinary text and implausibly short IDs", () => {
+    expect(commitHashQuery("remote terminals")).toBeNull();
+    expect(commitHashQuery("abc")).toBeNull();
   });
 });
