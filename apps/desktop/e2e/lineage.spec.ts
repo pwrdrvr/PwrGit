@@ -289,6 +289,17 @@ test("hovering an aligned commit SHA chip opens its context window", async () =>
   ).toBeVisible();
   await window.keyboard.press("Escape");
   await expect(menu).toBeHidden();
+
+  // WCAG 2.1 SC 1.4.13: content shown on hover has to be dismissible without
+  // moving the pointer or focus. Dismissing from inside the card must also
+  // not strand a keyboard user at the top of the document.
+  await shaChip.focus();
+  await expect(card).toBeVisible();
+  await window.keyboard.press("Tab");
+  await expect(shortCopy).toBeFocused();
+  await window.keyboard.press("Escape");
+  await expect(card).toBeHidden();
+  await expect(shaChip).toBeFocused();
 });
 
 test("a pointer whipped down the SHA column leaves no context cards behind", async () => {

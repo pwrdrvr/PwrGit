@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   HOVER_INTENT_DWELL_MS,
+  HOVER_INTENT_JITTER_PX,
   HOVER_INTENT_SETTLE_PX_PER_MS,
   HOVER_INTENT_WARM_DWELL_MS,
   HOVER_INTENT_WARM_WINDOW_MS,
@@ -60,11 +61,17 @@ describe("pointerSpeedAt", () => {
 });
 
 describe("hoverIntentVerdict", () => {
+  // A sweep is the only thing that must never open a card: fast *and* headed
+  // away from where it entered. Travelled-far distances are given explicitly
+  // so each case exercises the branch it names.
+  const travelled = 240;
+
   it("waits while the pointer is still travelling, however long it has been over the target", () => {
     expect(
       hoverIntentVerdict({
         dwellMs: HOVER_INTENT_DWELL_MS * 4,
         speed: 3,
+        driftPx: travelled,
         warm: false
       })
     ).toBe("wait");
@@ -75,6 +82,7 @@ describe("hoverIntentVerdict", () => {
       hoverIntentVerdict({
         dwellMs: HOVER_INTENT_DWELL_MS - 1,
         speed: 0,
+        driftPx: 0,
         warm: false
       })
     ).toBe("wait");
@@ -82,24 +90,56 @@ describe("hoverIntentVerdict", () => {
 
   it("opens for a settled pointer past the dwell", () => {
     expect(
-      hoverIntentVerdict({ dwellMs: HOVER_INTENT_DWELL_MS, speed: 0, warm: false })
+      hoverIntentVerdict({
+        dwellMs: HOVER_INTENT_DWELL_MS,
+        speed: 0,
+        driftPx: 0,
+        warm: false
+      })
     ).toBe("open");
   });
 
-  it("treats the settle threshold itself as settled", () => {
-    // The boundary a future tuner will move: at the threshold it opens, one
-    // increment above it waits.
+  it("opens for a hand that shakes in place faster than the settle threshold", () => {
+    // The accessibility case: a tremor reads as fast, but it is going
+    // nowhere, so staying inside the jitter radius is enough on its own.
+    expect(
+      hoverIntentVerdict({
+        dwellMs: HOVER_INTENT_DWELL_MS,
+        speed: HOVER_INTENT_SETTLE_PX_PER_MS * 4,
+        driftPx: HOVER_INTENT_JITTER_PX,
+        warm: false
+      })
+    ).toBe("open");
+  });
+
+  it("opens for a steady hand that drifts well past the jitter radius", () => {
+    // The mirror case: too far to be jitter, too slow to be a sweep.
+    expect(
+      hoverIntentVerdict({
+        dwellMs: HOVER_INTENT_DWELL_MS,
+        speed: HOVER_INTENT_SETTLE_PX_PER_MS / 2,
+        driftPx: travelled,
+        warm: false
+      })
+    ).toBe("open");
+  });
+
+  it("treats both aiming boundaries as aiming", () => {
+    // The two values a future tuner will move: at each threshold it opens,
+    // just past both of them it waits.
     expect(
       hoverIntentVerdict({
         dwellMs: HOVER_INTENT_DWELL_MS,
         speed: HOVER_INTENT_SETTLE_PX_PER_MS,
+        driftPx: travelled,
         warm: false
       })
     ).toBe("open");
     expect(
       hoverIntentVerdict({
         dwellMs: HOVER_INTENT_DWELL_MS,
-        speed: HOVER_INTENT_SETTLE_PX_PER_MS + 0.01,
+        speed: HOVER_INTENT_SETTLE_PX_PER_MS * 4,
+        driftPx: HOVER_INTENT_JITTER_PX + 0.01,
         warm: false
       })
     ).toBe("wait");
@@ -110,6 +150,7 @@ describe("hoverIntentVerdict", () => {
       hoverIntentVerdict({
         dwellMs: HOVER_INTENT_WARM_DWELL_MS,
         speed: 0,
+        driftPx: 0,
         warm: true
       })
     ).toBe("open");
@@ -117,6 +158,7 @@ describe("hoverIntentVerdict", () => {
       hoverIntentVerdict({
         dwellMs: HOVER_INTENT_WARM_DWELL_MS,
         speed: 0,
+        driftPx: 0,
         warm: false
       })
     ).toBe("wait");
@@ -178,6 +220,43 @@ describe("HoverIntentGate", () => {
     }
 
     expect(opened).toBe(true);
+  });
+
+  it("opens for a hand that shakes on the trigger without leaving it", () => {
+    const gate = new HoverIntentGate();
+    let t = 1000;
+    gate.track({ x: 200, y: 300, t });
+    gate.arm(t);
+    let opened = false;
+    // 8px back and forth every 15ms: 0.53 px/ms, above the settle threshold,
+    // yet never more than 8px from where the pointer entered. Under a
+    // speed-only gate this hand could never open a card at all.
+    for (let i = 1; i <= 40; i += 1) {
+      t += 15;
+      gate.track({ x: 200 + (i % 2 === 0 ? 0 : 8), y: 300, t });
+      if (gate.poll(t)) opened = true;
+    }
+
+    expect(gate.speedAt(t)).toBeGreaterThan(HOVER_INTENT_SETTLE_PX_PER_MS);
+    expect(opened).toBe(true);
+  });
+
+  it("still refuses a sweep that is both fast and going somewhere", () => {
+    // The jitter radius must not weaken the one case that matters: this is
+    // the whip again, asserted against drift rather than speed.
+    const gate = new HoverIntentGate();
+    let t = 1000;
+    gate.track({ x: 100, y: 300, t });
+    gate.arm(t);
+    let opened = false;
+    for (let i = 1; i <= 40; i += 1) {
+      t += SAMPLE_MS;
+      gate.track({ x: 100 + i * WHIP_STEP_PX, y: 300, t });
+      if (gate.poll(t)) opened = true;
+    }
+
+    expect(gate.driftAt()).toBeGreaterThan(HOVER_INTENT_JITTER_PX);
+    expect(opened).toBe(false);
   });
 
   it("forgets a pending open when the pointer leaves the trigger", () => {

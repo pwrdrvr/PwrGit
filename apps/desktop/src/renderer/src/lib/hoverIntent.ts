@@ -11,6 +11,11 @@ export const HOVER_INTENT_WARM_WINDOW_MS = 700;
  * A whip across the window runs 2–5 px/ms; the tail of a deliberate move is
  * far slower than this. */
 export const HOVER_INTENT_SETTLE_PX_PER_MS = 0.45;
+/** A pointer that has not strayed this far from where it entered the trigger
+ * is aiming, however fast it shakes. Speed alone would exclude anyone whose
+ * hand does not hold still: a 10px tremor at 20ms intervals reads as
+ * 0.5 px/ms — above the settle threshold — and would never open a card. */
+export const HOVER_INTENT_JITTER_PX = 10;
 /** A pointer device streams moves while the hand is moving. A gap this long
  * means it stopped — not that its last hop is still in flight. */
 export const POINTER_STOPPED_MS = 120;
@@ -36,19 +41,31 @@ export function pointerSpeedAt({
   return distance / Math.max(1, now - prev.t);
 }
 
-/** Whether a trigger that has been hovered for `dwellMs` should open its card
- * yet. Both gates must agree: the pointer has to be aiming, not passing
- * through, and it has to have lingered. */
+/** Whether a trigger hovered for `dwellMs` should open its card yet. The
+ * pointer must have lingered *and* be aiming rather than passing through.
+ *
+ * "Aiming" is satisfied two ways, and either is enough: the pointer has
+ * stayed within `HOVER_INTENT_JITTER_PX` of where it entered the trigger
+ * (a shaking hand that is going nowhere), or it has slowed below the settle
+ * threshold (a steady hand still drifting). A sweep satisfies neither — it is
+ * both fast and travelling away from where it started — so requiring only one
+ * costs nothing in suppression while excluding nobody. */
 export function hoverIntentVerdict({
   dwellMs,
   speed,
+  driftPx,
   warm
 }: {
   dwellMs: number;
   speed: number;
+  /** Distance from where the pointer entered this trigger. */
+  driftPx: number;
   warm: boolean;
 }): "open" | "wait" {
-  if (speed > HOVER_INTENT_SETTLE_PX_PER_MS) return "wait";
+  const aiming =
+    driftPx <= HOVER_INTENT_JITTER_PX ||
+    speed <= HOVER_INTENT_SETTLE_PX_PER_MS;
+  if (!aiming) return "wait";
   const required = warm ? HOVER_INTENT_WARM_DWELL_MS : HOVER_INTENT_DWELL_MS;
   return dwellMs >= required ? "open" : "wait";
 }
@@ -63,6 +80,8 @@ export class HoverIntentGate {
   private prev: PointerSample | undefined;
   private last: PointerSample | undefined;
   private armedAt: number | undefined;
+  /** Where the pointer was when it entered the current trigger. */
+  private armedFrom: PointerSample | undefined;
   /** Identifies the current arming, so a poller left over from a trigger the
    * pointer has already left cannot open someone else's card. */
   private armedSeq = 0;
@@ -87,9 +106,20 @@ export class HoverIntentGate {
     return this.opened || now - this.wentColdAt <= HOVER_INTENT_WARM_WINDOW_MS;
   }
 
+  /** How far the pointer has strayed since it entered the current trigger.
+   * Unarmed, or armed before any pointer sample, counts as no drift. */
+  driftAt(): number {
+    if (this.armedFrom === undefined || this.last === undefined) return 0;
+    return Math.hypot(
+      this.last.x - this.armedFrom.x,
+      this.last.y - this.armedFrom.y
+    );
+  }
+
   /** Returns a token identifying this arming; pass it back to `poll`. */
   arm(now: number): number {
     this.armedAt = now;
+    this.armedFrom = this.last;
     this.armedSeq += 1;
     return this.armedSeq;
   }
@@ -100,6 +130,7 @@ export class HoverIntentGate {
     const verdict = hoverIntentVerdict({
       dwellMs: now - this.armedAt,
       speed: this.speedAt(now),
+      driftPx: this.driftAt(),
       warm: this.isWarm(now)
     });
     if (verdict === "wait") return false;
@@ -110,6 +141,7 @@ export class HoverIntentGate {
   /** Focus and click bypass the gate — the intent is already explicit. */
   openNow(now: number): void {
     this.armedAt = now;
+    this.armedFrom = this.last;
     this.opened = true;
   }
 
@@ -118,6 +150,7 @@ export class HoverIntentGate {
   disarm(now: number): void {
     if (this.opened) this.wentColdAt = now;
     this.armedAt = undefined;
+    this.armedFrom = undefined;
     this.opened = false;
   }
 

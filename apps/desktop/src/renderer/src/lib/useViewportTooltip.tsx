@@ -151,6 +151,8 @@ export function useViewportTooltip(
   { interactive = false }: ViewportTooltipOptions = {}
 ): ViewportTooltip {
   const tooltipRef = useRef<HTMLDivElement>(null);
+  /** The element this tooltip was opened from, for returning focus. */
+  const targetRef = useRef<HTMLElement | null>(null);
   const dismissTimerRef = useRef<number | undefined>(undefined);
   const pointerInInteractiveTooltipRef = useRef(false);
   const [state, setState] = useState<TooltipState | undefined>(undefined);
@@ -213,6 +215,7 @@ export function useViewportTooltip(
   ): void => {
     cancelScheduledHide();
     pointerInInteractiveTooltipRef.current = false;
+    targetRef.current = target;
     setState({
       content,
       targetRect: rectOf(target.getBoundingClientRect()),
@@ -235,11 +238,28 @@ export function useViewportTooltip(
       if (interactive && pointerInInteractiveTooltipRef.current) return;
       hide();
     };
+    // WCAG 2.1 SC 1.4.13: content shown on hover must be dismissible without
+    // moving the pointer or focus. Hovering elsewhere is not a substitute —
+    // and a gated card takes deliberate effort to summon, so a user who did
+    // not want it needs a way out that is not "move the mouse and wait".
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      // A keyboard user may have tabbed into the card. Dismissing it must not
+      // drop them at the top of the document — send them back to the trigger
+      // they opened it from.
+      const card = tooltipRef.current;
+      const leavingFocusBehind =
+        card !== null && card.contains(document.activeElement);
+      hide();
+      if (leavingFocusBehind) targetRef.current?.focus();
+    };
     window.addEventListener("blur", hide);
     window.addEventListener("scroll", onScroll, { capture: true });
+    window.addEventListener("keydown", onKeyDown);
     return () => {
       window.removeEventListener("blur", hide);
       window.removeEventListener("scroll", onScroll, { capture: true });
+      window.removeEventListener("keydown", onKeyDown);
     };
   }, [visible, hide, interactive]);
 
