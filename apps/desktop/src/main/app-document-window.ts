@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { BrowserWindow } from "electron";
 import type { AppDocumentKind } from "@pwrgit/shared";
+import { WINDOW_BACKGROUND } from "./window-chrome";
 
 const documentWindows = new Map<AppDocumentKind, BrowserWindow>();
 
@@ -28,7 +29,7 @@ export function openAppDocumentWindow(kind: AppDocumentKind): void {
     minHeight: 480,
     show: false,
     title: titleFor(kind),
-    backgroundColor: "#0a0908",
+    backgroundColor: WINDOW_BACKGROUND,
     webPreferences: {
       preload: join(__dirname, "../preload/index.cjs"),
       contextIsolation: true,

@@ -1,5 +1,11 @@
 import { join } from "node:path";
 import { BrowserWindow, shell } from "electron";
+import {
+  TITLE_BAR_OVERLAY_BACKGROUND,
+  TITLE_BAR_OVERLAY_HEIGHT,
+  TITLE_BAR_OVERLAY_SYMBOL,
+  WINDOW_BACKGROUND
+} from "./window-chrome";
 
 /**
  * Create a profile-bound window (one window per profile). Frameless-inset
@@ -14,15 +20,15 @@ export function createMainWindow(profileId: string): BrowserWindow {
     minWidth: 940,
     minHeight: 600,
     show: false,
-    backgroundColor: "#0a0908",
+    backgroundColor: WINDOW_BACKGROUND,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
     trafficLightPosition: { x: 12, y: 10 },
     ...(process.platform === "win32"
       ? {
           titleBarOverlay: {
-            color: "#050403",
-            symbolColor: "#b8b0a4",
-            height: 32
+            color: TITLE_BAR_OVERLAY_BACKGROUND,
+            symbolColor: TITLE_BAR_OVERLAY_SYMBOL,
+            height: TITLE_BAR_OVERLAY_HEIGHT
           }
         }
       : {}),

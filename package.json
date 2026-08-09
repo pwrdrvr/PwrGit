@@ -10,6 +10,7 @@
   "scripts": {
     "build": "pnpm --filter @pwrgit/desktop build",
     "dev": "pnpm --filter @pwrgit/desktop dev",
+    "lint:colors": "node ./scripts/lint-renderer-colors.mjs",
     "licenses:check": "node ./scripts/check-package-license-policy.mjs && node ./scripts/generate-third-party-licenses.mjs --check",
     "licenses:generate": "node ./scripts/generate-third-party-licenses.mjs",
     "typecheck": "pnpm -r --if-present typecheck",

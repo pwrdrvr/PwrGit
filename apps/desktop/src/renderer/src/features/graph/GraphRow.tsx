@@ -17,20 +17,22 @@ const MAX_REF_CHIPS = 2;
 export const gutterWidth = (laneCount: number): number =>
   Math.min(Math.max(1, laneCount), MAX_GUTTER_LANES) * LANE_W;
 
-// Lane palette tuned for the dark warm background. Lane 0 (the default-branch
-// spine) is the app accent; the rest rotate through legible, distinct hues.
+// Lane palette. Lane 0 (the default-branch spine) is the app accent; the rest
+// rotate through legible, distinct hues. The values live in tokens.css as
+// --lane-1..--lane-8 so the palette themes with the app instead of pinning
+// dark-theme literals into TSX.
 const LANE_COLORS = [
-  "#e8743a",
-  "#62c882",
-  "#7aa2f7",
-  "#e5b566",
-  "#bd8ff0",
-  "#ef7f95",
-  "#58cfc0",
-  "#a9b665"
+  "var(--lane-1)",
+  "var(--lane-2)",
+  "var(--lane-3)",
+  "var(--lane-4)",
+  "var(--lane-5)",
+  "var(--lane-6)",
+  "var(--lane-7)",
+  "var(--lane-8)"
 ];
 export const laneColor = (i: number): string =>
-  LANE_COLORS[i % LANE_COLORS.length] ?? "#e8743a";
+  LANE_COLORS[i % LANE_COLORS.length] ?? "var(--lane-1)";
 
 const cx = (lane: number): number => lane * LANE_W + LANE_W / 2;
 
@@ -305,7 +307,7 @@ export function GraphRow({
         )}
         {commit.isMerge ? (
           <>
-            <circle cx={x} cy={MID} r={4} fill="#0e0d0b" stroke={color} strokeWidth={2} />
+            <circle cx={x} cy={MID} r={4} fill="var(--bg-panel)" stroke={color} strokeWidth={2} />
             <circle cx={x} cy={MID} r={1.6} fill={color} />
           </>
         ) : (
@@ -313,8 +315,8 @@ export function GraphRow({
             cx={x}
             cy={MID}
             r={isTip || isHead ? 5 : 4}
-            fill={isMine ? color : "#0e0d0b"}
-            stroke={isMine ? "#0e0d0b" : color}
+            fill={isMine ? color : "var(--bg-panel)"}
+            stroke={isMine ? "var(--bg-panel)" : color}
             strokeWidth={2}
           />
         )}
@@ -332,7 +334,7 @@ export function GraphRow({
         }}
       >
         {selected && (
-          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#1a0d05" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="var(--accent-on)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
             <path d="m20 6-11 11-5-5" />
           </svg>
         )}

@@ -20,7 +20,7 @@ async function orderedSelection(
 }
 
 const STEP_COLOR: Record<string, string> = {
-  pick: "var(--success-bright)",
+  pick: "var(--success-text)",
   squash: "var(--accent)"
 };
 
