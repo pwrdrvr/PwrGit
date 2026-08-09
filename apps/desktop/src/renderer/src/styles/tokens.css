@@ -67,6 +67,7 @@
      that must not read as a selected state. */
   --accent-tint: color-mix(in srgb, var(--accent) 8%, transparent);
   --accent-border: color-mix(in srgb, var(--accent) 42%, transparent);
+  --focus-ring: var(--accent);
 
   /* Semantic — danger / success / info. This is a subset of PwrAgnt's
      contract: --accent-strong, --accent-shadow, --info-soft, --info-border,

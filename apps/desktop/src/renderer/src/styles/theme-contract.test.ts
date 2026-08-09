@@ -71,6 +71,7 @@ const INHERITS_FROM_DARK = new Set([
   "--shadow-base", // drop shadows stay dark in both themes
   "--status-closed", // product choice: closed-without-merge is black in both
   "--lane-1", // follows --accent
+  "--focus-ring", // follows --accent
   // Alias tokens: resolve through a base the light block overrides.
   "--bg-menu",
   // Not colors.
@@ -126,5 +127,71 @@ describe("theme contract", () => {
     expect(WINDOW_BACKGROUND).toBe(valueOf("--bg-app"));
     expect(TITLE_BAR_OVERLAY_BACKGROUND).toBe(valueOf("--bg-titlebar"));
     expect(TITLE_BAR_OVERLAY_SYMBOL).toBe(valueOf("--text-secondary"));
+  });
+});
+
+describe("accent ramp usage", () => {
+  /**
+   * --accent-bright is contrast-floored against an --accent-soft tint (4.64:1
+   * there vs 5.45:1 on a flat surface); --accent is tuned for flat surfaces.
+   * Swapping them doesn't read as emphasis, it reads as a second, duller
+   * orange — which is what made the app look like it had two accents.
+   *
+   * So the pairing is checked in BOTH directions. One direction alone is
+   * useless: the retune's actual bug was accent-bright → accent on a tinted
+   * surface, and a test that only looks at accent-bright rules skips those
+   * rules entirely once they stop mentioning it.
+   *
+   * The tint may come from the rule's own body OR from an ancestor in its
+   * selector. The ancestor case is what a per-rule scan misses, and it is how
+   * `.wt-row.is-selected .wt-row__branch` and `.clone-protocol.is-active
+   * strong` were misclassified.
+   */
+  // Translucent/dark accent washes. A SOLID var(--accent) fill is excluded on
+  // purpose: text on that is --accent-on, not either ramp rung.
+  const TINT = /accent-soft|accent-tint|bg-row-active|bg-active-strong/;
+
+  const rules = [...strip(appCss).matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(
+    ([, selector, body]) => ({ selector: selector!.trim(), body: body! })
+  );
+
+  const backgroundOf = (body: string): string =>
+    (body.match(/background[^;]*/g) ?? []).join(" ");
+
+  /** Does any ancestor compound in this selector paint an accent tint? */
+  function ancestorTinted(selector: string): boolean {
+    return selector.split(",").some((part) => {
+      const ancestors = part.trim().split(/\s+/).slice(0, -1);
+      return ancestors.some((ancestor) =>
+        rules.some(
+          (r) =>
+            r.selector.split(",").some((s) => s.trim() === ancestor) &&
+            TINT.test(backgroundOf(r.body))
+        )
+      );
+    });
+  }
+
+  const onTint = (r: { selector: string; body: string }): boolean =>
+    TINT.test(backgroundOf(r.body)) || ancestorTinted(r.selector);
+
+  const paints = (body: string, token: string): boolean =>
+    new RegExp(`^\\s*color\\s*:\\s*var\\(${token}\\)`, "m").test(body);
+
+  const label = (r: { selector: string }): string =>
+    r.selector.replace(/\s+/g, " ").slice(0, 80);
+
+  it("never paints --accent-bright on a flat surface", () => {
+    const offenders = rules
+      .filter((r) => paints(r.body, "--accent-bright") && !onTint(r))
+      .map(label);
+    expect(offenders).toEqual([]);
+  });
+
+  it("never paints --accent on an accent tint", () => {
+    const offenders = rules
+      .filter((r) => paints(r.body, "--accent") && onTint(r))
+      .map(label);
+    expect(offenders).toEqual([]);
   });
 });
