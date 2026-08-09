@@ -37,7 +37,7 @@ test("⌘F search pick expands the repo, selects Primary, and scrolls it into vi
   await window.keyboard.press("Enter");
 
   // The main pane switched to agent-kit…
-  await expect(window.locator(".wt-header__repo")).toHaveText("agent-kit", {
+  await expect(window.locator(".titlebar__repo")).toHaveText("agent-kit", {
     timeout: 20_000
   });
   // …AND the sidebar expanded it, selected its Local checkout, and scrolled
@@ -89,7 +89,7 @@ test("⌘F finds a worktree by branch name and jumps to it", async () => {
     { timeout: 20_000 }
   );
   await expect(selected).toBeInViewport();
-  await expect(window.locator(".wt-header__branch-name")).toHaveText(
+  await expect(window.locator(".titlebar__branch-name")).toHaveText(
     "claude/side-by-side-experiment-groups-8013ec"
   );
 });
@@ -187,7 +187,7 @@ test("moving selection via ⌘F leaves no second 'selected-looking' row behind",
   await window.keyboard.press("Meta+f");
   await window.locator(".overlay-search input").fill("alpha-kit");
   await window.keyboard.press("Enter");
-  await expect(window.locator(".wt-header__repo")).toHaveText("alpha-kit", {
+  await expect(window.locator(".titlebar__repo")).toHaveText("alpha-kit", {
     timeout: 20_000
   });
 
