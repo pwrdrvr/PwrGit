@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { BrowserWindow, shell } from "electron";
+import { WINDOW_BACKGROUND } from "./window-chrome";
 
 /**
  * Singleton Logs window (PwrAgnt's app-log-window pattern): the renderer
@@ -22,7 +23,7 @@ export function openLogsWindow(): void {
     minHeight: 480,
     show: false,
     title: "PwrGit Logs",
-    backgroundColor: "#000000",
+    backgroundColor: WINDOW_BACKGROUND,
     webPreferences: {
       preload: join(__dirname, "../preload/index.cjs"),
       contextIsolation: true,

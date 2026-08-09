@@ -55,10 +55,11 @@
   --text-subtle: rgba(247, 243, 235, 0.42);
 
   /* Accent (tangerine). The ramp travels toward lighter on dark surfaces:
-     --accent → --accent-strong → --accent-bright is increasing emphasis.
-     It reverses in the light block — see the note there. */
+     --accent → --accent-bright is increasing emphasis. It reverses in the
+     light block — see the note there. --accent-bright is contrast-floored
+     against an --accent-soft tint, so paint text with it only ON such a tint;
+     on flat surfaces use --accent. */
   --accent: #ff8a1f;
-  --accent-strong: #ffa33d;
   --accent-bright: #ffb35c;
   --accent-on: #160a00;
   --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
@@ -66,10 +67,13 @@
      that must not read as a selected state. */
   --accent-tint: color-mix(in srgb, var(--accent) 8%, transparent);
   --accent-border: color-mix(in srgb, var(--accent) 42%, transparent);
-  --accent-shadow: color-mix(in srgb, var(--accent) 34%, transparent);
-  --focus-ring: var(--accent);
 
-  /* Semantic — danger / success / info */
+  /* Semantic — danger / success / info. This is a subset of PwrAgnt's
+     contract: --accent-strong, --accent-shadow, --info-soft, --info-border,
+     --success-border and --status-error are omitted because no PwrGit surface
+     paints with them, and a token nobody reads drifts silently
+     (theme-contract.test.ts enforces that). Re-add from PwrAgnt's
+     docs/UI-THEME.md when a surface needs one. */
   --danger-base: #b94232;
   --danger-soft: rgba(185, 66, 50, 0.24);
   --danger-border: color-mix(in srgb, var(--danger-base) 28%, transparent);
@@ -78,17 +82,13 @@
      confirm button). Flips with the theme like --accent-on does. */
   --danger-on: #2a0d08;
   --success-soft: rgba(74, 148, 92, 0.18);
-  --success-border: rgba(74, 148, 92, 0.32);
   --success-text: #9ce5b3;
-  --info-soft: rgba(86, 137, 196, 0.16);
-  --info-border: rgba(86, 137, 196, 0.28);
   --info-text: #9fc8ff;
 
   /* Status indicators */
   --status-ok: #5fa969;
   --status-warning: #d99a3d;
   --status-suspended: #6b6660;
-  --status-error: #c45a3a;
   /* PwrGit-only: the warning wash behind log lines and callouts. */
   --warn-soft: color-mix(in srgb, var(--status-warning) 14%, transparent);
 
@@ -166,15 +166,14 @@
   --text-muted: #736c64;
   --text-subtle: rgba(26, 22, 18, 0.42);
 
-  /* Accent — the ramp reverses here. --accent → --accent-strong →
-     --accent-bright is still increasing emphasis, but emphasis reads as
-     *darker* on a light surface, where it read as lighter on a dark one. Hue
+  /* Accent — the ramp reverses here. --accent → --accent-bright is still
+     increasing emphasis, but emphasis reads as *darker* on a light surface,
+     where it read as lighter on a dark one. Hue
      and saturation are held constant across the flip so both themes render
      the same tangerine; only lightness moves. The derived soft/tint/border/
      shadow mixes reference --accent, so overriding the bases here is enough.
      Foreground on an accent fill flips to white. */
   --accent: #b74c00;
-  --accent-strong: #b34a00;
   --accent-bright: #994c00;
   --accent-on: #ffffff;
 
@@ -185,24 +184,24 @@
   --danger-text: #8a1f12;
   --danger-on: #ffffff;
   --success-soft: rgba(46, 110, 64, 0.14);
-  --success-border: rgba(46, 110, 64, 0.28);
   --success-text: #1a5c2e;
-  --info-soft: rgba(54, 102, 165, 0.12);
-  --info-border: rgba(54, 102, 165, 0.24);
   --info-text: #1a4f8a;
 
   /* Status indicators — darker for visibility on light. */
   --status-ok: #2e7d3c;
   --status-warning: #a86b00;
   --status-suspended: #6b6660;
-  --status-error: #a8472a;
 
   /* One-off accents — darker variants for light surfaces. */
   --brand-purple: #6a4ba8;
 
   /* Lane palette — same hues, dropped in lightness so eight lanes stay
-     distinguishable against white. Lane 1 follows --accent as it does in
-     dark. */
+     distinguishable against white. Lane 1 follows --accent as it does in dark.
+     Measured against the three light surfaces a graph row can sit on (panel,
+     panel-hover, row-active): worst case 3.73:1 on lane-7, so all eight clear
+     the 3:1 graphics minimum. Caveat: lanes 2 and 7 land within 0.005 of each
+     other in luminance (green vs teal) — they separate by hue, not value, so
+     they will read alike in grayscale. */
   --lane-2: #2f8a4a;
   --lane-3: #2f5fbf;
   --lane-4: #8a6317;
