@@ -13,6 +13,7 @@
 import type {
   BranchRef,
   CloneCatalog,
+  CloneProgress,
   CloneProtocol,
   CloneRepository,
   PushRefPlan,
@@ -240,6 +241,7 @@ export interface Commands {
   /** Clone into a registered profile root/prefix and index the new checkout. */
   "repo:clone": {
     req: {
+      operationId: string;
       profileId: ProfileId;
       nameWithOwner: string;
       protocol: CloneProtocol;
@@ -565,6 +567,12 @@ export type Res<C extends CommandName> = Commands[C]["res"];
 export interface Events {
   "profile:changed": ProfileList;
   "repo:changed": { profileId: ProfileId };
+  /** Live Git progress for one clone command, correlated by operation id. */
+  "repo:cloneProgress": {
+    operationId: string;
+    profileId: ProfileId;
+    progress: CloneProgress;
+  };
   "worktree:changed": { worktreeId: string };
   /** A worktree finished being removed (streamed during a batch remove). */
   "worktree:removed": { worktreeId: string };

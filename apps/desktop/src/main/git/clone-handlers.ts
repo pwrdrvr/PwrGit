@@ -11,7 +11,13 @@ export function registerCloneHandlers(
     clones.checkSource(req.profileId, req.nameWithOwner)
   );
   bus.register("repo:clone", async (req) => {
-    const result = await clones.clone(req);
+    const result = await clones.clone(req, (progress) => {
+      emitEvent("repo:cloneProgress", {
+        operationId: req.operationId,
+        profileId: req.profileId,
+        progress
+      });
+    });
     if (result.ok) emitEvent("repo:changed", { profileId: req.profileId });
     return result;
   });

@@ -9,25 +9,31 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { err, ok, type Result } from "@pwrgit/shared";
+import { err, ok, type CloneProgress, type Result } from "@pwrgit/shared";
 import { openDatabase } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
 import {
   cloneDestinations,
   CloneService,
+  createCloneProgressParser,
   normalizeGitHubRepository,
+  parseCloneProgressLine,
   parseCloneRepositories
 } from "./clone-service";
 import type { GitExec, GitOutput } from "./dugite";
 import { RepoIndexer } from "./repo-indexer";
 
-const systemGit: GitExec = (args, cwd) =>
+const systemGit: GitExec = (args, cwd, options) =>
   new Promise<Result<GitOutput>>((resolve) => {
     const proc = spawn("git", args, { cwd });
     let stdout = "";
     let stderr = "";
     proc.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
-    proc.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+    proc.stderr.on("data", (chunk: Buffer) => {
+      const text = chunk.toString();
+      stderr += text;
+      options?.onStderr?.(text);
+    });
     proc.on("close", (code) =>
       resolve(ok({ stdout, stderr, exitCode: code ?? 0 }))
     );
@@ -99,6 +105,48 @@ describe("clone source metadata", () => {
         httpsUrl: "https://github.com/pwrdrvr/PwrGit",
         updatedAt: "2026-08-01T12:00:00Z",
         localPaths: []
+      }
+    ]);
+  });
+});
+
+describe("clone progress", () => {
+  it("parses transfer totals and rates from Git progress", () => {
+    expect(
+      parseCloneProgressLine(
+        "Receiving objects:  42% (420/1000), 12.34 MiB | 3.10 MiB/s"
+      )
+    ).toEqual({
+      phase: "receiving",
+      percent: 42,
+      completedObjects: 420,
+      totalObjects: 1000,
+      bytesReceived: "12.34 MiB",
+      transferRate: "3.10 MiB/s"
+    });
+  });
+
+  it("reassembles chunked carriage-return progress", () => {
+    const updates: CloneProgress[] = [];
+    const parse = createCloneProgressParser((progress) =>
+      updates.push(progress)
+    );
+    parse("remote: Counting objects: 50% (5/");
+    parse("10)\rReceiving objects: 100% (10/10), 2.00 KiB | 2.00 MiB/s\r");
+    expect(updates).toEqual([
+      {
+        phase: "counting",
+        percent: 50,
+        completedObjects: 5,
+        totalObjects: 10
+      },
+      {
+        phase: "receiving",
+        percent: 100,
+        completedObjects: 10,
+        totalObjects: 10,
+        bytesReceived: "2.00 KiB",
+        transferRate: "2.00 MiB/s"
       }
     ]);
   });
@@ -306,6 +354,7 @@ describe("CloneService", () => {
     expect(cloneCalls).toEqual([
       [
         "clone",
+        "--progress",
         "--",
         "git@github.com:pwrdrvr/new-service.git",
         join(services, "new-service")
@@ -360,8 +409,18 @@ describe("CloneService", () => {
 
     expect(result).toEqual(ok(indexedRepo));
     expect(gh).toHaveBeenCalledWith(
-      ["repo", "clone", "huntharo/x-code-clone", join(root, "x-code-clone")],
-      { timeoutMs: 10 * 60_000 }
+      [
+        "repo",
+        "clone",
+        "huntharo/x-code-clone",
+        join(root, "x-code-clone"),
+        "--",
+        "--progress"
+      ],
+      {
+        timeoutMs: 10 * 60_000,
+        onStderr: expect.any(Function)
+      }
     );
   });
 

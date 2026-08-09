@@ -1,7 +1,4 @@
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
 
 // Electron's PATH may miss Homebrew etc. in a packaged app; augment it so `gh`
 // resolves the way it does in the user's shell.
@@ -17,13 +14,31 @@ export function ghEnvironment(): NodeJS.ProcessEnv {
 /** Run the configured GitHub CLI without exposing its credential storage. */
 export async function runGh(
   args: string[],
-  options: { timeoutMs?: number } = {}
+  options: { timeoutMs?: number; onStderr?: (chunk: string) => void } = {}
 ): Promise<string> {
-  const { stdout } = await execFileAsync("gh", args, {
-    env: ghEnvironment(),
-    timeout: options.timeoutMs ?? 10_000,
-    maxBuffer: 1024 * 1024,
-    encoding: "utf8"
+  return new Promise((resolve, reject) => {
+    const process = execFile(
+      "gh",
+      args,
+      {
+        env: ghEnvironment(),
+        timeout: options.timeoutMs ?? 10_000,
+        maxBuffer: 1024 * 1024,
+        encoding: "utf8"
+      },
+      (error, stdout, stderr) => {
+        if (error !== null) {
+          const failure = error as Error & { stdout?: string; stderr?: string };
+          failure.stdout = stdout;
+          failure.stderr = stderr;
+          reject(failure);
+          return;
+        }
+        resolve(stdout.trim());
+      }
+    );
+    process.stderr?.on("data", (chunk: Buffer | string) => {
+      options.onStderr?.(chunk.toString());
+    });
   });
-  return stdout.trim();
 }
