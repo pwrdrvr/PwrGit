@@ -25,6 +25,15 @@ input {
   font-family: inherit;
 }
 
+/* Form controls always select, whatever the shell's policy is (see `.app`).
+   A text field you can't select inside is broken, not merely unpolished. */
+input,
+textarea,
+[contenteditable] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 ::-webkit-scrollbar {
   width: 9px;
   height: 9px;
@@ -81,6 +90,33 @@ input {
   display: flex;
   flex-direction: column;
   background: var(--bg-app);
+  /* Chrome is not a document. Dragging a row, a chip, or a section header used
+     to paint a blue text smear across half the sidebar instead of starting a
+     drag — and every row that grows a drag affordance later would have to
+     remember to opt out again. So the policy is inverted, matching PwrAgnt's
+     `.app-shell`: chrome is unselectable by default, and the surfaces that
+     hold real *content* opt back in below. When you add a text surface a user
+     would want to copy out of, add it to that list — not a `user-select: none`
+     to the row next to it. */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* The opt-in list: content, not chrome. Diff bodies and file paths (the things
+   you paste into a terminal or an issue), commit subjects and hashes, log
+   output, and toast text — plus `.selectable` as the escape hatch for one-offs
+   that don't warrant a rule here. Form controls are handled separately near
+   the top of this file, since a non-selectable <input> is broken outright. */
+.diff-text,
+.diff-file__path,
+.file-path,
+.commit-msg,
+.commit-sha-chip,
+.commit-context-card__subject,
+.commit-context-card__short-hash,
+.selectable {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .titlebar {
@@ -569,6 +605,111 @@ input {
 .repo-row.is-active {
   background: var(--bg-hover-strong);
 }
+.repo-row:focus-visible {
+  outline: none;
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 1px var(--accent-soft);
+}
+
+/* ---- Drag to reorder: handles, source dimming, insertion line ---- */
+
+/* The grip stays out of the layout's way until you're on the row: an always-on
+   handle on every row is visual noise, but a handle that only appears once the
+   drag has started is no affordance at all. */
+.repo-row__handle {
+  flex: 0 0 auto;
+  width: 11px;
+  margin-left: -3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-subtle);
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.repo-row.is-arrangeable:hover .repo-row__handle,
+.repo-row.is-arrangeable:focus-visible .repo-row__handle,
+.wt-row:hover .wt-row__handle,
+.wt-row:focus-visible .wt-row__handle,
+.wt-row.is-dragging .wt-row__handle,
+.repo-row.is-dragging .repo-row__handle {
+  opacity: 1;
+}
+.wt-row__handle {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.repo-row__handle:active,
+.wt-row__handle:active {
+  cursor: grabbing;
+}
+
+/* The source row fades rather than disappearing — it still marks where the row
+   came from, which is what makes the insertion line read as a *move*. */
+.repo-row.is-dragging,
+.wt-row.is-dragging {
+  opacity: 0.4;
+}
+
+/* The insertion line sits in the gap the drop would land in. Drawn as a ::after
+   on the row (not a spacer element) so nothing reflows mid-drag — a list that
+   shifts under the pointer makes the target move as you aim at it. */
+.repo-row.is-drop-before::after,
+.repo-row.is-drop-after::after,
+.wt-row.is-drop-before::after,
+.wt-row.is-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 4;
+}
+.repo-row.is-drop-before::after,
+.wt-row.is-drop-before::after {
+  top: -1px;
+}
+.repo-row.is-drop-after::after,
+.wt-row.is-drop-after::after {
+  bottom: -1px;
+}
+/* .wt-row is already `position: relative`; .repo-row is `sticky`, which also
+   establishes the containing block, so both anchor the line correctly. */
+
+/* Marks a repo that is in the Pinned lens only because one of its worktrees is
+   pinned — its own star is unlit, so the row would otherwise look misfiled. */
+.repo-row__pin-via {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  height: 15px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-subtle);
+  font: 600 8.5px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Inside the Pinned lens the star is redundant — every row in the list is
+   pinned, so a column of lit stars spends the accent color to repeat what the
+   lens header already said, and the accent stops meaning "look here". It
+   yields to hover, where it's still the unpin control. Everywhere else the
+   star is carrying real information and stays lit. */
+.repo-row.is-arrangeable .pin {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.repo-row.is-arrangeable:hover .pin,
+.repo-row.is-arrangeable:focus-within .pin,
+.repo-row.is-arrangeable .pin:focus-visible {
+  opacity: 1;
+}
 .chev {
   width: 7px;
   height: 7px;
@@ -940,10 +1081,14 @@ input {
   border: 1px solid transparent;
   background: transparent;
   transition: background 120ms ease;
-  user-select: none;
 }
 .wt-row:hover {
   background: var(--bg-panel-hover);
+}
+.wt-row:focus-visible {
+  outline: none;
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 1px var(--accent-soft);
 }
 .wt-row.is-selected {
   /* Keep the active worktree pinned just below the folder header so it doesn't

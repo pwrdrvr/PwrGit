@@ -101,6 +101,41 @@ describe("RepoIndexer", () => {
     expect(repoA?.worktrees.find((w) => w.isPrimary)?.branch).toBe("main");
   });
 
+  it("persists a hand-arranged repo order and survives a rescan", async () => {
+    const profile = profileService.get(profileId);
+    if (profile === null) throw new Error("profile missing");
+    const repos = await indexer.rescanProfile(profile);
+    // Name order puts repoA first; arranging inverts that.
+    expect(repos.map((r) => r.name)).toEqual(["repoA", "repoB"]);
+    const byName = new Map(repos.map((r) => [r.name, r.id]));
+    const a = byName.get("repoA");
+    const b = byName.get("repoB");
+    if (a === undefined || b === undefined) throw new Error("repos missing");
+
+    indexer.setRepoOrder(profileId, [b, a]);
+    expect(indexer.listRepos(profileId).map((r) => r.name)).toEqual([
+      "repoB",
+      "repoA"
+    ]);
+    expect(indexer.getRepo(b)?.order).toBe(0);
+    expect(indexer.getRepo(a)?.order).toBe(1);
+
+    // A rescan touches identity, not the arrangement.
+    const rescanned = await indexer.rescanProfile(profile);
+    expect(rescanned.map((r) => r.name)).toEqual(["repoB", "repoA"]);
+
+    // Reset so the ordering doesn't leak into the sibling tests below.
+    db.prepare("UPDATE repos SET custom_order = NULL").run();
+  });
+
+  it("leaves unarranged repos unordered and sorted by name", async () => {
+    const profile = profileService.get(profileId);
+    if (profile === null) throw new Error("profile missing");
+    const repos = await indexer.rescanProfile(profile);
+    for (const r of repos) expect(r.order).toBeUndefined();
+    expect(repos.map((r) => r.name)).toEqual(["repoA", "repoB"]);
+  });
+
   it("is idempotent across rescans (no duplicate rows)", async () => {
     const profile = profileService.get(profileId);
     if (profile === null) throw new Error("profile missing");

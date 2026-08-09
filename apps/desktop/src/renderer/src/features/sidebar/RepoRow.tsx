@@ -2,6 +2,8 @@ import {
   useEffect,
   useRef,
   useState,
+  type DragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent
 } from "react";
 import type { Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
@@ -9,11 +11,17 @@ import { useViewportTooltip } from "../../lib/useViewportTooltip";
 import {
   groupWorktreesForNavigation,
   reorder,
+  repoPinSource,
   repoPrimaryBehind,
-  SORT_LABEL
+  SORT_LABEL,
+  type DropPosition
 } from "./repo-view";
+import { useListReorder } from "./useListReorder";
 import { PinIcon, WorktreeRow } from "./WorktreeRow";
 import { RepoRefsSections } from "./RepoRefsSections";
+
+/** Distinguishes worktree drags from repo drags (see useListReorder). */
+const WORKTREE_MIME = "application/x-pwrgit-worktree";
 
 const REFRESH_WORKTREES_TOOLTIP =
   "Refresh this list — re-read Git for worktrees added, removed, or switched outside PwrGit (does not fetch)";
@@ -42,7 +50,15 @@ export function RepoRow({
   onReorder,
   onNewWorktree,
   onRevealWorktree,
-  onCreateWorktreeFromRef
+  onCreateWorktreeFromRef,
+  arrangeable,
+  dragProps,
+  dragging,
+  dropPosition,
+  focusable,
+  onRowKeyDown,
+  onRowFocus,
+  isPostDragClick
 }: {
   repo: Repo;
   expanded: boolean;
@@ -80,8 +96,25 @@ export function RepoRow({
     newBranch: boolean,
     startPoint?: string
   ) => void;
+  /** The current lens is one the user can arrange by hand (Pinned only). */
+  arrangeable: boolean;
+  /** Repo-level drag handlers from the sidebar's useListReorder. */
+  dragProps: {
+    draggable: boolean;
+    onDragStart?: (e: DragEvent) => void;
+    onDragOver?: (e: DragEvent) => void;
+    onDragLeave?: (e: DragEvent) => void;
+    onDrop?: (e: DragEvent) => void;
+    onDragEnd?: (e: DragEvent) => void;
+  };
+  dragging: boolean;
+  dropPosition: DropPosition | null;
+  focusable: boolean;
+  onRowKeyDown: (e: ReactKeyboardEvent) => void;
+  onRowFocus: () => void;
+  /** True while the synthetic click that follows a drop is still arriving. */
+  isPostDragClick: () => boolean;
 }) {
-  const dragId = useRef<string | null>(null);
   const refreshTooltip = useViewportTooltip();
   const { primary, pinned, remaining, displayIds } =
     groupWorktreesForNavigation(repo.worktrees, sort, customOrder);
@@ -126,6 +159,92 @@ export function RepoRow({
   const wtCount = repo.worktrees.length;
   const activeCollapsed = containsSelection && !expanded;
 
+  // The primary checkout is fixed at the top, so it is neither a drag source
+  // nor a drop target — `orderedIds` excludes it for the same reason.
+  //
+  // Pinned worktrees render in their own section above the disclosure, so a
+  // drop across that boundary would reorder the flat list while the row visibly
+  // snapped back into its own section. Keep the gesture inside one section:
+  // moving a worktree between them is what the pin is for.
+  const pinnedIds = new Set(pinned.map((worktree) => worktree.id));
+  const wtDrag = useListReorder({
+    mime: WORKTREE_MIME,
+    canDrop: (dragged, targetId) =>
+      pinnedIds.has(dragged) === pinnedIds.has(targetId),
+    onCommit: (dragged, targetId, position) => {
+      onReorder(reorder(orderedIds, dragged, targetId, position));
+    }
+  });
+
+  // Roving tabindex within this repo's worktree list: one tab stop, arrows to
+  // move between rows. Defaults to the selected row so tabbing in lands on the
+  // row the user is actually looking at.
+  const [focusedWtId, setFocusedWtId] = useState<string | null>(null);
+  const tabStopId =
+    focusedWtId !== null && displayIds.includes(focusedWtId)
+      ? focusedWtId
+      : selectedWorktreeId !== null && displayIds.includes(selectedWorktreeId)
+        ? selectedWorktreeId
+        : displayIds[0] ?? null;
+
+  const focusWorktreeAt = (index: number): void => {
+    const id = displayIds[index];
+    if (id === undefined) return;
+    setFocusedWtId(id);
+    const el = document.querySelector<HTMLElement>(`[data-wt-id="${id}"]`);
+    el?.focus();
+  };
+
+  const handleWorktreeKeyDown = (
+    worktree: Worktree,
+    event: ReactKeyboardEvent
+  ): void => {
+    const index = displayIds.indexOf(worktree.id);
+    if (index === -1) return;
+    // ⌘⇧↑/↓ moves the row; plain ↑/↓ moves the focus. Same modifier pair as
+    // PwrAgnt's pinned-directory reorder, so the two apps stay one muscle
+    // memory.
+    if (event.metaKey && event.shiftKey) {
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      if (worktree.isPrimary) return;
+      const from = orderedIds.indexOf(worktree.id);
+      const to = from + (event.key === "ArrowUp" ? -1 : 1);
+      const neighbor = orderedIds[to];
+      // Same section boundary the drag honors (see `canDrop` above).
+      if (
+        from === -1 ||
+        neighbor === undefined ||
+        pinnedIds.has(neighbor) !== pinnedIds.has(worktree.id)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      onReorder(
+        reorder(
+          orderedIds,
+          worktree.id,
+          neighbor,
+          event.key === "ArrowUp" ? "before" : "after"
+        )
+      );
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      focusWorktreeAt(Math.min(index + 1, displayIds.length - 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      focusWorktreeAt(Math.max(index - 1, 0));
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onSelectWorktree(
+        worktree,
+        event as unknown as ReactMouseEvent,
+        displayIds
+      );
+    }
+  };
+
   const renderWorktree = (worktree: Worktree) => (
     <WorktreeRow
       key={worktree.id}
@@ -133,7 +252,10 @@ export function RepoRow({
       selected={worktree.id === selectedWorktreeId}
       multiSelected={selectedIds.has(worktree.id)}
       now={now}
-      onSelect={(event) => onSelectWorktree(worktree, event, displayIds)}
+      onSelect={(event) => {
+        if (wtDrag.isPostDragClick()) return;
+        onSelectWorktree(worktree, event, displayIds);
+      }}
       onContextMenu={(event) =>
         onContextWorktree(worktree, event, displayIds)
       }
@@ -147,34 +269,64 @@ export function RepoRow({
             onRefreshPullRequest: () =>
               onRefreshPullRequest(worktree.branch)
           })}
-      onDragStart={() => {
-        if (!worktree.isPrimary) dragId.current = worktree.id;
-      }}
-      onDragOver={(event) => {
-        if (!worktree.isPrimary) event.preventDefault();
-      }}
-      onDrop={(event) => {
-        if (worktree.isPrimary) return;
-        event.preventDefault();
-        event.stopPropagation();
-        const dragged = dragId.current;
-        if (dragged !== null) {
-          onReorder(reorder(orderedIds, dragged, worktree.id));
-        }
-        dragId.current = null;
-      }}
-      onDragEnd={() => {
-        dragId.current = null;
-      }}
+      dragProps={wtDrag.rowProps(worktree.id, !worktree.isPrimary)}
+      dragging={wtDrag.dragId === worktree.id}
+      dropPosition={
+        wtDrag.target?.id === worktree.id ? wtDrag.target.position : null
+      }
+      focusable={tabStopId === worktree.id}
+      onKeyDown={(event) => handleWorktreeKeyDown(worktree, event)}
+      onFocus={() => setFocusedWtId(worktree.id)}
     />
   );
+
+  const pinSource = repoPinSource(repo);
+  const pinLabel = repo.pinned
+    ? "Unpin repo"
+    : pinSource === "worktree"
+      ? "Pin repo (currently listed because a worktree is pinned)"
+      : "Pin repo";
 
   return (
     <div className="repo-block">
       <div
-        className={`repo-row${activeCollapsed ? " is-active" : ""}`}
-        onClick={onToggleExpand}
+        className={`repo-row${activeCollapsed ? " is-active" : ""}${
+          arrangeable ? " is-arrangeable" : ""
+        }${dragging ? " is-dragging" : ""}${
+          dropPosition === null ? "" : ` is-drop-${dropPosition}`
+        }`}
+        data-repo-id={repo.id}
+        role="treeitem"
+        aria-expanded={expanded}
+        aria-label={repo.name}
+        tabIndex={focusable ? 0 : -1}
+        {...dragProps}
+        onClick={() => {
+          if (isPostDragClick()) return;
+          onToggleExpand();
+        }}
+        onKeyDown={onRowKeyDown}
+        onFocus={onRowFocus}
       >
+        {/* Only the arrangeable lens gets a handle: everywhere else the list
+            order is computed, so a grip would promise a gesture that has
+            nowhere to persist to. */}
+        {arrangeable && (
+          <span
+            className="repo-row__handle"
+            aria-hidden="true"
+            title="Drag to reorder — or ⌘⇧↑ / ⌘⇧↓ from the keyboard"
+          >
+            <svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor">
+              <circle cx="2" cy="2" r="1.3" />
+              <circle cx="7" cy="2" r="1.3" />
+              <circle cx="2" cy="7" r="1.3" />
+              <circle cx="7" cy="7" r="1.3" />
+              <circle cx="2" cy="12" r="1.3" />
+              <circle cx="7" cy="12" r="1.3" />
+            </svg>
+          </span>
+        )}
         <span className={`chev${expanded ? " is-open" : ""}`} />
         <svg
           className={`repo-row__icon${containsSelection ? " is-active" : ""}`}
@@ -194,16 +346,30 @@ export function RepoRow({
         <span className="repo-row__wtcount">
           {wtCount} {wtCount === 1 ? "wt" : "wts"}
         </span>
-        <span
+        {/* Present only via a pinned worktree: the repo's own star is unlit, so
+            without this marker the row looks like it doesn't belong in the
+            Pinned lens it's sitting in. */}
+        {pinSource === "worktree" && (
+          <span
+            className="repo-row__pin-via"
+            title="In Pinned because one of its worktrees is pinned"
+          >
+            via wt
+          </span>
+        )}
+        <button
+          type="button"
           className={`pin${repo.pinned ? " is-pinned" : ""}`}
-          title="Pin repo"
+          title={pinLabel}
+          aria-label={pinLabel}
+          aria-pressed={repo.pinned}
           onClick={(e) => {
             e.stopPropagation();
             onToggleRepoPin();
           }}
         >
           <PinIcon filled={repo.pinned} size={12} />
-        </span>
+        </button>
       </div>
 
       {expanded && (

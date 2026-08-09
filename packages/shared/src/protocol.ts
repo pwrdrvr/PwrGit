@@ -374,6 +374,11 @@ export interface Commands {
     req: { repoId: string; orderedWorktreeIds: string[] };
     res: null;
   };
+  /** Persist the user's hand-arranged repo order within a profile. */
+  "repo:setOrder": {
+    req: { profileId: string; orderedRepoIds: string[] };
+    res: null;
+  };
 
   // Branch switching — list local + remote branches, check one out in place
   "branch:list": { req: { worktreeId: string }; res: BranchRef[] };

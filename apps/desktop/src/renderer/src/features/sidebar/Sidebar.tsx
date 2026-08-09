@@ -2,6 +2,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent
 } from "react";
 import type { Lens, Profile, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
@@ -17,8 +18,14 @@ import {
   filterReposByLens,
   groupReposByRoot,
   lensCounts,
+  lensIsArrangeable,
+  reorder,
   SORT_CYCLE
 } from "./repo-view";
+import { useListReorder } from "./useListReorder";
+
+/** Distinguishes repo drags from worktree drags (see useListReorder). */
+const REPO_MIME = "application/x-pwrgit-repo";
 
 const EMPTY_IDS: Set<string> = new Set();
 
@@ -48,6 +55,7 @@ export function Sidebar({
   onRemoveWorktrees,
   onCreateWorktree,
   onPersistOrder,
+  onPersistRepoOrder,
   refreshingRepoIds,
   onRefreshRepo,
   onRefreshPullRequest,
@@ -76,6 +84,7 @@ export function Sidebar({
     startPoint?: string
   ) => Promise<string | null>;
   onPersistOrder: (repoId: string, orderedIds: string[]) => void;
+  onPersistRepoOrder: (orderedRepoIds: string[]) => void;
   refreshingRepoIds: Set<string>;
   onRefreshRepo: (repo: Repo) => void;
   onRefreshPullRequest: (repoId: string, branch: string) => void;
@@ -215,6 +224,97 @@ export function Sidebar({
 
   const counts = lensCounts(repos, now);
   const filtered = filterReposByLens(repos, lens, now);
+  const arrangeable = lensIsArrangeable(lens);
+  const filteredIds = filtered.map((repo) => repo.id);
+
+  const roots = activeProfile?.roots ?? [];
+  const canGroup = roots.length > 1;
+  const grouped = groupByFolder && canGroup;
+  const groups = grouped ? groupReposByRoot(filtered, roots) : [];
+
+  // Which folder group each repo renders under, so a drag can be kept inside
+  // its own group. Dragging across groups would reorder the flat list while the
+  // row visibly snaps back under its own heading — the arrangement would be
+  // real but invisible.
+  const groupOfRepo = new Map<string, string>();
+  for (const group of groups) {
+    for (const repo of group.repos) groupOfRepo.set(repo.id, group.root);
+  }
+
+  const repoDrag = useListReorder({
+    mime: REPO_MIME,
+    canDrop: (dragId, targetId) =>
+      !grouped || groupOfRepo.get(dragId) === groupOfRepo.get(targetId),
+    // Commit over the whole filtered list even when grouped: a group is a view
+    // of the flat order, so numbering the full list keeps one coherent
+    // arrangement instead of per-group indices that collide.
+    onCommit: (dragId, targetId, position) => {
+      onPersistRepoOrder(reorder(filteredIds, dragId, targetId, position));
+    }
+  });
+
+  // Roving tabindex across the repo list — one tab stop, arrows to move.
+  const [focusedRepoId, setFocusedRepoId] = useState<string | null>(null);
+  const repoTabStopId =
+    focusedRepoId !== null && filteredIds.includes(focusedRepoId)
+      ? focusedRepoId
+      : filteredIds[0] ?? null;
+
+  const focusRepoAt = (index: number): void => {
+    const id = filteredIds[index];
+    if (id === undefined) return;
+    setFocusedRepoId(id);
+    document.querySelector<HTMLElement>(`[data-repo-id="${id}"]`)?.focus();
+  };
+
+  const handleRepoKeyDown = (repo: Repo, event: ReactKeyboardEvent): void => {
+    const index = filteredIds.indexOf(repo.id);
+    if (index === -1) return;
+    if (event.metaKey && event.shiftKey) {
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      if (!arrangeable) return;
+      const step = event.key === "ArrowUp" ? -1 : 1;
+      // Step to the nearest neighbor in the SAME group, so keyboard moves obey
+      // the boundary the drag does.
+      let to = index + step;
+      if (grouped) {
+        while (
+          filteredIds[to] !== undefined &&
+          groupOfRepo.get(filteredIds[to] as string) !== groupOfRepo.get(repo.id)
+        ) {
+          to += step;
+        }
+      }
+      const neighbor = filteredIds[to];
+      if (neighbor === undefined) return;
+      event.preventDefault();
+      onPersistRepoOrder(
+        reorder(
+          filteredIds,
+          repo.id,
+          neighbor,
+          event.key === "ArrowUp" ? "before" : "after"
+        )
+      );
+      // Keep focus on the row that moved, not the slot it left.
+      window.requestAnimationFrame(() => {
+        document
+          .querySelector<HTMLElement>(`[data-repo-id="${repo.id}"]`)
+          ?.focus();
+      });
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      focusRepoAt(Math.min(index + 1, filteredIds.length - 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      focusRepoAt(Math.max(index - 1, 0));
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      toggleExpand(repo);
+    }
+  };
 
   const toggleExpand = (repo: Repo): void => {
     const willExpand = !expanded.has(repo.id);
@@ -401,13 +501,18 @@ export function Sidebar({
           ...(startPoint === undefined ? {} : { startPoint })
         })
       }
+      arrangeable={arrangeable}
+      dragProps={repoDrag.rowProps(repo.id, arrangeable)}
+      dragging={repoDrag.dragId === repo.id}
+      dropPosition={
+        repoDrag.target?.id === repo.id ? repoDrag.target.position : null
+      }
+      focusable={repoTabStopId === repo.id}
+      onRowKeyDown={(event) => handleRepoKeyDown(repo, event)}
+      onRowFocus={() => setFocusedRepoId(repo.id)}
+      isPostDragClick={repoDrag.isPostDragClick}
     />
   );
-
-  const roots = activeProfile?.roots ?? [];
-  const canGroup = roots.length > 1;
-  const grouped = groupByFolder && canGroup;
-  const groups = grouped ? groupReposByRoot(filtered, roots) : [];
 
   return (
     <aside className="pane pane--sidebar" data-testid="sidebar">
@@ -487,7 +592,7 @@ export function Sidebar({
         )}
       </div>
 
-      <div className="sidebar__list">
+      <div className="sidebar__list" role="tree" aria-label="Repositories">
         {grouped
           ? groups.map((g) => (
               <div className="repo-group" key={g.root || "__other"}>

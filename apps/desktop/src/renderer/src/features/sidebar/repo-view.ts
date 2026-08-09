@@ -82,6 +82,20 @@ function repoIsPinned(r: Repo): boolean {
   return r.pinned || r.worktrees.some((w) => w.pinned);
 }
 
+/**
+ * Why a repo is in the Pinned lens. The two pins are independent — pinning a
+ * worktree pulls its repo into the lens without lighting the repo's own star —
+ * so a row can otherwise look like it doesn't belong in the list it's in. The
+ * row uses this to say which it is instead of leaving the star ambiguous.
+ */
+export type RepoPinSource = "repo" | "worktree" | "none";
+
+export function repoPinSource(r: Repo): RepoPinSource {
+  if (r.pinned) return "repo";
+  if (r.worktrees.some((w) => w.pinned)) return "worktree";
+  return "none";
+}
+
 function repoHasPrunable(r: Repo, now: number): boolean {
   return r.worktrees.some((w) => isPrunableWorktree(w, now));
 }
@@ -123,6 +137,30 @@ export function formatLensCount(count: number): string {
   return `${shown}${suffix}`;
 }
 
+/**
+ * Only the Pinned lens is a list the user owns. Recent/Behind/Stale answer a
+ * question ("what changed", "what's out of date"), so a hand order there would
+ * fight the answer the lens exists to give — hence `orderedByHand` rather than
+ * a manual order applied everywhere.
+ */
+export function lensIsArrangeable(lens: Lens): boolean {
+  return lens === "Pinned";
+}
+
+/**
+ * Sort by the user's arrangement: repos carrying an `order` lead, in it; the
+ * rest follow in their incoming order (pinned-first, then name, from SQL).
+ * A repo the user has never dragged therefore never jumps around because a
+ * neighbor was dragged.
+ */
+function orderedByHand(list: Repo[]): Repo[] {
+  return [...list].sort((a, b) => {
+    const ao = a.order ?? Number.MAX_SAFE_INTEGER;
+    const bo = b.order ?? Number.MAX_SAFE_INTEGER;
+    return ao - bo;
+  });
+}
+
 /** Filter by lens, then float pinned repos to the top (stable otherwise). */
 export function filterReposByLens(
   repos: Repo[],
@@ -137,9 +175,10 @@ export function filterReposByLens(
   } else if (lens === "Stale") {
     list = repos.filter((r) => repoHasPrunable(r, now));
   }
-  return [...list].sort(
+  const byPin = [...list].sort(
     (a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)
   );
+  return lensIsArrangeable(lens) ? orderedByHand(byPin) : byPin;
 }
 
 export const SORT_CYCLE: Record<Exclude<WorktreeSort, "custom">, WorktreeSort> = {
@@ -249,16 +288,36 @@ export function relativeAge(iso: string, now: number = Date.now()): string {
   return `${Math.floor(days / 365)}y`;
 }
 
-/** Move an id to sit just before `beforeId` (drag-reorder). */
+/** Which side of the hovered row a drop lands on. */
+export type DropPosition = "before" | "after";
+
+/**
+ * Move an id to sit next to `targetId` (drag-reorder).
+ *
+ * `position` is what makes the last slot reachable: with only a "before"
+ * insert, no gesture can put a row at the end of the list — you can drop
+ * before the final row forever and never past it.
+ */
 export function reorder(
   ids: string[],
   dragId: string,
-  beforeId: string
+  targetId: string,
+  position: DropPosition = "before"
 ): string[] {
-  if (dragId === beforeId) return ids;
+  if (dragId === targetId) return ids;
   const next = ids.filter((id) => id !== dragId);
-  const at = next.indexOf(beforeId);
+  const at = next.indexOf(targetId);
   if (at === -1) return ids;
-  next.splice(at, 0, dragId);
+  next.splice(position === "after" ? at + 1 : at, 0, dragId);
   return next;
+}
+
+/**
+ * Where a pointer sitting at `clientY` within `rect` wants to drop: past the
+ * row's midpoint means after it. Shared by the repo and worktree lists so both
+ * feel identical, and so the indicator drawn during the drag and the splice
+ * performed on release can never disagree about which gap was meant.
+ */
+export function dropPositionWithin(rect: DOMRect, clientY: number): DropPosition {
+  return clientY >= rect.top + rect.height / 2 ? "after" : "before";
 }
