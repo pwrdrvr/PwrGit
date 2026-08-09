@@ -184,10 +184,22 @@ export class RepoIndexer {
     return row === undefined ? null : this.repoFromRow(row);
   }
 
+  /**
+   * Unpinning also drops the manual order. Only pinned repos are numbered (the
+   * Pinned lens is the arrangeable one), so an unpinned repo's index goes stale
+   * the moment its former neighbors are rearranged without it — and re-pinning
+   * would then reinsert it at an index another repo already holds, landing it
+   * somewhere the user never chose. Clearing on the way out means a re-pinned
+   * repo arrives unarranged, sorting by name behind the arranged ones.
+   */
   setRepoPinned(repoId: string, pinned: boolean): void {
     this.db
-      .prepare("UPDATE repos SET pinned = ? WHERE id = ?")
-      .run(pinned ? 1 : 0, repoId);
+      .prepare(
+        pinned
+          ? "UPDATE repos SET pinned = 1 WHERE id = ?"
+          : "UPDATE repos SET pinned = 0, custom_order = NULL WHERE id = ?"
+      )
+      .run(repoId);
   }
 
   setWorktreePinned(worktreeId: string, pinned: boolean): void {

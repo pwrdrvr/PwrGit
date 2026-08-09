@@ -133,3 +133,51 @@ test("the computed lenses stay computed — no drag handle outside Pinned", asyn
   await expect(window.locator(".repo-row.is-arrangeable")).toHaveCount(0);
   await expect(window.locator(".repo-row__handle")).toHaveCount(0);
 });
+
+test("the sidebar tree exposes valid, nested roles", async () => {
+  const window = await pinnedSandbox();
+
+  // Repo rows are treeitems at level 1 inside the tree — not `option`, which
+  // only means anything inside a listbox.
+  const tree = window.locator('.sidebar__list[role="tree"]');
+  await expect(tree).toHaveCount(1);
+  await expect(tree.locator('.repo-row[role="treeitem"]')).toHaveCount(3);
+  await expect(window.locator('[role="option"]')).toHaveCount(0);
+
+  // Expanding a repo adds a group of level-2 treeitems, owned by the repo row
+  // (the section is a DOM sibling, so ownership is explicit via aria-owns).
+  await window.locator(".repo-row", { hasText: "alpha" }).click();
+  const group = window.locator('.wt-section[role="group"]');
+  await expect(group).toHaveCount(1);
+  await expect(group.locator('.wt-row[role="treeitem"]')).not.toHaveCount(0);
+  const owns = await window
+    .locator(".repo-row", { hasText: "alpha" })
+    .getAttribute("aria-owns");
+  expect(owns).toBe(await group.getAttribute("id"));
+});
+
+test("the via-wt marker appears only in the lens whose claim it makes", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepo("solo");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await handle.setPickDirectory(sandbox.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await window.locator(".lens-chip", { hasText: "All" }).click();
+  await expect(window.locator(".repo-row__name")).toHaveCount(1, {
+    timeout: 20_000
+  });
+
+  // Pin a WORKTREE, not the repo: that pulls the repo into the Pinned lens
+  // while its own star stays unlit, which is what the marker explains.
+  await window.locator(".repo-row", { hasText: "solo" }).click();
+  const wtPin = window.locator(".wt-row").first().locator(".pin");
+  await wtPin.click();
+
+  // In All, the repo is not "in Pinned", so the marker must not claim it is.
+  await expect(window.locator(".repo-row__pin-via")).toHaveCount(0);
+
+  await window.locator(".lens-chip", { hasText: "Pinned" }).click();
+  await expect(window.locator(".repo-row__pin-via")).toHaveCount(1);
+});

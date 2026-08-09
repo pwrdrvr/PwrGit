@@ -74,6 +74,9 @@ export function WorktreeRow({
     }, PR_HOVER_PREFETCH_DELAY_MS);
   };
   useEffect(() => clearPrHoverTimer, []);
+  // `role="treeitem"`, not `option`: these rows live inside the sidebar's
+  // `role="tree"`, and `option` is only meaningful inside a listbox. Level 2
+  // puts them under their repo, which the flat DOM can't otherwise convey.
   return (
     <div
       className={`wt-row${selected ? " is-selected" : ""}${
@@ -82,8 +85,9 @@ export function WorktreeRow({
         dropPosition === null ? "" : ` is-drop-${dropPosition}`
       }`}
       data-wt-id={worktree.id}
-      role="option"
+      role="treeitem"
       aria-selected={selected}
+      aria-level={2}
       tabIndex={focusable ? 0 : -1}
       {...dragProps}
       onClick={onSelect}

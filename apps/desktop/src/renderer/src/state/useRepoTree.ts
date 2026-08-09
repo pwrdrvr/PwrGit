@@ -111,7 +111,17 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
   }, []);
 
   const setRepoPin = useCallback((repoId: string, pinned: boolean) => {
-    setRepos((rs) => rs.map((r) => (r.id === repoId ? { ...r, pinned } : r)));
+    setRepos((rs) =>
+      rs.map((r) => {
+        if (r.id !== repoId) return r;
+        // Mirror the main process, which drops custom_order on unpin (see
+        // RepoIndexer.setRepoPinned) — otherwise the optimistic row keeps a
+        // stale index until the next reload and sorts by it on re-pin.
+        if (pinned) return { ...r, pinned };
+        const { order: _dropped, ...rest } = r;
+        return { ...rest, pinned };
+      })
+    );
     void dispatch("repo:setPin", { repoId, pinned });
   }, []);
 

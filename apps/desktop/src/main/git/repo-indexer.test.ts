@@ -128,6 +128,34 @@ describe("RepoIndexer", () => {
     db.prepare("UPDATE repos SET custom_order = NULL").run();
   });
 
+  it("unpinning clears the manual order so a re-pin isn't placed arbitrarily", async () => {
+    const profile = profileService.get(profileId);
+    if (profile === null) throw new Error("profile missing");
+    const repos = await indexer.rescanProfile(profile);
+    const byName = new Map(repos.map((r) => [r.name, r.id]));
+    const a = byName.get("repoA");
+    const b = byName.get("repoB");
+    if (a === undefined || b === undefined) throw new Error("repos missing");
+
+    indexer.setRepoPinned(a, true);
+    indexer.setRepoPinned(b, true);
+    indexer.setRepoOrder(profileId, [b, a]);
+    expect(indexer.getRepo(a)?.order).toBe(1);
+
+    // Unpin A, then rearrange what's left. Without the clear, A would keep
+    // index 1 while B takes index 0 — and re-pinning A would collide with
+    // whatever now holds 1, dropping it somewhere the user never chose.
+    indexer.setRepoPinned(a, false);
+    expect(indexer.getRepo(a)?.order).toBeUndefined();
+
+    indexer.setRepoOrder(profileId, [b]);
+    indexer.setRepoPinned(a, true);
+    expect(indexer.getRepo(a)?.order).toBeUndefined();
+    expect(indexer.getRepo(b)?.order).toBe(0);
+
+    db.prepare("UPDATE repos SET custom_order = NULL, pinned = 0").run();
+  });
+
   it("leaves unarranged repos unordered and sorted by name", async () => {
     const profile = profileService.get(profileId);
     if (profile === null) throw new Error("profile missing");

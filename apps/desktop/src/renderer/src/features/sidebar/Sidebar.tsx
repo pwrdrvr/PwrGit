@@ -20,7 +20,8 @@ import {
   lensCounts,
   lensIsArrangeable,
   reorder,
-  SORT_CYCLE
+  SORT_CYCLE,
+  type SelectionModifiers
 } from "./repo-view";
 import { useListReorder } from "./useListReorder";
 
@@ -341,7 +342,7 @@ export function Sidebar({
   const handleRowClick = (
     repo: Repo,
     w: Worktree,
-    e: ReactMouseEvent,
+    e: SelectionModifiers,
     orderedIds: string[]
   ): void => {
     if (e.shiftKey && sel.repoId === repo.id && sel.anchor !== null) {
@@ -595,10 +596,23 @@ export function Sidebar({
       <div className="sidebar__list" role="tree" aria-label="Repositories">
         {grouped
           ? groups.map((g) => (
-              <div className="repo-group" key={g.root || "__other"}>
+              // A `tree` may own `group`s of treeitems, so the folder buckets
+              // are groups rather than bare divs — otherwise the repo rows are
+              // treeitems with no owning structure. The visual heading is then
+              // decorative, but its count has to survive into the group's name
+              // or screen-reader users simply lose it.
+              <div
+                className="repo-group"
+                key={g.root || "__other"}
+                role="group"
+                aria-label={`${g.label} (${g.repos.length} ${
+                  g.repos.length === 1 ? "repo" : "repos"
+                })`}
+              >
                 <div
                   className="repo-group__head"
                   title={g.root || "Not under any added folder"}
+                  aria-hidden="true"
                 >
                   <span className="repo-group__label">{g.label}</span>
                   <span className="repo-group__count">{g.repos.length}</span>

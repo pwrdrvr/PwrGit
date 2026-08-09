@@ -14,7 +14,8 @@ import {
   repoPinSource,
   repoPrimaryBehind,
   SORT_LABEL,
-  type DropPosition
+  type DropPosition,
+  type SelectionModifiers
 } from "./repo-view";
 import { useListReorder } from "./useListReorder";
 import { PinIcon, WorktreeRow } from "./WorktreeRow";
@@ -74,7 +75,7 @@ export function RepoRow({
   onRefreshWorktrees: () => void;
   onSelectWorktree: (
     worktree: Worktree,
-    e: ReactMouseEvent,
+    e: SelectionModifiers,
     orderedIds: string[]
   ) => void;
   onContextWorktree: (
@@ -237,11 +238,7 @@ export function RepoRow({
       focusWorktreeAt(Math.max(index - 1, 0));
     } else if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      onSelectWorktree(
-        worktree,
-        event as unknown as ReactMouseEvent,
-        displayIds
-      );
+      onSelectWorktree(worktree, event, displayIds);
     }
   };
 
@@ -287,8 +284,15 @@ export function RepoRow({
       ? "Pin repo (currently listed because a worktree is pinned)"
       : "Pin repo";
 
+  // A treeitem owns its children by DOM nesting, but the worktree section is a
+  // SIBLING of the repo row (the row is a sticky flex line; nesting the section
+  // inside it would break the layout). `aria-owns` is the escape hatch for
+  // exactly that case — without it the section reads as a group floating beside
+  // the repo rather than under it.
+  const worktreeGroupId = `wt-group-${repo.id}`;
+
   return (
-    <div className="repo-block">
+    <div className="repo-block" role="presentation">
       <div
         className={`repo-row${activeCollapsed ? " is-active" : ""}${
           arrangeable ? " is-arrangeable" : ""
@@ -299,6 +303,8 @@ export function RepoRow({
         role="treeitem"
         aria-expanded={expanded}
         aria-label={repo.name}
+        aria-level={1}
+        {...(expanded ? { "aria-owns": worktreeGroupId } : {})}
         tabIndex={focusable ? 0 : -1}
         {...dragProps}
         onClick={() => {
@@ -349,7 +355,7 @@ export function RepoRow({
         {/* Present only via a pinned worktree: the repo's own star is unlit, so
             without this marker the row looks like it doesn't belong in the
             Pinned lens it's sitting in. */}
-        {pinSource === "worktree" && (
+        {arrangeable && pinSource === "worktree" && (
           <span
             className="repo-row__pin-via"
             title="In Pinned because one of its worktrees is pinned"
@@ -373,7 +379,12 @@ export function RepoRow({
       </div>
 
       {expanded && (
-        <div className="wt-section">
+        <div
+          className="wt-section"
+          id={worktreeGroupId}
+          role="group"
+          aria-label={`${repo.name} worktrees`}
+        >
           <div className="wt-section__elevated">
             {primary !== undefined && renderWorktree(primary)}
             {pinned.map(renderWorktree)}

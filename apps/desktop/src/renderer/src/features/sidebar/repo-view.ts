@@ -288,6 +288,18 @@ export function relativeAge(iso: string, now: number = Date.now()): string {
   return `${Math.floor(days / 365)}y`;
 }
 
+/**
+ * The only parts of an event the row-selection logic reads. Declared
+ * structurally so a click and a keypress both satisfy it — the alternative was
+ * casting a KeyboardEvent to a MouseEvent, which type-checks by discarding the
+ * very guarantee that made the cast safe.
+ */
+export type SelectionModifiers = {
+  shiftKey: boolean;
+  metaKey: boolean;
+  ctrlKey: boolean;
+};
+
 /** Which side of the hovered row a drop lands on. */
 export type DropPosition = "before" | "after";
 
