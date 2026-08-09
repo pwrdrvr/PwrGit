@@ -100,6 +100,29 @@ export function lensCounts(
   };
 }
 
+/**
+ * Compact a lens count so the filter row stays inside the sidebar. Five chips
+ * share one row, and a four-digit count is wide enough to push the row past
+ * what it has — the tracks are floored at their content width, so an
+ * unabbreviated "1099" would overflow the pill rather than clip inside it.
+ *
+ * Truncates rather than rounds: a count is a floor ("at least this many"), so
+ * 1999 reads 1.9K, never 2K. One decimal only below 10 of a unit — past that
+ * the decimal costs a glyph without telling you anything you'd act on.
+ *
+ *   999 → "999"    1000 → "1K"     1150 → "1.1K"
+ *   1999 → "1.9K"  10_400 → "10K"  1_250_000 → "1.2M"
+ */
+export function formatLensCount(count: number): string {
+  if (!Number.isFinite(count) || count < 1000) return String(count);
+  const [value, suffix] =
+    count < 1_000_000 ? [count / 1000, "K"] : [count / 1_000_000, "M"];
+  // Truncate to one decimal, then drop a trailing ".0" so 1000 reads "1K".
+  const truncated = Math.floor(value * 10) / 10;
+  const shown = truncated < 10 ? truncated.toFixed(1).replace(/\.0$/, "") : String(Math.floor(truncated));
+  return `${shown}${suffix}`;
+}
+
 /** Filter by lens, then float pinned repos to the top (stable otherwise). */
 export function filterReposByLens(
   repos: Repo[],
