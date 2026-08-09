@@ -210,6 +210,22 @@ describe("clone destinations", () => {
       relativePath: join("search", "services"),
       lastUsedAt: "2026-08-04 12:00:00"
     });
+
+    const missingRecent = join(root, "removed");
+    db.prepare(
+      `INSERT INTO clone_destinations (profile_id, path, last_used_at)
+       VALUES (?, ?, ?)`
+    ).run(profile.id, missingRecent, "2026-08-05 12:00:00");
+    const priority = cloneDestinations(db, profile, []);
+    expect(priority.map((destination) => destination.path)).toEqual([
+      join(root, "search", "services"),
+      root
+    ]);
+    expect(priority).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: join(root, "search") })
+      ])
+    );
   });
 });
 

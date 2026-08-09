@@ -230,7 +230,6 @@ export type CloneDestination = {
 export type CloneCatalog = {
   owners: string[];
   repositories: CloneRepository[];
-  destinations: CloneDestination[];
   github: { installed: boolean; loggedIn: boolean };
   /** Owner catalogs that could not be loaded; other results remain usable. */
   warning?: string;

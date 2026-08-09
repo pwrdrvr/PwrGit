@@ -13,6 +13,7 @@
 import type {
   BranchRef,
   CloneCatalog,
+  CloneDestination,
   CloneProgress,
   CloneProtocol,
   CloneRepository,
@@ -231,8 +232,13 @@ export interface Commands {
     res: RepoWorktreeRefresh;
   };
   "repo:add": { req: { profileId: ProfileId; path: string }; res: Repo };
-  /** Repositories and registered/nested destinations shown by the clone dialog. */
+  /** GitHub repositories shown by the clone dialog. */
   "repo:cloneCatalog": { req: { profileId: ProfileId }; res: CloneCatalog };
+  /** Clone destinations, loaded in a fast roots/MRU pass before nested prefixes. */
+  "repo:cloneDestinations": {
+    req: { profileId: ProfileId; includeNested: boolean };
+    res: CloneDestination[];
+  };
   /** Verify an exact `owner/name` that was not in the loaded owner catalogs. */
   "repo:checkCloneSource": {
     req: { profileId: ProfileId; nameWithOwner: string };

@@ -1613,6 +1613,29 @@ textarea,
   text-align: center;
   font: 500 10.5px/1.35 var(--font-sans);
 }
+.clone-destination-progress {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 10px 7px;
+  color: var(--text-subtle);
+  font: 500 9px/1 var(--font-mono);
+}
+.clone-destination-progress__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: clone-destination-progress-pulse 1s ease-in-out infinite alternate;
+}
+@keyframes clone-destination-progress-pulse {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 1;
+  }
+}
 .clone-empty--error,
 .clone-submit-error {
   color: var(--danger-text);
