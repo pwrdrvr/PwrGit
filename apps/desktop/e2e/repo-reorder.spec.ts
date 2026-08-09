@@ -70,6 +70,13 @@ test("dragging a pinned repo to the end of the list reorders it", async () => {
   await window.mouse.up();
 
   expect(await repoNames(window)).toEqual(["bravo", "charlie", "alpha"]);
+
+  // Let the star fade settle before capturing. The 120ms transition otherwise
+  // lands in the screenshot as a half-lit star on a row nothing is pointing at,
+  // which reads as a bug in the artifact when it is only a frame mid-fade.
+  await expect(
+    window.locator(".repo-row", { hasText: "charlie" }).locator(".pin")
+  ).toHaveCSS("opacity", "0");
   await window
     .locator(".sidebar__list")
     .screenshot({ path: test.info().outputPath("after-drop.png") });
