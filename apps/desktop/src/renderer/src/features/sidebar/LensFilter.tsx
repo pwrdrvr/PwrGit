@@ -1,5 +1,5 @@
 import type { Lens } from "@pwrgit/shared";
-import { LENSES } from "./repo-view";
+import { formatLensCount, LENSES } from "./repo-view";
 
 export function LensFilter({
   lens,
@@ -19,7 +19,21 @@ export function LensFilter({
           onClick={() => onChange(l)}
         >
           {l}
-          {counts[l] > 0 && <span className="lens-chip__count">{counts[l]}</span>}
+          {counts[l] > 0 && (
+            <span
+              className="lens-chip__count"
+              /* The abbreviated form is lossy, so keep the exact count
+                 reachable on hover. No title when nothing was abbreviated —
+                 a tooltip that repeats the visible text is just noise. */
+              title={
+                formatLensCount(counts[l]) === String(counts[l])
+                  ? undefined
+                  : `${counts[l]}`
+              }
+            >
+              {formatLensCount(counts[l])}
+            </span>
+          )}
         </button>
       ))}
     </div>

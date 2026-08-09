@@ -386,7 +386,27 @@ input {
 .lens-filter {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  /* Five equal tracks can't hold five unequal labels: "All 109" wastes room
+     while "Pinned 13" overruns its share, and because .lens-chip centers its
+     content under overflow: hidden the overrun is cut off BOTH edges — so the
+     count lost a digit and 13 read as 1. Measured at the default 320px
+     sidebar, the equal-track layout overran by 6.5px on "Pinned 13" and 1.4px
+     on "Behind 3".
+
+     minmax(min-content, …) floors every track at its own content width, so
+     nothing is cut mid-glyph, while the 1fr max still shares the surplus so
+     the row reads as a segmented control rather than ragged chips.
+
+     The min-content floor is doing real work here and is NOT interchangeable
+     with `auto`: .lens-chip sets overflow: hidden, which zeroes a grid item's
+     automatic minimum size, so minmax(auto, 1fr) would resolve the floor to 0
+     and silently restore the bug.
+
+     Note this fits, but only just — "Pinned 13" clears by ~0.5px at 320px.
+     The row is at its limit: a sixth lens, a longer label, or a four-digit
+     count would overflow (which is why counts abbreviate past 999 — see
+     formatLensCount). Re-measure if you add anything to this row. */
+  grid-template-columns: repeat(5, minmax(min-content, 1fr));
   gap: 2px;
   padding: 3px;
   border: 1px solid var(--border-subtle);
@@ -415,6 +435,9 @@ input {
   color: var(--accent-bright);
 }
 .lens-chip__count {
+  /* Never the thing that gives: a half-eaten count reads as a different
+     number ("109" clipped to "10" is wrong, not just ugly). */
+  flex: 0 0 auto;
   font: 600 9px/1 var(--font-mono);
   opacity: 0.9;
 }
@@ -448,7 +471,16 @@ input {
     padding-inline: 6px;
   }
   .lens-filter {
-    grid-template-columns: 1.15fr 1.15fr 1.15fr 0.8fr 0.75fr;
+    /* Insurance, not a fix: measured at the 240px sidebar minimum these
+       fractions already clear their labels by 3–14px, because this block also
+       drops the counts and the font to 10px. The floor costs nothing and keeps
+       the guarantee if someone later restores counts here or raises the font.
+       The fractions still give "Behind" more room than "All"; min-content only
+       stops a track shrinking past its own glyphs. */
+    grid-template-columns:
+      minmax(min-content, 1.15fr) minmax(min-content, 1.15fr)
+      minmax(min-content, 1.15fr) minmax(min-content, 0.8fr)
+      minmax(min-content, 0.75fr);
     gap: 0;
     padding-inline: 0;
   }

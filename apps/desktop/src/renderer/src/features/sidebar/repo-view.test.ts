@@ -5,6 +5,7 @@ import {
   groupWorktreesForNavigation,
   groupReposByRoot,
   isPrunableWorktree,
+  formatLensCount,
   lensCounts,
   orderWorktrees,
   reorder,
@@ -335,5 +336,50 @@ describe("staleness with PR status", () => {
     });
     expect(isPrunableWorktree(open)).toBe(false);
     expect(isPrunableWorktree({ ...open, dirty: 1, pr: mergedPr })).toBe(false);
+  });
+});
+
+describe("formatLensCount", () => {
+  it("leaves counts under a thousand alone", () => {
+    for (const n of [0, 1, 42, 109, 999]) {
+      expect(formatLensCount(n)).toBe(String(n));
+    }
+  });
+
+  it("abbreviates thousands, dropping a trailing .0", () => {
+    expect(formatLensCount(1000)).toBe("1K");
+    expect(formatLensCount(1100)).toBe("1.1K");
+    expect(formatLensCount(1200)).toBe("1.2K");
+    expect(formatLensCount(9900)).toBe("9.9K");
+  });
+
+  // A count is a floor — "at least this many" — so it must never round up and
+  // claim repos that aren't there.
+  it("truncates rather than rounds", () => {
+    expect(formatLensCount(1999)).toBe("1.9K");
+    expect(formatLensCount(1150)).toBe("1.1K");
+    expect(formatLensCount(999_999)).toBe("999K");
+  });
+
+  it("drops the decimal past ten of a unit", () => {
+    expect(formatLensCount(10_000)).toBe("10K");
+    expect(formatLensCount(10_400)).toBe("10K");
+    expect(formatLensCount(42_000)).toBe("42K");
+  });
+
+  it("carries into millions rather than emitting 1000K", () => {
+    expect(formatLensCount(1_000_000)).toBe("1M");
+    expect(formatLensCount(1_250_000)).toBe("1.2M");
+  });
+
+  it("stays within five glyphs, which is what the chip has room for", () => {
+    for (const n of [999, 1000, 1999, 10_400, 999_999, 1_250_000]) {
+      expect(formatLensCount(n).length).toBeLessThanOrEqual(5);
+    }
+  });
+
+  it("does not throw on non-finite input", () => {
+    expect(formatLensCount(Number.NaN)).toBe("NaN");
+    expect(formatLensCount(Number.POSITIVE_INFINITY)).toBe("Infinity");
   });
 });
