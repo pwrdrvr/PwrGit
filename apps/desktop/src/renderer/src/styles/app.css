@@ -237,8 +237,12 @@ input {
   align-items: center;
   justify-content: center;
   font: 800 14px/1 var(--font-sans);
-  background: var(--bg-row-active);
-  color: var(--accent-bright);
+  /* Identity chrome, not a signal — whose profile this is doesn't change and
+     doesn't need the eye. The --sm variant below was already neutral; this
+     matches it. Accent stays on the profile MENU's selected row, which is a
+     real state. */
+  background: var(--bg-panel-elevated);
+  color: var(--text-secondary);
 }
 .mono-tile--sm {
   background: var(--bg-panel);
@@ -491,7 +495,7 @@ input {
   color: var(--text-primary);
 }
 .sidebar-options:focus-visible {
-  outline: 1px solid var(--accent-bright);
+  outline: 1px solid var(--focus-ring);
   outline-offset: 1px;
 }
 @container (max-width: 310px) {
@@ -582,7 +586,7 @@ input {
   color: var(--text-muted);
 }
 .repo-row__icon.is-active {
-  color: var(--accent-bright);
+  color: var(--accent);
 }
 .repo-row__name {
   flex: 1;
@@ -715,7 +719,7 @@ input {
   background: var(--bg-hover-strong);
 }
 .wt-refresh:focus-visible {
-  outline: 1px solid var(--accent-bright);
+  outline: 1px solid var(--focus-ring);
   outline-offset: 1px;
 }
 .wt-refresh:disabled {
@@ -872,7 +876,7 @@ input {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--accent-bright);
+  color: var(--accent);
   text-align: left;
   font: 600 10px/1 var(--font-sans);
   cursor: pointer;
@@ -979,7 +983,7 @@ input {
 }
 .wt-selbar__count {
   font: 700 10.5px/1 var(--font-sans);
-  color: var(--accent-bright);
+  color: var(--accent);
 }
 .wt-selbar__btn {
   height: 22px;
@@ -1009,6 +1013,8 @@ input {
   flex: 0 0 auto;
   color: var(--text-muted);
 }
+/* On .wt-row.is-selected's --bg-row-active tint, so this keeps the bright
+   rung — the tint comes from the ancestor, not from this rule. */
 .wt-row.is-selected .wt-row__branch-icon,
 .wt-row.is-selected .wt-row__branch {
   color: var(--accent-bright);
@@ -1083,10 +1089,15 @@ input {
 .clone-repo {
   height: 32px;
   margin-top: 8px;
+  /* Was an accent-bordered, accent-filled bar. Cloning is a secondary action
+     — the sidebar's primary job is picking among repos you already have — and
+     PwrAgnt's theme doc rules out large accent panels outright. Solid-bordered
+     ghost: still clearly a button, no longer competing with the selected row
+     two elements below it. */
   border-style: solid;
-  border-color: var(--accent-border);
-  background: var(--accent-soft);
-  color: var(--accent-bright);
+  border-color: var(--border-default);
+  background: var(--bg-panel-elevated);
+  color: var(--text-secondary);
   font-weight: 600;
 }
 .clone-repo:hover:not(:disabled),
@@ -1219,7 +1230,7 @@ input {
   border-radius: 999px;
   background: var(--bg-panel);
   border: 1px solid var(--border-subtle);
-  color: var(--accent-bright);
+  color: var(--accent);
   font: 600 9.5px/1 var(--font-mono);
 }
 .overlay-empty {
@@ -1354,7 +1365,7 @@ input {
   opacity: 0.45;
 }
 .clone-input-status {
-  color: var(--accent-bright);
+  color: var(--accent);
   font: 500 9.5px/1 var(--font-mono);
 }
 .clone-source-results,
@@ -1437,7 +1448,7 @@ input {
   padding: 0 7px;
   border: 1px solid var(--accent-border);
   border-radius: 999px;
-  color: var(--accent-bright);
+  color: var(--accent);
   font: 600 8.5px/1 var(--font-mono);
 }
 .clone-chip--muted {
@@ -1494,6 +1505,7 @@ input {
   border-color: var(--accent-border);
   background: var(--accent-soft);
 }
+/* Sits on the --accent-soft fill set by .clone-protocol.is-active above. */
 .clone-protocol.is-active strong {
   color: var(--accent-bright);
 }
@@ -1647,7 +1659,7 @@ input {
   color: var(--text-muted);
 }
 .rebase-accent {
-  color: var(--accent-bright);
+  color: var(--accent);
 }
 .rebase-section {
   font: 600 10px/1 var(--font-sans);
@@ -1757,7 +1769,7 @@ input {
 .rebase-check {
   background: var(--bg-panel-elevated);
   border: 1px solid var(--accent-border);
-  color: var(--accent-bright);
+  color: var(--accent);
 }
 .rebase-apply {
   background: var(--accent);
@@ -2055,7 +2067,7 @@ input {
   width: 0;
   overflow: hidden;
   opacity: 0;
-  color: var(--accent-bright);
+  color: var(--accent);
   font: 600 10px/1 var(--font-mono);
   transition: width 100ms ease, opacity 100ms ease;
 }
@@ -2072,7 +2084,7 @@ input {
 .refs-copyable-name:focus-visible > strong,
 .refs-copyable-upstream:hover,
 .refs-copyable-upstream:focus-visible {
-  color: var(--accent-bright);
+  color: var(--accent);
 }
 .refs-copyable-upstream {
   display: inline-flex;
@@ -2534,7 +2546,7 @@ input {
 }
 .branch-item__here {
   flex: 0 0 auto;
-  color: var(--accent-bright);
+  color: var(--accent);
   font: 600 9.5px/1 var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -2607,13 +2619,16 @@ input {
   opacity: 0.6;
   cursor: wait;
 }
+/* Pull is one of four peer actions, so at rest it looks like its neighbours.
+   The accent belongs to `.is-behind` — the state where pulling actually has
+   something to do — and lands on a tint there, so it takes the bright rung. */
 .wt-btn--pull {
-  border-color: var(--accent-border);
-  color: var(--accent-bright);
   font-weight: 700;
 }
 .wt-btn--pull.is-behind {
+  border-color: var(--accent-border);
   background: var(--bg-row-active);
+  color: var(--accent-bright);
 }
 
 /* Collapse button labels + sync chip when the main pane is tight. */
@@ -2642,7 +2657,9 @@ input {
 }
 .graph-toolbar__label {
   font: 600 11px/1 var(--font-sans);
-  color: var(--accent);
+  /* A section header is generic metadata — the doc's own example of what the
+     accent is NOT for. The uppercase + letter-spacing already carry it. */
+  color: var(--text-muted);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -3130,7 +3147,7 @@ input {
   transition: color 120ms ease, border-color 120ms ease;
 }
 .ref-wt:hover {
-  color: var(--accent-bright);
+  color: var(--accent);
   border-color: var(--accent-border);
 }
 
@@ -3145,7 +3162,7 @@ input {
 .graph-hidden-note button {
   background: none;
   border: none;
-  color: var(--accent-bright);
+  color: var(--accent);
   font: 600 11.5px/1 var(--font-sans);
   cursor: pointer;
   padding: 0;
@@ -3168,7 +3185,7 @@ input {
 }
 .selection-bar__count {
   font: 700 12px/1 var(--font-sans);
-  color: var(--accent-bright);
+  color: var(--accent);
 }
 .selection-bar__sep {
   width: 1px;
@@ -3645,7 +3662,7 @@ body.is-col-resizing {
   white-space: nowrap;
 }
 .commit-context-card__author .commit-context-card__github-login {
-  color: var(--accent-bright);
+  color: var(--accent);
   font: 600 10px/1.2 var(--font-mono);
 }
 .commit-context-card__author .commit-context-card__github-login--placeholder {
@@ -3678,7 +3695,7 @@ body.is-col-resizing {
   text-align: right;
 }
 .commit-context-card__row-value code {
-  color: var(--accent-bright);
+  color: var(--accent);
   font: inherit;
 }
 .commit-context-card__pending {
@@ -3805,7 +3822,7 @@ body.is-col-resizing {
   justify-content: center;
   border-radius: 6px;
   background: var(--bg-panel);
-  color: var(--accent-bright);
+  color: var(--accent);
   font-size: 13px;
 }
 
@@ -4797,7 +4814,7 @@ body.is-col-resizing {
   background: var(--accent);
 }
 .settings-switch.is-on .settings-switch__word {
-  color: var(--accent-bright);
+  color: var(--accent);
 }
 
 /* Segmented radio group */
@@ -4874,7 +4891,7 @@ body.is-col-resizing {
   border: 0;
   padding: 0;
   background: transparent;
-  color: var(--accent-bright);
+  color: var(--accent);
   font: 500 12px/1.4 var(--font-mono);
   cursor: pointer;
   word-break: break-all;
