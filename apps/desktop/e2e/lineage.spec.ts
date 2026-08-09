@@ -570,7 +570,7 @@ test("a tip chip's worktree button jumps to that worktree", async () => {
   // Selection moved to that worktree: sidebar row selected + header follows.
   const selected = window.locator(".wt-row.is-selected");
   await expect(selected).toContainText("feat/hop", { timeout: 20_000 });
-  await expect(window.locator(".wt-header__branch-name")).toHaveText("feat/hop");
+  await expect(window.locator(".titlebar__branch-name")).toHaveText("feat/hop");
 });
 
 test("horizontal wheel over the lane gutter pans lanes, not commits", async () => {

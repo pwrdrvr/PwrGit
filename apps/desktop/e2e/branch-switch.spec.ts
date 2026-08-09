@@ -27,11 +27,11 @@ test("switch the checked-out branch from the header switcher", async () => {
 
   // Select the primary worktree (on main) so its header shows.
   await branchRow(window, "main").first().click();
-  const branchName = window.locator(".wt-header__branch-name");
+  const branchName = window.locator(".titlebar__branch-name");
   await expect(branchName).toHaveText("main", { timeout: 20_000 });
 
   // Open the switcher and pick develop.
-  await window.locator(".wt-header__branch--switch").click();
+  await window.locator(".titlebar__branch").click();
   await expect(window.locator(".overlay-panel")).toBeVisible();
   await window
     .locator(".branch-item__name", { hasText: "develop" })
@@ -56,7 +56,7 @@ test("an externally switched checkout reconciles from the switcher", async () =>
   await addRootAndExpand(window, handle, sandbox, "agentflip");
 
   await branchRow(window, "main").first().click();
-  const branchName = window.locator(".wt-header__branch-name");
+  const branchName = window.locator(".titlebar__branch-name");
   await expect(branchName).toHaveText("main", { timeout: 20_000 });
 
   // An agent flips the branch outside PwrGit.
@@ -64,7 +64,7 @@ test("an externally switched checkout reconciles from the switcher", async () =>
 
   // The switcher lists live git truth: feature/agent is current there even
   // while the header may still say main. Picking it must heal the header.
-  await window.locator(".wt-header__branch--switch").click();
+  await window.locator(".titlebar__branch").click();
   await expect(window.locator(".overlay-panel")).toBeVisible();
   const liveCurrent = window.locator(".overlay-result", {
     hasText: "feature/agent"
