@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
+import { addRootAndExpand, branchRow } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -158,22 +159,26 @@ test("the sidebar tree exposes valid, nested roles", async () => {
 
 test("the via-wt marker appears only in the lens whose claim it makes", async () => {
   sandbox = createGitSandbox();
-  sandbox.makeRepo("solo");
+  sandbox.makeRepo("solo", { worktrees: ["feature/login"] });
 
   handle = await launchApp();
   const { window } = handle;
-  await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
-  await window.locator(".lens-chip", { hasText: "All" }).click();
-  await expect(window.locator(".repo-row__name")).toHaveCount(1, {
-    timeout: 20_000
-  });
+  await addRootAndExpand(window, handle, sandbox, "solo");
 
   // Pin a WORKTREE, not the repo: that pulls the repo into the Pinned lens
-  // while its own star stays unlit, which is what the marker explains.
-  await window.locator(".repo-row", { hasText: "solo" }).click();
-  const wtPin = window.locator(".wt-row").first().locator(".pin");
-  await wtPin.click();
+  // while the repo's own star stays unlit, which is what the marker explains.
+  // The pin lives in the hover-gated action cluster (`pointer-events: none` at
+  // rest), so the row has to be hovered before the click is actionable — and
+  // re-hovered inside the retry, since a background repo refresh can re-render
+  // the row and eat the :hover state.
+  const wtRow = branchRow(window, "feature/login");
+  await expect(async () => {
+    await wtRow.hover();
+    await wtRow
+      .getByRole("button", { name: "Pin worktree" })
+      .click({ timeout: 1000 });
+  }).toPass({ timeout: 15_000 });
+  await expect(wtRow.getByRole("button", { name: "Unpin worktree" })).toHaveCount(1);
 
   // In All, the repo is not "in Pinned", so the marker must not claim it is.
   await expect(window.locator(".repo-row__pin-via")).toHaveCount(0);
