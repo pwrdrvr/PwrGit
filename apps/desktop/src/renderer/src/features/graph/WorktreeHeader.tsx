@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type {
   PwrGitError,
-  Repo,
   RemoteDivergence,
   Result,
   Worktree,
@@ -9,9 +8,7 @@ import type {
 } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast } from "../../lib/toast";
-import { CopyTarget } from "../shell/CopyTarget";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
-import { BranchSwitcher } from "./BranchSwitcher";
 import { PullDivergenceDialog } from "./PullDivergenceDialog";
 
 type Chip = { text: string; tone: "muted" | "ok" | "warn" };
@@ -30,20 +27,10 @@ function baseChip(state: WorktreeState | null): Chip {
 type Busy = "fetch" | "pull" | "push" | null;
 type RecoveryBusy = "rebase" | "reset" | null;
 
-/** Compact path label: the last two segments locate a checkout precisely
- *  ("Acme/search-compare", "pwrdrvr/PwrAgnt") without burning a line on
- *  the full path — that lives in the tooltip, and click copies it. */
-function pathTail(path: string): string {
-  const parts = path.split("/").filter((p) => p !== "");
-  return parts.slice(-2).join("/");
-}
-
 export function WorktreeHeader({
-  repo,
   worktree,
   state
 }: {
-  repo: Repo;
   worktree: Worktree;
   state: WorktreeState | null;
 }) {
@@ -51,7 +38,6 @@ export function WorktreeHeader({
   const [divergence, setDivergence] = useState<RemoteDivergence | null>(null);
   const [recoveryBusy, setRecoveryBusy] = useState<RecoveryBusy>(null);
   const [flash, setFlash] = useState<Chip | null>(null);
-  const [switching, setSwitching] = useState(false);
   const activeWorktreeId = useRef(worktree.id);
   const recoveryInFlight = useRef<string | null>(null);
   const recoveryOperation = useRef(0);
@@ -199,45 +185,12 @@ export function WorktreeHeader({
 
   return (
     <div className="wt-header">
-      <div className="wt-header__id">
-        <span className="wt-header__repo" title={repo.name}>
-          {repo.name}
-        </span>
-        <span className="wt-header__sep">›</span>
-        <button
-          className="wt-header__branch wt-header__branch--switch"
-          title="Switch branch"
-          onClick={() => setSwitching(true)}
-        >
-          <span className="wt-header__dot" />
-          <span className="wt-header__branch-name">{worktree.branch}</span>
-          <svg
-            className="wt-header__caret"
-            width="11"
-            height="11"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.4"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="m6 9 6 6 6-6" />
-          </svg>
-        </button>
+      {/* Repo › branch › path moved up into the window strip (features/chrome/
+          TitleBar.tsx). What's left is live worktree state and the git actions
+          — hence __state, not __id — keeping this row's container-query
+          degrade ladder. */}
+      <div className="wt-header__state">
         {dirty > 0 && <span className="badge badge--warn">●{dirty}</span>}
-        <CopyTarget
-          value={worktree.path}
-          label="Copy worktree path"
-          hint={`${worktree.path}\nClick to copy`}
-          className="wt-header__pathchip copyable"
-          stopPropagation={false}
-        >
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
-          </svg>
-          {pathTail(worktree.path)}
-        </CopyTarget>
         <span style={{ flex: 1 }} />
         <span className={`sync-chip sync-chip--${chip.tone}`}>{chip.text}</span>
 
@@ -313,13 +266,6 @@ export function WorktreeHeader({
         </div>
         <WorktreeMenu worktree={worktree} />
       </div>
-      {switching && (
-        <BranchSwitcher
-          worktreeId={worktree.id}
-          currentBranch={worktree.branch}
-          onClose={() => setSwitching(false)}
-        />
-      )}
       {divergence !== null && (
         <PullDivergenceDialog
           divergence={divergence}

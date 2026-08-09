@@ -9,6 +9,7 @@ import type {
 import { DiffPane, type DiffTarget } from "./features/diff/DiffPane";
 import { LineageGraph } from "./features/graph/LineageGraph";
 import { SelectionBar } from "./features/graph/SelectionBar";
+import { TitleBar } from "./features/chrome/TitleBar";
 import { WorktreeHeader } from "./features/graph/WorktreeHeader";
 import { DialogHost } from "./features/shell/DialogHost";
 import { PaneResizer } from "./features/shell/PaneResizer";
@@ -308,11 +309,7 @@ export function App() {
 
   return (
     <div className="app">
-      <div className="titlebar">
-        <div className="titlebar__gutter" />
-        <div className="titlebar__title">{windowTitle}</div>
-        <div className="titlebar__gutter" />
-      </div>
+      <TitleBar repo={selectedRepo} worktree={selectedWorktree} />
 
       <div className="app-body" style={{ gridTemplateColumns }}>
         <Sidebar
@@ -361,7 +358,6 @@ export function App() {
           {selectedRepo !== null && selectedWorktree !== null ? (
             <>
               <WorktreeHeader
-                repo={selectedRepo}
                 worktree={selectedWorktree}
                 state={worktreeState}
               />
