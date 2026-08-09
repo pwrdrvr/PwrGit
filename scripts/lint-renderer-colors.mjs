@@ -32,11 +32,12 @@
  *     CI invokes.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { relative, resolve } from "node:path";
 
 const repoRoot = resolve(import.meta.dirname, "..");
-const stylesDir = resolve(repoRoot, "apps/desktop/src/renderer/src/styles");
+const rendererDir = resolve(repoRoot, "apps/desktop/src/renderer/src");
+const stylesDir = resolve(rendererDir, "styles");
 
 // The one file allowed to declare raw color literals, and only inside the
 // theme blocks listed below.
@@ -78,15 +79,24 @@ const COLOR_LITERAL_RE = /(#[0-9a-fA-F]{3,8}\b|\brgba?\s*\(|\bhsla?\s*\()/g;
 
 runSelfTests();
 
-const files = readdirSync(stylesDir)
-  .filter((name) => name.endsWith(".css"))
-  .sort();
+// Walk the whole renderer tree, not just styles/. A stylesheet added beside a
+// feature component is exactly the one nobody remembers to check.
+function collectStylesheets(dir, acc = []) {
+  for (const entry of readdirSync(dir).sort()) {
+    const full = resolve(dir, entry);
+    if (statSync(full).isDirectory()) collectStylesheets(full, acc);
+    else if (entry.endsWith(".css")) acc.push(full);
+  }
+  return acc;
+}
+
+const files = collectStylesheets(rendererDir);
 
 if (files.length === 0) {
-  console.error(`No stylesheets found under ${relative(repoRoot, stylesDir)}.`);
+  console.error(`No stylesheets found under ${relative(repoRoot, rendererDir)}.`);
   process.exit(1);
 }
-if (!files.includes(TOKENS_FILE)) {
+if (!files.includes(resolve(stylesDir, TOKENS_FILE))) {
   console.error(
     `Expected ${TOKENS_FILE} under ${relative(repoRoot, stylesDir)} — the token blocks moved or were renamed. Update this script.`,
   );
@@ -94,8 +104,10 @@ if (!files.includes(TOKENS_FILE)) {
 }
 
 const findings = [];
-for (const name of files) {
-  const path = resolve(stylesDir, name);
+for (const path of files) {
+  // Only the real tokens.css gets the theme-block allowlist — a tokens.css
+  // dropped somewhere else in the tree is not a second legal home.
+  const name = path === resolve(stylesDir, TOKENS_FILE) ? TOKENS_FILE : "";
   // Strip only comments at the source level (strings in selectors like
   // `:root[data-theme="light"]` must survive so the allowlist match works).
   // Strings inside rule bodies are stripped per-body in the scanner — see

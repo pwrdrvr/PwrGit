@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { BrowserWindow, shell } from "electron";
+import { WINDOW_BACKGROUND } from "./window-chrome";
 
 /**
  * Singleton Settings window (same aux-window pattern as the Logs window /
@@ -24,7 +25,7 @@ export function openSettingsWindow(): void {
     minHeight: 520,
     show: false,
     title: "PwrGit Settings",
-    backgroundColor: "#000000",
+    backgroundColor: WINDOW_BACKGROUND,
     webPreferences: {
       preload: join(__dirname, "../preload/index.cjs"),
       contextIsolation: true,

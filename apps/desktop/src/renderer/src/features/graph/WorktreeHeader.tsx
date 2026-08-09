@@ -186,9 +186,10 @@ export function WorktreeHeader({
   return (
     <div className="wt-header">
       {/* Repo › branch › path moved up into the window strip (features/chrome/
-          TitleBar.tsx). What's left here is live worktree state and the git
-          actions, which keep this row's container-query degrade ladder. */}
-      <div className="wt-header__id">
+          TitleBar.tsx). What's left is live worktree state and the git actions
+          — hence __state, not __id — keeping this row's container-query
+          degrade ladder. */}
+      <div className="wt-header__state">
         {dirty > 0 && <span className="badge badge--warn">●{dirty}</span>}
         <span style={{ flex: 1 }} />
         <span className={`sync-chip sync-chip--${chip.tone}`}>{chip.text}</span>
