@@ -9,25 +9,35 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { err, ok, type Result } from "@pwrgit/shared";
+import { err, ok, type CloneProgress, type Result } from "@pwrgit/shared";
 import { openDatabase } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
 import {
   cloneDestinations,
   CloneService,
+  createCloneProgressParser,
   normalizeGitHubRepository,
-  parseCloneRepositories
+  parseCloneProgressLine,
+  parseCloneRepositories,
+  sanitizeCloneStderr
 } from "./clone-service";
-import type { GitExec, GitOutput } from "./dugite";
+import type { GitExec, GitExecOptions, GitOutput } from "./dugite";
 import { RepoIndexer } from "./repo-indexer";
 
-const systemGit: GitExec = (args, cwd) =>
+const systemGit: GitExec = (args, cwd, options) =>
   new Promise<Result<GitOutput>>((resolve) => {
-    const proc = spawn("git", args, { cwd });
+    const proc = spawn("git", args, {
+      cwd,
+      env: { ...process.env, ...options?.env }
+    });
     let stdout = "";
     let stderr = "";
     proc.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
-    proc.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+    proc.stderr.on("data", (chunk: Buffer) => {
+      const text = chunk.toString();
+      stderr += text;
+      options?.onStderr?.(text);
+    });
     proc.on("close", (code) =>
       resolve(ok({ stdout, stderr, exitCode: code ?? 0 }))
     );
@@ -101,6 +111,63 @@ describe("clone source metadata", () => {
         localPaths: []
       }
     ]);
+  });
+});
+
+describe("clone progress", () => {
+  it("parses transfer totals and rates from Git progress", () => {
+    expect(
+      parseCloneProgressLine(
+        "Receiving objects:  42% (420/1000), 12.34 MiB | 3.10 MiB/s"
+      )
+    ).toEqual({
+      phase: "receiving",
+      percent: 42,
+      completedObjects: 420,
+      totalObjects: 1000,
+      bytesReceived: "12.34 MiB",
+      transferRate: "3.10 MiB/s"
+    });
+  });
+
+  it("reassembles chunked carriage-return progress", () => {
+    const updates: CloneProgress[] = [];
+    const parse = createCloneProgressParser((progress) =>
+      updates.push(progress)
+    );
+    parse("remote: Counting objects: 50% (5/");
+    parse("10)\rReceiving objects: 100% (10/10), 2.00 KiB | 2.00 MiB/s\r");
+    expect(updates).toEqual([
+      {
+        phase: "counting",
+        percent: 50,
+        completedObjects: 5,
+        totalObjects: 10
+      },
+      {
+        phase: "receiving",
+        percent: 100,
+        completedObjects: 10,
+        totalObjects: 10,
+        bytesReceived: "2.00 KiB",
+        transferRate: "2.00 MiB/s"
+      }
+    ]);
+  });
+
+  it("removes progress records from clone failures", () => {
+    expect(
+      sanitizeCloneStderr(
+        "Cloning into 'repo'...\n" +
+          "remote: Enumerating objects: 10, done.\n" +
+          "remote: Counting objects: 50% (5/10)\r" +
+          "Receiving objects: 90% (9/10), 1.00 MiB | 2.00 MiB/s\r" +
+          "remote: Repository not found.\n" +
+          "fatal: Could not read from remote repository.\n"
+      )
+    ).toBe(
+      "remote: Repository not found.\nfatal: Could not read from remote repository."
+    );
   });
 });
 
@@ -267,14 +334,16 @@ describe("CloneService", () => {
     initRepo(source);
 
     const cloneCalls: string[][] = [];
-    const cloneGit: GitExec = async (args, cwd) => {
+    const cloneOptions: GitExecOptions[] = [];
+    const cloneGit: GitExec = async (args, cwd, options) => {
       if (args[0] === "clone") {
         cloneCalls.push(args);
+        if (options !== undefined) cloneOptions.push(options);
         const destination = args.at(-1);
         if (destination === undefined) throw new Error("missing destination");
-        return systemGit(["clone", "--", source, destination], cwd);
+        return systemGit(["clone", "--", source, destination], cwd, options);
       }
-      return systemGit(args, cwd);
+      return systemGit(args, cwd, options);
     };
     const db = openDatabase(":memory:");
     const profiles = new ProfileService(db);
@@ -306,11 +375,13 @@ describe("CloneService", () => {
     expect(cloneCalls).toEqual([
       [
         "clone",
+        "--progress",
         "--",
         "git@github.com:pwrdrvr/new-service.git",
         join(services, "new-service")
       ]
     ]);
+    expect(cloneOptions[0]?.env).toEqual({ LC_ALL: "C", LANG: "C" });
     expect(
       db
         .prepare(
@@ -360,9 +431,69 @@ describe("CloneService", () => {
 
     expect(result).toEqual(ok(indexedRepo));
     expect(gh).toHaveBeenCalledWith(
-      ["repo", "clone", "huntharo/x-code-clone", join(root, "x-code-clone")],
-      { timeoutMs: 10 * 60_000 }
+      [
+        "repo",
+        "clone",
+        "huntharo/x-code-clone",
+        join(root, "x-code-clone"),
+        "--",
+        "--progress"
+      ],
+      {
+        timeoutMs: 10 * 60_000,
+        onStderr: expect.any(Function),
+        env: { LC_ALL: "C", LANG: "C" }
+      }
     );
+  });
+
+  it("returns direct clone failures without progress records", async () => {
+    const root = temporaryRoot();
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "Personal",
+      email: "test@pwrgit.dev",
+      roots: [root]
+    });
+    const gitExec = vi.fn<GitExec>(async () =>
+      ok({
+        stdout: "",
+        stderr:
+          "Cloning into 'missing'...\n" +
+          "Receiving objects: 50% (5/10), 1.00 MiB | 2.00 MiB/s\r" +
+          "remote: Repository not found.\n" +
+          "fatal: Could not read from remote repository.\n",
+        exitCode: 128
+      })
+    );
+    const indexer = {
+      listRepos: vi.fn(() => []),
+      indexRepoAt: vi.fn()
+    } as unknown as RepoIndexer;
+    const service = new CloneService(db, gitExec, indexer, profiles);
+
+    const result = await service.clone({
+      profileId: profile.id,
+      nameWithOwner: "huntharo/missing",
+      protocol: "ssh",
+      parentPath: root
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "exit_128",
+        message:
+          "remote: Repository not found.\nfatal: Could not read from remote repository."
+      }
+    });
+    expect(gitExec).toHaveBeenCalledWith(
+      expect.any(Array),
+      root,
+      expect.objectContaining({ env: { LC_ALL: "C", LANG: "C" } })
+    );
+    expect(indexer.indexRepoAt).not.toHaveBeenCalled();
   });
 
   it("rejects destinations outside registered roots before running git", async () => {

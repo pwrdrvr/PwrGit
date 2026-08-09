@@ -179,6 +179,26 @@ export type Repo = {
 /** Ways the clone dialog can hand a GitHub repository to the local machine. */
 export type CloneProtocol = "ssh" | "https" | "gh_cli";
 
+/** Live progress reported by Git while a repository is being cloned. */
+export type CloneProgress = {
+  phase:
+    | "starting"
+    | "counting"
+    | "compressing"
+    | "receiving"
+    | "resolving"
+    | "checking_out"
+    | "indexing";
+  /** Phase-local completion reported by Git; null for unmetered work. */
+  percent: number | null;
+  completedObjects?: number;
+  totalObjects?: number;
+  /** Git's human-readable transferred byte count, such as `12.4 MiB`. */
+  bytesReceived?: string;
+  /** Git's human-readable transfer rate, such as `3.1 MiB/s`. */
+  transferRate?: string;
+};
+
 /** GitHub repository metadata used by the clone autocomplete. */
 export type CloneRepository = {
   name: string;

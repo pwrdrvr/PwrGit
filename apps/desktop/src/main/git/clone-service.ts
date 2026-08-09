@@ -12,6 +12,7 @@ import {
   ok,
   type CloneCatalog,
   type CloneDestination,
+  type CloneProgress,
   type CloneProtocol,
   type CloneRepository,
   type Profile,
@@ -21,7 +22,7 @@ import {
 import type { DB } from "../persistence/db";
 import type { ProfileService } from "../profiles/profile-service";
 import { mapLimit } from "../util/map-limit";
-import { runGh } from "../github/gh-cli";
+import { runGh, type GhRunOptions } from "../github/gh-cli";
 import { getGhStatus, type GhStatus } from "../github/pr-client";
 import { parseGitHubRemote } from "../github/remote";
 import { requireExit0, type GitExec } from "./dugite";
@@ -35,7 +36,7 @@ const EXACT_REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 type GhRunner = (
   args: string[],
-  options?: { timeoutMs?: number }
+  options?: GhRunOptions
 ) => Promise<string>;
 type GhStatusReader = () => Promise<GhStatus>;
 
@@ -241,6 +242,81 @@ function messageFromUnknown(cause: unknown): string {
   return (stderr || cause.message).split("\n")[0] ?? cause.message;
 }
 
+const CLONE_PHASES: Record<string, CloneProgress["phase"]> = {
+  "Counting objects": "counting",
+  "Compressing objects": "compressing",
+  "Receiving objects": "receiving",
+  "Resolving deltas": "resolving",
+  "Updating files": "checking_out",
+  "Filtering content": "checking_out"
+};
+const CLONE_ENV = { LC_ALL: "C", LANG: "C" } as const;
+
+/** Parse one carriage-return-delimited progress update written by Git. */
+export function parseCloneProgressLine(line: string): CloneProgress | null {
+  const normalized = line
+    .replace(/\u001b\[[0-9;]*m/g, "")
+    .trim()
+    .replace(/^remote:\s*/, "");
+  const match = /^(Counting objects|Compressing objects|Receiving objects|Resolving deltas|Updating files|Filtering content):\s+(\d+)%\s+\((\d+)\/(\d+)\)(.*)$/.exec(
+    normalized
+  );
+  if (match === null) return null;
+
+  const progress: CloneProgress = {
+    phase: CLONE_PHASES[match[1]!]!,
+    percent: Number(match[2]),
+    completedObjects: Number(match[3]),
+    totalObjects: Number(match[4])
+  };
+  if (progress.phase === "receiving") {
+    const suffix = match[5] ?? "";
+    const bytes = /,\s*([\d.]+\s+(?:bytes?|[KMGTPE]i?B))/i.exec(suffix)?.[1];
+    const rate = /\|\s*([^,]+?\/s)(?:,|$)/i.exec(suffix)?.[1];
+    if (bytes !== undefined) progress.bytesReceived = bytes;
+    if (rate !== undefined) progress.transferRate = rate.trim();
+  }
+  return progress;
+}
+
+/** Reassemble chunked stderr into the updates Git separates with CR/LF. */
+export function createCloneProgressParser(
+  onProgress: (progress: CloneProgress) => void
+): (chunk: string) => void {
+  let pending = "";
+  return (chunk) => {
+    const lines = `${pending}${chunk}`.split(/[\r\n]/);
+    pending = lines.pop() ?? "";
+    for (const line of lines) {
+      const progress = parseCloneProgressLine(line);
+      if (progress !== null) onProgress(progress);
+    }
+  };
+}
+
+/** Remove high-volume progress meters while preserving actionable failures. */
+export function sanitizeCloneStderr(stderr: string): string {
+  return stderr
+    .split(/[\r\n]+/)
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (line === "") return false;
+      if (parseCloneProgressLine(line) !== null) return false;
+      if (/^Cloning into .+\.\.\.$/.test(line)) return false;
+      if (/^remote:\s+Enumerating objects:/i.test(line)) return false;
+      if (/^remote:\s+Total \d+/i.test(line)) return false;
+      return true;
+    })
+    .join("\n");
+}
+
+function cloneMessageFromUnknown(cause: unknown): string {
+  if (!(cause instanceof Error)) return String(cause);
+  const stderr = (cause as Error & { stderr?: string }).stderr;
+  const sanitized = sanitizeCloneStderr(stderr ?? "");
+  return sanitized || cause.message;
+}
+
 export class CloneService {
   private readonly ownerCache = new Map<
     string,
@@ -382,12 +458,15 @@ export class CloneService {
     }
   }
 
-  async clone(input: {
-    profileId: string;
-    nameWithOwner: string;
-    protocol: CloneProtocol;
-    parentPath: string;
-  }): Promise<Result<Repo>> {
+  async clone(
+    input: {
+      profileId: string;
+      nameWithOwner: string;
+      protocol: CloneProtocol;
+      parentPath: string;
+    },
+    onProgress: (progress: CloneProgress) => void = () => undefined
+  ): Promise<Result<Repo>> {
     const profile = this.profiles.get(input.profileId);
     if (profile === null) {
       return err({
@@ -444,16 +523,24 @@ export class CloneService {
       });
     }
 
+    onProgress({ phase: "starting", percent: null });
+    const readProgress = createCloneProgressParser(onProgress);
+
     if (input.protocol === "gh_cli") {
       try {
-        await this.gh(["repo", "clone", nameWithOwner, destination], {
-          timeoutMs: 10 * 60_000
-        });
+        await this.gh(
+          ["repo", "clone", nameWithOwner, destination, "--", "--progress"],
+          {
+            timeoutMs: 10 * 60_000,
+            onStderr: readProgress,
+            env: CLONE_ENV
+          }
+        );
       } catch (cause) {
         return err({
           kind: "git",
           code: "clone_failed",
-          message: messageFromUnknown(cause)
+          message: cloneMessageFromUnknown(cause)
         });
       }
     } else {
@@ -461,12 +548,20 @@ export class CloneService {
         input.protocol === "ssh"
           ? `git@github.com:${nameWithOwner}.git`
           : `https://github.com/${nameWithOwner}.git`;
-      const cloned = await this.git(["clone", "--", remote, destination], parentPath);
+      const cloned = await this.git(
+        ["clone", "--progress", "--", remote, destination],
+        parentPath,
+        { onStderr: readProgress, env: CLONE_ENV }
+      );
       if (!cloned.ok) return cloned;
-      const checked = requireExit0(cloned.value, ["clone"]);
+      const checked = requireExit0(
+        { ...cloned.value, stderr: sanitizeCloneStderr(cloned.value.stderr) },
+        ["clone"]
+      );
       if (!checked.ok) return checked;
     }
 
+    onProgress({ phase: "indexing", percent: null });
     const indexed = await this.indexer.indexRepoAt(input.profileId, destination);
     if (!indexed.ok) {
       return err({

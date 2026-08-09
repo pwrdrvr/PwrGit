@@ -8,6 +8,13 @@ const { exec } = dugite;
 
 export type GitOutput = { stdout: string; stderr: string; exitCode: number };
 
+export type GitExecOptions = {
+  /** Receive stderr as Git writes it (progress output is emitted here). */
+  onStderr?: (chunk: string) => void;
+  /** Extra environment variables applied to this Git process. */
+  env?: Record<string, string | undefined>;
+};
+
 /**
  * Runs a git command in `cwd` and resolves to the process output. Injected
  * everywhere git is needed so callers stay decoupled from dugite — tests pass
@@ -18,13 +25,21 @@ export type GitOutput = { stdout: string; stderr: string; exitCode: number };
  */
 export type GitExec = (
   args: string[],
-  cwd: string
+  cwd: string,
+  options?: GitExecOptions
 ) => Promise<Result<GitOutput, PwrGitError>>;
 
 /** Production GitExec backed by dugite's bundled git binary (KTD1). */
-export const execGit: GitExec = async (args, cwd) => {
+export const execGit: GitExec = async (args, cwd, options) => {
   try {
-    const result = await exec(args, cwd);
+    const result = await exec(args, cwd, {
+      ...(options?.env !== undefined ? { env: options.env } : {}),
+      processCallback: (process) => {
+        process.stderr?.on("data", (chunk: Buffer | string) => {
+          options?.onStderr?.(chunk.toString());
+        });
+      }
+    });
     // Non-zero exits are logged at debug: many are routine probes (cat-file
     // -e, stash pop with conflicts), but when a command silently fails this
     // is the ground truth the Logs window surfaces.

@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   CloneCatalog,
   CloneDestination,
+  CloneProgress,
   CloneProtocol,
   CloneRepository,
   Profile,
   Repo
 } from "@pwrgit/shared";
-import { dispatch } from "../../lib/pwrgit";
+import { dispatch, subscribe } from "../../lib/pwrgit";
 import {
   cloneDestinationLabel,
   cloneRepositoryAtSelection,
@@ -68,6 +69,16 @@ function protocolDetail(
   return `gh repo clone ${repository.nameWithOwner}`;
 }
 
+const CLONE_PROGRESS_LABELS: Record<CloneProgress["phase"], string> = {
+  starting: "Preparing clone",
+  counting: "Counting objects",
+  compressing: "Compressing objects",
+  receiving: "Receiving objects",
+  resolving: "Resolving deltas",
+  checking_out: "Checking out files",
+  indexing: "Adding repository to PwrGit"
+};
+
 export function CloneRepoDialog({
   profile,
   onCloned,
@@ -93,7 +104,9 @@ export function CloneRepoDialog({
     useState<CloneDestination | null>(null);
   const [destinationSelection, setDestinationSelection] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [cloneProgress, setCloneProgress] = useState<CloneProgress | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const activeCloneIdRef = useRef<string | null>(null);
   const sourceInputRef = useRef<HTMLInputElement>(null);
   const destinationInputRef = useRef<HTMLInputElement>(null);
 
@@ -111,6 +124,19 @@ export function CloneRepoDialog({
       active = false;
     };
   }, [profile.id]);
+
+  useEffect(
+    () =>
+      subscribe("repo:cloneProgress", (event) => {
+        if (
+          event.profileId === profile.id &&
+          event.operationId === activeCloneIdRef.current
+        ) {
+          setCloneProgress(event.progress);
+        }
+      }),
+    [profile.id]
+  );
 
   const parsedSourceQuery = useMemo(
     () => cloneSourceQuery(catalog?.repositories ?? [], sourceQuery),
@@ -193,17 +219,25 @@ export function CloneRepoDialog({
 
   const submit = async (destination = activeDestination): Promise<void> => {
     if (selectedRepository === null || destination === null || busy) return;
+    const operationId = window.crypto.randomUUID();
+    activeCloneIdRef.current = operationId;
     setBusy(true);
+    setCloneProgress({ phase: "starting", percent: null });
     setSubmitError(null);
     const result = await dispatch("repo:clone", {
+      operationId,
       profileId: profile.id,
       nameWithOwner: selectedRepository.nameWithOwner,
       protocol,
       parentPath: destination.path
     });
+    activeCloneIdRef.current = null;
     setBusy(false);
     if (result.ok) onCloned(result.value);
-    else setSubmitError(result.error.message);
+    else {
+      setCloneProgress(null);
+      setSubmitError(result.error.message);
+    }
   };
 
   const ghCliDisabled =
@@ -527,6 +561,52 @@ export function CloneRepoDialog({
           )}
         </div>
 
+        {busy && cloneProgress !== null && (
+          <div className="clone-progress" aria-live="polite">
+            <div className="clone-progress__status">
+              <strong>{CLONE_PROGRESS_LABELS[cloneProgress.phase]}</strong>
+              {cloneProgress.percent !== null && (
+                <span>{cloneProgress.percent}%</span>
+              )}
+            </div>
+            <div
+              className={`clone-progress__track${
+                cloneProgress.percent === null ? " is-indeterminate" : ""
+              }`}
+              role="progressbar"
+              aria-label={CLONE_PROGRESS_LABELS[cloneProgress.phase]}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={cloneProgress.percent ?? undefined}
+            >
+              <span
+                style={{
+                  width:
+                    cloneProgress.percent === null
+                      ? undefined
+                      : `${cloneProgress.percent}%`
+                }}
+              />
+            </div>
+            <div className="clone-progress__metrics">
+              {cloneProgress.bytesReceived !== undefined && (
+                <span>{cloneProgress.bytesReceived} transferred</span>
+              )}
+              {cloneProgress.bytesReceived === undefined &&
+                cloneProgress.completedObjects !== undefined &&
+                cloneProgress.totalObjects !== undefined && (
+                  <span>
+                    {cloneProgress.completedObjects.toLocaleString()} /{" "}
+                    {cloneProgress.totalObjects.toLocaleString()} objects
+                  </span>
+                )}
+              {cloneProgress.transferRate !== undefined && (
+                <span>{cloneProgress.transferRate}</span>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="clone-dialog__foot">
           <span>↑↓ navigate</span>
           <span>tab next field</span>
@@ -548,7 +628,11 @@ export function CloneRepoDialog({
             }
             onClick={() => void submit()}
           >
-            {busy ? "Cloning…" : "Clone repository"}
+            {busy && typeof cloneProgress?.percent === "number"
+              ? `Cloning ${cloneProgress.percent}%…`
+              : busy
+                ? "Cloning…"
+                : "Clone repository"}
           </button>
         </div>
       </div>
