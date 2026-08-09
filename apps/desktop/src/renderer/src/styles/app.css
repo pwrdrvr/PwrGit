@@ -2358,11 +2358,11 @@ input {
   }
 }
 @container (max-width: 680px) {
-  .wt-header__id .sync-chip {
+  .wt-header__state .sync-chip {
     display: none;
   }
 }
-.wt-header__id {
+.wt-header__state {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2594,7 +2594,7 @@ input {
   .wt-btn__label {
     display: none;
   }
-  .wt-header__id .sync-chip {
+  .wt-header__state .sync-chip {
     display: none;
   }
 }
@@ -3664,9 +3664,6 @@ body.is-col-resizing {
   outline: 1px solid var(--accent-border);
   outline-offset: 2px;
   border-radius: 5px;
-}
-.titlebar__branch.copyable:hover {
-  box-shadow: inset 0 0 0 1px var(--accent-border);
 }
 
 /* ---- Kebab "⋯" actions menu ---- */
