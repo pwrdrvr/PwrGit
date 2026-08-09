@@ -96,10 +96,18 @@ test("the lens goes quiet again after a drag, not just on a fresh list", async (
   });
   await window.mouse.up();
 
+  // Deliberately no blur() here — the retained focus IS the thing under test.
   await window.mouse.move(2000, 2000);
   const pins = window.locator(".repo-row .pin");
   await expect(pins).toHaveCount(3);
   for (let i = 0; i < 3; i += 1) {
     await expect(pins.nth(i)).toHaveCSS("opacity", "0");
+  }
+
+  // The grip is revealed by the same conditions, so it fails the same way.
+  const handles = window.locator(".repo-row__handle");
+  await expect(handles).toHaveCount(3);
+  for (let i = 0; i < 3; i += 1) {
+    await expect(handles.nth(i)).toHaveCSS("opacity", "0");
   }
 });

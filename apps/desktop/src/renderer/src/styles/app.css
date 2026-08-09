@@ -705,8 +705,15 @@ textarea,
   opacity: 0;
   transition: opacity 120ms ease;
 }
+/* `:focus-visible`, never `:focus-within`. These rows are focusable (roving
+   tabindex) AND draggable, and Chromium focuses a focusable element on
+   mousedown — so with `:focus-within` the row you last dragged keeps its star
+   lit for the rest of the session, pointer long gone. A star lit for an
+   incidental reason is worse than showing all of them: the lit one looks like
+   it means something. `:focus-visible` reveals it for the keyboard user who
+   needs to see what they're about to activate, and stays quiet for the mouse. */
 .repo-row.is-arrangeable:hover .pin,
-.repo-row.is-arrangeable:focus-within .pin,
+.repo-row.is-arrangeable:focus-visible .pin,
 .repo-row.is-arrangeable .pin:focus-visible {
   opacity: 1;
 }
@@ -1740,14 +1747,20 @@ textarea,
   transition: opacity 120ms ease;
 }
 /* The floating cluster shows only while the row is actually hovered/focused —
-   not on the persistent "selected" (active) row, whose tags stay readable. */
+   not on the persistent "selected" (active) row, whose tags stay readable.
+   `:has(:focus-visible)` rather than `:focus-within`: these rows became
+   focusable and draggable together, and Chromium focuses on mousedown, so
+   `:focus-within` would leave the last-dragged row's actions floating over it
+   permanently. `:has()` (not plain `:focus-visible`) because the keyboard focus
+   that should reveal them may land on the pin or the kebab inside the row, not
+   only on the row itself. */
 .wt-row:hover .wt-row__hoveracts,
-.wt-row:focus-within .wt-row__hoveracts {
+.wt-row:has(:focus-visible) .wt-row__hoveracts {
   opacity: 1;
   pointer-events: auto;
 }
 .wt-row:hover .wt-row__menu,
-.wt-row:focus-within .wt-row__menu,
+.wt-row:has(:focus-visible) .wt-row__menu,
 .wt-row.is-selected .wt-row__menu,
 .wt-row__menu:has(.kebab__btn[aria-expanded="true"]) {
   opacity: 1;
@@ -1756,7 +1769,7 @@ textarea,
    yields. PR chips, status tags, and count badges stay put and stay
    interactive (the PR chip has its own click + tooltip). */
 .wt-row:hover .wt-age,
-.wt-row:focus-within .wt-age {
+.wt-row:has(:focus-visible) .wt-age {
   opacity: 0;
 }
 
