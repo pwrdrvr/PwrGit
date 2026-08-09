@@ -11,6 +11,7 @@ import type {
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import {
   cloneDestinationLabel,
+  cloneDestinationSelectionIndex,
   cloneRepositoryAtSelection,
   cloneSourceQuery,
   filterCloneDestinations,
@@ -107,7 +108,9 @@ export function CloneRepoDialog({
   const [destinationQuery, setDestinationQuery] = useState("");
   const [selectedDestination, setSelectedDestination] =
     useState<CloneDestination | null>(null);
-  const [destinationSelection, setDestinationSelection] = useState(0);
+  const [destinationSelectionPath, setDestinationSelectionPath] = useState<
+    string | null
+  >(null);
   const [busy, setBusy] = useState(false);
   const [cloneProgress, setCloneProgress] = useState<CloneProgress | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -251,8 +254,12 @@ export function CloneRepoDialog({
     () => filterCloneDestinations(destinations, destinationQuery),
     [destinations, destinationQuery]
   );
+  const destinationSelection = cloneDestinationSelectionIndex(
+    destinationResults,
+    destinationSelectionPath
+  );
 
-  useEffect(() => setDestinationSelection(0), [destinationQuery]);
+  useEffect(() => setDestinationSelectionPath(null), [destinationQuery]);
 
   const chooseRepository = (repository: CloneRepository): void => {
     setSelectedRepository(repository);
@@ -527,21 +534,23 @@ export function CloneRepoDialog({
                 onKeyDown={(event) => {
                   if (event.key === "ArrowDown") {
                     event.preventDefault();
-                    setDestinationSelection((selection) =>
-                      moveCloneSelection(
-                        selection,
-                        1,
-                        destinationResults.length
-                      )
+                    const selection = moveCloneSelection(
+                      destinationSelection,
+                      1,
+                      destinationResults.length
+                    );
+                    setDestinationSelectionPath(
+                      destinationResults[selection]?.path ?? null
                     );
                   } else if (event.key === "ArrowUp") {
                     event.preventDefault();
-                    setDestinationSelection((selection) =>
-                      moveCloneSelection(
-                        selection,
-                        -1,
-                        destinationResults.length
-                      )
+                    const selection = moveCloneSelection(
+                      destinationSelection,
+                      -1,
+                      destinationResults.length
+                    );
+                    setDestinationSelectionPath(
+                      destinationResults[selection]?.path ?? null
                     );
                   } else if (event.key === "Enter") {
                     const destination =
@@ -577,7 +586,9 @@ export function CloneRepoDialog({
                   }`}
                   disabled={busy || selectedRepository === null}
                   title={destination.path}
-                  onMouseEnter={() => setDestinationSelection(index)}
+                  onMouseEnter={() =>
+                    setDestinationSelectionPath(destination.path)
+                  }
                   onClick={() => {
                     setSelectedDestination(destination);
                     setDestinationQuery(cloneDestinationLabel(destination));

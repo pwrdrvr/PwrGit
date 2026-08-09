@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { CloneDestination, CloneRepository } from "@pwrgit/shared";
 import {
   cloneDestinationLabel,
+  cloneDestinationSelectionIndex,
   cloneRepositoryAtSelection,
   cloneSourceQuery,
   exactGitHubRepository,
@@ -67,6 +68,16 @@ describe("clone dialog filtering", () => {
       destinations[1]
     ]);
     expect(cloneDestinationLabel(destinations[1]!)).toBe("pwrdrvr/services/");
+  });
+
+  it("preserves the highlighted destination when progressive results reorder", () => {
+    const selectedPath = destinations[1]!.path;
+    const reordered = [destinations[1]!, destinations[0]!];
+
+    const selection = cloneDestinationSelectionIndex(reordered, selectedPath);
+
+    expect(selection).toBe(0);
+    expect(reordered[selection]?.path).toBe(selectedPath);
   });
 
   it.each([
