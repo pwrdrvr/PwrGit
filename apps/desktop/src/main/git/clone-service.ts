@@ -22,7 +22,7 @@ import {
 import type { DB } from "../persistence/db";
 import type { ProfileService } from "../profiles/profile-service";
 import { mapLimit } from "../util/map-limit";
-import { runGh } from "../github/gh-cli";
+import { runGh, type GhRunOptions } from "../github/gh-cli";
 import { getGhStatus, type GhStatus } from "../github/pr-client";
 import { parseGitHubRemote } from "../github/remote";
 import { requireExit0, type GitExec } from "./dugite";
@@ -36,7 +36,7 @@ const EXACT_REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 type GhRunner = (
   args: string[],
-  options?: { timeoutMs?: number; onStderr?: (chunk: string) => void }
+  options?: GhRunOptions
 ) => Promise<string>;
 type GhStatusReader = () => Promise<GhStatus>;
 
@@ -250,6 +250,7 @@ const CLONE_PHASES: Record<string, CloneProgress["phase"]> = {
   "Updating files": "checking_out",
   "Filtering content": "checking_out"
 };
+const CLONE_ENV = { LC_ALL: "C", LANG: "C" } as const;
 
 /** Parse one carriage-return-delimited progress update written by Git. */
 export function parseCloneProgressLine(line: string): CloneProgress | null {
@@ -291,6 +292,29 @@ export function createCloneProgressParser(
       if (progress !== null) onProgress(progress);
     }
   };
+}
+
+/** Remove high-volume progress meters while preserving actionable failures. */
+export function sanitizeCloneStderr(stderr: string): string {
+  return stderr
+    .split(/[\r\n]+/)
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (line === "") return false;
+      if (parseCloneProgressLine(line) !== null) return false;
+      if (/^Cloning into .+\.\.\.$/.test(line)) return false;
+      if (/^remote:\s+Enumerating objects:/i.test(line)) return false;
+      if (/^remote:\s+Total \d+/i.test(line)) return false;
+      return true;
+    })
+    .join("\n");
+}
+
+function cloneMessageFromUnknown(cause: unknown): string {
+  if (!(cause instanceof Error)) return String(cause);
+  const stderr = (cause as Error & { stderr?: string }).stderr;
+  const sanitized = sanitizeCloneStderr(stderr ?? "");
+  return sanitized || cause.message;
 }
 
 export class CloneService {
@@ -508,14 +532,15 @@ export class CloneService {
           ["repo", "clone", nameWithOwner, destination, "--", "--progress"],
           {
             timeoutMs: 10 * 60_000,
-            onStderr: readProgress
+            onStderr: readProgress,
+            env: CLONE_ENV
           }
         );
       } catch (cause) {
         return err({
           kind: "git",
           code: "clone_failed",
-          message: messageFromUnknown(cause)
+          message: cloneMessageFromUnknown(cause)
         });
       }
     } else {
@@ -526,10 +551,13 @@ export class CloneService {
       const cloned = await this.git(
         ["clone", "--progress", "--", remote, destination],
         parentPath,
-        { onStderr: readProgress }
+        { onStderr: readProgress, env: CLONE_ENV }
       );
       if (!cloned.ok) return cloned;
-      const checked = requireExit0(cloned.value, ["clone"]);
+      const checked = requireExit0(
+        { ...cloned.value, stderr: sanitizeCloneStderr(cloned.value.stderr) },
+        ["clone"]
+      );
       if (!checked.ok) return checked;
     }
 

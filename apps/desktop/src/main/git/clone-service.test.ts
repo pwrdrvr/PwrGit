@@ -18,14 +18,18 @@ import {
   createCloneProgressParser,
   normalizeGitHubRepository,
   parseCloneProgressLine,
-  parseCloneRepositories
+  parseCloneRepositories,
+  sanitizeCloneStderr
 } from "./clone-service";
-import type { GitExec, GitOutput } from "./dugite";
+import type { GitExec, GitExecOptions, GitOutput } from "./dugite";
 import { RepoIndexer } from "./repo-indexer";
 
 const systemGit: GitExec = (args, cwd, options) =>
   new Promise<Result<GitOutput>>((resolve) => {
-    const proc = spawn("git", args, { cwd });
+    const proc = spawn("git", args, {
+      cwd,
+      env: { ...process.env, ...options?.env }
+    });
     let stdout = "";
     let stderr = "";
     proc.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
@@ -149,6 +153,21 @@ describe("clone progress", () => {
         transferRate: "2.00 MiB/s"
       }
     ]);
+  });
+
+  it("removes progress records from clone failures", () => {
+    expect(
+      sanitizeCloneStderr(
+        "Cloning into 'repo'...\n" +
+          "remote: Enumerating objects: 10, done.\n" +
+          "remote: Counting objects: 50% (5/10)\r" +
+          "Receiving objects: 90% (9/10), 1.00 MiB | 2.00 MiB/s\r" +
+          "remote: Repository not found.\n" +
+          "fatal: Could not read from remote repository.\n"
+      )
+    ).toBe(
+      "remote: Repository not found.\nfatal: Could not read from remote repository."
+    );
   });
 });
 
@@ -315,14 +334,16 @@ describe("CloneService", () => {
     initRepo(source);
 
     const cloneCalls: string[][] = [];
-    const cloneGit: GitExec = async (args, cwd) => {
+    const cloneOptions: GitExecOptions[] = [];
+    const cloneGit: GitExec = async (args, cwd, options) => {
       if (args[0] === "clone") {
         cloneCalls.push(args);
+        if (options !== undefined) cloneOptions.push(options);
         const destination = args.at(-1);
         if (destination === undefined) throw new Error("missing destination");
-        return systemGit(["clone", "--", source, destination], cwd);
+        return systemGit(["clone", "--", source, destination], cwd, options);
       }
-      return systemGit(args, cwd);
+      return systemGit(args, cwd, options);
     };
     const db = openDatabase(":memory:");
     const profiles = new ProfileService(db);
@@ -360,6 +381,7 @@ describe("CloneService", () => {
         join(services, "new-service")
       ]
     ]);
+    expect(cloneOptions[0]?.env).toEqual({ LC_ALL: "C", LANG: "C" });
     expect(
       db
         .prepare(
@@ -419,9 +441,59 @@ describe("CloneService", () => {
       ],
       {
         timeoutMs: 10 * 60_000,
-        onStderr: expect.any(Function)
+        onStderr: expect.any(Function),
+        env: { LC_ALL: "C", LANG: "C" }
       }
     );
+  });
+
+  it("returns direct clone failures without progress records", async () => {
+    const root = temporaryRoot();
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "Personal",
+      email: "test@pwrgit.dev",
+      roots: [root]
+    });
+    const gitExec = vi.fn<GitExec>(async () =>
+      ok({
+        stdout: "",
+        stderr:
+          "Cloning into 'missing'...\n" +
+          "Receiving objects: 50% (5/10), 1.00 MiB | 2.00 MiB/s\r" +
+          "remote: Repository not found.\n" +
+          "fatal: Could not read from remote repository.\n",
+        exitCode: 128
+      })
+    );
+    const indexer = {
+      listRepos: vi.fn(() => []),
+      indexRepoAt: vi.fn()
+    } as unknown as RepoIndexer;
+    const service = new CloneService(db, gitExec, indexer, profiles);
+
+    const result = await service.clone({
+      profileId: profile.id,
+      nameWithOwner: "huntharo/missing",
+      protocol: "ssh",
+      parentPath: root
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "exit_128",
+        message:
+          "remote: Repository not found.\nfatal: Could not read from remote repository."
+      }
+    });
+    expect(gitExec).toHaveBeenCalledWith(
+      expect.any(Array),
+      root,
+      expect.objectContaining({ env: { LC_ALL: "C", LANG: "C" } })
+    );
+    expect(indexer.indexRepoAt).not.toHaveBeenCalled();
   });
 
   it("rejects destinations outside registered roots before running git", async () => {

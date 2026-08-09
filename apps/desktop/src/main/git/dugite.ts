@@ -11,6 +11,8 @@ export type GitOutput = { stdout: string; stderr: string; exitCode: number };
 export type GitExecOptions = {
   /** Receive stderr as Git writes it (progress output is emitted here). */
   onStderr?: (chunk: string) => void;
+  /** Extra environment variables applied to this Git process. */
+  env?: Record<string, string | undefined>;
 };
 
 /**
@@ -31,6 +33,7 @@ export type GitExec = (
 export const execGit: GitExec = async (args, cwd, options) => {
   try {
     const result = await exec(args, cwd, {
+      ...(options?.env !== undefined ? { env: options.env } : {}),
       processCallback: (process) => {
         process.stderr?.on("data", (chunk: Buffer | string) => {
           options?.onStderr?.(chunk.toString());
