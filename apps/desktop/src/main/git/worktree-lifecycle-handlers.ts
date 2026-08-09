@@ -116,4 +116,9 @@ export function registerWorktreeLifecycleHandlers(
     indexer.setWorktreeOrder(req.repoId, req.orderedWorktreeIds);
     return ok(null);
   });
+
+  bus.register("repo:setOrder", (req) => {
+    indexer.setRepoOrder(req.profileId, req.orderedRepoIds);
+    return ok(null);
+  });
 }

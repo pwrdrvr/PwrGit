@@ -2,12 +2,13 @@ import {
   useEffect,
   useRef,
   type DragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent
 } from "react";
 import type { Worktree } from "@pwrgit/shared";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
 import { PrChip } from "./PrChip";
-import { isPrunableWorktree, relativeAge } from "./repo-view";
+import { isPrunableWorktree, relativeAge, type DropPosition } from "./repo-view";
 
 const PR_HOVER_PREFETCH_DELAY_MS = 750;
 
@@ -21,10 +22,12 @@ export function WorktreeRow({
   onTogglePin,
   onRemove,
   onRefreshPullRequest,
-  onDragStart,
-  onDragOver,
-  onDrop,
-  onDragEnd
+  dragProps,
+  dragging,
+  dropPosition,
+  focusable,
+  onKeyDown,
+  onFocus
 }: {
   worktree: Worktree;
   selected: boolean;
@@ -36,10 +39,23 @@ export function WorktreeRow({
   onRemove: () => void;
   /** Refresh this branch's PR after deliberate row hover. */
   onRefreshPullRequest?: () => void;
-  onDragStart: (e: DragEvent) => void;
-  onDragOver: (e: DragEvent) => void;
-  onDrop: (e: DragEvent) => void;
-  onDragEnd: () => void;
+  /** Drag handlers from useListReorder; `draggable: false` for the primary. */
+  dragProps: {
+    draggable: boolean;
+    onDragStart?: (e: DragEvent) => void;
+    onDragOver?: (e: DragEvent) => void;
+    onDragLeave?: (e: DragEvent) => void;
+    onDrop?: (e: DragEvent) => void;
+    onDragEnd?: (e: DragEvent) => void;
+  };
+  /** This row is the drag source (dim it so the insertion line reads). */
+  dragging: boolean;
+  /** Draw the insertion line on this side of the row, or nowhere. */
+  dropPosition: DropPosition | null;
+  /** The one row in this list that holds the tab stop (roving tabindex). */
+  focusable: boolean;
+  onKeyDown: (e: ReactKeyboardEvent) => void;
+  onFocus: () => void;
 }) {
   const prunable = isPrunableWorktree(worktree, now);
   const prHoverTimer = useRef<number | undefined>(undefined);
@@ -58,18 +74,25 @@ export function WorktreeRow({
     }, PR_HOVER_PREFETCH_DELAY_MS);
   };
   useEffect(() => clearPrHoverTimer, []);
+  // `role="treeitem"`, not `option`: these rows live inside the sidebar's
+  // `role="tree"`, and `option` is only meaningful inside a listbox. Level 2
+  // puts them under their repo, which the flat DOM can't otherwise convey.
   return (
     <div
       className={`wt-row${selected ? " is-selected" : ""}${
         multiSelected ? " is-multiselected" : ""
-      }${prunable ? " is-stale" : ""}`}
+      }${prunable ? " is-stale" : ""}${dragging ? " is-dragging" : ""}${
+        dropPosition === null ? "" : ` is-drop-${dropPosition}`
+      }`}
       data-wt-id={worktree.id}
-      draggable={!worktree.isPrimary}
-      onDragStart={onDragStart}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-      onDragEnd={onDragEnd}
+      role="treeitem"
+      aria-selected={selected}
+      aria-level={2}
+      tabIndex={focusable ? 0 : -1}
+      {...dragProps}
       onClick={onSelect}
+      onKeyDown={onKeyDown}
+      onFocus={onFocus}
       onContextMenu={onContextMenu}
       onMouseEnter={prefetchPullRequest}
       onMouseLeave={clearPrHoverTimer}
@@ -77,7 +100,12 @@ export function WorktreeRow({
       {/* The primary checkout is fixed at the top — no drag handle. */}
       <span
         className="wt-row__handle"
-        title={worktree.isPrimary ? undefined : "Drag to reorder"}
+        aria-hidden="true"
+        title={
+          worktree.isPrimary
+            ? undefined
+            : "Drag to reorder — or ⌘⇧↑ / ⌘⇧↓ from the keyboard"
+        }
       >
         {!worktree.isPrimary && (
           <svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor">

@@ -67,6 +67,7 @@ export function App() {
     createWorktree,
     removeWorktrees,
     persistWorktreeOrder,
+    persistRepoOrder,
     computeRepoState,
     refreshPullRequest,
     refreshRepoWorktrees
@@ -326,6 +327,7 @@ export function App() {
           onRemoveWorktrees={(ids) => void removeWorktrees(ids)}
           onCreateWorktree={createWorktree}
           onPersistOrder={persistWorktreeOrder}
+          onPersistRepoOrder={persistRepoOrder}
           onExpandRepo={computeRepoState}
           refreshingRepoIds={refreshingRepoIds}
           onRefreshRepo={(repo) => void refreshRepoWorktrees(repo)}

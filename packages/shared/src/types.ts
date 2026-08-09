@@ -166,6 +166,13 @@ export type Repo = {
   path: string;
   profileId: ProfileId;
   pinned: boolean;
+  /**
+   * Persisted drag-order index within the profile; absent until the user
+   * arranges the list by hand. Only the Pinned lens honors it — the computed
+   * lenses (Recent/Behind/Stale) answer a question, so a manual order there
+   * would fight the answer.
+   */
+  order?: number;
   worktrees: Worktree[];
 };
 

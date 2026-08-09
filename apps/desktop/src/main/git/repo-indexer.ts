@@ -44,6 +44,7 @@ type RepoRow = {
   name: string;
   path: string;
   pinned: number;
+  custom_order: number | null;
 };
 type WorktreeRow = {
   id: string;
@@ -157,8 +158,16 @@ export class RepoIndexer {
     // lowercase). The trailing `name` breaks NOCASE ties deterministically.
     const repoRows = this.db
       .prepare(
-        `SELECT id, profile_id, name, path, pinned FROM repos WHERE profile_id = ?
-         ORDER BY pinned DESC, sort_order, name COLLATE NOCASE, name`
+        // Hand-arranged repos lead, in their arranged order; everything the
+        // user hasn't touched follows by name. `(custom_order IS NULL)` sorts
+        // 0 before 1, which is how NULLs go last without a dialect-specific
+        // NULLS LAST. `sort_order` is dropped from the key: it has only ever
+        // held its DEFAULT 0, so it contributed nothing but a false suggestion
+        // that repo ordering already existed.
+        `SELECT id, profile_id, name, path, pinned, custom_order FROM repos
+         WHERE profile_id = ?
+         ORDER BY pinned DESC, (custom_order IS NULL), custom_order,
+                  name COLLATE NOCASE, name`
       )
       .all(profileId) as RepoRow[];
     // Ownership filter: a fossil DB (older builds) can hold the same worktree
@@ -168,21 +177,52 @@ export class RepoIndexer {
 
   getRepo(repoId: string): Repo | null {
     const row = this.db
-      .prepare("SELECT id, profile_id, name, path, pinned FROM repos WHERE id = ?")
+      .prepare(
+        "SELECT id, profile_id, name, path, pinned, custom_order FROM repos WHERE id = ?"
+      )
       .get(repoId) as RepoRow | undefined;
     return row === undefined ? null : this.repoFromRow(row);
   }
 
+  /**
+   * Unpinning also drops the manual order. Only pinned repos are numbered (the
+   * Pinned lens is the arrangeable one), so an unpinned repo's index goes stale
+   * the moment its former neighbors are rearranged without it — and re-pinning
+   * would then reinsert it at an index another repo already holds, landing it
+   * somewhere the user never chose. Clearing on the way out means a re-pinned
+   * repo arrives unarranged, sorting by name behind the arranged ones.
+   */
   setRepoPinned(repoId: string, pinned: boolean): void {
     this.db
-      .prepare("UPDATE repos SET pinned = ? WHERE id = ?")
-      .run(pinned ? 1 : 0, repoId);
+      .prepare(
+        pinned
+          ? "UPDATE repos SET pinned = 1 WHERE id = ?"
+          : "UPDATE repos SET pinned = 0, custom_order = NULL WHERE id = ?"
+      )
+      .run(repoId);
   }
 
   setWorktreePinned(worktreeId: string, pinned: boolean): void {
     this.db
       .prepare("UPDATE worktrees SET pinned = ? WHERE id = ?")
       .run(pinned ? 1 : 0, worktreeId);
+  }
+
+  /**
+   * Persist a manual drag order for a profile's repos. Only the ids handed in
+   * are numbered; repos left out keep their NULL custom_order and sort by name
+   * behind the arranged ones (see the ORDER BY in listRepos). That is what lets
+   * the user arrange their pinned shelf without implicitly freezing the order
+   * of the other hundred repos in the profile.
+   */
+  setRepoOrder(profileId: string, orderedIds: string[]): void {
+    const stmt = this.db.prepare(
+      "UPDATE repos SET custom_order = ? WHERE id = ? AND profile_id = ?"
+    );
+    const run = this.db.transaction(() => {
+      orderedIds.forEach((id, i) => stmt.run(i, id, profileId));
+    });
+    run();
   }
 
   /** Persist a manual drag order for a repo's worktrees (U14). */
@@ -492,7 +532,7 @@ export class RepoIndexer {
       }
       return wt;
     });
-    return {
+    const repo: Repo = {
       id: r.id,
       name: r.name,
       path: r.path,
@@ -500,6 +540,8 @@ export class RepoIndexer {
       pinned: r.pinned === 1,
       worktrees
     };
+    if (r.custom_order !== null) repo.order = r.custom_order;
+    return repo;
   }
 
   private upsertRepoRow(

@@ -1,5 +1,21 @@
 # renderer/src/styles — AGENTS.md
 
+## Text selection is opt-IN, not opt-out
+
+`.app` sets `user-select: none`. Chrome is not a document: before this, any
+drag in the sidebar painted a blue selection across every row it crossed, and
+each row that later grew a drag affordance had to remember to opt out.
+
+So a **new text surface a user would want to copy** must be added to the
+opt-in list beside `.app` in `app.css` — diff bodies, file paths, commit
+subjects and hashes, log output. Do not "fix" an unselectable surface by
+adding `user-select: none` to its neighbor. `.selectable` is the escape hatch
+for a one-off that doesn't warrant its own rule.
+
+Form controls (`input`, `textarea`, `[contenteditable]`) opt back in near the
+top of the file and must stay that way — a field you can't select inside is
+broken, not merely unpolished.
+
 ## No raw color literals outside `tokens.css`
 
 `tokens.css` holds the theme blocks — `:root` (dark) and

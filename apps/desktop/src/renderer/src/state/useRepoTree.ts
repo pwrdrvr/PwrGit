@@ -23,6 +23,7 @@ export type UseRepoTree = {
   ) => Promise<string | null>;
   removeWorktrees: (worktreeIds: string[]) => Promise<void>;
   persistWorktreeOrder: (repoId: string, orderedIds: string[]) => void;
+  persistRepoOrder: (orderedRepoIds: string[]) => void;
   computeRepoState: (repoId: string) => void;
   refreshPullRequest: (
     repoId: string,
@@ -110,7 +111,17 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
   }, []);
 
   const setRepoPin = useCallback((repoId: string, pinned: boolean) => {
-    setRepos((rs) => rs.map((r) => (r.id === repoId ? { ...r, pinned } : r)));
+    setRepos((rs) =>
+      rs.map((r) => {
+        if (r.id !== repoId) return r;
+        // Mirror the main process, which drops custom_order on unpin (see
+        // RepoIndexer.setRepoPinned) — otherwise the optimistic row keeps a
+        // stale index until the next reload and sorts by it on re-pin.
+        if (pinned) return { ...r, pinned };
+        const { order: _dropped, ...rest } = r;
+        return { ...rest, pinned };
+      })
+    );
     void dispatch("repo:setPin", { repoId, pinned });
   }, []);
 
@@ -228,6 +239,27 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     []
   );
 
+  // Apply the new order locally before the round-trip: `repo:changed` doesn't
+  // fire for an ordering write (nothing about the repos themselves changed), so
+  // without this the dropped row would snap back until the next reload.
+  const persistRepoOrder = useCallback(
+    (orderedRepoIds: string[]) => {
+      if (activeProfileId === null) return;
+      setRepos((rs) => {
+        const rank = new Map(orderedRepoIds.map((id, i) => [id, i]));
+        return [...rs].map((r) => {
+          const at = rank.get(r.id);
+          return at === undefined ? r : { ...r, order: at };
+        });
+      });
+      void dispatch("repo:setOrder", {
+        profileId: activeProfileId,
+        orderedRepoIds
+      });
+    },
+    [activeProfileId]
+  );
+
   // Compute a repo's worktree badges lazily when its row is expanded, and
   // refresh GitHub PR status (TTL-throttled in the main process).
   const computeRepoState = useCallback((repoId: string) => {
@@ -299,6 +331,7 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     createWorktree,
     removeWorktrees,
     persistWorktreeOrder,
+    persistRepoOrder,
     computeRepoState,
     refreshPullRequest,
     refreshRepoWorktrees

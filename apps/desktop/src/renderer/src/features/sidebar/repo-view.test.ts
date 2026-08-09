@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { Repo, Worktree } from "@pwrgit/shared";
 import {
+  dropPositionWithin,
   filterReposByLens,
   groupWorktreesForNavigation,
   groupReposByRoot,
   isPrunableWorktree,
   formatLensCount,
   lensCounts,
+  lensIsArrangeable,
   orderWorktrees,
   reorder,
+  repoPinSource,
   repoPrimaryBehind,
   SORT_CYCLE
 } from "./repo-view";
@@ -178,6 +181,99 @@ describe("reorder", () => {
   });
   it("is a no-op when dragging onto itself", () => {
     expect(reorder(["1", "2", "3"], "2", "2")).toEqual(["1", "2", "3"]);
+  });
+  it("drops after the target when asked", () => {
+    expect(reorder(["1", "2", "3"], "1", "2", "after")).toEqual(["2", "1", "3"]);
+  });
+  // The whole reason `position` exists: with before-only inserts the last slot
+  // is unreachable no matter how you drag.
+  it("can reach the end of the list", () => {
+    expect(reorder(["1", "2", "3"], "1", "3", "after")).toEqual(["2", "3", "1"]);
+  });
+  it("is a no-op when the target isn't in the list", () => {
+    expect(reorder(["1", "2"], "1", "9", "after")).toEqual(["1", "2"]);
+  });
+});
+
+describe("dropPositionWithin", () => {
+  const rect = { top: 100, height: 30 } as DOMRect;
+
+  it("reads the top half as 'before'", () => {
+    expect(dropPositionWithin(rect, 101)).toBe("before");
+    expect(dropPositionWithin(rect, 114)).toBe("before");
+  });
+  it("reads the midpoint and below as 'after'", () => {
+    expect(dropPositionWithin(rect, 115)).toBe("after");
+    expect(dropPositionWithin(rect, 129)).toBe("after");
+  });
+});
+
+describe("repoPinSource", () => {
+  it("reports the repo's own pin", () => {
+    expect(repoPinSource(repo({ id: "a", pinned: true }))).toBe("repo");
+  });
+  it("reports a repo pulled in only by a pinned worktree", () => {
+    const r = repo({
+      id: "b",
+      worktrees: [wt({ id: "b1", branch: "main", pinned: true })]
+    });
+    expect(repoPinSource(r)).toBe("worktree");
+  });
+  it("prefers the repo's own pin when both are set", () => {
+    const r = repo({
+      id: "c",
+      pinned: true,
+      worktrees: [wt({ id: "c1", branch: "main", pinned: true })]
+    });
+    expect(repoPinSource(r)).toBe("repo");
+  });
+  it("reports none for an unpinned repo", () => {
+    expect(repoPinSource(repo({ id: "d" }))).toBe("none");
+  });
+});
+
+describe("hand-arranged repo order", () => {
+  // Deliberately listed out of arranged order, and `z` sorts last by name, so
+  // a passing result can only come from `order`.
+  const repos: Repo[] = [
+    repo({ id: "a", pinned: true }),
+    repo({ id: "z", pinned: true, order: 0 }),
+    repo({ id: "m", pinned: true, order: 1 })
+  ];
+
+  it("only the Pinned lens is arrangeable", () => {
+    expect(lensIsArrangeable("Pinned")).toBe(true);
+    for (const lens of ["Recent", "Behind", "Stale", "All"] as const) {
+      expect(lensIsArrangeable(lens)).toBe(false);
+    }
+  });
+
+  it("applies the arrangement in the Pinned lens", () => {
+    expect(filterReposByLens(repos, "Pinned").map((r) => r.id)).toEqual([
+      "z",
+      "m",
+      "a"
+    ]);
+  });
+
+  it("leaves unarranged repos behind the arranged ones", () => {
+    const mixed = [
+      repo({ id: "unarranged", pinned: true }),
+      repo({ id: "arranged", pinned: true, order: 5 })
+    ];
+    expect(filterReposByLens(mixed, "Pinned").map((r) => r.id)).toEqual([
+      "arranged",
+      "unarranged"
+    ]);
+  });
+
+  it("ignores the arrangement in computed lenses", () => {
+    // "All" answers a question; a manual order there would fight the answer.
+    expect(filterReposByLens(repos, "All").map((r) => r.id)).toEqual([
+      "a",
+      "z",
+      "m"
+    ]);
   });
 });
 
