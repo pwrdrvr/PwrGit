@@ -25,6 +25,7 @@ import type {
   CommitStats,
   GitHubCommitAuthorIdentityLookup,
   GraphLog,
+  GitLfsStatus,
   LaneGraph,
   PrSummary,
   Profile,
@@ -267,6 +268,11 @@ export interface Commands {
   };
   "repo:setPin": { req: { repoId: string; pinned: boolean }; res: null };
   "repo:computeState": { req: { repoId: string }; res: null };
+  /** Whether a checkout declares Git LFS rules and can apply them locally. */
+  "repo:getGitLfsStatus": {
+    req: { repoId: string; worktreeId: string };
+    res: GitLfsStatus;
+  };
 
   // GitHub PR status. Repo expansion uses the bulk cached lookup; focused
   // worktrees and deliberate hover prefetches target one branch instead.

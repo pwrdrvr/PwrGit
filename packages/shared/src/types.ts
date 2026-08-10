@@ -189,6 +189,23 @@ export type Repo = {
   worktrees: Worktree[];
 };
 
+/** Effective Git LFS readiness for one checked-out worktree. Repositories that
+ * do not declare tracked `filter=lfs` attributes skip the more expensive
+ * executable/configuration probes. */
+export type GitLfsStatus =
+  | {
+      required: false;
+    }
+  | {
+      required: true;
+      /** PwrGit's Git runtime can invoke `git lfs`. */
+      installed: boolean;
+      /** Effective repo/global Git config contains the standard LFS filters. */
+      configured: boolean;
+      /** Full `git lfs version` output when the executable was available. */
+      version?: string;
+    };
+
 /** Ways the clone dialog can hand a GitHub repository to the local machine. */
 export type CloneProtocol = "ssh" | "https" | "gh_cli";
 

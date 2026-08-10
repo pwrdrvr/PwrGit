@@ -1,7 +1,9 @@
-import { ok, type WorktreeState } from "@pwrgit/shared";
+import { err, ok, type WorktreeState } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import type { DB } from "../persistence/db";
+import type { GitExec } from "./dugite";
+import { inspectGitLfs } from "./git-lfs";
 import type { WorktreeStateService } from "./worktree-state";
 
 function stateChanged(a: WorktreeState, b: WorktreeState): boolean {
@@ -77,6 +79,7 @@ export function registerWorktreeHandlers(
   state: WorktreeStateService,
   db: DB,
   refresher: WorktreeRefresher,
+  git: GitExec,
   onActivate: (worktreeId: string) => void
 ): void {
   bus.register("worktree:getState", (req) => {
@@ -101,5 +104,19 @@ export function registerWorktreeHandlers(
   bus.register("repo:computeState", (req) => {
     refresher.refreshRepoWorktrees(req.repoId);
     return ok(null);
+  });
+
+  bus.register("repo:getGitLfsStatus", (req) => {
+    const row = db
+      .prepare("SELECT path FROM worktrees WHERE id = ? AND repo_id = ?")
+      .get(req.worktreeId, req.repoId) as { path: string } | undefined;
+    if (row === undefined) {
+      return err({
+        kind: "repo",
+        code: "not_found",
+        message: "repo or worktree not found"
+      });
+    }
+    return inspectGitLfs(git, row.path);
   });
 }
