@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -311,6 +311,215 @@ describe("remote ops (bare-remote fixture)", () => {
     if (result.ok) expect(result.value.fastForwarded).toBe(true);
     expect(existsSync(join(cloneA, "g.txt"))).toBe(true);
   });
+
+  it("restores the original checkout before reapplying work after a partial merge failure", async () => {
+    const { local, remote } = makeDivergedFixture();
+    writeFileSync(join(remote, "base.txt"), "upstream version\n");
+    writeFileSync(join(remote, "upstream.txt"), "added upstream\n");
+    git(remote, ["add", "."]);
+    git(remote, ["commit", "-m", "advance upstream"]);
+    git(remote, ["push"]);
+
+    const originalHead = gitOut(local, ["rev-parse", "HEAD"]);
+    writeFileSync(join(local, "base.txt"), "staged work\n");
+    git(local, ["add", "base.txt"]);
+    writeFileSync(join(local, "base.txt"), "staged work\nunstaged work\n");
+    writeFileSync(join(local, "untracked.txt"), "keep me\n");
+    const originalStatus = gitOut(local, ["status", "--porcelain"]);
+    const originalStagedDiff = gitOut(local, ["diff", "--cached"]);
+    const originalUnstagedDiff = gitOut(local, ["diff"]);
+    let sawPartialMutation = false;
+    let restoredBeforePop = false;
+    let reappliedWithIndex = false;
+
+    const failAfterPartialCheckout: GitExec = async (args, cwd, options) => {
+      if (args[0] === "merge") {
+        git(cwd, ["checkout", "origin/main", "--", "base.txt", "upstream.txt"]);
+        sawPartialMutation =
+          readFileSync(join(cwd, "base.txt"), "utf8") === "upstream version\n" &&
+          existsSync(join(cwd, "upstream.txt")) &&
+          gitOut(cwd, ["diff", "--cached", "--name-only"]) !== "";
+        return ok({
+          stdout: "",
+          stderr: "simulated merge checkout failure",
+          exitCode: 128
+        });
+      }
+      if (args[0] === "stash" && args[1] === "pop") {
+        reappliedWithIndex = args.includes("--index");
+        restoredBeforePop =
+          gitOut(cwd, ["rev-parse", "HEAD"]) === originalHead &&
+          gitOut(cwd, ["status", "--porcelain"]) === "" &&
+          readFileSync(join(cwd, "base.txt"), "utf8") === "base.txt\n" &&
+          !existsSync(join(cwd, "upstream.txt"));
+      }
+      return systemGit(args, cwd, options);
+    };
+
+    const result = await pullFastForward(failAfterPartialCheckout, local);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("merge_failed");
+    expect(sawPartialMutation).toBe(true);
+    expect(restoredBeforePop).toBe(true);
+    expect(reappliedWithIndex).toBe(true);
+    expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(originalHead);
+    expect(readFileSync(join(local, "base.txt"), "utf8")).toBe(
+      "staged work\nunstaged work\n"
+    );
+    expect(readFileSync(join(local, "untracked.txt"), "utf8")).toBe("keep me\n");
+    expect(existsSync(join(local, "upstream.txt"))).toBe(false);
+    expect(gitOut(local, ["status", "--porcelain"])).toBe(originalStatus);
+    expect(gitOut(local, ["diff", "--cached"])).toBe(originalStagedDiff);
+    expect(gitOut(local, ["diff"])).toBe(originalUnstagedDiff);
+    expect(gitOut(local, ["stash", "list"])).toBe("");
+  }, 15_000);
+
+  it("preserves staged and unstaged state when reapplying work after a successful pull", async () => {
+    const { local, remote } = makeDivergedFixture();
+    commit(remote, "upstream.txt", "advance upstream");
+    git(remote, ["push"]);
+
+    writeFileSync(join(local, "base.txt"), "staged work\n");
+    git(local, ["add", "base.txt"]);
+    writeFileSync(join(local, "base.txt"), "staged work\nunstaged work\n");
+    writeFileSync(join(local, "untracked.txt"), "keep me\n");
+    const originalStatus = gitOut(local, ["status", "--porcelain"]);
+    const originalStagedDiff = gitOut(local, ["diff", "--cached"]);
+    const originalUnstagedDiff = gitOut(local, ["diff"]);
+
+    const result = await pullFastForward(systemGit, local);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toEqual({
+        fastForwarded: true,
+        stashed: true,
+        reappliedWithConflicts: false
+      });
+    }
+    expect(existsSync(join(local, "upstream.txt"))).toBe(true);
+    expect(gitOut(local, ["status", "--porcelain"])).toBe(originalStatus);
+    expect(gitOut(local, ["diff", "--cached"])).toBe(originalStagedDiff);
+    expect(gitOut(local, ["diff"])).toBe(originalUnstagedDiff);
+    expect(readFileSync(join(local, "untracked.txt"), "utf8")).toBe("keep me\n");
+    expect(gitOut(local, ["stash", "list"])).toBe("");
+  }, 15_000);
+
+  it("keeps a conflicting indexed stash recoverable after a successful pull", async () => {
+    const { local, remote } = makeDivergedFixture();
+    writeFileSync(join(remote, "base.txt"), "upstream work\n");
+    git(remote, ["add", "base.txt"]);
+    git(remote, ["commit", "-m", "change base upstream"]);
+    git(remote, ["push"]);
+
+    writeFileSync(join(local, "base.txt"), "local staged work\n");
+    git(local, ["add", "base.txt"]);
+
+    const result = await pullFastForward(systemGit, local);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toEqual({
+        fastForwarded: true,
+        stashed: true,
+        reappliedWithConflicts: true
+      });
+    }
+    expect(gitOut(local, ["status", "--porcelain"])).toContain("UU base.txt");
+    expect(readFileSync(join(local, "base.txt"), "utf8")).toContain("<<<<<<<");
+    expect(gitOut(local, ["stash", "list"])).toContain(
+      "pwrgit: auto-stash before pull"
+    );
+  }, 15_000);
+
+  it("stops without merging or losing work when auto-stash exits nonzero", async () => {
+    const { local } = makeDivergedFixture();
+    const originalHead = gitOut(local, ["rev-parse", "HEAD"]);
+    writeFileSync(join(local, "base.txt"), "local work\n");
+    let mergeCalled = false;
+
+    const failingStashGit: GitExec = async (args, cwd, options) => {
+      if (args[0] === "stash" && args[1] === "push") {
+        return ok({ stdout: "", stderr: "simulated stash failure", exitCode: 1 });
+      }
+      if (args[0] === "merge") mergeCalled = true;
+      return systemGit(args, cwd, options);
+    };
+
+    const result = await pullFastForward(failingStashGit, local);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("exit_1");
+    expect(mergeCalled).toBe(false);
+    expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(originalHead);
+    expect(readFileSync(join(local, "base.txt"), "utf8")).toBe("local work\n");
+    expect(gitOut(local, ["stash", "list"])).toBe("");
+  }, 15_000);
+
+  it("stops before stashing or merging when status exits nonzero", async () => {
+    const { local } = makeDivergedFixture();
+    let stashOrMergeCalled = false;
+    const failingStatusGit: GitExec = async (args, cwd, options) => {
+      if (args[0] === "status") {
+        return ok({ stdout: "", stderr: "simulated status failure", exitCode: 128 });
+      }
+      if (args[0] === "stash" || args[0] === "merge") stashOrMergeCalled = true;
+      return systemGit(args, cwd, options);
+    };
+
+    const result = await pullFastForward(failingStatusGit, local);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("exit_128");
+    expect(stashOrMergeCalled).toBe(false);
+  }, 15_000);
+
+  it("keeps the stash and reports when failed-pull rollback cannot complete", async () => {
+    const { local } = makeDivergedFixture();
+    writeFileSync(join(local, "base.txt"), "local work\n");
+    let popCalled = false;
+    const failingRollbackGit: GitExec = async (args, cwd, options) => {
+      if (args[0] === "merge") {
+        return ok({ stdout: "", stderr: "merge failed", exitCode: 128 });
+      }
+      if (args[0] === "reset") {
+        return ok({ stdout: "", stderr: "reset failed", exitCode: 128 });
+      }
+      if (args[0] === "stash" && args[1] === "pop") popCalled = true;
+      return systemGit(args, cwd, options);
+    };
+
+    const result = await pullFastForward(failingRollbackGit, local);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("pull_rollback_failed");
+      expect(result.error.message).toContain("local changes remain in the stash");
+    }
+    expect(popCalled).toBe(false);
+    expect(gitOut(local, ["stash", "list"])).toContain(
+      "pwrgit: auto-stash before pull"
+    );
+  }, 15_000);
+
+  it("reports a failed stash reapply instead of hiding the cleanup failure", async () => {
+    const { local } = makeDivergedFixture();
+    const originalHead = gitOut(local, ["rev-parse", "HEAD"]);
+    writeFileSync(join(local, "base.txt"), "local work\n");
+    const failingPopGit: GitExec = async (args, cwd, options) => {
+      if (args[0] === "merge") {
+        return ok({ stdout: "", stderr: "merge failed", exitCode: 128 });
+      }
+      if (args[0] === "stash" && args[1] === "pop") {
+        return ok({ stdout: "", stderr: "stash pop failed", exitCode: 1 });
+      }
+      return systemGit(args, cwd, options);
+    };
+
+    const result = await pullFastForward(failingPopGit, local);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("stash_reapply_failed");
+    expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(originalHead);
+    expect(gitOut(local, ["status", "--porcelain"])).toBe("");
+    expect(gitOut(local, ["stash", "list"])).toContain(
+      "pwrgit: auto-stash before pull"
+    );
+  }, 15_000);
 
   it("fetch succeeds when already up to date", async () => {
     const result = await fetchRemote(systemGit, cloneA);
