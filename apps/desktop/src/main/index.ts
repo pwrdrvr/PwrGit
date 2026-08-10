@@ -325,7 +325,7 @@ if (!gotSingleInstanceLock) {
     });
     registerRepoHandlers(bus, indexer, profiles);
     registerCloneHandlers(bus, cloneService);
-    registerWorktreeHandlers(bus, stateService, db, refresher, (id) => {
+    registerWorktreeHandlers(bus, stateService, db, refresher, execGit, (id) => {
       activeWorktreeId = id;
     });
     registerWorktreeLifecycleHandlers(bus, db, indexer, settings, stateService);
