@@ -1227,15 +1227,25 @@ export async function pullFastForward(
   git: GitExec,
   cwd: string
 ): Promise<Result<PullOutcome>> {
-  const originalHeadRaw = await git(["rev-parse", "--verify", "HEAD"], cwd);
+  const originalHeadArgs = ["rev-parse", "--verify", "HEAD"];
+  const originalHeadRaw = await git(originalHeadArgs, cwd);
   if (!originalHeadRaw.ok) return originalHeadRaw;
-  const originalHead = requireExit0(originalHeadRaw.value, [
-    "rev-parse",
-    "--verify",
-    "HEAD"
-  ]);
-  if (!originalHead.ok) return originalHead;
-  const originalHeadOid = originalHead.value.stdout.trim();
+  const originalHead = requireExit0(originalHeadRaw.value, originalHeadArgs);
+  let originalHeadOid: string | undefined;
+  if (originalHead.ok) {
+    originalHeadOid = originalHead.value.stdout.trim();
+  } else {
+    // A symbolic HEAD with no commit is a valid tracked unborn branch. Other
+    // rev-parse failures still abort before pull mutates the checkout.
+    const symbolicHeadRaw = await git(["symbolic-ref", "--quiet", "HEAD"], cwd);
+    if (!symbolicHeadRaw.ok) return symbolicHeadRaw;
+    const symbolicHead = requireExit0(symbolicHeadRaw.value, [
+      "symbolic-ref",
+      "--quiet",
+      "HEAD"
+    ]);
+    if (!symbolicHead.ok) return originalHead;
+  }
 
   const fetched = await fetchRemote(git, cwd);
   if (!fetched.ok) return fetched;
@@ -1263,19 +1273,36 @@ export async function pullFastForward(
   }
 
   const rollbackFailedMerge = async (): Promise<Result<void>> => {
-    const rollbackRaw = await git(["reset", "--hard", originalHeadOid], cwd);
-    if (!rollbackRaw.ok || rollbackRaw.value.exitCode !== 0) {
-      const detail = rollbackRaw.ok
-        ? `${rollbackRaw.value.stderr}\n${rollbackRaw.value.stdout}`.trim()
-        : rollbackRaw.error.message;
+    const rollbackStep = async (args: string[]): Promise<Result<void>> => {
+      const raw = await git(args, cwd);
+      if (raw.ok && raw.value.exitCode === 0) return ok(undefined);
+      const detail = raw.ok
+        ? `${raw.value.stderr}\n${raw.value.stdout}`.trim()
+        : raw.error.message;
       return err({
         kind: "remote",
         code: "pull_rollback_failed",
         message: `Pull failed, and PwrGit could not restore the original checkout.${
           stashed ? " Your local changes remain in the stash." : ""
-        }${detail !== "" ? ` ${detail}` : ""}`,
-        cause: rollbackRaw.ok ? rollbackRaw.value : rollbackRaw.error
+        }${detail !== "" ? ` ${detail}` : ` git ${args.join(" ")} failed.`}`,
+        cause: raw.ok ? raw.value : raw.error
       });
+    };
+
+    if (originalHeadOid !== undefined) {
+      const reset = await rollbackStep(["reset", "--hard", originalHeadOid]);
+      if (!reset.ok) return reset;
+    } else {
+      // Restore an unborn checkout even if the failed merge created its branch
+      // ref or partially populated the index/worktree.
+      for (const args of [
+        ["update-ref", "-d", "HEAD"],
+        ["read-tree", "--empty"],
+        ["clean", "-fd"]
+      ]) {
+        const step = await rollbackStep(args);
+        if (!step.ok) return step;
+      }
     }
 
     if (!stashed) return ok(undefined);

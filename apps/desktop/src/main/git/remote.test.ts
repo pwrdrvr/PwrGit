@@ -80,6 +80,25 @@ function makeDivergedFixture(): { local: string; remote: string } {
   return { local, remote };
 }
 
+function makeUnbornTrackedFixture(): { local: string; upstreamHead: string } {
+  const root = mkdtempSync(join(tmpdir(), "pwrgit-unborn-"));
+  git(root, ["init", "--bare", "-b", "main", "origin.git"]);
+
+  const remote = join(root, "remote");
+  git(root, ["clone", "origin.git", "remote"]);
+  configure(remote, "remote");
+  commit(remote, "base.txt", "base");
+  git(remote, ["push", "-u", "origin", "main"]);
+
+  const local = join(root, "local");
+  git(root, ["init", "-b", "main", "local"]);
+  configure(local, "local");
+  git(local, ["remote", "add", "origin", join(root, "origin.git")]);
+  git(local, ["config", "branch.main.remote", "origin"]);
+  git(local, ["config", "branch.main.merge", "refs/heads/main"]);
+  return { local, upstreamHead: gitOut(remote, ["rev-parse", "HEAD"]) };
+}
+
 let cloneA: string;
 let cloneB: string;
 
@@ -314,6 +333,60 @@ describe("remote ops (bare-remote fixture)", () => {
     if (result.ok) expect(result.value.fastForwarded).toBe(true);
     expect(existsSync(join(cloneA, "g.txt"))).toBe(true);
   });
+
+  it("pulls a tracked unborn branch", async () => {
+    const { local, upstreamHead } = makeUnbornTrackedFixture();
+    expect(() =>
+      execFileSync("git", ["rev-parse", "--verify", "HEAD"], {
+        cwd: local,
+        stdio: "ignore"
+      })
+    ).toThrow();
+
+    const result = await pullFastForward(systemGit, local);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toEqual({
+        fastForwarded: true,
+        stashed: false,
+        reappliedWithConflicts: false
+      });
+    }
+    expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(upstreamHead);
+    expect(fileText(local, "base.txt")).toBe("base.txt\n");
+  }, 15_000);
+
+  it("restores an unborn checkout after a partial merge failure", async () => {
+    const { local } = makeUnbornTrackedFixture();
+    let sawPartialMutation = false;
+    const failAfterPartialCheckout: GitExec = async (args, cwd, options) => {
+      if (args[0] === "merge") {
+        git(cwd, ["checkout", "origin/main", "--", "base.txt"]);
+        sawPartialMutation =
+          existsSync(join(cwd, "base.txt")) &&
+          gitOut(cwd, ["diff", "--cached", "--name-only"]) === "base.txt";
+        return ok({
+          stdout: "",
+          stderr: "simulated merge checkout failure",
+          exitCode: 128
+        });
+      }
+      return systemGit(args, cwd, options);
+    };
+
+    const result = await pullFastForward(failAfterPartialCheckout, local);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("merge_failed");
+    expect(sawPartialMutation).toBe(true);
+    expect(() =>
+      execFileSync("git", ["rev-parse", "--verify", "HEAD"], {
+        cwd: local,
+        stdio: "ignore"
+      })
+    ).toThrow();
+    expect(gitOut(local, ["status", "--porcelain"])).toBe("");
+    expect(existsSync(join(local, "base.txt"))).toBe(false);
+  }, 15_000);
 
   it("restores the original checkout before reapplying work after a partial merge failure", async () => {
     const { local, remote } = makeDivergedFixture();
