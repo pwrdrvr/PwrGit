@@ -41,6 +41,9 @@ function git(dir: string, args: string[]): void {
 function gitOut(dir: string, args: string[]): string {
   return execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
 }
+function fileText(dir: string, file: string): string {
+  return readFileSync(join(dir, file), "utf8").replaceAll("\r\n", "\n");
+}
 function configure(dir: string, name: string): void {
   git(dir, ["config", "user.email", `${name}@t.com`]);
   git(dir, ["config", "user.name", name]);
@@ -336,7 +339,7 @@ describe("remote ops (bare-remote fixture)", () => {
       if (args[0] === "merge") {
         git(cwd, ["checkout", "origin/main", "--", "base.txt", "upstream.txt"]);
         sawPartialMutation =
-          readFileSync(join(cwd, "base.txt"), "utf8") === "upstream version\n" &&
+          fileText(cwd, "base.txt") === "upstream version\n" &&
           existsSync(join(cwd, "upstream.txt")) &&
           gitOut(cwd, ["diff", "--cached", "--name-only"]) !== "";
         return ok({
@@ -350,7 +353,7 @@ describe("remote ops (bare-remote fixture)", () => {
         restoredBeforePop =
           gitOut(cwd, ["rev-parse", "HEAD"]) === originalHead &&
           gitOut(cwd, ["status", "--porcelain"]) === "" &&
-          readFileSync(join(cwd, "base.txt"), "utf8") === "base.txt\n" &&
+          fileText(cwd, "base.txt") === "base.txt\n" &&
           !existsSync(join(cwd, "upstream.txt"));
       }
       return systemGit(args, cwd, options);
@@ -363,10 +366,10 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(restoredBeforePop).toBe(true);
     expect(reappliedWithIndex).toBe(true);
     expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(originalHead);
-    expect(readFileSync(join(local, "base.txt"), "utf8")).toBe(
+    expect(fileText(local, "base.txt")).toBe(
       "staged work\nunstaged work\n"
     );
-    expect(readFileSync(join(local, "untracked.txt"), "utf8")).toBe("keep me\n");
+    expect(fileText(local, "untracked.txt")).toBe("keep me\n");
     expect(existsSync(join(local, "upstream.txt"))).toBe(false);
     expect(gitOut(local, ["status", "--porcelain"])).toBe(originalStatus);
     expect(gitOut(local, ["diff", "--cached"])).toBe(originalStagedDiff);
@@ -400,7 +403,7 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(gitOut(local, ["status", "--porcelain"])).toBe(originalStatus);
     expect(gitOut(local, ["diff", "--cached"])).toBe(originalStagedDiff);
     expect(gitOut(local, ["diff"])).toBe(originalUnstagedDiff);
-    expect(readFileSync(join(local, "untracked.txt"), "utf8")).toBe("keep me\n");
+    expect(fileText(local, "untracked.txt")).toBe("keep me\n");
     expect(gitOut(local, ["stash", "list"])).toBe("");
   }, 15_000);
 
@@ -424,7 +427,7 @@ describe("remote ops (bare-remote fixture)", () => {
       });
     }
     expect(gitOut(local, ["status", "--porcelain"])).toContain("UU base.txt");
-    expect(readFileSync(join(local, "base.txt"), "utf8")).toContain("<<<<<<<");
+    expect(fileText(local, "base.txt")).toContain("<<<<<<<");
     expect(gitOut(local, ["stash", "list"])).toContain(
       "pwrgit: auto-stash before pull"
     );
@@ -449,7 +452,7 @@ describe("remote ops (bare-remote fixture)", () => {
     if (!result.ok) expect(result.error.code).toBe("exit_1");
     expect(mergeCalled).toBe(false);
     expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(originalHead);
-    expect(readFileSync(join(local, "base.txt"), "utf8")).toBe("local work\n");
+    expect(fileText(local, "base.txt")).toBe("local work\n");
     expect(gitOut(local, ["stash", "list"])).toBe("");
   }, 15_000);
 
