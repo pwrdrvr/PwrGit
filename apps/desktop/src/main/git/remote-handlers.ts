@@ -36,12 +36,19 @@ export function registerRemoteHandlers(
   db: DB,
   refresher: WorktreeRefresher
 ): void {
-  const pathOf = (worktreeId: string): string | null =>
+  const worktreeOf = (
+    worktreeId: string
+  ): { path: string; repoId: string } | null =>
     (
-      db.prepare("SELECT path FROM worktrees WHERE id = ?").get(worktreeId) as
-        | { path: string }
+      db
+        .prepare("SELECT path, repo_id AS repoId FROM worktrees WHERE id = ?")
+        .get(worktreeId) as
+        | { path: string; repoId: string }
         | undefined
-    )?.path ?? null;
+    ) ?? null;
+
+  const pathOf = (worktreeId: string): string | null =>
+    worktreeOf(worktreeId)?.path ?? null;
 
   const repoOf = (repoId: string): { path: string } | null => {
     const row = db
@@ -197,19 +204,20 @@ export function registerRemoteHandlers(
   });
 
   bus.register("remote:resetToRemote", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
+    const worktree = worktreeOf(req.worktreeId);
+    if (worktree === null) return err(notFound);
     const startedAt = Date.now();
-    const result = await resetToRemote(execGit, path, req, req.mode);
+    const result = await resetToRemote(execGit, worktree.path, req, req.mode);
     // A failed hard reset can still have touched the checkout before a file
-    // operation failed. Recompute once for both outcomes so the UI never
-    // continues showing the reviewed pre-reset snapshot.
-    refresher.refreshWorktree(req.worktreeId);
+    // operation failed. The moved branch may also be the repository default,
+    // which changes every sibling's derived staleness/merge relationships.
+    // Recompute the repository once for both outcomes.
+    refresher.refreshRepoWorktrees(worktree.repoId);
     if (!result.ok) return result;
     logMain(
       "info",
       "remote",
-      `${req.mode}-reset ${path} (${req.branch}) to ${req.remoteRef} at ${req.remoteHead} (${seconds(startedAt)})`
+      `${req.mode}-reset ${worktree.path} (${req.branch}) to ${req.remoteRef} at ${req.remoteHead} (${seconds(startedAt)})`
     );
     return ok(null);
   });

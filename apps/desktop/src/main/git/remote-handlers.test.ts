@@ -75,9 +75,11 @@ describe("remote handlers", () => {
     expect(refresher.refreshRepoWorktrees).toHaveBeenCalledTimes(3);
   });
 
-  it("inspects without refreshing and refreshes exactly once after reset", async () => {
+  it("inspects without refreshing and refreshes every repo worktree once after reset", async () => {
     const db = {
-      prepare: vi.fn(() => ({ get: vi.fn(() => ({ path: "/repos/project" })) }))
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" }))
+      }))
     } as unknown as DB;
     const refresher = {
       refreshWorktree: vi.fn(),
@@ -103,6 +105,7 @@ describe("remote handlers", () => {
       snapshot.remoteRef
     );
     expect(refresher.refreshWorktree).not.toHaveBeenCalled();
+    expect(refresher.refreshRepoWorktrees).not.toHaveBeenCalled();
 
     const reset = await bus.dispatch("remote:resetToRemote", {
       worktreeId: "worktree-1",
@@ -116,9 +119,9 @@ describe("remote handlers", () => {
       expect.objectContaining({ mode: "hard", ...snapshot }),
       "hard"
     );
-    expect(refresher.refreshWorktree).toHaveBeenCalledOnce();
-    expect(refresher.refreshWorktree).toHaveBeenCalledWith("worktree-1");
-    expect(refresher.refreshRepoWorktrees).not.toHaveBeenCalled();
+    expect(refresher.refreshWorktree).not.toHaveBeenCalled();
+    expect(refresher.refreshRepoWorktrees).toHaveBeenCalledOnce();
+    expect(refresher.refreshRepoWorktrees).toHaveBeenCalledWith("repo-1");
 
     vi.mocked(resetToRemote).mockResolvedValueOnce(
       err({
@@ -127,13 +130,15 @@ describe("remote handlers", () => {
         message: "reset stopped after changing checkout state"
       })
     );
-    refresher.refreshWorktree.mockClear();
+    refresher.refreshRepoWorktrees.mockClear();
     const failed = await bus.dispatch("remote:resetToRemote", {
       worktreeId: "worktree-1",
       mode: "hard",
       ...snapshot
     });
     expect(failed.ok).toBe(false);
-    expect(refresher.refreshWorktree).toHaveBeenCalledOnce();
+    expect(refresher.refreshWorktree).not.toHaveBeenCalled();
+    expect(refresher.refreshRepoWorktrees).toHaveBeenCalledOnce();
+    expect(refresher.refreshRepoWorktrees).toHaveBeenCalledWith("repo-1");
   });
 });
