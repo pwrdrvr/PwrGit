@@ -10,6 +10,7 @@ import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast } from "../../lib/toast";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
 import { PullDivergenceDialog } from "./PullDivergenceDialog";
+import { ResetToRemoteDialog } from "./ResetToRemoteDialog";
 
 type Chip = { text: string; tone: "muted" | "ok" | "warn" };
 
@@ -37,6 +38,7 @@ export function WorktreeHeader({
   const [busy, setBusy] = useState<Busy>(null);
   const [divergence, setDivergence] = useState<RemoteDivergence | null>(null);
   const [recoveryBusy, setRecoveryBusy] = useState<RecoveryBusy>(null);
+  const [resetToRemoteOpen, setResetToRemoteOpen] = useState(false);
   const [flash, setFlash] = useState<Chip | null>(null);
   const activeWorktreeId = useRef(worktree.id);
   const recoveryInFlight = useRef<string | null>(null);
@@ -51,6 +53,7 @@ export function WorktreeHeader({
     setBusy(null);
     setDivergence(null);
     setRecoveryBusy(null);
+    setResetToRemoteOpen(false);
   }, [worktree.id]);
 
   const showFlash = (chip: Chip, ms: number): void => {
@@ -264,7 +267,10 @@ export function WorktreeHeader({
             </span>
           </button>
         </div>
-        <WorktreeMenu worktree={worktree} />
+        <WorktreeMenu
+          worktree={worktree}
+          onResetToRemote={() => setResetToRemoteOpen(true)}
+        />
       </div>
       {divergence !== null && (
         <PullDivergenceDialog
@@ -273,6 +279,21 @@ export function WorktreeHeader({
           onClose={() => setDivergence(null)}
           onRebase={() => void recover("rebase")}
           onReset={() => void recover("reset")}
+        />
+      )}
+      {resetToRemoteOpen && (
+        <ResetToRemoteDialog
+          worktree={worktree}
+          onClose={() => setResetToRemoteOpen(false)}
+          onComplete={(mode, remoteBranch) =>
+            showFlash(
+              {
+                text: `${mode} reset to ${remoteBranch}`,
+                tone: mode === "hard" ? "warn" : "ok"
+              },
+              2600
+            )
+          }
         />
       )}
     </div>

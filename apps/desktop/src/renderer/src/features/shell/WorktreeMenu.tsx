@@ -11,16 +11,18 @@ import { revealLabel, revealPath } from "./reveal";
 
 /**
  * A "⋯" actions menu for a worktree: copy branch/path, reveal in the OS file
- * manager, and (when the caller allows it) remove the worktree. The dropdown
- * is portalled to <body> so the sidebar's scroll container can't clip it.
+ * manager, and caller-provided reset/removal actions. The dropdown is portalled
+ * to <body> so the sidebar's scroll container can't clip it.
  */
 export function WorktreeMenu({
   worktree,
   className,
+  onResetToRemote,
   onRemove
 }: {
   worktree: Worktree;
   className?: string;
+  onResetToRemote?: () => void;
   onRemove?: () => void;
 }) {
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -115,6 +117,18 @@ export function WorktreeMenu({
             >
               {revealLabel}
             </button>
+            {onResetToRemote !== undefined && (
+              <>
+                <div className="pop-menu__sep" />
+                <button
+                  className="pop-menu__item"
+                  role="menuitem"
+                  onClick={(e) => pick(e, onResetToRemote)}
+                >
+                  Reset to remote branch…
+                </button>
+              </>
+            )}
             {onRemove !== undefined && (
               <>
                 <div className="pop-menu__sep" />

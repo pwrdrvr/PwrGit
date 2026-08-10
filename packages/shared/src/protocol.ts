@@ -34,6 +34,8 @@ import type {
   RebaseOperation,
   RebasePlan,
   RemoteDivergence,
+  RemoteResetMode,
+  RemoteResetSnapshot,
   Repo,
   RepoRefs,
   RepoSearchHit,
@@ -453,6 +455,19 @@ export interface Commands {
       branch: string;
       head: string;
       upstreamHead: string;
+    };
+    res: null;
+  };
+  /** Resolve a checked-out local branch and one fetched remote ref for review. */
+  "remote:inspectReset": {
+    req: { worktreeId: string; remoteRef: string };
+    res: RemoteResetSnapshot;
+  };
+  /** Reset only the still-current checkout/ref pair from the reviewed snapshot. */
+  "remote:resetToRemote": {
+    req: RemoteResetSnapshot & {
+      worktreeId: string;
+      mode: RemoteResetMode;
     };
     res: null;
   };

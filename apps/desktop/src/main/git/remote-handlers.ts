@@ -9,12 +9,14 @@ import {
   fetchNamedRemote,
   fetchRemote,
   inspectRemoteDivergence,
+  inspectRemoteReset,
   pullFastForward,
   planPushRefs,
   pushPlannedRefs,
   pushRemote,
   rebaseOntoUpstream,
   removeRemote,
+  resetToRemote,
   resetToUpstream,
   updateRemote
 } from "./git-service";
@@ -185,6 +187,30 @@ export function registerRemoteHandlers(
     if (!result.ok) return result;
     logMain("info", "remote", `reset ${path} to upstream (${seconds(startedAt)})`);
     refresher.refreshWorktree(req.worktreeId);
+    return ok(null);
+  });
+
+  bus.register("remote:inspectReset", async (req) => {
+    const path = pathOf(req.worktreeId);
+    if (path === null) return err(notFound);
+    return inspectRemoteReset(execGit, path, req.remoteRef);
+  });
+
+  bus.register("remote:resetToRemote", async (req) => {
+    const path = pathOf(req.worktreeId);
+    if (path === null) return err(notFound);
+    const startedAt = Date.now();
+    const result = await resetToRemote(execGit, path, req, req.mode);
+    // A failed hard reset can still have touched the checkout before a file
+    // operation failed. Recompute once for both outcomes so the UI never
+    // continues showing the reviewed pre-reset snapshot.
+    refresher.refreshWorktree(req.worktreeId);
+    if (!result.ok) return result;
+    logMain(
+      "info",
+      "remote",
+      `${req.mode}-reset ${path} (${req.branch}) to ${req.remoteRef} at ${req.remoteHead} (${seconds(startedAt)})`
+    );
     return ok(null);
   });
 
