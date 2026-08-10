@@ -283,6 +283,7 @@ export function WorktreeHeader({
       )}
       {resetToRemoteOpen && (
         <ResetToRemoteDialog
+          key={worktree.id}
           worktree={worktree}
           onClose={() => setResetToRemoteOpen(false)}
           onComplete={(mode, remoteBranch) =>

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ok } from "@pwrgit/shared";
+import { err, ok } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import type { DB } from "../persistence/db";
 import {
@@ -119,5 +119,21 @@ describe("remote handlers", () => {
     expect(refresher.refreshWorktree).toHaveBeenCalledOnce();
     expect(refresher.refreshWorktree).toHaveBeenCalledWith("worktree-1");
     expect(refresher.refreshRepoWorktrees).not.toHaveBeenCalled();
+
+    vi.mocked(resetToRemote).mockResolvedValueOnce(
+      err({
+        kind: "remote",
+        code: "reset_failed",
+        message: "reset stopped after changing checkout state"
+      })
+    );
+    refresher.refreshWorktree.mockClear();
+    const failed = await bus.dispatch("remote:resetToRemote", {
+      worktreeId: "worktree-1",
+      mode: "hard",
+      ...snapshot
+    });
+    expect(failed.ok).toBe(false);
+    expect(refresher.refreshWorktree).toHaveBeenCalledOnce();
   });
 });
