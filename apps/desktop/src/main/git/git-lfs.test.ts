@@ -12,7 +12,7 @@ function output(
 }
 
 function probingGit(options: {
-  attributes: string;
+  indexedAttributes: string;
   version?: GitOutput;
   config?: GitOutput;
 }): GitExec {
@@ -21,7 +21,7 @@ function probingGit(options: {
       case "ls-files":
         return output(".gitattributes\0");
       case "show":
-        return output(options.attributes);
+        return output(options.indexedAttributes);
       case "lfs":
         return ok(
           options.version ?? {
@@ -65,20 +65,28 @@ describe("Git LFS attributes", () => {
 
 describe("inspectGitLfs", () => {
   it("stops after tracked attributes when the checkout does not require LFS", async () => {
-    const git = probingGit({ attributes: "* text=auto\n" });
+    const git = probingGit({ indexedAttributes: "* text=auto\n" });
 
-    await expect(inspectGitLfs(git, "/repo")).resolves.toEqual(
+    await expect(
+      inspectGitLfs(git, "/repo", async () => "* text=auto\n")
+    ).resolves.toEqual(
       ok({ required: false })
     );
-    expect(git).toHaveBeenCalledTimes(2);
+    expect(git).toHaveBeenCalledTimes(1);
   });
 
   it("reports the available version and configured filters", async () => {
     const git = probingGit({
-      attributes: "*.psd filter=lfs diff=lfs merge=lfs -text\n"
+      indexedAttributes: "*.psd filter=lfs diff=lfs merge=lfs -text\n"
     });
 
-    await expect(inspectGitLfs(git, "/repo")).resolves.toEqual(
+    await expect(
+      inspectGitLfs(
+        git,
+        "/repo",
+        async () => "*.psd filter=lfs diff=lfs merge=lfs -text\n"
+      )
+    ).resolves.toEqual(
       ok({
         required: true,
         installed: true,
@@ -90,7 +98,7 @@ describe("inspectGitLfs", () => {
 
   it("distinguishes a missing executable from missing filter configuration", async () => {
     const git = probingGit({
-      attributes: "*.bin filter=lfs -text\n",
+      indexedAttributes: "*.bin filter=lfs -text\n",
       version: {
         stdout: "",
         stderr: "git: 'lfs' is not a git command",
@@ -99,8 +107,62 @@ describe("inspectGitLfs", () => {
       config: { stdout: "", stderr: "", exitCode: 1 }
     });
 
-    await expect(inspectGitLfs(git, "/repo")).resolves.toEqual(
+    await expect(
+      inspectGitLfs(git, "/repo", async () => "*.bin filter=lfs -text\n")
+    ).resolves.toEqual(
       ok({ required: true, installed: false, configured: false })
+    );
+  });
+
+  it("uses unstaged working-tree attributes instead of the index", async () => {
+    const added = probingGit({ indexedAttributes: "* text=auto\n" });
+    await expect(
+      inspectGitLfs(
+        added,
+        "/repo",
+        async () => "*.asset filter=lfs diff=lfs -text\n"
+      )
+    ).resolves.toEqual(
+      ok({
+        required: true,
+        installed: true,
+        configured: true,
+        version: "git-lfs/3.7.1 (GitHub; darwin arm64)"
+      })
+    );
+    expect(added).not.toHaveBeenCalledWith(
+      ["show", ":./.gitattributes"],
+      "/repo"
+    );
+
+    const removed = probingGit({
+      indexedAttributes: "*.asset filter=lfs diff=lfs -text\n"
+    });
+    await expect(
+      inspectGitLfs(removed, "/repo", async () => "* text=auto\n")
+    ).resolves.toEqual(ok({ required: false }));
+    expect(removed).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to indexed attributes when the worktree file is missing", async () => {
+    const git = probingGit({
+      indexedAttributes: "*.asset filter=lfs diff=lfs -text\n"
+    });
+    const missing = Object.assign(new Error("missing"), { code: "ENOENT" });
+
+    await expect(
+      inspectGitLfs(git, "/repo", async () => Promise.reject(missing))
+    ).resolves.toEqual(
+      ok({
+        required: true,
+        installed: true,
+        configured: true,
+        version: "git-lfs/3.7.1 (GitHub; darwin arm64)"
+      })
+    );
+    expect(git).toHaveBeenCalledWith(
+      ["show", ":./.gitattributes"],
+      "/repo"
     );
   });
 });

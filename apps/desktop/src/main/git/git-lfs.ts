@@ -1,4 +1,6 @@
-import { ok, type GitLfsStatus, type Result } from "@pwrgit/shared";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { err, ok, type GitLfsStatus, type Result } from "@pwrgit/shared";
 import { requireExit0, type GitExec } from "./dugite";
 
 const LFS_ATTRIBUTE = /(?:^|\s)filter=lfs(?:\s|$)/;
@@ -34,15 +36,66 @@ function lfsFiltersConfigured(stdout: string): boolean {
   );
 }
 
-/** Inspect tracked attributes first, then probe LFS only when this checkout
+type ReadTextFile = (path: string, encoding: "utf8") => Promise<string>;
+
+function isMissingFile(cause: unknown): boolean {
+  return (
+    cause !== null &&
+    typeof cause === "object" &&
+    "code" in cause &&
+    cause.code === "ENOENT"
+  );
+}
+
+/** Git consults the worktree copy first, but falls back to the index when an
+ * attributes file is absent (including sparse checkouts). Mirror that exact
+ * precedence so unstaged edits affect the status without breaking fallback. */
+async function readAttributes(
+  git: GitExec,
+  cwd: string,
+  path: string,
+  readTextFile: ReadTextFile
+): Promise<Result<string>> {
+  try {
+    return ok(await readTextFile(join(cwd, path), "utf8"));
+  } catch (cause) {
+    if (!isMissingFile(cause)) {
+      return err({
+        kind: "repo",
+        code: "attributes_unreadable",
+        message:
+          `Couldn't read ${path}: ` +
+          (cause instanceof Error ? cause.message : String(cause)),
+        cause
+      });
+    }
+  }
+
+  const shown = await git(["show", `:./${path}`], cwd);
+  if (!shown.ok) return shown;
+  // An untracked attributes file can disappear between ls-files and readFile;
+  // there is no index fallback in that race, so it contributes no rules.
+  return ok(shown.value.exitCode === 0 ? shown.value.stdout : "");
+}
+
+/** Inspect checkout attributes first, then probe LFS only when this checkout
  * actually asks Git to use it. All commands run through PwrGit's Git runtime,
  * so the result describes whether PwrGit can materialize this worktree. */
 export async function inspectGitLfs(
   git: GitExec,
-  cwd: string
+  cwd: string,
+  readTextFile: ReadTextFile = readFile
 ): Promise<Result<GitLfsStatus>> {
   const listed = await git(
-    ["ls-files", "-z", "--", ".gitattributes", ":(glob)**/.gitattributes"],
+    [
+      "ls-files",
+      "--cached",
+      "--others",
+      "-z",
+      "--",
+      ".gitattributes",
+      ":(glob)**/.gitattributes"
+    ],
     cwd
   );
   if (!listed.ok) return listed;
@@ -54,10 +107,9 @@ export async function inspectGitLfs(
   ];
   let required = false;
   for (const path of paths) {
-    const shown = await git(["show", `:./${path}`], cwd);
-    if (!shown.ok) return shown;
-    if (shown.value.exitCode !== 0) continue;
-    if (attributesRequireLfs(shown.value.stdout)) {
+    const attributes = await readAttributes(git, cwd, path, readTextFile);
+    if (!attributes.ok) return attributes;
+    if (attributesRequireLfs(attributes.value)) {
       required = true;
       break;
     }
