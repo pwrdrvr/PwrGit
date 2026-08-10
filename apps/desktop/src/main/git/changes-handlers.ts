@@ -10,6 +10,7 @@ import {
   commitFiles,
   commitStats,
   type CommitIdentity,
+  discardAllChanges,
   discardPath,
   fileDiff,
   readCommit,
@@ -65,6 +66,15 @@ export function registerChangesHandlers(
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
     const result = await discardPath(execGit, path, req.path);
+    if (!result.ok) return result;
+    refresher.refreshWorktree(req.worktreeId);
+    return ok(null);
+  });
+
+  bus.register("changes:discardAll", async (req) => {
+    const path = pathOf(req.worktreeId);
+    if (path === null) return err(notFound);
+    const result = await discardAllChanges(execGit, path);
     if (!result.ok) return result;
     refresher.refreshWorktree(req.worktreeId);
     return ok(null);

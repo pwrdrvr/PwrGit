@@ -517,6 +517,8 @@ export interface Commands {
   "changes:unstage": { req: { worktreeId: string; path: string }; res: null };
   /** Discard a file's uncommitted changes (revert to HEAD, or delete if new). */
   "changes:discard": { req: { worktreeId: string; path: string }; res: null };
+  /** Discard every uncommitted change while preserving ignored files. */
+  "changes:discardAll": { req: { worktreeId: string }; res: null };
   "changes:commit": {
     req: { worktreeId: string; message: string; amend?: boolean };
     res: null;

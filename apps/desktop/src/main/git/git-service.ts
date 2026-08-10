@@ -1317,6 +1317,63 @@ export async function discardPath(
   return checked.ok ? ok(undefined) : checked;
 }
 
+/**
+ * Discard every uncommitted change in a worktree. Restore tracked and staged
+ * paths from HEAD in one operation, then remove untracked (but not ignored)
+ * files and directories in one clean operation. Destructive — callers confirm
+ * first.
+ */
+export async function discardAllChanges(
+  git: GitExec,
+  cwd: string
+): Promise<Result<void>> {
+  const restoreArgs = [
+    "restore",
+    "--source=HEAD",
+    "--staged",
+    "--worktree",
+    "--",
+    "."
+  ];
+  const restored = await git(restoreArgs, cwd);
+  if (!restored.ok) return restored;
+  const checkedRestore = requireExit0(restored.value, restoreArgs);
+  if (!checkedRestore.ok) {
+    // An unborn repository has no HEAD tree to restore. Confirm that specific
+    // condition before falling back so an unrelated restore failure never
+    // triggers more destructive work.
+    const symbolicArgs = ["symbolic-ref", "--quiet", "HEAD"];
+    const symbolic = await git(symbolicArgs, cwd);
+    if (!symbolic.ok) return symbolic;
+    if (symbolic.value.exitCode !== 0) return checkedRestore;
+    const headRef = symbolic.value.stdout.trim();
+    if (!headRef.startsWith("refs/heads/")) return checkedRestore;
+
+    // A missing branch ref proves HEAD is unborn. An existing ref whose object
+    // cannot be resolved is corrupt, and must retain the original restore error
+    // without clearing recoverable index/worktree data. Other probe failures
+    // are also unsafe to treat as an unborn branch.
+    const refArgs = ["show-ref", "--verify", "--quiet", headRef];
+    const ref = await git(refArgs, cwd);
+    if (!ref.ok) return ref;
+    if (ref.value.exitCode !== 1) return checkedRestore;
+
+    // Make staged additions untracked so the clean below removes them too.
+    const clearArgs = ["read-tree", "--empty"];
+    const cleared = await git(clearArgs, cwd);
+    if (!cleared.ok) return cleared;
+    const checkedClear = requireExit0(cleared.value, clearArgs);
+    if (!checkedClear.ok) return checkedClear;
+  }
+
+  // `git clean` excludes ignored paths unless `-x`/`-X` is supplied.
+  const cleanArgs = ["clean", "-fd"];
+  const cleaned = await git(cleanArgs, cwd);
+  if (!cleaned.ok) return cleaned;
+  const checkedClean = requireExit0(cleaned.value, cleanArgs);
+  return checkedClean.ok ? ok(undefined) : checkedClean;
+}
+
 // Tab-delimited so subjects (last field) can contain anything but a tab.
 const BRANCH_FORMAT = [
   "%(refname)",
