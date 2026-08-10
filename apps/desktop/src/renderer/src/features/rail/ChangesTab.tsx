@@ -13,6 +13,28 @@ const STATUS_TONE: Record<string, string> = {
   "?": "muted"
 };
 
+export async function confirmAndDiscardAllChanges(
+  worktreeId: string,
+  changes: ChangeSet | null
+): Promise<void> {
+  const paths = [
+    ...new Set(
+      [...(changes?.staged ?? []), ...(changes?.unstaged ?? [])].map(
+        (file) => file.path
+      )
+    )
+  ];
+  if (paths.length === 0) return;
+  const yes = await confirmDialog({
+    title: "Discard all changes?",
+    message: `Discard all uncommitted changes across ${paths.length} file${paths.length === 1 ? "" : "s"}? This can't be undone.`,
+    confirmLabel: "Discard all",
+    danger: true
+  });
+  if (!yes) return;
+  await dispatch("changes:discardAll", { worktreeId });
+}
+
 function FileRow({
   file,
   onToggle,
@@ -129,20 +151,7 @@ export function ChangesTab({
 
   const discardAll = async (): Promise<void> => {
     if (wtId === null) return;
-    const paths = [
-      ...new Set([...(changes?.staged ?? []), ...(changes?.unstaged ?? [])].map((f) => f.path))
-    ];
-    if (paths.length === 0) return;
-    const yes = await confirmDialog({
-      title: "Discard all changes?",
-      message: `Discard all uncommitted changes across ${paths.length} file${paths.length === 1 ? "" : "s"}? This can't be undone.`,
-      confirmLabel: "Discard all",
-      danger: true
-    });
-    if (!yes) return;
-    for (const path of paths) {
-      await dispatch("changes:discard", { worktreeId: wtId, path });
-    }
+    await confirmAndDiscardAllChanges(wtId, changes);
   };
 
   const staged = changes?.staged ?? [];

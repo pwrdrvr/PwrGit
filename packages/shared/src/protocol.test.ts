@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { err, ok, type Result } from "./result";
 import type { CommandName, Req, Res } from "./protocol";
 
@@ -37,5 +37,12 @@ describe("command registry", () => {
 
     const res = await dispatch("ping", undefined);
     expect(res).toBe("pong");
+  });
+
+  it("exposes one typed command for discarding all worktree changes", () => {
+    expectTypeOf<Req<"changes:discardAll">>().toEqualTypeOf<{
+      worktreeId: string;
+    }>();
+    expectTypeOf<Res<"changes:discardAll">>().toEqualTypeOf<null>();
   });
 });
