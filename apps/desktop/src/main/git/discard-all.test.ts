@@ -143,7 +143,8 @@ describe("discardAllChanges (system git)", () => {
 
     expect(calls).toEqual([
       ["restore", "--source=HEAD", "--staged", "--worktree", "--", "."],
-      ["rev-parse", "--verify", "--quiet", "HEAD"],
+      ["symbolic-ref", "--quiet", "HEAD"],
+      ["show-ref", "--verify", "--quiet", "refs/heads/main"],
       ["read-tree", "--empty"],
       ["clean", "-fd"]
     ]);
@@ -155,6 +156,37 @@ describe("discardAllChanges (system git)", () => {
     );
     expect(git(unborn, ["status", "--porcelain", "--untracked-files=all"])).toBe(
       ""
+    );
+  });
+
+  it("does not clear recoverable data when a symbolic HEAD ref is corrupt", async () => {
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    writeFileSync(join(repo, "tracked.txt"), "recoverable worktree change\n");
+    writeFileSync(join(repo, "loose file.txt"), "recoverable untracked file\n");
+    unlinkSync(join(repo, ".git", "objects", head.slice(0, 2), head.slice(2)));
+
+    const calls: string[][] = [];
+    const countingGit: GitExec = (args, cwd) => {
+      calls.push([...args]);
+      return systemGit(args, cwd);
+    };
+
+    const result = await discardAllChanges(countingGit, repo);
+
+    expect(result.ok).toBe(false);
+    expect(calls).toEqual([
+      ["restore", "--source=HEAD", "--staged", "--worktree", "--", "."],
+      ["symbolic-ref", "--quiet", "HEAD"],
+      ["show-ref", "--verify", "--quiet", "refs/heads/main"]
+    ]);
+    expect(readFileSync(join(repo, "tracked.txt"), "utf8")).toBe(
+      "recoverable worktree change\n"
+    );
+    expect(readFileSync(join(repo, "loose file.txt"), "utf8")).toBe(
+      "recoverable untracked file\n"
+    );
+    expect(git(repo, ["ls-files", "--error-unmatch", "tracked.txt"])).toBe(
+      "tracked.txt"
     );
   });
 });

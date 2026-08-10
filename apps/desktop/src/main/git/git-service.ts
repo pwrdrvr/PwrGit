@@ -1342,10 +1342,21 @@ export async function discardAllChanges(
     // An unborn repository has no HEAD tree to restore. Confirm that specific
     // condition before falling back so an unrelated restore failure never
     // triggers more destructive work.
-    const headArgs = ["rev-parse", "--verify", "--quiet", "HEAD"];
-    const head = await git(headArgs, cwd);
-    if (!head.ok) return head;
-    if (head.value.exitCode === 0) return checkedRestore;
+    const symbolicArgs = ["symbolic-ref", "--quiet", "HEAD"];
+    const symbolic = await git(symbolicArgs, cwd);
+    if (!symbolic.ok) return symbolic;
+    if (symbolic.value.exitCode !== 0) return checkedRestore;
+    const headRef = symbolic.value.stdout.trim();
+    if (!headRef.startsWith("refs/heads/")) return checkedRestore;
+
+    // A missing branch ref proves HEAD is unborn. An existing ref whose object
+    // cannot be resolved is corrupt, and must retain the original restore error
+    // without clearing recoverable index/worktree data. Other probe failures
+    // are also unsafe to treat as an unborn branch.
+    const refArgs = ["show-ref", "--verify", "--quiet", headRef];
+    const ref = await git(refArgs, cwd);
+    if (!ref.ok) return ref;
+    if (ref.value.exitCode !== 1) return checkedRestore;
 
     // Make staged additions untracked so the clean below removes them too.
     const clearArgs = ["read-tree", "--empty"];
