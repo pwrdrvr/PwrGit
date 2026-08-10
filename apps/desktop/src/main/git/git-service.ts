@@ -1227,35 +1227,111 @@ export async function pullFastForward(
   git: GitExec,
   cwd: string
 ): Promise<Result<PullOutcome>> {
+  const originalHeadArgs = ["rev-parse", "--verify", "HEAD"];
+  const originalHeadRaw = await git(originalHeadArgs, cwd);
+  if (!originalHeadRaw.ok) return originalHeadRaw;
+  const originalHead = requireExit0(originalHeadRaw.value, originalHeadArgs);
+  let originalHeadOid: string | undefined;
+  if (originalHead.ok) {
+    originalHeadOid = originalHead.value.stdout.trim();
+  } else {
+    // A symbolic HEAD with no commit is a valid tracked unborn branch. Other
+    // rev-parse failures still abort before pull mutates the checkout.
+    const symbolicHeadRaw = await git(["symbolic-ref", "--quiet", "HEAD"], cwd);
+    if (!symbolicHeadRaw.ok) return symbolicHeadRaw;
+    const symbolicHead = requireExit0(symbolicHeadRaw.value, [
+      "symbolic-ref",
+      "--quiet",
+      "HEAD"
+    ]);
+    if (!symbolicHead.ok) return originalHead;
+  }
+
   const fetched = await fetchRemote(git, cwd);
   if (!fetched.ok) return fetched;
 
-  const status = await git(["status", "--porcelain"], cwd);
-  const dirty = status.ok && status.value.stdout.trim() !== "";
+  const statusRaw = await git(["status", "--porcelain"], cwd);
+  if (!statusRaw.ok) return statusRaw;
+  const status = requireExit0(statusRaw.value, ["status", "--porcelain"]);
+  if (!status.ok) return status;
+  const dirty = status.value.stdout.trim() !== "";
 
   let stashed = false;
   if (dirty) {
-    const stash = await git(
-      ["stash", "push", "--include-untracked", "-m", "pwrgit: auto-stash before pull"],
-      cwd
-    );
+    const stashArgs = [
+      "stash",
+      "push",
+      "--include-untracked",
+      "-m",
+      "pwrgit: auto-stash before pull"
+    ];
+    const stashRaw = await git(stashArgs, cwd);
+    if (!stashRaw.ok) return stashRaw;
+    const stash = requireExit0(stashRaw.value, stashArgs);
     if (!stash.ok) return stash;
-    stashed =
-      stash.value.exitCode === 0 &&
-      !/no local changes to save/i.test(stash.value.stdout);
+    stashed = !/no local changes to save/i.test(stash.value.stdout);
   }
 
-  const restoreStash = async (): Promise<void> => {
-    if (stashed) await git(["stash", "pop"], cwd);
+  const rollbackFailedMerge = async (): Promise<Result<void>> => {
+    const rollbackStep = async (args: string[]): Promise<Result<void>> => {
+      const raw = await git(args, cwd);
+      if (raw.ok && raw.value.exitCode === 0) return ok(undefined);
+      const detail = raw.ok
+        ? `${raw.value.stderr}\n${raw.value.stdout}`.trim()
+        : raw.error.message;
+      return err({
+        kind: "remote",
+        code: "pull_rollback_failed",
+        message: `Pull failed, and PwrGit could not restore the original checkout.${
+          stashed ? " Your local changes remain in the stash." : ""
+        }${detail !== "" ? ` ${detail}` : ` git ${args.join(" ")} failed.`}`,
+        cause: raw.ok ? raw.value : raw.error
+      });
+    };
+
+    if (originalHeadOid !== undefined) {
+      const reset = await rollbackStep(["reset", "--hard", originalHeadOid]);
+      if (!reset.ok) return reset;
+    } else {
+      // Restore an unborn checkout even if the failed merge created its branch
+      // ref or partially populated the index/worktree.
+      for (const args of [
+        ["update-ref", "-d", "HEAD"],
+        ["read-tree", "--empty"],
+        ["clean", "-fd"]
+      ]) {
+        const step = await rollbackStep(args);
+        if (!step.ok) return step;
+      }
+    }
+
+    if (!stashed) return ok(undefined);
+    const pop = await git(["stash", "pop", "--index"], cwd);
+    if (!pop.ok || pop.value.exitCode !== 0) {
+      const detail = pop.ok
+        ? `${pop.value.stderr}\n${pop.value.stdout}`.trim()
+        : pop.error.message;
+      return err({
+        kind: "remote",
+        code: "stash_reapply_failed",
+        message: `Pull failed and PwrGit restored the original commit, but your stashed changes could not be reapplied. The stash was kept.${
+          detail !== "" ? ` ${detail}` : ""
+        }`,
+        cause: pop.ok ? pop.value : pop.error
+      });
+    }
+    return ok(undefined);
   };
 
   const merge = await git(["merge", "--ff-only", "@{u}"], cwd);
   if (!merge.ok) {
-    await restoreStash();
+    const rollback = await rollbackFailedMerge();
+    if (!rollback.ok) return rollback;
     return merge;
   }
   if (merge.value.exitCode !== 0) {
-    await restoreStash();
+    const rollback = await rollbackFailedMerge();
+    if (!rollback.ok) return rollback;
     const message = `${merge.value.stderr}\n${merge.value.stdout}`.trim();
     const code = /fast-forward|diverg(?:e|ing)/i.test(message)
       ? "not_fast_forward"
@@ -1277,10 +1353,24 @@ export async function pullFastForward(
   if (!stashed) {
     return ok({ fastForwarded: true, stashed: false, reappliedWithConflicts: false });
   }
-  // Reapply the stashed work. `git stash pop` leaves conflict markers (and keeps
-  // the stash) when it can't apply cleanly — surface that so the user can resolve.
-  const pop = await git(["stash", "pop"], cwd);
+  // Reapply the stashed work, including its staged state. When an indexed pop
+  // rejects a conflict before changing the tree, retry without --index so Git
+  // can leave the usual conflict markers. Never retry over partial changes.
+  let pop = await git(["stash", "pop", "--index"], cwd);
   if (!pop.ok) return pop;
+  if (pop.value.exitCode !== 0) {
+    const statusAfterPopRaw = await git(["status", "--porcelain"], cwd);
+    if (!statusAfterPopRaw.ok) return statusAfterPopRaw;
+    const statusAfterPop = requireExit0(statusAfterPopRaw.value, [
+      "status",
+      "--porcelain"
+    ]);
+    if (!statusAfterPop.ok) return statusAfterPop;
+    if (statusAfterPop.value.stdout.trim() === "") {
+      pop = await git(["stash", "pop"], cwd);
+      if (!pop.ok) return pop;
+    }
+  }
   return ok({
     fastForwarded: true,
     stashed: true,
