@@ -45,6 +45,7 @@ describe("discardAllChanges (system git)", () => {
     git(repo, ["init", "-b", "main"]);
     git(repo, ["config", "user.name", "PwrGit Test"]);
     git(repo, ["config", "user.email", "pwrgit@example.com"]);
+    git(repo, ["config", "core.autocrlf", "false"]);
 
     writeFileSync(join(repo, ".gitignore"), "ignored/\n");
     writeFileSync(join(repo, "tracked.txt"), "tracked baseline\n");
