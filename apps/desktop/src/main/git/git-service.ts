@@ -11,6 +11,8 @@ import {
   type PushRefPlan,
   type PushRefResult,
   type RemoteDivergence,
+  type RemoteResetMode,
+  type RemoteResetSnapshot,
   type RemoteSummary,
   type RepoRefs,
   err,
@@ -1192,6 +1194,163 @@ export async function resetToUpstream(
     kind: "remote",
     code: "reset_failed",
     message: "Could not reset the local branch to its upstream."
+  });
+}
+
+async function resolveFetchedRemoteBranch(
+  git: GitExec,
+  cwd: string,
+  remoteRef: string
+): Promise<Result<string>> {
+  if (
+    !remoteRef.startsWith("refs/remotes/") ||
+    remoteRef.slice("refs/remotes/".length).split("/").length < 2
+  ) {
+    return err({
+      kind: "remote",
+      code: "invalid_remote_ref",
+      message: "The reset target must be a fetched remote-tracking branch."
+    });
+  }
+
+  const formatRaw = await git(["check-ref-format", remoteRef], cwd);
+  if (!formatRaw.ok) return formatRaw;
+  if (formatRaw.value.exitCode !== 0) {
+    return err({
+      kind: "remote",
+      code: "invalid_remote_ref",
+      message: "The selected remote-tracking branch name is invalid."
+    });
+  }
+
+  const refRaw = await git(["show-ref", "--verify", "--hash", remoteRef], cwd);
+  if (!refRaw.ok) return refRaw;
+  if (refRaw.value.exitCode !== 0 || refRaw.value.stdout.trim() === "") {
+    return err({
+      kind: "remote",
+      code: "remote_ref_missing",
+      message:
+        "The selected fetched remote-tracking branch no longer exists. Refresh and review the reset again."
+    });
+  }
+
+  // refs/remotes/<name>/HEAD is usually a symbolic convenience ref, not a
+  // fetched branch tip. Never allow it (or any other symbolic remote ref) to
+  // stand in for the concrete branch the user selected.
+  const symbolicRaw = await git(["symbolic-ref", "--quiet", remoteRef], cwd);
+  if (!symbolicRaw.ok) return symbolicRaw;
+  if (symbolicRaw.value.exitCode === 0) {
+    return err({
+      kind: "remote",
+      code: "invalid_remote_ref",
+      message: "Select a fetched remote branch, not a symbolic remote HEAD."
+    });
+  }
+
+  const head = refRaw.value.stdout.trim();
+  const typeRaw = await git(["cat-file", "-t", head], cwd);
+  if (!typeRaw.ok) return typeRaw;
+  if (typeRaw.value.exitCode !== 0 || typeRaw.value.stdout.trim() !== "commit") {
+    return err({
+      kind: "remote",
+      code: "invalid_remote_ref",
+      message: "The selected remote-tracking branch does not point to a commit."
+    });
+  }
+  return ok(head);
+}
+
+/** Resolve the exact checkout and fetched remote tip presented for reset. */
+export async function inspectRemoteReset(
+  git: GitExec,
+  cwd: string,
+  remoteRef: string
+): Promise<Result<RemoteResetSnapshot>> {
+  const checkout = await resolveCheckedOutRef(git, cwd);
+  if (!checkout.ok) return checkout;
+  const remoteHead = await resolveFetchedRemoteBranch(git, cwd, remoteRef);
+  if (!remoteHead.ok) return remoteHead;
+  return ok({
+    branch: checkout.value.branch,
+    head: checkout.value.head,
+    remoteRef,
+    remoteHead: remoteHead.value
+  });
+}
+
+/**
+ * Apply Git's soft/hard reset semantics only to the exact checkout and fetched
+ * remote-tracking tip reviewed by the user. Dirty state is intentional input:
+ * soft preserves it and hard may discard tracked changes after confirmation.
+ */
+export async function resetToRemote(
+  git: GitExec,
+  cwd: string,
+  expected: RemoteResetSnapshot,
+  mode: RemoteResetMode
+): Promise<Result<void>> {
+  if (mode !== "soft" && mode !== "hard") {
+    return err({
+      kind: "remote",
+      code: "invalid_reset_mode",
+      message: "Choose either a soft or hard reset."
+    });
+  }
+
+  const checkout = await resolveCheckedOutRef(git, cwd);
+  if (!checkout.ok) return checkout;
+  if (
+    checkout.value.branch !== expected.branch ||
+    checkout.value.head !== expected.head
+  ) {
+    return err({
+      kind: "remote",
+      code: "checkout_changed",
+      message:
+        "The checked-out branch or commit changed while this reset was open. Review the current checkout again."
+    });
+  }
+
+  const remoteHead = await resolveFetchedRemoteBranch(
+    git,
+    cwd,
+    expected.remoteRef
+  );
+  if (!remoteHead.ok) return remoteHead;
+  if (remoteHead.value !== expected.remoteHead) {
+    return err({
+      kind: "remote",
+      code: "remote_ref_changed",
+      message:
+        "The fetched remote-tracking branch changed while this reset was open. Review its current tip again."
+    });
+  }
+
+  // Re-read after resolving the remote ref so a checkout changed during that
+  // inspection is rejected before Git is asked to move anything.
+  const finalCheckout = await resolveCheckedOutRef(git, cwd);
+  if (!finalCheckout.ok) return finalCheckout;
+  if (
+    finalCheckout.value.branch !== expected.branch ||
+    finalCheckout.value.head !== expected.head
+  ) {
+    return err({
+      kind: "remote",
+      code: "checkout_changed",
+      message:
+        "The checked-out branch or commit changed while this reset was open. Review the current checkout again."
+    });
+  }
+
+  const raw = await git(["reset", `--${mode}`, expected.remoteHead], cwd);
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode === 0) return ok(undefined);
+  return err({
+    kind: "remote",
+    code: "reset_failed",
+    message:
+      raw.value.stderr.trim() ||
+      `Could not ${mode}-reset the local branch to the selected remote branch.`
   });
 }
 

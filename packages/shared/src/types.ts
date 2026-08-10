@@ -108,6 +108,19 @@ export type RemoteBranchSummary = {
   subject?: string;
 };
 
+export type RemoteResetMode = "soft" | "hard";
+
+/** Exact local checkout and fetched remote-tracking ref reviewed before reset. */
+export type RemoteResetSnapshot = {
+  branch: string;
+  /** Full object name of the checked-out local tip shown to the user. */
+  head: string;
+  /** Fully qualified fetched ref, e.g. `refs/remotes/origin/main`. */
+  remoteRef: string;
+  /** Full object name of the fetched remote-tracking tip shown to the user. */
+  remoteHead: string;
+};
+
 export type RemoteSummary = {
   name: string;
   fetchUrl: string;

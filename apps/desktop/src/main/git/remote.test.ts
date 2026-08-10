@@ -8,6 +8,7 @@ import type { GitExec, GitOutput } from "./dugite";
 import {
   addRemote,
   fetchRemote,
+  inspectRemoteReset,
   inspectRemoteDivergence,
   listRepoRefs,
   planPushRefs,
@@ -17,6 +18,7 @@ import {
   rebaseOntoUpstream,
   removeRemote,
   resetToUpstream,
+  resetToRemote,
   updateRemote
 } from "./git-service";
 
@@ -738,5 +740,142 @@ describe("remote ops (bare-remote fixture)", () => {
     }
     expect(gitOut(local, ["branch", "--show-current"])).toBe("same-upstream");
     expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(switchedHead);
+  }, 15_000);
+
+  it("soft-resets to the exact fetched tip without changing index or worktree", async () => {
+    const { local, remote } = makeDivergedFixture();
+    commit(local, "local.txt", "local commit");
+    commit(remote, "remote.txt", "remote commit");
+    git(remote, ["push"]);
+    git(local, ["fetch", "origin"]);
+
+    writeFileSync(join(local, "staged.txt"), "staged work\n");
+    git(local, ["add", "staged.txt"]);
+    writeFileSync(join(local, "base.txt"), "unstaged work\n");
+    writeFileSync(join(local, "untracked.txt"), "untracked work\n");
+
+    const inspected = await inspectRemoteReset(
+      systemGit,
+      local,
+      "refs/remotes/origin/main"
+    );
+    expect(inspected.ok).toBe(true);
+    if (!inspected.ok) return;
+    const reset = await resetToRemote(
+      systemGit,
+      local,
+      inspected.value,
+      "soft"
+    );
+
+    expect(reset.ok).toBe(true);
+    expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(
+      inspected.value.remoteHead
+    );
+    expect(existsSync(join(local, "local.txt"))).toBe(true);
+    expect(existsSync(join(local, "staged.txt"))).toBe(true);
+    expect(existsSync(join(local, "untracked.txt"))).toBe(true);
+    const statusAfter = gitOut(local, ["status", "--porcelain"]);
+    expect(statusAfter).toContain("M base.txt");
+    expect(statusAfter).toContain("A  staged.txt");
+    expect(statusAfter).toContain("?? untracked.txt");
+  }, 15_000);
+
+  it("hard-resets tracked state but does not clean ordinary untracked or ignored files", async () => {
+    const { local, remote } = makeDivergedFixture();
+    commit(local, "local.txt", "local commit");
+    commit(remote, "remote.txt", "remote commit");
+    git(remote, ["push"]);
+    git(local, ["fetch", "origin"]);
+
+    writeFileSync(join(local, "staged.txt"), "staged work\n");
+    git(local, ["add", "staged.txt"]);
+    writeFileSync(join(local, "base.txt"), "unstaged work\n");
+    writeFileSync(join(local, "untracked.txt"), "untracked work\n");
+    writeFileSync(join(local, ".git", "info", "exclude"), "ignored.txt\n");
+    writeFileSync(join(local, "ignored.txt"), "ignored work\n");
+
+    const inspected = await inspectRemoteReset(
+      systemGit,
+      local,
+      "refs/remotes/origin/main"
+    );
+    expect(inspected.ok).toBe(true);
+    if (!inspected.ok) return;
+    const reset = await resetToRemote(
+      systemGit,
+      local,
+      inspected.value,
+      "hard"
+    );
+
+    expect(reset.ok).toBe(true);
+    expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(
+      inspected.value.remoteHead
+    );
+    expect(existsSync(join(local, "remote.txt"))).toBe(true);
+    expect(existsSync(join(local, "local.txt"))).toBe(false);
+    expect(existsSync(join(local, "staged.txt"))).toBe(false);
+    expect(existsSync(join(local, "untracked.txt"))).toBe(true);
+    expect(existsSync(join(local, "ignored.txt"))).toBe(true);
+  }, 15_000);
+
+  it("rejects stale checkouts, changed fetched refs, and non-remote targets", async () => {
+    const { local, remote } = makeDivergedFixture();
+    commit(remote, "remote.txt", "remote commit");
+    git(remote, ["push"]);
+    git(local, ["fetch", "origin"]);
+
+    const inspected = await inspectRemoteReset(
+      systemGit,
+      local,
+      "refs/remotes/origin/main"
+    );
+    expect(inspected.ok).toBe(true);
+    if (!inspected.ok) return;
+
+    commit(local, "local.txt", "checkout moved");
+    const staleCheckout = await resetToRemote(
+      systemGit,
+      local,
+      inspected.value,
+      "soft"
+    );
+    expect(staleCheckout.ok).toBe(false);
+    if (!staleCheckout.ok) {
+      expect(staleCheckout.error.code).toBe("checkout_changed");
+    }
+
+    const fresh = await inspectRemoteReset(
+      systemGit,
+      local,
+      "refs/remotes/origin/main"
+    );
+    expect(fresh.ok).toBe(true);
+    if (!fresh.ok) return;
+    commit(remote, "new-remote.txt", "remote moved again");
+    git(remote, ["push"]);
+    git(local, ["fetch", "origin"]);
+    const staleRemote = await resetToRemote(
+      systemGit,
+      local,
+      fresh.value,
+      "hard"
+    );
+    expect(staleRemote.ok).toBe(false);
+    if (!staleRemote.ok) {
+      expect(staleRemote.error.code).toBe("remote_ref_changed");
+    }
+
+    for (const invalid of [
+      "main",
+      "refs/heads/main",
+      "HEAD",
+      "refs/remotes/origin/HEAD"
+    ]) {
+      const result = await inspectRemoteReset(systemGit, local, invalid);
+      expect(result.ok, invalid).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe("invalid_remote_ref");
+    }
   }, 15_000);
 });
