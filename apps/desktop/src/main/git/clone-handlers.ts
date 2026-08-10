@@ -7,6 +7,9 @@ export function registerCloneHandlers(
   clones: CloneService
 ): void {
   bus.register("repo:cloneCatalog", (req) => clones.catalog(req.profileId));
+  bus.register("repo:cloneDestinations", (req) =>
+    clones.destinations(req.profileId, req.includeNested)
+  );
   bus.register("repo:checkCloneSource", (req) =>
     clones.checkSource(req.profileId, req.nameWithOwner)
   );

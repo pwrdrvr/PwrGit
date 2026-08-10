@@ -84,6 +84,17 @@ export function filterCloneDestinations(
   });
 }
 
+export function cloneDestinationSelectionIndex(
+  destinations: CloneDestination[],
+  selectedPath: string | null
+): number {
+  if (selectedPath === null) return 0;
+  const index = destinations.findIndex(
+    (destination) => destination.path === selectedPath
+  );
+  return index === -1 ? 0 : index;
+}
+
 export function exactGitHubRepository(input: string): string | null {
   const trimmed = input.trim();
   const ghClone = /^gh\s+repo\s+clone\s+(\S+)$/i.exec(trimmed);

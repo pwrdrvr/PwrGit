@@ -358,7 +358,6 @@ export class CloneService {
     const base: CloneCatalog = {
       owners,
       repositories: [],
-      destinations: cloneDestinations(this.db, profile, repos),
       github
     };
     if (!github.installed || !github.loggedIn || owners.length === 0) {
@@ -397,6 +396,27 @@ export class CloneService {
       catalog.warning = `Couldn't load repositories for ${failures.join(", ")}.`;
     }
     return ok(catalog);
+  }
+
+  destinations(
+    profileId: string,
+    includeNested: boolean
+  ): Result<CloneDestination[]> {
+    const profile = this.profiles.get(profileId);
+    if (profile === null) {
+      return err({
+        kind: "profile",
+        code: "not_found",
+        message: `No profile "${profileId}"`
+      });
+    }
+    return ok(
+      cloneDestinations(
+        this.db,
+        profile,
+        includeNested ? this.indexer.listRepos(profileId) : []
+      )
+    );
   }
 
   async checkSource(

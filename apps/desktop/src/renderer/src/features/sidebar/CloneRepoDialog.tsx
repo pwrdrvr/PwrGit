@@ -11,6 +11,7 @@ import type {
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import {
   cloneDestinationLabel,
+  cloneDestinationSelectionIndex,
   cloneRepositoryAtSelection,
   cloneSourceQuery,
   filterCloneDestinations,
@@ -90,6 +91,11 @@ export function CloneRepoDialog({
 }) {
   const [catalog, setCatalog] = useState<CloneCatalog | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [destinations, setDestinations] = useState<CloneDestination[]>([]);
+  const [destinationsLoading, setDestinationsLoading] = useState(true);
+  const [destinationsError, setDestinationsError] = useState<string | null>(
+    null
+  );
   const [sourceQuery, setSourceQuery] = useState("");
   const [selectedRepository, setSelectedRepository] =
     useState<CloneRepository | null>(null);
@@ -102,7 +108,9 @@ export function CloneRepoDialog({
   const [destinationQuery, setDestinationQuery] = useState("");
   const [selectedDestination, setSelectedDestination] =
     useState<CloneDestination | null>(null);
-  const [destinationSelection, setDestinationSelection] = useState(0);
+  const [destinationSelectionPath, setDestinationSelectionPath] = useState<
+    string | null
+  >(null);
   const [busy, setBusy] = useState(false);
   const [cloneProgress, setCloneProgress] = useState<CloneProgress | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -137,6 +145,49 @@ export function CloneRepoDialog({
       }),
     [profile.id]
   );
+
+  useEffect(() => {
+    let active = true;
+    let expansionFrame: number | null = null;
+    setDestinations([]);
+    setDestinationsLoading(true);
+    setDestinationsError(null);
+
+    const loadExpanded = (): void => {
+      void dispatch("repo:cloneDestinations", {
+        profileId: profile.id,
+        includeNested: true
+      }).then((result) => {
+        if (!active) return;
+        setDestinationsLoading(false);
+        if (result.ok) {
+          setDestinations(result.value);
+          setDestinationsError(null);
+        } else {
+          setDestinationsError(result.error.message);
+        }
+      });
+    };
+
+    void dispatch("repo:cloneDestinations", {
+      profileId: profile.id,
+      includeNested: false
+    }).then((result) => {
+      if (!active) return;
+      if (result.ok) setDestinations(result.value);
+      else setDestinationsError(result.error.message);
+
+      // Let the priority results paint before the broader prefix scan begins.
+      expansionFrame = window.requestAnimationFrame(loadExpanded);
+    });
+
+    return () => {
+      active = false;
+      if (expansionFrame !== null) {
+        window.cancelAnimationFrame(expansionFrame);
+      }
+    };
+  }, [profile.id]);
 
   const parsedSourceQuery = useMemo(
     () => cloneSourceQuery(catalog?.repositories ?? [], sourceQuery),
@@ -200,12 +251,15 @@ export function CloneRepoDialog({
   }, [catalogMatches, checkedRepository]);
 
   const destinationResults = useMemo(
-    () =>
-      filterCloneDestinations(catalog?.destinations ?? [], destinationQuery),
-    [catalog?.destinations, destinationQuery]
+    () => filterCloneDestinations(destinations, destinationQuery),
+    [destinations, destinationQuery]
+  );
+  const destinationSelection = cloneDestinationSelectionIndex(
+    destinationResults,
+    destinationSelectionPath
   );
 
-  useEffect(() => setDestinationSelection(0), [destinationQuery]);
+  useEffect(() => setDestinationSelectionPath(null), [destinationQuery]);
 
   const chooseRepository = (repository: CloneRepository): void => {
     setSelectedRepository(repository);
@@ -480,21 +534,23 @@ export function CloneRepoDialog({
                 onKeyDown={(event) => {
                   if (event.key === "ArrowDown") {
                     event.preventDefault();
-                    setDestinationSelection((selection) =>
-                      moveCloneSelection(
-                        selection,
-                        1,
-                        destinationResults.length
-                      )
+                    const selection = moveCloneSelection(
+                      destinationSelection,
+                      1,
+                      destinationResults.length
+                    );
+                    setDestinationSelectionPath(
+                      destinationResults[selection]?.path ?? null
                     );
                   } else if (event.key === "ArrowUp") {
                     event.preventDefault();
-                    setDestinationSelection((selection) =>
-                      moveCloneSelection(
-                        selection,
-                        -1,
-                        destinationResults.length
-                      )
+                    const selection = moveCloneSelection(
+                      destinationSelection,
+                      -1,
+                      destinationResults.length
+                    );
+                    setDestinationSelectionPath(
+                      destinationResults[selection]?.path ?? null
                     );
                   } else if (event.key === "Enter") {
                     const destination =
@@ -509,6 +565,9 @@ export function CloneRepoDialog({
                   }
                 }}
               />
+              {destinationsLoading && (
+                <span className="clone-input-status">finding folders…</span>
+              )}
             </div>
 
             <div className="clone-destination-results" role="listbox">
@@ -527,7 +586,9 @@ export function CloneRepoDialog({
                   }`}
                   disabled={busy || selectedRepository === null}
                   title={destination.path}
-                  onMouseEnter={() => setDestinationSelection(index)}
+                  onMouseEnter={() =>
+                    setDestinationSelectionPath(destination.path)
+                  }
                   onClick={() => {
                     setSelectedDestination(destination);
                     setDestinationQuery(cloneDestinationLabel(destination));
@@ -541,18 +602,31 @@ export function CloneRepoDialog({
                   </span>
                 </button>
               ))}
-              {catalog !== null && catalog.destinations.length === 0 && (
-                <div className="clone-empty">
-                  Add a repo folder to this profile before cloning.
+              {destinationsError !== null && destinations.length === 0 && (
+                <div className="clone-empty clone-empty--error">
+                  {destinationsError}
                 </div>
               )}
-              {catalog !== null &&
-                catalog.destinations.length > 0 &&
+              {!destinationsLoading &&
+                destinationsError === null &&
+                destinations.length === 0 && (
+                  <div className="clone-empty">
+                    Add a repo folder to this profile before cloning.
+                  </div>
+                )}
+              {!destinationsLoading &&
+                destinations.length > 0 &&
                 destinationResults.length === 0 && (
                   <div className="clone-empty">
                     No checkout folders match “{destinationQuery}”.
                   </div>
-                )}
+              )}
+              {destinationsLoading && (
+                <div className="clone-destination-progress" role="status">
+                  <span className="clone-destination-progress__dot" />
+                  Finding more checkout folders…
+                </div>
+              )}
             </div>
           </section>
 
