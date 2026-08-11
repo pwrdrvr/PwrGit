@@ -128,10 +128,14 @@ describe("runGh", () => {
     async (stream) => {
       const child = streamingChild();
       childProcess.spawn.mockReturnValue(child);
-      const secret = "gho_overflowCredential123";
+      const secret = "opaque-overflow-credential-123";
+      const retainedFragment = secret.slice(0, 9);
 
       const result = runGh(["api", "user"], { env: { GH_TOKEN: secret } });
-      child[stream].emit("data", secret + "x".repeat(1024 * 1024));
+      child[stream].emit(
+        "data",
+        "x".repeat(1024 * 1024 - retainedFragment.length) + secret
+      );
       expect(child.kill).toHaveBeenCalledWith("SIGTERM");
       child.emit("close", null, "SIGTERM");
       const failure = await result.catch((cause: unknown) => cause);
@@ -141,8 +145,32 @@ describe("runGh", () => {
         message: `GitHub CLI ${stream} exceeded the 1048576-byte limit.`
       });
       expect(JSON.stringify(failure)).not.toContain(secret);
+      const diagnostics = failure as { stdout: string; stderr: string };
+      expect(diagnostics[stream]).not.toContain(retainedFragment);
     }
   );
+
+  it("removes a token prefix split by the buffered output limit", async () => {
+    const child = streamingChild();
+    childProcess.spawn.mockReturnValue(child);
+    const token = "github_pat_bufferBoundaryCredential123";
+    const retainedFragment = token.slice(0, 5);
+
+    const result = runGh(["api", "user"]);
+    child.stdout.emit(
+      "data",
+      "x".repeat(1024 * 1024 - retainedFragment.length) + token
+    );
+    child.emit("close", null, "SIGTERM");
+    const failure = (await result.catch((cause: unknown) => cause)) as {
+      code: string;
+      stdout: string;
+    };
+
+    expect(failure.code).toBe("output_too_large");
+    expect(failure.stdout).not.toContain(retainedFragment);
+    expect(failure.stdout).not.toContain(token);
+  });
 
   it("maps authentication failures without exposing credentials", async () => {
     const child = streamingChild();

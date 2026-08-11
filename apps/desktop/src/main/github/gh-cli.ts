@@ -208,17 +208,39 @@ function protectTokenBoundary(diagnostic: string, proposedCut: number): number {
   return protectedCut;
 }
 
+function sanitizeTruncatedGhDiagnostic(
+  diagnostic: string,
+  environment: NodeJS.ProcessEnv
+): string {
+  let safeEnd = protectTokenBoundary(diagnostic, diagnostic.length);
+  for (const secret of secretValues(environment)) {
+    // The retained bytes may end at any point inside this exact value. Dropping
+    // one value-length from the boundary guarantees that a partial suffix is
+    // never surfaced; complete values before that boundary are redacted below.
+    safeEnd = Math.min(safeEnd, Math.max(0, diagnostic.length - secret.length));
+  }
+  return sanitizeGhDiagnostic(diagnostic.slice(0, safeEnd), environment);
+}
+
 function outputTooLargeFailure(
   stream: "stdout" | "stderr",
   stdout: string,
   stderr: string,
   environment: NodeJS.ProcessEnv
 ): GhCliError {
+  const safeStdout =
+    stream === "stdout"
+      ? sanitizeTruncatedGhDiagnostic(stdout, environment)
+      : sanitizeGhDiagnostic(stdout, environment);
+  const safeStderr =
+    stream === "stderr"
+      ? sanitizeTruncatedGhDiagnostic(stderr, environment)
+      : sanitizeGhDiagnostic(stderr, environment);
   return new GhCliError(
     `GitHub CLI ${stream} exceeded the ${MAX_BUFFER_BYTES}-byte limit.`,
     "output_too_large",
-    sanitizeGhDiagnostic(stdout, environment),
-    sanitizeGhDiagnostic(stderr, environment)
+    safeStdout,
+    safeStderr
   );
 }
 
