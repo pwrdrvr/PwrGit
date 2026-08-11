@@ -314,12 +314,54 @@ describe("runGh", () => {
       message: "gh timed out after 100ms"
     });
     await vi.advanceTimersByTimeAsync(100);
-    expect(kill).toHaveBeenCalledWith(-4_242, "SIGTERM");
+    if (process.platform === "win32") {
+      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+      expect(kill).not.toHaveBeenCalled();
+    } else {
+      expect(kill).toHaveBeenCalledWith(-4_242, "SIGTERM");
+      expect(child.kill).not.toHaveBeenCalled();
+    }
     await vi.advanceTimersByTimeAsync(1_000);
-    expect(kill).toHaveBeenLastCalledWith(-4_242, "SIGKILL");
-    expect(child.kill).not.toHaveBeenCalled();
+    if (process.platform === "win32") {
+      expect(child.kill).toHaveBeenLastCalledWith("SIGKILL");
+    } else {
+      expect(kill).toHaveBeenLastCalledWith(-4_242, "SIGKILL");
+    }
 
     await rejection;
     kill.mockRestore();
+  });
+
+  it("uses the child handle for timeout cleanup on Windows", async () => {
+    vi.useFakeTimers();
+    const child = streamingChild();
+    Object.assign(child, { pid: 4_242 });
+    childProcess.spawn.mockReturnValue(child);
+    const kill = vi.spyOn(process, "kill").mockReturnValue(true);
+    const actualPlatform = process.platform;
+    Object.defineProperty(process, "platform", {
+      configurable: true,
+      value: "win32"
+    });
+
+    try {
+      const result = runGh(["api", "user"], { timeoutMs: 100 });
+      const rejection = expect(result).rejects.toMatchObject({
+        code: "timed_out",
+        message: "gh timed out after 100ms"
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+      expect(kill).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(child.kill).toHaveBeenLastCalledWith("SIGKILL");
+      await rejection;
+    } finally {
+      Object.defineProperty(process, "platform", {
+        configurable: true,
+        value: actualPlatform
+      });
+      kill.mockRestore();
+    }
   });
 });
