@@ -5,6 +5,8 @@ import { spawn, type ChildProcess } from "node:child_process";
 const EXTRA_PATH = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"];
 const MAX_BUFFER_BYTES = 1024 * 1024;
 const MAX_STREAM_TAIL_CHARS = 64 * 1024;
+const MAX_PENDING_STREAM_STDERR_CHARS = 64 * 1024;
+const MIN_STREAM_REDACTION_OVERLAP_CHARS = 4 * 1024;
 const FORCE_KILL_DELAY_MS = 1_000;
 const AUTHENTICATION_REQUIRED_MESSAGE =
   "GitHub authentication is required. Run gh auth login and verify your Git/SSH credentials, then try again.";
@@ -48,6 +50,7 @@ function environmentWith(overrides: GhRunOptions["env"]): NodeJS.ProcessEnv {
 export type GhCliErrorCode =
   | "authentication_required"
   | "timed_out"
+  | "output_too_large"
   | "command_failed";
 
 export class GhCliError extends Error {
@@ -161,6 +164,31 @@ function appendTail(current: string, chunk: string, limit: number): string {
     : combined.slice(-limit);
 }
 
+function appendWithinByteLimit(
+  current: string,
+  chunk: string,
+  limit: number
+): string {
+  const remaining = limit - Buffer.byteLength(current);
+  if (remaining <= 0) return current;
+  const bytes = Buffer.from(chunk);
+  return current + bytes.subarray(0, remaining).toString("utf8");
+}
+
+function outputTooLargeFailure(
+  stream: "stdout" | "stderr",
+  stdout: string,
+  stderr: string,
+  environment: NodeJS.ProcessEnv
+): GhCliError {
+  return new GhCliError(
+    `GitHub CLI ${stream} exceeded the ${MAX_BUFFER_BYTES}-byte limit.`,
+    "output_too_large",
+    sanitizeGhDiagnostic(stdout, environment),
+    sanitizeGhDiagnostic(stderr, environment)
+  );
+}
+
 function terminateChild(child: ChildProcess, signal: NodeJS.Signals): void {
   // Detached POSIX children own a process group, so kill gh and Git/SSH helpers
   // together. This also prevents an inherited Terminal from becoming their TTY.
@@ -198,30 +226,22 @@ function runSpawnedGh(
     let stderrTail = "";
     let pendingStreamStderr = "";
     let settled = false;
-    let timedOut = false;
+    let terminationReason:
+      | { kind: "timed_out" }
+      | { kind: "output_too_large"; stream: "stdout" | "stderr" }
+      | undefined;
     let forceKillTimeout: ReturnType<typeof setTimeout> | undefined;
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
     const stdoutLimit =
       options.onStderr === undefined ? MAX_BUFFER_BYTES : MAX_STREAM_TAIL_CHARS;
     const stderrLimit =
       options.onStderr === undefined ? MAX_BUFFER_BYTES : MAX_STREAM_TAIL_CHARS;
     const timeoutMs = options.timeoutMs ?? 10_000;
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      terminateChild(child, "SIGTERM");
-      forceKillTimeout = setTimeout(() => {
-        terminateChild(child, "SIGKILL");
-        flushStreamingStderr();
-        rejectOnce(
-          ghFailure(
-            new Error("GitHub CLI did not exit after SIGTERM."),
-            stdoutTail,
-            stderrTail,
-            environment,
-            `gh timed out after ${timeoutMs}ms`
-          )
-        );
-      }, FORCE_KILL_DELAY_MS);
-    }, timeoutMs);
+    const timeout = setTimeout(
+      () => beginTermination({ kind: "timed_out" }),
+      timeoutMs
+    );
 
     const rejectOnce = (cause: Error): void => {
       if (settled) return;
@@ -229,6 +249,38 @@ function runSpawnedGh(
       clearTimeout(timeout);
       if (forceKillTimeout !== undefined) clearTimeout(forceKillTimeout);
       reject(cause);
+    };
+
+    const terminationFailure = (): GhCliError => {
+      if (terminationReason?.kind === "output_too_large") {
+        return outputTooLargeFailure(
+          terminationReason.stream,
+          stdoutTail,
+          stderrTail,
+          environment
+        );
+      }
+      return ghFailure(
+        new Error("GitHub CLI did not exit before its timeout."),
+        stdoutTail,
+        stderrTail,
+        environment,
+        `gh timed out after ${timeoutMs}ms`
+      );
+    };
+
+    const beginTermination = (
+      reason: NonNullable<typeof terminationReason>
+    ): void => {
+      if (terminationReason !== undefined || settled) return;
+      terminationReason = reason;
+      clearTimeout(timeout);
+      terminateChild(child, "SIGTERM");
+      forceKillTimeout = setTimeout(() => {
+        terminateChild(child, "SIGKILL");
+        flushStreamingStderr();
+        rejectOnce(terminationFailure());
+      }, FORCE_KILL_DELAY_MS);
     };
 
     const flushStreamingStderr = (complete = true): void => {
@@ -239,30 +291,85 @@ function runSpawnedGh(
           pendingStreamStderr.lastIndexOf("\n"),
           pendingStreamStderr.lastIndexOf("\r")
         ) + 1;
+        if (
+          emitLength === 0 &&
+          pendingStreamStderr.length > MAX_PENDING_STREAM_STDERR_CHARS
+        ) {
+          const longestSecret = secretValues(environment).reduce(
+            (longest, secret) => Math.max(longest, secret.length),
+            0
+          );
+          const overlap = Math.min(
+            MAX_PENDING_STREAM_STDERR_CHARS / 2,
+            Math.max(
+              MIN_STREAM_REDACTION_OVERLAP_CHARS,
+              longestSecret + 64
+            )
+          );
+          emitLength = pendingStreamStderr.length - overlap;
+          for (const secret of secretValues(environment)) {
+            const start = pendingStreamStderr.lastIndexOf(
+              secret,
+              emitLength - 1
+            );
+            if (
+              start >= 0 &&
+              start < emitLength &&
+              start + secret.length > emitLength
+            ) {
+              emitLength = start;
+            }
+          }
+        }
       }
       if (emitLength === 0) return;
       const diagnostic = pendingStreamStderr.slice(0, emitLength);
       pendingStreamStderr = pendingStreamStderr.slice(emitLength);
       options.onStderr(sanitizeGhDiagnostic(diagnostic, environment));
+      if (
+        !complete &&
+        pendingStreamStderr.length > MAX_PENDING_STREAM_STDERR_CHARS
+      ) {
+        flushStreamingStderr(false);
+      }
     };
 
     child.stdout.on("data", (chunk: Buffer | string) => {
       // Successful stdout is the API result. In particular, `gh auth token`
       // intentionally returns a credential to the in-process token client.
       // It is sanitized only if the command fails and becomes diagnostic data.
-      stdoutTail = appendTail(stdoutTail, chunk.toString(), stdoutLimit);
+      const text = chunk.toString();
+      if (options.onStderr === undefined) {
+        stdoutBytes += Buffer.byteLength(text);
+        stdoutTail = appendWithinByteLimit(stdoutTail, text, stdoutLimit);
+        if (stdoutBytes > stdoutLimit) {
+          beginTermination({ kind: "output_too_large", stream: "stdout" });
+        }
+      } else {
+        stdoutTail = appendTail(stdoutTail, text, stdoutLimit);
+      }
     });
     child.stderr.on("data", (chunk: Buffer | string) => {
       const text = chunk.toString();
-      stderrTail = appendTail(stderrTail, text, stderrLimit);
-      if (options.onStderr !== undefined) {
+      if (options.onStderr === undefined) {
+        stderrBytes += Buffer.byteLength(text);
+        stderrTail = appendWithinByteLimit(stderrTail, text, stderrLimit);
+        if (stderrBytes > stderrLimit) {
+          beginTermination({ kind: "output_too_large", stream: "stderr" });
+        }
+      } else {
+        stderrTail = appendTail(stderrTail, text, stderrLimit);
         pendingStreamStderr += text;
         flushStreamingStderr(false);
       }
     });
     child.once("error", (error) => {
       flushStreamingStderr();
-      rejectOnce(ghFailure(error, stdoutTail, stderrTail, environment));
+      rejectOnce(
+        terminationReason === undefined
+          ? ghFailure(error, stdoutTail, stderrTail, environment)
+          : terminationFailure()
+      );
     });
     child.once("close", (exitCode, signal) => {
       if (settled) return;
@@ -270,8 +377,12 @@ function runSpawnedGh(
       settled = true;
       clearTimeout(timeout);
       if (forceKillTimeout !== undefined) clearTimeout(forceKillTimeout);
-      if (exitCode === 0 && !timedOut) {
+      if (exitCode === 0 && terminationReason === undefined) {
         resolve(stdoutTail.trim());
+        return;
+      }
+      if (terminationReason !== undefined) {
+        reject(terminationFailure());
         return;
       }
       const cause = new Error(
@@ -283,8 +394,7 @@ function runSpawnedGh(
           cause,
           stdoutTail,
           stderrTail,
-          environment,
-          timedOut ? `gh timed out after ${timeoutMs}ms` : undefined
+          environment
         )
       );
     });

@@ -28,12 +28,22 @@ describe("runGh", () => {
   });
 
   it("forces a non-interactive base environment", () => {
-    expect(ghEnvironment()).toMatchObject({
-      GH_PROMPT_DISABLED: "1",
-      GIT_TERMINAL_PROMPT: "0",
-      GCM_INTERACTIVE: "Never"
-    });
-    expect(ghEnvironment()).not.toHaveProperty("GIT_SSH_COMMAND");
+    const previousSshCommand = process.env.GIT_SSH_COMMAND;
+    process.env.GIT_SSH_COMMAND = "user-configured-ssh-command";
+    try {
+      expect(ghEnvironment()).toMatchObject({
+        GH_PROMPT_DISABLED: "1",
+        GIT_TERMINAL_PROMPT: "0",
+        GCM_INTERACTIVE: "Never",
+        GIT_SSH_COMMAND: "user-configured-ssh-command"
+      });
+    } finally {
+      if (previousSshCommand === undefined) {
+        delete process.env.GIT_SSH_COMMAND;
+      } else {
+        process.env.GIT_SSH_COMMAND = previousSshCommand;
+      }
+    }
   });
 
   it("streams with ignored stdin and protected prompt guards", async () => {
@@ -113,6 +123,27 @@ describe("runGh", () => {
     await expect(result).resolves.toBe(token);
   });
 
+  it.each(["stdout", "stderr"] as const)(
+    "rejects buffered %s overflow instead of returning truncated data",
+    async (stream) => {
+      const child = streamingChild();
+      childProcess.spawn.mockReturnValue(child);
+      const secret = "gho_overflowCredential123";
+
+      const result = runGh(["api", "user"], { env: { GH_TOKEN: secret } });
+      child[stream].emit("data", secret + "x".repeat(1024 * 1024));
+      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+      child.emit("close", null, "SIGTERM");
+      const failure = await result.catch((cause: unknown) => cause);
+
+      expect(failure).toMatchObject({
+        code: "output_too_large",
+        message: `GitHub CLI ${stream} exceeded the 1048576-byte limit.`
+      });
+      expect(JSON.stringify(failure)).not.toContain(secret);
+    }
+  );
+
   it("maps authentication failures without exposing credentials", async () => {
     const child = streamingChild();
     childProcess.spawn.mockReturnValue(child);
@@ -177,6 +208,27 @@ describe("runGh", () => {
     child.stderr.emit("data", `fatal: token ${secret.slice(0, 9)}`);
     expect(received).toEqual([]);
     child.stderr.emit("data", `${secret.slice(9)} is invalid\n`);
+    child.emit("close", 1, null);
+    await result.catch(() => undefined);
+
+    expect(received.join("")).not.toContain(secret);
+    expect(received.join("")).toContain("[REDACTED]");
+  });
+
+  it("bounds no-newline streamed stderr while retaining a redaction overlap", async () => {
+    const child = streamingChild();
+    childProcess.spawn.mockReturnValue(child);
+    const received: string[] = [];
+    const secret = "gho_longStreamCredential123";
+
+    const result = runGh(["repo", "clone", "owner/private"], {
+      onStderr: (chunk) => received.push(chunk),
+      env: { GH_TOKEN: secret }
+    });
+    child.stderr.emit("data", `first line\n${"x".repeat(128 * 1024)}`);
+    expect(received.join("").length).toBeGreaterThan(64 * 1024);
+    child.stderr.emit("data", secret.slice(0, 10));
+    child.stderr.emit("data", `${secret.slice(10)} failed\n`);
     child.emit("close", 1, null);
     await result.catch(() => undefined);
 
