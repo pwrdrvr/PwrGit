@@ -335,11 +335,11 @@ if (!gotSingleInstanceLock) {
       activeWorktreeId = id;
     });
     registerWorktreeLifecycleHandlers(bus, db, indexer, settings, stateService);
-    registerBranchHandlers(bus, db, indexer, refresher);
+    registerBranchHandlers(bus, db, indexer, refresher, worktreeOperations);
     registerRemoteHandlers(bus, db, refresher, worktreeOperations);
     registerGraphHandlers(bus, db, stateService);
     registerChangesHandlers(bus, db, refresher, worktreeOperations);
-    registerRebaseHandlers(bus, db, refresher);
+    registerRebaseHandlers(bus, db, refresher, worktreeOperations);
     registerDialogHandlers(bus);
     registerShellHandlers(bus);
     const githubHandlers = registerGitHubHandlers(

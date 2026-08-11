@@ -417,7 +417,9 @@ export function registerRemoteHandlers(
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
     const startedAt = Date.now();
-    const result = await resetToUpstream(execGit, path, req);
+    const result = await operations.run(req.worktreeId, () =>
+      resetToUpstream(execGit, path, req)
+    );
     if (!result.ok) return result;
     logMain("info", "remote", `reset ${path} to upstream (${seconds(startedAt)})`);
     refresher.refreshWorktree(req.worktreeId);
@@ -434,7 +436,9 @@ export function registerRemoteHandlers(
     const worktree = worktreeOf(req.worktreeId);
     if (worktree === null) return err(notFound);
     const startedAt = Date.now();
-    const result = await resetToRemote(execGit, worktree.path, req, req.mode);
+    const result = await operations.run(req.worktreeId, () =>
+      resetToRemote(execGit, worktree.path, req, req.mode)
+    );
     // A failed hard reset can still have touched the checkout before a file
     // operation failed. The moved branch may also be the repository default,
     // which changes every sibling's derived staleness/merge relationships.
@@ -453,7 +457,9 @@ export function registerRemoteHandlers(
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
     const startedAt = Date.now();
-    const result = await rebaseOntoUpstream(execGit, path, req);
+    const result = await operations.run(req.worktreeId, () =>
+      rebaseOntoUpstream(execGit, path, req)
+    );
     // A stopped rebase changes the checkout too; refresh so the Changes panel
     // and sync badges show the conflict state immediately.
     refresher.refreshWorktree(req.worktreeId);
