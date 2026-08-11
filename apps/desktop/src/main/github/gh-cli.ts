@@ -258,6 +258,7 @@ function runSpawnedGh(
     let stdoutTail = "";
     let stderrTail = "";
     let pendingStreamStderr = "";
+    let redactPendingStreamStderr = false;
     let settled = false;
     let terminationReason:
       | { kind: "timed_out" }
@@ -319,6 +320,7 @@ function runSpawnedGh(
     const flushStreamingStderr = (complete = true): void => {
       if (options.onStderr === undefined || pendingStreamStderr === "") return;
       let emitLength = pendingStreamStderr.length;
+      let replaceEmittedDiagnostic = false;
       if (!complete) {
         emitLength = Math.max(
           pendingStreamStderr.lastIndexOf("\n"),
@@ -354,12 +356,29 @@ function runSpawnedGh(
               emitLength = start;
             }
           }
+          if (emitLength === 0) {
+            // An unusually large caller-provided secret can be longer than the
+            // carry window. Drop its emitted prefix as one redaction marker so
+            // memory remains bounded without reconstructing the secret later.
+            emitLength =
+              pendingStreamStderr.length -
+              MAX_PENDING_STREAM_STDERR_CHARS / 2;
+            replaceEmittedDiagnostic = true;
+            redactPendingStreamStderr = true;
+          }
         }
       }
       if (emitLength === 0) return;
       const diagnostic = pendingStreamStderr.slice(0, emitLength);
       pendingStreamStderr = pendingStreamStderr.slice(emitLength);
-      options.onStderr(sanitizeGhDiagnostic(diagnostic, environment));
+      options.onStderr(
+        replaceEmittedDiagnostic || redactPendingStreamStderr
+          ? "[REDACTED]"
+          : sanitizeGhDiagnostic(diagnostic, environment)
+      );
+      if (complete || /[\r\n]/.test(diagnostic)) {
+        redactPendingStreamStderr = false;
+      }
       if (
         !complete &&
         pendingStreamStderr.length > MAX_PENDING_STREAM_STDERR_CHARS

@@ -260,6 +260,26 @@ describe("runGh", () => {
     expect(received.join("")).toContain("[REDACTED]");
   });
 
+  it("bounds stderr even when a configured secret exceeds the carry window", async () => {
+    const child = streamingChild();
+    childProcess.spawn.mockReturnValue(child);
+    const received: string[] = [];
+    const secret = `opaque-${"s".repeat(70 * 1024)}`;
+
+    const result = runGh(["repo", "clone", "owner/private"], {
+      onStderr: (chunk) => received.push(chunk),
+      env: { GH_TOKEN: secret }
+    });
+    child.stderr.emit("data", secret);
+    expect(received).toContain("[REDACTED]");
+    child.stderr.emit("data", "\n");
+    child.emit("close", 1, null);
+    await result.catch(() => undefined);
+
+    expect(received.join("")).not.toContain(secret);
+    expect(received.join("")).not.toContain(secret.slice(-1024));
+  });
+
   it("terminates a timed-out streaming process and settles on close", async () => {
     vi.useFakeTimers();
     const child = streamingChild();
