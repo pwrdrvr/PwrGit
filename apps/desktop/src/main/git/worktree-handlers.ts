@@ -22,7 +22,7 @@ function stateChanged(a: WorktreeState, b: WorktreeState): boolean {
 
 export type WorktreeRefresher = {
   /** Recompute one worktree; emit worktree:changed only if it actually moved. */
-  refreshWorktree: (worktreeId: string) => void;
+  refreshWorktree: (worktreeId: string) => Promise<void>;
   /** Recompute all worktrees of a repo; emit repo:changed once when done. */
   refreshRepoWorktrees: (repoId: string) => void;
 };
@@ -31,27 +31,26 @@ export function createWorktreeRefresher(
   state: WorktreeStateService,
   db: DB
 ): WorktreeRefresher {
-  const refreshWorktree = (worktreeId: string): void => {
+  const refreshWorktree = async (worktreeId: string): Promise<void> => {
     const before = state.getCached(worktreeId);
-    void state.compute(worktreeId).then((fresh) => {
-      if (fresh === null) return;
-      if (before !== null && !stateChanged(before, fresh)) return;
-      // The header reads live worktree state (worktree:changed); the sidebar's
-      // badges (behind/ahead/merged/…) come from the repo tree, which reloads on
-      // repo:changed — so a single-worktree change (pull/fetch/push/commit) must
-      // nudge both, or e.g. the ↓N badge goes stale after a fast-forward.
-      emitEvent("worktree:changed", { worktreeId });
-      const row = db
-        .prepare(
-          `SELECT r.profile_id AS profile_id
-           FROM worktrees w JOIN repos r ON r.id = w.repo_id
-           WHERE w.id = ?`
-        )
-        .get(worktreeId) as { profile_id: string } | undefined;
-      if (row !== undefined) {
-        emitEvent("repo:changed", { profileId: row.profile_id });
-      }
-    });
+    const fresh = await state.compute(worktreeId);
+    if (fresh === null) return;
+    if (before !== null && !stateChanged(before, fresh)) return;
+    // The header reads live worktree state (worktree:changed); the sidebar's
+    // badges (behind/ahead/merged/…) come from the repo tree, which reloads on
+    // repo:changed — so a single-worktree change (pull/fetch/push/commit) must
+    // nudge both, or e.g. the ↓N badge goes stale after a fast-forward.
+    emitEvent("worktree:changed", { worktreeId });
+    const row = db
+      .prepare(
+        `SELECT r.profile_id AS profile_id
+         FROM worktrees w JOIN repos r ON r.id = w.repo_id
+         WHERE w.id = ?`
+      )
+      .get(worktreeId) as { profile_id: string } | undefined;
+    if (row !== undefined) {
+      emitEvent("repo:changed", { profileId: row.profile_id });
+    }
   };
 
   const refreshRepoWorktrees = (repoId: string): void => {

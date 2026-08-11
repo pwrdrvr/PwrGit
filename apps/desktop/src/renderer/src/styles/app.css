@@ -2636,7 +2636,7 @@ textarea,
   }
 }
 @container (max-width: 680px) {
-  .wt-header__state .sync-chip {
+  .wt-header__state .sync-chip:not(.sync-chip--progress) {
     display: none;
   }
 }
@@ -2956,6 +2956,13 @@ textarea,
   background: var(--warn-soft);
   color: var(--status-warning);
 }
+.sync-chip--progress {
+  min-width: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .wt-actions {
   display: flex;
@@ -3003,7 +3010,7 @@ textarea,
   .wt-btn__label {
     display: none;
   }
-  .wt-header__state .sync-chip {
+  .wt-header__state .sync-chip:not(.sync-chip--progress) {
     display: none;
   }
 }

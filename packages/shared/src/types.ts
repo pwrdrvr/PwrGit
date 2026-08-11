@@ -164,6 +164,16 @@ export type PushRefResult = {
   message?: string;
 };
 
+/** Coarse, user-facing milestones during a pull. Git does not expose a stable
+ * percentage for checkout or filter work, so phases stay honest without
+ * guessing at completion. */
+export type PullProgressPhase =
+  | "fetch"
+  | "prepare"
+  | "fast_forward"
+  | "reapply"
+  | "refresh";
+
 /** Lifecycle of a pull request — the only status we track in the first cut. */
 export type PrLifecycle = "open" | "merged" | "closed";
 

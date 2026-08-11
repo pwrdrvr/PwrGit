@@ -30,6 +30,7 @@ import type {
   PrSummary,
   Profile,
   ProfileId,
+  PullProgressPhase,
   RebaseCommitRef,
   RebaseCheckResult,
   RebaseOperation,
@@ -608,6 +609,11 @@ export interface Events {
     progress: CloneProgress;
   };
   "worktree:changed": { worktreeId: string };
+  /** Coarse live pull progress for one worktree. */
+  "worktree:pullProgress": {
+    worktreeId: string;
+    phase: PullProgressPhase;
+  };
   /** A worktree finished being removed (streamed during a batch remove). */
   "worktree:removed": { worktreeId: string };
   /**
