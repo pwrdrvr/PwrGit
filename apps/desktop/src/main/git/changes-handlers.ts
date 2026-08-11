@@ -19,6 +19,7 @@ import {
   unstagePath
 } from "./git-service";
 import type { WorktreeRefresher } from "./worktree-handlers";
+import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 const notFound = {
   kind: "repo" as const,
@@ -29,7 +30,8 @@ const notFound = {
 export function registerChangesHandlers(
   bus: CommandBus,
   db: DB,
-  refresher: WorktreeRefresher
+  refresher: WorktreeRefresher,
+  operations: WorktreeOperationQueue
 ): void {
   const pathOf = (worktreeId: string): string | null =>
     (
@@ -41,13 +43,15 @@ export function registerChangesHandlers(
   bus.register("changes:list", async (req) => {
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
-    return readChanges(execGit, path);
+    return operations.run(req.worktreeId, () => readChanges(execGit, path));
   });
 
   bus.register("changes:stage", async (req) => {
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
-    const result = await stagePath(execGit, path, req.path);
+    const result = await operations.run(req.worktreeId, () =>
+      stagePath(execGit, path, req.path)
+    );
     if (!result.ok) return result;
     refresher.refreshWorktree(req.worktreeId);
     return ok(null);
@@ -56,7 +60,9 @@ export function registerChangesHandlers(
   bus.register("changes:unstage", async (req) => {
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
-    const result = await unstagePath(execGit, path, req.path);
+    const result = await operations.run(req.worktreeId, () =>
+      unstagePath(execGit, path, req.path)
+    );
     if (!result.ok) return result;
     refresher.refreshWorktree(req.worktreeId);
     return ok(null);
@@ -65,7 +71,9 @@ export function registerChangesHandlers(
   bus.register("changes:discard", async (req) => {
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
-    const result = await discardPath(execGit, path, req.path);
+    const result = await operations.run(req.worktreeId, () =>
+      discardPath(execGit, path, req.path)
+    );
     if (!result.ok) return result;
     refresher.refreshWorktree(req.worktreeId);
     return ok(null);
@@ -74,7 +82,9 @@ export function registerChangesHandlers(
   bus.register("changes:discardAll", async (req) => {
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
-    const result = await discardAllChanges(execGit, path);
+    const result = await operations.run(req.worktreeId, () =>
+      discardAllChanges(execGit, path)
+    );
     if (!result.ok) return result;
     refresher.refreshWorktree(req.worktreeId);
     return ok(null);
@@ -108,9 +118,11 @@ export function registerChangesHandlers(
         ? { email: row.email, name: row.author_name }
         : { email: row.email };
 
-    const result = await commitChanges(execGit, row.path, req.message, identity, {
-      amend: req.amend ?? false
-    });
+    const result = await operations.run(req.worktreeId, () =>
+      commitChanges(execGit, row.path, req.message, identity, {
+        amend: req.amend ?? false
+      })
+    );
     if (!result.ok) return result;
     logMain(
       "info",

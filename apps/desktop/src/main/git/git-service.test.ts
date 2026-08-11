@@ -8,6 +8,7 @@ import {
   parseNumstat,
   parseRepoRefRows,
   parseWorktreeList,
+  readChanges,
   readCommit,
   topoMergeCommits
 } from "./git-service";
@@ -330,6 +331,17 @@ describe("parseChanges", () => {
     expect(cs.staged.find((f) => f.path === "new.txt")?.status).toBe("R");
     expect(cs.unstaged.find((f) => f.path === "untracked.txt")?.status).toBe(
       "?"
+    );
+  });
+
+  it("reads status without taking Git's optional index lock", async () => {
+    const git: GitExec = async (_args, _cwd, options) => {
+      expect(options?.env?.["GIT_OPTIONAL_LOCKS"]).toBe("0");
+      return ok({ stdout: "", stderr: "", exitCode: 0 });
+    };
+
+    await expect(readChanges(git, "/repo")).resolves.toEqual(
+      ok({ staged: [], unstaged: [] })
     );
   });
 });

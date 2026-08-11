@@ -9,6 +9,7 @@ import { ProfileService } from "../profiles/profile-service";
 import type { GitExec, GitOutput } from "./dugite";
 import { RepoIndexer } from "./repo-indexer";
 import { parseStatus, WorktreeStateService } from "./worktree-state";
+import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 const systemGit: GitExec = (args, cwd) =>
   new Promise<Result<GitOutput>>((resolve) => {
@@ -238,5 +239,66 @@ describe("WorktreeStateService (system git)", () => {
       await svc.compute(worktreeId);
       expect(spawns).toBeGreaterThan(0);
     });
+  });
+
+  it("waits for an active checkout mutation before probing state", async () => {
+    const operations = new WorktreeOperationQueue();
+    let finishMutation!: () => void;
+    const mutation = operations.run(
+      worktreeId,
+      () =>
+        new Promise<void>((resolve) => {
+          finishMutation = resolve;
+        })
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    let spawns = 0;
+    const countingGit: GitExec = (args, cwd, options) => {
+      spawns += 1;
+      return systemGit(args, cwd, options);
+    };
+    const svc = new WorktreeStateService(db, countingGit, operations);
+
+    const probe = svc.compute(worktreeId);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(spawns).toBe(0);
+
+    finishMutation();
+    await mutation;
+    expect(await probe).not.toBeNull();
+    expect(spawns).toBeGreaterThan(0);
+  });
+
+  it("coalesces repeated state probes queued behind a mutation", async () => {
+    const operations = new WorktreeOperationQueue();
+    let finishMutation!: () => void;
+    const mutation = operations.run(
+      worktreeId,
+      () =>
+        new Promise<void>((resolve) => {
+          finishMutation = resolve;
+        })
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    let statusSpawns = 0;
+    const countingGit: GitExec = (args, cwd, options) => {
+      if (args[0] === "status") statusSpawns += 1;
+      return systemGit(args, cwd, options);
+    };
+    const svc = new WorktreeStateService(db, countingGit, operations);
+
+    const probes = Array.from({ length: 100 }, () => svc.compute(worktreeId));
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(statusSpawns).toBe(0);
+
+    finishMutation();
+    await mutation;
+    const states = await Promise.all(probes);
+    expect(states.every((state) => state !== null)).toBe(true);
+    expect(statusSpawns).toBe(1);
+
+    expect(await svc.compute(worktreeId)).not.toBeNull();
+    expect(statusSpawns).toBe(2);
   });
 });

@@ -36,6 +36,11 @@ export function gitExecutionEnvironment(
   return { ...overrides, ...NON_INTERACTIVE_GIT_ENV };
 }
 
+/** Read-only probes should never compete with a mutating Git command's lock. */
+export const NO_OPTIONAL_LOCKS = {
+  env: { GIT_OPTIONAL_LOCKS: "0" }
+} satisfies GitExecOptions;
+
 /** Keep Git diagnostics useful in Logs without retaining common credentials. */
 export function sanitizeGitLogDetail(detail: unknown): string {
   const raw =

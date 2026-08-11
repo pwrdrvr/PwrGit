@@ -22,7 +22,7 @@ import {
   ok,
   type Result
 } from "@pwrgit/shared";
-import { requireExit0, type GitExec } from "./dugite";
+import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
 
 function mapStatusCode(c: string | undefined): FileStatus {
   switch (c) {
@@ -86,7 +86,11 @@ export async function readChanges(
   git: GitExec,
   cwd: string
 ): Promise<Result<ChangeSet>> {
-  const raw = await git(["status", "--porcelain=v2"], cwd);
+  const raw = await git(
+    ["status", "--porcelain=v2"],
+    cwd,
+    NO_OPTIONAL_LOCKS
+  );
   if (!raw.ok) return raw;
   const checked = requireExit0(raw.value, ["status"]);
   if (!checked.ok) return checked;

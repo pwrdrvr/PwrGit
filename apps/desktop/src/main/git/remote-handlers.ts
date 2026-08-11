@@ -37,6 +37,7 @@ import {
   type PullWatchdogPhase,
   type PullWatchdogSnapshot
 } from "./pull-watchdog";
+import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 const seconds = (startedAt: number): string =>
   `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
@@ -126,7 +127,8 @@ const notFound: PwrGitError = {
 export function registerRemoteHandlers(
   bus: CommandBus,
   db: DB,
-  refresher: WorktreeRefresher
+  refresher: WorktreeRefresher,
+  operations: WorktreeOperationQueue
 ): void {
   const worktreeOf = (
     worktreeId: string
@@ -295,38 +297,40 @@ export function registerRemoteHandlers(
     };
     let result: Awaited<ReturnType<typeof pullFastForward>>;
     try {
-      result = await pullFastForward(execGit, path, reportPhase, {
-        signal: watchdog.signal,
-        onActivity: () => watchdog.noteActivity(),
-        startRecovery: () => {
-          watchdog.finish();
-          const priorPhase = currentPhase;
-          recoveryActive = true;
-          currentPhase = "recovery";
-          logMain(
-            "info",
-            "remote",
-            `pull phase ${pullPhaseDescription("recovery")} ${path} (${seconds(startedAt)})`
-          );
-          recoveryWatchdog = new PullWatchdog({
-            stallWarningMs: PULL_RECOVERY_STALL_WARNING_MS,
-            stallTimeoutMs: PULL_RECOVERY_STALL_TIMEOUT_MS,
-            operationTimeoutMs: PULL_RECOVERY_OPERATION_TIMEOUT_MS,
-            onStallWarning,
-            onTimeout
-          });
-          recoveryWatchdog.setPhase("recovery");
-          return {
-            signal: recoveryWatchdog.signal,
-            onActivity: () => recoveryWatchdog?.noteActivity(),
-            finish: (succeeded: boolean) => {
-              recoveryWatchdog?.finish();
-              recoveryActive = false;
-              if (succeeded) currentPhase = priorPhase;
-            }
-          };
-        }
-      });
+      result = await operations.run(req.worktreeId, () =>
+        pullFastForward(execGit, path, reportPhase, {
+          signal: watchdog.signal,
+          onActivity: () => watchdog.noteActivity(),
+          startRecovery: () => {
+            watchdog.finish();
+            const priorPhase = currentPhase;
+            recoveryActive = true;
+            currentPhase = "recovery";
+            logMain(
+              "info",
+              "remote",
+              `pull phase ${pullPhaseDescription("recovery")} ${path} (${seconds(startedAt)})`
+            );
+            recoveryWatchdog = new PullWatchdog({
+              stallWarningMs: PULL_RECOVERY_STALL_WARNING_MS,
+              stallTimeoutMs: PULL_RECOVERY_STALL_TIMEOUT_MS,
+              operationTimeoutMs: PULL_RECOVERY_OPERATION_TIMEOUT_MS,
+              onStallWarning,
+              onTimeout
+            });
+            recoveryWatchdog.setPhase("recovery");
+            return {
+              signal: recoveryWatchdog.signal,
+              onActivity: () => recoveryWatchdog?.noteActivity(),
+              finish: (succeeded: boolean) => {
+                recoveryWatchdog?.finish();
+                recoveryActive = false;
+                if (succeeded) currentPhase = priorPhase;
+              }
+            };
+          }
+        })
+      );
     } catch (cause) {
       const detail = sanitizeGitLogDetail(cause);
       watchdog.finish();
@@ -413,7 +417,9 @@ export function registerRemoteHandlers(
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
     const startedAt = Date.now();
-    const result = await resetToUpstream(execGit, path, req);
+    const result = await operations.run(req.worktreeId, () =>
+      resetToUpstream(execGit, path, req)
+    );
     if (!result.ok) return result;
     logMain("info", "remote", `reset ${path} to upstream (${seconds(startedAt)})`);
     refresher.refreshWorktree(req.worktreeId);
@@ -430,7 +436,9 @@ export function registerRemoteHandlers(
     const worktree = worktreeOf(req.worktreeId);
     if (worktree === null) return err(notFound);
     const startedAt = Date.now();
-    const result = await resetToRemote(execGit, worktree.path, req, req.mode);
+    const result = await operations.run(req.worktreeId, () =>
+      resetToRemote(execGit, worktree.path, req, req.mode)
+    );
     // A failed hard reset can still have touched the checkout before a file
     // operation failed. The moved branch may also be the repository default,
     // which changes every sibling's derived staleness/merge relationships.
@@ -449,7 +457,9 @@ export function registerRemoteHandlers(
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
     const startedAt = Date.now();
-    const result = await rebaseOntoUpstream(execGit, path, req);
+    const result = await operations.run(req.worktreeId, () =>
+      rebaseOntoUpstream(execGit, path, req)
+    );
     // A stopped rebase changes the checkout too; refresh so the Changes panel
     // and sync badges show the conflict state immediately.
     refresher.refreshWorktree(req.worktreeId);

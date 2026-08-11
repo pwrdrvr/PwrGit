@@ -16,6 +16,7 @@ import {
   validateSelection
 } from "./rebase-assistant";
 import type { WorktreeRefresher } from "./worktree-handlers";
+import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 type RebaseRow = {
   path: string;
@@ -66,6 +67,7 @@ export function registerRebaseHandlers(
   bus: CommandBus,
   db: DB,
   refresher: WorktreeRefresher,
+  operations: WorktreeOperationQueue,
   dependencyOverrides: Partial<RebaseHandlerDependencies> = {}
 ): void {
   const dependencies = { ...DEFAULT_DEPENDENCIES, ...dependencyOverrides };
@@ -199,13 +201,15 @@ export function registerRebaseHandlers(
     }
 
     invalidateWorktreeApprovals(req.worktreeId);
-    const result = await dependencies.apply(
-      dependencies.git,
-      row.path,
-      req.commits,
-      req.op,
-      identityFor(row),
-      { head: approval.sourceHead, headRef: approval.sourceRef }
+    const result = await operations.run(req.worktreeId, () =>
+      dependencies.apply(
+        dependencies.git,
+        row.path,
+        req.commits,
+        req.op,
+        identityFor(row),
+        { head: approval.sourceHead, headRef: approval.sourceRef }
+      )
     );
     if (!result.ok) return result;
     refresher.refreshWorktree(req.worktreeId);

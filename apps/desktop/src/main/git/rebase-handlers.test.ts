@@ -12,6 +12,7 @@ import {
   registerRebaseHandlers,
   type RebaseHandlerDependencies
 } from "./rebase-handlers";
+import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 const commits: RebaseCommitRef[] = [
   { hash: "bbbbbbbb", subject: "top" },
@@ -45,12 +46,13 @@ function setup() {
   const refresher = {
     refreshWorktree: vi.fn()
   } as unknown as WorktreeRefresher;
-  registerRebaseHandlers(bus, fakeDb(), refresher, {
+  const operations = new WorktreeOperationQueue();
+  registerRebaseHandlers(bus, fakeDb(), refresher, operations, {
     apply,
     dryRun,
     createToken: () => "approval-1"
   });
-  return { bus, apply, dryRun, refresher };
+  return { bus, apply, dryRun, refresher, operations };
 }
 
 describe("rebase handler approval gate", () => {

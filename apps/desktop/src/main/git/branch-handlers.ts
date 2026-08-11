@@ -7,6 +7,7 @@ import { execGit } from "./dugite";
 import { listBranches, listRepoRefs, switchBranch } from "./git-service";
 import type { RepoIndexer } from "./repo-indexer";
 import type { WorktreeRefresher } from "./worktree-handlers";
+import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 const notFound = {
   kind: "repo" as const,
@@ -20,7 +21,8 @@ export function registerBranchHandlers(
   bus: CommandBus,
   db: DB,
   indexer: RepoIndexer,
-  refresher: WorktreeRefresher
+  refresher: WorktreeRefresher,
+  operations: WorktreeOperationQueue
 ): void {
   const rowOf = (worktreeId: string): Row | undefined =>
     db
@@ -59,7 +61,9 @@ export function registerBranchHandlers(
   bus.register("branch:switch", async (req) => {
     const row = rowOf(req.worktreeId);
     if (row === undefined) return err(notFound);
-    const result = await switchBranch(execGit, row.path, req.branch);
+    const result = await operations.run(req.worktreeId, () =>
+      switchBranch(execGit, row.path, req.branch)
+    );
     if (!result.ok) return result;
     logMain("info", "branch", `switched ${row.path} to ${req.branch}`);
     // The worktree's branch column is now stale — re-list (branch is keyed by

@@ -28,6 +28,7 @@ import {
   createWorktreeRefresher,
   registerWorktreeHandlers
 } from "./git/worktree-handlers";
+import { WorktreeOperationQueue } from "./git/worktree-operation-queue";
 import { registerWorktreeLifecycleHandlers } from "./git/worktree-lifecycle-handlers";
 import { WorktreeStateService } from "./git/worktree-state";
 import {
@@ -221,7 +222,12 @@ if (!gotSingleInstanceLock) {
     });
     const indexer = new RepoIndexer(db, execGit);
     const cloneService = new CloneService(db, execGit, indexer, profiles);
-    const stateService = new WorktreeStateService(db, execGit);
+    const worktreeOperations = new WorktreeOperationQueue();
+    const stateService = new WorktreeStateService(
+      db,
+      execGit,
+      worktreeOperations
+    );
     const refresher = createWorktreeRefresher(stateService, db);
     const prService = new PrService(db, execGit);
     const avatarThumbnails = new GitHubAvatarThumbnailCache(db, {
@@ -329,11 +335,11 @@ if (!gotSingleInstanceLock) {
       activeWorktreeId = id;
     });
     registerWorktreeLifecycleHandlers(bus, db, indexer, settings, stateService);
-    registerBranchHandlers(bus, db, indexer, refresher);
-    registerRemoteHandlers(bus, db, refresher);
+    registerBranchHandlers(bus, db, indexer, refresher, worktreeOperations);
+    registerRemoteHandlers(bus, db, refresher, worktreeOperations);
     registerGraphHandlers(bus, db, stateService);
-    registerChangesHandlers(bus, db, refresher);
-    registerRebaseHandlers(bus, db, refresher);
+    registerChangesHandlers(bus, db, refresher, worktreeOperations);
+    registerRebaseHandlers(bus, db, refresher, worktreeOperations);
     registerDialogHandlers(bus);
     registerShellHandlers(bus);
     const githubHandlers = registerGitHubHandlers(
