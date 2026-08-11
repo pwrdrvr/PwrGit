@@ -3,7 +3,13 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PullProgressPhase, Worktree } from "@pwrgit/shared";
+import {
+  err,
+  ok,
+  type PullProgressPhase,
+  type SshRemoteRecovery,
+  type Worktree
+} from "@pwrgit/shared";
 
 const bridge = vi.hoisted(() => ({
   dispatch: vi.fn(),
@@ -17,7 +23,10 @@ vi.mock("../../lib/pwrgit", () => ({
   dispatch: bridge.dispatch,
   subscribe: bridge.subscribe
 }));
-vi.mock("../../lib/toast", () => ({ showErrorToast: vi.fn() }));
+vi.mock("../../lib/toast", () => ({
+  showErrorToast: vi.fn(),
+  showInfoToast: vi.fn()
+}));
 vi.mock("../shell/WorktreeMenu", () => ({ WorktreeMenu: () => null }));
 
 import { WorktreeHeader } from "./WorktreeHeader";
@@ -99,5 +108,45 @@ describe("WorktreeHeader pull progress", () => {
       });
     });
     expect(container.textContent).toContain("Finishing refresh…");
+  });
+
+  it("offers SSH recovery after a GitHub HTTPS authentication failure", async () => {
+    const recovery: SshRemoteRecovery = {
+      remote: "origin",
+      httpsUrl: "https://github.com/pwrdrvr/PwrAgent.git",
+      sshUrl: "git@github.com:pwrdrvr/PwrAgent.git",
+      pushUrlWillAlsoChange: true
+    };
+    bridge.dispatch.mockImplementation((name: string) => {
+      if (name === "remote:pull") {
+        return Promise.resolve(
+          err({
+            kind: "remote",
+            code: "authentication_required",
+            message: "Pull needs authentication."
+          })
+        );
+      }
+      if (name === "remote:inspectSshRecovery") {
+        return Promise.resolve(ok(recovery));
+      }
+      return new Promise(() => undefined);
+    });
+    const pull = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Pull"]'
+    );
+
+    await act(async () => {
+      pull?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:inspectSshRecovery", {
+      worktreeId: worktree.id
+    });
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(container.textContent).toContain("Try this remote with SSH?");
+    expect(container.textContent).toContain(recovery.sshUrl);
   });
 });
