@@ -65,6 +65,11 @@ export type GitSandbox = {
     name: string,
     opts?: { behindBy?: number }
   ) => TestRepo;
+  /** A tracked release branch synced with origin but behind a newer main. */
+  makeRepoWithSyncedReleaseBranch: (
+    name: string,
+    opts?: { mainAheadBy?: number; backports?: number }
+  ) => TestRepo;
   cleanup: () => void;
 };
 
@@ -154,6 +159,44 @@ export function createGitSandbox(): GitSandbox {
     };
   };
 
+  const makeRepoWithSyncedReleaseBranch = (
+    name: string,
+    opts: { mainAheadBy?: number; backports?: number } = {}
+  ): TestRepo => {
+    const mainAheadBy = opts.mainAheadBy ?? 3;
+    const backports = opts.backports ?? 1;
+    const repoPath = initRepo(name);
+    const remotePath = join(remotesDir, `${name}.git`);
+    git(remotesDir, "init", "--bare", `${name}.git`);
+    git(remotePath, "symbolic-ref", "HEAD", "refs/heads/main");
+    git(repoPath, "remote", "add", "origin", remotePath);
+    git(repoPath, "push", "-u", "origin", "main");
+    git(repoPath, "remote", "set-head", "origin", "--auto");
+
+    const addWorktree = worktreeAdder(name, repoPath);
+    const releasePath = addWorktree("releases/1.0");
+    for (let i = 0; i < backports; i += 1) {
+      writeFileSync(join(releasePath, `backport-${i}.txt`), `${i}\n`);
+      git(releasePath, "add", "-A");
+      git(releasePath, "commit", "-m", `backport ${i}`);
+    }
+    git(releasePath, "push", "-u", "origin", "releases/1.0");
+
+    for (let i = 0; i < mainAheadBy; i += 1) {
+      writeFileSync(join(repoPath, `main-${i}.txt`), `${i}\n`);
+      git(repoPath, "add", "-A");
+      git(repoPath, "commit", "-m", `main commit ${i}`);
+    }
+    git(repoPath, "push", "origin", "main");
+
+    return {
+      name,
+      path: repoPath,
+      addWorktree,
+      createBranch: (branch: string) => git(repoPath, "branch", branch)
+    };
+  };
+
   const commit = (cwd: string, file: string, message: string): void => {
     writeFileSync(join(cwd, file), `${message}\n`);
     git(cwd, "add", "-A");
@@ -207,6 +250,7 @@ export function createGitSandbox(): GitSandbox {
     commitEmptyAt,
     makeRepo,
     makeRepoBehindRemote,
+    makeRepoWithSyncedReleaseBranch,
     cleanup
   };
 }

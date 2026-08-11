@@ -242,10 +242,14 @@ export function RepoRow({
     }
   };
 
+  const defaultBranch =
+    repo.worktrees.find((worktree) => worktree.isDefaultBranch)?.branch ??
+    "default";
   const renderWorktree = (worktree: Worktree) => (
     <WorktreeRow
       key={worktree.id}
       worktree={worktree}
+      defaultBranch={defaultBranch}
       selected={worktree.id === selectedWorktreeId}
       multiSelected={selectedIds.has(worktree.id)}
       now={now}

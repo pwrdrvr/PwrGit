@@ -1198,7 +1198,7 @@ textarea,
   background: var(--success-soft);
   color: var(--success-text);
 }
-.wt-tag--behind {
+.wt-tag--default-ahead {
   background: var(--warn-soft);
   color: var(--status-warning);
 }

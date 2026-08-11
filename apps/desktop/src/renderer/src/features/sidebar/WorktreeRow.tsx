@@ -14,6 +14,7 @@ const PR_HOVER_PREFETCH_DELAY_MS = 750;
 
 export function WorktreeRow({
   worktree,
+  defaultBranch,
   selected,
   multiSelected,
   now,
@@ -30,6 +31,8 @@ export function WorktreeRow({
   onFocus
 }: {
   worktree: Worktree;
+  /** Display name of the ref behindDefault compares against. */
+  defaultBranch: string;
   selected: boolean;
   multiSelected: boolean;
   now: number;
@@ -197,10 +200,10 @@ export function WorktreeRow({
             !worktree.divergedFromDefault &&
             worktree.behindDefault > 0 && (
               <span
-                className="wt-tag wt-tag--behind"
-                title={`${worktree.behindDefault} commits behind the default branch`}
+                className="wt-tag wt-tag--default-ahead"
+                title={`${defaultBranch} has ${worktree.behindDefault} commits not in ${worktree.branch}; this is not commits available to pull`}
               >
-                ↓{worktree.behindDefault}
+                {defaultBranch} +{worktree.behindDefault}
               </span>
             )}
         </>
