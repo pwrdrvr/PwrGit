@@ -19,6 +19,7 @@ import {
   unstagePath
 } from "./git-service";
 import type { WorktreeRefresher } from "./worktree-handlers";
+import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 const notFound = {
   kind: "repo" as const,
@@ -29,7 +30,8 @@ const notFound = {
 export function registerChangesHandlers(
   bus: CommandBus,
   db: DB,
-  refresher: WorktreeRefresher
+  refresher: WorktreeRefresher,
+  operations: WorktreeOperationQueue
 ): void {
   const pathOf = (worktreeId: string): string | null =>
     (
@@ -41,7 +43,7 @@ export function registerChangesHandlers(
   bus.register("changes:list", async (req) => {
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
-    return readChanges(execGit, path);
+    return operations.run(req.worktreeId, () => readChanges(execGit, path));
   });
 
   bus.register("changes:stage", async (req) => {

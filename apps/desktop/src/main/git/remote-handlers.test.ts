@@ -95,7 +95,7 @@ describe("remote handlers", () => {
       }
     );
     const bus = new CommandBus();
-    registerRemoteHandlers(bus, db, refresher);
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
 
     await expect(
       bus.dispatch("remote:pull", { worktreeId: "worktree-1" })
@@ -141,7 +141,7 @@ describe("remote handlers", () => {
         })
     );
     const bus = new CommandBus();
-    registerRemoteHandlers(bus, db, refresher);
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
 
     const pull = bus.dispatch("remote:pull", { worktreeId: "worktree-1" });
     await vi.advanceTimersByTimeAsync(PULL_STALL_WARNING_MS);
@@ -208,7 +208,7 @@ describe("remote handlers", () => {
         })
     );
     const bus = new CommandBus();
-    registerRemoteHandlers(bus, db, refresher);
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
 
     const pull = bus.dispatch("remote:pull", { worktreeId: "worktree-1" });
     await vi.advanceTimersByTimeAsync(PULL_STALL_TIMEOUT_MS);
@@ -243,7 +243,7 @@ describe("remote handlers", () => {
       refreshRepoWorktrees: vi.fn()
     } satisfies WorktreeRefresher;
     const bus = new CommandBus();
-    registerRemoteHandlers(bus, db, refresher);
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
 
     const pull = bus.dispatch("remote:pull", { worktreeId: "worktree-1" });
     await vi.advanceTimersByTimeAsync(PULL_REFRESH_WAIT_LIMIT_MS);
@@ -281,7 +281,7 @@ describe("remote handlers", () => {
       }
     );
     const bus = new CommandBus();
-    registerRemoteHandlers(bus, db, refresher);
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
 
     const result = await bus.dispatch("remote:pull", {
       worktreeId: "worktree-1"
@@ -337,7 +337,7 @@ describe("remote handlers", () => {
       }
     );
     const bus = new CommandBus();
-    registerRemoteHandlers(bus, db, refresher);
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
 
     const pull = bus.dispatch("remote:pull", { worktreeId: "worktree-1" });
     await vi.waitFor(() => expect(refreshWorktree).toHaveBeenCalledOnce());
@@ -391,7 +391,7 @@ describe("remote handlers", () => {
       refreshRepoWorktrees: vi.fn()
     } satisfies WorktreeRefresher;
     const bus = new CommandBus();
-    registerRemoteHandlers(bus, db, refresher);
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
 
     await expect(
       bus.dispatch("remote:pull", { worktreeId: "worktree-1" })
@@ -421,7 +421,7 @@ describe("remote handlers", () => {
       refreshRepoWorktrees: vi.fn()
     } satisfies WorktreeRefresher;
     const bus = new CommandBus();
-    registerRemoteHandlers(bus, db, refresher);
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
 
     const fetched = await bus.dispatch("remote:fetchRepo", {
       repoId: "repo-1",
@@ -457,7 +457,7 @@ describe("remote handlers", () => {
       refreshRepoWorktrees: vi.fn()
     } satisfies WorktreeRefresher;
     const bus = new CommandBus();
-    registerRemoteHandlers(bus, db, refresher);
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
 
     const snapshot = {
       branch: "main",

@@ -1,7 +1,8 @@
 import type { WorktreeState } from "@pwrgit/shared";
 import type { DB } from "../persistence/db";
 import { mapLimit } from "../util/map-limit";
-import { requireExit0, type GitExec } from "./dugite";
+import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
+import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 export type ParsedStatus = {
   head: string;
@@ -106,7 +107,8 @@ export class WorktreeStateService {
 
   constructor(
     private readonly db: DB,
-    private readonly git: GitExec
+    private readonly git: GitExec,
+    private readonly operations = new WorktreeOperationQueue()
   ) {}
 
   getCached(worktreeId: string): WorktreeState | null {
@@ -172,7 +174,9 @@ export class WorktreeStateService {
   async compute(worktreeId: string): Promise<WorktreeState | null> {
     if (this.removalLocks.has(worktreeId)) return this.getCached(worktreeId);
 
-    const run = this.computeFresh(worktreeId);
+    const run = this.operations.run(worktreeId, () =>
+      this.computeFresh(worktreeId)
+    );
     let running = this.inFlight.get(worktreeId);
     if (running === undefined) {
       running = new Set();
@@ -218,7 +222,8 @@ export class WorktreeStateService {
 
     const statusRaw = await this.git(
       ["status", "--porcelain=v2", "--branch"],
-      wt.path
+      wt.path,
+      NO_OPTIONAL_LOCKS
     );
     if (!statusRaw.ok) return this.getCached(worktreeId);
     const status = requireExit0(statusRaw.value, ["status"]);
