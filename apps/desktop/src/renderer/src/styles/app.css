@@ -696,27 +696,6 @@ textarea,
   text-transform: uppercase;
 }
 
-/* Inside the Pinned lens the star is redundant — every row in the list is
-   pinned, so a column of lit stars spends the accent color to repeat what the
-   lens header already said, and the accent stops meaning "look here". It
-   yields to hover, where it's still the unpin control. Everywhere else the
-   star is carrying real information and stays lit. */
-.repo-row.is-arrangeable .pin {
-  opacity: 0;
-  transition: opacity 120ms ease;
-}
-/* `:focus-visible`, never `:focus-within`. These rows are focusable (roving
-   tabindex) AND draggable, and Chromium focuses a focusable element on
-   mousedown — so with `:focus-within` the row you last dragged keeps its star
-   lit for the rest of the session, pointer long gone. A star lit for an
-   incidental reason is worse than showing all of them: the lit one looks like
-   it means something. `:focus-visible` reveals it for the keyboard user who
-   needs to see what they're about to activate, and stays quiet for the mouse. */
-.repo-row.is-arrangeable:hover .pin,
-.repo-row.is-arrangeable:focus-visible .pin,
-.repo-row.is-arrangeable .pin:focus-visible {
-  opacity: 1;
-}
 .chev {
   width: 7px;
   height: 7px;

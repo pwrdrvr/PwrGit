@@ -14,15 +14,7 @@ test.afterEach(async () => {
   sandbox = null;
 });
 
-/**
- * The point of hover-gating the star inside the Pinned lens is that the lens
- * reads quiet: every row there is pinned, so a column of lit stars spends the
- * accent color to repeat the header. A row that keeps its star for an
- * incidental reason (it happens to still hold focus, it happens to be first)
- * is worse than showing all of them — the lit ones look like they mean
- * something.
- */
-test("the Pinned lens shows no stars when the pointer is away", async () => {
+test("the Pinned lens keeps pinned stars visible", async () => {
   sandbox = createGitSandbox();
   for (const name of ["alpha", "bravo", "charlie"]) sandbox.makeRepo(name);
 
@@ -43,24 +35,32 @@ test("the Pinned lens shows no stars when the pointer is away", async () => {
   await window.locator(".lens-chip", { hasText: "Pinned" }).click();
   await expect(window.locator(".repo-row__name")).toHaveCount(3);
 
-  // Park the pointer well clear of the list and drop focus to the body, so
-  // nothing is hovered or focused for an incidental reason.
+  // Park the pointer well clear of the list and drop focus to the body. The
+  // stars communicate pin state even when the rows are idle.
   await window.mouse.move(2000, 2000);
   await window.evaluate(() => {
     (document.activeElement as HTMLElement | null)?.blur();
   });
 
-  // `toHaveCSS` retries, which matters here: the star fades over 120ms, so a
-  // one-shot read of computed opacity samples the transition mid-flight and
-  // reports a lit star that is actually on its way out.
   const pins = window.locator(".repo-row .pin");
   await expect(pins).toHaveCount(3);
   for (let i = 0; i < 3; i += 1) {
-    await expect(pins.nth(i)).toHaveCSS("opacity", "0");
+    await expect(pins.nth(i)).toHaveCSS("opacity", "1");
+    await expect(pins.nth(i)).toHaveAttribute("aria-pressed", "true");
   }
+
+  // The visible star remains the unpin action, so the row leaves this lens.
+  await window
+    .locator(".repo-row", { hasText: "bravo" })
+    .getByRole("button", { name: "Unpin repo" })
+    .click();
+  await expect(window.locator(".repo-row__name")).toHaveCount(2);
+  await expect(
+    window.locator(".repo-row", { hasText: "bravo" })
+  ).toHaveCount(0);
 });
 
-test("the lens goes quiet again after a drag, not just on a fresh list", async () => {
+test("a drag keeps stars visible but lets the grip hide again", async () => {
   sandbox = createGitSandbox();
   for (const name of ["alpha", "bravo", "charlie"]) sandbox.makeRepo(name);
 
@@ -82,9 +82,8 @@ test("the lens goes quiet again after a drag, not just on a fresh list", async (
   await expect(window.locator(".repo-row__name")).toHaveCount(3);
 
   // Drag, which focuses the source row: a `draggable` element with a tab stop
-  // takes focus on mousedown. If the reveal were keyed on plain focus, that row
-  // would keep a lit star for the rest of the session — a star lit for an
-  // incidental reason reads as meaningful.
+  // takes focus on mousedown. The pin stays visible because it represents
+  // state; the transient drag grip should still disappear with the pointer.
   const alpha = window.locator(".repo-row", { hasText: "alpha" });
   const charlie = window.locator(".repo-row", { hasText: "charlie" });
   const box = await charlie.boundingBox();
@@ -96,15 +95,15 @@ test("the lens goes quiet again after a drag, not just on a fresh list", async (
   });
   await window.mouse.up();
 
-  // Deliberately no blur() here — the retained focus IS the thing under test.
+  // Deliberately no blur() here so the retained drag focus is covered.
   await window.mouse.move(2000, 2000);
   const pins = window.locator(".repo-row .pin");
   await expect(pins).toHaveCount(3);
   for (let i = 0; i < 3; i += 1) {
-    await expect(pins.nth(i)).toHaveCSS("opacity", "0");
+    await expect(pins.nth(i)).toHaveCSS("opacity", "1");
+    await expect(pins.nth(i)).toHaveAttribute("aria-pressed", "true");
   }
 
-  // The grip is revealed by the same conditions, so it fails the same way.
   const handles = window.locator(".repo-row__handle");
   await expect(handles).toHaveCount(3);
   for (let i = 0; i < 3; i += 1) {
