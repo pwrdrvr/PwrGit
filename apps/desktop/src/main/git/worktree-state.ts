@@ -102,6 +102,12 @@ export class WorktreeStateService {
   /** Probes currently running git for a worktree (removal drains these). */
   private readonly inFlight = new Map<string, Set<Promise<unknown>>>();
 
+  /** One queued/running state probe per worktree; overlapping polls share it. */
+  private readonly pendingComputes = new Map<
+    string,
+    Promise<WorktreeState | null>
+  >();
+
   /** Worktrees whose removal is underway; counted so overlapping batches nest. */
   private readonly removalLocks = new Map<string, number>();
 
@@ -174,9 +180,13 @@ export class WorktreeStateService {
   async compute(worktreeId: string): Promise<WorktreeState | null> {
     if (this.removalLocks.has(worktreeId)) return this.getCached(worktreeId);
 
+    const pending = this.pendingComputes.get(worktreeId);
+    if (pending !== undefined) return pending;
+
     const run = this.operations.run(worktreeId, () =>
       this.computeFresh(worktreeId)
     );
+    this.pendingComputes.set(worktreeId, run);
     let running = this.inFlight.get(worktreeId);
     if (running === undefined) {
       running = new Set();
@@ -186,6 +196,9 @@ export class WorktreeStateService {
     try {
       return await run;
     } finally {
+      if (this.pendingComputes.get(worktreeId) === run) {
+        this.pendingComputes.delete(worktreeId);
+      }
       running.delete(run);
       if (running.size === 0) this.inFlight.delete(worktreeId);
     }

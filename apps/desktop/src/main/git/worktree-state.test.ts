@@ -268,4 +268,37 @@ describe("WorktreeStateService (system git)", () => {
     expect(await probe).not.toBeNull();
     expect(spawns).toBeGreaterThan(0);
   });
+
+  it("coalesces repeated state probes queued behind a mutation", async () => {
+    const operations = new WorktreeOperationQueue();
+    let finishMutation!: () => void;
+    const mutation = operations.run(
+      worktreeId,
+      () =>
+        new Promise<void>((resolve) => {
+          finishMutation = resolve;
+        })
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    let statusSpawns = 0;
+    const countingGit: GitExec = (args, cwd, options) => {
+      if (args[0] === "status") statusSpawns += 1;
+      return systemGit(args, cwd, options);
+    };
+    const svc = new WorktreeStateService(db, countingGit, operations);
+
+    const probes = Array.from({ length: 100 }, () => svc.compute(worktreeId));
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(statusSpawns).toBe(0);
+
+    finishMutation();
+    await mutation;
+    const states = await Promise.all(probes);
+    expect(states.every((state) => state !== null)).toBe(true);
+    expect(statusSpawns).toBe(1);
+
+    expect(await svc.compute(worktreeId)).not.toBeNull();
+    expect(statusSpawns).toBe(2);
+  });
 });
