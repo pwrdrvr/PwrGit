@@ -22,7 +22,12 @@ import {
 import type { DB } from "../persistence/db";
 import type { ProfileService } from "../profiles/profile-service";
 import { mapLimit } from "../util/map-limit";
-import { runGh, type GhRunOptions } from "../github/gh-cli";
+import {
+  ghErrorMessage,
+  isGhAuthenticationError,
+  runGh,
+  type GhRunOptions
+} from "../github/gh-cli";
 import { getGhStatus, type GhStatus } from "../github/pr-client";
 import { parseGitHubRemote } from "../github/remote";
 import { requireExit0, type GitExec } from "./dugite";
@@ -237,9 +242,8 @@ export function parseCloneRepositories(stdout: string): CloneRepository[] {
 }
 
 function messageFromUnknown(cause: unknown): string {
-  if (!(cause instanceof Error)) return String(cause);
-  const stderr = (cause as Error & { stderr?: string }).stderr?.trim();
-  return (stderr || cause.message).split("\n")[0] ?? cause.message;
+  const message = ghErrorMessage(cause);
+  return message.split("\n")[0] ?? message;
 }
 
 const CLONE_PHASES: Record<string, CloneProgress["phase"]> = {
@@ -311,10 +315,11 @@ export function sanitizeCloneStderr(stderr: string): string {
 }
 
 function cloneMessageFromUnknown(cause: unknown): string {
-  if (!(cause instanceof Error)) return String(cause);
+  if (isGhAuthenticationError(cause)) return ghErrorMessage(cause);
+  if (!(cause instanceof Error)) return ghErrorMessage(cause);
   const stderr = (cause as Error & { stderr?: string }).stderr;
   const sanitized = sanitizeCloneStderr(stderr ?? "");
-  return sanitized || cause.message;
+  return ghErrorMessage(sanitized || cause.message);
 }
 
 export class CloneService {
@@ -365,11 +370,18 @@ export class CloneService {
     }
 
     const failures: string[] = [];
+    let authenticationCause: unknown;
     const repositoriesByOwner = new Map<string, CloneRepository[]>();
     await mapLimit(owners, OWNER_CONCURRENCY, async (owner) => {
       try {
         repositoriesByOwner.set(owner, await this.repositoriesForOwner(owner));
-      } catch {
+      } catch (cause) {
+        if (
+          authenticationCause === undefined &&
+          isGhAuthenticationError(cause)
+        ) {
+          authenticationCause = cause;
+        }
         failures.push(owner);
         repositoriesByOwner.set(owner, []);
       }
@@ -392,7 +404,9 @@ export class CloneService {
       .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
 
     const catalog: CloneCatalog = { ...base, repositories };
-    if (failures.length > 0) {
+    if (authenticationCause !== undefined) {
+      catalog.warning = ghErrorMessage(authenticationCause);
+    } else if (failures.length > 0) {
       catalog.warning = `Couldn't load repositories for ${failures.join(", ")}.`;
     }
     return ok(catalog);
@@ -470,6 +484,13 @@ export class CloneService {
         local.pathsByRepo.get(repository.nameWithOwner.toLowerCase()) ?? [];
       return ok(repository);
     } catch (cause) {
+      if (isGhAuthenticationError(cause)) {
+        return err({
+          kind: "remote",
+          code: "github_login_required",
+          message: ghErrorMessage(cause)
+        });
+      }
       return err({
         kind: "remote",
         code: "repository_not_found",
@@ -557,6 +578,13 @@ export class CloneService {
           }
         );
       } catch (cause) {
+        if (isGhAuthenticationError(cause)) {
+          return err({
+            kind: "remote",
+            code: "github_login_required",
+            message: ghErrorMessage(cause)
+          });
+        }
         return err({
           kind: "git",
           code: "clone_failed",
