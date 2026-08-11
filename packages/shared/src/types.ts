@@ -42,6 +42,8 @@ export type Worktree = {
   /** Commits the repo's default branch is ahead of this worktree (staleness).
    *  0 when the branch shares no history with the default (see divergedFromDefault). */
   behindDefault: number;
+  /** Resolved default branch used for behindDefault, e.g. "main". */
+  defaultBranch: string;
   /** This worktree's branch is fully merged into the default branch. */
   mergedIntoDefault: boolean;
   /** No common ancestor with the default branch (rewritten/orphaned history). */
@@ -372,6 +374,8 @@ export type WorktreeState = {
   behind: number;
   dirty: number;
   behindDefault: number;
+  /** Resolved default branch used for behindDefault, e.g. "main". */
+  defaultBranch: string;
   mergedIntoDefault: boolean;
   divergedFromDefault: boolean;
   isDefaultBranch: boolean;

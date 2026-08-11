@@ -58,6 +58,7 @@ export function WorktreeRow({
   onFocus: () => void;
 }) {
   const prunable = isPrunableWorktree(worktree, now);
+  const defaultBranch = worktree.defaultBranch || "default branch";
   const prHoverTimer = useRef<number | undefined>(undefined);
   const clearPrHoverTimer = (): void => {
     if (prHoverTimer.current !== undefined) {
@@ -197,10 +198,10 @@ export function WorktreeRow({
             !worktree.divergedFromDefault &&
             worktree.behindDefault > 0 && (
               <span
-                className="wt-tag wt-tag--behind"
-                title={`${worktree.behindDefault} commits behind the default branch`}
+                className="wt-tag wt-tag--default-ahead"
+                title={`${defaultBranch} has ${worktree.behindDefault} commits not in ${worktree.branch}; this is not commits available to pull`}
               >
-                ↓{worktree.behindDefault}
+                {defaultBranch} +{worktree.behindDefault}
               </span>
             )}
         </>

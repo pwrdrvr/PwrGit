@@ -119,6 +119,8 @@ describe("WorktreeStateService (system git)", () => {
     expect(state?.dirty).toBe(0);
     expect(state?.head).not.toBe("");
     expect(state?.hasUpstream).toBe(false);
+    expect(state?.defaultBranch).toBe("main");
+    expect(service.getCached(worktreeId)?.defaultBranch).toBe("main");
     expect(state?.lastActivityAt).toBeTruthy();
   });
 
