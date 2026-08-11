@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import type {
   PwrGitError,
+  PullProgressPhase,
   RemoteDivergence,
   Result,
   Worktree,
   WorktreeState
 } from "@pwrgit/shared";
-import { dispatch } from "../../lib/pwrgit";
+import { dispatch, subscribe } from "../../lib/pwrgit";
 import { showErrorToast } from "../../lib/toast";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
 import { PullDivergenceDialog } from "./PullDivergenceDialog";
@@ -28,6 +29,21 @@ function baseChip(state: WorktreeState | null): Chip {
 type Busy = "fetch" | "pull" | "push" | null;
 type RecoveryBusy = "rebase" | "reset" | null;
 
+export function pullPhaseLabel(phase: PullProgressPhase): string {
+  switch (phase) {
+    case "fetch":
+      return "Fetching updates…";
+    case "prepare":
+      return "Preparing local changes…";
+    case "fast_forward":
+      return "Fast-forwarding and checking out files…";
+    case "reapply":
+      return "Reapplying local changes…";
+    case "refresh":
+      return "Finishing refresh…";
+  }
+}
+
 export function WorktreeHeader({
   worktree,
   state
@@ -36,6 +52,7 @@ export function WorktreeHeader({
   state: WorktreeState | null;
 }) {
   const [busy, setBusy] = useState<Busy>(null);
+  const [pullPhase, setPullPhase] = useState<PullProgressPhase>("fetch");
   const [divergence, setDivergence] = useState<RemoteDivergence | null>(null);
   const [recoveryBusy, setRecoveryBusy] = useState<RecoveryBusy>(null);
   const [resetToRemoteOpen, setResetToRemoteOpen] = useState(false);
@@ -51,10 +68,21 @@ export function WorktreeHeader({
     recoveryOperation.current += 1;
     recoveryInFlight.current = null;
     setBusy(null);
+    setPullPhase("fetch");
     setDivergence(null);
     setRecoveryBusy(null);
     setResetToRemoteOpen(false);
   }, [worktree.id]);
+
+  useEffect(
+    () =>
+      subscribe("worktree:pullProgress", (event) => {
+        if (event.worktreeId === activeWorktreeId.current) {
+          setPullPhase(event.phase);
+        }
+      }),
+    []
+  );
 
   const showFlash = (chip: Chip, ms: number): void => {
     setFlash(chip);
@@ -98,6 +126,7 @@ export function WorktreeHeader({
   };
   const onPull = (): void => {
     const worktreeId = id;
+    setPullPhase("fetch");
     setBusy("pull");
     void dispatch("remote:pull", { worktreeId }).then(async (result) => {
       if (!result.ok) {
@@ -182,7 +211,11 @@ export function WorktreeHeader({
     );
   };
 
-  const chip = flash ?? baseChip(state);
+  const pullLabel = pullPhaseLabel(pullPhase);
+  const chip =
+    busy === "pull"
+      ? { text: pullLabel, tone: "muted" as const }
+      : (flash ?? baseChip(state));
   const dirty = state?.dirty ?? worktree.dirty;
   const behind = state?.behind ?? worktree.behind;
 
@@ -195,7 +228,14 @@ export function WorktreeHeader({
       <div className="wt-header__state">
         {dirty > 0 && <span className="badge badge--warn">●{dirty}</span>}
         <span style={{ flex: 1 }} />
-        <span className={`sync-chip sync-chip--${chip.tone}`}>{chip.text}</span>
+        <span
+          className={`sync-chip sync-chip--${chip.tone}${
+            busy === "pull" ? " sync-chip--progress" : ""
+          }`}
+          role={busy === "pull" ? "status" : undefined}
+        >
+          {chip.text}
+        </span>
 
         <div className="wt-actions">
           {/* While an op runs its button swaps the icon for a spinner — the
@@ -227,9 +267,9 @@ export function WorktreeHeader({
             className={`wt-btn wt-btn--pull${behind > 0 ? " is-behind" : ""}`}
             onClick={onPull}
             disabled={busy !== null}
-            aria-label="Pull"
+            aria-label={busy === "pull" ? pullLabel : "Pull"}
             aria-busy={busy === "pull"}
-            title="Pull · fetch + fast-forward"
+            title={busy === "pull" ? pullLabel : "Pull · fetch + fast-forward"}
           >
             {busy === "pull" ? (
               <span className="wt-btn__spinner" />
@@ -241,7 +281,7 @@ export function WorktreeHeader({
               </svg>
             )}
             <span className="wt-btn__label">
-              {busy === "pull" ? "Pulling…" : "Pull"}
+              {busy === "pull" ? pullLabel : "Pull"}
             </span>
           </button>
 

@@ -1,5 +1,6 @@
 import { err, ok, type PwrGitError } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
+import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import { execGit } from "./dugite";
@@ -155,7 +156,9 @@ export function registerRemoteHandlers(
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
     const startedAt = Date.now();
-    const result = await pullFastForward(execGit, path);
+    const result = await pullFastForward(execGit, path, (phase) => {
+      emitEvent("worktree:pullProgress", { worktreeId: req.worktreeId, phase });
+    });
     if (result.ok) {
       const { stashed, reappliedWithConflicts } = result.value;
       const outcome = reappliedWithConflicts
@@ -164,7 +167,11 @@ export function registerRemoteHandlers(
           ? "fast-forwarded, stashed changes reapplied"
           : "fast-forwarded";
       logMain("info", "remote", `pulled ${path}: ${outcome} (${seconds(startedAt)})`);
-      refresher.refreshWorktree(req.worktreeId);
+      emitEvent("worktree:pullProgress", {
+        worktreeId: req.worktreeId,
+        phase: "refresh"
+      });
+      await refresher.refreshWorktree(req.worktreeId);
     }
     return result;
   });

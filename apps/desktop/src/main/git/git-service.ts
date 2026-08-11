@@ -10,6 +10,7 @@ import {
   type LocalBranchSummary,
   type PushRefPlan,
   type PushRefResult,
+  type PullProgressPhase,
   type RemoteDivergence,
   type RemoteResetMode,
   type RemoteResetSnapshot,
@@ -1384,7 +1385,8 @@ export async function rebaseOntoUpstream(
  */
 export async function pullFastForward(
   git: GitExec,
-  cwd: string
+  cwd: string,
+  onProgress: (phase: PullProgressPhase) => void = () => undefined
 ): Promise<Result<PullOutcome>> {
   const originalHeadArgs = ["rev-parse", "--verify", "HEAD"];
   const originalHeadRaw = await git(originalHeadArgs, cwd);
@@ -1406,9 +1408,11 @@ export async function pullFastForward(
     if (!symbolicHead.ok) return originalHead;
   }
 
+  onProgress("fetch");
   const fetched = await fetchRemote(git, cwd);
   if (!fetched.ok) return fetched;
 
+  onProgress("prepare");
   const statusRaw = await git(["status", "--porcelain"], cwd);
   if (!statusRaw.ok) return statusRaw;
   const status = requireExit0(statusRaw.value, ["status", "--porcelain"]);
@@ -1465,6 +1469,7 @@ export async function pullFastForward(
     }
 
     if (!stashed) return ok(undefined);
+    onProgress("reapply");
     const pop = await git(["stash", "pop", "--index"], cwd);
     if (!pop.ok || pop.value.exitCode !== 0) {
       const detail = pop.ok
@@ -1482,6 +1487,7 @@ export async function pullFastForward(
     return ok(undefined);
   };
 
+  onProgress("fast_forward");
   const merge = await git(["merge", "--ff-only", "@{u}"], cwd);
   if (!merge.ok) {
     const rollback = await rollbackFailedMerge();
@@ -1515,6 +1521,7 @@ export async function pullFastForward(
   // Reapply the stashed work, including its staged state. When an indexed pop
   // rejects a conflict before changing the tree, retry without --index so Git
   // can leave the usual conflict markers. Never retry over partial changes.
+  onProgress("reapply");
   let pop = await git(["stash", "pop", "--index"], cwd);
   if (!pop.ok) return pop;
   if (pop.value.exitCode !== 0) {

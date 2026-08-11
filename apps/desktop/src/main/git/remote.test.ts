@@ -330,9 +330,13 @@ describe("remote ops (bare-remote fixture)", () => {
   });
 
   it("pull fast-forwards a behind branch and advances the tree", async () => {
-    const result = await pullFastForward(systemGit, cloneA);
+    const phases: string[] = [];
+    const result = await pullFastForward(systemGit, cloneA, (phase) =>
+      phases.push(phase)
+    );
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value.fastForwarded).toBe(true);
+    expect(phases).toEqual(["fetch", "prepare", "fast_forward"]);
     expect(existsSync(join(cloneA, "g.txt"))).toBe(true);
   });
 
@@ -345,7 +349,10 @@ describe("remote ops (bare-remote fixture)", () => {
       })
     ).toThrow();
 
-    const result = await pullFastForward(systemGit, local);
+    const phases: string[] = [];
+    const result = await pullFastForward(systemGit, local, (phase) =>
+      phases.push(phase)
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value).toEqual({
@@ -354,6 +361,7 @@ describe("remote ops (bare-remote fixture)", () => {
         reappliedWithConflicts: false
       });
     }
+    expect(phases).toEqual(["fetch", "prepare", "fast_forward"]);
     expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(upstreamHead);
     expect(fileText(local, "base.txt")).toBe("base.txt\n");
   }, 15_000);
@@ -465,7 +473,10 @@ describe("remote ops (bare-remote fixture)", () => {
     const originalStagedDiff = gitOut(local, ["diff", "--cached"]);
     const originalUnstagedDiff = gitOut(local, ["diff"]);
 
-    const result = await pullFastForward(systemGit, local);
+    const phases: string[] = [];
+    const result = await pullFastForward(systemGit, local, (phase) =>
+      phases.push(phase)
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value).toEqual({
@@ -474,6 +485,12 @@ describe("remote ops (bare-remote fixture)", () => {
         reappliedWithConflicts: false
       });
     }
+    expect(phases).toEqual([
+      "fetch",
+      "prepare",
+      "fast_forward",
+      "reapply"
+    ]);
     expect(existsSync(join(local, "upstream.txt"))).toBe(true);
     expect(gitOut(local, ["status", "--porcelain"])).toBe(originalStatus);
     expect(gitOut(local, ["diff", "--cached"])).toBe(originalStagedDiff);

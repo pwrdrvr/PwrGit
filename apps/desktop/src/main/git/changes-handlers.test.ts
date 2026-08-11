@@ -16,7 +16,7 @@ function setup() {
     prepare: vi.fn(() => ({ get: vi.fn(() => ({ path: "/repos/project" })) }))
   } as unknown as DB;
   const refresher = {
-    refreshWorktree: vi.fn(),
+    refreshWorktree: vi.fn(async () => undefined),
     refreshRepoWorktrees: vi.fn()
   } satisfies WorktreeRefresher;
   const bus = new CommandBus();

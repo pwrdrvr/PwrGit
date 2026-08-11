@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { err, ok } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
+import { emitEvent } from "../ipc";
 import type { DB } from "../persistence/db";
 import {
   fetchNamedRemote,
   inspectRemoteReset,
   planPushRefs,
+  pullFastForward,
   pushPlannedRefs,
   resetToRemote
 } from "./git-service";
@@ -19,10 +21,13 @@ vi.mock("./git-service", async (importOriginal) => {
     fetchNamedRemote: vi.fn(),
     inspectRemoteReset: vi.fn(),
     planPushRefs: vi.fn(),
+    pullFastForward: vi.fn(),
     pushPlannedRefs: vi.fn(),
     resetToRemote: vi.fn()
   };
 });
+
+vi.mock("../ipc", () => ({ emitEvent: vi.fn() }));
 
 describe("remote handlers", () => {
   beforeEach(() => {
@@ -37,8 +42,88 @@ describe("remote handlers", () => {
       })
     );
     vi.mocked(planPushRefs).mockResolvedValue(ok([]));
+    vi.mocked(pullFastForward).mockResolvedValue(
+      ok({
+        fastForwarded: true,
+        stashed: false,
+        reappliedWithConflicts: false
+      })
+    );
     vi.mocked(pushPlannedRefs).mockResolvedValue(ok([]));
     vi.mocked(resetToRemote).mockResolvedValue(ok(undefined));
+  });
+
+  it("streams pull phases and waits for the finishing refresh", async () => {
+    const db = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" }))
+      }))
+    } as unknown as DB;
+    let finishRefresh: (() => void) | undefined;
+    const refreshWorktree = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRefresh = resolve;
+        })
+    );
+    const refresher = {
+      refreshWorktree,
+      refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    vi.mocked(pullFastForward).mockImplementationOnce(
+      async (_git, _path, onProgress) => {
+        onProgress?.("fetch");
+        onProgress?.("prepare");
+        onProgress?.("fast_forward");
+        onProgress?.("reapply");
+        return ok({
+          fastForwarded: true,
+          stashed: true,
+          reappliedWithConflicts: false
+        });
+      }
+    );
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, refresher);
+
+    const pull = bus.dispatch("remote:pull", { worktreeId: "worktree-1" });
+    await vi.waitFor(() => expect(refreshWorktree).toHaveBeenCalledOnce());
+
+    expect(emitEvent).toHaveBeenNthCalledWith(1, "worktree:pullProgress", {
+      worktreeId: "worktree-1",
+      phase: "fetch"
+    });
+    expect(emitEvent).toHaveBeenNthCalledWith(2, "worktree:pullProgress", {
+      worktreeId: "worktree-1",
+      phase: "prepare"
+    });
+    expect(emitEvent).toHaveBeenNthCalledWith(3, "worktree:pullProgress", {
+      worktreeId: "worktree-1",
+      phase: "fast_forward"
+    });
+    expect(emitEvent).toHaveBeenNthCalledWith(4, "worktree:pullProgress", {
+      worktreeId: "worktree-1",
+      phase: "reapply"
+    });
+    expect(emitEvent).toHaveBeenNthCalledWith(5, "worktree:pullProgress", {
+      worktreeId: "worktree-1",
+      phase: "refresh"
+    });
+
+    let settled = false;
+    void pull.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    finishRefresh?.();
+    await expect(pull).resolves.toEqual(
+      ok({
+        fastForwarded: true,
+        stashed: true,
+        reappliedWithConflicts: false
+      })
+    );
   });
 
   it("refreshes repo worktree state after repo-scoped ref operations", async () => {
@@ -46,7 +131,7 @@ describe("remote handlers", () => {
       prepare: vi.fn(() => ({ get: vi.fn(() => ({ path: "/repos/project" })) }))
     } as unknown as DB;
     const refresher = {
-      refreshWorktree: vi.fn(),
+      refreshWorktree: vi.fn(async () => undefined),
       refreshRepoWorktrees: vi.fn()
     } satisfies WorktreeRefresher;
     const bus = new CommandBus();
@@ -82,7 +167,7 @@ describe("remote handlers", () => {
       }))
     } as unknown as DB;
     const refresher = {
-      refreshWorktree: vi.fn(),
+      refreshWorktree: vi.fn(async () => undefined),
       refreshRepoWorktrees: vi.fn()
     } satisfies WorktreeRefresher;
     const bus = new CommandBus();
