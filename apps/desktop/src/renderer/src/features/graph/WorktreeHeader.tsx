@@ -4,6 +4,7 @@ import type {
   PullProgressPhase,
   RemoteDivergence,
   Result,
+  SshRemoteRecovery,
   Worktree,
   WorktreeState
 } from "@pwrgit/shared";
@@ -12,6 +13,7 @@ import { showErrorToast } from "../../lib/toast";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
 import { PullDivergenceDialog } from "./PullDivergenceDialog";
 import { ResetToRemoteDialog } from "./ResetToRemoteDialog";
+import { SshRemoteRecoveryDialog } from "./SshRemoteRecoveryDialog";
 
 type Chip = { text: string; tone: "muted" | "ok" | "warn" };
 
@@ -56,8 +58,10 @@ export function WorktreeHeader({
   const [divergence, setDivergence] = useState<RemoteDivergence | null>(null);
   const [recoveryBusy, setRecoveryBusy] = useState<RecoveryBusy>(null);
   const [resetToRemoteOpen, setResetToRemoteOpen] = useState(false);
+  const [sshRecovery, setSshRecovery] = useState<SshRemoteRecovery | null>(null);
   const [flash, setFlash] = useState<Chip | null>(null);
   const activeWorktreeId = useRef(worktree.id);
+  const pullOperation = useRef(0);
   const recoveryInFlight = useRef<string | null>(null);
   const recoveryOperation = useRef(0);
 
@@ -65,6 +69,7 @@ export function WorktreeHeader({
   // started for one worktree must never surface a dialog or flash on another.
   useEffect(() => {
     activeWorktreeId.current = worktree.id;
+    pullOperation.current += 1;
     recoveryOperation.current += 1;
     recoveryInFlight.current = null;
     setBusy(null);
@@ -72,6 +77,7 @@ export function WorktreeHeader({
     setDivergence(null);
     setRecoveryBusy(null);
     setResetToRemoteOpen(false);
+    setSshRecovery(null);
   }, [worktree.id]);
 
   useEffect(
@@ -126,6 +132,7 @@ export function WorktreeHeader({
   };
   const onPull = (): void => {
     const worktreeId = id;
+    const operation = ++pullOperation.current;
     setPullPhase("fetch");
     setBusy("pull");
     void dispatch("remote:pull", { worktreeId }).then(async (result) => {
@@ -137,19 +144,52 @@ export function WorktreeHeader({
           const inspected = await dispatch("remote:inspectDivergence", {
             worktreeId
           });
-          if (activeWorktreeId.current !== worktreeId) return;
+          if (
+            activeWorktreeId.current !== worktreeId ||
+            pullOperation.current !== operation
+          ) {
+            return;
+          }
           setBusy(null);
           if (inspected.ok) {
             setDivergence(inspected.value);
             return;
           }
         }
-        if (activeWorktreeId.current !== worktreeId) return;
+        if (
+          activeWorktreeId.current !== worktreeId ||
+          pullOperation.current !== operation
+        ) {
+          return;
+        }
         setBusy(null);
+        if (
+          result.error.kind === "remote" &&
+          result.error.code === "authentication_required"
+        ) {
+          const inspected = await dispatch("remote:inspectSshRecovery", {
+            worktreeId
+          });
+          if (
+            activeWorktreeId.current !== worktreeId ||
+            pullOperation.current !== operation
+          ) {
+            return;
+          }
+          if (inspected.ok && inspected.value !== null) {
+            setSshRecovery(inspected.value);
+            return;
+          }
+        }
         flashError("Pull", result.error);
         return;
       }
-      if (activeWorktreeId.current !== worktreeId) return;
+      if (
+        activeWorktreeId.current !== worktreeId ||
+        pullOperation.current !== operation
+      ) {
+        return;
+      }
       setBusy(null);
       const { stashed, reappliedWithConflicts } = result.value;
       if (reappliedWithConflicts) {
@@ -312,6 +352,20 @@ export function WorktreeHeader({
           onResetToRemote={() => setResetToRemoteOpen(true)}
         />
       </div>
+      {sshRecovery !== null && (
+        <SshRemoteRecoveryDialog
+          worktreeId={id}
+          recovery={sshRecovery}
+          onClose={() => setSshRecovery(null)}
+          onChanged={() => {
+            setSshRecovery(null);
+            showFlash(
+              { text: `${sshRecovery.remote} now uses SSH`, tone: "ok" },
+              2400
+            );
+          }}
+        />
+      )}
       {divergence !== null && (
         <PullDivergenceDialog
           divergence={divergence}

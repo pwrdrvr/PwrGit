@@ -4555,6 +4555,91 @@ body.is-col-resizing {
   }
 }
 
+/* ---- HTTPS authentication recovery through SSH ---- */
+
+.ssh-recovery-backdrop {
+  align-items: center;
+  padding: 24px 0;
+}
+.ssh-recovery {
+  width: min(620px, 92vw);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+.ssh-recovery__intro,
+.ssh-recovery__note {
+  margin: 0;
+  color: var(--text-secondary);
+  font: 500 12px/1.5 var(--font-sans);
+}
+.ssh-recovery__intro code,
+.ssh-recovery__note code {
+  color: var(--text-primary);
+  font: 600 11px/1.4 var(--font-mono);
+}
+.ssh-recovery__urls {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0;
+}
+.ssh-recovery__urls > div {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+.ssh-recovery__urls dt {
+  color: var(--text-muted);
+  font: 600 9.5px/1.45 var(--font-sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.ssh-recovery__urls dd {
+  min-width: 0;
+  margin: 0;
+}
+.ssh-recovery__urls code {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font: 600 10.5px/1.45 var(--font-mono);
+  user-select: text;
+}
+.ssh-recovery__note {
+  margin-top: 10px;
+  color: var(--text-muted);
+  font-size: 10.5px;
+}
+.ssh-recovery__success,
+.ssh-recovery__error {
+  margin: 14px 0 0;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--success-text) 35%, transparent);
+  border-radius: 8px;
+  background: var(--success-soft);
+  color: var(--success-text);
+  font: 600 11px/1.45 var(--font-sans);
+}
+.ssh-recovery__error {
+  border-color: color-mix(in srgb, var(--danger-text) 48%, var(--border-default));
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+.ssh-recovery__actions {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 560px) {
+  .ssh-recovery__urls > div {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+
 /* ---- Reset checked-out branch to fetched remote ---- */
 
 .reset-remote-backdrop {
