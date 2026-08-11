@@ -16,6 +16,7 @@ const worktree: Worktree = {
   ahead: 1,
   behind: 0,
   behindDefault: 0,
+  defaultBranch: "main",
   mergedIntoDefault: false,
   divergedFromDefault: false,
   isDefaultBranch: false,

@@ -43,10 +43,14 @@ test("Pull fast-forwards and clears the ↓behind badge in the sidebar", async (
 
 test("a synced release branch distinguishes default-branch drift from commits to pull", async () => {
   sandbox = createGitSandbox();
-  sandbox.makeRepoWithSyncedReleaseBranch("release", {
+  const repo = sandbox.makeRepoWithSyncedReleaseBranch("release", {
     mainAheadBy: 4,
     backports: 2
   });
+  // Keep main as the resolved default ref without leaving any worktree on it.
+  // The display name must come from the same resolution as behindDefault, not
+  // from whichever branches happen to be checked out right now.
+  sandbox.git(repo.path, "switch", "-c", "feature/current");
   handle = await launchApp();
   const { window } = handle;
 

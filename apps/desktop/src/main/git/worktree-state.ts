@@ -58,6 +58,7 @@ type StateRow = {
   behind: number;
   dirty: number;
   behind_default: number;
+  default_branch: string;
   merged_into_default: number;
   diverged_from_default: number;
   is_default_branch: number;
@@ -75,6 +76,7 @@ function rowToState(r: StateRow): WorktreeState {
     behind: r.behind,
     dirty: r.dirty,
     behindDefault: r.behind_default,
+    defaultBranch: r.default_branch,
     mergedIntoDefault: r.merged_into_default === 1,
     divergedFromDefault: r.diverged_from_default === 1,
     isDefaultBranch: r.is_default_branch === 1,
@@ -285,6 +287,7 @@ export class WorktreeStateService {
       behind: parsed.behind,
       dirty: parsed.dirty,
       behindDefault,
+      defaultBranch: def.name,
       mergedIntoDefault,
       divergedFromDefault,
       isDefaultBranch,
@@ -308,16 +311,17 @@ export class WorktreeStateService {
       .prepare(
         `INSERT INTO worktree_state
            (worktree_id, branch, head, has_upstream, ahead, behind, dirty,
-            behind_default, merged_into_default, diverged_from_default,
+            behind_default, default_branch, merged_into_default, diverged_from_default,
             is_default_branch, last_activity_at, updated_at)
          VALUES (@worktree_id, @branch, @head, @has_upstream, @ahead, @behind, @dirty,
-                 @behind_default, @merged_into_default, @diverged_from_default,
+                 @behind_default, @default_branch, @merged_into_default, @diverged_from_default,
                  @is_default_branch, @last_activity_at, @updated_at)
          ON CONFLICT(worktree_id) DO UPDATE SET
            branch = excluded.branch, head = excluded.head,
            has_upstream = excluded.has_upstream, ahead = excluded.ahead,
            behind = excluded.behind, dirty = excluded.dirty,
            behind_default = excluded.behind_default,
+           default_branch = excluded.default_branch,
            merged_into_default = excluded.merged_into_default,
            diverged_from_default = excluded.diverged_from_default,
            is_default_branch = excluded.is_default_branch,
@@ -332,6 +336,7 @@ export class WorktreeStateService {
         behind: s.behind,
         dirty: s.dirty,
         behind_default: s.behindDefault,
+        default_branch: s.defaultBranch,
         merged_into_default: s.mergedIntoDefault ? 1 : 0,
         diverged_from_default: s.divergedFromDefault ? 1 : 0,
         is_default_branch: s.isDefaultBranch ? 1 : 0,

@@ -24,6 +24,7 @@ function wt(partial: Partial<Worktree> & { id: string; branch: string }): Worktr
     ahead: 0,
     behind: 0,
     behindDefault: 0,
+    defaultBranch: "main",
     mergedIntoDefault: false,
     divergedFromDefault: false,
     isDefaultBranch: false,

@@ -57,6 +57,7 @@ type WorktreeRow = {
   ahead: number | null;
   behind: number | null;
   behind_default: number | null;
+  default_branch: string | null;
   merged_into_default: number | null;
   diverged_from_default: number | null;
   is_default_branch: number | null;
@@ -483,6 +484,7 @@ export class RepoIndexer {
                   w.custom_order AS custom_order,
                   s.dirty AS dirty, s.ahead AS ahead, s.behind AS behind,
                   s.behind_default AS behind_default,
+                  s.default_branch AS default_branch,
                   s.merged_into_default AS merged_into_default,
                   s.diverged_from_default AS diverged_from_default,
                   s.is_default_branch AS is_default_branch,
@@ -507,6 +509,7 @@ export class RepoIndexer {
         ahead: w.ahead ?? 0,
         behind: w.behind ?? 0,
         behindDefault: w.behind_default ?? 0,
+        defaultBranch: w.default_branch ?? "",
         mergedIntoDefault: w.merged_into_default === 1,
         divergedFromDefault: w.diverged_from_default === 1,
         isDefaultBranch: w.is_default_branch === 1,
@@ -622,6 +625,7 @@ function worktreeShape(path: string, branch: string, isPrimary: boolean): Worktr
     ahead: 0,
     behind: 0,
     behindDefault: 0,
+    defaultBranch: "",
     mergedIntoDefault: false,
     divergedFromDefault: false,
     isDefaultBranch: false,

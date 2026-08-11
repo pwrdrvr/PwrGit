@@ -14,7 +14,6 @@ const PR_HOVER_PREFETCH_DELAY_MS = 750;
 
 export function WorktreeRow({
   worktree,
-  defaultBranch,
   selected,
   multiSelected,
   now,
@@ -31,8 +30,6 @@ export function WorktreeRow({
   onFocus
 }: {
   worktree: Worktree;
-  /** Display name of the ref behindDefault compares against. */
-  defaultBranch: string;
   selected: boolean;
   multiSelected: boolean;
   now: number;
@@ -61,6 +58,7 @@ export function WorktreeRow({
   onFocus: () => void;
 }) {
   const prunable = isPrunableWorktree(worktree, now);
+  const defaultBranch = worktree.defaultBranch || "default branch";
   const prHoverTimer = useRef<number | undefined>(undefined);
   const clearPrHoverTimer = (): void => {
     if (prHoverTimer.current !== undefined) {

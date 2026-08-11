@@ -11,6 +11,7 @@ const wt = (id: string, path: string, isPrimary: boolean): Worktree => ({
   ahead: 0,
   behind: 0,
   behindDefault: 0,
+  defaultBranch: "main",
   mergedIntoDefault: false,
   divergedFromDefault: false,
   isDefaultBranch: true,
