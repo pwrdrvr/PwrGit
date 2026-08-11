@@ -128,14 +128,20 @@ export function SshRemoteRecoveryDialog({
           refs, or download Git LFS objects. LFS access is exercised when you
           choose Pull again.
         </p>
-        {!recovery.pushUrlWillAlsoChange && (
+        {recovery.pushUrlWillAlsoChange ? (
+          <p className="ssh-recovery__note">
+            Changing this remote to SSH will also change the address Git uses
+            for pushes. The read-only test does not verify push permission.
+          </p>
+        ) : (
           <p className="ssh-recovery__note">
             A separate push URL is configured and will remain unchanged.
           </p>
         )}
         {tested && (
           <p className="ssh-recovery__success" role="status">
-            SSH can read this repository. You can now change the fetch URL;
+            SSH can read this repository. You can now change the fetch URL
+            {recovery.pushUrlWillAlsoChange && " and effective push URL"};
             PwrGit will not retry Pull automatically.
           </p>
         )}

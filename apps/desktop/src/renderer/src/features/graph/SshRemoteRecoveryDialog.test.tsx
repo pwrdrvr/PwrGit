@@ -79,6 +79,7 @@ describe("SshRemoteRecoveryDialog", () => {
       { worktreeId: "worktree-1", recovery }
     );
     expect(container.textContent).toContain("SSH can read this repository");
+    expect(container.textContent).toContain("and effective push URL");
     const changeButton = [...container.querySelectorAll("button")].find(
       (button) => button.textContent === "Change origin to SSH"
     );
@@ -100,5 +101,34 @@ describe("SshRemoteRecoveryDialog", () => {
       message: "origin now uses SSH. Pull again when you are ready."
     });
     expect(onChanged).toHaveBeenCalledOnce();
+  });
+
+  it("warns when changing the fetch URL also changes the effective push URL", () => {
+    expect(container.textContent).toContain(
+      "Changing this remote to SSH will also change the address Git uses for pushes"
+    );
+    expect(container.textContent).toContain(
+      "The read-only test does not verify push permission"
+    );
+  });
+
+  it("explains when a separate push URL remains unchanged", async () => {
+    await act(async () => {
+      root.render(
+        <SshRemoteRecoveryDialog
+          worktreeId="worktree-1"
+          recovery={{ ...recovery, pushUrlWillAlsoChange: false }}
+          onClose={vi.fn()}
+          onChanged={vi.fn()}
+        />
+      );
+    });
+
+    expect(container.textContent).toContain(
+      "A separate push URL is configured and will remain unchanged"
+    );
+    expect(container.textContent).not.toContain(
+      "also change the address Git uses for pushes"
+    );
   });
 });
