@@ -22,6 +22,7 @@ import {
   PULL_STALL_WARNING_MS
 } from "./pull-watchdog";
 import type { WorktreeRefresher } from "./worktree-handlers";
+import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 vi.mock("./git-service", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./git-service")>();
