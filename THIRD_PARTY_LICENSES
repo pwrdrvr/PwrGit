@@ -85,7 +85,7 @@ MIT
 - decompress-response@6.0.0 | sindresorhus/decompress-response
 - deep-extend@0.6.0 | https://github.com/unclechu/node-deep-extend
 - dugite@3.2.2 | https://github.com/desktop/dugite
-- electron@41.10.3 | https://github.com/electron/electron
+- electron@41.10.4 | https://github.com/electron/electron
 - electron-updater@6.8.9 | https://github.com/electron-userland/electron-builder
 - end-of-stream@1.4.5 | https://github.com/mafintosh/end-of-stream
 - fast-content-type-parse@2.0.1 | https://github.com/fastify/fast-content-type-parse
@@ -1520,13 +1520,13 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-electron@41.10.3 (MIT)
+electron@41.10.4 (MIT)
 ----------------------
 
 Applies to:
-- electron@41.10.3 (MIT)
+- electron@41.10.4 (MIT)
 
-Representative file: electron@41.10.3/LICENSE
+Representative file: electron@41.10.4/LICENSE
 
 Copyright (c) Electron contributors
 Copyright (c) 2013-2020 GitHub Inc.
