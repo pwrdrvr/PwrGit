@@ -2714,7 +2714,7 @@ textarea,
 .lfs-notice p {
   margin: 3px 0 0;
 }
-.lfs-notice__check {
+.lfs-notice__action {
   flex: 0 0 auto;
   height: 26px;
   padding: 0 9px;
@@ -2725,11 +2725,11 @@ textarea,
   font: 600 10.5px/1 var(--font-sans);
   cursor: pointer;
 }
-.lfs-notice__check:hover:not(:disabled) {
+.lfs-notice__action:hover:not(:disabled) {
   border-color: var(--border-default);
   color: var(--text-primary);
 }
-.lfs-notice__check:disabled {
+.lfs-notice__action:disabled {
   cursor: default;
   opacity: 0.65;
 }
