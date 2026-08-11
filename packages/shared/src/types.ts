@@ -133,6 +133,15 @@ export type RemoteSummary = {
   branches: RemoteBranchSummary[];
 };
 
+/** Reviewed migration from a GitHub HTTPS fetch URL to its SSH equivalent. */
+export type SshRemoteRecovery = {
+  remote: string;
+  httpsUrl: string;
+  sshUrl: string;
+  /** With no explicit pushurl, changing the fetch URL changes push too. */
+  pushUrlWillAlsoChange: boolean;
+};
+
 /** Repository-wide refs and configured remote endpoints. */
 export type RepoRefs = {
   branches: LocalBranchSummary[];

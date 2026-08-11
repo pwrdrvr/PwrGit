@@ -43,6 +43,7 @@ import type {
   RepoSearchHit,
   RepoWorktreeRefresh,
   SearchHitStatus,
+  SshRemoteRecovery,
   WorktreeState
 } from "./types";
 
@@ -422,6 +423,21 @@ export interface Commands {
       fetchUrl: string;
       pushUrl?: string;
     };
+    res: null;
+  };
+  /** Inspect the checked-out branch for a GitHub HTTPS upstream. */
+  "remote:inspectSshRecovery": {
+    req: { worktreeId: string };
+    res: SshRemoteRecovery | null;
+  };
+  /** Test the reviewed SSH URL without fetching or changing local refs. */
+  "remote:testSshRecovery": {
+    req: { worktreeId: string; recovery: SshRemoteRecovery };
+    res: null;
+  };
+  /** Revalidate and replace only the reviewed remote's fetch URL. */
+  "remote:applySshRecovery": {
+    req: { worktreeId: string; recovery: SshRemoteRecovery };
     res: null;
   };
   "remote:remove": { req: { repoId: string; remote: string }; res: null };

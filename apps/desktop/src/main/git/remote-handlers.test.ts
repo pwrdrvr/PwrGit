@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { err, ok, type PwrGitError } from "@pwrgit/shared";
+import {
+  err,
+  ok,
+  type PwrGitError,
+  type SshRemoteRecovery
+} from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
@@ -21,6 +26,11 @@ import {
   PULL_STALL_TIMEOUT_MS,
   PULL_STALL_WARNING_MS
 } from "./pull-watchdog";
+import {
+  applySshRemoteRecovery,
+  inspectSshRemoteRecovery,
+  testSshRemoteRecovery
+} from "./ssh-remote-recovery";
 import type { WorktreeRefresher } from "./worktree-handlers";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
@@ -39,6 +49,11 @@ vi.mock("./git-service", async (importOriginal) => {
 
 vi.mock("../ipc", () => ({ emitEvent: vi.fn() }));
 vi.mock("../logs", () => ({ logMain: vi.fn() }));
+vi.mock("./ssh-remote-recovery", () => ({
+  applySshRemoteRecovery: vi.fn(),
+  inspectSshRemoteRecovery: vi.fn(),
+  testSshRemoteRecovery: vi.fn()
+}));
 
 describe("remote handlers", () => {
   beforeEach(() => {
@@ -62,6 +77,9 @@ describe("remote handlers", () => {
     );
     vi.mocked(pushPlannedRefs).mockResolvedValue(ok([]));
     vi.mocked(resetToRemote).mockResolvedValue(ok(undefined));
+    vi.mocked(inspectSshRemoteRecovery).mockResolvedValue(ok(null));
+    vi.mocked(testSshRemoteRecovery).mockResolvedValue(ok(undefined));
+    vi.mocked(applySshRemoteRecovery).mockResolvedValue(ok(undefined));
   });
 
   afterEach(() => vi.useRealTimers());
@@ -510,6 +528,57 @@ describe("remote handlers", () => {
     });
     expect(failed.ok).toBe(false);
     expect(refresher.refreshWorktree).not.toHaveBeenCalled();
+    expect(refresher.refreshRepoWorktrees).toHaveBeenCalledOnce();
+    expect(refresher.refreshRepoWorktrees).toHaveBeenCalledWith("repo-1");
+  });
+
+  it("inspects, tests, and explicitly applies an SSH remote recovery", async () => {
+    const recovery: SshRemoteRecovery = {
+      remote: "origin",
+      httpsUrl: "https://github.com/pwrdrvr/PwrAgent.git",
+      sshUrl: "git@github.com:pwrdrvr/PwrAgent.git",
+      pushUrlWillAlsoChange: true
+    };
+    vi.mocked(inspectSshRemoteRecovery).mockResolvedValueOnce(ok(recovery));
+    const db = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" }))
+      }))
+    } as unknown as DB;
+    const refresher = {
+      refreshWorktree: vi.fn(async () => undefined),
+      refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
+
+    await expect(
+      bus.dispatch("remote:inspectSshRecovery", { worktreeId: "worktree-1" })
+    ).resolves.toEqual(ok(recovery));
+    await expect(
+      bus.dispatch("remote:testSshRecovery", {
+        worktreeId: "worktree-1",
+        recovery
+      })
+    ).resolves.toEqual(ok(null));
+    expect(testSshRemoteRecovery).toHaveBeenCalledWith(
+      expect.any(Function),
+      "/repos/project",
+      recovery
+    );
+    expect(refresher.refreshRepoWorktrees).not.toHaveBeenCalled();
+
+    await expect(
+      bus.dispatch("remote:applySshRecovery", {
+        worktreeId: "worktree-1",
+        recovery
+      })
+    ).resolves.toEqual(ok(null));
+    expect(applySshRemoteRecovery).toHaveBeenCalledWith(
+      expect.any(Function),
+      "/repos/project",
+      recovery
+    );
     expect(refresher.refreshRepoWorktrees).toHaveBeenCalledOnce();
     expect(refresher.refreshRepoWorktrees).toHaveBeenCalledWith("repo-1");
   });

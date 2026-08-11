@@ -37,6 +37,11 @@ import {
   type PullWatchdogPhase,
   type PullWatchdogSnapshot
 } from "./pull-watchdog";
+import {
+  applySshRemoteRecovery,
+  inspectSshRemoteRecovery,
+  testSshRemoteRecovery
+} from "./ssh-remote-recovery";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 const seconds = (startedAt: number): string =>
@@ -203,6 +208,49 @@ export function registerRemoteHandlers(
       `updated remote ${req.originalName} as ${req.name} in ${repo.path}`
     );
     refresher.refreshRepoWorktrees(req.repoId);
+    return ok(null);
+  });
+
+  bus.register("remote:inspectSshRecovery", async (req) => {
+    const worktree = worktreeOf(req.worktreeId);
+    if (worktree === null) return err(notFound);
+    return inspectSshRemoteRecovery(execGit, worktree.path);
+  });
+
+  bus.register("remote:testSshRecovery", async (req) => {
+    const worktree = worktreeOf(req.worktreeId);
+    if (worktree === null) return err(notFound);
+    const startedAt = Date.now();
+    logMain(
+      "info",
+      "remote",
+      `testing SSH read access for ${req.recovery.remote} in ${worktree.path}`
+    );
+    const result = await operations.run(req.worktreeId, () =>
+      testSshRemoteRecovery(execGit, worktree.path, req.recovery)
+    );
+    if (!result.ok) return result;
+    logMain(
+      "info",
+      "remote",
+      `SSH read test succeeded for ${req.recovery.remote} in ${worktree.path} (${seconds(startedAt)})`
+    );
+    return ok(null);
+  });
+
+  bus.register("remote:applySshRecovery", async (req) => {
+    const worktree = worktreeOf(req.worktreeId);
+    if (worktree === null) return err(notFound);
+    const result = await operations.run(req.worktreeId, () =>
+      applySshRemoteRecovery(execGit, worktree.path, req.recovery)
+    );
+    if (!result.ok) return result;
+    logMain(
+      "info",
+      "remote",
+      `changed ${req.recovery.remote} from HTTPS to SSH in ${worktree.path}`
+    );
+    refresher.refreshRepoWorktrees(worktree.repoId);
     return ok(null);
   });
 
