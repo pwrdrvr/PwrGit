@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { err, ok } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
+import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import {
   fetchNamedRemote,
@@ -28,6 +29,7 @@ vi.mock("./git-service", async (importOriginal) => {
 });
 
 vi.mock("../ipc", () => ({ emitEvent: vi.fn() }));
+vi.mock("../logs", () => ({ logMain: vi.fn() }));
 
 describe("remote handlers", () => {
   beforeEach(() => {
@@ -123,6 +125,40 @@ describe("remote handlers", () => {
         stashed: true,
         reappliedWithConflicts: false
       })
+    );
+  });
+
+  it("preserves a successful pull when the finishing refresh fails", async () => {
+    const db = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" }))
+      }))
+    } as unknown as DB;
+    const refreshFailure = new Error("database unavailable");
+    const refresher = {
+      refreshWorktree: vi.fn(async () => Promise.reject(refreshFailure)),
+      refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, refresher);
+
+    await expect(
+      bus.dispatch("remote:pull", { worktreeId: "worktree-1" })
+    ).resolves.toEqual(
+      ok({
+        fastForwarded: true,
+        stashed: false,
+        reappliedWithConflicts: false
+      })
+    );
+    expect(refresher.refreshWorktree).toHaveBeenCalledExactlyOnceWith(
+      "worktree-1"
+    );
+    expect(logMain).toHaveBeenCalledWith(
+      "warn",
+      "remote",
+      "could not refresh /repos/project after pull:",
+      refreshFailure
     );
   });
 

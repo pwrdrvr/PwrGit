@@ -171,7 +171,14 @@ export function registerRemoteHandlers(
         worktreeId: req.worktreeId,
         phase: "refresh"
       });
-      await refresher.refreshWorktree(req.worktreeId);
+      try {
+        await refresher.refreshWorktree(req.worktreeId);
+      } catch (cause) {
+        // The pull has already changed the repository successfully. A failed
+        // state refresh must not turn that completed mutation into "Pull
+        // failed"; record the bookkeeping failure for diagnosis instead.
+        logMain("warn", "remote", `could not refresh ${path} after pull:`, cause);
+      }
     }
     return result;
   });
