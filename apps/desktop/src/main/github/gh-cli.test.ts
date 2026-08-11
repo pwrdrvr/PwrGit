@@ -236,6 +236,30 @@ describe("runGh", () => {
     expect(received.join("")).toContain("[REDACTED]");
   });
 
+  it("does not reconstruct a non-env token pattern across a forced boundary", async () => {
+    const child = streamingChild();
+    childProcess.spawn.mockReturnValue(child);
+    const received: string[] = [];
+    const token = "github_pat_boundaryCredential123456789";
+    const splitInsidePrefix = 5;
+    const trailingLength = 4 * 1024 + splitInsidePrefix - token.length;
+
+    const result = runGh(["repo", "clone", "owner/private"], {
+      onStderr: (chunk) => received.push(chunk)
+    });
+    child.stderr.emit(
+      "data",
+      `${"x".repeat(70 * 1024)}${token}${"y".repeat(trailingLength)}`
+    );
+    child.stderr.emit("data", "\n");
+    child.emit("close", 1, null);
+    await result.catch(() => undefined);
+
+    expect(received.length).toBeGreaterThan(1);
+    expect(received.join("")).not.toContain(token);
+    expect(received.join("")).toContain("[REDACTED]");
+  });
+
   it("terminates a timed-out streaming process and settles on close", async () => {
     vi.useFakeTimers();
     const child = streamingChild();

@@ -7,6 +7,15 @@ const MAX_BUFFER_BYTES = 1024 * 1024;
 const MAX_STREAM_TAIL_CHARS = 64 * 1024;
 const MAX_PENDING_STREAM_STDERR_CHARS = 64 * 1024;
 const MIN_STREAM_REDACTION_OVERLAP_CHARS = 4 * 1024;
+const TOKEN_BOUNDARY_LOOKBEHIND_CHARS = 1024;
+const GITHUB_TOKEN_PREFIXES = [
+  "github_pat_",
+  "gho_",
+  "ghp_",
+  "ghu_",
+  "ghs_",
+  "ghr_"
+] as const;
 const FORCE_KILL_DELAY_MS = 1_000;
 const AUTHENTICATION_REQUIRED_MESSAGE =
   "GitHub authentication is required. Run gh auth login and verify your Git/SSH credentials, then try again.";
@@ -175,6 +184,30 @@ function appendWithinByteLimit(
   return current + bytes.subarray(0, remaining).toString("utf8");
 }
 
+function protectTokenBoundary(diagnostic: string, proposedCut: number): number {
+  const windowStart = Math.max(
+    0,
+    proposedCut - TOKEN_BOUNDARY_LOOKBEHIND_CHARS
+  );
+  const beforeCut = diagnostic.slice(windowStart, proposedCut);
+  let protectedCut = proposedCut;
+  for (const prefix of GITHUB_TOKEN_PREFIXES) {
+    const tokenStart = beforeCut.lastIndexOf(prefix);
+    if (
+      tokenStart >= 0 &&
+      /^[A-Za-z0-9_]*$/.test(beforeCut.slice(tokenStart + prefix.length))
+    ) {
+      protectedCut = Math.min(protectedCut, windowStart + tokenStart);
+    }
+    for (let prefixLength = 1; prefixLength < prefix.length; prefixLength += 1) {
+      if (beforeCut.endsWith(prefix.slice(0, prefixLength))) {
+        protectedCut = Math.min(protectedCut, proposedCut - prefixLength);
+      }
+    }
+  }
+  return protectedCut;
+}
+
 function outputTooLargeFailure(
   stream: "stdout" | "stderr",
   stdout: string,
@@ -307,6 +340,7 @@ function runSpawnedGh(
             )
           );
           emitLength = pendingStreamStderr.length - overlap;
+          emitLength = protectTokenBoundary(pendingStreamStderr, emitLength);
           for (const secret of secretValues(environment)) {
             const start = pendingStreamStderr.lastIndexOf(
               secret,
