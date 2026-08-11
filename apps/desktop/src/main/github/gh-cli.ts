@@ -1,14 +1,28 @@
-import { execFile, spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 
 // Electron's PATH may miss Homebrew etc. in a packaged app; augment it so `gh`
 // resolves the way it does in the user's shell.
 const EXTRA_PATH = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"];
 const MAX_BUFFER_BYTES = 1024 * 1024;
 const MAX_STREAM_TAIL_CHARS = 64 * 1024;
+const FORCE_KILL_DELAY_MS = 1_000;
+const AUTHENTICATION_REQUIRED_MESSAGE =
+  "GitHub authentication is required. Run gh auth login and verify your Git/SSH credentials, then try again.";
+const NON_INTERACTIVE_ENV = {
+  GH_PROMPT_DISABLED: "1",
+  GIT_TERMINAL_PROMPT: "0",
+  GCM_INTERACTIVE: "Never"
+} as const;
+const SENSITIVE_ENV_NAMES = [
+  "GH_TOKEN",
+  "GITHUB_TOKEN",
+  "GH_ENTERPRISE_TOKEN",
+  "GITHUB_ENTERPRISE_TOKEN"
+] as const;
 
 export type GhRunOptions = {
   timeoutMs?: number;
-  /** Stream stderr instead of buffering it in execFile. */
+  /** Receive sanitized stderr chunks while retaining only a bounded tail. */
   onStderr?: (chunk: string) => void;
   env?: Record<string, string | undefined>;
 };
@@ -16,76 +30,263 @@ export type GhRunOptions = {
 export function ghEnvironment(): NodeJS.ProcessEnv {
   return {
     ...process.env,
-    PATH: [process.env.PATH ?? "", ...EXTRA_PATH].filter(Boolean).join(":")
+    PATH: [process.env.PATH ?? "", ...EXTRA_PATH].filter(Boolean).join(":"),
+    ...NON_INTERACTIVE_ENV
   };
 }
 
 function environmentWith(overrides: GhRunOptions["env"]): NodeJS.ProcessEnv {
-  return { ...ghEnvironment(), ...overrides };
+  return {
+    ...ghEnvironment(),
+    ...overrides,
+    // A caller may add locale or command-specific values, but no GUI gh call
+    // may opt back into a prompt that can open the inherited controlling TTY.
+    ...NON_INTERACTIVE_ENV
+  };
 }
 
-function appendTail(current: string, chunk: string): string {
+export type GhCliErrorCode =
+  | "authentication_required"
+  | "timed_out"
+  | "command_failed";
+
+export class GhCliError extends Error {
+  readonly name = "GhCliError";
+
+  constructor(
+    message: string,
+    readonly code: GhCliErrorCode,
+    readonly stdout: string,
+    readonly stderr: string
+  ) {
+    super(message);
+  }
+}
+
+function secretValues(environment: NodeJS.ProcessEnv): string[] {
+  return SENSITIVE_ENV_NAMES.map((name) => environment[name]?.trim())
+    .filter((value): value is string => value !== undefined && value.length >= 4)
+    .sort((a, b) => b.length - a.length);
+}
+
+/** Keep CLI diagnostics useful without allowing credentials into UI errors. */
+export function sanitizeGhDiagnostic(
+  diagnostic: string,
+  environment: NodeJS.ProcessEnv = ghEnvironment()
+): string {
+  let sanitized = diagnostic;
+  for (const secret of secretValues(environment)) {
+    sanitized = sanitized.split(secret).join("[REDACTED]");
+  }
+  return sanitized
+    .replace(
+      /\b((?:GH|GITHUB)(?:_ENTERPRISE)?_TOKEN\s*[=:]\s*)\S+/gi,
+      "$1[REDACTED]"
+    )
+    .replace(
+      /\b(authorization\s*:\s*(?:bearer|token)\s+)\S+/gi,
+      "$1[REDACTED]"
+    )
+    .replace(
+      /\b(?:gh[opusr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{8,})\b/g,
+      "[REDACTED]"
+    )
+    .replace(/(https?:\/\/)[^\s/@:]+:[^\s/@]+@/gi, "$1[REDACTED]@");
+}
+
+function authenticationRequired(diagnostic: string): boolean {
+  return /(?:authentication (?:is )?required|authentication failed|bad credentials|not logged (?:in|into)|gh auth login|http 401|status code 401|terminal prompts disabled|could not read (?:username|password)|no credentials (?:found|available)|permission denied \(publickey\))/i.test(
+    diagnostic
+  );
+}
+
+export function isGhAuthenticationError(cause: unknown): boolean {
+  if (cause instanceof GhCliError) {
+    return cause.code === "authentication_required";
+  }
+  if (!(cause instanceof Error)) return false;
+  const failure = cause as Error & { stdout?: string; stderr?: string };
+  return authenticationRequired(
+    `${failure.message}\n${failure.stdout ?? ""}\n${failure.stderr ?? ""}`
+  );
+}
+
+export function ghErrorMessage(cause: unknown): string {
+  if (isGhAuthenticationError(cause)) return AUTHENTICATION_REQUIRED_MESSAGE;
+  if (!(cause instanceof Error)) return sanitizeGhDiagnostic(String(cause));
+  const failure = cause as Error & { stderr?: string };
+  return sanitizeGhDiagnostic(failure.stderr?.trim() || cause.message);
+}
+
+function ghFailure(
+  cause: unknown,
+  stdout: string,
+  stderr: string,
+  environment: NodeJS.ProcessEnv,
+  timedOutMessage?: string
+): GhCliError {
+  const safeStdout = sanitizeGhDiagnostic(stdout, environment);
+  const safeStderr = sanitizeGhDiagnostic(stderr, environment);
+  const causeMessage =
+    cause instanceof Error ? sanitizeGhDiagnostic(cause.message, environment) : "";
+  const diagnostic = `${causeMessage}\n${safeStdout}\n${safeStderr}`;
+  if (timedOutMessage !== undefined) {
+    return new GhCliError(
+      timedOutMessage,
+      "timed_out",
+      safeStdout,
+      safeStderr
+    );
+  }
+  if (authenticationRequired(diagnostic)) {
+    return new GhCliError(
+      AUTHENTICATION_REQUIRED_MESSAGE,
+      "authentication_required",
+      safeStdout,
+      safeStderr
+    );
+  }
+  return new GhCliError(
+    safeStderr.trim() || causeMessage || "GitHub CLI command failed.",
+    "command_failed",
+    safeStdout,
+    safeStderr
+  );
+}
+
+function appendTail(current: string, chunk: string, limit: number): string {
   const combined = current + chunk;
-  return combined.length <= MAX_STREAM_TAIL_CHARS
+  return combined.length <= limit
     ? combined
-    : combined.slice(-MAX_STREAM_TAIL_CHARS);
+    : combined.slice(-limit);
 }
 
-function runStreamingGh(
+function terminateChild(child: ChildProcess, signal: NodeJS.Signals): void {
+  // Detached POSIX children own a process group, so kill gh and Git/SSH helpers
+  // together. This also prevents an inherited Terminal from becoming their TTY.
+  if (process.platform !== "win32" && child.pid !== undefined) {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch {
+      // The group may have already exited; fall through to the child handle.
+    }
+  }
+  try {
+    child.kill(signal);
+  } catch {
+    // A close/error event, or the force-kill timer, will settle the operation.
+  }
+}
+
+function runSpawnedGh(
   args: string[],
   options: GhRunOptions
 ): Promise<string> {
   return new Promise((resolve, reject) => {
+    const environment = environmentWith(options.env);
     const child = spawn("gh", args, {
-      env: environmentWith(options.env),
+      env: environment,
       stdio: ["ignore", "pipe", "pipe"],
+      // On POSIX this starts a new session without the GUI's inherited
+      // controlling terminal. It covers Git/SSH askpass behavior without
+      // replacing the user's SSH command or configuration.
+      detached: process.platform !== "win32",
       windowsHide: true
     });
     let stdoutTail = "";
     let stderrTail = "";
+    let pendingStreamStderr = "";
     let settled = false;
     let timedOut = false;
+    let forceKillTimeout: ReturnType<typeof setTimeout> | undefined;
+    const stdoutLimit =
+      options.onStderr === undefined ? MAX_BUFFER_BYTES : MAX_STREAM_TAIL_CHARS;
+    const stderrLimit =
+      options.onStderr === undefined ? MAX_BUFFER_BYTES : MAX_STREAM_TAIL_CHARS;
     const timeoutMs = options.timeoutMs ?? 10_000;
     const timeout = setTimeout(() => {
       timedOut = true;
-      child.kill();
+      terminateChild(child, "SIGTERM");
+      forceKillTimeout = setTimeout(() => {
+        terminateChild(child, "SIGKILL");
+        flushStreamingStderr();
+        rejectOnce(
+          ghFailure(
+            new Error("GitHub CLI did not exit after SIGTERM."),
+            stdoutTail,
+            stderrTail,
+            environment,
+            `gh timed out after ${timeoutMs}ms`
+          )
+        );
+      }, FORCE_KILL_DELAY_MS);
     }, timeoutMs);
 
     const rejectOnce = (cause: Error): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
+      if (forceKillTimeout !== undefined) clearTimeout(forceKillTimeout);
       reject(cause);
     };
 
+    const flushStreamingStderr = (complete = true): void => {
+      if (options.onStderr === undefined || pendingStreamStderr === "") return;
+      let emitLength = pendingStreamStderr.length;
+      if (!complete) {
+        emitLength = Math.max(
+          pendingStreamStderr.lastIndexOf("\n"),
+          pendingStreamStderr.lastIndexOf("\r")
+        ) + 1;
+      }
+      if (emitLength === 0) return;
+      const diagnostic = pendingStreamStderr.slice(0, emitLength);
+      pendingStreamStderr = pendingStreamStderr.slice(emitLength);
+      options.onStderr(sanitizeGhDiagnostic(diagnostic, environment));
+    };
+
     child.stdout.on("data", (chunk: Buffer | string) => {
-      stdoutTail = appendTail(stdoutTail, chunk.toString());
+      // Successful stdout is the API result. In particular, `gh auth token`
+      // intentionally returns a credential to the in-process token client.
+      // It is sanitized only if the command fails and becomes diagnostic data.
+      stdoutTail = appendTail(stdoutTail, chunk.toString(), stdoutLimit);
     });
     child.stderr.on("data", (chunk: Buffer | string) => {
       const text = chunk.toString();
-      stderrTail = appendTail(stderrTail, text);
-      options.onStderr?.(text);
+      stderrTail = appendTail(stderrTail, text, stderrLimit);
+      if (options.onStderr !== undefined) {
+        pendingStreamStderr += text;
+        flushStreamingStderr(false);
+      }
     });
-    child.once("error", rejectOnce);
+    child.once("error", (error) => {
+      flushStreamingStderr();
+      rejectOnce(ghFailure(error, stdoutTail, stderrTail, environment));
+    });
     child.once("close", (exitCode, signal) => {
       if (settled) return;
+      flushStreamingStderr();
       settled = true;
       clearTimeout(timeout);
+      if (forceKillTimeout !== undefined) clearTimeout(forceKillTimeout);
       if (exitCode === 0 && !timedOut) {
         resolve(stdoutTail.trim());
         return;
       }
-      const message = timedOut
-        ? `gh timed out after ${timeoutMs}ms`
-        : stderrTail.trim() ||
-          `gh exited ${exitCode ?? `after signal ${signal ?? "unknown"}`}`;
-      const failure = new Error(message) as Error & {
-        stdout?: string;
-        stderr?: string;
-      };
-      failure.stdout = stdoutTail;
-      failure.stderr = stderrTail;
-      reject(failure);
+      const cause = new Error(
+        stderrTail.trim() ||
+          `gh exited ${exitCode ?? `after signal ${signal ?? "unknown"}`}`
+      );
+      reject(
+        ghFailure(
+          cause,
+          stdoutTail,
+          stderrTail,
+          environment,
+          timedOut ? `gh timed out after ${timeoutMs}ms` : undefined
+        )
+      );
     });
   });
 }
@@ -95,29 +296,5 @@ export async function runGh(
   args: string[],
   options: GhRunOptions = {}
 ): Promise<string> {
-  if (options.onStderr !== undefined) {
-    return runStreamingGh(args, options);
-  }
-  return new Promise((resolve, reject) => {
-    execFile(
-      "gh",
-      args,
-      {
-        env: environmentWith(options.env),
-        timeout: options.timeoutMs ?? 10_000,
-        maxBuffer: MAX_BUFFER_BYTES,
-        encoding: "utf8"
-      },
-      (error, stdout, stderr) => {
-        if (error !== null) {
-          const failure = error as Error & { stdout?: string; stderr?: string };
-          failure.stdout = stdout;
-          failure.stderr = stderr;
-          reject(failure);
-          return;
-        }
-        resolve(stdout.trim());
-      }
-    );
-  });
+  return runSpawnedGh(args, options);
 }

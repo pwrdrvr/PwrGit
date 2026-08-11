@@ -342,6 +342,80 @@ describe("CloneService", () => {
     ]);
   });
 
+  it("maps expired GitHub CLI authentication during lookup", async () => {
+    const root = temporaryRoot();
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "Personal",
+      email: "test@pwrgit.dev",
+      roots: [root]
+    });
+    const indexer = new RepoIndexer(db, systemGit);
+    const gh = vi.fn(async () => {
+      const failure = new Error("HTTP 401: Bad credentials") as Error & {
+        stderr?: string;
+      };
+      failure.stderr =
+        "GH_TOKEN=github_pat_secretShouldNotLeak run gh auth login";
+      throw failure;
+    });
+    const service = new CloneService(
+      db,
+      systemGit,
+      indexer,
+      profiles,
+      gh,
+      async () => ({ installed: true, loggedIn: true })
+    );
+
+    const result = await service.checkSource(profile.id, "huntharo/private");
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        kind: "remote",
+        code: "github_login_required",
+        message:
+          "GitHub authentication is required. Run gh auth login and verify your Git/SSH credentials, then try again."
+      }
+    });
+    expect(JSON.stringify(result)).not.toContain("secretShouldNotLeak");
+  });
+
+  it("surfaces authentication expiry instead of flattening catalog failures", async () => {
+    const root = temporaryRoot();
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "PwrDrvr",
+      email: "test@pwrgit.dev",
+      org: "pwrdrvr",
+      roots: [root]
+    });
+    const indexer = new RepoIndexer(db, systemGit);
+    const service = new CloneService(
+      db,
+      systemGit,
+      indexer,
+      profiles,
+      async () => {
+        throw new Error("not logged into any GitHub hosts; run gh auth login");
+      },
+      async () => ({ installed: true, loggedIn: true })
+    );
+
+    const result = await service.catalog(profile.id);
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        warning:
+          "GitHub authentication is required. Run gh auth login and verify your Git/SSH credentials, then try again."
+      }
+    });
+  });
+
   it("clones with SSH, indexes the checkout, and records the chosen prefix", async () => {
     const root = temporaryRoot();
     const services = join(root, "services");
@@ -509,6 +583,54 @@ describe("CloneService", () => {
       root,
       expect.objectContaining({ env: { LC_ALL: "C", LANG: "C" } })
     );
+    expect(indexer.indexRepoAt).not.toHaveBeenCalled();
+  });
+
+  it("maps GitHub CLI clone authentication without leaking credentials", async () => {
+    const root = temporaryRoot();
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "Personal",
+      email: "test@pwrgit.dev",
+      roots: [root]
+    });
+    const secret = "gho_secretShouldNotLeak";
+    const gh = vi.fn(async () => {
+      const failure = new Error("clone failed") as Error & { stderr?: string };
+      failure.stderr = `fatal: could not read Username for 'https://github.com': terminal prompts disabled ${secret}`;
+      throw failure;
+    });
+    const indexer = {
+      listRepos: vi.fn(() => []),
+      indexRepoAt: vi.fn()
+    } as unknown as RepoIndexer;
+    const service = new CloneService(
+      db,
+      systemGit,
+      indexer,
+      profiles,
+      gh,
+      async () => ({ installed: true, loggedIn: true })
+    );
+
+    const result = await service.clone({
+      profileId: profile.id,
+      nameWithOwner: "huntharo/private",
+      protocol: "gh_cli",
+      parentPath: root
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        kind: "remote",
+        code: "github_login_required",
+        message:
+          "GitHub authentication is required. Run gh auth login and verify your Git/SSH credentials, then try again."
+      }
+    });
+    expect(JSON.stringify(result)).not.toContain(secret);
     expect(indexer.indexRepoAt).not.toHaveBeenCalled();
   });
 
