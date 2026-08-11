@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { err, ok } from "@pwrgit/shared";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { err, ok, type PwrGitError } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
@@ -12,7 +12,15 @@ import {
   pushPlannedRefs,
   resetToRemote
 } from "./git-service";
-import { registerRemoteHandlers } from "./remote-handlers";
+import {
+  PULL_REFRESH_WAIT_LIMIT_MS,
+  registerRemoteHandlers
+} from "./remote-handlers";
+import {
+  PULL_RECOVERY_STALL_TIMEOUT_MS,
+  PULL_STALL_TIMEOUT_MS,
+  PULL_STALL_WARNING_MS
+} from "./pull-watchdog";
 import type { WorktreeRefresher } from "./worktree-handlers";
 
 vi.mock("./git-service", async (importOriginal) => {
@@ -53,6 +61,249 @@ describe("remote handlers", () => {
     );
     vi.mocked(pushPlannedRefs).mockResolvedValue(ok([]));
     vi.mocked(resetToRemote).mockResolvedValue(ok(undefined));
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  it("logs pull start and every phase immediately with path and elapsed time", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const db = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" }))
+      }))
+    } as unknown as DB;
+    const refresher = {
+      refreshWorktree: vi.fn(async () => undefined),
+      refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    vi.mocked(pullFastForward).mockImplementationOnce(
+      async (_git, _path, onProgress) => {
+        onProgress?.("fetch");
+        vi.advanceTimersByTime(1_000);
+        onProgress?.("prepare");
+        vi.advanceTimersByTime(1_000);
+        onProgress?.("fast_forward");
+        vi.advanceTimersByTime(1_000);
+        onProgress?.("reapply");
+        vi.advanceTimersByTime(1_000);
+        return ok({
+          fastForwarded: true,
+          stashed: true,
+          reappliedWithConflicts: false
+        });
+      }
+    );
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, refresher);
+
+    await expect(
+      bus.dispatch("remote:pull", { worktreeId: "worktree-1" })
+    ).resolves.toMatchObject({ ok: true });
+
+    const messages = vi.mocked(logMain).mock.calls.map((call) => call[2]);
+    expect(messages).toEqual(
+      expect.arrayContaining([
+        "pull started /repos/project (0.0s)",
+        "pull phase fetching /repos/project (0.0s)",
+        "pull phase inspecting/preparing local changes /repos/project (1.0s)",
+        "pull phase fast-forward/checkout /repos/project (2.0s)",
+        "pull phase reapplying local changes /repos/project (3.0s)",
+        "pull phase refreshing/finish /repos/project (4.0s)",
+        "pull finished /repos/project: fast-forwarded, stashed changes reapplied (4.0s)"
+      ])
+    );
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("logs stalled warnings and returns a typed phase timeout without timer leaks", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const db = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" }))
+      }))
+    } as unknown as DB;
+    const refresher = {
+      refreshWorktree: vi.fn(async () => undefined),
+      refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    vi.mocked(pullFastForward).mockImplementationOnce(
+      (_git, _path, onProgress, control) =>
+        new Promise((resolve) => {
+          onProgress?.("fetch");
+          control?.signal?.addEventListener(
+            "abort",
+            () =>
+              resolve(err(control.signal?.reason as PwrGitError)),
+            { once: true }
+          );
+        })
+    );
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, refresher);
+
+    const pull = bus.dispatch("remote:pull", { worktreeId: "worktree-1" });
+    await vi.advanceTimersByTimeAsync(PULL_STALL_WARNING_MS);
+    expect(logMain).toHaveBeenCalledWith(
+      "warn",
+      "remote",
+      expect.stringContaining(
+        "pull still waiting /repos/project during fetching"
+      )
+    );
+    await vi.advanceTimersByTimeAsync(
+      PULL_STALL_TIMEOUT_MS - PULL_STALL_WARNING_MS
+    );
+
+    await expect(pull).resolves.toMatchObject({
+      ok: false,
+      error: {
+        kind: "remote",
+        code: "pull_stalled",
+        message: expect.stringContaining("during fetching after 15m 0s")
+      }
+    });
+    expect(logMain).toHaveBeenCalledWith(
+      "error",
+      "remote",
+      expect.stringContaining(
+        "pull timeout /repos/project during fetching after 15m 0s"
+      )
+    );
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("bounds recovery with a fresh watchdog after the primary merge times out", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const db = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" }))
+      }))
+    } as unknown as DB;
+    const refresher = {
+      refreshWorktree: vi.fn(async () => undefined),
+      refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    vi.mocked(pullFastForward).mockImplementationOnce(
+      (_git, _path, onProgress, control) =>
+        new Promise((resolve) => {
+          onProgress?.("fast_forward");
+          control?.signal?.addEventListener(
+            "abort",
+            () => {
+              const recovery = control.startRecovery?.();
+              recovery?.signal?.addEventListener(
+                "abort",
+                () => {
+                  recovery.finish?.(false);
+                  resolve(err(recovery.signal?.reason as PwrGitError));
+                },
+                { once: true }
+              );
+            },
+            { once: true }
+          );
+        })
+    );
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, refresher);
+
+    const pull = bus.dispatch("remote:pull", { worktreeId: "worktree-1" });
+    await vi.advanceTimersByTimeAsync(PULL_STALL_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(PULL_RECOVERY_STALL_TIMEOUT_MS);
+
+    await expect(pull).resolves.toMatchObject({
+      ok: false,
+      error: {
+        kind: "remote",
+        code: "pull_stalled",
+        message: expect.stringContaining("during rollback/recovery after 5m 0s")
+      }
+    });
+    expect(logMain).toHaveBeenCalledWith(
+      "info",
+      "remote",
+      expect.stringContaining("pull phase rollback/recovery /repos/project")
+    );
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("stops waiting for a hung finishing refresh and returns pull success", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const db = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" }))
+      }))
+    } as unknown as DB;
+    const refresher = {
+      refreshWorktree: vi.fn(() => new Promise<void>(() => undefined)),
+      refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, refresher);
+
+    const pull = bus.dispatch("remote:pull", { worktreeId: "worktree-1" });
+    await vi.advanceTimersByTimeAsync(PULL_REFRESH_WAIT_LIMIT_MS);
+
+    await expect(pull).resolves.toMatchObject({ ok: true });
+    expect(logMain).toHaveBeenCalledWith(
+      "warn",
+      "remote",
+      expect.stringContaining(
+        "pull refresh still running for /repos/project after 2m 0s"
+      )
+    );
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("returns immediately with typed auth guidance and sanitized Git detail", async () => {
+    const db = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" }))
+      }))
+    } as unknown as DB;
+    const refresher = {
+      refreshWorktree: vi.fn(async () => undefined),
+      refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    vi.mocked(pullFastForward).mockImplementationOnce(
+      async (_git, _path, onProgress) => {
+        onProgress?.("fetch");
+        return err({
+          kind: "git",
+          code: "exit_128",
+          message:
+            "fatal: Authentication failed for 'https://harold:secret@example.com/repo?token=abc123'\nterminal prompts disabled"
+        });
+      }
+    );
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, refresher);
+
+    const result = await bus.dispatch("remote:pull", {
+      worktreeId: "worktree-1"
+    });
+
+    expect(result).toEqual(
+      err({
+        kind: "remote",
+        code: "authentication_required",
+        message:
+          "Pull needs authentication during fetching after 0s. Configure a credential manager, authenticated remote, or SSH key, then retry. PwrGit does not open terminal credential prompts. See Logs for details."
+      })
+    );
+    const failureLog = vi
+      .mocked(logMain)
+      .mock.calls.find((call) => String(call[2]).startsWith("pull failed"));
+    expect(failureLog?.[2]).toContain(
+      "https://[redacted]@example.com/repo?token=[redacted]"
+    );
+    expect(failureLog?.[2]).toContain("terminal prompts disabled");
+    expect(failureLog?.[2]).not.toContain("secret");
+    expect(failureLog?.[2]).not.toContain("abc123");
   });
 
   it("streams pull phases and waits for the finishing refresh", async () => {
@@ -157,8 +408,7 @@ describe("remote handlers", () => {
     expect(logMain).toHaveBeenCalledWith(
       "warn",
       "remote",
-      "could not refresh /repos/project after pull:",
-      refreshFailure
+      "pull refresh failed /repos/project during refreshing/finish after 0.0s: database unavailable"
     );
   });
 
