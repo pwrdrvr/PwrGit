@@ -2610,11 +2610,14 @@ textarea,
     display: none;
   }
 }
-/* Matches the drift chip too — both chips are `.sync-chip`, and they collapse
-   together rather than on their own rung: at the default 1360px window this
-   pane is ~700px, so an earlier breakpoint would hide drift out of the box. */
+/* Measured against the header's CONTENT box, not its border box: at the stock
+   1360px window this pane is 696px, which is 656px inside the 20px padding — so
+   the sync chip is already gone out of the box. The drift chip opts out (it
+   collapses at 540px with the buttons) because nothing else in the header
+   carries its signal, whereas ↓behind survives here as the Pull button's
+   `.is-behind` accent. */
 @container (max-width: 680px) {
-  .wt-header__state .sync-chip:not(.sync-chip--progress) {
+  .wt-header__state .sync-chip:not(.sync-chip--progress):not(.sync-chip--drift) {
     display: none;
   }
 }
@@ -2948,8 +2951,9 @@ textarea,
   border: 1px solid var(--border-subtle);
   color: var(--text-subtle);
   font-weight: 500;
-  /* The border must not make the chip taller than the filled ones beside it. */
-  height: 24px;
+  /* 1px off the base padding, so the border lands where the filled chips' edge
+     does and the text keeps a common left offset. Height needs no adjustment —
+     `box-sizing: border-box` puts the border inside `.sync-chip`'s 24px. */
   padding: 0 9px;
 }
 
@@ -2989,8 +2993,12 @@ textarea,
   color: var(--accent-bright);
 }
 
-/* Collapse button labels + sync chip when the main pane is tight. */
+/* Collapse button labels + both chips when the main pane is tight. Below this
+   the buttons are bare icons, so the row has nothing left to give. */
 @container (max-width: 540px) {
+  .wt-header__state .sync-chip--drift {
+    display: none;
+  }
   .wt-btn {
     padding: 0;
     width: 32px;

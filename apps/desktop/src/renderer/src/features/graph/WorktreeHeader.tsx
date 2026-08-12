@@ -33,18 +33,22 @@ function baseChip(state: WorktreeState | null): Chip {
  * `main +4` chip. Not a sync state: pulling won't change it, which is why it
  * reads quieter than the sync chip and never takes the warn rung.
  *
- * The five fields are read from ONE source (the live snapshot when there is
- * one, else the tree's worktree) — mixing them can pair a fresh count with a
- * stale branch name, and the whole point of the chip is naming which branch
- * the count belongs to. `null` when there's nothing to say: on the default
- * branch itself, once the work is contained in it, or with no shared history
- * (where the count is 0 anyway).
+ * The five fields are read from ONE source — mixing them can pair a fresh count
+ * with a stale branch name, and the whole point of the chip is naming which
+ * branch the count belongs to. That source is the live snapshot only when it is
+ * *this* worktree's: `useWorktreeState` keeps the previous selection's snapshot
+ * until the new `worktree:getState` resolves, and unlike a stale ↓behind count,
+ * a stale drift chip states something false about the branch on screen ("main
+ * has 4 commits not in <the branch you just navigated away from>").
+ *
+ * `null` when there's nothing to say: on the default branch itself, once the
+ * work is contained in it, or with no shared history (count is 0 anyway).
  */
 function defaultBranchDrift(
   state: WorktreeState | null,
   worktree: Worktree
 ): { text: string; title: string } | null {
-  const s = state ?? worktree;
+  const s = state?.worktreeId === worktree.id ? state : worktree;
   if (s.isDefaultBranch || s.mergedIntoDefault || s.divergedFromDefault) {
     return null;
   }
@@ -299,7 +303,9 @@ export function WorktreeHeader({
         <span style={{ flex: 1 }} />
         {/* Left of the sync chip, which stays adjacent to the buttons it maps
             onto. Hidden mid-pull so the progress label keeps the width it
-            ellipsizes into. */}
+            ellipsizes into; on width it outlives the sync chip (see the
+            container queries — ↓behind has the Pull accent, drift has nothing
+            else). */}
         {drift !== null && busy !== "pull" && (
           <span className="sync-chip sync-chip--drift" title={drift.title}>
             {drift.text}

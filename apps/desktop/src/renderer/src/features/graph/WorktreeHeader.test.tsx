@@ -206,6 +206,28 @@ describe("WorktreeHeader default-branch drift", () => {
     expect(drift()?.textContent).toBe("develop +9");
   });
 
+  it("ignores the snapshot still held from the previous selection", async () => {
+    // useWorktreeState keeps the old worktree's state until the new
+    // `worktree:getState` resolves. Trusting it here would tell the user
+    // viewing `main` that main is 9 commits ahead of a branch they left.
+    await render(worktree, {
+      worktreeId: "worktree-2",
+      branch: "releases/1.0",
+      head: "abc1234",
+      hasUpstream: true,
+      ahead: 0,
+      behind: 0,
+      dirty: 0,
+      behindDefault: 9,
+      defaultBranch: "main",
+      mergedIntoDefault: false,
+      divergedFromDefault: false,
+      isDefaultBranch: false,
+      updatedAt: "2026-08-12T00:00:00.000Z"
+    });
+    expect(drift()).toBeNull();
+  });
+
   it("says nothing on the default branch, or once the work is in it", async () => {
     await render(worktree);
     expect(drift()).toBeNull();
