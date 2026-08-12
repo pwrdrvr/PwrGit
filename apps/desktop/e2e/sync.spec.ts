@@ -72,12 +72,28 @@ test("a synced release branch distinguishes default-branch drift from commits to
   await expect(release.locator(".badge-text--warn")).toHaveCount(0, {
     timeout: 20_000
   });
+  // The sidebar row is identity + actionable state only: drift belongs to the
+  // selected worktree's header, where it can't crowd out the branch name.
+  await expect(release.locator(".sync-chip--drift")).toHaveCount(0);
+  await expect(release.locator(".wt-row__branch")).toHaveText("releases/1.0");
+
+  await release.click();
+  // The header is a size container: below 540px of content it drops the drift
+  // chip on purpose. Establish that width here instead of inheriting whatever
+  // the runner's screen gives — GitHub's Windows runners are 1024×768, where
+  // the main pane is ~360px and the chip is legitimately hidden. Collapsing the
+  // rail hands the pane the width a real window has on any screen ≥ 900px.
+  await window.getByRole("button", { name: "Collapse panel" }).click();
+
   // main has four commits not in the release branch. Keep that useful
   // staleness signal, but visibly identify the other side of the comparison.
-  await expect(release.locator(".wt-tag--default-ahead")).toHaveText(
-    "main +4"
-  );
-  await expect(release.locator(".wt-tag--default-ahead")).toHaveAttribute(
+  const drift = window.locator(".wt-header .sync-chip--drift");
+  // Visible, not merely present: toHaveText passes on a display:none element,
+  // which is how a breakpoint that hid this chip at every width first shipped
+  // green.
+  await expect(drift).toBeVisible({ timeout: 20_000 });
+  await expect(drift).toHaveText("main +4");
+  await expect(drift).toHaveAttribute(
     "title",
     "main has 4 commits not in releases/1.0; this is not commits available to pull"
   );

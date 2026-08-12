@@ -8,7 +8,8 @@ import {
   ok,
   type PullProgressPhase,
   type SshRemoteRecovery,
-  type Worktree
+  type Worktree,
+  type WorktreeState
 } from "@pwrgit/shared";
 
 const bridge = vi.hoisted(() => ({
@@ -148,5 +149,91 @@ describe("WorktreeHeader pull progress", () => {
     expect(container.querySelector('[role="dialog"]')).not.toBeNull();
     expect(container.textContent).toContain("Try this remote with SSH?");
     expect(container.textContent).toContain(recovery.sshUrl);
+  });
+});
+
+describe("WorktreeHeader default-branch drift", () => {
+  const feature: Worktree = {
+    ...worktree,
+    branch: "releases/1.0",
+    isDefaultBranch: false,
+    isPrimary: false,
+    behind: 0,
+    behindDefault: 4
+  };
+  const render = async (
+    w: Worktree,
+    state: WorktreeState | null = null
+  ): Promise<void> => {
+    await act(async () => {
+      root.render(<WorktreeHeader worktree={w} state={state} />);
+    });
+  };
+  const drift = (): HTMLElement | null =>
+    container.querySelector(".sync-chip--drift");
+
+  it("names the branch the count belongs to, without the warn rung", async () => {
+    await render(feature);
+    expect(drift()?.textContent).toBe("main +4");
+    expect(drift()?.getAttribute("title")).toBe(
+      "main has 4 commits not in releases/1.0; this is not commits available to pull"
+    );
+    // Warn is reserved for ↓behind, which Pull actually clears.
+    expect(drift()?.classList.contains("sync-chip--warn")).toBe(false);
+  });
+
+  it("reads the count and the name from one source, never a mix", async () => {
+    // A stale tree row beside a fresh snapshot that resolved a different
+    // default: pairing "main" with 9 would name the wrong comparison.
+    await render(
+      { ...feature, defaultBranch: "main", behindDefault: 4 },
+      {
+        worktreeId: feature.id,
+        branch: "releases/1.0",
+        head: "abc1234",
+        hasUpstream: true,
+        ahead: 0,
+        behind: 0,
+        dirty: 0,
+        behindDefault: 9,
+        defaultBranch: "develop",
+        mergedIntoDefault: false,
+        divergedFromDefault: false,
+        isDefaultBranch: false,
+        updatedAt: "2026-08-12T00:00:00.000Z"
+      }
+    );
+    expect(drift()?.textContent).toBe("develop +9");
+  });
+
+  it("ignores the snapshot still held from the previous selection", async () => {
+    // useWorktreeState keeps the old worktree's state until the new
+    // `worktree:getState` resolves. Trusting it here would tell the user
+    // viewing `main` that main is 9 commits ahead of a branch they left.
+    await render(worktree, {
+      worktreeId: "worktree-2",
+      branch: "releases/1.0",
+      head: "abc1234",
+      hasUpstream: true,
+      ahead: 0,
+      behind: 0,
+      dirty: 0,
+      behindDefault: 9,
+      defaultBranch: "main",
+      mergedIntoDefault: false,
+      divergedFromDefault: false,
+      isDefaultBranch: false,
+      updatedAt: "2026-08-12T00:00:00.000Z"
+    });
+    expect(drift()).toBeNull();
+  });
+
+  it("says nothing on the default branch, or once the work is in it", async () => {
+    await render(worktree);
+    expect(drift()).toBeNull();
+    await render({ ...feature, mergedIntoDefault: true });
+    expect(drift()).toBeNull();
+    await render({ ...feature, behindDefault: 0 });
+    expect(drift()).toBeNull();
   });
 });

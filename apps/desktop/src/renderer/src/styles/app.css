@@ -1177,10 +1177,6 @@ textarea,
   background: var(--success-soft);
   color: var(--success-text);
 }
-.wt-tag--default-ahead {
-  background: var(--warn-soft);
-  color: var(--status-warning);
-}
 .wt-tag--diverged {
   background: var(--danger-soft);
   color: var(--danger-text);
@@ -2614,8 +2610,14 @@ textarea,
     display: none;
   }
 }
+/* Measured against the header's CONTENT box, not its border box: at the stock
+   1360px window this pane is 696px, which is 656px inside the 20px padding — so
+   the sync chip is already gone out of the box. The drift chip opts out (it
+   collapses at 540px with the buttons) because nothing else in the header
+   carries its signal, whereas ↓behind survives here as the Pull button's
+   `.is-behind` accent. */
 @container (max-width: 680px) {
-  .wt-header__state .sync-chip:not(.sync-chip--progress) {
+  .wt-header__state .sync-chip:not(.sync-chip--progress):not(.sync-chip--drift) {
     display: none;
   }
 }
@@ -2942,6 +2944,18 @@ textarea,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Default-branch drift ("main +4"). Context, not a sync state — no button acts
+   on it — so it sits a rung below its neighbour: outline instead of a fill,
+   subtle instead of warn. Warn stays reserved for ↓behind, which Pull clears. */
+.sync-chip--drift {
+  border: 1px solid var(--border-subtle);
+  color: var(--text-subtle);
+  font-weight: 500;
+  /* 1px off the base padding, so the border lands where the filled chips' edge
+     does and the text keeps a common left offset. Height needs no adjustment —
+     `box-sizing: border-box` puts the border inside `.sync-chip`'s 24px. */
+  padding: 0 9px;
+}
 
 .wt-actions {
   display: flex;
@@ -2979,8 +2993,12 @@ textarea,
   color: var(--accent-bright);
 }
 
-/* Collapse button labels + sync chip when the main pane is tight. */
+/* Collapse button labels + both chips when the main pane is tight. Below this
+   the buttons are bare icons, so the row has nothing left to give. */
 @container (max-width: 540px) {
+  .wt-header__state .sync-chip--drift {
+    display: none;
+  }
   .wt-btn {
     padding: 0;
     width: 32px;
