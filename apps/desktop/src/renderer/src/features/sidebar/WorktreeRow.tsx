@@ -58,7 +58,6 @@ export function WorktreeRow({
   onFocus: () => void;
 }) {
   const prunable = isPrunableWorktree(worktree, now);
-  const defaultBranch = worktree.defaultBranch || "default branch";
   const prHoverTimer = useRef<number | undefined>(undefined);
   const clearPrHoverTimer = (): void => {
     if (prHoverTimer.current !== undefined) {
@@ -193,17 +192,12 @@ export function WorktreeRow({
               diverged
             </span>
           )}
-          {!worktree.isDefaultBranch &&
-            !worktree.mergedIntoDefault &&
-            !worktree.divergedFromDefault &&
-            worktree.behindDefault > 0 && (
-              <span
-                className="wt-tag wt-tag--default-ahead"
-                title={`${defaultBranch} has ${worktree.behindDefault} commits not in ${worktree.branch}; this is not commits available to pull`}
-              >
-                {defaultBranch} +{worktree.behindDefault}
-              </span>
-            )}
+          {/* Default-branch drift ("main +401") used to sit here. The branch
+              name is the only shrinkable thing in the row, so a tag naming
+              *another* branch — at a width that grows with the drift — ate the
+              name this row exists to show. It's also true of nearly every
+              in-flight branch, and nothing here acts on it. It now lives in the
+              selected worktree's header, beside the sync chip. */}
         </>
       )}
       {worktree.lastActivityAt !== undefined && (

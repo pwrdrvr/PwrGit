@@ -1177,10 +1177,6 @@ textarea,
   background: var(--success-soft);
   color: var(--success-text);
 }
-.wt-tag--default-ahead {
-  background: var(--warn-soft);
-  color: var(--status-warning);
-}
 .wt-tag--diverged {
   background: var(--danger-soft);
   color: var(--danger-text);
@@ -2614,6 +2610,9 @@ textarea,
     display: none;
   }
 }
+/* Matches the drift chip too — both chips are `.sync-chip`, and they collapse
+   together rather than on their own rung: at the default 1360px window this
+   pane is ~700px, so an earlier breakpoint would hide drift out of the box. */
 @container (max-width: 680px) {
   .wt-header__state .sync-chip:not(.sync-chip--progress) {
     display: none;
@@ -2941,6 +2940,17 @@ textarea,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Default-branch drift ("main +4"). Context, not a sync state — no button acts
+   on it — so it sits a rung below its neighbour: outline instead of a fill,
+   subtle instead of warn. Warn stays reserved for ↓behind, which Pull clears. */
+.sync-chip--drift {
+  border: 1px solid var(--border-subtle);
+  color: var(--text-subtle);
+  font-weight: 500;
+  /* The border must not make the chip taller than the filled ones beside it. */
+  height: 24px;
+  padding: 0 9px;
 }
 
 .wt-actions {

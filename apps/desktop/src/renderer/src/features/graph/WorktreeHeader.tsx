@@ -28,6 +28,34 @@ function baseChip(state: WorktreeState | null): Chip {
   return { text: "up to date", tone: "muted" };
 }
 
+/**
+ * How far the repo's default branch has moved on without this branch — the
+ * `main +4` chip. Not a sync state: pulling won't change it, which is why it
+ * reads quieter than the sync chip and never takes the warn rung.
+ *
+ * The five fields are read from ONE source (the live snapshot when there is
+ * one, else the tree's worktree) — mixing them can pair a fresh count with a
+ * stale branch name, and the whole point of the chip is naming which branch
+ * the count belongs to. `null` when there's nothing to say: on the default
+ * branch itself, once the work is contained in it, or with no shared history
+ * (where the count is 0 anyway).
+ */
+function defaultBranchDrift(
+  state: WorktreeState | null,
+  worktree: Worktree
+): { text: string; title: string } | null {
+  const s = state ?? worktree;
+  if (s.isDefaultBranch || s.mergedIntoDefault || s.divergedFromDefault) {
+    return null;
+  }
+  if (s.behindDefault <= 0) return null;
+  const defaultBranch = s.defaultBranch || "default branch";
+  return {
+    text: `${defaultBranch} +${s.behindDefault}`,
+    title: `${defaultBranch} has ${s.behindDefault} commits not in ${s.branch}; this is not commits available to pull`
+  };
+}
+
 type Busy = "fetch" | "pull" | "push" | null;
 type RecoveryBusy = "rebase" | "reset" | null;
 
@@ -258,6 +286,7 @@ export function WorktreeHeader({
       : (flash ?? baseChip(state));
   const dirty = state?.dirty ?? worktree.dirty;
   const behind = state?.behind ?? worktree.behind;
+  const drift = defaultBranchDrift(state, worktree);
 
   return (
     <div className="wt-header">
@@ -268,6 +297,14 @@ export function WorktreeHeader({
       <div className="wt-header__state">
         {dirty > 0 && <span className="badge badge--warn">●{dirty}</span>}
         <span style={{ flex: 1 }} />
+        {/* Left of the sync chip, which stays adjacent to the buttons it maps
+            onto. Hidden mid-pull so the progress label keeps the width it
+            ellipsizes into. */}
+        {drift !== null && busy !== "pull" && (
+          <span className="sync-chip sync-chip--drift" title={drift.title}>
+            {drift.text}
+          </span>
+        )}
         <span
           className={`sync-chip sync-chip--${chip.tone}${
             busy === "pull" ? " sync-chip--progress" : ""
