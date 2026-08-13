@@ -27,6 +27,7 @@ const GIT_CONCURRENCY = 12;
 const HYDRATION_GIT_CONCURRENCY = 4;
 const REMOTE_BRANCH_WRITE_CHUNK_SIZE = 100;
 const DISCOVERY_YIELD_EVERY = 32;
+const PROFILE_RESCAN_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const SKIP_DIRS = new Set([
   "node_modules",
   ".git",
@@ -79,6 +80,8 @@ export type RepoIndexerOptions = {
   yieldToEventLoop?: () => Promise<void>;
   remoteBranchWriteChunkSize?: number;
   discoveryYieldEvery?: number;
+  profileRescanIntervalMs?: number;
+  now?: () => number;
 };
 
 const defaultYieldToEventLoop = (): Promise<void> =>
@@ -93,6 +96,8 @@ export class RepoIndexer {
   private readonly yieldToEventLoop: () => Promise<void>;
   private readonly remoteBranchWriteChunkSize: number;
   private readonly discoveryYieldEvery: number;
+  private readonly profileRescanIntervalMs: number;
+  private readonly now: () => number;
 
   constructor(
     private readonly db: DB,
@@ -108,6 +113,37 @@ export class RepoIndexer {
     this.discoveryYieldEvery = Math.max(
       1,
       options.discoveryYieldEvery ?? DISCOVERY_YIELD_EVERY
+    );
+    this.profileRescanIntervalMs = Math.max(
+      1,
+      options.profileRescanIntervalMs ?? PROFILE_RESCAN_INTERVAL_MS
+    );
+    this.now = options.now ?? Date.now;
+  }
+
+  /** Full root discovery is periodic; explicit user rescans bypass this gate. */
+  shouldRescanProfile(profileId: ProfileId): boolean {
+    const pendingBranchIndex = this.db
+      .prepare(
+        `SELECT 1
+         FROM repos r
+         LEFT JOIN remote_branch_index_state s ON s.repo_id = r.id
+         WHERE r.profile_id = ? AND s.repo_id IS NULL
+         LIMIT 1`
+      )
+      .get(profileId);
+    if (pendingBranchIndex !== undefined) return true;
+
+    const state = this.db
+      .prepare(
+        `SELECT scanned_at_ms
+         FROM profile_scan_state
+         WHERE profile_id = ?`
+      )
+      .get(profileId) as { scanned_at_ms: number } | undefined;
+    return (
+      state === undefined ||
+      this.now() - state.scanned_at_ms >= this.profileRescanIntervalMs
     );
   }
 
@@ -161,11 +197,17 @@ export class RepoIndexer {
       seenRepoIds.push(repoId);
       if (remoteBranches !== null) {
         await this.syncRemoteBranchesChunked(repoId, remoteBranches);
+      } else {
+        // Record the attempt so one temporarily unreadable repo does not turn
+        // the one-time migration repair into an every-launch full rescan. The
+        // daily scan (or an explicit refresh) retries it normally.
+        this.markRemoteBranchesIndexed(repoId);
       }
       await this.yieldToEventLoop();
     }
     this.db.transaction(() => {
       this.pruneScannedRepos(profile.id, seenRepoIds);
+      this.markProfileScanned(profile.id);
     })();
 
     return this.listRepos(profile.id);
@@ -892,6 +934,17 @@ export class RepoIndexer {
          VALUES (?)`
       )
       .run(repoId);
+  }
+
+  private markProfileScanned(profileId: ProfileId): void {
+    this.db
+      .prepare(
+        `INSERT INTO profile_scan_state (profile_id, scanned_at_ms)
+         VALUES (?, ?)
+         ON CONFLICT(profile_id) DO UPDATE SET
+           scanned_at_ms = excluded.scanned_at_ms`
+      )
+      .run(profileId, this.now());
   }
 
   private pruneScannedRepos(profileId: string, keepIds: string[]): void {

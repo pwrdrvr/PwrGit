@@ -9,3 +9,17 @@ CREATE TABLE remote_branch_index_state (
 
 INSERT INTO remote_branch_index_state (repo_id)
 SELECT DISTINCT repo_id FROM remote_branches;
+
+-- Full root discovery is maintenance, not launch-critical work. Seed its
+-- schedule from the last successful scan so upgrades do not immediately repeat
+-- a recent scan.
+CREATE TABLE profile_scan_state (
+  profile_id    TEXT PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+  scanned_at_ms INTEGER NOT NULL
+);
+
+INSERT INTO profile_scan_state (profile_id, scanned_at_ms)
+SELECT profile_id, CAST(strftime('%s', MAX(last_seen_at)) AS INTEGER) * 1000
+FROM repos
+WHERE source = 'scan'
+GROUP BY profile_id;

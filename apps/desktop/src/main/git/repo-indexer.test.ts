@@ -100,6 +100,32 @@ describe("findRepoDirs", () => {
 });
 
 describe("RepoIndexer", () => {
+  it("throttles routine root discovery after a successful scan", async () => {
+    const isolatedRoot = mkdtempSync(join(tmpdir(), "pwrgit-schedule-"));
+    initRepo(join(isolatedRoot, "scheduled"));
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({
+      name: "Scheduled",
+      email: "scheduled@example.com",
+      roots: [isolatedRoot]
+    });
+    let now = 1_000;
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit, {
+      now: () => now,
+      profileRescanIntervalMs: 100
+    });
+
+    expect(isolatedIndexer.shouldRescanProfile(profile.id)).toBe(true);
+    await isolatedIndexer.rescanProfile(profile);
+    expect(isolatedIndexer.shouldRescanProfile(profile.id)).toBe(false);
+
+    now += 99;
+    expect(isolatedIndexer.shouldRescanProfile(profile.id)).toBe(false);
+    now += 1;
+    expect(isolatedIndexer.shouldRescanProfile(profile.id)).toBe(true);
+  });
+
   it("hydrates remote-only search entries for every persisted repo", async () => {
     const isolatedDb = openDatabase(":memory:");
     const profiles = new ProfileService(isolatedDb);

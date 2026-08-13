@@ -250,12 +250,20 @@ if (!gotSingleInstanceLock) {
     // interval instead of via filesystem watchers (which peg fseventd on large
     // trees). PwrGit's own git ops refresh directly through the refresher.
     let activeWorktreeId: string | null = null;
+    const rescanningProfiles = new Set<string>();
 
     const rescanInBackground = (profile: Profile): void => {
+      if (
+        rescanningProfiles.has(profile.id) ||
+        !indexer.shouldRescanProfile(profile.id)
+      ) {
+        return;
+      }
       // Scan lists repos + worktrees (cheap). Per-worktree *state*
       // (dirty/ahead/behind/staleness) is computed lazily per repo when its row
       // is expanded (repo:computeState) — computing all 156 at launch storms git.
       const startedAt = Date.now();
+      rescanningProfiles.add(profile.id);
       void indexer
         .rescanProfile(profile)
         .then((repos) => {
@@ -267,7 +275,8 @@ if (!gotSingleInstanceLock) {
           );
           emitEvent("repo:changed", { profileId: profile.id });
         })
-        .catch((cause) => logMain("error", "scan", "rescan failed:", cause));
+        .catch((cause) => logMain("error", "scan", "rescan failed:", cause))
+        .finally(() => rescanningProfiles.delete(profile.id));
     };
 
     // One window per profile. Opening a profile that already has a window
