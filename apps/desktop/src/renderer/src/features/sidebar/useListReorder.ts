@@ -11,6 +11,22 @@ import { dropPositionWithin, type DropPosition } from "./repo-view";
  */
 const POST_DRAG_CLICK_SUPPRESS_MS = 250;
 
+/**
+ * "No drag has ended yet." Deliberately not 0: `performance.now()` counts from
+ * the document's load, so 0 reads as a drag that ended at page load and
+ * suppresses every row click for the first POST_DRAG_CLICK_SUPPRESS_MS of the
+ * window's life.
+ */
+export const NO_DRAG_ENDED = Number.NEGATIVE_INFINITY;
+
+/**
+ * Whether a click arriving at `now` is the synthetic one a drag release fires.
+ * Split out from the hook so the seed above stays covered by a test — the bug
+ * this guards was in the initial value, not in the comparison.
+ */
+export const isPostDragClickAt = (now: number, endedAt: number): boolean =>
+  now - endedAt < POST_DRAG_CLICK_SUPPRESS_MS;
+
 export type ReorderTarget = { id: string; position: DropPosition };
 
 export type ListReorder = {
@@ -66,7 +82,12 @@ export function useListReorder({
   // during `drop` on some platforms, and because a drag that starts in another
   // list must be identifiable without reading state we never set.
   const dragIdRef = useRef<string | null>(null);
-  const endedAtRef = useRef(0);
+  // Seeding this with 0 claimed "a drag ended at page load" and suppressed
+  // every row click for the window's first POST_DRAG_CLICK_SUPPRESS_MS — long
+  // enough to eat a real one, since expanding a repo the moment the sidebar
+  // lists it lands right on that boundary, and it failed silently because a
+  // suppressed click is indistinguishable from one that never happened.
+  const endedAtRef = useRef(NO_DRAG_ENDED);
 
   const clear = useCallback(() => {
     dragIdRef.current = null;
@@ -75,7 +96,7 @@ export function useListReorder({
   }, []);
 
   const isPostDragClick = useCallback(
-    () => performance.now() - endedAtRef.current < POST_DRAG_CLICK_SUPPRESS_MS,
+    () => isPostDragClickAt(performance.now(), endedAtRef.current),
     []
   );
 

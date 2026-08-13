@@ -34,6 +34,20 @@ the Electron build.
 - Confirms/alerts are **in-app** dialogs (not native), so drive them by clicking
   `.modal--dialog .modal__create` (confirm) / `.modal__cancel` — don't use
   Playwright's `window.on("dialog", …)`.
-- Shared step helpers (`addRootAndExpand`, `branchRow`) live in
+- Shared step helpers (`addRootAndExpand`, `expandRepoGroup`,
+  `expandWorktrees`, `collapseWorktrees`, `repoGroup`, `branchRow`) live in
   `fixtures/steps.ts`; a repo that trails its origin comes from
   `sandbox.makeRepoBehindRemote(name, { behindBy })`.
+- **Never expand a disclosure with a bare `click()`.** Sidebar row clicks used
+  to vanish for the first 250ms of a window's life: `useListReorder` seeded its
+  post-drag suppression timestamp with `0`, and `performance.now()` counts from
+  document load, so every early click read as the synthetic click a drag
+  release fires. Expanding a repo the moment the sidebar lists it landed right
+  on that boundary and failed about half the time, silently. That is fixed
+  (`NO_DRAG_ENDED` in `useListReorder.ts`) — but keep using the helpers in
+  `fixtures/steps.ts`, **including for closing** (`collapseWorktrees`), since a
+  dropped click is not direction-specific. They read `aria-expanded` back,
+  click again if it did not flip, and `console.warn` when they retry; that log
+  is what found the bug. A `click N did not take` line from any spec other than
+  `sidebar-expand.spec.ts` (which drops a click on purpose) means dropped
+  clicks are back — investigate rather than raising a timeout.
