@@ -460,6 +460,81 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(gitOut(local, ["stash", "list"])).toBe("");
   }, 15_000);
 
+  it("removes partial untracked checkout artifacts before restoring a clean checkout", async () => {
+    const { local, remote } = makeDivergedFixture();
+    commit(remote, "upstream.txt", "advance upstream");
+    git(remote, ["push"]);
+
+    const originalHead = gitOut(local, ["rev-parse", "HEAD"]);
+    let sawPartialArtifact = false;
+    const failAfterUntrackedCheckout: GitExec = async (args, cwd, options) => {
+      if (args[0] === "merge") {
+        writeFileSync(join(cwd, "upstream.txt"), "partial upstream checkout\n");
+        sawPartialArtifact =
+          existsSync(join(cwd, "upstream.txt")) &&
+          gitOut(cwd, ["status", "--porcelain"]) === "?? upstream.txt";
+        return ok({
+          stdout: "",
+          stderr: "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+          exitCode: 128
+        });
+      }
+      return systemGit(args, cwd, options);
+    };
+
+    const result = await pullFastForward(failAfterUntrackedCheckout, local);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("merge_failed");
+      expect(result.error.message).toContain("terminal prompts disabled");
+    }
+    expect(sawPartialArtifact).toBe(true);
+    expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(originalHead);
+    expect(gitOut(local, ["status", "--porcelain"])).toBe("");
+    expect(existsSync(join(local, "upstream.txt"))).toBe(false);
+  }, 15_000);
+
+  it("cleans a partial checkout before reapplying an untracked file with the same path", async () => {
+    const { local, remote } = makeDivergedFixture();
+    commit(remote, "upstream.txt", "advance upstream");
+    git(remote, ["push"]);
+
+    const originalHead = gitOut(local, ["rev-parse", "HEAD"]);
+    writeFileSync(join(local, "upstream.txt"), "local untracked work\n");
+    const originalStatus = gitOut(local, ["status", "--porcelain"]);
+    let sawPartialArtifact = false;
+    let cleanBeforePop = false;
+    const failAfterUntrackedCheckout: GitExec = async (args, cwd, options) => {
+      if (args[0] === "merge") {
+        writeFileSync(join(cwd, "upstream.txt"), "partial upstream checkout\n");
+        sawPartialArtifact =
+          fileText(cwd, "upstream.txt") === "partial upstream checkout\n";
+        return ok({
+          stdout: "",
+          stderr: "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+          exitCode: 128
+        });
+      }
+      if (args[0] === "stash" && args[1] === "pop") {
+        cleanBeforePop = !existsSync(join(cwd, "upstream.txt"));
+      }
+      return systemGit(args, cwd, options);
+    };
+
+    const result = await pullFastForward(failAfterUntrackedCheckout, local);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("merge_failed");
+      expect(result.error.message).toContain("terminal prompts disabled");
+    }
+    expect(sawPartialArtifact).toBe(true);
+    expect(cleanBeforePop).toBe(true);
+    expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(originalHead);
+    expect(gitOut(local, ["status", "--porcelain"])).toBe(originalStatus);
+    expect(fileText(local, "upstream.txt")).toBe("local untracked work\n");
+    expect(gitOut(local, ["stash", "list"])).toBe("");
+  }, 15_000);
+
   it("preserves staged and unstaged state when reapplying work after a successful pull", async () => {
     const { local, remote } = makeDivergedFixture();
     commit(remote, "upstream.txt", "advance upstream");

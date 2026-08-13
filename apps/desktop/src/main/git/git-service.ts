@@ -1503,6 +1503,13 @@ export async function pullFastForward(
       if (originalHeadOid !== undefined) {
         const reset = await rollbackStep(["reset", "--hard", originalHeadOid]);
         if (!reset.ok) return reset;
+        // A failed checkout can write files from the new commit before a
+        // smudge/filter error aborts the merge. Once HEAD is reset those files
+        // are untracked, so reset --hard leaves them behind. All pre-pull
+        // non-ignored work was included in the auto-stash above; remove only
+        // non-ignored untracked artifacts before restoring that stash.
+        const clean = await rollbackStep(["clean", "-fd"]);
+        if (!clean.ok) return clean;
       } else {
         // Restore an unborn checkout even if the failed merge created its branch
         // ref or partially populated the index/worktree.
