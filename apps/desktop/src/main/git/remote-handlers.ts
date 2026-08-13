@@ -159,12 +159,18 @@ export function registerRemoteHandlers(
   // Ordinary sync successes log at info; Pull adds live phase/failure details
   // below because a long-running command cannot wait for command-bus logging.
   bus.register("remote:fetch", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
+    const worktree = worktreeOf(req.worktreeId);
+    if (worktree === null) return err(notFound);
     const startedAt = Date.now();
-    const result = await fetchRemote(execGit, path);
+    const result = await operations.runRepository(worktree.repoId, () =>
+      fetchRemote(execGit, worktree.path)
+    );
     if (!result.ok) return result;
-    logMain("info", "remote", `fetched ${path} (${seconds(startedAt)})`);
+    logMain(
+      "info",
+      "remote",
+      `fetched ${worktree.path} (${seconds(startedAt)})`
+    );
     refresher.refreshWorktree(req.worktreeId);
     return ok(null);
   });
@@ -173,10 +179,11 @@ export function registerRemoteHandlers(
     const repo = repoOf(req.repoId);
     if (repo === null) return err({ ...notFound, message: "repo not found" });
     const startedAt = Date.now();
-    const result =
+    const result = await operations.runRepository(req.repoId, () =>
       req.remote === undefined
-        ? await fetchAllRemotes(execGit, repo.path)
-        : await fetchNamedRemote(execGit, repo.path, req.remote);
+        ? fetchAllRemotes(execGit, repo.path)
+        : fetchNamedRemote(execGit, repo.path, req.remote)
+    );
     if (!result.ok) return result;
     logMain(
       "info",
@@ -267,11 +274,8 @@ export function registerRemoteHandlers(
   bus.register("remote:planPushRefs", async (req) => {
     const repo = repoOf(req.repoId);
     if (repo === null) return err({ ...notFound, message: "repo not found" });
-    const result = await planPushRefs(
-      execGit,
-      repo.path,
-      req.sourceRef,
-      req.destinations
+    const result = await operations.runRepository(req.repoId, () =>
+      planPushRefs(execGit, repo.path, req.sourceRef, req.destinations)
     );
     refresher.refreshRepoWorktrees(req.repoId);
     return result;
@@ -281,7 +285,9 @@ export function registerRemoteHandlers(
     const repo = repoOf(req.repoId);
     if (repo === null) return err({ ...notFound, message: "repo not found" });
     const startedAt = Date.now();
-    const result = await pushPlannedRefs(execGit, repo.path, req.plans);
+    const result = await operations.runRepository(req.repoId, () =>
+      pushPlannedRefs(execGit, repo.path, req.plans)
+    );
     refresher.refreshRepoWorktrees(req.repoId);
     if (!result.ok) return result;
     const pushed = result.value.filter((item) => item.outcome === "pushed").length;
@@ -294,8 +300,9 @@ export function registerRemoteHandlers(
   });
 
   bus.register("remote:pull", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
+    const worktree = worktreeOf(req.worktreeId);
+    if (worktree === null) return err(notFound);
+    const path = worktree.path;
     const startedAt = Date.now();
     let currentPhase: PullWatchdogPhase = "starting";
     let recoveryActive = false;
@@ -318,71 +325,82 @@ export function registerRemoteHandlers(
         `pull timeout ${path} during ${pullPhaseDescription(snapshot.phase)} after ${formatPullDuration(snapshot.elapsedMs)}: ${error.code}; direct Git termination requested (LFS/filter helpers should exit when inherited pipes close)`
       );
     };
-    const watchdog = new PullWatchdog({
-      onStallWarning,
-      onTimeout
-    });
-    const reportPhase = (phase: PullProgressPhase): void => {
-      if (recoveryActive) {
-        logMain(
-          "info",
-          "remote",
-          `pull recovery step ${pullPhaseDescription(phase)} ${path} (${seconds(startedAt)})`
-        );
-        emitEvent("worktree:pullProgress", { worktreeId: req.worktreeId, phase });
-        return;
-      }
-      // Once a timeout fires, preserve its phase while cleanup runs.
-      if (watchdog.signal.aborted) return;
-      currentPhase = phase;
-      watchdog.setPhase(phase);
-      logMain(
-        "info",
-        "remote",
-        `pull phase ${pullPhaseDescription(phase)} ${path} (${seconds(startedAt)})`
-      );
-      emitEvent("worktree:pullProgress", { worktreeId: req.worktreeId, phase });
-    };
+    let reportPhase: (phase: PullProgressPhase) => void = () => {};
     let result: Awaited<ReturnType<typeof pullFastForward>>;
     try {
-      result = await operations.run(req.worktreeId, () =>
-        pullFastForward(execGit, path, reportPhase, {
-          signal: watchdog.signal,
-          onActivity: () => watchdog.noteActivity(),
-          startRecovery: () => {
-            watchdog.finish();
-            const priorPhase = currentPhase;
-            recoveryActive = true;
-            currentPhase = "recovery";
+      result = await operations.runRepository(worktree.repoId, async () => {
+        // Start the watchdog only after this pull owns the repository fetch
+        // scope. Time spent queued behind another fetch is not a Git stall.
+        const watchdog = new PullWatchdog({ onStallWarning, onTimeout });
+        reportPhase = (phase: PullProgressPhase): void => {
+          if (recoveryActive) {
             logMain(
               "info",
               "remote",
-              `pull phase ${pullPhaseDescription("recovery")} ${path} (${seconds(startedAt)})`
+              `pull recovery step ${pullPhaseDescription(phase)} ${path} (${seconds(startedAt)})`
             );
-            recoveryWatchdog = new PullWatchdog({
-              stallWarningMs: PULL_RECOVERY_STALL_WARNING_MS,
-              stallTimeoutMs: PULL_RECOVERY_STALL_TIMEOUT_MS,
-              operationTimeoutMs: PULL_RECOVERY_OPERATION_TIMEOUT_MS,
-              onStallWarning,
-              onTimeout
+            emitEvent("worktree:pullProgress", {
+              worktreeId: req.worktreeId,
+              phase
             });
-            recoveryWatchdog.setPhase("recovery");
-            return {
-              signal: recoveryWatchdog.signal,
-              onActivity: () => recoveryWatchdog?.noteActivity(),
-              finish: (succeeded: boolean) => {
-                recoveryWatchdog?.finish();
-                recoveryActive = false;
-                if (succeeded) currentPhase = priorPhase;
-              }
-            };
+            return;
           }
-        })
-      );
+          // Once a timeout fires, preserve its phase while cleanup runs.
+          if (watchdog.signal.aborted) return;
+          currentPhase = phase;
+          watchdog.setPhase(phase);
+          logMain(
+            "info",
+            "remote",
+            `pull phase ${pullPhaseDescription(phase)} ${path} (${seconds(startedAt)})`
+          );
+          emitEvent("worktree:pullProgress", {
+            worktreeId: req.worktreeId,
+            phase
+          });
+        };
+        try {
+          return await operations.run(req.worktreeId, () =>
+            pullFastForward(execGit, path, reportPhase, {
+              signal: watchdog.signal,
+              onActivity: () => watchdog.noteActivity(),
+              startRecovery: () => {
+                watchdog.finish();
+                const priorPhase = currentPhase;
+                recoveryActive = true;
+                currentPhase = "recovery";
+                logMain(
+                  "info",
+                  "remote",
+                  `pull phase ${pullPhaseDescription("recovery")} ${path} (${seconds(startedAt)})`
+                );
+                recoveryWatchdog = new PullWatchdog({
+                  stallWarningMs: PULL_RECOVERY_STALL_WARNING_MS,
+                  stallTimeoutMs: PULL_RECOVERY_STALL_TIMEOUT_MS,
+                  operationTimeoutMs: PULL_RECOVERY_OPERATION_TIMEOUT_MS,
+                  onStallWarning,
+                  onTimeout
+                });
+                recoveryWatchdog.setPhase("recovery");
+                return {
+                  signal: recoveryWatchdog.signal,
+                  onActivity: () => recoveryWatchdog?.noteActivity(),
+                  finish: (succeeded: boolean) => {
+                    recoveryWatchdog?.finish();
+                    recoveryActive = false;
+                    if (succeeded) currentPhase = priorPhase;
+                  }
+                };
+              }
+            })
+          );
+        } finally {
+          watchdog.finish();
+          recoveryWatchdog?.finish();
+        }
+      });
     } catch (cause) {
       const detail = sanitizeGitLogDetail(cause);
-      watchdog.finish();
-      recoveryWatchdog?.finish();
       logMain(
         "error",
         "remote",
@@ -394,8 +412,6 @@ export function registerRemoteHandlers(
         message: `Pull failed during ${pullPhaseDescription(currentPhase)} after ${formatPullDuration(Date.now() - startedAt)}. See Logs for details, then retry.`
       });
     }
-    watchdog.finish();
-    recoveryWatchdog?.finish();
     if (!result.ok) {
       const classified = classifyPullError(result.error);
       const detail = sanitizeGitLogDetail(result.error.message);
