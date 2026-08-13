@@ -34,6 +34,12 @@ the Electron build.
 - Confirms/alerts are **in-app** dialogs (not native), so drive them by clicking
   `.modal--dialog .modal__create` (confirm) / `.modal__cancel` — don't use
   Playwright's `window.on("dialog", …)`.
-- Shared step helpers (`addRootAndExpand`, `branchRow`) live in
-  `fixtures/steps.ts`; a repo that trails its origin comes from
-  `sandbox.makeRepoBehindRemote(name, { behindBy })`.
+- Shared step helpers (`addRootAndExpand`, `expandWorktrees`, `repoGroup`,
+  `branchRow`) live in `fixtures/steps.ts`; a repo that trails its origin comes
+  from `sandbox.makeRepoBehindRemote(name, { behindBy })`.
+- **Never expand a disclosure with a bare `click()`.** The sidebar re-renders
+  while a newly added root is indexed, and a click that lands mid-render is
+  dropped — the group stays collapsed and the spec times out much later on a
+  `.wt-row` that cannot exist. The helpers in `fixtures/steps.ts` read
+  `aria-expanded` back and click again; use them (or copy the shape) rather
+  than assuming one click took.

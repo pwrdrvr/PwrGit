@@ -1,7 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
-import { addRootAndExpand, branchRow } from "./fixtures/steps";
+import {
+  addRootAndExpand,
+  branchRow,
+  expandWorktrees
+} from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -55,16 +59,8 @@ test("a synced release branch distinguishes default-branch drift from commits to
   const { window } = handle;
 
   await addRootAndExpand(window, handle, sandbox, "release");
-  const worktrees = window.getByRole("button", { name: /^Worktrees 1/ });
-  if ((await worktrees.count()) === 0) {
-    await window
-      .getByRole("treeitem", { name: "release", exact: true })
-      .click();
-  }
-  await expect(worktrees).toBeVisible({ timeout: 20_000 });
-  if ((await worktrees.getAttribute("aria-expanded")) !== "true") {
-    await worktrees.click();
-  }
+  const worktrees = await expandWorktrees(window, "release");
+  await expect(worktrees.locator(".ref-section__count")).toHaveText("1");
 
   const release = branchRow(window, "releases/1.0");
   await expect(release).toBeVisible({ timeout: 20_000 });
