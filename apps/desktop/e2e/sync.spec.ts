@@ -60,7 +60,11 @@ test("a synced release branch distinguishes default-branch drift from commits to
 
   await addRootAndExpand(window, handle, sandbox, "release");
   const worktrees = await expandWorktrees(window, "release");
-  await expect(worktrees.locator(".ref-section__count")).toHaveText("1");
+  // The count only reaches 1 once the linked worktree is indexed, so give it
+  // the same room the old inline wait had.
+  await expect(worktrees.locator(".ref-section__count")).toHaveText("1", {
+    timeout: 20_000
+  });
 
   const release = branchRow(window, "releases/1.0");
   await expect(release).toBeVisible({ timeout: 20_000 });
