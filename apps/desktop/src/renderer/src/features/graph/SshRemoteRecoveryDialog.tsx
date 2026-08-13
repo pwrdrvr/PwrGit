@@ -108,10 +108,10 @@ export function SshRemoteRecoveryDialog({
           Try this remote with SSH?
         </div>
         <p className="ssh-recovery__intro">
-          Pull could not find a usable HTTPS credential. The tracked remote{" "}
-          <code>{recovery.remote}</code> points to GitHub over HTTPS. PwrGit can
-          test the equivalent SSH address without fetching or changing this
-          repository.
+          Pull—or Git LFS during checkout—could not find a usable HTTPS
+          credential. The tracked remote <code>{recovery.remote}</code> points
+          to GitHub over HTTPS. PwrGit can test the equivalent SSH address
+          without fetching or changing this repository.
         </p>
         <dl className="ssh-recovery__urls">
           <div>

@@ -325,6 +325,46 @@ describe("remote handlers", () => {
     expect(failureLog?.[2]).not.toContain("abc123");
   });
 
+  it("classifies Git LFS smudge authentication as SSH-recoverable pull auth", async () => {
+    const db = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" }))
+      }))
+    } as unknown as DB;
+    const refresher = {
+      refreshWorktree: vi.fn(async () => undefined),
+      refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    vi.mocked(pullFastForward).mockImplementationOnce(
+      async (_git, _path, onProgress) => {
+        onProgress?.("fast_forward");
+        return err({
+          kind: "git",
+          code: "exit_128",
+          message: [
+            "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+            "Error downloading object: screenshot.png: Smudge error: batch response: Git credentials for https://github.com/pwrdrvr/PwrAgent.git not found.",
+            "error: external filter 'git-lfs filter-process' failed",
+            "fatal: screenshot.png: smudge filter lfs failed"
+          ].join("\n")
+        });
+      }
+    );
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
+
+    await expect(
+      bus.dispatch("remote:pull", { worktreeId: "worktree-1" })
+    ).resolves.toEqual(
+      err({
+        kind: "remote",
+        code: "authentication_required",
+        message:
+          "Pull needs authentication during fast-forward/checkout after 0s. Configure a credential manager, authenticated remote, or SSH key, then retry. PwrGit does not open terminal credential prompts. See Logs for details."
+      })
+    );
+  });
+
   it("streams pull phases and waits for the finishing refresh", async () => {
     const db = {
       prepare: vi.fn(() => ({

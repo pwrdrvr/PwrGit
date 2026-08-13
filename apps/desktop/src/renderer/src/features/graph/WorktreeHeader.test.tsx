@@ -111,7 +111,7 @@ describe("WorktreeHeader pull progress", () => {
     expect(container.textContent).toContain("Finishing refresh…");
   });
 
-  it("offers SSH recovery after a GitHub HTTPS authentication failure", async () => {
+  it("offers user-approved SSH recovery after a Git LFS HTTPS authentication failure", async () => {
     const recovery: SshRemoteRecovery = {
       remote: "origin",
       httpsUrl: "https://github.com/pwrdrvr/PwrAgent.git",
@@ -124,7 +124,7 @@ describe("WorktreeHeader pull progress", () => {
           err({
             kind: "remote",
             code: "authentication_required",
-            message: "Pull needs authentication."
+            message: "Git LFS needs authentication during checkout."
           })
         );
       }
@@ -149,6 +149,14 @@ describe("WorktreeHeader pull progress", () => {
     expect(container.querySelector('[role="dialog"]')).not.toBeNull();
     expect(container.textContent).toContain("Try this remote with SSH?");
     expect(container.textContent).toContain(recovery.sshUrl);
+    expect(bridge.dispatch).not.toHaveBeenCalledWith(
+      "remote:testSshRecovery",
+      expect.anything()
+    );
+    expect(bridge.dispatch).not.toHaveBeenCalledWith(
+      "remote:applySshRecovery",
+      expect.anything()
+    );
   });
 });
 
