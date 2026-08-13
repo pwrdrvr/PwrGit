@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { type Dirent, readdirSync } from "node:fs";
+import { readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   err,
@@ -23,6 +24,9 @@ import { claimWorktreeOwnership } from "./repo-ownership";
 
 const MAX_SCAN_DEPTH = 5;
 const GIT_CONCURRENCY = 12;
+const HYDRATION_GIT_CONCURRENCY = 4;
+const REMOTE_BRANCH_WRITE_CHUNK_SIZE = 100;
+const DISCOVERY_YIELD_EVERY = 32;
 const SKIP_DIRS = new Set([
   "node_modules",
   ".git",
@@ -71,22 +75,51 @@ type WorktreeRow = {
   pr_is_draft: number | null;
 };
 
+export type RepoIndexerOptions = {
+  yieldToEventLoop?: () => Promise<void>;
+  remoteBranchWriteChunkSize?: number;
+  discoveryYieldEvery?: number;
+};
+
+const defaultYieldToEventLoop = (): Promise<void> =>
+  new Promise((resolve) => setImmediate(resolve));
+
 /**
  * Discovers git repositories under a profile's root folders and persists a
  * repo/worktree index the sidebar reads. Read-only with respect to git.
  * The GitExec is injected so the scan logic is testable against system git.
  */
 export class RepoIndexer {
+  private readonly yieldToEventLoop: () => Promise<void>;
+  private readonly remoteBranchWriteChunkSize: number;
+  private readonly discoveryYieldEvery: number;
+
   constructor(
     private readonly db: DB,
-    private readonly git: GitExec
-  ) {}
+    private readonly git: GitExec,
+    options: RepoIndexerOptions = {}
+  ) {
+    this.yieldToEventLoop =
+      options.yieldToEventLoop ?? defaultYieldToEventLoop;
+    this.remoteBranchWriteChunkSize = Math.max(
+      1,
+      options.remoteBranchWriteChunkSize ?? REMOTE_BRANCH_WRITE_CHUNK_SIZE
+    );
+    this.discoveryYieldEvery = Math.max(
+      1,
+      options.discoveryYieldEvery ?? DISCOVERY_YIELD_EVERY
+    );
+  }
 
   /** Rescan a profile's roots; upsert discovered repos, prune vanished ones. */
   async rescanProfile(profile: Profile): Promise<Repo[]> {
     const found = new Set<string>();
     for (const root of profile.roots) {
-      for (const dir of findRepoDirs(root)) found.add(dir);
+      const dirs = await findRepoDirsAsync(root, MAX_SCAN_DEPTH, {
+        yieldEvery: this.discoveryYieldEvery,
+        yieldToEventLoop: this.yieldToEventLoop
+      });
+      for (const dir of dirs) found.add(dir);
     }
 
     // Resolve each found dir to its canonical (primary worktree) path via git,
@@ -108,24 +141,32 @@ export class RepoIndexer {
         path: primary.path,
         worktrees: listed.value
           .filter((w) => !w.bare)
-          .map((w, i) =>
-            worktreeShape(w.path, w.branch, i === 0)
-          ),
+          .map((w, i) => worktreeShape(w.path, w.branch, i === 0)),
         remoteBranches: listedBranches.ok ? listedBranches.value : null
       });
     });
 
     const seenRepoIds: string[] = [];
-    const upsertRepo = this.db.transaction(() => {
-      for (const { path, worktrees, remoteBranches } of canonical.values()) {
-        const repoId = this.upsertRepoRow(profile.id, basename(path), path, "scan");
-        seenRepoIds.push(repoId);
+    for (const { path, worktrees, remoteBranches } of canonical.values()) {
+      const repoId = this.db.transaction(() => {
+        const repoId = this.upsertRepoRow(
+          profile.id,
+          basename(path),
+          path,
+          "scan"
+        );
         this.syncWorktrees(repoId, worktrees);
-        if (remoteBranches !== null) this.syncRemoteBranches(repoId, remoteBranches);
+        return repoId;
+      })();
+      seenRepoIds.push(repoId);
+      if (remoteBranches !== null) {
+        await this.syncRemoteBranchesChunked(repoId, remoteBranches);
       }
+      await this.yieldToEventLoop();
+    }
+    this.db.transaction(() => {
       this.pruneScannedRepos(profile.id, seenRepoIds);
-    });
-    upsertRepo();
+    })();
 
     return this.listRepos(profile.id);
   }
@@ -154,11 +195,18 @@ export class RepoIndexer {
 
     const repoId = hashId(primary.path);
     const run = this.db.transaction(() => {
-      this.upsertRepoRow(profileId, basename(primary.path), primary.path, "manual");
+      this.upsertRepoRow(
+        profileId,
+        basename(primary.path),
+        primary.path,
+        "manual"
+      );
       this.syncWorktrees(repoId, worktrees);
-      if (listedBranches.ok) this.syncRemoteBranches(repoId, listedBranches.value);
     });
     run();
+    if (listedBranches.ok) {
+      await this.syncRemoteBranchesChunked(repoId, listedBranches.value);
+    }
 
     const repo = this.getRepo(repoId);
     return repo === null
@@ -208,41 +256,60 @@ export class RepoIndexer {
     }
     const listed = await listBranches(this.git, repo.path);
     if (!listed.ok) return listed;
-    this.syncRemoteBranches(repoId, listed.value);
+    await this.syncRemoteBranchesChunked(repoId, listed.value);
     return ok(undefined);
   }
 
   /**
-   * Hydrate the derived remote-branch index for every persisted repository.
-   * This runs at startup so a migration's empty table is populated for manual
-   * repos and unopened profiles as well as the profile currently being scanned.
+   * Backfill the derived remote-branch index for persisted repositories. The
+   * completion marker makes this migration repair a one-time operation;
+   * routine profile scans and remote mutations maintain the index afterward.
    */
-  async hydrateRemoteBranches(): Promise<{ refreshed: number; failed: number }> {
+  async hydrateRemoteBranches(options: {
+    excludeProfileId?: ProfileId | null;
+  } = {}): Promise<{ refreshed: number; failed: number }> {
     const repos = this.db
-      .prepare("SELECT id, path FROM repos")
-      .all() as { id: string; path: string }[];
-    const inspected: {
-      repoId: string;
-      result: Result<BranchRef[]>;
-    }[] = [];
-    await mapLimit(repos, GIT_CONCURRENCY, async (repo) => {
-      inspected.push({
-        repoId: repo.id,
-        result: await listBranches(this.git, repo.path)
-      });
-    });
+      .prepare(
+        `SELECT r.id, r.path
+         FROM repos r
+         LEFT JOIN remote_branch_index_state s ON s.repo_id = r.id
+         WHERE s.repo_id IS NULL
+           AND (? IS NULL OR r.profile_id <> ?)
+         ORDER BY r.id`
+      )
+      .all(
+        options.excludeProfileId ?? null,
+        options.excludeProfileId ?? null
+      ) as { id: string; path: string }[];
     let refreshed = 0;
     let failed = 0;
-    this.db.transaction(() => {
+    for (
+      let offset = 0;
+      offset < repos.length;
+      offset += HYDRATION_GIT_CONCURRENCY
+    ) {
+      const batch = repos.slice(offset, offset + HYDRATION_GIT_CONCURRENCY);
+      const inspected: {
+        repoId: string;
+        result: Result<BranchRef[]>;
+      }[] = [];
+      await mapLimit(batch, HYDRATION_GIT_CONCURRENCY, async (repo) => {
+        inspected.push({
+          repoId: repo.id,
+          result: await listBranches(this.git, repo.path)
+        });
+      });
       for (const item of inspected) {
         if (!item.result.ok) {
           failed += 1;
+          this.markRemoteBranchesIndexed(item.repoId);
           continue;
         }
-        this.syncRemoteBranches(item.repoId, item.result.value);
+        await this.syncRemoteBranchesChunked(item.repoId, item.result.value);
         refreshed += 1;
       }
-    })();
+      await this.yieldToEventLoop();
+    }
     return { refreshed, failed };
   }
 
@@ -338,8 +405,10 @@ export class RepoIndexer {
     const worktrees = listed.value
       .filter((w) => !w.bare)
       .map((w, i) => worktreeShape(w.path, w.branch, i === 0));
-    this.syncWorktrees(repoId, worktrees);
-    if (listedBranches.ok) this.syncRemoteBranches(repoId, listedBranches.value);
+    this.db.transaction(() => this.syncWorktrees(repoId, worktrees))();
+    if (listedBranches.ok) {
+      await this.syncRemoteBranchesChunked(repoId, listedBranches.value);
+    }
 
     const refreshed = this.getRepo(repoId);
     if (refreshed === null) {
@@ -724,20 +793,19 @@ export class RepoIndexer {
       .run(repoId, ...seen);
   }
 
-  private syncRemoteBranches(repoId: string, branches: BranchRef[]): void {
-    const seen: string[] = [];
+  private async syncRemoteBranchesChunked(
+    repoId: string,
+    branches: BranchRef[]
+  ): Promise<void> {
     const localNames = new Set(
       branches.filter((branch) => !branch.isRemote).map((branch) => branch.name)
     );
-    const upsert = this.db.prepare(
-      `INSERT INTO remote_branches (id, repo_id, name, full_name, remote_name)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         repo_id = excluded.repo_id,
-         name = excluded.name,
-         full_name = excluded.full_name,
-         remote_name = excluded.remote_name`
-    );
+    const rows: {
+      id: string;
+      name: string;
+      fullName: string;
+      remoteName: string;
+    }[] = [];
     for (const branch of branches) {
       if (!branch.isRemote) continue;
       const slash = branch.name.indexOf("/");
@@ -746,21 +814,84 @@ export class RepoIndexer {
       const name = branch.name.slice(slash + 1);
       if (localNames.has(name)) continue;
       const fullName = `refs/remotes/${branch.name}`;
-      const id = `${repoId}:${fullName}`;
-      seen.push(id);
-      upsert.run(id, repoId, name, fullName, remoteName);
+      rows.push({
+        id: `${repoId}:${fullName}`,
+        name,
+        fullName,
+        remoteName
+      });
     }
-    if (seen.length === 0) {
-      this.db.prepare("DELETE FROM remote_branches WHERE repo_id = ?").run(repoId);
-      return;
+
+    const upsert = this.db.prepare(
+      `INSERT INTO remote_branches (id, repo_id, name, full_name, remote_name)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         repo_id = excluded.repo_id,
+         name = excluded.name,
+         full_name = excluded.full_name,
+         remote_name = excluded.remote_name
+       WHERE remote_branches.repo_id <> excluded.repo_id
+          OR remote_branches.name <> excluded.name
+          OR remote_branches.full_name <> excluded.full_name
+          OR remote_branches.remote_name <> excluded.remote_name`
+    );
+    for (
+      let offset = 0;
+      offset < rows.length;
+      offset += this.remoteBranchWriteChunkSize
+    ) {
+      const chunk = rows.slice(offset, offset + this.remoteBranchWriteChunkSize);
+      this.db.transaction(() => {
+        for (const row of chunk) {
+          upsert.run(
+            row.id,
+            repoId,
+            row.name,
+            row.fullName,
+            row.remoteName
+          );
+        }
+      })();
+      await this.yieldToEventLoop();
     }
-    const placeholders = seen.map(() => "?").join(",");
+
+    const wanted = new Set(rows.map((row) => row.id));
+    const stale = (
+      this.db
+        .prepare("SELECT id FROM remote_branches WHERE repo_id = ?")
+        .all(repoId) as { id: string }[]
+    ).filter((row) => !wanted.has(row.id));
+    for (
+      let offset = 0;
+      offset < stale.length;
+      offset += this.remoteBranchWriteChunkSize
+    ) {
+      const chunk = stale.slice(
+        offset,
+        offset + this.remoteBranchWriteChunkSize
+      );
+      const placeholders = chunk.map(() => "?").join(",");
+      this.db.transaction(() => {
+        this.db
+          .prepare(
+            `DELETE FROM remote_branches
+             WHERE repo_id = ? AND id IN (${placeholders})`
+          )
+          .run(repoId, ...chunk.map((row) => row.id));
+      })();
+      await this.yieldToEventLoop();
+    }
+
+    this.markRemoteBranchesIndexed(repoId);
+  }
+
+  private markRemoteBranchesIndexed(repoId: string): void {
     this.db
       .prepare(
-        `DELETE FROM remote_branches
-         WHERE repo_id = ? AND id NOT IN (${placeholders})`
+        `INSERT OR IGNORE INTO remote_branch_index_state (repo_id)
+         VALUES (?)`
       )
-      .run(repoId, ...seen);
+      .run(repoId);
   }
 
   private pruneScannedRepos(profileId: string, keepIds: string[]): void {
@@ -834,5 +965,55 @@ export function findRepoDirs(
   };
 
   walk(root, 0);
+  return results;
+}
+
+/**
+ * Non-blocking counterpart used by startup rescans. Directory IO happens off
+ * the main thread, and explicit bounded yields keep Electron IPC responsive
+ * even when cached filesystem reads resolve in a tight loop.
+ */
+export async function findRepoDirsAsync(
+  root: string,
+  maxDepth: number = MAX_SCAN_DEPTH,
+  options: {
+    yieldEvery?: number;
+    yieldToEventLoop?: () => Promise<void>;
+  } = {}
+): Promise<string[]> {
+  const results: string[] = [];
+  const pending: { dir: string; depth: number }[] = [{ dir: root, depth: 0 }];
+  const yieldEvery = Math.max(1, options.yieldEvery ?? DISCOVERY_YIELD_EVERY);
+  const yieldToEventLoop = options.yieldToEventLoop ?? defaultYieldToEventLoop;
+  let visited = 0;
+
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (current === undefined) break;
+
+    let entries: Dirent[];
+    try {
+      entries = await readdir(current.dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    visited += 1;
+    if (entries.some((entry) => entry.name === ".git")) {
+      results.push(current.dir);
+    } else if (current.depth < maxDepth) {
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        if (SKIP_DIRS.has(entry.name) || entry.name.startsWith(".")) continue;
+        pending.push({
+          dir: join(current.dir, entry.name),
+          depth: current.depth + 1
+        });
+      }
+    }
+
+    if (visited % yieldEvery === 0) await yieldToEventLoop();
+  }
+
   return results;
 }

@@ -7,7 +7,7 @@ import { err, ok, type Result } from "@pwrgit/shared";
 import { openDatabase } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
 import type { GitExec, GitOutput } from "./dugite";
-import { findRepoDirs, RepoIndexer } from "./repo-indexer";
+import { findRepoDirs, findRepoDirsAsync, RepoIndexer } from "./repo-indexer";
 
 // Drive the indexer with system git so the test is independent of dugite's
 // bundled binary.
@@ -84,6 +84,19 @@ describe("findRepoDirs", () => {
     expect(dirs.some((d) => d.includes("node_modules"))).toBe(false);
     expect(dirs.some((d) => d.endsWith("plain"))).toBe(false);
   });
+
+  it("discovers asynchronously with bounded event-loop yields", async () => {
+    let yields = 0;
+    const dirs = await findRepoDirsAsync(root, undefined, {
+      yieldEvery: 1,
+      yieldToEventLoop: async () => {
+        yields += 1;
+      }
+    });
+
+    expect(new Set(dirs)).toEqual(new Set(findRepoDirs(root)));
+    expect(yields).toBeGreaterThan(0);
+  });
 });
 
 describe("RepoIndexer", () => {
@@ -100,7 +113,13 @@ describe("RepoIndexer", () => {
       email: "second@example.com",
       roots: []
     });
-    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
+    let yields = 0;
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit, {
+      remoteBranchWriteChunkSize: 1,
+      yieldToEventLoop: async () => {
+        yields += 1;
+      }
+    });
     const repoPaths = [first, second].map((profile, index) => {
       const container = mkdtempSync(join(tmpdir(), `pwrgit-hydrate-${index}-`));
       const repoPath = join(container, `manual-${index}`);
@@ -123,12 +142,33 @@ describe("RepoIndexer", () => {
 
     // Simulate the just-upgraded database: persisted repos exist, while the
     // new derived remote-branch table starts empty.
+    isolatedDb.prepare("DELETE FROM remote_branch_index_state").run();
     isolatedDb.prepare("DELETE FROM remote_branches").run();
     expect(isolatedIndexer.searchAll("releases")).toHaveLength(0);
+    yields = 0;
 
-    const hydrated = await isolatedIndexer.hydrateRemoteBranches();
+    const background = await isolatedIndexer.hydrateRemoteBranches({
+      excludeProfileId: first.id
+    });
 
-    expect(hydrated).toEqual({ refreshed: 2, failed: 0 });
+    expect(background).toEqual({ refreshed: 1, failed: 0 });
+    expect(
+      isolatedIndexer
+        .searchAll("releases/0.0")
+        .some((hit) => hit.name === "releases/0.0")
+    ).toBe(false);
+    expect(isolatedIndexer.searchAll("releases/1.0")).toContainEqual(
+      expect.objectContaining({
+        kind: "remote_branch",
+        profileId: second.id,
+        name: "releases/1.0"
+      })
+    );
+
+    expect(await isolatedIndexer.hydrateRemoteBranches()).toEqual({
+      refreshed: 1,
+      failed: 0
+    });
     for (const entry of repoPaths) {
       expect(isolatedIndexer.searchAll(entry.branch)).toContainEqual(
         expect.objectContaining({
@@ -138,6 +178,15 @@ describe("RepoIndexer", () => {
         })
       );
     }
+    expect(yields).toBeGreaterThan(0);
+
+    // Startup backfill is migration repair, not routine maintenance. Once a
+    // repository has been attempted, the next launch must do no Git work for
+    // it; ordinary rescans and remote mutations keep the index current.
+    expect(await isolatedIndexer.hydrateRemoteBranches()).toEqual({
+      refreshed: 0,
+      failed: 0
+    });
   });
 
   it("indexes discovered repos, deduping linked worktrees into their repo", async () => {

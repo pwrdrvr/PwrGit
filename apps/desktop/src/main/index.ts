@@ -270,20 +270,6 @@ if (!gotSingleInstanceLock) {
         .catch((cause) => logMain("error", "scan", "rescan failed:", cause));
     };
 
-    void indexer
-      .hydrateRemoteBranches()
-      .then(({ refreshed, failed }) => {
-        logMain(
-          failed === 0 ? "info" : "warn",
-          "scan",
-          `hydrated remote branches for ${refreshed} repos` +
-            (failed === 0 ? "" : `; ${failed} failed`)
-        );
-      })
-      .catch((cause) =>
-        logMain("error", "scan", "remote-branch hydration failed:", cause)
-      );
-
     // One window per profile. Opening a profile that already has a window
     // focuses it; cross-profile reveals are stashed until the new window asks.
     const windows = createProfileWindows();
@@ -426,6 +412,27 @@ if (!gotSingleInstanceLock) {
     const activeId = profiles.getActiveId();
     if (activeId !== null) openProfileWindow(activeId);
     refreshMenu();
+
+    // Migration 0019 could not populate Git-derived rows in SQL. Repair only
+    // repos that have never been attempted, after opening the first window.
+    // The active profile's normal rescan owns its branch refresh, so exclude it
+    // from this low-concurrency background pass.
+    setImmediate(() => {
+      void indexer
+        .hydrateRemoteBranches({ excludeProfileId: activeId })
+        .then(({ refreshed, failed }) => {
+          if (refreshed === 0 && failed === 0) return;
+          logMain(
+            failed === 0 ? "info" : "warn",
+            "scan",
+            `hydrated missing remote branches for ${refreshed} repos` +
+              (failed === 0 ? "" : `; ${failed} failed`)
+          );
+        })
+        .catch((cause) =>
+          logMain("error", "scan", "remote-branch hydration failed:", cause)
+        );
+    });
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {
