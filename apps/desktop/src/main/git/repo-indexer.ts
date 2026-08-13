@@ -198,6 +198,54 @@ export class RepoIndexer {
     return row === undefined ? null : this.repoFromRow(row);
   }
 
+  /** Refresh only the derived remote-branch search rows for one repository. */
+  async refreshRepoRemoteBranches(repoId: string): Promise<Result<void>> {
+    const repo = this.db
+      .prepare("SELECT path FROM repos WHERE id = ?")
+      .get(repoId) as { path: string } | undefined;
+    if (repo === undefined) {
+      return err({ kind: "repo", code: "not_found", message: "repo not found" });
+    }
+    const listed = await listBranches(this.git, repo.path);
+    if (!listed.ok) return listed;
+    this.syncRemoteBranches(repoId, listed.value);
+    return ok(undefined);
+  }
+
+  /**
+   * Hydrate the derived remote-branch index for every persisted repository.
+   * This runs at startup so a migration's empty table is populated for manual
+   * repos and unopened profiles as well as the profile currently being scanned.
+   */
+  async hydrateRemoteBranches(): Promise<{ refreshed: number; failed: number }> {
+    const repos = this.db
+      .prepare("SELECT id, path FROM repos")
+      .all() as { id: string; path: string }[];
+    const inspected: {
+      repoId: string;
+      result: Result<BranchRef[]>;
+    }[] = [];
+    await mapLimit(repos, GIT_CONCURRENCY, async (repo) => {
+      inspected.push({
+        repoId: repo.id,
+        result: await listBranches(this.git, repo.path)
+      });
+    });
+    let refreshed = 0;
+    let failed = 0;
+    this.db.transaction(() => {
+      for (const item of inspected) {
+        if (!item.result.ok) {
+          failed += 1;
+          continue;
+        }
+        this.syncRemoteBranches(item.repoId, item.result.value);
+        refreshed += 1;
+      }
+    })();
+    return { refreshed, failed };
+  }
+
   /**
    * Unpinning also drops the manual order. Only pinned repos are numbered (the
    * Pinned lens is the arrangeable one), so an unpinned repo's index goes stale

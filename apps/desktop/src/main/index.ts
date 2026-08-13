@@ -7,7 +7,11 @@ import {
   protocol,
   safeStorage
 } from "electron";
-import { ok, type Profile } from "@pwrgit/shared";
+import {
+  ok,
+  type Profile,
+  type RemoteBranchReveal
+} from "@pwrgit/shared";
 import { registerAppDocumentHandlers } from "./app-document-handlers";
 import { openAppDocumentWindow } from "./app-document-window";
 import { initAutoUpdater } from "./auto-updater";
@@ -266,10 +270,28 @@ if (!gotSingleInstanceLock) {
         .catch((cause) => logMain("error", "scan", "rescan failed:", cause));
     };
 
+    void indexer
+      .hydrateRemoteBranches()
+      .then(({ refreshed, failed }) => {
+        logMain(
+          failed === 0 ? "info" : "warn",
+          "scan",
+          `hydrated remote branches for ${refreshed} repos` +
+            (failed === 0 ? "" : `; ${failed} failed`)
+        );
+      })
+      .catch((cause) =>
+        logMain("error", "scan", "remote-branch hydration failed:", cause)
+      );
+
     // One window per profile. Opening a profile that already has a window
     // focuses it; cross-profile reveals are stashed until the new window asks.
     const windows = createProfileWindows();
-    type Reveal = { repoId: string; worktreeId: string | null };
+    type Reveal = {
+      repoId: string;
+      worktreeId: string | null;
+      remoteBranch: RemoteBranchReveal | null;
+    };
     const pendingReveals = new Map<string, Reveal>();
 
     const refreshMenu = (): void => {
@@ -292,7 +314,8 @@ if (!gotSingleInstanceLock) {
     const openProfileWindow = (
       profileId: string,
       revealRepoId?: string,
-      revealWorktreeId?: string
+      revealWorktreeId?: string,
+      revealRemoteBranch?: RemoteBranchReveal
     ): boolean => {
       const profile = profiles.get(profileId);
       if (profile === null) return false;
@@ -302,7 +325,8 @@ if (!gotSingleInstanceLock) {
       if (revealRepoId !== undefined) {
         const reveal: Reveal = {
           repoId: revealRepoId,
-          worktreeId: revealWorktreeId ?? null
+          worktreeId: revealWorktreeId ?? null,
+          remoteBranch: revealRemoteBranch ?? null
         };
         if (wasOpen) emitEvent("ui:revealRepo", { profileId, ...reveal });
         else pendingReveals.set(profileId, reveal);
@@ -336,7 +360,7 @@ if (!gotSingleInstanceLock) {
     });
     registerWorktreeLifecycleHandlers(bus, db, indexer, settings, stateService);
     registerBranchHandlers(bus, db, indexer, refresher, worktreeOperations);
-    registerRemoteHandlers(bus, db, refresher, worktreeOperations);
+    registerRemoteHandlers(bus, db, refresher, worktreeOperations, indexer);
     registerGraphHandlers(bus, db, stateService);
     registerChangesHandlers(bus, db, refresher, worktreeOperations);
     registerRebaseHandlers(bus, db, refresher, worktreeOperations);

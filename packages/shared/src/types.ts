@@ -521,6 +521,12 @@ export type SearchHitStatus = {
   behind: number | null;
 };
 
+/** Remote-only branch action carried between profile-bound windows. */
+export type RemoteBranchReveal = {
+  name: string;
+  fullName: string;
+};
+
 export type RepoSearchHit = {
   /** Repo itself, checked-out worktree, or a fetched remote-only branch. */
   kind: "repo" | "worktree" | "remote_branch";

@@ -87,6 +87,59 @@ describe("findRepoDirs", () => {
 });
 
 describe("RepoIndexer", () => {
+  it("hydrates remote-only search entries for every persisted repo", async () => {
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const first = profiles.create({
+      name: "First",
+      email: "first@example.com",
+      roots: []
+    });
+    const second = profiles.create({
+      name: "Second",
+      email: "second@example.com",
+      roots: []
+    });
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
+    const repoPaths = [first, second].map((profile, index) => {
+      const container = mkdtempSync(join(tmpdir(), `pwrgit-hydrate-${index}-`));
+      const repoPath = join(container, `manual-${index}`);
+      const remotePath = join(container, `remote-${index}.git`);
+      initRepo(repoPath);
+      git(container, ["init", "--bare", `remote-${index}.git`]);
+      git(repoPath, ["remote", "add", "origin", remotePath]);
+      git(repoPath, ["branch", `releases/${index}.0`]);
+      git(repoPath, ["push", "origin", `releases/${index}.0`]);
+      git(repoPath, ["branch", "-D", `releases/${index}.0`]);
+      return { profile, repoPath, branch: `releases/${index}.0` };
+    });
+    for (const entry of repoPaths) {
+      const indexed = await isolatedIndexer.indexRepoAt(
+        entry.profile.id,
+        entry.repoPath
+      );
+      expect(indexed.ok).toBe(true);
+    }
+
+    // Simulate the just-upgraded database: persisted repos exist, while the
+    // new derived remote-branch table starts empty.
+    isolatedDb.prepare("DELETE FROM remote_branches").run();
+    expect(isolatedIndexer.searchAll("releases")).toHaveLength(0);
+
+    const hydrated = await isolatedIndexer.hydrateRemoteBranches();
+
+    expect(hydrated).toEqual({ refreshed: 2, failed: 0 });
+    for (const entry of repoPaths) {
+      expect(isolatedIndexer.searchAll(entry.branch)).toContainEqual(
+        expect.objectContaining({
+          kind: "remote_branch",
+          profileId: entry.profile.id,
+          name: entry.branch
+        })
+      );
+    }
+  });
+
   it("indexes discovered repos, deduping linked worktrees into their repo", async () => {
     const profile = profileService.get(profileId);
     if (profile === null) throw new Error("profile missing");

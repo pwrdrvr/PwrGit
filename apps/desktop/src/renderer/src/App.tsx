@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   Commit,
   Profile,
+  RemoteBranchReveal,
   Repo,
   RepoSearchHit,
   Worktree
@@ -50,6 +51,7 @@ export function App() {
   const [pendingReveal, setPendingReveal] = useState<{
     repoId: string;
     worktreeId: string | null;
+    remoteBranch: RemoteBranchReveal | null;
   } | null>(null);
 
   const {
@@ -159,6 +161,15 @@ export function App() {
     if (pendingReveal === null) return;
     const repo = repos.find((r) => r.id === pendingReveal.repoId);
     if (repo === undefined) return;
+    if (pendingReveal.remoteBranch !== null) {
+      setSearchNewWorktree({
+        repo,
+        branch: pendingReveal.remoteBranch.name,
+        startPoint: pendingReveal.remoteBranch.fullName
+      });
+      setPendingReveal(null);
+      return;
+    }
     const target =
       (pendingReveal.worktreeId !== null
         ? repo.worktrees.find((w) => w.id === pendingReveal.worktreeId)
@@ -179,12 +190,20 @@ export function App() {
     if (profileId === null) return;
     void dispatch("window:consumeReveal", { profileId }).then((r) => {
       if (r.ok && r.value.repoId !== null) {
-        setPendingReveal({ repoId: r.value.repoId, worktreeId: r.value.worktreeId });
+        setPendingReveal({
+          repoId: r.value.repoId,
+          worktreeId: r.value.worktreeId,
+          remoteBranch: r.value.remoteBranch
+        });
       }
     });
     return subscribe("ui:revealRepo", (p) => {
       if (p.profileId === profileId) {
-        setPendingReveal({ repoId: p.repoId, worktreeId: p.worktreeId });
+        setPendingReveal({
+          repoId: p.repoId,
+          worktreeId: p.worktreeId,
+          remoteBranch: p.remoteBranch
+        });
       }
     });
   }, []);
@@ -222,7 +241,14 @@ export function App() {
       if (activeProfile !== null && hit.profileId !== activeProfile.id) {
         // Another profile's hit → open/focus THAT profile's window and
         // reveal it there; this window stays put.
-        void openProfile(hit.profileId, hit.repoId, hit.worktreeId);
+        void openProfile(
+          hit.profileId,
+          hit.repoId,
+          hit.worktreeId,
+          hit.kind === "remote_branch" && hit.remoteRef !== undefined
+            ? { name: hit.name, fullName: hit.remoteRef }
+            : undefined
+        );
         return;
       }
       if (hit.kind === "remote_branch" && hit.remoteRef !== undefined) {
@@ -236,7 +262,11 @@ export function App() {
           return;
         }
       }
-      setPendingReveal({ repoId: hit.repoId, worktreeId: hit.worktreeId ?? null });
+      setPendingReveal({
+        repoId: hit.repoId,
+        worktreeId: hit.worktreeId ?? null,
+        remoteBranch: null
+      });
     },
     [activeProfile, openProfile, repos]
   );
@@ -411,7 +441,11 @@ export function App() {
                       r.worktrees.some((w) => w.id === worktreeId)
                     );
                     if (repo !== undefined) {
-                      setPendingReveal({ repoId: repo.id, worktreeId });
+                      setPendingReveal({
+                        repoId: repo.id,
+                        worktreeId,
+                        remoteBranch: null
+                      });
                     }
                   }}
                 />
@@ -535,7 +569,11 @@ export function App() {
           profile={activeProfile}
           onCloned={(repo) => {
             setCloneOpen(false);
-            setPendingReveal({ repoId: repo.id, worktreeId: null });
+            setPendingReveal({
+              repoId: repo.id,
+              worktreeId: null,
+              remoteBranch: null
+            });
           }}
           onClose={() => setCloneOpen(false)}
         />

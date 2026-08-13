@@ -27,6 +27,7 @@ import {
   updateRemote
 } from "./git-service";
 import type { WorktreeRefresher } from "./worktree-handlers";
+import type { RepoIndexer } from "./repo-indexer";
 import {
   formatPullDuration,
   PULL_RECOVERY_OPERATION_TIMEOUT_MS,
@@ -133,7 +134,8 @@ export function registerRemoteHandlers(
   bus: CommandBus,
   db: DB,
   refresher: WorktreeRefresher,
-  operations: WorktreeOperationQueue
+  operations: WorktreeOperationQueue,
+  indexer?: Pick<RepoIndexer, "refreshRepoRemoteBranches">
 ): void {
   const worktreeOf = (
     worktreeId: string
@@ -156,6 +158,29 @@ export function registerRemoteHandlers(
     return row === undefined ? null : { path: row.path };
   };
 
+  const refreshRemoteBranches = async (
+    repoId: string,
+    operation: string
+  ): Promise<void> => {
+    if (indexer === undefined) return;
+    try {
+      const refreshed = await indexer.refreshRepoRemoteBranches(repoId);
+      if (!refreshed.ok) {
+        logMain(
+          "warn",
+          "remote",
+          `${operation} branch-index refresh failed for ${repoId}: ${refreshed.error.message}`
+        );
+      }
+    } catch (cause) {
+      logMain(
+        "warn",
+        "remote",
+        `${operation} branch-index refresh failed for ${repoId}: ${sanitizeGitLogDetail(cause)}`
+      );
+    }
+  };
+
   // Ordinary sync successes log at info; Pull adds live phase/failure details
   // below because a long-running command cannot wait for command-bus logging.
   bus.register("remote:fetch", async (req) => {
@@ -171,6 +196,7 @@ export function registerRemoteHandlers(
       "remote",
       `fetched ${worktree.path} (${seconds(startedAt)})`
     );
+    await refreshRemoteBranches(worktree.repoId, "fetch");
     refresher.refreshWorktree(req.worktreeId);
     return ok(null);
   });
@@ -190,6 +216,7 @@ export function registerRemoteHandlers(
       "remote",
       `fetched ${req.remote ?? "all remotes"} for ${repo.path} (${seconds(startedAt)})`
     );
+    await refreshRemoteBranches(req.repoId, "fetch");
     refresher.refreshRepoWorktrees(req.repoId);
     return ok(null);
   });
@@ -200,6 +227,7 @@ export function registerRemoteHandlers(
     const result = await addRemote(execGit, repo.path, req);
     if (!result.ok) return result;
     logMain("info", "remote", `added remote ${req.name} to ${repo.path}`);
+    await refreshRemoteBranches(req.repoId, "add remote");
     refresher.refreshRepoWorktrees(req.repoId);
     return ok(null);
   });
@@ -214,6 +242,7 @@ export function registerRemoteHandlers(
       "remote",
       `updated remote ${req.originalName} as ${req.name} in ${repo.path}`
     );
+    await refreshRemoteBranches(req.repoId, "update remote");
     refresher.refreshRepoWorktrees(req.repoId);
     return ok(null);
   });
@@ -267,6 +296,7 @@ export function registerRemoteHandlers(
     const result = await removeRemote(execGit, repo.path, req.remote);
     if (!result.ok) return result;
     logMain("info", "remote", `removed remote ${req.remote} from ${repo.path}`);
+    await refreshRemoteBranches(req.repoId, "remove remote");
     refresher.refreshRepoWorktrees(req.repoId);
     return ok(null);
   });
@@ -290,6 +320,7 @@ export function registerRemoteHandlers(
     );
     refresher.refreshRepoWorktrees(req.repoId);
     if (!result.ok) return result;
+    await refreshRemoteBranches(req.repoId, "push refs");
     const pushed = result.value.filter((item) => item.outcome === "pushed").length;
     logMain(
       "info",
@@ -457,16 +488,21 @@ export function registerRemoteHandlers(
       "remote",
       `pull finished ${path}: ${outcome} (${seconds(startedAt)})`
     );
+    const pulledWorktree = worktreeOf(req.worktreeId);
+    if (pulledWorktree !== null) {
+      await refreshRemoteBranches(pulledWorktree.repoId, "pull");
+    }
     return result;
   });
 
   bus.register("remote:push", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
+    const worktree = worktreeOf(req.worktreeId);
+    if (worktree === null) return err(notFound);
     const startedAt = Date.now();
-    const result = await pushRemote(execGit, path);
+    const result = await pushRemote(execGit, worktree.path);
     if (!result.ok) return result;
-    logMain("info", "remote", `pushed ${path} (${seconds(startedAt)})`);
+    logMain("info", "remote", `pushed ${worktree.path} (${seconds(startedAt)})`);
+    await refreshRemoteBranches(worktree.repoId, "push");
     refresher.refreshWorktree(req.worktreeId);
     return ok(null);
   });

@@ -33,6 +33,7 @@ import {
   testSshRemoteRecovery
 } from "./ssh-remote-recovery";
 import type { WorktreeRefresher } from "./worktree-handlers";
+import type { RepoIndexer } from "./repo-indexer";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 vi.mock("./git-service", async (importOriginal) => {
@@ -552,6 +553,35 @@ describe("remote handlers", () => {
       ok(null)
     ]);
     expect(started).toEqual(["worktree", "repo"]);
+  });
+
+  it("refreshes remote-branch search after fetching repository refs", async () => {
+    const db = {
+      prepare: vi.fn(() => ({ get: vi.fn(() => ({ path: "/repos/project" })) }))
+    } as unknown as DB;
+    const refresher = {
+      refreshWorktree: vi.fn(async () => undefined),
+      refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    const indexer = {
+      refreshRepoRemoteBranches: vi.fn(async () => ok(undefined))
+    } as unknown as RepoIndexer;
+    const bus = new CommandBus();
+    registerRemoteHandlers(
+      bus,
+      db,
+      refresher,
+      new WorktreeOperationQueue(),
+      indexer
+    );
+
+    await expect(
+      bus.dispatch("remote:fetchRepo", { repoId: "repo-1", remote: "origin" })
+    ).resolves.toMatchObject({ ok: true });
+
+    expect(indexer.refreshRepoRemoteBranches).toHaveBeenCalledExactlyOnceWith(
+      "repo-1"
+    );
   });
 
   it("inspects without refreshing and refreshes every repo worktree once after reset", async () => {
