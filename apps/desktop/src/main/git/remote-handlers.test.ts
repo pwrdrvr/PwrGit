@@ -11,6 +11,7 @@ import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import {
   fetchNamedRemote,
+  fetchRemote,
   inspectRemoteReset,
   planPushRefs,
   pullFastForward,
@@ -39,6 +40,7 @@ vi.mock("./git-service", async (importOriginal) => {
   return {
     ...actual,
     fetchNamedRemote: vi.fn(),
+    fetchRemote: vi.fn(),
     inspectRemoteReset: vi.fn(),
     planPushRefs: vi.fn(),
     pullFastForward: vi.fn(),
@@ -59,6 +61,7 @@ describe("remote handlers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(fetchNamedRemote).mockResolvedValue(ok(undefined));
+    vi.mocked(fetchRemote).mockResolvedValue(ok(undefined));
     vi.mocked(inspectRemoteReset).mockResolvedValue(
       ok({
         branch: "main",
@@ -463,6 +466,52 @@ describe("remote handlers", () => {
     });
     expect(pushed.ok).toBe(true);
     expect(refresher.refreshRepoWorktrees).toHaveBeenCalledTimes(3);
+  });
+
+  it("serializes worktree and repo fetches that update the same repository refs", async () => {
+    let finishWorktreeFetch!: () => void;
+    const worktreeFetch = new Promise<void>((resolve) => {
+      finishWorktreeFetch = resolve;
+    });
+    const started: string[] = [];
+    vi.mocked(fetchRemote).mockImplementationOnce(async () => {
+      started.push("worktree");
+      await worktreeFetch;
+      return ok(undefined);
+    });
+    vi.mocked(fetchNamedRemote).mockImplementationOnce(async () => {
+      started.push("repo");
+      return ok(undefined);
+    });
+    const db = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" }))
+      }))
+    } as unknown as DB;
+    const refresher = {
+      refreshWorktree: vi.fn(async () => undefined),
+      refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
+
+    const fromWorktree = bus.dispatch("remote:fetch", {
+      worktreeId: "worktree-1"
+    });
+    const fromRepo = bus.dispatch("remote:fetchRepo", {
+      repoId: "repo-1",
+      remote: "origin"
+    });
+
+    await Promise.resolve();
+    expect(started).toEqual(["worktree"]);
+
+    finishWorktreeFetch();
+    await expect(Promise.all([fromWorktree, fromRepo])).resolves.toEqual([
+      ok(null),
+      ok(null)
+    ]);
+    expect(started).toEqual(["worktree", "repo"]);
   });
 
   it("inspects without refreshing and refreshes every repo worktree once after reset", async () => {
