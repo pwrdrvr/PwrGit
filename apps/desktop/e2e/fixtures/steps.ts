@@ -2,90 +2,125 @@ import { expect, type Locator, type Page } from "@playwright/test";
 import type { AppHandle } from "./electron-app";
 import type { GitSandbox } from "./git-sandbox";
 
-// Every step below is bounded, and the bounds are sized as a budget against
-// playwright.config.ts's 60s per-test timeout. The caller has already spent
-// time on launchApp() and the Add-folders/lens clicks, and waiting for a
-// freshly added repo to be indexed can take the 20s below on its own. The
-// expand dance therefore caps itself at
-// ATTEMPTS * (READ + CLICK + SETTLE) + FINAL ≈ 23s, so that when a group
-// genuinely refuses to open the final assertion still gets to run and name it
-// — rather than the test being cut off at 60s with an opaque timeout pointing
-// at whatever line happened to be executing.
+// Every step below is bounded, and the bounds are a budget against
+// playwright.config.ts's 60s per-test timeout: launchApp() and the
+// Add-folders/lens clicks are already charged to it before any of this runs.
+// One disclosure dance costs at most
+//   MAX_PASSES * (READ + CLICK + SETTLE + READ) + FINAL
+//   = 4 * (1 + 3 + 1.5 + 1) + 5 = 31s
+// — the trailing READ is the one `settlesWithin` performs on its last poll, and
+// it is easy to forget when re-tuning these. Staying under the test timeout is
+// what lets a disclosure that genuinely refuses to open reach the assertion
+// that names it, instead of the run being cut off with an opaque timeout
+// pointing at whatever line happened to be executing.
 const EXPAND_READ_MS = 1_000;
 const EXPAND_CLICK_MS = 3_000;
-const EXPAND_SETTLE_MS = 2_000;
+const EXPAND_SETTLE_MS = 1_500;
 const EXPAND_FINAL_MS = 5_000;
 /** Odd on purpose. A disclosure click is a *toggle*, so if every click lands
-    but the renders lag past SETTLE_MS, the retries alternate open/closed: an
-    even count ends collapsed and the final assertion can never pass, while an
-    odd count ends expanded. */
-const EXPAND_ATTEMPTS = 3;
+    but the renders lag past SETTLE_MS the clicks alternate open/closed: an even
+    count ends on the wrong state and the final assertion can never pass, while
+    an odd count ends on the one we want. This counts clicks that actually
+    landed — bounding the loop on passes instead would let a swallowed click
+    flip the parity. */
+const EXPAND_CLICKS = 3;
+/** Safety valve for the click budget above: a trigger that is never clickable
+    must not spin. Passes beyond this are almost certainly a broken selector
+    rather than a dropped click, and the failure message says so. */
+const EXPAND_MAX_PASSES = 4;
 /** How long a repo row may take to appear once its root is added — this is the
     indexing wait, and it dwarfs everything else here. */
 const ROW_VISIBLE_MS = 20_000;
+/** The worktree section renders in the same React commit as its repo group, so
+    once the group reads expanded this only has to cover a render. Deliberately
+    not ROW_VISIBLE_MS: two 20s waits in one helper would overrun the test
+    timeout that the budget above exists to respect. */
+const SECTION_VISIBLE_MS = 5_000;
+
+/** Playwright raises `TimeoutError` when a locator can't be resolved in time,
+    and a plain `Error` for a strict-mode violation. Only the former is worth
+    retrying. */
+const isTimeout = (err: unknown): boolean =>
+  err instanceof Error && err.name === "TimeoutError";
 
 /** Read `aria-expanded`, or null when the control can't be resolved in time.
-    Never throws: a row that vanishes mid-re-render is a reason to look again,
-    not to abort the loop that exists to survive re-renders. */
+    A row that vanishes mid-re-render is a reason to look again — but an
+    ambiguous locator is a real test bug, so strict-mode violations propagate
+    instead of being laundered into "not expanded". */
 async function expandedState(control: Locator): Promise<string | null> {
   try {
     return await control.getAttribute("aria-expanded", {
       timeout: EXPAND_READ_MS
     });
-  } catch {
+  } catch (err) {
+    if (!isTimeout(err)) throw err;
     return null;
   }
 }
 
-/** Poll `aria-expanded` for up to `ms`; false if it never reads "true". */
-async function opensWithin(control: Locator, ms: number): Promise<boolean> {
+/** Poll `aria-expanded` for up to `ms`; false if it never reads `target`. */
+async function settlesWithin(
+  control: Locator,
+  target: string,
+  ms: number
+): Promise<boolean> {
   const deadline = Date.now() + ms;
   for (;;) {
-    if ((await expandedState(control)) === "true") return true;
+    if ((await expandedState(control)) === target) return true;
     if (Date.now() >= deadline) return false;
     await control.page().waitForTimeout(50);
   }
 }
 
-/** Click `trigger` until `control` reports itself expanded.
+/** Click `trigger` until `control` reports `aria-expanded` matching `want`.
 
     Expanding used to be one unchecked click, and specs would stall 20-30s
     later on a `.wt-row` that could not exist because the group was still
     closed. The first expand click after a root is added really does get
     dropped — instrumenting this retry showed it firing on roughly half of
-    idle-machine runs, in a test that was not rigging the click — so the second
+    idle-machine runs, in specs that were not rigging the click — so the second
     click here is load-bearing, not belt-and-braces. Keep the `console.warn`:
     it is the only signal that distinguishes a dropped click from the other
     candidate (worktree indexing latency), which would show up as a stall with
     no retry logged. */
-async function clickToExpand(
+async function clickUntilExpanded(
   control: Locator,
   trigger: Locator,
+  want: boolean,
   what: string
 ): Promise<void> {
+  const target = want ? "true" : "false";
+  const verb = want ? "open" : "close";
   let clicks = 0;
-  for (let attempt = 0; attempt < EXPAND_ATTEMPTS; attempt += 1) {
-    if ((await expandedState(control)) === "true") return;
+  let passes = 0;
+  let lastClickError: string | null = null;
+  while (clicks < EXPAND_CLICKS && passes < EXPAND_MAX_PASSES) {
+    passes += 1;
+    if ((await expandedState(control)) === target) return;
     if (clicks > 0) {
-      // Whether the dropped-click theory is real is only answerable if the
+      // Whether the dropped-click theory holds is only answerable if the
       // recovery is visible when it happens. Keep this loud.
       console.warn(`[steps] ${what}: click ${clicks} did not take — retrying`);
     }
     try {
       await trigger.click({ timeout: EXPAND_CLICK_MS });
       clicks += 1;
-    } catch {
-      // Not clickable right now (mid-re-render, or covered). Fall through to
-      // the settle poll and look again on the next pass.
+    } catch (err) {
+      // Not clickable right now (mid-re-render, or covered). Keep the reason:
+      // a stale selector fails here every pass, and reporting only "stayed
+      // closed" would send the reader to the wrong place entirely.
+      lastClickError = String(err).split("\n")[0] ?? String(err);
     }
-    if (await opensWithin(control, EXPAND_SETTLE_MS)) return;
+    if (await settlesWithin(control, target, EXPAND_SETTLE_MS)) return;
   }
-  // Out of attempts: assert, so the failure names the collapsed disclosure
-  // instead of surfacing as a missing row somewhere downstream.
+  // Out of budget: assert, so the failure names the stuck disclosure instead
+  // of surfacing as a missing row somewhere downstream.
+  const detail =
+    lastClickError === null ? "" : `; last click error: ${lastClickError}`;
   await expect(
     control,
-    `${what} stayed collapsed after ${clicks} of ${EXPAND_ATTEMPTS} attempted clicks`
-  ).toHaveAttribute("aria-expanded", "true", { timeout: EXPAND_FINAL_MS });
+    `${what} did not ${verb}: ${clicks} of ${passes} clicks landed${detail}`
+  ).toHaveAttribute("aria-expanded", target, { timeout: EXPAND_FINAL_MS });
 }
 
 /** The sidebar row for `repoName`: a level-1 `treeitem` whose `aria-expanded`
@@ -101,9 +136,10 @@ export async function expandRepoGroup(
 ): Promise<Locator> {
   const group = repoGroup(window, repoName);
   await expect(group).toBeVisible({ timeout: ROW_VISIBLE_MS });
-  await clickToExpand(
+  await clickUntilExpanded(
     group,
     group.locator(".repo-row__name"),
+    true,
     `Repo group "${repoName}"`
   );
   return group;
@@ -123,24 +159,54 @@ export async function addRootAndExpand(
   await expandRepoGroup(window, repoName);
 }
 
-/** Open the nested "Worktrees N" disclosure inside `repoName`'s group, and
-    return its toggle. The section is usually already open — it defaults closed
-    only when the repo has a pinned worktree, or when an earlier click in the
-    same test closed it — but reading `aria-expanded` back means a spec that
-    needs the unpinned rows doesn't have to guess. */
-export async function expandWorktrees(
+/** The nested "Worktrees N" disclosure inside `repoName`'s group. Only exists
+    while the group is open, which is why both helpers below re-assert that
+    first. */
+async function worktreesToggle(
   window: Page,
   repoName: string
 ): Promise<Locator> {
-  // The section only renders while the repo group is open, so a collapsed
-  // group would otherwise show up here as a long wait for a toggle that cannot
-  // exist. Re-assert the group first; it is a no-op when it is already open.
   const group = await expandRepoGroup(window, repoName);
   const toggle = window
     .locator(".repo-block", { has: group })
     .locator(".wt-section__toggle");
-  await expect(toggle).toBeVisible({ timeout: ROW_VISIBLE_MS });
-  await clickToExpand(toggle, toggle, `Worktrees section of "${repoName}"`);
+  await expect(toggle).toBeVisible({ timeout: SECTION_VISIBLE_MS });
+  return toggle;
+}
+
+/** Open the nested "Worktrees N" disclosure and return its toggle. The section
+    is usually already open — it defaults closed only when the repo has a
+    pinned worktree, or when an earlier click in the same test closed it — but
+    reading `aria-expanded` back means a spec that needs the unpinned rows
+    doesn't have to guess. */
+export async function expandWorktrees(
+  window: Page,
+  repoName: string
+): Promise<Locator> {
+  const toggle = await worktreesToggle(window, repoName);
+  await clickUntilExpanded(
+    toggle,
+    toggle,
+    true,
+    `Worktrees section of "${repoName}"`
+  );
+  return toggle;
+}
+
+/** Close the nested "Worktrees N" disclosure and return its toggle. Closing is
+    exposed to the same dropped click as opening, so it gets the same read-back
+    rather than a bare `click()`. */
+export async function collapseWorktrees(
+  window: Page,
+  repoName: string
+): Promise<Locator> {
+  const toggle = await worktreesToggle(window, repoName);
+  await clickUntilExpanded(
+    toggle,
+    toggle,
+    false,
+    `Worktrees section of "${repoName}"`
+  );
   return toggle;
 }
 

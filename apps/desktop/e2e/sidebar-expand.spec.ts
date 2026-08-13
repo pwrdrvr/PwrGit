@@ -4,6 +4,7 @@ import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
 import {
   addRootAndExpand,
   branchRow,
+  collapseWorktrees,
   expandWorktrees,
   repoGroup
 } from "./fixtures/steps";
@@ -66,8 +67,10 @@ test("the expand helpers recover a dropped Worktrees-section click", async () =>
 
   await addRootAndExpand(window, handle, sandbox, "dropped-section");
   // Close the section so the helper has real work to do, then eat the reopen.
-  const toggle = window.locator(".wt-section__toggle");
-  await toggle.click();
+  // Closing goes through the helper too: a bare click here is exposed to the
+  // same dropped click as the one this test is about, which would flake the
+  // setup rather than the thing under test.
+  const toggle = await collapseWorktrees(window, "dropped-section");
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
 
   await dropFirstClickOn(window, ".wt-section__toggle");

@@ -35,8 +35,8 @@ the Electron build.
   `.modal--dialog .modal__create` (confirm) / `.modal__cancel` — don't use
   Playwright's `window.on("dialog", …)`.
 - Shared step helpers (`addRootAndExpand`, `expandRepoGroup`,
-  `expandWorktrees`, `repoGroup`, `branchRow`) live in `fixtures/steps.ts`; a
-  repo that trails its origin comes from
+  `expandWorktrees`, `collapseWorktrees`, `repoGroup`, `branchRow`) live in
+  `fixtures/steps.ts`; a repo that trails its origin comes from
   `sandbox.makeRepoBehindRemote(name, { behindBy })`.
 - **Never expand a disclosure with a bare `click()`.** The first expand click
   after a root is added gets dropped roughly **half the time, even on an idle
@@ -45,5 +45,7 @@ the Electron build.
   spec stalls 20-30s later on a `.wt-row` that cannot exist. The helpers in
   `fixtures/steps.ts` read `aria-expanded` back, click again if it did not
   flip, and `console.warn` when they retry. Use them rather than assuming one
-  click took. If a stall ever comes back **without** a `click N did not take`
-  line, it is not this — look at worktree indexing latency instead.
+  click took — **including when closing one** (`collapseWorktrees`), since a
+  dropped click is not direction-specific. If a stall ever comes back
+  **without** a `click N did not take` line, it is not this — look at worktree
+  indexing latency instead.
