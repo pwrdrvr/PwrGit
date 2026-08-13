@@ -494,6 +494,36 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(existsSync(join(local, "upstream.txt"))).toBe(false);
   }, 15_000);
 
+  it("preserves an unrelated untracked file created while a failed pull is running", async () => {
+    const { local, remote } = makeDivergedFixture();
+    commit(remote, "upstream.txt", "advance upstream");
+    git(remote, ["push"]);
+
+    const originalHead = gitOut(local, ["rev-parse", "HEAD"]);
+    const failAfterConcurrentWrite: GitExec = async (args, cwd, options) => {
+      if (args[0] === "merge") {
+        writeFileSync(join(cwd, "upstream.txt"), "partial upstream checkout\n");
+        writeFileSync(join(cwd, "generated-during-pull.txt"), "keep me\n");
+        return ok({
+          stdout: "",
+          stderr: "simulated checkout failure",
+          exitCode: 128
+        });
+      }
+      return systemGit(args, cwd, options);
+    };
+
+    const result = await pullFastForward(failAfterConcurrentWrite, local);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("merge_failed");
+    expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(originalHead);
+    expect(existsSync(join(local, "upstream.txt"))).toBe(false);
+    expect(fileText(local, "generated-during-pull.txt")).toBe("keep me\n");
+    expect(gitOut(local, ["status", "--porcelain"])).toBe(
+      "?? generated-during-pull.txt"
+    );
+  }, 15_000);
+
   it("cleans a partial checkout before reapplying an untracked file with the same path", async () => {
     const { local, remote } = makeDivergedFixture();
     commit(remote, "upstream.txt", "advance upstream");

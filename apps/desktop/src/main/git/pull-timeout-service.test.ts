@@ -25,6 +25,7 @@ describe("pullFastForward timeout recovery", () => {
     const git: GitExec = vi.fn(async (args, _cwd, options) => {
       if (args[0] === "rev-parse") return output("a".repeat(40));
       if (args[0] === "fetch") return output();
+      if (args[0] === "diff") return output();
       if (args[0] === "status") return output();
       seenSignals.push(options?.signal);
       if (args[0] === "merge") {
