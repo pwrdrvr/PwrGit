@@ -53,6 +53,13 @@ afterEach(async () => {
 });
 
 describe("SshRemoteRecoveryDialog", () => {
+  it("explains that checkout-time Git LFS authentication can use SSH", () => {
+    expect(container.textContent).toContain("Git LFS during checkout");
+    expect(container.textContent).toContain(
+      "LFS access is exercised when you choose Pull again"
+    );
+  });
+
   it("tests first, changes only after success, and never retries Pull", async () => {
     const onChanged = vi.fn();
     await act(async () => {

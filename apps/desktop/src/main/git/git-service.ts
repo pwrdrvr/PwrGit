@@ -1456,6 +1456,36 @@ export async function pullFastForward(
   const fetched = await fetchRemote(pullGit, cwd, true);
   if (!fetched.ok) return fetched;
 
+  const upstream = await resolveUpstream(pullGit, cwd);
+  if (!upstream.ok) return upstream;
+
+  // A filter can fail after checkout has written paths that only exist in the
+  // incoming commit. Record that bounded pathset before any mutation so
+  // rollback never has to clean unrelated untracked files repository-wide.
+  const incomingPathArgs =
+    originalHeadOid === undefined
+      ? ["ls-tree", "-r", "--name-only", "-z", upstream.value.head]
+      : [
+          "diff",
+          "--name-only",
+          "-z",
+          "--diff-filter=A",
+          "--no-renames",
+          originalHeadOid,
+          upstream.value.head,
+          "--"
+        ];
+  const incomingPathsRaw = await pullGit(incomingPathArgs, cwd);
+  if (!incomingPathsRaw.ok) return incomingPathsRaw;
+  const incomingPathsResult = requireExit0(
+    incomingPathsRaw.value,
+    incomingPathArgs
+  );
+  if (!incomingPathsResult.ok) return incomingPathsResult;
+  const incomingPaths = incomingPathsResult.value.stdout
+    .split("\0")
+    .filter((path) => path !== "");
+
   onProgress("prepare");
   const statusRaw = await pullGit(["status", "--porcelain"], cwd);
   if (!statusRaw.ok) return statusRaw;
@@ -1508,13 +1538,39 @@ export async function pullFastForward(
         // ref or partially populated the index/worktree.
         for (const args of [
           ["update-ref", "-d", "HEAD"],
-          ["read-tree", "--empty"],
-          ["clean", "-fd"]
+          ["read-tree", "--empty"]
         ]) {
           const step = await rollbackStep(args);
           if (!step.ok) return step;
         }
       }
+
+      // reset --hard does not remove paths that are untracked relative to the
+      // original commit. Limit cleanup to paths newly tracked upstream, in
+      // bounded argument chunks; files created concurrently elsewhere survive.
+      const cleanPrefix = ["--literal-pathspecs", "clean", "-fd", "--"];
+      let cleanArgs = [...cleanPrefix];
+      let cleanArgLength = cleanArgs.join(" ").length;
+      const flushClean = async (): Promise<Result<void>> => {
+        if (cleanArgs.length === cleanPrefix.length) return ok(undefined);
+        const cleaned = await rollbackStep(cleanArgs);
+        cleanArgs = [...cleanPrefix];
+        cleanArgLength = cleanArgs.join(" ").length;
+        return cleaned;
+      };
+      for (const path of incomingPaths) {
+        if (
+          cleanArgs.length > cleanPrefix.length &&
+          cleanArgLength + path.length + 1 > 24_000
+        ) {
+          const cleaned = await flushClean();
+          if (!cleaned.ok) return cleaned;
+        }
+        cleanArgs.push(path);
+        cleanArgLength += path.length + 1;
+      }
+      const cleaned = await flushClean();
+      if (!cleaned.ok) return cleaned;
 
       if (!stashed) return ok(undefined);
       onProgress("reapply");
@@ -1548,7 +1604,7 @@ export async function pullFastForward(
 
   onProgress("fast_forward");
   const merge = await pullGit(
-    ["merge", "--ff-only", "--progress", "@{u}"],
+    ["merge", "--ff-only", "--progress", upstream.value.head],
     cwd
   );
   if (!merge.ok) {

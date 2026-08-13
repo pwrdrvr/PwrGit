@@ -460,6 +460,139 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(gitOut(local, ["stash", "list"])).toBe("");
   }, 15_000);
 
+  it("removes partial untracked checkout artifacts before restoring a clean checkout", async () => {
+    const { local, remote } = makeDivergedFixture();
+    commit(remote, "upstream.txt", "advance upstream");
+    git(remote, ["push"]);
+
+    const originalHead = gitOut(local, ["rev-parse", "HEAD"]);
+    let sawPartialArtifact = false;
+    const failAfterUntrackedCheckout: GitExec = async (args, cwd, options) => {
+      if (args[0] === "merge") {
+        writeFileSync(join(cwd, "upstream.txt"), "partial upstream checkout\n");
+        sawPartialArtifact =
+          existsSync(join(cwd, "upstream.txt")) &&
+          gitOut(cwd, ["status", "--porcelain"]) === "?? upstream.txt";
+        return ok({
+          stdout: "",
+          stderr: "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+          exitCode: 128
+        });
+      }
+      return systemGit(args, cwd, options);
+    };
+
+    const result = await pullFastForward(failAfterUntrackedCheckout, local);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("merge_failed");
+      expect(result.error.message).toContain("terminal prompts disabled");
+    }
+    expect(sawPartialArtifact).toBe(true);
+    expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(originalHead);
+    expect(gitOut(local, ["status", "--porcelain"])).toBe("");
+    expect(existsSync(join(local, "upstream.txt"))).toBe(false);
+  }, 15_000);
+
+  it("preserves an unrelated untracked file created while a failed pull is running", async () => {
+    const { local, remote } = makeDivergedFixture();
+    commit(remote, "upstream.txt", "advance upstream");
+    git(remote, ["push"]);
+
+    const originalHead = gitOut(local, ["rev-parse", "HEAD"]);
+    const failAfterConcurrentWrite: GitExec = async (args, cwd, options) => {
+      if (args[0] === "merge") {
+        writeFileSync(join(cwd, "upstream.txt"), "partial upstream checkout\n");
+        writeFileSync(join(cwd, "generated-during-pull.txt"), "keep me\n");
+        return ok({
+          stdout: "",
+          stderr: "simulated checkout failure",
+          exitCode: 128
+        });
+      }
+      return systemGit(args, cwd, options);
+    };
+
+    const result = await pullFastForward(failAfterConcurrentWrite, local);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("merge_failed");
+    expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(originalHead);
+    expect(existsSync(join(local, "upstream.txt"))).toBe(false);
+    expect(fileText(local, "generated-during-pull.txt")).toBe("keep me\n");
+    expect(gitOut(local, ["status", "--porcelain"])).toBe(
+      "?? generated-during-pull.txt"
+    );
+  }, 15_000);
+
+  it("treats incoming cleanup paths as literals instead of pathspec magic", async () => {
+    const { local, remote } = makeDivergedFixture();
+    // Bracket expressions are valid Git pathspec magic and valid filenames on
+    // Windows. Without literal pathspec handling, this also matches "p.txt".
+    const magicPath = "[partial].txt";
+    commit(remote, magicPath, "add pathspec-shaped filename");
+    git(remote, ["push"]);
+
+    const failAfterConcurrentWrite: GitExec = async (args, cwd, options) => {
+      if (args[0] === "merge") {
+        writeFileSync(join(cwd, magicPath), "partial upstream checkout\n");
+        writeFileSync(join(cwd, "p.txt"), "keep me\n");
+        return ok({
+          stdout: "",
+          stderr: "simulated checkout failure",
+          exitCode: 128
+        });
+      }
+      return systemGit(args, cwd, options);
+    };
+
+    const result = await pullFastForward(failAfterConcurrentWrite, local);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("merge_failed");
+    expect(existsSync(join(local, magicPath))).toBe(false);
+    expect(fileText(local, "p.txt")).toBe("keep me\n");
+  }, 15_000);
+
+  it("cleans a partial checkout before reapplying an untracked file with the same path", async () => {
+    const { local, remote } = makeDivergedFixture();
+    commit(remote, "upstream.txt", "advance upstream");
+    git(remote, ["push"]);
+
+    const originalHead = gitOut(local, ["rev-parse", "HEAD"]);
+    writeFileSync(join(local, "upstream.txt"), "local untracked work\n");
+    const originalStatus = gitOut(local, ["status", "--porcelain"]);
+    let sawPartialArtifact = false;
+    let cleanBeforePop = false;
+    const failAfterUntrackedCheckout: GitExec = async (args, cwd, options) => {
+      if (args[0] === "merge") {
+        writeFileSync(join(cwd, "upstream.txt"), "partial upstream checkout\n");
+        sawPartialArtifact =
+          fileText(cwd, "upstream.txt") === "partial upstream checkout\n";
+        return ok({
+          stdout: "",
+          stderr: "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+          exitCode: 128
+        });
+      }
+      if (args[0] === "stash" && args[1] === "pop") {
+        cleanBeforePop = !existsSync(join(cwd, "upstream.txt"));
+      }
+      return systemGit(args, cwd, options);
+    };
+
+    const result = await pullFastForward(failAfterUntrackedCheckout, local);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("merge_failed");
+      expect(result.error.message).toContain("terminal prompts disabled");
+    }
+    expect(sawPartialArtifact).toBe(true);
+    expect(cleanBeforePop).toBe(true);
+    expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(originalHead);
+    expect(gitOut(local, ["status", "--porcelain"])).toBe(originalStatus);
+    expect(fileText(local, "upstream.txt")).toBe("local untracked work\n");
+    expect(gitOut(local, ["stash", "list"])).toBe("");
+  }, 15_000);
+
   it("preserves staged and unstaged state when reapplying work after a successful pull", async () => {
     const { local, remote } = makeDivergedFixture();
     commit(remote, "upstream.txt", "advance upstream");
