@@ -1548,17 +1548,21 @@ export async function pullFastForward(
       // reset --hard does not remove paths that are untracked relative to the
       // original commit. Limit cleanup to paths newly tracked upstream, in
       // bounded argument chunks; files created concurrently elsewhere survive.
-      let cleanArgs = ["clean", "-fd", "--"];
+      const cleanPrefix = ["--literal-pathspecs", "clean", "-fd", "--"];
+      let cleanArgs = [...cleanPrefix];
       let cleanArgLength = cleanArgs.join(" ").length;
       const flushClean = async (): Promise<Result<void>> => {
-        if (cleanArgs.length === 3) return ok(undefined);
+        if (cleanArgs.length === cleanPrefix.length) return ok(undefined);
         const cleaned = await rollbackStep(cleanArgs);
-        cleanArgs = ["clean", "-fd", "--"];
+        cleanArgs = [...cleanPrefix];
         cleanArgLength = cleanArgs.join(" ").length;
         return cleaned;
       };
       for (const path of incomingPaths) {
-        if (cleanArgs.length > 3 && cleanArgLength + path.length + 1 > 24_000) {
+        if (
+          cleanArgs.length > cleanPrefix.length &&
+          cleanArgLength + path.length + 1 > 24_000
+        ) {
           const cleaned = await flushClean();
           if (!cleaned.ok) return cleaned;
         }
