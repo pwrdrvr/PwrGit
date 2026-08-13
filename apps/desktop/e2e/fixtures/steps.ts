@@ -76,13 +76,12 @@ async function settlesWithin(
 
     Expanding used to be one unchecked click, and specs would stall 20-30s
     later on a `.wt-row` that could not exist because the group was still
-    closed. The first expand click after a root is added really does get
-    dropped — instrumenting this retry showed it firing on roughly half of
-    idle-machine runs, in specs that were not rigging the click — so the second
-    click here is load-bearing, not belt-and-braces. Keep the `console.warn`:
-    it is the only signal that distinguishes a dropped click from the other
-    candidate (worktree indexing latency), which would show up as a stall with
-    no retry logged. */
+    closed. This retry is what caught why: its `console.warn` fired on about
+    half of idle-machine runs, which led to `useListReorder` suppressing every
+    row click for the first 250ms of the window's life. That is fixed at the
+    source now, so this loop should be silent — keep the log, because a line
+    from any spec that isn't deliberately dropping a click is the signal that
+    something has regressed. */
 async function clickUntilExpanded(
   control: Locator,
   trigger: Locator,

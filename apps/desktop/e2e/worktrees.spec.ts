@@ -3,7 +3,11 @@ import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
-import { addRootAndExpand, branchRow } from "./fixtures/steps";
+import {
+  addRootAndExpand,
+  branchRow,
+  collapseWorktrees
+} from "./fixtures/steps";
 
 // Real Electron app + real git repos in a throwaway dir, driven through the UI.
 // Sequential (workers: 1) so the module-level handles are safe.
@@ -71,10 +75,10 @@ test("keeps the primary and pinned worktrees visible when the remaining list is 
     })
   ).toBeVisible();
 
-  const worktreesToggle = window.locator(".wt-section__toggle");
-  await worktreesToggle.click();
-
-  await expect(worktreesToggle).toHaveAttribute("aria-expanded", "false");
+  // Collapsing is setup for what this test is actually about, so it goes
+  // through the helper: a bare click here can be dropped, and the failure would
+  // land on the visibility assertions below rather than on the collapse.
+  const worktreesToggle = await collapseWorktrees(window, "navigation");
   await expect(
     worktreesToggle.locator(".ref-section__count")
   ).toHaveText("1");
