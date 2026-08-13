@@ -526,14 +526,16 @@ describe("remote ops (bare-remote fixture)", () => {
 
   it("treats incoming cleanup paths as literals instead of pathspec magic", async () => {
     const { local, remote } = makeDivergedFixture();
-    const magicPath = ":(glob)**";
+    // Bracket expressions are valid Git pathspec magic and valid filenames on
+    // Windows. Without literal pathspec handling, this also matches "p.txt".
+    const magicPath = "[partial].txt";
     commit(remote, magicPath, "add pathspec-shaped filename");
     git(remote, ["push"]);
 
     const failAfterConcurrentWrite: GitExec = async (args, cwd, options) => {
       if (args[0] === "merge") {
         writeFileSync(join(cwd, magicPath), "partial upstream checkout\n");
-        writeFileSync(join(cwd, "generated-during-pull.txt"), "keep me\n");
+        writeFileSync(join(cwd, "p.txt"), "keep me\n");
         return ok({
           stdout: "",
           stderr: "simulated checkout failure",
@@ -547,7 +549,7 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe("merge_failed");
     expect(existsSync(join(local, magicPath))).toBe(false);
-    expect(fileText(local, "generated-during-pull.txt")).toBe("keep me\n");
+    expect(fileText(local, "p.txt")).toBe("keep me\n");
   }, 15_000);
 
   it("cleans a partial checkout before reapplying an untracked file with the same path", async () => {
