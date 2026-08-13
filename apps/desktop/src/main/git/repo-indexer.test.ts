@@ -165,6 +165,9 @@ describe("RepoIndexer", () => {
       );
       expect(indexed.ok).toBe(true);
     }
+    isolatedDb
+      .prepare("UPDATE repos SET source = 'scan' WHERE profile_id = ?")
+      .run(first.id);
 
     // Simulate the just-upgraded database: persisted repos exist, while the
     // new derived remote-branch table starts empty.
@@ -174,7 +177,7 @@ describe("RepoIndexer", () => {
     yields = 0;
 
     const background = await isolatedIndexer.hydrateRemoteBranches({
-      excludeProfileId: first.id
+      excludeScannedProfileId: first.id
     });
 
     expect(background).toEqual({ refreshed: 1, failed: 0 });
@@ -213,6 +216,81 @@ describe("RepoIndexer", () => {
       refreshed: 0,
       failed: 0
     });
+  });
+
+  it("hydrates active-profile manual repos while its scanned repos rescan", async () => {
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({
+      name: "Mixed",
+      email: "mixed@example.com",
+      roots: []
+    });
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
+    const repos = ["scanned", "manual"].map((name) => {
+      const container = mkdtempSync(join(tmpdir(), `pwrgit-mixed-${name}-`));
+      const repoPath = join(container, name);
+      const remotePath = join(container, `${name}.git`);
+      initRepo(repoPath);
+      git(container, ["init", "--bare", `${name}.git`]);
+      git(repoPath, ["remote", "add", "origin", remotePath]);
+      git(repoPath, ["branch", "releases/1.0"]);
+      git(repoPath, ["push", "origin", "releases/1.0"]);
+      git(repoPath, ["branch", "-D", "releases/1.0"]);
+      return { name, repoPath };
+    });
+    for (const repo of repos) {
+      expect(
+        (await isolatedIndexer.indexRepoAt(profile.id, repo.repoPath)).ok
+      ).toBe(true);
+    }
+    isolatedDb
+      .prepare("UPDATE repos SET source = 'scan' WHERE name = 'scanned'")
+      .run();
+    isolatedDb.prepare("DELETE FROM remote_branch_index_state").run();
+    isolatedDb.prepare("DELETE FROM remote_branches").run();
+
+    const hydrated = await isolatedIndexer.hydrateRemoteBranches({
+      excludeScannedProfileId: profile.id
+    });
+
+    expect(hydrated).toEqual({ refreshed: 1, failed: 0 });
+    const hits = isolatedIndexer.searchAll("releases/1.0");
+    expect(hits.some((hit) => hit.repoName === "manual")).toBe(true);
+    expect(hits.some((hit) => hit.repoName === "scanned")).toBe(false);
+  });
+
+  it("matches slash-containing configured remote names by longest prefix", async () => {
+    const container = mkdtempSync(join(tmpdir(), "pwrgit-slash-remote-"));
+    const repoPath = join(container, "slash-remote");
+    const remotePath = join(container, "remote.git");
+    initRepo(repoPath);
+    git(container, ["init", "--bare", "remote.git"]);
+    git(repoPath, ["remote", "add", "team/foo", remotePath]);
+    git(repoPath, ["branch", "release"]);
+    git(repoPath, ["push", "team/foo", "release"]);
+    git(repoPath, ["branch", "-D", "release"]);
+
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({
+      name: "Slash",
+      email: "slash@example.com",
+      roots: []
+    });
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
+    expect(
+      (await isolatedIndexer.indexRepoAt(profile.id, repoPath)).ok
+    ).toBe(true);
+
+    expect(isolatedIndexer.searchAll("release")).toContainEqual(
+      expect.objectContaining({
+        kind: "remote_branch",
+        name: "release",
+        remoteName: "team/foo",
+        remoteRef: "refs/remotes/team/foo/release"
+      })
+    );
   });
 
   it("indexes discovered repos, deduping linked worktrees into their repo", async () => {

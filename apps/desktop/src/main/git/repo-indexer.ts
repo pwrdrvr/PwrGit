@@ -19,7 +19,7 @@ import type { DB } from "../persistence/db";
 import { mapLimit } from "../util/map-limit";
 import type { GitExec } from "./dugite";
 import { buildFtsQuery } from "./fts-query";
-import { listBranches, listWorktrees } from "./git-service";
+import { listBranches, listRemoteNames, listWorktrees } from "./git-service";
 import { claimWorktreeOwnership } from "./repo-ownership";
 
 const MAX_SCAN_DEPTH = 5;
@@ -75,6 +75,24 @@ type WorktreeRow = {
   pr_state: string | null;
   pr_is_draft: number | null;
 };
+
+type IndexedBranches = {
+  branches: BranchRef[];
+  remoteNames: string[];
+};
+
+async function listIndexedBranches(
+  git: GitExec,
+  cwd: string
+): Promise<Result<IndexedBranches>> {
+  const [branches, remoteNames] = await Promise.all([
+    listBranches(git, cwd),
+    listRemoteNames(git, cwd)
+  ]);
+  if (!branches.ok) return branches;
+  if (!remoteNames.ok) return remoteNames;
+  return ok({ branches: branches.value, remoteNames: remoteNames.value });
+}
 
 export type RepoIndexerOptions = {
   yieldToEventLoop?: () => Promise<void>;
@@ -162,12 +180,16 @@ export class RepoIndexer {
     // deduping repos reachable from more than one worktree dir.
     const canonical = new Map<
       string,
-      { path: string; worktrees: Worktree[]; remoteBranches: BranchRef[] | null }
+      {
+        path: string;
+        worktrees: Worktree[];
+        remoteBranches: IndexedBranches | null;
+      }
     >();
     await mapLimit([...found], GIT_CONCURRENCY, async (dir) => {
       const [listed, listedBranches] = await Promise.all([
         listWorktrees(this.git, dir),
-        listBranches(this.git, dir)
+        listIndexedBranches(this.git, dir)
       ]);
       if (!listed.ok || listed.value.length === 0) return;
       const primary = listed.value[0];
@@ -196,7 +218,11 @@ export class RepoIndexer {
       })();
       seenRepoIds.push(repoId);
       if (remoteBranches !== null) {
-        await this.syncRemoteBranchesChunked(repoId, remoteBranches);
+        await this.syncRemoteBranchesChunked(
+          repoId,
+          remoteBranches.branches,
+          remoteBranches.remoteNames
+        );
       } else {
         // Record the attempt so one temporarily unreadable repo does not turn
         // the one-time migration repair into an every-launch full rescan. The
@@ -220,7 +246,7 @@ export class RepoIndexer {
   ): Promise<Result<Repo>> {
     const [listed, listedBranches] = await Promise.all([
       listWorktrees(this.git, path),
-      listBranches(this.git, path)
+      listIndexedBranches(this.git, path)
     ]);
     if (!listed.ok) return listed;
     const primary = listed.value[0];
@@ -247,7 +273,11 @@ export class RepoIndexer {
     });
     run();
     if (listedBranches.ok) {
-      await this.syncRemoteBranchesChunked(repoId, listedBranches.value);
+      await this.syncRemoteBranchesChunked(
+        repoId,
+        listedBranches.value.branches,
+        listedBranches.value.remoteNames
+      );
     }
 
     const repo = this.getRepo(repoId);
@@ -296,9 +326,13 @@ export class RepoIndexer {
     if (repo === undefined) {
       return err({ kind: "repo", code: "not_found", message: "repo not found" });
     }
-    const listed = await listBranches(this.git, repo.path);
+    const listed = await listIndexedBranches(this.git, repo.path);
     if (!listed.ok) return listed;
-    await this.syncRemoteBranchesChunked(repoId, listed.value);
+    await this.syncRemoteBranchesChunked(
+      repoId,
+      listed.value.branches,
+      listed.value.remoteNames
+    );
     return ok(undefined);
   }
 
@@ -308,7 +342,7 @@ export class RepoIndexer {
    * routine profile scans and remote mutations maintain the index afterward.
    */
   async hydrateRemoteBranches(options: {
-    excludeProfileId?: ProfileId | null;
+    excludeScannedProfileId?: ProfileId | null;
   } = {}): Promise<{ refreshed: number; failed: number }> {
     const repos = this.db
       .prepare(
@@ -316,12 +350,12 @@ export class RepoIndexer {
          FROM repos r
          LEFT JOIN remote_branch_index_state s ON s.repo_id = r.id
          WHERE s.repo_id IS NULL
-           AND (? IS NULL OR r.profile_id <> ?)
+           AND (? IS NULL OR r.profile_id <> ? OR r.source <> 'scan')
          ORDER BY r.id`
       )
       .all(
-        options.excludeProfileId ?? null,
-        options.excludeProfileId ?? null
+        options.excludeScannedProfileId ?? null,
+        options.excludeScannedProfileId ?? null
       ) as { id: string; path: string }[];
     let refreshed = 0;
     let failed = 0;
@@ -333,12 +367,12 @@ export class RepoIndexer {
       const batch = repos.slice(offset, offset + HYDRATION_GIT_CONCURRENCY);
       const inspected: {
         repoId: string;
-        result: Result<BranchRef[]>;
+        result: Result<IndexedBranches>;
       }[] = [];
       await mapLimit(batch, HYDRATION_GIT_CONCURRENCY, async (repo) => {
         inspected.push({
           repoId: repo.id,
-          result: await listBranches(this.git, repo.path)
+          result: await listIndexedBranches(this.git, repo.path)
         });
       });
       for (const item of inspected) {
@@ -347,7 +381,11 @@ export class RepoIndexer {
           this.markRemoteBranchesIndexed(item.repoId);
           continue;
         }
-        await this.syncRemoteBranchesChunked(item.repoId, item.result.value);
+        await this.syncRemoteBranchesChunked(
+          item.repoId,
+          item.result.value.branches,
+          item.result.value.remoteNames
+        );
         refreshed += 1;
       }
       await this.yieldToEventLoop();
@@ -422,7 +460,7 @@ export class RepoIndexer {
     }
     const [listed, listedBranches] = await Promise.all([
       listWorktrees(this.git, repo.path),
-      listBranches(this.git, repo.path)
+      listIndexedBranches(this.git, repo.path)
     ]);
     if (!listed.ok) return listed;
     const primary = listed.value[0];
@@ -449,7 +487,11 @@ export class RepoIndexer {
       .map((w, i) => worktreeShape(w.path, w.branch, i === 0));
     this.db.transaction(() => this.syncWorktrees(repoId, worktrees))();
     if (listedBranches.ok) {
-      await this.syncRemoteBranchesChunked(repoId, listedBranches.value);
+      await this.syncRemoteBranchesChunked(
+        repoId,
+        listedBranches.value.branches,
+        listedBranches.value.remoteNames
+      );
     }
 
     const refreshed = this.getRepo(repoId);
@@ -837,7 +879,8 @@ export class RepoIndexer {
 
   private async syncRemoteBranchesChunked(
     repoId: string,
-    branches: BranchRef[]
+    branches: BranchRef[],
+    remoteNames: string[]
   ): Promise<void> {
     const localNames = new Set(
       branches.filter((branch) => !branch.isRemote).map((branch) => branch.name)
@@ -848,12 +891,19 @@ export class RepoIndexer {
       fullName: string;
       remoteName: string;
     }[] = [];
+    const remotePrefixes = remoteNames
+      .slice()
+      .sort((left, right) => right.length - left.length)
+      .map((remoteName) => ({ remoteName, prefix: `${remoteName}/` }));
     for (const branch of branches) {
       if (!branch.isRemote) continue;
-      const slash = branch.name.indexOf("/");
-      if (slash <= 0 || slash === branch.name.length - 1) continue;
-      const remoteName = branch.name.slice(0, slash);
-      const name = branch.name.slice(slash + 1);
+      const remote = remotePrefixes.find(({ prefix }) =>
+        branch.name.startsWith(prefix)
+      );
+      if (remote === undefined) continue;
+      const { remoteName, prefix } = remote;
+      const name = branch.name.slice(prefix.length);
+      if (name === "") continue;
       if (localNames.has(name)) continue;
       const fullName = `refs/remotes/${branch.name}`;
       rows.push({

@@ -11,7 +11,7 @@ import { PinIcon } from "./WorktreeRow";
 const isMac = navigator.platform.startsWith("Mac");
 
 const hitKey = (hit: RepoSearchHit): string =>
-  `${hit.kind}:${hit.worktreeId ?? hit.remoteRef ?? hit.repoId}`;
+  `${hit.kind}:${hit.repoId}:${hit.worktreeId ?? hit.remoteRef ?? ""}`;
 
 type PaletteItem =
   | { kind: "commit"; commit: Commit }

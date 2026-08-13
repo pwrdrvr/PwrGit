@@ -424,11 +424,11 @@ if (!gotSingleInstanceLock) {
 
     // Migration 0019 could not populate Git-derived rows in SQL. Repair only
     // repos that have never been attempted, after opening the first window.
-    // The active profile's normal rescan owns its branch refresh, so exclude it
-    // from this low-concurrency background pass.
+    // The active profile's normal rescan owns its root-discovered repos, so
+    // exclude only those scan rows. Manual repos still need this repair.
     setImmediate(() => {
       void indexer
-        .hydrateRemoteBranches({ excludeProfileId: activeId })
+        .hydrateRemoteBranches({ excludeScannedProfileId: activeId })
         .then(({ refreshed, failed }) => {
           if (refreshed === 0 && failed === 0) return;
           logMain(

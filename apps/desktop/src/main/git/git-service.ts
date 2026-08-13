@@ -1870,7 +1870,7 @@ function trackingStatus(
   return { ahead, behind, tracking };
 }
 
-async function configuredRemoteNames(
+export async function listRemoteNames(
   git: GitExec,
   cwd: string
 ): Promise<Result<string[]>> {
@@ -1953,7 +1953,7 @@ export async function listRepoRefs(
   checkedOutByBranch: ReadonlyMap<string, string[]> = new Map()
 ): Promise<Result<RepoRefs>> {
   const [names, raw] = await Promise.all([
-    configuredRemoteNames(git, cwd),
+    listRemoteNames(git, cwd),
     git(
       [
         "for-each-ref",
@@ -2177,7 +2177,7 @@ export async function planPushRefs(
       message: "Choose at least one destination remote."
     });
   }
-  const names = await configuredRemoteNames(git, cwd);
+  const names = await listRemoteNames(git, cwd);
   if (!names.ok) return names;
   const known = new Set(names.value);
   for (const destination of destinations) {

@@ -308,6 +308,7 @@ export function registerRemoteHandlers(
       planPushRefs(execGit, repo.path, req.sourceRef, req.destinations)
     );
     refresher.refreshRepoWorktrees(req.repoId);
+    if (result.ok) await refreshRemoteBranches(req.repoId, "plan push refs");
     return result;
   });
 

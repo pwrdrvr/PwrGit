@@ -110,6 +110,36 @@ test("finds fetched remote-only branches from the command palette", async () => 
   await expect(newWorktree).toContainText("Starting from refs/remotes/origin/releases/1.0");
 });
 
+test("narrowing remote branches across repos removes ghosts and keeps exact matches first", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  for (let index = 0; index < 4; index += 1) {
+    const repo = box.makeRepoBehindRemote(`release-${index}`);
+    addRemoteOnlyBranch(box, repo, "release");
+  }
+  for (let index = 0; index < 2; index += 1) {
+    const repo = box.makeRepoBehindRemote(`exact-${index}`);
+    addRemoteOnlyBranch(box, repo);
+  }
+
+  handle = await launchApp({ worktreeRoot: box.worktreeRoot });
+  const { window } = handle;
+  await addRootAndExpand(window, handle, box, "exact-0");
+
+  await window.keyboard.press("Meta+k");
+  const input = window.locator(".overlay-search input");
+  const rows = window.locator(".overlay-result");
+  await input.fill("release");
+  await expect.poll(async () => rows.count()).toBeGreaterThan(6);
+
+  await input.fill("releases/1.0");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first().locator(".overlay-result__name")).toHaveText(
+    "releases/1.0"
+  );
+  await expect(window.locator(".overlay-foot")).toContainText("2 results");
+});
+
 test("browses local branches and nested remotes, then pushes to a test target", async () => {
   sandbox = createGitSandbox();
   const box = sandbox;

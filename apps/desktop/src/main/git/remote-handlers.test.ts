@@ -582,6 +582,18 @@ describe("remote handlers", () => {
     expect(indexer.refreshRepoRemoteBranches).toHaveBeenCalledExactlyOnceWith(
       "repo-1"
     );
+
+    vi.mocked(indexer.refreshRepoRemoteBranches).mockClear();
+    await expect(
+      bus.dispatch("remote:planPushRefs", {
+        repoId: "repo-1",
+        sourceRef: "refs/heads/main",
+        destinations: [{ remote: "origin", branch: "main" }]
+      })
+    ).resolves.toMatchObject({ ok: true });
+    expect(indexer.refreshRepoRemoteBranches).toHaveBeenCalledExactlyOnceWith(
+      "repo-1"
+    );
   });
 
   it("inspects without refreshing and refreshes every repo worktree once after reset", async () => {
