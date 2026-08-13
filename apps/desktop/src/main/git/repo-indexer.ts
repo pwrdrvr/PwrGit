@@ -382,17 +382,19 @@ export class RepoIndexer {
     const fts = buildFtsQuery(query);
     if (fts === null) return this.browseRepos();
 
-    // bm25 weights per column (entity_id, kind, name, path, repo_name, pr):
-    // a hit in the repo/branch name outranks one buried in a path; PR
-    // number/title hits rank just under names.
+    // Exact literal names come first so the intended row survives the result
+    // cap. Within exact/fuzzy groups, bm25 weights per column (entity_id,
+    // kind, name, path, repo_name, pr): a hit in the repo/branch name outranks
+    // one buried in a path; PR number/title hits rank just under names.
     const matches = this.db
       .prepare(
         `SELECT entity_id, kind FROM search_fts
          WHERE search_fts MATCH ?
-         ORDER BY bm25(search_fts, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0)
+         ORDER BY CASE WHEN name = ? COLLATE NOCASE THEN 0 ELSE 1 END,
+                  bm25(search_fts, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0)
          LIMIT 60`
       )
-      .all(fts) as {
+      .all(fts, query.trim()) as {
       entity_id: string;
       kind: "repo" | "worktree" | "remote_branch";
     }[];
@@ -547,7 +549,9 @@ export class RepoIndexer {
     }
 
     // Emit in bm25 order; hydration misses (an index row whose entity vanished
-    // mid-flight) are simply skipped.
+    // mid-flight) are simply skipped. An exact name is stronger intent than
+    // term frequency, though: without this promotion a branch containing the
+    // query tokens repeatedly can outrank the literal branch the user pasted.
     const out: RepoSearchHit[] = [];
     for (const m of unique) {
       const hit =
@@ -558,6 +562,12 @@ export class RepoIndexer {
             : remoteBranchHits.get(m.entity_id);
       if (hit !== undefined) out.push(hit);
     }
+    const exactName = normalizeExactSearchName(query);
+    out.sort(
+      (left, right) =>
+        Number(normalizeExactSearchName(right.name) === exactName) -
+        Number(normalizeExactSearchName(left.name) === exactName)
+    );
     return out;
   }
 
@@ -768,6 +778,13 @@ export class RepoIndexer {
       .run(profileId, ...keepIds);
   }
 }
+
+const normalizeExactSearchName = (value: string): string =>
+  value
+    .trim()
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase();
 
 function worktreeShape(path: string, branch: string, isPrimary: boolean): Worktree {
   return {

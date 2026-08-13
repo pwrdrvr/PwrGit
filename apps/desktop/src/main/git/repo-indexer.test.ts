@@ -446,6 +446,38 @@ describe("searchAll (FTS5)", () => {
     expect(hits[0]?.name).toBe("repoA");
   });
 
+  it("ranks an exact branch name above stronger fuzzy term-frequency matches", () => {
+    const repo = db
+      .prepare("SELECT id FROM repos WHERE name = 'repoA'")
+      .get() as { id: string };
+    const insert = db.prepare(
+      `INSERT INTO remote_branches (id, repo_id, name, full_name, remote_name)
+       VALUES (?, ?, ?, ?, 'origin')`
+    );
+    // Repeating every query token gives this row a stronger raw bm25 score.
+    // The literal branch-name match is still the user's clear intent.
+    for (let index = 0; index < 65; index += 1) {
+      insert.run(
+        `remote-noisy-release-${index}`,
+        repo.id,
+        `releases/1.0-releases-1.0-noise-${index}`,
+        `refs/remotes/origin/releases/1.0-releases-1.0-noise-${index}`
+      );
+    }
+    insert.run(
+      "remote-exact-release",
+      repo.id,
+      "releases/1.0",
+      "refs/remotes/origin/releases/1.0"
+    );
+
+    const releaseHits = indexer
+      .searchAll("releases/1.0")
+      .filter((hit) => hit.kind === "remote_branch");
+
+    expect(releaseHits[0]?.name).toBe("releases/1.0");
+  });
+
   it("falls back to browsing repos on an empty or junk query", () => {
     const empty = indexer.searchAll("");
     expect(empty.length).toBeGreaterThan(0);

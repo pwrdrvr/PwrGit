@@ -128,6 +128,46 @@ test("narrowing a ⌘F query leaves no stale ghost rows behind", async () => {
   await expect(window.locator(".overlay-foot")).toContainText("1 result");
 });
 
+test("⌘K keeps focus in the query while arrows select and reveal rows", async () => {
+  sandbox = createGitSandbox();
+  for (let index = 0; index < 14; index += 1) {
+    sandbox.makeRepo(`palette-${String(index).padStart(2, "0")}`);
+  }
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, sandbox, "palette-00");
+
+  await window.keyboard.press("Meta+k");
+  const input = window.locator(".overlay-search input");
+  const rows = window.locator(".overlay-result");
+  await expect(rows).toHaveCount(14);
+  await expect(input).toBeFocused();
+  await expect(rows.first()).toHaveAttribute("aria-selected", "true");
+
+  for (let index = 0; index < 12; index += 1) {
+    await window.keyboard.press("ArrowDown");
+  }
+  await window.keyboard.press("ArrowUp");
+  const selected = rows.nth(11);
+  await expect(selected).toHaveAttribute("aria-selected", "true");
+  await expect(selected).toBeInViewport();
+  await expect(input).toBeFocused();
+  const selectedId = await selected.getAttribute("id");
+  if (selectedId === null) throw new Error("selected palette row has no id");
+  await expect(input).toHaveAttribute(
+    "aria-activedescendant",
+    selectedId
+  );
+
+  await window.keyboard.press("Tab");
+  await expect(input).toBeFocused();
+  await window.keyboard.press("Enter");
+  await expect(window.locator(".titlebar__repo")).toHaveText("palette-11", {
+    timeout: 20_000
+  });
+});
+
 test("⌘F rows show pin state, toggle it by star click and ⌘P, and browse pins-first", async () => {
   sandbox = createGitSandbox();
   sandbox.makeRepo("alpha-kit");

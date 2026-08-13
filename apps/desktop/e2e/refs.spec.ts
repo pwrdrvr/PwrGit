@@ -80,6 +80,13 @@ test("finds fetched remote-only branches from the command palette", async () => 
   sandbox = createGitSandbox();
   const box = sandbox;
   const repo = box.makeRepoBehindRemote("remote-search");
+  for (let index = 0; index < 5; index += 1) {
+    addRemoteOnlyBranch(
+      box,
+      repo,
+      `releases/1.0-releases-1.0-noise-${index}`
+    );
+  }
   addRemoteOnlyBranch(box, repo);
 
   handle = await launchApp({ worktreeRoot: box.worktreeRoot });
@@ -89,10 +96,11 @@ test("finds fetched remote-only branches from the command palette", async () => 
   await window.keyboard.press("Meta+k");
   await window.locator(".overlay-search input").fill("releases/1.0");
 
-  const release = window.locator(".overlay-result", {
-    hasText: "releases/1.0"
-  });
+  const release = window.locator(".overlay-result").first();
   await expect(release).toBeVisible();
+  await expect(release.locator(".overlay-result__name")).toHaveText(
+    "releases/1.0"
+  );
   await expect(release).toContainText("remote-search");
   await release.click();
   const newWorktree = window.locator(".modal", {

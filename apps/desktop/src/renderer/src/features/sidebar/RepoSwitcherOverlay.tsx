@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { Commit, RepoSearchHit, SearchHitStatus } from "@pwrgit/shared";
 import { createAsyncFill } from "../../lib/asyncFill";
 import { dispatch } from "../../lib/pwrgit";
@@ -101,6 +101,9 @@ export function RepoSwitcherOverlay({
   } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
+  const idPrefix = useId();
+  const resultsId = `${idPrefix}-results`;
+  const rowId = (index: number): string => `${idPrefix}-result-${index}`;
   const commitWorktreeId = commitContext?.worktreeId ?? null;
   const commitResults = useMemo(
     () => searchCommits(commits, query),
@@ -189,9 +192,62 @@ export function RepoSwitcherOverlay({
     setSel((current) => Math.min(current, Math.max(0, items.length - 1)));
   }, [items.length]);
 
+  // Keyboard selection remains virtual so the query keeps focus. Keep the
+  // active descendant visible when arrows move beyond the scroll viewport.
+  useEffect(() => {
+    const selected = resultsRef.current?.querySelector(
+      ".overlay-result.is-selected"
+    );
+    if (typeof selected?.scrollIntoView === "function") {
+      selected.scrollIntoView({ block: "nearest" });
+    }
+  }, [sel, items.length]);
+
   const pickItem = (item: PaletteItem | undefined): void => {
     if (item?.kind === "commit") onPickCommit(item.commit);
     else if (item?.kind === "repo") onPick(item.hit);
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    // The field is the palette's only tab stop. Rows are selected through
+    // aria-activedescendant, so Tab must not hand focus to Chromium's
+    // keyboard-focusable scroll container.
+    if (event.key === "Tab") {
+      event.preventDefault();
+      inputRef.current?.focus();
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setSel((current) =>
+        Math.min(current + 1, Math.max(0, items.length - 1))
+      );
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setSel((current) => Math.max(current - 1, 0));
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      pickItem(items[sel]);
+      return;
+    }
+    if (
+      (event.metaKey || event.ctrlKey) &&
+      !event.shiftKey &&
+      event.key.toLowerCase() === "p"
+    ) {
+      event.preventDefault();
+      const item = items[sel];
+      if (item?.kind === "repo") togglePin(item.hit);
+    }
   };
 
   // Lazily fill per-hit status (tip age + dirty/ahead/behind when cached) as
@@ -245,50 +301,54 @@ export function RepoSwitcherOverlay({
 
   return (
     <div className="overlay-backdrop" onClick={onClose}>
-      <div className="overlay-panel" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="overlay-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Jump to repo, branch, or commit"
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={handleKeyDown}
+        onMouseDown={(event) => {
+          if (event.target === inputRef.current) return;
+          event.preventDefault();
+          inputRef.current?.focus();
+        }}
+      >
         <div className="overlay-search">
           <SearchIcon />
           <input
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            aria-label="Jump to repo, branch, or commit"
+            aria-controls={items.length > 0 ? resultsId : undefined}
+            aria-activedescendant={
+              items.length > 0 ? rowId(sel) : undefined
+            }
+            autoComplete="off"
+            spellCheck={false}
             placeholder="Search repos, branches & current repo commits…"
-            onKeyDown={(e) => {
-              if (e.key === "ArrowDown") {
-                e.preventDefault();
-                setSel((s) =>
-                  Math.min(s + 1, Math.max(0, items.length - 1))
-                );
-              } else if (e.key === "ArrowUp") {
-                e.preventDefault();
-                setSel((s) => Math.max(s - 1, 0));
-              } else if (e.key === "Enter") {
-                pickItem(items[sel]);
-              } else if (
-                (e.metaKey || e.ctrlKey) &&
-                !e.shiftKey &&
-                e.key.toLowerCase() === "p"
-              ) {
-                e.preventDefault();
-                const item = items[sel];
-                if (item?.kind === "repo") togglePin(item.hit);
-              } else if (e.key === "Escape") {
-                onClose();
-              }
-            }}
           />
           <span className="kbd">esc</span>
         </div>
 
-        <div className="overlay-results" role="listbox" ref={resultsRef}>
+        <div
+          className="overlay-results"
+          id={resultsId}
+          role="listbox"
+          aria-label="Repositories, branches, and commits"
+          ref={resultsRef}
+        >
           {items.map((item, i) => {
             if (item.kind === "commit") {
               const commit = item.commit;
               return (
                 <div
                   key={`commit:${commit.hash}`}
+                  id={rowId(i)}
                   role="option"
                   aria-selected={i === sel}
+                  tabIndex={-1}
                   className={`overlay-result${i === sel ? " is-selected" : ""}`}
                   title={
                     commitContext === null
@@ -319,9 +379,11 @@ export function RepoSwitcherOverlay({
                 // hash-of-path id, and duplicate keys strand ghost rows in the
                 // DOM across re-renders.
                 key={hitKey(r)}
+                id={rowId(i)}
                 data-hit-key={hitKey(r)}
                 role="option"
                 aria-selected={i === sel}
+                tabIndex={-1}
                 className={`overlay-result${i === sel ? " is-selected" : ""}`}
                 onMouseEnter={() => setSel(i)}
                 onClick={() => onPick(r)}
