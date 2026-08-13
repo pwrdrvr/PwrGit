@@ -329,6 +329,39 @@ describe("RepoIndexer", () => {
 });
 
 describe("searchAll (FTS5)", () => {
+  it("indexes fetched remote-only branches and prunes deleted tracking refs", async () => {
+    const repoPath = join(root, "repoA");
+    const remoteRoot = mkdtempSync(join(tmpdir(), "pwrgit-search-remote-"));
+    const remotePath = join(remoteRoot, "repoA.git");
+    git(remoteRoot, ["init", "--bare", "repoA.git"]);
+    git(repoPath, ["remote", "add", "origin", remotePath]);
+    git(repoPath, ["branch", "releases/1.0"]);
+    git(repoPath, ["push", "origin", "releases/1.0"]);
+    git(repoPath, ["branch", "-D", "releases/1.0"]);
+
+    const profile = profileService.get(profileId);
+    if (profile === null) throw new Error("profile missing");
+    const repo = (await indexer.rescanProfile(profile)).find(
+      (candidate) => candidate.name === "repoA"
+    );
+    if (repo === undefined) throw new Error("repoA missing");
+
+    expect(indexer.searchAll("releases 1.0")).toContainEqual(
+      expect.objectContaining({
+        kind: "remote_branch",
+        repoId: repo.id,
+        repoName: "repoA",
+        name: "releases/1.0",
+        remoteName: "origin",
+        remoteRef: "refs/remotes/origin/releases/1.0"
+      })
+    );
+
+    git(repoPath, ["update-ref", "-d", "refs/remotes/origin/releases/1.0"]);
+    await indexer.refreshRepoWorktrees(repo.id);
+    expect(indexer.searchAll("releases 1.0")).toHaveLength(0);
+  });
+
   it("finds worktrees by branch prefix, with repo context", async () => {
     const profile = profileService.get(profileId);
     if (profile === null) throw new Error("profile missing");

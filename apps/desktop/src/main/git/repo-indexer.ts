@@ -4,6 +4,7 @@ import { basename, join } from "node:path";
 import {
   err,
   ok,
+  type BranchRef,
   type Profile,
   type ProfileId,
   type PrSummary,
@@ -17,7 +18,7 @@ import type { DB } from "../persistence/db";
 import { mapLimit } from "../util/map-limit";
 import type { GitExec } from "./dugite";
 import { buildFtsQuery } from "./fts-query";
-import { listWorktrees } from "./git-service";
+import { listBranches, listWorktrees } from "./git-service";
 import { claimWorktreeOwnership } from "./repo-ownership";
 
 const MAX_SCAN_DEPTH = 5;
@@ -90,9 +91,15 @@ export class RepoIndexer {
 
     // Resolve each found dir to its canonical (primary worktree) path via git,
     // deduping repos reachable from more than one worktree dir.
-    const canonical = new Map<string, { path: string; worktrees: Worktree[] }>();
+    const canonical = new Map<
+      string,
+      { path: string; worktrees: Worktree[]; remoteBranches: BranchRef[] | null }
+    >();
     await mapLimit([...found], GIT_CONCURRENCY, async (dir) => {
-      const listed = await listWorktrees(this.git, dir);
+      const [listed, listedBranches] = await Promise.all([
+        listWorktrees(this.git, dir),
+        listBranches(this.git, dir)
+      ]);
       if (!listed.ok || listed.value.length === 0) return;
       const primary = listed.value[0];
       if (primary === undefined || primary.bare) return;
@@ -103,16 +110,18 @@ export class RepoIndexer {
           .filter((w) => !w.bare)
           .map((w, i) =>
             worktreeShape(w.path, w.branch, i === 0)
-          )
+          ),
+        remoteBranches: listedBranches.ok ? listedBranches.value : null
       });
     });
 
     const seenRepoIds: string[] = [];
     const upsertRepo = this.db.transaction(() => {
-      for (const { path, worktrees } of canonical.values()) {
+      for (const { path, worktrees, remoteBranches } of canonical.values()) {
         const repoId = this.upsertRepoRow(profile.id, basename(path), path, "scan");
         seenRepoIds.push(repoId);
         this.syncWorktrees(repoId, worktrees);
+        if (remoteBranches !== null) this.syncRemoteBranches(repoId, remoteBranches);
       }
       this.pruneScannedRepos(profile.id, seenRepoIds);
     });
@@ -126,7 +135,10 @@ export class RepoIndexer {
     profileId: ProfileId,
     path: string
   ): Promise<Result<Repo>> {
-    const listed = await listWorktrees(this.git, path);
+    const [listed, listedBranches] = await Promise.all([
+      listWorktrees(this.git, path),
+      listBranches(this.git, path)
+    ]);
     if (!listed.ok) return listed;
     const primary = listed.value[0];
     if (primary === undefined || primary.bare) {
@@ -144,6 +156,7 @@ export class RepoIndexer {
     const run = this.db.transaction(() => {
       this.upsertRepoRow(profileId, basename(primary.path), primary.path, "manual");
       this.syncWorktrees(repoId, worktrees);
+      if (listedBranches.ok) this.syncRemoteBranches(repoId, listedBranches.value);
     });
     run();
 
@@ -250,7 +263,10 @@ export class RepoIndexer {
         message: "repo not found"
       });
     }
-    const listed = await listWorktrees(this.git, repo.path);
+    const [listed, listedBranches] = await Promise.all([
+      listWorktrees(this.git, repo.path),
+      listBranches(this.git, repo.path)
+    ]);
     if (!listed.ok) return listed;
     const primary = listed.value[0];
     // A repo row whose dir is actually a LINKED worktree of another repo (its
@@ -275,6 +291,7 @@ export class RepoIndexer {
       .filter((w) => !w.bare)
       .map((w, i) => worktreeShape(w.path, w.branch, i === 0));
     this.syncWorktrees(repoId, worktrees);
+    if (listedBranches.ok) this.syncRemoteBranches(repoId, listedBranches.value);
 
     const refreshed = this.getRepo(repoId);
     if (refreshed === null) {
@@ -327,7 +344,10 @@ export class RepoIndexer {
          ORDER BY bm25(search_fts, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0)
          LIMIT 60`
       )
-      .all(fts) as { entity_id: string; kind: "repo" | "worktree" }[];
+      .all(fts) as {
+      entity_id: string;
+      kind: "repo" | "worktree" | "remote_branch";
+    }[];
     if (matches.length === 0) return [];
 
     // One hit per entity: a dirty index (fossil DBs could double-insert via
@@ -344,6 +364,9 @@ export class RepoIndexer {
     const repoIds = unique.filter((m) => m.kind === "repo").map((m) => m.entity_id);
     const wtIds = unique
       .filter((m) => m.kind === "worktree")
+      .map((m) => m.entity_id);
+    const remoteBranchIds = unique
+      .filter((m) => m.kind === "remote_branch")
       .map((m) => m.entity_id);
 
     const marks = (n: number): string => Array(n).fill("?").join(",");
@@ -435,12 +458,56 @@ export class RepoIndexer {
       }
     }
 
+    const remoteBranchHits = new Map<string, RepoSearchHit>();
+    if (remoteBranchIds.length > 0) {
+      const rows = this.db
+        .prepare(
+          `SELECT b.id, b.repo_id, b.name, b.full_name, b.remote_name,
+                  r.name AS repo_name, r.path, r.profile_id,
+                  p.name AS profile_name
+           FROM remote_branches b
+           JOIN repos r ON r.id = b.repo_id
+           JOIN profiles p ON p.id = r.profile_id
+           WHERE b.id IN (${marks(remoteBranchIds.length)})`
+        )
+        .all(...remoteBranchIds) as {
+        id: string;
+        repo_id: string;
+        name: string;
+        full_name: string;
+        remote_name: string;
+        repo_name: string;
+        path: string;
+        profile_id: string;
+        profile_name: string;
+      }[];
+      for (const branch of rows) {
+        remoteBranchHits.set(branch.id, {
+          kind: "remote_branch",
+          repoId: branch.repo_id,
+          name: branch.name,
+          path: branch.path,
+          profileId: branch.profile_id,
+          profileName: branch.profile_name,
+          worktreeCount: 0,
+          pinned: false,
+          repoName: branch.repo_name,
+          remoteRef: branch.full_name,
+          remoteName: branch.remote_name
+        });
+      }
+    }
+
     // Emit in bm25 order; hydration misses (an index row whose entity vanished
     // mid-flight) are simply skipped.
     const out: RepoSearchHit[] = [];
     for (const m of unique) {
       const hit =
-        m.kind === "repo" ? repoHits.get(m.entity_id) : wtHits.get(m.entity_id);
+        m.kind === "repo"
+          ? repoHits.get(m.entity_id)
+          : m.kind === "worktree"
+            ? wtHits.get(m.entity_id)
+            : remoteBranchHits.get(m.entity_id);
       if (hit !== undefined) out.push(hit);
     }
     return out;
@@ -595,6 +662,45 @@ export class RepoIndexer {
     this.db
       .prepare(
         `DELETE FROM worktrees WHERE repo_id = ? AND id NOT IN (${placeholders})`
+      )
+      .run(repoId, ...seen);
+  }
+
+  private syncRemoteBranches(repoId: string, branches: BranchRef[]): void {
+    const seen: string[] = [];
+    const localNames = new Set(
+      branches.filter((branch) => !branch.isRemote).map((branch) => branch.name)
+    );
+    const upsert = this.db.prepare(
+      `INSERT INTO remote_branches (id, repo_id, name, full_name, remote_name)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         repo_id = excluded.repo_id,
+         name = excluded.name,
+         full_name = excluded.full_name,
+         remote_name = excluded.remote_name`
+    );
+    for (const branch of branches) {
+      if (!branch.isRemote) continue;
+      const slash = branch.name.indexOf("/");
+      if (slash <= 0 || slash === branch.name.length - 1) continue;
+      const remoteName = branch.name.slice(0, slash);
+      const name = branch.name.slice(slash + 1);
+      if (localNames.has(name)) continue;
+      const fullName = `refs/remotes/${branch.name}`;
+      const id = `${repoId}:${fullName}`;
+      seen.push(id);
+      upsert.run(id, repoId, name, fullName, remoteName);
+    }
+    if (seen.length === 0) {
+      this.db.prepare("DELETE FROM remote_branches WHERE repo_id = ?").run(repoId);
+      return;
+    }
+    const placeholders = seen.map(() => "?").join(",");
+    this.db
+      .prepare(
+        `DELETE FROM remote_branches
+         WHERE repo_id = ? AND id NOT IN (${placeholders})`
       )
       .run(repoId, ...seen);
   }

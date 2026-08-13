@@ -18,6 +18,7 @@ import { ToastHost } from "./features/shell/ToastHost";
 import { Rail } from "./features/rail/Rail";
 import { ProfileModal } from "./features/sidebar/ProfileModal";
 import { CloneRepoDialog } from "./features/sidebar/CloneRepoDialog";
+import { NewWorktreeModal } from "./features/sidebar/NewWorktreeModal";
 import { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
 import { Sidebar } from "./features/sidebar/Sidebar";
 import { profileWindowTitle } from "./lib/profileTitle";
@@ -37,6 +38,11 @@ export function App() {
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [overlayOpen, setOverlayOpen] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
+  const [searchNewWorktree, setSearchNewWorktree] = useState<{
+    repo: Repo;
+    branch: string;
+    startPoint: string;
+  } | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
   const worktreePrMonitorIdRef = useRef(crypto.randomUUID());
   // A queued "jump to this repo (and optionally this worktree)" — from ⌘F
@@ -219,9 +225,20 @@ export function App() {
         void openProfile(hit.profileId, hit.repoId, hit.worktreeId);
         return;
       }
+      if (hit.kind === "remote_branch" && hit.remoteRef !== undefined) {
+        const repo = repos.find((candidate) => candidate.id === hit.repoId);
+        if (repo !== undefined) {
+          setSearchNewWorktree({
+            repo,
+            branch: hit.name,
+            startPoint: hit.remoteRef
+          });
+          return;
+        }
+      }
       setPendingReveal({ repoId: hit.repoId, worktreeId: hit.worktreeId ?? null });
     },
-    [activeProfile, openProfile]
+    [activeProfile, openProfile, repos]
   );
 
   const onPickCommitSearch = useCallback((commit: Commit) => {
@@ -497,6 +514,19 @@ export function App() {
           onClose={() => setOverlayOpen(false)}
           onPick={onPickSearch}
           onPickCommit={onPickCommitSearch}
+        />
+      )}
+
+      {searchNewWorktree !== null && (
+        <NewWorktreeModal
+          repo={searchNewWorktree.repo}
+          initialBranch={searchNewWorktree.branch}
+          initialNewBranch
+          startPoint={searchNewWorktree.startPoint}
+          onCreate={(branch, newBranch, startPoint) =>
+            createWorktree(searchNewWorktree.repo.id, branch, newBranch, startPoint)
+          }
+          onClose={() => setSearchNewWorktree(null)}
         />
       )}
 

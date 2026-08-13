@@ -11,7 +11,7 @@ import { PinIcon } from "./WorktreeRow";
 const isMac = navigator.platform.startsWith("Mac");
 
 const hitKey = (hit: RepoSearchHit): string =>
-  `${hit.kind}:${hit.worktreeId ?? hit.repoId}`;
+  `${hit.kind}:${hit.worktreeId ?? hit.remoteRef ?? hit.repoId}`;
 
 type PaletteItem =
   | { kind: "commit"; commit: Commit }
@@ -47,6 +47,26 @@ function CommitIcon() {
     >
       <path d="M3 12h6M15 12h6" />
       <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function BranchIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="6" cy="5" r="2" />
+      <circle cx="6" cy="19" r="2" />
+      <circle cx="18" cy="8" r="2" />
+      <path d="M6 7v10M8 17c5 0 8-2 8-7" />
     </svg>
   );
 }
@@ -115,6 +135,7 @@ export function RepoSwitcherOverlay({
   // the handler's repo:changed event, and our copy keeps results stable (no
   // re-query, so rows don't jump while the overlay is open).
   const togglePin = (hit: RepoSearchHit) => {
+    if (hit.kind === "remote_branch") return;
     const pinned = !hit.pinned;
     setResults((prev) =>
       prev.map((h) => (hitKey(h) === hitKey(hit) ? { ...h, pinned } : h))
@@ -200,6 +221,7 @@ export function RepoSwitcherOverlay({
           if (statusesRef.current.has(key)) continue;
           const hit = byKey.get(key);
           if (hit === undefined) continue;
+          if (hit.kind === "remote_branch") continue;
           fill.request(key, async () => {
             const r = await dispatch("search:status", {
               repoId: hit.repoId,
@@ -304,7 +326,9 @@ export function RepoSwitcherOverlay({
                 onMouseEnter={() => setSel(i)}
                 onClick={() => onPick(r)}
               >
-              {r.kind === "worktree" ? (
+              {r.kind === "remote_branch" ? (
+                <BranchIcon />
+              ) : r.kind === "worktree" ? (
                 <svg
                   width="15"
                   height="15"
@@ -335,27 +359,29 @@ export function RepoSwitcherOverlay({
                 </svg>
               )}
               <span className="overlay-result__name">{r.name}</span>
-              <button
-                type="button"
-                className={`pin${r.pinned ? " is-pinned" : ""}`}
-                title={
-                  r.pinned
-                    ? `Unpin ${r.kind === "worktree" ? "worktree" : "repo"}`
-                    : `Pin ${r.kind === "worktree" ? "worktree" : "repo"}`
-                }
-                aria-label={
-                  r.pinned
-                    ? `Unpin ${r.kind === "worktree" ? "worktree" : "repo"}`
-                    : `Pin ${r.kind === "worktree" ? "worktree" : "repo"}`
-                }
-                tabIndex={-1}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  togglePin(r);
-                }}
-              >
-                <PinIcon filled={r.pinned} size={12} />
-              </button>
+              {r.kind !== "remote_branch" && (
+                <button
+                  type="button"
+                  className={`pin${r.pinned ? " is-pinned" : ""}`}
+                  title={
+                    r.pinned
+                      ? `Unpin ${r.kind === "worktree" ? "worktree" : "repo"}`
+                      : `Pin ${r.kind === "worktree" ? "worktree" : "repo"}`
+                  }
+                  aria-label={
+                    r.pinned
+                      ? `Unpin ${r.kind === "worktree" ? "worktree" : "repo"}`
+                      : `Pin ${r.kind === "worktree" ? "worktree" : "repo"}`
+                  }
+                  tabIndex={-1}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    togglePin(r);
+                  }}
+                >
+                  <PinIcon filled={r.pinned} size={12} />
+                </button>
+              )}
               {r.pr !== undefined && <PrChip pr={r.pr} />}
               {(() => {
                 const s = statuses.get(hitKey(r));
@@ -389,7 +415,9 @@ export function RepoSwitcherOverlay({
                 );
               })()}
               <span className="overlay-result__meta">
-                {r.kind === "worktree"
+                {r.kind === "remote_branch"
+                  ? `${r.repoName ?? ""} · ${r.remoteName ?? "remote"}`
+                  : r.kind === "worktree"
                   ? (r.repoName ?? "")
                   : `${r.worktreeCount} ${r.worktreeCount === 1 ? "wt" : "wts"}`}
               </span>
@@ -409,7 +437,7 @@ export function RepoSwitcherOverlay({
         <div className="overlay-foot">
           <span>↑↓ navigate</span>
           <span>↵ open</span>
-          {items[sel]?.kind === "repo" && (
+          {items[sel]?.kind === "repo" && items[sel].hit.kind !== "remote_branch" && (
             <span>{isMac ? "⌘P" : "ctrl+P"} pin</span>
           )}
           <span style={{ flex: 1 }} />

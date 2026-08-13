@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   LocalBranchSummary,
   RemoteBranchSummary,
@@ -38,6 +38,10 @@ export function localBranchForRemote(
   return refs.branches.find((candidate) => candidate.name === branch.name);
 }
 
+type BrowserBranch =
+  | { kind: "local"; branch: LocalBranchSummary }
+  | { kind: "remote"; branch: RemoteBranchSummary };
+
 export function RepoRefsModal({
   repo,
   refs,
@@ -68,16 +72,30 @@ export function RepoRefsModal({
     null
   );
   const q = query.trim().toLowerCase();
+  const allBranches = useMemo<BrowserBranch[]>(() => {
+    const localNames = new Set(refs.branches.map((branch) => branch.name));
+    return [
+      ...refs.branches.map((branch) => ({ kind: "local" as const, branch })),
+      ...refs.remotes.flatMap((remote) =>
+        remote.branches
+          .filter((branch) => !localNames.has(branch.name))
+          .map((branch) => ({ kind: "remote" as const, branch }))
+      )
+    ];
+  }, [refs]);
   const branches = useMemo(
     () =>
       q === ""
-        ? refs.branches
-        : refs.branches.filter((branch) =>
-            `${branch.name} ${branch.upstream ?? ""} ${branch.subject ?? ""}`
+        ? allBranches
+        : allBranches.filter(({ kind, branch }) =>
+            (kind === "local"
+              ? `${branch.name} ${branch.upstream ?? ""} ${branch.subject ?? ""}`
+              : `${branch.name} ${branch.qualifiedName} ${branch.subject ?? ""}`
+            )
               .toLowerCase()
               .includes(q)
           ),
-    [q, refs.branches]
+    [allBranches, q]
   );
   const remotes = useMemo(
     () =>
@@ -136,6 +154,18 @@ export function RepoRefsModal({
     onRefresh();
   };
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      if (remoteEditor !== null) setRemoteEditor(null);
+      else if (pushOpen) setPushOpen(false);
+      else onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose, pushOpen, remoteEditor]);
+
   return (
     <div className="overlay-backdrop" onClick={onClose}>
       <div
@@ -162,7 +192,7 @@ export function RepoRefsModal({
               className={tab === "branches" ? "is-active" : ""}
               onClick={() => setTab("branches")}
             >
-              Branches <span>{refs.branches.length}</span>
+              Branches <span>{allBranches.length}</span>
             </button>
             <button
               className={tab === "remotes" ? "is-active" : ""}
@@ -200,68 +230,116 @@ export function RepoRefsModal({
                 <span>Last commit</span>
                 <span />
               </div>
-              {branches.map((branch) => (
-                <div className="refs-table__row" key={branch.fullName}>
-                  <div className="refs-table__identity">
-                    <span className="refs-branch-icon">⑂</span>
-                    <div>
+              {branches.map((item) => {
+                if (item.kind === "remote") {
+                  const branch = item.branch;
+                  return (
+                    <div className="refs-table__row" key={branch.fullName}>
+                      <div className="refs-table__identity">
+                        <span className="refs-branch-icon">⑂</span>
+                        <div>
+                          <CopyTarget
+                            value={branch.name}
+                            label={`Copy branch name ${branch.name}`}
+                            hint={`${branch.qualifiedName}\nClick to copy branch name`}
+                            className="refs-copyable-name copyable"
+                          >
+                            <strong>{branch.name}</strong>
+                          </CopyTarget>
+                          {branch.subject !== undefined && (
+                            <small>{branch.subject}</small>
+                          )}
+                        </div>
+                      </div>
                       <CopyTarget
-                        value={branch.name}
-                        label={`Copy branch name ${branch.name}`}
-                        hint={`${branch.name}\nClick to copy branch name`}
-                        className="refs-copyable-name copyable"
+                        value={branch.qualifiedName}
+                        label={`Copy remote branch ${branch.qualifiedName}`}
+                        hint={`${branch.qualifiedName}\nClick to copy remote branch`}
+                        className="refs-table__muted refs-copyable-upstream copyable"
                       >
-                        <strong>{branch.name}</strong>
+                        {branch.qualifiedName}
                       </CopyTarget>
-                      {branch.subject !== undefined && <small>{branch.subject}</small>}
+                      <span className="refs-status refs-status--remote">Remote</span>
+                      <span className="refs-table__muted">
+                        {branch.lastCommitAt === undefined
+                          ? "—"
+                          : shortWhen(branch.lastCommitAt, now)}
+                      </span>
+                      <button
+                        className="refs-row-action"
+                        onClick={() => createRemoteWorktree(branch)}
+                      >
+                        New worktree
+                      </button>
                     </div>
+                  );
+                }
+                const branch = item.branch;
+                return (
+                  <div className="refs-table__row" key={branch.fullName}>
+                    <div className="refs-table__identity">
+                      <span className="refs-branch-icon">⑂</span>
+                      <div>
+                        <CopyTarget
+                          value={branch.name}
+                          label={`Copy branch name ${branch.name}`}
+                          hint={`${branch.name}\nClick to copy branch name`}
+                          className="refs-copyable-name copyable"
+                        >
+                          <strong>{branch.name}</strong>
+                        </CopyTarget>
+                        {branch.subject !== undefined && (
+                          <small>{branch.subject}</small>
+                        )}
+                      </div>
+                    </div>
+                    {branch.upstream === undefined ? (
+                      <span className="refs-table__muted">—</span>
+                    ) : (
+                      <CopyTarget
+                        value={branch.upstream}
+                        label={`Copy upstream branch ${branch.upstream}`}
+                        hint={`${branch.upstream}\nClick to copy upstream branch`}
+                        className="refs-table__muted refs-copyable-upstream copyable"
+                      >
+                        {branch.upstream}
+                      </CopyTarget>
+                    )}
+                    <span className={`refs-status refs-status--${branch.tracking}`}>
+                      {trackingLabel(branch)}
+                    </span>
+                    <span className="refs-table__muted">
+                      {branch.lastCommitAt === undefined
+                        ? "—"
+                        : shortWhen(branch.lastCommitAt, now)}
+                    </span>
+                    {branch.checkedOutWorktreeIds.length > 0 ? (
+                      <button
+                        className="refs-row-action"
+                        onClick={() => {
+                          const id = branch.checkedOutWorktreeIds[0];
+                          if (id !== undefined) onRevealWorktree(id);
+                          onClose();
+                        }}
+                      >
+                        Show worktree
+                      </button>
+                    ) : (
+                      <button
+                        className="refs-row-action"
+                        onClick={() => {
+                          onCreateWorktree(branch.name, false);
+                          onClose();
+                        }}
+                      >
+                        New worktree
+                      </button>
+                    )}
                   </div>
-                  {branch.upstream === undefined ? (
-                    <span className="refs-table__muted">—</span>
-                  ) : (
-                    <CopyTarget
-                      value={branch.upstream}
-                      label={`Copy upstream branch ${branch.upstream}`}
-                      hint={`${branch.upstream}\nClick to copy upstream branch`}
-                      className="refs-table__muted refs-copyable-upstream copyable"
-                    >
-                      {branch.upstream}
-                    </CopyTarget>
-                  )}
-                  <span className={`refs-status refs-status--${branch.tracking}`}>
-                    {trackingLabel(branch)}
-                  </span>
-                  <span className="refs-table__muted">
-                    {branch.lastCommitAt === undefined
-                      ? "—"
-                      : shortWhen(branch.lastCommitAt, now)}
-                  </span>
-                  {branch.checkedOutWorktreeIds.length > 0 ? (
-                    <button
-                      className="refs-row-action"
-                      onClick={() => {
-                        const id = branch.checkedOutWorktreeIds[0];
-                        if (id !== undefined) onRevealWorktree(id);
-                        onClose();
-                      }}
-                    >
-                      Show worktree
-                    </button>
-                  ) : (
-                    <button
-                      className="refs-row-action"
-                      onClick={() => {
-                        onCreateWorktree(branch.name, false);
-                        onClose();
-                      }}
-                    >
-                      New worktree
-                    </button>
-                  )}
-                </div>
-              ))}
+                );
+              })}
               {branches.length === 0 && (
-                <div className="refs-browser__empty">No matching local branches.</div>
+                <div className="refs-browser__empty">No matching branches.</div>
               )}
             </div>
           )}

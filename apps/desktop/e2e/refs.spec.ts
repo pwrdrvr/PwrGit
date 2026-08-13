@@ -6,6 +6,16 @@ import { addRootAndExpand } from "./fixtures/steps";
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
 
+function addRemoteOnlyBranch(
+  box: GitSandbox,
+  repo: ReturnType<GitSandbox["makeRepoBehindRemote"]>,
+  branch = "releases/1.0"
+): void {
+  repo.createBranch(branch);
+  box.git(repo.path, "push", "origin", branch);
+  box.git(repo.path, "branch", "-D", branch);
+}
+
 test.afterEach(async () => {
   if (handle !== null) {
     await handle.cleanup();
@@ -13,6 +23,83 @@ test.afterEach(async () => {
   }
   sandbox?.cleanup();
   sandbox = null;
+});
+
+test("closes the repository refs browser with Escape", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  box.makeRepoBehindRemote("escape-refs");
+
+  handle = await launchApp({ worktreeRoot: box.worktreeRoot });
+  const { window } = handle;
+  await addRootAndExpand(window, handle, box, "escape-refs");
+
+  await window.getByRole("button", { name: /^Remotes/ }).click();
+  await window
+    .getByRole("button", { name: "Manage remotes and remote branches…" })
+    .click();
+  const browser = window.getByRole("dialog", {
+    name: "escape-refs branches and remotes"
+  });
+  await expect(browser).toBeVisible();
+
+  await window.keyboard.press("Escape");
+
+  await expect(browser).toHaveCount(0);
+});
+
+test("includes fetched remote-only branches in the branches browser", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepoBehindRemote("remote-refs");
+  addRemoteOnlyBranch(box, repo);
+
+  handle = await launchApp({ worktreeRoot: box.worktreeRoot });
+  const { window } = handle;
+  await addRootAndExpand(window, handle, box, "remote-refs");
+
+  await window.getByRole("button", { name: /^Remotes/ }).click();
+  await window
+    .getByRole("button", { name: "Manage remotes and remote branches…" })
+    .click();
+  const browser = window.getByRole("dialog", {
+    name: "remote-refs branches and remotes"
+  });
+  await browser.getByRole("button", { name: /^Branches/ }).click();
+  await browser.getByPlaceholder("Filter branches…").fill("releases/1.0");
+
+  const release = browser.locator(".refs-table__row", {
+    hasText: "releases/1.0"
+  });
+  await expect(release).toBeVisible();
+  await expect(release).toContainText("origin/releases/1.0");
+  await expect(release.getByRole("button", { name: "New worktree" })).toBeVisible();
+});
+
+test("finds fetched remote-only branches from the command palette", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepoBehindRemote("remote-search");
+  addRemoteOnlyBranch(box, repo);
+
+  handle = await launchApp({ worktreeRoot: box.worktreeRoot });
+  const { window } = handle;
+  await addRootAndExpand(window, handle, box, "remote-search");
+
+  await window.keyboard.press("Meta+k");
+  await window.locator(".overlay-search input").fill("releases/1.0");
+
+  const release = window.locator(".overlay-result", {
+    hasText: "releases/1.0"
+  });
+  await expect(release).toBeVisible();
+  await expect(release).toContainText("remote-search");
+  await release.click();
+  const newWorktree = window.locator(".modal", {
+    hasText: "New worktree · remote-search"
+  });
+  await expect(newWorktree.locator(".modal__input")).toHaveValue("releases/1.0");
+  await expect(newWorktree).toContainText("Starting from refs/remotes/origin/releases/1.0");
 });
 
 test("browses local branches and nested remotes, then pushes to a test target", async () => {
