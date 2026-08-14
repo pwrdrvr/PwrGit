@@ -5,6 +5,7 @@ import { emitEvent } from "../ipc";
 import type { ProfileService } from "../profiles/profile-service";
 import type { RepoIndexer } from "./repo-indexer";
 import { registerRepoHandlers } from "./repo-handlers";
+import type { WorktreeRefresher } from "./worktree-handlers";
 
 vi.mock("../ipc", () => ({
   registerIpc: vi.fn(),
@@ -30,6 +31,11 @@ const canonicalRepo: Repo = {
 };
 
 describe("repo handlers", () => {
+  const refresher = {
+    refreshWorktree: vi.fn(async () => undefined),
+    refreshRepoWorktrees: vi.fn(async () => undefined)
+  } satisfies WorktreeRefresher;
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -47,7 +53,7 @@ describe("repo handlers", () => {
       )
     } as unknown as RepoIndexer;
     const bus = new CommandBus();
-    registerRepoHandlers(bus, indexer, {} as ProfileService);
+    registerRepoHandlers(bus, indexer, {} as ProfileService, refresher);
 
     const result = await bus.dispatch("repo:refreshWorktrees", {
       repoId: fossilRepo.id
@@ -68,9 +74,10 @@ describe("repo handlers", () => {
     // profileId rides on the outcome, so the handler no longer has to read the
     // repo before deleting it just to learn where to send the event.
     expect(getRepo).not.toHaveBeenCalled();
+    expect(refresher.refreshRepoWorktrees).not.toHaveBeenCalled();
   });
 
-  it("refreshes the tree after an ordinary reconcile", async () => {
+  it("refreshes reconciled worktree state before completing", async () => {
     const indexer = {
       getRepo: vi.fn(() => canonicalRepo),
       refreshRepoWorktrees: vi.fn(async () =>
@@ -84,15 +91,18 @@ describe("repo handlers", () => {
       )
     } as unknown as RepoIndexer;
     const bus = new CommandBus();
-    registerRepoHandlers(bus, indexer, {} as ProfileService);
+    registerRepoHandlers(bus, indexer, {} as ProfileService, refresher);
 
     const result = await bus.dispatch("repo:refreshWorktrees", {
       repoId: canonicalRepo.id
     });
 
     expect(result.ok).toBe(true);
-    expect(emitEvent).toHaveBeenCalledExactlyOnceWith("repo:changed", {
-      profileId: canonicalRepo.profileId
-    });
+    expect(refresher.refreshRepoWorktrees).toHaveBeenCalledExactlyOnceWith(
+      canonicalRepo.id
+    );
+    // The real refresher emits only after its state probes finish; the handler
+    // must not also publish the stale pre-probe tree.
+    expect(emitEvent).not.toHaveBeenCalled();
   });
 });

@@ -24,7 +24,7 @@ export type WorktreeRefresher = {
   /** Recompute one worktree; emit worktree:changed only if it actually moved. */
   refreshWorktree: (worktreeId: string) => Promise<void>;
   /** Recompute all worktrees of a repo; emit repo:changed once when done. */
-  refreshRepoWorktrees: (repoId: string) => void;
+  refreshRepoWorktrees: (repoId: string) => void | Promise<void>;
 };
 
 export function createWorktreeRefresher(
@@ -53,21 +53,20 @@ export function createWorktreeRefresher(
     }
   };
 
-  const refreshRepoWorktrees = (repoId: string): void => {
+  const refreshRepoWorktrees = async (repoId: string): Promise<void> => {
     const ids = (
       db
         .prepare("SELECT id FROM worktrees WHERE repo_id = ?")
         .all(repoId) as { id: string }[]
     ).map((r) => r.id);
     if (ids.length === 0) return;
-    void state.refreshMany(ids).then(() => {
-      const repo = db
-        .prepare("SELECT profile_id FROM repos WHERE id = ?")
-        .get(repoId) as { profile_id: string } | undefined;
-      if (repo !== undefined) {
-        emitEvent("repo:changed", { profileId: repo.profile_id });
-      }
-    });
+    await state.refreshMany(ids);
+    const repo = db
+      .prepare("SELECT profile_id FROM repos WHERE id = ?")
+      .get(repoId) as { profile_id: string } | undefined;
+    if (repo !== undefined) {
+      emitEvent("repo:changed", { profileId: repo.profile_id });
+    }
   };
 
   return { refreshWorktree, refreshRepoWorktrees };
