@@ -112,6 +112,7 @@ test("reconciles worktrees changed outside PwrGit", async () => {
   sandbox = createGitSandbox();
   const repo = sandbox.makeRepo("delta");
   const linked = repo.addWorktree("feature/old");
+  sandbox.commitEmptyAt(linked, "old worktree activity", 1_700_000_000);
   handle = await launchApp();
   const { window } = handle;
 
@@ -139,6 +140,9 @@ test("reconciles worktrees changed outside PwrGit", async () => {
   ).toBeVisible();
   await expect(branchRow(window, "external/new")).toBeVisible();
   await expect(branchRow(window, "feature/old")).toHaveCount(0);
+  await expect(
+    window.locator(".wt-section__body .wt-row__branch").first()
+  ).toHaveText("external/new");
   await expect(window.locator(".app-toast__message")).toHaveText(
     "1 discovered · 1 updated"
   );

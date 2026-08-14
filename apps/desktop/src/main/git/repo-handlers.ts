@@ -3,11 +3,13 @@ import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import type { ProfileService } from "../profiles/profile-service";
 import type { RepoIndexer } from "./repo-indexer";
+import type { WorktreeRefresher } from "./worktree-handlers";
 
 export function registerRepoHandlers(
   bus: CommandBus,
   indexer: RepoIndexer,
-  profiles: ProfileService
+  profiles: ProfileService,
+  refresher: WorktreeRefresher
 ): void {
   bus.register("repo:list", (req) => {
     const profileId = req.profileId ?? profiles.getActiveId();
@@ -34,14 +36,16 @@ export function registerRepoHandlers(
   bus.register("repo:refreshWorktrees", async (req) => {
     const result = await indexer.refreshRepoWorktrees(req.repoId);
     if (!result.ok) return result;
-    // Both outcomes persist a change — a reconcile rewrites the worktree rows,
-    // a deindex drops the repo row — so both need the tree re-read.
-    emitEvent("repo:changed", {
-      profileId:
-        result.value.outcome === "reconciled"
-          ? result.value.repo.profileId
-          : result.value.profileId
-    });
+    if (result.value.outcome === "reconciled") {
+      // A newly discovered worktree has no cached activity timestamp yet.
+      // Compute the reconciled family before the command completes so Recent
+      // sorting does not strand that row at the bottom as "undated".
+      await refresher.refreshRepoWorktrees(req.repoId);
+    } else {
+      // Deindexing leaves no worktrees to compute, but the deleted repo row
+      // still needs to disappear from this profile's tree.
+      emitEvent("repo:changed", { profileId: result.value.profileId });
+    }
     return result;
   });
 

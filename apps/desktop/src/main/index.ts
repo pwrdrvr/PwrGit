@@ -329,7 +329,7 @@ if (!gotSingleInstanceLock) {
         return reveal;
       }
     });
-    registerRepoHandlers(bus, indexer, profiles);
+    registerRepoHandlers(bus, indexer, profiles, refresher);
     registerCloneHandlers(bus, cloneService);
     registerWorktreeHandlers(bus, stateService, db, refresher, execGit, (id) => {
       activeWorktreeId = id;
