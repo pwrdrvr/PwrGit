@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   Commit,
   Profile,
-  RemoteBranchReveal,
   Repo,
   RepoSearchHit,
   Worktree
@@ -21,6 +20,10 @@ import { ProfileModal } from "./features/sidebar/ProfileModal";
 import { CloneRepoDialog } from "./features/sidebar/CloneRepoDialog";
 import { NewWorktreeModal } from "./features/sidebar/NewWorktreeModal";
 import { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
+import {
+  pendingRevealForSearchHit,
+  type PendingRepoReveal
+} from "./features/sidebar/search-reveal";
 import { Sidebar } from "./features/sidebar/Sidebar";
 import { profileWindowTitle } from "./lib/profileTitle";
 import { dispatch, subscribe, windowProfileId } from "./lib/pwrgit";
@@ -48,11 +51,8 @@ export function App() {
   const worktreePrMonitorIdRef = useRef(crypto.randomUUID());
   // A queued "jump to this repo (and optionally this worktree)" — from ⌘F
   // picks and cross-window reveals — resolved once the repo list has it.
-  const [pendingReveal, setPendingReveal] = useState<{
-    repoId: string;
-    worktreeId: string | null;
-    remoteBranch: RemoteBranchReveal | null;
-  } | null>(null);
+  const [pendingReveal, setPendingReveal] =
+    useState<PendingRepoReveal | null>(null);
 
   const {
     profiles,
@@ -262,11 +262,7 @@ export function App() {
           return;
         }
       }
-      setPendingReveal({
-        repoId: hit.repoId,
-        worktreeId: hit.worktreeId ?? null,
-        remoteBranch: null
-      });
+      setPendingReveal(pendingRevealForSearchHit(hit));
     },
     [activeProfile, openProfile, repos]
   );

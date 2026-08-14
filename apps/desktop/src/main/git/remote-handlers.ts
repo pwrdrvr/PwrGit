@@ -187,16 +187,17 @@ export function registerRemoteHandlers(
     const worktree = worktreeOf(req.worktreeId);
     if (worktree === null) return err(notFound);
     const startedAt = Date.now();
-    const result = await operations.runRepository(worktree.repoId, () =>
-      fetchRemote(execGit, worktree.path)
-    );
+    const result = await operations.runRepository(worktree.repoId, async () => {
+      const fetched = await fetchRemote(execGit, worktree.path);
+      if (fetched.ok) await refreshRemoteBranches(worktree.repoId, "fetch");
+      return fetched;
+    });
     if (!result.ok) return result;
     logMain(
       "info",
       "remote",
       `fetched ${worktree.path} (${seconds(startedAt)})`
     );
-    await refreshRemoteBranches(worktree.repoId, "fetch");
     refresher.refreshWorktree(req.worktreeId);
     return ok(null);
   });
@@ -205,18 +206,19 @@ export function registerRemoteHandlers(
     const repo = repoOf(req.repoId);
     if (repo === null) return err({ ...notFound, message: "repo not found" });
     const startedAt = Date.now();
-    const result = await operations.runRepository(req.repoId, () =>
-      req.remote === undefined
+    const result = await operations.runRepository(req.repoId, async () => {
+      const fetched = await (req.remote === undefined
         ? fetchAllRemotes(execGit, repo.path)
-        : fetchNamedRemote(execGit, repo.path, req.remote)
-    );
+        : fetchNamedRemote(execGit, repo.path, req.remote));
+      if (fetched.ok) await refreshRemoteBranches(req.repoId, "fetch");
+      return fetched;
+    });
     if (!result.ok) return result;
     logMain(
       "info",
       "remote",
       `fetched ${req.remote ?? "all remotes"} for ${repo.path} (${seconds(startedAt)})`
     );
-    await refreshRemoteBranches(req.repoId, "fetch");
     refresher.refreshRepoWorktrees(req.repoId);
     return ok(null);
   });
@@ -224,10 +226,13 @@ export function registerRemoteHandlers(
   bus.register("remote:add", async (req) => {
     const repo = repoOf(req.repoId);
     if (repo === null) return err({ ...notFound, message: "repo not found" });
-    const result = await addRemote(execGit, repo.path, req);
+    const result = await operations.runRepository(req.repoId, async () => {
+      const added = await addRemote(execGit, repo.path, req);
+      if (added.ok) await refreshRemoteBranches(req.repoId, "add remote");
+      return added;
+    });
     if (!result.ok) return result;
     logMain("info", "remote", `added remote ${req.name} to ${repo.path}`);
-    await refreshRemoteBranches(req.repoId, "add remote");
     refresher.refreshRepoWorktrees(req.repoId);
     return ok(null);
   });
@@ -235,14 +240,17 @@ export function registerRemoteHandlers(
   bus.register("remote:update", async (req) => {
     const repo = repoOf(req.repoId);
     if (repo === null) return err({ ...notFound, message: "repo not found" });
-    const result = await updateRemote(execGit, repo.path, req);
+    const result = await operations.runRepository(req.repoId, async () => {
+      const updated = await updateRemote(execGit, repo.path, req);
+      if (updated.ok) await refreshRemoteBranches(req.repoId, "update remote");
+      return updated;
+    });
     if (!result.ok) return result;
     logMain(
       "info",
       "remote",
       `updated remote ${req.originalName} as ${req.name} in ${repo.path}`
     );
-    await refreshRemoteBranches(req.repoId, "update remote");
     refresher.refreshRepoWorktrees(req.repoId);
     return ok(null);
   });
@@ -293,10 +301,13 @@ export function registerRemoteHandlers(
   bus.register("remote:remove", async (req) => {
     const repo = repoOf(req.repoId);
     if (repo === null) return err({ ...notFound, message: "repo not found" });
-    const result = await removeRemote(execGit, repo.path, req.remote);
+    const result = await operations.runRepository(req.repoId, async () => {
+      const removed = await removeRemote(execGit, repo.path, req.remote);
+      if (removed.ok) await refreshRemoteBranches(req.repoId, "remove remote");
+      return removed;
+    });
     if (!result.ok) return result;
     logMain("info", "remote", `removed remote ${req.remote} from ${repo.path}`);
-    await refreshRemoteBranches(req.repoId, "remove remote");
     refresher.refreshRepoWorktrees(req.repoId);
     return ok(null);
   });
@@ -304,11 +315,19 @@ export function registerRemoteHandlers(
   bus.register("remote:planPushRefs", async (req) => {
     const repo = repoOf(req.repoId);
     if (repo === null) return err({ ...notFound, message: "repo not found" });
-    const result = await operations.runRepository(req.repoId, () =>
-      planPushRefs(execGit, repo.path, req.sourceRef, req.destinations)
-    );
+    const result = await operations.runRepository(req.repoId, async () => {
+      const planned = await planPushRefs(
+        execGit,
+        repo.path,
+        req.sourceRef,
+        req.destinations
+      );
+      if (planned.ok) {
+        await refreshRemoteBranches(req.repoId, "plan push refs");
+      }
+      return planned;
+    });
     refresher.refreshRepoWorktrees(req.repoId);
-    if (result.ok) await refreshRemoteBranches(req.repoId, "plan push refs");
     return result;
   });
 
@@ -316,12 +335,13 @@ export function registerRemoteHandlers(
     const repo = repoOf(req.repoId);
     if (repo === null) return err({ ...notFound, message: "repo not found" });
     const startedAt = Date.now();
-    const result = await operations.runRepository(req.repoId, () =>
-      pushPlannedRefs(execGit, repo.path, req.plans)
-    );
+    const result = await operations.runRepository(req.repoId, async () => {
+      const pushed = await pushPlannedRefs(execGit, repo.path, req.plans);
+      if (pushed.ok) await refreshRemoteBranches(req.repoId, "push refs");
+      return pushed;
+    });
     refresher.refreshRepoWorktrees(req.repoId);
     if (!result.ok) return result;
-    await refreshRemoteBranches(req.repoId, "push refs");
     const pushed = result.value.filter((item) => item.outcome === "pushed").length;
     logMain(
       "info",
@@ -392,7 +412,7 @@ export function registerRemoteHandlers(
           });
         };
         try {
-          return await operations.run(req.worktreeId, () =>
+          const pulled = await operations.run(req.worktreeId, () =>
             pullFastForward(execGit, path, reportPhase, {
               signal: watchdog.signal,
               onActivity: () => watchdog.noteActivity(),
@@ -426,6 +446,14 @@ export function registerRemoteHandlers(
               }
             })
           );
+          if (pulled.ok) {
+            // Git has finished; branch-index maintenance remains under the
+            // repository lock, but it must not be counted as a stalled pull.
+            watchdog.finish();
+            recoveryWatchdog?.finish();
+            await refreshRemoteBranches(worktree.repoId, "pull");
+          }
+          return pulled;
         } finally {
           watchdog.finish();
           recoveryWatchdog?.finish();
@@ -489,10 +517,6 @@ export function registerRemoteHandlers(
       "remote",
       `pull finished ${path}: ${outcome} (${seconds(startedAt)})`
     );
-    const pulledWorktree = worktreeOf(req.worktreeId);
-    if (pulledWorktree !== null) {
-      await refreshRemoteBranches(pulledWorktree.repoId, "pull");
-    }
     return result;
   });
 
@@ -500,10 +524,13 @@ export function registerRemoteHandlers(
     const worktree = worktreeOf(req.worktreeId);
     if (worktree === null) return err(notFound);
     const startedAt = Date.now();
-    const result = await pushRemote(execGit, worktree.path);
+    const result = await operations.runRepository(worktree.repoId, async () => {
+      const pushed = await pushRemote(execGit, worktree.path);
+      if (pushed.ok) await refreshRemoteBranches(worktree.repoId, "push");
+      return pushed;
+    });
     if (!result.ok) return result;
     logMain("info", "remote", `pushed ${worktree.path} (${seconds(startedAt)})`);
-    await refreshRemoteBranches(worktree.repoId, "push");
     refresher.refreshWorktree(req.worktreeId);
     return ok(null);
   });

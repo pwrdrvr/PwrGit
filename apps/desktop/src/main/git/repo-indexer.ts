@@ -28,6 +28,7 @@ const HYDRATION_GIT_CONCURRENCY = 4;
 const REMOTE_BRANCH_WRITE_CHUNK_SIZE = 100;
 const DISCOVERY_YIELD_EVERY = 32;
 const PROFILE_RESCAN_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const HYDRATION_RETRY_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const SKIP_DIRS = new Set([
   "node_modules",
   ".git",
@@ -99,6 +100,7 @@ export type RepoIndexerOptions = {
   remoteBranchWriteChunkSize?: number;
   discoveryYieldEvery?: number;
   profileRescanIntervalMs?: number;
+  hydrationRetryIntervalMs?: number;
   now?: () => number;
 };
 
@@ -115,6 +117,7 @@ export class RepoIndexer {
   private readonly remoteBranchWriteChunkSize: number;
   private readonly discoveryYieldEvery: number;
   private readonly profileRescanIntervalMs: number;
+  private readonly hydrationRetryIntervalMs: number;
   private readonly now: () => number;
 
   constructor(
@@ -136,6 +139,10 @@ export class RepoIndexer {
       1,
       options.profileRescanIntervalMs ?? PROFILE_RESCAN_INTERVAL_MS
     );
+    this.hydrationRetryIntervalMs = Math.max(
+      1,
+      options.hydrationRetryIntervalMs ?? HYDRATION_RETRY_INTERVAL_MS
+    );
     this.now = options.now ?? Date.now;
   }
 
@@ -146,7 +153,9 @@ export class RepoIndexer {
         `SELECT 1
          FROM repos r
          LEFT JOIN remote_branch_index_state s ON s.repo_id = r.id
-         WHERE r.profile_id = ? AND s.repo_id IS NULL
+         WHERE r.profile_id = ?
+           AND r.source = 'scan'
+           AND s.repo_id IS NULL
          LIMIT 1`
       )
       .get(profileId);
@@ -349,11 +358,14 @@ export class RepoIndexer {
         `SELECT r.id, r.path
          FROM repos r
          LEFT JOIN remote_branch_index_state s ON s.repo_id = r.id
+         LEFT JOIN remote_branch_hydration_retry h ON h.repo_id = r.id
          WHERE s.repo_id IS NULL
+           AND (h.repo_id IS NULL OR h.retry_after_ms <= ?)
            AND (? IS NULL OR r.profile_id <> ? OR r.source <> 'scan')
          ORDER BY r.id`
       )
       .all(
+        this.now(),
         options.excludeScannedProfileId ?? null,
         options.excludeScannedProfileId ?? null
       ) as { id: string; path: string }[];
@@ -378,7 +390,7 @@ export class RepoIndexer {
       for (const item of inspected) {
         if (!item.result.ok) {
           failed += 1;
-          this.markRemoteBranchesIndexed(item.repoId);
+          this.scheduleRemoteBranchHydrationRetry(item.repoId);
           continue;
         }
         await this.syncRemoteBranchesChunked(
@@ -978,12 +990,28 @@ export class RepoIndexer {
   }
 
   private markRemoteBranchesIndexed(repoId: string): void {
+    this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO remote_branch_index_state (repo_id)
+           VALUES (?)`
+        )
+        .run(repoId);
+      this.db
+        .prepare("DELETE FROM remote_branch_hydration_retry WHERE repo_id = ?")
+        .run(repoId);
+    })();
+  }
+
+  private scheduleRemoteBranchHydrationRetry(repoId: string): void {
     this.db
       .prepare(
-        `INSERT OR IGNORE INTO remote_branch_index_state (repo_id)
-         VALUES (?)`
+        `INSERT INTO remote_branch_hydration_retry (repo_id, retry_after_ms)
+         VALUES (?, ?)
+         ON CONFLICT(repo_id) DO UPDATE SET
+           retry_after_ms = excluded.retry_after_ms`
       )
-      .run(repoId);
+      .run(repoId, this.now() + this.hydrationRetryIntervalMs);
   }
 
   private markProfileScanned(profileId: ProfileId): void {

@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -258,6 +258,72 @@ describe("RepoIndexer", () => {
     const hits = isolatedIndexer.searchAll("releases/1.0");
     expect(hits.some((hit) => hit.repoName === "manual")).toBe(true);
     expect(hits.some((hit) => hit.repoName === "scanned")).toBe(false);
+  });
+
+  it("retries unavailable manual-repo hydration on a bounded schedule", async () => {
+    const container = mkdtempSync(join(tmpdir(), "pwrgit-retry-hydrate-"));
+    const repoPath = join(container, "manual");
+    const unavailablePath = join(container, "manual-unavailable");
+    const remotePath = join(container, "remote.git");
+    initRepo(repoPath);
+    git(container, ["init", "--bare", "remote.git"]);
+    git(repoPath, ["remote", "add", "origin", remotePath]);
+    git(repoPath, ["branch", "releases/1.0"]);
+    git(repoPath, ["push", "origin", "releases/1.0"]);
+    git(repoPath, ["branch", "-D", "releases/1.0"]);
+
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({
+      name: "Retry",
+      email: "retry@example.com",
+      roots: []
+    });
+    let now = 1_000;
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit, {
+      hydrationRetryIntervalMs: 100,
+      now: () => now
+    });
+    expect((await isolatedIndexer.indexRepoAt(profile.id, repoPath)).ok).toBe(
+      true
+    );
+    isolatedDb.prepare("DELETE FROM remote_branch_index_state").run();
+    isolatedDb.prepare("DELETE FROM remote_branches").run();
+
+    renameSync(repoPath, unavailablePath);
+    try {
+      expect(await isolatedIndexer.hydrateRemoteBranches()).toEqual({
+        refreshed: 0,
+        failed: 1
+      });
+      expect(
+        isolatedDb
+          .prepare("SELECT COUNT(*) AS n FROM remote_branch_index_state")
+          .get()
+      ).toEqual({ n: 0 });
+      expect(await isolatedIndexer.hydrateRemoteBranches()).toEqual({
+        refreshed: 0,
+        failed: 0
+      });
+    } finally {
+      renameSync(unavailablePath, repoPath);
+    }
+
+    now += 100;
+    expect(await isolatedIndexer.hydrateRemoteBranches()).toEqual({
+      refreshed: 1,
+      failed: 0
+    });
+    expect(
+      isolatedIndexer
+        .searchAll("releases/1.0")
+        .some((hit) => hit.repoName === "manual")
+    ).toBe(true);
+    expect(
+      isolatedDb
+        .prepare("SELECT COUNT(*) AS n FROM remote_branch_hydration_retry")
+        .get()
+    ).toEqual({ n: 0 });
   });
 
   it("matches slash-containing configured remote names by longest prefix", async () => {
