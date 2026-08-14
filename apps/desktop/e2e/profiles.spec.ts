@@ -154,3 +154,45 @@ test("profile menu closes on outside click and Escape", async () => {
   await window.keyboard.press("Escape");
   await expect(window.locator(".profile-menu")).toHaveCount(0);
 });
+
+test("a cross-profile remote branch opens its new-worktree flow in the owning window", async () => {
+  boxA = createGitSandbox();
+  const repo = boxA.makeRepoBehindRemote("remote-profile");
+  repo.createBranch("releases/1.0");
+  boxA.git(repo.path, "push", "origin", "releases/1.0");
+  boxA.git(repo.path, "branch", "-D", "releases/1.0");
+
+  handle = await launchApp({ worktreeRoot: boxA.worktreeRoot });
+  const { window } = handle;
+  await window.locator(".profile-chip").click();
+  await window.locator(".profile-menu__action", { hasText: "New profile" }).click();
+  await window.getByPlaceholder("e.g. Acme or Personal").fill("Remote team");
+  await window.getByPlaceholder("you@company.com").fill("remote@example.com");
+  await handle.setPickDirectory(boxA.reposDir);
+  await window.locator(".modal--profile .rootlist__add").click();
+  const windowPromise = handle.app.waitForEvent("window");
+  await window.locator(".modal--profile .modal__create").click();
+  const remoteWindow = await windowPromise;
+  await remoteWindow.waitForSelector("#root");
+  await remoteWindow.locator(".lens-chip", { hasText: "All" }).click();
+  await expect(
+    remoteWindow.locator(".repo-row__name", { hasText: "remote-profile" })
+  ).toBeVisible({ timeout: 20_000 });
+
+  await window.keyboard.press("Meta+k");
+  await window.locator(".overlay-search input").fill("releases/1.0");
+  const release = window.locator(".overlay-result", {
+    hasText: "releases/1.0"
+  });
+  await expect(release).toBeVisible({ timeout: 20_000 });
+  await release.click();
+
+  const modal = remoteWindow.locator(".modal", {
+    hasText: "New worktree · remote-profile"
+  });
+  await expect(modal).toBeVisible();
+  await expect(modal.locator(".modal__input")).toHaveValue("releases/1.0");
+  await expect(modal).toContainText(
+    "Starting from refs/remotes/origin/releases/1.0"
+  );
+});

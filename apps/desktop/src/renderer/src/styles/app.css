@@ -2325,6 +2325,9 @@ textarea,
 .refs-status--ahead {
   color: var(--success-text);
 }
+.refs-status--remote {
+  color: var(--accent);
+}
 .refs-status--behind,
 .refs-status--diverged,
 .refs-status--upstream_missing {

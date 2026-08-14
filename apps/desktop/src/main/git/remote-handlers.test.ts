@@ -33,6 +33,7 @@ import {
   testSshRemoteRecovery
 } from "./ssh-remote-recovery";
 import type { WorktreeRefresher } from "./worktree-handlers";
+import type { RepoIndexer } from "./repo-indexer";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 vi.mock("./git-service", async (importOriginal) => {
@@ -552,6 +553,119 @@ describe("remote handlers", () => {
       ok(null)
     ]);
     expect(started).toEqual(["worktree", "repo"]);
+  });
+
+  it("keeps remote-branch replacement inside the repository fetch lock", async () => {
+    let finishFirstRefresh!: () => void;
+    const firstRefresh = new Promise<void>((resolve) => {
+      finishFirstRefresh = resolve;
+    });
+    let signalFirstRefresh!: () => void;
+    const firstRefreshStarted = new Promise<void>((resolve) => {
+      signalFirstRefresh = resolve;
+    });
+    const started: string[] = [];
+    vi.mocked(fetchRemote).mockImplementationOnce(async () => {
+      started.push("worktree-fetch");
+      return ok(undefined);
+    });
+    vi.mocked(fetchNamedRemote).mockImplementationOnce(async () => {
+      started.push("repo-fetch");
+      return ok(undefined);
+    });
+    let refreshCount = 0;
+    const indexer = {
+      refreshRepoRemoteBranches: vi.fn(async () => {
+        refreshCount += 1;
+        started.push(`refresh-${refreshCount}`);
+        if (refreshCount === 1) {
+          signalFirstRefresh();
+          await firstRefresh;
+        }
+        return ok(undefined);
+      })
+    } as unknown as RepoIndexer;
+    const db = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" }))
+      }))
+    } as unknown as DB;
+    const refresher = {
+      refreshWorktree: vi.fn(async () => undefined),
+      refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    const bus = new CommandBus();
+    registerRemoteHandlers(
+      bus,
+      db,
+      refresher,
+      new WorktreeOperationQueue(),
+      indexer
+    );
+
+    const fromWorktree = bus.dispatch("remote:fetch", {
+      worktreeId: "worktree-1"
+    });
+    const fromRepo = bus.dispatch("remote:fetchRepo", {
+      repoId: "repo-1",
+      remote: "origin"
+    });
+
+    await firstRefreshStarted;
+    expect(started).toEqual(["worktree-fetch", "refresh-1"]);
+
+    finishFirstRefresh();
+    await expect(Promise.all([fromWorktree, fromRepo])).resolves.toEqual([
+      ok(null),
+      ok(null)
+    ]);
+    expect(started).toEqual([
+      "worktree-fetch",
+      "refresh-1",
+      "repo-fetch",
+      "refresh-2"
+    ]);
+  });
+
+  it("refreshes remote-branch search after fetching repository refs", async () => {
+    const db = {
+      prepare: vi.fn(() => ({ get: vi.fn(() => ({ path: "/repos/project" })) }))
+    } as unknown as DB;
+    const refresher = {
+      refreshWorktree: vi.fn(async () => undefined),
+      refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    const indexer = {
+      refreshRepoRemoteBranches: vi.fn(async () => ok(undefined))
+    } as unknown as RepoIndexer;
+    const bus = new CommandBus();
+    registerRemoteHandlers(
+      bus,
+      db,
+      refresher,
+      new WorktreeOperationQueue(),
+      indexer
+    );
+
+    await expect(
+      bus.dispatch("remote:fetchRepo", { repoId: "repo-1", remote: "origin" })
+    ).resolves.toMatchObject({ ok: true });
+
+    expect(indexer.refreshRepoRemoteBranches).toHaveBeenCalledExactlyOnceWith(
+      "repo-1"
+    );
+
+    vi.mocked(indexer.refreshRepoRemoteBranches).mockClear();
+    await expect(
+      bus.dispatch("remote:planPushRefs", {
+        repoId: "repo-1",
+        sourceRef: "refs/heads/main",
+        destinations: [{ remote: "origin", branch: "main" }]
+      })
+    ).resolves.toMatchObject({ ok: true });
+    expect(indexer.refreshRepoRemoteBranches).toHaveBeenCalledExactlyOnceWith(
+      "repo-1"
+    );
   });
 
   it("inspects without refreshing and refreshes every repo worktree once after reset", async () => {

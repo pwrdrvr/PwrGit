@@ -3,6 +3,7 @@ import type {
   CreateProfileRequest,
   Profile,
   ProfileList,
+  RemoteBranchReveal,
   UpdateProfileRequest
 } from "@pwrgit/shared";
 import { dispatch, subscribe, windowProfileId } from "../lib/pwrgit";
@@ -14,7 +15,8 @@ export type UseProfiles = ProfileList & {
   openProfile: (
     profileId: string,
     revealRepoId?: string,
-    revealWorktreeId?: string
+    revealWorktreeId?: string,
+    revealRemoteBranch?: RemoteBranchReveal
   ) => Promise<void>;
   /** Create a profile and open its window. Returns an error message or null. */
   createProfile: (req: CreateProfileRequest) => Promise<string | null>;
@@ -49,12 +51,14 @@ export function useProfiles(): UseProfiles {
     async (
       profileId: string,
       revealRepoId?: string,
-      revealWorktreeId?: string
+      revealWorktreeId?: string,
+      revealRemoteBranch?: RemoteBranchReveal
     ) => {
       await dispatch("profile:openWindow", {
         profileId,
         ...(revealRepoId !== undefined ? { revealRepoId } : {}),
-        ...(revealWorktreeId !== undefined ? { revealWorktreeId } : {})
+        ...(revealWorktreeId !== undefined ? { revealWorktreeId } : {}),
+        ...(revealRemoteBranch !== undefined ? { revealRemoteBranch } : {})
       });
     },
     []

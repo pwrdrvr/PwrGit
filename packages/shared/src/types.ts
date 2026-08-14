@@ -521,11 +521,17 @@ export type SearchHitStatus = {
   behind: number | null;
 };
 
+/** Remote-only branch action carried between profile-bound windows. */
+export type RemoteBranchReveal = {
+  name: string;
+  fullName: string;
+};
+
 export type RepoSearchHit = {
-  /** "repo" = the repo itself; "worktree" = a branch match within one. */
-  kind: "repo" | "worktree";
+  /** Repo itself, checked-out worktree, or a fetched remote-only branch. */
+  kind: "repo" | "worktree" | "remote_branch";
   repoId: RepoId;
-  /** Repo name — or the branch name for worktree hits. */
+  /** Repo name, checked-out branch, or remote-only branch name. */
   name: string;
   path: string;
   profileId: ProfileId;
@@ -535,7 +541,11 @@ export type RepoSearchHit = {
   pinned: boolean;
   /** The matched worktree (worktree hits only). */
   worktreeId?: WorktreeId;
-  /** Owning repo's name, shown as context on worktree hits. */
+  /** Fully-qualified fetched ref (remote-branch hits only). */
+  remoteRef?: string;
+  /** Configured remote that owns the fetched ref (remote-branch hits only). */
+  remoteName?: string;
+  /** Owning repo's name, shown as context on branch hits. */
   repoName?: string;
   /** The branch's PR, when known (worktree hits only). */
   pr?: PrSummary;
