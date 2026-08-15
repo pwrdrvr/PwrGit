@@ -56,17 +56,19 @@ test("the lens row fits, and names every lens for the keyboard", async () => {
   });
 
   // Icons carry no text, so the count each label used to show has to survive in
-  // the accessible name — otherwise the information is simply gone.
-  await expect(lensChip(window, "Behind")).toHaveAttribute(
-    "aria-label",
-    /^Behind \(\d+\)$/
-  );
+  // the accessible name — otherwise the information is simply gone. "All" is
+  // the count to assert on: it's just repos.length, whereas Behind/Stale read
+  // per-worktree state that is computed lazily when a repo is expanded, so
+  // they are legitimately 0 on a list nobody has opened yet.
   await expect(lensChip(window, "All")).toHaveAttribute(
     "aria-label",
     /^All \(15\)$/
   );
-  // And the lenses that have something in them say so at a glance.
-  await expect(window.locator(".lens-chip__dot")).not.toHaveCount(0);
+  // The other branch of the same logic: a lens with nothing in it carries no
+  // parenthetical and no dot, so neither is decoration.
+  await expect(lensChip(window, "Recent")).toHaveAttribute("aria-label", "Recent");
+  await expect(lensChip(window, "Recent").locator(".lens-chip__dot")).toHaveCount(0);
+  await expect(lensChip(window, "All").locator(".lens-chip__dot")).toHaveCount(1);
   // The active lens still spells its count out.
   await expect(window.locator(".lens-filter__count")).toHaveText("15");
 
