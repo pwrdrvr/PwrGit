@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
-import { lensChip } from "./fixtures/steps";
+import { expandRepoGroup, lensChip } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -148,6 +148,7 @@ test("sidebar rows are sized by their content, not by a fixed box", async () => 
   // Worktree rows have the same trap in a different child — the 24px kebab —
   // so guard them too. 11px mono at 1.25 is 13.75, + 2px padding each side + 2
   // border ≈ 20; 22 is the rounding allowance.
+  await expandRepoGroup(window, "dense");
   const wtRow = window.locator(".wt-row").first();
   await expect(wtRow).toBeVisible();
   const wtHeight = await wtRow.evaluate((el) => el.getBoundingClientRect().height);
