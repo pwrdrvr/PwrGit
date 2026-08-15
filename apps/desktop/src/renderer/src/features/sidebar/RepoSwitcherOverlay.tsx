@@ -13,9 +13,47 @@ const isMac = navigator.platform.startsWith("Mac");
 const hitKey = (hit: RepoSearchHit): string =>
   `${hit.kind}:${hit.repoId}:${hit.worktreeId ?? hit.remoteRef ?? ""}`;
 
-type PaletteItem =
+export type PaletteItem =
   | { kind: "commit"; commit: Commit }
   | { kind: "repo"; hit: RepoSearchHit };
+
+export const paletteItemKey = (item: PaletteItem): string =>
+  item.kind === "commit" ? `commit:${item.commit.hash}` : hitKey(item.hit);
+
+export function selectedPaletteItemIndex(
+  items: PaletteItem[],
+  selectedKey: string | null
+): number {
+  if (selectedKey === null) return 0;
+  const index = items.findIndex((item) => paletteItemKey(item) === selectedKey);
+  return index < 0 ? 0 : index;
+}
+
+export function buildPaletteItems(
+  commits: Commit[],
+  results: RepoSearchHit[],
+  query: string
+): PaletteItem[] {
+  const exactName = query.trim().normalize("NFC").toLowerCase();
+  const exactRepos: RepoSearchHit[] = [];
+  const otherResults: RepoSearchHit[] = [];
+  for (const hit of results) {
+    if (
+      hit.kind === "repo" &&
+      hit.name.normalize("NFC").toLowerCase() === exactName
+    ) {
+      exactRepos.push(hit);
+    } else {
+      otherResults.push(hit);
+    }
+  }
+
+  return [
+    ...exactRepos.map((hit) => ({ kind: "repo" as const, hit })),
+    ...commits.map((commit) => ({ kind: "commit" as const, commit })),
+    ...otherResults.map((hit) => ({ kind: "repo" as const, hit }))
+  ];
+}
 
 function SearchIcon() {
   return (
@@ -91,7 +129,7 @@ export function RepoSwitcherOverlay({
   const now = useRelativeClock();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<RepoSearchHit[]>([]);
-  const [sel, setSel] = useState(0);
+  const [selectedItemKey, setSelectedItemKey] = useState<string | null>(null);
   const [statuses, setStatuses] = useState<Map<string, SearchHitStatus>>(
     () => new Map()
   );
@@ -123,12 +161,10 @@ export function RepoSwitcherOverlay({
     [commitResults, directCommit]
   );
   const items = useMemo<PaletteItem[]>(
-    () => [
-      ...allCommitResults.map((commit) => ({ kind: "commit" as const, commit })),
-      ...results.map((hit) => ({ kind: "repo" as const, hit }))
-    ],
-    [allCommitResults, results]
+    () => buildPaletteItems(allCommitResults, results, query),
+    [allCommitResults, results, query]
   );
+  const sel = selectedPaletteItemIndex(items, selectedItemKey);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -187,11 +223,6 @@ export function RepoSwitcherOverlay({
     };
   }, [commitWorktreeId, hashQuery]);
 
-  useEffect(() => setSel(0), [query]);
-  useEffect(() => {
-    setSel((current) => Math.min(current, Math.max(0, items.length - 1)));
-  }, [items.length]);
-
   // Keyboard selection remains virtual so the query keeps focus. Keep the
   // active descendant visible when arrows move beyond the scroll viewport.
   useEffect(() => {
@@ -206,6 +237,11 @@ export function RepoSwitcherOverlay({
   const pickItem = (item: PaletteItem | undefined): void => {
     if (item?.kind === "commit") onPickCommit(item.commit);
     else if (item?.kind === "repo") onPick(item.hit);
+  };
+
+  const selectItem = (index: number): void => {
+    const item = items[index];
+    setSelectedItemKey(item === undefined ? null : paletteItemKey(item));
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
@@ -224,14 +260,12 @@ export function RepoSwitcherOverlay({
     }
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setSel((current) =>
-        Math.min(current + 1, Math.max(0, items.length - 1))
-      );
+      selectItem(Math.min(sel + 1, Math.max(0, items.length - 1)));
       return;
     }
     if (event.key === "ArrowUp") {
       event.preventDefault();
-      setSel((current) => Math.max(current - 1, 0));
+      selectItem(Math.max(sel - 1, 0));
       return;
     }
     if (event.key === "Enter") {
@@ -319,7 +353,10 @@ export function RepoSwitcherOverlay({
           <input
             ref={inputRef}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setSelectedItemKey(null);
+            }}
             aria-label="Jump to repo, branch, or commit"
             aria-controls={items.length > 0 ? resultsId : undefined}
             aria-activedescendant={
@@ -355,7 +392,7 @@ export function RepoSwitcherOverlay({
                       ? commit.hash
                       : `${commitContext.repoName} · ${commitContext.branch} · ${commit.hash}`
                   }
-                  onMouseEnter={() => setSel(i)}
+                  onMouseEnter={() => selectItem(i)}
                   onClick={() => onPickCommit(commit)}
                 >
                   <CommitIcon />
@@ -385,7 +422,7 @@ export function RepoSwitcherOverlay({
                 aria-selected={i === sel}
                 tabIndex={-1}
                 className={`overlay-result${i === sel ? " is-selected" : ""}`}
-                onMouseEnter={() => setSel(i)}
+                onMouseEnter={() => selectItem(i)}
                 onClick={() => onPick(r)}
               >
               {r.kind === "remote_branch" ? (
