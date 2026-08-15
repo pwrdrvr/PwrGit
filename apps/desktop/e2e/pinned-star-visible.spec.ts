@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
+import { lensChip } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -22,7 +23,7 @@ test("the Pinned lens keeps pinned stars visible", async () => {
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
   await window.getByRole("button", { name: /Add folders/i }).click();
-  await window.locator(".lens-chip", { hasText: "All" }).click();
+  await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(3, {
     timeout: 20_000
   });
@@ -32,7 +33,7 @@ test("the Pinned lens keeps pinned stars visible", async () => {
       .locator(".pin")
       .click();
   }
-  await window.locator(".lens-chip", { hasText: "Pinned" }).click();
+  await lensChip(window, "Pinned").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(3);
 
   // Park the pointer well clear of the list and drop focus to the body. The
@@ -68,7 +69,7 @@ test("a drag keeps stars visible but lets the grip hide again", async () => {
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
   await window.getByRole("button", { name: /Add folders/i }).click();
-  await window.locator(".lens-chip", { hasText: "All" }).click();
+  await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(3, {
     timeout: 20_000
   });
@@ -78,7 +79,7 @@ test("a drag keeps stars visible but lets the grip hide again", async () => {
       .locator(".pin")
       .click();
   }
-  await window.locator(".lens-chip", { hasText: "Pinned" }).click();
+  await lensChip(window, "Pinned").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(3);
 
   // Drag, which focuses the source row: a `draggable` element with a tab stop

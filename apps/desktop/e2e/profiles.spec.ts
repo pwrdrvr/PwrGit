@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
+import { lensChip } from "./fixtures/steps";
 
 // One window per profile: creating/picking a profile opens (or focuses) its
 // own window — it never repoints the window you're in.
@@ -57,7 +58,7 @@ test("creating a profile opens its own window with repos from all roots", async 
   await expect(window.locator(".profile-chip__name")).toHaveText("Personal");
 
   // The new window lists repos from BOTH roots.
-  await acmeWindow.locator(".lens-chip", { hasText: "All" }).click();
+  await lensChip(acmeWindow, "All").click();
   await expect(
     acmeWindow.locator(".repo-row__name", { hasText: "acme-svc" })
   ).toBeVisible({ timeout: 20_000 });
@@ -77,7 +78,9 @@ test("creating a profile opens its own window with repos from all roots", async 
   await expect(sidebarResizer).toHaveAttribute("aria-valuenow", "240");
   const lensWidths = await acmeWindow.locator(".lens-chip").evaluateAll((chips) =>
     chips.map((chip) => ({
-      label: chip.textContent?.trim() ?? "unknown",
+      // The chips are icon-only, so their name is the accessible one — reading
+      // textContent here would label every failure "unknown".
+      label: chip.getAttribute("aria-label") ?? "unknown",
       available: chip.clientWidth,
       required: chip.scrollWidth
     }))

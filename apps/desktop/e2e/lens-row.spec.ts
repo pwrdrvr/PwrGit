@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
+import { lensChip } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -15,43 +16,32 @@ test.afterEach(async () => {
 });
 
 /**
- * Widest rendered content vs. the space the chip actually has.
+ * Does the lens row fit inside the sidebar?
  *
- * `scrollWidth` is not enough here. `.lens-chip` centers its content, so an
- * overrun spills off BOTH edges, and overflow past the *start* edge doesn't
- * show up in `scrollWidth` — a chip clipped symmetrically can report
- * `scrollWidth === clientWidth` while visibly missing glyphs. A Range over the
- * chip's contents measures the laid-out content box instead: `overflow: hidden`
- * clips painting, not layout, so the rect still reports the true width.
+ * This replaces a per-chip glyph-clipping measurement. The old row was five
+ * text chips in a fixed five-track grid, and the failure mode was a label
+ * losing glyphs off both edges — so the guard had to measure content vs. track
+ * with a Range. Icons are fixed-size, so the only thing that can go wrong now
+ * is the ROW overflowing its container, which is one measurement.
  */
-async function chipOverflows(window: Page): Promise<{ label: string; over: number }[]> {
-  return window.locator(".lens-chip").evaluateAll((els) =>
-    els
-      .map((el) => {
-        const range = document.createRange();
-        range.selectNodeContents(el);
-        const content = range.getBoundingClientRect().width;
-        range.detach();
-        return {
-          label: (el.textContent ?? "").trim(),
-          over: Math.round((content - el.clientWidth) * 100) / 100
-        };
-      })
-      // 1px of slack. Grid track sizes round to layout units while the Range
-      // rect is fractional, so a chip that fits exactly still measures a few
-      // tenths over — the fixed layout sits at +0.38px on "Behind 3". The bug
-      // this guards against is far larger: the equal-track layout overran by
-      // 6.5px and 1.4px. Anything past 1px is a real glyph, not rounding.
-      .filter((r) => r.over > 1)
-  );
+async function lensRowOverflow(window: Page): Promise<number> {
+  return window.locator(".lens-filter").evaluate((el) => {
+    const parent = el.parentElement;
+    if (parent === null) return 0;
+    return Math.round(
+      (el.getBoundingClientRect().right - parent.getBoundingClientRect().right) *
+        100
+    ) / 100;
+  });
 }
 
-test("lens chips never clip their labels or counts", async () => {
+test("the lens row fits, and names every lens for the keyboard", async () => {
   sandbox = createGitSandbox();
-  // Enough repos for a three-digit "All", and several genuinely behind so the
-  // "Behind" chip carries a count too — "Behind 3" is the pairing that used to
-  // overrun its equal-width track and lose glyphs off both ends.
-  for (let i = 0; i < 12; i += 1) sandbox.makeRepo(`repo-${String(i).padStart(2, "0")}`);
+  // A three-digit "All" and a real "Behind" count — the pairing that used to
+  // overrun the equal-width tracks.
+  for (let i = 0; i < 12; i += 1) {
+    sandbox.makeRepo(`repo-${String(i).padStart(2, "0")}`);
+  }
   for (const name of ["behind-a", "behind-b", "behind-c"]) {
     sandbox.makeRepoBehindRemote(name, { behindBy: 2 });
   }
@@ -60,42 +50,67 @@ test("lens chips never clip their labels or counts", async () => {
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
   await window.getByRole("button", { name: /Add folders/i }).click();
-  await window.locator(".lens-chip", { hasText: "All" }).click();
+  await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(15, {
     timeout: 20_000
   });
 
-  // Counts must actually be on screen, or this test would pass against the
-  // very layout it exists to catch.
-  await expect(window.locator(".lens-chip__count").first()).toBeVisible();
+  // Icons carry no text, so the count each label used to show has to survive in
+  // the accessible name — otherwise the information is simply gone.
+  await expect(lensChip(window, "Behind")).toHaveAttribute(
+    "aria-label",
+    /^Behind \(\d+\)$/
+  );
+  await expect(lensChip(window, "All")).toHaveAttribute(
+    "aria-label",
+    /^All \(15\)$/
+  );
+  // And the lenses that have something in them say so at a glance.
+  await expect(window.locator(".lens-chip__dot")).not.toHaveCount(0);
+  // The active lens still spells its count out.
+  await expect(window.locator(".lens-filter__count")).toHaveText("15");
 
-  expect(await chipOverflows(window)).toEqual([]);
+  expect(await lensRowOverflow(window)).toBeLessThanOrEqual(0);
 });
 
-test("lens chips never clip at the minimum sidebar width", async () => {
+test("the lens row survives the narrowest sidebar at the largest text size", async () => {
   sandbox = createGitSandbox();
-  for (let i = 0; i < 12; i += 1) sandbox.makeRepo(`repo-${String(i).padStart(2, "0")}`);
+  for (let i = 0; i < 12; i += 1) {
+    sandbox.makeRepo(`repo-${String(i).padStart(2, "0")}`);
+  }
 
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
   await window.getByRole("button", { name: /Add folders/i }).click();
-  await window.locator(".lens-chip", { hasText: "All" }).click();
+  await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(12, {
     timeout: 20_000
   });
 
-  // 240 is useColumnResize's floor for the sidebar. Below 310 the compact
-  // container-query block takes over — a different track template, so it needs
-  // its own coverage.
-  await window.evaluate(() =>
-    window.localStorage.setItem("pwrgit.sidebarWidth", "240")
-  );
+  // 240 is useColumnResize's floor. Combined with the largest text notch this
+  // is the case the OLD row could not survive at all: its own CSS note recorded
+  // "Pinned 13" clearing by ~0.5px at 320px, so one notch overflowed it. Icons
+  // don't read the type scale, which is the whole point of the change.
+  await window.evaluate(() => {
+    window.localStorage.setItem("pwrgit.sidebarWidth", "240");
+    document.documentElement.setAttribute("data-sidebar-text", "xl");
+  });
   await window.reload();
-  await window.locator(".lens-chip", { hasText: "All" }).click();
+  await window.evaluate(() =>
+    document.documentElement.setAttribute("data-sidebar-text", "xl")
+  );
+  await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(12, {
     timeout: 20_000
   });
 
-  expect(await chipOverflows(window)).toEqual([]);
+  // The names did grow — otherwise this asserts nothing about the notch.
+  const nameSize = await window
+    .locator(".repo-row__name")
+    .first()
+    .evaluate((el) => getComputedStyle(el).fontSize);
+  expect(nameSize).toBe("15px");
+
+  expect(await lensRowOverflow(window)).toBeLessThanOrEqual(0);
 });

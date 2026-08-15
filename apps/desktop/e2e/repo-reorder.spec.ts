@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
-import { addRootAndExpand, branchRow } from "./fixtures/steps";
+import { addRootAndExpand, branchRow, lensChip } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -27,7 +27,7 @@ async function pinnedSandbox(): Promise<Page> {
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
   await window.getByRole("button", { name: /Add folders/i }).click();
-  await window.locator(".lens-chip", { hasText: "All" }).click();
+  await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(3, {
     timeout: 20_000
   });
@@ -39,7 +39,7 @@ async function pinnedSandbox(): Promise<Page> {
       .locator(".pin")
       .click();
   }
-  await window.locator(".lens-chip", { hasText: "Pinned" }).click();
+  await lensChip(window, "Pinned").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(3);
   expect(await repoNames(window)).toEqual(["alpha", "bravo", "charlie"]);
   return window;
@@ -130,7 +130,7 @@ test("the computed lenses stay computed — no drag handle outside Pinned", asyn
     window.locator(".repo-row").first()
   ).toHaveClass(/is-arrangeable/);
 
-  await window.locator(".lens-chip", { hasText: "All" }).click();
+  await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(3);
   await expect(window.locator(".repo-row.is-arrangeable")).toHaveCount(0);
   await expect(window.locator(".repo-row__handle")).toHaveCount(0);
@@ -184,6 +184,6 @@ test("the via-wt marker appears only in the lens whose claim it makes", async ()
   // In All, the repo is not "in Pinned", so the marker must not claim it is.
   await expect(window.locator(".repo-row__pin-via")).toHaveCount(0);
 
-  await window.locator(".lens-chip", { hasText: "Pinned" }).click();
+  await lensChip(window, "Pinned").click();
   await expect(window.locator(".repo-row__pin-via")).toHaveCount(1);
 });
