@@ -221,9 +221,17 @@ export function RepoRefsSections({
             className={`ref-fetch-all${fetching === "*" ? " is-fetching" : ""}`}
             aria-label={`Fetch all remotes for ${repo.name}`}
             title="Fetch all remotes and prune deleted branches"
-            disabled={fetching !== null || (refs?.remotes.length ?? 0) === 0}
+            /* `disabled` stays for the static case (there is nothing to fetch),
+               but NOT for the in-flight one: Chromium blurs an element the
+               moment it becomes disabled, so a fetch started from the keyboard
+               threw focus to <body> until it returned (SC 2.4.3). Busy is
+               aria-disabled, which says the same thing and keeps the button
+               focusable — same fix as .wt-refresh in RepoRow. */
+            disabled={(refs?.remotes.length ?? 0) === 0}
+            aria-disabled={fetching !== null || (refs?.remotes.length ?? 0) === 0}
             onClick={(event) => {
               event.stopPropagation();
+              if (fetching !== null) return;
               void fetchRemote();
             }}
           >
@@ -266,9 +274,11 @@ export function RepoRefsSections({
                         fetching === remote.name ? " is-fetching" : ""
                       }`}
                       aria-label={`Fetch ${remote.name}`}
-                      disabled={fetching !== null}
+                      /* Busy, not unavailable — see .ref-fetch-all above. */
+                      aria-disabled={fetching !== null}
                       onClick={(event) => {
                         event.stopPropagation();
+                        if (fetching !== null) return;
                         void fetchRemote(remote.name);
                       }}
                     >

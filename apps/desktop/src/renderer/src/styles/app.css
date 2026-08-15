@@ -1188,8 +1188,11 @@ textarea,
   font: 600 11px/1 var(--font-mono);
   cursor: pointer;
 }
-.ref-mini-action:hover:not(:disabled),
-.ref-fetch-all:hover:not(:disabled) {
+/* "Busy" is aria-disabled rather than `disabled` on these, so that a fetch
+   started from the keyboard does not blur the button — see RepoRefsSections.
+   The hover treatment has to honour both spellings. */
+.ref-mini-action:hover:not(:disabled):not([aria-disabled="true"]),
+.ref-fetch-all:hover:not(:disabled):not([aria-disabled="true"]) {
   color: var(--accent-bright);
   border-color: var(--accent-border);
   background: var(--accent-soft);
