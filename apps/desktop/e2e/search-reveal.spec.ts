@@ -34,6 +34,15 @@ test("⌘F search pick expands the repo, selects Primary, and scrolls it into vi
   await window.keyboard.press("Meta+f");
   await expect(window.locator(".overlay-panel")).toBeVisible();
   await window.locator(".overlay-search input").fill("agent-kit");
+  // Wait for the query's results to land before Enter. `repo:search` is an
+  // async round-trip with no debounce, and Enter picks `items[sel]` with sel
+  // pinned to 0 — so pressing it early picks whatever topped the PREVIOUS
+  // (empty-query) browse list, which is alphabetically "aaa-park" here. The
+  // window is invisible when the app is idle and opens up whenever the
+  // sidebar has more background status work in flight.
+  await expect(window.locator(".overlay-result").first()).toContainText(
+    "agent-kit"
+  );
   await window.keyboard.press("Enter");
 
   // The main pane switched to agent-kit…
@@ -226,6 +235,10 @@ test("moving selection via ⌘F leaves no second 'selected-looking' row behind",
   // Now move the selection from OUTSIDE the sidebar: ⌘F → pick alpha-kit.
   await window.keyboard.press("Meta+f");
   await window.locator(".overlay-search input").fill("alpha-kit");
+  // Same race as above — wait for the query's own results before picking.
+  await expect(window.locator(".overlay-result").first()).toContainText(
+    "alpha-kit"
+  );
   await window.keyboard.press("Enter");
   await expect(window.locator(".titlebar__repo")).toHaveText("alpha-kit", {
     timeout: 20_000
