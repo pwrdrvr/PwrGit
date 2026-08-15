@@ -77,6 +77,7 @@ const INHERITS_FROM_DARK = new Set([
   // Not colors.
   "--font-sans",
   "--font-mono",
+  "--sidebar-title-size", // appearance axis, theme-neutral (see tokens.css)
   "--radius-sm",
   "--radius-md",
   "--radius-lg",

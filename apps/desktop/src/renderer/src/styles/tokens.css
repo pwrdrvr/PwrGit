@@ -21,6 +21,16 @@
   --font-sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
   --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
 
+  /* Sidebar title size — the user-adjustable text-size axis (Settings →
+     Appearance → Sidebar text size), mirroring PwrAgnt's token of the same
+     name. 13px is the "md" default and, like the other appearance axes,
+     carries no attribute; the notch ladder at the bottom of this file moves it
+     ±2px. Repo names read it directly and worktree branches derive from it
+     (−1px), so the header/row hierarchy survives every notch. Counts, tags,
+     and section labels deliberately hold still — a notch should read as
+     "bigger names there", not as page zoom. */
+  --sidebar-title-size: 13px;
+
   /* Surfaces */
   --bg-app: #000000;
   --bg-titlebar: #050505;
@@ -216,4 +226,26 @@
      card and visually overrides its rounded corners. */
   --shadow-popover: 0 18px 48px color-mix(in srgb, var(--shadow-base) 18%, transparent);
   --shadow-overlay: 0 32px 80px color-mix(in srgb, var(--shadow-base) 24%, transparent);
+}
+
+/* ---------------------------------------------------------------------------
+   Appearance axes — user-adjustable notches applied as `data-*` on <html>.
+
+   These are NOT theme blocks: they carry no colors and are declared once, not
+   per theme (see `--sidebar-title-size` in `:root` above, and the "Not colors"
+   exemptions in theme-contract.test.ts). Only the named surface's typography
+   scales, so a notch reads as "bigger names in the sidebar" rather than a page
+   zoom. "md" is the tuned default and, like the theme, carries no attribute.
+   --------------------------------------------------------------------------- */
+:root[data-sidebar-text="xs"] {
+  --sidebar-title-size: 11px;
+}
+:root[data-sidebar-text="sm"] {
+  --sidebar-title-size: 12px;
+}
+:root[data-sidebar-text="lg"] {
+  --sidebar-title-size: 14px;
+}
+:root[data-sidebar-text="xl"] {
+  --sidebar-title-size: 15px;
 }
