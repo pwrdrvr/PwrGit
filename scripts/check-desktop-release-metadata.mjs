@@ -18,6 +18,10 @@ const verifyAsarContentsPath = resolve(
   repoRoot,
   "apps/desktop/scripts/verify-asar-contents.mjs",
 );
+const verifyEmbeddedGitNoticesPath = resolve(
+  repoRoot,
+  "apps/desktop/scripts/verify-embedded-git-notices.mjs",
+);
 const windowsArchiveScriptPath = resolve(
   repoRoot,
   "scripts/release/archive-windows-signing-input.ps1",
@@ -151,6 +155,10 @@ const releaseWorkflow = readFileSync(releaseWorkflowPath, "utf8");
 const workflowsReadme = readFileSync(workflowsReadmePath, "utf8");
 const releaseScript = readFileSync(releaseScriptPath, "utf8");
 const verifyAsarContents = readFileSync(verifyAsarContentsPath, "utf8");
+const verifyEmbeddedGitNotices = readFileSync(
+  verifyEmbeddedGitNoticesPath,
+  "utf8",
+);
 const windowsArchiveScript = readFileSync(windowsArchiveScriptPath, "utf8");
 const trustedSigningScript = readFileSync(trustedSigningScriptPath, "utf8");
 
@@ -270,6 +278,7 @@ for (const expected of [
   "--config.node-linker=hoisted",
   "--config.win.azureSignOptions.publisherName",
   "PWRGIT_ASAR_MODULE_ROOT",
+  "PWRGIT_NOTICE_SOURCE_ROOT",
   "--require-signing",
 ]) {
   assertContains(releaseScript, "apps/desktop/scripts/release.mjs", expected);
@@ -281,6 +290,11 @@ assertContains(
   verifyAsarContents,
   "apps/desktop/scripts/verify-asar-contents.mjs",
   "PWRGIT_ASAR_MODULE_ROOT",
+);
+assertContains(
+  verifyEmbeddedGitNotices,
+  "apps/desktop/scripts/verify-embedded-git-notices.mjs",
+  "PWRGIT_NOTICE_SOURCE_ROOT",
 );
 for (const expected of [
   "apps/desktop/release-stage/node_modules/.pnpm/node_modules",

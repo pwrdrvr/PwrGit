@@ -378,7 +378,11 @@ if (win) {
   );
 
   step("verify embedded Git runtime notices");
-  runChecked("node", [join(desktopRoot, "scripts", "verify-embedded-git-notices.mjs"), builtApp]);
+  runChecked(
+    "node",
+    [join(desktopRoot, "scripts", "verify-embedded-git-notices.mjs"), builtApp],
+    { env: { PWRGIT_NOTICE_SOURCE_ROOT: stageDir } },
+  );
 
   step("verify installer artifact + write checksums");
   const checksumPath = writeWindowsChecksums(dist);

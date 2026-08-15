@@ -7,7 +7,13 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const noticeSourceDir = join(desktopRoot, "resources", "embedded-git");
+// The protected Windows signing job receives a prepared release-stage rather
+// than the workspace package tree. Allow release.mjs to point this verifier at
+// the notices already copied into that verified stage.
+const noticeSourceRoot = process.env.PWRGIT_NOTICE_SOURCE_ROOT?.trim()
+  ? resolve(process.env.PWRGIT_NOTICE_SOURCE_ROOT)
+  : desktopRoot;
+const noticeSourceDir = join(noticeSourceRoot, "resources", "embedded-git");
 const requiredNotices = [
   "COPYING",
   "LICENSE.git-lfs",
@@ -29,7 +35,7 @@ export function verifyEmbeddedGitNotices(appPath) {
     const sourcePath = join(noticeSourceDir, file);
     const packagedPath = join(runtimeDir, file);
     if (!existsSync(sourcePath)) {
-      failures.push(`source notice is missing: ${relative(desktopRoot, sourcePath)}`);
+      failures.push(`source notice is missing: ${relative(noticeSourceRoot, sourcePath)}`);
       continue;
     }
     if (!existsSync(packagedPath)) {
