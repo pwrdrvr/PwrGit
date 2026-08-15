@@ -13,9 +13,20 @@ const isMac = navigator.platform.startsWith("Mac");
 const hitKey = (hit: RepoSearchHit): string =>
   `${hit.kind}:${hit.worktreeId ?? hit.repoId}`;
 
-type PaletteItem =
+export type PaletteItem =
   | { kind: "commit"; commit: Commit }
   | { kind: "repo"; hit: RepoSearchHit };
+
+export function buildPaletteItems(
+  commits: Commit[],
+  results: RepoSearchHit[],
+  _query: string
+): PaletteItem[] {
+  return [
+    ...commits.map((commit) => ({ kind: "commit" as const, commit })),
+    ...results.map((hit) => ({ kind: "repo" as const, hit }))
+  ];
+}
 
 function SearchIcon() {
   return (
@@ -100,11 +111,8 @@ export function RepoSwitcherOverlay({
     [commitResults, directCommit]
   );
   const items = useMemo<PaletteItem[]>(
-    () => [
-      ...allCommitResults.map((commit) => ({ kind: "commit" as const, commit })),
-      ...results.map((hit) => ({ kind: "repo" as const, hit }))
-    ],
-    [allCommitResults, results]
+    () => buildPaletteItems(allCommitResults, results, query),
+    [allCommitResults, results, query]
   );
 
   useEffect(() => {
