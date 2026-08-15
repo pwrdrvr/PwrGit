@@ -177,7 +177,7 @@ test("a cross-profile remote branch opens its new-worktree flow in the owning wi
   await window.locator(".modal--profile .modal__create").click();
   const remoteWindow = await windowPromise;
   await remoteWindow.waitForSelector("#root");
-  await remoteWindow.locator(".lens-chip", { hasText: "All" }).click();
+  await lensChip(remoteWindow, "All").click();
   await expect(
     remoteWindow.locator(".repo-row__name", { hasText: "remote-profile" })
   ).toBeVisible({ timeout: 20_000 });

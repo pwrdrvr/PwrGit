@@ -35,9 +35,17 @@ the Electron build.
   `.modal--dialog .modal__create` (confirm) / `.modal__cancel` — don't use
   Playwright's `window.on("dialog", …)`.
 - Shared step helpers (`addRootAndExpand`, `expandRepoGroup`,
-  `expandWorktrees`, `collapseWorktrees`, `repoGroup`, `branchRow`) live in
-  `fixtures/steps.ts`; a repo that trails its origin comes from
-  `sandbox.makeRepoBehindRemote(name, { behindBy })`.
+  `expandWorktrees`, `collapseWorktrees`, `repoGroup`, `branchRow`,
+  `lensChip`) live in `fixtures/steps.ts`; a repo that trails its origin comes
+  from `sandbox.makeRepoBehindRemote(name, { behindBy })`.
+- **The lens switch is icon-only — reach it with `lensChip(window, "All")`,
+  never `locator(".lens-chip", { hasText: … })`.** The chips carry no text, so
+  a `hasText` filter matches nothing and burns the full click timeout before
+  failing, with a message pointing at the click rather than at the selector.
+  `lensChip` matches the accessible name, which also carries the count
+  (`"Pinned (14)"`) — hence its prefix match. This is easy to reintroduce: a
+  spec written against an older sidebar merges cleanly and only fails at
+  runtime.
 - **Never expand a disclosure with a bare `click()`.** Sidebar row clicks used
   to vanish for the first 250ms of a window's life: `useListReorder` seeded its
   post-drag suppression timestamp with `0`, and `performance.now()` counts from
