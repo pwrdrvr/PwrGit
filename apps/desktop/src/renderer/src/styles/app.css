@@ -436,7 +436,7 @@ textarea,
 .jump-btn__label {
   flex: 1;
   text-align: left;
-  font: 500 12.5px/1 var(--font-sans);
+  font: 500 12px/1 var(--font-sans);
 }
 .kbd {
   font: 600 10px/1 var(--font-mono);
@@ -454,28 +454,14 @@ textarea,
 }
 .lens-filter {
   flex: 1;
-  display: grid;
-  /* Five equal tracks can't hold five unequal labels: "All 109" wastes room
-     while "Pinned 13" overruns its share, and because .lens-chip centers its
-     content under overflow: hidden the overrun is cut off BOTH edges — so the
-     count lost a digit and 13 read as 1. Measured at the default 320px
-     sidebar, the equal-track layout overran by 6.5px on "Pinned 13" and 1.4px
-     on "Behind 3".
-
-     minmax(min-content, …) floors every track at its own content width, so
-     nothing is cut mid-glyph, while the 1fr max still shares the surplus so
-     the row reads as a segmented control rather than ragged chips.
-
-     The min-content floor is doing real work here and is NOT interchangeable
-     with `auto`: .lens-chip sets overflow: hidden, which zeroes a grid item's
-     automatic minimum size, so minmax(auto, 1fr) would resolve the floor to 0
-     and silently restore the bug.
-
-     Note this fits, but only just — "Pinned 13" clears by ~0.5px at 320px.
-     The row is at its limit: a sixth lens, a longer label, or a four-digit
-     count would overflow (which is why counts abbreviate past 999 — see
-     formatLensCount). Re-measure if you add anything to this row. */
-  grid-template-columns: repeat(5, minmax(min-content, 1fr));
+  /* Icon-only, so the row no longer scales with the type ladder. The previous
+     five-track text grid was pinned to its own content width and cleared
+     "Pinned 13" by ~0.5px at a 320px sidebar — one notch of
+     --sidebar-title-size, a sixth lens, or a four-digit count all overflowed
+     it. Icons are fixed-size, so this row is now width-independent and the
+     surplus goes to the active count instead of to five competing labels. */
+  display: flex;
+  align-items: center;
   gap: 2px;
   padding: 3px;
   border: 1px solid var(--border-subtle);
@@ -484,31 +470,56 @@ textarea,
 }
 .lens-chip {
   position: relative;
-  height: 30px;
+  width: 30px;
+  height: 26px;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
   padding: 0;
   border-radius: 7px;
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-muted);
-  font: 600 11px/1 var(--font-sans);
   cursor: pointer;
-  overflow: hidden;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.lens-chip:hover {
+  background: var(--bg-panel-hover);
+  color: var(--text-secondary);
 }
 .lens-chip.is-active {
   border-color: var(--accent-border);
   background: var(--bg-row-active);
   color: var(--accent-bright);
 }
-.lens-chip__count {
-  /* Never the thing that gives: a half-eaten count reads as a different
-     number ("109" clipped to "10" is wrong, not just ugly). */
+.lens-chip:focus-visible {
+  outline: none;
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 1px var(--accent-soft);
+}
+/* Presence, not quantity: the exact number lives in the button's accessible
+   name, so this only has to answer "is there anything in there". */
+.lens-chip__dot {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.lens-chip.is-active .lens-chip__dot {
+  background: var(--accent-bright);
+}
+/* The active lens's count, spelled out in the room the icons freed. Fixed
+   tier — it holds still across text-size notches like the other counts. */
+.lens-filter__count {
+  margin-left: auto;
+  padding: 0 6px 0 4px;
   flex: 0 0 auto;
-  font: 600 9px/1 var(--font-mono);
-  opacity: 0.9;
+  font: 600 11px/1 var(--font-mono);
+  color: var(--text-subtle);
 }
 .sidebar-options {
   width: 32px;
@@ -534,30 +545,13 @@ textarea,
   outline: 1px solid var(--focus-ring);
   outline-offset: 1px;
 }
+/* Narrow-sidebar rescues for the lens row are gone with the text grid: five
+   fixed-size icons plus a count fit the 240px minimum with room to spare, so
+   there is nothing left to reflow. Only the surrounding chrome still tightens. */
 @container (max-width: 310px) {
   .sidebar__lens {
     gap: 2px;
     padding-inline: 6px;
-  }
-  .lens-filter {
-    /* Insurance, not a fix: measured at the 240px sidebar minimum these
-       fractions already clear their labels by 3–14px, because this block also
-       drops the counts and the font to 10px. The floor costs nothing and keeps
-       the guarantee if someone later restores counts here or raises the font.
-       The fractions still give "Behind" more room than "All"; min-content only
-       stops a track shrinking past its own glyphs. */
-    grid-template-columns:
-      minmax(min-content, 1.15fr) minmax(min-content, 1.15fr)
-      minmax(min-content, 1.15fr) minmax(min-content, 0.8fr)
-      minmax(min-content, 0.75fr);
-    gap: 0;
-    padding-inline: 0;
-  }
-  .lens-chip {
-    font-size: 10px;
-  }
-  .lens-chip__count {
-    display: none;
   }
   .sidebar-options {
     width: 26px;
@@ -571,15 +565,39 @@ textarea,
   overflow-y: auto;
   padding: 0 8px 16px;
 }
+/* ---------------------------------------------------------------------------
+   Density axis — `data-density="compact"` on <html> (Settings → Appearance).
+
+   Comfortable is the default and carries no attribute, so this block only
+   holds the overrides. Compact trims the padding that sits AROUND the content
+   and the gaps BETWEEN rows; it never touches type size, which is the other
+   axis's job. Keeping the two independent is what lets someone run large text
+   at high density — the combination a fixed-height row could never express.
+   --------------------------------------------------------------------------- */
+:root[data-density="compact"] .repo-row {
+  padding: 3px 8px;
+}
+:root[data-density="compact"] .wt-row {
+  padding: 2px 31px 2px 4px;
+}
+:root[data-density="compact"] .wt-section {
+  padding-block: 1px 3px;
+  margin-block: 0 2px;
+}
+:root[data-density="compact"] .sidebar__list {
+  padding-bottom: 10px;
+}
+
 .sidebar__empty {
   padding: 24px 12px;
   text-align: center;
   color: var(--text-subtle);
-  font: 500 11.5px/1.5 var(--font-sans);
+  font: 500 12px/1.5 var(--font-sans);
 }
 
 .repo-block {
-  margin-bottom: 2px;
+  /* PwrAgnt's list gap is 0: the row's own padding is the rhythm. */
+  margin-bottom: 0;
 }
 .repo-row {
   position: sticky;
@@ -587,10 +605,14 @@ textarea,
   z-index: 3;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   width: 100%;
-  height: 36px;
-  padding: 0 8px;
+  /* Content-sized, not a fixed box. A `height` cannot respond to the
+     --sidebar-title-size axis: raise the notch and the text clips inside a row
+     that never grows. min-height sets the floor for a comfortable hit target,
+     padding does the rest, and the row grows with its own type. */
+  min-height: var(--sidebar-repo-row-height);
+  padding: 4px 8px;
   border: 1px solid transparent;
   border-radius: 8px;
   cursor: pointer;
@@ -615,11 +637,20 @@ textarea,
 
 /* The grip stays out of the layout's way until you're on the row: an always-on
    handle on every row is visual noise, but a handle that only appears once the
-   drag has started is no affordance at all. */
+   drag has started is no affordance at all.
+
+   Absolutely positioned in the row's left padding, NOT an in-flow flex child.
+   It renders only in the arrangeable lens, so as a flex child it shifted every
+   Pinned row's content right by its width — invisible at opacity 0, but still
+   taking layout — and the Pinned list read as indented next to Recent. Out of
+   flow, every lens shares one left edge and the grip overlays the padding when
+   it fades in. Same principle as .wt-row__hoveracts. */
 .repo-row__handle {
-  flex: 0 0 auto;
-  width: 11px;
-  margin-left: -3px;
+  position: absolute;
+  left: 1px;
+  top: 0;
+  bottom: 0;
+  width: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -691,50 +722,72 @@ textarea,
   border-radius: 4px;
   border: 1px solid var(--border-subtle);
   color: var(--text-subtle);
-  font: 600 8.5px/1 var(--font-mono);
+  font: 600 9px/1 var(--font-mono);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
+/* The sidebar's ONE disclosure glyph — a filled caret, matching PwrAgnt's
+   `.directory-row__chevron`. It replaced two different border-stroke chevrons
+   (7px/1.7px here, 6px/1.5px on ref sections) that disagreed with each other
+   and with PwrAgnt, whose own note records why the stroke lost: it "read
+   chunky at header size and existed nowhere else in the sidebar".
+
+   Points right when collapsed, rotates 90° to point down when open — so the
+   glyph's meaning is carried by rotation, not by redrawing it. */
 .chev {
-  width: 7px;
-  height: 7px;
+  width: 0;
+  height: 0;
   flex: 0 0 auto;
-  border-right: 1.7px solid var(--text-muted);
-  border-bottom: 1.7px solid var(--text-muted);
-  transform: rotate(-45deg);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid var(--text-muted);
+  opacity: 0.82;
   transition: transform 140ms ease;
 }
 .chev.is-open {
-  transform: rotate(45deg);
-}
-.repo-row__icon {
-  flex: 0 0 auto;
-  color: var(--text-muted);
-}
-.repo-row__icon.is-active {
-  color: var(--accent);
+  transform: rotate(90deg);
 }
 .repo-row__name {
   flex: 1;
   min-width: 0;
   text-align: left;
-  font: 600 13px/1.1 var(--font-sans);
+  /* The one surface that reads the axis directly. line-height 1.25 (not 1.1)
+     because the row is now content-sized — a tight leading would make the row
+     height jump unevenly between notches. */
+  font: 600 var(--sidebar-title-size) / 1.25 var(--font-sans);
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The repo holding the current selection — the signal the folder glyph used to
+   carry before it was dropped as redundant. Only meaningful while expanded;
+   collapsed, .repo-row.is-active tints the whole row instead. */
+.repo-row__name.is-active {
+  color: var(--accent);
+}
 .repo-row__wtcount {
-  font: 500 10.5px/1 var(--font-mono);
+  /* Fixed tier: counts hold still across notches, so a bigger name reads as
+     "bigger name", not as page zoom. */
+  font: 500 11px/1 var(--font-mono);
   color: var(--text-subtle);
   flex: 0 0 auto;
 }
 
 .pin {
   flex: 0 0 auto;
-  width: 24px;
-  height: 24px;
+  /* Sized to sit INSIDE the row's content box rather than define it. At 24px
+     this button was the repo row's real height driver — taller than the 13px
+     name it sits beside — so content-sizing the row bought almost nothing
+     until this shrank too. The worktree rows avoid the problem differently:
+     their action cluster is absolutely positioned, so it never contributes
+     height at all.
+
+     18px, not 20: at 20 the button was STILL the driver (20 + 8 padding + 2
+     border = a 30px row) because the 13px name only needs 16.25px. */
+  width: 16px;
+  height: 16px;
   padding: 0;
   display: flex;
   align-items: center;
@@ -824,7 +877,7 @@ textarea,
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   color: var(--text-muted);
-  font: 600 9.5px/1 var(--font-mono);
+  font: 600 10px/1 var(--font-mono);
   cursor: pointer;
 }
 .wt-refresh {
@@ -888,17 +941,20 @@ textarea,
   color: var(--text-primary);
   background: var(--bg-panel-hover);
 }
+/* Same caret vocabulary as `.chev`, one size down for the 9px section
+   eyebrows — mirroring PwrAgnt's `.directory-row__thread-divider-chevron`. */
 .ref-section__chev {
-  width: 6px;
-  height: 6px;
+  width: 0;
+  height: 0;
   flex: 0 0 auto;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: rotate(-45deg);
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  border-left: 4px solid currentColor;
+  opacity: 0.82;
   transition: transform 120ms ease;
 }
 .ref-section__chev.is-open {
-  transform: rotate(45deg);
+  transform: rotate(90deg);
 }
 .ref-section__label {
   font: 600 9px/1 var(--font-sans);
@@ -1014,7 +1070,7 @@ textarea,
 .ref-section__empty,
 .ref-section__error {
   padding: 7px;
-  font: 500 9.5px/1.35 var(--font-sans);
+  font: 500 10px/1.35 var(--font-sans);
   color: var(--text-subtle);
 }
 .ref-section__error {
@@ -1059,9 +1115,10 @@ textarea,
   position: relative;
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 0 7px 0 4px;
-  height: 30px;
+  gap: 6px;
+  /* Content-sized for the same reason as .repo-row — see the note there. */
+  min-height: 20px;
+  padding: 3px 31px 3px 4px;
   border-radius: 7px;
   cursor: pointer;
   border: 1px solid transparent;
@@ -1080,7 +1137,11 @@ textarea,
   /* Keep the active worktree pinned just below the folder header so it doesn't
      scroll out of view down a long worktree list. */
   position: sticky;
-  top: 36px;
+  /* Not a literal: the header used to be a fixed 36px, and this was 36 too.
+     Once the header became content-sized this offset was wrong at every notch
+     and shoved a selected row that sat closer than 36px down to 36 — the row
+     visibly jumped when selected. It now tracks the header token. */
+  top: var(--sidebar-repo-row-height);
   z-index: 2;
   border-color: var(--accent-border);
   background: var(--bg-row-active);
@@ -1113,7 +1174,7 @@ textarea,
   border: 1px solid var(--accent-border);
 }
 .wt-selbar__count {
-  font: 700 10.5px/1 var(--font-sans);
+  font: 700 11px/1 var(--font-sans);
   color: var(--accent);
 }
 .wt-selbar__btn {
@@ -1154,7 +1215,11 @@ textarea,
   flex: 1;
   min-width: 0;
   text-align: left;
-  font: 500 11.5px/1.2 var(--font-mono);
+  /* Derived from the axis so the repo→branch hierarchy holds at every notch.
+     −2px rather than PwrAgnt's −1px because this line is mono: at equal pixel
+     size a mono face reads larger than the sans above it, so −1 would flatten
+     the two. */
+  font: 500 calc(var(--sidebar-title-size) - 2px) / 1.25 var(--font-mono);
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1170,7 +1235,7 @@ textarea,
   height: 16px;
   padding: 0 5px;
   border-radius: 999px;
-  font: 600 9px/1 var(--font-mono);
+  font: 600 10px/1 var(--font-mono);
   flex: 0 0 auto;
 }
 .wt-tag--merged {
@@ -1191,7 +1256,7 @@ textarea,
   color: var(--accent);
 }
 .wt-age {
-  font: 500 9.5px/1 var(--font-mono);
+  font: 500 10px/1 var(--font-mono);
   color: var(--text-subtle);
   flex: 0 0 auto;
 }
@@ -1793,9 +1858,31 @@ textarea,
   pointer-events: none;
   transition: opacity 120ms ease;
 }
-.wt-row__menu {
+/* Two classes on purpose: `.kebab` (declared later) sets `position: relative`
+   for its popover, and on equal specificity it won — the menu silently stayed
+   in flow and every worktree row measured 30px, i.e. the kebab's 24 plus
+   padding. The compound selector outranks it. */
+.wt-row .kebab.wt-row__menu {
+  /* Out of flow, in the 24px the row reserves on its right (see .wt-row's
+     padding-right). The kebab is a 24px hit target — bigger than the 11px
+     branch line it sits beside — so as an in-flow child it set the row's
+     height, and every worktree row was as tall as its menu button. Absolutely
+     positioned it keeps its full target and contributes no height. */
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  transform: translateY(-50%);
   opacity: 0;
   transition: opacity 120ms ease;
+}
+/* Sidebar-scoped sizes for chrome that ships larger elsewhere. Each is under
+   the text ceiling so the row height comes from the type, not the chrome. */
+.repo-row .badge,
+.wt-row .pr-chip {
+  height: 16px;
+}
+.wt-row .wt-tag {
+  height: 14px;
 }
 /* The floating cluster shows only while the row is actually hovered/focused —
    not on the persistent "selected" (active) row, whose tags stay readable.
@@ -4323,14 +4410,14 @@ body.is-col-resizing {
   z-index: 4;
 }
 .repo-group__label {
-  font: 700 9.5px/1 var(--font-sans);
+  font: 700 10px/1 var(--font-sans);
   color: var(--text-muted);
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
 .repo-group__count {
   margin-left: auto;
-  font: 600 9.5px/1 var(--font-mono);
+  font: 600 10px/1 var(--font-mono);
   color: var(--text-subtle);
 }
 

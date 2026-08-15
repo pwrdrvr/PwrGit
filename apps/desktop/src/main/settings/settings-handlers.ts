@@ -5,6 +5,8 @@ import {
   HOT_CPU_HEAP_SNAPSHOT_LIMIT_MAX,
   isHotCpuStartDelayMs,
   isHotCpuTriggerMode,
+  isSidebarDensity,
+  isSidebarTextSize,
   ok,
   type AppSettingsPatch,
   type AppSettingsSnapshot,
@@ -52,8 +54,19 @@ function sanitizePatch(patch: AppSettingsPatch): {
   const diagnostics: Partial<DiagnosticsSettings> = {};
 
   const gen = patch.general;
-  if (gen !== undefined && typeof gen.developerMode === "boolean") {
-    general.developerMode = gen.developerMode;
+  if (gen !== undefined) {
+    if (typeof gen.developerMode === "boolean") {
+      general.developerMode = gen.developerMode;
+    }
+    // Narrow to the known notches: these cross IPC as plain strings and end up
+    // stamped on <html>, so an unvalidated value would ship an attribute no
+    // stylesheet answers to.
+    if (isSidebarTextSize(gen.sidebarTextSize)) {
+      general.sidebarTextSize = gen.sidebarTextSize;
+    }
+    if (isSidebarDensity(gen.sidebarDensity)) {
+      general.sidebarDensity = gen.sidebarDensity;
+    }
   }
 
   const exp = patch.experimental;

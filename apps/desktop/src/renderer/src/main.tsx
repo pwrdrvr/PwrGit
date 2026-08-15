@@ -4,10 +4,16 @@ import { App } from "./App";
 import { AppDocumentWindow } from "./features/documents/AppDocumentWindow";
 import { LogsWindow } from "./features/logs/LogsWindow";
 import { SettingsWindow } from "./features/settings/SettingsWindow";
+import { startAppearanceSync } from "./lib/appearance";
 import "./styles/app.css";
 
 const container = document.getElementById("root");
 if (container === null) throw new Error("root element not found");
+
+// Stamp the appearance axes on <html> before the first render, for every
+// window kind — otherwise a non-default text size would flash at its default
+// on each launch.
+startAppearanceSync();
 
 // Auxiliary windows boot on a hash route (PwrAgnt pattern): `#logs` renders
 // the Logs window and `#settings` the Settings window instead of the app

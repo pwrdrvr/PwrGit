@@ -140,9 +140,39 @@ export type DiagnosticsEnvOverrides = {
   startupCpuProfilingForcedOn: boolean;
 };
 
+/**
+ * Sidebar text-size notches. "md" is the tuned default and, like the theme,
+ * carries no attribute — only non-default notches stamp `data-sidebar-text`
+ * on <html>, where `tokens.css` picks them up.
+ */
+export const SIDEBAR_TEXT_SIZES = ["xs", "sm", "md", "lg", "xl"] as const;
+export type SidebarTextSize = (typeof SIDEBAR_TEXT_SIZES)[number];
+
+export function isSidebarTextSize(value: unknown): value is SidebarTextSize {
+  return (
+    typeof value === "string" &&
+    (SIDEBAR_TEXT_SIZES as readonly string[]).includes(value)
+  );
+}
+
+/** Row density. "comfortable" is the default and carries no attribute. */
+export const SIDEBAR_DENSITIES = ["comfortable", "compact"] as const;
+export type SidebarDensity = (typeof SIDEBAR_DENSITIES)[number];
+
+export function isSidebarDensity(value: unknown): value is SidebarDensity {
+  return (
+    typeof value === "string" &&
+    (SIDEBAR_DENSITIES as readonly string[]).includes(value)
+  );
+}
+
 export type GeneralSettings = {
   /** Expose Reload, Force Reload, and Developer Tools in the View menu. */
   developerMode: boolean;
+  /** Sidebar name/branch type scale (`--sidebar-title-size`). */
+  sidebarTextSize: SidebarTextSize;
+  /** Sidebar row density — trims row padding and list gaps. */
+  sidebarDensity: SidebarDensity;
 };
 
 export type ExperimentalSettings = {
@@ -166,7 +196,9 @@ export type DiagnosticsSettings = {
 };
 
 export const GENERAL_DEFAULTS: GeneralSettings = {
-  developerMode: false
+  developerMode: false,
+  sidebarTextSize: "md",
+  sidebarDensity: "comfortable"
 };
 
 export const EXPERIMENTAL_DEFAULTS: ExperimentalSettings = {

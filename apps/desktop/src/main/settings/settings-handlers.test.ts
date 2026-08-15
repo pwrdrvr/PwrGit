@@ -24,6 +24,8 @@ describe("settings handlers", () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.value.general.developerMode).toBe(false);
+    expect(r.value.general.sidebarTextSize).toBe("md");
+    expect(r.value.general.sidebarDensity).toBe("comfortable");
     expect(r.value.experimental.lineageAllBranches).toBe(false);
     expect(r.value.diagnostics.heapMonitorEnabled).toBe(false);
     expect(r.value.diagnostics.hotCpuProfilingTriggerMode).toBe("sustained");
@@ -96,5 +98,54 @@ describe("settings handlers", () => {
     const snapshot = settingsSnapshot(service, "/diag");
     expect(snapshot.experimental.lineageAllBranches).toBe(true);
     expect(snapshot.diagnostics.startupCpuProfilingEnabled).toBe(false);
+  });
+});
+
+describe("appearance axes", () => {
+  it("round-trips the sidebar text size and density", async () => {
+    const bus = new CommandBus();
+    const service = freshService();
+    registerSettingsHandlers(bus, service, {
+      diagnosticsOutputRoot: "/diag",
+      onChanged: () => undefined
+    });
+
+    const r = await bus.dispatch("settings:update", {
+      patch: { general: { sidebarTextSize: "lg", sidebarDensity: "compact" } }
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.general.sidebarTextSize).toBe("lg");
+    expect(r.value.general.sidebarDensity).toBe("compact");
+    // Stored sparsely — an untouched key must not be written back as a value.
+    expect(service.get().general).toEqual({
+      sidebarTextSize: "lg",
+      sidebarDensity: "compact"
+    });
+  });
+
+  it("drops out-of-range notches instead of stamping them on <html>", async () => {
+    const bus = new CommandBus();
+    const service = freshService();
+    registerSettingsHandlers(bus, service, {
+      diagnosticsOutputRoot: "/diag",
+      onChanged: () => undefined
+    });
+
+    // These cross IPC as plain strings and end up as a `data-*` attribute, so
+    // an unvalidated value would ship an attribute no stylesheet answers to.
+    const r = await bus.dispatch("settings:update", {
+      patch: {
+        general: {
+          sidebarTextSize: "xxl" as never,
+          sidebarDensity: "cozy" as never
+        }
+      }
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.general.sidebarTextSize).toBe("md");
+    expect(r.value.general.sidebarDensity).toBe("comfortable");
+    expect(service.get().general ?? {}).toEqual({});
   });
 });

@@ -122,6 +122,12 @@ function SettingsSectionBody(props: {
         onDeveloperModeChange={(enabled) => {
           update({ general: { developerMode: enabled } });
         }}
+        onSidebarTextSizeChange={(sidebarTextSize) => {
+          update({ general: { sidebarTextSize } });
+        }}
+        onSidebarDensityChange={(sidebarDensity) => {
+          update({ general: { sidebarDensity } });
+        }}
       />
     );
   }

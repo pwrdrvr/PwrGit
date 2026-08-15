@@ -1,18 +1,42 @@
-import type { AppSettingsSnapshot } from "@pwrgit/shared";
+import type {
+  AppSettingsSnapshot,
+  SidebarDensity,
+  SidebarTextSize
+} from "@pwrgit/shared";
 import {
   SettingsField,
   SettingsPanelHead,
-  SettingsSection
+  SettingsSection,
+  SettingsSegmented
 } from "./SettingsLayout";
 import { SettingsSwitch } from "./SettingsSwitch";
+
+/** The notch ladder, labelled. Values match `tokens.css`. */
+const TEXT_SIZES: Array<{ value: SidebarTextSize; label: string; meta: string }> =
+  [
+    { value: "xs", label: "XS", meta: "11px" },
+    { value: "sm", label: "S", meta: "12px" },
+    { value: "md", label: "M", meta: "13px" },
+    { value: "lg", label: "L", meta: "14px" },
+    { value: "xl", label: "XL", meta: "15px" }
+  ];
+
+const DENSITIES: Array<{ value: SidebarDensity; label: string }> = [
+  { value: "comfortable", label: "Comfortable" },
+  { value: "compact", label: "Compact" }
+];
 
 /** General pane (PwrAgnt's GeneralSettings pattern, PwrGit-sized). */
 export function GeneralSettings(props: {
   saving: boolean;
   snapshot: AppSettingsSnapshot;
   onDeveloperModeChange: (enabled: boolean) => void;
+  onSidebarTextSizeChange: (size: SidebarTextSize) => void;
+  onSidebarDensityChange: (density: SidebarDensity) => void;
 }) {
   const developerMode = props.snapshot.general.developerMode;
+  const textSize = props.snapshot.general.sidebarTextSize;
+  const density = props.snapshot.general.sidebarDensity;
 
   return (
     <div className="settings-stack" aria-label="General settings">
@@ -21,6 +45,45 @@ export function GeneralSettings(props: {
         title="General settings"
         help="Defaults that apply across PwrGit windows."
       />
+
+      <SettingsSection
+        eyebrow="Appearance"
+        title="Sidebar"
+        description="Two independent axes: how big the names are, and how tightly the rows pack."
+        chip={density === "compact" ? "Compact" : textSize.toUpperCase()}
+        chipKind="default"
+      >
+        <div className="settings-fields">
+          <SettingsField
+            label="Text size"
+            sub="Repo names in the left bar; worktree branches follow one step down."
+            help="Counts, tags, and section labels hold still on purpose, so a larger size reads as bigger names rather than as zooming the whole app."
+            control={
+              <SettingsSegmented
+                aria-label="Sidebar text size"
+                disabled={props.saving}
+                options={TEXT_SIZES}
+                value={textSize}
+                onChange={props.onSidebarTextSizeChange}
+              />
+            }
+          />
+          <SettingsField
+            label="Density"
+            sub="Row padding and the gaps between repos."
+            help="Independent of text size — Compact with a larger text size is a valid combination."
+            control={
+              <SettingsSegmented
+                aria-label="Sidebar density"
+                disabled={props.saving}
+                options={DENSITIES}
+                value={density}
+                onChange={props.onSidebarDensityChange}
+              />
+            }
+          />
+        </div>
+      </SettingsSection>
 
       <SettingsSection
         eyebrow="General"

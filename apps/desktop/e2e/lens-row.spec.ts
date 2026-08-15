@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
+import { expandRepoGroup, lensChip } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -15,43 +16,32 @@ test.afterEach(async () => {
 });
 
 /**
- * Widest rendered content vs. the space the chip actually has.
+ * Does the lens row fit inside the sidebar?
  *
- * `scrollWidth` is not enough here. `.lens-chip` centers its content, so an
- * overrun spills off BOTH edges, and overflow past the *start* edge doesn't
- * show up in `scrollWidth` — a chip clipped symmetrically can report
- * `scrollWidth === clientWidth` while visibly missing glyphs. A Range over the
- * chip's contents measures the laid-out content box instead: `overflow: hidden`
- * clips painting, not layout, so the rect still reports the true width.
+ * This replaces a per-chip glyph-clipping measurement. The old row was five
+ * text chips in a fixed five-track grid, and the failure mode was a label
+ * losing glyphs off both edges — so the guard had to measure content vs. track
+ * with a Range. Icons are fixed-size, so the only thing that can go wrong now
+ * is the ROW overflowing its container, which is one measurement.
  */
-async function chipOverflows(window: Page): Promise<{ label: string; over: number }[]> {
-  return window.locator(".lens-chip").evaluateAll((els) =>
-    els
-      .map((el) => {
-        const range = document.createRange();
-        range.selectNodeContents(el);
-        const content = range.getBoundingClientRect().width;
-        range.detach();
-        return {
-          label: (el.textContent ?? "").trim(),
-          over: Math.round((content - el.clientWidth) * 100) / 100
-        };
-      })
-      // 1px of slack. Grid track sizes round to layout units while the Range
-      // rect is fractional, so a chip that fits exactly still measures a few
-      // tenths over — the fixed layout sits at +0.38px on "Behind 3". The bug
-      // this guards against is far larger: the equal-track layout overran by
-      // 6.5px and 1.4px. Anything past 1px is a real glyph, not rounding.
-      .filter((r) => r.over > 1)
-  );
+async function lensRowOverflow(window: Page): Promise<number> {
+  return window.locator(".lens-filter").evaluate((el) => {
+    const parent = el.parentElement;
+    if (parent === null) return 0;
+    return Math.round(
+      (el.getBoundingClientRect().right - parent.getBoundingClientRect().right) *
+        100
+    ) / 100;
+  });
 }
 
-test("lens chips never clip their labels or counts", async () => {
+test("the lens row fits, and names every lens for the keyboard", async () => {
   sandbox = createGitSandbox();
-  // Enough repos for a three-digit "All", and several genuinely behind so the
-  // "Behind" chip carries a count too — "Behind 3" is the pairing that used to
-  // overrun its equal-width track and lose glyphs off both ends.
-  for (let i = 0; i < 12; i += 1) sandbox.makeRepo(`repo-${String(i).padStart(2, "0")}`);
+  // A three-digit "All" and a real "Behind" count — the pairing that used to
+  // overrun the equal-width tracks.
+  for (let i = 0; i < 12; i += 1) {
+    sandbox.makeRepo(`repo-${String(i).padStart(2, "0")}`);
+  }
   for (const name of ["behind-a", "behind-b", "behind-c"]) {
     sandbox.makeRepoBehindRemote(name, { behindBy: 2 });
   }
@@ -60,42 +50,183 @@ test("lens chips never clip their labels or counts", async () => {
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
   await window.getByRole("button", { name: /Add folders/i }).click();
-  await window.locator(".lens-chip", { hasText: "All" }).click();
+  await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(15, {
     timeout: 20_000
   });
 
-  // Counts must actually be on screen, or this test would pass against the
-  // very layout it exists to catch.
-  await expect(window.locator(".lens-chip__count").first()).toBeVisible();
+  // Icons carry no text, so the count each label used to show has to survive in
+  // the accessible name — otherwise the information is simply gone. "All" is
+  // the count to assert on: it's just repos.length, whereas Behind/Stale read
+  // per-worktree state that is computed lazily when a repo is expanded, so
+  // they are legitimately 0 on a list nobody has opened yet.
+  await expect(lensChip(window, "All")).toHaveAttribute(
+    "aria-label",
+    /^All \(15\)$/
+  );
+  // The other branch of the same logic: a lens with nothing in it carries no
+  // parenthetical and no dot, so neither is decoration.
+  await expect(lensChip(window, "Recent")).toHaveAttribute("aria-label", "Recent");
+  await expect(lensChip(window, "Recent").locator(".lens-chip__dot")).toHaveCount(0);
+  await expect(lensChip(window, "All").locator(".lens-chip__dot")).toHaveCount(1);
+  // The active lens still spells its count out.
+  await expect(window.locator(".lens-filter__count")).toHaveText("15");
 
-  expect(await chipOverflows(window)).toEqual([]);
+  expect(await lensRowOverflow(window)).toBeLessThanOrEqual(0);
 });
 
-test("lens chips never clip at the minimum sidebar width", async () => {
+test("the lens row survives the narrowest sidebar at the largest text size", async () => {
   sandbox = createGitSandbox();
-  for (let i = 0; i < 12; i += 1) sandbox.makeRepo(`repo-${String(i).padStart(2, "0")}`);
+  for (let i = 0; i < 12; i += 1) {
+    sandbox.makeRepo(`repo-${String(i).padStart(2, "0")}`);
+  }
 
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
   await window.getByRole("button", { name: /Add folders/i }).click();
-  await window.locator(".lens-chip", { hasText: "All" }).click();
+  await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(12, {
     timeout: 20_000
   });
 
-  // 240 is useColumnResize's floor for the sidebar. Below 310 the compact
-  // container-query block takes over — a different track template, so it needs
-  // its own coverage.
-  await window.evaluate(() =>
-    window.localStorage.setItem("pwrgit.sidebarWidth", "240")
-  );
+  // 240 is useColumnResize's floor. Combined with the largest text notch this
+  // is the case the OLD row could not survive at all: its own CSS note recorded
+  // "Pinned 13" clearing by ~0.5px at 320px, so one notch overflowed it. Icons
+  // don't read the type scale, which is the whole point of the change.
+  await window.evaluate(() => {
+    window.localStorage.setItem("pwrgit.sidebarWidth", "240");
+    document.documentElement.setAttribute("data-sidebar-text", "xl");
+  });
   await window.reload();
-  await window.locator(".lens-chip", { hasText: "All" }).click();
+  await window.evaluate(() =>
+    document.documentElement.setAttribute("data-sidebar-text", "xl")
+  );
+  await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(12, {
     timeout: 20_000
   });
 
-  expect(await chipOverflows(window)).toEqual([]);
+  // The names did grow — otherwise this asserts nothing about the notch.
+  const nameSize = await window
+    .locator(".repo-row__name")
+    .first()
+    .evaluate((el) => getComputedStyle(el).fontSize);
+  expect(nameSize).toBe("15px");
+
+  expect(await lensRowOverflow(window)).toBeLessThanOrEqual(0);
+});
+
+test("sidebar rows are sized by their content, not by a fixed box", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepo("dense", { worktrees: ["feature/one"] });
+
+  handle = await launchApp();
+  const { window } = handle;
+  await handle.setPickDirectory(sandbox.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await lensChip(window, "All").click();
+  const repoRow = window.locator(".repo-row", { hasText: "dense" });
+  await expect(repoRow).toBeVisible({ timeout: 20_000 });
+
+  // The point of content-sizing is that the row tracks its type. Guarding the
+  // rendered height is the only way to catch the failure that actually
+  // happened: `height` was removed, but a fixed 24px pin button silently
+  // became the new floor, so the row stayed ~32px and the density work bought
+  // nothing. Shrinking it to 20px still left the pin in charge at 30px.
+  //
+  // The floor here is arithmetic, not taste: a 13px name at line-height 1.25
+  // is 16.25px, plus 4px padding top and bottom and a 1px border, so ~26px is
+  // as short as Comfortable goes at the default notch. 28 leaves room for host
+  // font rounding while still catching a fixed-size child (pin, badge, kebab)
+  // taking the row over — the first two cuts of this change stalled at 32px
+  // and 30px exactly that way, and a looser bound waved one of them through.
+  const repoHeight = await repoRow.evaluate((el) => el.getBoundingClientRect().height);
+  expect(repoHeight).toBeLessThanOrEqual(28);
+
+  // Worktree rows have the same trap in a different child — the 24px kebab —
+  // so guard them too. 11px mono at 1.25 is 13.75, + 3px padding each side + 2
+  // border ≈ 22; 24 is the rounding allowance.
+  await expandRepoGroup(window, "dense");
+  const wtRow = window.locator(".wt-row").first();
+  await expect(wtRow).toBeVisible();
+  const wtHeight = await wtRow.evaluate((el) => el.getBoundingClientRect().height);
+  expect(wtHeight).toBeLessThanOrEqual(24);
+
+  // Compact is the tight setting; Comfortable is not. Both must move.
+  await window.evaluate(() =>
+    document.documentElement.setAttribute("data-density", "compact")
+  );
+  const compactRepo = await repoRow.evaluate((el) => el.getBoundingClientRect().height);
+  const compactWt = await wtRow.evaluate((el) => el.getBoundingClientRect().height);
+  expect(compactRepo).toBeLessThan(repoHeight);
+  expect(compactWt).toBeLessThan(wtHeight);
+  await window.evaluate(() =>
+    document.documentElement.removeAttribute("data-density")
+  );
+
+  // And it must actually GROW with the axis — a row that ignores the notch
+  // would also pass the bound above.
+  await window.evaluate(() =>
+    document.documentElement.setAttribute("data-sidebar-text", "xl")
+  );
+  const grown = await repoRow.evaluate((el) => el.getBoundingClientRect().height);
+  expect(grown).toBeGreaterThan(repoHeight);
+});
+
+test("every lens shares one left edge — the Pinned grip must not indent its rows", async () => {
+  sandbox = createGitSandbox();
+  for (const name of ["alpha", "bravo"]) sandbox.makeRepo(name);
+
+  handle = await launchApp();
+  const { window } = handle;
+  await handle.setPickDirectory(sandbox.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await lensChip(window, "All").click();
+  await expect(window.locator(".repo-row__name")).toHaveCount(2, {
+    timeout: 20_000
+  });
+  const nameLeft = async (): Promise<number> =>
+    window
+      .locator(".repo-row__name", { hasText: "alpha" })
+      .evaluate((el) => el.getBoundingClientRect().left);
+  const allLeft = await nameLeft();
+
+  // Pin both and switch lens. The Pinned lens renders a drag grip that the
+  // others don't; it is invisible at rest, but it used to be an in-flow flex
+  // child, so it shifted every Pinned row's content right by its width and the
+  // list read as indented next to Recent. Out of flow, the edges agree.
+  for (const name of ["alpha", "bravo"]) {
+    await window.locator(".repo-row", { hasText: name }).locator(".pin").click();
+  }
+  await lensChip(window, "Pinned").click();
+  await expect(window.locator(".repo-row__name")).toHaveCount(2);
+  const pinnedLeft = await nameLeft();
+  expect(Math.abs(pinnedLeft - allLeft)).toBeLessThanOrEqual(0.5);
+});
+
+test("selecting a worktree row does not move it", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepo("steady", { worktrees: ["feature/one"] });
+
+  handle = await launchApp();
+  const { window } = handle;
+  await handle.setPickDirectory(sandbox.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await lensChip(window, "All").click();
+  await expandRepoGroup(window, "steady");
+
+  // The selected row is `position: sticky` so it stays visible under the repo
+  // header while a long list scrolls. Its `top` used to be a literal 36px —
+  // the header's OLD fixed height. Once the header became content-sized, a
+  // row that sat closer than 36px to the scrollport was shoved down to 36 the
+  // moment it was selected, so the row (and its icon) visibly jumped. The
+  // offset now derives from the header token; this pins that.
+  const row = window.locator(".wt-row", { hasText: "feature/one" });
+  await expect(row).toBeVisible();
+  const before = await row.evaluate((el) => el.getBoundingClientRect().top);
+  await row.click();
+  await expect(row).toHaveClass(/is-selected/);
+  const after = await row.evaluate((el) => el.getBoundingClientRect().top);
+  expect(Math.abs(after - before)).toBeLessThanOrEqual(0.5);
 });

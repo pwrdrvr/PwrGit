@@ -146,6 +146,14 @@ export async function expandRepoGroup(
 
 /** Add the sandbox as a repo folder (via the stubbed picker), switch to the All
     lens so nothing is filtered out, then wait for `repoName` and expand it. */
+/**
+ * A lens button by name. The switch is icon-only, so there is no text to match
+ * — the lens name lives in the accessible name, which also carries the count
+ * ("Pinned (14)"), hence the prefix match.
+ */
+export const lensChip = (window: Page, lens: string): Locator =>
+  window.getByRole("tab", { name: new RegExp(`^${lens}\\b`) });
+
 export async function addRootAndExpand(
   window: Page,
   app: AppHandle,
@@ -154,7 +162,7 @@ export async function addRootAndExpand(
 ): Promise<void> {
   await app.setPickDirectory(box.reposDir);
   await window.getByRole("button", { name: /Add folders/i }).click();
-  await window.locator(".lens-chip", { hasText: "All" }).click();
+  await lensChip(window, "All").click();
   await expandRepoGroup(window, repoName);
 }
 
