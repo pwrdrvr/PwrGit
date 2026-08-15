@@ -13,19 +13,17 @@
  *       --no-publish  : build + package signed/notarized, no publish
  *       --prepare-only: build + prepare release-stage, no package/sign/publish
  *       --sign-stage-only:
- *                       sign/notarize/publish an already prepared release-stage
- *                       without reinstalling dependencies or rerunning tests
- *       --win         : build/package a Windows x64 NSIS installer (unsigned,
- *                       no publish). Run on a Windows host/runner.
+ *                       package/sign an already prepared release-stage without
+ *                       reinstalling dependencies or rerunning tests. Defaults
+ *                       to macOS; combine with --win for Windows NSIS.
+ *       --win         : build/package a Windows x64 NSIS installer (unsigned
+ *                       unless Azure signing env is present; no publish). Run
+ *                       on a Windows host/runner.
  *       --win --publish:
- *                       Authenticode-signed installer, published via
- *                       electron-builder (requires WIN_CSC_LINK /
- *                       WIN_CSC_KEY_PASSWORD or CSC_LINK/CSC_KEY_PASSWORD).
- *       --win --unsigned-release:
- *                       release-shaped installer without Authenticode and
- *                       without publishing. Only for the pre-signing-cert
- *                       phase; the workflow uploads it under an
- *                       `-unsigned-setup.exe` name.
+ *                       Azure-signed installer, published via electron-builder.
+ *       --require-signing:
+ *                       fail unless the complete Azure signing configuration is
+ *                       present. Release CI always passes this flag.
  *       (default)     : build + package signed/notarized + publish to the
  *                       channel configured in electron-builder.yml
  *   - In CI, the App Store Connect API key may arrive as a base64-encoded
@@ -70,20 +68,24 @@ const noPublish = args.includes("--no-publish");
 const prepareOnly = args.includes("--prepare-only");
 const signStageOnly = args.includes("--sign-stage-only");
 const win = args.includes("--win");
-const winPublish = args.includes("--publish");
-const winUnsignedRelease = args.includes("--unsigned-release");
+const explicitPublish = args.includes("--publish");
+const winPublish = win && explicitPublish;
+const requireSigning = args.includes("--require-signing") || winPublish;
 
 if (prepareOnly && signStageOnly) {
   throw new Error("--prepare-only and --sign-stage-only cannot be combined");
 }
-if (win && signStageOnly) {
-  throw new Error("--win cannot be combined with --sign-stage-only");
+if (explicitPublish && !win) {
+  throw new Error("--publish is a Windows sub-mode; add --win");
 }
-if ((winPublish || winUnsignedRelease) && !win) {
-  throw new Error("--publish/--unsigned-release are Windows sub-modes; add --win");
+if (args.includes("--unsigned-release")) {
+  throw new Error("--unsigned-release was removed; signed releases must fail closed");
 }
-if (winPublish && winUnsignedRelease) {
-  throw new Error("--publish and --unsigned-release cannot be combined");
+if (requireSigning && !win) {
+  throw new Error("--require-signing is a Windows sub-mode; add --win");
+}
+if (winPublish && noPublish) {
+  throw new Error("--publish and --no-publish cannot be combined");
 }
 
 const publish = !dryrun && !noPublish && !prepareOnly && (!win || winPublish);
@@ -98,10 +100,10 @@ function runChecked(file, args, opts = {}) {
     stdio: "inherit",
     cwd: opts.cwd ?? desktopRoot,
     env: { ...process.env, ...opts.env },
-    // On Windows `pnpm` is a .cmd shim that spawnSync only resolves through a
-    // shell (and Node refuses to spawn .cmd without one). Repo/stage paths here
-    // contain no spaces, so unquoted shell args are safe.
-    shell: process.platform === "win32",
+    // Only pnpm is a .cmd shim on Windows. Keep node shell-free so Azure
+    // signing arguments containing spaces (publisherName=PwrDrvr LLC) remain
+    // one argument instead of being split by cmd.exe.
+    shell: process.platform === "win32" && file === "pnpm",
   });
   if (result.error) {
     console.error(`  ! failed to spawn ${file}: ${result.error.message}`);
@@ -113,7 +115,12 @@ function runChecked(file, args, opts = {}) {
 }
 
 function electronBuilderCli() {
-  const cli = join(desktopRoot, "node_modules", "electron-builder", "cli.js");
+  // Windows signing receives a self-contained, hoisted release-stage archive
+  // instead of the workspace's pnpm symlink graph. Its signing job must not
+  // install dependencies, so use the staged electron-builder toolchain there.
+  const cli = signStageOnly && win
+    ? join(stageDir, "node_modules", "electron-builder", "cli.js")
+    : join(desktopRoot, "node_modules", "electron-builder", "cli.js");
   if (!existsSync(cli)) {
     throw new Error(
       `electron-builder CLI is missing at ${cli}; run \`pnpm install\` from the repo root first`,
@@ -160,27 +167,62 @@ function writeWindowsChecksums(distDir) {
   return checksumPath;
 }
 
-function assertWindowsReleaseInputs({ requireSigning }) {
+function assertWindowsReleaseInputs() {
   if (process.platform !== "win32") {
     throw new Error("Windows release packaging must run on Windows so native packaging is exercised.");
-  }
-
-  const cscLink = process.env.WIN_CSC_LINK || process.env.CSC_LINK;
-  const cscPassword = process.env.WIN_CSC_KEY_PASSWORD || process.env.CSC_KEY_PASSWORD;
-  if (requireSigning && (!cscLink || !cscPassword)) {
-    throw new Error(
-      "Windows release packaging requires WIN_CSC_LINK/WIN_CSC_KEY_PASSWORD " +
-        "(or CSC_LINK/CSC_KEY_PASSWORD) for Authenticode signing.",
-    );
-  }
-  if (cscLink && cscPassword) {
-    process.env.CSC_LINK ??= cscLink;
-    process.env.CSC_KEY_PASSWORD ??= cscPassword;
   }
 
   if (winPublish && !process.env.GH_TOKEN && !process.env.GITHUB_TOKEN) {
     throw new Error("--publish requires GH_TOKEN or GITHUB_TOKEN so electron-builder can upload artifacts.");
   }
+}
+
+// Azure Artifact Signing was originally named Trusted Signing. All four
+// WIN_AZURE_SIGN_* values and all three AZURE_* service-principal credentials
+// are required together. None means an intentional unsigned local build; any
+// partial configuration is always an error.
+function resolveWindowsAzureSigning() {
+  const config = {
+    WIN_AZURE_SIGN_PUBLISHER_NAME:
+      process.env.WIN_AZURE_SIGN_PUBLISHER_NAME?.trim(),
+    WIN_AZURE_SIGN_ENDPOINT: process.env.WIN_AZURE_SIGN_ENDPOINT?.trim(),
+    WIN_AZURE_SIGN_ACCOUNT: process.env.WIN_AZURE_SIGN_ACCOUNT?.trim(),
+    WIN_AZURE_SIGN_PROFILE: process.env.WIN_AZURE_SIGN_PROFILE?.trim(),
+  };
+  const missingConfig = Object.entries(config)
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
+
+  if (missingConfig.length === Object.keys(config).length) {
+    return undefined;
+  }
+  if (missingConfig.length > 0) {
+    throw new Error(
+      `Windows signing is partially configured — missing: ${missingConfig.join(", ")}. ` +
+        "Set all WIN_AZURE_SIGN_* values or none to build unsigned.",
+    );
+  }
+
+  const missingCredentials = Object.entries({
+    AZURE_TENANT_ID: process.env.AZURE_TENANT_ID?.trim(),
+    AZURE_CLIENT_ID: process.env.AZURE_CLIENT_ID?.trim(),
+    AZURE_CLIENT_SECRET: process.env.AZURE_CLIENT_SECRET?.trim(),
+  })
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
+  if (missingCredentials.length > 0) {
+    throw new Error(
+      `Windows signing is configured but service-principal credentials are missing: ${missingCredentials.join(", ")}. ` +
+        "Unset WIN_AZURE_SIGN_* to build unsigned instead.",
+    );
+  }
+
+  return {
+    publisherName: config.WIN_AZURE_SIGN_PUBLISHER_NAME,
+    endpoint: config.WIN_AZURE_SIGN_ENDPOINT,
+    accountName: config.WIN_AZURE_SIGN_ACCOUNT,
+    profileName: config.WIN_AZURE_SIGN_PROFILE,
+  };
 }
 
 // Decode CI-provided Apple API key (if present) to a real .p8 file.
@@ -203,10 +245,6 @@ function maybeDecodeAppleApiKey() {
   console.log("  decoded APPLE_API_KEY_BASE64 -> temporary App Store Connect key file");
 }
 
-if (win && (winPublish || winUnsignedRelease)) {
-  assertWindowsReleaseInputs({ requireSigning: !winUnsignedRelease });
-}
-
 if (!signStageOnly) {
   // 1. Check license notices before doing expensive release work.
   step("license notices check");
@@ -216,17 +254,29 @@ if (!signStageOnly) {
   step("electron-vite build");
   runChecked("pnpm", ["--filter", "@pwrgit/desktop", "build"], { cwd: repoRoot });
 
-  // 3. Materialize a self-contained, flat node_modules under stage.
-  step("pnpm deploy --prod -> release-stage");
+  // 3. Materialize the release stage. Windows must include electron-builder in
+  // the staged tree: its protected signing job receives only this tree, and
+  // Windows tar follows pnpm's workspace junctions when workspace node_modules
+  // are archived. A hoisted deploy avoids that junction graph while leaving
+  // package-manager work outside the credential boundary.
+  const deployArgs = [
+    "deploy",
+    "--filter",
+    "@pwrgit/desktop",
+    "--legacy",
+  ];
+  if (win) {
+    deployArgs.push("--config.node-linker=hoisted");
+  } else {
+    deployArgs.push("--prod");
+  }
+  deployArgs.push(stageDir);
+  step(`pnpm ${win ? "deploy (hoisted)" : "deploy --prod"} -> release-stage`);
   if (existsSync(stageDir)) {
     rmSync(stageDir, { recursive: true, force: true });
   }
   mkdirSync(stageDir, { recursive: true });
-  runChecked(
-    "pnpm",
-    ["deploy", "--filter", "@pwrgit/desktop", "--prod", "--legacy", stageDir],
-    { cwd: repoRoot },
-  );
+  runChecked("pnpm", deployArgs, { cwd: repoRoot });
 
   // 4. Copy the build output, notices, changelog, and electron-builder inputs into the
   //    stage so electron-builder finds them at well-known paths. pnpm deploy
@@ -260,13 +310,35 @@ if (!signStageOnly) {
 // 5. electron-builder.
 const builderArgs = [];
 if (win) {
+  assertWindowsReleaseInputs();
+  const azureSign = resolveWindowsAzureSigning();
+  // The partial-config guard cannot catch a job that never joined the
+  // windows-signing environment: every value is empty, indistinguishable from
+  // an intentional unsigned local build. Release CI passes --require-signing
+  // so that case fails instead of quietly publishing an unsigned installer.
+  if (requireSigning && !azureSign) {
+    throw new Error(
+      "--require-signing was passed but no Windows signing configuration is present. " +
+        "Check that the job declares `environment: windows-signing`.",
+    );
+  }
   step(
     `electron-builder --win nsis --x64 (${
-      winPublish ? "publish" : winUnsignedRelease ? "unsigned release, no publish" : "no publish"
+      azureSign ? "Azure Artifact Signing" : "UNSIGNED"
+    }, ${
+      winPublish ? "publish" : "no publish"
     })`,
   );
   builderArgs.push("--win", "nsis", "--x64");
   builderArgs.push(winPublish ? "--publish" : "--publish=never", winPublish ? "always" : "");
+  if (azureSign) {
+    builderArgs.push(
+      `--config.win.azureSignOptions.publisherName=${azureSign.publisherName}`,
+      `--config.win.azureSignOptions.endpoint=${azureSign.endpoint}`,
+      `--config.win.azureSignOptions.codeSigningAccountName=${azureSign.accountName}`,
+      `--config.win.azureSignOptions.certificateProfileName=${azureSign.profileName}`,
+    );
+  }
 } else {
   step(`electron-builder --mac --universal (${publish ? "publish" : "no publish"}, ${dryrun ? "ad-hoc signed" : "signed"})`);
   maybeDecodeAppleApiKey();
@@ -299,7 +371,11 @@ if (win) {
   const builtApp = findWindowsUnpackedDir(dist);
 
   step("verify packaged asar contents");
-  runChecked("node", [join(desktopRoot, "scripts", "verify-asar-contents.mjs"), builtApp]);
+  runChecked(
+    "node",
+    [join(desktopRoot, "scripts", "verify-asar-contents.mjs"), builtApp],
+    { env: { PWRGIT_ASAR_MODULE_ROOT: stageDir } },
+  );
 
   step("verify embedded Git runtime notices");
   runChecked("node", [join(desktopRoot, "scripts", "verify-embedded-git-notices.mjs"), builtApp]);
