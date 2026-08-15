@@ -34,6 +34,24 @@ textarea,
   user-select: text;
 }
 
+/* Text for assistive technology only. Clip rather than `display: none` or
+   `visibility: hidden`, both of which remove the node from the accessibility
+   tree along with the pixels. Used where a glyph carries meaning that has no
+   text equivalent — the sidebar's ●/↑/↓ count badges — and for the live region
+   that announces keyboard reorders. */
+.a11y-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 ::-webkit-scrollbar {
   width: 9px;
   height: 9px;
@@ -488,15 +506,21 @@ textarea,
   background: var(--bg-panel-hover);
   color: var(--text-secondary);
 }
+/* Which lens is active is a state (SC 1.4.11, 3:1). Its fill is 1.00:1 against
+   the filter's --bg-panel in dark and 1.05:1 in light, and the --accent-border
+   hairline was 2.30:1 / 1.87:1 — so before this the only thing separating the
+   active chip from the other four was the icon changing colour. --accent is
+   8.40:1 / 5.06:1. */
 .lens-chip.is-active {
-  border-color: var(--accent-border);
+  border-color: var(--accent);
   background: var(--bg-row-active);
   color: var(--accent-bright);
 }
+/* Same 1.4.11 fix, and the same inset, as the rows — see
+   .repo-row:focus-visible. */
 .lens-chip:focus-visible {
-  outline: none;
-  border-color: var(--accent-border);
-  box-shadow: 0 0 0 1px var(--accent-soft);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 /* Presence, not quantity: the exact number lives in the button's accessible
    name, so this only has to answer "is there anything in there". */
@@ -630,8 +654,9 @@ textarea,
 /* Rows are the primary keyboard target — the roving tabindex exists for them —
    so they get the strongest indicator in the sidebar, not the weakest. The old
    ring was a 42%-alpha border plus a 12%-alpha glow, which resolves to ≈2.27:1
-   on --bg-sidebar and misses WCAG 2.4.11's 3:1; small chrome buttons like
-   .wt-refresh already used a solid --focus-ring and outranked it.
+   on --bg-sidebar in dark and 1.84:1 in light, and misses WCAG 1.4.11's 3:1;
+   small chrome buttons like .wt-refresh already used a solid --focus-ring and
+   outranked it. --focus-ring is 8.64:1 / 4.73:1.
 
    Inset (negative offset), unlike PwrAgnt's +2: these rows sit flush against
    each other with opaque backgrounds and .repo-row is sticky at z-index 3, so
@@ -685,11 +710,32 @@ textarea,
   cursor: grabbing;
 }
 
-/* The source row fades rather than disappearing — it still marks where the row
-   came from, which is what makes the insertion line read as a *move*. */
+/* The source row still marks where the row came from — that is what makes the
+   insertion line read as a *move* rather than an insert — but it no longer
+   does it by fading.
+
+   `opacity: 0.4` took the row's own TEXT down with it: 3.46:1 for the name,
+   2.29:1 for the branch, 1.48:1 for the count and the grip, all against the
+   sidebar. SC 1.4.3 has no exemption for a state that is merely transient, and
+   the arithmetic here has no comfortable answer — the quiet tier only clears
+   4.5:1 again at about 0.88 opacity, which is not a fade at all. Dimming was
+   the wrong mechanism, not the wrong number.
+
+   So mark the row instead of washing it out: the "grabbed" surface the palette
+   already carries a token for, plus the transparent border every row reserves
+   turned solid accent (8.64:1 dark / 4.73:1 light, so the marker itself clears
+   1.4.11). Text stays at full strength, and the state is more legible than it
+   was, not less. Costs no layout — both rows already declare a 1px border. */
 .repo-row.is-dragging,
 .wt-row.is-dragging {
-  opacity: 0.4;
+  background: var(--bg-hover-strong);
+  /* The hover strip fades into the row behind it, so a row that changes its
+     background owes a matching scrim — otherwise the fade resolves to the
+     wrong colour over a dragged row. Same pairing every other .wt-row state
+     rule makes. */
+  --row-scrim: var(--bg-hover-strong);
+  border-color: var(--accent);
+  border-style: dashed;
 }
 
 /* The insertion line sits in the gap the drop would land in. Drawn as a ::after
@@ -817,6 +863,78 @@ textarea,
   color: var(--accent);
 }
 
+/* ---------------------------------------------------------------------------
+   Target size (SC 2.5.8) — 24×24 pointer targets for sub-24px sidebar chrome.
+
+   Every control below is deliberately drawn smaller than 24px, and for a
+   reason that still holds: sidebar rows are content-sized, so a 24px child
+   becomes the row's height driver (that is exactly how the pin ended up at
+   16px — see its note above — and it is what e2e/lens-row.spec.ts's 28px/24px
+   row bounds exist to catch). None of them clears the SC's spacing exception
+   either, since each has a neighbouring target well inside 24px.
+
+   So grow the TARGET, not the glyph and not the row. A positioned ::after is
+   out of flow, contributes no height, and is what the browser hit-tests — the
+   control keeps its drawn size while the clickable box becomes at least
+   24×24, centred on it. Measured sizes before this: .wt-refresh 20×20,
+   .sort-cycle h20, .wt-section__toggle h≈11, .wt-selbar__btn h22,
+   .ref-mini-action / .ref-fetch-all 21×21.
+
+   `.pin` is NOT in this list, and deliberately: it solves the same problem with
+   a real 24px box pulled back to a 16px footprint by a negative margin (see its
+   rule above). That is the better technique where it fits — the element the
+   browser hit-tests is the actual button, so the focus ring and hover fill land
+   on the true target rather than on a phantom. It costs a compensating
+   adjustment wherever the bled-past border box meets a neighbour, which the pin
+   pays for in `.wt-row__hoveracts`'s padding. The controls below sit in tight
+   flex rows whose gaps would shift instead, so they take the pseudo-element. */
+.wt-refresh,
+.sort-cycle,
+.wt-section__toggle,
+.wt-selbar__btn,
+.ref-mini-action,
+.ref-fetch-all {
+  position: relative;
+}
+.wt-refresh::after,
+.sort-cycle::after,
+.wt-section__toggle::after,
+.wt-selbar__btn::after,
+.ref-mini-action::after,
+.ref-fetch-all::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  /* At least 24 in both axes, never smaller than the control it belongs to. */
+  width: 100%;
+  height: 100%;
+  min-width: 24px;
+  min-height: 24px;
+}
+
+/* Focus rings for the sidebar controls that had none. These fell through to
+   Chromium's default ring, which is visible — but the app suppresses that ring
+   everywhere else it styles focus, so relying on it here left SC 2.4.7 resting
+   on whichever control a future rule happened not to reach. Same colour and
+   weight as the rows, so one indicator vocabulary. */
+.pin:focus-visible,
+.sort-cycle:focus-visible,
+.wt-section__toggle:focus-visible,
+.wt-selbar__btn:focus-visible,
+.ref-mini-action:focus-visible,
+.ref-fetch-all:focus-visible,
+.ref-section__head:focus-visible,
+.ref-remote__main:focus-visible,
+.new-wt:focus-visible,
+.add-folder:focus-visible,
+.clone-repo:focus-visible,
+.jump-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
@@ -920,7 +1038,10 @@ textarea,
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
 }
-.wt-refresh:hover:not(:disabled) {
+/* Refreshing is signalled with aria-disabled, not `disabled`, so the button
+   keeps its place in the focus order — see RepoRow.tsx. Match on the attribute
+   so the resting/hover treatments still track the state. */
+.wt-refresh:hover:not([aria-disabled="true"]) {
   color: var(--text-primary);
   background: var(--bg-hover-strong);
 }
@@ -928,7 +1049,7 @@ textarea,
   outline: 1px solid var(--focus-ring);
   outline-offset: 1px;
 }
-.wt-refresh:disabled {
+.wt-refresh[aria-disabled="true"] {
   cursor: default;
 }
 .wt-refresh.is-refreshing svg {
@@ -1173,6 +1294,14 @@ textarea,
   outline-offset: -2px;
   border-color: var(--accent-border);
 }
+/* Arrowing through the list must not park the focused row under the sticky
+   repo header (or the sticky folder heading above it), which is what the
+   browser's scroll-into-view would otherwise do. WCAG 2.2's SC 2.4.11, ahead
+   of the standard this audit targets, but the fix is one declaration. */
+.wt-row,
+.repo-row {
+  scroll-margin-top: var(--sidebar-repo-row-height);
+}
 .wt-row.is-selected {
   /* Keep the active worktree pinned just below the folder header so it doesn't
      scroll out of view down a long worktree list. */
@@ -1183,7 +1312,13 @@ textarea,
      visibly jumped when selected. It now tracks the header token. */
   top: var(--sidebar-repo-row-height);
   z-index: 2;
-  border-color: var(--accent-border);
+  /* "Selected" is a state, so SC 1.4.11 wants it identifiable at 3:1. The
+     --bg-row-active fill alone is 1.03:1 against the sidebar in dark and
+     1.02:1 in light — it reads as a wash, not as a state — and the
+     --accent-border hairline was 2.33:1 against its own fill. --accent is
+     8.40:1 / 4.82:1 there, so the border becomes the thing that actually
+     carries the state and the tint stays a tint. */
+  border-color: var(--accent);
   background: var(--bg-row-active);
   --row-scrim: var(--bg-row-active);
 }
@@ -1214,9 +1349,17 @@ textarea,
   background: var(--accent-soft);
   border: 1px solid var(--accent-border);
 }
-.wt-selbar__count {
+/* Written with the ancestor spelled out, not as a bare `.wt-selbar__count`:
+   the tint this text sits on comes from .wt-selbar, and theme-contract's
+   accent-ramp check reads ancestry off the SELECTOR. As a bare class the
+   relationship was invisible to it and the rule was scored as accent on a flat
+   surface. */
+.wt-selbar .wt-selbar__count {
   font: 700 11px/1 var(--font-sans);
-  color: var(--accent);
+  /* --accent-bright is contrast-floored against exactly this --accent-soft
+     tint (see tokens.css). --accent measured 4.02:1 here in light, under
+     SC 1.4.3; --accent-bright is 4.80:1. */
+  color: var(--accent-bright);
 }
 .wt-selbar__btn {
   height: 22px;
@@ -4349,9 +4492,11 @@ body.is-col-resizing {
   border-color: var(--border-default);
   color: var(--text-primary);
 }
+/* --accent-border alone was 2.27:1 against the sidebar — under SC 1.4.11's 3:1
+   for a focus state. See .repo-row:focus-visible. */
 .kebab__btn:focus-visible {
-  outline: none;
-  border-color: var(--accent-border);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
   color: var(--text-primary);
 }
 /* Shared dropdown/context-menu surface (kebab + right-click menus). */

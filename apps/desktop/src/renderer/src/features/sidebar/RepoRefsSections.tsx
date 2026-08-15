@@ -102,8 +102,13 @@ export function RepoRefsSections({
   return (
     <>
       <div className="ref-section">
+        {/* These are disclosures — they were rendering a rotating caret and no
+            `aria-expanded`, so open and closed were indistinguishable to
+            anything not looking at the pixels (SC 4.1.2). The Worktrees toggle
+            in RepoRow already did this correctly; these two did not. */}
         <button
           className="ref-section__head"
+          aria-expanded={openSections.has("branches")}
           onClick={(event) => {
             event.stopPropagation();
             toggleSection("branches");
@@ -127,7 +132,7 @@ export function RepoRefsSections({
           <div className="ref-section__body">
             {visibleBranches.map((branch) => (
               <div className="ref-branch-row" key={branch.fullName}>
-                <span className="refs-branch-icon">⑂</span>
+                <span className="refs-branch-icon" aria-hidden="true">⑂</span>
                 <CopyTarget
                   value={branch.name}
                   label={`Copy branch name ${branch.name}`}
@@ -144,9 +149,15 @@ export function RepoRefsSections({
                 >
                   {compactTrackingLabel(trackingLabel(branch))}
                 </span>
+                {/* The accessible name of a button comes from its CONTENT
+                    before its `title`, so these announced as "●" and "+" —
+                    "black circle, button" (SC 4.1.2). An explicit label wins
+                    over both, and naming the branch makes the six of them on
+                    screen distinguishable from one another. */}
                 {branch.checkedOutWorktreeIds.length > 0 ? (
                   <button
                     className="ref-mini-action"
+                    aria-label={`Show worktree checked out at ${branch.name}`}
                     title="Show checked-out worktree"
                     onClick={(event) => {
                       event.stopPropagation();
@@ -154,18 +165,19 @@ export function RepoRefsSections({
                       if (id !== undefined) onRevealWorktree(id);
                     }}
                   >
-                    ●
+                    <span aria-hidden="true">●</span>
                   </button>
                 ) : (
                   <button
                     className="ref-mini-action"
+                    aria-label={`Create worktree for ${branch.name}`}
                     title="Create worktree"
                     onClick={(event) => {
                       event.stopPropagation();
                       onCreateWorktree(branch.name, false);
                     }}
                   >
-                    +
+                    <span aria-hidden="true">+</span>
                   </button>
                 )}
               </div>
@@ -193,6 +205,7 @@ export function RepoRefsSections({
         <div className="ref-section__head-wrap">
           <button
             className="ref-section__head"
+            aria-expanded={openSections.has("remotes")}
             onClick={(event) => {
               event.stopPropagation();
               toggleSection("remotes");
@@ -226,6 +239,7 @@ export function RepoRefsSections({
                   <div className="ref-remote__row">
                     <button
                       className="ref-remote__main"
+                      aria-expanded={open}
                       title={remote.fetchUrl}
                       onClick={(event) => {
                         event.stopPropagation();
@@ -271,7 +285,7 @@ export function RepoRefsSections({
                             className="ref-remote-branch-row"
                             key={branch.fullName}
                           >
-                            <span className="refs-branch-icon">⑂</span>
+                            <span className="refs-branch-icon" aria-hidden="true">⑂</span>
                             <CopyTarget
                               value={branch.name}
                               label={`Copy branch name ${branch.name}`}
@@ -287,6 +301,13 @@ export function RepoRefsSections({
                             )}
                             <button
                               className="ref-mini-action"
+                              aria-label={
+                                checkedOutId !== undefined
+                                  ? `Show worktree checked out at ${branch.name}`
+                                  : local !== undefined
+                                    ? `Create worktree from local branch ${local.name}`
+                                    : `Create a local branch and worktree from ${branch.qualifiedName}`
+                              }
                               title={
                                 checkedOutId !== undefined
                                   ? "Show checked-out worktree"
@@ -309,7 +330,9 @@ export function RepoRefsSections({
                                 }
                               }}
                             >
-                              {checkedOutId === undefined ? "+" : "●"}
+                              <span aria-hidden="true">
+                                {checkedOutId === undefined ? "+" : "●"}
+                              </span>
                             </button>
                           </div>
                         );

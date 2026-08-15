@@ -141,21 +141,104 @@ test("the sidebar tree exposes valid, nested roles", async () => {
 
   // Repo rows are treeitems at level 1 inside the tree — not `option`, which
   // only means anything inside a listbox.
-  const tree = window.locator('.sidebar__list[role="tree"]');
+  //
+  // The tree is `.sidebar__tree`, INSIDE the `.sidebar__list` scrollport
+  // rather than being it. A `tree` may only own `treeitem` and `group`
+  // children, and the scrollport also holds the empty state and the "Add
+  // folders…" button — so while the role sat on the scrollport, a button was a
+  // direct child of the tree and the structure was invalid.
+  const tree = window.locator('.sidebar__tree[role="tree"]');
   await expect(tree).toHaveCount(1);
   await expect(tree.locator('.repo-row[role="treeitem"]')).toHaveCount(3);
   await expect(window.locator('[role="option"]')).toHaveCount(0);
+  await expect(tree.locator(".add-folder")).toHaveCount(0);
+  await expect(window.locator(".sidebar__list .add-folder")).toHaveCount(1);
+
+  // Position is stated rather than left to be inferred: folder buckets wrap
+  // rows in groups, and every expanded repo drops a sibling section between
+  // two rows that `aria-owns` then re-parents.
+  const alpha = window.locator(".repo-row", { hasText: "alpha" });
+  await expect(alpha).toHaveAttribute("aria-posinset", "1");
+  await expect(alpha).toHaveAttribute("aria-setsize", "3");
+  await expect(
+    window.locator(".repo-row", { hasText: "charlie" })
+  ).toHaveAttribute("aria-posinset", "3");
+
+  // The row's name stays the repo name (every step helper resolves rows by it),
+  // so the counts it also shows reach a screen reader as a description.
+  await expect(alpha).toHaveAttribute("aria-label", "alpha");
+  const describedBy = await alpha.getAttribute("aria-describedby");
+  expect(describedBy).not.toBeNull();
+  await expect(window.locator(`#${describedBy}`)).toHaveText(/worktree/);
 
   // Expanding a repo adds a group of level-2 treeitems, owned by the repo row
   // (the section is a DOM sibling, so ownership is explicit via aria-owns).
-  await window.locator(".repo-row", { hasText: "alpha" }).click();
+  await alpha.click();
   const group = window.locator('.wt-section[role="group"]');
   await expect(group).toHaveCount(1);
-  await expect(group.locator('.wt-row[role="treeitem"]')).not.toHaveCount(0);
-  const owns = await window
-    .locator(".repo-row", { hasText: "alpha" })
-    .getAttribute("aria-owns");
+  const worktrees = group.locator('.wt-row[role="treeitem"]');
+  await expect(worktrees).not.toHaveCount(0);
+  const owns = await alpha.getAttribute("aria-owns");
   expect(owns).toBe(await group.getAttribute("id"));
+
+  // Level-2 rows carry their own position within that group.
+  await expect(worktrees.first()).toHaveAttribute("aria-posinset", "1");
+  await expect(worktrees.first()).toHaveAttribute(
+    "aria-setsize",
+    String(await worktrees.count())
+  );
+
+  // The refs disclosures inside the group are buttons that open and close, so
+  // they have to say which they are — these two carried a rotating caret and
+  // nothing else.
+  for (const section of ["Branches", "Remotes"]) {
+    await expect(
+      window.getByRole("button", { name: new RegExp(`^${section}`) }).first()
+    ).toHaveAttribute("aria-expanded", "false");
+  }
+});
+
+test("a dragged row is marked without its text being dimmed", async () => {
+  const window = await pinnedSandbox();
+
+  const alpha = window.locator(".repo-row", { hasText: "alpha" });
+  const charlie = window.locator(".repo-row", { hasText: "charlie" });
+  const box = await charlie.boundingBox();
+  if (box === null) throw new Error("charlie row has no box");
+
+  await alpha.hover();
+  await window.mouse.down();
+  await window.mouse.move(box.x + box.width / 2, box.y + box.height * 0.8, {
+    steps: 12
+  });
+  await expect(alpha).toHaveClass(/is-dragging/);
+
+  // The source row used to be painted at `opacity: 0.4`, which took its own
+  // text to 2.29:1 (branch) and 1.48:1 (count) — SC 1.4.3 does not exempt a
+  // state for being transient, and no opacity that still reads as a fade
+  // clears 4.5:1 for the quiet tier. It is marked on its own surface instead.
+  const dragged = await alpha.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return { opacity: s.opacity, borderStyle: s.borderTopStyle };
+  });
+  expect(dragged.opacity, "the drag source must not be faded").toBe("1");
+  expect(dragged.borderStyle).toBe("dashed");
+
+  await window.mouse.up();
+});
+
+test("⌘⇧↓ announces where the row landed", async () => {
+  const window = await pinnedSandbox();
+
+  // The gesture deliberately keeps focus on the row that moved, so nothing is
+  // re-announced on its own and the reorder is silent to a screen reader
+  // (SC 4.1.3). A polite live region says what happened.
+  await window.locator(".repo-row", { hasText: "alpha" }).focus();
+  await window.keyboard.press("Meta+Shift+ArrowDown");
+
+  const live = window.locator("#pwrgit-live-region");
+  await expect(live).toHaveAttribute("aria-live", "polite");
+  await expect(live).toHaveText("alpha moved to 2 of 3.");
 });
 
 test("the via-wt marker appears only in the lens whose claim it makes", async () => {

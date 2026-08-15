@@ -6,6 +6,7 @@ import {
   type MouseEvent as ReactMouseEvent
 } from "react";
 import type { Lens, Profile, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
+import { announce, movedMessage } from "../../lib/announce";
 import { copyText } from "../../lib/copyText";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
@@ -42,6 +43,9 @@ const EMPTY_COPY: Record<Lens, string> = {
   Behind: "No repo is behind its upstream.",
   Stale: "No worktrees look safe to prune."
 };
+
+/** The repo tree, named so the lens switch can point `aria-controls` at it. */
+const REPO_TREE_ID = "sidebar-repo-tree";
 
 // Multi-selection is scoped to a single repo's worktrees (a range needs one
 // ordering). `anchor` is the pivot for shift-click ranges.
@@ -282,6 +286,13 @@ export function Sidebar({
   };
 
   const handleRepoKeyDown = (repo: Repo, event: ReactKeyboardEvent): void => {
+    // Keydown from the pin button (or anything else focusable inside the row)
+    // bubbles to here. Acting on it swallowed the button: a `<button>` fires
+    // its click from the default action of Enter's keydown and Space's keyup,
+    // and cancelling the keydown cancels BOTH — so Enter or Space on a focused
+    // pin toggled the repo's disclosure and never reached the pin at all
+    // (SC 2.1.1). Only the row itself drives row-level keys.
+    if (event.target !== event.currentTarget) return;
     const index = filteredIds.indexOf(repo.id);
     if (index === -1) return;
     if (event.metaKey && event.shiftKey) {
@@ -302,13 +313,23 @@ export function Sidebar({
       const neighbor = filteredIds[to];
       if (neighbor === undefined) return;
       event.preventDefault();
-      onPersistRepoOrder(
-        reorder(
-          filteredIds,
-          repo.id,
-          neighbor,
-          event.key === "ArrowUp" ? "before" : "after"
-        )
+      const moved = reorder(
+        filteredIds,
+        repo.id,
+        neighbor,
+        event.key === "ArrowUp" ? "before" : "after"
+      );
+      onPersistRepoOrder(moved);
+      // Focus stays on the row that moved, so nothing is re-announced on its
+      // own — see lib/announce (SC 4.1.3). Announce against the group the row
+      // is actually listed in, which is what its posinset counts within.
+      const siblings = grouped
+        ? moved.filter(
+            (id) => groupOfRepo.get(id) === groupOfRepo.get(repo.id)
+          )
+        : moved;
+      announce(
+        movedMessage(repo.name, siblings.indexOf(repo.id) + 1, siblings.length)
       );
       // Keep focus on the row that moved, not the slot it left.
       window.requestAnimationFrame(() => {
@@ -467,9 +488,14 @@ export function Sidebar({
     });
   };
 
-  const renderRepo = (repo: Repo) => (
+  // `map` hands us (repo, index, list), which is exactly the posinset/setsize
+  // pair each row needs — within its folder group when grouped, within the
+  // filtered list when not. See RepoRow for why they are stated explicitly.
+  const renderRepo = (repo: Repo, index: number, list: Repo[]) => (
     <RepoRow
       key={repo.id}
+      posinset={index + 1}
+      setsize={list.length}
       repo={repo}
       expanded={expanded.has(repo.id)}
       containsSelection={repo.worktrees.some(
@@ -584,7 +610,12 @@ export function Sidebar({
       </div>
 
       <div className="sidebar__lens">
-        <LensFilter lens={lens} counts={counts} onChange={setLens} />
+        <LensFilter
+          lens={lens}
+          counts={counts}
+          onChange={setLens}
+          controlsId={REPO_TREE_ID}
+        />
         {canGroup && (
           <button
             ref={optionsTriggerRef}
@@ -615,34 +646,51 @@ export function Sidebar({
         )}
       </div>
 
-      <div className="sidebar__list" role="tree" aria-label="Repositories">
-        {grouped
-          ? groups.map((g) => (
-              // A `tree` may own `group`s of treeitems, so the folder buckets
-              // are groups rather than bare divs — otherwise the repo rows are
-              // treeitems with no owning structure. The visual heading is then
-              // decorative, but its count has to survive into the group's name
-              // or screen-reader users simply lose it.
-              <div
-                className="repo-group"
-                key={g.root || "__other"}
-                role="group"
-                aria-label={`${g.label} (${g.repos.length} ${
-                  g.repos.length === 1 ? "repo" : "repos"
-                })`}
-              >
+      {/* The scrollport and the tree are two different things. `role="tree"`
+          used to sit on .sidebar__list, which also holds the empty state — and
+          a `tree` may only own `treeitem` and `group` children, so anything
+          else parked among the rows makes the whole structure invalid
+          (SC 1.3.1; axe's aria-required-children). It used to hold the "Add
+          folders…" button too, which was the loudest version of the problem;
+          that button now lives up in .sidebar__actions, but the empty state
+          still needs to sit outside the tree. The wrapper below owns only rows
+          and folder groups. It is a plain static block, so it changes no layout
+          and the rows still stick to .sidebar__list's scrollport. */}
+      <div className="sidebar__list">
+        <div
+          className="sidebar__tree"
+          id={REPO_TREE_ID}
+          role="tree"
+          aria-label="Repositories"
+        >
+          {grouped
+            ? groups.map((g) => (
+                // A `tree` may own `group`s of treeitems, so the folder buckets
+                // are groups rather than bare divs — otherwise the repo rows
+                // are treeitems with no owning structure. The visual heading is
+                // then decorative, but its count has to survive into the
+                // group's name or screen-reader users simply lose it.
                 <div
-                  className="repo-group__head"
-                  title={g.root || "Not under any added folder"}
-                  aria-hidden="true"
+                  className="repo-group"
+                  key={g.root || "__other"}
+                  role="group"
+                  aria-label={`${g.label} (${g.repos.length} ${
+                    g.repos.length === 1 ? "repo" : "repos"
+                  })`}
                 >
-                  <span className="repo-group__label">{g.label}</span>
-                  <span className="repo-group__count">{g.repos.length}</span>
+                  <div
+                    className="repo-group__head"
+                    title={g.root || "Not under any added folder"}
+                    aria-hidden="true"
+                  >
+                    <span className="repo-group__label">{g.label}</span>
+                    <span className="repo-group__count">{g.repos.length}</span>
+                  </div>
+                  {g.repos.map(renderRepo)}
                 </div>
-                {g.repos.map(renderRepo)}
-              </div>
-            ))
-          : filtered.map(renderRepo)}
+              ))
+            : filtered.map(renderRepo)}
+        </div>
 
         {filtered.length === 0 && (
           <div className="sidebar__empty">

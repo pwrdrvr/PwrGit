@@ -72,7 +72,16 @@
   --text-primary: #f7f3eb;
   --text-secondary: #b8b0a5;
   --text-muted: #8c857a;
-  --text-subtle: rgba(247, 243, 235, 0.42);
+  /* The quiet tier, and the only text token that is an alpha rather than a
+     solid — it has to sit on every surface below. 0.42 composited to #6b6966
+     on --bg-sidebar: 3.72:1, which fails SC 1.4.3 (4.5:1) for the counts,
+     eyebrows and ages that are the only things painted with it, and fails
+     1.4.11 (3:1) for the drag grips. 0.54 is the lowest notch that clears 4.5:1
+     on the LIGHTEST surface it lands on (--bg-hover-strong, which needs 0.478)
+     with room for the alpha to be re-derived. This is a deliberate divergence
+     from PwrAgnt's shared value — see sidebar-contrast.test.ts, which pins the
+     ratios rather than the alpha. */
+  --text-subtle: rgba(247, 243, 235, 0.54);
 
   /* Accent (tangerine). The ramp travels toward lighter on dark surfaces:
      --accent → --accent-bright is increasing emphasis. It reverses in the
@@ -185,7 +194,11 @@
   --text-primary: #1a1612;
   --text-secondary: #524a40;
   --text-muted: #736c64;
-  --text-subtle: rgba(26, 22, 18, 0.42);
+  /* Same fix as the dark block, and light needs more of it: dark ink on a
+     near-white sidebar loses contrast faster per unit of alpha. 0.42 gave
+     2.66:1. The worst surface here is --bg-hover-strong (#ebe5da), which needs
+     0.611 for 4.5:1; 0.68 clears it with margin. */
+  --text-subtle: rgba(26, 22, 18, 0.68);
 
   /* Accent — the ramp reverses here. --accent → --accent-bright is still
      increasing emphasis, but emphasis reads as *darker* on a light surface,
@@ -210,7 +223,11 @@
 
   /* Status indicators — darker for visibility on light. */
   --status-ok: #2e7d3c;
-  --status-warning: #a86b00;
+  /* #a86b00 was 4.01:1 as text on --bg-sidebar and only 3.40:1 inside a
+     --warn-soft badge (the wash is derived from this token, so the badge is
+     always the tighter of the two) — both under SC 1.4.3's 4.5:1. #805200
+     holds the same hue and clears 6.13:1 / 5.00:1. */
+  --status-warning: #805200;
   --status-suspended: #6b6660;
 
   /* One-off accents — darker variants for light surfaces. */
