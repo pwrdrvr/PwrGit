@@ -116,3 +116,32 @@ test("the lens row survives the narrowest sidebar at the largest text size", asy
 
   expect(await lensRowOverflow(window)).toBeLessThanOrEqual(0);
 });
+
+test("sidebar rows are sized by their content, not by a fixed box", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepo("dense", { worktrees: ["feature/one"] });
+
+  handle = await launchApp();
+  const { window } = handle;
+  await handle.setPickDirectory(sandbox.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await lensChip(window, "All").click();
+  const repoRow = window.locator(".repo-row", { hasText: "dense" });
+  await expect(repoRow).toBeVisible({ timeout: 20_000 });
+
+  // The point of content-sizing is that the row tracks its type. Guarding the
+  // rendered height is the only way to catch the failure that actually
+  // happened: `height` was removed, but a fixed 24px pin button silently
+  // became the new floor, so the row stayed ~32px and the density work bought
+  // nothing. A bound, not an exact value — fonts round differently per host.
+  const repoHeight = await repoRow.evaluate((el) => el.getBoundingClientRect().height);
+  expect(repoHeight).toBeLessThanOrEqual(28);
+
+  // And it must actually GROW with the axis — a row that ignores the notch
+  // would also pass the bound above.
+  await window.evaluate(() =>
+    document.documentElement.setAttribute("data-sidebar-text", "xl")
+  );
+  const grown = await repoRow.evaluate((el) => el.getBoundingClientRect().height);
+  expect(grown).toBeGreaterThan(repoHeight);
+});

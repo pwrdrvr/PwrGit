@@ -773,8 +773,14 @@ textarea,
 
 .pin {
   flex: 0 0 auto;
-  width: 24px;
-  height: 24px;
+  /* Sized to sit INSIDE the row's content box rather than define it. At 24px
+     this button was the repo row's real height driver — taller than the 13px
+     name it sits beside — so content-sizing the row bought almost nothing
+     until this shrank too. The worktree rows avoid the problem differently:
+     their action cluster is absolutely positioned, so it never contributes
+     height at all. */
+  width: 20px;
+  height: 20px;
   padding: 0;
   display: flex;
   align-items: center;
