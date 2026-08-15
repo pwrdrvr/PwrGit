@@ -1,4 +1,9 @@
-import { err, ok, type Profile } from "@pwrgit/shared";
+import {
+  err,
+  ok,
+  type Profile,
+  type RemoteBranchReveal
+} from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import type { ProfileService } from "./profile-service";
@@ -12,12 +17,17 @@ export type ProfileHandlerDeps = {
   openWindow: (
     profileId: string,
     revealRepoId?: string,
-    revealWorktreeId?: string
+    revealWorktreeId?: string,
+    revealRemoteBranch?: RemoteBranchReveal
   ) => boolean;
   /** Hand a queued reveal to the window that just booted for a profile. */
   consumeReveal: (
     profileId: string
-  ) => { repoId: string; worktreeId: string | null } | null;
+  ) => {
+    repoId: string;
+    worktreeId: string | null;
+    remoteBranch: RemoteBranchReveal | null;
+  } | null;
 };
 
 export function registerProfileHandlers(
@@ -46,7 +56,12 @@ export function registerProfileHandlers(
   });
 
   bus.register("profile:openWindow", (req) => {
-    const opened = openWindow(req.profileId, req.revealRepoId, req.revealWorktreeId);
+    const opened = openWindow(
+      req.profileId,
+      req.revealRepoId,
+      req.revealWorktreeId,
+      req.revealRemoteBranch
+    );
     if (!opened) {
       return err({
         kind: "profile",
@@ -62,7 +77,8 @@ export function registerProfileHandlers(
     const reveal = consumeReveal(req.profileId);
     return ok({
       repoId: reveal?.repoId ?? null,
-      worktreeId: reveal?.worktreeId ?? null
+      worktreeId: reveal?.worktreeId ?? null,
+      remoteBranch: reveal?.remoteBranch ?? null
     });
   });
 

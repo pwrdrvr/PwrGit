@@ -7,7 +7,11 @@ import {
   protocol,
   safeStorage
 } from "electron";
-import { ok, type Profile } from "@pwrgit/shared";
+import {
+  ok,
+  type Profile,
+  type RemoteBranchReveal
+} from "@pwrgit/shared";
 import { registerAppDocumentHandlers } from "./app-document-handlers";
 import { openAppDocumentWindow } from "./app-document-window";
 import { initAutoUpdater } from "./auto-updater";
@@ -246,12 +250,20 @@ if (!gotSingleInstanceLock) {
     // interval instead of via filesystem watchers (which peg fseventd on large
     // trees). PwrGit's own git ops refresh directly through the refresher.
     let activeWorktreeId: string | null = null;
+    const rescanningProfiles = new Set<string>();
 
     const rescanInBackground = (profile: Profile): void => {
+      if (
+        rescanningProfiles.has(profile.id) ||
+        !indexer.shouldRescanProfile(profile.id)
+      ) {
+        return;
+      }
       // Scan lists repos + worktrees (cheap). Per-worktree *state*
       // (dirty/ahead/behind/staleness) is computed lazily per repo when its row
       // is expanded (repo:computeState) — computing all 156 at launch storms git.
       const startedAt = Date.now();
+      rescanningProfiles.add(profile.id);
       void indexer
         .rescanProfile(profile)
         .then((repos) => {
@@ -263,13 +275,18 @@ if (!gotSingleInstanceLock) {
           );
           emitEvent("repo:changed", { profileId: profile.id });
         })
-        .catch((cause) => logMain("error", "scan", "rescan failed:", cause));
+        .catch((cause) => logMain("error", "scan", "rescan failed:", cause))
+        .finally(() => rescanningProfiles.delete(profile.id));
     };
 
     // One window per profile. Opening a profile that already has a window
     // focuses it; cross-profile reveals are stashed until the new window asks.
     const windows = createProfileWindows();
-    type Reveal = { repoId: string; worktreeId: string | null };
+    type Reveal = {
+      repoId: string;
+      worktreeId: string | null;
+      remoteBranch: RemoteBranchReveal | null;
+    };
     const pendingReveals = new Map<string, Reveal>();
 
     const refreshMenu = (): void => {
@@ -292,7 +309,8 @@ if (!gotSingleInstanceLock) {
     const openProfileWindow = (
       profileId: string,
       revealRepoId?: string,
-      revealWorktreeId?: string
+      revealWorktreeId?: string,
+      revealRemoteBranch?: RemoteBranchReveal
     ): boolean => {
       const profile = profiles.get(profileId);
       if (profile === null) return false;
@@ -302,7 +320,8 @@ if (!gotSingleInstanceLock) {
       if (revealRepoId !== undefined) {
         const reveal: Reveal = {
           repoId: revealRepoId,
-          worktreeId: revealWorktreeId ?? null
+          worktreeId: revealWorktreeId ?? null,
+          remoteBranch: revealRemoteBranch ?? null
         };
         if (wasOpen) emitEvent("ui:revealRepo", { profileId, ...reveal });
         else pendingReveals.set(profileId, reveal);
@@ -336,7 +355,7 @@ if (!gotSingleInstanceLock) {
     });
     registerWorktreeLifecycleHandlers(bus, db, indexer, settings, stateService);
     registerBranchHandlers(bus, db, indexer, refresher, worktreeOperations);
-    registerRemoteHandlers(bus, db, refresher, worktreeOperations);
+    registerRemoteHandlers(bus, db, refresher, worktreeOperations, indexer);
     registerGraphHandlers(bus, db, stateService);
     registerChangesHandlers(bus, db, refresher, worktreeOperations);
     registerRebaseHandlers(bus, db, refresher, worktreeOperations);
@@ -402,6 +421,27 @@ if (!gotSingleInstanceLock) {
     const activeId = profiles.getActiveId();
     if (activeId !== null) openProfileWindow(activeId);
     refreshMenu();
+
+    // Migration 0019 could not populate Git-derived rows in SQL. Repair only
+    // repos that have never been attempted, after opening the first window.
+    // The active profile's normal rescan owns its root-discovered repos, so
+    // exclude only those scan rows. Manual repos still need this repair.
+    setImmediate(() => {
+      void indexer
+        .hydrateRemoteBranches({ excludeScannedProfileId: activeId })
+        .then(({ refreshed, failed }) => {
+          if (refreshed === 0 && failed === 0) return;
+          logMain(
+            failed === 0 ? "info" : "warn",
+            "scan",
+            `hydrated missing remote branches for ${refreshed} repos` +
+              (failed === 0 ? "" : `; ${failed} failed`)
+          );
+        })
+        .catch((cause) =>
+          logMain("error", "scan", "remote-branch hydration failed:", cause)
+        );
+    });
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {
