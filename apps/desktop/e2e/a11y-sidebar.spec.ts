@@ -215,6 +215,37 @@ test("the worktree row's hover-gated actions are reachable and visible from the 
   await expect(
     row.getByRole("button", { name: "Unpin worktree" })
   ).toBeVisible();
+
+  // The pin and the kebab float over the same right edge, and the pin's hit
+  // area is wider than the glyph it draws. The kebab renders after the strip
+  // and so hit-tests above it, which means any overlap is silently won by the
+  // kebab and taken out of the pin's 24px — the failure mode that left the pin
+  // a 19px target once before. Assert the two boxes are disjoint.
+  //
+  // `getBoundingClientRect` is the whole measurement here: the pin is a real
+  // 24×24 button pulled back to a 16px footprint by a negative margin, so its
+  // border box IS its target. (Sibling controls in tighter rows grow a ::after
+  // instead; `targetSize` above covers that shape.)
+  const boxes = await row.evaluate((el) => {
+    const pin = el.querySelector(".wt-row__hoveracts .pin");
+    const kebab = el.querySelector(".wt-row__menu");
+    if (pin === null || kebab === null) return null;
+    const pinBox = pin.getBoundingClientRect();
+    return {
+      pinWidth: pinBox.width,
+      pinRight: pinBox.right,
+      kebabLeft: kebab.getBoundingClientRect().left
+    };
+  });
+  expect(boxes, "worktree row must have both a pin and a kebab").not.toBeNull();
+  expect(
+    Math.round(boxes!.pinWidth),
+    "the pin's own box is its target"
+  ).toBeGreaterThanOrEqual(24);
+  expect(
+    boxes!.pinRight,
+    "the pin's hit area must not run under the kebab"
+  ).toBeLessThanOrEqual(boxes!.kebabLeft + 0.5);
 });
 
 test("focused rows and chips carry a real focus indicator", async () => {
