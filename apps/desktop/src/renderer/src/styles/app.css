@@ -1856,7 +1856,11 @@ textarea,
   pointer-events: none;
   transition: opacity 120ms ease;
 }
-.wt-row__menu {
+/* Two classes on purpose: `.kebab` (declared later) sets `position: relative`
+   for its popover, and on equal specificity it won — the menu silently stayed
+   in flow and every worktree row measured 30px, i.e. the kebab's 24 plus
+   padding. The compound selector outranks it. */
+.wt-row .kebab.wt-row__menu {
   /* Out of flow, in the 24px the row reserves on its right (see .wt-row's
      padding-right). The kebab is a 24px hit target — bigger than the 11px
      branch line it sits beside — so as an in-flow child it set the row's
