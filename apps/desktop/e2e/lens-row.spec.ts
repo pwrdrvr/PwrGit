@@ -136,11 +136,22 @@ test("sidebar rows are sized by their content, not by a fixed box", async () => 
   // nothing. Shrinking it to 20px still left the pin in charge at 30px.
   //
   // The floor here is arithmetic, not taste: a 13px name at line-height 1.25
-  // is 16.25px, plus 4px padding top and bottom and a 1px border, so ~26px is
-  // as short as this row goes at the default notch. 29 leaves room for host
-  // font rounding while still catching a fixed-size child taking over again.
+  // is 16.25px, plus 3px padding top and bottom and a 1px border, so ~24px is
+  // as short as this row goes at the default notch — which is also where
+  // PwrAgnt's directory rows sit. 26 leaves room for host font rounding while
+  // still catching a fixed-size child (pin, badge, kebab) taking over again;
+  // the first two attempts at this change stalled at 32px and 30px exactly
+  // that way, and this bound at 29 waved the second one through.
   const repoHeight = await repoRow.evaluate((el) => el.getBoundingClientRect().height);
-  expect(repoHeight).toBeLessThanOrEqual(29);
+  expect(repoHeight).toBeLessThanOrEqual(26);
+
+  // Worktree rows have the same trap in a different child — the 24px kebab —
+  // so guard them too. 11px mono at 1.25 is 13.75, + 2px padding each side + 2
+  // border ≈ 20; 22 is the rounding allowance.
+  const wtRow = window.locator(".wt-row").first();
+  await expect(wtRow).toBeVisible();
+  const wtHeight = await wtRow.evaluate((el) => el.getBoundingClientRect().height);
+  expect(wtHeight).toBeLessThanOrEqual(22);
 
   // And it must actually GROW with the axis — a row that ignores the notch
   // would also pass the bound above.
@@ -149,4 +160,35 @@ test("sidebar rows are sized by their content, not by a fixed box", async () => 
   );
   const grown = await repoRow.evaluate((el) => el.getBoundingClientRect().height);
   expect(grown).toBeGreaterThan(repoHeight);
+});
+
+test("every lens shares one left edge — the Pinned grip must not indent its rows", async () => {
+  sandbox = createGitSandbox();
+  for (const name of ["alpha", "bravo"]) sandbox.makeRepo(name);
+
+  handle = await launchApp();
+  const { window } = handle;
+  await handle.setPickDirectory(sandbox.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await lensChip(window, "All").click();
+  await expect(window.locator(".repo-row__name")).toHaveCount(2, {
+    timeout: 20_000
+  });
+  const nameLeft = async (): Promise<number> =>
+    window
+      .locator(".repo-row__name", { hasText: "alpha" })
+      .evaluate((el) => el.getBoundingClientRect().left);
+  const allLeft = await nameLeft();
+
+  // Pin both and switch lens. The Pinned lens renders a drag grip that the
+  // others don't; it is invisible at rest, but it used to be an in-flow flex
+  // child, so it shifted every Pinned row's content right by its width and the
+  // list read as indented next to Recent. Out of flow, the edges agree.
+  for (const name of ["alpha", "bravo"]) {
+    await window.locator(".repo-row", { hasText: name }).locator(".pin").click();
+  }
+  await lensChip(window, "Pinned").click();
+  await expect(window.locator(".repo-row__name")).toHaveCount(2);
+  const pinnedLeft = await nameLeft();
+  expect(Math.abs(pinnedLeft - allLeft)).toBeLessThanOrEqual(0.5);
 });

@@ -574,16 +574,13 @@ textarea,
    axis's job. Keeping the two independent is what lets someone run large text
    at high density — the combination a fixed-height row could never express.
    --------------------------------------------------------------------------- */
-:root[data-density="compact"] .repo-block {
-  margin-bottom: 0;
-}
 :root[data-density="compact"] .repo-row {
   min-height: 22px;
   padding: 2px 8px;
 }
 :root[data-density="compact"] .wt-row {
-  min-height: 20px;
-  padding: 1px 7px 1px 4px;
+  min-height: 18px;
+  padding: 1px 31px 1px 4px;
 }
 :root[data-density="compact"] .wt-section {
   padding-block: 1px 3px;
@@ -601,7 +598,8 @@ textarea,
 }
 
 .repo-block {
-  margin-bottom: 2px;
+  /* PwrAgnt's list gap is 0: the row's own padding is the rhythm. */
+  margin-bottom: 0;
 }
 .repo-row {
   position: sticky;
@@ -616,7 +614,7 @@ textarea,
      that never grows. min-height sets the floor for a comfortable hit target,
      padding does the rest, and the row grows with its own type. */
   min-height: 24px;
-  padding: 4px 8px;
+  padding: 3px 8px;
   border: 1px solid transparent;
   border-radius: 8px;
   cursor: pointer;
@@ -641,11 +639,20 @@ textarea,
 
 /* The grip stays out of the layout's way until you're on the row: an always-on
    handle on every row is visual noise, but a handle that only appears once the
-   drag has started is no affordance at all. */
+   drag has started is no affordance at all.
+
+   Absolutely positioned in the row's left padding, NOT an in-flow flex child.
+   It renders only in the arrangeable lens, so as a flex child it shifted every
+   Pinned row's content right by its width — invisible at opacity 0, but still
+   taking layout — and the Pinned list read as indented next to Recent. Out of
+   flow, every lens shares one left edge and the grip overlays the padding when
+   it fades in. Same principle as .wt-row__hoveracts. */
 .repo-row__handle {
-  flex: 0 0 auto;
-  width: 11px;
-  margin-left: -3px;
+  position: absolute;
+  left: 1px;
+  top: 0;
+  bottom: 0;
+  width: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -743,13 +750,6 @@ textarea,
 .chev.is-open {
   transform: rotate(90deg);
 }
-.repo-row__icon {
-  flex: 0 0 auto;
-  color: var(--text-muted);
-}
-.repo-row__icon.is-active {
-  color: var(--accent);
-}
 .repo-row__name {
   flex: 1;
   min-width: 0;
@@ -762,6 +762,12 @@ textarea,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* The repo holding the current selection — the signal the folder glyph used to
+   carry before it was dropped as redundant. Only meaningful while expanded;
+   collapsed, .repo-row.is-active tints the whole row instead. */
+.repo-row__name.is-active {
+  color: var(--accent);
 }
 .repo-row__wtcount {
   /* Fixed tier: counts hold still across notches, so a bigger name reads as
@@ -782,8 +788,8 @@ textarea,
 
      18px, not 20: at 20 the button was STILL the driver (20 + 8 padding + 2
      border = a 30px row) because the 13px name only needs 16.25px. */
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   padding: 0;
   display: flex;
   align-items: center;
@@ -1113,8 +1119,8 @@ textarea,
   align-items: center;
   gap: 6px;
   /* Content-sized for the same reason as .repo-row — see the note there. */
-  min-height: 22px;
-  padding: 3px 7px 3px 4px;
+  min-height: 20px;
+  padding: 2px 31px 2px 4px;
   border-radius: 7px;
   cursor: pointer;
   border: 1px solid transparent;
@@ -1851,8 +1857,26 @@ textarea,
   transition: opacity 120ms ease;
 }
 .wt-row__menu {
+  /* Out of flow, in the 24px the row reserves on its right (see .wt-row's
+     padding-right). The kebab is a 24px hit target — bigger than the 11px
+     branch line it sits beside — so as an in-flow child it set the row's
+     height, and every worktree row was as tall as its menu button. Absolutely
+     positioned it keeps its full target and contributes no height. */
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  transform: translateY(-50%);
   opacity: 0;
   transition: opacity 120ms ease;
+}
+/* Sidebar-scoped sizes for chrome that ships larger elsewhere. Each is under
+   the text ceiling so the row height comes from the type, not the chrome. */
+.repo-row .badge,
+.wt-row .pr-chip {
+  height: 16px;
+}
+.wt-row .wt-tag {
+  height: 14px;
 }
 /* The floating cluster shows only while the row is actually hovered/focused —
    not on the persistent "selected" (active) row, whose tags stay readable.
