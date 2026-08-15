@@ -2349,8 +2349,20 @@ textarea,
   overflow: hidden;
   vertical-align: top;
 }
+/* `.refs-copyable-name` is an inline-FLEX box (it lays the name out beside the
+   hover-revealed copy glyph below), and `text-overflow` is inert on a flex
+   container — it needs a block box, or a flex ITEM to hang off. The modal's
+   rows pass `<strong>{name}</strong>` and so had one; the sidebar's ref rows
+   passed a bare string, whose anonymous flex item cannot be selected, so a long
+   branch name hard-clipped mid-glyph straight into the status label with no
+   ellipsis and no gutter. `:not(:has(strong))` was aimed at that case but put
+   the properties back on the same flex container, where they still did nothing.
+   Every text child is wrapped now, so there is always a real item to truncate.
+   Blockifying the wrapper instead would have cost the copy glyph its
+   `width`/`overflow` animation, which inline boxes ignore. */
 .refs-copyable-name > strong,
-.refs-copyable-name:not(:has(strong)) {
+.refs-copyable-name__text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4400,14 +4412,25 @@ body.is-col-resizing {
   display: flex;
   align-items: center;
   gap: 7px;
-  height: 28px;
+  height: var(--sidebar-group-head-height);
   padding: 0 8px;
   background: var(--bg-sidebar);
   box-shadow: 0 1px 0 var(--border-subtle);
 }
 .repo-group .repo-row {
-  top: 28px;
+  top: var(--sidebar-group-head-height);
   z-index: 4;
+}
+/* Grouped, there are TWO sticky bars above a worktree row, not one. The base
+   `.wt-row.is-selected` offset clears only the repo header, so under a group
+   heading the selected row parked at the repo header's TOP edge and was painted
+   over by it (repo row z-index 4 / heading 5, both opaque) — the row the sticky
+   exists to keep visible disappeared completely the moment the list scrolled.
+   Group-by-folder is on by default for any profile with more than one root. */
+.repo-group .wt-row.is-selected {
+  top: calc(
+    var(--sidebar-group-head-height) + var(--sidebar-repo-row-height)
+  );
 }
 .repo-group__label {
   font: 700 10px/1 var(--font-sans);

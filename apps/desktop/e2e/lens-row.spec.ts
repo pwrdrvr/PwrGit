@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
@@ -203,6 +204,96 @@ test("every lens shares one left edge — the Pinned grip must not indent its ro
   await expect(window.locator(".repo-row__name")).toHaveCount(2);
   const pinnedLeft = await nameLeft();
   expect(Math.abs(pinnedLeft - allLeft)).toBeLessThanOrEqual(0.5);
+});
+
+test("a long ref-list branch name ellipsises instead of hard-clipping", async () => {
+  sandbox = createGitSandbox();
+  const repo = sandbox.makeRepo("refs-overflow");
+  repo.createBranch("feature/a-branch-name-far-wider-than-the-sidebar-can-show");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await handle.setPickDirectory(sandbox.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await lensChip(window, "All").click();
+  await expandRepoGroup(window, "refs-overflow");
+  await window.getByRole("button", { name: /^Branches/ }).first().click();
+
+  // The name span is a child of an inline-FLEX wrapper (it sits beside the
+  // hover-revealed copy glyph). `text-overflow` does nothing on a flex
+  // container, so when the name was a bare text node it clipped mid-glyph into
+  // the status label — no ellipsis, no gutter. The fix gives the text its own
+  // flex item; assert on the item, since that is where the property has to land.
+  const name = window
+    .locator(".ref-branch-row__name .refs-copyable-name__text")
+    .filter({ hasText: "a-branch-name-far-wider" });
+  await expect(name).toBeVisible({ timeout: 15_000 });
+
+  const box = await name.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return {
+      display: style.display,
+      textOverflow: style.textOverflow,
+      overflows: el.scrollWidth > el.clientWidth
+    };
+  });
+  // If it does not overflow, the test proves nothing — widen the branch name.
+  expect(box.overflows).toBe(true);
+  expect(box.textOverflow).toBe("ellipsis");
+  // `flex`/`inline-flex` here is the regression: the property would be inert.
+  expect(box.display).not.toContain("flex");
+});
+
+test("the selected worktree row clears BOTH sticky bars when grouped", async () => {
+  sandbox = createGitSandbox();
+  const repo = sandbox.makeRepo("grouped");
+  for (let i = 0; i < 12; i += 1) repo.addWorktree(`feature/w-${i}`);
+  // A second root is what turns group-by-folder on (it needs roots.length > 1),
+  // and it is on by default from there.
+  const otherRoot = sandbox.worktreeRoot;
+  sandbox.git(otherRoot, "init", "-b", "main", "elsewhere");
+  sandbox.commit(join(otherRoot, "elsewhere"), "README.md", "# elsewhere");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await handle.setPickDirectories([sandbox.reposDir, otherRoot]);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await lensChip(window, "All").click();
+  await expect(window.locator(".repo-group__head")).not.toHaveCount(0, {
+    timeout: 20_000
+  });
+  await expandRepoGroup(window, "grouped");
+
+  const row = window.locator(".wt-row", { hasText: "feature/w-1" }).first();
+  await expect(row).toBeVisible({ timeout: 15_000 });
+  await row.click();
+  await expect(row).toHaveClass(/is-selected/);
+
+  // Scroll far enough that the row would have left the viewport unaided. The
+  // selected row is sticky so the active worktree stays reachable down a long
+  // list — but the offset only cleared the repo header, and grouped there is a
+  // 28px folder heading above THAT. The row parked at the header's top edge and
+  // both opaque bars (z-index 4 and 5, against the row's 2) painted straight
+  // over it: it vanished completely rather than staying put.
+  await window.locator(".sidebar__list").evaluate((el) => {
+    el.scrollTop = 300;
+  });
+  await window.waitForTimeout(300);
+
+  const geom = await window.evaluate(() => {
+    const rect = (s: string): DOMRect | null =>
+      document.querySelector(s)?.getBoundingClientRect() ?? null;
+    return {
+      repoRow: rect(".repo-group .repo-row"),
+      selected: rect(".wt-row.is-selected")
+    };
+  });
+  expect(geom.repoRow).not.toBeNull();
+  expect(geom.selected).not.toBeNull();
+  const repoRow = geom.repoRow as DOMRect;
+  const selected = geom.selected as DOMRect;
+  // The whole point: it sits BELOW the repo header, not under it.
+  expect(selected.top).toBeGreaterThanOrEqual(repoRow.bottom - 0.5);
 });
 
 test("selecting a worktree row does not move it", async () => {
