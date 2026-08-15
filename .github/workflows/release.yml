@@ -1,4 +1,4 @@
-name: Release Desktop (macOS universal + Windows)
+name: Release Desktop (macOS universal + Windows; Linux-gated)
 
 on:
   push:
@@ -11,6 +11,13 @@ on:
         description: "Tag to build (e.g. v0.0.1-alpha.1). Must already exist on the repo."
         required: true
         type: string
+  pull_request:
+    # `labeled` starts the opt-in signing check. `synchronize` and `reopened`
+    # keep it current while ci:windows-signing remains on the PR.
+    types:
+      - labeled
+      - synchronize
+      - reopened
 
 permissions:
   contents: read
@@ -18,7 +25,8 @@ permissions:
 
 jobs:
   prepare:
-    name: Test and prepare signing input
+    name: Test and prepare macOS signing input
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: macos-15 # Apple Silicon GH-hosted runner; matches signing identity
     timeout-minutes: 45
     permissions:
@@ -48,8 +56,7 @@ jobs:
 
       # vitest runs under Node, but the postinstall electron-rebuild leaves
       # better-sqlite3 built for Electron's ABI. Rebuild for Node before the
-      # unit suite; must run from apps/desktop (a root-level rebuild silently
-      # no-ops because better-sqlite3 is a desktop dep).
+      # unit suite; must run from apps/desktop.
       - name: Rebuild better-sqlite3 for Node
         working-directory: apps/desktop
         run: pnpm rebuild better-sqlite3
@@ -58,8 +65,7 @@ jobs:
         run: pnpm test
 
       # Restore the Electron-ABI native build before staging — the release
-      # stage ships whatever better-sqlite3 binary is in node_modules, and the
-      # packaged app loads it under Electron, not Node.
+      # stage ships whatever better-sqlite3 binary is in node_modules.
       - name: Restore Electron-ABI native build
         run: pnpm --filter @pwrgit/desktop run rebuild:electron-native
 
@@ -102,13 +108,13 @@ jobs:
           retention-days: 7
 
   sign:
-    name: Sign, notarize, publish
+    name: Sign, notarize, package macOS
     runs-on: macos-15
     needs: prepare
     timeout-minutes: 60
     environment: apple-signing
     permissions:
-      contents: write # publish releases to the same repo
+      contents: read
       id-token: none
     steps:
       - name: Download signing input
@@ -133,96 +139,86 @@ jobs:
       - name: Expand signing input
         run: tar -xzf .release-input/desktop-release-signing-input.tgz
 
-      - name: Sign, notarize, publish
+      - name: Sign, notarize, package macOS
         env:
-          # Code signing (Developer ID Application: PwrDrvr LLC, T44CNHC4UH).
-          # These come from the apple-signing GitHub Environment, NOT from
-          # repository secrets. Protect the environment with required
-          # reviewers and a v* tag deployment policy.
-          # CSC_LINK is the .p12 base64-encoded; CSC_KEY_PASSWORD is its password.
+          # These come from the apple-signing GitHub Environment.
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-
-          # Notarization via App Store Connect API key.
-          # APPLE_API_KEY_BASE64 is the .p8 file base64-encoded; release.mjs
-          # decodes it to a temp file before invoking electron-builder.
           APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_TEAM_ID: T44CNHC4UH
+        run: node apps/desktop/scripts/release.mjs --sign-stage-only --no-publish
 
-          # Publish to the private pwrdrvr/PwrGit repo (dogfooding phase).
-          GH_TOKEN: ${{ secrets.RELEASES_PAT || github.token }}
-        run: node apps/desktop/scripts/release.mjs --sign-stage-only
-
-      - name: Publish stable-name DMG alias
-        # PwrGit.dmg is the canonical download URL — it always points at the
-        # latest release. Copy-and-upload the versioned DMG under the alias
-        # name; --clobber overwrites the prior alias.
-        env:
-          GH_TOKEN: ${{ secrets.RELEASES_PAT || github.token }}
-          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      - name: Prepare stable-name DMG alias
+        # PwrGit.dmg is the canonical latest-release download name. The final
+        # publication job uploads it only after every platform gate succeeds.
         run: |
           set -euo pipefail
           cd apps/desktop/release-stage/dist
           versioned=$(ls PwrGit-*-universal.dmg | head -n 1)
           cp "$versioned" PwrGit.dmg
-          gh release upload "$RELEASE_TAG" \
-            PwrGit.dmg \
-            --repo pwrdrvr/PwrGit \
-            --clobber
 
-      - name: Publish release notes from changelog
-        env:
-          GH_TOKEN: ${{ secrets.RELEASES_PAT || github.token }}
-          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
-        run: |
-          set -euo pipefail
-          notes="$RUNNER_TEMP/RELEASE_NOTES.md"
-          node scripts/check-desktop-release-metadata.mjs \
-            --tag "$RELEASE_TAG" \
-            --notes-file "$notes"
-          gh release edit "$RELEASE_TAG" \
-            --repo pwrdrvr/PwrGit \
-            --notes-file "$notes"
-          body_length="$(gh release view "$RELEASE_TAG" \
-            --repo pwrdrvr/PwrGit \
-            --json body \
-            --jq '.body | length')"
-          if [ "$body_length" -le 0 ]; then
-            echo "::error::Release $RELEASE_TAG still has an empty body" >&2
-            exit 1
-          fi
-          is_prerelease="$(gh release view "$RELEASE_TAG" \
-            --repo pwrdrvr/PwrGit \
-            --json isPrerelease \
-            --jq '.isPrerelease')"
-          if [ "$is_prerelease" != "true" ]; then
-            echo "::error::Release $RELEASE_TAG was not born as a GitHub Pre-release" >&2
-            exit 1
-          fi
-
-      - name: Upload release artifacts (debug retention)
+      # Required input to the publication job. No GitHub Release exists until
+      # all platform gates succeed.
+      - name: Upload macOS release assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ !cancelled() }}
         with:
-          name: desktop-release-artifacts
+          name: desktop-release-macos-artifacts
           path: |
             apps/desktop/release-stage/dist/*.dmg
             apps/desktop/release-stage/dist/*.zip
             apps/desktop/release-stage/dist/*.blockmap
             apps/desktop/release-stage/dist/latest-mac.yml
-            apps/desktop/release-stage/dist/builder-debug.yml
           retention-days: 30
 
-  windows:
-    name: Sign and publish Windows installer
-    runs-on: windows-latest
-    needs: [prepare, sign]
-    timeout-minutes: 45
-    environment: windows-signing
+  linux-build:
+    name: Validate Linux desktop build
+    runs-on: ubuntu-24.04
+    needs: prepare
+    timeout-minutes: 30
     permissions:
-      contents: write # publish releases to the same repo
+      contents: read
+      id-token: none
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          persist-credentials: false
+
+      - name: Install Node.js and dependencies
+        uses: pwrdrvr/configure-nodejs@7c109865ae9af59c6fcd2f2a0e8cc851f6ded26a # v1
+        with:
+          node-version: 24.x
+
+      # Linux distribution is not published yet, but a tag cannot create a
+      # release unless the desktop code builds successfully on Linux.
+      - name: Build desktop on Linux
+        run: pnpm run build
+
+  windows-prepare:
+    name: Prepare Windows signing input
+    runs-on: windows-2022
+    if: >-
+      ${{
+        github.event_name != 'pull_request'
+        || (
+          github.event.pull_request.head.repo.full_name == github.repository
+          && (
+            (github.event.action == 'labeled' && github.event.label.name == 'ci:windows-signing')
+            || (
+              github.event.action != 'labeled'
+              && contains(github.event.pull_request.labels.*.name, 'ci:windows-signing')
+            )
+          )
+        )
+      }}
+    timeout-minutes: 45
+    outputs:
+      signing-input-sha256: ${{ steps.archive.outputs.sha256 }}
+    permissions:
+      contents: read
       id-token: none
     steps:
       - name: Checkout repository
@@ -244,61 +240,238 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Check release metadata
+        if: ${{ github.event_name != 'pull_request' }}
         env:
           RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: pnpm release:check
 
-      - name: Sign and publish Windows installer
-        if: ${{ vars.WINDOWS_UNSIGNED_RELEASE != 'true' }}
-        env:
-          # Authenticode certificate for PwrDrvr LLC. These come from the
-          # protected windows-signing environment, not repository-wide secrets.
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-          GH_TOKEN: ${{ secrets.RELEASES_PAT || github.token }}
-        run: node apps/desktop/scripts/release.mjs --win --publish
+      - name: Prepare Windows release stage
+        run: node apps/desktop/scripts/release.mjs --win --prepare-only
 
-      # Until the Windows signing cert lands, set the repo/environment variable
-      # WINDOWS_UNSIGNED_RELEASE=true to publish a clearly-labeled unsigned
-      # installer instead. No updater feed (latest.yml) is published this way.
-      - name: Build unsigned Windows installer
-        if: ${{ vars.WINDOWS_UNSIGNED_RELEASE == 'true' }}
-        run: node apps/desktop/scripts/release.mjs --win --unsigned-release
-
-      - name: Publish unsigned Windows installer
-        if: ${{ vars.WINDOWS_UNSIGNED_RELEASE == 'true' }}
+      - name: Archive Windows signing input
+        id: archive
         shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "windows-release-signing-input.tgz"
+          ./scripts/release/archive-windows-signing-input.ps1 -ArchivePath $archive
+          $sha256 = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          "sha256=$sha256" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "$sha256  windows-release-signing-input.tgz" |
+            Set-Content -Path "$archive.sha256" -Encoding ascii
+
+      - name: Upload Windows signing input
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-release-signing-input
+          path: |
+            ${{ runner.temp }}/windows-release-signing-input.tgz
+            ${{ runner.temp }}/windows-release-signing-input.tgz.sha256
+          retention-days: 7
+
+  windows-sign:
+    name: Sign and package Windows installer
+    # Only this job can access Azure credentials. It does not check out source
+    # or install project dependencies/lifecycle scripts. For PRs, GitHub checks
+    # the environment deployment rule against refs/pull/<number>/merge; a rule
+    # mismatch fails the deployment before credentialed steps can start.
+    needs: windows-prepare
+    if: >-
+      ${{
+        github.event_name != 'pull_request'
+        || (
+          github.event.pull_request.head.repo.full_name == github.repository
+          && (
+            (github.event.action == 'labeled' && github.event.label.name == 'ci:windows-signing')
+            || (
+              github.event.action != 'labeled'
+              && contains(github.event.pull_request.labels.*.name, 'ci:windows-signing')
+            )
+          )
+        )
+      }}
+    environment: windows-signing
+    runs-on: windows-2022
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: none
+    steps:
+      - name: Download Windows signing input
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-release-signing-input
+          path: .release-input
+
+      - name: Verify Windows signing input
+        shell: pwsh
+        env:
+          EXPECTED_SHA256: ${{ needs.windows-prepare.outputs.signing-input-sha256 }}
+        run: |
+          $archive = ".release-input/windows-release-signing-input.tgz"
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $env:EXPECTED_SHA256) {
+            throw "Windows signing input digest mismatch: expected $env:EXPECTED_SHA256, got $actual."
+          }
+          $recorded = (Get-Content "$archive.sha256" -Raw).Trim()
+          if ($recorded -ne "$actual  windows-release-signing-input.tgz") {
+            throw "Windows signing input checksum file does not match the downloaded archive."
+          }
+
+      - name: Expand Windows signing input
+        shell: pwsh
+        run: |
+          & tar.exe -xzf .release-input/windows-release-signing-input.tgz
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to expand Windows signing input (exit code $LASTEXITCODE)."
+          }
+
+      - name: Install TrustedSigning
+        shell: pwsh -NoProfile -NonInteractive -File {0}
+        run: ./scripts/release/install-trusted-signing.ps1
+
+      # electron-builder signs the app executables, generated uninstaller, and
+      # final NSIS installer, so protected packaging is the irreducible signing
+      # boundary shared by release and PR smoke runs.
+      - name: Sign and package Windows installer
+        env:
+          WIN_AZURE_SIGN_PUBLISHER_NAME: ${{ vars.WIN_AZURE_SIGN_PUBLISHER_NAME }}
+          WIN_AZURE_SIGN_ENDPOINT: ${{ vars.WIN_AZURE_SIGN_ENDPOINT }}
+          WIN_AZURE_SIGN_ACCOUNT: ${{ vars.WIN_AZURE_SIGN_ACCOUNT }}
+          WIN_AZURE_SIGN_PROFILE: ${{ vars.WIN_AZURE_SIGN_PROFILE }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: >-
+          node apps/desktop/scripts/release.mjs
+          --win --sign-stage-only --no-publish --require-signing
+
+      - name: Verify Authenticode signatures
+        shell: pwsh
+        env:
+          EXPECTED_PUBLISHER: ${{ vars.WIN_AZURE_SIGN_PUBLISHER_NAME }}
+        run: |
+          $dist = "apps/desktop/release-stage/dist"
+          $installer = Get-ChildItem $dist -File -Filter "*-setup.exe" | Select-Object -First 1
+          $app = Get-ChildItem $dist -Recurse -File -Filter "PwrGit.exe" | Select-Object -First 1
+          foreach ($target in @($installer, $app)) {
+            if ($null -eq $target) {
+              throw "Expected signed Windows executable is missing."
+            }
+            $signature = Get-AuthenticodeSignature $target.FullName
+            if ($signature.Status -ne "Valid") {
+              throw "Authenticode signature is not valid for $($target.FullName): $($signature.Status)"
+            }
+            if ($signature.SignerCertificate.Subject -notlike "*CN=$env:EXPECTED_PUBLISHER*") {
+              throw "Unexpected Authenticode signer for $($target.FullName): $($signature.SignerCertificate.Subject)"
+            }
+          }
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ github.event_name == 'pull_request' && 'windows-signed-installer-pr' || 'windows-installer' }}
+          path: |
+            apps/desktop/release-stage/dist/*-setup.exe
+            apps/desktop/release-stage/dist/*-setup.exe.blockmap
+            apps/desktop/release-stage/dist/latest.yml
+            apps/desktop/release-stage/dist/SHA256SUMS
+          retention-days: 7
+
+  publish-release-assets:
+    name: Create release and publish platform assets
+    # PR signing smoke runs stop at the signed workflow artifact. Only tag or
+    # explicit release dispatch events may create a GitHub Release.
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-24.04
+    needs:
+      - linux-build
+      - sign
+      - windows-sign
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: none
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          persist-credentials: false
+
+      - name: Download macOS release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: desktop-release-macos-artifacts
+          path: mac-dist
+
+      - name: Download Windows installer artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-installer
+          path: windows-dist
+
+      - name: Name Windows checksum manifest
+        run: |
+          set -euo pipefail
+          mapfile -t checksums < <(find windows-dist -type f -name SHA256SUMS -print)
+          if [ "${#checksums[@]}" -ne 1 ]; then
+            echo "::error::Expected one Windows SHA256SUMS file, found ${#checksums[@]}." >&2
+            exit 1
+          fi
+          mv "${checksums[0]}" "$(dirname "${checksums[0]}")/PwrGit-windows-SHA256SUMS"
+
+      - name: Create release and publish all platform assets
         env:
           GH_TOKEN: ${{ secrets.RELEASES_PAT || github.token }}
           RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN)) {
-            throw "GH_TOKEN is required to upload unsigned Windows release artifacts."
-          }
+          set -euo pipefail
+          RELEASE_TAG="${RELEASE_TAG:?}"
+          notes="$RUNNER_TEMP/RELEASE_NOTES.md"
 
-          $dist = "apps/desktop/release-stage/dist"
-          $installer = Get-ChildItem -Path $dist -Filter "*-setup.exe" | Select-Object -First 1
-          if ($null -eq $installer) {
-            throw "No Windows installer found in $dist"
-          }
+          node scripts/check-desktop-release-metadata.mjs \
+            --tag "$RELEASE_TAG" \
+            --notes-file "$notes"
 
-          $unsignedName = $installer.Name -replace "-setup\.exe$", "-unsigned-setup.exe"
-          $unsignedPath = Join-Path $dist $unsignedName
-          Copy-Item -Path $installer.FullName -Destination $unsignedPath -Force
-          gh release upload $env:RELEASE_TAG `
-            $unsignedPath `
-            --repo pwrdrvr/PwrGit `
-            --clobber
+          if [ ! -s "$notes" ]; then
+            echo "::error::No CHANGELOG.md notes found for $RELEASE_TAG" >&2
+            exit 1
+          fi
 
-      - name: Upload Windows release artifacts (debug retention)
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ !cancelled() }}
-        with:
-          name: desktop-release-windows-artifacts
-          path: |
-            apps/desktop/release-stage/dist/*-setup.exe
-            apps/desktop/release-stage/dist/*-setup.exe.blockmap
-            apps/desktop/release-stage/dist/SHA256SUMS
-            apps/desktop/release-stage/dist/latest.yml
-            apps/desktop/release-stage/dist/builder-debug.yml
-          retention-days: 30
+          mapfile -t mac_assets < <(find mac-dist -type f -print | sort)
+          mapfile -t windows_assets < <(find windows-dist -type f -print | sort)
+          if [ "${#mac_assets[@]}" -eq 0 ]; then
+            echo "::error::No macOS release asset files were downloaded." >&2
+            exit 1
+          fi
+          if [ "${#windows_assets[@]}" -eq 0 ]; then
+            echo "::error::No Windows release asset files were downloaded." >&2
+            exit 1
+          fi
+
+          gh release create "$RELEASE_TAG" \
+            --repo pwrdrvr/PwrGit \
+            --verify-tag \
+            --title "$RELEASE_TAG" \
+            --notes-file "$notes" \
+            --prerelease \
+            "${mac_assets[@]}" \
+            "${windows_assets[@]}"
+
+          body_length="$(gh release view "$RELEASE_TAG" \
+            --repo pwrdrvr/PwrGit \
+            --json body \
+            --jq '.body | length')"
+          if [ "$body_length" -le 0 ]; then
+            echo "::error::Release $RELEASE_TAG has an empty body." >&2
+            exit 1
+          fi
+
+          is_prerelease="$(gh release view "$RELEASE_TAG" \
+            --repo pwrdrvr/PwrGit \
+            --json isPrerelease \
+            --jq '.isPrerelease')"
+          if [ "$is_prerelease" != "true" ]; then
+            echo "::error::Release $RELEASE_TAG was not created as a GitHub Pre-release." >&2
+            exit 1
+          fi
