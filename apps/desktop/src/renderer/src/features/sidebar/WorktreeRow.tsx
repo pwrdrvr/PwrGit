@@ -179,31 +179,44 @@ export function WorktreeRow({
       {/* ●3 / ↑2 / ↓1 are the row's whole status story, and as bare glyphs they
           reached a screen reader as "3", "2", "1" run together with the branch
           name — the meaning lived only in a symbol and a colour (SC 1.1.1,
-          1.3.1). The glyph stays for sighted readers; the words are what the
-          accessible name is built from. */}
+          1.3.1).
+
+          The words go BESIDE each badge rather than inside it. Nesting them
+          made the badge's own textContent "↓2 2 behind upstream", which is
+          what the sidebar's visible-text assertions read; a badge is a visual
+          element and its text should stay exactly what is painted. The
+          sr-only span is `position: absolute`, so it is not a flex item and
+          costs the row no width, no gap and no height. */}
       {worktree.dirty > 0 && (
-        <span className="badge badge--warn">
-          <span aria-hidden="true">●{worktree.dirty}</span>
-          <span className="a11y-sr-only">
-            {worktree.dirty} uncommitted {worktree.dirty === 1 ? "change" : "changes"}
+        <>
+          <span className="badge badge--warn" aria-hidden="true">
+            ●{worktree.dirty}
           </span>
-        </span>
+          <span className="a11y-sr-only">
+            {worktree.dirty} uncommitted{" "}
+            {worktree.dirty === 1 ? "change" : "changes"}
+          </span>
+        </>
       )}
       {worktree.ahead > 0 && (
-        <span className="badge-text badge-text--ok">
-          <span aria-hidden="true">↑{worktree.ahead}</span>
+        <>
+          <span className="badge-text badge-text--ok" aria-hidden="true">
+            ↑{worktree.ahead}
+          </span>
           <span className="a11y-sr-only">
             {worktree.ahead} ahead of upstream
           </span>
-        </span>
+        </>
       )}
       {worktree.behind > 0 && (
-        <span className="badge-text badge-text--warn">
-          <span aria-hidden="true">↓{worktree.behind}</span>
+        <>
+          <span className="badge-text badge-text--warn" aria-hidden="true">
+            ↓{worktree.behind}
+          </span>
           <span className="a11y-sr-only">
             {worktree.behind} behind upstream
           </span>
-        </span>
+        </>
       )}
       {worktree.pr !== undefined && !worktree.isDefaultBranch ? (
         <PrChip pr={worktree.pr} />

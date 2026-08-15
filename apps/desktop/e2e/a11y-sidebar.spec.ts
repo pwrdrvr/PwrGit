@@ -319,6 +319,36 @@ test("refreshing a worktree list does not throw focus away", async () => {
   expect(stillFocused).toBe("Refresh worktrees for alpha");
 });
 
+test("status badges keep their glyph visible and their meaning readable", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepoBehindRemote("svc", { behindBy: 2 });
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, sandbox, "svc");
+
+  // ↓2 alone reached a screen reader as "2", jammed onto the end of the branch
+  // name — a count whose meaning lived entirely in an arrow and a colour.
+  await expect(
+    window.getByRole("treeitem", { name: /2 behind upstream/ })
+  ).toHaveCount(1, { timeout: 20_000 });
+
+  // ...and the badge itself still paints exactly "↓2". The first cut of this
+  // put the words INSIDE the badge, which made its textContent
+  // "↓2 2 behind upstream" and broke the sync specs that read the visible
+  // badge. A badge is a visual element; its text is what is painted.
+  await expect(
+    branchRow(window, "main").locator(".badge-text--warn")
+  ).toHaveText("↓2");
+
+  // The words are out of flow, so they must cost the row no height either —
+  // the row bound lens-row.spec.ts owns still has to hold.
+  const wtHeight = await branchRow(window, "main").evaluate(
+    (el) => el.getBoundingClientRect().height
+  );
+  expect(wtHeight, "worktree row height").toBeLessThanOrEqual(24);
+});
+
 test("the sidebar reflows at its narrowest width and largest text notch", async () => {
   sandbox = createGitSandbox();
   sandbox.makeRepo("a-repo-with-a-genuinely-long-name", {
