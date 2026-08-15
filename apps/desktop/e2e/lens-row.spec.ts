@@ -136,23 +136,34 @@ test("sidebar rows are sized by their content, not by a fixed box", async () => 
   // nothing. Shrinking it to 20px still left the pin in charge at 30px.
   //
   // The floor here is arithmetic, not taste: a 13px name at line-height 1.25
-  // is 16.25px, plus 3px padding top and bottom and a 1px border, so ~24px is
-  // as short as this row goes at the default notch — which is also where
-  // PwrAgnt's directory rows sit. 26 leaves room for host font rounding while
-  // still catching a fixed-size child (pin, badge, kebab) taking over again;
-  // the first two attempts at this change stalled at 32px and 30px exactly
-  // that way, and this bound at 29 waved the second one through.
+  // is 16.25px, plus 4px padding top and bottom and a 1px border, so ~26px is
+  // as short as Comfortable goes at the default notch. 28 leaves room for host
+  // font rounding while still catching a fixed-size child (pin, badge, kebab)
+  // taking the row over — the first two cuts of this change stalled at 32px
+  // and 30px exactly that way, and a looser bound waved one of them through.
   const repoHeight = await repoRow.evaluate((el) => el.getBoundingClientRect().height);
-  expect(repoHeight).toBeLessThanOrEqual(26);
+  expect(repoHeight).toBeLessThanOrEqual(28);
 
   // Worktree rows have the same trap in a different child — the 24px kebab —
-  // so guard them too. 11px mono at 1.25 is 13.75, + 2px padding each side + 2
-  // border ≈ 20; 22 is the rounding allowance.
+  // so guard them too. 11px mono at 1.25 is 13.75, + 3px padding each side + 2
+  // border ≈ 22; 24 is the rounding allowance.
   await expandRepoGroup(window, "dense");
   const wtRow = window.locator(".wt-row").first();
   await expect(wtRow).toBeVisible();
   const wtHeight = await wtRow.evaluate((el) => el.getBoundingClientRect().height);
-  expect(wtHeight).toBeLessThanOrEqual(22);
+  expect(wtHeight).toBeLessThanOrEqual(24);
+
+  // Compact is the tight setting; Comfortable is not. Both must move.
+  await window.evaluate(() =>
+    document.documentElement.setAttribute("data-density", "compact")
+  );
+  const compactRepo = await repoRow.evaluate((el) => el.getBoundingClientRect().height);
+  const compactWt = await wtRow.evaluate((el) => el.getBoundingClientRect().height);
+  expect(compactRepo).toBeLessThan(repoHeight);
+  expect(compactWt).toBeLessThan(wtHeight);
+  await window.evaluate(() =>
+    document.documentElement.removeAttribute("data-density")
+  );
 
   // And it must actually GROW with the axis — a row that ignores the notch
   // would also pass the bound above.
@@ -192,4 +203,30 @@ test("every lens shares one left edge — the Pinned grip must not indent its ro
   await expect(window.locator(".repo-row__name")).toHaveCount(2);
   const pinnedLeft = await nameLeft();
   expect(Math.abs(pinnedLeft - allLeft)).toBeLessThanOrEqual(0.5);
+});
+
+test("selecting a worktree row does not move it", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepo("steady", { worktrees: ["feature/one"] });
+
+  handle = await launchApp();
+  const { window } = handle;
+  await handle.setPickDirectory(sandbox.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await lensChip(window, "All").click();
+  await expandRepoGroup(window, "steady");
+
+  // The selected row is `position: sticky` so it stays visible under the repo
+  // header while a long list scrolls. Its `top` used to be a literal 36px —
+  // the header's OLD fixed height. Once the header became content-sized, a
+  // row that sat closer than 36px to the scrollport was shoved down to 36 the
+  // moment it was selected, so the row (and its icon) visibly jumped. The
+  // offset now derives from the header token; this pins that.
+  const row = window.locator(".wt-row", { hasText: "feature/one" });
+  await expect(row).toBeVisible();
+  const before = await row.evaluate((el) => el.getBoundingClientRect().top);
+  await row.click();
+  await expect(row).toHaveClass(/is-selected/);
+  const after = await row.evaluate((el) => el.getBoundingClientRect().top);
+  expect(Math.abs(after - before)).toBeLessThanOrEqual(0.5);
 });

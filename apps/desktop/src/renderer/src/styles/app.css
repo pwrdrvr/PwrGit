@@ -575,12 +575,10 @@ textarea,
    at high density — the combination a fixed-height row could never express.
    --------------------------------------------------------------------------- */
 :root[data-density="compact"] .repo-row {
-  min-height: 22px;
-  padding: 2px 8px;
+  padding: 3px 8px;
 }
 :root[data-density="compact"] .wt-row {
-  min-height: 18px;
-  padding: 1px 31px 1px 4px;
+  padding: 2px 31px 2px 4px;
 }
 :root[data-density="compact"] .wt-section {
   padding-block: 1px 3px;
@@ -613,8 +611,8 @@ textarea,
      --sidebar-title-size axis: raise the notch and the text clips inside a row
      that never grows. min-height sets the floor for a comfortable hit target,
      padding does the rest, and the row grows with its own type. */
-  min-height: 24px;
-  padding: 3px 8px;
+  min-height: var(--sidebar-repo-row-height);
+  padding: 4px 8px;
   border: 1px solid transparent;
   border-radius: 8px;
   cursor: pointer;
@@ -1120,7 +1118,7 @@ textarea,
   gap: 6px;
   /* Content-sized for the same reason as .repo-row — see the note there. */
   min-height: 20px;
-  padding: 2px 31px 2px 4px;
+  padding: 3px 31px 3px 4px;
   border-radius: 7px;
   cursor: pointer;
   border: 1px solid transparent;
@@ -1139,7 +1137,11 @@ textarea,
   /* Keep the active worktree pinned just below the folder header so it doesn't
      scroll out of view down a long worktree list. */
   position: sticky;
-  top: 36px;
+  /* Not a literal: the header used to be a fixed 36px, and this was 36 too.
+     Once the header became content-sized this offset was wrong at every notch
+     and shoved a selected row that sat closer than 36px down to 36 — the row
+     visibly jumped when selected. It now tracks the header token. */
+  top: var(--sidebar-repo-row-height);
   z-index: 2;
   border-color: var(--accent-border);
   background: var(--bg-row-active);

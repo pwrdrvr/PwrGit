@@ -30,6 +30,11 @@
      and section labels deliberately hold still — a notch should read as
      "bigger names there", not as page zoom. */
   --sidebar-title-size: 13px;
+  /* The repo header's height, derived from the axis so anything that must
+     clear it (the selected worktree row sticks just below it) follows the
+     notch and the density. title × 1.25 line-height + vertical padding ×2 +
+     2px border. Comfortable pads 4px; the compact block trims it. */
+  --sidebar-repo-row-height: calc(var(--sidebar-title-size) * 1.25 + 10px);
 
   /* Surfaces */
   --bg-app: #000000;
@@ -248,4 +253,9 @@
 }
 :root[data-sidebar-text="xl"] {
   --sidebar-title-size: 15px;
+}
+
+/* Density trims the padding the header height above accounts for. */
+:root[data-density="compact"] {
+  --sidebar-repo-row-height: calc(var(--sidebar-title-size) * 1.25 + 8px);
 }
