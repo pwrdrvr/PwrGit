@@ -26,11 +26,21 @@ const repo = (name: string): RepoSearchHit => ({
 
 describe("buildPaletteItems", () => {
   it("ranks an exact repository-name match above matching commits", () => {
-    const items = buildPaletteItems([commit], [repo("codex-tools"), repo("codex")], "codex");
+    const items = buildPaletteItems(
+      [commit],
+      [repo("codex-tools"), repo("Codex")],
+      "codex"
+    );
 
     expect(items[0]).toMatchObject({
       kind: "repo",
-      hit: { name: "codex" }
+      hit: { name: "Codex" }
     });
+  });
+
+  it("keeps commit-first ordering when no repository name matches exactly", () => {
+    const items = buildPaletteItems([commit], [repo("codex-tools")], "codex");
+
+    expect(items.map((item) => item.kind)).toEqual(["commit", "repo"]);
   });
 });

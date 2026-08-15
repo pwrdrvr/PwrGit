@@ -20,11 +20,26 @@ export type PaletteItem =
 export function buildPaletteItems(
   commits: Commit[],
   results: RepoSearchHit[],
-  _query: string
+  query: string
 ): PaletteItem[] {
+  const exactName = query.trim().normalize("NFC").toLowerCase();
+  const exactRepos: RepoSearchHit[] = [];
+  const otherResults: RepoSearchHit[] = [];
+  for (const hit of results) {
+    if (
+      hit.kind === "repo" &&
+      hit.name.normalize("NFC").toLowerCase() === exactName
+    ) {
+      exactRepos.push(hit);
+    } else {
+      otherResults.push(hit);
+    }
+  }
+
   return [
+    ...exactRepos.map((hit) => ({ kind: "repo" as const, hit })),
     ...commits.map((commit) => ({ kind: "commit" as const, commit })),
-    ...results.map((hit) => ({ kind: "repo" as const, hit }))
+    ...otherResults.map((hit) => ({ kind: "repo" as const, hit }))
   ];
 }
 
