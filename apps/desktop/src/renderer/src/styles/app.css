@@ -778,9 +778,12 @@ textarea,
      name it sits beside — so content-sizing the row bought almost nothing
      until this shrank too. The worktree rows avoid the problem differently:
      their action cluster is absolutely positioned, so it never contributes
-     height at all. */
-  width: 20px;
-  height: 20px;
+     height at all.
+
+     18px, not 20: at 20 the button was STILL the driver (20 + 8 padding + 2
+     border = a 30px row) because the 13px name only needs 16.25px. */
+  width: 18px;
+  height: 18px;
   padding: 0;
   display: flex;
   align-items: center;

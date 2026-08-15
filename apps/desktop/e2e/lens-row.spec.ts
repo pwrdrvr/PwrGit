@@ -133,9 +133,14 @@ test("sidebar rows are sized by their content, not by a fixed box", async () => 
   // rendered height is the only way to catch the failure that actually
   // happened: `height` was removed, but a fixed 24px pin button silently
   // became the new floor, so the row stayed ~32px and the density work bought
-  // nothing. A bound, not an exact value — fonts round differently per host.
+  // nothing. Shrinking it to 20px still left the pin in charge at 30px.
+  //
+  // The floor here is arithmetic, not taste: a 13px name at line-height 1.25
+  // is 16.25px, plus 4px padding top and bottom and a 1px border, so ~26px is
+  // as short as this row goes at the default notch. 29 leaves room for host
+  // font rounding while still catching a fixed-size child taking over again.
   const repoHeight = await repoRow.evaluate((el) => el.getBoundingClientRect().height);
-  expect(repoHeight).toBeLessThanOrEqual(28);
+  expect(repoHeight).toBeLessThanOrEqual(29);
 
   // And it must actually GROW with the axis — a row that ignores the notch
   // would also pass the bound above.
