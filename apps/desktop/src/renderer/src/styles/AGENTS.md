@@ -1,5 +1,31 @@
 # renderer/src/styles — AGENTS.md
 
+## Appearance axes: `--sidebar-title-size` and `data-density`
+
+Two independent axes, persisted in `general.sidebarTextSize` /
+`general.sidebarDensity` and stamped on `<html>` by `lib/appearance.ts`.
+**Defaults carry no attribute** — the bare `:root` block is the tuned default,
+so returning to it means *removing* the attribute, not writing `md`.
+
+Type reads the token; density only touches padding and gaps. Keeping them
+independent is the point: large text at high density is a combination the old
+fixed-height rows could not express. So don't add a font-size to a
+`[data-density]` block, and don't add padding to the token ladder.
+
+Sidebar rows are `min-height` + padding, never `height`. A fixed height cannot
+grow with the type axis — the text clips instead. Same rule for any new row.
+
+## PwrGit deliberately has no centre-column cap
+
+PwrAgnt caps its chat column (`--chat-column-max: 940px`) because a transcript
+is prose and long measures hurt reading. PwrGit's centre pane is a lineage
+graph and a diff — data-dense surfaces that *want* the horizontal room. The
+sidebar default likewise stays 320px against PwrAgnt's 408px: PwrGit rows carry
+a short repo name, not a thread title plus chip rows.
+
+These are considered divergences, not drift. Don't "align" them without a
+reason that applies to this app's content.
+
 ## Text selection is opt-IN, not opt-out
 
 `.app` sets `user-select: none`. Chrome is not a document: before this, any
