@@ -1,6 +1,10 @@
 import type { Commit, RepoSearchHit } from "@pwrgit/shared";
 import { describe, expect, it } from "vitest";
-import { buildPaletteItems } from "./RepoSwitcherOverlay";
+import {
+  buildPaletteItems,
+  paletteItemKey,
+  selectedPaletteItemIndex
+} from "./RepoSwitcherOverlay";
 
 const commit: Commit = {
   hash: "a".repeat(40),
@@ -42,5 +46,29 @@ describe("buildPaletteItems", () => {
     const items = buildPaletteItems([commit], [repo("codex-tools")], "codex");
 
     expect(items.map((item) => item.kind)).toEqual(["commit", "repo"]);
+  });
+
+  it("preserves a selected commit when async results prepend an exact repo", () => {
+    const otherCommit = {
+      ...commit,
+      hash: "b".repeat(40),
+      shortHash: "b".repeat(7),
+      subject: "docs: explain codex search"
+    };
+    const initialItems = buildPaletteItems([commit, otherCommit], [], "codex");
+    const selectedKey = paletteItemKey(initialItems[1]!);
+
+    const reorderedItems = buildPaletteItems(
+      [commit, otherCommit],
+      [repo("codex")],
+      "codex"
+    );
+    const selectedIndex = selectedPaletteItemIndex(
+      reorderedItems,
+      selectedKey
+    );
+
+    expect(reorderedItems[selectedIndex]).toEqual(initialItems[1]);
+    expect(selectedIndex).toBe(2);
   });
 });
