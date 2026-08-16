@@ -34,11 +34,14 @@ test.afterEach(async () => {
 /**
  * The rendered size of a control's pointer target.
  *
- * Not `boundingBox()`: several sidebar controls are drawn under 24px on
- * purpose (a 24px child would become the row's height driver — see app.css and
- * lens-row.spec.ts) and grow only their hit area, via a positioned ::after
- * that contributes no layout. That pseudo-element is what the browser
- * hit-tests, so it is what this has to measure.
+ * Sidebar controls are drawn under 24px on purpose — a 24px in-flow child
+ * becomes the row's height driver (see app.css and lens-row.spec.ts) — and
+ * they reach a 24px TARGET one of two ways: most are a real 24px box pulled
+ * back to their drawn footprint by a negative margin, where `boundingBox()`
+ * is the answer; `.wt-section__toggle` and `.wt-selbar__btn` instead grow a
+ * positioned ::after, which contributes no layout and is what the browser
+ * hit-tests. Take whichever is larger so the assertion is blind to which
+ * mechanism a given control uses.
  */
 async function targetSize(
   control: Locator
@@ -87,14 +90,19 @@ test("sub-24px sidebar controls still expose a 24×24 pointer target", async () 
   const { window } = handle;
   await addRootAndExpand(window, handle, sandbox, "alpha");
 
+  // Two different mechanisms reach 24px here and the assertion covers both, on
+  // purpose: most of these are a real 24px box pulled back to their drawn size
+  // by a negative margin, while `.wt-section__toggle` grows a ::after instead
+  // (see app.css for why it can't take the margin). `targetSize` measures
+  // whichever one the control actually uses.
   const repoRow = window.locator(".repo-row", { hasText: "alpha" });
   const cases: [string, Locator][] = [
-    // Shrunk to 16×16 so it would stop driving the repo row's height.
+    // Occupies 16×16 so it does not drive the repo row's height.
     ["repo pin", repoRow.locator(".pin")],
-    // 20×20 and 20-tall respectively, in the Worktrees section head.
+    // Occupy 20px in the Worktrees section head, for the same reason.
     ["worktrees refresh", window.locator(".wt-refresh").first()],
     ["sort cycle", window.locator(".sort-cycle").first()],
-    // An inline-flex button around a 9px eyebrow — barely 11px tall.
+    // An inline-flex button around a 9px eyebrow — barely 11px drawn.
     ["worktrees toggle", window.locator(".wt-section__toggle").first()]
   ];
 

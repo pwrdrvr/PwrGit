@@ -839,44 +839,33 @@ textarea,
 }
 
 /* ---------------------------------------------------------------------------
-   Target size (SC 2.5.8) — 24×24 pointer targets for sub-24px sidebar chrome.
+   Target size (SC 2.5.8) — the two sidebar controls a negative margin can't fix.
 
-   Every control below is deliberately drawn smaller than 24px, and for a
-   reason that still holds: sidebar rows are content-sized, so a 24px child
-   becomes the row's height driver (that is exactly how the pin ended up at
-   16px — see its note above — and it is what e2e/lens-row.spec.ts's 28px/24px
-   row bounds exist to catch). None of them clears the SC's spacing exception
-   either, since each has a neighbouring target well inside 24px.
+   The house technique for this is a real 24px box pulled back to its drawn
+   footprint by a negative margin: `.pin`, `.sort-cycle`, `.wt-refresh`,
+   `.ref-mini-action` and `.ref-fetch-all` all do it that way. It is the better
+   one wherever it fits, because the element the browser hit-tests is the actual
+   button — focus ring and hover fill land on the true target rather than on a
+   phantom — and it costs only a compensating adjustment where the bled-past
+   border box meets a neighbour.
 
-   So grow the TARGET, not the glyph and not the row. A positioned ::after is
-   out of flow, contributes no height, and is what the browser hit-tests — the
-   control keeps its drawn size while the clickable box becomes at least
-   24×24, centred on it. Measured sizes before this: .wt-refresh 20×20,
-   .sort-cycle h20, .wt-section__toggle h≈11, .wt-selbar__btn h22,
-   .ref-mini-action / .ref-fetch-all 21×21.
+   These two can't take it. `.wt-section__toggle` is an inline-flex wrapper
+   around a 9px eyebrow, so its drawn height is ~11px and collapsing a 24px box
+   back to that needs a −6.5px margin that would re-break on any font change.
+   `.wt-selbar__btn` is 22px, and growing its box would visibly thicken a
+   button whose border is part of the strip's look. Both keep their drawn size
+   and grow only the hit area: a positioned ::after is out of flow, contributes
+   no height, and is what the browser hit-tests.
 
-   `.pin` is NOT in this list, and deliberately: it solves the same problem with
-   a real 24px box pulled back to a 16px footprint by a negative margin (see its
-   rule above). That is the better technique where it fits — the element the
-   browser hit-tests is the actual button, so the focus ring and hover fill land
-   on the true target rather than on a phantom. It costs a compensating
-   adjustment wherever the bled-past border box meets a neighbour, which the pin
-   pays for in `.wt-row__hoveracts`'s padding. The controls below sit in tight
-   flex rows whose gaps would shift instead, so they take the pseudo-element. */
-.wt-refresh,
-.sort-cycle,
+   Rows stay the constraint either way — they are content-sized, so a 24px
+   in-flow child becomes the row's height driver, which is what
+   e2e/lens-row.spec.ts's 28px/24px bounds exist to catch. */
 .wt-section__toggle,
-.wt-selbar__btn,
-.ref-mini-action,
-.ref-fetch-all {
+.wt-selbar__btn {
   position: relative;
 }
-.wt-refresh::after,
-.sort-cycle::after,
 .wt-section__toggle::after,
-.wt-selbar__btn::after,
-.ref-mini-action::after,
-.ref-fetch-all::after {
+.wt-selbar__btn::after {
   content: "";
   position: absolute;
   left: 50%;
@@ -894,7 +883,6 @@ textarea,
    everywhere else it styles focus, so relying on it here left SC 2.4.7 resting
    on whichever control a future rule happened not to reach. Same colour and
    weight as the rows, so one indicator vocabulary. */
-.pin:focus-visible,
 .sort-cycle:focus-visible,
 .wt-section__toggle:focus-visible,
 .wt-selbar__btn:focus-visible,
@@ -908,6 +896,16 @@ textarea,
 .jump-btn:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
+}
+/* The pin rings INWARD, unlike its neighbours above. Its 24px box very nearly
+   fills the row — about 1.1px of clearance at the default notch — so a ring
+   drawn 1px outside it bleeds ~1.9px into the rows on either side, and those
+   are flush, opaque and stacked at the same z-index: the row below paints over
+   the bottom of the ring while the top draws across the row above. Same
+   reasoning, and the same inset, as .repo-row:focus-visible. */
+.pin:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 
 .badge {
