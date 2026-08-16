@@ -5043,7 +5043,7 @@ body.is-col-resizing {
   color: var(--success-text);
 }
 .pull-divergence__comparison-row.is-changed .pull-divergence__relation {
-  color: var(--accent-bright);
+  color: var(--accent);
 }
 .pull-divergence__options {
   display: grid;
