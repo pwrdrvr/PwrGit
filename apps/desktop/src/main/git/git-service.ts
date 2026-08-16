@@ -1060,7 +1060,7 @@ function parseRangeDiff(
   const upstreamByHash = new Map(
     upstreamCommits.map((commit) => [commit.hash, commit])
   );
-  const rows: DivergenceCommitAlignment[] = [];
+  const rangeRows: DivergenceCommitAlignment[] = [];
 
   for (const line of stdout.split(/\r?\n/)) {
     const match = RANGE_DIFF_HEADER.exec(line);
@@ -1076,11 +1076,76 @@ function parseRangeDiff(
           : marker === "<"
             ? "local-only"
             : "upstream-only";
-    rows.push({ local, upstream, relation });
+    rangeRows.push({ local, upstream, relation });
   }
 
-  // range-diff is oldest-first; the recovery dialog presents branch tips first.
-  return rows.reverse();
+  // range-diff deliberately omits merge commits. Use its rows as alignment
+  // anchors, then fill every unreported commit from each complete log as a
+  // side-only row, including a range made entirely of merge commits.
+  const localOldestFirst = [...localCommits].reverse();
+  const upstreamOldestFirst = [...upstreamCommits].reverse();
+  const reportedLocal = new Set(
+    rangeRows.flatMap((row) => (row.local === null ? [] : [row.local.hash]))
+  );
+  const reportedUpstream = new Set(
+    rangeRows.flatMap((row) =>
+      row.upstream === null ? [] : [row.upstream.hash]
+    )
+  );
+  const completeRows: DivergenceCommitAlignment[] = [];
+  let localIndex = 0;
+  let upstreamIndex = 0;
+
+  const appendLocalUntil = (hash: string | null): void => {
+    while (
+      localIndex < localOldestFirst.length &&
+      localOldestFirst[localIndex]?.hash !== hash
+    ) {
+      const commit = localOldestFirst[localIndex];
+      if (commit !== undefined && !reportedLocal.has(commit.hash)) {
+        completeRows.push({
+          local: commit,
+          upstream: null,
+          relation: "local-only"
+        });
+      }
+      localIndex += 1;
+    }
+    if (hash !== null && localOldestFirst[localIndex]?.hash === hash) {
+      localIndex += 1;
+    }
+  };
+
+  const appendUpstreamUntil = (hash: string | null): void => {
+    while (
+      upstreamIndex < upstreamOldestFirst.length &&
+      upstreamOldestFirst[upstreamIndex]?.hash !== hash
+    ) {
+      const commit = upstreamOldestFirst[upstreamIndex];
+      if (commit !== undefined && !reportedUpstream.has(commit.hash)) {
+        completeRows.push({
+          local: null,
+          upstream: commit,
+          relation: "upstream-only"
+        });
+      }
+      upstreamIndex += 1;
+    }
+    if (hash !== null && upstreamOldestFirst[upstreamIndex]?.hash === hash) {
+      upstreamIndex += 1;
+    }
+  };
+
+  for (const row of rangeRows) {
+    if (row.local !== null) appendLocalUntil(row.local.hash);
+    if (row.upstream !== null) appendUpstreamUntil(row.upstream.hash);
+    completeRows.push(row);
+  }
+  appendLocalUntil(null);
+  appendUpstreamUntil(null);
+
+  // Both source logs and the recovery dialog present branch tips first.
+  return completeRows.reverse();
 }
 
 async function resolveUpstream(

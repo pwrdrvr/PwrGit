@@ -888,6 +888,78 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(equivalent?.local?.hash).not.toBe(equivalent?.upstream?.hash);
   }, 15_000);
 
+  it("keeps a local merge commit that range-diff omits", async () => {
+    const { local, remote } = makeDivergedFixture();
+    commit(remote, "shared.txt", "feat: shared remote change");
+    git(remote, ["push"]);
+    git(local, ["fetch", "origin"]);
+    git(local, [
+      "merge",
+      "--no-ff",
+      "origin/main",
+      "-m",
+      "merge: local upstream snapshot"
+    ]);
+    commit(remote, "later.txt", "feat: later remote change");
+    git(remote, ["push"]);
+    await pullFastForward(systemGit, local);
+
+    const divergence = await inspectRemoteDivergence(systemGit, local);
+    expect(divergence.ok).toBe(true);
+    if (!divergence.ok) return;
+
+    expect(divergence.value.localCommits.map((commit) => commit.subject)).toEqual([
+      "merge: local upstream snapshot"
+    ]);
+    expect(
+      divergence.value.alignedCommits
+        .map((row) => row.local)
+        .filter((commit) => commit !== null)
+        .map((commit) => commit.hash)
+    ).toEqual(divergence.value.localCommits.map((commit) => commit.hash));
+    expect(divergence.value.alignedCommits).toContainEqual({
+      local: divergence.value.localCommits[0],
+      upstream: null,
+      relation: "local-only"
+    });
+  }, 15_000);
+
+  it("keeps an upstream merge commit that range-diff omits", async () => {
+    const { local, remote } = makeDivergedFixture();
+    commit(local, "shared.txt", "feat: shared local change");
+    git(local, ["push"]);
+    git(remote, ["fetch", "origin"]);
+    git(remote, [
+      "merge",
+      "--no-ff",
+      "origin/main",
+      "-m",
+      "merge: upstream local snapshot"
+    ]);
+    commit(local, "later.txt", "feat: later local change");
+    git(remote, ["push"]);
+    await pullFastForward(systemGit, local);
+
+    const divergence = await inspectRemoteDivergence(systemGit, local);
+    expect(divergence.ok).toBe(true);
+    if (!divergence.ok) return;
+
+    expect(
+      divergence.value.upstreamCommits.map((commit) => commit.subject)
+    ).toEqual(["merge: upstream local snapshot"]);
+    expect(
+      divergence.value.alignedCommits
+        .map((row) => row.upstream)
+        .filter((commit) => commit !== null)
+        .map((commit) => commit.hash)
+    ).toEqual(divergence.value.upstreamCommits.map((commit) => commit.hash));
+    expect(divergence.value.alignedCommits).toContainEqual({
+      local: null,
+      upstream: divergence.value.upstreamCommits[0],
+      relation: "upstream-only"
+    });
+  }, 15_000);
+
   it("resets only a clean branch to the exact inspected upstream", async () => {
     const { local, remote } = makeDivergedFixture();
     commit(local, "local.txt", "feat: local only");
