@@ -144,15 +144,29 @@ test("the sidebar tree exposes valid, nested roles", async () => {
   //
   // The tree is `.sidebar__tree`, INSIDE the `.sidebar__list` scrollport
   // rather than being it. A `tree` may only own `treeitem` and `group`
-  // children, and the scrollport also holds the empty state and the "Add
-  // folders…" button — so while the role sat on the scrollport, a button was a
-  // direct child of the tree and the structure was invalid.
+  // children, and the scrollport also holds the empty state — so while the
+  // role sat on the scrollport, non-treeitem content was a direct child of the
+  // tree and the structure was invalid.
   const tree = window.locator('.sidebar__tree[role="tree"]');
   await expect(tree).toHaveCount(1);
   await expect(tree.locator('.repo-row[role="treeitem"]')).toHaveCount(3);
   await expect(window.locator('[role="option"]')).toHaveCount(0);
-  await expect(tree.locator(".add-folder")).toHaveCount(0);
-  await expect(window.locator(".sidebar__list .add-folder")).toHaveCount(1);
+
+  // Nothing but rows and folder groups may be a child of the tree. Asserted
+  // structurally rather than by naming the controls that used to sit there:
+  // "Add folders…" has since moved up beside Clone, and the next thing added
+  // to the scrollport should fail this without needing the test edited.
+  const strayChildren = await tree.evaluate((el) =>
+    [...el.children]
+      .filter((child) => {
+        const role = child.getAttribute("role");
+        return role !== "group" && !child.classList.contains("repo-block");
+      })
+      .map((child) => child.className)
+  );
+  expect(strayChildren, "only rows and groups belong inside the tree").toEqual(
+    []
+  );
 
   // Position is stated rather than left to be inferred: folder buckets wrap
   // rows in groups, and every expanded repo drops a sibling section between
