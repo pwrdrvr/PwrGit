@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.3.0 - 2026-08-16
+
+- Clone and Sync - Added guided repository cloning with progressive destination and progress feedback, plus recovery from HTTPS pull authentication failures by switching to SSH.
+- Branch Recovery - Added safe branch reset to a fetched remote, an isolated rebase dry run, clearer pull phases, and a single action to discard all local changes.
+- Worktrees - Improved worktree navigation, ordering, refresh behavior, pinned-repository organization, remote-branch visibility, and a calmer collapsed sidebar by default.
+- Commit Graph - Improved remote-only and detached-HEAD history, pull-request landing lanes, branch-stack compaction, and command-palette search for commits and exact SHAs.
+- Desktop - Refined the PwrGit sidebar, repository header, palette, Windows window chrome, and WCAG 2.1 AA accessibility behavior.
+- Updates - Added Stable and Beta update trains and completed the signed Windows release path alongside the packaged Electron runtime update.
+
 ## v0.2.0 - 2026-08-03
 
 - Commit Context - Added proof-backed GitHub identities and cached avatar thumbnails, so commit details can show a trusted GitHub login immediately while retaining local Git authorship as a safe fallback.
