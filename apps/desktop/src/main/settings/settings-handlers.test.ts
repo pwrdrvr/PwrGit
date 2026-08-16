@@ -225,4 +225,33 @@ describe("update train and track", () => {
       channel: "latest"
     });
   });
+
+  it("keeps an inferred Beta train when only channel is written", async () => {
+    const bus = new CommandBus();
+    const service = freshService();
+    registerSettingsHandlers(bus, service, {
+      appVersion: "1.1.0-alpha.7",
+      diagnosticsOutputRoot: "/diag",
+      onChanged: () => undefined
+    });
+
+    const before = await bus.dispatch("settings:read", undefined);
+    expect(before.ok).toBe(true);
+    if (!before.ok) return;
+    expect(before.value.updates).toEqual({
+      train: "beta",
+      channel: "prerelease"
+    });
+
+    const r = await bus.dispatch("settings:update", {
+      patch: { updates: { channel: "latest" } }
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.updates).toEqual({ train: "beta", channel: "latest" });
+    expect(service.get().updates).toEqual({
+      train: "beta",
+      channel: "latest"
+    });
+  });
 });
