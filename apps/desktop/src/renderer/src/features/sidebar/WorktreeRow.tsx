@@ -179,7 +179,12 @@ export function WorktreeRow({
           {!worktree.isDefaultBranch && worktree.mergedIntoDefault && (
             <span
               className="wt-tag wt-tag--merged"
-              title="Contained in the default branch by ancestry — not necessarily a merged PR (squash/rebase merges won't show here)"
+              title={
+                "Its commits are already in the default branch, so this " +
+                "worktree is usually safe to remove.\n\n" +
+                "Detected by ancestry, not by a merged PR — a squash or " +
+                "rebase merge rewrites the commits and won't show here."
+              }
             >
               in default
             </span>

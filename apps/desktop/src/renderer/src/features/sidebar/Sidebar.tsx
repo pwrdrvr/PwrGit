@@ -30,6 +30,19 @@ const REPO_MIME = "application/x-pwrgit-repo";
 
 const EMPTY_IDS: Set<string> = new Set();
 
+/**
+ * Per-lens empty copy. The old `No ${lens.toLowerCase()} repos.` template
+ * produced "No behind repos.", which isn't English — the lens names are a mix
+ * of adjective, verb and noun, so no one template fits all five.
+ */
+const EMPTY_COPY: Record<Lens, string> = {
+  Recent: "No repos yet — add a folder above and PwrGit will scan it.",
+  All: "No repos yet — add a folder above and PwrGit will scan it.",
+  Pinned: "Nothing pinned yet. Star a repo to keep it here.",
+  Behind: "No repo is behind its upstream.",
+  Stale: "No worktrees look safe to prune."
+};
+
 // Multi-selection is scoped to a single repo's worktrees (a range needs one
 // ordering). `anchor` is the pivot for shift-click ranges.
 type Selection = { repoId: string; ids: Set<string>; anchor: string | null };
@@ -547,18 +560,27 @@ export function Sidebar({
             ⌘F
           </span>
         </button>
-        <button
-          className="clone-repo"
-          onClick={onCloneRepo}
-          disabled={activeProfile === null || activeProfile.roots.length === 0}
-          title={
-            activeProfile !== null && activeProfile.roots.length === 0
-              ? "Add a repo folder before cloning"
-              : "Clone a GitHub repository"
-          }
-        >
-          <span className="new-wt__plus">↓</span> Clone repository…
-        </button>
+        {/* Add folders is the prerequisite for everything else — Clone is
+            disabled until a root exists — so it sits beside Clone rather than
+            at the bottom of the list, where it was the quietest control on a
+            first-run sidebar whose only working action it was. */}
+        <div className="sidebar__actions">
+          <button className="add-folder" onClick={onAddFolder}>
+            <span className="new-wt__plus">+</span> Add folders…
+          </button>
+          <button
+            className="clone-repo"
+            onClick={onCloneRepo}
+            disabled={activeProfile === null || activeProfile.roots.length === 0}
+            title={
+              activeProfile !== null && activeProfile.roots.length === 0
+                ? "Add a repo folder before cloning"
+                : "Clone a GitHub repository"
+            }
+          >
+            <span className="new-wt__plus">↓</span> Clone…
+          </button>
+        </div>
       </div>
 
       <div className="sidebar__lens">
@@ -624,17 +646,9 @@ export function Sidebar({
 
         {filtered.length === 0 && (
           <div className="sidebar__empty">
-            {loading
-              ? "Scanning…"
-              : lens === "All" || lens === "Recent"
-                ? "No repos yet — add a folder to scan."
-                : `No ${lens.toLowerCase()} repos.`}
+            {loading ? "Scanning…" : EMPTY_COPY[lens]}
           </div>
         )}
-
-        <button className="add-folder" onClick={onAddFolder}>
-          <span className="new-wt__plus">+</span> Add folders…
-        </button>
       </div>
 
       {newWorktree !== null && (

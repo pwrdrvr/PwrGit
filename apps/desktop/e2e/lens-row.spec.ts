@@ -66,9 +66,15 @@ test("the lens row fits, and names every lens for the keyboard", async () => {
     /^All \(15\)$/
   );
   // The other branch of the same logic: a lens with nothing in it carries no
-  // parenthetical and no dot, so neither is decoration.
-  await expect(lensChip(window, "Recent")).toHaveAttribute("aria-label", "Recent");
-  await expect(lensChip(window, "Recent").locator(".lens-chip__dot")).toHaveCount(0);
+  // parenthetical and no dot, so neither is decoration. Stale is the empty one
+  // here — Recent now reports the full list like All, since it holds every repo
+  // and was previously the only lens showing rows under no count at all.
+  await expect(lensChip(window, "Stale")).toHaveAttribute("aria-label", "Stale");
+  await expect(lensChip(window, "Stale").locator(".lens-chip__dot")).toHaveCount(0);
+  await expect(lensChip(window, "Recent")).toHaveAttribute(
+    "aria-label",
+    /^Recent \(15\)$/
+  );
   await expect(lensChip(window, "All").locator(".lens-chip__dot")).toHaveCount(1);
   // The active lens still spells its count out.
   await expect(window.locator(".lens-filter__count")).toHaveText("15");
@@ -294,6 +300,204 @@ test("the selected worktree row clears BOTH sticky bars when grouped", async () 
   const selected = geom.selected as DOMRect;
   // The whole point: it sits BELOW the repo header, not under it.
   expect(selected.top).toBeGreaterThanOrEqual(repoRow.bottom - 0.5);
+});
+
+test("the repo row counts linked worktrees only, and hides a zero", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepo("bare-checkout");
+  sandbox.makeRepo("has-two", { worktrees: ["feature/a", "feature/b"] });
+
+  handle = await launchApp();
+  const { window } = handle;
+  await handle.setPickDirectory(sandbox.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await lensChip(window, "All").click();
+  await expect(window.locator(".repo-row__name")).toHaveCount(2, {
+    timeout: 20_000
+  });
+
+  // The primary checkout is the repo's own directory, not a worktree someone
+  // added — counting it made every repo claim one more than it has.
+  const bare = window.locator(".repo-row", { hasText: "bare-checkout" });
+  await expect(bare.locator(".repo-row__wtcount")).toHaveCount(0);
+
+  const two = window.locator(".repo-row", { hasText: "has-two" });
+  await expect(two.locator(".repo-row__wtcount")).toHaveText("2 wts");
+});
+
+test("the section headings account for every worktree the repo row claims", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepo("split", {
+    worktrees: ["feature/pinned-one", "feature/plain-one", "feature/plain-two"]
+  });
+
+  handle = await launchApp();
+  const { window } = handle;
+  await handle.setPickDirectory(sandbox.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await lensChip(window, "All").click();
+  await expandRepoGroup(window, "split");
+
+  const row = window.locator(".repo-row", { hasText: "split" });
+  await expect(row.locator(".repo-row__wtcount")).toHaveText("3 wts");
+  // Nothing pinned yet, so the single disclosure holds all three and matches.
+  await expect(
+    window.getByRole("button", { name: /^Worktrees 3/ })
+  ).toBeVisible();
+  await expect(window.locator(".wt-subhead")).toHaveCount(0);
+
+  // Pin one. It moves into the elevated block, which now names itself — the
+  // regression this guards is the old "Worktrees 0" sitting under visible rows.
+  const pinned = window.locator(".wt-row", { hasText: "feature/pinned-one" });
+  await expect(async () => {
+    await pinned.hover();
+    await pinned
+      .getByRole("button", { name: "Pin worktree" })
+      .click({ timeout: 1_000 });
+  }).toPass({ timeout: 20_000 });
+
+  await expect(window.locator(".wt-subhead")).toHaveCount(1);
+  await expect(window.locator(".wt-subhead")).toContainText("Pinned");
+  await expect(window.locator(".wt-subhead .ref-section__count")).toHaveText("1");
+  await expect(
+    window.getByRole("button", { name: /^Other worktrees 2/ })
+  ).toBeVisible();
+  // 1 + 2 = the 3 the repo row still claims.
+  await expect(row.locator(".repo-row__wtcount")).toHaveText("3 wts");
+});
+
+test("the worktree row reserves no lane for the kebab", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepo("roomy", { worktrees: ["feature/one"] });
+
+  handle = await launchApp();
+  const { window } = handle;
+  await handle.setPickDirectory(sandbox.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await lensChip(window, "All").click();
+  await expandRepoGroup(window, "roomy");
+
+  const row = window.locator(".wt-row", { hasText: "feature/one" });
+  await expect(row).toBeVisible({ timeout: 15_000 });
+
+  // 31px of every row was held for a kebab that is invisible at rest — 13% of
+  // the row at the 240px minimum, taken from the only field that shrinks. The
+  // actions float over the row's tail on hover instead, so the resting reserve
+  // should now be single-digit.
+  const padRight = await row.evaluate((el) =>
+    parseFloat(getComputedStyle(el).paddingRight)
+  );
+  expect(padRight).toBeLessThanOrEqual(10);
+
+  // And the strip that replaced it must actually be opaque, or the branch name
+  // reads straight through the buttons floating over it.
+  const backdrop = await row
+    .locator(".wt-row__hoveracts")
+    .evaluate((el) => getComputedStyle(el).backgroundImage);
+  expect(backdrop).toContain("gradient");
+});
+
+test("row focus is a solid ring, not a 12%-alpha whisper", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepo("focusable", { worktrees: ["feature/one"] });
+  sandbox.makeRepo("neighbour");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await handle.setPickDirectory(sandbox.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await lensChip(window, "All").click();
+  const row = window.locator(".repo-row", { hasText: "focusable" });
+  await expect(row).toBeVisible({ timeout: 20_000 });
+
+  // These rows carry the roving tabindex, so they are the primary keyboard
+  // target — and they had the weakest indicator in the sidebar (≈2.27:1,
+  // under WCAG 2.4.11's 3:1) while small chrome buttons got a solid one.
+  //
+  // Arrow down and back rather than just calling focus(): `:focus-visible`
+  // keys off the last INPUT MODALITY, and a bare programmatic focus with no
+  // preceding key press leaves it at "pointer", so the rule under test simply
+  // does not apply and every assertion below reads the unfocused values. The
+  // round trip also lands focus through the roving tabindex, which is how a
+  // user actually gets here.
+  await row.focus();
+  await window.keyboard.press("ArrowDown");
+  await window.keyboard.press("ArrowUp");
+  await expect(row).toBeFocused();
+
+  const ring = await row.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return { width: s.outlineWidth, style: s.outlineStyle, color: s.outlineColor };
+  });
+  expect(parseFloat(ring.width)).toBeGreaterThanOrEqual(2);
+  expect(ring.style).toBe("solid");
+  // --focus-ring is --accent at full strength; a transparent-ish ring is the
+  // regression.
+  expect(ring.color).not.toContain("rgba(0, 0, 0, 0)");
+});
+
+test("the row controls clear the 24px pointer-target floor", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepo("targets", { worktrees: ["feature/one"] });
+
+  handle = await launchApp();
+  const { window } = handle;
+  await handle.setPickDirectory(sandbox.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await lensChip(window, "All").click();
+  await expandRepoGroup(window, "targets");
+
+  // WCAG 2.5.8. Each of these is a 24px button collapsed by negative margins so
+  // layout still sees a small box — measure the BORDER box, which is what the
+  // pointer hits, not the space it occupies.
+  for (const selector of [".repo-row .pin", ".wt-refresh", ".sort-cycle"]) {
+    const box = await window
+      .locator(selector)
+      .first()
+      .evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return { w: r.width, h: r.height };
+      });
+    expect(box.w, `${selector} width`).toBeGreaterThanOrEqual(24);
+    expect(box.h, `${selector} height`).toBeGreaterThanOrEqual(24);
+  }
+
+  // …and collapsing them must not have grown the rows the density pass tuned.
+  const repoHeight = await window
+    .locator(".repo-row", { hasText: "targets" })
+    .evaluate((el) => el.getBoundingClientRect().height);
+  expect(repoHeight).toBeLessThanOrEqual(28);
+});
+
+test("Recent and All are no longer the same list", async () => {
+  sandbox = createGitSandbox();
+  // Alphabetically zulu is last; by activity it is first.
+  const zulu = sandbox.makeRepo("zulu");
+  sandbox.makeRepo("alpha");
+  sandbox.makeRepo("mike");
+  sandbox.commitEmptyAt(zulu.path, "recent work", 1_800_000_000);
+
+  handle = await launchApp();
+  const { window } = handle;
+  await handle.setPickDirectory(sandbox.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await lensChip(window, "All").click();
+  await expect(window.locator(".repo-row__name")).toHaveCount(3, {
+    timeout: 20_000
+  });
+
+  // All is the index: position follows name, and pinning must not move it.
+  expect(await window.locator(".repo-row__name").allTextContents()).toEqual([
+    "alpha",
+    "mike",
+    "zulu"
+  ]);
+  await window.locator(".repo-row", { hasText: "zulu" }).locator(".pin").click();
+  expect(await window.locator(".repo-row__name").allTextContents()).toEqual([
+    "alpha",
+    "mike",
+    "zulu"
+  ]);
 });
 
 test("selecting a worktree row does not move it", async () => {
