@@ -8,6 +8,7 @@ import {
   branchRow,
   collapseWorktrees,
   expandRepoGroup,
+  expandWorktrees,
   lensChip,
   repoGroup
 } from "./fixtures/steps";
@@ -47,7 +48,7 @@ test("collapses unpinned Worktrees by default and remembers an explicit choice",
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
   await expect(branchRow(window, "feature/one")).toHaveCount(0);
 
-  await toggle.click();
+  await expandWorktrees(window, "collapsed-by-default");
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
 
   // Switching lenses unmounts this unpinned repo. Returning to All creates a
