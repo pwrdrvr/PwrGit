@@ -151,7 +151,10 @@ if (!/^\s*releaseType:\s*prerelease\s*$/m.test(electronBuilder)) {
   fail("apps/desktop/electron-builder.yml publish.releaseType must be prerelease");
 }
 
-const releaseWorkflow = readFileSync(releaseWorkflowPath, "utf8");
+const releaseWorkflow = readFileSync(releaseWorkflowPath, "utf8").replace(
+  /\r\n?/g,
+  "\n",
+);
 const workflowsReadme = readFileSync(workflowsReadmePath, "utf8");
 const releaseScript = readFileSync(releaseScriptPath, "utf8");
 const verifyAsarContents = readFileSync(verifyAsarContentsPath, "utf8");
