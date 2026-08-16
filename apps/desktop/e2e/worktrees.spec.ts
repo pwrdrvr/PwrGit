@@ -6,7 +6,10 @@ import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
 import {
   addRootAndExpand,
   branchRow,
-  collapseWorktrees
+  collapseWorktrees,
+  expandRepoGroup,
+  lensChip,
+  repoGroup
 } from "./fixtures/steps";
 
 // Real Electron app + real git repos in a throwaway dir, driven through the UI.
@@ -23,6 +26,41 @@ test.afterEach(async () => {
     sandbox.cleanup();
     sandbox = null;
   }
+});
+
+test("collapses unpinned Worktrees by default and remembers an explicit choice", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepo("collapsed-by-default", {
+    worktrees: ["feature/one", "feature/two"]
+  });
+  handle = await launchApp();
+  const { window } = handle;
+
+  await handle.setPickDirectory(sandbox.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await lensChip(window, "All").click();
+  const group = await expandRepoGroup(window, "collapsed-by-default");
+  const toggle = window
+    .locator(".repo-block", { has: group })
+    .locator(".wt-section__toggle");
+
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(branchRow(window, "feature/one")).toHaveCount(0);
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+  // Switching lenses unmounts this unpinned repo. Returning to All creates a
+  // fresh row, which must restore the choice rather than fall back to default.
+  await lensChip(window, "Pinned").click();
+  await expect(repoGroup(window, "collapsed-by-default")).toHaveCount(0);
+  await lensChip(window, "All").click();
+  const restoredGroup = await expandRepoGroup(window, "collapsed-by-default");
+  await expect(
+    window
+      .locator(".repo-block", { has: restoredGroup })
+      .locator(".wt-section__toggle")
+  ).toHaveAttribute("aria-expanded", "true");
 });
 
 test("scans a folder and lists a repo with its worktrees", async () => {
