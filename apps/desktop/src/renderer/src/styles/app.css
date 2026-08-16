@@ -1383,10 +1383,6 @@ textarea,
   background: var(--bg-row-active);
   box-shadow: none;
 }
-.wt-row.is-multiselected .wt-row__menu {
-  opacity: 1;
-}
-
 /* ---- Drag source ----
 
    The source row still marks where the row came from — that is what makes the
@@ -2219,15 +2215,6 @@ textarea,
   opacity: 0;
   transition: opacity 120ms ease;
 }
-/* The kebab is persistent on the selected row, where the hover strip is not
-   shown — so it carries its own backdrop there rather than the row holding a
-   lane open for it. Without this it would sit transparently over the age. */
-.wt-row.is-selected .kebab.wt-row__menu {
-  border-radius: 6px;
-  background: var(--row-scrim);
-  box-shadow: -9px 0 7px -5px var(--row-scrim);
-}
-
 /* Sidebar-scoped sizes for chrome that ships larger elsewhere. Each is under
    the text ceiling so the row height comes from the type, not the chrome. */
 .repo-row .badge,
@@ -2263,21 +2250,14 @@ textarea,
 }
 .wt-row:hover .wt-row__menu,
 .wt-row:has(:focus-visible) .wt-row__menu,
-.wt-row.is-selected .wt-row__menu,
 .wt-row__menu:has(.kebab__btn[aria-expanded="true"]) {
   opacity: 1;
 }
 /* Wherever the actions are showing, the floating cluster lands where the age
    text sits — ONLY the age yields. PR chips, status tags, and count badges stay
-   put and stay interactive (the PR chip has its own click + tooltip).
-
-   `.is-selected` is in this list because the kebab is persistent there, and the
-   row no longer holds a lane open for it: without this the kebab's backdrop
-   clipped "today" to a stray "t", which reads as a rendering fault rather than
-   as something politely getting out of the way. */
+   put and stay interactive (the PR chip has its own click + tooltip). */
 .wt-row:hover .wt-age,
-.wt-row:has(:focus-visible) .wt-age,
-.wt-row.is-selected .wt-age {
+.wt-row:has(:focus-visible) .wt-age {
   opacity: 0;
 }
 
