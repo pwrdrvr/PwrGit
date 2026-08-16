@@ -7,6 +7,7 @@ import {
   type MouseEvent as ReactMouseEvent
 } from "react";
 import type { Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
+import { announce, movedMessage } from "../../lib/announce";
 import { useViewportTooltip } from "../../lib/useViewportTooltip";
 import {
   groupWorktreesForNavigation,
@@ -60,7 +61,9 @@ export function RepoRow({
   focusable,
   onRowKeyDown,
   onRowFocus,
-  isPostDragClick
+  isPostDragClick,
+  posinset,
+  setsize
 }: {
   repo: Repo;
   expanded: boolean;
@@ -116,6 +119,10 @@ export function RepoRow({
   onRowFocus: () => void;
   /** True while the synthetic click that follows a drop is still arriving. */
   isPostDragClick: () => boolean;
+  /** 1-based position of this row among the treeitems it is listed with. */
+  posinset: number;
+  /** How many treeitems that list holds. */
+  setsize: number;
 }) {
   const refreshTooltip = useViewportTooltip();
   const { primary, pinned, remaining, displayIds } =
@@ -210,6 +217,10 @@ export function RepoRow({
     worktree: Worktree,
     event: ReactKeyboardEvent
   ): void => {
+    // The pin and the kebab live inside this row, and their keydowns bubble
+    // here. Handling them cancelled the button's own activation — see the note
+    // on Sidebar's handleRepoKeyDown (SC 2.1.1).
+    if (event.target !== event.currentTarget) return;
     const index = displayIds.indexOf(worktree.id);
     if (index === -1) return;
     // ⌘⇧↑/↓ moves the row; plain ↑/↓ moves the focus. Same modifier pair as
@@ -230,12 +241,28 @@ export function RepoRow({
         return;
       }
       event.preventDefault();
-      onReorder(
-        reorder(
-          orderedIds,
-          worktree.id,
-          neighbor,
-          event.key === "ArrowUp" ? "before" : "after"
+      const moved = reorder(
+        orderedIds,
+        worktree.id,
+        neighbor,
+        event.key === "ArrowUp" ? "before" : "after"
+      );
+      onReorder(moved);
+      // Focus does not move, so without this the reorder is silent (SC 4.1.3).
+      //
+      // Count in the same terms as this row's aria-posinset, which is an index
+      // into `displayIds`. `orderedIds` (and so `moved`) leaves the primary
+      // checkout out — it is fixed at the top and cannot be reordered — so
+      // announcing a raw index into it would tell the user "2 of 3" about a
+      // row whose own aria-posinset reads "3 of 4". displayIds is
+      // [primary?, ...pinned, ...remaining], so the primary is the whole
+      // difference.
+      const primaryOffset = primary === undefined ? 0 : 1;
+      announce(
+        movedMessage(
+          worktree.branch,
+          moved.indexOf(worktree.id) + 1 + primaryOffset,
+          moved.length + primaryOffset
         )
       );
       return;
@@ -255,6 +282,10 @@ export function RepoRow({
   const renderWorktree = (worktree: Worktree) => (
     <WorktreeRow
       key={worktree.id}
+      // `displayIds` is the group's treeitem order (primary, pinned, then the
+      // rest) — the same list the arrow keys walk.
+      posinset={displayIds.indexOf(worktree.id) + 1}
+      setsize={displayIds.length}
       worktree={worktree}
       selected={worktree.id === selectedWorktreeId}
       multiSelected={selectedIds.has(worktree.id)}
@@ -301,6 +332,37 @@ export function RepoRow({
   // the repo rather than under it.
   const worktreeGroupId = `wt-group-${repo.id}`;
 
+  // `aria-label` pins the row's name to the repo name alone — every E2E step
+  // helper resolves rows by that exact name, and it is the right name. But a
+  // label REPLACES the name computed from contents, so the two things the row
+  // also shows (its worktree count, and the behind badge) reached nobody using
+  // a screen reader. A description carries them without touching the name.
+  //
+  // `aria-posinset` / `aria-setsize` for the same reason: the tree's DOM
+  // children are not a clean run of treeitems. Folder buckets wrap them in
+  // groups, every expanded repo drops a sibling wt-section between two rows,
+  // and `aria-owns` re-parents that section under the row above it — so a
+  // browser's implicit position is computed from a list that has holes in it.
+  // State it instead.
+  const describedById = `repo-desc-${repo.id}`;
+  const description = [
+    // Mirrors the visible count exactly, including its absence: `wtCount` is
+    // LINKED worktrees, and a repo with none renders no badge at all rather
+    // than "0 wts", so describing it as "0 worktrees" would announce a fact
+    // the row deliberately stopped making.
+    wtCount === 0
+      ? null
+      : wtCount === 1
+        ? "1 linked worktree"
+        : `${wtCount} linked worktrees`,
+    behind > 0 ? `primary branch ${behind} behind upstream` : null,
+    arrangeable && pinSource === "worktree"
+      ? "in Pinned because one of its worktrees is pinned"
+      : null
+  ]
+    .filter((part): part is string => part !== null)
+    .join(", ");
+
   return (
     <div className="repo-block" role="presentation">
       <div
@@ -313,7 +375,10 @@ export function RepoRow({
         role="treeitem"
         aria-expanded={expanded}
         aria-label={repo.name}
+        {...(description === "" ? {} : { "aria-describedby": describedById })}
         aria-level={1}
+        aria-posinset={posinset}
+        aria-setsize={setsize}
         {...(expanded ? { "aria-owns": worktreeGroupId } : {})}
         tabIndex={focusable ? 0 : -1}
         {...dragProps}
@@ -348,8 +413,14 @@ export function RepoRow({
             its icon tells the two apart; this list is only ever repos, and a
             glyph on every row identifies nothing. The one signal it carried —
             "this repo holds the current selection" — moves to the name. */}
+        {/* The name is the only thing in the row that can shrink, so at the
+            240px minimum width and the largest text notch it ellipsises. The
+            branch line below already carried a title for the same reason; this
+            one did not, leaving the truncated text with no way to be read
+            (SC 1.4.4's intent — no loss of content when text is enlarged). */}
         <span
           className={`repo-row__name${containsSelection ? " is-active" : ""}`}
+          title={repo.name}
         >
           {repo.name}
         </span>
@@ -357,6 +428,15 @@ export function RepoRow({
         {wtCount > 0 && (
           <span className="repo-row__wtcount">
             {wtCount} {wtCount === 1 ? "wt" : "wts"}
+          </span>
+        )}
+        {/* Rendered only when it says something. A repo with no linked
+            worktrees, nothing behind and no borrowed pin has nothing to add
+            beyond its name, and pointing aria-describedby at an empty element
+            is worse than not describing it at all. */}
+        {description !== "" && (
+          <span id={describedById} className="a11y-sr-only">
+            {description}
           </span>
         )}
         {/* Present only via a pinned worktree: the repo's own star is unlit, so
@@ -462,7 +542,14 @@ export function RepoRow({
               className={`wt-refresh${refreshing ? " is-refreshing" : ""}`}
               aria-label={`Refresh worktrees for ${repo.name}`}
               aria-busy={refreshing}
-              disabled={refreshing}
+              /* `disabled` (not `aria-disabled`) used to be set here the
+                 instant the button was activated. Chromium blurs an element
+                 the moment it becomes disabled, so activating this from the
+                 keyboard threw focus back to <body> and the user lost their
+                 place in the sidebar mid-refresh (SC 2.4.3). aria-disabled
+                 conveys the same state without removing the element from the
+                 focus order; the click handler below is what makes it inert. */
+              aria-disabled={refreshing}
               onMouseEnter={(e) =>
                 refreshTooltip.show(
                   e.currentTarget,
@@ -479,6 +566,7 @@ export function RepoRow({
               onBlur={refreshTooltip.hide}
               onClick={(e) => {
                 e.stopPropagation();
+                if (refreshing) return;
                 refreshTooltip.hide();
                 onRefreshWorktrees();
               }}
@@ -501,12 +589,20 @@ export function RepoRow({
               </svg>
             </button>
             {refreshTooltip.tooltipNode}
+            {/* The visible text is the current VALUE ("Recent"), which on its
+                own named this button "Recent" — a name that says nothing about
+                what activating it does (SC 4.1.2). The label states the action
+                and still contains the visible string, so it also satisfies
+                SC 2.5.3 Label in Name for speech input. */}
             <button
               className="sort-cycle"
               onClick={(e) => {
                 e.stopPropagation();
                 onCycleSort();
               }}
+              aria-label={`${
+                SORT_LABEL[customOrder !== undefined ? "custom" : sort]
+              } — cycle worktree sort order`}
               title="Cycle worktree sort"
             >
               {SORT_LABEL[customOrder !== undefined ? "custom" : sort]}

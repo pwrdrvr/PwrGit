@@ -27,7 +27,9 @@ export function WorktreeRow({
   dropPosition,
   focusable,
   onKeyDown,
-  onFocus
+  onFocus,
+  posinset,
+  setsize
 }: {
   worktree: Worktree;
   selected: boolean;
@@ -56,6 +58,11 @@ export function WorktreeRow({
   focusable: boolean;
   onKeyDown: (e: ReactKeyboardEvent) => void;
   onFocus: () => void;
+  /** 1-based position among this repo's worktree treeitems. The group also
+   *  holds a section head, a "New worktree" button and the refs sections, so
+   *  the position is not derivable from DOM order. */
+  posinset: number;
+  setsize: number;
 }) {
   const prunable = isPrunableWorktree(worktree, now);
   const prHoverTimer = useRef<number | undefined>(undefined);
@@ -88,6 +95,8 @@ export function WorktreeRow({
       role="treeitem"
       aria-selected={selected}
       aria-level={2}
+      aria-posinset={posinset}
+      aria-setsize={setsize}
       tabIndex={focusable ? 0 : -1}
       {...dragProps}
       onClick={onSelect}
@@ -129,7 +138,10 @@ export function WorktreeRow({
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          aria-label="Primary checkout"
+          /* Was aria-label="Primary checkout" on a bare <svg>, which most AT
+             ignores without role="img" — and where it was honoured it doubled
+             the visible "primary" tag two elements along. Decorative. */
+          aria-hidden="true"
         >
           <path d="M3 10.5 12 3l9 7.5" />
           <path d="M5 9.5V20h14V9.5" />
@@ -145,6 +157,7 @@ export function WorktreeRow({
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
+          aria-hidden="true"
         >
           <path d="M6 3v12" />
           <circle cx="6" cy="18" r="3" />
@@ -163,14 +176,47 @@ export function WorktreeRow({
           primary
         </span>
       )}
+      {/* ●3 / ↑2 / ↓1 are the row's whole status story, and as bare glyphs they
+          reached a screen reader as "3", "2", "1" run together with the branch
+          name — the meaning lived only in a symbol and a colour (SC 1.1.1,
+          1.3.1).
+
+          The words go BESIDE each badge rather than inside it. Nesting them
+          made the badge's own textContent "↓2 2 behind upstream", which is
+          what the sidebar's visible-text assertions read; a badge is a visual
+          element and its text should stay exactly what is painted. The
+          sr-only span is `position: absolute`, so it is not a flex item and
+          costs the row no width, no gap and no height. */}
       {worktree.dirty > 0 && (
-        <span className="badge badge--warn">●{worktree.dirty}</span>
+        <>
+          <span className="badge badge--warn" aria-hidden="true">
+            ●{worktree.dirty}
+          </span>
+          <span className="a11y-sr-only">
+            {worktree.dirty} uncommitted{" "}
+            {worktree.dirty === 1 ? "change" : "changes"}
+          </span>
+        </>
       )}
       {worktree.ahead > 0 && (
-        <span className="badge-text badge-text--ok">↑{worktree.ahead}</span>
+        <>
+          <span className="badge-text badge-text--ok" aria-hidden="true">
+            ↑{worktree.ahead}
+          </span>
+          <span className="a11y-sr-only">
+            {worktree.ahead} ahead of upstream
+          </span>
+        </>
       )}
       {worktree.behind > 0 && (
-        <span className="badge-text badge-text--warn">↓{worktree.behind}</span>
+        <>
+          <span className="badge-text badge-text--warn" aria-hidden="true">
+            ↓{worktree.behind}
+          </span>
+          <span className="a11y-sr-only">
+            {worktree.behind} behind upstream
+          </span>
+        </>
       )}
       {worktree.pr !== undefined && !worktree.isDefaultBranch ? (
         <PrChip pr={worktree.pr} />
@@ -246,6 +292,8 @@ export function PinIcon({ filled, size }: { filled: boolean; size: number }) {
       stroke="currentColor"
       strokeWidth="1.7"
       strokeLinejoin="round"
+      /* Every button that renders this one has its own aria-label. */
+      aria-hidden="true"
     >
       <path d="M12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9Z" />
     </svg>

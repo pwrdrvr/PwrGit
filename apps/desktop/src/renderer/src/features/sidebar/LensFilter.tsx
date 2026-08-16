@@ -65,11 +65,14 @@ const DESCRIPTION: Record<Lens, string> = {
 export function LensFilter({
   lens,
   counts,
-  onChange
+  onChange,
+  controlsId
 }: {
   lens: Lens;
   counts: Record<Lens, number>;
   onChange: (lens: Lens) => void;
+  /** The repo tree these tabs filter, for `aria-controls`. */
+  controlsId: string;
 }) {
   const activeCount = counts[lens];
   return (
@@ -83,6 +86,7 @@ export function LensFilter({
             type="button"
             role="tab"
             aria-selected={l === lens}
+            aria-controls={controlsId}
             aria-label={label}
             title={`${label} — ${DESCRIPTION[l]}`}
             className={`lens-chip${l === lens ? " is-active" : ""}`}
@@ -108,9 +112,14 @@ export function LensFilter({
           </button>
         );
       })}
+      {/* Decorative here, and deliberately so: a `tablist` may only own tabs,
+          and this count is already in the active tab's own accessible name
+          ("Pinned (14)"), so exposing it a second time would both break the
+          role structure and read the same number twice. */}
       {activeCount > 0 && (
         <span
           className="lens-filter__count"
+          aria-hidden="true"
           title={
             formatLensCount(activeCount) === String(activeCount)
               ? undefined
