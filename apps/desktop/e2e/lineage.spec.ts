@@ -1,3 +1,4 @@
+import { renameSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
@@ -49,6 +50,56 @@ test("multi-lane lineage shows active branches and hides merged ones", async () 
   await hint.locator("button").click();
   await expect(window.locator(".only-me")).toHaveText(/All branches/);
   await expect(hint).toBeHidden();
+});
+
+test("detached repo with no branch refs still shows HEAD history", async () => {
+  sandbox = createGitSandbox();
+  const repo = sandbox.makeRepo("ref-less");
+  sandbox.commit(repo.path, "second.txt", "second detached commit");
+  const head = sandbox.git(repo.path, "rev-parse", "--short=7", "HEAD");
+  // PowerLab materializes test targets at a commit and keeps only custom
+  // refs/pwrlab markers. There is deliberately no local branch or remote.
+  sandbox.git(repo.path, "update-ref", "refs/pwrlab/test-target", "HEAD");
+  sandbox.git(repo.path, "checkout", "--detach");
+  sandbox.git(repo.path, "branch", "-D", "main");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, sandbox, "ref-less");
+  await branchRow(window, `detached@${head}`).first().click();
+
+  await expect(
+    window.locator(".graph-row", { hasText: "second detached commit" })
+  ).toBeVisible({ timeout: 20_000 });
+  await expect(
+    window.locator(".graph-row", { hasText: "initial commit" })
+  ).toBeVisible();
+  await expect(window.locator(".graph-empty")).toBeHidden();
+});
+
+test("lineage failures surface a toast instead of looking like empty history", async () => {
+  sandbox = createGitSandbox();
+  const repo = sandbox.makeRepo("broken-history");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, sandbox, "broken-history");
+  await branchRow(window, "main").first().click();
+  await expect(
+    window.locator(".graph-row", { hasText: "initial commit" })
+  ).toBeVisible({ timeout: 20_000 });
+
+  // Make the next, differently-scoped graph request fail after the repo has
+  // already loaded. The renderer must not silently translate that Result into
+  // "No commits."
+  renameSync(join(repo.path, ".git"), join(repo.path, ".git-unavailable"));
+  await window.locator(".only-me").click();
+
+  const toast = window.locator(".app-toast", { hasText: "History unavailable" });
+  await expect(toast).toBeVisible();
+  await expect(toast).toContainText(/not a git repository/i);
+  await expect(toast.getByRole("button", { name: "Logs" })).toBeVisible();
+  await expect(window.locator(".graph-empty")).toBeHidden();
 });
 
 test("command palette finds and opens commits from the current timeline", async () => {

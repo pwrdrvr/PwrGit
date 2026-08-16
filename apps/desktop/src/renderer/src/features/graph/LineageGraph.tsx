@@ -10,6 +10,7 @@ import type {
 } from "@pwrgit/shared";
 import { useHoverIntent } from "../../lib/hoverIntent";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { showErrorToast } from "../../lib/toast";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import {
   type TooltipAnchor,
@@ -239,6 +240,7 @@ export function LineageGraph({
   const [data, setData] = useState<LaneGraph | null>(null);
   const [scope, setScope] = useState<Scope>("active");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [branchPrGeneration, setBranchPrGeneration] = useState(0);
   const [flash, setFlash] = useState<string | null>(null);
   const [branchesOpen, setBranchesOpen] = useState(false);
@@ -314,10 +316,18 @@ export function LineageGraph({
     let loadSequence = 0;
     const load = (force: boolean): void => {
       const sequence = ++loadSequence;
+      setLoadError(null);
       void dispatch("graph:lanes", { worktreeId, scope, force }).then((r) => {
         if (!active || sequence !== loadSequence) return;
         if (!r.ok) {
+          const message = r.error.message.split("\n")[0];
+          setLoadError(message);
           setLoading(false);
+          showErrorToast({
+            title: "History unavailable",
+            message,
+            detail: r.error.message
+          });
           return;
         }
 
@@ -1034,7 +1044,9 @@ export function LineageGraph({
           </div>
         ) : (
           <div className="graph-empty">
-            {loading
+            {loadError !== null
+              ? `Couldn't load history: ${loadError}`
+              : loading
               ? "Loading history…"
               : scope === "active"
                 ? "No active branches — you're all caught up."
