@@ -406,8 +406,25 @@ export type WorktreeState = {
 
 /** A commit that exists on only one side of a diverged tracked branch. */
 export type DivergenceCommit = {
+  /** Full object name, used to correlate range-diff output. */
+  hash: string;
   shortHash: string;
   subject: string;
+  additions: number;
+  deletions: number;
+};
+
+export type DivergenceCommitRelation =
+  | "equivalent"
+  | "changed"
+  | "local-only"
+  | "upstream-only";
+
+/** One range-diff row, ordered newest-first for direct display. */
+export type DivergenceCommitAlignment = {
+  local: DivergenceCommit | null;
+  upstream: DivergenceCommit | null;
+  relation: DivergenceCommitRelation;
 };
 
 /**
@@ -425,6 +442,8 @@ export type RemoteDivergence = {
   workingTreeClean: boolean;
   localCommits: DivergenceCommit[];
   upstreamCommits: DivergenceCommit[];
+  /** Patch-aware correspondence between the two unique commit ranges. */
+  alignedCommits: DivergenceCommitAlignment[];
   /**
    * Both sides have the same number of unique commits and their subject lines
    * match in history order. This is consistent with a remote rebase/force-push,

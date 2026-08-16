@@ -99,19 +99,16 @@ test("a synced release branch distinguishes default-branch drift from commits to
   );
 });
 
-test("a diverged pull explains the comparison and can reset a clean local branch", async () => {
+test("a diverged pull aligns rewritten commits, scrolls both histories, and resets", async () => {
   sandbox = createGitSandbox();
   const box = sandbox;
-  const repo = box.makeRepoBehindRemote("rewritten", { behindBy: 1 });
-  // Recreate the remote-only commit with the same patch + subject but a
-  // different identity. This is the shape a remote rebase/force-push leaves:
-  // matching labels, different commit object IDs.
-  box.commitAs(
-    "local-rewrite@pwrgit.dev",
-    repo.path,
-    "remote-0.txt",
-    "remote commit 0"
-  );
+  // Ten recreated commits model a remote rebase. Two commits exist only on the
+  // local branch and three only upstream, so reset risk is visible on both sides.
+  const repo = box.makeRepoWithRewrittenDivergence("rewritten", {
+    paired: 10,
+    localOnly: 2,
+    remoteOnly: 3
+  });
   handle = await launchApp();
   const { window } = handle;
 
@@ -124,10 +121,47 @@ test("a diverged pull explains the comparison and can reset a clean local branch
   await expect(dialog).toContainText("Remote only");
   await expect(dialog).toContainText("Working tree");
   await expect(dialog).toContainText("Clean");
+  await expect(dialog).toContainText("Git lined up 10 commits");
   await expect(dialog).toContainText(
-    "same number of commits with matching messages"
+    "2 commits appear only locally and 3 commits only upstream"
   );
-  await expect(dialog).toContainText("remote commit 0");
+  await expect(dialog).toContainText("Only on this branch 12 commits");
+  await expect(dialog).toContainText("Only on origin/main 13 commits");
+
+  const comparison = dialog.locator(".pull-divergence__comparison-scroll");
+  await expect(comparison.locator('[role="row"]')).toHaveCount(15);
+  await expect(
+    comparison.getByLabel("Corresponding commit with changes")
+  ).toHaveCount(10);
+  await expect(comparison.getByLabel("Only on the local branch")).toHaveCount(
+    2
+  );
+  await expect(
+    comparison.getByLabel("Only on the upstream branch")
+  ).toHaveCount(3);
+  await expect
+    .poll(() =>
+      comparison.evaluate((element) => element.scrollHeight > element.clientHeight)
+    )
+    .toBe(true);
+
+  const alignedRow = comparison.locator('[role="row"]', {
+    hasText: "feat: shared change 7"
+  });
+  await expect(alignedRow.locator(".pull-divergence__commit-subject")).toHaveText([
+    "feat: shared change 7",
+    "feat: shared change 7"
+  ]);
+  await expect(alignedRow.locator(".pull-divergence__commit-stats")).toHaveText([
+    "+1−0",
+    "+1−0"
+  ]);
+  await comparison.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect
+    .poll(() => comparison.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
   await expect(
     dialog.getByRole("button", { name: "Rebase local commits" })
   ).toBeEnabled();
