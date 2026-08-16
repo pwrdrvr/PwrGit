@@ -133,9 +133,9 @@ export function RepoRow({
       const stored = window.localStorage.getItem(
         `pwrgit.unpinnedWorktreesOpen.${repo.id}`
       );
-      return stored === null ? pinned.length === 0 : stored !== "0";
+      return stored !== null && stored !== "0";
     } catch {
-      return pinned.length === 0;
+      return false;
     }
   });
   useEffect(() => {

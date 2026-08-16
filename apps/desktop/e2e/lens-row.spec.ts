@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
-import { expandRepoGroup, lensChip } from "./fixtures/steps";
+import { expandRepoGroup, expandWorktrees, lensChip } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -155,6 +155,7 @@ test("sidebar rows are sized by their content, not by a fixed box", async () => 
   // so guard them too. 11px mono at 1.25 is 13.75, + 3px padding each side + 2
   // border ≈ 22; 24 is the rounding allowance.
   await expandRepoGroup(window, "dense");
+  await expandWorktrees(window, "dense");
   const wtRow = window.locator(".wt-row").first();
   await expect(wtRow).toBeVisible();
   const wtHeight = await wtRow.evaluate((el) => el.getBoundingClientRect().height);
@@ -269,6 +270,7 @@ test("the selected worktree row clears BOTH sticky bars when grouped", async () 
     timeout: 20_000
   });
   await expandRepoGroup(window, "grouped");
+  await expandWorktrees(window, "grouped");
 
   const row = window.locator(".wt-row", { hasText: "feature/w-1" }).first();
   await expect(row).toBeVisible({ timeout: 15_000 });
@@ -337,6 +339,7 @@ test("the section headings account for every worktree the repo row claims", asyn
   await window.getByRole("button", { name: /Add folders/i }).click();
   await lensChip(window, "All").click();
   await expandRepoGroup(window, "split");
+  await expandWorktrees(window, "split");
 
   const row = window.locator(".repo-row", { hasText: "split" });
   await expect(row.locator(".repo-row__wtcount")).toHaveText("3 wts");
@@ -376,6 +379,7 @@ test("the worktree row reserves no lane for the kebab", async () => {
   await window.getByRole("button", { name: /Add folders/i }).click();
   await lensChip(window, "All").click();
   await expandRepoGroup(window, "roomy");
+  await expandWorktrees(window, "roomy");
 
   const row = window.locator(".wt-row", { hasText: "feature/one" });
   await expect(row).toBeVisible({ timeout: 15_000 });
@@ -423,6 +427,7 @@ test("the worktree row's pin keeps a full target under the kebab", async () => {
   await window.getByRole("button", { name: /Add folders/i }).click();
   await lensChip(window, "All").click();
   await expandRepoGroup(window, "targets-wt");
+  await expandWorktrees(window, "targets-wt");
 
   const row = window.locator(".wt-row", { hasText: "feature/one" });
   await expect(row).toBeVisible({ timeout: 15_000 });
@@ -558,6 +563,7 @@ test("selecting a worktree row does not move it", async () => {
   await window.getByRole("button", { name: /Add folders/i }).click();
   await lensChip(window, "All").click();
   await expandRepoGroup(window, "steady");
+  await expandWorktrees(window, "steady");
 
   // The selected row is `position: sticky` so it stays visible under the repo
   // header while a long list scrolls. Its `top` used to be a literal 36px —

@@ -145,7 +145,9 @@ export async function expandRepoGroup(
 }
 
 /** Add the sandbox as a repo folder (via the stubbed picker), switch to the All
-    lens so nothing is filtered out, then wait for `repoName` and expand it. */
+    lens so nothing is filtered out, then open its repo and Worktrees groups.
+    The explicit Worktrees step keeps specs that need a row focused on their
+    behavior instead of the default disclosure state. */
 /**
  * A lens button by name. The switch is icon-only, so there is no text to match
  * — the lens name lives in the accessible name, which also carries the count
@@ -164,6 +166,7 @@ export async function addRootAndExpand(
   await window.getByRole("button", { name: /Add folders/i }).click();
   await lensChip(window, "All").click();
   await expandRepoGroup(window, repoName);
+  await expandWorktrees(window, repoName);
 }
 
 /** The nested "Worktrees N" disclosure inside `repoName`'s group. Only exists
@@ -181,11 +184,9 @@ async function worktreesToggle(
   return toggle;
 }
 
-/** Open the nested "Worktrees N" disclosure and return its toggle. The section
-    is usually already open — it defaults closed only when the repo has a
-    pinned worktree, or when an earlier click in the same test closed it — but
-    reading `aria-expanded` back means a spec that needs the unpinned rows
-    doesn't have to guess. */
+/** Open the nested "Worktrees N" disclosure and return its toggle. Reading
+    `aria-expanded` back means a spec that needs its rows never has to depend
+    on the current default or an earlier click in the same test. */
 export async function expandWorktrees(
   window: Page,
   repoName: string
