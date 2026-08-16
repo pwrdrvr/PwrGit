@@ -399,8 +399,13 @@ export function RepoRow({
                 worktrees. Naming them accounts for the difference between this
                 block and the one below, so both counts add up to the repo
                 row's. */}
+            {/* aria-hidden for the same reason .repo-group__head is: only
+                treeitems and nested groups are valid content inside this
+                `role="group"`, and a bare text node lands in the middle of the
+                level-2 rows. Each pinned row already announces its state
+                through its own "Unpin worktree" button. */}
             {pinned.length > 0 && (
-              <div className="wt-subhead">
+              <div className="wt-subhead" aria-hidden="true">
                 <span className="wt-section__label">Pinned</span>
                 <span className="ref-section__count">{pinned.length}</span>
               </div>

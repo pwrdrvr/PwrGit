@@ -1362,25 +1362,33 @@ textarea,
   align-items: stretch;
   gap: 8px;
 }
-.sidebar__actions .add-folder {
+.sidebar__actions .add-folder,
+.sidebar__actions .clone-repo {
+  /* Both labels are single-line. `flex-basis: auto` (not 0) is what keeps that
+     true: an even 0-basis split hands each button half the row, and at the
+     240px resize floor half is ~104px against the ~117px "+ Add folders…"
+     needs, so it wrapped to two lines inside a fixed 32px box. Sizing from
+     content and sharing only the surplus fits both at every supported width. */
   flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+}
+.sidebar__actions .add-folder {
   border-style: solid;
   background: var(--bg-panel-elevated);
   color: var(--text-secondary);
   font-weight: 600;
 }
 .sidebar__actions .clone-repo {
-  flex: 0 1 auto;
+  flex-grow: 0;
   border-style: dashed;
   background: transparent;
   color: var(--text-muted);
   font-weight: 500;
-  white-space: nowrap;
 }
 /* Once there is somewhere to clone INTO, the two are peers. */
-.sidebar__actions:has(.clone-repo:not(:disabled)) .add-folder,
 .sidebar__actions:has(.clone-repo:not(:disabled)) .clone-repo {
-  flex: 1 1 0;
+  flex-grow: 1;
 }
 .sidebar__actions:has(.clone-repo:not(:disabled)) .clone-repo {
   border-style: solid;
@@ -1466,8 +1474,14 @@ textarea,
 /* The pin star keeps its slot (no layout shift) but only shows on rows that
    are pinned, hovered, or keyboard-selected. */
 .overlay-result .pin {
-  width: 20px;
-  height: 20px;
+  /* `margin: 0` is load-bearing: `.pin` carries a -4px margin to collapse its
+     24px sidebar target to a 16px footprint, and inheriting that here would
+     leave this 20px button occupying 12px and overflowing its slot into the
+     neighbouring status text. These rows have the room for a full target, so
+     take it rather than re-shrinking the box. */
+  width: 24px;
+  height: 24px;
+  margin: 0;
   opacity: 0;
 }
 .overlay-result:hover .pin,
@@ -1944,9 +1958,12 @@ textarea,
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
-  /* Right: the lane the absolutely-positioned kebab below sits in. Left: the
-     room the fade needs to resolve. */
-  padding: 0 28px 0 20px;
+  /* Right: the lane the absolutely-positioned kebab below sits in — 29px (it is
+     24px wide at `right: 5px`) plus the 4px its negative margin lets the pin's
+     border box bleed past its margin box. At 28px the kebab, which hit-tests
+     above this strip as a later sibling, covered 5px of the pin and left it a
+     19px target. Left: the room the fade needs to resolve. */
+  padding: 0 33px 0 20px;
   border-radius: 0 6px 6px 0;
   background:
     linear-gradient(to right, transparent, var(--row-scrim) 20px),
@@ -1996,10 +2013,21 @@ textarea,
    `:focus-within` would leave the last-dragged row's actions floating over it
    permanently. `:has()` (not plain `:focus-visible`) because the keyboard focus
    that should reveal them may land on the pin or the kebab inside the row, not
-   only on the row itself. */
+   only on the row itself.
+
+   The STRIP itself never takes pointer events — only the button inside it does.
+   It used to be a 16px box parked left of the reserved kebab lane, so making
+   the whole thing clickable cost nothing; now it spans the row's full right
+   edge, and `pointer-events: auto` on the container would swallow clicks meant
+   for whatever it floats over. The PR chip is the one that matters: it is a
+   real `role="button"` that opens the PR, and it sits in exactly the slot the
+   strip covers. */
 .wt-row:hover .wt-row__hoveracts,
 .wt-row:has(:focus-visible) .wt-row__hoveracts {
   opacity: 1;
+}
+.wt-row:hover .wt-row__hoveracts .pin,
+.wt-row:has(:focus-visible) .wt-row__hoveracts .pin {
   pointer-events: auto;
 }
 .wt-row:hover .wt-row__menu,

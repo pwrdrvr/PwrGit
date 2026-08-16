@@ -395,6 +395,54 @@ test("the worktree row reserves no lane for the kebab", async () => {
     .locator(".wt-row__hoveracts")
     .evaluate((el) => getComputedStyle(el).backgroundImage);
   expect(backdrop).toContain("gradient");
+
+  // The strip spans the row's whole right edge now, so it must stay
+  // click-through: only the button inside it takes pointer events. Otherwise it
+  // swallows clicks meant for what it floats over — the PR chip is a real
+  // role="button" sitting in exactly that slot.
+  await row.hover();
+  const events = await row.evaluate((el) => ({
+    strip: getComputedStyle(
+      el.querySelector(".wt-row__hoveracts") as Element
+    ).pointerEvents,
+    pin: getComputedStyle(
+      el.querySelector(".wt-row__hoveracts .pin") as Element
+    ).pointerEvents
+  }));
+  expect(events.strip).toBe("none");
+  expect(events.pin).toBe("auto");
+});
+
+test("the worktree row's pin keeps a full target under the kebab", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepo("targets-wt", { worktrees: ["feature/one"] });
+
+  handle = await launchApp();
+  const { window } = handle;
+  await handle.setPickDirectory(sandbox.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await lensChip(window, "All").click();
+  await expandRepoGroup(window, "targets-wt");
+
+  const row = window.locator(".wt-row", { hasText: "feature/one" });
+  await expect(row).toBeVisible({ timeout: 15_000 });
+  await row.hover();
+
+  // The pin's border box bleeds 4px right of its margin box (that negative
+  // margin is how a 24px target occupies 16px), and the kebab hit-tests above
+  // it as a later absolutely-positioned sibling. If the strip's right padding
+  // does not clear the kebab's lane, the kebab silently eats part of the pin —
+  // which is how the WCAG 2.5.8 fix would end up not applying to this row.
+  const geom = await row.evaluate((el) => {
+    const pin = el
+      .querySelector(".wt-row__hoveracts .pin")!
+      .getBoundingClientRect();
+    const kebab = el.querySelector(".wt-row__menu")!.getBoundingClientRect();
+    return { pinW: pin.width, pinH: pin.height, pinRight: pin.right, kebabLeft: kebab.left };
+  });
+  expect(geom.pinW).toBeGreaterThanOrEqual(24);
+  expect(geom.pinH).toBeGreaterThanOrEqual(24);
+  expect(geom.pinRight).toBeLessThanOrEqual(geom.kebabLeft + 0.5);
 });
 
 test("row focus is a solid ring, not a 12%-alpha whisper", async () => {
