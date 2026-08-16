@@ -710,33 +710,8 @@ textarea,
   cursor: grabbing;
 }
 
-/* The source row still marks where the row came from — that is what makes the
-   insertion line read as a *move* rather than an insert — but it no longer
-   does it by fading.
-
-   `opacity: 0.4` took the row's own TEXT down with it: 3.46:1 for the name,
-   2.29:1 for the branch, 1.48:1 for the count and the grip, all against the
-   sidebar. SC 1.4.3 has no exemption for a state that is merely transient, and
-   the arithmetic here has no comfortable answer — the quiet tier only clears
-   4.5:1 again at about 0.88 opacity, which is not a fade at all. Dimming was
-   the wrong mechanism, not the wrong number.
-
-   So mark the row instead of washing it out: the "grabbed" surface the palette
-   already carries a token for, plus the transparent border every row reserves
-   turned solid accent (8.64:1 dark / 4.73:1 light, so the marker itself clears
-   1.4.11). Text stays at full strength, and the state is more legible than it
-   was, not less. Costs no layout — both rows already declare a 1px border. */
-.repo-row.is-dragging,
-.wt-row.is-dragging {
-  background: var(--bg-hover-strong);
-  /* The hover strip fades into the row behind it, so a row that changes its
-     background owes a matching scrim — otherwise the fade resolves to the
-     wrong colour over a dragged row. Same pairing every other .wt-row state
-     rule makes. */
-  --row-scrim: var(--bg-hover-strong);
-  border-color: var(--accent);
-  border-style: dashed;
-}
+/* The drag-source treatment lives further down, after the .wt-row state rules
+   it has to beat — see "Drag source" below `.wt-row.is-multiselected`. */
 
 /* The insertion line sits in the gap the drop would land in. Drawn as a ::after
    on the row (not a spacer element) so nothing reflows mid-drag — a list that
@@ -1298,11 +1273,13 @@ textarea,
   border-color: var(--accent-border);
 }
 /* Arrowing through the list must not park the focused row under the sticky
-   repo header (or the sticky folder heading above it), which is what the
-   browser's scroll-into-view would otherwise do. WCAG 2.2's SC 2.4.11, ahead
-   of the standard this audit targets, but the fix is one declaration. */
-.wt-row,
-.repo-row {
+   repo header, which is what the browser's scroll-into-view would otherwise
+   do. WCAG 2.2's SC 2.4.11, ahead of the standard this audit targets.
+
+   Ungrouped, the repo row is itself the only sticky layer (top: 0), so it owes
+   nothing and only worktree rows have something above them. Grouped, there is
+   a second layer — see `.repo-group .repo-row` for that half. */
+.wt-row {
   scroll-margin-top: var(--sidebar-repo-row-height);
 }
 .wt-row.is-selected {
@@ -1339,6 +1316,45 @@ textarea,
 }
 .wt-row.is-multiselected .wt-row__menu {
   opacity: 1;
+}
+
+/* ---- Drag source ----
+
+   The source row still marks where the row came from — that is what makes the
+   insertion line read as a *move* rather than an insert — but it no longer
+   does it by fading.
+
+   `opacity: 0.4` took the row's own TEXT down with it: 3.46:1 for the name,
+   2.29:1 for the branch, 1.48:1 for the count and the grip, all against the
+   sidebar. SC 1.4.3 has no exemption for a state that is merely transient, and
+   the arithmetic here has no comfortable answer — the quiet tier only clears
+   4.5:1 again at about 0.88 opacity, which is not a fade at all. Dimming was
+   the wrong mechanism, not the wrong number.
+
+   So mark the row instead of washing it out: the "grabbed" surface the palette
+   already carries a token for, plus the transparent border every row reserves
+   turned solid accent (8.64:1 dark / 4.73:1 light, so the marker itself clears
+   1.4.11). Text stays at full strength, and the state is more legible than it
+   was, not less. Costs no layout — both rows already declare a 1px border.
+
+   It sits HERE, not up in the drag section with the grips and the insertion
+   line, because `.wt-row:hover`, `.wt-row.is-selected` and
+   `.wt-row.is-multiselected` all set `background` at the same specificity and
+   all come after that section. Declared up there, the surface was inert for
+   the three cases that matter most — a row is always hovered at drag start,
+   and dragging the selected or a multi-selected row is routine — and
+   sidebar-contrast.test.ts would have been asserting the dragged row's text
+   against a surface it never actually had. Keep it below them. */
+.repo-row.is-dragging,
+.wt-row.is-dragging {
+  background: var(--bg-hover-strong);
+  /* The hover strip fades into the row behind it, so a row that changes its
+     background owes a matching scrim — otherwise the fade resolves to the
+     wrong colour over a dragged row. Same pairing every other .wt-row state
+     rule makes. */
+  --row-scrim: var(--bg-hover-strong);
+  border-color: var(--accent);
+  border-style: dashed;
 }
 
 /* Batch-selection action strip inside an expanded repo's worktree section. */
@@ -4707,6 +4723,21 @@ body.is-col-resizing {
 .repo-group .repo-row {
   top: var(--sidebar-group-head-height);
   z-index: 4;
+  /* Grouped, the folder heading sticks above this row, so a row scrolled to
+     the top of the scrollport would sit underneath it (SC 2.4.11). Same token
+     the sticky offsets use, for the same reason — three rules have to agree on
+     this height. */
+  scroll-margin-top: var(--sidebar-group-head-height);
+}
+/* And a worktree row has BOTH sticky layers above it — the folder heading and
+   its repo header — which is the same pairing `.repo-group .wt-row.is-selected`
+   below has to make for `top`. The base `.wt-row` rule accounts only for the
+   repo header, so under a group heading the focused row still landed beneath
+   the headings. */
+.repo-group .wt-row {
+  scroll-margin-top: calc(
+    var(--sidebar-group-head-height) + var(--sidebar-repo-row-height)
+  );
 }
 /* Grouped, there are TWO sticky bars above a worktree row, not one. The base
    `.wt-row.is-selected` offset clears only the repo header, so under a group

@@ -249,11 +249,20 @@ export function RepoRow({
       );
       onReorder(moved);
       // Focus does not move, so without this the reorder is silent (SC 4.1.3).
+      //
+      // Count in the same terms as this row's aria-posinset, which is an index
+      // into `displayIds`. `orderedIds` (and so `moved`) leaves the primary
+      // checkout out — it is fixed at the top and cannot be reordered — so
+      // announcing a raw index into it would tell the user "2 of 3" about a
+      // row whose own aria-posinset reads "3 of 4". displayIds is
+      // [primary?, ...pinned, ...remaining], so the primary is the whole
+      // difference.
+      const primaryOffset = primary === undefined ? 0 : 1;
       announce(
         movedMessage(
           worktree.branch,
-          moved.indexOf(worktree.id) + 1,
-          moved.length
+          moved.indexOf(worktree.id) + 1 + primaryOffset,
+          moved.length + primaryOffset
         )
       );
       return;

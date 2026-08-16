@@ -349,6 +349,37 @@ test("status badges keep their glyph visible and their meaning readable", async 
   expect(wtHeight, "worktree row height").toBeLessThanOrEqual(24);
 });
 
+test("a worktree reorder announces the same position the row reports", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepo("alpha", { worktrees: ["feature/one", "feature/two"] });
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, sandbox, "alpha");
+
+  const row = branchRow(window, "feature/one");
+  await expect(row).toBeVisible();
+  await row.focus();
+  await window.keyboard.press("Meta+Shift+ArrowDown");
+
+  // The announcement and `aria-posinset` have to agree. They are computed from
+  // two different lists — the reorder works over the reorderable worktrees,
+  // which excludes the fixed primary checkout, while posinset counts every
+  // treeitem in the group including it. Announcing a raw index into the former
+  // told the user "2 of 3" about a row reporting "3 of 4".
+  const live = window.locator("#pwrgit-live-region");
+  await expect(live).toHaveText(/feature\/one moved to \d+ of \d+\./);
+  const spoken = (await live.textContent()) ?? "";
+  const match = /moved to (\d+) of (\d+)\./.exec(spoken);
+  expect(match, `unparseable announcement: ${spoken}`).not.toBeNull();
+
+  await expect(row).toHaveAttribute("aria-posinset", match![1]!);
+  await expect(row).toHaveAttribute("aria-setsize", match![2]!);
+  // And the primary is counted, so the total is more than the two rows that
+  // can actually move — otherwise this passes while both sides are wrong.
+  expect(Number(match![2])).toBe(3);
+});
+
 test("the sidebar reflows at its narrowest width and largest text notch", async () => {
   sandbox = createGitSandbox();
   sandbox.makeRepo("a-repo-with-a-genuinely-long-name", {
