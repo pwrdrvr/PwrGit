@@ -13,6 +13,7 @@ import {
   type RemoteBranchReveal
 } from "@pwrgit/shared";
 import { registerAppDocumentHandlers } from "./app-document-handlers";
+import { wireAppMenuBridge } from "./app-menu-bridge";
 import { openAppDocumentWindow } from "./app-document-window";
 import { initAutoUpdater } from "./auto-updater";
 import { CommandBus } from "./command-bus";
@@ -150,6 +151,7 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    wireAppMenuBridge();
     // App log: ring buffer + file, streamed to the Logs window (Help › Logs).
     initLogFile(join(app.getPath("userData"), "pwrgit-main.log"));
     subscribeLogEntries((entry) => emitEvent("logs:entry", entry));

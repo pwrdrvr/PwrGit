@@ -1,5 +1,12 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
-import { IPC_DISPATCH_CHANNEL, IPC_EVENT_CHANNEL } from "@pwrgit/shared";
+import {
+  APP_MENU_MODEL_CHANNEL,
+  APP_MENU_POPUP_CHANNEL,
+  IPC_DISPATCH_CHANNEL,
+  IPC_EVENT_CHANNEL,
+  type AppMenuPopupRequest,
+  type AppMenuTopLevel
+} from "@pwrgit/shared";
 
 // Each window is bound to one profile, passed by the main process via
 // additionalArguments when the window is created.
@@ -9,6 +16,7 @@ const profileArg = process.argv.find((a) => a.startsWith("--pwrgit-profile="));
 // src/renderer/src/lib/pwrgit.ts add the command/event generics on top.
 const api = {
   profileId: profileArg?.slice("--pwrgit-profile=".length) ?? null,
+  platform: process.platform,
 
   dispatch: (name: string, req: unknown): Promise<unknown> =>
     ipcRenderer.invoke(IPC_DISPATCH_CHANNEL, name, req),
@@ -23,7 +31,13 @@ const api = {
     };
     ipcRenderer.on(IPC_EVENT_CHANNEL, listener);
     return () => ipcRenderer.off(IPC_EVENT_CHANNEL, listener);
-  }
+  },
+
+  getAppMenuModel: (): Promise<AppMenuTopLevel[]> =>
+    ipcRenderer.invoke(APP_MENU_MODEL_CHANNEL) as Promise<AppMenuTopLevel[]>,
+
+  popupAppMenu: (payload: AppMenuPopupRequest): void =>
+    ipcRenderer.send(APP_MENU_POPUP_CHANNEL, payload)
 };
 
 contextBridge.exposeInMainWorld("pwrgit", api);

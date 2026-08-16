@@ -132,6 +132,29 @@ describe("theme contract", () => {
   });
 });
 
+describe("platform window chrome", () => {
+  it("moves the Windows window-control reservation to the right", () => {
+    expect(appCss).toMatch(
+      /:root\[data-platform="win32"\]\s+\.titlebar\s*\{[\s\S]*?padding-right:\s*150px;/
+    );
+    expect(appCss).toMatch(
+      /:root\[data-platform="win32"\]\s+\.titlebar__gutter\s*\{[\s\S]*?display:\s*none;/
+    );
+  });
+
+  it("styles Windows menu states with theme tokens", () => {
+    expect(appCss).toMatch(
+      /\.titlebar__menu-item\s*\{[\s\S]*?color:\s*var\(--text-secondary\);/
+    );
+    expect(appCss).toMatch(
+      /\.titlebar__menu-item:hover,[\s\S]*?background:\s*var\(--bg-panel-hover\);[\s\S]*?color:\s*var\(--text-primary\);/
+    );
+    expect(appCss).toMatch(
+      /\.titlebar__menu-item\.is-focused\s*\{[\s\S]*?var\(--accent\)/
+    );
+  });
+});
+
 describe("accent ramp usage", () => {
   /**
    * --accent-bright is contrast-floored against an --accent-soft tint (4.64:1

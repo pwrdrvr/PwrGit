@@ -3,8 +3,18 @@ import { dispatch, dispatchOrThrow, PwrGitDispatchError, subscribe } from "./pwr
 
 type Bridge = Window["pwrgit"];
 
-function installBridge(bridge: Bridge): void {
-  (globalThis as { window?: { pwrgit: Bridge } }).window = { pwrgit: bridge };
+function installBridge(
+  bridge: Partial<Bridge> & Pick<Bridge, "dispatch" | "on">
+): void {
+  (globalThis as { window?: { pwrgit: Bridge } }).window = {
+    pwrgit: {
+      profileId: null,
+      platform: "darwin",
+      getAppMenuModel: async () => [],
+      popupAppMenu: () => {},
+      ...bridge
+    }
+  };
 }
 
 afterEach(() => {

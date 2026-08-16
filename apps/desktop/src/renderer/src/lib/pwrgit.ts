@@ -1,4 +1,6 @@
 import type {
+  AppMenuPopupRequest,
+  AppMenuTopLevel,
   CommandName,
   EventChannel,
   EventPayload,
@@ -11,8 +13,12 @@ import type {
 type PwrGitBridge = {
   /** The profile this window is bound to (one window per profile). */
   profileId: string | null;
+  /** OS platform exposed synchronously for pre-render window chrome. */
+  platform: string;
   dispatch: (name: string, req: unknown) => Promise<unknown>;
   on: (channel: string, handler: (payload: unknown) => void) => () => void;
+  getAppMenuModel: () => Promise<AppMenuTopLevel[]>;
+  popupAppMenu: (payload: AppMenuPopupRequest) => void;
 };
 
 declare global {
