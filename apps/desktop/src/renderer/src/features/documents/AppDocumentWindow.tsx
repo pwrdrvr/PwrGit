@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { AppDocument, AppDocumentKind } from "@pwrgit/shared";
+import { AuxiliaryTitleBar } from "../chrome/AuxiliaryTitleBar";
 import { dispatch } from "../../lib/pwrgit";
 
 /** Read-only viewer for main-process allowlisted app resources. */
@@ -29,8 +30,8 @@ export function AppDocumentWindow(props: { kind: AppDocumentKind }) {
 
   return (
     <main className="document-window">
+      <AuxiliaryTitleBar section="Help" title={title} />
       <header className="document-window__header">
-        <p className="document-window__eyebrow">PwrGit</p>
         <h1>{title}</h1>
       </header>
       {error !== null ? (

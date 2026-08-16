@@ -207,6 +207,38 @@ textarea,
   min-width: 12px;
 }
 
+.auxiliary-titlebar__breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-left: 14px;
+  color: var(--text-muted);
+  font: 500 11px/1 var(--font-sans);
+}
+
+.auxiliary-titlebar__section {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.auxiliary-titlebar__separator {
+  flex: 0 0 auto;
+  color: var(--text-subtle);
+}
+
+.auxiliary-titlebar__title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* The strip is a window-drag region, so every interactive descendant has to
    opt back out. Without this the OS claims the middle of each control —
    arrow cursor, clicks swallowed — and only the padding edges stay live.
@@ -5247,10 +5279,18 @@ body.is-col-resizing {
 
 .settings-screen {
   display: flex;
+  flex-direction: column;
   height: 100vh;
   background: var(--bg-app);
   color: var(--text-primary);
   font-family: var(--font-sans);
+  overflow: hidden;
+}
+
+.settings-screen__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -5263,17 +5303,6 @@ body.is-col-resizing {
   border-right: 1px solid var(--border-subtle);
   padding: 0 10px 12px;
   overflow-y: auto;
-}
-.settings-nav__masthead {
-  padding: 16px 8px 10px;
-}
-.settings-nav__brand {
-  margin: 0;
-  font: 700 15px/1.2 var(--font-sans);
-  letter-spacing: 0.01em;
-}
-.settings-nav__brand-accent {
-  color: var(--accent);
 }
 .settings-nav__group-label {
   margin: 10px 8px 4px;
@@ -5308,29 +5337,7 @@ body.is-col-resizing {
   flex-direction: column;
   flex: 1;
   min-width: 0;
-}
-.settings-titlebar {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  flex: 0 0 auto;
-  padding: 13px 22px;
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-panel);
-}
-.settings-titlebar__eyebrow {
-  font: 600 11px/1 var(--font-sans);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-.settings-titlebar__separator {
-  color: var(--text-subtle);
-  font-size: 12px;
-}
-.settings-titlebar__current {
-  font: 600 12.5px/1 var(--font-sans);
-  color: var(--text-primary);
+  min-height: 0;
 }
 .settings-content {
   flex: 1;
@@ -6162,13 +6169,6 @@ body.is-col-resizing {
   padding: 18px 24px 16px;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-panel);
-}
-.document-window__eyebrow {
-  margin: 0 0 4px;
-  color: var(--accent);
-  font: 600 10.5px/1 var(--font-sans);
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
 }
 .document-window__header h1 {
   margin: 0;

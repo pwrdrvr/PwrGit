@@ -5,7 +5,8 @@ import { describe, expect, it } from "vitest";
 import {
   TITLE_BAR_OVERLAY_BACKGROUND,
   TITLE_BAR_OVERLAY_SYMBOL,
-  WINDOW_BACKGROUND
+  WINDOW_BACKGROUND,
+  WINDOW_CHROME_BY_THEME
 } from "../../../main/window-chrome";
 
 /**
@@ -130,6 +131,25 @@ describe("theme contract", () => {
     expect(TITLE_BAR_OVERLAY_BACKGROUND).toBe(valueOf("--bg-titlebar"));
     expect(TITLE_BAR_OVERLAY_SYMBOL).toBe(valueOf("--text-secondary"));
   });
+
+  it("prepares matching main-process chrome for the authored light theme", () => {
+    const valueOf = (selector: string, token: string): string => {
+      const m = block(selector).match(
+        new RegExp(`^\\s+${token}\\s*:\\s*([^;]+);`, "m")
+      );
+      if (m === null) throw new Error(`missing token: ${token}`);
+      return m[1]!.trim();
+    };
+    expect(WINDOW_CHROME_BY_THEME.light.background).toBe(
+      valueOf(':root[data-theme="light"]', "--bg-app")
+    );
+    expect(WINDOW_CHROME_BY_THEME.light.titleBar).toBe(
+      valueOf(':root[data-theme="light"]', "--bg-titlebar")
+    );
+    expect(WINDOW_CHROME_BY_THEME.light.symbol).toBe(
+      valueOf(':root[data-theme="light"]', "--text-secondary")
+    );
+  });
 });
 
 describe("platform window chrome", () => {
@@ -139,6 +159,12 @@ describe("platform window chrome", () => {
     );
     expect(appCss).toMatch(
       /:root\[data-platform="win32"\]\s+\.titlebar__gutter\s*\{[\s\S]*?display:\s*none;/
+    );
+  });
+
+  it("uses the same platform-aware title strip in auxiliary windows", () => {
+    expect(appCss).toMatch(
+      /\.auxiliary-titlebar__breadcrumb\s*\{[\s\S]*?margin-left:\s*14px;/
     );
   });
 
