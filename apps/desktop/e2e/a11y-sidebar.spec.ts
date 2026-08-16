@@ -107,13 +107,17 @@ test("sub-24px sidebar controls still expose a 24×24 pointer target", async () 
     );
   }
 
-  // Measuring the pseudo-element proves it is 24px; this proves the browser
-  // actually routes a click there. ±11 keeps the probe inside a 24×24 box
-  // centred on the control while staying off its boundary pixel.
+  // Measuring the box proves it is 24px; this proves the browser actually
+  // routes a click there. Probe the four edge midpoints, not the corners: the
+  // pin has a 6px border-radius, and hit-testing honours it — a diagonal probe
+  // at ±11 lands 7.07px from the corner arc's centre and misses a 6px radius,
+  // which says nothing about the target's real extent.
   const pin = repoRow.locator(".pin");
   for (const [dx, dy] of [
-    [-11, -11],
-    [11, 11]
+    [-11, 0],
+    [11, 0],
+    [0, -11],
+    [0, 11]
   ] as const) {
     expect(
       await hitsControl(window, pin, dx, dy),
@@ -134,6 +138,28 @@ test("sub-24px sidebar controls still expose a 24×24 pointer target", async () 
     .first()
     .evaluate((el) => el.getBoundingClientRect().height);
   expect(wtHeight, "worktree row height").toBeLessThanOrEqual(24);
+});
+
+test("a repo row describes the counts its label hides", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepo("alpha", { worktrees: ["feature/one", "feature/two"] });
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, sandbox, "alpha");
+
+  // `aria-label` pins the name to the repo name, which every step helper
+  // depends on — but a label REPLACES the name built from contents, so the
+  // "2 wts" the row also shows reached nobody. It comes back as a description.
+  const repoRow = window.locator(".repo-row", { hasText: "alpha" });
+  await expect(repoRow).toHaveAttribute("aria-label", "alpha");
+  const describedBy = await repoRow.getAttribute("aria-describedby");
+  expect(describedBy, "a repo with worktrees owes a description").not.toBeNull();
+  // Linked worktrees only, matching the visible count exactly — the primary
+  // checkout is the repo's own, not one of them.
+  await expect(window.locator(`#${describedBy}`)).toHaveText(
+    "2 linked worktrees"
+  );
 });
 
 test("row keys never swallow the buttons inside the row", async () => {

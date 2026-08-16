@@ -178,12 +178,14 @@ test("the sidebar tree exposes valid, nested roles", async () => {
     window.locator(".repo-row", { hasText: "charlie" })
   ).toHaveAttribute("aria-posinset", "3");
 
-  // The row's name stays the repo name (every step helper resolves rows by it),
-  // so the counts it also shows reach a screen reader as a description.
+  // The row's name stays the repo name — every step helper resolves rows by it.
   await expect(alpha).toHaveAttribute("aria-label", "alpha");
-  const describedBy = await alpha.getAttribute("aria-describedby");
-  expect(describedBy).not.toBeNull();
-  await expect(window.locator(`#${describedBy}`)).toHaveText(/worktree/);
+  // These sandbox repos have no linked worktrees, are not behind, and are
+  // pinned in their own right, so there is nothing the row shows that its name
+  // does not already say. It must then carry no description at all rather than
+  // pointing at an empty one. (The populated case is covered in
+  // a11y-sidebar.spec.ts, on a repo that actually has worktrees.)
+  expect(await alpha.getAttribute("aria-describedby")).toBeNull();
 
   // Expanding a repo adds a group of level-2 treeitems, owned by the repo row
   // (the section is a DOM sibling, so ownership is explicit via aria-owns).

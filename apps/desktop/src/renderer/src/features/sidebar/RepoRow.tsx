@@ -375,7 +375,7 @@ export function RepoRow({
         role="treeitem"
         aria-expanded={expanded}
         aria-label={repo.name}
-        aria-describedby={describedById}
+        {...(description === "" ? {} : { "aria-describedby": describedById })}
         aria-level={1}
         aria-posinset={posinset}
         aria-setsize={setsize}
@@ -430,11 +430,15 @@ export function RepoRow({
             {wtCount} {wtCount === 1 ? "wt" : "wts"}
           </span>
         )}
-        {/* Always rendered, even when the description is short: aria-describedby
-            must resolve to a real element. */}
-        <span id={describedById} className="a11y-sr-only">
-          {description}
-        </span>
+        {/* Rendered only when it says something. A repo with no linked
+            worktrees, nothing behind and no borrowed pin has nothing to add
+            beyond its name, and pointing aria-describedby at an empty element
+            is worse than not describing it at all. */}
+        {description !== "" && (
+          <span id={describedById} className="a11y-sr-only">
+            {description}
+          </span>
+        )}
         {/* Present only via a pinned worktree: the repo's own star is unlit, so
             without this marker the row looks like it doesn't belong in the
             Pinned lens it's sitting in. */}
