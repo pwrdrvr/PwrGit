@@ -11,10 +11,13 @@ const setFeedURLMock = vi.fn();
 const emitEventMock = vi.fn();
 const logMainMock = vi.fn();
 
+const addAuthHeaderMock = vi.fn();
+
 const autoUpdaterMock = {
   allowPrerelease: false,
   autoDownload: false,
   autoInstallOnAppQuit: false,
+  addAuthHeader: addAuthHeaderMock,
   checkForUpdates: checkForUpdatesMock,
   currentVersion: { version: "1.0.0-beta.7" },
   logger: undefined as unknown,
@@ -82,10 +85,26 @@ function mockGitHubReleases(
 
 const fetchMock = vi.fn();
 
+function createDeferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("auto updater", () => {
   const originalNodeEnv = process.env.NODE_ENV;
   const originalPlatform = process.platform;
   const originalFetch = globalThis.fetch;
+  const originalGhToken = process.env.GH_TOKEN;
+  const originalGithubToken = process.env.GITHUB_TOKEN;
   let resolveChannel: "latest" | "prerelease" = "latest";
   let resolveTrain: "stable" | "beta" = "stable";
 
@@ -112,15 +131,19 @@ describe("auto updater", () => {
     vi.useFakeTimers();
     setPlatform("darwin");
     process.env.NODE_ENV = "production";
+    delete process.env.GH_TOKEN;
+    delete process.env.GITHUB_TOKEN;
     resolveChannel = "latest";
     resolveTrain = "stable";
     updateEventHandlers.clear();
     emitEventMock.mockReset();
     checkForUpdatesMock.mockReset();
     checkForUpdatesMock.mockResolvedValue({
+      isUpdateAvailable: true,
       updateInfo: { version: "1.0.0-beta.8" }
     });
     setFeedURLMock.mockReset();
+    addAuthHeaderMock.mockReset();
     fetchMock.mockReset();
     mockGitHubReleases();
     Object.defineProperty(globalThis, "fetch", {
@@ -140,6 +163,10 @@ describe("auto updater", () => {
   afterEach(() => {
     vi.useRealTimers();
     process.env.NODE_ENV = originalNodeEnv;
+    if (originalGhToken === undefined) delete process.env.GH_TOKEN;
+    else process.env.GH_TOKEN = originalGhToken;
+    if (originalGithubToken === undefined) delete process.env.GITHUB_TOKEN;
+    else process.env.GITHUB_TOKEN = originalGithubToken;
     Object.defineProperty(globalThis, "fetch", {
       configurable: true,
       value: originalFetch
@@ -205,6 +232,7 @@ describe("auto updater", () => {
       githubRelease("v1.0.0")
     ]);
     checkForUpdatesMock.mockResolvedValue({
+      isUpdateAvailable: true,
       updateInfo: { version: "1.1.0-beta.2" }
     });
     autoUpdaterMock.currentVersion = { version: "1.0.0" };
@@ -260,6 +288,7 @@ describe("auto updater", () => {
     resolveChannel = "prerelease";
     mockGitHubReleases([githubRelease("v1.0.0-beta.36")]);
     checkForUpdatesMock.mockResolvedValue({
+      isUpdateAvailable: true,
       updateInfo: { version: "1.0.0-beta.36" }
     });
     autoUpdaterMock.currentVersion = { version: "1.0.0-beta.35" };
@@ -274,7 +303,31 @@ describe("auto updater", () => {
       provider: "generic",
       url: "https://github.com/pwrdrvr/PwrGit/releases/download/v1.0.0-beta.36/"
     });
+    expect(addAuthHeaderMock).not.toHaveBeenCalled();
     expect(checkForUpdatesMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("authenticates the pinned feed with GH_TOKEN", async () => {
+    process.env.GH_TOKEN = "test-token";
+    resolveChannel = "prerelease";
+    mockGitHubReleases([githubRelease("v1.0.0-beta.36")]);
+    checkForUpdatesMock.mockResolvedValue({
+      isUpdateAvailable: true,
+      updateInfo: { version: "1.0.0-beta.36" }
+    });
+    autoUpdaterMock.currentVersion = { version: "1.0.0-beta.35" };
+    const updater = await startUpdater();
+
+    await expect(updater.checkForAppUpdatesNow("manual")).resolves.toEqual({
+      status: "available",
+      version: "1.0.0-beta.36"
+    });
+
+    expect(setFeedURLMock).toHaveBeenCalledWith({
+      provider: "generic",
+      url: "https://github.com/pwrdrvr/PwrGit/releases/download/v1.0.0-beta.36/"
+    });
+    expect(addAuthHeaderMock).toHaveBeenCalledWith("token test-token");
   });
 
   it("pins the beta train to the smoke-checked main-train tag", async () => {
@@ -286,6 +339,7 @@ describe("auto updater", () => {
       githubRelease("v1.0.0")
     ]);
     checkForUpdatesMock.mockResolvedValue({
+      isUpdateAvailable: true,
       updateInfo: { version: "1.1.0-beta.2" }
     });
     autoUpdaterMock.currentVersion = { version: "1.0.0" };
@@ -331,6 +385,7 @@ describe("auto updater", () => {
       githubRelease("v1.0.0-beta.36")
     ]);
     checkForUpdatesMock.mockResolvedValue({
+      isUpdateAvailable: true,
       updateInfo: { version: "1.0.0-beta.36" }
     });
     autoUpdaterMock.currentVersion = { version: "1.0.0-beta.35" };
@@ -350,6 +405,87 @@ describe("auto updater", () => {
     expect(setFeedURLMock).toHaveBeenCalledWith({
       provider: "generic",
       url: "https://github.com/pwrdrvr/PwrGit/releases/download/v1.0.0-beta.36/"
+    });
+  });
+
+  it("treats isUpdateAvailable=false as no-update even when the version is newer", async () => {
+    checkForUpdatesMock.mockResolvedValue({
+      isUpdateAvailable: false,
+      updateInfo: { version: "1.0.0-beta.8" }
+    });
+    const updater = await startUpdater();
+
+    await expect(updater.checkForAppUpdatesNow("manual")).resolves.toEqual({
+      status: "no-update",
+      version: "1.0.0-beta.8"
+    });
+  });
+
+  it("does not join an in-flight check for a different train", async () => {
+    mockGitHubReleases([
+      githubRelease("v1.1.0-beta.2", { prerelease: true }),
+      githubRelease("v1.0.0")
+    ]);
+    autoUpdaterMock.currentVersion = { version: "0.9.0" };
+    const firstCheck = createDeferred<{
+      isUpdateAvailable: boolean;
+      updateInfo: { version: string };
+    }>();
+    checkForUpdatesMock
+      .mockReturnValueOnce(firstCheck.promise)
+      .mockResolvedValue({
+        isUpdateAvailable: true,
+        updateInfo: { version: "1.1.0-beta.2" }
+      });
+    const updater = await startUpdater();
+    await vi.waitFor(() => {
+      expect(checkForUpdatesMock).toHaveBeenCalledTimes(1);
+    });
+
+    resolveTrain = "beta";
+    const betaCheck = updater.checkForAppUpdatesNow("manual");
+    expect(checkForUpdatesMock).toHaveBeenCalledTimes(1);
+
+    firstCheck.resolve({
+      isUpdateAvailable: true,
+      updateInfo: { version: "1.0.0" }
+    });
+    await expect(betaCheck).resolves.toEqual({
+      status: "available",
+      version: "1.1.0-beta.2"
+    });
+    expect(checkForUpdatesMock).toHaveBeenCalledTimes(2);
+    expect(setFeedURLMock).toHaveBeenLastCalledWith({
+      provider: "generic",
+      url: "https://github.com/pwrdrvr/PwrGit/releases/download/v1.1.0-beta.2/"
+    });
+  });
+
+  it("holds the in-flight lock until the automatic download finishes", async () => {
+    const download = createDeferred<string[]>();
+    checkForUpdatesMock.mockImplementation(async () => ({
+      isUpdateAvailable: true,
+      updateInfo: { version: "1.0.0-beta.8" },
+      downloadPromise: (async () => {
+        const files = await download.promise;
+        updateEventHandlers.get("update-downloaded")?.({
+          version: "1.0.0-beta.8"
+        });
+        return files;
+      })()
+    }));
+    const updater = await startUpdater();
+    await vi.waitFor(() => {
+      expect(checkForUpdatesMock).toHaveBeenCalledTimes(1);
+    });
+
+    const joined = updater.checkForAppUpdatesNow("manual");
+    expect(checkForUpdatesMock).toHaveBeenCalledTimes(1);
+
+    download.resolve(["/tmp/PwrGit-update"]);
+    await expect(joined).resolves.toEqual({
+      status: "downloaded",
+      version: "1.0.0-beta.8"
     });
   });
 

@@ -61,6 +61,7 @@ let resolveSelection: () => UpdatesSettings = () => ({
 let updateStatus: AppUpdateStatus = { status: "idle" };
 let periodicUpdateCheckTimer: ReturnType<typeof setInterval> | undefined;
 let updateCheckInFlight: Promise<AppUpdateCheckResult> | undefined;
+let updateCheckInFlightSelection: UpdateSelectionKey | undefined;
 let updateCheckChannelInFlight: UpdateSelectionKey | undefined;
 let heldDownloadedUpdate:
   | { selection: UpdateSelectionKey; version: string }
@@ -115,13 +116,31 @@ function configureAutoUpdaterChannel(
   );
 }
 
+function githubUpdateToken(): string | undefined {
+  const token = process.env.GH_TOKEN?.trim() || process.env.GITHUB_TOKEN?.trim();
+  return token || undefined;
+}
+
 function configureAutoUpdaterFeedForRelease(release: GitHubRelease): void {
   const tag = release.tag_name;
   if (!tag) return;
+  // Pin to the selected tag via a generic feed. setFeedURL does not copy
+  // requestHeaders onto the updater, so auth is applied afterward — the same
+  // GH_TOKEN / GITHUB_TOKEN PrivateGitHubProvider would have used.
   autoUpdater.setFeedURL({
     provider: "generic",
     url: `https://github.com/pwrdrvr/PwrGit/releases/download/${encodeURIComponent(tag)}/`
   });
+  const token = githubUpdateToken();
+  if (token) {
+    autoUpdater.addAuthHeader(`token ${token}`);
+  } else {
+    logMain(
+      "warn",
+      "updater",
+      "no GH_TOKEN/GITHUB_TOKEN; private release downloads will 404"
+    );
+  }
   logMain("info", "updater", `pinned feed to ${tag}`);
 }
 
@@ -227,83 +246,113 @@ export async function checkForAppUpdatesNow(
     return result;
   }
 
+  const wanted = currentUpdateSelectionKey();
   if (updateCheckInFlight) {
-    logMain("info", "updater", `joining in-flight update check (${trigger})`);
-    return updateCheckInFlight;
+    if (wanted === updateCheckInFlightSelection) {
+      logMain("info", "updater", `joining in-flight update check (${trigger})`);
+      return updateCheckInFlight;
+    }
+    logMain(
+      "info",
+      "updater",
+      `deferring ${wanted} check until ${updateCheckInFlightSelection} finishes (${trigger})`
+    );
+    try {
+      await updateCheckInFlight;
+    } catch {
+      // The in-flight check already reported its error.
+    }
+    return checkForAppUpdatesNow(trigger);
   }
 
-  updateCheckInFlight = (async () => {
+  const check = (async () => {
     try {
-      const selected = currentSelection();
-      const selection = updateSelectionKey(selected.train, selected.channel);
-      reconcileDownloadedUpdateEligibility(selection);
-      const downloadedResult = downloadedUpdateMatchesChannel(selection);
-      if (downloadedResult) {
-        logMain(
-          "info",
-          "updater",
-          `skipping check; update already downloaded ${downloadedResult.version}`
-        );
-        return downloadedResult;
-      }
-      logMain(
-        "info",
-        "updater",
-        `checking for updates (${trigger}) train=${selected.train} track=${selected.channel}`
-      );
-      configureAutoUpdaterChannel(selected);
-      const release = await readAppUpdateReleaseForChannel(
-        selected.channel,
-        selected.train
-      );
-      const currentVersion = autoUpdater.currentVersion?.version ?? "unknown";
-      if (!release?.tag_name) {
-        const result = { status: "no-update", version: currentVersion } as const;
-        setUpdateStatusUnlessDownloaded(result);
-        return result;
-      }
-      const selectedVersion = release.tag_name.replace(/^v/i, "");
-      if (compareSemver(selectedVersion, currentVersion) <= 0) {
-        const result = { status: "no-update", version: currentVersion } as const;
-        setUpdateStatusUnlessDownloaded(result);
-        return result;
-      }
-      configureAutoUpdaterFeedForRelease(release);
-      updateCheckChannelInFlight = selection;
-      const result = await autoUpdater.checkForUpdates();
-      if (result?.updateInfo?.version !== currentVersion) {
-        recordPendingDownloadChannel(
-          result?.updateInfo?.version,
-          selection
-        );
-      }
-      const matchingDownloadedResult = downloadedUpdateMatchesChannel(selection);
-      if (matchingDownloadedResult) return matchingDownloadedResult;
-      if (!result || !result.updateInfo) {
-        return {
-          status: "no-update",
-          version: result?.updateInfo?.version ?? "unknown"
-        };
-      }
-      if (result.updateInfo.version === currentVersion) {
-        return { status: "no-update", version: currentVersion };
-      }
-      return { status: "available", version: result.updateInfo.version };
-    } catch (err) {
-      const result = {
-        status: "error",
-        message: err instanceof Error ? err.message : String(err)
-      } as const;
-      setUpdateStatusUnlessDownloaded(result);
-      logMain("warn", "updater", "checkForUpdates failed", result.message);
-      return result;
+      return await runUpdateCheck(trigger);
     } finally {
       updateCheckChannelInFlight = undefined;
       updateCheckInFlight = undefined;
+      updateCheckInFlightSelection = undefined;
     }
   })();
+  updateCheckInFlight = check;
+  updateCheckInFlightSelection = wanted;
+  return check;
+}
 
-  return updateCheckInFlight;
+async function runUpdateCheck(
+  trigger: "startup" | "periodic" | "manual"
+): Promise<AppUpdateCheckResult> {
+  const selected = currentSelection();
+  const selection = updateSelectionKey(selected.train, selected.channel);
+  reconcileDownloadedUpdateEligibility(selection);
+  const downloadedResult = downloadedUpdateMatchesChannel(selection);
+  if (downloadedResult) {
+    logMain(
+      "info",
+      "updater",
+      `skipping check; update already downloaded ${downloadedResult.version}`
+    );
+    return downloadedResult;
+  }
+  logMain(
+    "info",
+    "updater",
+    `checking for updates (${trigger}) train=${selected.train} track=${selected.channel}`
+  );
+  configureAutoUpdaterChannel(selected);
+  const release = await readAppUpdateReleaseForChannel(
+    selected.channel,
+    selected.train
+  );
+  const currentVersion = autoUpdater.currentVersion?.version ?? "unknown";
+  if (!release?.tag_name) {
+    const result = { status: "no-update", version: currentVersion } as const;
+    setUpdateStatusUnlessDownloaded(result);
+    return result;
+  }
+  const selectedVersion = release.tag_name.replace(/^v/i, "");
+  if (compareSemver(selectedVersion, currentVersion) <= 0) {
+    const result = { status: "no-update", version: currentVersion } as const;
+    setUpdateStatusUnlessDownloaded(result);
+    return result;
+  }
+  configureAutoUpdaterFeedForRelease(release);
+  updateCheckChannelInFlight = selection;
+  const result = await autoUpdater.checkForUpdates();
+  if (result?.isUpdateAvailable && result.updateInfo?.version) {
+    recordPendingDownloadChannel(result.updateInfo.version, selection);
+  }
+  if (result?.isUpdateAvailable && result.downloadPromise) {
+    try {
+      await result.downloadPromise;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const downloadError = { status: "error", message } as const;
+      setUpdateStatusUnlessDownloaded(downloadError);
+      logMain("warn", "updater", "update download failed", message);
+      return downloadError;
+    }
+  }
+  const matchingDownloadedResult = downloadedUpdateMatchesChannel(selection);
+  if (matchingDownloadedResult) return matchingDownloadedResult;
+  if (!result || !result.updateInfo) {
+    return {
+      status: "no-update",
+      version: result?.updateInfo?.version ?? "unknown"
+    };
+  }
+  if (
+    result.isUpdateAvailable === false ||
+    result.updateInfo.version === currentVersion
+  ) {
+    const skipped = {
+      status: "no-update",
+      version: result.updateInfo.version
+    } as const;
+    setUpdateStatusUnlessDownloaded(skipped);
+    return skipped;
+  }
+  return { status: "available", version: result.updateInfo.version };
 }
 
 function startPeriodicUpdateChecks(): void {
@@ -572,7 +621,7 @@ function releaseForSelection(
 }
 
 function githubReleaseHeaders(): HeadersInit {
-  const token = process.env.GH_TOKEN?.trim() || process.env.GITHUB_TOKEN?.trim();
+  const token = githubUpdateToken();
   return {
     Accept: "application/vnd.github+json",
     "User-Agent": "PwrGit",
