@@ -4,6 +4,7 @@ import type {
   AppSettingsSnapshot,
   DiagnosticsSettings as DiagnosticsSettingsShape
 } from "@pwrgit/shared";
+import { AuxiliaryTitleBar } from "../chrome/AuxiliaryTitleBar";
 import { AboutSettings } from "./AboutSettings";
 import { DiagnosticsSettings } from "./DiagnosticsSettings";
 import { ExperimentalSettings } from "./ExperimentalSettings";
@@ -30,9 +31,10 @@ const SECTIONS: Array<{ id: SettingsSection; label: string }> = [
 ];
 
 /**
- * The Settings window (boots on the `#settings` hash route). PwrAgnt's
- * SettingsScreen shell: left section nav with the brand masthead, content
- * pane with a breadcrumb titlebar on the right.
+ * The Settings window (boots on the `#settings` hash route). A shared
+ * auxiliary title strip sits above the section nav and content pane so
+ * Windows caption controls and macOS traffic lights occupy the same chrome as
+ * every helper window.
  */
 export function SettingsWindow() {
   const settings = useAppSettings();
@@ -42,42 +44,32 @@ export function SettingsWindow() {
 
   return (
     <section className="settings-screen" aria-label="Settings">
-      <nav className="settings-nav" aria-label="Settings sections">
-        <header className="settings-nav__masthead">
-          <p className="settings-nav__brand">
-            Pwr<span className="settings-nav__brand-accent">Git</span>
-          </p>
-        </header>
-        <p className="settings-nav__group-label">Settings</p>
-        {SECTIONS.map((item) => (
-          <button
-            key={item.id}
-            aria-current={section === item.id ? "page" : undefined}
-            className={`settings-nav__button${section === item.id ? " is-active" : ""}`}
-            type="button"
-            onClick={() => setSection(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </nav>
+      <AuxiliaryTitleBar section="Settings" title={activeLabel} />
+      <div className="settings-screen__body">
+        <nav className="settings-nav" aria-label="Settings sections">
+          <p className="settings-nav__group-label">Settings</p>
+          {SECTIONS.map((item) => (
+            <button
+              key={item.id}
+              aria-current={section === item.id ? "page" : undefined}
+              className={`settings-nav__button${section === item.id ? " is-active" : ""}`}
+              type="button"
+              onClick={() => setSection(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </nav>
 
-      <div className="settings-main">
-        <header className="settings-titlebar">
-          <span className="settings-titlebar__eyebrow">Settings</span>
-          <span aria-hidden="true" className="settings-titlebar__separator">
-            ›
-          </span>
-          <span className="settings-titlebar__current">{activeLabel}</span>
-        </header>
-
-        <div className="settings-content">
-          <SettingsSectionBody section={section} settings={settings} />
-          {settings.error !== null && (
-            <p className="settings-field__error" role="alert">
-              {settings.error}
-            </p>
-          )}
+        <div className="settings-main">
+          <div className="settings-content">
+            <SettingsSectionBody section={section} settings={settings} />
+            {settings.error !== null && (
+              <p className="settings-field__error" role="alert">
+                {settings.error}
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </section>

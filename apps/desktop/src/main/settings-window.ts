@@ -1,5 +1,9 @@
 import { join } from "node:path";
 import { BrowserWindow, shell } from "electron";
+import {
+  auxiliaryWindowChromeOptions,
+  hideAuxiliaryWindowMenuBar
+} from "./auxiliary-window-chrome";
 import { WINDOW_BACKGROUND } from "./window-chrome";
 
 /**
@@ -25,6 +29,7 @@ export function openSettingsWindow(): void {
     minHeight: 520,
     show: false,
     title: "PwrGit Settings",
+    ...auxiliaryWindowChromeOptions(),
     backgroundColor: WINDOW_BACKGROUND,
     webPreferences: {
       preload: join(__dirname, "../preload/index.cjs"),
@@ -33,6 +38,8 @@ export function openSettingsWindow(): void {
       sandbox: true
     }
   });
+
+  hideAuxiliaryWindowMenuBar(window);
 
   window.once("ready-to-show", () => window.show());
   window.webContents.setWindowOpenHandler(({ url }) => {

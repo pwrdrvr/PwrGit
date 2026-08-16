@@ -10,6 +10,11 @@ import "./styles/app.css";
 const container = document.getElementById("root");
 if (container === null) throw new Error("root element not found");
 
+// Window chrome is platform-specific: macOS traffic lights reserve space on
+// the left; Windows caption buttons overlay the right side of our titlebar.
+// Stamp this before React renders so the first frame uses the correct layout.
+document.documentElement.dataset["platform"] = window.pwrgit.platform;
+
 // Stamp the appearance axes on <html> before the first render, for every
 // window kind — otherwise a non-default text size would flash at its default
 // on each launch.

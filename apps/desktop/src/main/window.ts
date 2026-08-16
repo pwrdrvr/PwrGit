@@ -10,7 +10,8 @@ import {
 /**
  * Create a profile-bound window (one window per profile). Frameless-inset
  * titlebar on macOS, custom title-bar overlay on Windows; the renderer paints
- * its own titlebar row. The bound profile travels via additionalArguments so
+ * its own titlebar row and Windows top-level menu labels. Native submenus stay
+ * in the main process. The bound profile travels via additionalArguments so
  * the preload can expose it before the renderer boots.
  */
 export function createMainWindow(profileId: string): BrowserWindow {

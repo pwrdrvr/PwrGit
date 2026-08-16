@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Repo, Worktree } from "@pwrgit/shared";
 import { CopyTarget } from "../shell/CopyTarget";
 import { BranchSwitcher } from "../graph/BranchSwitcher";
+import { AppMenuBar } from "./AppMenuBar";
 
 /** Compact path label: the last two segments locate a checkout precisely
  *  ("Acme/search-compare", "pwrdrvr/PwrAgnt") without burning a line on
@@ -42,13 +43,13 @@ export function TitleBar({
   return (
     <>
       <div className="titlebar">
-        {/* Reserves room for the macOS traffic lights (hiddenInset). On
-            Windows the caption buttons sit at the far right instead, over
-            the spacer. */}
+        {/* macOS-only traffic-light reservation; CSS removes it on Windows. */}
         <div className="titlebar__gutter" />
         <p className="titlebar__brand">
           Pwr<span className="titlebar__brand-accent">Git</span>
         </p>
+
+        {window.pwrgit.platform === "win32" && <AppMenuBar />}
 
         {repo !== null && worktree !== null && (
           <div className="titlebar__id">

@@ -8,6 +8,7 @@ import {
   type ReactNode
 } from "react";
 import type { LogEntry } from "@pwrgit/shared";
+import { AuxiliaryTitleBar } from "../chrome/AuxiliaryTitleBar";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 
 // Logs window — ported from PwrAgnt's LogsWindow and adapted to PwrGit's
@@ -234,6 +235,7 @@ export function LogsWindow() {
 
   return (
     <div className="log-window">
+      <AuxiliaryTitleBar section="Help" title="Logs" />
       <main className="log-window__content">
         <div className="log-window__toolbar" aria-label="Log controls">
           <label className="log-window__search">

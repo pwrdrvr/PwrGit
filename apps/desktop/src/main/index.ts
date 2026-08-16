@@ -4,6 +4,7 @@ import {
   BrowserWindow,
   dialog,
   nativeImage,
+  nativeTheme,
   protocol,
   safeStorage
 } from "electron";
@@ -14,6 +15,7 @@ import {
   type RemoteBranchReveal
 } from "@pwrgit/shared";
 import { registerAppDocumentHandlers } from "./app-document-handlers";
+import { wireAppMenuBridge } from "./app-menu-bridge";
 import { openAppDocumentWindow } from "./app-document-window";
 import {
   initAutoUpdater,
@@ -73,6 +75,7 @@ import {
 import { rebuildAppMenu } from "./menu";
 import { createProfileWindows } from "./profile-windows";
 import { openSettingsWindow } from "./settings-window";
+import { applyNativeWindowTheme } from "./window-chrome";
 
 const APP_NAME = "PwrGit";
 
@@ -93,6 +96,10 @@ protocol.registerSchemesAsPrivileged([
 // carry the product name, but setting it explicitly keeps every launch mode
 // consistent.
 app.setName(APP_NAME);
+// PwrGit currently renders dark-only. Keep Electron-owned popup menus and
+// dialogs on that same theme; the shared chrome helper is ready to switch this
+// alongside the renderer when the authored light theme becomes selectable.
+applyNativeWindowTheme(nativeTheme);
 app.setAboutPanelOptions({
   applicationName: APP_NAME,
   applicationVersion: app.getVersion()
@@ -155,6 +162,7 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    wireAppMenuBridge();
     // App log: ring buffer + file, streamed to the Logs window (Help › Logs).
     initLogFile(join(app.getPath("userData"), "pwrgit-main.log"));
     subscribeLogEntries((entry) => emitEvent("logs:entry", entry));

@@ -1,6 +1,10 @@
 import { join } from "node:path";
 import { BrowserWindow } from "electron";
 import type { AppDocumentKind } from "@pwrgit/shared";
+import {
+  auxiliaryWindowChromeOptions,
+  hideAuxiliaryWindowMenuBar
+} from "./auxiliary-window-chrome";
 import { WINDOW_BACKGROUND } from "./window-chrome";
 
 const documentWindows = new Map<AppDocumentKind, BrowserWindow>();
@@ -29,6 +33,7 @@ export function openAppDocumentWindow(kind: AppDocumentKind): void {
     minHeight: 480,
     show: false,
     title: titleFor(kind),
+    ...auxiliaryWindowChromeOptions(),
     backgroundColor: WINDOW_BACKGROUND,
     webPreferences: {
       preload: join(__dirname, "../preload/index.cjs"),
@@ -37,6 +42,8 @@ export function openAppDocumentWindow(kind: AppDocumentKind): void {
       sandbox: true
     }
   });
+
+  hideAuxiliaryWindowMenuBar(window);
 
   window.once("ready-to-show", () => window.show());
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
