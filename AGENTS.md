@@ -97,7 +97,9 @@ Packaging goes through `apps/desktop/scripts/release.mjs` (pnpm-deploy stage →
 electron-builder; `pnpm --filter @pwrgit/desktop package:dryrun` for a local
 unsigned DMG). Releases are cut by pushing a `vX.Y.Z` tag that matches
 `apps/desktop/package.json` and a `CHANGELOG.md` section (`pnpm release:check`
-verifies). CI, preview builds, and signing secrets are documented in
+verifies). Tag suffixes map onto Settings → Updates: no suffix is Stable
+Latest, `-prerelease` is Stable Prerelease, `-beta` is Beta Latest, `-alpha`
+is Beta Prerelease. CI, preview builds, and signing secrets are documented in
 `.github/workflows/README.md`.
 
 ## Docs & conventions

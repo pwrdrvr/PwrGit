@@ -9,12 +9,17 @@ import {
 } from "electron";
 import {
   ok,
+  resolveUpdateSelection,
   type Profile,
   type RemoteBranchReveal
 } from "@pwrgit/shared";
 import { registerAppDocumentHandlers } from "./app-document-handlers";
 import { openAppDocumentWindow } from "./app-document-window";
-import { initAutoUpdater } from "./auto-updater";
+import {
+  initAutoUpdater,
+  reconcileDownloadedUpdateEligibility,
+  registerAppUpdateHandlers
+} from "./auto-updater";
 import { CommandBus } from "./command-bus";
 import { registerDialogHandlers } from "./dialog-handlers";
 import { execGit } from "./git/dugite";
@@ -369,6 +374,7 @@ if (!gotSingleInstanceLock) {
     registerSearchStatusHandlers(bus, db);
     registerSettingsHandlers(bus, settings, {
       diagnosticsOutputRoot,
+      appVersion: app.getVersion(),
       onChanged: (snapshot) => {
         emitEvent("settings:changed", snapshot);
         diagnostics.sync();
@@ -380,7 +386,14 @@ if (!gotSingleInstanceLock) {
     registerIpc(bus, {
       onWebContentsDestroyed: githubHandlers.releaseWebContents
     });
-    initAutoUpdater();
+    registerAppUpdateHandlers(bus);
+    settings.onWrite(() => {
+      reconcileDownloadedUpdateEligibility();
+    });
+    initAutoUpdater({
+      resolveSelection: () =>
+        resolveUpdateSelection(settings.get().updates, app.getVersion())
+    });
 
     const refreshActive = (): void => {
       if (activeWorktreeId !== null) refresher.refreshWorktree(activeWorktreeId);

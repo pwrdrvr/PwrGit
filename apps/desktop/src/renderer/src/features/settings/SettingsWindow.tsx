@@ -9,10 +9,12 @@ import { DiagnosticsSettings } from "./DiagnosticsSettings";
 import { ExperimentalSettings } from "./ExperimentalSettings";
 import { GeneralSettings } from "./GeneralSettings";
 import { ProfilesSettings } from "./ProfilesSettings";
+import { UpdatesSettings } from "./UpdatesSettings";
 import { useAppSettings, type AppSettingsState } from "./useAppSettings";
 
 export type SettingsSection =
   | "general"
+  | "updates"
   | "profiles"
   | "experimental"
   | "diagnostics"
@@ -20,6 +22,7 @@ export type SettingsSection =
 
 const SECTIONS: Array<{ id: SettingsSection; label: string }> = [
   { id: "general", label: "General" },
+  { id: "updates", label: "Updates" },
   { id: "profiles", label: "Profiles" },
   { id: "experimental", label: "Experimental" },
   { id: "diagnostics", label: "Memory / CPU" },
@@ -127,6 +130,18 @@ function SettingsSectionBody(props: {
         }}
         onSidebarDensityChange={(sidebarDensity) => {
           update({ general: { sidebarDensity } });
+        }}
+      />
+    );
+  }
+
+  if (props.section === "updates") {
+    return (
+      <UpdatesSettings
+        saving={settings.saving}
+        snapshot={snapshot}
+        onSelectionChange={(next) => {
+          update({ updates: next });
         }}
       />
     );

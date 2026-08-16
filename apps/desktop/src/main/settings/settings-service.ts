@@ -3,7 +3,8 @@ import { dirname } from "node:path";
 import type {
   DiagnosticsSettings,
   ExperimentalSettings,
-  GeneralSettings
+  GeneralSettings,
+  UpdatesSettings
 } from "@pwrgit/shared";
 
 /** App-level (not per-profile) settings. Grows as later units need it.
@@ -17,6 +18,8 @@ export type AppSettings = {
   general?: Partial<GeneralSettings>;
   experimental?: Partial<ExperimentalSettings>;
   diagnostics?: Partial<DiagnosticsSettings>;
+  /** Both keys are written together once the user picks a train or track. */
+  updates?: Partial<UpdatesSettings>;
 };
 
 const DEFAULTS: AppSettings = {};
@@ -28,6 +31,7 @@ const DEFAULTS: AppSettings = {};
  */
 export class SettingsService {
   private cache: AppSettings;
+  private readonly writeListeners = new Set<() => void>();
 
   constructor(private readonly filePath: string) {
     this.cache = this.readFromDisk();
@@ -37,9 +41,19 @@ export class SettingsService {
     return { ...this.cache };
   }
 
+  /** Fired after a successful disk write. Used by the updater to hide a
+   *  downloaded file that no longer matches the selected train. */
+  onWrite(listener: () => void): () => void {
+    this.writeListeners.add(listener);
+    return () => {
+      this.writeListeners.delete(listener);
+    };
+  }
+
   update(patch: Partial<AppSettings>): AppSettings {
     this.cache = { ...this.cache, ...patch };
     this.writeAtomic(this.cache);
+    for (const listener of this.writeListeners) listener();
     return this.get();
   }
 
