@@ -792,11 +792,100 @@ describe("remote ops (bare-remote fixture)", () => {
       matchingCommitSubjects: true
     });
     expect(divergence.value.localCommits).toEqual([
-      { shortHash: expect.any(String), subject: "feat: keep this change" }
+      {
+        hash: expect.any(String),
+        shortHash: expect.any(String),
+        subject: "feat: keep this change",
+        additions: 1,
+        deletions: 0
+      }
     ]);
     expect(divergence.value.upstreamCommits).toEqual([
-      { shortHash: expect.any(String), subject: "feat: keep this change" }
+      {
+        hash: expect.any(String),
+        shortHash: expect.any(String),
+        subject: "feat: keep this change",
+        additions: 1,
+        deletions: 0
+      }
     ]);
+    expect(divergence.value.alignedCommits).toEqual([
+      {
+        local: divergence.value.localCommits[0],
+        upstream: divergence.value.upstreamCommits[0],
+        relation: "changed"
+      }
+    ]);
+  }, 15_000);
+
+  it("aligns a rewritten series while preserving commits unique to both sides", async () => {
+    const { local, remote } = makeDivergedFixture();
+    for (let index = 0; index < 10; index += 1) {
+      const file = `shared-${index}.txt`;
+      const subject = `feat: shared change ${index}`;
+      commit(local, file, subject);
+      commit(remote, file, subject);
+    }
+    commit(local, "local-0.txt", "feat: local only 0");
+    commit(local, "local-1.txt", "feat: local only 1");
+    commit(remote, "remote-0.txt", "feat: remote only 0");
+    commit(remote, "remote-1.txt", "feat: remote only 1");
+    commit(remote, "remote-2.txt", "feat: remote only 2");
+    git(remote, ["push"]);
+    await pullFastForward(systemGit, local);
+
+    const divergence = await inspectRemoteDivergence(systemGit, local);
+    expect(divergence.ok).toBe(true);
+    if (!divergence.ok) return;
+
+    expect(divergence.value.localCommits).toHaveLength(12);
+    expect(divergence.value.upstreamCommits).toHaveLength(13);
+    expect(divergence.value.alignedCommits).toHaveLength(15);
+    expect(
+      divergence.value.alignedCommits.filter(
+        (row) => row.relation === "changed"
+      )
+    ).toHaveLength(10);
+    expect(
+      divergence.value.alignedCommits.filter(
+        (row) => row.relation === "local-only"
+      )
+    ).toHaveLength(2);
+    expect(
+      divergence.value.alignedCommits.filter(
+        (row) => row.relation === "upstream-only"
+      )
+    ).toHaveLength(3);
+    const aligned = divergence.value.alignedCommits.find(
+      (row) => row.local?.subject === "feat: shared change 7"
+    );
+    expect(aligned).toMatchObject({
+      relation: "changed",
+      local: { subject: "feat: shared change 7", additions: 1, deletions: 0 },
+      upstream: { subject: "feat: shared change 7", additions: 1, deletions: 0 }
+    });
+  }, 15_000);
+
+  it("marks recreated patches as equivalent even when their commit IDs differ", async () => {
+    const { local, remote } = makeDivergedFixture();
+    configure(remote, "local");
+    commit(local, "shared.txt", "feat: shared patch");
+    commit(remote, "remote-base.txt", "chore: upstream base");
+    commit(remote, "shared.txt", "feat: shared patch");
+    git(remote, ["push"]);
+    await pullFastForward(systemGit, local);
+
+    const divergence = await inspectRemoteDivergence(systemGit, local);
+    expect(divergence.ok).toBe(true);
+    if (!divergence.ok) return;
+    const equivalent = divergence.value.alignedCommits.find(
+      (row) => row.relation === "equivalent"
+    );
+    expect(equivalent).toMatchObject({
+      local: { subject: "feat: shared patch", additions: 1, deletions: 0 },
+      upstream: { subject: "feat: shared patch", additions: 1, deletions: 0 }
+    });
+    expect(equivalent?.local?.hash).not.toBe(equivalent?.upstream?.hash);
   }, 15_000);
 
   it("resets only a clean branch to the exact inspected upstream", async () => {
