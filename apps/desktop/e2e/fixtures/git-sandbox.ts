@@ -70,6 +70,11 @@ export type GitSandbox = {
     name: string,
     opts?: { mainAheadBy?: number; backports?: number }
   ) => TestRepo;
+  /** Rewritten commits plus work unique to both local and upstream. */
+  makeRepoWithRewrittenDivergence: (
+    name: string,
+    opts?: { paired?: number; localOnly?: number; remoteOnly?: number }
+  ) => TestRepo;
   cleanup: () => void;
 };
 
@@ -224,6 +229,52 @@ export function createGitSandbox(): GitSandbox {
     });
   };
 
+  const makeRepoWithRewrittenDivergence = (
+    name: string,
+    opts: { paired?: number; localOnly?: number; remoteOnly?: number } = {}
+  ): TestRepo => {
+    const paired = opts.paired ?? 10;
+    const localOnly = opts.localOnly ?? 2;
+    const remoteOnly = opts.remoteOnly ?? 3;
+    const repoPath = initRepo(name);
+    const remotePath = join(remotesDir, `${name}.git`);
+    git(remotesDir, "init", "--bare", `${name}.git`);
+    git(repoPath, "remote", "add", "origin", remotePath);
+    git(repoPath, "push", "-u", "origin", "main");
+    const base = git(repoPath, "rev-parse", "HEAD");
+
+    for (let index = 0; index < paired; index += 1) {
+      commit(repoPath, `shared-${index}.txt`, `feat: shared change ${index}`);
+    }
+    for (let index = 0; index < localOnly; index += 1) {
+      commit(repoPath, `local-${index}.txt`, `feat: local only ${index}`);
+    }
+    const localTip = git(repoPath, "rev-parse", "HEAD");
+
+    git(repoPath, "reset", "--hard", base);
+    for (let index = 0; index < paired; index += 1) {
+      commitAs(
+        "rewrite@pwrgit.dev",
+        repoPath,
+        `shared-${index}.txt`,
+        `feat: shared change ${index}`
+      );
+    }
+    for (let index = 0; index < remoteOnly; index += 1) {
+      commit(repoPath, `remote-${index}.txt`, `feat: remote only ${index}`);
+    }
+    git(repoPath, "push", "origin", "main");
+
+    git(repoPath, "reset", "--hard", localTip);
+    git(repoPath, "fetch", "origin");
+    return {
+      name,
+      path: repoPath,
+      addWorktree: worktreeAdder(name, repoPath),
+      createBranch: (branch: string) => git(repoPath, "branch", branch)
+    };
+  };
+
   const commitEmptyAt = (
     cwd: string,
     message: string,
@@ -251,6 +302,7 @@ export function createGitSandbox(): GitSandbox {
     makeRepo,
     makeRepoBehindRemote,
     makeRepoWithSyncedReleaseBranch,
+    makeRepoWithRewrittenDivergence,
     cleanup
   };
 }

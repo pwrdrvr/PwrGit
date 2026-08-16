@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import type { DivergenceCommit, RemoteDivergence } from "@pwrgit/shared";
+import type {
+  DivergenceCommit,
+  DivergenceCommitAlignment,
+  RemoteDivergence
+} from "@pwrgit/shared";
 
 type RecoveryAction = "rebase" | "reset" | null;
 
@@ -7,33 +11,100 @@ function countLabel(count: number): string {
   return `${count} ${count === 1 ? "commit" : "commits"}`;
 }
 
-function CommitPreview({
-  title,
-  commits
+function CommitCell({
+  commit,
+  side
 }: {
-  title: string;
-  commits: DivergenceCommit[];
+  commit: DivergenceCommit | null;
+  side: "local" | "upstream";
 }) {
-  const shown = commits.slice(0, 3);
+  if (commit === null) {
+    return (
+      <span className="pull-divergence__commit-empty">
+        Not present {side === "local" ? "locally" : "upstream"}
+      </span>
+    );
+  }
+
   return (
-    <section className="pull-divergence__commits">
-      <div className="pull-divergence__commits-head">
-        <span>{title}</span>
-        <span>{countLabel(commits.length)}</span>
+    <div className="pull-divergence__commit" title={commit.subject}>
+      <code>{commit.shortHash}</code>
+      <span className="pull-divergence__commit-subject">
+        {commit.subject || "(no commit message)"}
+      </span>
+      <span
+        className="pull-divergence__commit-stats"
+        aria-label={`${commit.additions} additions, ${commit.deletions} deletions`}
+      >
+        <span>+{commit.additions}</span>
+        <span>−{commit.deletions}</span>
+      </span>
+    </div>
+  );
+}
+
+function relationLabel(relation: DivergenceCommitAlignment["relation"]): string {
+  switch (relation) {
+    case "equivalent":
+      return "Equivalent patch";
+    case "changed":
+      return "Corresponding commit with changes";
+    case "local-only":
+      return "Only on the local branch";
+    case "upstream-only":
+      return "Only on the upstream branch";
+  }
+}
+
+function CommitComparison({ divergence }: { divergence: RemoteDivergence }) {
+  return (
+    <section className="pull-divergence__comparison">
+      <div className="pull-divergence__comparison-head">
+        <span>
+          Only on this branch{" "}
+          <small>{countLabel(divergence.localCommits.length)}</small>
+        </span>
+        <span aria-hidden="true" />
+        <span>
+          Only on {divergence.upstream}{" "}
+          <small>{countLabel(divergence.upstreamCommits.length)}</small>
+        </span>
       </div>
-      <ul>
-        {shown.map((commit, index) => (
-          <li key={`${commit.shortHash}-${index}`} title={commit.subject}>
-            <code>{commit.shortHash}</code>
-            <span>{commit.subject || "(no commit message)"}</span>
-          </li>
-        ))}
-      </ul>
-      {commits.length > shown.length && (
-        <div className="pull-divergence__more">
-          +{commits.length - shown.length} more
+      <div
+        className="pull-divergence__comparison-scroll"
+        tabIndex={0}
+        aria-label="Aligned diverged commit histories"
+      >
+        <div className="pull-divergence__comparison-rows" role="table">
+          {divergence.alignedCommits.map((row, index) => (
+            <div
+              className={`pull-divergence__comparison-row is-${row.relation}`}
+              role="row"
+              key={`${row.local?.hash ?? "none"}-${row.upstream?.hash ?? "none"}-${index}`}
+            >
+              <div role="cell">
+                <CommitCell commit={row.local} side="local" />
+              </div>
+              <span
+                className="pull-divergence__relation"
+                aria-label={relationLabel(row.relation)}
+                title={relationLabel(row.relation)}
+              >
+                {row.relation === "equivalent"
+                  ? "="
+                  : row.relation === "changed"
+                    ? "≈"
+                    : row.relation === "local-only"
+                      ? "←"
+                      : "→"}
+              </span>
+              <div role="cell">
+                <CommitCell commit={row.upstream} side="upstream" />
+              </div>
+            </div>
+          ))}
         </div>
-      )}
+      </div>
     </section>
   );
 }
@@ -75,6 +146,15 @@ export function PullDivergenceDialog({
 
   const canRecover = divergence.workingTreeClean && busy === null;
   const localCount = divergence.localCommits.length;
+  const pairedCount = divergence.alignedCommits.filter(
+    (row) => row.local !== null && row.upstream !== null
+  ).length;
+  const localUnpairedCount = divergence.alignedCommits.filter(
+    (row) => row.relation === "local-only"
+  ).length;
+  const upstreamUnpairedCount = divergence.alignedCommits.filter(
+    (row) => row.relation === "upstream-only"
+  ).length;
 
   return (
     <div
@@ -150,20 +230,22 @@ export function PullDivergenceDialog({
               </div>
             </div>
 
-            {divergence.matchingCommitSubjects && (
+            {pairedCount > 0 && (
               <div className="pull-divergence__signal">
-                Both sides have the same number of commits with matching messages.
-                That can happen after a remote rebase or force-push.
+                Git lined up {countLabel(pairedCount)} across both histories. Compare
+                the titles and +/− totals; matching rows commonly come from a rebase
+                or force-push.
+                {(localUnpairedCount > 0 || upstreamUnpairedCount > 0) && (
+                  <span>
+                    {" "}
+                    {countLabel(localUnpairedCount)} appear only locally and{" "}
+                    {countLabel(upstreamUnpairedCount)} only upstream.
+                  </span>
+                )}
               </div>
             )}
 
-            <div className="pull-divergence__commit-grid">
-              <CommitPreview title="Only on this branch" commits={divergence.localCommits} />
-              <CommitPreview
-                title={`Only on ${divergence.upstream}`}
-                commits={divergence.upstreamCommits}
-              />
-            </div>
+            <CommitComparison divergence={divergence} />
 
             {!divergence.workingTreeClean && (
               <div className="pull-divergence__warning">

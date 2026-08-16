@@ -132,6 +132,8 @@ textarea,
 .commit-sha-chip,
 .commit-context-card__subject,
 .commit-context-card__short-hash,
+.pull-divergence__commit-subject,
+.pull-divergence__commit code,
 .selectable {
   -webkit-user-select: text;
   user-select: text;
@@ -4868,7 +4870,7 @@ body.is-col-resizing {
   padding: 24px 0;
 }
 .pull-divergence {
-  width: min(680px, 92vw);
+  width: min(900px, 92vw);
   max-height: calc(100vh - 48px);
   overflow-y: auto;
 }
@@ -4895,7 +4897,7 @@ body.is-col-resizing {
   background: var(--bg-panel);
 }
 .pull-divergence__facts span,
-.pull-divergence__commits-head {
+.pull-divergence__comparison-head {
   display: block;
   color: var(--text-muted);
   font: 600 9.5px/1.2 var(--font-sans);
@@ -4934,60 +4936,114 @@ body.is-col-resizing {
   background: var(--warn-soft);
   color: var(--status-warning);
 }
-.pull-divergence__commit-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+.pull-divergence__comparison {
   margin-top: 12px;
-}
-.pull-divergence__commits {
-  min-width: 0;
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   overflow: hidden;
 }
-.pull-divergence__commits-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
+.pull-divergence__comparison-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr);
   padding: 9px 10px;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-panel);
 }
-.pull-divergence__commits-head span:last-child {
-  flex: 0 0 auto;
+.pull-divergence__comparison-head > span:last-child {
+  text-align: right;
+}
+.pull-divergence__comparison-head small {
+  margin-left: 6px;
   color: var(--text-subtle);
+  font: inherit;
 }
-.pull-divergence__commits ul {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  margin: 0;
-  padding: 9px 10px;
-  list-style: none;
+.pull-divergence__comparison-scroll {
+  max-height: 280px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
-.pull-divergence__commits li {
+.pull-divergence__comparison-scroll:focus-visible {
+  outline: 1px solid var(--accent-border);
+  outline-offset: -1px;
+}
+.pull-divergence__comparison-rows {
+  min-width: 700px;
+}
+.pull-divergence__comparison-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr);
+  min-height: 38px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.pull-divergence__comparison-row:last-child {
+  border-bottom: 0;
+}
+.pull-divergence__comparison-row > div {
   display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 7px 9px;
+}
+.pull-divergence__comparison-row > div:last-child {
+  border-left: 1px solid var(--border-subtle);
+}
+.pull-divergence__comparison-row.is-equivalent > div {
+  background: color-mix(in srgb, var(--success-text) 5%, transparent);
+}
+.pull-divergence__comparison-row.is-changed > div {
+  background: color-mix(in srgb, var(--accent-bright) 5%, transparent);
+}
+.pull-divergence__commit {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  width: 100%;
   min-width: 0;
   gap: 7px;
   color: var(--text-secondary);
   font: 500 10.5px/1.35 var(--font-sans);
 }
-.pull-divergence__commits li code {
-  flex: 0 0 auto;
+.pull-divergence__commit code {
   color: var(--text-subtle);
   font-size: 10px;
 }
-.pull-divergence__commits li span {
+.pull-divergence__commit-subject {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.pull-divergence__more {
-  padding: 0 10px 9px;
+.pull-divergence__commit-stats {
+  display: flex;
+  gap: 4px;
+  font: 600 9.5px/1 var(--font-mono);
+  white-space: nowrap;
+}
+.pull-divergence__commit-stats span:first-child {
+  color: var(--success-text);
+}
+.pull-divergence__commit-stats span:last-child {
+  color: var(--danger-text);
+}
+.pull-divergence__commit-empty {
+  width: 100%;
   color: var(--text-subtle);
-  font: 500 10px/1 var(--font-mono);
+  font: 500 10px/1.2 var(--font-sans);
+  text-align: center;
+}
+.pull-divergence__relation {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-subtle);
+  font: 700 11px/1 var(--font-mono);
+}
+.pull-divergence__comparison-row.is-equivalent .pull-divergence__relation {
+  color: var(--success-text);
+}
+.pull-divergence__comparison-row.is-changed .pull-divergence__relation {
+  color: var(--accent-bright);
 }
 .pull-divergence__options {
   display: grid;
@@ -5040,8 +5096,7 @@ body.is-col-resizing {
   cursor: not-allowed;
 }
 @media (max-width: 560px) {
-  .pull-divergence__facts,
-  .pull-divergence__commit-grid {
+  .pull-divergence__facts {
     grid-template-columns: 1fr;
   }
   .pull-divergence__options section {
