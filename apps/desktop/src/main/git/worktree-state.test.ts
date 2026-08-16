@@ -164,6 +164,27 @@ describe("WorktreeStateService (system git)", () => {
     git(repoPath, ["switch", "main"]);
   });
 
+  it("uses HEAD as the graph base for a detached repo with no branch refs", async () => {
+    const detachedRepo = join(
+      mkdtempSync(join(tmpdir(), "pwrgit-ref-less-")),
+      "repo"
+    );
+    mkdirSync(detachedRepo, { recursive: true });
+    git(detachedRepo, ["init", "-b", "main"]);
+    git(detachedRepo, ["config", "user.email", "t@t.com"]);
+    git(detachedRepo, ["config", "user.name", "Tester"]);
+    writeFileSync(join(detachedRepo, "README.md"), "# ref-less\n");
+    git(detachedRepo, ["add", "."]);
+    git(detachedRepo, ["commit", "-m", "initial commit"]);
+    git(detachedRepo, ["checkout", "--detach"]);
+    git(detachedRepo, ["branch", "-D", "main"]);
+
+    const isolated = new WorktreeStateService(db, systemGit);
+    await expect(
+      isolated.resolveDefaultBranch("ref-less", detachedRepo)
+    ).resolves.toEqual({ ref: "HEAD", name: "HEAD" });
+  });
+
   // Windows can't delete a directory that is any process's cwd; the removal
   // lock is what keeps state probes (git spawned with cwd in the worktree)
   // and `git worktree remove` mutually exclusive.

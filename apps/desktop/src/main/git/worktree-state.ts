@@ -137,7 +137,10 @@ export class WorktreeStateService {
 
   /**
    * Resolve a repo's default branch: prefer the remote default
-   * (`origin/HEAD` → `origin/<name>`), fall back to a local `main`/`master`.
+   * (`origin/HEAD` → `origin/<name>`), then a local `main`/`master`, then the
+   * currently checked-out branch. Repositories materialized at a commit with
+   * no branch refs (for example, build/test sandboxes) use `HEAD` itself so
+   * history remains readable instead of passing a nonexistent `main` to Git.
    * Cached per repo for the process lifetime.
    */
   async resolveDefaultBranch(
@@ -147,7 +150,7 @@ export class WorktreeStateService {
     const cached = this.defaultBranch.get(repoId);
     if (cached !== undefined) return cached;
 
-    let resolved: { ref: string; name: string } = { ref: "main", name: "main" };
+    let resolved: { ref: string; name: string } | null = null;
     const sym = await this.git(
       ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
       repoPath
@@ -155,7 +158,8 @@ export class WorktreeStateService {
     if (sym.ok && sym.value.exitCode === 0) {
       const name = sym.value.stdout.trim().replace("refs/remotes/origin/", "");
       if (name !== "") resolved = { ref: `origin/${name}`, name };
-    } else {
+    }
+    if (resolved === null) {
       for (const cand of ["main", "master"]) {
         const v = await this.git(
           ["rev-parse", "--verify", "--quiet", cand],
@@ -167,6 +171,17 @@ export class WorktreeStateService {
         }
       }
     }
+    if (resolved === null) {
+      const current = await this.git(
+        ["symbolic-ref", "--quiet", "--short", "HEAD"],
+        repoPath
+      );
+      if (current.ok && current.value.exitCode === 0) {
+        const name = current.value.stdout.trim();
+        if (name !== "") resolved = { ref: name, name };
+      }
+    }
+    resolved ??= { ref: "HEAD", name: "HEAD" };
     this.defaultBranch.set(repoId, resolved);
     return resolved;
   }
