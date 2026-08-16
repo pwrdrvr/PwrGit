@@ -10,6 +10,7 @@ import type { Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
 import { useViewportTooltip } from "../../lib/useViewportTooltip";
 import {
   groupWorktreesForNavigation,
+  linkedWorktreeCount,
   reorder,
   repoPinSource,
   repoPrimaryBehind,
@@ -157,8 +158,17 @@ export function RepoRow({
   }, [remaining, selectedWorktreeId]);
 
   const behind = repoPrimaryBehind(repo);
-  const wtCount = repo.worktrees.length;
+  // Linked worktrees only — the primary is the repo's own checkout, not one of
+  // them. A repo with none shows no count at all rather than "0 wts" on what is
+  // typically most of the list.
+  const wtCount = linkedWorktreeCount(repo);
   const activeCollapsed = containsSelection && !expanded;
+
+  // The disclosure holds every linked worktree only when none are pinned. Once
+  // some are, they render above it under their own heading, so the disclosure
+  // says what it actually contains — and the two counts add up to the repo
+  // row's total instead of silently disagreeing with it.
+  const worktreesLabel = pinned.length > 0 ? "Other worktrees" : "Worktrees";
 
   // The primary checkout is fixed at the top, so it is neither a drag source
   // nor a drop target — `orderedIds` excludes it for the same reason.
@@ -344,9 +354,11 @@ export function RepoRow({
           {repo.name}
         </span>
         {behind > 0 && <span className="badge badge--warn">↓{behind}</span>}
-        <span className="repo-row__wtcount">
-          {wtCount} {wtCount === 1 ? "wt" : "wts"}
-        </span>
+        {wtCount > 0 && (
+          <span className="repo-row__wtcount">
+            {wtCount} {wtCount === 1 ? "wt" : "wts"}
+          </span>
+        )}
         {/* Present only via a pinned worktree: the repo's own star is unlit, so
             without this marker the row looks like it doesn't belong in the
             Pinned lens it's sitting in. */}
@@ -382,6 +394,22 @@ export function RepoRow({
         >
           <div className="wt-section__elevated">
             {primary !== undefined && renderWorktree(primary)}
+            {/* Pinned worktrees sat here unlabelled, which is what made the
+                disclosure below read "Worktrees 0" directly under two visible
+                worktrees. Naming them accounts for the difference between this
+                block and the one below, so both counts add up to the repo
+                row's. */}
+            {/* aria-hidden for the same reason .repo-group__head is: only
+                treeitems and nested groups are valid content inside this
+                `role="group"`, and a bare text node lands in the middle of the
+                level-2 rows. Each pinned row already announces its state
+                through its own "Unpin worktree" button. */}
+            {pinned.length > 0 && (
+              <div className="wt-subhead" aria-hidden="true">
+                <span className="wt-section__label">Pinned</span>
+                <span className="ref-section__count">{pinned.length}</span>
+              </div>
+            )}
             {pinned.map(renderWorktree)}
           </div>
 
@@ -422,7 +450,7 @@ export function RepoRow({
               }}
             >
               <span className={`ref-section__chev${worktreesOpen ? " is-open" : ""}`} />
-              <span className="wt-section__label">Worktrees</span>
+              <span className="wt-section__label">{worktreesLabel}</span>
               <span className="ref-section__count">{remaining.length}</span>
             </button>
             <span style={{ flex: 1 }} />

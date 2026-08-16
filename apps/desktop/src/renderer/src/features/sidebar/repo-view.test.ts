@@ -8,6 +8,7 @@ import {
   isPrunableWorktree,
   formatLensCount,
   lensCounts,
+  linkedWorktreeCount,
   lensIsArrangeable,
   orderWorktrees,
   reorder,
@@ -56,7 +57,9 @@ describe("lensCounts / filterReposByLens", () => {
 
   it("counts pinned (repo or worktree), behind, and all", () => {
     const counts = lensCounts(repos);
-    expect(counts).toEqual({ Recent: 0, Pinned: 2, Behind: 1, Stale: 0, All: 3 });
+    // Recent holds every repo, exactly like All — it used to report 0, which
+    // made the lens the app opens on the only one with no count and no dot.
+    expect(counts).toEqual({ Recent: 3, Pinned: 2, Behind: 1, Stale: 0, All: 3 });
   });
 
   it("Behind lens keeps only repos with a behind worktree", () => {
@@ -70,8 +73,140 @@ describe("lensCounts / filterReposByLens", () => {
     ]);
   });
 
-  it("All lens floats pinned repos to the top", () => {
-    expect(filterReposByLens(repos, "All")[0]?.id).toBe("a");
+  it("All lens is a strict alphabetical index — pins do not jump the queue", () => {
+    // "a" is the pinned one. It leads here because of its NAME, so prove the
+    // ordering with a pinned repo that sorts last: an index whose positions
+    // move when you pin something is not an index.
+    const shuffled = [
+      repo({ id: "zulu", name: "zulu", pinned: true }),
+      repo({ id: "alpha", name: "alpha" }),
+      repo({ id: "mike", name: "mike" })
+    ];
+    expect(filterReposByLens(shuffled, "All").map((r) => r.id)).toEqual([
+      "alpha",
+      "mike",
+      "zulu"
+    ]);
+  });
+
+  it("All sorts naturally: case-insensitive, v2 before v10", () => {
+    const names = ["Foo", "v10", "foo", "v2"].map((n) => repo({ id: n, name: n }));
+    expect(filterReposByLens(names, "All").map((r) => r.name)).toEqual([
+      "Foo",
+      "foo",
+      "v2",
+      "v10"
+    ]);
+  });
+});
+
+describe("Recent lens", () => {
+  const at = (id: string, iso?: string): Repo =>
+    repo({
+      id,
+      name: id,
+      worktrees: [
+        wt({
+          id: `${id}-1`,
+          branch: "main",
+          ...(iso === undefined ? {} : { lastActivityAt: iso })
+        })
+      ]
+    });
+
+  it("orders by newest worktree activity, not by name", () => {
+    const repos = [
+      at("alpha", "2026-01-01T00:00:00Z"),
+      at("bravo", "2026-08-01T00:00:00Z"),
+      at("charlie", "2026-04-01T00:00:00Z")
+    ];
+    expect(filterReposByLens(repos, "Recent").map((r) => r.id)).toEqual([
+      "bravo",
+      "charlie",
+      "alpha"
+    ]);
+  });
+
+  it("takes a repo's NEWEST worktree, not its first", () => {
+    const stale = repo({
+      id: "stale",
+      name: "stale",
+      worktrees: [
+        wt({ id: "s1", branch: "old", lastActivityAt: "2026-01-01T00:00:00Z" }),
+        wt({ id: "s2", branch: "hot", lastActivityAt: "2026-09-01T00:00:00Z" })
+      ]
+    });
+    const mid = at("mid", "2026-05-01T00:00:00Z");
+    expect(filterReposByLens([mid, stale], "Recent").map((r) => r.id)).toEqual([
+      "stale",
+      "mid"
+    ]);
+  });
+
+  it("sinks repos with no known activity, alphabetical among themselves", () => {
+    // Worktree state is computed lazily, so "unknown" is the normal state for a
+    // repo nobody has opened. Those must not shuffle: -Infinity minus -Infinity
+    // is NaN, and a NaN comparator returns an arbitrary order every call.
+    const repos = [at("zulu"), at("known", "2026-03-01T00:00:00Z"), at("alpha")];
+    expect(filterReposByLens(repos, "Recent").map((r) => r.id)).toEqual([
+      "known",
+      "alpha",
+      "zulu"
+    ]);
+  });
+
+  it("Recent and All disagree — they were the same list before", () => {
+    const repos = [
+      at("zulu", "2026-08-01T00:00:00Z"),
+      at("alpha", "2026-01-01T00:00:00Z")
+    ];
+    expect(filterReposByLens(repos, "Recent").map((r) => r.id)).toEqual([
+      "zulu",
+      "alpha"
+    ]);
+    expect(filterReposByLens(repos, "All").map((r) => r.id)).toEqual([
+      "alpha",
+      "zulu"
+    ]);
+  });
+});
+
+describe("linkedWorktreeCount", () => {
+  it("excludes the primary checkout", () => {
+    const r = repo({
+      id: "r",
+      worktrees: [
+        wt({ id: "p", branch: "main", isPrimary: true }),
+        wt({ id: "a", branch: "feature/a" }),
+        wt({ id: "b", branch: "feature/b" })
+      ]
+    });
+    expect(linkedWorktreeCount(r)).toBe(2);
+  });
+
+  it("is 0 for a repo that is only a local checkout", () => {
+    // The case that made the old count wrong on most rows: the repo's own
+    // directory is not a worktree you added, so there is nothing to report.
+    const r = repo({
+      id: "r",
+      worktrees: [wt({ id: "p", branch: "main", isPrimary: true })]
+    });
+    expect(linkedWorktreeCount(r)).toBe(0);
+  });
+
+  it("counts pinned and unpinned alike, so the row total covers both sections", () => {
+    const r = repo({
+      id: "r",
+      worktrees: [
+        wt({ id: "p", branch: "main", isPrimary: true }),
+        wt({ id: "a", branch: "feature/a", pinned: true }),
+        wt({ id: "b", branch: "feature/b" })
+      ]
+    });
+    const grouped = groupWorktreesForNavigation(r.worktrees, "recent");
+    expect(grouped.pinned.length + grouped.remaining.length).toBe(
+      linkedWorktreeCount(r)
+    );
   });
 });
 
@@ -270,10 +405,11 @@ describe("hand-arranged repo order", () => {
 
   it("ignores the arrangement in computed lenses", () => {
     // "All" answers a question; a manual order there would fight the answer.
+    // The arrangement would give z, m, a — alphabetical gives a, m, z.
     expect(filterReposByLens(repos, "All").map((r) => r.id)).toEqual([
       "a",
-      "z",
-      "m"
+      "m",
+      "z"
     ]);
   });
 });

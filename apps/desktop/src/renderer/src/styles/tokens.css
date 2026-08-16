@@ -35,6 +35,11 @@
      notch and the density. title × 1.25 line-height + vertical padding ×2 +
      2px border. Comfortable pads 4px; the compact block trims it. */
   --sidebar-repo-row-height: calc(var(--sidebar-title-size) * 1.25 + 10px);
+  /* The group-by-folder heading's height. A token because THREE rules have to
+     agree on it: the heading's own box, the repo row that sticks below it, and
+     the selected worktree row that sticks below both. It holds still across the
+     notches — the heading is a fixed-tier 10px label, like the counts. */
+  --sidebar-group-head-height: 28px;
 
   /* Surfaces */
   --bg-app: #000000;

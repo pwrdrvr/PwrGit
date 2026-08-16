@@ -134,7 +134,9 @@ export function RepoRefsSections({
                   hint={`${branch.name}\nClick to copy branch name`}
                   className="ref-branch-row__name refs-copyable-name copyable"
                 >
-                  {branch.name}
+                  {/* Wrapped, not bare: the wrapper is a flex box, so the name
+                      needs to BE a flex item for `text-overflow` to reach it. */}
+                  <span className="refs-copyable-name__text">{branch.name}</span>
                 </CopyTarget>
                 <span
                   className={`ref-branch-row__status is-${branch.tracking}`}
@@ -276,7 +278,9 @@ export function RepoRefsSections({
                               hint={`${branch.qualifiedName}\nClick to copy branch name`}
                               className="refs-copyable-name copyable"
                             >
-                              {branch.name}
+                              <span className="refs-copyable-name__text">
+                                {branch.name}
+                              </span>
                             </CopyTarget>
                             {branch.name === remote.defaultBranch && (
                               <small>default</small>

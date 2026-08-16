@@ -79,6 +79,7 @@ const INHERITS_FROM_DARK = new Set([
   "--font-mono",
   "--sidebar-title-size", // appearance axis, theme-neutral (see tokens.css)
   "--sidebar-repo-row-height", // derived from the axis; not a color
+  "--sidebar-group-head-height", // sticky-stack geometry; not a color
   "--radius-sm",
   "--radius-md",
   "--radius-lg",

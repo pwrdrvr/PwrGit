@@ -13,6 +13,41 @@ export function repoPrimaryBehind(repo: Repo): number {
   return primary?.behind ?? 0;
 }
 
+/**
+ * How many **linked worktrees** a repo has. The primary checkout is the repo's
+ * own directory, not a worktree you added — counting it made every repo claim
+ * one more than it has, and a repo with nothing but a local checkout read
+ * "1 wt" when the honest answer is that it has none. Callers hide the count
+ * entirely at 0 rather than printing "0 wts" on most rows in the list.
+ */
+export function linkedWorktreeCount(repo: Repo): number {
+  return repo.worktrees.filter((worktree) => !worktree.isPrimary).length;
+}
+
+/**
+ * Newest known activity across a repo's worktrees, or `-Infinity` when nothing
+ * has been computed for it yet. Worktree state is filled lazily (on expand) but
+ * persisted afterwards, so this sharpens as the user works rather than being
+ * empty forever — and a repo with no known activity sorts last instead of
+ * jumping around.
+ */
+export function repoLastActivity(repo: Repo): number {
+  let newest = Number.NEGATIVE_INFINITY;
+  for (const worktree of repo.worktrees) {
+    if (worktree.lastActivityAt === undefined) continue;
+    const at = Date.parse(worktree.lastActivityAt);
+    if (Number.isFinite(at) && at > newest) newest = at;
+  }
+  return newest;
+}
+
+/** Case-insensitive, natural-numeric: "Foo" sits by "foo", "v2" precedes "v10". */
+const byName = (a: Repo, b: Repo): number =>
+  a.name.localeCompare(b.name, undefined, {
+    sensitivity: "accent",
+    numeric: true
+  });
+
 export type RepoGroup = { root: string; label: string; repos: Repo[] };
 
 // Repo/root paths arrive with the platform's separators (backslashes on
@@ -100,13 +135,20 @@ function repoHasPrunable(r: Repo, now: number): boolean {
   return r.worktrees.some((w) => isPrunableWorktree(w, now));
 }
 
-/** Counts shown on the lens chips. Recent has no counter (it's the default). */
+/**
+ * Counts shown on the lens chips.
+ *
+ * Recent used to be hardcoded 0 on the grounds that it was "the default view,
+ * not a filtered set" — but it displayed rows, so the one lens the app opens on
+ * was also the only one showing neither a count nor a presence dot. It holds
+ * every repo, exactly like All, so it reports the same number.
+ */
 export function lensCounts(
   repos: Repo[],
   now: number = Date.now()
 ): Record<Lens, number> {
   return {
-    Recent: 0,
+    Recent: repos.length,
     Pinned: repos.filter(repoIsPinned).length,
     Behind: repos.filter((r) => r.worktrees.some((w) => w.behind > 0)).length,
     Stale: repos.filter((r) => repoHasPrunable(r, now)).length,
@@ -161,7 +203,24 @@ function orderedByHand(list: Repo[]): Repo[] {
   });
 }
 
-/** Filter by lens, then float pinned repos to the top (stable otherwise). */
+/**
+ * Filter by lens, then order it by whatever that lens is *for*.
+ *
+ * Recent and All used to be the same call: both fell through to the unfiltered
+ * list and took the same pinned-first sort, so two of the five lenses were one
+ * view wearing two icons. They hold the same repos on purpose — the difference
+ * is the question each answers, which is the ordering:
+ *
+ * - **All** is the index: strict alphabetical, so a name is findable by
+ *   position.
+ * - **Recent** is the worklist: newest activity first, unknown-activity repos
+ *   last (and alphabetical among themselves, so they don't shuffle).
+ *
+ * Neither floats pinned repos any more. Pinning already has a lens of its own,
+ * and a pin hoisted into All broke the one property — position follows name —
+ * that makes an alphabetical index worth having. Behind and Stale keep the
+ * float: they are short answer-lists where "mine first" still helps.
+ */
 export function filterReposByLens(
   repos: Repo[],
   lens: Lens,
@@ -174,6 +233,17 @@ export function filterReposByLens(
     list = repos.filter(repoIsPinned);
   } else if (lens === "Stale") {
     list = repos.filter((r) => repoHasPrunable(r, now));
+  }
+  if (lens === "All") return [...list].sort(byName);
+  if (lens === "Recent") {
+    return [...list].sort((a, b) => {
+      const ta = repoLastActivity(a);
+      const tb = repoLastActivity(b);
+      // Equal covers "both unknown" (-Infinity === -Infinity), which is what
+      // keeps this from evaluating -Inf − -Inf and sorting by NaN.
+      if (ta !== tb) return tb - ta;
+      return byName(a, b);
+    });
   }
   const byPin = [...list].sort(
     (a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)

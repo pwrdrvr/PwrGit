@@ -31,11 +31,17 @@ const ICONS: Record<Lens, ReactNode> = {
       <path d="M5 20h14" />
     </>
   ),
+  // An hourglass, not the archive box this used to draw. At 15px with a 1.7
+  // stroke the lid-plus-body read as a trash can, which in a row of *filters*
+  // promises a destructive action. Time-passing is the honest metaphor for
+  // "old enough to prune", and the angular form doesn't collide with the round
+  // clock two chips to the left.
   Stale: (
     <>
-      <path d="M4 7h16v3H4z" />
-      <path d="M6 10v9h12v-9" />
-      <path d="M10 14h4" />
+      <path d="M6 3h12" />
+      <path d="M6 21h12" />
+      <path d="M7.5 3v3.2L12 12l4.5-5.8V3" />
+      <path d="M7.5 21v-3.2L12 12l4.5 5.8V21" />
     </>
   ),
   All: (

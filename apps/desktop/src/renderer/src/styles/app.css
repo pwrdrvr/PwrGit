@@ -578,7 +578,7 @@ textarea,
   padding: 3px 8px;
 }
 :root[data-density="compact"] .wt-row {
-  padding: 2px 31px 2px 4px;
+  padding: 2px 6px 2px 4px;
 }
 :root[data-density="compact"] .wt-section {
   padding-block: 1px 3px;
@@ -627,10 +627,19 @@ textarea,
 .repo-row.is-active {
   background: var(--bg-hover-strong);
 }
+/* Rows are the primary keyboard target — the roving tabindex exists for them —
+   so they get the strongest indicator in the sidebar, not the weakest. The old
+   ring was a 42%-alpha border plus a 12%-alpha glow, which resolves to ≈2.27:1
+   on --bg-sidebar and misses WCAG 2.4.11's 3:1; small chrome buttons like
+   .wt-refresh already used a solid --focus-ring and outranked it.
+
+   Inset (negative offset), unlike PwrAgnt's +2: these rows sit flush against
+   each other with opaque backgrounds and .repo-row is sticky at z-index 3, so
+   a ring drawn outside the box is painted over by the neighbouring row. */
 .repo-row:focus-visible {
-  outline: none;
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
   border-color: var(--accent-border);
-  box-shadow: 0 0 0 1px var(--accent-soft);
 }
 
 /* ---- Drag to reorder: handles, source dimming, insertion line ---- */
@@ -777,17 +786,18 @@ textarea,
 
 .pin {
   flex: 0 0 auto;
-  /* Sized to sit INSIDE the row's content box rather than define it. At 24px
-     this button was the repo row's real height driver — taller than the 13px
-     name it sits beside — so content-sizing the row bought almost nothing
-     until this shrank too. The worktree rows avoid the problem differently:
-     their action cluster is absolutely positioned, so it never contributes
-     height at all.
+  /* A real 24×24 pointer target (WCAG 2.5.8) that OCCUPIES 16×16.
 
-     18px, not 20: at 20 the button was STILL the driver (20 + 8 padding + 2
-     border = a 30px row) because the 13px name only needs 16.25px. */
-  width: 16px;
-  height: 16px;
+     The button used to be 16px outright, because at its natural size it was the
+     repo row's real height driver — taller than the 13px name beside it — so
+     content-sizing the row bought nothing until this shrank. Shrinking the box
+     also shrank the hit target, which was the wrong half to give up. The
+     negative margin (PwrAgnt's `.thread-row__heading-pin` technique) pulls the
+     footprint back to 16px in both axes, so layout still sees the small box —
+     24 − 2×4 = 16 — while the pointer gets the full square. */
+  width: 24px;
+  height: 24px;
+  margin: -4px;
   padding: 0;
   display: flex;
   align-items: center;
@@ -847,6 +857,17 @@ textarea,
 .wt-section__elevated {
   padding-top: 3px;
 }
+/* Heading over the pinned worktrees in the elevated block. They used to sit
+   here unlabelled, which is what let the disclosure below read "Worktrees 0"
+   directly under visible worktree rows — this and that heading now partition
+   the repo row's total between them. Same eyebrow vocabulary as
+   .wt-section__head, without the controls. */
+.wt-subhead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 6px 4px 4px;
+}
 .wt-section__toggle {
   display: inline-flex;
   align-items: center;
@@ -867,11 +888,15 @@ textarea,
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+/* The three controls on the section head all take the same treatment as .pin:
+   a 24px target that occupies 20px, so they clear WCAG 2.5.8 without making
+   the eyebrow line taller. */
 .sort-cycle {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 20px;
+  height: 24px;
+  margin-block: -2px;
   padding: 0 7px;
   background: transparent;
   border: 1px solid var(--border-subtle);
@@ -884,8 +909,9 @@ textarea,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
+  margin: -2px;
   padding: 0;
   background: transparent;
   border: 1px solid var(--border-subtle);
@@ -1022,14 +1048,17 @@ textarea,
 .ref-branch-row__status.is-upstream_missing {
   color: var(--status-warning);
 }
+/* 24px target occupying 20px — see .pin. The ref rows are 29px tall, so this
+   costs no height. */
 .ref-mini-action,
 .ref-fetch-all {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  width: 21px;
-  height: 21px;
+  width: 24px;
+  height: 24px;
+  margin: -2px;
   padding: 0;
   border: 1px solid transparent;
   border-radius: 5px;
@@ -1118,7 +1147,16 @@ textarea,
   gap: 6px;
   /* Content-sized for the same reason as .repo-row — see the note there. */
   min-height: 20px;
-  padding: 3px 31px 3px 4px;
+  /* No reserved lane on the right any more. 31px was held for a kebab that is
+     invisible at rest — 13% of the row at the 240px minimum, taken permanently
+     from the branch name, which is the only field that shrinks. The actions
+     float over the row's tail on hover instead (see .wt-row__hoveracts), which
+     is what PwrAgnt does. */
+  padding: 3px 6px 3px 4px;
+  /* The backdrop those floating actions sit on. Tracks the row's own state so
+     the strip never reads as a differently-coloured patch; the states below
+     override it. */
+  --row-scrim: var(--bg-sidebar);
   border-radius: 7px;
   cursor: pointer;
   border: 1px solid transparent;
@@ -1127,11 +1165,13 @@ textarea,
 }
 .wt-row:hover {
   background: var(--bg-panel-hover);
+  --row-scrim: var(--bg-panel-hover);
 }
+/* Same reasoning as .repo-row:focus-visible above. */
 .wt-row:focus-visible {
-  outline: none;
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
   border-color: var(--accent-border);
-  box-shadow: 0 0 0 1px var(--accent-soft);
 }
 .wt-row.is-selected {
   /* Keep the active worktree pinned just below the folder header so it doesn't
@@ -1145,6 +1185,7 @@ textarea,
   z-index: 2;
   border-color: var(--accent-border);
   background: var(--bg-row-active);
+  --row-scrim: var(--bg-row-active);
 }
 /* Batch-selected (⌘/Shift-click) — a left accent bar + tint, distinct from the
    single "active" (main-pane) selection above. */
@@ -1238,9 +1279,15 @@ textarea,
   font: 600 10px/1 var(--font-mono);
   flex: 0 0 auto;
 }
+/* Quiet, not a filled pill. "in default" is true of most branches that are
+   still lying around, so at 45 rows it formed a solid green column that was the
+   most prominent thing in the list — louder than the branch names, while saying
+   the same word every time. It is context for the name, not a status to hunt
+   for, so it keeps the hue and drops the fill. */
 .wt-tag--merged {
-  background: var(--success-soft);
-  color: var(--success-text);
+  background: transparent;
+  color: color-mix(in srgb, var(--success-text) 78%, transparent);
+  padding: 0 2px;
 }
 .wt-tag--diverged {
   background: var(--danger-soft);
@@ -1304,6 +1351,50 @@ textarea,
 .add-folder {
   height: 32px;
   margin-top: 8px;
+}
+/* Add folders and Clone share the row under the jump field. Add folders is the
+   prerequisite — Clone stays disabled until a root exists — so it leads, takes
+   the larger share, and is the solid-bordered one. It used to be a dashed
+   whisper at the very bottom of the list, which on a first-run sidebar made the
+   only working control the quietest thing on screen. */
+.sidebar__actions {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+.sidebar__actions .add-folder,
+.sidebar__actions .clone-repo {
+  /* Both labels are single-line. `flex-basis: auto` (not 0) is what keeps that
+     true: an even 0-basis split hands each button half the row, and at the
+     240px resize floor half is ~104px against the ~117px "+ Add folders…"
+     needs, so it wrapped to two lines inside a fixed 32px box. Sizing from
+     content and sharing only the surplus fits both at every supported width. */
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+}
+.sidebar__actions .add-folder {
+  border-style: solid;
+  background: var(--bg-panel-elevated);
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.sidebar__actions .clone-repo {
+  flex-grow: 0;
+  border-style: dashed;
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+/* Once there is somewhere to clone INTO, the two are peers. */
+.sidebar__actions:has(.clone-repo:not(:disabled)) .clone-repo {
+  flex-grow: 1;
+}
+.sidebar__actions:has(.clone-repo:not(:disabled)) .clone-repo {
+  border-style: solid;
+  background: var(--bg-panel-elevated);
+  color: var(--text-secondary);
+  font-weight: 600;
 }
 .new-wt__plus {
   font-size: 13px;
@@ -1383,8 +1474,14 @@ textarea,
 /* The pin star keeps its slot (no layout shift) but only shows on rows that
    are pinned, hovered, or keyboard-selected. */
 .overlay-result .pin {
-  width: 20px;
-  height: 20px;
+  /* `margin: 0` is load-bearing: `.pin` carries a -4px margin to collapse its
+     24px sidebar target to a 16px footprint, and inheriting that here would
+     leave this 20px button occupying 12px and overflowing its slot into the
+     neighbouring status text. These rows have the room for a full target, so
+     take it rather than re-shrinking the box. */
+  width: 24px;
+  height: 24px;
+  margin: 0;
   opacity: 0;
 }
 .overlay-result:hover .pin,
@@ -1843,17 +1940,34 @@ textarea,
   }
 }
 
-/* The pin star floats over the row's right edge, reserving no space at rest —
-   only the kebab keeps a reserved slot (so it never shifts). Removal lives in
-   the kebab so status tags and PR chips never hide to make room. */
+/* The action strip floats over the row's tail — the row reserves nothing for
+   it. It runs to the right edge and carries its own backdrop, so the branch
+   name can occupy the full width and simply pass underneath: the gradient
+   resolves over 20px, so the name slides under a fade rather than meeting a
+   hard edge. Two stacked gradients because --row-scrim can be a translucent
+   tint (multi-select), and a see-through backdrop would leave text legible
+   through the buttons; the --bg-sidebar layer beneath guarantees opacity.
+   Removal lives in the kebab so status tags and PR chips never hide to make
+   room. */
 .wt-row__hoveracts {
   position: absolute;
-  right: 33px; /* just left of the reserved 24px kebab (+ 7px row padding) */
-  top: 0;
-  bottom: 0;
+  right: 0;
+  top: 1px;
+  bottom: 1px;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 6px;
+  /* Right: the lane the absolutely-positioned kebab below sits in — 29px (it is
+     24px wide at `right: 5px`) plus the 4px its negative margin lets the pin's
+     border box bleed past its margin box. At 28px the kebab, which hit-tests
+     above this strip as a later sibling, covered 5px of the pin and left it a
+     19px target. Left: the room the fade needs to resolve. */
+  padding: 0 33px 0 20px;
+  border-radius: 0 6px 6px 0;
+  background:
+    linear-gradient(to right, transparent, var(--row-scrim) 20px),
+    linear-gradient(to right, transparent, var(--bg-sidebar) 20px);
   opacity: 0;
   pointer-events: none;
   transition: opacity 120ms ease;
@@ -1863,18 +1977,26 @@ textarea,
    in flow and every worktree row measured 30px, i.e. the kebab's 24 plus
    padding. The compound selector outranks it. */
 .wt-row .kebab.wt-row__menu {
-  /* Out of flow, in the 24px the row reserves on its right (see .wt-row's
-     padding-right). The kebab is a 24px hit target — bigger than the 11px
-     branch line it sits beside — so as an in-flow child it set the row's
-     height, and every worktree row was as tall as its menu button. Absolutely
-     positioned it keeps its full target and contributes no height. */
+  /* Out of flow so it contributes no height: the kebab is a 24px hit target,
+     bigger than the 11px branch line beside it, and as an in-flow child it set
+     every worktree row's height. It renders after .wt-row__hoveracts in the
+     DOM, so it paints — and hit-tests — above that strip's backdrop. */
   position: absolute;
-  right: 7px;
+  right: 5px;
   top: 50%;
   transform: translateY(-50%);
   opacity: 0;
   transition: opacity 120ms ease;
 }
+/* The kebab is persistent on the selected row, where the hover strip is not
+   shown — so it carries its own backdrop there rather than the row holding a
+   lane open for it. Without this it would sit transparently over the age. */
+.wt-row.is-selected .kebab.wt-row__menu {
+  border-radius: 6px;
+  background: var(--row-scrim);
+  box-shadow: -9px 0 7px -5px var(--row-scrim);
+}
+
 /* Sidebar-scoped sizes for chrome that ships larger elsewhere. Each is under
    the text ceiling so the row height comes from the type, not the chrome. */
 .repo-row .badge,
@@ -1891,10 +2013,21 @@ textarea,
    `:focus-within` would leave the last-dragged row's actions floating over it
    permanently. `:has()` (not plain `:focus-visible`) because the keyboard focus
    that should reveal them may land on the pin or the kebab inside the row, not
-   only on the row itself. */
+   only on the row itself.
+
+   The STRIP itself never takes pointer events — only the button inside it does.
+   It used to be a 16px box parked left of the reserved kebab lane, so making
+   the whole thing clickable cost nothing; now it spans the row's full right
+   edge, and `pointer-events: auto` on the container would swallow clicks meant
+   for whatever it floats over. The PR chip is the one that matters: it is a
+   real `role="button"` that opens the PR, and it sits in exactly the slot the
+   strip covers. */
 .wt-row:hover .wt-row__hoveracts,
 .wt-row:has(:focus-visible) .wt-row__hoveracts {
   opacity: 1;
+}
+.wt-row:hover .wt-row__hoveracts .pin,
+.wt-row:has(:focus-visible) .wt-row__hoveracts .pin {
   pointer-events: auto;
 }
 .wt-row:hover .wt-row__menu,
@@ -1903,11 +2036,17 @@ textarea,
 .wt-row__menu:has(.kebab__btn[aria-expanded="true"]) {
   opacity: 1;
 }
-/* On hover the floating star lands where the age text sits — ONLY the age
-   yields. PR chips, status tags, and count badges stay put and stay
-   interactive (the PR chip has its own click + tooltip). */
+/* Wherever the actions are showing, the floating cluster lands where the age
+   text sits — ONLY the age yields. PR chips, status tags, and count badges stay
+   put and stay interactive (the PR chip has its own click + tooltip).
+
+   `.is-selected` is in this list because the kebab is persistent there, and the
+   row no longer holds a lane open for it: without this the kebab's backdrop
+   clipped "today" to a stray "t", which reads as a rendering fault rather than
+   as something politely getting out of the way. */
 .wt-row:hover .wt-age,
-.wt-row:has(:focus-visible) .wt-age {
+.wt-row:has(:focus-visible) .wt-age,
+.wt-row.is-selected .wt-age {
   opacity: 0;
 }
 
@@ -2349,8 +2488,20 @@ textarea,
   overflow: hidden;
   vertical-align: top;
 }
+/* `.refs-copyable-name` is an inline-FLEX box (it lays the name out beside the
+   hover-revealed copy glyph below), and `text-overflow` is inert on a flex
+   container — it needs a block box, or a flex ITEM to hang off. The modal's
+   rows pass `<strong>{name}</strong>` and so had one; the sidebar's ref rows
+   passed a bare string, whose anonymous flex item cannot be selected, so a long
+   branch name hard-clipped mid-glyph straight into the status label with no
+   ellipsis and no gutter. `:not(:has(strong))` was aimed at that case but put
+   the properties back on the same flex container, where they still did nothing.
+   Every text child is wrapped now, so there is always a real item to truncate.
+   Blockifying the wrapper instead would have cost the copy glyph its
+   `width`/`overflow` animation, which inline boxes ignore. */
 .refs-copyable-name > strong,
-.refs-copyable-name:not(:has(strong)) {
+.refs-copyable-name__text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4400,14 +4551,25 @@ body.is-col-resizing {
   display: flex;
   align-items: center;
   gap: 7px;
-  height: 28px;
+  height: var(--sidebar-group-head-height);
   padding: 0 8px;
   background: var(--bg-sidebar);
   box-shadow: 0 1px 0 var(--border-subtle);
 }
 .repo-group .repo-row {
-  top: 28px;
+  top: var(--sidebar-group-head-height);
   z-index: 4;
+}
+/* Grouped, there are TWO sticky bars above a worktree row, not one. The base
+   `.wt-row.is-selected` offset clears only the repo header, so under a group
+   heading the selected row parked at the repo header's TOP edge and was painted
+   over by it (repo row z-index 4 / heading 5, both opaque) — the row the sticky
+   exists to keep visible disappeared completely the moment the list scrolled.
+   Group-by-folder is on by default for any profile with more than one root. */
+.repo-group .wt-row.is-selected {
+  top: calc(
+    var(--sidebar-group-head-height) + var(--sidebar-repo-row-height)
+  );
 }
 .repo-group__label {
   font: 700 10px/1 var(--font-sans);
