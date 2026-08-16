@@ -43,17 +43,36 @@ test("scans a folder and lists a repo with its worktrees", async () => {
   await expect(firstRow.locator(".wt-tag--local")).toBeVisible();
 
   // Row actions float over the right edge (absolute → reserve no space at rest)
-  // and only fade in on hover; the kebab keeps its reserved slot.
+  // and only fade in on hover or keyboard focus.
   const restRow = branchRow(window, "feature/login");
   const acts = restRow.locator(".wt-row__hoveracts");
+  const menu = restRow.locator(".wt-row__menu");
   await expect(acts).toHaveCSS("position", "absolute");
   await expect(acts).toHaveCSS("opacity", "0");
+  await expect(menu).toHaveCSS("opacity", "0");
+
+  // The currently viewed worktree is also part of the multiselection. Its
+  // actions must still stay out of the way until the user asks for them.
+  await restRow.click();
+  await expect(restRow).toHaveClass(/is-selected/);
+  await window.getByRole("button", { name: /Add folders/i }).hover();
+  await expect(menu).toHaveCSS("opacity", "0");
+
   // Re-hover inside the retry: boot-time repo refreshes can re-render the row
   // list right after a hover lands, eating the :hover state.
   await expect(async () => {
     await restRow.hover();
     await expect(acts).toHaveCSS("opacity", "1", { timeout: 500 });
+    await expect(menu).toHaveCSS("opacity", "1", { timeout: 500 });
   }).toPass({ timeout: 10_000 });
+
+  // The button remains reachable and visible with the keyboard even though it
+  // is visually quiet at rest.
+  await restRow.focus();
+  await window.keyboard.press("Tab");
+  await window.keyboard.press("Tab");
+  await expect(menu.getByRole("button", { name: "Worktree actions" })).toBeFocused();
+  await expect(menu).toHaveCSS("opacity", "1");
 });
 
 test("keeps the primary and pinned worktrees visible when the remaining list is collapsed", async () => {

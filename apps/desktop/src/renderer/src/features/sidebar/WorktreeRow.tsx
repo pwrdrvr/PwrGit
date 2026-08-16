@@ -256,9 +256,9 @@ export function WorktreeRow({
           {relativeAge(worktree.lastActivityAt, now)}
         </span>
       )}
-      {/* Only the pin star floats over the right edge on hover (it overlays
-          the age); removal lives in the kebab so the PR chip and status tags
-          never have to hide to make room. The kebab keeps its slot. */}
+      {/* The pin and kebab float over the right edge on hover or keyboard focus
+          (they overlay the age); removal lives in the kebab so the PR chip and
+          status tags never have to hide to make room. */}
       <div className="wt-row__hoveracts">
         <button
           type="button"
