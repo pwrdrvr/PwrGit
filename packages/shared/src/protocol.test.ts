@@ -1,6 +1,12 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { err, ok, type Result } from "./result";
-import type { CommandName, Req, Res } from "./protocol";
+import {
+  inferUpdateSelection,
+  resolveUpdateSelection,
+  type CommandName,
+  type Req,
+  type Res
+} from "./protocol";
 
 describe("Result", () => {
   it("ok carries the value and narrows", () => {
@@ -44,5 +50,67 @@ describe("command registry", () => {
       worktreeId: string;
     }>();
     expectTypeOf<Res<"changes:discardAll">>().toEqualTypeOf<null>();
+  });
+});
+
+describe("inferUpdateSelection", () => {
+  it("maps website download versions onto the matching train and track", () => {
+    expect(inferUpdateSelection("1.0.1")).toEqual({
+      train: "stable",
+      channel: "latest"
+    });
+    expect(inferUpdateSelection("1.0.1-prerelease.5")).toEqual({
+      train: "stable",
+      channel: "prerelease"
+    });
+    expect(inferUpdateSelection("1.1.0-beta.2")).toEqual({
+      train: "beta",
+      channel: "latest"
+    });
+    expect(inferUpdateSelection("v1.1.0-alpha.7")).toEqual({
+      train: "beta",
+      channel: "prerelease"
+    });
+  });
+
+  it("keeps historical 1.0.0-beta builds on Stable Latest", () => {
+    expect(inferUpdateSelection("1.0.0-beta.50")).toEqual({
+      train: "stable",
+      channel: "latest"
+    });
+  });
+});
+
+describe("resolveUpdateSelection", () => {
+  it("infers from the app version only when both keys are absent", () => {
+    expect(resolveUpdateSelection(undefined, "1.1.0-beta.2")).toEqual({
+      train: "beta",
+      channel: "latest"
+    });
+    expect(resolveUpdateSelection({}, "1.1.0-alpha.7")).toEqual({
+      train: "beta",
+      channel: "prerelease"
+    });
+  });
+
+  it("keeps a legacy channel-only prerelease config on the Stable train", () => {
+    expect(
+      resolveUpdateSelection({ channel: "prerelease" }, "1.1.0-beta.2")
+    ).toEqual({
+      train: "stable",
+      channel: "prerelease"
+    });
+  });
+
+  it("honors an explicit Stable Latest choice on a Beta binary", () => {
+    expect(
+      resolveUpdateSelection(
+        { train: "stable", channel: "latest" },
+        "1.1.0-beta.2"
+      )
+    ).toEqual({
+      train: "stable",
+      channel: "latest"
+    });
   });
 });

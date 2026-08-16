@@ -51,3 +51,18 @@ Cutting a release: bump `apps/desktop/package.json` version, add a matching
 push the `vX.Y.Z` tag. No release is created until Linux, macOS, and Windows
 jobs succeed. Releases are born as GitHub Pre-releases; promote to Latest
 manually after validation.
+
+Settings → Updates maps tag suffixes onto two axes (Stable|Beta ×
+Latest|Prerelease):
+
+| Settings slot | Tag | GitHub flag |
+|---|---|---|
+| Stable · Latest | `v1.0.5` | Latest |
+| Stable · Prerelease | `v1.0.6-prerelease.1` | Pre-release |
+| Beta · Latest | `v1.1.0-beta.3` | Pre-release |
+| Beta · Prerelease | `v1.1.0-alpha.7` | Pre-release |
+
+Use `-prerelease.N` for Stable RCs. Use `-alpha.N` / `-beta.N` on `main`.
+Every `main` tag with a prerelease suffix must stay a GitHub Pre-release so it
+cannot steal `/releases/latest` from the Stable train. The updater pins
+electron-updater to the selected tag via the generic GitHub download feed.

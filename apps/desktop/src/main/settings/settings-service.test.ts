@@ -16,4 +16,20 @@ describe("SettingsService", () => {
     // A fresh instance reads the persisted value back from disk.
     expect(new SettingsService(file).get().worktreeRoot).toBe("/wt");
   });
+
+  it("notifies write listeners after a successful persist", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pwrgit-settings-"));
+    const file = join(dir, "settings.json");
+    const s = new SettingsService(file);
+    const writes: string[] = [];
+    const off = s.onWrite(() => {
+      writes.push(s.get().worktreeRoot ?? "");
+    });
+
+    s.update({ worktreeRoot: "/wt" });
+    expect(writes).toEqual(["/wt"]);
+    off();
+    s.update({ worktreeRoot: "/other" });
+    expect(writes).toEqual(["/wt"]);
+  });
 });

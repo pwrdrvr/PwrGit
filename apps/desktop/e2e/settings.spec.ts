@@ -71,6 +71,17 @@ test("menu opens the Settings window; panes render and settings persist", async 
     "Active"
   );
 
+  // Updates: picking a train persists both keys so a later Beta binary
+  // cannot re-infer after the operator chose Stable.
+  await settings.locator(".settings-nav__button", { hasText: "Updates" }).click();
+  await expect(
+    settings.getByRole("radio", { name: "Stable" })
+  ).toHaveAttribute("aria-checked", "true");
+  await settings.getByRole("radio", { name: "Beta" }).click();
+  await expect(
+    settings.getByRole("radio", { name: "Beta" })
+  ).toHaveAttribute("aria-checked", "true");
+
   // Experimental: the lineage-scope toggle round-trips through
   // settings:update (button state comes from the returned snapshot).
   await settings
@@ -107,6 +118,7 @@ test("menu opens the Settings window; panes render and settings persist", async 
     readFileSync(join(userData, "settings.json"), "utf8")
   ) as Record<string, unknown>;
   expect(stored["general"]).toEqual({ developerMode: true });
+  expect(stored["updates"]).toEqual({ train: "beta", channel: "latest" });
   expect(stored["experimental"]).toEqual({ lineageAllBranches: true });
   expect(stored["diagnostics"]).toEqual({ hotCpuProfilingEnabled: true });
 

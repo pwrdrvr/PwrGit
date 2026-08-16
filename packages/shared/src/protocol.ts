@@ -166,6 +166,147 @@ export function isSidebarDensity(value: unknown): value is SidebarDensity {
   );
 }
 
+/** Latest is smoke-checked; Prerelease is newer and may not install. */
+export const UPDATE_CHANNELS = ["latest", "prerelease"] as const;
+export type UpdateChannel = (typeof UPDATE_CHANNELS)[number];
+export const UPDATE_CHANNEL_DEFAULT: UpdateChannel = "latest";
+
+/** Stable is the 1.0 train; Beta follows main. */
+export const UPDATE_TRAINS = ["stable", "beta"] as const;
+export type UpdateTrain = (typeof UPDATE_TRAINS)[number];
+export const UPDATE_TRAIN_DEFAULT: UpdateTrain = "stable";
+
+export function isUpdateChannel(value: unknown): value is UpdateChannel {
+  return (
+    typeof value === "string" &&
+    (UPDATE_CHANNELS as readonly string[]).includes(value)
+  );
+}
+
+export function isUpdateTrain(value: unknown): value is UpdateTrain {
+  return (
+    typeof value === "string" &&
+    (UPDATE_TRAINS as readonly string[]).includes(value)
+  );
+}
+
+export type UpdatesSettings = {
+  channel: UpdateChannel;
+  train: UpdateTrain;
+};
+
+// Last 1.0 core that used `-beta.N` as the Stable prerelease line. Builds
+// at this core stay on Stable so a website Beta download cannot be confused
+// with `v1.0.0-beta.50`.
+const LEGACY_STABLE_BETA_CORE: [number, number, number] = [1, 0, 0];
+
+function parseUpdateVersion(
+  version: string
+): { core: [number, number, number]; pre: string[] } | undefined {
+  const trimmed = version.trim().replace(/^v/i, "");
+  const match = trimmed.match(
+    /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/
+  );
+  if (!match) return undefined;
+  const [, maj, min, patch, pre] = match;
+  return {
+    core: [Number(maj), Number(min), Number(patch)],
+    pre: pre ? pre.split(".") : []
+  };
+}
+
+/**
+ * Map a desktop app version onto the Settings update train/track.
+ * Used only when both `updates.train` and `updates.channel` are unset so a
+ * GitHub or website download of Beta/Prerelease follows that feed. A
+ * pre-train config that only set `channel` stays on Stable.
+ */
+export function inferUpdateSelection(version: string): UpdatesSettings {
+  const parsed = parseUpdateVersion(version);
+  if (!parsed || parsed.pre.length === 0) {
+    return {
+      channel: UPDATE_CHANNEL_DEFAULT,
+      train: UPDATE_TRAIN_DEFAULT
+    };
+  }
+  const id = parsed.pre[0];
+  if (id === "alpha") {
+    return { channel: "prerelease", train: "beta" };
+  }
+  if (id === "prerelease" || id === "rc") {
+    return { channel: "prerelease", train: UPDATE_TRAIN_DEFAULT };
+  }
+  if (id === "beta") {
+    const isLegacyStableBeta =
+      parsed.core[0] === LEGACY_STABLE_BETA_CORE[0] &&
+      parsed.core[1] === LEGACY_STABLE_BETA_CORE[1] &&
+      parsed.core[2] === LEGACY_STABLE_BETA_CORE[2];
+    if (isLegacyStableBeta) {
+      return {
+        channel: UPDATE_CHANNEL_DEFAULT,
+        train: UPDATE_TRAIN_DEFAULT
+      };
+    }
+    return { channel: "latest", train: "beta" };
+  }
+  return { channel: "prerelease", train: UPDATE_TRAIN_DEFAULT };
+}
+
+/** Resolve stored keys, inferring from the app version only when both are absent. */
+export function resolveUpdateSelection(
+  stored: Partial<UpdatesSettings> | undefined,
+  appVersion: string
+): UpdatesSettings {
+  if (stored?.channel === undefined && stored?.train === undefined) {
+    return inferUpdateSelection(appVersion);
+  }
+  return {
+    channel: stored.channel ?? UPDATE_CHANNEL_DEFAULT,
+    train: stored.train ?? UPDATE_TRAIN_DEFAULT
+  };
+}
+
+export type AppUpdateCheckResult =
+  | { status: "skipped"; reason: string }
+  | { status: "error"; message: string }
+  | { status: "checking" }
+  | { status: "no-update"; version: string }
+  | { status: "downloaded"; version: string }
+  | { status: "available"; version: string };
+
+export type AppUpdateStatus =
+  | { status: "idle" }
+  | { status: "skipped"; reason: string }
+  | { status: "checking" }
+  | { status: "no-update"; version: string }
+  | { status: "available"; version: string }
+  | { status: "downloading"; version: string; percent?: number }
+  | { status: "downloaded"; version: string }
+  | { status: "error"; message: string };
+
+export type AppUpdateInstallResult =
+  | { status: "restarting" }
+  | { status: "error"; message: string };
+
+export type AppUpdateReleaseInfo = {
+  version?: string;
+  name?: string;
+  url?: string;
+  publishedAt?: string;
+  unavailableReason?: string;
+};
+
+export type AppUpdateReleaseSlotVersions = {
+  latest: AppUpdateReleaseInfo;
+  prerelease: AppUpdateReleaseInfo;
+};
+
+export type AppUpdateReleaseVersions = {
+  stable: AppUpdateReleaseSlotVersions;
+  beta: AppUpdateReleaseSlotVersions;
+  fetchedAt: number;
+};
+
 export type GeneralSettings = {
   /** Expose Reload, Force Reload, and Developer Tools in the View menu. */
   developerMode: boolean;
@@ -219,6 +360,7 @@ export type AppSettingsSnapshot = {
   general: GeneralSettings;
   experimental: ExperimentalSettings;
   diagnostics: DiagnosticsSettings;
+  updates: UpdatesSettings;
   diagnosticsEnv: DiagnosticsEnvOverrides;
   /** Directory diagnostics sessions (profiles, snapshots) are written to. */
   diagnosticsOutputRoot: string;
@@ -228,6 +370,7 @@ export type AppSettingsPatch = {
   general?: Partial<GeneralSettings>;
   experimental?: Partial<ExperimentalSettings>;
   diagnostics?: Partial<DiagnosticsSettings>;
+  updates?: Partial<UpdatesSettings>;
 };
 
 export interface Commands {
@@ -631,6 +774,12 @@ export interface Commands {
   "settings:read": { req: void; res: AppSettingsSnapshot };
   "settings:update": { req: { patch: AppSettingsPatch }; res: AppSettingsSnapshot };
 
+  // Desktop auto-update (Settings → Updates)
+  "app:readUpdateStatus": { req: void; res: AppUpdateStatus };
+  "app:readUpdateReleases": { req: void; res: AppUpdateReleaseVersions };
+  "app:checkForUpdate": { req: void; res: AppUpdateCheckResult };
+  "app:installUpdate": { req: void; res: AppUpdateInstallResult };
+
   // App logs (diagnosability — silent failures must be findable somewhere)
   "logs:read": { req: void; res: LogSnapshot };
   "logs:openWindow": { req: void; res: null };
@@ -695,6 +844,8 @@ export interface Events {
   "ui:manageProfile": Record<string, never>;
   /** App settings changed (any window) — payload is the fresh snapshot. */
   "settings:changed": AppSettingsSnapshot;
+  /** Auto-update status changed — Settings and any future banner subscribe. */
+  "app:updateStatus": AppUpdateStatus;
   /** Reveal a repo (and optionally a worktree) in the window bound to
    *  `profileId` — cross-profile ⌘F pick landing in an open window. */
   "ui:revealRepo": {

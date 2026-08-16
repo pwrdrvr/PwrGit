@@ -5700,6 +5700,25 @@ body.is-col-resizing {
   color: var(--text-muted);
 }
 
+.settings-update-channel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 8px;
+}
+.settings-update-channel__restart {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+.settings-update-channel__result {
+  color: var(--text-secondary);
+}
+.settings-update-channel__result--error {
+  color: var(--danger-text);
+}
+
 /* Buttons + path link */
 .settings-button {
   appearance: none;

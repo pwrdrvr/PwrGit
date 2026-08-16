@@ -29,6 +29,7 @@ describe("settings handlers", () => {
     expect(r.value.experimental.lineageAllBranches).toBe(false);
     expect(r.value.diagnostics.heapMonitorEnabled).toBe(false);
     expect(r.value.diagnostics.hotCpuProfilingTriggerMode).toBe("sustained");
+    expect(r.value.updates).toEqual({ train: "stable", channel: "latest" });
     // No PWRGIT_* diagnostics vars in the test env → nothing env-forced.
     expect(r.value.diagnosticsEnv).toEqual({
       heapMonitorForcedOn: false,
@@ -147,5 +148,110 @@ describe("appearance axes", () => {
     expect(r.value.general.sidebarTextSize).toBe("md");
     expect(r.value.general.sidebarDensity).toBe("comfortable");
     expect(service.get().general ?? {}).toEqual({});
+  });
+});
+
+describe("update train and track", () => {
+  it("persists both keys when the user picks a train or track", async () => {
+    const bus = new CommandBus();
+    const service = freshService();
+    registerSettingsHandlers(bus, service, {
+      appVersion: "1.1.0-beta.2",
+      diagnosticsOutputRoot: "/diag",
+      onChanged: () => undefined
+    });
+
+    const r = await bus.dispatch("settings:update", {
+      patch: { updates: { train: "stable", channel: "latest" } }
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.updates).toEqual({ train: "stable", channel: "latest" });
+    expect(service.get().updates).toEqual({
+      train: "stable",
+      channel: "latest"
+    });
+  });
+
+  it("infers Beta Latest from a newer-than-1.0.0 beta app version", async () => {
+    const bus = new CommandBus();
+    registerSettingsHandlers(bus, freshService(), {
+      appVersion: "1.1.0-beta.2",
+      diagnosticsOutputRoot: "/diag",
+      onChanged: () => undefined
+    });
+
+    const r = await bus.dispatch("settings:read", undefined);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.updates).toEqual({ train: "beta", channel: "latest" });
+  });
+
+  it("keeps a legacy channel-only prerelease config on Stable", async () => {
+    const service = freshService();
+    service.update({ updates: { channel: "prerelease" } });
+    const bus = new CommandBus();
+    registerSettingsHandlers(bus, service, {
+      appVersion: "1.1.0-beta.2",
+      diagnosticsOutputRoot: "/diag",
+      onChanged: () => undefined
+    });
+
+    const r = await bus.dispatch("settings:read", undefined);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.updates).toEqual({ train: "stable", channel: "prerelease" });
+    // The inferred train is not written back unless the user chooses it.
+    expect(service.get().updates).toEqual({ channel: "prerelease" });
+  });
+
+  it("writes the resolved pair even when the patch only names one axis", async () => {
+    const bus = new CommandBus();
+    const service = freshService();
+    registerSettingsHandlers(bus, service, {
+      appVersion: "1.1.0-beta.2",
+      diagnosticsOutputRoot: "/diag",
+      onChanged: () => undefined
+    });
+
+    const r = await bus.dispatch("settings:update", {
+      patch: { updates: { train: "stable" } }
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.updates).toEqual({ train: "stable", channel: "latest" });
+    expect(service.get().updates).toEqual({
+      train: "stable",
+      channel: "latest"
+    });
+  });
+
+  it("keeps an inferred Beta train when only channel is written", async () => {
+    const bus = new CommandBus();
+    const service = freshService();
+    registerSettingsHandlers(bus, service, {
+      appVersion: "1.1.0-alpha.7",
+      diagnosticsOutputRoot: "/diag",
+      onChanged: () => undefined
+    });
+
+    const before = await bus.dispatch("settings:read", undefined);
+    expect(before.ok).toBe(true);
+    if (!before.ok) return;
+    expect(before.value.updates).toEqual({
+      train: "beta",
+      channel: "prerelease"
+    });
+
+    const r = await bus.dispatch("settings:update", {
+      patch: { updates: { channel: "latest" } }
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.updates).toEqual({ train: "beta", channel: "latest" });
+    expect(service.get().updates).toEqual({
+      train: "beta",
+      channel: "latest"
+    });
   });
 });

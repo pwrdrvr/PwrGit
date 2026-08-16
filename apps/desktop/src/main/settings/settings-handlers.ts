@@ -7,12 +7,16 @@ import {
   isHotCpuTriggerMode,
   isSidebarDensity,
   isSidebarTextSize,
+  isUpdateChannel,
+  isUpdateTrain,
   ok,
+  resolveUpdateSelection,
   type AppSettingsPatch,
   type AppSettingsSnapshot,
   type DiagnosticsSettings,
   type ExperimentalSettings,
-  type GeneralSettings
+  type GeneralSettings,
+  type UpdatesSettings
 } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import type { SettingsService } from "./settings-service";
@@ -23,7 +27,8 @@ import { resolveStartupCpuProfileConfig } from "../diagnostics/startup-cpu-profi
 /** Stored settings are sparse; snapshots are fully defaulted. */
 export function settingsSnapshot(
   settings: SettingsService,
-  diagnosticsOutputRoot: string
+  diagnosticsOutputRoot: string,
+  appVersion = ""
 ): AppSettingsSnapshot {
   const stored = settings.get();
   // A resolver called with the setting off can only come back enabled when a
@@ -34,6 +39,7 @@ export function settingsSnapshot(
     general: { ...GENERAL_DEFAULTS, ...stored.general },
     experimental: { ...EXPERIMENTAL_DEFAULTS, ...stored.experimental },
     diagnostics: { ...DIAGNOSTICS_DEFAULTS, ...stored.diagnostics },
+    updates: resolveUpdateSelection(stored.updates, appVersion),
     diagnosticsEnv: {
       heapMonitorForcedOn: resolveHeapMonitorConfig(off).enabled,
       hotCpuProfilingForcedOn: resolveHotCpuProfileConfig(off).enabled,
@@ -48,10 +54,12 @@ function sanitizePatch(patch: AppSettingsPatch): {
   general: Partial<GeneralSettings>;
   experimental: Partial<ExperimentalSettings>;
   diagnostics: Partial<DiagnosticsSettings>;
+  updates: Partial<UpdatesSettings>;
 } {
   const general: Partial<GeneralSettings> = {};
   const experimental: Partial<ExperimentalSettings> = {};
   const diagnostics: Partial<DiagnosticsSettings> = {};
+  const updates: Partial<UpdatesSettings> = {};
 
   const gen = patch.general;
   if (gen !== undefined) {
@@ -109,7 +117,17 @@ function sanitizePatch(patch: AppSettingsPatch): {
     }
   }
 
-  return { general, experimental, diagnostics };
+  const upd = patch.updates;
+  if (upd !== undefined) {
+    if (isUpdateChannel(upd.channel)) {
+      updates.channel = upd.channel;
+    }
+    if (isUpdateTrain(upd.train)) {
+      updates.train = upd.train;
+    }
+  }
+
+  return { general, experimental, diagnostics, updates };
 }
 
 export function registerSettingsHandlers(
@@ -117,24 +135,46 @@ export function registerSettingsHandlers(
   settings: SettingsService,
   options: {
     diagnosticsOutputRoot: string;
+    /** Installed app version — used to seed train/track when both keys are absent. */
+    appVersion?: string;
     /** Fired after a successful write with the fresh snapshot — index.ts
      *  broadcasts settings:changed and re-syncs diagnostics from it. */
     onChanged: (snapshot: AppSettingsSnapshot) => void;
   }
 ): void {
+  const appVersion = options.appVersion ?? "";
   bus.register("settings:read", () =>
-    ok(settingsSnapshot(settings, options.diagnosticsOutputRoot))
+    ok(settingsSnapshot(settings, options.diagnosticsOutputRoot, appVersion))
   );
 
   bus.register("settings:update", (req) => {
     const sanitized = sanitizePatch(req.patch);
     const stored = settings.get();
-    settings.update({
+    const next: {
+      general: Partial<GeneralSettings>;
+      experimental: Partial<ExperimentalSettings>;
+      diagnostics: Partial<DiagnosticsSettings>;
+      updates?: UpdatesSettings;
+    } = {
       general: { ...stored.general, ...sanitized.general },
       experimental: { ...stored.experimental, ...sanitized.experimental },
       diagnostics: { ...stored.diagnostics, ...sanitized.diagnostics }
-    });
-    const snapshot = settingsSnapshot(settings, options.diagnosticsOutputRoot);
+    };
+    // Persist both keys whenever the user touches Updates, including
+    // stable/latest, so a Beta binary does not re-infer after they pick Stable.
+    if (req.patch.updates !== undefined) {
+      const current = resolveUpdateSelection(stored.updates, appVersion);
+      next.updates = {
+        channel: sanitized.updates.channel ?? current.channel,
+        train: sanitized.updates.train ?? current.train
+      };
+    }
+    settings.update(next);
+    const snapshot = settingsSnapshot(
+      settings,
+      options.diagnosticsOutputRoot,
+      appVersion
+    );
     options.onChanged(snapshot);
     return ok(snapshot);
   });

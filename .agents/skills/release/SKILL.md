@@ -73,6 +73,21 @@ still allowed when the user explicitly asks for one.
 - Use a leading-`v` tag such as `v0.0.1-alpha.1`.
 - Require the tag version, desktop package version, and `CHANGELOG.md` heading
   to match exactly.
+- Settings → Updates exposes two axes: **channel** (Stable or Beta) and
+  **track** (Latest or Prerelease). Encode those slots in the tag suffix so
+  GitHub `/releases/latest` stays on the Stable Latest train:
+  - Stable Latest: `v1.0.5` (no suffix; GitHub Latest)
+  - Stable Prerelease: `v1.0.6-prerelease.1` (GitHub Pre-release)
+  - Beta Latest: `v1.1.0-beta.3` (GitHub Pre-release; smoke-checked `main`)
+  - Beta Prerelease: `v1.1.0-alpha.7` (GitHub Pre-release; may not install)
+- Keep `-prerelease.N` for Stable RCs. Do not reuse `-rc` or `-beta` for 1.0
+  RCs; `-beta` is the Beta Latest identifier.
+- `main` tags with a prerelease suffix must stay GitHub Pre-release so they
+  never steal `/releases/latest` from the Stable train.
+- To promote a smoked alpha to beta, bump `apps/desktop/package.json` and add
+  a CHANGELOG heading from `X.Y.Z-alpha.N` to `X.Y.Z-beta.M`, commit, and tag
+  that commit. Do not add a second tag to the alpha SHA: the metadata gate and
+  the baked app version both come from `package.json`.
 - Create every CI-published version as a GitHub Pre-release, including a stable
   SemVer such as `v1.0.0`. Promotion to Latest is a separate, explicit operator
   action after validation.
