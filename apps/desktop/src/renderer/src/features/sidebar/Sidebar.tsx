@@ -6,7 +6,7 @@ import {
   type MouseEvent as ReactMouseEvent
 } from "react";
 import type { Lens, Profile, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
-import { announce, movedMessage } from "../../lib/announce";
+import { announce, mountLiveRegion, movedMessage } from "../../lib/announce";
 import { copyText } from "../../lib/copyText";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
@@ -114,6 +114,10 @@ export function Sidebar({
   onManageProfile: () => void;
 }) {
   const now = useRelativeClock();
+  // The reorder gestures announce through a shared live region. Put it in the
+  // DOM now, while nothing is being said, so the screen reader has registered
+  // it long before the first ⌘⇧↑/↓ — see lib/announce.
+  useEffect(mountLiveRegion, []);
   const [lens, setLens] = useState<Lens>("Recent");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [sortByRepo, setSortByRepo] = useState<Record<string, WorktreeSort>>({});

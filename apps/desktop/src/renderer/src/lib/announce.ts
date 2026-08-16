@@ -33,6 +33,23 @@ function region(): HTMLElement | null {
 }
 
 /**
+ * Put the empty region in the DOM. Call this once from a long-lived component
+ * at startup.
+ *
+ * A live region has to be *registered* by the screen reader before the text
+ * inside it changes — that registration happens when the element lands in the
+ * accessibility tree, and a mutation in the same breath as the insertion is
+ * routinely missed. `announce()` creates the region on demand as a fallback,
+ * but on the very first call that leaves only one frame between "the region
+ * exists" and "the region says something", so the first reorder of a session
+ * could go unspoken while every later one worked. Mounting it up front removes
+ * that asymmetry.
+ */
+export function mountLiveRegion(): void {
+  region();
+}
+
+/**
  * Speak `message` politely. Repeating an identical string is a no-op in most
  * screen readers (the node's text never changes), so clear first — pressing
  * ⌘⇧↓ twice at the end of a list should confirm twice, not once.
@@ -41,8 +58,9 @@ export function announce(message: string): void {
   const node = region();
   if (node === null) return;
   node.textContent = "";
-  // A microtask is enough for the clear to be observed as a mutation; a
-  // synchronous re-set collapses into one change and is not re-announced.
+  // Let the clear land as its own change before the message: setting both in
+  // one task collapses into a single mutation, which an unchanged string would
+  // not re-announce. A frame is the cheapest reliable gap.
   window.requestAnimationFrame(() => {
     node.textContent = message;
   });

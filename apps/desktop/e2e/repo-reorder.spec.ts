@@ -230,14 +230,21 @@ test("a dragged row is marked without its text being dimmed", async () => {
 test("⌘⇧↓ announces where the row landed", async () => {
   const window = await pinnedSandbox();
 
+  // The region has to be in the DOM and EMPTY before anything is said: a
+  // screen reader registers a live region when it lands in the accessibility
+  // tree, and a region that appears and speaks in the same breath routinely
+  // goes unheard — which would have made the first reorder of a session the
+  // one that got no feedback.
+  const live = window.locator("#pwrgit-live-region");
+  await expect(live).toHaveAttribute("aria-live", "polite");
+  await expect(live).toHaveText("");
+
   // The gesture deliberately keeps focus on the row that moved, so nothing is
   // re-announced on its own and the reorder is silent to a screen reader
-  // (SC 4.1.3). A polite live region says what happened.
+  // (SC 4.1.3). The region is what says what happened.
   await window.locator(".repo-row", { hasText: "alpha" }).focus();
   await window.keyboard.press("Meta+Shift+ArrowDown");
 
-  const live = window.locator("#pwrgit-live-region");
-  await expect(live).toHaveAttribute("aria-live", "polite");
   await expect(live).toHaveText("alpha moved to 2 of 3.");
 });
 
