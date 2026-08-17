@@ -540,17 +540,21 @@ export type SearchHitStatus = {
   behind: number | null;
 };
 
-/** Remote-only branch action carried between profile-bound windows. */
-export type RemoteBranchReveal = {
-  name: string;
-  fullName: string;
-};
+/**
+ * Worktree-less branch action carried between profile-bound windows: a fetched
+ * remote-only ref becomes a new tracking branch (hence its start point), while
+ * a local branch already exists and is simply checked out.
+ */
+export type BranchReveal =
+  | { kind: "remote"; name: string; fullName: string }
+  | { kind: "local"; name: string };
 
 export type RepoSearchHit = {
-  /** Repo itself, checked-out worktree, or a fetched remote-only branch. */
-  kind: "repo" | "worktree" | "remote_branch";
+  /** Repo itself, checked-out worktree, or a branch with no worktree —
+   *  fetched remote-only, or local with nothing checked out on it. */
+  kind: "repo" | "worktree" | "remote_branch" | "local_branch";
   repoId: RepoId;
-  /** Repo name, checked-out branch, or remote-only branch name. */
+  /** Repo name, checked-out branch, or worktree-less branch name. */
   name: string;
   path: string;
   profileId: ProfileId;

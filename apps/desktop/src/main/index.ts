@@ -12,7 +12,7 @@ import {
   ok,
   resolveUpdateSelection,
   type Profile,
-  type RemoteBranchReveal
+  type BranchReveal
 } from "@pwrgit/shared";
 import { registerAppDocumentHandlers } from "./app-document-handlers";
 import { wireAppMenuBridge } from "./app-menu-bridge";
@@ -298,7 +298,7 @@ if (!gotSingleInstanceLock) {
     type Reveal = {
       repoId: string;
       worktreeId: string | null;
-      remoteBranch: RemoteBranchReveal | null;
+      branch: BranchReveal | null;
     };
     const pendingReveals = new Map<string, Reveal>();
 
@@ -323,7 +323,7 @@ if (!gotSingleInstanceLock) {
       profileId: string,
       revealRepoId?: string,
       revealWorktreeId?: string,
-      revealRemoteBranch?: RemoteBranchReveal
+      revealBranch?: BranchReveal
     ): boolean => {
       const profile = profiles.get(profileId);
       if (profile === null) return false;
@@ -334,7 +334,7 @@ if (!gotSingleInstanceLock) {
         const reveal: Reveal = {
           repoId: revealRepoId,
           worktreeId: revealWorktreeId ?? null,
-          remoteBranch: revealRemoteBranch ?? null
+          branch: revealBranch ?? null
         };
         if (wasOpen) emitEvent("ui:revealRepo", { profileId, ...reveal });
         else pendingReveals.set(profileId, reveal);

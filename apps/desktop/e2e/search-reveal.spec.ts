@@ -1,7 +1,9 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
-import { addRootAndExpand } from "./fixtures/steps";
+import { addRootAndExpand, branchRow } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -101,6 +103,63 @@ test("⌘F finds a worktree by branch name and jumps to it", async () => {
   await expect(window.locator(".titlebar__branch-name")).toHaveText(
     "claude/side-by-side-experiment-groups-8013ec"
   );
+});
+
+// A branch created without a checkout — the app can now make these itself —
+// belongs to no worktree, so before 0022 it was in none of the indexed kinds
+// and ⌘K could not reach it at all.
+test("⌘F finds a local branch with no worktree and checks it out", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepo("localonly");
+  repo.createBranch("spike/no-checkout");
+  box.makeRepo("other-repo");
+
+  handle = await launchApp({ worktreeRoot: box.worktreeRoot });
+  const { window } = handle;
+  await addRootAndExpand(window, handle, box, "localonly");
+
+  await window.keyboard.press("Meta+f");
+  await window.locator(".overlay-search input").fill("spike/no-checkout");
+  const hit = window.locator(".overlay-result");
+  await expect(hit).toHaveCount(1);
+  await expect(hit.locator(".overlay-result__name")).toHaveText(
+    "spike/no-checkout"
+  );
+  // Owning repo plus why it isn't in the sidebar. Nothing to pin, and no lazy
+  // status either — there is no working tree to report dirty/ahead/behind.
+  await expect(hit).toContainText("localonly · no worktree");
+  await expect(hit.locator(".pin")).toHaveCount(0);
+  await expect(window.locator(".overlay-foot")).not.toContainText("pin");
+
+  await window.keyboard.press("Enter");
+
+  // The branch already exists, so the modal checks it out rather than creating
+  // it — "Create as a new branch" is off, and there is no start point to show.
+  const modal = window.locator(".modal", {
+    hasText: "New worktree · localonly"
+  });
+  await expect(modal.locator(".modal__input")).toHaveValue("spike/no-checkout");
+  await expect(modal.locator(".modal__check input")).not.toBeChecked();
+  await expect(modal).not.toContainText("Starting from");
+
+  await modal.locator(".modal__create").click();
+  // `worktree add <path> <branch>` on the existing branch — no "already
+  // exists" error, and the branch is now a real checkout in the sidebar.
+  await expect(modal).toHaveCount(0);
+  await expect(branchRow(window, "spike/no-checkout")).toBeVisible({
+    timeout: 20_000
+  });
+  expect(
+    existsSync(join(box.worktreeRoot, "localonly", "spike-no-checkout"))
+  ).toBe(true);
+
+  // And it has moved between indexed kinds: one hit, now a pinnable worktree.
+  await window.keyboard.press("Meta+f");
+  await window.locator(".overlay-search input").fill("spike/no-checkout");
+  await expect(hit).toHaveCount(1);
+  await expect(hit).not.toContainText("no worktree");
+  await expect(hit.locator(".pin")).toHaveCount(1);
 });
 
 test("narrowing a ⌘F query leaves no stale ghost rows behind", async () => {
