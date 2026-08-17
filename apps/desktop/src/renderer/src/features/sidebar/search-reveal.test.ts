@@ -92,7 +92,7 @@ describe("resolveWorktreeReveal", () => {
   it("selects the named worktree", () => {
     expect(
       resolveWorktreeReveal(
-        { repoId: "repo-1", worktreeId: "feature", remoteBranch: null },
+        { repoId: "repo-1", worktreeId: "feature", branch: null },
         trees
       )
     ).toEqual({ kind: "select", worktreeId: "feature" });
@@ -101,7 +101,7 @@ describe("resolveWorktreeReveal", () => {
   it("stands in with the primary when no worktree was named", () => {
     expect(
       resolveWorktreeReveal(
-        { repoId: "repo-1", worktreeId: null, remoteBranch: null },
+        { repoId: "repo-1", worktreeId: null, branch: null },
         trees
       )
     ).toEqual({ kind: "select", worktreeId: "main" });
@@ -110,7 +110,7 @@ describe("resolveWorktreeReveal", () => {
   it("stands in with the primary when a named worktree is gone", () => {
     expect(
       resolveWorktreeReveal(
-        { repoId: "repo-1", worktreeId: "removed", remoteBranch: null },
+        { repoId: "repo-1", worktreeId: "removed", branch: null },
         trees
       )
     ).toEqual({ kind: "select", worktreeId: "main" });
@@ -137,7 +137,7 @@ describe("resolveWorktreeReveal", () => {
   it("has nothing to select in a repo with no worktrees", () => {
     expect(
       resolveWorktreeReveal(
-        { repoId: "repo-1", worktreeId: null, remoteBranch: null },
+        { repoId: "repo-1", worktreeId: null, branch: null },
         []
       )
     ).toEqual({ kind: "none" });
