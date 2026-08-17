@@ -25,6 +25,40 @@ test.afterEach(async () => {
   sandbox = null;
 });
 
+test("adds the first remote to a repository with no configured remotes", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepo("local-only");
+  const remoteUrl = "https://example.com/local-only.git";
+
+  handle = await launchApp({ worktreeRoot: box.worktreeRoot });
+  const { window } = handle;
+  await addRootAndExpand(window, handle, box, "local-only");
+
+  await window.getByRole("button", { name: /^Remotes/ }).click();
+  await expect(window.getByText("No remotes configured.")).toBeVisible();
+  await window
+    .getByRole("button", { name: "Manage remotes and remote branches…" })
+    .click();
+
+  const browser = window.getByRole("dialog", {
+    name: "local-only branches and remotes"
+  });
+  await browser.getByRole("button", { name: "Add remote…" }).click();
+  const editor = window.getByRole("dialog", { name: "Add remote" });
+  const fields = editor.locator(".refs-field input");
+  await fields.nth(0).fill("origin");
+  await fields.nth(1).fill(remoteUrl);
+  await editor.getByRole("button", { name: "Add remote" }).click();
+
+  await expect(
+    browser.locator(".refs-remote-card", { hasText: "origin" })
+  ).toBeVisible();
+  await expect
+    .poll(() => box.git(repo.path, "remote", "get-url", "origin"))
+    .toBe(remoteUrl);
+});
+
 test("closes the repository refs browser with Escape", async () => {
   sandbox = createGitSandbox();
   const box = sandbox;
