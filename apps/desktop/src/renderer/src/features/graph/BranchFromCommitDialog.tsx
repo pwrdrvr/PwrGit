@@ -72,15 +72,15 @@ export function BranchFromCommitDialog({
     };
   }, []);
 
-  // The worktree's own branch list doubles as the "name taken" check. Remote
-  // refs are excluded: `git branch` only refuses a local name.
+  // Names only, and local only: `git branch` refuses a name that a local ref
+  // already holds, and nothing else here needs per-ref metadata. On a repo with
+  // thousands of remote-tracking refs, `branch:list` would ship (and parse)
+  // hundreds of KB per opening to answer the same question.
   useEffect(() => {
     let live = true;
-    void dispatch("branch:list", { worktreeId }).then((result) => {
+    void dispatch("branch:localNames", { worktreeId }).then((result) => {
       if (!live || !result.ok) return;
-      setExisting(
-        result.value.filter((ref) => !ref.isRemote).map((ref) => ref.name)
-      );
+      setExisting(result.value);
     });
     return () => {
       live = false;
@@ -134,17 +134,21 @@ export function BranchFromCommitDialog({
     };
   }, [problem, repoId, target, trimmed]);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape" && !busy) onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [busy, onClose]);
-
   // "here" stays checked until the dirty check answers, so hold the submit too
   // rather than sending a checkout the main process would only reject.
   const blocked = problem !== null || (target === "here" && !canCheckoutHere);
+
+  // Dismissing mid-create is allowed (checking out a big repo takes seconds),
+  // so say the work continues — the outcome arrives as a toast either way.
+  const dismiss = (): void => {
+    if (busy) {
+      showInfoToast({
+        title: "Still creating",
+        message: `${trimmed} is being created in the background.`
+      });
+    }
+    onClose();
+  };
 
   const submit = async (): Promise<void> => {
     if (blocked || busy) return;
@@ -156,11 +160,12 @@ export function BranchFromCommitDialog({
       startPoint: commit.hash,
       checkout: target
     });
-    if (!active.current) return;
-    setBusy(false);
+    // Everything below reports the outcome and must survive a dialog the user
+    // dismissed while waiting; only the in-dialog state is mount-guarded.
+    if (active.current) setBusy(false);
     if (!result.ok) {
       const message = firstLine(result.error.message);
-      setError(message);
+      if (active.current) setError(message);
       showErrorToast({
         title: "Create branch failed",
         message,
@@ -222,18 +227,21 @@ export function BranchFromCommitDialog({
   );
 
   return (
-    <div
-      className="overlay-backdrop"
-      onClick={() => {
-        if (!busy) onClose();
-      }}
-    >
+    <div className="overlay-backdrop" onClick={dismiss}>
       <div
         className="modal branch-from"
         role="dialog"
         aria-modal="true"
         aria-labelledby="branch-from-title"
         onClick={(event) => event.stopPropagation()}
+        // Escape is handled here rather than on window: with the ⌘F switcher
+        // stacked above this dialog, a window listener would close both on the
+        // keystroke that was only meant to dismiss the switcher.
+        onKeyDown={(event) => {
+          if (event.key !== "Escape") return;
+          event.stopPropagation();
+          dismiss();
+        }}
       >
         <div className="modal__title" id="branch-from-title">
           Branch from {commit.shortHash} · {repoName}
@@ -304,8 +312,8 @@ export function BranchFromCommitDialog({
         {error !== null && <div className="modal__error">{error}</div>}
 
         <div className="modal__actions">
-          <button className="modal__cancel" disabled={busy} onClick={onClose}>
-            Cancel
+          <button className="modal__cancel" onClick={dismiss}>
+            {busy ? "Close" : "Cancel"}
           </button>
           <button
             className="modal__create"

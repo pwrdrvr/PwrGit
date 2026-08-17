@@ -105,6 +105,35 @@ test("checks a branch created from a commit out into a new worktree", async () =
   );
 });
 
+test("closes rather than act on a worktree switched under it", async () => {
+  sandbox = createGitSandbox();
+  const repo = sandbox.makeRepo("switcheroo");
+  sandbox.commit(repo.path, "one.txt", "the branch point");
+  repo.addWorktree("feature/elsewhere");
+
+  handle = await launchApp({ worktreeRoot: sandbox.worktreeRoot });
+  const { window } = handle;
+  await addRootAndExpand(window, handle, sandbox, "switcheroo");
+  await branchRow(window, "main").first().click();
+  await openBranchDialog(window, "the branch point");
+
+  // ⌘F reaches past the dialog's backdrop, so the selection can move out from
+  // under it. The dialog's commit, dirty check and branch list all belong to
+  // the worktree it was opened from, so it must not survive the switch.
+  await window.keyboard.press("Meta+f");
+  await window.locator(".overlay-search input").fill("feature/elsewhere");
+  await expect(window.locator(".overlay-result").first()).toContainText(
+    "feature/elsewhere"
+  );
+  await window.keyboard.press("Enter");
+
+  await expect(window.locator(".wt-row.is-selected")).toContainText(
+    "feature/elsewhere",
+    { timeout: GRAPH_MS }
+  );
+  await expect(window.locator(".branch-from")).toBeHidden();
+});
+
 test("checks out in place only while the worktree is clean", async () => {
   sandbox = createGitSandbox();
   const repo = sandbox.makeRepo("branchhere");

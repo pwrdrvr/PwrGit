@@ -258,6 +258,14 @@ export function LineageGraph({
   // window no longer covers that commit would otherwise unmount the dialog
   // mid-submit — dropping the success toast, the reveal, and anything typed.
   const [branchFromCommit, setBranchFromCommit] = useState<Commit | null>(null);
+
+  // ⌘F reaches past the dialog's backdrop, so the selected worktree can change
+  // under an open dialog. Its commit, dirty check and branch list all belong to
+  // the worktree it was opened from — close it rather than let it act on
+  // another one.
+  useEffect(() => {
+    setBranchFromCommit(null);
+  }, [worktreeId]);
   const [commitStats, setCommitStats] = useState<
     Record<string, CommitStats | null>
   >({});

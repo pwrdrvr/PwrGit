@@ -12,6 +12,7 @@ vi.mock("../../lib/toast", () => ({
   showInfoToast: vi.fn()
 }));
 
+import { showInfoToast } from "../../lib/toast";
 import { BranchFromCommitDialog } from "./BranchFromCommitDialog";
 
 const commit: Commit = {
@@ -33,10 +34,8 @@ const onClose = vi.fn();
 /** Reply per command so the dialog's parallel loads all resolve. */
 function respond({ dirty = 0, branches = ["main"] } = {}): void {
   dispatchMock.mockImplementation((channel: string) => {
-    if (channel === "branch:list") {
-      return Promise.resolve(
-        ok(branches.map((name) => ({ name, isRemote: false, isCurrent: false })))
-      );
+    if (channel === "branch:localNames") {
+      return Promise.resolve(ok(branches));
     }
     if (channel === "worktree:getState") {
       return Promise.resolve(ok({ dirty }));
@@ -221,5 +220,71 @@ describe("BranchFromCommitDialog", () => {
     await act(async () => createButton().click());
 
     expect(onCreated).toHaveBeenCalledExactlyOnceWith("worktree-2");
+  });
+
+  it("asks for local branch names only, never the full ref list", async () => {
+    await render();
+
+    expect(dispatchMock).toHaveBeenCalledWith("branch:localNames", {
+      worktreeId: "worktree-1"
+    });
+    expect(dispatchMock).not.toHaveBeenCalledWith(
+      "branch:list",
+      expect.anything()
+    );
+  });
+
+  describe("while a slow create is running", () => {
+    /** Hold branch:create open so the dialog stays in its busy state. */
+    function holdCreate(): { finish: () => void } {
+      let release!: () => void;
+      const pending = new Promise((resolve) => {
+        release = () =>
+          resolve(ok({ checkedOutWorktreeId: "worktree-2", worktreePath: null }));
+      });
+      const base = dispatchMock.getMockImplementation()!;
+      dispatchMock.mockImplementation((channel: string, req: unknown) =>
+        channel === "branch:create" ? pending : base(channel, req)
+      );
+      return { finish: release };
+    }
+
+    it("can still be dismissed, and says the work continues", async () => {
+      await render();
+      const held = holdCreate();
+      await act(async () => createButton().click());
+
+      const cancel = container.querySelector<HTMLButtonElement>(".modal__cancel")!;
+      expect(cancel.disabled).toBe(false);
+      expect(cancel.textContent).toBe("Close");
+
+      await act(async () => cancel.click());
+      expect(onClose).toHaveBeenCalledOnce();
+      expect(showInfoToast).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Still creating" })
+      );
+
+      held.finish();
+    });
+
+    it("reports the outcome after the dialog is gone", async () => {
+      await render();
+      const held = holdCreate();
+      await act(async () => createButton().click());
+      await act(async () => root.unmount());
+
+      await act(async () => {
+        held.finish();
+      });
+
+      // The reveal and the confirmation are the only trace left once the
+      // dialog has been dismissed — they must not be lost with it.
+      expect(onCreated).toHaveBeenCalledExactlyOnceWith("worktree-2");
+      expect(showInfoToast).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Branch created" })
+      );
+
+      root = createRoot(container);
+    });
   });
 });

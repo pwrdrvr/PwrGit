@@ -604,6 +604,12 @@ export interface Commands {
 
   // Branch switching — list local + remote branches, check one out in place
   "branch:list": { req: { worktreeId: string }; res: BranchRef[] };
+  /**
+   * Local branch names only — the "is this name taken?" question, without the
+   * per-ref metadata (or the thousands of remote-tracking refs) `branch:list`
+   * carries across IPC to answer it.
+   */
+  "branch:localNames": { req: { worktreeId: string }; res: string[] };
   "branch:switch": { req: { worktreeId: string; branch: string }; res: null };
   /**
    * Create a branch at an arbitrary commit and optionally check it out. The

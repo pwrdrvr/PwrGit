@@ -9,6 +9,7 @@ import {
   checkoutNewBranchAt,
   createBranchAt,
   listBranches,
+  listLocalBranchNames,
   listRepoRefs,
   readChanges,
   switchBranch,
@@ -55,6 +56,12 @@ export function registerBranchHandlers(
     const row = rowOf(req.worktreeId);
     if (row === undefined) return err(notFound);
     return listBranches(execGit, row.path);
+  });
+
+  bus.register("branch:localNames", async (req) => {
+    const row = rowOf(req.worktreeId);
+    if (row === undefined) return err(notFound);
+    return listLocalBranchNames(execGit, row.path);
   });
 
   bus.register("repo:refs", async (req) => {
