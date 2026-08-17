@@ -674,7 +674,9 @@ textarea,
    at high density — the combination a fixed-height row could never express.
    --------------------------------------------------------------------------- */
 :root[data-density="compact"] .repo-row {
-  padding: 3px 8px;
+  /* Density trims the block padding only. The inline values are load-bearing
+     geometry (the grip's column — see .repo-row), not rhythm. */
+  padding: 3px 8px 3px 12px;
 }
 :root[data-density="compact"] .wt-row {
   padding: 2px 6px 2px 4px;
@@ -711,7 +713,10 @@ textarea,
      that never grows. min-height sets the floor for a comfortable hit target,
      padding does the rest, and the row grows with its own type. */
   min-height: var(--sidebar-repo-row-height);
-  padding: 4px 8px;
+  /* Left padding is 4px wider than the right: it is the grip's column, and 8px
+     could not hold one — see .repo-row__handle. `.chev` gives the 4px straight
+     back with a negative margin, so the name lands where it always did. */
+  padding: 4px 8px 4px 12px;
   border: 1px solid transparent;
   border-radius: 8px;
   cursor: pointer;
@@ -753,7 +758,18 @@ textarea,
    Pinned row's content right by its width — invisible at opacity 0, but still
    taking layout — and the Pinned list read as indented next to Recent. Out of
    flow, every lens shares one left edge and the grip overlays the padding when
-   it fades in. Same principle as .wt-row__hoveracts. */
+   it fades in. Same principle as .wt-row__hoveracts.
+
+   Out of flow still means it needs a column of its own to overlay, and 8px of
+   padding was not one: a 9px grip seated at left:1px ran from the row's x=10 to
+   x=19, and the caret's own left edge is at x=17 — so the right dot column was
+   drawn straight through the caret's point. The row's left padding is 12px for
+   this, which puts the caret at 21 and the dots' right edge at 18.3.
+
+   The other end of the column is the focus ring, not the row edge:
+   `outline-offset: -2px` on a 2px outline paints flush INSIDE the border box,
+   i.e. x=8–10, so left:1px (x=10) is the first clear pixel. Both bounds are
+   tight — a wider grip, a wider ring, or a smaller padding re-collides. */
 .repo-row__handle {
   position: absolute;
   left: 1px;
@@ -844,6 +860,17 @@ textarea,
   width: 0;
   height: 0;
   flex: 0 0 auto;
+  /* Hands back the 4px .repo-row's left padding borrowed for the grip column,
+     so the caret moves right but the name — the one edge every lens has to
+     agree on (lens-row.spec.ts) — does not. It lands the caret 4px from the
+     name rather than the row's 8px gap, which suits a glyph that belongs to
+     the name it discloses.
+
+     4px is also what centres this caret on x=23.5, where `.wt-section` drops
+     its 1px spine: expanded, the rule now descends from the glyph that opened
+     it instead of from 4px to its right. Retune the grip column and the caret
+     lands off that line. */
+  margin-right: -4px;
   border-top: 4px solid transparent;
   border-bottom: 4px solid transparent;
   border-left: 5px solid var(--text-muted);

@@ -1,7 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
-import { addRootAndExpand, branchRow, lensChip } from "./fixtures/steps";
+import {
+  addRootAndExpand,
+  branchRow,
+  expandRepoGroup,
+  lensChip
+} from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -134,6 +139,85 @@ test("the computed lenses stay computed — no drag handle outside Pinned", asyn
   await expect(window.locator(".repo-row__name")).toHaveCount(3);
   await expect(window.locator(".repo-row.is-arrangeable")).toHaveCount(0);
   await expect(window.locator(".repo-row__handle")).toHaveCount(0);
+});
+
+test("the drag grip clears the caret, and stays inside the scrollport", async () => {
+  const window = await pinnedSandbox();
+
+  const row = window.locator(".repo-row", { hasText: "alpha" });
+  await row.hover();
+  await expect(row.locator(".repo-row__handle")).toHaveCSS("opacity", "1");
+
+  // Measure the DOTS, not the <svg> box: the box carries ~0.7px of slack each
+  // side, and what a reader sees collide is the ink. `.chev` needs no such care
+  // — it is a 0×0 border triangle, so its border box IS the caret.
+  type Geom = {
+    gap: number;
+    inkLeft: number;
+    rowLeft: number;
+    ring: number;
+    listLeft: number;
+  };
+  const measure = async (): Promise<Geom> =>
+    row.evaluate((el) => {
+      const grip = el.querySelector(".repo-row__handle svg");
+      const chev = el.querySelector(".chev");
+      const list = el.closest(".sidebar__list");
+      if (grip === null || chev === null) throw new Error("row has no grip");
+      if (list === null) throw new Error("row is outside the scrollport");
+      const box = grip.getBoundingClientRect();
+      // getBBox is the union of the circles in viewBox units; the glyph is
+      // rendered 1:1, but scale anyway so a resized grip still measures true.
+      const ink = (grip as SVGSVGElement).getBBox();
+      const scale = box.width / (grip as SVGSVGElement).viewBox.baseVal.width;
+      return {
+        gap: chev.getBoundingClientRect().left - (box.left + (ink.x + ink.width) * scale),
+        inkLeft: box.left + ink.x * scale,
+        rowLeft: el.getBoundingClientRect().left,
+        // A 2px outline at offset -2px paints flush INSIDE the border box, so
+        // this width is exactly how far into the row the focus ring reaches.
+        ring: Number.parseFloat(getComputedStyle(el).outlineWidth),
+        // The scrollport clips: `overflow-y: auto` makes overflow-x `auto` too,
+        // so anything left of its padding box is cut off rather than drawn.
+        listLeft: list.getBoundingClientRect().left
+      };
+    });
+
+  // The caret rotates over 140ms, and mid-flight its axis-aligned box is WIDER
+  // than at either end — a tilted rectangle bounds larger than a square-on one.
+  // Measuring during the transition reads a collision that is not there.
+  const settled = async (): Promise<Geom> => {
+    let previous = await measure();
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      await window.waitForTimeout(50);
+      const next = await measure();
+      if (Math.abs(next.gap - previous.gap) < 0.01) return next;
+      previous = next;
+    }
+    throw new Error("the caret never stopped moving");
+  };
+
+  // The bug: a 9px grip seated in 8px of padding put its right dot column on
+  // top of the caret's left edge. 1px is the floor, not the target — the CSS
+  // aims for 2.7px here, so this fails on a re-collision, not on a nudge.
+  const collapsed = await settled();
+  expect(collapsed.gap).toBeGreaterThanOrEqual(1);
+
+  // Open, the caret is that triangle rotated 90°, so its box grows 1.5px to the
+  // LEFT: the tighter of the two states, and the one a fix measured against the
+  // collapsed row would miss.
+  await expandRepoGroup(window, "alpha");
+  await row.hover();
+  const open = await settled();
+  expect(open.gap).toBeGreaterThanOrEqual(1);
+  expect(open.gap).toBeLessThan(collapsed.gap);
+
+  // The column's other bound. The grip is revealed on :focus-visible too, so
+  // clearing the caret is only half of it — the grip also has to stay off the
+  // focus ring it shares the row's left edge with…
+  expect(open.inkLeft).toBeGreaterThanOrEqual(open.rowLeft + open.ring);
+  // …and must not have been shoved out of the scrollport to get there.
+  expect(open.inkLeft).toBeGreaterThanOrEqual(open.listLeft);
 });
 
 test("the sidebar tree exposes valid, nested roles", async () => {
