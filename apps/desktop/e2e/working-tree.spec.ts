@@ -17,6 +17,26 @@ test.afterEach(async () => {
   sandbox = null;
 });
 
+test("worktree and rail header dividers align", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepo("aligned-headers");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, sandbox, "aligned-headers");
+
+  const [worktreeBottom, railBottom] = await Promise.all([
+    window
+      .locator(".wt-header")
+      .evaluate((element) => element.getBoundingClientRect().bottom),
+    window
+      .locator(".rail__bar")
+      .evaluate((element) => element.getBoundingClientRect().bottom)
+  ]);
+
+  expect(railBottom).toBe(worktreeBottom);
+});
+
 test("discarding a file's changes returns the worktree to clean", async () => {
   sandbox = createGitSandbox();
   const repo = sandbox.makeRepo("dsc");
