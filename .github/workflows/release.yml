@@ -42,7 +42,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@7c109865ae9af59c6fcd2f2a0e8cc851f6ded26a # v1
+        uses: pwrdrvr/configure-nodejs@e1bd1cc1494a20f0ee91dae622b0d2523b6fb53c # v1.4.0
         with:
           node-version: 24.x
 
@@ -188,7 +188,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@7c109865ae9af59c6fcd2f2a0e8cc851f6ded26a # v1
+        uses: pwrdrvr/configure-nodejs@e1bd1cc1494a20f0ee91dae622b0d2523b6fb53c # v1.4.0
         with:
           node-version: 24.x
 
@@ -227,17 +227,13 @@ jobs:
           ref: ${{ github.event.inputs.tag || github.ref }}
           persist-credentials: false
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v6
-
-      - name: Install Node.js
-        uses: actions/setup-node@v7
+      # Same SHA-pinned action as the macOS/Linux jobs above; it runs natively
+      # on Windows and activates the pnpm version pinned in package.json's
+      # `packageManager` field via Corepack.
+      - name: Install Node.js and dependencies
+        uses: pwrdrvr/configure-nodejs@e1bd1cc1494a20f0ee91dae622b0d2523b6fb53c # v1.4.0
         with:
           node-version: 24.x
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       - name: Check release metadata
         if: ${{ github.event_name != 'pull_request' }}
