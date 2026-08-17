@@ -10,8 +10,16 @@ import { PinIcon } from "./WorktreeRow";
 
 const isMac = navigator.platform.startsWith("Mac");
 
+// The kind's own identity within its repo: a worktree id, a fetched ref, or —
+// for a local branch, which carries neither — the branch name itself. Two local
+// branches in one repo would otherwise share a React key.
 const hitKey = (hit: RepoSearchHit): string =>
-  `${hit.kind}:${hit.repoId}:${hit.worktreeId ?? hit.remoteRef ?? ""}`;
+  `${hit.kind}:${hit.repoId}:${hit.worktreeId ?? hit.remoteRef ?? hit.name}`;
+
+/** A branch hit with no worktree behind it: nothing to pin, no status to fill,
+ *  and picking it opens the New worktree modal instead of selecting a row. */
+const isWorktreelessBranch = (hit: RepoSearchHit): boolean =>
+  hit.kind === "remote_branch" || hit.kind === "local_branch";
 
 export type PaletteItem =
   | { kind: "commit"; commit: Commit }
@@ -174,7 +182,7 @@ export function RepoSwitcherOverlay({
   // the handler's repo:changed event, and our copy keeps results stable (no
   // re-query, so rows don't jump while the overlay is open).
   const togglePin = (hit: RepoSearchHit) => {
-    if (hit.kind === "remote_branch") return;
+    if (isWorktreelessBranch(hit)) return;
     const pinned = !hit.pinned;
     setResults((prev) =>
       prev.map((h) => (hitKey(h) === hitKey(hit) ? { ...h, pinned } : h))
@@ -311,7 +319,7 @@ export function RepoSwitcherOverlay({
           if (statusesRef.current.has(key)) continue;
           const hit = byKey.get(key);
           if (hit === undefined) continue;
-          if (hit.kind === "remote_branch") continue;
+          if (isWorktreelessBranch(hit)) continue;
           fill.request(key, async () => {
             const r = await dispatch("search:status", {
               repoId: hit.repoId,
@@ -425,7 +433,7 @@ export function RepoSwitcherOverlay({
                 onMouseEnter={() => selectItem(i)}
                 onClick={() => onPick(r)}
               >
-              {r.kind === "remote_branch" ? (
+              {isWorktreelessBranch(r) ? (
                 <BranchIcon />
               ) : r.kind === "worktree" ? (
                 <svg
@@ -458,7 +466,7 @@ export function RepoSwitcherOverlay({
                 </svg>
               )}
               <span className="overlay-result__name">{r.name}</span>
-              {r.kind !== "remote_branch" && (
+              {!isWorktreelessBranch(r) && (
                 <button
                   type="button"
                   className={`pin${r.pinned ? " is-pinned" : ""}`}
@@ -516,6 +524,8 @@ export function RepoSwitcherOverlay({
               <span className="overlay-result__meta">
                 {r.kind === "remote_branch"
                   ? `${r.repoName ?? ""} · ${r.remoteName ?? "remote"}`
+                  : r.kind === "local_branch"
+                  ? `${r.repoName ?? ""} · no worktree`
                   : r.kind === "worktree"
                   ? (r.repoName ?? "")
                   : `${r.worktreeCount} ${r.worktreeCount === 1 ? "wt" : "wts"}`}
@@ -536,9 +546,10 @@ export function RepoSwitcherOverlay({
         <div className="overlay-foot">
           <span>↑↓ navigate</span>
           <span>↵ open</span>
-          {items[sel]?.kind === "repo" && items[sel].hit.kind !== "remote_branch" && (
-            <span>{isMac ? "⌘P" : "ctrl+P"} pin</span>
-          )}
+          {items[sel]?.kind === "repo" &&
+            !isWorktreelessBranch(items[sel].hit) && (
+              <span>{isMac ? "⌘P" : "ctrl+P"} pin</span>
+            )}
           <span style={{ flex: 1 }} />
           <span>
             {items.length} {items.length === 1 ? "result" : "results"}
