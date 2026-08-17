@@ -443,10 +443,11 @@ if (!gotSingleInstanceLock) {
     if (activeId !== null) openProfileWindow(activeId);
     refreshMenu();
 
-    // Migration 0019 could not populate Git-derived rows in SQL. Repair only
-    // repos that have never been attempted, after opening the first window.
-    // The active profile's normal rescan owns its root-discovered repos, so
-    // exclude only those scan rows. Manual repos still need this repair.
+    // Migrations 0019/0022 could not populate Git-derived rows in SQL, so both
+    // derived branch tables (remote-only and local-only) are filled here.
+    // Repair only repos that have never been attempted, after opening the first
+    // window. The active profile's normal rescan owns its root-discovered
+    // repos, so exclude only those scan rows. Manual repos still need this.
     setImmediate(() => {
       void indexer
         .hydrateRemoteBranches({ excludeScannedProfileId: activeId })
@@ -455,12 +456,12 @@ if (!gotSingleInstanceLock) {
           logMain(
             failed === 0 ? "info" : "warn",
             "scan",
-            `hydrated missing remote branches for ${refreshed} repos` +
+            `hydrated missing branch index for ${refreshed} repos` +
               (failed === 0 ? "" : `; ${failed} failed`)
           );
         })
         .catch((cause) =>
-          logMain("error", "scan", "remote-branch hydration failed:", cause)
+          logMain("error", "scan", "branch-index hydration failed:", cause)
         );
     });
 

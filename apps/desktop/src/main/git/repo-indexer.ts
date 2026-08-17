@@ -1009,9 +1009,16 @@ export class RepoIndexer {
   /**
    * Local branches with no worktree of their own. A branch that IS checked out
    * already has a kind='worktree' row in the FTS index — indexing it here too
-   * would put the same branch in the palette twice, so those are skipped. The
-   * worktrees table is authoritative because every caller syncs worktrees
-   * before reaching this point.
+   * would put the same branch in the palette twice, so those are skipped.
+   *
+   * The exclusion reads the worktrees table rather than git because that table
+   * IS the set of kind='worktree' rows we are deduplicating against: agreeing
+   * with it is what keeps a branch to exactly one hit, even when it has drifted
+   * from the repo on disk. Callers that re-list worktrees (rescanProfile,
+   * indexRepoAt, refreshRepoWorktrees) do so before calling in, so they dedupe
+   * against fresh rows; the ref-only callers (refreshRepoRemoteBranches,
+   * hydrateRemoteBranches) dedupe against the app's current view, which is
+   * exactly what the palette is showing.
    */
   private async syncLocalBranchRows(
     repoId: string,
