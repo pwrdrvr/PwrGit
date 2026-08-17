@@ -169,6 +169,31 @@ describe("BranchFromCommitDialog", () => {
     );
   });
 
+  it("keeps the stored choice when the fallback is accepted as-is", async () => {
+    window.localStorage.setItem("pwrgit.branchCheckoutTarget", "here");
+    respond({ dirty: 1 });
+    await render();
+    await act(async () => createButton().click());
+
+    // Creating from the substitute is not a decision to abandon "here" — the
+    // next clean worktree must still open on it.
+    expect(window.localStorage.getItem("pwrgit.branchCheckoutTarget")).toBe(
+      "here"
+    );
+  });
+
+  it("stores a target the user picks over the fallback", async () => {
+    window.localStorage.setItem("pwrgit.branchCheckoutTarget", "here");
+    respond({ dirty: 1 });
+    await render();
+    await act(async () => radio("none").click());
+    await act(async () => createButton().click());
+
+    expect(window.localStorage.getItem("pwrgit.branchCheckoutTarget")).toBe(
+      "none"
+    );
+  });
+
   it("blocks a name that already exists", async () => {
     respond({ branches: ["main", "taken"] });
     await render();

@@ -204,6 +204,36 @@ describe("branch handlers", () => {
       );
     });
 
+    it("holds the queue across the dirty check and the checkout", async () => {
+      const { bus, operations } = harness();
+      let finishStatus!: () => void;
+      vi.mocked(readChanges).mockReturnValueOnce(
+        new Promise((resolve) => {
+          finishStatus = () => resolve(clean);
+        })
+      );
+
+      const creating = bus.dispatch("branch:create", {
+        ...request,
+        checkout: "here"
+      });
+      await vi.waitFor(() => expect(readChanges).toHaveBeenCalledOnce());
+      // Anything that could dirty the tree between the check and the checkout —
+      // a pull reapplying its auto-stash — must wait for both.
+      let intervened = false;
+      const other = operations.run("worktree-1", async () => {
+        intervened = true;
+      });
+      await Promise.resolve();
+      expect(intervened).toBe(false);
+
+      finishStatus();
+      await creating;
+      await other;
+      expect(intervened).toBe(true);
+      expect(checkoutNewBranchAt).toHaveBeenCalledOnce();
+    });
+
     it("refuses an in-place checkout while the worktree is dirty", async () => {
       const { bus } = harness();
       vi.mocked(readChanges).mockResolvedValue(

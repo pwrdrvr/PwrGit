@@ -1,4 +1,4 @@
-import { err, ok } from "@pwrgit/shared";
+import { err, ok, type Result } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
@@ -83,21 +83,30 @@ export function registerBranchHandlers(
     if (req.checkout === "here") {
       // The renderer disables this choice for a dirty worktree, but its view of
       // dirtiness is a cached snapshot — re-check against the working copy so a
-      // checkout can never carry (or clobber) work the user forgot about.
-      const changes = await readChanges(execGit, row.path);
-      if (!changes.ok) return changes;
-      const dirty =
-        changes.value.staged.length + changes.value.unstaged.length > 0;
-      if (dirty) {
-        return err({
-          kind: "repo",
-          code: "dirty",
-          message:
-            "This worktree has uncommitted changes. Commit or stash them, or create the branch without checking it out."
-        });
-      }
-      const created = await operations.run(req.worktreeId, () =>
-        checkoutNewBranchAt(execGit, row.path, req.branch, req.startPoint)
+      // checkout can never carry (or clobber) work the user forgot about. The
+      // check shares the queued slot with the checkout it guards: read it
+      // outside and a pull holding the queue could reapply its auto-stash in
+      // between, leaving the checkout to run on the tree we just cleared.
+      const created = await operations.run(
+        req.worktreeId,
+        async (): Promise<Result<void>> => {
+          const changes = await readChanges(execGit, row.path);
+          if (!changes.ok) return err(changes.error);
+          if (changes.value.staged.length + changes.value.unstaged.length > 0) {
+            return err({
+              kind: "repo",
+              code: "dirty",
+              message:
+                "This worktree has uncommitted changes. Commit or stash them, or create the branch without checking it out."
+            });
+          }
+          return checkoutNewBranchAt(
+            execGit,
+            row.path,
+            req.branch,
+            req.startPoint
+          );
+        }
       );
       if (!created.ok) return created;
       logMain(

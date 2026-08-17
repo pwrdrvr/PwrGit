@@ -54,6 +54,8 @@ export function BranchFromCommitDialog({
   const [error, setError] = useState<string | null>(null);
   const active = useRef(true);
   const selected = useRef(false);
+  /** Whether the checkout target on screen is the user's pick or the fallback. */
+  const picked = useRef(false);
 
   // The suggestion is a starting point, so it opens selected — typing replaces
   // it wholesale. Only on mount: a later click into the field places a caret.
@@ -166,7 +168,10 @@ export function BranchFromCommitDialog({
       });
       return;
     }
-    writeStoredCheckoutTarget(target);
+    // Only a target the user picked is worth remembering. Persisting whatever
+    // was on screen would let the dirty-worktree fallback quietly replace a
+    // stored "here" the moment someone accepted the substitute once.
+    if (picked.current) writeStoredCheckoutTarget(target);
     showInfoToast({
       title: "Branch created",
       message:
@@ -204,7 +209,10 @@ export function BranchFromCommitDialog({
         value={value}
         checked={target === value}
         disabled={disabled || busy}
-        onChange={() => setTarget(value)}
+        onChange={() => {
+          picked.current = true;
+          setTarget(value);
+        }}
       />
       <span>
         {label}
@@ -248,6 +256,12 @@ export function BranchFromCommitDialog({
           value={branch}
           aria-label="Branch name"
           aria-invalid={nameError !== null}
+          // Points at the message so a screen reader reads WHY the name is
+          // rejected, not just that it is — the button disables on the same
+          // condition, leaving no other route to the reason.
+          {...(nameError === null
+            ? {}
+            : { "aria-describedby": "branch-from-name-error" })}
           placeholder="branch name"
           onChange={(event) => {
             setBranch(event.target.value);
@@ -282,7 +296,11 @@ export function BranchFromCommitDialog({
           )}
         </fieldset>
 
-        {nameError !== null && <div className="modal__error">{nameError}</div>}
+        {nameError !== null && (
+          <div className="modal__error" id="branch-from-name-error">
+            {nameError}
+          </div>
+        )}
         {error !== null && <div className="modal__error">{error}</div>}
 
         <div className="modal__actions">

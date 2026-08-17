@@ -253,7 +253,11 @@ export function LineageGraph({
   const [branchesOpen, setBranchesOpen] = useState(false);
   const [hoveredCommit, setHoveredCommit] = useState<string | null>(null);
   const [commitMenu, setCommitMenu] = useState<CommitMenuState | null>(null);
-  const [branchFromHash, setBranchFromHash] = useState<string | null>(null);
+  // The commit itself, not its hash: the dialog outlives graph reloads (its own
+  // branch:create emits worktree:changed before it returns), and a reload whose
+  // window no longer covers that commit would otherwise unmount the dialog
+  // mid-submit — dropping the success toast, the reveal, and anything typed.
+  const [branchFromCommit, setBranchFromCommit] = useState<Commit | null>(null);
   const [commitStats, setCommitStats] = useState<
     Record<string, CommitStats | null>
   >({});
@@ -564,8 +568,6 @@ export function LineageGraph({
     hoveredCommit === null ? undefined : vmByHash.get(hoveredCommit);
   const menuVm =
     commitMenu === null ? undefined : vmByHash.get(commitMenu.hash);
-  const branchFromVm =
-    branchFromHash === null ? undefined : vmByHash.get(branchFromHash);
 
   // The interactive card owns its delayed dismissal. Clear the associated
   // commit once it is actually gone, rather than as the pointer starts across
@@ -1083,17 +1085,17 @@ export function LineageGraph({
           onViewChanges={() =>
             onOpenCommit(menuVm.commit.hash, menuVm.commit.subject)
           }
-          onBranchFrom={() => setBranchFromHash(menuVm.commit.hash)}
+          onBranchFrom={() => setBranchFromCommit(menuVm.commit)}
           onClose={() => setCommitMenu(null)}
         />
       )}
-      {branchFromVm !== undefined && (
+      {branchFromCommit !== null && (
         <BranchFromCommitDialog
           repoId={repoId}
           repoName={repoName}
           worktreeId={worktreeId}
           viewingBranch={viewingBranch}
-          commit={branchFromVm.commit}
+          commit={branchFromCommit}
           now={now}
           onCreated={(checkedOutWorktreeId) => {
             if (
@@ -1103,7 +1105,7 @@ export function LineageGraph({
               onRevealCreatedWorktree(checkedOutWorktreeId);
             }
           }}
-          onClose={() => setBranchFromHash(null)}
+          onClose={() => setBranchFromCommit(null)}
         />
       )}
     </>
