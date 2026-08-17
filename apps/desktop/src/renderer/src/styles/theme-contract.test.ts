@@ -82,6 +82,8 @@ const INHERITS_FROM_DARK = new Set([
   "--sidebar-title-size", // appearance axis, theme-neutral (see tokens.css)
   "--sidebar-repo-row-height", // derived from the axis; not a color
   "--sidebar-group-head-height", // sticky-stack geometry; not a color
+  "--sidebar-repo-inset", // repo-row inline padding; not a color
+  "--sidebar-repo-grip-column", // the drag grip's seat; not a color
   "--radius-sm",
   "--radius-md",
   "--radius-lg",

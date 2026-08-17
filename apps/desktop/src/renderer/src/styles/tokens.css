@@ -40,6 +40,14 @@
      the selected worktree row that sticks below both. It holds still across the
      notches — the heading is a fixed-tier 10px label, like the counts. */
   --sidebar-group-head-height: 28px;
+  /* The repo row's inline padding, split in two because the left side has to
+     seat the drag grip and the right side does not. A token pair because THREE
+     rules have to agree: the row's padding, the compact block that restates it,
+     and `.chev`'s negative margin, which subtracts the difference so the name
+     lands where a symmetrically-padded row would put it. Hard-coded, the three
+     drift apart and every repo name silently moves. */
+  --sidebar-repo-inset: 8px;
+  --sidebar-repo-grip-column: 12px;
 
   /* Surfaces */
   --bg-app: #000000;

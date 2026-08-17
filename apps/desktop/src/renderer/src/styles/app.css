@@ -675,8 +675,9 @@ textarea,
    --------------------------------------------------------------------------- */
 :root[data-density="compact"] .repo-row {
   /* Density trims the block padding only. The inline values are load-bearing
-     geometry (the grip's column — see .repo-row), not rhythm. */
-  padding: 3px 8px 3px 12px;
+     geometry (the grip's column — see .repo-row), not rhythm, so they stay on
+     the tokens rather than being restated as literals here. */
+  padding: 3px var(--sidebar-repo-inset) 3px var(--sidebar-repo-grip-column);
 }
 :root[data-density="compact"] .wt-row {
   padding: 2px 6px 2px 4px;
@@ -713,10 +714,12 @@ textarea,
      that never grows. min-height sets the floor for a comfortable hit target,
      padding does the rest, and the row grows with its own type. */
   min-height: var(--sidebar-repo-row-height);
-  /* Left padding is 4px wider than the right: it is the grip's column, and 8px
-     could not hold one — see .repo-row__handle. `.chev` gives the 4px straight
-     back with a negative margin, so the name lands where it always did. */
-  padding: 4px 8px 4px 12px;
+  /* Left padding is wider than the right: it is the grip's column, and the
+     plain inset could not hold one — see .repo-row__handle. `.chev` gives the
+     difference straight back with a negative margin, so the name lands where it
+     always did. Both sides are tokens because a third rule (the compact block)
+     restates them and a fourth (`.chev`) derives from them. */
+  padding: 4px var(--sidebar-repo-inset) 4px var(--sidebar-repo-grip-column);
   border: 1px solid transparent;
   border-radius: 8px;
   cursor: pointer;
@@ -860,17 +863,20 @@ textarea,
   width: 0;
   height: 0;
   flex: 0 0 auto;
-  /* Hands back the 4px .repo-row's left padding borrowed for the grip column,
-     so the caret moves right but the name — the one edge every lens has to
-     agree on (lens-row.spec.ts) — does not. It lands the caret 4px from the
-     name rather than the row's 8px gap, which suits a glyph that belongs to
-     the name it discloses.
+  /* Hands back exactly what .repo-row's left padding borrowed for the grip
+     column, so the caret moves right but the name — the one edge every lens has
+     to agree on (lens-row.spec.ts) — does not. Derived, not written as -4px:
+     the two are one relationship, and repo-reorder.spec.ts asserts it holds.
+     It lands the caret 4px from the name rather than the row's 8px gap, which
+     suits a glyph that belongs to the name it discloses.
 
-     4px is also what centres this caret on x=23.5, where `.wt-section` drops
-     its 1px spine: expanded, the rule now descends from the glyph that opened
-     it instead of from 4px to its right. Retune the grip column and the caret
-     lands off that line. */
-  margin-right: -4px;
+     That also centres this caret on x=23.5, where `.wt-section` drops its 1px
+     spine: expanded, the rule now descends from the glyph that opened it
+     instead of from 4px to its right. Retune the grip column and the caret
+     lands off that line, which is why the spec measures it. */
+  margin-right: calc(
+    var(--sidebar-repo-inset) - var(--sidebar-repo-grip-column)
+  );
   border-top: 4px solid transparent;
   border-bottom: 4px solid transparent;
   border-left: 5px solid var(--text-muted);

@@ -155,31 +155,53 @@ test("the drag grip clears the caret, and stays inside the scrollport", async ()
     gap: number;
     inkLeft: number;
     rowLeft: number;
-    ring: number;
     listLeft: number;
+    /* The rotation's sine: 0 collapsed, 1 open, anything between means the
+       140ms transition is still running. */
+    rotation: number;
+    /* The borrow-and-give-back pair, read off the cascade rather than assumed. */
+    padLeft: number;
+    padRight: number;
+    chevMargin: number;
+    /* The caret's centre against the spine `.wt-section` drops beneath it. */
+    chevCentre: number;
   };
   const measure = async (): Promise<Geom> =>
     row.evaluate((el) => {
       const grip = el.querySelector(".repo-row__handle svg");
+      if (grip === null) throw new Error("row has no grip");
       const chev = el.querySelector(".chev");
+      if (chev === null) throw new Error("row has no caret");
       const list = el.closest(".sidebar__list");
-      if (grip === null || chev === null) throw new Error("row has no grip");
       if (list === null) throw new Error("row is outside the scrollport");
       const box = grip.getBoundingClientRect();
       // getBBox is the union of the circles in viewBox units; the glyph is
       // rendered 1:1, but scale anyway so a resized grip still measures true.
       const ink = (grip as SVGSVGElement).getBBox();
-      const scale = box.width / (grip as SVGSVGElement).viewBox.baseVal.width;
+      const units = (grip as SVGSVGElement).viewBox.baseVal.width;
+      if (units === 0) throw new Error("grip svg has no viewBox to scale by");
+      const scale = box.width / units;
+      const chevBox = chev.getBoundingClientRect();
+      const chevStyle = getComputedStyle(chev);
+      const rowStyle = getComputedStyle(el);
       return {
-        gap: chev.getBoundingClientRect().left - (box.left + (ink.x + ink.width) * scale),
+        gap: chevBox.left - (box.left + (ink.x + ink.width) * scale),
         inkLeft: box.left + ink.x * scale,
         rowLeft: el.getBoundingClientRect().left,
-        // A 2px outline at offset -2px paints flush INSIDE the border box, so
-        // this width is exactly how far into the row the focus ring reaches.
-        ring: Number.parseFloat(getComputedStyle(el).outlineWidth),
         // The scrollport clips: `overflow-y: auto` makes overflow-x `auto` too,
         // so anything left of its padding box is cut off rather than drawn.
-        listLeft: list.getBoundingClientRect().left
+        listLeft: list.getBoundingClientRect().left,
+        // matrix(a, b, c, d, …) — `b` is sin(angle), so 90° reads 1.
+        rotation: Math.abs(
+          Number.parseFloat(
+            (chevStyle.transform.match(/matrix\(([^,]+),\s*([^,]+)/)?.[2] ??
+              "0").trim()
+          )
+        ),
+        padLeft: Number.parseFloat(rowStyle.paddingLeft),
+        padRight: Number.parseFloat(rowStyle.paddingRight),
+        chevMargin: Number.parseFloat(chevStyle.marginRight),
+        chevCentre: chevBox.left + chevBox.width / 2
       };
     });
 
@@ -203,21 +225,78 @@ test("the drag grip clears the caret, and stays inside the scrollport", async ()
   const collapsed = await settled();
   expect(collapsed.gap).toBeGreaterThanOrEqual(1);
 
+  // The invariant the whole fix rests on, and the one no other spec can see:
+  // lens-row.spec.ts only compares the name's edge BETWEEN lenses, and both
+  // rules here apply to every lens, so a uniform shift passes it. The caret's
+  // negative margin has to return exactly what the grip column borrowed —
+  // i.e. the name lands where a symmetrically-padded row would put it.
+  expect(collapsed.padLeft + collapsed.chevMargin).toBeCloseTo(
+    collapsed.padRight,
+    1
+  );
+
   // Open, the caret is that triangle rotated 90°, so its box grows 1.5px to the
   // LEFT: the tighter of the two states, and the one a fix measured against the
   // collapsed row would miss.
   await expandRepoGroup(window, "alpha");
   await row.hover();
+  await expect(row.locator(".repo-row__handle")).toHaveCSS("opacity", "1");
   const open = await settled();
+  // Proves the settled read caught the OPEN state rather than a pre-transition
+  // frame. Asserted on the rotation itself: comparing the two gaps instead
+  // would encode that `.chev` is taller than it is wide, which is incidental.
+  expect(open.rotation).toBeCloseTo(1, 2);
   expect(open.gap).toBeGreaterThanOrEqual(1);
-  expect(open.gap).toBeLessThan(collapsed.gap);
 
-  // The column's other bound. The grip is revealed on :focus-visible too, so
-  // clearing the caret is only half of it — the grip also has to stay off the
-  // focus ring it shares the row's left edge with…
-  expect(open.inkLeft).toBeGreaterThanOrEqual(open.rowLeft + open.ring);
-  // …and must not have been shoved out of the scrollport to get there.
+  // It must not have been shoved out of the scrollport to clear the caret.
   expect(open.inkLeft).toBeGreaterThanOrEqual(open.listLeft);
+
+  // Expanded, `.wt-section` drops a 1px spine that should descend from the
+  // caret that opened it — the alignment the grip column was tuned around.
+  const spineCentre = await window
+    .locator(".wt-section")
+    .first()
+    .evaluate((el) => {
+      const rect = el.getBoundingClientRect();
+      return (
+        rect.left + Number.parseFloat(getComputedStyle(el).borderLeftWidth) / 2
+      );
+    });
+  expect(open.chevCentre).toBeCloseTo(spineCentre, 0);
+
+  // The column's other bound, and it can only be measured with the ring
+  // actually painted. `:focus-visible` keys off the last input modality, so a
+  // bare focus() after a pointer-driven setup leaves `outline-width` computing
+  // to 0px and every bound below reads as trivially satisfied — the trap
+  // lens-row.spec.ts documents. Arrow down and back is how that spec gets a
+  // real ring, and it lands focus through the roving tabindex besides.
+  await row.focus();
+  await window.keyboard.press("ArrowDown");
+  await window.keyboard.press("ArrowUp");
+  await expect(row).toBeFocused();
+  const focused = await row.evaluate((el) => {
+    const grip = el.querySelector(".repo-row__handle svg");
+    if (grip === null) throw new Error("row has no grip");
+    const style = getComputedStyle(el);
+    const ink = (grip as SVGSVGElement).getBBox();
+    const box = grip.getBoundingClientRect();
+    const scale = box.width / (grip as SVGSVGElement).viewBox.baseVal.width;
+    return {
+      // A solid outline at offset -width paints flush INSIDE the border box,
+      // so this is exactly how far into the row the ring reaches.
+      ring: Number.parseFloat(style.outlineWidth),
+      offset: Number.parseFloat(style.outlineOffset),
+      inkLeft: box.left + ink.x * scale,
+      rowLeft: el.getBoundingClientRect().left
+    };
+  });
+  // If the ring is not actually painted the bound below proves nothing, so
+  // assert the state before asserting against it.
+  expect(focused.ring).toBeGreaterThan(0);
+  expect(focused.offset).toBeCloseTo(-focused.ring, 1);
+  expect(focused.inkLeft).toBeGreaterThanOrEqual(
+    focused.rowLeft + focused.ring
+  );
 });
 
 test("the sidebar tree exposes valid, nested roles", async () => {
