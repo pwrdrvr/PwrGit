@@ -438,8 +438,13 @@ export function RepoRefsModal({
               {branches.length === 0 && !remoteSearch.loading && (
                 <div className="refs-browser__empty">No matching branches.</div>
               )}
+              {/* Count fetched rows, not rendered ones: a remote branch that
+                  shadows a local one is still represented on screen — by the
+                  local row it was folded into. Counting rendered rows instead
+                  would leave the footer permanently short of its total with no
+                  "Load more" to close the gap. */}
               <RefsPageFooter
-                shown={branches.length}
+                shown={localMatches.length + remoteSearch.rows.length}
                 total={localMatches.length + remoteSearch.total}
                 search={remoteSearch}
               />

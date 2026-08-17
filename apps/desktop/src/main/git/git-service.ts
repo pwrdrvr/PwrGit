@@ -2118,8 +2118,12 @@ async function remoteSummary(
     ])
   ]);
   const prefix = `refs/remotes/${name}/`;
+  // Exclude only the ref that IS the remote's symbolic HEAD, not everything
+  // whose last segment happens to be HEAD: `feature/HEAD` is a legal branch,
+  // and `listRemoteBranchPage` lists it — so counting it out here would make
+  // `branchCount` disagree with the paged `total` for the same remote.
   const branches = rows.filter(
-    (row) => row.fullName.startsWith(prefix) && !row.fullName.endsWith("/HEAD")
+    (row) => row.fullName.startsWith(prefix) && row.fullName !== `${prefix}HEAD`
   );
   const headPrefix = `refs/remotes/${name}/`;
   return {
@@ -2213,8 +2217,27 @@ const REMOTE_BRANCH_FORMAT = [
   "%(contents:subject)"
 ].join("%09");
 
-/** A remote name git would accept, and that cannot be read as an option. */
-const SAFE_REMOTE_NAME = /^[A-Za-z0-9._][A-Za-z0-9._-]*$/;
+/**
+ * Split a remote-tracking ref into its remote and its branch name.
+ *
+ * This cannot be done by finding the first slash: `git remote add team/fork`
+ * is accepted, and produces `refs/remotes/team/fork/main` — which that rule
+ * reads as remote "team", branch "fork/main". Only the configured remote names
+ * disambiguate it, so match against them, longest first (a repository can hold
+ * both `team` and `team/fork`).
+ */
+function splitRemoteRef(
+  fullName: string,
+  remotesLongestFirst: readonly string[]
+): { remote: string; name: string } | null {
+  for (const remote of remotesLongestFirst) {
+    const prefix = `refs/remotes/${remote}/`;
+    if (fullName.startsWith(prefix)) {
+      return { remote, name: fullName.slice(prefix.length) };
+    }
+  }
+  return null;
+}
 
 export type RemoteBranchPageOptions = {
   /** Restrict to one remote; omitted searches every remote. */
@@ -2238,13 +2261,20 @@ export async function listRemoteBranchPage(
   options: RemoteBranchPageOptions = {}
 ): Promise<Result<RemoteBranchPage>> {
   const { remote, query = "", offset = 0, limit = REMOTE_BRANCH_PAGE_SIZE } = options;
-  if (remote !== undefined && !SAFE_REMOTE_NAME.test(remote)) {
+  // The configured remotes are both the guard on `remote` and what makes the
+  // ref split exact — a name the repository does not have cannot reach argv,
+  // so `--sort=…` and friends are rejected without a pattern to maintain.
+  const names = await listRemoteNames(git, cwd);
+  if (!names.ok) return names;
+  if (remote !== undefined && !names.value.includes(remote)) {
     return err({
       kind: "repo",
       code: "invalid_remote",
-      message: `Not a valid remote name: ${remote}`
+      message: `Not a configured remote: ${remote}`
     });
   }
+  const scoped = remote === undefined ? names.value : [remote];
+  const longestFirst = [...scoped].sort((a, b) => b.length - a.length);
   const pattern = remote === undefined ? "refs/remotes" : `refs/remotes/${remote}`;
   const raw = await git(
     [
@@ -2266,13 +2296,12 @@ export async function listRemoteBranchPage(
     const fields = line.split("\t");
     const [fullName = "", shortName = "", head = "", lastCommitAt = ""] = fields;
     if (fullName === "" || shortName === "" || head === "") continue;
-    // `refs/remotes/<remote>/<branch>` — remote names cannot contain a slash,
-    // so the first segment splits the two exactly, at any nesting depth.
-    const rest = fullName.slice("refs/remotes/".length);
-    const slash = rest.indexOf("/");
-    if (slash < 0) continue;
-    const name = rest.slice(slash + 1);
-    // The remote's symbolic HEAD is a pointer, not a branch anyone can check out.
+    const split = splitRemoteRef(fullName, longestFirst);
+    if (split === null) continue;
+    const name = split.name;
+    // The remote's symbolic HEAD is a pointer, not a branch anyone can check
+    // out. Only the ref directly at `<remote>/HEAD` is that pointer — a branch
+    // genuinely named `feature/HEAD` is a branch, and stays listed.
     if (name === "HEAD") continue;
     const subject = fields.slice(4).join("\t");
     if (
