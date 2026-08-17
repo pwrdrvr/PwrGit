@@ -44,9 +44,10 @@ export const TITLE_BAR_OVERLAY_BACKGROUND =
 export const TITLE_BAR_OVERLAY_SYMBOL =
   WINDOW_CHROME_BY_THEME[DEFAULT_WINDOW_CHROME_THEME].symbol;
 
-/** Must match the renderer's `.titlebar` height, or the painted strip and the
- *  OS caption buttons sit on different lines. */
-export const TITLE_BAR_OVERLAY_HEIGHT = 32;
+/** One pixel shorter than the renderer's 32px `.titlebar`. The uncovered last
+ * pixel is its bottom border, so the divider continues beneath the native
+ * Windows caption buttons instead of disappearing under the overlay. */
+export const TITLE_BAR_OVERLAY_HEIGHT = 31;
 
 /** Keep native popup menus and dialogs aligned with the renderer theme. */
 export function applyNativeWindowTheme(

@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   TITLE_BAR_OVERLAY_BACKGROUND,
+  TITLE_BAR_OVERLAY_HEIGHT,
   TITLE_BAR_OVERLAY_SYMBOL,
   WINDOW_BACKGROUND,
   WINDOW_CHROME_BY_THEME
@@ -154,6 +155,13 @@ describe("theme contract", () => {
 });
 
 describe("platform window chrome", () => {
+  it("leaves the titlebar divider visible below Windows caption buttons", () => {
+    const titlebar = appCss.match(/\.titlebar\s*\{([\s\S]*?)\}/)?.[1];
+    expect(titlebar).toMatch(/height:\s*32px;/);
+    expect(titlebar).toMatch(/border-bottom:\s*1px\s+solid/);
+    expect(TITLE_BAR_OVERLAY_HEIGHT).toBe(31);
+  });
+
   it("moves the Windows window-control reservation to the right", () => {
     expect(appCss).toMatch(
       /:root\[data-platform="win32"\]\s+\.titlebar\s*\{[\s\S]*?padding-right:\s*150px;/
