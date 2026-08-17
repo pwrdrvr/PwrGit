@@ -71,7 +71,8 @@ MIT
 - @octokit/request-error@6.1.8 | github:octokit/request-error.js
 - @octokit/types@14.1.0 | github:octokit/types.ts
 - @pwrdrvr/agent-core@0.2.0 | https://github.com/pwrdrvr/agent-kit
-- @pwrdrvr/codex-discovery@0.1.4 | https://github.com/pwrdrvr/agent-kit
+- @pwrdrvr/agent-transport@0.1.7 | https://github.com/pwrdrvr/agent-kit
+- @pwrdrvr/codex-discovery@0.1.6 | https://github.com/pwrdrvr/agent-kit
 - @shutterstock/p-map-iterable@1.1.2 | https://github.com/shutterstock/p-map-iterable
 - aggregate-error@3.1.0 | sindresorhus/aggregate-error
 - base64-js@1.5.1 | https://github.com/beatgammit/base64-js
@@ -444,7 +445,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 Applies to:
 - @pwrdrvr/agent-core@0.2.0 (MIT)
-- @pwrdrvr/codex-discovery@0.1.4 (MIT)
+- @pwrdrvr/agent-transport@0.1.7 (MIT)
+- @pwrdrvr/codex-discovery@0.1.6 (MIT)
 
 Representative file: @pwrdrvr/agent-core@0.2.0/LICENSE
 
