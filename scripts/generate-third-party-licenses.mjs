@@ -32,7 +32,7 @@ const EMBEDDED_GIT_NOTICE_SOURCES = [
     version: "2.53.0",
     declaredLicense: "GPL-2.0-only",
     file: "COPYING",
-    source: "https://github.com/desktop/dugite-native/tree/v2.53.0-3",
+    source: "https://github.com/desktop/dugite-native/tree/v2.53.0-4",
   },
   {
     name: "Git LFS embedded runtime",
@@ -43,17 +43,17 @@ const EMBEDDED_GIT_NOTICE_SOURCES = [
   },
   {
     name: "Git Credential Manager embedded runtime",
-    version: "2.7.3",
+    version: "2.9.0",
     declaredLicense: "MIT",
     file: "LICENSE.git-credential-manager",
-    source: "https://github.com/git-ecosystem/git-credential-manager/tree/v2.7.3",
+    source: "https://github.com/git-ecosystem/git-credential-manager/tree/v2.9.0",
   },
   {
     name: "Git Credential Manager notices",
-    version: "2.7.3",
+    version: "2.9.0",
     declaredLicense: "MIT",
     file: "NOTICE",
-    source: "https://github.com/git-ecosystem/git-credential-manager/tree/v2.7.3",
+    source: "https://github.com/git-ecosystem/git-credential-manager/tree/v2.9.0",
   },
 ];
 
