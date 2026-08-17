@@ -17,6 +17,7 @@ export function CommitContextMenu({
   branchInfo,
   viewingBranch,
   onViewChanges,
+  onBranchFrom,
   onClose
 }: {
   x: number;
@@ -25,11 +26,17 @@ export function CommitContextMenu({
   branchInfo: Record<string, LaneBranchInfo>;
   viewingBranch: string;
   onViewChanges: () => void;
+  onBranchFrom: () => void;
   onClose: () => void;
 }) {
   const { commit } = vm;
   const items: MenuItem[] = [
     { type: "item", label: "View changes", onSelect: onViewChanges },
+    {
+      type: "item",
+      label: "Branch from this commit…",
+      onSelect: onBranchFrom
+    },
     { type: "sep" },
     {
       type: "item",

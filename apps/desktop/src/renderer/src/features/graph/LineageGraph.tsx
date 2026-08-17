@@ -16,6 +16,7 @@ import {
   type TooltipAnchor,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
+import { BranchFromCommitDialog } from "./BranchFromCommitDialog";
 import { CommitContextCard } from "./CommitContextCard";
 import { CommitContextMenu } from "./CommitContextMenu";
 import {
@@ -209,6 +210,7 @@ const scrollBehavior = (): ScrollBehavior =>
 
 export function LineageGraph({
   repoId,
+  repoName,
   worktreeId,
   viewingBranch,
   activeEmail,
@@ -218,9 +220,12 @@ export function LineageGraph({
   onToggleCommit,
   onCommitsChange,
   onOpenCommit,
-  onRevealWorktree
+  onRevealWorktree,
+  onRevealCreatedWorktree
 }: {
   repoId: string;
+  /** Repository name, shown when a dialog needs to name what it acts on. */
+  repoName: string;
   worktreeId: string;
   /** Branch checked out in the worktree whose lineage is being viewed. */
   viewingBranch: string;
@@ -236,6 +241,8 @@ export function LineageGraph({
   onOpenCommit: (hash: string, subject: string) => void;
   /** Jump to a worktree from a tip chip's worktree button. */
   onRevealWorktree: (worktreeId: string) => void;
+  /** Select a worktree just created here, once the repo tree lists it. */
+  onRevealCreatedWorktree: (worktreeId: string) => void;
 }) {
   const [data, setData] = useState<LaneGraph | null>(null);
   const [scope, setScope] = useState<Scope>("active");
@@ -246,6 +253,7 @@ export function LineageGraph({
   const [branchesOpen, setBranchesOpen] = useState(false);
   const [hoveredCommit, setHoveredCommit] = useState<string | null>(null);
   const [commitMenu, setCommitMenu] = useState<CommitMenuState | null>(null);
+  const [branchFromHash, setBranchFromHash] = useState<string | null>(null);
   const [commitStats, setCommitStats] = useState<
     Record<string, CommitStats | null>
   >({});
@@ -556,6 +564,8 @@ export function LineageGraph({
     hoveredCommit === null ? undefined : vmByHash.get(hoveredCommit);
   const menuVm =
     commitMenu === null ? undefined : vmByHash.get(commitMenu.hash);
+  const branchFromVm =
+    branchFromHash === null ? undefined : vmByHash.get(branchFromHash);
 
   // The interactive card owns its delayed dismissal. Clear the associated
   // commit once it is actually gone, rather than as the pointer starts across
@@ -1073,7 +1083,27 @@ export function LineageGraph({
           onViewChanges={() =>
             onOpenCommit(menuVm.commit.hash, menuVm.commit.subject)
           }
+          onBranchFrom={() => setBranchFromHash(menuVm.commit.hash)}
           onClose={() => setCommitMenu(null)}
+        />
+      )}
+      {branchFromVm !== undefined && (
+        <BranchFromCommitDialog
+          repoId={repoId}
+          repoName={repoName}
+          worktreeId={worktreeId}
+          viewingBranch={viewingBranch}
+          commit={branchFromVm.commit}
+          now={now}
+          onCreated={(checkedOutWorktreeId) => {
+            if (
+              checkedOutWorktreeId !== null &&
+              checkedOutWorktreeId !== worktreeId
+            ) {
+              onRevealCreatedWorktree(checkedOutWorktreeId);
+            }
+          }}
+          onClose={() => setBranchFromHash(null)}
         />
       )}
     </>

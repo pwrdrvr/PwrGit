@@ -166,6 +166,24 @@ export function isSidebarDensity(value: unknown): value is SidebarDensity {
   );
 }
 
+/**
+ * Where a branch created from a commit gets checked out. "none" leaves the
+ * working copies alone (just the ref), "new-worktree" adds one under the
+ * worktree root, "here" switches the worktree the branch was created from.
+ */
+export const BRANCH_CHECKOUT_TARGETS = ["none", "new-worktree", "here"] as const;
+export type BranchCheckoutTarget = (typeof BRANCH_CHECKOUT_TARGETS)[number];
+export const BRANCH_CHECKOUT_TARGET_DEFAULT: BranchCheckoutTarget = "none";
+
+export function isBranchCheckoutTarget(
+  value: unknown
+): value is BranchCheckoutTarget {
+  return (
+    typeof value === "string" &&
+    (BRANCH_CHECKOUT_TARGETS as readonly string[]).includes(value)
+  );
+}
+
 /** Latest is smoke-checked; Prerelease is newer and may not install. */
 export const UPDATE_CHANNELS = ["latest", "prerelease"] as const;
 export type UpdateChannel = (typeof UPDATE_CHANNELS)[number];
@@ -559,6 +577,11 @@ export interface Commands {
     };
     res: null;
   };
+  /** Resolve the path `worktree:create` would use, for a pre-create preview. */
+  "worktree:pathPreview": {
+    req: { repoId: string; branch: string };
+    res: { path: string };
+  };
   "worktree:removeMany": {
     req: { worktreeIds: string[]; force?: boolean };
     res: {
@@ -582,6 +605,26 @@ export interface Commands {
   // Branch switching — list local + remote branches, check one out in place
   "branch:list": { req: { worktreeId: string }; res: BranchRef[] };
   "branch:switch": { req: { worktreeId: string; branch: string }; res: null };
+  /**
+   * Create a branch at an arbitrary commit and optionally check it out. The
+   * worktree supplies the git directory the branch is written to, and is also
+   * the checkout target for `"here"`.
+   */
+  "branch:create": {
+    req: {
+      worktreeId: string;
+      branch: string;
+      /** Commit the new branch points at. */
+      startPoint: string;
+      checkout: BranchCheckoutTarget;
+    };
+    res: {
+      /** Worktree now holding the branch — added or switched — else null. */
+      checkedOutWorktreeId: string | null;
+      /** Path of a worktree added for the branch, else null. */
+      worktreePath: string | null;
+    };
+  };
   /** Repository-wide local branches and configured remote-tracking refs. */
   "repo:refs": { req: { repoId: string }; res: RepoRefs };
 

@@ -1,5 +1,3 @@
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { err, ok } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
@@ -8,9 +6,8 @@ import type { SettingsService } from "../settings/settings-service";
 import { execGit } from "./dugite";
 import { worktreeAdd, worktreeRemove } from "./git-service";
 import type { RepoIndexer } from "./repo-indexer";
+import { worktreePathFor } from "./worktree-paths";
 import type { WorktreeStateService } from "./worktree-state";
-
-const slugBranch = (branch: string): string => branch.replace(/\//g, "-");
 
 export function registerWorktreeLifecycleHandlers(
   bus: CommandBus,
@@ -19,19 +16,29 @@ export function registerWorktreeLifecycleHandlers(
   settings: SettingsService,
   state: WorktreeStateService
 ): void {
-  const worktreeRoot = (): string =>
-    settings.get().worktreeRoot ?? join(homedir(), "wt");
-
-  bus.register("worktree:create", async (req) => {
-    const repo = db
+  const repoRow = (
+    repoId: string
+  ): { id: string; name: string; path: string; profile_id: string } | undefined =>
+    db
       .prepare("SELECT id, name, path, profile_id FROM repos WHERE id = ?")
-      .get(req.repoId) as
+      .get(repoId) as
       | { id: string; name: string; path: string; profile_id: string }
       | undefined;
+
+  bus.register("worktree:pathPreview", (req) => {
+    const repo = repoRow(req.repoId);
     if (repo === undefined) {
       return err({ kind: "repo", code: "not_found", message: "repo not found" });
     }
-    const wtPath = join(worktreeRoot(), repo.name, slugBranch(req.branch));
+    return ok({ path: worktreePathFor(settings, repo.name, req.branch) });
+  });
+
+  bus.register("worktree:create", async (req) => {
+    const repo = repoRow(req.repoId);
+    if (repo === undefined) {
+      return err({ kind: "repo", code: "not_found", message: "repo not found" });
+    }
+    const wtPath = worktreePathFor(settings, repo.name, req.branch);
     const added = await worktreeAdd(execGit, repo.path, wtPath, req.branch, {
       newBranch: req.newBranch,
       ...(req.startPoint === undefined ? {} : { startPoint: req.startPoint })
