@@ -222,6 +222,45 @@ describe("BranchFromCommitDialog", () => {
     expect(onCreated).toHaveBeenCalledExactlyOnceWith("worktree-2");
   });
 
+  describe("Escape", () => {
+    const escape = async (): Promise<void> => {
+      await act(async () => {
+        window.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+        );
+      });
+    };
+
+    it("closes the dialog when focus is inside it", async () => {
+      await render();
+      input().focus();
+      await escape();
+
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    it("still closes once focus has fallen back to the body", async () => {
+      await render();
+      // What happens after an overlay opened over the dialog closes again.
+      (document.activeElement as HTMLElement | null)?.blur();
+      await escape();
+
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    it("leaves the keystroke to an overlay that owns the focus", async () => {
+      await render();
+      const elsewhere = document.createElement("input");
+      document.body.append(elsewhere);
+      elsewhere.focus();
+
+      await escape();
+
+      expect(onClose).not.toHaveBeenCalled();
+      elsewhere.remove();
+    });
+  });
+
   it("asks for local branch names only, never the full ref list", async () => {
     await render();
 
@@ -267,7 +306,7 @@ describe("BranchFromCommitDialog", () => {
       held.finish();
     });
 
-    it("reports the outcome after the dialog is gone", async () => {
+    it("still confirms the outcome after the dialog is gone", async () => {
       await render();
       const held = holdCreate();
       await act(async () => createButton().click());
@@ -277,12 +316,14 @@ describe("BranchFromCommitDialog", () => {
         held.finish();
       });
 
-      // The reveal and the confirmation are the only trace left once the
-      // dialog has been dismissed — they must not be lost with it.
-      expect(onCreated).toHaveBeenCalledExactlyOnceWith("worktree-2");
+      // The toast is the only trace left once the dialog has been dismissed,
+      // so it must not be lost with it…
       expect(showInfoToast).toHaveBeenCalledWith(
         expect.objectContaining({ title: "Branch created" })
       );
+      // …but dismissing is the user choosing to be elsewhere, so nothing drags
+      // their selection to the worktree that just finished.
+      expect(onCreated).not.toHaveBeenCalled();
 
       root = createRoot(container);
     });

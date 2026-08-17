@@ -54,6 +54,9 @@ export function BranchFromCommitDialog({
   const [error, setError] = useState<string | null>(null);
   const active = useRef(true);
   const selected = useRef(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  /** Latest dismiss, so the one-shot key listener never calls a stale closure. */
+  const dismissRef = useRef<() => void>(() => undefined);
   /** Whether the checkout target on screen is the user's pick or the fallback. */
   const picked = useRef(false);
 
@@ -138,6 +141,29 @@ export function BranchFromCommitDialog({
   // rather than sending a checkout the main process would only reject.
   const blocked = problem !== null || (target === "here" && !canCheckoutHere);
 
+  /**
+   * Escape closes the dialog unless something else owns the keystroke. ⌘F opens
+   * the repo switcher over this dialog, and the Escape that dismisses it must
+   * not take the dialog with it — but scoping the handler to the dialog's own
+   * subtree is too narrow: once that switcher closes, focus falls back to
+   * <body> and Escape would stop working entirely. Focus inside the dialog, or
+   * nowhere in particular, is ours; focus inside another overlay is not.
+   */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      const focused = document.activeElement;
+      const ownsFocus =
+        focused === null ||
+        focused === document.body ||
+        dialogRef.current?.contains(focused) === true;
+      if (!ownsFocus) return;
+      dismissRef.current();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   // Dismissing mid-create is allowed (checking out a big repo takes seconds),
   // so say the work continues — the outcome arrives as a toast either way.
   const dismiss = (): void => {
@@ -149,6 +175,7 @@ export function BranchFromCommitDialog({
     }
     onClose();
   };
+  dismissRef.current = dismiss;
 
   const submit = async (): Promise<void> => {
     if (blocked || busy) return;
@@ -160,8 +187,11 @@ export function BranchFromCommitDialog({
       startPoint: commit.hash,
       checkout: target
     });
-    // Everything below reports the outcome and must survive a dialog the user
-    // dismissed while waiting; only the in-dialog state is mount-guarded.
+    // The toasts below report the outcome and must survive a dialog the user
+    // dismissed while waiting. Moving the selection is different: every way
+    // this dialog goes away — dismissed, or the worktree switched under it —
+    // is the user choosing to be somewhere else, so the reveal stays behind
+    // the mount guard along with the in-dialog state.
     if (active.current) setBusy(false);
     if (!result.ok) {
       const message = firstLine(result.error.message);
@@ -186,6 +216,7 @@ export function BranchFromCommitDialog({
             ? `${trimmed} is checked out here at ${commit.shortHash}.`
             : `${trimmed} is checked out in a new worktree at ${commit.shortHash}.`
     });
+    if (!active.current) return;
     onCreated(result.value.checkedOutWorktreeId);
     onClose();
   };
@@ -233,15 +264,8 @@ export function BranchFromCommitDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="branch-from-title"
+        ref={dialogRef}
         onClick={(event) => event.stopPropagation()}
-        // Escape is handled here rather than on window: with the ⌘F switcher
-        // stacked above this dialog, a window listener would close both on the
-        // keystroke that was only meant to dismiss the switcher.
-        onKeyDown={(event) => {
-          if (event.key !== "Escape") return;
-          event.stopPropagation();
-          dismiss();
-        }}
       >
         <div className="modal__title" id="branch-from-title">
           Branch from {commit.shortHash} · {repoName}
