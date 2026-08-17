@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  BranchReveal,
   Commit,
   Profile,
   Repo,
@@ -21,6 +22,7 @@ import { CloneRepoDialog } from "./features/sidebar/CloneRepoDialog";
 import { NewWorktreeModal } from "./features/sidebar/NewWorktreeModal";
 import { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
 import {
+  branchRevealForSearchHit,
   pendingRevealForCreatedWorktree,
   pendingRevealForSearchHit,
   resolveWorktreeReveal,
@@ -44,10 +46,13 @@ export function App() {
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [overlayOpen, setOverlayOpen] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
+  // A ⌘F pick on a branch with no worktree — the New worktree modal, primed to
+  // branch from a fetched ref (remote-only) or to check the branch out (local).
   const [searchNewWorktree, setSearchNewWorktree] = useState<{
     repo: Repo;
     branch: string;
-    startPoint: string;
+    newBranch: boolean;
+    startPoint?: string;
   } | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
   const worktreePrMonitorIdRef = useRef(crypto.randomUUID());
@@ -157,18 +162,33 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // A branch with no worktree can't be selected — offer to give it one. A
+  // remote-only branch is created from the fetched ref; a local branch already
+  // exists, so the modal checks it out rather than creating it again.
+  const openBranchWorktreeModal = useCallback(
+    (repo: Repo, branch: BranchReveal) => {
+      setSearchNewWorktree(
+        branch.kind === "remote"
+          ? {
+              repo,
+              branch: branch.name,
+              newBranch: true,
+              startPoint: branch.fullName
+            }
+          : { repo, branch: branch.name, newBranch: false }
+      );
+    },
+    []
+  );
+
   // Resolve a reveal once this window's repos have loaded: the named worktree
   // if given (⌘F branch hit), else the repo's primary.
   useEffect(() => {
     if (pendingReveal === null) return;
     const repo = repos.find((r) => r.id === pendingReveal.repoId);
     if (repo === undefined) return;
-    if (pendingReveal.remoteBranch !== null) {
-      setSearchNewWorktree({
-        repo,
-        branch: pendingReveal.remoteBranch.name,
-        startPoint: pendingReveal.remoteBranch.fullName
-      });
+    if (pendingReveal.branch !== null) {
+      openBranchWorktreeModal(repo, pendingReveal.branch);
       setPendingReveal(null);
       return;
     }
@@ -180,7 +200,7 @@ export function App() {
       setSelection({ repoId: repo.id, worktreeId: resolved.worktreeId });
     }
     setPendingReveal(null);
-  }, [pendingReveal, repos]);
+  }, [openBranchWorktreeModal, pendingReveal, repos]);
 
   // One window per profile: on boot, pick up any reveal queued for this
   // window (a cross-profile ⌘F pick that opened it); afterwards, reveals for
@@ -193,7 +213,7 @@ export function App() {
         setPendingReveal({
           repoId: r.value.repoId,
           worktreeId: r.value.worktreeId,
-          remoteBranch: r.value.remoteBranch
+          branch: r.value.branch
         });
       }
     });
@@ -202,7 +222,7 @@ export function App() {
         setPendingReveal({
           repoId: p.repoId,
           worktreeId: p.worktreeId,
-          remoteBranch: p.remoteBranch
+          branch: p.branch
         });
       }
     });
@@ -238,6 +258,7 @@ export function App() {
   const onPickSearch = useCallback(
     (hit: RepoSearchHit) => {
       setOverlayOpen(false);
+      const branch = branchRevealForSearchHit(hit);
       if (activeProfile !== null && hit.profileId !== activeProfile.id) {
         // Another profile's hit → open/focus THAT profile's window and
         // reveal it there; this window stays put.
@@ -245,26 +266,20 @@ export function App() {
           hit.profileId,
           hit.repoId,
           hit.worktreeId,
-          hit.kind === "remote_branch" && hit.remoteRef !== undefined
-            ? { name: hit.name, fullName: hit.remoteRef }
-            : undefined
+          branch ?? undefined
         );
         return;
       }
-      if (hit.kind === "remote_branch" && hit.remoteRef !== undefined) {
+      if (branch !== null) {
         const repo = repos.find((candidate) => candidate.id === hit.repoId);
         if (repo !== undefined) {
-          setSearchNewWorktree({
-            repo,
-            branch: hit.name,
-            startPoint: hit.remoteRef
-          });
+          openBranchWorktreeModal(repo, branch);
           return;
         }
       }
       setPendingReveal(pendingRevealForSearchHit(hit));
     },
-    [activeProfile, openProfile, repos]
+    [activeProfile, openBranchWorktreeModal, openProfile, repos]
   );
 
   const onPickCommitSearch = useCallback((commit: Commit) => {
@@ -449,7 +464,7 @@ export function App() {
                       setPendingReveal({
                         repoId: repo.id,
                         worktreeId,
-                        remoteBranch: null
+                        branch: null
                       });
                     }
                   }}
@@ -560,8 +575,10 @@ export function App() {
         <NewWorktreeModal
           repo={searchNewWorktree.repo}
           initialBranch={searchNewWorktree.branch}
-          initialNewBranch
-          startPoint={searchNewWorktree.startPoint}
+          initialNewBranch={searchNewWorktree.newBranch}
+          {...(searchNewWorktree.startPoint !== undefined
+            ? { startPoint: searchNewWorktree.startPoint }
+            : {})}
           onCreate={(branch, newBranch, startPoint) =>
             createWorktree(searchNewWorktree.repo.id, branch, newBranch, startPoint)
           }
@@ -577,7 +594,7 @@ export function App() {
             setPendingReveal({
               repoId: repo.id,
               worktreeId: null,
-              remoteBranch: null
+              branch: null
             });
           }}
           onClose={() => setCloneOpen(false)}

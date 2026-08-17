@@ -1,9 +1,9 @@
-import type { RemoteBranchReveal, RepoSearchHit, Worktree } from "@pwrgit/shared";
+import type { BranchReveal, RepoSearchHit, Worktree } from "@pwrgit/shared";
 
 export type PendingRepoReveal = {
   repoId: string;
   worktreeId: string | null;
-  remoteBranch: RemoteBranchReveal | null;
+  branch: BranchReveal | null;
   /**
    * Hold the reveal until that exact worktree is in the tree, instead of
    * settling for the repo's primary. A worktree PwrGit just created is indexed
@@ -19,7 +19,7 @@ export function pendingRevealForCreatedWorktree(
   repoId: string,
   worktreeId: string
 ): PendingRepoReveal {
-  return { repoId, worktreeId, remoteBranch: null, awaitWorktree: true };
+  return { repoId, worktreeId, branch: null, awaitWorktree: true };
 }
 
 export type RevealResolution =
@@ -58,9 +58,20 @@ export function pendingRevealForSearchHit(
   return {
     repoId: hit.repoId,
     worktreeId: hit.worktreeId ?? null,
-    remoteBranch:
-      hit.kind === "remote_branch" && hit.remoteRef !== undefined
-        ? { name: hit.name, fullName: hit.remoteRef }
-        : null
+    branch: branchRevealForSearchHit(hit)
   };
+}
+
+/**
+ * The worktree-less-branch action a hit carries, if any: a remote-only branch
+ * needs a start point to branch from, a local branch is checked out by name.
+ */
+export function branchRevealForSearchHit(
+  hit: RepoSearchHit
+): BranchReveal | null {
+  if (hit.kind === "remote_branch" && hit.remoteRef !== undefined) {
+    return { kind: "remote", name: hit.name, fullName: hit.remoteRef };
+  }
+  if (hit.kind === "local_branch") return { kind: "local", name: hit.name };
+  return null;
 }

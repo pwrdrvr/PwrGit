@@ -36,7 +36,7 @@ import type {
   RebaseOperation,
   RebasePlan,
   RemoteDivergence,
-  RemoteBranchReveal,
+  BranchReveal,
   RemoteResetMode,
   RemoteResetSnapshot,
   Repo,
@@ -406,7 +406,7 @@ export interface Commands {
       profileId: ProfileId;
       revealRepoId?: string;
       revealWorktreeId?: string;
-      revealRemoteBranch?: RemoteBranchReveal;
+      revealBranch?: BranchReveal;
     };
     res: null;
   };
@@ -416,7 +416,7 @@ export interface Commands {
     res: {
       repoId: string | null;
       worktreeId: string | null;
-      remoteBranch: RemoteBranchReveal | null;
+      branch: BranchReveal | null;
     };
   };
   "profile:create": { req: CreateProfileRequest; res: Profile };
@@ -895,7 +895,7 @@ export interface Events {
     profileId: ProfileId;
     repoId: string;
     worktreeId: string | null;
-    remoteBranch: RemoteBranchReveal | null;
+    branch: BranchReveal | null;
   };
   /** A new main-process log line — streamed live to the Logs window. */
   "logs:entry": LogEntry;

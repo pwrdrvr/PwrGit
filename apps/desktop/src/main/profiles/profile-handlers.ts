@@ -2,7 +2,7 @@ import {
   err,
   ok,
   type Profile,
-  type RemoteBranchReveal
+  type BranchReveal
 } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
@@ -18,7 +18,7 @@ export type ProfileHandlerDeps = {
     profileId: string,
     revealRepoId?: string,
     revealWorktreeId?: string,
-    revealRemoteBranch?: RemoteBranchReveal
+    revealBranch?: BranchReveal
   ) => boolean;
   /** Hand a queued reveal to the window that just booted for a profile. */
   consumeReveal: (
@@ -26,7 +26,7 @@ export type ProfileHandlerDeps = {
   ) => {
     repoId: string;
     worktreeId: string | null;
-    remoteBranch: RemoteBranchReveal | null;
+    branch: BranchReveal | null;
   } | null;
 };
 
@@ -60,7 +60,7 @@ export function registerProfileHandlers(
       req.profileId,
       req.revealRepoId,
       req.revealWorktreeId,
-      req.revealRemoteBranch
+      req.revealBranch
     );
     if (!opened) {
       return err({
@@ -78,7 +78,7 @@ export function registerProfileHandlers(
     return ok({
       repoId: reveal?.repoId ?? null,
       worktreeId: reveal?.worktreeId ?? null,
-      remoteBranch: reveal?.remoteBranch ?? null
+      branch: reveal?.branch ?? null
     });
   });
 

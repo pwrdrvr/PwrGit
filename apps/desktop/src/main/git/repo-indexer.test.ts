@@ -141,7 +141,7 @@ describe("RepoIndexer", () => {
     });
     let yields = 0;
     const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit, {
-      remoteBranchWriteChunkSize: 1,
+      branchWriteChunkSize: 1,
       yieldToEventLoop: async () => {
         yields += 1;
       }
@@ -538,7 +538,14 @@ describe("RepoIndexer", () => {
       removed: 1,
       updated: 0
     });
-    expect(isolatedIndexer.searchAll("external-added")).toHaveLength(0);
+    // Removing a worktree does not delete its branch, so the branch stays
+    // findable — as a local branch with nothing checked out on it (0022).
+    const orphaned = isolatedIndexer.searchAll("external-added");
+    expect(orphaned).toHaveLength(1);
+    expect(orphaned[0]).toMatchObject({
+      kind: "local_branch",
+      name: "external-added"
+    });
   });
 
   it("reports dropping a fossil repo row as a success, not a failure", async () => {
@@ -632,6 +639,116 @@ describe("searchAll (FTS5)", () => {
     git(repoPath, ["update-ref", "-d", "refs/remotes/origin/releases/1.0"]);
     await indexer.refreshRepoWorktrees(repo.id);
     expect(indexer.searchAll("releases 1.0")).toHaveLength(0);
+  });
+
+  // Local branches were in none of the indexed kinds before 0022, so a branch
+  // created without a checkout was unreachable from ⌘K. Its own isolated repo:
+  // the shared `root` fixture is asserted on by name/branch across this file.
+  it("indexes local branches with no worktree, and hands them back on checkout", async () => {
+    const container = mkdtempSync(join(tmpdir(), "pwrgit-local-branch-"));
+    const repoPath = join(container, "solo");
+    initRepo(repoPath);
+    git(repoPath, ["branch", "spike/no-checkout"]);
+
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({
+      name: "Local",
+      email: "local@example.com",
+      roots: []
+    });
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
+    const indexed = await isolatedIndexer.indexRepoAt(profile.id, repoPath);
+    expect(indexed.ok).toBe(true);
+    if (!indexed.ok) return;
+    const repoId = indexed.value.id;
+
+    expect(isolatedIndexer.searchAll("spike no-checkout")).toContainEqual(
+      expect.objectContaining({
+        kind: "local_branch",
+        repoId,
+        repoName: "solo",
+        name: "spike/no-checkout",
+        worktreeCount: 0,
+        pinned: false
+      })
+    );
+
+    // "main" IS checked out, so it stays a worktree hit only — indexing it here
+    // too would put the same branch in the palette twice.
+    const mainHits = isolatedIndexer.searchAll("main");
+    expect(mainHits.some((hit) => hit.kind === "worktree")).toBe(true);
+    expect(mainHits.some((hit) => hit.kind === "local_branch")).toBe(false);
+
+    // Giving the branch a worktree moves it between kinds — one hit throughout.
+    const wtPath = join(container, "solo-spike");
+    git(repoPath, ["worktree", "add", wtPath, "spike/no-checkout"]);
+    expect((await isolatedIndexer.refreshRepoWorktrees(repoId)).ok).toBe(true);
+    const afterCheckout = isolatedIndexer.searchAll("spike no-checkout");
+    expect(afterCheckout).toHaveLength(1);
+    expect(afterCheckout[0]?.kind).toBe("worktree");
+    expect(afterCheckout[0]?.worktreeId).toBeDefined();
+  });
+
+  it("prunes local-branch rows once the branch is gone", async () => {
+    const container = mkdtempSync(join(tmpdir(), "pwrgit-local-prune-"));
+    const repoPath = join(container, "pruner");
+    initRepo(repoPath);
+    git(repoPath, ["branch", "throwaway/idea"]);
+
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({
+      name: "Prune",
+      email: "prune@example.com",
+      roots: []
+    });
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit, {
+      branchWriteChunkSize: 1
+    });
+    const indexed = await isolatedIndexer.indexRepoAt(profile.id, repoPath);
+    expect(indexed.ok).toBe(true);
+    if (!indexed.ok) return;
+
+    expect(isolatedIndexer.searchAll("throwaway idea")).toHaveLength(1);
+    git(repoPath, ["branch", "-D", "throwaway/idea"]);
+    expect(
+      (await isolatedIndexer.refreshRepoRemoteBranches(indexed.value.id)).ok
+    ).toBe(true);
+    expect(isolatedIndexer.searchAll("throwaway idea")).toHaveLength(0);
+  });
+
+  // 0022 clears the 0020 completion markers so the existing one-time backfill
+  // fills the new table too; without that an upgraded database would show no
+  // local branches until a daily rescan happened to come round.
+  it("backfills local branches through the branch-index hydration pass", async () => {
+    const container = mkdtempSync(join(tmpdir(), "pwrgit-local-hydrate-"));
+    const repoPath = join(container, "upgraded");
+    initRepo(repoPath);
+    git(repoPath, ["branch", "carried/over"]);
+
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({
+      name: "Upgrade",
+      email: "upgrade@example.com",
+      roots: []
+    });
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
+    expect((await isolatedIndexer.indexRepoAt(profile.id, repoPath)).ok).toBe(
+      true
+    );
+    isolatedDb.prepare("DELETE FROM remote_branch_index_state").run();
+    isolatedDb.prepare("DELETE FROM local_branches").run();
+    expect(isolatedIndexer.searchAll("carried over")).toHaveLength(0);
+
+    expect(await isolatedIndexer.hydrateRemoteBranches()).toEqual({
+      refreshed: 1,
+      failed: 0
+    });
+    expect(isolatedIndexer.searchAll("carried over")).toContainEqual(
+      expect.objectContaining({ kind: "local_branch", name: "carried/over" })
+    );
   });
 
   it("finds worktrees by branch prefix, with repo context", async () => {

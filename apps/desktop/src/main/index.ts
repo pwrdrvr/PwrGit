@@ -12,7 +12,7 @@ import {
   ok,
   resolveUpdateSelection,
   type Profile,
-  type RemoteBranchReveal
+  type BranchReveal
 } from "@pwrgit/shared";
 import { registerAppDocumentHandlers } from "./app-document-handlers";
 import { wireAppMenuBridge } from "./app-menu-bridge";
@@ -298,7 +298,7 @@ if (!gotSingleInstanceLock) {
     type Reveal = {
       repoId: string;
       worktreeId: string | null;
-      remoteBranch: RemoteBranchReveal | null;
+      branch: BranchReveal | null;
     };
     const pendingReveals = new Map<string, Reveal>();
 
@@ -323,7 +323,7 @@ if (!gotSingleInstanceLock) {
       profileId: string,
       revealRepoId?: string,
       revealWorktreeId?: string,
-      revealRemoteBranch?: RemoteBranchReveal
+      revealBranch?: BranchReveal
     ): boolean => {
       const profile = profiles.get(profileId);
       if (profile === null) return false;
@@ -334,7 +334,7 @@ if (!gotSingleInstanceLock) {
         const reveal: Reveal = {
           repoId: revealRepoId,
           worktreeId: revealWorktreeId ?? null,
-          remoteBranch: revealRemoteBranch ?? null
+          branch: revealBranch ?? null
         };
         if (wasOpen) emitEvent("ui:revealRepo", { profileId, ...reveal });
         else pendingReveals.set(profileId, reveal);
@@ -450,10 +450,11 @@ if (!gotSingleInstanceLock) {
     if (activeId !== null) openProfileWindow(activeId);
     refreshMenu();
 
-    // Migration 0019 could not populate Git-derived rows in SQL. Repair only
-    // repos that have never been attempted, after opening the first window.
-    // The active profile's normal rescan owns its root-discovered repos, so
-    // exclude only those scan rows. Manual repos still need this repair.
+    // Migrations 0019/0022 could not populate Git-derived rows in SQL, so both
+    // derived branch tables (remote-only and local-only) are filled here.
+    // Repair only repos that have never been attempted, after opening the first
+    // window. The active profile's normal rescan owns its root-discovered
+    // repos, so exclude only those scan rows. Manual repos still need this.
     setImmediate(() => {
       void indexer
         .hydrateRemoteBranches({ excludeScannedProfileId: activeId })
@@ -462,12 +463,12 @@ if (!gotSingleInstanceLock) {
           logMain(
             failed === 0 ? "info" : "warn",
             "scan",
-            `hydrated missing remote branches for ${refreshed} repos` +
+            `hydrated missing branch index for ${refreshed} repos` +
               (failed === 0 ? "" : `; ${failed} failed`)
           );
         })
         .catch((cause) =>
-          logMain("error", "scan", "remote-branch hydration failed:", cause)
+          logMain("error", "scan", "branch-index hydration failed:", cause)
         );
     });
 
