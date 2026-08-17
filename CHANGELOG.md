@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.4.0 - 2026-08-17
+
+- Remotes - Fixed empty repositories so **Manage remotes and remote branches…** remains available, letting you add the first remote without a workaround.
+- Windows - Fixed the title-bar divider so it continues beneath the native window controls, including in auxiliary windows.
+
 ## v0.3.0 - 2026-08-16
 
 - Clone and Sync - Added guided repository cloning with progressive destination and progress feedback, plus recovery from HTTPS pull authentication failures by switching to SSH.
