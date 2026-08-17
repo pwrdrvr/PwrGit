@@ -29,6 +29,7 @@ jobs:
         uses: pwrdrvr/configure-nodejs@v1
         with:
           node-version: 24.x
+          cache-electron: "true"
 
       - name: Compute preview version
         id: version
@@ -79,6 +80,7 @@ jobs:
         uses: pwrdrvr/configure-nodejs@v1
         with:
           node-version: 24.x
+          cache-electron: "true"
 
       # windows-latest defaults to pwsh; force bash for the version-stamp steps
       # so they stay identical to the macOS preview job above.
