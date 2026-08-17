@@ -23,7 +23,9 @@ import { NewWorktreeModal } from "./features/sidebar/NewWorktreeModal";
 import { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
 import {
   branchRevealForSearchHit,
+  pendingRevealForCreatedWorktree,
   pendingRevealForSearchHit,
+  resolveWorktreeReveal,
   type PendingRepoReveal
 } from "./features/sidebar/search-reveal";
 import { Sidebar } from "./features/sidebar/Sidebar";
@@ -190,14 +192,12 @@ export function App() {
       setPendingReveal(null);
       return;
     }
-    const target =
-      (pendingReveal.worktreeId !== null
-        ? repo.worktrees.find((w) => w.id === pendingReveal.worktreeId)
-        : undefined) ??
-      repo.worktrees.find((w) => w.isPrimary) ??
-      repo.worktrees[0];
-    if (target !== undefined) {
-      setSelection({ repoId: repo.id, worktreeId: target.id });
+    const resolved = resolveWorktreeReveal(pendingReveal, repo.worktrees);
+    // A freshly created worktree may not be in this copy of the tree yet; keep
+    // the reveal queued rather than falling back to the primary.
+    if (resolved.kind === "wait") return;
+    if (resolved.kind === "select") {
+      setSelection({ repoId: repo.id, worktreeId: resolved.worktreeId });
     }
     setPendingReveal(null);
   }, [openBranchWorktreeModal, pendingReveal, repos]);
@@ -435,6 +435,7 @@ export function App() {
               >
                 <LineageGraph
                   repoId={selectedRepo.id}
+                  repoName={selectedRepo.name}
                   worktreeId={selectedWorktree.id}
                   viewingBranch={selectedWorktree.branch}
                   activeEmail={activeProfile?.email ?? ""}
@@ -447,6 +448,14 @@ export function App() {
                     setCommitFocus({ hash, subject });
                     setRailCollapsed(false);
                   }}
+                  onRevealCreatedWorktree={(worktreeId) =>
+                    setPendingReveal(
+                      pendingRevealForCreatedWorktree(
+                        selectedRepo.id,
+                        worktreeId
+                      )
+                    )
+                  }
                   onRevealWorktree={(worktreeId) => {
                     const repo = repos.find((r) =>
                       r.worktrees.some((w) => w.id === worktreeId)

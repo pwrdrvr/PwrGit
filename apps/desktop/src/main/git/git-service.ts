@@ -734,6 +734,63 @@ export async function listWorktrees(
   return ok(parseWorktreeList(checked.value.stdout));
 }
 
+/**
+ * Classify a failure from `git branch` / `git checkout -b`. Both refuse an
+ * existing name and an unusable start point with distinct messages, so the
+ * dialog can point at the field that is actually wrong.
+ */
+function branchCreationError(stderr: string): {
+  kind: "repo";
+  code: string;
+  message: string;
+} {
+  const message = stderr.trim();
+  const code = /already exists/i.test(message)
+    ? "already_exists"
+    : /not a valid (object|branch) name|unknown revision|invalid reference/i.test(
+          message
+        )
+      ? "invalid_start_point"
+      : /is not a valid branch name/i.test(message)
+        ? "invalid_branch"
+        : /overwritten by checkout|local changes|would be overwritten/i.test(
+              message
+            )
+          ? "dirty"
+          : "branch_create_failed";
+  return {
+    kind: "repo",
+    code,
+    message: message !== "" ? message : "Could not create the branch"
+  };
+}
+
+/** Point a new branch at a commit without touching any working copy. */
+export async function createBranchAt(
+  git: GitExec,
+  cwd: string,
+  branch: string,
+  startPoint: string
+): Promise<Result<void>> {
+  const raw = await git(["branch", "--", branch, startPoint], cwd);
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode !== 0) return err(branchCreationError(raw.value.stderr));
+  return ok(undefined);
+}
+
+/** Create a branch at a commit and check it out in this worktree. */
+export async function checkoutNewBranchAt(
+  git: GitExec,
+  cwd: string,
+  branch: string,
+  startPoint: string
+): Promise<Result<void>> {
+  const raw = await git(["checkout", "-b", branch, startPoint], cwd);
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode !== 0) return err(branchCreationError(raw.value.stderr));
+  return ok(undefined);
+}
+
 /** Create a worktree, optionally checking out a new branch. */
 export async function worktreeAdd(
   git: GitExec,

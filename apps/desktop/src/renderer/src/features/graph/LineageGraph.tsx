@@ -16,6 +16,7 @@ import {
   type TooltipAnchor,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
+import { BranchFromCommitDialog } from "./BranchFromCommitDialog";
 import { CommitContextCard } from "./CommitContextCard";
 import { CommitContextMenu } from "./CommitContextMenu";
 import {
@@ -209,6 +210,7 @@ const scrollBehavior = (): ScrollBehavior =>
 
 export function LineageGraph({
   repoId,
+  repoName,
   worktreeId,
   viewingBranch,
   activeEmail,
@@ -218,9 +220,12 @@ export function LineageGraph({
   onToggleCommit,
   onCommitsChange,
   onOpenCommit,
-  onRevealWorktree
+  onRevealWorktree,
+  onRevealCreatedWorktree
 }: {
   repoId: string;
+  /** Repository name, shown when a dialog needs to name what it acts on. */
+  repoName: string;
   worktreeId: string;
   /** Branch checked out in the worktree whose lineage is being viewed. */
   viewingBranch: string;
@@ -236,6 +241,8 @@ export function LineageGraph({
   onOpenCommit: (hash: string, subject: string) => void;
   /** Jump to a worktree from a tip chip's worktree button. */
   onRevealWorktree: (worktreeId: string) => void;
+  /** Select a worktree just created here, once the repo tree lists it. */
+  onRevealCreatedWorktree: (worktreeId: string) => void;
 }) {
   const [data, setData] = useState<LaneGraph | null>(null);
   const [scope, setScope] = useState<Scope>("active");
@@ -246,6 +253,19 @@ export function LineageGraph({
   const [branchesOpen, setBranchesOpen] = useState(false);
   const [hoveredCommit, setHoveredCommit] = useState<string | null>(null);
   const [commitMenu, setCommitMenu] = useState<CommitMenuState | null>(null);
+  // The commit itself, not its hash: the dialog outlives graph reloads (its own
+  // branch:create emits worktree:changed before it returns), and a reload whose
+  // window no longer covers that commit would otherwise unmount the dialog
+  // mid-submit — dropping the success toast, the reveal, and anything typed.
+  const [branchFromCommit, setBranchFromCommit] = useState<Commit | null>(null);
+
+  // ⌘F reaches past the dialog's backdrop, so the selected worktree can change
+  // under an open dialog. Its commit, dirty check and branch list all belong to
+  // the worktree it was opened from — close it rather than let it act on
+  // another one.
+  useEffect(() => {
+    setBranchFromCommit(null);
+  }, [worktreeId]);
   const [commitStats, setCommitStats] = useState<
     Record<string, CommitStats | null>
   >({});
@@ -1073,7 +1093,27 @@ export function LineageGraph({
           onViewChanges={() =>
             onOpenCommit(menuVm.commit.hash, menuVm.commit.subject)
           }
+          onBranchFrom={() => setBranchFromCommit(menuVm.commit)}
           onClose={() => setCommitMenu(null)}
+        />
+      )}
+      {branchFromCommit !== null && (
+        <BranchFromCommitDialog
+          repoId={repoId}
+          repoName={repoName}
+          worktreeId={worktreeId}
+          viewingBranch={viewingBranch}
+          commit={branchFromCommit}
+          now={now}
+          onCreated={(checkedOutWorktreeId) => {
+            if (
+              checkedOutWorktreeId !== null &&
+              checkedOutWorktreeId !== worktreeId
+            ) {
+              onRevealCreatedWorktree(checkedOutWorktreeId);
+            }
+          }}
+          onClose={() => setBranchFromCommit(null)}
         />
       )}
     </>

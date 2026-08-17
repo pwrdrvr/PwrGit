@@ -1,6 +1,27 @@
 import { describe, expect, it } from "vitest";
-import type { RepoSearchHit } from "@pwrgit/shared";
-import { pendingRevealForSearchHit } from "./search-reveal";
+import type { RepoSearchHit, Worktree } from "@pwrgit/shared";
+import {
+  pendingRevealForCreatedWorktree,
+  pendingRevealForSearchHit,
+  resolveWorktreeReveal
+} from "./search-reveal";
+
+const worktree = (id: string, isPrimary = false): Worktree => ({
+  id,
+  repoId: "repo-1",
+  branch: id,
+  path: `/wt/${id}`,
+  dirty: 0,
+  ahead: 0,
+  behind: 0,
+  behindDefault: 0,
+  defaultBranch: "main",
+  mergedIntoDefault: false,
+  divergedFromDefault: false,
+  isDefaultBranch: false,
+  pinned: false,
+  isPrimary
+});
 
 const base = {
   repoId: "repo-1",
@@ -62,5 +83,63 @@ describe("pendingRevealForSearchHit", () => {
       worktreeId: "wt-1",
       branch: null
     });
+  });
+});
+
+describe("resolveWorktreeReveal", () => {
+  const trees = [worktree("main", true), worktree("feature")];
+
+  it("selects the named worktree", () => {
+    expect(
+      resolveWorktreeReveal(
+        { repoId: "repo-1", worktreeId: "feature", branch: null },
+        trees
+      )
+    ).toEqual({ kind: "select", worktreeId: "feature" });
+  });
+
+  it("stands in with the primary when no worktree was named", () => {
+    expect(
+      resolveWorktreeReveal(
+        { repoId: "repo-1", worktreeId: null, branch: null },
+        trees
+      )
+    ).toEqual({ kind: "select", worktreeId: "main" });
+  });
+
+  it("stands in with the primary when a named worktree is gone", () => {
+    expect(
+      resolveWorktreeReveal(
+        { repoId: "repo-1", worktreeId: "removed", branch: null },
+        trees
+      )
+    ).toEqual({ kind: "select", worktreeId: "main" });
+  });
+
+  it("waits for a created worktree instead of selecting the primary", () => {
+    expect(
+      resolveWorktreeReveal(
+        pendingRevealForCreatedWorktree("repo-1", "fresh"),
+        trees
+      )
+    ).toEqual({ kind: "wait" });
+  });
+
+  it("selects the created worktree once the tree lists it", () => {
+    expect(
+      resolveWorktreeReveal(pendingRevealForCreatedWorktree("repo-1", "fresh"), [
+        ...trees,
+        worktree("fresh")
+      ])
+    ).toEqual({ kind: "select", worktreeId: "fresh" });
+  });
+
+  it("has nothing to select in a repo with no worktrees", () => {
+    expect(
+      resolveWorktreeReveal(
+        { repoId: "repo-1", worktreeId: null, branch: null },
+        []
+      )
+    ).toEqual({ kind: "none" });
   });
 });
