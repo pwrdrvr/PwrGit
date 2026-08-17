@@ -2,10 +2,6 @@
 node_modules/
 .pnpm-store/
 
-# configure-nodejs writes its workspace-local Electron/prebuild download caches
-# here when the workflows run with cache-electron enabled.
-.cache/
-
 # Build output
 dist/
 out/

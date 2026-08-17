@@ -23,14 +23,7 @@ jobs:
   # the fan-out below restores instead of each job installing from scratch.
   # The cache key includes runner OS and arch, so Windows needs its own gate —
   # see `windows-install-deps`. Gate and consumers must agree on every
-  # key-forming input (`node-version` major, `working-directory`,
-  # `cache-electron`, …); a mismatch warms a key nobody reads, silently.
-  #
-  # `cache-electron` folds two lifecycle downloads into that same cache: the
-  # Electron runtime that `@electron/get` fetches, and the `prebuild-install`
-  # binaries. A warm pnpm store holds neither, so without it every job still
-  # reaches out to the network during `postinstall` — which for this repo is
-  # `electron-rebuild -f`. Keep the flag on all of them or none.
+  # key-forming input (`node-version` major, `working-directory`, …).
   install-deps:
     name: Install Dependencies
     runs-on: ubuntu-latest
@@ -42,7 +35,6 @@ jobs:
         uses: pwrdrvr/configure-nodejs@v1
         with:
           node-version: 24.x
-          cache-electron: "true"
           lookup-only: "true"
 
   windows-install-deps:
@@ -56,7 +48,6 @@ jobs:
         uses: pwrdrvr/configure-nodejs@v1
         with:
           node-version: 24.x
-          cache-electron: "true"
           lookup-only: "true"
 
   typecheck:
@@ -75,7 +66,6 @@ jobs:
         uses: pwrdrvr/configure-nodejs@v1
         with:
           node-version: 24.x
-          cache-electron: "true"
 
       # One aggregate step on purpose: `pnpm lint` chains the checks
       # cheapest-first (colors, licenses, boundaries, typecheck), so a new
@@ -96,7 +86,6 @@ jobs:
         uses: pwrdrvr/configure-nodejs@v1
         with:
           node-version: 24.x
-          cache-electron: "true"
 
       - name: Build
         run: pnpm run build
@@ -113,7 +102,6 @@ jobs:
         uses: pwrdrvr/configure-nodejs@v1
         with:
           node-version: 24.x
-          cache-electron: "true"
 
       # vitest runs under Node, but the postinstall electron-rebuild leaves
       # better-sqlite3 built for Electron's ABI. Rebuild for Node before the
@@ -139,7 +127,6 @@ jobs:
         uses: pwrdrvr/configure-nodejs@v1
         with:
           node-version: 24.x
-          cache-electron: "true"
 
       - name: Run desktop Electron E2E specs
         # No `playwright install-deps` step: `ubuntu-latest` ships
@@ -175,7 +162,6 @@ jobs:
         uses: pwrdrvr/configure-nodejs@v1
         with:
           node-version: 24.x
-          cache-electron: "true"
 
       # Deliberately NOT `pnpm lint`. This job exists to catch Windows-specific
       # breakage, and most of the lint chain is platform-independent static
@@ -215,7 +201,6 @@ jobs:
         uses: pwrdrvr/configure-nodejs@v1
         with:
           node-version: 24.x
-          cache-electron: "true"
 
       - name: Run desktop Electron E2E specs (Windows)
         # windows-latest provides an interactive desktop session, so (unlike

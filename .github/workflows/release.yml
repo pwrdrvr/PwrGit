@@ -45,7 +45,6 @@ jobs:
         uses: pwrdrvr/configure-nodejs@e1bd1cc1494a20f0ee91dae622b0d2523b6fb53c # v1.4.0
         with:
           node-version: 24.x
-          cache-electron: "true"
 
       - name: Check release metadata
         env:
@@ -192,7 +191,6 @@ jobs:
         uses: pwrdrvr/configure-nodejs@e1bd1cc1494a20f0ee91dae622b0d2523b6fb53c # v1.4.0
         with:
           node-version: 24.x
-          cache-electron: "true"
 
       # Linux distribution is not published yet, but a tag cannot create a
       # release unless the desktop code builds successfully on Linux.
@@ -236,7 +234,6 @@ jobs:
         uses: pwrdrvr/configure-nodejs@e1bd1cc1494a20f0ee91dae622b0d2523b6fb53c # v1.4.0
         with:
           node-version: 24.x
-          cache-electron: "true"
 
       - name: Check release metadata
         if: ${{ github.event_name != 'pull_request' }}
