@@ -24,7 +24,7 @@
   },
   "devDependencies": {
     "@types/node": "24.12.4",
-    "dependency-cruiser": "^18.0.0",
+    "dependency-cruiser": "^18.2.0",
     "jsdom": "^30.0.1",
     "typescript": "^6.0.2",
     "vitest": "^4.1.10"
