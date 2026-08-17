@@ -359,7 +359,7 @@ export function RepoRefsSections({
             {!loading && refs !== null && refs.remotes.length === 0 && (
               <div className="ref-section__empty">No remotes configured.</div>
             )}
-            {refs !== null && refs.remotes.length > 0 && (
+            {refs !== null && (
               <button
                 className="ref-view-all"
                 onClick={(event) => {
