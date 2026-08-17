@@ -3,13 +3,21 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import { err, ok, type RemoteDivergence, type Result } from "@pwrgit/shared";
+import {
+  err,
+  ok,
+  REMOTE_BRANCH_PAGE_MAX,
+  REMOTE_BRANCH_PREVIEW,
+  type RemoteDivergence,
+  type Result
+} from "@pwrgit/shared";
 import type { GitExec, GitOutput } from "./dugite";
 import {
   addRemote,
   fetchRemote,
   inspectRemoteReset,
   inspectRemoteDivergence,
+  listRemoteBranchPage,
   listRepoRefs,
   planPushRefs,
   pullFastForward,
@@ -54,6 +62,25 @@ function commit(dir: string, file: string, msg: string): void {
   writeFileSync(join(dir, file), `${file}\n`);
   git(dir, ["add", "."]);
   git(dir, ["commit", "-m", msg]);
+}
+/**
+ * Commit on a fixed date (`YYYY-MM-DD`). `for-each-ref --sort=-committerdate`
+ * has no defined tie-break within one second, so any test asserting ref order
+ * has to pin the dates rather than race the wall clock.
+ */
+function commitAt(dir: string, file: string, msg: string, date: string): void {
+  writeFileSync(join(dir, file), `${file}\n`);
+  git(dir, ["add", "."]);
+  const stamp = `${date}T12:00:00Z`;
+  execFileSync("git", ["commit", "-m", msg], {
+    cwd: dir,
+    stdio: "ignore",
+    env: {
+      ...process.env,
+      GIT_AUTHOR_DATE: stamp,
+      GIT_COMMITTER_DATE: stamp
+    }
+  });
 }
 
 function recoverySnapshot(
@@ -1189,4 +1216,323 @@ describe("remote ops (bare-remote fixture)", () => {
       if (!result.ok) expect(result.error.code).toBe("invalid_remote_ref");
     }
   }, 15_000);
+});
+
+/**
+ * A repository with more remote-tracking branches than any surface renders at
+ * once — the shape that made `repo:refs` ship a megabyte of JSON. `origin`
+ * carries twelve branches with strictly increasing committer dates so ordering
+ * is assertable; `fork` carries two, so scoping is too.
+ */
+function makePagedRemoteFixture(): { local: string; names: string[] } {
+  const root = mkdtempSync(join(tmpdir(), "pwrgit-paged-refs-"));
+  for (const remote of ["origin", "fork"]) {
+    git(root, ["init", "--bare", "-b", "main", `${remote}.git`]);
+  }
+  const local = join(root, "local");
+  git(root, ["init", "-b", "main", "local"]);
+  configure(local, "local");
+  // Every commit here gets a pinned date. Leaving `main`'s to the wall clock
+  // would make it the newest ref in the repository and quietly reorder the
+  // listings these tests assert on.
+  commitAt(local, "base.txt", "base", "2023-01-01");
+  for (const remote of ["origin", "fork"]) {
+    git(local, ["remote", "add", remote, join(root, `${remote}.git`)]);
+  }
+  git(local, ["push", "origin", "main"]);
+
+  // Newest last, so the expected order is the reverse of this list.
+  const names: string[] = [];
+  for (let index = 1; index <= 12; index += 1) {
+    const name = `feature/page-${String(index).padStart(2, "0")}`;
+    names.push(name);
+    git(local, ["switch", "-c", name, "main"]);
+    commitAt(
+      local,
+      `${index}.txt`,
+      `add widget number ${index}`,
+      `2024-01-${String(index).padStart(2, "0")}`
+    );
+    git(local, ["push", "origin", name]);
+  }
+  git(local, ["switch", "main"]);
+  git(local, ["push", "fork", `${names[0]}:${names[0]}`]);
+  git(local, ["push", "fork", `${names[1]}:${names[1]}`]);
+  // A branch whose last segment is HEAD — legal, and not the symbolic pointer.
+  git(local, ["push", "fork", `${names[0]}:spike/HEAD`]);
+
+  // A remote whose OWN name contains a slash. git accepts this, and it makes
+  // `refs/remotes/team/fork/<branch>` ambiguous to anything that splits on the
+  // first slash.
+  git(root, ["init", "--bare", "-b", "main", "team-fork.git"]);
+  git(local, ["remote", "add", "team/fork", join(root, "team-fork.git")]);
+  git(local, ["push", "team/fork", "main:main"]);
+  git(local, ["push", "team/fork", `${names[0]}:${names[0]}`]);
+
+  // Every local feature branch is deleted, so `refs/remotes` is the only source.
+  for (const name of names) git(local, ["branch", "-D", name]);
+  git(local, ["fetch", "--all"]);
+  git(local, ["remote", "set-head", "origin", "main"]);
+  git(local, ["remote", "set-head", "team/fork", "main"]);
+  return { local, names };
+}
+
+describe("listRemoteBranchPage (paged remote refs)", () => {
+  let fixture: { local: string; names: string[] };
+
+  beforeAll(() => {
+    fixture = makePagedRemoteFixture();
+  }, 60_000);
+
+  it("returns one page and the full match count, newest commit first", async () => {
+    const page = await listRemoteBranchPage(systemGit, fixture.local, {
+      remote: "origin",
+      limit: 5
+    });
+    expect(page.ok).toBe(true);
+    if (!page.ok) return;
+    // 12 features + main, and NOT origin/HEAD.
+    expect(page.value.total).toBe(13);
+    expect(page.value.rows).toHaveLength(5);
+    expect(page.value.rows.map((row) => row.name)).toEqual([
+      "feature/page-12",
+      "feature/page-11",
+      "feature/page-10",
+      "feature/page-09",
+      "feature/page-08"
+    ]);
+    expect(page.value.rows[0]).toMatchObject({
+      qualifiedName: "origin/feature/page-12",
+      fullName: "refs/remotes/origin/feature/page-12",
+      subject: "add widget number 12"
+    });
+  }, 20_000);
+
+  it("walks the whole remote through offsets without repeating a ref", async () => {
+    const seen: string[] = [];
+    for (let offset = 0; offset < 13; offset += 5) {
+      const page = await listRemoteBranchPage(systemGit, fixture.local, {
+        remote: "origin",
+        offset,
+        limit: 5
+      });
+      expect(page.ok).toBe(true);
+      if (!page.ok) return;
+      seen.push(...page.value.rows.map((row) => row.fullName));
+    }
+    expect(seen).toHaveLength(13);
+    expect(new Set(seen).size).toBe(13);
+    // Past the end is empty, not an error and not a wrap-around.
+    const past = await listRemoteBranchPage(systemGit, fixture.local, {
+      remote: "origin",
+      offset: 99
+    });
+    expect(past.ok).toBe(true);
+    if (past.ok) {
+      expect(past.value.rows).toEqual([]);
+      expect(past.value.total).toBe(13);
+    }
+  }, 20_000);
+
+  it("filters on qualified name and on commit subject", async () => {
+    const byName = await listRemoteBranchPage(systemGit, fixture.local, {
+      remote: "origin",
+      query: "page-07"
+    });
+    expect(byName.ok).toBe(true);
+    if (byName.ok) {
+      expect(byName.value.total).toBe(1);
+      expect(byName.value.rows[0]?.name).toBe("feature/page-07");
+    }
+
+    // The subject is the only place "widget number 3" appears.
+    const bySubject = await listRemoteBranchPage(systemGit, fixture.local, {
+      remote: "origin",
+      query: "widget number 3"
+    });
+    expect(bySubject.ok).toBe(true);
+    if (bySubject.ok) {
+      expect(bySubject.value.rows.map((row) => row.name)).toEqual([
+        "feature/page-03"
+      ]);
+    }
+
+    const caseInsensitive = await listRemoteBranchPage(systemGit, fixture.local, {
+      remote: "origin",
+      query: "FEATURE/PAGE-05"
+    });
+    expect(caseInsensitive.ok).toBe(true);
+    if (caseInsensitive.ok) expect(caseInsensitive.value.total).toBe(1);
+
+    const miss = await listRemoteBranchPage(systemGit, fixture.local, {
+      remote: "origin",
+      query: "no-such-branch"
+    });
+    expect(miss.ok).toBe(true);
+    if (miss.ok) {
+      expect(miss.value.total).toBe(0);
+      expect(miss.value.rows).toEqual([]);
+    }
+  }, 20_000);
+
+  it("scopes to one remote, and searches every remote when unscoped", async () => {
+    const fork = await listRemoteBranchPage(systemGit, fixture.local, {
+      remote: "fork"
+    });
+    expect(fork.ok).toBe(true);
+    if (fork.ok) {
+      // page-01, page-02, spike/HEAD.
+      expect(fork.value.total).toBe(3);
+      expect(fork.value.rows.every((row) => row.qualifiedName.startsWith("fork/"))).toBe(
+        true
+      );
+    }
+
+    const all = await listRemoteBranchPage(systemGit, fixture.local, {});
+    expect(all.ok).toBe(true);
+    if (all.ok) {
+      // 13 on origin + 3 on fork + 2 on team/fork, every symbolic HEAD excluded.
+      expect(all.value.total).toBe(18);
+      expect(
+        all.value.rows.some((row) => row.qualifiedName === "fork/feature/page-01")
+      ).toBe(true);
+    }
+  }, 20_000);
+
+  it("never returns the remote's symbolic HEAD as a branch", async () => {
+    // The fixture set origin/HEAD, so the ref exists and must be filtered out.
+    expect(gitOut(fixture.local, ["symbolic-ref", "refs/remotes/origin/HEAD"])).toBe(
+      "refs/remotes/origin/main"
+    );
+    const page = await listRemoteBranchPage(systemGit, fixture.local, {
+      remote: "origin",
+      limit: 200
+    });
+    expect(page.ok).toBe(true);
+    if (!page.ok) return;
+    expect(page.value.rows.some((row) => row.name === "HEAD")).toBe(false);
+    expect(
+      page.value.rows.some((row) => row.fullName.endsWith("/HEAD"))
+    ).toBe(false);
+  }, 20_000);
+
+  it("accepts only names the repository actually has as remotes", async () => {
+    // Membership in the configured remotes is the guard, so an option-looking
+    // argument can never reach `for-each-ref` argv.
+    for (const invalid of ["--sort=-refname", "-x", "origin/main", "a b", "nope"]) {
+      const result = await listRemoteBranchPage(systemGit, fixture.local, {
+        remote: invalid
+      });
+      expect(result.ok, invalid).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe("invalid_remote");
+    }
+  }, 20_000);
+
+  it("handles a remote whose own name contains a slash", async () => {
+    // `git remote add team/fork` is legal, and yields refs shaped
+    // `refs/remotes/team/fork/<branch>`. Splitting on the first slash would
+    // read that as remote "team", branch "fork/<branch>".
+    const scoped = await listRemoteBranchPage(systemGit, fixture.local, {
+      remote: "team/fork"
+    });
+    expect(scoped.ok).toBe(true);
+    if (!scoped.ok) return;
+    // main + feature/page-01, newest commit first, and NOT team/fork/HEAD.
+    expect(scoped.value.rows.map((row) => row.name)).toEqual([
+      "feature/page-01",
+      "main"
+    ]);
+    expect(scoped.value.rows[0]).toMatchObject({
+      name: "feature/page-01",
+      qualifiedName: "team/fork/feature/page-01",
+      fullName: "refs/remotes/team/fork/feature/page-01"
+    });
+
+    // Unscoped has to reach the same split without being told the remote.
+    const all = await listRemoteBranchPage(systemGit, fixture.local, {
+      query: "team/fork",
+      limit: REMOTE_BRANCH_PAGE_MAX
+    });
+    expect(all.ok).toBe(true);
+    if (!all.ok) return;
+    expect(all.value.rows.map((row) => row.name)).toEqual([
+      "feature/page-01",
+      "main"
+    ]);
+
+    // …including its symbolic HEAD, which is `team/fork/HEAD` and not a branch.
+    expect(
+      gitOut(fixture.local, ["symbolic-ref", "refs/remotes/team/fork/HEAD"])
+    ).toBe("refs/remotes/team/fork/main");
+    const everything = await listRemoteBranchPage(systemGit, fixture.local, {
+      remote: "team/fork",
+      limit: REMOTE_BRANCH_PAGE_MAX
+    });
+    expect(everything.ok).toBe(true);
+    if (everything.ok) {
+      expect(everything.value.rows.some((row) => row.name === "HEAD")).toBe(false);
+      expect(
+        everything.value.rows.some((row) => row.fullName.endsWith("/HEAD"))
+      ).toBe(false);
+    }
+  }, 20_000);
+
+  it("treats a branch named feature/HEAD as a branch, in both counts", async () => {
+    // Only the ref directly at `<remote>/HEAD` is the symbolic pointer. A
+    // branch whose last segment is HEAD is an ordinary branch, and the sidebar
+    // count and the paged total have to agree about it.
+    const page = await listRemoteBranchPage(systemGit, fixture.local, {
+      remote: "fork",
+      limit: REMOTE_BRANCH_PAGE_MAX
+    });
+    expect(page.ok).toBe(true);
+    if (!page.ok) return;
+    expect(page.value.rows.some((row) => row.name === "spike/HEAD")).toBe(true);
+
+    const refs = await listRepoRefs(systemGit, fixture.local, new Map());
+    expect(refs.ok).toBe(true);
+    if (!refs.ok) return;
+    const fork = refs.value.remotes.find((remote) => remote.name === "fork");
+    expect(fork?.branchCount).toBe(page.value.total);
+  }, 20_000);
+
+  it("caps an oversized limit instead of honouring it", async () => {
+    const page = await listRemoteBranchPage(systemGit, fixture.local, {
+      limit: 10_000
+    });
+    expect(page.ok).toBe(true);
+    if (!page.ok) return;
+    expect(page.value.rows.length).toBeLessThanOrEqual(REMOTE_BRANCH_PAGE_MAX);
+  }, 20_000);
+
+  it("keeps repo:refs bounded: a preview per remote, plus a true total", async () => {
+    const refs = await listRepoRefs(systemGit, fixture.local, new Map());
+    expect(refs.ok).toBe(true);
+    if (!refs.ok) return;
+    const origin = refs.value.remotes.find((remote) => remote.name === "origin");
+    expect(origin).toBeDefined();
+    if (origin === undefined) return;
+    // The count is the whole remote; the payload is only the preview.
+    expect(origin.branchCount).toBe(13);
+    expect(origin.previewBranches).toHaveLength(REMOTE_BRANCH_PREVIEW);
+    expect(origin.previewBranches.map((branch) => branch.name)).toEqual([
+      "feature/page-12",
+      "feature/page-11",
+      "feature/page-10",
+      "feature/page-09",
+      "feature/page-08",
+      "feature/page-07"
+    ]);
+    // The preview is a prefix of the paged listing, not a separate ordering.
+    const page = await listRemoteBranchPage(systemGit, fixture.local, {
+      remote: "origin",
+      limit: REMOTE_BRANCH_PREVIEW
+    });
+    expect(page.ok).toBe(true);
+    if (page.ok) {
+      expect(page.value.rows.map((row) => row.fullName)).toEqual(
+        origin.previewBranches.map((branch) => branch.fullName)
+      );
+    }
+  }, 20_000);
 });

@@ -130,7 +130,23 @@ export type RemoteSummary = {
   /** Branch name relative to the remote, when its symbolic HEAD is known. */
   defaultBranch?: string;
   skipFetchAll: boolean;
-  branches: RemoteBranchSummary[];
+  /**
+   * The newest `REMOTE_BRANCH_PREVIEW` branches by committer date — enough for
+   * the sidebar disclosure, and deliberately NOT the whole set. A fetched fork
+   * network runs to thousands of remote-tracking refs (openclaw: 4,466), which
+   * is megabytes of IPC to hand a surface that renders six rows. Page the rest
+   * through `repo:remoteBranches`.
+   */
+  previewBranches: RemoteBranchSummary[];
+  /** Total branches on this remote, of which `previewBranches` is a prefix. */
+  branchCount: number;
+};
+
+/** One page of `repo:remoteBranches`, newest commit first. */
+export type RemoteBranchPage = {
+  rows: RemoteBranchSummary[];
+  /** Matches for the query across the whole remote, not just this page. */
+  total: number;
 };
 
 /** Reviewed migration from a GitHub HTTPS fetch URL to its SSH equivalent. */

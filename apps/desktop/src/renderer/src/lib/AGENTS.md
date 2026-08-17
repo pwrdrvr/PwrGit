@@ -53,3 +53,28 @@ card. A sweep satisfies neither, so the extra path costs no suppression.
 `useViewportTooltip` handles Escape (WCAG 2.1 SC 1.4.13) and returns focus to
 the trigger when the user had tabbed into the card. Anything that renders its
 own hover surface outside that hook owes the same.
+
+## Remote branches are paged — never list them whole
+
+`repo:refs` returns every **local** branch, but only a six-row
+`previewBranches` per remote plus a `branchCount`. It is not the whole
+repository, and it must not become that again: on a fetched fork network
+(openclaw, 4,470 remote-tracking refs) shipping them all was 1.5 MB of JSON per
+call, held in renderer state, and — in the reset and push dialogs — one
+`<option>` per ref.
+
+Any surface that browses or picks from more than the preview pulls pages
+through `useRemoteBranchSearch` (→ `repo:remoteBranches`), which debounces the
+query, filters in the main process, and returns `{ rows, total }`. Two rules
+that fall out of that:
+
+- **Say what you truncated.** A page that stops at 50 of 4,466 with no marker
+  reads as the whole remote — render `RefsPageFooter` (or the picker's own
+  status line) so the count is visible.
+- **Filter in main, not in the page.** Filtering only the rows already fetched
+  silently hides matches that sort past the first page.
+
+`BranchRefPicker` is the shared control for "pick one ref" (reset-to-remote,
+push source). It stays a sized `<select>` — a native listbox already has the
+keyboard and screen-reader model — and note that a sized select exposes role
+**listbox**, not combobox, which is what Playwright specs must query.

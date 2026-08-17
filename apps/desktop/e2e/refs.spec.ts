@@ -16,6 +16,33 @@ function addRemoteOnlyBranch(
   box.git(repo.path, "branch", "-D", branch);
 }
 
+/**
+ * Push `count` remote-only branches in two git invocations rather than three
+ * per branch — enough of them to exceed one page, without spending the whole
+ * test budget on process spawns.
+ */
+function addManyRemoteOnlyBranches(
+  box: GitSandbox,
+  repo: ReturnType<GitSandbox["makeRepoBehindRemote"]>,
+  count: number,
+  prefix = "bulk"
+): string[] {
+  const names: string[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const name = `${prefix}/branch-${String(index).padStart(3, "0")}`;
+    names.push(name);
+    repo.createBranch(name);
+  }
+  box.git(
+    repo.path,
+    "push",
+    "origin",
+    `refs/heads/${prefix}/*:refs/heads/${prefix}/*`
+  );
+  for (const name of names) box.git(repo.path, "branch", "-D", name);
+  return names;
+}
+
 test.afterEach(async () => {
   if (handle !== null) {
     await handle.cleanup();
@@ -247,11 +274,11 @@ test("browses local branches and nested remotes, then pushes to a test target", 
     name: "Push refsrepo branch to remotes"
   });
   await expect(push).toBeVisible();
-  await push.getByRole("combobox", { name: "Source" }).selectOption({
-    label: "main · Local"
-  });
+  await push.getByRole("listbox", { name: "Source" })
+    .selectOption("refs/heads/main");
   await push.locator(".refs-destination", { hasText: "mac-tests" }).click();
-  await push.locator(".refs-field input").fill("playwright/main");
+  await push.getByRole("textbox", { name: "Destination branch" })
+    .fill("playwright/main");
   await push.getByRole("button", { name: "Review push" }).click();
   await expect(push.getByText("Will create")).toBeVisible({ timeout: 20_000 });
   await expect(push.getByText(/Push uses a lease/)).toBeVisible();
@@ -277,11 +304,11 @@ test("browses local branches and nested remotes, then pushes to a test target", 
   const equalPush = window.getByRole("dialog", {
     name: "Push refsrepo branch to remotes"
   });
-  await equalPush.getByRole("combobox", { name: "Source" }).selectOption({
-    label: "main · Local"
-  });
+  await equalPush.getByRole("listbox", { name: "Source" })
+    .selectOption("refs/heads/main");
   await equalPush.locator(".refs-destination", { hasText: "mac-tests" }).click();
-  await equalPush.locator(".refs-field input").fill("playwright/main");
+  await equalPush.getByRole("textbox", { name: "Destination branch" })
+    .fill("playwright/main");
   await equalPush.getByRole("button", { name: "Review push" }).click();
   await expect(equalPush.getByText("Up to date")).toBeVisible({ timeout: 20_000 });
   await expect(
@@ -315,4 +342,130 @@ test("browses local branches and nested remotes, then pushes to a test target", 
   await expect(
     localOnly.getByTitle("Show checked-out worktree")
   ).toBeVisible({ timeout: 20_000 });
+});
+
+test("bounds the remote branch preview and pages the rest on demand", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepoBehindRemote("many-refs");
+  // 60 bulk branches + main = 61 remote-tracking refs, so the sidebar preview
+  // (6) and the first page (50) both fall short of the whole remote.
+  addManyRemoteOnlyBranches(box, repo, 60);
+
+  handle = await launchApp({ worktreeRoot: box.worktreeRoot });
+  const { window } = handle;
+  await addRootAndExpand(window, handle, box, "many-refs");
+
+  await window.getByRole("button", { name: /^Remotes/ }).click();
+  await window.getByRole("button", { name: /^origin/ }).click();
+
+  // The disclosure renders a preview, not the remote: six rows and an honest
+  // count, rather than 61 rows nobody asked for.
+  await expect(window.locator(".ref-remote-branch-row")).toHaveCount(6);
+  const viewAll = window.getByRole("button", {
+    name: "View all 61 branches on origin…"
+  });
+  await expect(viewAll).toBeVisible();
+
+  await viewAll.click();
+  const browser = window.getByRole("dialog", {
+    name: "many-refs branches and remotes"
+  });
+  const card = browser.locator(".refs-remote-card", { hasText: "origin" });
+  await expect(card).toContainText("61 branches");
+
+  // One page, and it says so rather than trailing off at 50 silently.
+  const footer = card.locator(".refs-page-footer");
+  await expect(footer).toContainText("Showing 50 of 61");
+  await expect(card.locator(".refs-remote-branch")).toHaveCount(50);
+
+  await footer.getByRole("button", { name: "Load more" }).click();
+  await expect(footer).toContainText("Showing 61 of 61");
+  await expect(card.locator(".refs-remote-branch")).toHaveCount(61);
+  await expect(
+    footer.getByRole("button", { name: "Load more" })
+  ).toHaveCount(0);
+});
+
+test("filters remote branches in the main process rather than in the page", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepoBehindRemote("filter-refs");
+  addManyRemoteOnlyBranches(box, repo, 60);
+  addRemoteOnlyBranch(box, repo, "releases/1.0");
+
+  handle = await launchApp({ worktreeRoot: box.worktreeRoot });
+  const { window } = handle;
+  await addRootAndExpand(window, handle, box, "filter-refs");
+
+  await window.getByRole("button", { name: /^Remotes/ }).click();
+  await window
+    .getByRole("button", { name: "Manage remotes and remote branches…" })
+    .click();
+  const browser = window.getByRole("dialog", {
+    name: "filter-refs branches and remotes"
+  });
+  const card = browser.locator(".refs-remote-card", { hasText: "origin" });
+  await expect(card.locator(".refs-page-footer")).toContainText("Showing 50 of 62");
+
+  // A filter narrows the whole remote, not just the rows already fetched —
+  // branch-057 sorts well past the first page.
+  await browser.getByPlaceholder("Filter remotes…").fill("branch-057");
+  await expect(card.locator(".refs-remote-branch")).toHaveCount(1);
+  await expect(card).toContainText("bulk/branch-057");
+
+  await browser.getByPlaceholder("Filter remotes…").fill("releases/1.0");
+  await expect(card.locator(".refs-remote-branch")).toHaveCount(1);
+  await expect(card).toContainText("releases/1.0");
+
+  await browser.getByPlaceholder("Filter remotes…").fill("no-such-branch");
+  await expect(card.locator(".refs-remote-branch")).toHaveCount(0);
+  await expect(card).toContainText("No fetched branches match this filter.");
+});
+
+test("the push source picker filters instead of listing every remote branch", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepoBehindRemote("push-picker");
+  addManyRemoteOnlyBranches(box, repo, 60);
+
+  handle = await launchApp({ worktreeRoot: box.worktreeRoot });
+  const { window } = handle;
+  await addRootAndExpand(window, handle, box, "push-picker");
+
+  await window.getByRole("button", { name: /^Remotes/ }).click();
+  await window
+    .getByRole("button", { name: "Manage remotes and remote branches…" })
+    .click();
+  const browser = window.getByRole("dialog", {
+    name: "push-picker branches and remotes"
+  });
+  await browser.getByRole("button", { name: "Push to remotes…" }).click();
+
+  const push = window.getByRole("dialog", {
+    name: "Push push-picker branch to remotes"
+  });
+  const picker = push.locator(".branch-picker");
+  // The source control is a page plus the local branches, never 61 options.
+  await expect(picker.locator("option")).toHaveCount(51);
+  await expect(picker.locator(".branch-picker__status")).toContainText(
+    "Showing 51 of 62"
+  );
+
+  await picker.getByPlaceholder("Filter by name or commit subject").fill(
+    "branch-042"
+  );
+  // Two options, not one: the match, plus the branch that was already selected.
+  // A filter that silently dropped the selection would let a stray keystroke
+  // repoint the push without the user seeing it change.
+  await expect(picker.locator("option")).toHaveCount(2);
+  await expect(picker.locator("option").nth(0)).toContainText("main");
+  await expect(picker.locator("option").nth(0)).toContainText("(selected)");
+  await expect(picker.locator("option").nth(1)).toContainText(
+    "origin/bulk/branch-042"
+  );
+  // The pinned selection is not counted as a match.
+  await expect(picker.locator(".branch-picker__status")).toContainText(
+    "Showing 1 of 1"
+  );
 });

@@ -266,7 +266,7 @@ export function RepoRefsSections({
                           ? "default"
                           : remote.name === "upstream"
                             ? "upstream"
-                            : `${remote.branches.length} refs`}
+                            : `${remote.branchCount} refs`}
                       </small>
                     </button>
                     <button
@@ -287,7 +287,7 @@ export function RepoRefsSections({
                   </div>
                   {open && (
                     <div className="ref-remote__branches">
-                      {remote.branches.slice(0, 6).map((branch) => {
+                      {remote.previewBranches.map((branch) => {
                         const local = localBranchForRemote(refs, branch);
                         const checkedOutId = local?.checkedOutWorktreeIds[0];
                         return (
@@ -347,8 +347,22 @@ export function RepoRefsSections({
                           </div>
                         );
                       })}
-                      {remote.branches.length === 0 && (
+                      {remote.branchCount === 0 && (
                         <div className="ref-section__empty">No fetched branches.</div>
+                      )}
+                      {/* The preview is the newest handful, not the whole
+                          remote — say so, rather than letting six rows read as
+                          "this remote has six branches". */}
+                      {remote.branchCount > remote.previewBranches.length && (
+                        <button
+                          className="ref-view-all"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setBrowser("remotes");
+                          }}
+                        >
+                          View all {remote.branchCount} branches on {remote.name}…
+                        </button>
                       )}
                     </div>
                   )}

@@ -10,6 +10,10 @@ import { shortWhen } from "../graph/graph-view";
 import { confirmDialog } from "../shell/dialogs";
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast } from "../../lib/toast";
+import {
+  useRemoteBranchSearch,
+  type RemoteBranchSearch
+} from "../../lib/useRemoteBranchSearch";
 import { CopyTarget } from "../shell/CopyTarget";
 import { PushRefsDialog } from "./PushRefsDialog";
 import { RemoteEditorDialog } from "./RemoteEditorDialog";
@@ -42,6 +46,107 @@ type BrowserBranch =
   | { kind: "local"; branch: LocalBranchSummary }
   | { kind: "remote"; branch: RemoteBranchSummary };
 
+/**
+ * "Showing X of Y" plus the control that extends the page.
+ *
+ * Silent truncation is the failure mode worth designing against here: a list
+ * that stops at 50 of 4,466 with no marker reads as the whole remote.
+ */
+function RefsPageFooter({
+  shown,
+  total,
+  search
+}: {
+  shown: number;
+  total: number;
+  search: RemoteBranchSearch;
+}) {
+  if (search.error !== null) {
+    return <div className="refs-page-footer is-error">{search.error}</div>;
+  }
+  if (search.loading && shown === 0) {
+    return <div className="refs-page-footer">Loading branches…</div>;
+  }
+  if (total === 0) return null;
+  return (
+    <div className="refs-page-footer">
+      <span>
+        Showing {shown} of {total}
+      </span>
+      {search.hasMore && (
+        <button
+          className="refs-row-action"
+          disabled={search.loading}
+          onClick={() => search.loadMore()}
+        >
+          {search.loading ? "Loading…" : "Load more"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** One remote's branches, paged rather than listed whole. */
+function RemoteBranchList({
+  repoId,
+  remote,
+  query,
+  now,
+  refs,
+  onPick
+}: {
+  repoId: string;
+  remote: string;
+  query: string;
+  now: number;
+  refs: RepoRefs;
+  onPick: (branch: RemoteBranchSummary) => void;
+}) {
+  const search = useRemoteBranchSearch({ repoId, remote, query });
+  return (
+    <div className="refs-remote-branches">
+      {search.rows.map((branch) => {
+        const local = localBranchForRemote(refs, branch);
+        const checkedOut = (local?.checkedOutWorktreeIds.length ?? 0) > 0;
+        return (
+          <div className="refs-remote-branch" key={branch.fullName}>
+            <span className="refs-branch-icon">⑂</span>
+            <div>
+              <CopyTarget
+                value={branch.name}
+                label={`Copy branch name ${branch.name}`}
+                hint={`${branch.qualifiedName}\nClick to copy branch name`}
+                className="refs-copyable-name copyable"
+              >
+                <strong>{branch.name}</strong>
+              </CopyTarget>
+              {branch.subject !== undefined && <small>{branch.subject}</small>}
+            </div>
+            <span className="refs-table__muted">
+              {branch.lastCommitAt === undefined
+                ? "—"
+                : shortWhen(branch.lastCommitAt, now)}
+            </span>
+            <button className="refs-row-action" onClick={() => onPick(branch)}>
+              {checkedOut ? "Show worktree" : "New worktree"}
+            </button>
+          </div>
+        );
+      })}
+      {search.total === 0 && !search.loading && (
+        <div className="refs-browser__empty">
+          No fetched branches match this filter.
+        </div>
+      )}
+      <RefsPageFooter
+        shown={search.rows.length}
+        total={search.total}
+        search={search}
+      />
+    </div>
+  );
+}
+
 export function RepoRefsModal({
   repo,
   refs,
@@ -72,54 +177,46 @@ export function RepoRefsModal({
     null
   );
   const q = query.trim().toLowerCase();
-  const allBranches = useMemo<BrowserBranch[]>(() => {
-    const localNames = new Set(refs.branches.map((branch) => branch.name));
-    return [
-      ...refs.branches.map((branch) => ({ kind: "local" as const, branch })),
-      ...refs.remotes.flatMap((remote) =>
-        remote.branches
-          .filter((branch) => !localNames.has(branch.name))
-          .map((branch) => ({ kind: "remote" as const, branch }))
-      )
-    ];
-  }, [refs]);
-  const branches = useMemo(
+  // Locals arrive whole on `repo:refs` and are bounded in practice, so they
+  // still filter here. Remote branches are not: they page in from main.
+  const localMatches = useMemo<BrowserBranch[]>(
     () =>
-      q === ""
-        ? allBranches
-        : allBranches.filter(({ kind, branch }) =>
-            (kind === "local"
-              ? `${branch.name} ${branch.upstream ?? ""} ${branch.subject ?? ""}`
-              : `${branch.name} ${branch.qualifiedName} ${branch.subject ?? ""}`
-            )
+      refs.branches
+        .filter(
+          (branch) =>
+            q === "" ||
+            `${branch.name} ${branch.upstream ?? ""} ${branch.subject ?? ""}`
               .toLowerCase()
               .includes(q)
-          ),
-    [allBranches, q]
+        )
+        .map((branch) => ({ kind: "local" as const, branch })),
+    [q, refs.branches]
   );
-  const remotes = useMemo(
+  const localNames = useMemo(
+    () => new Set(refs.branches.map((branch) => branch.name)),
+    [refs.branches]
+  );
+  const remoteSearch = useRemoteBranchSearch({
+    repoId: repo.id,
+    query,
+    enabled: tab === "branches"
+  });
+  // A remote branch that shadows a local one is still one branch to the user,
+  // so it is dropped — per page, since that is the scope we have.
+  const remoteMatches = useMemo<BrowserBranch[]>(
     () =>
-      refs.remotes
-        .map((remote) => ({
-          ...remote,
-          branches:
-            q === ""
-              ? remote.branches
-              : remote.branches.filter((branch) =>
-                  `${branch.qualifiedName} ${branch.subject ?? ""}`
-                    .toLowerCase()
-                    .includes(q)
-                )
-        }))
-        .filter(
-          (remote) =>
-            q === "" ||
-            remote.name.toLowerCase().includes(q) ||
-            remote.fetchUrl.toLowerCase().includes(q) ||
-            remote.branches.length > 0
-        ),
-    [q, refs.remotes]
+      remoteSearch.rows
+        .filter((branch) => !localNames.has(branch.name))
+        .map((branch) => ({ kind: "remote" as const, branch })),
+    [localNames, remoteSearch.rows]
   );
+  const branches = useMemo(
+    () => [...localMatches, ...remoteMatches],
+    [localMatches, remoteMatches]
+  );
+  const branchTabCount =
+    refs.branches.length +
+    refs.remotes.reduce((total, remote) => total + remote.branchCount, 0);
 
   const createRemoteWorktree = (branch: RemoteBranchSummary): void => {
     const local = localBranchForRemote(refs, branch);
@@ -192,7 +289,7 @@ export function RepoRefsModal({
               className={tab === "branches" ? "is-active" : ""}
               onClick={() => setTab("branches")}
             >
-              Branches <span>{allBranches.length}</span>
+              Branches <span>{branchTabCount}</span>
             </button>
             <button
               className={tab === "remotes" ? "is-active" : ""}
@@ -338,15 +435,25 @@ export function RepoRefsModal({
                   </div>
                 );
               })}
-              {branches.length === 0 && (
+              {branches.length === 0 && !remoteSearch.loading && (
                 <div className="refs-browser__empty">No matching branches.</div>
               )}
+              {/* Count fetched rows, not rendered ones: a remote branch that
+                  shadows a local one is still represented on screen — by the
+                  local row it was folded into. Counting rendered rows instead
+                  would leave the footer permanently short of its total with no
+                  "Load more" to close the gap. */}
+              <RefsPageFooter
+                shown={localMatches.length + remoteSearch.rows.length}
+                total={localMatches.length + remoteSearch.total}
+                search={remoteSearch}
+              />
             </div>
           )}
 
           {tab === "remotes" && (
             <div className="refs-remotes">
-              {remotes.map((remote) => (
+              {refs.remotes.map((remote) => (
                 <section className="refs-remote-card" key={remote.name}>
                   <div className="refs-remote-card__head">
                     <div>
@@ -360,7 +467,7 @@ export function RepoRefsModal({
                       </span>
                     </div>
                     <div className="refs-remote-card__actions">
-                      <span>{remote.branches.length} branches</span>
+                      <span>{remote.branchCount} branches</span>
                       <button onClick={() => setRemoteEditor(remote)}>Edit</button>
                       <button
                         className="is-danger"
@@ -378,51 +485,18 @@ export function RepoRefsModal({
                     <span>Default</span>
                     <code>{remote.defaultBranch ?? "Unknown"}</code>
                   </div>
-                  <div className="refs-remote-branches">
-                    {remote.branches.map((branch) => {
-                      const local = localBranchForRemote(refs, branch);
-                      const checkedOut =
-                        (local?.checkedOutWorktreeIds.length ?? 0) > 0;
-                      return (
-                        <div className="refs-remote-branch" key={branch.fullName}>
-                          <span className="refs-branch-icon">⑂</span>
-                          <div>
-                            <CopyTarget
-                              value={branch.name}
-                              label={`Copy branch name ${branch.name}`}
-                              hint={`${branch.qualifiedName}\nClick to copy branch name`}
-                              className="refs-copyable-name copyable"
-                            >
-                              <strong>{branch.name}</strong>
-                            </CopyTarget>
-                            {branch.subject !== undefined && (
-                              <small>{branch.subject}</small>
-                            )}
-                          </div>
-                          <span className="refs-table__muted">
-                            {branch.lastCommitAt === undefined
-                              ? "—"
-                              : shortWhen(branch.lastCommitAt, now)}
-                          </span>
-                          <button
-                            className="refs-row-action"
-                            onClick={() => createRemoteWorktree(branch)}
-                          >
-                            {checkedOut ? "Show worktree" : "New worktree"}
-                          </button>
-                        </div>
-                      );
-                    })}
-                    {remote.branches.length === 0 && (
-                      <div className="refs-browser__empty">
-                        No fetched branches match this filter.
-                      </div>
-                    )}
-                  </div>
+                  <RemoteBranchList
+                    repoId={repo.id}
+                    remote={remote.name}
+                    query={query}
+                    now={now}
+                    refs={refs}
+                    onPick={createRemoteWorktree}
+                  />
                 </section>
               ))}
-              {remotes.length === 0 && (
-                <div className="refs-browser__empty">No matching remotes.</div>
+              {refs.remotes.length === 0 && (
+                <div className="refs-browser__empty">No remotes configured.</div>
               )}
             </div>
           )}

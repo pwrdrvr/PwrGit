@@ -35,6 +35,7 @@ import type {
   RebaseCheckResult,
   RebaseOperation,
   RebasePlan,
+  RemoteBranchPage,
   RemoteDivergence,
   BranchReveal,
   RemoteResetMode,
@@ -183,6 +184,19 @@ export function isBranchCheckoutTarget(
     (BRANCH_CHECKOUT_TARGETS as readonly string[]).includes(value)
   );
 }
+
+/**
+ * Remote branches carried inline on `repo:refs`, per remote. The sidebar
+ * disclosure renders six rows, so shipping more buys nothing — and shipping
+ * all of them cost 1.5 MB of JSON on a fetched fork network.
+ */
+export const REMOTE_BRANCH_PREVIEW = 6;
+
+/** Default page size for `repo:remoteBranches`. */
+export const REMOTE_BRANCH_PAGE_SIZE = 50;
+
+/** Upper bound a renderer cannot talk its way past, so one page stays one page. */
+export const REMOTE_BRANCH_PAGE_MAX = 200;
 
 /** Latest is smoke-checked; Prerelease is newer and may not install. */
 export const UPDATE_CHANNELS = ["latest", "prerelease"] as const;
@@ -633,6 +647,24 @@ export interface Commands {
   };
   /** Repository-wide local branches and configured remote-tracking refs. */
   "repo:refs": { req: { repoId: string }; res: RepoRefs };
+  /**
+   * One page of a remote's branches, newest commit first. `repo:refs` carries
+   * only a preview per remote; every surface that browses or picks from the
+   * full set pages through here so a fork network's thousands of
+   * remote-tracking refs never cross IPC in one response.
+   */
+  "repo:remoteBranches": {
+    req: {
+      repoId: string;
+      /** Restrict to one remote; omitted searches across all of them. */
+      remote?: string;
+      /** Case-insensitive substring over qualified name and commit subject. */
+      query?: string;
+      offset?: number;
+      limit?: number;
+    };
+    res: RemoteBranchPage;
+  };
 
   // Remotes (U9 / U13)
   "remote:fetch": { req: { worktreeId: string }; res: null };

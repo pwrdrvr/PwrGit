@@ -13,10 +13,15 @@ import {
   type PushRefResult,
   type PullProgressPhase,
   type PwrGitError,
+  type RemoteBranchPage,
+  type RemoteBranchSummary,
   type RemoteDivergence,
   type RemoteResetMode,
   type RemoteResetSnapshot,
   type RemoteSummary,
+  REMOTE_BRANCH_PAGE_MAX,
+  REMOTE_BRANCH_PAGE_SIZE,
+  REMOTE_BRANCH_PREVIEW,
   type RepoRefs,
   err,
   type FileStatus,
@@ -2113,18 +2118,13 @@ async function remoteSummary(
     ])
   ]);
   const prefix = `refs/remotes/${name}/`;
-  const branches = rows
-    .filter(
-      (row) => row.fullName.startsWith(prefix) && !row.fullName.endsWith("/HEAD")
-    )
-    .map((row) => ({
-      name: row.fullName.slice(prefix.length),
-      qualifiedName: row.shortName,
-      fullName: row.fullName,
-      head: row.head,
-      ...(row.lastCommitAt === "" ? {} : { lastCommitAt: row.lastCommitAt }),
-      ...(row.subject === "" ? {} : { subject: row.subject })
-    }));
+  // Exclude only the ref that IS the remote's symbolic HEAD, not everything
+  // whose last segment happens to be HEAD: `feature/HEAD` is a legal branch,
+  // and `listRemoteBranchPage` lists it — so counting it out here would make
+  // `branchCount` disagree with the paged `total` for the same remote.
+  const branches = rows.filter(
+    (row) => row.fullName.startsWith(prefix) && row.fullName !== `${prefix}HEAD`
+  );
   const headPrefix = `refs/remotes/${name}/`;
   return {
     name,
@@ -2134,7 +2134,23 @@ async function remoteSummary(
       ? { defaultBranch: symbolicHead.slice(headPrefix.length) }
       : {}),
     skipFetchAll: skipFetchAll === "true",
-    branches
+    // `rows` is already sorted newest-first, so the preview is a plain prefix.
+    previewBranches: branches
+      .slice(0, REMOTE_BRANCH_PREVIEW)
+      .map((row) => remoteBranchOf(row, prefix)),
+    branchCount: branches.length
+  };
+}
+
+/** Shape one `for-each-ref` row as a remote branch, given its remote's prefix. */
+function remoteBranchOf(row: RepoRefRow, prefix: string): RemoteBranchSummary {
+  return {
+    name: row.fullName.slice(prefix.length),
+    qualifiedName: row.shortName,
+    fullName: row.fullName,
+    head: row.head,
+    ...(row.lastCommitAt === "" ? {} : { lastCommitAt: row.lastCommitAt }),
+    ...(row.subject === "" ? {} : { subject: row.subject })
   };
 }
 
@@ -2185,6 +2201,128 @@ export async function listRepoRefs(
     names.value.map((name) => remoteSummary(git, cwd, name, rows))
   );
   return ok({ branches, remotes });
+}
+
+/**
+ * Remote-tracking refs carry no upstream of their own, so `%(upstream:track)`
+ * is always empty for them — and asking for it anyway costs about 0.1s across
+ * a fetched fork network's thousands of refs. This is `REPO_REFS_FORMAT` minus
+ * the two fields that only mean something for `refs/heads`.
+ */
+const REMOTE_BRANCH_FORMAT = [
+  "%(refname)",
+  "%(refname:short)",
+  "%(objectname)",
+  "%(committerdate:iso8601-strict)",
+  "%(contents:subject)"
+].join("%09");
+
+/**
+ * Split a remote-tracking ref into its remote and its branch name.
+ *
+ * This cannot be done by finding the first slash: `git remote add team/fork`
+ * is accepted, and produces `refs/remotes/team/fork/main` — which that rule
+ * reads as remote "team", branch "fork/main". Only the configured remote names
+ * disambiguate it, so match against them, longest first (a repository can hold
+ * both `team` and `team/fork`).
+ */
+function splitRemoteRef(
+  fullName: string,
+  remotesLongestFirst: readonly string[]
+): { remote: string; name: string } | null {
+  for (const remote of remotesLongestFirst) {
+    const prefix = `refs/remotes/${remote}/`;
+    if (fullName.startsWith(prefix)) {
+      return { remote, name: fullName.slice(prefix.length) };
+    }
+  }
+  return null;
+}
+
+export type RemoteBranchPageOptions = {
+  /** Restrict to one remote; omitted searches every remote. */
+  remote?: string;
+  query?: string;
+  offset?: number;
+  limit?: number;
+};
+
+/**
+ * One page of remote-tracking branches, newest commit first.
+ *
+ * The whole listing is read and filtered here in main — `for-each-ref` has no
+ * substring filter, and `--count` applies before sorting is useful to us — but
+ * only the requested slice is returned, so the response stays page-sized no
+ * matter how many refs the repository has fetched.
+ */
+export async function listRemoteBranchPage(
+  git: GitExec,
+  cwd: string,
+  options: RemoteBranchPageOptions = {}
+): Promise<Result<RemoteBranchPage>> {
+  const { remote, query = "", offset = 0, limit = REMOTE_BRANCH_PAGE_SIZE } = options;
+  // The configured remotes are both the guard on `remote` and what makes the
+  // ref split exact — a name the repository does not have cannot reach argv,
+  // so `--sort=…` and friends are rejected without a pattern to maintain.
+  const names = await listRemoteNames(git, cwd);
+  if (!names.ok) return names;
+  if (remote !== undefined && !names.value.includes(remote)) {
+    return err({
+      kind: "repo",
+      code: "invalid_remote",
+      message: `Not a configured remote: ${remote}`
+    });
+  }
+  const scoped = remote === undefined ? names.value : [remote];
+  const longestFirst = [...scoped].sort((a, b) => b.length - a.length);
+  const pattern = remote === undefined ? "refs/remotes" : `refs/remotes/${remote}`;
+  const raw = await git(
+    [
+      "for-each-ref",
+      "--sort=-committerdate",
+      `--format=${REMOTE_BRANCH_FORMAT}`,
+      pattern
+    ],
+    cwd
+  );
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["for-each-ref"]);
+  if (!checked.ok) return checked;
+
+  const needle = query.trim().toLowerCase();
+  const matches: RemoteBranchSummary[] = [];
+  for (const line of checked.value.stdout.split("\n")) {
+    if (line.trim() === "") continue;
+    const fields = line.split("\t");
+    const [fullName = "", shortName = "", head = "", lastCommitAt = ""] = fields;
+    if (fullName === "" || shortName === "" || head === "") continue;
+    const split = splitRemoteRef(fullName, longestFirst);
+    if (split === null) continue;
+    const name = split.name;
+    // The remote's symbolic HEAD is a pointer, not a branch anyone can check
+    // out. Only the ref directly at `<remote>/HEAD` is that pointer — a branch
+    // genuinely named `feature/HEAD` is a branch, and stays listed.
+    if (name === "HEAD") continue;
+    const subject = fields.slice(4).join("\t");
+    if (
+      needle !== "" &&
+      !`${shortName} ${subject}`.toLowerCase().includes(needle)
+    ) {
+      continue;
+    }
+    matches.push({
+      name,
+      qualifiedName: shortName,
+      fullName,
+      head,
+      ...(lastCommitAt === "" ? {} : { lastCommitAt }),
+      ...(subject === "" ? {} : { subject })
+    });
+  }
+
+  const start = Math.max(0, offset);
+  const size = Math.min(Math.max(1, limit), REMOTE_BRANCH_PAGE_MAX);
+  return ok({ rows: matches.slice(start, start + size), total: matches.length });
 }
 
 /**
