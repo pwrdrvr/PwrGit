@@ -1,15 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
-  RemoteBranchSummary,
   RemoteResetMode,
   RemoteResetSnapshot,
-  RepoRefs,
   Worktree
 } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
+import {
+  BranchRefPicker,
+  type BranchPickerOption
+} from "../shell/BranchRefPicker";
 
-type Busy = "load" | "review" | "reset" | null;
+/* The dialog no longer blocks on a repo-wide ref load — the picker pages its
+   own results — so there is no "load" phase left to gate the controls on. */
+type Busy = "review" | "reset" | null;
 
 function firstLine(message: string): string {
   return message.split("\n")[0] ?? message;
@@ -40,19 +44,12 @@ export function ResetToRemoteDialog({
   onClose: () => void;
   onComplete: (mode: RemoteResetMode, branch: string) => void;
 }) {
-  const [refs, setRefs] = useState<RepoRefs | null>(null);
-  const [selectedRef, setSelectedRef] = useState("");
+  const [selected, setSelected] = useState<BranchPickerOption | null>(null);
   const [mode, setMode] = useState<RemoteResetMode>("soft");
   const [review, setReview] = useState<RemoteResetSnapshot | null>(null);
-  const [busy, setBusy] = useState<Busy>("load");
+  const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<string | null>(null);
   const activeRef = useRef(true);
-
-  const branches = useMemo(
-    () => refs?.remotes.flatMap((remote) => remote.branches) ?? [],
-    [refs]
-  );
-  const selected = branches.find((branch) => branch.fullName === selectedRef);
 
   useEffect(() => {
     activeRef.current = true;
@@ -60,29 +57,6 @@ export function ResetToRemoteDialog({
       activeRef.current = false;
     };
   }, []);
-
-  useEffect(() => {
-    let active = true;
-    void dispatch("repo:refs", { repoId: worktree.repoId }).then((result) => {
-      if (!active) return;
-      setBusy(null);
-      if (!result.ok) {
-        const message = firstLine(result.error.message);
-        setError(message);
-        showErrorToast({
-          title: "Load remote branches failed",
-          message,
-          detail: result.error.message
-        });
-        return;
-      }
-      setRefs(result.value);
-      setSelectedRef(result.value.remotes[0]?.branches[0]?.fullName ?? "");
-    });
-    return () => {
-      active = false;
-    };
-  }, [worktree.repoId]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -101,12 +75,12 @@ export function ResetToRemoteDialog({
   };
 
   const inspect = async (): Promise<void> => {
-    if (selected === undefined) return;
+    if (selected === null) return;
     setBusy("review");
     setError(null);
     const result = await dispatch(
       "remote:inspectReset",
-      resetInspectionRequest(worktree.id, selected.fullName)
+      resetInspectionRequest(worktree.id, selected.ref)
     );
     if (!activeRef.current) return;
     setBusy(null);
@@ -124,7 +98,7 @@ export function ResetToRemoteDialog({
   };
 
   const reset = async (): Promise<void> => {
-    if (review === null || selected === undefined) return;
+    if (review === null || selected === null) return;
     setBusy("reset");
     setError(null);
     const result = await dispatch(
@@ -146,14 +120,14 @@ export function ResetToRemoteDialog({
     }
     showInfoToast({
       title: `${mode === "hard" ? "Hard" : "Soft"} reset complete`,
-      message: `${review.branch} now points to ${selected.qualifiedName} at ${shortHead(review.remoteHead)}.`
+      message: `${review.branch} now points to ${selected.label} at ${shortHead(review.remoteHead)}.`
     });
-    onComplete(mode, selected.qualifiedName);
+    onComplete(mode, selected.label);
     onClose();
   };
 
   const canClose = busy === null;
-  const targetLabel = selected?.qualifiedName ?? review?.remoteRef ?? "remote branch";
+  const targetLabel = selected?.label ?? review?.remoteRef ?? "remote branch";
 
   return (
     <div
@@ -179,34 +153,19 @@ export function ResetToRemoteDialog({
               showing the final confirmation.
             </p>
 
-            <label className="refs-field reset-remote__target">
-              <span>Remote branch</span>
-              <select
+            <div className="reset-remote__target">
+              <BranchRefPicker
+                repoId={worktree.repoId}
+                label="Remote branch"
                 autoFocus
-                value={selectedRef}
-                disabled={busy !== null || branches.length === 0}
-                onChange={(event) => {
-                  setSelectedRef(event.target.value);
+                disabled={busy !== null}
+                onChange={(option) => {
+                  setSelected(option);
                   setReview(null);
                   setError(null);
                 }}
-              >
-                {branches.map((branch: RemoteBranchSummary) => (
-                  <option key={branch.fullName} value={branch.fullName}>
-                    {branch.qualifiedName} · {shortHead(branch.head)}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {busy === "load" && (
-              <div className="reset-remote__empty">Loading fetched branches…</div>
-            )}
-            {busy !== "load" && refs !== null && branches.length === 0 && (
-              <div className="reset-remote__empty">
-                No fetched remote branches are available. Fetch a remote first.
-              </div>
-            )}
+              />
+            </div>
 
             <fieldset className="reset-remote__modes">
               <legend>Reset mode</legend>
@@ -303,7 +262,7 @@ export function ResetToRemoteDialog({
           {review === null ? (
             <button
               className="modal__create"
-              disabled={busy !== null || selected === undefined}
+              disabled={busy !== null || selected === null}
               onClick={() => void inspect()}
             >
               {busy === "review"

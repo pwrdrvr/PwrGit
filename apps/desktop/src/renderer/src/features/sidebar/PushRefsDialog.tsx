@@ -6,16 +6,20 @@ import type {
   RepoRefs
 } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
+import {
+  BranchRefPicker,
+  type BranchPickerOption
+} from "../shell/BranchRefPicker";
 import { CopyTarget } from "../shell/CopyTarget";
 
-function sourceBranchName(sourceRef: string, refs: RepoRefs): string {
-  const local = refs.branches.find((branch) => branch.fullName === sourceRef);
-  if (local !== undefined) return local.name;
-  for (const remote of refs.remotes) {
-    const branch = remote.branches.find((candidate) => candidate.fullName === sourceRef);
-    if (branch !== undefined) return branch.name;
-  }
-  return "";
+/**
+ * The branch name a push should default to for `option` — the name relative to
+ * its remote for a remote-tracking ref, the plain name for a local one. The
+ * picker already carries both, so this no longer has to search a repo-wide
+ * ref list that is now only a preview.
+ */
+function sourceBranchName(option: BranchPickerOption): string {
+  return option.remoteBranch?.name ?? option.label;
 }
 
 function relationLabel(plan: PushRefPlan): string {
@@ -56,28 +60,21 @@ export function PushRefsDialog({
   onCompleted: () => void;
   onClose: () => void;
 }) {
-  const sources = useMemo(
-    () => [
-      ...refs.branches.map((branch) => ({
+  // Locals are already loaded and bounded, so the picker filters them in place;
+  // only the remote side, which can run to thousands of refs, is paged.
+  const locals = useMemo<BranchPickerOption[]>(
+    () =>
+      refs.branches.map((branch) => ({
         ref: branch.fullName,
         label: branch.name,
-        kind: "Local"
+        kind: "local" as const,
+        head: branch.head
       })),
-      ...refs.remotes.flatMap((remote) =>
-        remote.branches.map((branch) => ({
-          ref: branch.fullName,
-          label: branch.qualifiedName,
-          kind: "Remote"
-        }))
-      )
-    ],
-    [refs]
+    [refs.branches]
   );
-  const firstSource = sources[0]?.ref ?? "";
-  const [sourceRef, setSourceRef] = useState(firstSource);
-  const [destinationBranch, setDestinationBranch] = useState(() =>
-    sourceBranchName(firstSource, refs)
-  );
+  const [source, setSource] = useState<BranchPickerOption | null>(null);
+  const sourceRef = source?.ref ?? "";
+  const [destinationBranch, setDestinationBranch] = useState("");
   const [selectedRemotes, setSelectedRemotes] = useState<Set<string>>(new Set());
   const [plans, setPlans] = useState<PushRefPlan[] | null>(null);
   const [results, setResults] = useState<PushRefResult[] | null>(null);
@@ -141,24 +138,16 @@ export function PushRefsDialog({
         onClick={(event) => event.stopPropagation()}
       >
         <div className="modal__title">Push branch to remotes · {repo.name}</div>
-        <label className="refs-field">
-          <span>Source</span>
-          <select
-            value={sourceRef}
-            onChange={(event) => {
-              const next = event.target.value;
-              setSourceRef(next);
-              setDestinationBranch(sourceBranchName(next, refs));
-              resetReview();
-            }}
-          >
-            {sources.map((source) => (
-              <option key={source.ref} value={source.ref}>
-                {source.label} · {source.kind}
-              </option>
-            ))}
-          </select>
-        </label>
+        <BranchRefPicker
+          repoId={repo.id}
+          label="Source"
+          locals={locals}
+          onChange={(option) => {
+            setSource(option);
+            setDestinationBranch(sourceBranchName(option));
+            resetReview();
+          }}
+        />
         <label className="refs-field">
           <span>Destination branch</span>
           <input

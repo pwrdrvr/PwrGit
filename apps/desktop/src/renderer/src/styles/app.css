@@ -2915,6 +2915,54 @@ textarea,
   padding: 6px 13px;
   border-top: 1px solid var(--border-subtle);
 }
+/* Paged ref lists carry a footer saying how much of the match set is on
+   screen — see RefsPageFooter. Without it, a page that stops at 50 of 4,466
+   reads as the whole remote. */
+.refs-page-footer {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font: 500 10.5px/1.4 var(--font-sans);
+}
+.refs-page-footer.is-error {
+  color: var(--danger-text);
+}
+
+/* BranchRefPicker — a filter box over a sized native listbox. */
+.branch-picker {
+  display: grid;
+  gap: 2px;
+}
+.branch-picker__list select {
+  height: auto;
+  padding: 4px;
+}
+.branch-picker__status {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 6px;
+  color: var(--text-muted);
+  font: 500 10.5px/1.4 var(--font-sans);
+}
+.branch-picker__error {
+  color: var(--danger-text);
+}
+.branch-picker__more {
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: 600 10.5px/1 var(--font-sans);
+  cursor: pointer;
+}
 .refs-push-backdrop {
   z-index: 110;
   padding-top: 9vh;

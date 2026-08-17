@@ -10,6 +10,7 @@ import {
   createBranchAt,
   listBranches,
   listLocalBranchNames,
+  listRemoteBranchPage,
   listRepoRefs,
   readChanges,
   switchBranch,
@@ -81,6 +82,21 @@ export function registerBranchHandlers(
       checkedOut.set(worktree.branch, ids);
     }
     return listRepoRefs(execGit, repo.path, checkedOut);
+  });
+
+  bus.register("repo:remoteBranches", async (req) => {
+    const repo = db
+      .prepare("SELECT path FROM repos WHERE id = ?")
+      .get(req.repoId) as { path: string } | undefined;
+    if (repo === undefined) {
+      return err({ ...notFound, message: "repo not found" });
+    }
+    return listRemoteBranchPage(execGit, repo.path, {
+      ...(req.remote === undefined ? {} : { remote: req.remote }),
+      ...(req.query === undefined ? {} : { query: req.query }),
+      ...(req.offset === undefined ? {} : { offset: req.offset }),
+      ...(req.limit === undefined ? {} : { limit: req.limit })
+    });
   });
 
   bus.register("branch:create", async (req) => {
