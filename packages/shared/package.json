@@ -11,6 +11,7 @@
     "./protocol": "./src/protocol.ts",
     "./result": "./src/result.ts",
     "./types": "./src/types.ts",
+    "./image": "./src/image.ts",
     "./ipc": "./src/ipc.ts"
   },
   "scripts": {

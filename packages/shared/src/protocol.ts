@@ -48,6 +48,7 @@ import type {
   SshRemoteRecovery,
   WorktreeState
 } from "./types";
+import type { ImagePreview, ImageRevision } from "./image";
 
 export type ProfileList = {
   activeProfileId: ProfileId | null;
@@ -855,6 +856,11 @@ export interface Commands {
   "diff:commitFile": {
     req: { worktreeId: string; hash: string; path: string };
     res: string;
+  };
+  /** Bytes of one side of an image diff, base64 for a data: URL. */
+  "diff:image": {
+    req: { worktreeId: string; path: string; rev: ImageRevision };
+    res: ImagePreview;
   };
 
   // App settings (Settings window)
