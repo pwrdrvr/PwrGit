@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.5.0 - 2026-08-18
+
+- Changes - Added image previews, live refresh after staging or external edits, folder grouping, and safe discard for an entire folder.
+- Changes - Added **Add to .gitignore** in the right-click menu for untracked files and folders; large change sets now stay responsive, retain accurate totals, and identify the folder most worth ignoring.
+- Commit Graph - Added actions for branches directly from Lineage, including creating a branch from any commit.
+- Branches and Worktrees - Added Command Palette search for local branches without a worktree, paired the branch list with the selected worktree, and immediately select newly created worktrees.
+- Worktrees - Show a worktree's folder name when it differs from its branch name, making linked checkouts easier to distinguish.
+- Repositories - Page remote branches instead of loading every ref at once, keeping large repositories responsive.
+- Desktop - Remember the selected sidebar lens across restarts and refined pane, sidebar, and title-bar details.
+- Updates - Updated the packaged Electron runtime to 41.10.5 and refreshed bundled Git and desktop dependencies.
+
 ## v0.4.0 - 2026-08-17
 
 - Remotes - Fixed empty repositories so **Manage remotes and remote branches…** remains available, letting you add the first remote without a workaround.
