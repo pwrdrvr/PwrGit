@@ -136,10 +136,12 @@ test("a worktree whose folder no longer matches its branch shows both names", as
     "recursing-euler-9edf74"
   );
   // The repo's own checkout keeps its single name: the folder row above it
-  // already says "snapfarm".
-  await expect(
-    branchRow(window, "main").locator(".wt-row__folder")
-  ).toHaveCount(0);
+  // already says "snapfarm". Assert the row is THERE before asserting what it
+  // does not contain — a count of 0 inside a locator that matched nothing is
+  // satisfied by the row having vanished, which is not what is being claimed.
+  const primary = branchRow(window, "main");
+  await expect(primary.locator(".wt-row__branch")).toHaveText("main");
+  await expect(primary.locator(".wt-row__folder")).toHaveCount(0);
 
   // ⌘F for the directory — what your shell prompt shows — reaches the same
   // row, and the row says why it matched.

@@ -1349,9 +1349,11 @@ textarea,
   position: relative;
   display: flex;
   align-items: center;
-  /* Only .wt-row__folder ever takes a second line (it asks for 100% of one);
-     every other child either shrinks or is content-sized, so a row without a
-     folder is laid out exactly as it was. */
+  /* .wt-row__folder is the only child that ASKS for a line of its own (it
+     takes 100% of one), and the branch shrinks to nothing before anything
+     else has to move — so a row without a folder is laid out exactly as it
+     was. A row crowded past that point now wraps its trailing badges instead
+     of overflowing its own box, which is the better of the two. */
   flex-wrap: wrap;
   /* Row gap 0: the only wrapped line is .wt-row__folder, which belongs to the
      branch above it — 6px there would set it adrift between two rows. */
@@ -1557,6 +1559,14 @@ textarea,
   /* Line up under the branch text, past the drag grip and branch glyph
      (11px + 6px gap + 12px + 6px gap), so the pair reads as one row. */
   margin-left: 35px;
+  /* Keep clear of .wt-row__hoveracts, which is anchored to the row's right
+     edge across BOTH lines: 24px pin + 33px right padding is its solid part,
+     the 20px left padding being where its gradient resolves. Without this the
+     name ran under the strip and was cut mid-word — no ellipsis, no tooltip
+     hint that anything was missing — on hover, which is the moment the row is
+     being read. Reserved at rest too: re-ellipsizing on :hover would make the
+     text jump under the pointer. */
+  padding-right: 57px;
   color: var(--text-subtle);
   /* Below the branch on the same axis — see .wt-row__branch. */
   font: 500 calc(var(--sidebar-title-size) - 3px) / 1.2 var(--font-mono);

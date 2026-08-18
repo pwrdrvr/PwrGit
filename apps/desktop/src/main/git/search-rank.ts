@@ -14,7 +14,7 @@ import type { RepoSearchHit } from "@pwrgit/shared";
  */
 
 /** Case- and diacritic-insensitive, for literal name comparison. */
-export const normalizeSearchName = (value: string): string =>
+const normalizeSearchName = (value: string): string =>
   value
     .trim()
     .normalize("NFKD")
@@ -70,7 +70,7 @@ export function searchMatchTier(
  * checkouts share rank 0, so an exactly-named repo and an exactly-named
  * worktree keep whatever order bm25 gave them.
  */
-export const searchKindRank = (hit: RepoSearchHit): 0 | 1 =>
+const searchKindRank = (hit: RepoSearchHit): 0 | 1 =>
   hit.kind === "repo" || hit.kind === "worktree" ? 0 : 1;
 
 /**
