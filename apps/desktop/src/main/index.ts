@@ -29,6 +29,10 @@ import { registerBranchHandlers } from "./git/branch-handlers";
 import { registerCloneHandlers } from "./git/clone-handlers";
 import { CloneService } from "./git/clone-service";
 import { registerChangesHandlers } from "./git/changes-handlers";
+import {
+  ChangeSetWatch,
+  createChangeSetAnnouncer
+} from "./git/changes-watch";
 import { registerGraphHandlers } from "./git/graph-handlers";
 import { registerRebaseHandlers } from "./git/rebase-handlers";
 import { registerRemoteHandlers } from "./git/remote-handlers";
@@ -410,8 +414,27 @@ if (!gotSingleInstanceLock) {
         resolveUpdateSelection(settings.get().updates, app.getVersion())
     });
 
+    // The refresher only speaks up when the *coarse* state moved, which a
+    // .gitignore edit need not do even as it empties the change list — so the
+    // active worktree also gets its status compared entry by entry.
+    const announceChangeSetMoves = createChangeSetAnnouncer({
+      watch: new ChangeSetWatch(execGit),
+      pathOf: (worktreeId) =>
+        (
+          db
+            .prepare("SELECT path FROM worktrees WHERE id = ?")
+            .get(worktreeId) as { path: string } | undefined
+        )?.path ?? null,
+      run: (worktreeId, operation) =>
+        worktreeOperations.run(worktreeId, operation),
+      announce: (worktreeId) => emitEvent("changes:changed", { worktreeId }),
+      onError: (cause) =>
+        logMain("error", "changes", "change-set watch failed:", cause)
+    });
     const refreshActive = (): void => {
-      if (activeWorktreeId !== null) refresher.refreshWorktree(activeWorktreeId);
+      if (activeWorktreeId === null) return;
+      void refresher.refreshWorktree(activeWorktreeId);
+      announceChangeSetMoves(activeWorktreeId);
     };
     app.on("browser-window-focus", () => {
       refreshActive();

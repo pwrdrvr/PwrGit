@@ -335,9 +335,29 @@ export type FileChange = {
   staged: boolean;
 };
 
+/**
+ * How many entries per section survive into the renderer. Reading them costs
+ * git almost nothing (`-uall` over 20k untracked files measured ~40ms against
+ * ~25ms collapsed), but the rail paints a row apiece and that is superlinear:
+ * ~25ms of raw DOM for 1k rows, ~540ms for 20k — on every refresh, so every
+ * stage click. Past this many files the answer is a .gitignore rule, not a
+ * longer list, so the list is capped and says so.
+ */
+export const CHANGE_LIST_LIMIT = 1000;
+
 export type ChangeSet = {
   staged: FileChange[];
   unstaged: FileChange[];
+  /**
+   * Set only when `CHANGE_LIST_LIMIT` bit. The totals are the real counts, so
+   * the UI can say what it is not showing; `largestUntrackedFolder` names the
+   * directory that contributed the most rows — the one worth ignoring.
+   */
+  truncated?: {
+    staged: number;
+    unstaged: number;
+    largestUntrackedFolder: { dir: string; count: number } | null;
+  };
 };
 
 /** One file touched by a commit (rail's commit-scoped file list). */

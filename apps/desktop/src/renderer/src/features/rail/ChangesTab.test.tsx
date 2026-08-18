@@ -3,7 +3,12 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ok, type ChangeSet, type Worktree } from "@pwrgit/shared";
+import {
+  CHANGE_LIST_LIMIT,
+  ok,
+  type ChangeSet,
+  type Worktree
+} from "@pwrgit/shared";
 
 const mocks = vi.hoisted(() => ({
   confirmDialog: vi.fn(),
@@ -248,5 +253,84 @@ describe("ChangesTab list", () => {
         message: "index.lock exists"
       })
     );
+  });
+});
+
+describe("ChangesTab truncation notice", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  const worktree = { id: "worktree-1" } as Worktree;
+
+  const render = async (changeSet: ChangeSet): Promise<void> => {
+    mocks.dispatch.mockImplementation(async (command: string) =>
+      command === "changes:list" ? ok(changeSet) : ok(null)
+    );
+    await act(async () => {
+      root.render(
+        <ChangesTab worktree={worktree} activeEmail="a@b.c" onOpenDiff={vi.fn()} />
+      );
+    });
+  };
+
+  const capped = (largestUntrackedFolder: { dir: string; count: number } | null) =>
+    ({
+      staged: [],
+      unstaged: Array.from({ length: 3 }, (_, i) => ({
+        path: `dist/f${i}.js`,
+        status: "?" as const,
+        staged: false
+      })),
+      truncated: { staged: 0, unstaged: 20_000, largestUntrackedFolder }
+    }) satisfies ChangeSet;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.subscribe.mockReturnValue(() => undefined);
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("says what it is not showing and which folder to ignore", async () => {
+    await render(capped({ dir: "dist", count: 19_800 }));
+
+    const notice = container.querySelector(".changes-truncated");
+    expect(notice?.textContent).toContain(
+      `Showing ${new Intl.NumberFormat().format(CHANGE_LIST_LIMIT)} of 20,000`
+    );
+    expect(notice?.textContent).toContain("dist/");
+    expect(notice?.textContent).toContain("19,800");
+    expect(notice?.textContent).toContain(".gitignore");
+  });
+
+  it("counts the header and the commit button off the real total", async () => {
+    await render(capped({ dir: "dist", count: 19_800 }));
+
+    // Not "Unstaged · 3" — the header would otherwise contradict the notice
+    // sitting directly beneath it.
+    expect(container.textContent).toContain("Unstaged · 20,000");
+  });
+
+  it("drops the .gitignore advice when no folder is to blame", async () => {
+    await render(capped(null));
+
+    const notice = container.querySelector(".changes-truncated");
+    expect(notice?.textContent).toContain("Showing");
+    expect(notice?.textContent).not.toContain(".gitignore");
+  });
+
+  it("shows no notice for a list that fits", async () => {
+    await render({
+      staged: [],
+      unstaged: [{ path: "a.txt", status: "?", staged: false }]
+    });
+
+    expect(container.querySelector(".changes-truncated")).toBeNull();
   });
 });
