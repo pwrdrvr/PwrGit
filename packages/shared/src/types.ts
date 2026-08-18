@@ -482,6 +482,8 @@ export type LaneBranchInfo = {
   pr?: PrSummary;
   /** The worktree this branch is checked out in, when any. */
   worktreeId?: WorktreeId;
+  /** That worktree's path on disk, for menus that offer to copy it. */
+  worktreePath?: string;
 };
 
 /** Multi-branch lineage: a topo-ordered union log across the drawn branches. */

@@ -4,8 +4,11 @@ import { dispatch } from "../../lib/pwrgit";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
 import type { GraphRowVM } from "./GraphRow";
 import {
+  branchRefsAtCommit,
+  type CommitSwitchTarget,
   commitUrlForPullRequest,
-  pullRequestsAtCommit
+  pullRequestsAtCommit,
+  switchTargetsAtCommit
 } from "./commit-context-menu";
 
 /** Context actions for a lineage commit. PR actions are shown only when a
@@ -16,8 +19,11 @@ export function CommitContextMenu({
   vm,
   branchInfo,
   viewingBranch,
+  worktreeId,
   onViewChanges,
   onBranchFrom,
+  onSwitchBranch,
+  onRevealWorktree,
   onClose
 }: {
   x: number;
@@ -25,13 +31,49 @@ export function CommitContextMenu({
   vm: GraphRowVM;
   branchInfo: Record<string, LaneBranchInfo>;
   viewingBranch: string;
+  /** The worktree these actions move — its own checkout, not the repo's. */
+  worktreeId: string;
   onViewChanges: () => void;
   onBranchFrom: () => void;
+  /** Check a branch tipped here out in the viewed worktree. */
+  onSwitchBranch: (target: CommitSwitchTarget) => void;
+  /** Jump to the worktree already holding a branch tipped here. */
+  onRevealWorktree: (worktreeId: string) => void;
   onClose: () => void;
 }) {
   const { commit } = vm;
+  const switchTargets = switchTargetsAtCommit(
+    vm.refs,
+    vm.remoteRefs,
+    branchInfo,
+    viewingBranch,
+    worktreeId
+  );
+  const branchRefs = branchRefsAtCommit(vm.refs, vm.remoteRefs);
   const items: MenuItem[] = [
     { type: "item", label: "View changes", onSelect: onViewChanges },
+    // Moving this worktree onto a branch drawn here is the action the graph
+    // most obviously implies, so it sits with the other commit verbs rather
+    // than only in the header switcher.
+    ...switchTargets.map((target): MenuItem => {
+      const holder = target.checkedOutIn;
+      // A branch git already has checked out elsewhere cannot be switched to;
+      // offering that worktree beats an action that can only fail.
+      if (holder !== undefined) {
+        return {
+          type: "item",
+          label: `Open the ${target.branch} worktree`,
+          onSelect: () => onRevealWorktree(holder)
+        };
+      }
+      return {
+        type: "item",
+        label: target.isRemoteOnly
+          ? `Switch to ${target.branch} from ${target.ref}`
+          : `Switch to ${target.branch}`,
+        onSelect: () => onSwitchBranch(target)
+      };
+    }),
     {
       type: "item",
       label: "Branch from this commit…",
@@ -59,6 +101,16 @@ export function CommitContextMenu({
       disabled: commit.authorEmail === "",
       onSelect: () => void copyText(commit.authorEmail)
     },
+    // The chips are capped and truncated on the row, so the branches drawn
+    // here are copyable in full from the menu — including any the +N pill hid.
+    ...branchRefs.map((ref): MenuItem => ({
+      type: "item",
+      label:
+        branchRefs.length === 1
+          ? "Copy branch name"
+          : `Copy branch name (${ref})`,
+      onSelect: () => void copyText(ref)
+    })),
     {
       type: "item",
       label: "Copy viewing branch",

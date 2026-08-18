@@ -1,8 +1,10 @@
+import type { MouseEvent } from "react";
 import type { Commit, LaneBranchInfo, PrSummary } from "@pwrgit/shared";
 import { hoverIntentHandlers, type HoverIntent } from "../../lib/hoverIntent";
 import { PrChip } from "../sidebar/PrChip";
 import type { LaneRow } from "./lane-layout";
 import type { PrLandingSeg } from "./pr-landings";
+import type { BranchChipTarget } from "./BranchChipMenu";
 import { shortWhen } from "./graph-view";
 
 export const LANE_W = 16;
@@ -98,6 +100,7 @@ export function GraphRow({
   onHideContext,
   onFocusContext,
   onOpenContextMenu,
+  onOpenBranchMenu,
   onRevealWorktree
 }: {
   vm: GraphRowVM;
@@ -128,6 +131,8 @@ export function GraphRow({
   /** Move keyboard focus from the SHA trigger into the open context card. */
   onFocusContext: () => boolean;
   onOpenContextMenu: (position: { x: number; y: number }) => void;
+  /** Open the branch menu for one tip chip, at the pointer. */
+  onOpenBranchMenu?: (target: BranchChipTarget) => void;
   /** Jump to the worktree a tip branch is checked out in. */
   onRevealWorktree?: (worktreeId: string) => void;
 }) {
@@ -160,6 +165,24 @@ export function GraphRow({
     show: showContextFor,
     hide: onHideContext
   });
+
+  // A tip chip is the branch's own surface: either button opens its menu, so a
+  // right-click on a branch offers branch actions instead of the commit's, and
+  // a left-click does not fall through to opening the commit.
+  const branchMenu = (
+    ref: string,
+    isRemote: boolean
+  ): {
+    onClick: (event: MouseEvent) => void;
+    onContextMenu: (event: MouseEvent) => void;
+  } => {
+    const open = (event: MouseEvent): void => {
+      event.preventDefault();
+      event.stopPropagation();
+      onOpenBranchMenu?.({ ref, isRemote, x: event.clientX, y: event.clientY });
+    };
+    return { onClick: open, onContextMenu: open };
+  };
 
   // A lane that runs straight through both halves of the row is drawn as ONE
   // full-height line (no half-line seam at the vertical midpoint). Halves with
@@ -390,17 +413,20 @@ export function GraphRow({
                 const wtId = info?.worktreeId;
                 return (
                   <span key={name} className="ref-group">
-                    <span
+                    <button
+                      type="button"
                       className="ref-chip"
+                      aria-label={`Actions for branch ${name}`}
                       style={{
                         color,
                         borderColor: `color-mix(in srgb, ${color} 45%, transparent)`,
                         background: `color-mix(in srgb, ${color} 13%, transparent)`
                       }}
+                      {...branchMenu(name, false)}
                     >
                       <BranchGlyph />
                       <span className="ref-chip__name">{name}</span>
-                    </span>
+                    </button>
                     {info?.pr !== undefined &&
                       info.pr.number !== pullRequest?.number && (
                         <PrChip pr={info.pr} />
@@ -426,19 +452,39 @@ export function GraphRow({
               })}
               {remoteRefs
                 .slice(0, Math.max(0, MAX_REF_CHIPS - refs.length))
-                .map((name) => (
-                  <span
-                    key={`r:${name}`}
-                    className="ref-chip ref-chip--remote"
-                    style={{
-                      color,
-                      borderColor: `color-mix(in srgb, ${color} 45%, transparent)`
-                    }}
-                  >
-                    <BranchGlyph />
-                    <span className="ref-chip__name">{name}</span>
-                  </span>
-                ))}
+                .map((name) =>
+                  // A collapsed chip names the remote alone ("origin", drawn
+                  // when it sits on the local branch): its branch actions are
+                  // the local chip's, so it stays a label.
+                  name.includes("/") ? (
+                    <button
+                      type="button"
+                      key={`r:${name}`}
+                      className="ref-chip ref-chip--remote"
+                      aria-label={`Actions for branch ${name}`}
+                      style={{
+                        color,
+                        borderColor: `color-mix(in srgb, ${color} 45%, transparent)`
+                      }}
+                      {...branchMenu(name, true)}
+                    >
+                      <BranchGlyph />
+                      <span className="ref-chip__name">{name}</span>
+                    </button>
+                  ) : (
+                    <span
+                      key={`r:${name}`}
+                      className="ref-chip ref-chip--remote"
+                      style={{
+                        color,
+                        borderColor: `color-mix(in srgb, ${color} 45%, transparent)`
+                      }}
+                    >
+                      <BranchGlyph />
+                      <span className="ref-chip__name">{name}</span>
+                    </span>
+                  )
+                )}
               {chipCount > MAX_REF_CHIPS && (
                 <span className="ref-chip ref-chip--more">
                   +{chipCount - MAX_REF_CHIPS}
