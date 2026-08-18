@@ -180,4 +180,30 @@ describe("worktree:create", () => {
     expect(indexed).toBeDefined();
     if (res.ok) expect(res.value.worktreeId).toBe(indexed?.id);
   });
+
+  // The flow this reply exists for: a ⌘K pick on a remote-only branch runs
+  // `worktree add -b <branch> <path> <startPoint>`, where the start point is a
+  // differently-named ref. The id has to come from the branch that `-b` made,
+  // not from anything derived off the ref it started at.
+  it("reports the id when branching from a remote-tracking ref", async () => {
+    git(repoPath, [
+      "update-ref",
+      "refs/remotes/origin/claude/thread-link",
+      "HEAD"
+    ]);
+
+    const res = await bus.dispatch("worktree:create", {
+      repoId,
+      branch: "claude/thread-link",
+      newBranch: true,
+      startPoint: "refs/remotes/origin/claude/thread-link"
+    });
+
+    expect(res.ok).toBe(true);
+    const indexed = indexer
+      .listRepos(profileId)[0]
+      ?.worktrees.find((w) => w.branch === "claude/thread-link");
+    expect(indexed).toBeDefined();
+    if (res.ok) expect(res.value.worktreeId).toBe(indexed?.id);
+  });
 });
