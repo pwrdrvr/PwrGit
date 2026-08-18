@@ -157,7 +157,11 @@ test("creates a worktree through the New worktree modal", async () => {
   await window.locator(".modal__input").fill("feature/e2e-created");
   await window.locator(".modal__create").click();
 
-  await expect(branchRow(window, "feature/e2e-created")).toBeVisible({
+  const created = branchRow(window, "feature/e2e-created");
+  await expect(created).toBeVisible({ timeout: 20_000 });
+  // Creating a worktree takes you to it — otherwise it lands unfound among a
+  // repo's other hundred and the user has to hunt for what they just made.
+  await expect(created).toHaveAttribute("aria-selected", "true", {
     timeout: 20_000
   });
   // The app created it under the configured worktreeRoot (branch slashes → '-').

@@ -189,11 +189,16 @@ export function Sidebar({
     );
     if (repo === undefined) return;
     pendingRevealRef.current = selectedWorktreeId;
+    // A lens the repo doesn't pass would hide the row we're about to scroll to,
+    // leaving the selection real but invisible — a ⌘K pick or a freshly created
+    // worktree lands nowhere. Widen to the everything-lens rather than
+    // second-guess which filter the user meant to keep.
+    if (filterReposByLens([repo], lens, now).length === 0) setLens("Recent");
     if (!expanded.has(repo.id)) {
       setExpanded((prev) => new Set(prev).add(repo.id));
       onExpandRepo(repo.id); // lazy badge/state compute, like a manual expand
     }
-  }, [selectedWorktreeId, repos, expanded, onExpandRepo]);
+  }, [selectedWorktreeId, repos, expanded, lens, now, onExpandRepo]);
   useEffect(() => {
     const id = pendingRevealRef.current;
     if (id === null) return;

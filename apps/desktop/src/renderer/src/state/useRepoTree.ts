@@ -6,6 +6,15 @@ import { showErrorToast, showInfoToast } from "../lib/toast";
 
 export type RemovalProgress = { done: number; total: number };
 
+/**
+ * Creating a worktree is only half of what the user asked for — they want to
+ * be *in* it. Carry the new worktree's id (null when the post-create refresh
+ * didn't list it) so the caller can move the selection there.
+ */
+export type CreateWorktreeResult =
+  | { ok: true; worktreeId: string | null }
+  | { ok: false; message: string };
+
 export type UseRepoTree = {
   repos: Repo[];
   loading: boolean;
@@ -20,7 +29,7 @@ export type UseRepoTree = {
     branch: string,
     newBranch: boolean,
     startPoint?: string
-  ) => Promise<string | null>;
+  ) => Promise<CreateWorktreeResult>;
   removeWorktrees: (worktreeIds: string[]) => Promise<void>;
   persistWorktreeOrder: (repoId: string, orderedIds: string[]) => void;
   persistRepoOrder: (orderedRepoIds: string[]) => void;
@@ -143,14 +152,16 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
       branch: string,
       newBranch: boolean,
       startPoint?: string
-    ) => {
+    ): Promise<CreateWorktreeResult> => {
       const r = await dispatch("worktree:create", {
         repoId,
         branch,
         newBranch,
         ...(startPoint === undefined ? {} : { startPoint })
       });
-      return r.ok ? null : r.error.message;
+      return r.ok
+        ? { ok: true, worktreeId: r.value.worktreeId }
+        : { ok: false, message: r.error.message };
     },
     []
   );

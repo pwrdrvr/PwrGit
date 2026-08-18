@@ -181,6 +181,29 @@ export function App() {
     []
   );
 
+  // Creating a worktree is a "take me there" action, not a filing action: the
+  // user named a branch because they want to work on it. Select the worktree
+  // the create just indexed, so it doesn't land unfound among a repo's other
+  // hundred. Reports the failure message the modals render, as before.
+  const createAndRevealWorktree = useCallback(
+    async (
+      repoId: string,
+      branch: string,
+      newBranch: boolean,
+      startPoint?: string
+    ): Promise<string | null> => {
+      const result = await createWorktree(repoId, branch, newBranch, startPoint);
+      if (!result.ok) return result.message;
+      if (result.worktreeId !== null) {
+        setPendingReveal(
+          pendingRevealForCreatedWorktree(repoId, result.worktreeId)
+        );
+      }
+      return null;
+    },
+    [createWorktree]
+  );
+
   // Resolve a reveal once this window's repos have loaded: the named worktree
   // if given (⌘F branch hit), else the repo's primary.
   useEffect(() => {
@@ -384,7 +407,7 @@ export function App() {
           onSetWorktreePin={setWorktreePin}
           onRemoveWorktree={(id) => void removeWorktrees([id])}
           onRemoveWorktrees={(ids) => void removeWorktrees(ids)}
-          onCreateWorktree={createWorktree}
+          onCreateWorktree={createAndRevealWorktree}
           onPersistOrder={persistWorktreeOrder}
           onPersistRepoOrder={persistRepoOrder}
           onExpandRepo={computeRepoState}
@@ -580,7 +603,12 @@ export function App() {
             ? { startPoint: searchNewWorktree.startPoint }
             : {})}
           onCreate={(branch, newBranch, startPoint) =>
-            createWorktree(searchNewWorktree.repo.id, branch, newBranch, startPoint)
+            createAndRevealWorktree(
+              searchNewWorktree.repo.id,
+              branch,
+              newBranch,
+              startPoint
+            )
           }
           onClose={() => setSearchNewWorktree(null)}
         />
