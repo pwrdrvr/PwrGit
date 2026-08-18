@@ -220,3 +220,30 @@ export async function collapseWorktrees(
 
 export const branchRow = (window: Page, branch: string): Locator =>
   window.locator(".wt-row").filter({ hasText: branch });
+
+/** Open the repo-wide "Branches N" disclosure and return its group. Uses the
+    same read-back-`aria-expanded` loop as the Worktrees section, so a dropped
+    click surfaces as a stuck disclosure rather than a missing row. */
+export async function expandBranchesSection(
+  window: Page,
+  repoName: string
+): Promise<Locator> {
+  const group = await expandRepoGroup(window, repoName);
+  const block = window.locator(".repo-block", { has: group });
+  const toggle = block.locator(".ref-section__head", { hasText: "Branches" });
+  await expect(toggle).toBeVisible({ timeout: SECTION_VISIBLE_MS });
+  await clickUntilExpanded(
+    toggle,
+    toggle,
+    true,
+    `Branches section of "${repoName}"`
+  );
+  return block.locator(".ref-branch-list");
+}
+
+/** One row in the repo-wide branch list — the paired-focus surface, distinct
+    from `branchRow`, which is a worktree row that happens to show a branch. */
+export const refBranchRow = (window: Page, branch: string): Locator =>
+  window.locator(".ref-branch-row").filter({
+    has: window.locator(".refs-copyable-name__text", { hasText: branch })
+  });

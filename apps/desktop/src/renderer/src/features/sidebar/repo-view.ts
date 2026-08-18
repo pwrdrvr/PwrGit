@@ -64,7 +64,10 @@ const comparablePath = (path: string): string => {
   return /^[A-Za-z]:\//.test(normalized) ? normalized.toLowerCase() : normalized;
 };
 
-const lastSegment = (path: string): string =>
+/** A path's final segment — the folder a repo or worktree lives in. Exported
+ *  because a switch confirm has to name the checkout it would move, and it
+ *  names it by folder for the same reason the rows do. */
+export const lastSegment = (path: string): string =>
   normalizeSlashes(path).split("/").filter(Boolean).pop() ?? path;
 
 const isUnder = (path: string, root: string): boolean => {

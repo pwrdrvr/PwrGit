@@ -460,6 +460,7 @@ export function App() {
                   repoId={selectedRepo.id}
                   repoName={selectedRepo.name}
                   worktreeId={selectedWorktree.id}
+                  worktreePath={selectedWorktree.path}
                   viewingBranch={selectedWorktree.branch}
                   activeEmail={activeProfile?.email ?? ""}
                   selectedCommits={selectedCommits}

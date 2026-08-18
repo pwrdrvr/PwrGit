@@ -20,6 +20,8 @@ import { BranchChipMenu, type BranchChipTarget } from "./BranchChipMenu";
 import { BranchFromCommitDialog } from "./BranchFromCommitDialog";
 import type { CommitSwitchTarget } from "./commit-context-menu";
 import { switchFailureMessage } from "./commit-context-menu";
+import { guardedSwitchBranch } from "../shell/branchSwitch";
+import { lastSegment } from "../sidebar/repo-view";
 import { CommitContextCard } from "./CommitContextCard";
 import { CommitContextMenu } from "./CommitContextMenu";
 import {
@@ -215,6 +217,7 @@ export function LineageGraph({
   repoId,
   repoName,
   worktreeId,
+  worktreePath,
   viewingBranch,
   activeEmail,
   selectedCommits,
@@ -230,6 +233,9 @@ export function LineageGraph({
   /** Repository name, shown when a dialog needs to name what it acts on. */
   repoName: string;
   worktreeId: string;
+  /** That worktree's path — a switch confirm names the checkout it would move
+   *  by its folder, since the destination branch already names the branch. */
+  worktreePath: string;
   /** Branch checked out in the worktree whose lineage is being viewed. */
   viewingBranch: string;
   activeEmail: string;
@@ -778,15 +784,39 @@ export function LineageGraph({
    * by another worktree) has nowhere else to appear.
    */
   const switchToBranch = async (target: CommitSwitchTarget): Promise<void> => {
-    const result = await dispatch("branch:switch", {
+    const outcome = await guardedSwitchBranch({
       worktreeId,
+      worktreeLabel: lastSegment(worktreePath),
       branch: target.branch
     });
-    if (!result.ok) {
+    if (outcome.kind === "cancelled") return;
+    if (outcome.kind === "held") {
+      // The chip believed this branch free, and something checked it out in
+      // the meantime. Resolve it the way the sidebar does — go to whoever
+      // holds it now — rather than reporting a refusal the user cannot act on.
+      const fresh = await dispatch("repo:refs", { repoId });
+      const holder = fresh.ok
+        ? fresh.value.branches.find((b) => b.name === target.branch)
+            ?.checkedOutWorktreeIds[0]
+        : undefined;
+      if (holder !== undefined) {
+        onRevealWorktree(holder);
+        return;
+      }
       showErrorToast({
         title: "Switch failed",
-        message: switchFailureMessage(result.error, target.branch),
-        detail: result.error.message
+        message: `${target.branch} is already checked out in another worktree.`
+      });
+      return;
+    }
+    if (outcome.kind === "failed") {
+      showErrorToast({
+        title: "Switch failed",
+        message: switchFailureMessage(
+          { kind: "repo", code: outcome.code, message: outcome.message },
+          target.branch
+        ),
+        detail: outcome.message
       });
       return;
     }

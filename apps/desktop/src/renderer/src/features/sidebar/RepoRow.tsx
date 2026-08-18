@@ -628,6 +628,12 @@ export function RepoRow({
           <RepoRefsSections
             repo={repo}
             now={now}
+            // Only when the working target lives in THIS repo. That is what
+            // keeps the current-branch marker unique across the window while
+            // "occupied" stays per-repo.
+            focusedWorktree={
+              repo.worktrees.find((w) => w.id === selectedWorktreeId) ?? null
+            }
             onRevealWorktree={(worktreeId) => {
               setWorktreesOpen(true);
               onRevealWorktree(worktreeId);
