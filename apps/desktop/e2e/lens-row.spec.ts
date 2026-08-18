@@ -579,3 +579,84 @@ test("selecting a worktree row does not move it", async () => {
   const after = await row.evaluate((el) => el.getBoundingClientRect().top);
   expect(Math.abs(after - before)).toBeLessThanOrEqual(0.5);
 });
+
+test("the chosen lens survives a reload", async () => {
+  sandbox = createGitSandbox();
+  for (const name of ["alpha", "bravo"]) sandbox.makeRepo(name);
+
+  handle = await launchApp();
+  const { window } = handle;
+  await handle.setPickDirectory(sandbox.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await expect(window.locator(".repo-row__name")).toHaveCount(2, {
+    timeout: 20_000
+  });
+
+  // Pin one repo so Pinned holds something: a lens that restores to an empty
+  // list can't tell "restored" apart from "fell back and found nothing".
+  await window
+    .locator(".repo-row", { hasText: "alpha" })
+    .locator(".pin")
+    .click();
+  await lensChip(window, "Pinned").click();
+  await expect(window.locator(".repo-row__name")).toHaveCount(1);
+  await expect(lensChip(window, "Pinned")).toHaveAttribute(
+    "aria-selected",
+    "true"
+  );
+
+  // A reload is the renderer-only restart: the same thing HMR does in dev, and
+  // the same thing a relaunch does to component state. Recent used to win both.
+  await window.reload();
+  await expect(lensChip(window, "Pinned")).toHaveAttribute(
+    "aria-selected",
+    "true",
+    { timeout: 20_000 }
+  );
+  await expect(lensChip(window, "Recent")).toHaveAttribute(
+    "aria-selected",
+    "false"
+  );
+  await expect(window.locator(".repo-row__name")).toHaveCount(1, {
+    timeout: 20_000
+  });
+});
+
+test("an automatic widen does not retire the lens the user chose", async () => {
+  sandbox = createGitSandbox();
+  for (const name of ["alpha", "bravo"]) sandbox.makeRepo(name);
+
+  handle = await launchApp();
+  const { window } = handle;
+  await handle.setPickDirectory(sandbox.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await expect(window.locator(".repo-row__name")).toHaveCount(2, {
+    timeout: 20_000
+  });
+  await window
+    .locator(".repo-row", { hasText: "alpha" })
+    .locator(".pin")
+    .click();
+  await lensChip(window, "Pinned").click();
+
+  // ⌘K into bravo, which Pinned excludes. The sidebar widens to Recent so the
+  // selected row is visible — that part is deliberate and must still happen.
+  await window.keyboard.press("Meta+f");
+  await window.locator(".overlay-search input").fill("bravo");
+  await expect(window.locator(".overlay-result").first()).toContainText("bravo");
+  await window.keyboard.press("Enter");
+  await expect(lensChip(window, "Recent")).toHaveAttribute(
+    "aria-selected",
+    "true",
+    { timeout: 20_000 }
+  );
+
+  // But the widen was the app's decision, not the user's, so it must not have
+  // overwritten the stored pick: a restart still opens on Pinned.
+  await window.reload();
+  await expect(lensChip(window, "Pinned")).toHaveAttribute(
+    "aria-selected",
+    "true",
+    { timeout: 20_000 }
+  );
+});

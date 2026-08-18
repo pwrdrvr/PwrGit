@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -18,6 +19,7 @@ import { RepoRow } from "./RepoRow";
 import {
   filterReposByLens,
   groupReposByRoot,
+  LENSES,
   lensCounts,
   lensIsArrangeable,
   reorder,
@@ -30,6 +32,27 @@ import { useListReorder } from "./useListReorder";
 const REPO_MIME = "application/x-pwrgit-repo";
 
 const EMPTY_IDS: Set<string> = new Set();
+
+/**
+ * The lens survives a restart (and an HMR remount) so the app reopens on the
+ * view you were actually working in — landing back on Recent every launch means
+ * re-picking Pinned by hand each time.
+ */
+const LENS_KEY = "pwrgit.lens";
+
+function readStoredLens(): Lens {
+  try {
+    const stored = window.localStorage.getItem(LENS_KEY);
+    // Names ship in the store, so a renamed or dropped lens can come back from
+    // an older install — fall back rather than filter by a lens that is gone.
+    if (stored !== null && (LENSES as string[]).includes(stored)) {
+      return stored as Lens;
+    }
+  } catch {
+    // ignore private-mode failures
+  }
+  return "Recent";
+}
 
 /**
  * Per-lens empty copy. The old `No ${lens.toLowerCase()} repos.` template
@@ -118,7 +141,19 @@ export function Sidebar({
   // DOM now, while nothing is being said, so the screen reader has registered
   // it long before the first ⌘⇧↑/↓ — see lib/announce.
   useEffect(mountLiveRegion, []);
-  const [lens, setLens] = useState<Lens>("Recent");
+  const [lens, setLens] = useState<Lens>(readStoredLens);
+  // Only an explicit pick is worth remembering. The reveal effect below also
+  // calls setLens, to widen a lens that would hide the row it is scrolling to
+  // — persisting that would let one ⌘K jump into an unpinned repo retire the
+  // lens the user actually chose.
+  const chooseLens = useCallback((next: Lens) => {
+    setLens(next);
+    try {
+      window.localStorage.setItem(LENS_KEY, next);
+    } catch {
+      // ignore private-mode/quota failures
+    }
+  }, []);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [sortByRepo, setSortByRepo] = useState<Record<string, WorktreeSort>>({});
   const [orderByRepo, setOrderByRepo] = useState<Record<string, string[]>>({});
@@ -179,7 +214,10 @@ export function Sidebar({
   // scroll wait for the expansion render; the ref-guard keeps ordinary repo
   // refreshes from yanking the list back to the selection.
   const pendingRevealRef = useRef<string | null>(null);
-  const lastRevealedRef = useRef<string | null>(null);
+  // Seeded with the selection we mount with, not null: a remount (HMR, or a
+  // reload that keeps App's selection) is not a fresh pick, and treating it as
+  // one would widen the lens below and overwrite the persisted choice.
+  const lastRevealedRef = useRef<string | null>(selectedWorktreeId);
   useEffect(() => {
     if (selectedWorktreeId === null) return;
     if (lastRevealedRef.current === selectedWorktreeId) return;
@@ -622,7 +660,7 @@ export function Sidebar({
         <LensFilter
           lens={lens}
           counts={counts}
-          onChange={setLens}
+          onChange={chooseLens}
           controlsId={REPO_TREE_ID}
         />
         {canGroup && (
