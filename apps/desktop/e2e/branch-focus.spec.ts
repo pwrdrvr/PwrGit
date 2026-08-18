@@ -21,6 +21,27 @@ let handle: AppHandle | null = null;
 
 const SETTLE_MS = 20_000;
 
+/**
+ * Wait for the branch list to stop moving before acting on a row.
+ *
+ * The list is not stable the moment it renders: rows arrive when `repo:refs`
+ * resolves, and then the working target's branch is pinned to the top once the
+ * selection resolves. A double-click whose two clicks straddle that reorder
+ * lands on two different rows, so no `dblclick` fires at all — which is exactly
+ * how this flaked on the slower Windows runner. The current-branch marker is
+ * the signal that refs, selection and pinning have all settled.
+ */
+async function settledBranchList(
+  window: AppHandle["window"],
+  repoName: string,
+  currentBranch: string
+): Promise<void> {
+  await expandBranchesSection(window, repoName);
+  await expect(refBranchRow(window, currentBranch)).toHaveClass(/is-current/, {
+    timeout: SETTLE_MS
+  });
+}
+
 test.afterEach(async () => {
   if (handle !== null) {
     await handle.cleanup();
@@ -78,7 +99,7 @@ test("double-clicking a free branch switches the selected worktree to it", async
   const headerBranch = window.locator(".titlebar__branch-name");
   await expect(headerBranch).toHaveText("main", { timeout: SETTLE_MS });
 
-  await expandBranchesSection(window, "dblswitch");
+  await settledBranchList(window, "dblswitch", "main");
   await refBranchRow(window, "develop").dblclick();
 
   // The checkout moved: the header, and the marker, both follow.
@@ -106,7 +127,7 @@ test("a clean switch asks nothing", async () => {
     timeout: SETTLE_MS
   });
 
-  await expandBranchesSection(window, "noprompt");
+  await settledBranchList(window, "noprompt", "main");
   await refBranchRow(window, "develop").dblclick();
 
   await expect(window.locator(".titlebar__branch-name")).toHaveText("develop", {
@@ -130,7 +151,7 @@ test("Enter on a focused branch row activates it", async () => {
     timeout: SETTLE_MS
   });
 
-  await expandBranchesSection(window, "keyboardswitch");
+  await settledBranchList(window, "keyboardswitch", "main");
   const row = refBranchRow(window, "develop");
   await row.focus();
   await row.press("Enter");
