@@ -17,6 +17,9 @@ import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
  * `-uall` across 20,000 untracked files measured ~40ms.
  */
 export class ChangeSetWatch {
+  /** One hex digest per worktree ever looked at. Nothing prunes it: a
+   *  worktree id is never reused, so a stale entry can only ever be dead
+   *  weight, and the weight is one short string per worktree. */
   private readonly fingerprints = new Map<string, string>();
 
   constructor(private readonly git: GitExec) {}
@@ -44,10 +47,6 @@ export class ChangeSetWatch {
     return previous !== undefined && previous !== fingerprint;
   }
 
-  /** Drop a worktree's fingerprint (removed worktree, or a forced re-seed). */
-  forget(worktreeId: string): void {
-    this.fingerprints.delete(worktreeId);
-  }
 }
 
 /**
@@ -64,14 +63,24 @@ export function createChangeSetAnnouncer(deps: {
   announce: (worktreeId: string) => void;
   onError: (cause: unknown) => void;
 }): (worktreeId: string) => void {
+  // Triggers arrive faster than looks complete: the poll ticks every 15s, and
+  // every window focus fires one too. The operation queue chains rather than
+  // coalescing, so without this an alt-tab flurry — or any tick landing while
+  // a long pull holds the queue — buys a status read per trigger, all of them
+  // after the first guaranteed to see the same fingerprint. One outstanding
+  // look per worktree is enough; the next trigger reads the state this one
+  // would have.
+  const looking = new Set<string>();
   return (worktreeId) => {
     const path = deps.pathOf(worktreeId);
-    if (path === null) return;
+    if (path === null || looking.has(worktreeId)) return;
+    looking.add(worktreeId);
     void deps
       .run(worktreeId, () => deps.watch.hasChanged(worktreeId, path))
       .then((changed) => {
         if (changed) deps.announce(worktreeId);
       })
-      .catch(deps.onError);
+      .catch(deps.onError)
+      .finally(() => looking.delete(worktreeId));
   };
 }

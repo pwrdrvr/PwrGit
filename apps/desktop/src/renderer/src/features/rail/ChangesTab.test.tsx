@@ -3,12 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  CHANGE_LIST_LIMIT,
-  ok,
-  type ChangeSet,
-  type Worktree
-} from "@pwrgit/shared";
+import { ok, type ChangeSet, type Worktree } from "@pwrgit/shared";
 
 const mocks = vi.hoisted(() => ({
   confirmDialog: vi.fn(),
@@ -301,9 +296,9 @@ describe("ChangesTab truncation notice", () => {
     await render(capped({ dir: "dist", count: 19_800 }));
 
     const notice = container.querySelector(".changes-truncated");
-    expect(notice?.textContent).toContain(
-      `Showing ${new Intl.NumberFormat().format(CHANGE_LIST_LIMIT)} of 20,000`
-    );
+    // "3", not CHANGE_LIST_LIMIT: the notice counts the rows beside it rather
+    // than assuming the cap produced them, so the two cannot drift apart.
+    expect(notice?.textContent).toContain("Showing 3 of 20,000");
     expect(notice?.textContent).toContain("dist/");
     expect(notice?.textContent).toContain("19,800");
     expect(notice?.textContent).toContain(".gitignore");

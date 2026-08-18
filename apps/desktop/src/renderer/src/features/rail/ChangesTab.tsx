@@ -1,6 +1,5 @@
 import { type ReactNode, useEffect, useState } from "react";
 import type { ChangeSet, FileChange, Worktree } from "@pwrgit/shared";
-import { CHANGE_LIST_LIMIT } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { showErrorToast } from "../../lib/toast";
 import { confirmDialog } from "../shell/dialogs";
@@ -132,17 +131,21 @@ const countFormat = new Intl.NumberFormat();
  * with the folder responsible instead of just apologising for the cut.
  */
 function TruncationNotice({
+  shown,
   total,
   largestUntrackedFolder
 }: {
+  /** How many this section actually rendered — read from the list itself, not
+   *  from the cap, so the two can never drift apart. */
+  shown: number;
   total: number;
   largestUntrackedFolder: { dir: string; count: number } | null;
 }) {
   return (
     <div className="changes-truncated" role="status">
       <div className="changes-truncated__head">
-        Showing {countFormat.format(CHANGE_LIST_LIMIT)} of{" "}
-        {countFormat.format(total)} files
+        Showing {countFormat.format(shown)} of {countFormat.format(total)}{" "}
+        files
       </div>
       <div className="changes-truncated__body">
         {largestUntrackedFolder === null ? (
@@ -480,6 +483,7 @@ export function ChangesTab({
             {renderEntries(staged, "s", true)}
             {stagedTotal > staged.length && (
               <TruncationNotice
+                shown={staged.length}
                 total={stagedTotal}
                 largestUntrackedFolder={null}
               />
@@ -503,6 +507,7 @@ export function ChangesTab({
             {renderEntries(unstaged, "u", false)}
             {unstagedTotal > unstaged.length && (
               <TruncationNotice
+                shown={unstaged.length}
                 total={unstagedTotal}
                 largestUntrackedFolder={
                   truncated?.largestUntrackedFolder ?? null

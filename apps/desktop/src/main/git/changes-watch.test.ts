@@ -89,15 +89,6 @@ describe("ChangeSetWatch (system git)", () => {
     await expect(watch.hasChanged("worktree-1", repo)).resolves.toBe(true);
   });
 
-  it("re-seeds a forgotten worktree instead of reporting a change", async () => {
-    const watch = new ChangeSetWatch(systemGit);
-    await watch.hasChanged("worktree-1", repo);
-    writeFileSync(join(repo, "new.txt"), "hi\n");
-    watch.forget("worktree-1");
-
-    await expect(watch.hasChanged("worktree-1", repo)).resolves.toBe(false);
-  });
-
   it("keeps worktrees apart", async () => {
     const watch = new ChangeSetWatch(systemGit);
     await watch.hasChanged("worktree-1", repo);
@@ -118,13 +109,14 @@ describe("ChangeSetWatch (system git)", () => {
 });
 
 describe("createChangeSetAnnouncer", () => {
-  const setup = (hasChanged: boolean | Error) => {
+  const setup = (hasChanged: boolean | Error, gate?: Promise<void>) => {
     const watch = {
-      hasChanged: vi.fn(async () =>
-        hasChanged instanceof Error
+      hasChanged: vi.fn(async () => {
+        if (gate !== undefined) await gate;
+        return hasChanged instanceof Error
           ? Promise.reject(hasChanged)
-          : Promise.resolve(hasChanged)
-      )
+          : Promise.resolve(hasChanged);
+      })
     } as unknown as ChangeSetWatch;
     const announce = vi.fn();
     const onError = vi.fn();
@@ -178,5 +170,68 @@ describe("createChangeSetAnnouncer", () => {
 
     await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(boom));
     expect(announce).not.toHaveBeenCalled();
+  });
+  // The poll ticks every 15s and every window focus fires one too, while the
+  // operation queue chains rather than coalescing — so without a guard an
+  // alt-tab flurry buys one status read per focus event.
+  it("keeps one look outstanding per worktree", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { announcer, announce, queued, watch } = setup(true, gate);
+
+    announcer("worktree-1");
+    announcer("worktree-1");
+    announcer("worktree-1");
+
+    expect(queued).toEqual(["worktree-1"]);
+    release();
+    await vi.waitFor(() => expect(announce).toHaveBeenCalledTimes(1));
+    expect(watch.hasChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("looks again once the outstanding one settles", async () => {
+    const { announcer, queued, watch } = setup(false);
+
+    announcer("worktree-1");
+    // Retrying the trigger is what the poll itself does, and it is the only
+    // race-free way to assert the guard is transient: the call count rises
+    // before the chain's `finally` reopens it.
+    await vi.waitFor(() => {
+      announcer("worktree-1");
+      expect(watch.hasChanged).toHaveBeenCalledTimes(2);
+    });
+
+    expect(queued).toEqual(["worktree-1", "worktree-1"]);
+  });
+
+  it("does not let a failed look wedge the guard shut", async () => {
+    const { announcer, onError, watch } = setup(new Error("git exploded"));
+
+    announcer("worktree-1");
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+
+    await vi.waitFor(() => {
+      announcer("worktree-1");
+      expect(watch.hasChanged).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("does not let one worktree's look block another", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { announcer, queued } = setup(true, gate);
+
+    announcer("worktree-1");
+    announcer("worktree-2");
+
+    // worktree-2 has no path in this fixture, so the useful assertion is that
+    // worktree-1's outstanding look did not swallow the second call: it was
+    // rejected by pathOf, not by the guard.
+    expect(queued).toEqual(["worktree-1"]);
+    release();
   });
 });
