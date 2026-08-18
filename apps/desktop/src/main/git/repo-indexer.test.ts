@@ -359,6 +359,61 @@ describe("RepoIndexer", () => {
     );
   });
 
+  // A worktree keeps the directory name it was created with; renaming its
+  // branch leaves the directory as the only name that still matches what the
+  // user's shell shows them. Both names then exist as separate index rows — the
+  // discarded branch under its old name, the checkout under its new one — and
+  // the query hit them in the wrong order: the branch matched a `name` column
+  // (bm25 weight 10) and the checkout only its tokenized path (weight 2), so
+  // the bare ref, which is checked out nowhere, came first.
+  it("ranks a checkout above the discarded branch its folder is named after", async () => {
+    const container = mkdtempSync(join(tmpdir(), "pwrgit-folder-rank-"));
+    const repoPath = join(container, "snapfarm");
+    initRepo(repoPath);
+    const wtPath = join(container, "recursing-euler-9edf74");
+    git(repoPath, ["worktree", "add", wtPath, "-b", "recursing-euler-9edf74"]);
+    // The rename Claude-style tooling performs after creating the worktree.
+    git(wtPath, ["branch", "-m", "dmg-file-art-update-4fd193"]);
+    // …and the discarded branch it leaves behind, checked out nowhere.
+    git(repoPath, ["branch", "recursing-euler-9edf74"]);
+
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({
+      name: "Folders",
+      email: "folders@example.com",
+      roots: []
+    });
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
+    expect((await isolatedIndexer.indexRepoAt(profile.id, repoPath)).ok).toBe(
+      true
+    );
+
+    // Typed as much as the shell prompt shows, and typed in full.
+    for (const query of ["recursing", "recursing-euler-9edf74"]) {
+      const hits = isolatedIndexer
+        .searchAll(query)
+        .filter((hit) => hit.kind === "worktree" || hit.kind === "local_branch");
+      // Asserted by branch, not by path: git reports its own normalization of
+      // a worktree path (on macOS the /private realpath of a temp dir), so a
+      // path rebuilt here with node:path would not compare equal.
+      expect(hits[0]).toMatchObject({
+        kind: "worktree",
+        name: "dmg-file-art-update-4fd193"
+      });
+      expect(hits[1]).toMatchObject({
+        kind: "local_branch",
+        name: "recursing-euler-9edf74"
+      });
+    }
+
+    // The branch is still the stronger answer where it is the one named: its
+    // own name beats a folder that merely starts with the query.
+    expect(
+      isolatedIndexer.searchAll("dmg-file-art-update-4fd193")[0]
+    ).toMatchObject({ kind: "worktree", name: "dmg-file-art-update-4fd193" });
+  });
+
   it("indexes discovered repos, deduping linked worktrees into their repo", async () => {
     const profile = profileService.get(profileId);
     if (profile === null) throw new Error("profile missing");

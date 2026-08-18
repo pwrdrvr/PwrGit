@@ -105,6 +105,73 @@ test("⌘F finds a worktree by branch name and jumps to it", async () => {
   );
 });
 
+// A worktree's directory is named once, when it is created; its branch can be
+// renamed or recreated afterwards and nothing renames the directory to match.
+// Agent tooling does this routinely, and the sidebar then titled the row with a
+// branch that appears nowhere in the shell prompt sitting in that directory —
+// while ⌘F for the directory name returned that row (paths are indexed) with
+// nothing on it explaining the match.
+test("a worktree whose folder no longer matches its branch shows both names", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepo("snapfarm");
+  const wtPath = repo.addWorktree("recursing-euler-9edf74");
+  box.git(wtPath, "branch", "-m", "dmg-file-art-update-4fd193");
+  // The discarded branch such tooling leaves behind under the original name —
+  // it is checked out nowhere, and it used to top these results.
+  repo.createBranch("recursing-euler-9edf74");
+  box.makeRepo("other-repo");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, box, "snapfarm");
+
+  // The sidebar row carries the branch AND the directory it lives in.
+  const row = branchRow(window, "dmg-file-art-update-4fd193");
+  await expect(row.locator(".wt-row__branch")).toHaveText(
+    "dmg-file-art-update-4fd193",
+    { timeout: 20_000 }
+  );
+  await expect(row.locator(".wt-row__folder-name")).toHaveText(
+    "recursing-euler-9edf74"
+  );
+  // The repo's own checkout keeps its single name: the folder row above it
+  // already says "snapfarm". Assert the row is THERE before asserting what it
+  // does not contain — a count of 0 inside a locator that matched nothing is
+  // satisfied by the row having vanished, which is not what is being claimed.
+  const primary = branchRow(window, "main");
+  await expect(primary.locator(".wt-row__branch")).toHaveText("main");
+  await expect(primary.locator(".wt-row__folder")).toHaveCount(0);
+
+  // ⌘F for the directory — what your shell prompt shows — reaches the same
+  // row, and the row says why it matched.
+  await window.keyboard.press("Meta+f");
+  await window.locator(".overlay-search input").fill("recursing-euler");
+  const hit = window.locator(".overlay-result", {
+    has: window.locator(".overlay-result__folder-name", {
+      hasText: "recursing-euler-9edf74"
+    })
+  });
+  await expect(hit).toHaveCount(1);
+  await expect(hit.locator(".overlay-result__name")).toHaveText(
+    "dmg-file-art-update-4fd193"
+  );
+  // And it leads: a checkout the query names outranks a branch of that name
+  // that is checked out nowhere. Enter therefore lands on the worktree.
+  const results = window.locator(".overlay-result");
+  await expect(results.first()).toHaveAttribute("aria-selected", "true");
+  await expect(results.first().locator(".overlay-result__name")).toHaveText(
+    "dmg-file-art-update-4fd193"
+  );
+  await expect(results.nth(1)).toContainText("recursing-euler-9edf74");
+  await expect(results.nth(1)).toContainText("no worktree");
+  await window.keyboard.press("Enter");
+  await expect(window.locator(".titlebar__branch-name")).toHaveText(
+    "dmg-file-art-update-4fd193",
+    { timeout: 20_000 }
+  );
+});
+
 // A branch created without a checkout — the app can now make these itself —
 // belongs to no worktree, so before 0022 it was in none of the indexed kinds
 // and ⌘K could not reach it at all.

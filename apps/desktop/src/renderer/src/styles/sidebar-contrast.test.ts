@@ -162,9 +162,10 @@ describe.each(THEMES)("sidebar contrast — %s theme", (themeName, theme) => {
     it.each(ROW_SURFACES)(
       "--text-subtle carries counts, ages and eyebrows on %s",
       (...bg) => {
-        // .repo-row__wtcount, .wt-age, .wt-section__label, .ref-section__label,
-        // .ref-section__count, .repo-row__pin-via, .repo-group__count,
-        // .lens-filter__count, .sidebar__empty all paint with this one token.
+        // .repo-row__wtcount, .wt-age, .wt-row__folder, .wt-section__label,
+        // .ref-section__label, .ref-section__count, .repo-row__pin-via,
+        // .repo-group__count, .lens-filter__count, .sidebar__empty and
+        // .overlay-result__folder all paint with this one token.
         expect(round(ratio(theme, "--text-subtle", bg))).toBeGreaterThanOrEqual(
           4.5
         );
