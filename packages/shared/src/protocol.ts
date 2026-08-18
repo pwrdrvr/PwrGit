@@ -589,7 +589,13 @@ export interface Commands {
       /** Optional remote/local ref used as the starting point of a new branch. */
       startPoint?: string;
     };
-    res: null;
+    res: {
+      /**
+       * The worktree just indexed for `branch`, so the caller can select it.
+       * Null only if the post-create refresh failed to list it.
+       */
+      worktreeId: string | null;
+    };
   };
   /** Resolve the path `worktree:create` would use, for a pre-create preview. */
   "worktree:pathPreview": {

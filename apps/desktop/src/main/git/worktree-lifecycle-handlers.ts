@@ -46,7 +46,14 @@ export function registerWorktreeLifecycleHandlers(
     if (!added.ok) return added;
     await indexer.refreshRepoWorktrees(repo.id);
     emitEvent("repo:changed", { profileId: repo.profile_id });
-    return ok(null);
+    // Hand the new worktree's id back so the caller can select it. A branch is
+    // checked out in at most one worktree, so its name identifies the row the
+    // refresh just indexed — reading it back beats rebuilding the id from a
+    // path git may have normalised.
+    const created = db
+      .prepare("SELECT id FROM worktrees WHERE repo_id = ? AND branch = ?")
+      .get(repo.id, req.branch) as { id: string } | undefined;
+    return ok({ worktreeId: created?.id ?? null });
   });
 
   bus.register("worktree:removeMany", async (req) => {

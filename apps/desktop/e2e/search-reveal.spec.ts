@@ -154,6 +154,18 @@ test("⌘F finds a local branch with no worktree and checks it out", async () =>
     existsSync(join(box.worktreeRoot, "localonly", "spike-no-checkout"))
   ).toBe(true);
 
+  // And the app took you to it. Creating a worktree is a "go there" action —
+  // leaving the selection on the repo's primary means hunting for the row you
+  // just made, which in a repo with a hundred worktrees is the whole list.
+  const selected = window.locator(".wt-row.is-selected");
+  await expect(selected).toContainText("spike/no-checkout", {
+    timeout: 20_000
+  });
+  await expect(selected).toBeInViewport();
+  await expect(window.locator(".titlebar__branch-name")).toHaveText(
+    "spike/no-checkout"
+  );
+
   // And it has moved between indexed kinds: one hit, now a pinnable worktree.
   await window.keyboard.press("Meta+f");
   await window.locator(".overlay-search input").fill("spike/no-checkout");

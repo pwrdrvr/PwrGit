@@ -106,6 +106,9 @@ beforeAll(async () => {
   state = new WorktreeStateService(db, recordingGit);
   bus = new CommandBus();
   const settings = new SettingsService(join(root, "settings.json"));
+  // `worktree:create` resolves its own path from settings — point it inside the
+  // sandbox, or the default (~/wt) makes the test write to the real home.
+  settings.update({ worktreeRoot: join(root, "wt") });
   registerWorktreeLifecycleHandlers(bus, db, indexer, settings, state);
 });
 
@@ -156,5 +159,25 @@ describe("worktree:removeMany × state probes", () => {
       expect(c.end).toBeGreaterThan(0);
       expect(c.end).toBeLessThan(remove?.start ?? 0);
     }
+  });
+});
+
+describe("worktree:create", () => {
+  // The renderer selects the worktree it just made. Without an id in the reply
+  // it can only guess, and a fresh branch lands unfound in a repo with a
+  // hundred worktrees.
+  it("reports the id of the worktree it indexed", async () => {
+    const res = await bus.dispatch("worktree:create", {
+      repoId,
+      branch: "feature/created",
+      newBranch: true
+    });
+
+    expect(res.ok).toBe(true);
+    const indexed = indexer
+      .listRepos(profileId)[0]
+      ?.worktrees.find((w) => w.branch === "feature/created");
+    expect(indexed).toBeDefined();
+    if (res.ok) expect(res.value.worktreeId).toBe(indexed?.id);
   });
 });
