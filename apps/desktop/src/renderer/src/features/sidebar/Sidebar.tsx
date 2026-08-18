@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -141,13 +142,18 @@ export function Sidebar({
   // it long before the first ⌘⇧↑/↓ — see lib/announce.
   useEffect(mountLiveRegion, []);
   const [lens, setLens] = useState<Lens>(readStoredLens);
-  useEffect(() => {
+  // Only an explicit pick is worth remembering. The reveal effect below also
+  // calls setLens, to widen a lens that would hide the row it is scrolling to
+  // — persisting that would let one ⌘K jump into an unpinned repo retire the
+  // lens the user actually chose.
+  const chooseLens = useCallback((next: Lens) => {
+    setLens(next);
     try {
-      window.localStorage.setItem(LENS_KEY, lens);
+      window.localStorage.setItem(LENS_KEY, next);
     } catch {
       // ignore private-mode/quota failures
     }
-  }, [lens]);
+  }, []);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [sortByRepo, setSortByRepo] = useState<Record<string, WorktreeSort>>({});
   const [orderByRepo, setOrderByRepo] = useState<Record<string, string[]>>({});
@@ -654,7 +660,7 @@ export function Sidebar({
         <LensFilter
           lens={lens}
           counts={counts}
-          onChange={setLens}
+          onChange={chooseLens}
           controlsId={REPO_TREE_ID}
         />
         {canGroup && (
