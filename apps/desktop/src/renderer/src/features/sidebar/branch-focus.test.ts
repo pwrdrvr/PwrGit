@@ -6,8 +6,7 @@ import {
   branchSectionSummary,
   holderWorktreeId,
   isBranchSentinel,
-  visibleBranches,
-  worktreeLabel
+  visibleBranches
 } from "./branch-focus";
 
 function branch(
@@ -117,24 +116,6 @@ describe("holderWorktreeId", () => {
   it("falls back to the only holder even when it is the working target", () => {
     expect(holderWorktreeId(branch("main", ["wt-primary"]), "wt-primary")).toBe(
       "wt-primary"
-    );
-  });
-});
-
-describe("worktreeLabel", () => {
-  // Branch and worktree are 1:1, so naming a worktree by its branch would only
-  // repeat the row it sits on. The folder is the new information.
-  it("is the path's last segment", () => {
-    expect(worktreeLabel("/Users/h/pwrdrvr/PwrSnap")).toBe("PwrSnap");
-  });
-
-  it("ignores a trailing separator", () => {
-    expect(worktreeLabel("/Users/h/pwrdrvr/PwrSnap/")).toBe("PwrSnap");
-  });
-
-  it("handles Windows separators", () => {
-    expect(worktreeLabel("C:\\src\\PwrSnap-wonderful")).toBe(
-      "PwrSnap-wonderful"
     );
   });
 });

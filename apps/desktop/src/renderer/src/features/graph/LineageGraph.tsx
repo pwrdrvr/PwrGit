@@ -21,7 +21,7 @@ import { BranchFromCommitDialog } from "./BranchFromCommitDialog";
 import type { CommitSwitchTarget } from "./commit-context-menu";
 import { switchFailureMessage } from "./commit-context-menu";
 import { guardedSwitchBranch } from "../shell/branchSwitch";
-import { worktreeLabel } from "../sidebar/branch-focus";
+import { lastSegment } from "../sidebar/repo-view";
 import { CommitContextCard } from "./CommitContextCard";
 import { CommitContextMenu } from "./CommitContextMenu";
 import {
@@ -786,7 +786,7 @@ export function LineageGraph({
   const switchToBranch = async (target: CommitSwitchTarget): Promise<void> => {
     const outcome = await guardedSwitchBranch({
       worktreeId,
-      worktreeLabel: worktreeLabel(worktreePath),
+      worktreeLabel: lastSegment(worktreePath),
       branch: target.branch
     });
     if (outcome.kind === "cancelled") return;

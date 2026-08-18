@@ -60,15 +60,6 @@ export function holderWorktreeId(
   return ids.find((id) => id !== focusedWorktreeId) ?? ids[0] ?? null;
 }
 
-/** The chip must not repeat the branch name — branch↔worktree is 1:1, so
- *  labelling a worktree by its branch says nothing the row does not already
- *  say. Its path basename is the only distinguishing thing it carries, and it
- *  tells the user where on disk the checkout lives. */
-export function worktreeLabel(path: string): string {
-  const segments = path.split(/[/\\]/).filter((s) => s !== "");
-  return segments[segments.length - 1] ?? path;
-}
-
 /**
  * What activating a branch row does — "make this branch the one I am working
  * on", by the cheapest safe route. Two of the three answers run no git at all.

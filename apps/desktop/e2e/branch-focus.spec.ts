@@ -76,15 +76,51 @@ test("the branch list marks the branch the selected worktree is on", async () =>
   const current = refBranchRow(window, "main");
   await expect(current).toHaveClass(/is-current/, { timeout: SETTLE_MS });
   await expect(current).toHaveAttribute("aria-current", "true");
-  // The chip names the WORKTREE by its folder, not by the branch.
-  await expect(current.locator(".ref-checkout-chip__name")).toHaveText(
-    "pairedfocus"
-  );
+  // Its chip is the filled "here" variant. It carries no folder name: the
+  // primary lives in the repo's own folder, which the header above shows.
+  await expect(current.locator(".ref-checkout-chip.is-here")).toBeVisible();
+  await expect(current.locator(".ref-checkout-chip__name")).toHaveCount(0);
 
   // develop has no worktree, so it is free — no marker, no chip.
   const free = refBranchRow(window, "develop");
   await expect(free).toHaveClass(/is-free/);
   await expect(free.locator(".ref-checkout-chip")).toHaveCount(0);
+});
+
+test("an occupied branch names the worktree holding it", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepo("occupied");
+  // Deliberately NOT the branch's own slug: a folder named after its branch
+  // would only repeat the row, and the chip drops it. This one adds something.
+  repo.createBranch("feature/x");
+  const elsewhere = `${repo.path}-scratch-checkout`;
+  box.git(repo.path, "worktree", "add", elsewhere, "feature/x");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, box, "occupied");
+  await branchRow(window, "main").first().click();
+  await settledBranchList(window, "occupied", "main");
+
+  // Occupied, not current: an outlined chip naming that worktree's folder.
+  const occupied = refBranchRow(window, "feature/x");
+  await expect(occupied).toHaveClass(/is-occupied/, { timeout: SETTLE_MS });
+  await expect(occupied.locator(".ref-checkout-chip")).not.toHaveClass(
+    /is-here/
+  );
+  await expect(occupied.locator(".ref-checkout-chip__name")).toHaveText(
+    "occupied-scratch-checkout"
+  );
+
+  // Activating it is a focus move, not a checkout — git refuses a second
+  // checkout of one branch, so the app goes to the worktree instead.
+  await occupied.dblclick();
+  await expect(window.locator(".titlebar__branch-name")).toHaveText(
+    "feature/x",
+    { timeout: SETTLE_MS }
+  );
+  await expect(window.locator(".modal--dialog")).toHaveCount(0);
 });
 
 test("double-clicking a free branch switches the selected worktree to it", async () => {

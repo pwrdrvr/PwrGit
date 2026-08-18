@@ -15,9 +15,9 @@ import {
   branchFocusState,
   branchSectionSummary,
   holderWorktreeId,
-  visibleBranches as pinCurrentFirst,
-  worktreeLabel
+  visibleBranches as pinCurrentFirst
 } from "./branch-focus";
+import { lastSegment, worktreeFolderLabel } from "./repo-view";
 import {
   localBranchForRemote,
   RepoRefsModal,
@@ -158,7 +158,7 @@ export function RepoRefsSections({
     }
     const outcome = await guardedSwitchBranch({
       worktreeId: focusedWorktree.id,
-      worktreeLabel: worktreeLabel(focusedWorktree.path),
+      worktreeLabel: lastSegment(focusedWorktree.path),
       branch: action.branch
     });
     if (outcome.kind === "held") {
@@ -280,6 +280,12 @@ export function RepoRefsSections({
                 );
                 const holder =
                   holderId === null ? undefined : worktreesById.get(holderId);
+                const folderName =
+                  holder === undefined
+                    ? null
+                    : worktreeFolderLabel(holder.branch, holder.path, [
+                        repo.name
+                      ]);
                 return (
                   <div
                     className={`ref-branch-row is-${state}`}
@@ -335,8 +341,8 @@ export function RepoRefsSections({
                         }`}
                         aria-label={
                           state === "current"
-                            ? `${branch.name} is checked out here, in ${worktreeLabel(holder.path)}`
-                            : `Go to ${worktreeLabel(holder.path)}, which has ${branch.name} checked out`
+                            ? `${branch.name} is checked out here, in ${lastSegment(holder.path)}`
+                            : `Go to ${lastSegment(holder.path)}, which has ${branch.name} checked out`
                         }
                         title={holder.path}
                         onClick={(event) => {
@@ -347,9 +353,16 @@ export function RepoRefsSections({
                         <span aria-hidden="true">
                           {holder.isPrimary ? "⌂" : "⑂"}
                         </span>
-                        <span className="ref-checkout-chip__name">
-                          {worktreeLabel(holder.path)}
-                        </span>
+                        {/* Only when the folder adds something. A directory
+                            named after the branch would just repeat the row,
+                            and a primary checkout's folder is the repo folder
+                            the header above already shows — the glyph alone
+                            still says which checkout holds this branch. */}
+                        {folderName !== null && (
+                          <span className="ref-checkout-chip__name">
+                            {folderName}
+                          </span>
+                        )}
                       </button>
                     ) : (
                       // The accessible name of a button comes from its CONTENT
