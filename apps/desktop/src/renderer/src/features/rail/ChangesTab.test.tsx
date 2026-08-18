@@ -9,7 +9,9 @@ const mocks = vi.hoisted(() => ({
   confirmDialog: vi.fn(),
   dispatch: vi.fn(),
   subscribe: vi.fn(),
-  showErrorToast: vi.fn()
+  showErrorToast: vi.fn(),
+  showInfoToast: vi.fn(),
+  copyText: vi.fn()
 }));
 
 vi.mock("../../lib/pwrgit", () => ({
@@ -17,7 +19,11 @@ vi.mock("../../lib/pwrgit", () => ({
   subscribe: mocks.subscribe
 }));
 vi.mock("../shell/dialogs", () => ({ confirmDialog: mocks.confirmDialog }));
-vi.mock("../../lib/toast", () => ({ showErrorToast: mocks.showErrorToast }));
+vi.mock("../../lib/toast", () => ({
+  showErrorToast: mocks.showErrorToast,
+  showInfoToast: mocks.showInfoToast
+}));
+vi.mock("../../lib/copyText", () => ({ copyText: mocks.copyText }));
 
 import { ChangesTab, confirmAndDiscardAllChanges, groupChanges } from "./ChangesTab";
 
@@ -327,5 +333,168 @@ describe("ChangesTab truncation notice", () => {
     });
 
     expect(container.querySelector(".changes-truncated")).toBeNull();
+  });
+});
+
+describe("ChangesTab folder actions", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  const worktree = { id: "worktree-1" } as Worktree;
+
+  const listed: ChangeSet = {
+    staged: [],
+    unstaged: [
+      { path: "dist/a.js", status: "?", staged: false },
+      { path: "dist/b.js", status: "?", staged: false },
+      { path: "src/app.ts", status: "M", staged: false }
+    ]
+  };
+
+  const byLabel = (label: string): HTMLButtonElement => {
+    const found = [...document.querySelectorAll("button")].find(
+      (b) => b.getAttribute("aria-label") === label
+    );
+    if (found === undefined) throw new Error(`no button labelled "${label}"`);
+    return found;
+  };
+
+  const menuItem = (text: string): HTMLButtonElement => {
+    const found = [...document.querySelectorAll(".pop-menu__item")].find(
+      (b) => b.textContent === text
+    );
+    if (found === undefined) {
+      throw new Error(
+        `no menu item "${text}"; saw ${[...document.querySelectorAll(".pop-menu__item")]
+          .map((b) => b.textContent)
+          .join(" | ")}`
+      );
+    }
+    return found as HTMLButtonElement;
+  };
+
+  const rightClick = async (row: Element): Promise<void> => {
+    await act(async () => {
+      row.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 10 })
+      );
+    });
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mocks.confirmDialog.mockResolvedValue(true);
+    mocks.subscribe.mockReturnValue(() => undefined);
+    mocks.dispatch.mockImplementation(async (command: string) =>
+      command === "changes:list"
+        ? ok(listed)
+        : command === "changes:ignore"
+          ? ok({ added: ["/dist/"], gitignorePath: "/repo/.gitignore" })
+          : ok(null)
+    );
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <ChangesTab worktree={worktree} activeEmail="a@b.c" onOpenDiff={vi.fn()} />
+      );
+    });
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("discards a whole folder from its row, after confirming the count", async () => {
+    await act(async () => {
+      byLabel("Discard all 2 files in dist").click();
+    });
+
+    expect(mocks.confirmDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("all 2 files in dist/"),
+        danger: true
+      })
+    );
+    expect(mocks.dispatch).toHaveBeenCalledWith("changes:discard", {
+      worktreeId: "worktree-1",
+      paths: ["dist/a.js", "dist/b.js"]
+    });
+  });
+
+  it("does not discard when the confirmation is declined", async () => {
+    mocks.confirmDialog.mockResolvedValue(false);
+
+    await act(async () => {
+      byLabel("Discard all 2 files in dist").click();
+    });
+
+    expect(mocks.dispatch).not.toHaveBeenCalledWith(
+      "changes:discard",
+      expect.anything()
+    );
+  });
+
+  it("ignores a whole new folder from the context menu", async () => {
+    const folderRow = container.querySelector(".folder-row");
+    if (folderRow === null) throw new Error("no folder row");
+    await rightClick(folderRow);
+
+    await act(async () => {
+      menuItem("Add folder to .gitignore").click();
+    });
+
+    // A directory entry, so main writes "/dist/" rather than a file pattern.
+    expect(mocks.dispatch).toHaveBeenCalledWith("changes:ignore", {
+      worktreeId: "worktree-1",
+      entries: [{ path: "dist", directory: true }]
+    });
+  });
+
+  it("offers no ignore entry for a tracked file", async () => {
+    const row = [...container.querySelectorAll(".file-row")].find((r) =>
+      r.textContent?.includes("src/app.ts")
+    );
+    if (row === undefined) throw new Error("no tracked row");
+    await rightClick(row);
+
+    expect(
+      [...document.querySelectorAll(".pop-menu__item")].map((b) => b.textContent)
+    ).toEqual(["Stage", "Copy path", "Discard changes…"]);
+  });
+
+  it("says so when the pattern was already there", async () => {
+    mocks.dispatch.mockImplementation(async (command: string) =>
+      command === "changes:list"
+        ? ok(listed)
+        : command === "changes:ignore"
+          ? ok({ added: [], gitignorePath: "/repo/.gitignore" })
+          : ok(null)
+    );
+    const folderRow = container.querySelector(".folder-row");
+    if (folderRow === null) throw new Error("no folder row");
+    await rightClick(folderRow);
+
+    await act(async () => {
+      menuItem("Add folder to .gitignore").click();
+    });
+
+    expect(mocks.showInfoToast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Already ignored" })
+    );
+  });
+
+  it("copies every path a folder stands for", async () => {
+    const folderRow = container.querySelector(".folder-row");
+    if (folderRow === null) throw new Error("no folder row");
+    await rightClick(folderRow);
+
+    await act(async () => {
+      menuItem("Copy path").click();
+    });
+
+    expect(mocks.copyText).toHaveBeenCalledWith("dist/a.js\ndist/b.js");
   });
 });

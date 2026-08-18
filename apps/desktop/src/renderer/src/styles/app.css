@@ -4505,7 +4505,9 @@ button.ref-chip:focus-visible {
   opacity: 0;
 }
 .file-row:hover .file-action--discard,
-.file-row:focus-within .file-action--discard {
+.file-row:focus-within .file-action--discard,
+.folder-row:hover .file-action--discard,
+.folder-row:focus-within .file-action--discard {
   opacity: 1;
 }
 .file-action--discard:hover {

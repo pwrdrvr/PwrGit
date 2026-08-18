@@ -1931,28 +1931,109 @@ export async function pullFastForward(
  * (index + worktree) back to HEAD; a new file (untracked, or staged-add) is
  * unstaged and removed. Destructive — callers confirm first.
  */
-export async function discardPath(
+/**
+ * Which of `paths` exist in the HEAD tree. One `ls-tree` per batch rather than
+ * a `cat-file -e` per path: discarding a folder of 200 files would otherwise
+ * spawn 200 processes before doing any work. `-z` sidesteps quoting — git
+ * would otherwise escape non-ASCII names and we'd have to unescape them back
+ * into pathspecs.
+ */
+async function pathsInHead(
   git: GitExec,
   cwd: string,
-  path: string
-): Promise<Result<void>> {
-  const inHead = await git(["cat-file", "-e", `HEAD:${path}`], cwd);
-  if (inHead.ok && inHead.value.exitCode === 0) {
+  paths: string[]
+): Promise<Result<Set<string>>> {
+  const found = new Set<string>();
+  for (let i = 0; i < paths.length; i += PATHSPEC_BATCH) {
+    const batch = paths.slice(i, i + PATHSPEC_BATCH);
     const raw = await git(
-      ["restore", "--source=HEAD", "--staged", "--worktree", "--", path],
+      ["ls-tree", "-z", "-r", "--name-only", "HEAD", "--", ...batch],
       cwd
     );
     if (!raw.ok) return raw;
-    const checked = requireExit0(raw.value, ["restore"]);
-    return checked.ok ? ok(undefined) : checked;
+    // An unborn HEAD has no tree; everything is then "new", which is correct.
+    if (raw.value.exitCode !== 0) continue;
+    for (const name of raw.value.stdout.split("\0")) {
+      if (name !== "") found.add(name);
+    }
   }
-  // New file: best-effort unstage (a no-op/expected error for untracked), then
-  // remove it from the working tree.
-  await git(["restore", "--staged", "--", path], cwd);
-  const clean = await git(["clean", "-fd", "--", path], cwd);
-  if (!clean.ok) return clean;
-  const checked = requireExit0(clean.value, ["clean"]);
-  return checked.ok ? ok(undefined) : checked;
+  return ok(found);
+}
+
+/** Which of `paths` the index currently holds. */
+async function pathsInIndex(
+  git: GitExec,
+  cwd: string,
+  paths: string[]
+): Promise<Result<Set<string>>> {
+  const found = new Set<string>();
+  for (let i = 0; i < paths.length; i += PATHSPEC_BATCH) {
+    const raw = await git(
+      ["ls-files", "-z", "--", ...paths.slice(i, i + PATHSPEC_BATCH)],
+      cwd
+    );
+    if (!raw.ok) return raw;
+    const checked = requireExit0(raw.value, ["ls-files"]);
+    if (!checked.ok) return checked;
+    for (const name of checked.value.stdout.split("\0")) {
+      if (name !== "") found.add(name);
+    }
+  }
+  return ok(found);
+}
+
+/**
+ * Discard uncommitted changes to `paths`: tracked ones go back to their HEAD
+ * content, new ones are unstaged and deleted. Destructive — callers confirm.
+ *
+ * The three sets are worked out up front because git validates a whole
+ * pathspec list before acting, so a batch is all-or-nothing. Sending an
+ * untracked path to the unstage step would abort it for the staged-new paths
+ * beside it, and `clean` then refuses to remove them — the index still claims
+ * them. `rm --cached` rather than `restore --staged` for that step: it means
+ * the same thing here and also works on an unborn HEAD, which has no commit to
+ * restore an index entry from.
+ */
+export async function discardPaths(
+  git: GitExec,
+  cwd: string,
+  paths: string[]
+): Promise<Result<void>> {
+  if (paths.length === 0) return ok(undefined);
+
+  const head = await pathsInHead(git, cwd, paths);
+  if (!head.ok) return head;
+  const index = await pathsInIndex(git, cwd, paths);
+  if (!index.ok) return index;
+
+  const committed = paths.filter((path) => head.value.has(path));
+  const isNew = paths.filter((path) => !head.value.has(path));
+  const stagedNew = isNew.filter((path) => index.value.has(path));
+
+  if (committed.length > 0) {
+    const restored = await runBatched(
+      git,
+      cwd,
+      ["restore", "--source=HEAD", "--staged", "--worktree"],
+      committed
+    );
+    if (!restored.ok) return restored;
+  }
+  if (stagedNew.length > 0) {
+    const unstaged = await runBatched(
+      git,
+      cwd,
+      ["rm", "--cached", "--force"],
+      stagedNew
+    );
+    if (!unstaged.ok) return unstaged;
+  }
+  if (isNew.length > 0) {
+    const cleaned = await runBatched(git, cwd, ["clean", "-fd"], isNew);
+    if (!cleaned.ok) return cleaned;
+  }
+
+  return ok(undefined);
 }
 
 /**
