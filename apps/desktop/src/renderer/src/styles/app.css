@@ -5767,6 +5767,67 @@ body.is-col-resizing {
   font: 500 11.5px/1.4 var(--font-sans);
 }
 
+/* Image previews stand in for the patch Git cannot produce for binary blobs.
+   Two sides side by side when both exist; one alone for an add or a delete. */
+.diff-image {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px;
+}
+.diff-image__side {
+  flex: 1 1 240px;
+  min-width: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.diff-image__label {
+  font: 600 9px/1 var(--font-sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}
+.diff-image__frame {
+  /* Stretch to the taller side so both captions and meta lines line up,
+     whatever the two revisions' pixel dimensions are. */
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 96px;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  /* Chequerboard so a transparent PNG reads as transparent, not as the
+     panel's own background. */
+  background-color: var(--bg-input);
+  background-image: repeating-conic-gradient(
+    color-mix(in srgb, var(--text-subtle) 14%, transparent) 0% 25%,
+    transparent 0% 50%
+  );
+  background-size: 16px 16px;
+}
+.diff-image__img {
+  max-width: 100%;
+  /* Tall assets stay inside the row instead of pushing the other side away. */
+  max-height: 420px;
+  object-fit: contain;
+  image-orientation: from-image;
+}
+.diff-image__note {
+  padding: 8px;
+  text-align: center;
+  color: var(--text-muted);
+  font: 500 11.5px/1.4 var(--font-sans);
+}
+.diff-image__meta {
+  min-height: 12px;
+  font: 500 10.5px/1 var(--font-mono);
+  color: var(--text-subtle);
+}
+
 .diff-file {
   margin-bottom: 12px;
   border: 1px solid var(--border-subtle);

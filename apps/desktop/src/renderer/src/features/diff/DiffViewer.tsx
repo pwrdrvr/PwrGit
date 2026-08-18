@@ -1,5 +1,7 @@
 import { useMemo } from "react";
+import { imageMediaType } from "@pwrgit/shared";
 import { DiffStat } from "./DiffStat";
+import { ImageDiff, type ImageDiffRevisions } from "./ImageDiff";
 import { type DiffFile, parseUnifiedDiff } from "./parse-diff";
 
 const STATUS_LABEL: Record<DiffFile["status"], string> = {
@@ -13,10 +15,13 @@ const STATUS_LABEL: Record<DiffFile["status"], string> = {
  *  highlighting — added/removed/context rows in a line-numbered grid. */
 export function DiffViewer({
   patch,
-  emptyLabel
+  emptyLabel,
+  images
 }: {
   patch: string;
   emptyLabel?: string;
+  /** Revisions the patch compares; enables previews for binary image files. */
+  images?: ImageDiffRevisions;
 }) {
   const parsed = useMemo(() => parseUnifiedDiff(patch), [patch]);
   if (parsed.files.length === 0) {
@@ -25,13 +30,19 @@ export function DiffViewer({
   return (
     <div className="diff-view">
       {parsed.files.map((file, i) => (
-        <DiffFileView key={`${file.path}-${i}`} file={file} />
+        <DiffFileView key={`${file.path}-${i}`} file={file} images={images} />
       ))}
     </div>
   );
 }
 
-function DiffFileView({ file }: { file: DiffFile }) {
+function DiffFileView({
+  file,
+  images
+}: {
+  file: DiffFile;
+  images: ImageDiffRevisions | undefined;
+}) {
   const name =
     file.status === "renamed" && file.oldPath !== undefined
       ? `${file.oldPath} → ${file.path}`
@@ -50,7 +61,11 @@ function DiffFileView({ file }: { file: DiffFile }) {
       </div>
 
       {file.binary ? (
-        <div className="diff-binary">Binary file — no preview.</div>
+        images !== undefined && imageMediaType(file.path) !== null ? (
+          <ImageDiff file={file} revisions={images} />
+        ) : (
+          <div className="diff-binary">Binary file — no preview.</div>
+        )
       ) : (
         file.hunks.map((hunk, hi) => (
           <div className="diff-hunk" key={hi}>

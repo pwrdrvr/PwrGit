@@ -173,6 +173,50 @@ export const execGit: GitExec = async (args, cwd, options) => {
   }
 };
 
+export type GitBinaryOutput = {
+  stdout: Buffer;
+  stderr: string;
+  exitCode: number;
+};
+
+/**
+ * Like `GitExec`, but keeps stdout as raw bytes. Blob contents (image
+ * previews) must not go through utf8 decoding — it replaces every byte that
+ * isn't valid UTF-8 and silently corrupts the file.
+ */
+export type GitExecBinary = (
+  args: string[],
+  cwd: string
+) => Promise<Result<GitBinaryOutput, PwrGitError>>;
+
+/** Production GitExecBinary backed by dugite's bundled git binary. */
+export const execGitBinary: GitExecBinary = async (args, cwd) => {
+  try {
+    const result = await exec(args, cwd, {
+      encoding: "buffer",
+      env: gitExecutionEnvironment(NO_OPTIONAL_LOCKS.env)
+    });
+    return ok({
+      stdout: result.stdout,
+      stderr: result.stderr.toString(),
+      exitCode: result.exitCode
+    });
+  } catch (cause) {
+    logMain(
+      "error",
+      "git",
+      `${gitCommandLogLabel(args, cwd)} failed to spawn:`,
+      sanitizeGitLogDetail(cause)
+    );
+    return err({
+      kind: "git",
+      code: "spawn_failed",
+      message: cause instanceof Error ? cause.message : String(cause),
+      cause
+    });
+  }
+};
+
 /** Turn a non-zero git exit into a typed error; pass through ok output. */
 export function requireExit0(
   output: GitOutput,

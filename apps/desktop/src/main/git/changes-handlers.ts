@@ -3,7 +3,7 @@ import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
-import { execGit } from "./dugite";
+import { execGit, execGitBinary } from "./dugite";
 import {
   commitChanges,
   commitDiff,
@@ -19,6 +19,7 @@ import {
   stagePaths,
   unstagePaths
 } from "./git-service";
+import { readImagePreview } from "./image-preview";
 import type { WorktreeRefresher } from "./worktree-handlers";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
@@ -186,5 +187,11 @@ export function registerChangesHandlers(
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
     return commitFileDiff(execGit, path, req.hash, req.path);
+  });
+
+  bus.register("diff:image", async (req) => {
+    const path = pathOf(req.worktreeId);
+    if (path === null) return err(notFound);
+    return readImagePreview(execGit, execGitBinary, path, req.path, req.rev);
   });
 }

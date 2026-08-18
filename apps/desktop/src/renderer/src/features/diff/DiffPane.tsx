@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { dispatch } from "../../lib/pwrgit";
 import { DiffViewer } from "./DiffViewer";
+import type { ImageDiffRevisions } from "./ImageDiff";
 
 export type DiffTarget =
   | { kind: "file"; path: string; staged: boolean }
@@ -58,6 +59,26 @@ export function DiffPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [worktreeId, key]);
 
+  // Binary image files carry no patch text, so the viewer needs to know which
+  // two revisions this diff compares in order to fetch the bytes itself.
+  const images: ImageDiffRevisions = useMemo(
+    () =>
+      target.kind === "file"
+        ? {
+            worktreeId,
+            before: target.staged ? { kind: "head" } : { kind: "index" },
+            after: target.staged ? { kind: "index" } : { kind: "worktree" }
+          }
+        : {
+            worktreeId,
+            before: { kind: "commitParent", hash: target.hash },
+            after: { kind: "commit", hash: target.hash }
+          },
+    // Same target identity the patch fetch keys on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [worktreeId, key]
+  );
+
   const title =
     target.kind === "file" || target.kind === "commitFile"
       ? target.path
@@ -89,6 +110,7 @@ export function DiffPane({
         ) : (
           <DiffViewer
             patch={patch ?? ""}
+            images={images}
             emptyLabel={
               target.kind === "commit"
                 ? "This commit has no textual changes."
