@@ -69,6 +69,11 @@ just goes there, instead of failing with git's *"already used by worktree"*.
 `+` (create a worktree for this branch) survives as an explicit secondary
 action, not as the primary meaning of the row.
 
+The three states are read from a `repo:refs` snapshot, which can be stale — so
+"Free" is a belief, not a fact, and the switch it triggers can still come back
+`checked_out_elsewhere`. That is the same situation as "Occupied" arriving a
+second late, and it resolves the same way rather than as an error; see §6.
+
 Activation is bound to: **double-click**, **Enter** on the focused row, and
 **Switch here** in the row's context menu. Double-click alone is not
 sufficient — a pointer-only activation fails SC 2.1.1, and the app already
@@ -128,10 +133,13 @@ a worktree of this repo. This is the cheap 90% of the pairing: it is visible
 without expanding 161 rows, and it makes the sidebar agree with the title bar
 at rest.
 
-For a detached worktree the suffix reads `· detached`. (`Worktree.branch` is
-`detached@0123456` in that case, so no local branch row will match it — the
-current-state styling correctly applies to nothing, and only the summary needs
-the special case.)
+`Worktree.branch` is not always a branch name: `listWorktrees` substitutes
+`detached@0123456`, `(bare)`, or `(unknown)` whenever `git worktree list
+--porcelain` emits no `branch` line. All three are sentinels and none may be
+printed as if it were a branch — the summary reads `· detached` for the first
+and drops to a bare `BRANCHES 161` for the other two. (No local branch row can
+match any of them, so the current-state styling correctly applies to nothing;
+only the summary needs the check.)
 
 ### 4.4 Pinning the current branch into view
 
@@ -161,48 +169,84 @@ The user's second question. Rules, in order of importance:
    the working target. `occupied` is per-repo and can appear in every repo at
    once. This distinction is what stops the sidebar from looking like it has 12
    simultaneous selections.
-5. **Activating a branch in a repo that is not the working target** first moves
-   the working target to that repo's primary worktree, then applies §3 against
-   it. State this in the confirm dialog, because it is a two-part action:
-   *"Switch PwrSnap (primary checkout) to `claude/sad-joliot`?"*
+5. **Activating a branch in a repo that is not the working target** resolves
+   §3 *first*, against that repo. An **occupied** branch still just focuses the
+   worktree holding it — no primary is involved, no git runs, no dialog appears,
+   exactly as within the working repo. Only the **free** case needs a target to
+   switch, and only then does the working target move to that repo's primary
+   checkout. Because that case is a two-part action, the confirm says so:
+   *"Switch PwrSnap (primary checkout) to `claude/sad-joliot`?"* — and it is
+   shown even when the destination is clean, since moving the working target
+   across repos is not something the user asked for implicitly.
 
 ## 6. The safety gate
 
 `switchBranch` already classifies failures into `checked_out_elsewhere`,
-`dirty`, and `switch_failed`. Under §3 the first is unreachable — an occupied
-branch never reaches `branch:switch`. That leaves dirt.
+`dirty`, and `switch_failed`. §3 makes the first *rare* — an occupied branch is
+routed to a focus move — but **not unreachable**, and the design must not treat
+it as such: occupancy is decided from the `repo:refs` snapshot
+`RepoRefsSections` holds in component state, and a second PwrGit window, a
+terminal, or a concurrent switch can check a branch out after that snapshot was
+taken. So `checked_out_elsewhere` keeps a handler, and it is not an error path:
+re-list the repo's worktrees, then do what §3 would have done — focus the
+worktree that now holds the branch. The stale row corrects itself on the
+refresh that follows.
 
-Note that `git switch` *succeeds* with uncommitted changes when they do not
-conflict, carrying them to the new branch. That is sometimes what you want and
-sometimes a genuine footgun, and the user cannot tell which from the sidebar.
-So it is gated, not attempted blind:
+That leaves dirt. Note that `git switch` *succeeds* with uncommitted changes
+when they do not conflict, carrying them to the new branch. That is sometimes
+what you want and sometimes a genuine footgun, and the user cannot tell which
+from the sidebar. So it is gated, not attempted blind:
 
-- **`dirty === 0`** → switch immediately. No dialog. This is the common case
-  and a dialog here would make the feature feel expensive.
-- **`dirty > 0`** → confirm sheet, naming the worktree, the count, and the
-  destination. Choices: **Carry changes over** / **Cancel**. When stash lands,
-  **Stash and switch** becomes the recommended first option.
-- **A rebase/merge/cherry-pick is in progress, or the worktree operation queue
-  is busy** → refuse up front with the reason. Do not queue a checkout behind a
-  rebase.
+- **Known clean** → switch immediately. No dialog. This is the common case and
+  a dialog here would make the feature feel expensive. "Known" is load-bearing;
+  see the staging note below.
+- **Dirty, or dirtiness unknown** → confirm sheet, naming the worktree, the
+  count, and the destination. Choices: **Carry changes over** / **Cancel**.
+  When stash lands, **Stash and switch** becomes the recommended first option.
+- **A rebase/merge/cherry-pick is in progress** → refuse up front with the
+  reason. Do not queue a checkout behind a rebase.
 - **Anything else** → let git decide and surface `switch_failed` as an error
   toast (the existing pattern), because git is the authority on *"would be
   overwritten by checkout."*
 
-**Staging.** v1 reads `dirty` off the `Worktree` already in the tree and calls
-the existing `branch:switch` — no protocol change. v2 adds
-`branch:inspectSwitch` returning `{ dirty, conflicting, operationInProgress }`,
-following the established `remote:inspectDivergence` / `remote:inspectReset`
-inspect-then-act pattern, so the dialog states facts rather than an estimate.
+Note what is deliberately *not* on that list: the worktree operation queue
+being busy. `WorktreeOperationQueue` exists to serialize a scope's operations
+without blocking unrelated ones, it exposes no busy state to check, and
+`branch:switch` already runs inside it. A switch requested while a pull is in
+flight should queue behind the pull, as it does today — refusing it would be a
+regression against the queue's contract, not a safety measure.
+
+**Staging.** The obvious v1 — read `dirty` off the `Worktree` already in the
+tree — is **not sound**, and this is the one place the shortcut has to be
+resisted. `repoFromRow` maps `dirty: w.dirty ?? 0` over a LEFT JOIN against
+`worktree_state`, and that row is written lazily; a worktree whose state has
+never been computed reports `dirty: 0` while holding a dozen modified files, so
+the gate would silently take the no-dialog path in exactly the case it exists
+to catch.
+
+So v1 calls `worktree:getState` for the target before deciding, and treats a
+failed or absent snapshot as **unknown**, not clean — unknown takes the confirm
+branch. Still no protocol change. v2 adds `branch:inspectSwitch` returning
+`{ dirty, conflicting, operationInProgress }`, following the established
+`remote:inspectDivergence` / `remote:inspectReset` inspect-then-act pattern, so
+the dialog states facts rather than an estimate.
 
 ## 7. Keyboard and accessibility
 
 Branch rows are `div`s today with a single `CopyTarget` button inside — not
 reachable as rows, not announced as list items.
 
-- Branch rows join the sidebar tree as `role="treeitem"` at `aria-level={3}`
-  under their section, with a roving tabindex per repo (the same pattern
-  `WorktreeRow` uses).
+- Branch rows join the sidebar tree as `role="treeitem"`, with a roving
+  tabindex per repo (the same pattern `WorktreeRow` uses).
+- **The section body has to become a real group first.** `RepoRefsSections`
+  renders directly inside the single `role="group"` `RepoRow` opens for the
+  repo, whose treeitems are `aria-level={2}`; the Branches head is a plain
+  `<button>`, not a group. Dropping level-3 items in there yields a depth jump
+  with no parent, and breaks the `aria-posinset`/`aria-setsize` accounting the
+  level-2 rows already do by hand — the same constraint that forces the Pinned
+  subhead to be `aria-hidden`. So: wrap each section body in its own nested
+  `role="group"`, labelled by its head, and *then* the rows are
+  `aria-level={3}`. Anything less and they stay at level 2.
 - `aria-current="true"` on the current-branch row. This is the accessible
   half of the pairing and is what makes it survive without color.
 - `Enter` = activate (§3). `Space` = set cursor. `⌘C` = copy branch name.
@@ -223,17 +267,19 @@ second step, not a side effect of this one.
 
 | File | Change |
 |---|---|
-| `features/sidebar/RepoRefsSections.tsx` | new props `focusedWorktree`, `worktreesById`; three-state row rendering, checkout chip, pinned current branch, section summary, dbl-click/Enter |
+| `features/sidebar/RepoRefsSections.tsx` | new props `focusedWorktree`, `worktreesById`; three-state row rendering, checkout chip, pinned current branch, section summary, dbl-click/Enter; nested `role="group"` per section body (§7) |
 | `features/sidebar/RepoRow.tsx:628` | pass `selectedWorktreeId` + `repo.worktrees` down (both already in scope) |
 | `features/sidebar/RepoRefsModal.tsx` | same three states in the "View all 161 branches" list — the states must not differ between the slice and the modal |
 | `styles/app.css` | `.ref-branch-row.is-current` / `.is-occupied`, `.ref-checkout-chip` |
-| `App.tsx` | expose an `activateBranch(repoId, branch)` that resolves §3 and §5.5 |
-| `features/shell/dialogs.ts` | the dirty-switch confirm |
+| `App.tsx` | expose an `activateBranch(repoId, branch)` that resolves §3 and §5.5, reads `worktree:getState` before the gate, and handles `checked_out_elsewhere` as a focus move rather than an error |
+| `features/shell/dialogs.ts` | the dirty-switch confirm (also shown when dirtiness is unknown) |
 | `main/git/branch-handlers.ts` | v2 only: `branch:inspectSwitch` |
 
-No change to `Worktree`, `RepoRefs`, or `LocalBranchSummary` — `checkedOutWorktreeIds`
-plus `repo.worktrees[].path` already carry everything the chip and the three
-states need.
+No change to `Worktree`, `RepoRefs`, or `LocalBranchSummary` — `checkedOutWorktreeIds`,
+`repo.worktrees[].path` and `.isPrimary` already carry everything the chip and
+the three states need, and `repoFromRow` returns a repo's worktrees unpaged. The
+gate reaches for the existing `worktree:getState` rather than the tree's `dirty`
+field, for the reason in §6.
 
 ## 9. Rejected
 
