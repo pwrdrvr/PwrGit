@@ -69,6 +69,10 @@ describe("staging untracked work (system git)", () => {
     git(repo, ["init", "-b", "main"]);
     git(repo, ["config", "user.name", "PwrGit Test"]);
     git(repo, ["config", "user.email", "pwrgit@example.com"]);
+    // Windows checkouts default to core.autocrlf=true, which rewrites LF to
+    // CRLF on the way out of HEAD — a restored file would then not match the
+    // bytes this test committed.
+    git(repo, ["config", "core.autocrlf", "false"]);
     writeFileSync(join(repo, "tracked.txt"), "baseline\n");
     git(repo, ["add", "."]);
     git(repo, ["commit", "-m", "baseline"]);
@@ -235,6 +239,10 @@ describe("readChanges cap (system git)", () => {
     git(repo, ["init", "-b", "main"]);
     git(repo, ["config", "user.name", "PwrGit Test"]);
     git(repo, ["config", "user.email", "pwrgit@example.com"]);
+    // Windows checkouts default to core.autocrlf=true, which rewrites LF to
+    // CRLF on the way out of HEAD — a restored file would then not match the
+    // bytes this test committed.
+    git(repo, ["config", "core.autocrlf", "false"]);
     writeFileSync(join(repo, "tracked.txt"), "baseline\n");
     git(repo, ["add", "."]);
     git(repo, ["commit", "-m", "baseline"]);
@@ -272,6 +280,10 @@ describe("discardPaths (system git)", () => {
     git(repo, ["init", "-b", "main"]);
     git(repo, ["config", "user.name", "PwrGit Test"]);
     git(repo, ["config", "user.email", "pwrgit@example.com"]);
+    // Windows checkouts default to core.autocrlf=true, which rewrites LF to
+    // CRLF on the way out of HEAD — a restored file would then not match the
+    // bytes this test committed.
+    git(repo, ["config", "core.autocrlf", "false"]);
     mkdirSync(join(repo, "src"));
     writeFileSync(join(repo, "src", "kept.ts"), "baseline\n");
     writeFileSync(join(repo, "src", "edited.ts"), "baseline\n");
@@ -334,6 +346,7 @@ describe("discardPaths (system git)", () => {
     const fresh = join(root, "unborn");
     mkdirSync(fresh);
     git(fresh, ["init", "-b", "main"]);
+    git(fresh, ["config", "core.autocrlf", "false"]);
     writeFileSync(join(fresh, "first.txt"), "x\n");
     git(fresh, ["add", "."]);
 

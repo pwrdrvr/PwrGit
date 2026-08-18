@@ -19,6 +19,9 @@ describe("toGitignorePattern", () => {
     expect(toGitignorePattern("dist", { directory: true })).toBe("/dist/");
   });
 
+  // These stay pure string work on purpose: `*` and `?` are legal on POSIX but
+  // reserved on Windows, so the round-trip through a real file is covered by
+  // the bracket case below instead.
   it("escapes glob syntax that is legal in a filename", () => {
     expect(toGitignorePattern("report [final].pdf")).toBe(
       "/report \\[final\\].pdf"
@@ -70,6 +73,24 @@ describe("addPatterns", () => {
   it("matches an existing line despite surrounding whitespace", () => {
     expect(addPatterns("  /dist/  \n", ["/dist/"]).added).toEqual([]);
   });
+
+  // A .gitignore is committed and shared, so the endings the file already uses
+  // win over the ones this platform would pick.
+  it("follows a CRLF file's line endings", () => {
+    expect(addPatterns("/out/\r\n", ["/dist/", "/tmp/"]).text).toBe(
+      "/out/\r\n/dist/\r\n/tmp/\r\n"
+    );
+  });
+
+  it("separates with CRLF when a CRLF file lacks its final newline", () => {
+    expect(addPatterns("/out/\r\n/a", ["/dist/"]).text).toBe(
+      "/out/\r\n/a\r\n/dist/\r\n"
+    );
+  });
+
+  it("dedupes against CRLF lines", () => {
+    expect(addPatterns("/dist/\r\n", ["/dist/"]).added).toEqual([]);
+  });
 });
 
 describe("appendToGitignore (real files + git check-ignore)", () => {
@@ -111,15 +132,18 @@ describe("appendToGitignore (real files + git check-ignore)", () => {
   });
 
   it("ignores exactly the awkward filename it was given", () => {
-    // The escaping earns its keep here: unescaped, "/build-*.log" would also
-    // swallow build-prod.log, which the user never pointed at.
-    writeFileSync(join(root, "build-*.log"), "x\n");
-    writeFileSync(join(root, "build-prod.log"), "x\n");
+    // Brackets rather than the more obvious `*`: Windows forbids `*` and `?`
+    // in filenames outright, so a test that needs the file to exist cannot use
+    // them. This case has more teeth anyway — unescaped, `/report [final].pdf`
+    // is a character class matching one of f, i, n, a, l, so it ignores
+    // "report f.pdf" and leaves the file the user actually pointed at alone.
+    writeFileSync(join(root, "report [final].pdf"), "x\n");
+    writeFileSync(join(root, "report f.pdf"), "x\n");
 
-    appendToGitignore(root, [toGitignorePattern("build-*.log")]);
+    appendToGitignore(root, [toGitignorePattern("report [final].pdf")]);
 
-    expect(ignored("build-*.log")).toBe(true);
-    expect(ignored("build-prod.log")).toBe(false);
+    expect(ignored("report [final].pdf")).toBe(true);
+    expect(ignored("report f.pdf")).toBe(false);
   });
 
   it("does not ignore a same-named file in a subdirectory", () => {

@@ -44,6 +44,7 @@ export function addPatterns(
   existing: string,
   patterns: string[]
 ): { text: string; added: string[] } {
+  // trim() also drops the "\r" of a CRLF file, so the dedupe works either way.
   const present = new Set(
     existing.split("\n").map((line) => line.trim()).filter((line) => line !== "")
   );
@@ -55,10 +56,18 @@ export function addPatterns(
   }
   if (added.length === 0) return { text: existing, added };
 
+  // Follow the file rather than the platform: a repo's .gitignore is shared,
+  // and appending LF into a CRLF file leaves mixed endings that show up as
+  // whitespace noise in the next diff.
+  const newline = existing.includes("\r\n") ? "\r\n" : "\n";
   // A file that does not end in a newline would otherwise glue the first new
   // pattern onto the last existing one, silently changing that pattern too.
-  const separator = existing === "" || existing.endsWith("\n") ? "" : "\n";
-  return { text: `${existing}${separator}${added.join("\n")}\n`, added };
+  const separator =
+    existing === "" || existing.endsWith("\n") ? "" : newline;
+  return {
+    text: `${existing}${separator}${added.join(newline)}${newline}`,
+    added
+  };
 }
 
 export type GitignoreWrite = { added: string[]; gitignorePath: string };
