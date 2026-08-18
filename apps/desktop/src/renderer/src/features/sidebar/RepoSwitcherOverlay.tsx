@@ -6,6 +6,7 @@ import { useRelativeClock } from "../../lib/useRelativeClock";
 import { shortWhen } from "../graph/graph-view";
 import { commitHashQuery, searchCommits } from "./commit-search";
 import { PrChip } from "./PrChip";
+import { worktreeFolderLabel } from "./repo-view";
 import { PinIcon } from "./WorktreeRow";
 
 const isMac = navigator.platform.startsWith("Mac");
@@ -20,6 +21,16 @@ const hitKey = (hit: RepoSearchHit): string =>
  *  and picking it opens the New worktree modal instead of selecting a row. */
 const isWorktreelessBranch = (hit: RepoSearchHit): boolean =>
   hit.kind === "remote_branch" || hit.kind === "local_branch";
+
+/** The directory a worktree hit lives in, when its branch name doesn't say.
+ *  Paths are indexed too (0008_search_fts weights them below names), so a query
+ *  typed from a shell prompt matches a worktree whose branch has since been
+ *  renamed — and without this the row that came back named a branch the user
+ *  had never heard of, with nothing to connect it to what they searched for. */
+const hitFolderLabel = (hit: RepoSearchHit): string | null =>
+  hit.kind === "worktree"
+    ? worktreeFolderLabel(hit.name, hit.path, [hit.repoName])
+    : null;
 
 export type PaletteItem =
   | { kind: "commit"; commit: Commit }
@@ -466,6 +477,34 @@ export function RepoSwitcherOverlay({
                 </svg>
               )}
               <span className="overlay-result__name">{r.name}</span>
+              {(() => {
+                const folder = hitFolderLabel(r);
+                if (folder === null) return null;
+                return (
+                  <>
+                    <span className="a11y-sr-only">in folder</span>
+                    <span
+                      className="overlay-result__folder"
+                      title={`Worktree folder — ${r.path}`}
+                    >
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+                      </svg>
+                      <span className="overlay-result__folder-name">{folder}</span>
+                    </span>
+                  </>
+                );
+              })()}
               {!isWorktreelessBranch(r) && (
                 <button
                   type="button"

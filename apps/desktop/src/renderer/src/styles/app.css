@@ -1349,7 +1349,13 @@ textarea,
   position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
+  /* Only .wt-row__folder ever takes a second line (it asks for 100% of one);
+     every other child either shrinks or is content-sized, so a row without a
+     folder is laid out exactly as it was. */
+  flex-wrap: wrap;
+  /* Row gap 0: the only wrapped line is .wt-row__folder, which belongs to the
+     branch above it — 6px there would set it adrift between two rows. */
+  gap: 0 6px;
   /* Content-sized for the same reason as .repo-row — see the note there. */
   min-height: 20px;
   /* No reserved lane on the right any more. 31px was held for a kebab that is
@@ -1532,6 +1538,36 @@ textarea,
 }
 .wt-row.is-stale .wt-row__branch {
   color: var(--text-muted);
+}
+/* The worktree's directory name, printed under the branch only when the branch
+   name is not also the directory's (repo-view.ts's worktreeFolderLabel decides
+   — it stays silent for the overwhelmingly common case where they match).
+
+   A line of its own, not a second column: the sidebar's default is 320px and
+   its minimum is 240px, and two names sharing one line there truncated BOTH to
+   a few characters. Two half-names identify nothing, so the branch keeps the
+   width it always had and the folder takes the row's full width beneath it.
+   `flex-basis: 100%` is the wrap: no line can hold it beside anything else. */
+.wt-row__folder {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 1 100%;
+  min-width: 0;
+  /* Line up under the branch text, past the drag grip and branch glyph
+     (11px + 6px gap + 12px + 6px gap), so the pair reads as one row. */
+  margin-left: 35px;
+  color: var(--text-subtle);
+  /* Below the branch on the same axis — see .wt-row__branch. */
+  font: 500 calc(var(--sidebar-title-size) - 3px) / 1.2 var(--font-mono);
+}
+.wt-row__folder svg {
+  flex: 0 0 auto;
+}
+.wt-row__folder-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wt-tag {
@@ -1722,7 +1758,10 @@ textarea,
   background: var(--bg-row-active);
 }
 .overlay-result__name {
-  flex: 1;
+  /* Auto basis for the same reason as .wt-row__branch: with a zero basis the
+     hit's name is whatever space its own qualifiers left behind, and a worktree
+     that carries .overlay-result__folder truncated its NAME first. */
+  flex: 1 1 auto;
   min-width: 0;
   text-align: left;
   font: 600 13px/1.2 var(--font-sans);
@@ -1734,6 +1773,27 @@ textarea,
 .overlay-result__meta {
   font: 500 10px/1 var(--font-mono);
   color: var(--text-muted);
+}
+/* Same rule as the sidebar's .wt-row__folder, in this row's proportions: a
+   worktree hit can match on its PATH (paths are indexed), and a row that named
+   only the branch left the user no way to see why it came back. */
+.overlay-result__folder {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 4 auto;
+  min-width: 0;
+  max-width: 38%;
+  color: var(--text-subtle);
+  font: 500 11px/1 var(--font-mono);
+}
+.overlay-result__folder svg {
+  flex: 0 0 auto;
+}
+.overlay-result__folder-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* The pin star keeps its slot (no layout shift) but only shows on rows that
    are pinned, hovered, or keyboard-selected. */

@@ -105,6 +105,55 @@ test("⌘F finds a worktree by branch name and jumps to it", async () => {
   );
 });
 
+// A worktree's directory is named once, when it is created; its branch can be
+// renamed or recreated afterwards and nothing renames the directory to match.
+// Agent tooling does this routinely, and the sidebar then titled the row with a
+// branch that appears nowhere in the shell prompt sitting in that directory —
+// while ⌘F for the directory name returned that row (paths are indexed) with
+// nothing on it explaining the match.
+test("a worktree whose folder no longer matches its branch shows both names", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepo("snapfarm");
+  const wtPath = repo.addWorktree("recursing-euler-9edf74");
+  box.git(wtPath, "branch", "-m", "dmg-file-art-update-4fd193");
+  box.makeRepo("other-repo");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, box, "snapfarm");
+
+  // The sidebar row carries the branch AND the directory it lives in.
+  const row = branchRow(window, "dmg-file-art-update-4fd193");
+  await expect(row.locator(".wt-row__branch")).toHaveText(
+    "dmg-file-art-update-4fd193",
+    { timeout: 20_000 }
+  );
+  await expect(row.locator(".wt-row__folder-name")).toHaveText(
+    "recursing-euler-9edf74"
+  );
+  // The repo's own checkout keeps its single name: the folder row above it
+  // already says "snapfarm".
+  await expect(
+    branchRow(window, "main").locator(".wt-row__folder")
+  ).toHaveCount(0);
+
+  // ⌘F for the directory — what your shell prompt shows — reaches the same
+  // row, and the row says why it matched.
+  await window.keyboard.press("Meta+f");
+  await window.locator(".overlay-search input").fill("recursing-euler");
+  const hit = window.locator(".overlay-result", {
+    has: window.locator(".overlay-result__folder-name", {
+      hasText: "recursing-euler-9edf74"
+    })
+  });
+  await expect(hit).toHaveCount(1);
+  await expect(hit.locator(".overlay-result__name")).toHaveText(
+    "dmg-file-art-update-4fd193"
+  );
+  await window.keyboard.press("Escape");
+});
+
 // A branch created without a checkout — the app can now make these itself —
 // belongs to no worktree, so before 0022 it was in none of the indexed kinds
 // and ⌘K could not reach it at all.

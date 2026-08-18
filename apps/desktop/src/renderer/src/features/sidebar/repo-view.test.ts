@@ -14,7 +14,8 @@ import {
   reorder,
   repoPinSource,
   repoPrimaryBehind,
-  SORT_CYCLE
+  SORT_CYCLE,
+  worktreeFolderLabel
 } from "./repo-view";
 
 function wt(partial: Partial<Worktree> & { id: string; branch: string }): Worktree {
@@ -614,5 +615,71 @@ describe("formatLensCount", () => {
   it("does not throw on non-finite input", () => {
     expect(formatLensCount(Number.NaN)).toBe("NaN");
     expect(formatLensCount(Number.POSITIVE_INFINITY)).toBe("Infinity");
+  });
+});
+
+describe("worktreeFolderLabel", () => {
+  it("stays silent when the branch is also the directory name", () => {
+    expect(
+      worktreeFolderLabel("feat/graph-x", "/wt/PwrGit/feat/graph-x")
+    ).toBeNull();
+    expect(worktreeFolderLabel("main", "/repos/PwrGit/main")).toBeNull();
+  });
+
+  it("stays silent when the directory holds the branch's last segment", () => {
+    // The usual worktree layout: `git worktree add ../graph-x feat/graph-x`.
+    expect(worktreeFolderLabel("feat/graph-x", "/wt/graph-x")).toBeNull();
+  });
+
+  it("stays silent when only the separators differ", () => {
+    // A branch name can carry characters a directory cannot, and each tool
+    // flattens them its own way — that is the same name, not a second one.
+    expect(worktreeFolderLabel("feat/graph-x", "/wt/feat-graph-x")).toBeNull();
+    expect(worktreeFolderLabel("fix.this_thing", "/wt/fix-this-thing")).toBeNull();
+    expect(worktreeFolderLabel("Feat/Graph-X", "/wt/feat-graph-x")).toBeNull();
+  });
+
+  // The case this exists for: an agent named the directory after the branch it
+  // created, then renamed or recreated the branch underneath it.
+  it("names the directory when the branch no longer matches it", () => {
+    expect(
+      worktreeFolderLabel(
+        "dmg-file-art-update-4fd193",
+        "/Users/me/claude-worktrees/PwrSnap/recursing-euler-9edf74"
+      )
+    ).toBe("recursing-euler-9edf74");
+  });
+
+  it("names the directory for a detached checkout, which has no branch", () => {
+    expect(worktreeFolderLabel("detached@2ffe55f", "/wt/release-audit")).toBe(
+      "release-audit"
+    );
+  });
+
+  it("takes further names that make the directory redundant", () => {
+    // A repo's primary checkout lives in the repo's own folder, already named
+    // by the folder row above it.
+    expect(worktreeFolderLabel("main", "/repos/PwrSnap", ["PwrSnap"])).toBeNull();
+    expect(worktreeFolderLabel("main", "/repos/PwrSnap", [undefined])).toBe(
+      "PwrSnap"
+    );
+  });
+
+  it("reads a Windows path's last segment", () => {
+    expect(
+      worktreeFolderLabel("feature/login", "C:/Users/me/wt/other-dir")
+    ).toBe("other-dir");
+    expect(
+      worktreeFolderLabel("feature/login", "C:\\Users\\me\\wt\\login")
+    ).toBeNull();
+  });
+
+  it("has nothing to say about a path with no segments", () => {
+    expect(worktreeFolderLabel("main", "")).toBeNull();
+  });
+
+  it("compares non-Latin names as themselves, not as empty strings", () => {
+    expect(worktreeFolderLabel("機能/検索", "/wt/検索")).toBeNull();
+    expect(worktreeFolderLabel("機能/検索", "/wt/設定")).toBe("設定");
   });
 });

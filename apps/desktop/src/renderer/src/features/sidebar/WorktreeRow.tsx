@@ -8,7 +8,12 @@ import {
 import type { Worktree } from "@pwrgit/shared";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
 import { PrChip } from "./PrChip";
-import { isPrunableWorktree, relativeAge, type DropPosition } from "./repo-view";
+import {
+  isPrunableWorktree,
+  relativeAge,
+  worktreeFolderLabel,
+  type DropPosition
+} from "./repo-view";
 
 const PR_HOVER_PREFETCH_DELAY_MS = 750;
 
@@ -65,6 +70,12 @@ export function WorktreeRow({
   setsize: number;
 }) {
   const prunable = isPrunableWorktree(worktree, now);
+  // The primary checkout sits in the repo's own directory, which the folder row
+  // directly above already names — repeating it on every repo's first row would
+  // be noise, so only linked worktrees carry the folder.
+  const folder = worktree.isPrimary
+    ? null
+    : worktreeFolderLabel(worktree.branch, worktree.path);
   const prHoverTimer = useRef<number | undefined>(undefined);
   const clearPrHoverTimer = (): void => {
     if (prHoverTimer.current !== undefined) {
@@ -255,6 +266,40 @@ export function WorktreeRow({
         <span className="wt-age" title={worktree.lastActivityAt}>
           {relativeAge(worktree.lastActivityAt, now)}
         </span>
+      )}
+      {/* Both names, because either one on its own can be the one you are
+          holding: the branch is what git and every PR call this work, the
+          folder is what your shell prompt and editor call it.
+
+          On its own line, last in the row: the sidebar is 320px by default and
+          a second name beside the first left both truncated to a few characters
+          — two half-names identify nothing. This wraps (the row is
+          `flex-wrap: wrap` and the line takes 100% of it), so the branch keeps
+          the width it had and the folder gets a full line of its own. The
+          sr-only word stops the two from reading as one name. */}
+      {folder !== null && (
+        <>
+          <span className="a11y-sr-only">in folder</span>
+          <span
+            className="wt-row__folder"
+            title={`Worktree folder — ${worktree.path}`}
+          >
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+            </svg>
+            <span className="wt-row__folder-name">{folder}</span>
+          </span>
+        </>
       )}
       {/* The pin and kebab float over the right edge on hover or keyboard focus
           (they overlay the age); removal lives in the kebab so the PR chip and

@@ -348,6 +348,50 @@ export function groupWorktreesForNavigation(
   };
 }
 
+// Letters and numbers of any script survive; everything else collapses to a
+// single dash, so "feat/new-graph" and "feat-new-graph" compare equal. A branch
+// name can hold characters a directory cannot, and the tools that create
+// worktrees flatten them differently — comparing the raw strings would then
+// print a "folder" that is the branch with its slashes swapped, on every row.
+const folderKey = (value: string): string =>
+  value
+    .normalize("NFC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "");
+
+/**
+ * The worktree's own directory name, or null when the branch name already
+ * tells you what it is.
+ *
+ * A worktree's row is titled by its branch, which is normally the same word as
+ * the directory it lives in — but nothing keeps them together. Agent-driven
+ * checkouts are the case that hurts: the directory is named for whatever branch
+ * existed when it was created, the branch is later renamed or recreated, and
+ * the row then names something you cannot find on disk (nor, searching for the
+ * directory you *are* sitting in, recognise in the results). Detached
+ * checkouts have no branch name to go on at all.
+ *
+ * `impliedBy` takes further names that make the directory redundant — a repo's
+ * primary checkout lives in the repo's own folder, which its folder row above
+ * already shows.
+ */
+export function worktreeFolderLabel(
+  branch: string,
+  path: string,
+  impliedBy: (string | undefined)[] = []
+): string | null {
+  const folder = lastSegment(path);
+  if (folder === "") return null;
+  const key = folderKey(folder);
+  // "feat/graph-x" in a "graph-x" directory is the same name, one segment of it.
+  const branchTail = branch.split("/").filter(Boolean).pop() ?? branch;
+  const redundant = [branch, branchTail, ...impliedBy].some(
+    (name) => name !== undefined && folderKey(name) === key
+  );
+  return redundant ? null : folder;
+}
+
 /** Short relative age label for a last-activity timestamp. */
 export function relativeAge(iso: string, now: number = Date.now()): string {
   const days = Math.floor((now - new Date(iso).getTime()) / 86_400_000);
