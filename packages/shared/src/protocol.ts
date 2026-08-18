@@ -819,8 +819,13 @@ export interface Commands {
 
   // Changes (U11 / U12)
   "changes:list": { req: { worktreeId: string }; res: ChangeSet };
-  "changes:stage": { req: { worktreeId: string; path: string }; res: null };
-  "changes:unstage": { req: { worktreeId: string; path: string }; res: null };
+  /** Stage the named paths. A folder row sends every file it lists, so the
+   *  command stages exactly what the user saw. */
+  "changes:stage": { req: { worktreeId: string; paths: string[] }; res: null };
+  "changes:unstage": {
+    req: { worktreeId: string; paths: string[] };
+    res: null;
+  };
   /** Discard a file's uncommitted changes (revert to HEAD, or delete if new). */
   "changes:discard": { req: { worktreeId: string; path: string }; res: null };
   /** Discard every uncommitted change while preserving ignored files. */
@@ -899,6 +904,14 @@ export interface Events {
     progress: CloneProgress;
   };
   "worktree:changed": { worktreeId: string };
+  /**
+   * The index or working tree of one worktree moved — re-read `changes:list`.
+   * Distinct from `worktree:changed`, which only fires when the *coarse* state
+   * (dirty count, head, ahead/behind, …) moved: staging or unstaging a single
+   * file leaves every one of those identical, so the Changes list needs its own
+   * signal or it silently shows a stale set.
+   */
+  "changes:changed": { worktreeId: string };
   /** Coarse live pull progress for one worktree. */
   "worktree:pullProgress": {
     worktreeId: string;

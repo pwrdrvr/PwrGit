@@ -1,5 +1,6 @@
 import { err, ok } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
+import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import { execGit } from "./dugite";
@@ -15,8 +16,8 @@ import {
   fileDiff,
   readCommit,
   readChanges,
-  stagePath,
-  unstagePath
+  stagePaths,
+  unstagePaths
 } from "./git-service";
 import type { WorktreeRefresher } from "./worktree-handlers";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
@@ -33,6 +34,18 @@ export function registerChangesHandlers(
   refresher: WorktreeRefresher,
   operations: WorktreeOperationQueue
 ): void {
+  /**
+   * Announce that a worktree's index/working tree moved. `changes:changed` is
+   * unconditional because staging or unstaging a file changes nothing the
+   * worktree refresher compares (same dirty line count, same head), so relying
+   * on `worktree:changed` alone leaves the Changes list stale — the file's
+   * stage button looks dead. The refresher still runs for the coarse badges.
+   */
+  const notifyChanged = (worktreeId: string): void => {
+    emitEvent("changes:changed", { worktreeId });
+    void refresher.refreshWorktree(worktreeId);
+  };
+
   const pathOf = (worktreeId: string): string | null =>
     (
       db.prepare("SELECT path FROM worktrees WHERE id = ?").get(worktreeId) as
@@ -50,10 +63,15 @@ export function registerChangesHandlers(
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
     const result = await operations.run(req.worktreeId, () =>
-      stagePath(execGit, path, req.path)
+      stagePaths(execGit, path, req.paths)
     );
+    // Announce either way. Git validates a whole pathspec list before touching
+    // the index, so one run is atomic — but a list longer than one batch is
+    // several runs, and a failure in a later one leaves the earlier ones
+    // applied. Staying quiet there would leave the list showing files as
+    // unstaged that are already in the index.
+    notifyChanged(req.worktreeId);
     if (!result.ok) return result;
-    refresher.refreshWorktree(req.worktreeId);
     return ok(null);
   });
 
@@ -61,10 +79,10 @@ export function registerChangesHandlers(
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
     const result = await operations.run(req.worktreeId, () =>
-      unstagePath(execGit, path, req.path)
+      unstagePaths(execGit, path, req.paths)
     );
+    notifyChanged(req.worktreeId);
     if (!result.ok) return result;
-    refresher.refreshWorktree(req.worktreeId);
     return ok(null);
   });
 
@@ -75,7 +93,7 @@ export function registerChangesHandlers(
       discardPath(execGit, path, req.path)
     );
     if (!result.ok) return result;
-    refresher.refreshWorktree(req.worktreeId);
+    notifyChanged(req.worktreeId);
     return ok(null);
   });
 
@@ -86,7 +104,7 @@ export function registerChangesHandlers(
       discardAllChanges(execGit, path)
     );
     if (!result.ok) return result;
-    refresher.refreshWorktree(req.worktreeId);
+    notifyChanged(req.worktreeId);
     return ok(null);
   });
 
@@ -130,7 +148,7 @@ export function registerChangesHandlers(
       `${req.amend === true ? "amended" : "committed"} in ${row.path}:`,
       req.message.split("\n")[0]
     );
-    refresher.refreshWorktree(req.worktreeId);
+    notifyChanged(req.worktreeId);
     return ok(null);
   });
 

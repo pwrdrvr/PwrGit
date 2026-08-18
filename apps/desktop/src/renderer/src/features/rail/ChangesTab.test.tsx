@@ -1,11 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ok, type ChangeSet } from "@pwrgit/shared";
-import { confirmAndDiscardAllChanges } from "./ChangesTab";
+// @vitest-environment jsdom
+
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ok, type ChangeSet, type Worktree } from "@pwrgit/shared";
 
 const mocks = vi.hoisted(() => ({
   confirmDialog: vi.fn(),
   dispatch: vi.fn(),
-  subscribe: vi.fn()
+  subscribe: vi.fn(),
+  showErrorToast: vi.fn()
 }));
 
 vi.mock("../../lib/pwrgit", () => ({
@@ -13,6 +17,9 @@ vi.mock("../../lib/pwrgit", () => ({
   subscribe: mocks.subscribe
 }));
 vi.mock("../shell/dialogs", () => ({ confirmDialog: mocks.confirmDialog }));
+vi.mock("../../lib/toast", () => ({ showErrorToast: mocks.showErrorToast }));
+
+import { ChangesTab, confirmAndDiscardAllChanges, groupChanges } from "./ChangesTab";
 
 const changes: ChangeSet = {
   staged: [
@@ -44,6 +51,202 @@ describe("ChangesTab discard all", () => {
     expect(mocks.dispatch).toHaveBeenCalledExactlyOnceWith(
       "changes:discardAll",
       { worktreeId: "worktree-1" }
+    );
+  });
+});
+
+describe("groupChanges", () => {
+  const untracked = (path: string) =>
+    ({ path, status: "?", staged: false }) as const;
+
+  it("gathers files under their folder, whatever their status", () => {
+    const edited = { path: "src/app.ts", status: "M", staged: false } as const;
+    expect(
+      groupChanges([
+        edited,
+        untracked("design/handoff/icon.swift"),
+        untracked("design/handoff/tray.mjs"),
+        untracked("README.md")
+      ])
+    ).toEqual([
+      { kind: "file", file: edited },
+      {
+        kind: "folder",
+        dir: "design/handoff",
+        files: [
+          untracked("design/handoff/icon.swift"),
+          untracked("design/handoff/tray.mjs")
+        ]
+      },
+      { kind: "file", file: untracked("README.md") }
+    ]);
+  });
+
+  it("does not wrap a lone file in folder chrome", () => {
+    expect(groupChanges([untracked("design/only.md")])).toEqual([
+      { kind: "file", file: untracked("design/only.md") }
+    ]);
+  });
+});
+
+describe("ChangesTab list", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  /** Event channel → the ChangesTab handler subscribed to it. */
+  let handlers: Map<string, (payload: { worktreeId: string }) => void>;
+
+  const worktree = { id: "worktree-1" } as Worktree;
+
+  const listed: ChangeSet = {
+    staged: [],
+    unstaged: [
+      { path: "design/Background Comparison.html", status: "?", staged: false },
+      { path: "design/handoff/icon.swift", status: "?", staged: false },
+      { path: "design/handoff/tray.mjs", status: "?", staged: false }
+    ]
+  };
+
+  const buttonByLabel = (label: string): HTMLButtonElement => {
+    const found = [...container.querySelectorAll("button")].find(
+      (b) => b.getAttribute("aria-label") === label
+    );
+    if (found === undefined) {
+      throw new Error(
+        `no button labelled "${label}"; saw ${[...container.querySelectorAll("button")]
+          .map((b) => b.getAttribute("aria-label") ?? b.textContent)
+          .join(" | ")}`
+      );
+    }
+    return found;
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    handlers = new Map();
+    mocks.subscribe.mockImplementation(
+      (channel: string, handler: (p: { worktreeId: string }) => void) => {
+        handlers.set(channel, handler);
+        return () => handlers.delete(channel);
+      }
+    );
+    mocks.dispatch.mockImplementation(async (command: string) =>
+      command === "changes:list" ? ok(listed) : ok(null)
+    );
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <ChangesTab worktree={worktree} activeEmail="a@b.c" onOpenDiff={vi.fn()} />
+      );
+    });
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("shows a new folder's files and stages the whole folder from one click", async () => {
+    expect(container.textContent).toContain("design/handoff/");
+    expect(container.textContent).toContain("icon.swift");
+    expect(container.textContent).toContain("tray.mjs");
+
+    await act(async () => {
+      buttonByLabel("Stage all 2 files in design/handoff").click();
+    });
+
+    // Named files, not the directory — `git add -- design/handoff` would also
+    // sweep in nested folders this row never listed.
+    expect(mocks.dispatch).toHaveBeenCalledWith("changes:stage", {
+      worktreeId: "worktree-1",
+      paths: ["design/handoff/icon.swift", "design/handoff/tray.mjs"]
+    });
+  });
+
+  it("unstages a staged folder as a unit", async () => {
+    const withStaged: ChangeSet = {
+      staged: [
+        { path: "design/briefs/one.md", status: "A", staged: true },
+        { path: "design/briefs/two.md", status: "A", staged: true }
+      ],
+      unstaged: []
+    };
+    mocks.dispatch.mockImplementation(async (command: string) =>
+      command === "changes:list" ? ok(withStaged) : ok(null)
+    );
+    await act(async () => {
+      handlers.get("changes:changed")?.({ worktreeId: "worktree-1" });
+    });
+
+    await act(async () => {
+      buttonByLabel("Unstage all 2 files in design/briefs").click();
+    });
+
+    expect(mocks.dispatch).toHaveBeenCalledWith("changes:unstage", {
+      worktreeId: "worktree-1",
+      paths: ["design/briefs/one.md", "design/briefs/two.md"]
+    });
+  });
+
+  it("stages one file out of a folder", async () => {
+    await act(async () => {
+      buttonByLabel("Stage design/handoff/icon.swift").click();
+    });
+
+    expect(mocks.dispatch).toHaveBeenCalledWith("changes:stage", {
+      worktreeId: "worktree-1",
+      paths: ["design/handoff/icon.swift"]
+    });
+  });
+
+  // The reported bug: the second stage click looked dead, because the list only
+  // reloaded on `worktree:changed` and staging a file never moves that state.
+  it("re-reads the change set when the index moves", async () => {
+    const listCalls = (): number =>
+      mocks.dispatch.mock.calls.filter((c) => c[0] === "changes:list").length;
+    const before = listCalls();
+
+    await act(async () => {
+      handlers.get("changes:changed")?.({ worktreeId: "worktree-1" });
+    });
+
+    expect(listCalls()).toBe(before + 1);
+  });
+
+  it("ignores index moves in other worktrees", async () => {
+    const before = mocks.dispatch.mock.calls.filter(
+      (c) => c[0] === "changes:list"
+    ).length;
+
+    await act(async () => {
+      handlers.get("changes:changed")?.({ worktreeId: "worktree-2" });
+    });
+
+    expect(
+      mocks.dispatch.mock.calls.filter((c) => c[0] === "changes:list").length
+    ).toBe(before);
+  });
+
+  it("surfaces a failed stage instead of swallowing it", async () => {
+    mocks.dispatch.mockImplementation(async (command: string) =>
+      command === "changes:list"
+        ? ok(listed)
+        : {
+            ok: false,
+            error: { kind: "git", code: "exit_128", message: "index.lock exists" }
+          }
+    );
+
+    await act(async () => {
+      buttonByLabel("Stage design/Background Comparison.html").click();
+    });
+
+    expect(mocks.showErrorToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Stage failed",
+        message: "index.lock exists"
+      })
     );
   });
 });
