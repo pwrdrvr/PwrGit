@@ -2,14 +2,29 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { err, ok } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import type { DB } from "../persistence/db";
-import { discardAllChanges, readChanges } from "./git-service";
+import { emitEvent } from "../ipc";
+import {
+  discardAllChanges,
+  discardPath,
+  readChanges,
+  stagePaths,
+  unstagePaths
+} from "./git-service";
 import { registerChangesHandlers } from "./changes-handlers";
 import type { WorktreeRefresher } from "./worktree-handlers";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
+vi.mock("../ipc", () => ({ emitEvent: vi.fn() }));
 vi.mock("./git-service", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./git-service")>();
-  return { ...actual, discardAllChanges: vi.fn(), readChanges: vi.fn() };
+  return {
+    ...actual,
+    discardAllChanges: vi.fn(),
+    discardPath: vi.fn(),
+    readChanges: vi.fn(),
+    stagePaths: vi.fn(),
+    unstagePaths: vi.fn()
+  };
 });
 
 function setup(operations?: WorktreeOperationQueue) {
@@ -99,5 +114,61 @@ describe("changes:list handler", () => {
       expect.any(Function),
       "/repos/project"
     );
+  });
+});
+
+/**
+ * Staging one file moves the index but nothing the worktree refresher compares:
+ * `git status` still prints the same number of entry lines (the path just moves
+ * from the unstaged column to the staged one), and head/ahead/behind are
+ * untouched. `refreshWorktree` is deliberately silent in that case, so before
+ * `changes:changed` existed the Changes list never reloaded and the row's "+"
+ * looked broken — you could stage a whole untracked folder (which *does* change
+ * the line count) and then nothing else in the list would respond.
+ */
+describe("changes mutation events", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(stagePaths).mockResolvedValue(ok(undefined));
+    vi.mocked(unstagePaths).mockResolvedValue(ok(undefined));
+    vi.mocked(discardPath).mockResolvedValue(ok(undefined));
+    vi.mocked(discardAllChanges).mockResolvedValue(ok(undefined));
+  });
+
+  it.each([
+    ["changes:stage", { worktreeId: "worktree-1", paths: ["notes.txt"] }],
+    ["changes:unstage", { worktreeId: "worktree-1", paths: ["notes.txt"] }],
+    ["changes:discard", { worktreeId: "worktree-1", path: "notes.txt" }],
+    ["changes:discardAll", { worktreeId: "worktree-1" }]
+  ] as const)(
+    "%s tells the renderer to re-read the change set",
+    async (command, req) => {
+      const { bus } = setup();
+
+      await expect(bus.dispatch(command, req)).resolves.toEqual(ok(null));
+
+      expect(emitEvent).toHaveBeenCalledWith("changes:changed", {
+        worktreeId: "worktree-1"
+      });
+    }
+  );
+
+  it("stays quiet when the mutation failed", async () => {
+    const failure = err({
+      kind: "git" as const,
+      code: "exit_128",
+      message: "pathspec did not match"
+    });
+    vi.mocked(stagePaths).mockResolvedValueOnce(failure);
+    const { bus, refresher } = setup();
+
+    await expect(
+      bus.dispatch("changes:stage", {
+        worktreeId: "worktree-1",
+        paths: ["missing.txt"]
+      })
+    ).resolves.toEqual(failure);
+    expect(emitEvent).not.toHaveBeenCalled();
+    expect(refresher.refreshWorktree).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
@@ -50,7 +50,7 @@ test("discarding a file's changes returns the worktree to clean", async () => {
   await expect(fileRow).toBeVisible({ timeout: 20_000 });
 
   await fileRow.hover();
-  await fileRow.locator(".file-discard").click();
+  await fileRow.locator(".file-action--discard").click();
   // Destructive → in-app confirm dialog (not a native one).
   await window.locator(".modal--dialog .modal__create").click();
 
@@ -83,4 +83,46 @@ test("pulling with local edits auto-stashes and reapplies them", async () => {
   await expect(
     window.locator(".file-row", { hasText: "README.md" })
   ).toBeVisible();
+});
+
+/**
+ * The reported bug, end to end. Staging a folder always appeared to work — git
+ * collapses a wholly-new directory into one status entry, so staging it *does*
+ * move the dirty count the worktree refresher compares. Staging a single file
+ * moves nothing it compares, so before `changes:changed` the list froze and
+ * every later +/- looked dead.
+ */
+test("every stage and unstage click repaints the list", async () => {
+  sandbox = createGitSandbox();
+  const repo = sandbox.makeRepo("stg");
+  writeFileSync(join(repo.path, "README.md"), "# stg\nedited\n");
+  mkdirSync(join(repo.path, "design"));
+  writeFileSync(join(repo.path, "design", "one.md"), "one\n");
+  writeFileSync(join(repo.path, "design", "two.md"), "two\n");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, sandbox, "stg");
+
+  // Each new file is listed by name, under a folder row that stages the lot.
+  const folderStage = window.getByRole("button", {
+    name: "Stage all 2 files in design"
+  });
+  await expect(folderStage).toBeVisible({ timeout: 20_000 });
+  await expect(window.locator(".file-row", { hasText: "one.md" })).toBeVisible();
+  await folderStage.click();
+  await expect(
+    window.locator(".file-row.is-staged", { hasText: "one.md" })
+  ).toBeVisible({ timeout: 20_000 });
+
+  // …and now the click that used to do nothing visible.
+  await window.getByRole("button", { name: "Stage README.md" }).click();
+  await expect(
+    window.locator(".file-row.is-staged", { hasText: "README.md" })
+  ).toBeVisible({ timeout: 20_000 });
+
+  await window.getByRole("button", { name: "Unstage README.md" }).click();
+  await expect(
+    window.locator(".file-row.is-staged", { hasText: "README.md" })
+  ).toHaveCount(0, { timeout: 20_000 });
 });

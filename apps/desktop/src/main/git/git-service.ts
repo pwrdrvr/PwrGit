@@ -92,8 +92,12 @@ export async function readChanges(
   git: GitExec,
   cwd: string
 ): Promise<Result<ChangeSet>> {
+  // -uall, not git's default -unormal: normal collapses a wholly-untracked
+  // directory into one `? dir/` entry, which lists no files, hides how much a
+  // click is about to stage, and makes a folder masquerade as a file row. The
+  // renderer regroups the flat list back into folders itself.
   const raw = await git(
-    ["status", "--porcelain=v2"],
+    ["status", "--porcelain=v2", "--untracked-files=all"],
     cwd,
     NO_OPTIONAL_LOCKS
   );
@@ -103,26 +107,46 @@ export async function readChanges(
   return ok(parseChanges(checked.value.stdout));
 }
 
-export async function stagePath(
+/**
+ * Pathspecs per git invocation. Callers stage whole folders by naming every
+ * file in them — exact, unlike passing the directory, which would also sweep in
+ * nested folders the user never saw. That trades one long argument list for
+ * precision, and Windows caps a command line at ~32 KB, so long lists are split
+ * across runs rather than truncated.
+ */
+const PATHSPEC_BATCH = 100;
+
+async function runBatched(
   git: GitExec,
   cwd: string,
-  path: string
+  prefix: string[],
+  paths: string[]
 ): Promise<Result<void>> {
-  const raw = await git(["add", "--", path], cwd);
-  if (!raw.ok) return raw;
-  const checked = requireExit0(raw.value, ["add"]);
-  return checked.ok ? ok(undefined) : checked;
+  if (paths.length === 0) return ok(undefined);
+  for (let i = 0; i < paths.length; i += PATHSPEC_BATCH) {
+    const batch = paths.slice(i, i + PATHSPEC_BATCH);
+    const raw = await git([...prefix, "--", ...batch], cwd);
+    if (!raw.ok) return raw;
+    const checked = requireExit0(raw.value, prefix);
+    if (!checked.ok) return checked;
+  }
+  return ok(undefined);
 }
 
-export async function unstagePath(
+export async function stagePaths(
   git: GitExec,
   cwd: string,
-  path: string
+  paths: string[]
 ): Promise<Result<void>> {
-  const raw = await git(["restore", "--staged", "--", path], cwd);
-  if (!raw.ok) return raw;
-  const checked = requireExit0(raw.value, ["restore"]);
-  return checked.ok ? ok(undefined) : checked;
+  return runBatched(git, cwd, ["add"], paths);
+}
+
+export async function unstagePaths(
+  git: GitExec,
+  cwd: string,
+  paths: string[]
+): Promise<Result<void>> {
+  return runBatched(git, cwd, ["restore", "--staged"], paths);
 }
 
 /** Unified diff for one working-tree file. Untracked files (empty `git diff`)

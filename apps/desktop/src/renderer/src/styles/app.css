@@ -128,6 +128,7 @@ textarea,
 .diff-text,
 .diff-file__path,
 .file-path,
+.folder-row__path,
 .commit-msg,
 .commit-sha-chip,
 .commit-context-card__subject,
@@ -4183,22 +4184,55 @@ button.ref-chip:focus-visible {
   padding: 12px;
 }
 .changes-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 6px;
+}
+.changes-section:not(:first-child) {
+  margin-top: 14px;
+}
+.changes-section__label {
+  flex: 1;
+  min-width: 0;
   font: 600 10px/1 var(--font-sans);
   color: var(--text-muted);
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  margin: 2px 0 8px;
 }
-.changes-section:not(:first-child) {
-  margin-top: 14px;
+/* Bulk action, quiet twin of .changes-wip__discard so the two read as one
+   family: the section owns a verb, the row owns the same verb for one file. */
+.changes-section__action {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-subtle);
+  font: 600 9px/1 var(--font-sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+.changes-section__action:hover {
+  color: var(--accent-bright);
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
 }
 .file-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 8px;
+  padding: 4px 4px 4px 8px;
+  min-height: 30px;
   border-radius: var(--radius-md);
-  margin-bottom: 2px;
+  margin-bottom: 1px;
+}
+/* A file inside an untracked-folder group: indented under its folder row and
+   labelled by basename, so the shared prefix is stated once, not per row. */
+.file-row--nested {
+  padding-left: 22px;
 }
 .file-status {
   flex: 0 0 auto;
@@ -4247,45 +4281,128 @@ button.ref-chip:focus-visible {
 .file-row.is-staged {
   background: var(--bg-panel);
 }
-.file-toggle {
+/* Trailing action cluster. One shape for every row action — the stage toggle
+   used to be a bordered box around a typographic "+", which out-shouted the
+   status chip beside it and sat a pixel off centre in the sans face. */
+.file-row__actions {
   flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
-  border-radius: 5px;
-  border: 1px solid var(--border-default);
-  background: transparent;
-  color: var(--text-muted);
-  font: 600 12px/1 var(--font-sans);
-  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
-/* Discard-file button: hidden until the row is hovered/focused (destructive, so
-   not always in your face), then a danger-tinted trash. */
-.file-discard {
+.file-action {
   flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  opacity: 0;
   transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
 }
-.file-row:hover .file-discard,
-.file-row:focus-within .file-discard {
+.file-action:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+/* Stage/unstage is the row's primary verb: always present, but at rest it is
+   only as loud as the path it belongs to. */
+.file-action--stage,
+.file-action--unstage {
+  opacity: 0.62;
+}
+.file-row:hover .file-action--stage,
+.file-row:hover .file-action--unstage,
+.folder-row:hover .file-action--stage,
+.file-row:focus-within .file-action--stage,
+.file-row:focus-within .file-action--unstage,
+.folder-row:focus-within .file-action--stage {
   opacity: 1;
 }
-.file-discard:hover,
-.file-discard:focus-visible {
-  outline: none;
+.file-action--stage:hover {
+  color: var(--accent-bright);
+  background: var(--accent-soft);
+}
+.file-action--unstage:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover-strong);
+}
+/* Destructive, so it stays out of the way until the row is hovered/focused. */
+.file-action--discard {
+  opacity: 0;
+}
+.file-row:hover .file-action--discard,
+.file-row:focus-within .file-action--discard {
+  opacity: 1;
+}
+.file-action--discard:hover {
   color: var(--danger-text);
   background: var(--danger-soft);
-  border-color: transparent;
+}
+
+/* ---- Untracked folder group ---- */
+
+.folder-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 4px;
+  min-height: 30px;
+  border-radius: var(--radius-md);
+  margin-bottom: 1px;
+  cursor: pointer;
+}
+.folder-row:hover {
+  background: var(--bg-panel-hover);
+}
+.folder-row__twisty {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 24px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.folder-row__twisty:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+.folder-row__icon {
+  flex: 0 0 auto;
+  display: flex;
+  color: var(--text-muted);
+}
+.folder-row__path {
+  flex: 1;
+  min-width: 0;
+  font: 500 11px/1.3 var(--font-mono);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folder-row__count {
+  flex: 0 0 auto;
+  min-width: 16px;
+  height: 15px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--bg-panel-elevated);
+  color: var(--text-muted);
+  font: 600 9px/1 var(--font-mono);
 }
 
 .commit-box {

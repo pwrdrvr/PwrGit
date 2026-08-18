@@ -6,7 +6,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     environment: "node",
-    // Nine main-process suites drive real `git` subprocesses against temp
+    // Eleven main-process suites drive real `git` subprocesses against temp
     // repos, and every operation pays full process-spawn cost. That is well
     // outside what Vitest's 5s default is sized for: on Windows CI runners,
     // where spawning is dearest, `rebase-assistant.test.ts` alone has run

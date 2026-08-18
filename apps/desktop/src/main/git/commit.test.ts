@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { err, ok, type Result } from "@pwrgit/shared";
 import type { GitExec, GitOutput } from "./dugite";
-import { commitChanges, stagePath, unstagePath } from "./git-service";
+import { commitChanges, stagePaths, unstagePaths } from "./git-service";
 
 const systemGit: GitExec = (args, cwd) =>
   new Promise<Result<GitOutput>>((resolve) => {
@@ -39,7 +39,7 @@ beforeAll(() => {
 describe("commit flow", () => {
   it("commits under the per-commit identity without writing repo config", async () => {
     writeFileSync(join(repo, "a.txt"), "1\n");
-    expect((await stagePath(systemGit, repo, "a.txt")).ok).toBe(true);
+    expect((await stagePaths(systemGit, repo, ["a.txt"])).ok).toBe(true);
 
     const result = await commitChanges(systemGit, repo, "feat: a", {
       email: "custom@acme.io",
@@ -62,8 +62,8 @@ describe("commit flow", () => {
 
   it("stage then unstage removes a file from the index", async () => {
     writeFileSync(join(repo, "b.txt"), "2\n");
-    await stagePath(systemGit, repo, "b.txt");
-    await unstagePath(systemGit, repo, "b.txt");
+    await stagePaths(systemGit, repo, ["b.txt"]);
+    await unstagePaths(systemGit, repo, ["b.txt"]);
     expect(gitOut(repo, ["status", "--porcelain"])).toContain("?? b.txt");
   });
 
