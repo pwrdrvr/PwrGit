@@ -1,5 +1,13 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -11,7 +19,12 @@ import {
   type FileChange
 } from "@pwrgit/shared";
 import type { GitExec, GitOutput } from "./dugite";
-import { capChangeSet, readChanges, stagePaths } from "./git-service";
+import {
+  capChangeSet,
+  discardPaths,
+  readChanges,
+  stagePaths
+} from "./git-service";
 import { parseStatus } from "./worktree-state";
 
 const systemGit: GitExec = (args, cwd) =>
@@ -245,5 +258,101 @@ describe("readChanges cap (system git)", () => {
       dir: "dist",
       count: total
     });
+  });
+});
+
+describe("discardPaths (system git)", () => {
+  let root: string;
+  let repo: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "pwrgit-discard-paths-"));
+    repo = join(root, "repo");
+    mkdirSync(repo);
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.name", "PwrGit Test"]);
+    git(repo, ["config", "user.email", "pwrgit@example.com"]);
+    mkdirSync(join(repo, "src"));
+    writeFileSync(join(repo, "src", "kept.ts"), "baseline\n");
+    writeFileSync(join(repo, "src", "edited.ts"), "baseline\n");
+    writeFileSync(join(repo, "src", "removed.ts"), "baseline\n");
+    git(repo, ["add", "."]);
+    git(repo, ["commit", "-m", "baseline"]);
+  });
+
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  /**
+   * One folder row, every kind of change under it. Tracked files go back to
+   * their HEAD content (including one deleted from disk), new files are
+   * removed — and the untouched file beside them is left completely alone.
+   */
+  it("discards a folder's mixed changes in one go", async () => {
+    writeFileSync(join(repo, "src", "edited.ts"), "local edit\n");
+    unlinkSync(join(repo, "src", "removed.ts"));
+    writeFileSync(join(repo, "src", "brand-new.ts"), "new\n");
+    writeFileSync(join(repo, "src", "staged-new.ts"), "new\n");
+    git(repo, ["add", "src/staged-new.ts"]);
+
+    await expect(
+      discardPaths(systemGit, repo, [
+        "src/edited.ts",
+        "src/removed.ts",
+        "src/brand-new.ts",
+        "src/staged-new.ts"
+      ])
+    ).resolves.toEqual(ok(undefined));
+
+    expect(readFileSync(join(repo, "src", "edited.ts"), "utf8")).toBe(
+      "baseline\n"
+    );
+    expect(readFileSync(join(repo, "src", "removed.ts"), "utf8")).toBe(
+      "baseline\n"
+    );
+    expect(existsSync(join(repo, "src", "brand-new.ts"))).toBe(false);
+    expect(existsSync(join(repo, "src", "staged-new.ts"))).toBe(false);
+    expect(readFileSync(join(repo, "src", "kept.ts"), "utf8")).toBe(
+      "baseline\n"
+    );
+
+    const changes = await readChanges(systemGit, repo);
+    expect(changes.ok && changes.value).toEqual({ staged: [], unstaged: [] });
+  });
+
+  it("leaves files outside the named paths untouched", async () => {
+    writeFileSync(join(repo, "src", "edited.ts"), "local edit\n");
+    writeFileSync(join(repo, "src", "kept.ts"), "also edited\n");
+
+    await discardPaths(systemGit, repo, ["src/edited.ts"]);
+
+    expect(readFileSync(join(repo, "src", "kept.ts"), "utf8")).toBe(
+      "also edited\n"
+    );
+  });
+
+  it("treats everything as new when HEAD is unborn", async () => {
+    const fresh = join(root, "unborn");
+    mkdirSync(fresh);
+    git(fresh, ["init", "-b", "main"]);
+    writeFileSync(join(fresh, "first.txt"), "x\n");
+    git(fresh, ["add", "."]);
+
+    await expect(
+      discardPaths(systemGit, fresh, ["first.txt"])
+    ).resolves.toEqual(ok(undefined));
+
+    expect(existsSync(join(fresh, "first.txt"))).toBe(false);
+  });
+
+  it("does nothing, successfully, for an empty path list", async () => {
+    writeFileSync(join(repo, "src", "edited.ts"), "local edit\n");
+
+    await expect(discardPaths(systemGit, repo, [])).resolves.toEqual(
+      ok(undefined)
+    );
+
+    expect(readFileSync(join(repo, "src", "edited.ts"), "utf8")).toBe(
+      "local edit\n"
+    );
   });
 });

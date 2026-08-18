@@ -1,8 +1,23 @@
-import { type ReactNode, useEffect, useState } from "react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  useEffect,
+  useState
+} from "react";
 import type { ChangeSet, FileChange, Worktree } from "@pwrgit/shared";
+import { copyText } from "../../lib/copyText";
 import { dispatch, subscribe } from "../../lib/pwrgit";
-import { showErrorToast } from "../../lib/toast";
+import { showErrorToast, showInfoToast } from "../../lib/toast";
+import { ContextMenu } from "../shell/ContextMenu";
 import { confirmDialog } from "../shell/dialogs";
+import {
+  canIgnore,
+  changesRowMenuItems,
+  ignorePathFor,
+  targetIsStaged,
+  targetPaths,
+  type ChangesRowTarget
+} from "./changes-row-menu";
 
 const STATUS_TONE: Record<string, string> = {
   M: "warn",
@@ -169,7 +184,8 @@ function FileRow({
   nested,
   onToggle,
   onOpen,
-  onDiscard
+  onDiscard,
+  onContextMenu
 }: {
   file: FileChange;
   /** Text to show — the basename inside a folder group, the full path outside. */
@@ -178,11 +194,13 @@ function FileRow({
   onToggle: () => void;
   onOpen: () => void;
   onDiscard: () => void;
+  onContextMenu: (event: ReactMouseEvent) => void;
 }) {
   return (
     <div
       className={`file-row is-clickable${file.staged ? " is-staged" : ""}${nested ? " file-row--nested" : ""}`}
       onClick={onOpen}
+      onContextMenu={onContextMenu}
       title="View changes"
     >
       <span
@@ -229,7 +247,9 @@ function FolderRow({
   open,
   staged,
   onToggleOpen,
-  onToggle
+  onToggle,
+  onDiscard,
+  onContextMenu
 }: {
   dir: string;
   count: number;
@@ -238,10 +258,16 @@ function FolderRow({
   staged: boolean;
   onToggleOpen: () => void;
   onToggle: () => void;
+  onDiscard: () => void;
+  onContextMenu: (event: ReactMouseEvent) => void;
 }) {
   const verb = staged ? "Unstage" : "Stage";
   return (
-    <div className="folder-row" onClick={onToggleOpen}>
+    <div
+      className="folder-row"
+      onClick={onToggleOpen}
+      onContextMenu={onContextMenu}
+    >
       <button
         className="folder-row__twisty"
         onClick={(e) => {
@@ -266,6 +292,17 @@ function FolderRow({
       </span>
       <span className="folder-row__count">{count}</span>
       <span className="file-row__actions">
+        <button
+          className="file-action file-action--discard"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDiscard();
+          }}
+          title={`Discard all ${count} files in this folder`}
+          aria-label={`Discard all ${count} files in ${dir}`}
+        >
+          <TrashIcon />
+        </button>
         <button
           className={`file-action file-action--${staged ? "unstage" : "stage"}`}
           onClick={(e) => {
@@ -295,11 +332,17 @@ export function ChangesTab({
   const [message, setMessage] = useState("");
   /** Explicit folder disclosure state; unset folders follow the size default. */
   const [folderOpen, setFolderOpen] = useState<Record<string, boolean>>({});
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    target: ChangesRowTarget;
+  } | null>(null);
   const wtId = worktree?.id ?? null;
 
   useEffect(() => {
     setMessage("");
     setFolderOpen({});
+    setMenu(null);
     if (wtId === null) {
       setChanges(null);
       return;
@@ -351,15 +394,59 @@ export function ChangesTab({
     );
   };
 
-  const discardOne = async (file: FileChange): Promise<void> => {
+  /** Discard one row's worth of work — a file, or a whole folder group. */
+  const discardTarget = async (target: ChangesRowTarget): Promise<void> => {
     if (wtId === null) return;
+    const paths = targetPaths(target);
+    if (paths.length === 0) return;
     const yes = await confirmDialog({
       title: "Discard changes?",
-      message: `Discard your changes to ${file.path}? This can't be undone.`,
+      message:
+        target.kind === "file"
+          ? `Discard your changes to ${target.file.path}? This can't be undone.`
+          : `Discard your changes to all ${paths.length} file${paths.length === 1 ? "" : "s"} in ${target.dir}/? This can't be undone.`,
       confirmLabel: "Discard",
       danger: true
     });
-    if (yes) void dispatch("changes:discard", { worktreeId: wtId, path: file.path });
+    if (!yes) return;
+    void dispatch("changes:discard", { worktreeId: wtId, paths }).then((r) => {
+      if (r.ok) return;
+      showErrorToast({
+        title: "Discard failed",
+        message: r.error.message,
+        detail: paths.join(", ")
+      });
+    });
+  };
+
+  /** Write the row's `.gitignore` line. Only offered for untracked rows. */
+  const ignoreTarget = (target: ChangesRowTarget): void => {
+    if (wtId === null || !canIgnore(target)) return;
+    const { path, directory } = ignorePathFor(target);
+    void dispatch("changes:ignore", {
+      worktreeId: wtId,
+      entries: [{ path, directory }]
+    }).then((r) => {
+      if (!r.ok) {
+        showErrorToast({
+          title: "Could not update .gitignore",
+          message: r.error.message,
+          detail: path
+        });
+        return;
+      }
+      showInfoToast(
+        r.value.added.length === 0
+          ? {
+              title: "Already ignored",
+              message: `${path} was already covered by .gitignore.`
+            }
+          : {
+              title: "Added to .gitignore",
+              message: r.value.added.join(", ")
+            }
+      );
+    });
   };
 
   const discardAll = async (): Promise<void> => {
@@ -397,21 +484,33 @@ export function ChangesTab({
     stagedSection: boolean
   ): ReactNode[] => {
     const command = stagedSection ? "changes:unstage" : "changes:stage";
+    const openMenu = (
+      event: ReactMouseEvent,
+      target: ChangesRowTarget
+    ): void => {
+      event.preventDefault();
+      event.stopPropagation();
+      setMenu({ x: event.clientX, y: event.clientY, target });
+    };
     const fileRow = (
       file: FileChange,
       key: string,
       dir: string | null
-    ): ReactNode => (
-      <FileRow
-        key={key}
-        file={file}
-        label={dir === null ? file.path : file.path.slice(dir.length + 1)}
-        nested={dir !== null}
-        onToggle={() => run(command, [file.path])}
-        onOpen={() => onOpenDiff(file.path, stagedSection)}
-        onDiscard={() => void discardOne(file)}
-      />
-    );
+    ): ReactNode => {
+      const target: ChangesRowTarget = { kind: "file", file };
+      return (
+        <FileRow
+          key={key}
+          file={file}
+          label={dir === null ? file.path : file.path.slice(dir.length + 1)}
+          nested={dir !== null}
+          onToggle={() => run(command, [file.path])}
+          onOpen={() => onOpenDiff(file.path, stagedSection)}
+          onDiscard={() => void discardTarget(target)}
+          onContextMenu={(event) => openMenu(event, target)}
+        />
+      );
+    };
 
     return groupChanges(files).flatMap((entry, i) => {
       if (entry.kind === "file") {
@@ -423,6 +522,11 @@ export function ChangesTab({
       const foldKey = `${keyPrefix}:${entry.dir}`;
       const open =
         folderOpen[foldKey] ?? entry.files.length <= FOLDER_AUTO_COLLAPSE;
+      const target: ChangesRowTarget = {
+        kind: "folder",
+        dir: entry.dir,
+        files: entry.files
+      };
       return [
         <FolderRow
           key={`${keyPrefix}-${i}-${entry.dir}`}
@@ -441,6 +545,8 @@ export function ChangesTab({
               entry.files.map((f) => f.path)
             )
           }
+          onDiscard={() => void discardTarget(target)}
+          onContextMenu={(event) => openMenu(event, target)}
         />,
         ...(open
           ? entry.files.map((file, j) =>
@@ -517,6 +623,27 @@ export function ChangesTab({
           </>
         )}
       </div>
+
+      {menu !== null && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          label="File actions"
+          onClose={() => setMenu(null)}
+          items={changesRowMenuItems(menu.target, {
+            onToggle: () =>
+              run(
+                targetIsStaged(menu.target)
+                  ? "changes:unstage"
+                  : "changes:stage",
+                targetPaths(menu.target)
+              ),
+            onDiscard: () => void discardTarget(menu.target),
+            onIgnore: () => ignoreTarget(menu.target),
+            onCopyPath: () => void copyText(targetPaths(menu.target).join("\n"))
+          })}
+        />
+      )}
 
       <div className="commit-box">
         <input

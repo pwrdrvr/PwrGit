@@ -5,7 +5,7 @@ import type { DB } from "../persistence/db";
 import { emitEvent } from "../ipc";
 import {
   discardAllChanges,
-  discardPath,
+  discardPaths,
   readChanges,
   stagePaths,
   unstagePaths
@@ -20,7 +20,7 @@ vi.mock("./git-service", async (importOriginal) => {
   return {
     ...actual,
     discardAllChanges: vi.fn(),
-    discardPath: vi.fn(),
+    discardPaths: vi.fn(),
     readChanges: vi.fn(),
     stagePaths: vi.fn(),
     unstagePaths: vi.fn()
@@ -131,14 +131,14 @@ describe("changes mutation events", () => {
     vi.clearAllMocks();
     vi.mocked(stagePaths).mockResolvedValue(ok(undefined));
     vi.mocked(unstagePaths).mockResolvedValue(ok(undefined));
-    vi.mocked(discardPath).mockResolvedValue(ok(undefined));
+    vi.mocked(discardPaths).mockResolvedValue(ok(undefined));
     vi.mocked(discardAllChanges).mockResolvedValue(ok(undefined));
   });
 
   it.each([
     ["changes:stage", { worktreeId: "worktree-1", paths: ["notes.txt"] }],
     ["changes:unstage", { worktreeId: "worktree-1", paths: ["notes.txt"] }],
-    ["changes:discard", { worktreeId: "worktree-1", path: "notes.txt" }],
+    ["changes:discard", { worktreeId: "worktree-1", paths: ["notes.txt"] }],
     ["changes:discardAll", { worktreeId: "worktree-1" }]
   ] as const)(
     "%s tells the renderer to re-read the change set",

@@ -12,13 +12,14 @@ import {
   commitStats,
   type CommitIdentity,
   discardAllChanges,
-  discardPath,
+  discardPaths,
   fileDiff,
   readCommit,
   readChanges,
   stagePaths,
   unstagePaths
 } from "./git-service";
+import { appendToGitignore, toGitignorePattern } from "./gitignore";
 import { readImagePreview } from "./image-preview";
 import type { WorktreeRefresher } from "./worktree-handlers";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
@@ -91,11 +92,45 @@ export function registerChangesHandlers(
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
     const result = await operations.run(req.worktreeId, () =>
-      discardPath(execGit, path, req.path)
+      discardPaths(execGit, path, req.paths)
+    );
+    // Announce either way: discarding is restore-then-clean over batched
+    // pathspecs, so a failure part-way still moved the working tree.
+    notifyChanged(req.worktreeId);
+    if (!result.ok) return result;
+    return ok(null);
+  });
+
+  bus.register("changes:ignore", async (req) => {
+    const path = pathOf(req.worktreeId);
+    if (path === null) return err(notFound);
+    if (req.entries.length === 0) {
+      return err({
+        kind: "validation",
+        code: "no_patterns",
+        message: "Nothing to ignore"
+      });
+    }
+    const result = appendToGitignore(
+      path,
+      req.entries.map((entry) =>
+        toGitignorePattern(entry.path, { directory: entry.directory })
+      )
     );
     if (!result.ok) return result;
-    notifyChanged(req.worktreeId);
-    return ok(null);
+    if (result.value.added.length > 0) {
+      logMain(
+        "info",
+        "changes",
+        `ignored in ${path}:`,
+        result.value.added.join(", ")
+      );
+      // The ignored files leave the change set, which the coarse worktree
+      // state can miss entirely — an untracked folder is one status line
+      // before, and .gitignore is one status line after.
+      notifyChanged(req.worktreeId);
+    }
+    return ok(result.value);
   });
 
   bus.register("changes:discardAll", async (req) => {

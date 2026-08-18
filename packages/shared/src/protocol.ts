@@ -827,8 +827,24 @@ export interface Commands {
     req: { worktreeId: string; paths: string[] };
     res: null;
   };
-  /** Discard a file's uncommitted changes (revert to HEAD, or delete if new). */
-  "changes:discard": { req: { worktreeId: string; path: string }; res: null };
+  /** Discard uncommitted changes to the named paths (revert to HEAD, or delete
+   *  if new). A folder row sends every file it lists. */
+  "changes:discard": { req: { worktreeId: string; paths: string[] }; res: null };
+  /**
+   * Ignore these paths in the worktree's root `.gitignore`, creating the file
+   * if absent and skipping any line already present. The renderer sends paths
+   * rather than patterns: anchoring and glob-escaping are git's rules, so they
+   * belong beside the code that writes the file. Returns the patterns actually
+   * written, so the UI can say "already ignored" instead of claiming work it
+   * did not do.
+   */
+  "changes:ignore": {
+    req: {
+      worktreeId: string;
+      entries: { path: string; directory: boolean }[];
+    };
+    res: { added: string[]; gitignorePath: string };
+  };
   /** Discard every uncommitted change while preserving ignored files. */
   "changes:discardAll": { req: { worktreeId: string }; res: null };
   "changes:commit": {
