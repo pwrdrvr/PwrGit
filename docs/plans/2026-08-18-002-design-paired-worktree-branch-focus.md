@@ -179,12 +179,16 @@ The user's second question. Rules, in order of importance:
 5. **Activating a branch in a repo that is not the working target** resolves
    §3 *first*, against that repo. An **occupied** branch still just focuses the
    worktree holding it — no primary is involved, no git runs, no dialog appears,
-   exactly as within the working repo. Only the **free** case needs a target to
-   switch, and only then does the working target move to that repo's primary
-   checkout. Because that case is a two-part action, the confirm says so:
-   *"Switch PwrSnap (primary checkout) to `claude/sad-joliot`?"* — and it is
-   shown even when the destination is clean, since moving the working target
-   across repos is not something the user asked for implicitly.
+   exactly as within the working repo.
+
+   The **free** case has no checkout to move, and the implementation does *not*
+   commandeer that repo's primary for one. Checking out over a worktree the
+   user never selected is a bigger action than the gesture asked for, and it
+   would be the only place in the app where activating a row mutates a checkout
+   the user cannot see. It opens **New worktree** for the branch instead:
+   non-destructive, and it leaves the user's working target where they put it.
+   (An earlier draft of this section said the opposite; the code is the
+   authority here, and the reasoning above is why.)
 
 ## 6. The safety gate
 

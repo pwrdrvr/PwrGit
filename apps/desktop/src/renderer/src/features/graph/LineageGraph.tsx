@@ -791,6 +791,18 @@ export function LineageGraph({
     });
     if (outcome.kind === "cancelled") return;
     if (outcome.kind === "held") {
+      // The chip believed this branch free, and something checked it out in
+      // the meantime. Resolve it the way the sidebar does — go to whoever
+      // holds it now — rather than reporting a refusal the user cannot act on.
+      const fresh = await dispatch("repo:refs", { repoId });
+      const holder = fresh.ok
+        ? fresh.value.branches.find((b) => b.name === target.branch)
+            ?.checkedOutWorktreeIds[0]
+        : undefined;
+      if (holder !== undefined) {
+        onRevealWorktree(holder);
+        return;
+      }
       showErrorToast({
         title: "Switch failed",
         message: `${target.branch} is already checked out in another worktree.`

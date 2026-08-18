@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent
 } from "react";
@@ -76,6 +77,11 @@ export function RepoRefsSections({
   // Which branch row holds the group's single tab stop. A cursor, not a
   // selection: it carries no git meaning and no accent.
   const [branchCursor, setBranchCursor] = useState(0);
+  // One activation at a time. Enter auto-repeats while held, and each repeat
+  // would otherwise queue its own dirty confirm — `dialogs.ts` queues rather
+  // than coalesces, so the user would be left dismissing a stack of identical
+  // prompts, each accepted one dispatching another switch.
+  const activating = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -143,6 +149,7 @@ export function RepoRefsSections({
    * only a free branch costs a checkout.
    */
   const activate = async (branch: LocalBranchSummary): Promise<void> => {
+    if (activating.current) return;
     const action = branchActivation(branch, focusedWorktree);
     if (action.kind === "none") return;
     if (action.kind === "reveal") {
@@ -156,10 +163,24 @@ export function RepoRefsSections({
       onCreateWorktree(branch.name, false);
       return;
     }
+    activating.current = true;
+    try {
+      await switchTo(focusedWorktree, action.branch);
+    } finally {
+      activating.current = false;
+    }
+  };
+
+  /** The checkout half of `activate`, split out so the in-flight flag has one
+   *  obvious scope. */
+  const switchTo = async (
+    target: Worktree,
+    branchName: string
+  ): Promise<void> => {
     const outcome = await guardedSwitchBranch({
-      worktreeId: focusedWorktree.id,
-      worktreeLabel: lastSegment(focusedWorktree.path),
-      branch: action.branch
+      worktreeId: target.id,
+      worktreeLabel: lastSegment(target.path),
+      branch: branchName
     });
     if (outcome.kind === "held") {
       // The refs snapshot was stale — something checked this branch out after
@@ -168,11 +189,9 @@ export function RepoRefsSections({
       const fresh = await dispatch("repo:refs", { repoId: repo.id });
       if (fresh.ok) {
         setRefs(fresh.value);
-        const held = fresh.value.branches.find((b) => b.name === action.branch);
+        const held = fresh.value.branches.find((b) => b.name === branchName);
         const holder =
-          held === undefined
-            ? null
-            : holderWorktreeId(held, focusedWorktree.id);
+          held === undefined ? null : holderWorktreeId(held, target.id);
         if (holder !== null) {
           onRevealWorktree(holder);
           return;
@@ -180,7 +199,7 @@ export function RepoRefsSections({
       }
       showErrorToast({
         title: "Switch failed",
-        message: `${action.branch} is checked out in another worktree.`
+        message: `${branchName} is checked out in another worktree.`
       });
       return;
     }
@@ -189,7 +208,7 @@ export function RepoRefsSections({
         title: "Switch failed",
         message:
           outcome.code === "dirty"
-            ? `${action.branch} could not be checked out without overwriting local changes. Commit or stash them first.`
+            ? `${branchName} could not be checked out without overwriting local changes. Commit or stash them first.`
             : outcome.message.split("\n")[0],
         detail: outcome.message
       });
@@ -278,8 +297,17 @@ export function RepoRefsSections({
                   branch,
                   focusedWorktree?.id ?? null
                 );
+                // Fall back to the working target when refs names a holder
+                // the tree has not listed yet: the two are refreshed
+                // independently, and without this the row briefly offers
+                // "Create worktree" for a branch that IS checked out.
                 const holder =
-                  holderId === null ? undefined : worktreesById.get(holderId);
+                  (holderId === null
+                    ? undefined
+                    : worktreesById.get(holderId)) ??
+                  (state === "current" && focusedWorktree !== null
+                    ? focusedWorktree
+                    : undefined);
                 const folderName =
                   holder === undefined
                     ? null

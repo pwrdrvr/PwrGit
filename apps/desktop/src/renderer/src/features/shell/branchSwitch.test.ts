@@ -236,10 +236,7 @@ describe("guardedSwitchBranch", () => {
         message: "fatal: 'feature/x' is already used by worktree at '/repos/b'"
       }
     });
-    await expect(guardedSwitchBranch(args)).resolves.toEqual({
-      kind: "held",
-      worktreeId: null
-    });
+    await expect(guardedSwitchBranch(args)).resolves.toEqual({ kind: "held" });
   });
 
   it("passes any other refusal through with its code", async () => {

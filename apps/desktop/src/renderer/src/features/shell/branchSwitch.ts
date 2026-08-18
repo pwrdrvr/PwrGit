@@ -112,9 +112,10 @@ export type SwitchOutcome =
   | { kind: "switched" }
   | { kind: "cancelled" }
   /** The refs snapshot was stale and another worktree holds the branch. Not an
-   *  error: the caller reveals that worktree, which is what the user asked for.
-   */
-  | { kind: "held"; worktreeId: WorktreeId | null }
+   *  error: the caller re-lists and reveals that worktree, which is what the
+   *  user asked for. Which worktree is deliberately not carried here — git's
+   *  refusal names a path, not an id, so the caller resolves it. */
+  | { kind: "held" }
   | { kind: "failed"; code: string; message: string };
 
 /**
@@ -160,11 +161,7 @@ export async function guardedSwitchBranch({
   const result = await dispatch("branch:switch", { worktreeId, branch });
   if (result.ok) return { kind: "switched" };
 
-  if (result.error.code === "checked_out_elsewhere") {
-    // The main process knows which worktree, but does not report it on this
-    // path; the caller re-lists and finds it. Null means "look it up".
-    return { kind: "held", worktreeId: null };
-  }
+  if (result.error.code === "checked_out_elsewhere") return { kind: "held" };
   return {
     kind: "failed",
     code: result.error.code,
