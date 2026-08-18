@@ -10,13 +10,16 @@ import type {
 } from "@pwrgit/shared";
 import { useHoverIntent } from "../../lib/hoverIntent";
 import { dispatch, subscribe } from "../../lib/pwrgit";
-import { showErrorToast } from "../../lib/toast";
+import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import {
   type TooltipAnchor,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
+import { BranchChipMenu, type BranchChipTarget } from "./BranchChipMenu";
 import { BranchFromCommitDialog } from "./BranchFromCommitDialog";
+import type { CommitSwitchTarget } from "./commit-context-menu";
+import { switchFailureMessage } from "./commit-context-menu";
 import { CommitContextCard } from "./CommitContextCard";
 import { CommitContextMenu } from "./CommitContextMenu";
 import {
@@ -253,6 +256,7 @@ export function LineageGraph({
   const [branchesOpen, setBranchesOpen] = useState(false);
   const [hoveredCommit, setHoveredCommit] = useState<string | null>(null);
   const [commitMenu, setCommitMenu] = useState<CommitMenuState | null>(null);
+  const [branchMenu, setBranchMenu] = useState<BranchChipTarget | null>(null);
   // The commit itself, not its hash: the dialog outlives graph reloads (its own
   // branch:create emits worktree:changed before it returns), and a reload whose
   // window no longer covers that commit would otherwise unmount the dialog
@@ -757,7 +761,39 @@ export function LineageGraph({
     position: { x: number; y: number }
   ): void => {
     commitContext.hide();
+    setBranchMenu(null);
     setCommitMenu({ hash: vm.commit.hash, ...position });
+  };
+
+  const openBranchMenu = (target: BranchChipTarget): void => {
+    commitContext.hide();
+    setCommitMenu(null);
+    setBranchMenu(target);
+  };
+
+  /**
+   * Move this worktree onto a branch drawn in the graph. The menu is already
+   * gone by the time git answers, so the outcome arrives as a toast — a switch
+   * of a large checkout takes seconds, and a refusal (dirty tree, branch held
+   * by another worktree) has nowhere else to appear.
+   */
+  const switchToBranch = async (target: CommitSwitchTarget): Promise<void> => {
+    const result = await dispatch("branch:switch", {
+      worktreeId,
+      branch: target.branch
+    });
+    if (!result.ok) {
+      showErrorToast({
+        title: "Switch failed",
+        message: switchFailureMessage(result.error, target.branch),
+        detail: result.error.message
+      });
+      return;
+    }
+    showInfoToast({
+      title: "Branch switched",
+      message: `${target.branch} is checked out here.`
+    });
   };
 
   const gutterW = gutterWidth(prLandingLayout.laneCount);
@@ -1058,6 +1094,7 @@ export function LineageGraph({
                 onHideContext={commitContext.scheduleHide}
                 onFocusContext={commitContext.focusFirst}
                 onOpenContextMenu={(position) => openCommitMenu(vm, position)}
+                onOpenBranchMenu={openBranchMenu}
                 onRevealWorktree={onRevealWorktree}
               />
             ))}
@@ -1090,11 +1127,25 @@ export function LineageGraph({
           vm={menuVm}
           branchInfo={data?.branches ?? {}}
           viewingBranch={viewingBranch}
+          worktreeId={worktreeId}
           onViewChanges={() =>
             onOpenCommit(menuVm.commit.hash, menuVm.commit.subject)
           }
           onBranchFrom={() => setBranchFromCommit(menuVm.commit)}
+          onSwitchBranch={(target) => void switchToBranch(target)}
+          onRevealWorktree={onRevealWorktree}
           onClose={() => setCommitMenu(null)}
+        />
+      )}
+      {branchMenu !== null && (
+        <BranchChipMenu
+          target={branchMenu}
+          branchInfo={data?.branches ?? {}}
+          viewingBranch={viewingBranch}
+          worktreeId={worktreeId}
+          onSwitchBranch={(target) => void switchToBranch(target)}
+          onRevealWorktree={onRevealWorktree}
+          onClose={() => setBranchMenu(null)}
         />
       )}
       {branchFromCommit !== null && (

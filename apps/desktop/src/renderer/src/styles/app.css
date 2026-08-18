@@ -4017,6 +4017,18 @@ textarea,
   flex: 0 0 auto;
   opacity: 0.85;
 }
+/* A chip that names a branch is a button — click or right-click opens that
+   branch's menu. The "+N" pill and a collapsed remote label stay plain spans,
+   so the affordance is on the chips that actually do something. */
+button.ref-chip {
+  cursor: pointer;
+  transition: box-shadow 120ms ease;
+}
+button.ref-chip:hover,
+button.ref-chip:focus-visible {
+  /* currentColor is the lane tint set inline, so the ring matches the chip. */
+  box-shadow: 0 0 0 1px currentColor;
+}
 /* Overflow pill ("+N") — neutral, after .ref-chip so its color wins. */
 .ref-chip--more {
   color: var(--text-muted);

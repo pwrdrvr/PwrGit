@@ -199,10 +199,10 @@ export function registerGraphHandlers(
       // else in this cache.
       const branchInfo: Record<string, LaneBranchInfo> = {};
       const wtRows = db
-        .prepare("SELECT id, branch FROM worktrees WHERE repo_id = ?")
-        .all(wt.repo_id) as { id: string; branch: string }[];
+        .prepare("SELECT id, branch, path FROM worktrees WHERE repo_id = ?")
+        .all(wt.repo_id) as { id: string; branch: string; path: string }[];
       for (const row of wtRows) {
-        branchInfo[row.branch] = { worktreeId: row.id };
+        branchInfo[row.branch] = { worktreeId: row.id, worktreePath: row.path };
       }
       const prRows = db
         .prepare(
