@@ -1,5 +1,5 @@
 import type { WorktreeId } from "@pwrgit/shared";
-import { dispatch } from "../../lib/pwrgit";
+import { dispatch, subscribe } from "../../lib/pwrgit";
 import { confirmDialog } from "./dialogs";
 
 /**
@@ -25,6 +25,11 @@ export type DirtyState =
   /** No snapshot could be read. Treated exactly like dirty — see below. */
   | { kind: "unknown" };
 
+/** How long to wait for a first snapshot to be computed before giving up and
+ *  calling the tree's dirtiness unknown. Generous: the alternative to waiting
+ *  is a confirm the user did not need. */
+const FIRST_SNAPSHOT_WAIT_MS = 5_000;
+
 /**
  * Read the destination's dirtiness from a live snapshot.
  *
@@ -35,17 +40,55 @@ export type DirtyState =
  * files, so trusting it would skip the confirm in exactly the case the confirm
  * exists to catch.
  *
- * A failed read is `unknown`, never `clean`. Unknown takes the confirm branch:
- * a needless prompt costs one keystroke, a needless carry-over costs the user
- * their working state.
+ * `worktree:getState` returns the CACHED snapshot and only kicks off a refresh
+ * — it does not wait for one. So on a repo the user just added, the first read
+ * is a miss, and treating that as unknown would prompt about "changes PwrGit
+ * could not count" on a perfectly clean tree. A miss is therefore not the
+ * answer, it is the question: the refresh the read just started emits
+ * `worktree:changed` when the snapshot lands, so wait for that and read again.
+ *
+ * Only a read that fails, or a snapshot that never arrives, is `unknown` — and
+ * unknown still takes the confirm branch. A needless prompt costs one
+ * keystroke; a needless carry-over costs the user their working state.
  */
 export async function readDirtyState(
-  worktreeId: WorktreeId
+  worktreeId: WorktreeId,
+  waitMs: number = FIRST_SNAPSHOT_WAIT_MS
 ): Promise<DirtyState> {
-  const result = await dispatch("worktree:getState", { worktreeId });
-  if (!result.ok || result.value === null) return { kind: "unknown" };
-  const files = result.value.dirty;
-  return files > 0 ? { kind: "dirty", files } : { kind: "clean" };
+  const snapshot = (state: { dirty: number }): DirtyState =>
+    state.dirty > 0 ? { kind: "dirty", files: state.dirty } : { kind: "clean" };
+
+  // Subscribe BEFORE asking. The refresh the read kicks off can finish before
+  // a listener attached afterwards would exist, and its event does not repeat.
+  let landed: (() => void) | undefined;
+  const arrival = new Promise<boolean>((resolve) => {
+    landed = () => resolve(true);
+  });
+  const unsubscribe = subscribe("worktree:changed", (event) => {
+    if (event.worktreeId === worktreeId) landed?.();
+  });
+
+  try {
+    const first = await dispatch("worktree:getState", { worktreeId });
+    if (!first.ok) return { kind: "unknown" };
+    if (first.value !== null) return snapshot(first.value);
+
+    // Bare setTimeout, not window.setTimeout: this module is exercised by unit
+    // tests running under Node, where there is no `window`.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), waitMs);
+    });
+    const arrived = await Promise.race([arrival, timeout]);
+    if (timer !== undefined) clearTimeout(timer);
+    if (!arrived) return { kind: "unknown" };
+
+    const second = await dispatch("worktree:getState", { worktreeId });
+    if (!second.ok || second.value === null) return { kind: "unknown" };
+    return snapshot(second.value);
+  } finally {
+    unsubscribe();
+  }
 }
 
 /** The confirm's body. Named separately so the wording is testable without a
@@ -88,7 +131,8 @@ export async function guardedSwitchBranch({
   worktreeId,
   worktreeLabel,
   branch,
-  skipDirtyConfirm = false
+  skipDirtyConfirm = false,
+  snapshotWaitMs
 }: {
   worktreeId: WorktreeId;
   /** How the confirm names the checkout being moved — its folder, not its
@@ -97,9 +141,11 @@ export async function guardedSwitchBranch({
   branch: string;
   /** Set when the caller has already confirmed with the user. */
   skipDirtyConfirm?: boolean;
+  /** Test seam: how long to wait for a first snapshot. */
+  snapshotWaitMs?: number;
 }): Promise<SwitchOutcome> {
   if (!skipDirtyConfirm) {
-    const dirty = await readDirtyState(worktreeId);
+    const dirty = await readDirtyState(worktreeId, snapshotWaitMs);
     if (dirty.kind !== "clean") {
       const proceed = await confirmDialog({
         title: `Switch ${worktreeLabel} to ${branch}?`,

@@ -231,9 +231,15 @@ never been computed reports `dirty: 0` while holding a dozen modified files, so
 the gate would silently take the no-dialog path in exactly the case it exists
 to catch.
 
-So v1 calls `worktree:getState` for the target before deciding, and treats a
-failed or absent snapshot as **unknown**, not clean — unknown takes the confirm
-branch. Still no protocol change. v2 adds `branch:inspectSwitch` returning
+So v1 calls `worktree:getState` for the target before deciding. But that
+handler answers from cache and only *kicks off* a refresh, so the first read of
+a repo the user just added is a miss — and calling that miss "unknown" would
+prompt about changes PwrGit could not count on a perfectly clean tree. A miss
+is the question, not the answer: the refresh it started emits
+`worktree:changed` when the snapshot lands, so the gate subscribes first, waits
+for it, and reads again. Only a failed read or a snapshot that never arrives is
+**unknown**, and unknown still takes the confirm branch. Still no protocol
+change. v2 adds `branch:inspectSwitch` returning
 `{ dirty, conflicting, operationInProgress }`, following the established
 `remote:inspectDivergence` / `remote:inspectReset` inspect-then-act pattern, so
 the dialog states facts rather than an estimate.
