@@ -19,6 +19,7 @@ import type { DB } from "../persistence/db";
 import { mapLimit } from "../util/map-limit";
 import type { GitExec } from "./dugite";
 import { buildFtsQuery } from "./fts-query";
+import { pathLeafLikePatterns, rankSearchHits } from "./search-rank";
 import { listBranches, listRemoteNames, listWorktrees } from "./git-service";
 import { claimWorktreeOwnership } from "./repo-ownership";
 
@@ -550,18 +551,26 @@ export class RepoIndexer {
     if (fts === null) return this.browseRepos();
 
     // Exact literal names come first so the intended row survives the result
-    // cap. Within exact/fuzzy groups, bm25 weights per column (entity_id,
-    // kind, name, path, repo_name, pr): a hit in the repo/branch name outranks
-    // one buried in a path; PR number/title hits rank just under names.
+    // cap — a name the user typed in full, or the final segment of a repo's or
+    // a checkout's path, which is that directory's name and is not something
+    // FTS5 can pick out of a tokenized path. Within exact/fuzzy groups, bm25
+    // weights per column (entity_id, kind, name, path, repo_name, pr): a hit in
+    // the repo/branch name outranks one buried in a path; PR number/title hits
+    // rank just under names.
+    const [leafPosix, leafWindows] = pathLeafLikePatterns(query);
     const matches = this.db
       .prepare(
         `SELECT entity_id, kind FROM search_fts
          WHERE search_fts MATCH ?
-         ORDER BY CASE WHEN name = ? COLLATE NOCASE THEN 0 ELSE 1 END,
+         ORDER BY CASE WHEN name = ? COLLATE NOCASE
+                         OR (kind IN ('repo', 'worktree')
+                             AND (path LIKE ? ESCAPE '\\'
+                                  OR path LIKE ? ESCAPE '\\'))
+                       THEN 0 ELSE 1 END,
                   bm25(search_fts, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0)
          LIMIT 60`
       )
-      .all(fts, query.trim()) as {
+      .all(fts, query.trim(), leafPosix, leafWindows) as {
       entity_id: string;
       kind: RepoSearchHit["kind"];
     }[];
@@ -755,9 +764,12 @@ export class RepoIndexer {
     }
 
     // Emit in bm25 order; hydration misses (an index row whose entity vanished
-    // mid-flight) are simply skipped. An exact name is stronger intent than
-    // term frequency, though: without this promotion a branch containing the
-    // query tokens repeatedly can outrank the literal branch the user pasted.
+    // mid-flight) are simply skipped. How directly a hit is NAMED by the query
+    // is stronger intent than term frequency, though — see search-rank.ts:
+    // without that promotion a branch containing the query tokens repeatedly
+    // can outrank the literal branch the user pasted, and a checkout the user
+    // named by its directory loses to any branch merely starting with the same
+    // word.
     const out: RepoSearchHit[] = [];
     for (const m of unique) {
       const hit =
@@ -770,13 +782,7 @@ export class RepoIndexer {
               : localBranchHits.get(m.entity_id);
       if (hit !== undefined) out.push(hit);
     }
-    const exactName = normalizeExactSearchName(query);
-    out.sort(
-      (left, right) =>
-        Number(normalizeExactSearchName(right.name) === exactName) -
-        Number(normalizeExactSearchName(left.name) === exactName)
-    );
-    return out;
+    return rankSearchHits(out, query);
   }
 
   /** The overlay's empty-query state: all repos, pinned first, alphabetical. */
@@ -1162,13 +1168,6 @@ export class RepoIndexer {
       .run(profileId, ...keepIds);
   }
 }
-
-const normalizeExactSearchName = (value: string): string =>
-  value
-    .trim()
-    .normalize("NFKD")
-    .replace(/\p{M}/gu, "")
-    .toLowerCase();
 
 function worktreeShape(path: string, branch: string, isPrimary: boolean): Worktree {
   return {

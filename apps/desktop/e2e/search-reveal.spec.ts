@@ -117,6 +117,9 @@ test("a worktree whose folder no longer matches its branch shows both names", as
   const repo = box.makeRepo("snapfarm");
   const wtPath = repo.addWorktree("recursing-euler-9edf74");
   box.git(wtPath, "branch", "-m", "dmg-file-art-update-4fd193");
+  // The discarded branch such tooling leaves behind under the original name —
+  // it is checked out nowhere, and it used to top these results.
+  repo.createBranch("recursing-euler-9edf74");
   box.makeRepo("other-repo");
 
   handle = await launchApp();
@@ -151,7 +154,20 @@ test("a worktree whose folder no longer matches its branch shows both names", as
   await expect(hit.locator(".overlay-result__name")).toHaveText(
     "dmg-file-art-update-4fd193"
   );
-  await window.keyboard.press("Escape");
+  // And it leads: a checkout the query names outranks a branch of that name
+  // that is checked out nowhere. Enter therefore lands on the worktree.
+  const results = window.locator(".overlay-result");
+  await expect(results.first()).toHaveAttribute("aria-selected", "true");
+  await expect(results.first().locator(".overlay-result__name")).toHaveText(
+    "dmg-file-art-update-4fd193"
+  );
+  await expect(results.nth(1)).toContainText("recursing-euler-9edf74");
+  await expect(results.nth(1)).toContainText("no worktree");
+  await window.keyboard.press("Enter");
+  await expect(window.locator(".titlebar__branch-name")).toHaveText(
+    "dmg-file-art-update-4fd193",
+    { timeout: 20_000 }
+  );
 });
 
 // A branch created without a checkout — the app can now make these itself —
