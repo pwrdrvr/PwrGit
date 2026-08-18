@@ -66,9 +66,16 @@ export async function confirmAndDiscardAllChanges(
     )
   ];
   if (paths.length === 0) return;
+  // `git clean` does not stop at the render cap, so neither can the warning:
+  // count what is really there, not what fitted in the list.
+  const shown = paths.length;
+  const total =
+    changes?.truncated === undefined
+      ? shown
+      : Math.max(shown, changes.truncated.staged, changes.truncated.unstaged);
   const yes = await confirmDialog({
     title: "Discard all changes?",
-    message: `Discard all uncommitted changes across ${paths.length} file${paths.length === 1 ? "" : "s"}? This can't be undone.`,
+    message: `Discard all uncommitted changes across ${total} file${total === 1 ? "" : "s"}? This can't be undone.`,
     confirmLabel: "Discard all",
     danger: true
   });
@@ -114,6 +121,46 @@ export function groupChanges(files: FileChange[]): ChangeEntry[] {
     const only = entry.files[0];
     return only === undefined ? [] : [{ kind: "file" as const, file: only }];
   });
+}
+
+const countFormat = new Intl.NumberFormat();
+
+/**
+ * Shown when the list was capped. Past a thousand changed files the useful
+ * answer is a .gitignore rule rather than a longer list, so the notice leads
+ * with the folder responsible instead of just apologising for the cut.
+ */
+function TruncationNotice({
+  shown,
+  total,
+  largestUntrackedFolder
+}: {
+  /** How many this section actually rendered — read from the list itself, not
+   *  from the cap, so the two can never drift apart. */
+  shown: number;
+  total: number;
+  largestUntrackedFolder: { dir: string; count: number } | null;
+}) {
+  return (
+    <div className="changes-truncated" role="status">
+      <div className="changes-truncated__head">
+        Showing {countFormat.format(shown)} of {countFormat.format(total)}{" "}
+        files
+      </div>
+      <div className="changes-truncated__body">
+        {largestUntrackedFolder === null ? (
+          <>The rest are hidden to keep this list responsive.</>
+        ) : (
+          <>
+            <code>{largestUntrackedFolder.dir}/</code> holds{" "}
+            {countFormat.format(largestUntrackedFolder.count)} new files. Add it
+            to <code>.gitignore</code> if it is build output — this list picks
+            that up on its own.
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function FileRow({
@@ -322,6 +369,11 @@ export function ChangesTab({
 
   const staged = changes?.staged ?? [];
   const unstaged = changes?.unstaged ?? [];
+  // The section headers count what git found, not what survived the cap — a
+  // header reading "1,000" beside a notice reading "of 20,000" is just noise.
+  const truncated = changes?.truncated;
+  const stagedTotal = truncated?.staged ?? staged.length;
+  const unstagedTotal = truncated?.unstaged ?? unstaged.length;
   const hasChanges = staged.length > 0 || unstaged.length > 0;
   const canCommit = message.trim() !== "" && staged.length > 0;
 
@@ -418,7 +470,7 @@ export function ChangesTab({
           <>
             <div className="changes-section">
               <span className="changes-section__label">
-                Staged · {staged.length}
+                Staged · {countFormat.format(stagedTotal)}
               </span>
               <button
                 className="changes-section__action"
@@ -429,13 +481,20 @@ export function ChangesTab({
               </button>
             </div>
             {renderEntries(staged, "s", true)}
+            {stagedTotal > staged.length && (
+              <TruncationNotice
+                shown={staged.length}
+                total={stagedTotal}
+                largestUntrackedFolder={null}
+              />
+            )}
           </>
         )}
         {unstaged.length > 0 && (
           <>
             <div className="changes-section">
               <span className="changes-section__label">
-                Unstaged · {unstaged.length}
+                Unstaged · {countFormat.format(unstagedTotal)}
               </span>
               <button
                 className="changes-section__action"
@@ -446,6 +505,15 @@ export function ChangesTab({
               </button>
             </div>
             {renderEntries(unstaged, "u", false)}
+            {unstagedTotal > unstaged.length && (
+              <TruncationNotice
+                shown={unstaged.length}
+                total={unstagedTotal}
+                largestUntrackedFolder={
+                  truncated?.largestUntrackedFolder ?? null
+                }
+              />
+            )}
           </>
         )}
       </div>
@@ -463,7 +531,10 @@ export function ChangesTab({
             disabled={!canCommit}
             onClick={() => commit(false)}
           >
-            Commit {staged.length > 0 ? `${staged.length} file${staged.length === 1 ? "" : "s"}` : ""}
+            Commit{" "}
+            {stagedTotal > 0
+              ? `${countFormat.format(stagedTotal)} file${stagedTotal === 1 ? "" : "s"}`
+              : ""}
           </button>
           <button
             className="amend-btn"

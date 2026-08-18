@@ -3,6 +3,7 @@ import {
   type BranchRef,
   type BranchTrackingStatus,
   type ChangeSet,
+  CHANGE_LIST_LIMIT,
   type Commit,
   type CommitFileChange,
   type CommitStats,
@@ -87,6 +88,44 @@ export function parseChanges(stdout: string): ChangeSet {
   return { staged, unstaged };
 }
 
+/**
+ * Cap a change set at `limit` entries per section, recording what was dropped.
+ * The largest untracked folder is computed over the FULL list — it is the
+ * actionable part of the notice ("dist/ is 19,800 of these"), and picking it
+ * from the surviving 1,000 would name whichever folder happened to sort first.
+ */
+export function capChangeSet(
+  set: ChangeSet,
+  limit: number = CHANGE_LIST_LIMIT
+): ChangeSet {
+  if (set.staged.length <= limit && set.unstaged.length <= limit) return set;
+
+  const perFolder = new Map<string, number>();
+  for (const file of set.unstaged) {
+    if (file.status !== "?") continue;
+    const slash = file.path.lastIndexOf("/");
+    if (slash <= 0) continue;
+    const dir = file.path.slice(0, slash);
+    perFolder.set(dir, (perFolder.get(dir) ?? 0) + 1);
+  }
+  let largestUntrackedFolder: { dir: string; count: number } | null = null;
+  for (const [dir, count] of perFolder) {
+    if (largestUntrackedFolder === null || count > largestUntrackedFolder.count) {
+      largestUntrackedFolder = { dir, count };
+    }
+  }
+
+  return {
+    staged: set.staged.slice(0, limit),
+    unstaged: set.unstaged.slice(0, limit),
+    truncated: {
+      staged: set.staged.length,
+      unstaged: set.unstaged.length,
+      largestUntrackedFolder
+    }
+  };
+}
+
 /** Read the staged/unstaged change set for a worktree. */
 export async function readChanges(
   git: GitExec,
@@ -104,7 +143,7 @@ export async function readChanges(
   if (!raw.ok) return raw;
   const checked = requireExit0(raw.value, ["status"]);
   if (!checked.ok) return checked;
-  return ok(parseChanges(checked.value.stdout));
+  return ok(capChangeSet(parseChanges(checked.value.stdout)));
 }
 
 /**

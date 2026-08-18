@@ -3,9 +3,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { err, ok } from "@pwrgit/shared";
+import {
+  CHANGE_LIST_LIMIT,
+  err,
+  ok,
+  type ChangeSet,
+  type FileChange
+} from "@pwrgit/shared";
 import type { GitExec, GitOutput } from "./dugite";
-import { readChanges, stagePaths } from "./git-service";
+import { capChangeSet, readChanges, stagePaths } from "./git-service";
 import { parseStatus } from "./worktree-state";
 
 const systemGit: GitExec = (args, cwd) =>
@@ -134,5 +140,110 @@ describe("staging untracked work (system git)", () => {
     await stagePaths(systemGit, repo, ["design/github.md"]);
 
     expect(await dirty()).toBe(before);
+  });
+});
+
+describe("capChangeSet", () => {
+  const untracked = (path: string): FileChange => ({
+    path,
+    status: "?",
+    staged: false
+  });
+  const set = (unstaged: FileChange[], staged: FileChange[] = []): ChangeSet => ({
+    staged,
+    unstaged
+  });
+
+  it("leaves a list that fits completely alone", () => {
+    const small = set([untracked("a.txt"), untracked("b.txt")]);
+
+    const capped = capChangeSet(small, 10);
+
+    expect(capped).toBe(small);
+    expect(capped.truncated).toBeUndefined();
+  });
+
+  it("caps each section and reports the real totals", () => {
+    const many = set(
+      Array.from({ length: 12 }, (_, i) => untracked(`dist/f${i}.js`)),
+      Array.from({ length: 5 }, (_, i) => ({
+        path: `src/s${i}.ts`,
+        status: "A" as const,
+        staged: true
+      }))
+    );
+
+    const capped = capChangeSet(many, 4);
+
+    expect(capped.unstaged).toHaveLength(4);
+    expect(capped.staged).toHaveLength(4);
+    expect(capped.truncated).toEqual({
+      staged: 5,
+      unstaged: 12,
+      largestUntrackedFolder: { dir: "dist", count: 12 }
+    });
+  });
+
+  it("names the biggest folder from the whole list, not the surviving slice", () => {
+    // `assets` sorts first and fills the entire cap, but `dist` is the folder
+    // actually worth ignoring — picking from the slice would name the wrong one.
+    const many = set([
+      ...Array.from({ length: 3 }, (_, i) => untracked(`assets/a${i}.png`)),
+      ...Array.from({ length: 40 }, (_, i) => untracked(`dist/f${i}.js`))
+    ]);
+
+    expect(capChangeSet(many, 3).truncated?.largestUntrackedFolder).toEqual({
+      dir: "dist",
+      count: 40
+    });
+  });
+
+  it("has no folder to blame when the flood is tracked edits", () => {
+    const many = set(
+      Array.from({ length: 9 }, (_, i) => ({
+        path: `src/f${i}.ts`,
+        status: "M" as const,
+        staged: false
+      }))
+    );
+
+    expect(capChangeSet(many, 4).truncated?.largestUntrackedFolder).toBeNull();
+  });
+});
+
+describe("readChanges cap (system git)", () => {
+  let root: string;
+  let repo: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "pwrgit-cap-"));
+    repo = join(root, "repo");
+    mkdirSync(repo);
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.name", "PwrGit Test"]);
+    git(repo, ["config", "user.email", "pwrgit@example.com"]);
+    writeFileSync(join(repo, "tracked.txt"), "baseline\n");
+    git(repo, ["add", "."]);
+    git(repo, ["commit", "-m", "baseline"]);
+  });
+
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  it("hands the renderer a bounded list and the count it stands for", async () => {
+    mkdirSync(join(repo, "dist"));
+    const total = CHANGE_LIST_LIMIT + 25;
+    for (let i = 0; i < total; i += 1) {
+      writeFileSync(join(repo, "dist", `f${i}.js`), "x\n");
+    }
+
+    const changes = await readChanges(systemGit, repo);
+    if (!changes.ok) throw new Error(changes.error.message);
+
+    expect(changes.value.unstaged).toHaveLength(CHANGE_LIST_LIMIT);
+    expect(changes.value.truncated?.unstaged).toBe(total);
+    expect(changes.value.truncated?.largestUntrackedFolder).toEqual({
+      dir: "dist",
+      count: total
+    });
   });
 });
