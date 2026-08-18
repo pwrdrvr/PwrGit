@@ -1251,6 +1251,93 @@ textarea,
 .ref-branch-row__status.is-upstream_missing {
   color: var(--status-warning);
 }
+
+/* ---- Paired focus: the branch the selected worktree is sitting on ----
+
+   The worktree row keeps the accent BORDER BOX (`.wt-row.is-selected`) — that
+   row *is* the selection. The branch row gets an accent BAR, which is the
+   vocabulary `.wt-row.is-multiselected` already uses for "related to the
+   selection, but not it". One box and one bar read as a pair; two boxes read as
+   two competing selections, which would contradict the fact that the branch is
+   derived from the worktree and not separately selectable.
+
+   Inset box-shadow rather than a border, for the same reason the multi-select
+   bar uses one: these rows are a fixed 29px with 7px of left padding, and a
+   border would move the branch name by 2px on state change. */
+.ref-branch-row.is-current {
+  /* The --bg-row-active fill is ~1.03:1 against the sidebar — a wash, not a
+     state — so the bar is what carries SC 1.4.11 here, exactly as the border
+     does on .wt-row.is-selected. The tint stays a tint. */
+  background: var(--bg-row-active);
+  box-shadow: inset 2px 0 0 0 var(--accent);
+}
+.ref-branch-row.is-current:hover {
+  background: var(--bg-active-strong);
+}
+/* --accent-bright, not --accent: the row's --bg-row-active fill is an accent
+   tint, and the ramp travels toward lighter on those. Same pairing as
+   .wt-row.is-selected .wt-row__branch-icon. */
+.ref-branch-row.is-current .refs-branch-icon {
+  color: var(--accent-bright);
+}
+.ref-branch-row.is-current .ref-branch-row__name {
+  font-weight: 600;
+}
+/* Rows are activatable (double-click / Enter), so they take the tab stop and
+   need a visible focus state of their own. */
+.ref-branch-row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* The chip names the worktree holding this branch, by its folder. Filled when
+   that worktree is the working target, outlined when it is some other
+   checkout — "occupied" is a weaker fact than "here". */
+.ref-checkout-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  max-width: 116px;
+  height: 17px;
+  padding: 0 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font: 600 9px/1 var(--font-mono);
+  cursor: pointer;
+}
+.ref-checkout-chip__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ref-checkout-chip.is-here {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  /* --accent-bright is contrast-floored against an --accent-soft tint, which is
+     exactly the fill underneath it here. */
+  color: var(--accent-bright);
+}
+.ref-checkout-chip:hover,
+.ref-checkout-chip:focus-visible {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+
+/* "· on main" beside the Branches count — the pair, readable while the section
+   is collapsed. Quieter than .ref-section__summary's warning tier: it states
+   where you are, not that anything needs attention. */
+.ref-section__on {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 9px/1 var(--font-mono);
+  color: var(--accent);
+  text-transform: none;
+}
 /* 24px target occupying 20px — see .pin. The ref rows are 29px tall, so this
    costs no height. */
 .ref-mini-action,

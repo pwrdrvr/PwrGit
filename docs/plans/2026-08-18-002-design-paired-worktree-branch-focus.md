@@ -1,6 +1,13 @@
 # Paired focus: working target and checked-out branch
 
-Status: design, not yet implemented.
+Status: implemented for the sidebar branch list. The three row states, the
+checkout chip, the section summary, the pinned current branch, double-click /
+Enter activation and the §6 gate all landed; `features/sidebar/branch-focus.ts`
+holds the pure logic and `features/shell/branchSwitch.ts` the gate. The gate is
+shared, so the lineage graph's branch-tip switch (#111, which dispatched
+`branch:switch` unguarded) now goes through it too. Still open: a per-row
+context menu (§7) and `branch:inspectSwitch` (§6 v2).
+
 Scope: sidebar branch list, worktree rows, title bar breadcrumb, `branch:switch`.
 
 ## 1. What is broken
