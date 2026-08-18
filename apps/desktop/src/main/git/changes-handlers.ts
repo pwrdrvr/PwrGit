@@ -65,8 +65,13 @@ export function registerChangesHandlers(
     const result = await operations.run(req.worktreeId, () =>
       stagePaths(execGit, path, req.paths)
     );
-    if (!result.ok) return result;
+    // Announce either way. Git validates a whole pathspec list before touching
+    // the index, so one run is atomic — but a list longer than one batch is
+    // several runs, and a failure in a later one leaves the earlier ones
+    // applied. Staying quiet there would leave the list showing files as
+    // unstaged that are already in the index.
     notifyChanged(req.worktreeId);
+    if (!result.ok) return result;
     return ok(null);
   });
 
@@ -76,8 +81,8 @@ export function registerChangesHandlers(
     const result = await operations.run(req.worktreeId, () =>
       unstagePaths(execGit, path, req.paths)
     );
-    if (!result.ok) return result;
     notifyChanged(req.worktreeId);
+    if (!result.ok) return result;
     return ok(null);
   });
 

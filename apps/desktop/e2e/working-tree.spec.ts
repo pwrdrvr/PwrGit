@@ -105,8 +105,12 @@ test("every stage and unstage click repaints the list", async () => {
   await addRootAndExpand(window, handle, sandbox, "stg");
 
   // Each new file is listed by name, under a folder row that stages the lot.
+  // `exact` throughout: getByRole matches a case-insensitive *substring* by
+  // default, and "Stage x" is a substring of "Unstage x" — a file listed in
+  // both sections would resolve two buttons and fail strict mode at the click.
   const folderStage = window.getByRole("button", {
-    name: "Stage all 2 files in design"
+    name: "Stage all 2 files in design",
+    exact: true
   });
   await expect(folderStage).toBeVisible({ timeout: 20_000 });
   await expect(window.locator(".file-row", { hasText: "one.md" })).toBeVisible();
@@ -116,12 +120,16 @@ test("every stage and unstage click repaints the list", async () => {
   ).toBeVisible({ timeout: 20_000 });
 
   // …and now the click that used to do nothing visible.
-  await window.getByRole("button", { name: "Stage README.md" }).click();
+  await window
+    .getByRole("button", { name: "Stage README.md", exact: true })
+    .click();
   await expect(
     window.locator(".file-row.is-staged", { hasText: "README.md" })
   ).toBeVisible({ timeout: 20_000 });
 
-  await window.getByRole("button", { name: "Unstage README.md" }).click();
+  await window
+    .getByRole("button", { name: "Unstage README.md", exact: true })
+    .click();
   await expect(
     window.locator(".file-row.is-staged", { hasText: "README.md" })
   ).toHaveCount(0, { timeout: 20_000 });

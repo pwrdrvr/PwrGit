@@ -4260,6 +4260,8 @@ button.ref-chip:focus-visible {
   color: var(--text-muted);
   background: var(--bg-panel-elevated);
 }
+/* `direction: rtl` is what truncates a long path from the LEFT, keeping the
+   filename visible — the column is otherwise pure LTR content. */
 .file-path {
   flex: 1;
   min-width: 0;
@@ -4270,6 +4272,14 @@ button.ref-chip:focus-visible {
   white-space: nowrap;
   direction: rtl;
   text-align: left;
+}
+/* A trailing "/" is bidi-neutral, so in an RTL paragraph it takes the
+   paragraph direction and jumps to the front: git's `? vendor/` (a nested repo
+   — even -uall won't list inside one) rendered as "/vendor". A trailing
+   left-to-right mark anchors it. It lives in a pseudo-element rather than the
+   label so a copied path carries no invisible character. */
+.file-path::after {
+  content: "\200E";
 }
 
 .changes-pane {
@@ -4318,9 +4328,11 @@ button.ref-chip:focus-visible {
 .file-row:hover .file-action--stage,
 .file-row:hover .file-action--unstage,
 .folder-row:hover .file-action--stage,
+.folder-row:hover .file-action--unstage,
 .file-row:focus-within .file-action--stage,
 .file-row:focus-within .file-action--unstage,
-.folder-row:focus-within .file-action--stage {
+.folder-row:focus-within .file-action--stage,
+.folder-row:focus-within .file-action--unstage {
   opacity: 1;
 }
 .file-action--stage:hover {

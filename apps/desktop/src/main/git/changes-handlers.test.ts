@@ -153,20 +153,41 @@ describe("changes mutation events", () => {
     }
   );
 
-  it("stays quiet when the mutation failed", async () => {
+  // A failed stage still announces. Git validates a whole pathspec list before
+  // touching the index, so one run is atomic — but `stagePaths` splits a long
+  // list across runs, and a failure in a later one leaves the earlier ones
+  // applied. Going quiet there would show staged files as unstaged.
+  it("still announces when a batched mutation failed part-way", async () => {
     const failure = err({
       kind: "git" as const,
       code: "exit_128",
       message: "pathspec did not match"
     });
     vi.mocked(stagePaths).mockResolvedValueOnce(failure);
-    const { bus, refresher } = setup();
+    const { bus } = setup();
 
     await expect(
       bus.dispatch("changes:stage", {
         worktreeId: "worktree-1",
-        paths: ["missing.txt"]
+        paths: ["staged.txt", "missing.txt"]
       })
+    ).resolves.toEqual(failure);
+    expect(emitEvent).toHaveBeenCalledWith("changes:changed", {
+      worktreeId: "worktree-1"
+    });
+  });
+
+  it("stays quiet when a single-command mutation failed", async () => {
+    const failure = err({
+      kind: "git" as const,
+      code: "exit_1",
+      message: "restore failed"
+    });
+    vi.mocked(discardAllChanges).mockResolvedValueOnce(failure);
+    const { bus, refresher } = setup();
+
+    await expect(
+      bus.dispatch("changes:discardAll", { worktreeId: "worktree-1" })
     ).resolves.toEqual(failure);
     expect(emitEvent).not.toHaveBeenCalled();
     expect(refresher.refreshWorktree).not.toHaveBeenCalled();
