@@ -339,9 +339,12 @@ test("browses local branches and nested remotes, then pushes to a test target", 
   await localOnly.getByTitle("Create worktree").click();
   const newWorktree = window.locator(".modal", { hasText: "New worktree" });
   await newWorktree.getByRole("button", { name: "Create" }).click();
-  await expect(
-    localOnly.getByTitle("Show checked-out worktree")
-  ).toBeVisible({ timeout: 20_000 });
+  // A local branch that now has a worktree swaps its "+" for a checkout chip
+  // naming that worktree — the successor to the old "●" reveal button. (The
+  // remote list above still uses the button; only local rows carry the pair.)
+  await expect(localOnly.locator(".ref-checkout-chip")).toBeVisible({
+    timeout: 20_000
+  });
 });
 
 test("bounds the remote branch preview and pages the rest on demand", async () => {
