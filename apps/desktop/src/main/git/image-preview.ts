@@ -1,5 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import {
   err,
   imageMediaType,
@@ -57,7 +57,9 @@ function insideWorktree(cwd: string, path: string): string | null {
   if (isAbsolute(path)) return null;
   const full = resolve(cwd, path);
   const rel = relative(resolve(cwd), full);
-  if (rel === "" || rel.startsWith("..")) return null;
+  // Only a leading `..` SEGMENT escapes — a plain `startsWith("..")` would
+  // also reject a file that merely begins with two dots (`..cover.png`).
+  if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`)) return null;
   return full;
 }
 

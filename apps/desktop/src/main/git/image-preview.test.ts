@@ -139,6 +139,16 @@ describe("readImagePreview", () => {
     expect(result.error.code).toBe("not_an_image");
   });
 
+  it("reads a file whose name merely begins with two dots", async () => {
+    const dotted = join(repo, "art", "..cover.png");
+    writeFileSync(dotted, GIF_V1);
+    // Extension says PNG, bytes say GIF — irrelevant here: the point is that
+    // `..cover.png` is inside the worktree and must not read as an escape.
+    const result = await read(repo, "art/..cover.png", { kind: "worktree" });
+    expect(result.ok && result.value.kind).toBe("image");
+    rmSync(dotted);
+  });
+
   it("refuses a path that escapes the worktree", async () => {
     const result = await read(repo, "../outside.png", { kind: "worktree" });
     expect(result.ok).toBe(false);

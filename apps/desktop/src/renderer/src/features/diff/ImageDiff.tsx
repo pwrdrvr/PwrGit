@@ -1,5 +1,9 @@
-import { useEffect, useState } from "react";
-import type { ImagePreview, ImageRevision } from "@pwrgit/shared";
+import { useEffect, useRef, useState, type RefObject } from "react";
+import {
+  imageMediaType,
+  type ImagePreview,
+  type ImageRevision
+} from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import type { DiffFile } from "./parse-diff";
 
@@ -13,6 +17,9 @@ export type ImageDiffRevisions = {
 type SideKey = "before" | "after";
 
 type SideState = ImagePreview | { kind: "loading" } | { kind: "failed" };
+
+/** Decoded dimensions, tagged with the source they were measured from. */
+type Measured = { src: string; w: number; h: number };
 
 const SIDE_LABEL: Record<SideKey, string> = {
   before: "before",
@@ -32,11 +39,48 @@ function revisionKey(rev: ImageRevision): string {
     : rev.kind;
 }
 
-/** Which sides are worth fetching — an added file has no "before". */
-function sidesFor(status: DiffFile["status"]): SideKey[] {
-  if (status === "added") return ["after"];
+/**
+ * Which sides are worth fetching. An added file has no "before"; neither does
+ * a rename out of a non-image extension (`logo.bin` → `logo.png`), where the
+ * old blob is not something an <img> can show.
+ */
+function sidesFor(status: DiffFile["status"], beforePath: string): SideKey[] {
   if (status === "deleted") return ["before"];
+  if (status === "added" || imageMediaType(beforePath) === null) {
+    return ["after"];
+  }
   return ["before", "after"];
+}
+
+/**
+ * A whole-commit diff renders every file it touched, so fetching on mount
+ * would pull each image's bytes — up to 16 MB apiece, base64'd — for pictures
+ * scrolled far off screen. Wait until the row is near the viewport.
+ */
+function useNearViewport(): [RefObject<HTMLDivElement | null>, boolean] {
+  const host = useRef<HTMLDivElement | null>(null);
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    const node = host.current;
+    // No observer (jsdom, very old engines) means no way to defer: fetch now
+    // rather than leave the row blank forever.
+    if (node === null || typeof IntersectionObserver === "undefined") {
+      setNear(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setNear(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "400px" }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  return [host, near];
 }
 
 /**
@@ -51,9 +95,10 @@ export function ImageDiff({
   file: DiffFile;
   revisions: ImageDiffRevisions;
 }) {
-  const sides = sidesFor(file.status);
   // Renames move the bytes: the old revision only knows the old path.
   const beforePath = file.oldPath ?? file.path;
+  const sides = sidesFor(file.status, beforePath);
+  const [host, near] = useNearViewport();
   const [state, setState] = useState<Record<SideKey, SideState>>({
     before: { kind: "loading" },
     after: { kind: "loading" }
@@ -62,6 +107,7 @@ export function ImageDiff({
   useEffect(() => {
     let active = true;
     setState({ before: { kind: "loading" }, after: { kind: "loading" } });
+    if (!near) return;
     for (const side of sides) {
       const path = side === "before" ? beforePath : file.path;
       void dispatch("diff:image", {
@@ -82,6 +128,7 @@ export function ImageDiff({
     // Paths and revisions fully determine the fetch; `sides` derives from them.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    near,
     revisions.worktreeId,
     revisionKey(revisions.before),
     revisionKey(revisions.after),
@@ -91,7 +138,7 @@ export function ImageDiff({
   ]);
 
   return (
-    <div className="diff-image">
+    <div className="diff-image" ref={host}>
       {sides.map((side) => (
         <ImageSide
           key={side}
@@ -113,16 +160,30 @@ function ImageSide({
   path: string;
   state: SideState;
 }) {
-  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  const src =
+    state.kind === "image"
+      ? `data:${state.mediaType};base64,${state.base64}`
+      : null;
+  // Measured dimensions carry the source they were measured from. Bytes that
+  // never decode fire no `load`, so an unqualified size would keep reporting
+  // whatever the side showed previously.
+  const [size, setSize] = useState<Measured | null>(null);
+  const measured = size !== null && size.src === src ? size : null;
   return (
     <figure className="diff-image__side">
       <figcaption className="diff-image__label">{label}</figcaption>
       <div className="diff-image__frame">
-        <ImageBody path={path} label={label} state={state} onSize={setSize} />
+        <ImageBody
+          src={src}
+          path={path}
+          label={label}
+          state={state}
+          onSize={setSize}
+        />
       </div>
       <div className="diff-image__meta">
         {state.kind === "image"
-          ? `${size === null ? "" : `${size.w}×${size.h} · `}${formatBytes(state.bytes)}`
+          ? `${measured === null ? "" : `${measured.w}×${measured.h} · `}${formatBytes(state.bytes)}`
           : ""}
       </div>
     </figure>
@@ -130,15 +191,17 @@ function ImageSide({
 }
 
 function ImageBody({
+  src,
   path,
   label,
   state,
   onSize
 }: {
+  src: string | null;
   path: string;
   label: string;
   state: SideState;
-  onSize: (size: { w: number; h: number }) => void;
+  onSize: (size: Measured) => void;
 }) {
   switch (state.kind) {
     case "loading":
@@ -163,10 +226,11 @@ function ImageBody({
       return (
         <img
           className="diff-image__img"
-          src={`data:${state.mediaType};base64,${state.base64}`}
+          src={src ?? ""}
           alt={`${path}, ${label}`}
           onLoad={(e) =>
             onSize({
+              src: e.currentTarget.getAttribute("src") ?? "",
               w: e.currentTarget.naturalWidth,
               h: e.currentTarget.naturalHeight
             })

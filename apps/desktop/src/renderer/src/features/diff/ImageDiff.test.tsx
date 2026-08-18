@@ -101,6 +101,41 @@ describe("ImageDiff", () => {
     expect(paths).toEqual(["art/old-logo.png", "art/logo.png"]);
   });
 
+  it("drops dimensions measured from a revision no longer on screen", async () => {
+    dispatchMock.mockResolvedValue(ok(png("QUZURVI=")));
+    await render(binaryFile({ status: "added" }));
+
+    // Report a decode for the first revision the way the browser would.
+    const img = images()[0]!;
+    Object.defineProperty(img, "naturalWidth", { value: 40, configurable: true });
+    Object.defineProperty(img, "naturalHeight", { value: 30, configurable: true });
+    await act(async () => {
+      img.dispatchEvent(new Event("load"));
+    });
+    expect(container.textContent).toContain("40×30");
+
+    // Second revision whose bytes never decode — no load event follows, so the
+    // earlier dimensions must not be reported against the new blob.
+    dispatchMock.mockResolvedValue(ok(png("Q09SUlVQVA==")));
+    await render(binaryFile({ status: "added", path: "art/other.png" }));
+    expect(container.textContent).not.toContain("40×30");
+  });
+
+  it("skips the before side when the old path was not an image", async () => {
+    dispatchMock.mockResolvedValue(ok(png("QUZURVI=")));
+
+    await render(
+      binaryFile({ status: "renamed", oldPath: "art/logo.bin" })
+    );
+
+    expect(dispatchMock).toHaveBeenCalledTimes(1);
+    expect(dispatchMock.mock.calls[0]?.[1]).toMatchObject({
+      path: "art/logo.png",
+      rev: { kind: "worktree" }
+    });
+    expect(container.textContent).not.toContain("Could not read the image");
+  });
+
   it("explains an LFS pointer rather than showing a broken image", async () => {
     dispatchMock.mockResolvedValue(ok({ kind: "lfsPointer" }));
 
