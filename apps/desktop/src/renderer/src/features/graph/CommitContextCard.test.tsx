@@ -126,6 +126,7 @@ describe("CommitContextCard pull request", () => {
 
     expect(markup).toContain("pr-chip--merged");
     expect(markup).toContain("merged #29");
-    expect(markup).toContain("PR #29 (merged)");
+    // The chip names the forge's own object type for screen readers.
+    expect(markup).toContain("Pull request #29 (merged)");
   });
 });

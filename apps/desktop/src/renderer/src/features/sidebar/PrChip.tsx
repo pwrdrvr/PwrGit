@@ -8,10 +8,16 @@ import {
 } from "../../lib/hoverIntent";
 import { dispatch } from "../../lib/pwrgit";
 import { useViewportTooltip } from "../../lib/useViewportTooltip";
+import { PrStatusCard } from "./PrStatusCard";
 
 /** A compact PR-status chip: colored dot + #number. Click opens the PR in
- *  the browser; ⌥-click copies its URL. The tooltip carries the full story —
- *  number, title, state, draft. */
+ *  the browser; ⌥-click copies its URL. Hovering opens `PrStatusCard`, which
+ *  carries the full story — title, branches, diff size, and timeline.
+ *
+ *  The card renders entirely from the `PrSummary` already in the tree. It
+ *  issues no request of its own: hovering a chip must never reach a forge API,
+ *  or a sweep across a commit list would fan out one call per chip. Fresh data
+ *  arrives through main's `pr:changed` deltas like everything else. */
 export function PrChip({
   pr,
   hoverIntent: sharedIntent,
@@ -33,7 +39,7 @@ export function PrChip({
     hide: hideTooltip,
     update: updateTooltip,
     tooltipNode
-  } = useViewportTooltip();
+  } = useViewportTooltip("pr-status-card", { interactive: true });
   // The hook is cheap and must be called unconditionally; a caller-supplied
   // gate simply wins over this instance's own.
   const ownIntent = useHoverIntent();
@@ -47,9 +53,7 @@ export function PrChip({
       : pr.state === "closed"
       ? `closed #${pr.number}`
         : `#${pr.number}`;
-  const tooltipText = `#${pr.number} — ${pr.title || "untitled"}\n${pr.state}${
-    isDraft ? " · draft" : ""
-  }\nClick to open · ⌥-click to copy URL`;
+  const card = <PrStatusCard pr={pr} />;
   const open = (): void => void dispatch("shell:openExternal", { url: pr.url });
   const activate = (altKey: boolean): void => {
     if (altKey) void copyText(pr.url);
@@ -57,7 +61,7 @@ export function PrChip({
   };
   const show = (target: HTMLElement): void => {
     if (onShowContext !== undefined) onShowContext(target);
-    else showTooltip(target, tooltipText);
+    else showTooltip(target, card);
   };
   const hide = (): void => {
     if (onHideContext !== undefined) onHideContext();
@@ -68,10 +72,12 @@ export function PrChip({
   // with it on the way to the browser.
   const chip = hoverIntentHandlers({ intent: hoverIntent, show, hide });
 
-  // Keep an already-visible tooltip accurate when a targeted PR refresh lands.
+  // Keep an already-visible card accurate when a targeted PR refresh lands.
+  // Depends on `pr`, not the element: a new element every render would make an
+  // open card re-render on every parent paint.
   useEffect(() => {
-    updateTooltip(tooltipText);
-  }, [tooltipText, updateTooltip]);
+    updateTooltip(<PrStatusCard pr={pr} />);
+  }, [pr, updateTooltip]);
 
   return (
     <>
@@ -79,7 +85,9 @@ export function PrChip({
         className={`pr-chip pr-chip--${pr.state}${isDraft ? " pr-chip--draft" : ""}`}
         role="button"
         tabIndex={0}
-        aria-label={`PR #${pr.number} (${pr.state}) — Enter opens in browser`}
+        aria-label={`${
+          pr.forge === "gitlab" ? "Merge request" : "Pull request"
+        } #${pr.number} (${pr.state}) — Enter opens in browser`}
         onMouseEnter={(e) => chip.onMouseEnter(e.currentTarget)}
         onMouseLeave={chip.onMouseLeave}
         onFocus={(e) => chip.onFocus(e.currentTarget)}

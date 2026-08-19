@@ -45,6 +45,37 @@ speaks `PrSummary` and never learns which forge answered.
 - **No schema migration was needed.** `branch_pr`/`commit_pr` already store only
   `number/url/title/state/is_draft`, which is forge-agnostic.
 
+## Status, capabilities, and who may call a forge
+
+- **Only main talks to a forge.** The renderer asks over the bus (`pr:refresh`,
+  `forge:status`) and renders from what main pushes back (`pr:changed`,
+  `forge:statusChanged`). `renderer-does-not-call-forge-apis` in
+  `.dependency-cruiser.cjs` enforces the SDK half of that; a raw `fetch` to a
+  forge would still slip through, so it is also a review rule. The reason is
+  React StrictMode: every effect runs twice in dev, so one careless `useEffect`
+  is two calls per mount per chip, and a sweep across a commit list becomes a
+  burst that gets rate limited.
+- **`forge:status` is answered from a cached probe** (`status.ts`). Probing
+  spawns a subprocess, so the cache is the point — repeat reads collapse onto
+  one value and one in-flight promise. A broken forge re-probes sooner than a
+  healthy one, and listeners are woken only when availability actually changed,
+  never merely because someone asked.
+- **Capabilities describe the integration, not a login** (`capabilities.ts`), so
+  they are static per forge and need no network call. `batchedCommitAssociation`
+  is false for GitLab because it has no batch endpoint; callers use that to
+  avoid asking rather than to handle a failure.
+
+## The hover card
+
+`PrChip` opens `PrStatusCard` (renderer, beside the chip). It renders purely
+from the `PrSummary` already in the tree and issues **no** request of its own.
+
+Everything past `isDraft` on `PrSummary` is optional and must stay that way: a
+row cached before those fields existed will never gain them, because a change
+request that reached a terminal state stops being refreshed. Absence means "not
+known" and renders as nothing — never as zero, which is a stronger claim we
+have no evidence for. Every section of the card is conditional for that reason.
+
 ## Commit-author identity
 
 Identity is forge-wide too (`commit-author.ts`, `commit-author-transport.ts`).
