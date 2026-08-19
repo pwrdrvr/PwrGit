@@ -230,6 +230,44 @@ describe("graph:lanes — unapplied upstream work on non-default branches", () =
     );
   });
 
+  it("walks both legs of a rewritten divergence, down to the merge base", async () => {
+    const fixture = makeDivergedRelease();
+    // The same two changes on each side with different SHAs — what a rebase or
+    // a cherry-pick onto another base leaves behind. Subjects match; nothing
+    // else does. Git sees a genuine fork, so both legs have to be walked or
+    // the graph silently claims their work is ours.
+    git(fixture.repo, "checkout", "-q", "-b", "their-rewrite", "origin/releases/1.0");
+    commit(fixture.repo, "fix-x.txt", "rel: fix X");
+    commit(fixture.repo, "fix-y.txt", "rel: fix Y");
+    git(fixture.repo, "push", "origin", "their-rewrite:releases/1.0");
+    const theirs = git(fixture.repo, "rev-list", "origin/releases/1.0~2..their-rewrite")
+      .trim()
+      .split("\n");
+    git(fixture.repo, "checkout", "-q", "main");
+    git(fixture.repo, "branch", "-D", "their-rewrite");
+
+    // Our versions of the same two changes, with different bytes.
+    writeFileSync(join(fixture.release, "fix-x.txt"), "x, resolved differently\n");
+    git(fixture.release, "add", "-A");
+    git(fixture.release, "commit", "-m", "rel: fix X");
+    writeFileSync(join(fixture.release, "fix-y.txt"), "y, resolved differently\n");
+    git(fixture.release, "add", "-A");
+    git(fixture.release, "commit", "-m", "rel: fix Y");
+    git(fixture.repo, "fetch", "origin");
+
+    const graph = await lanes(harness(fixture), "active");
+    const hashes = new Set(graph.commits.map((c) => c.hash));
+
+    // Both of THEIR rewritten commits, by SHA — matching subjects would pass
+    // against our own copies and prove nothing.
+    for (const hash of theirs) expect(hashes).toContain(hash);
+    // Our leg survives alongside them, and the fork commit anchors both.
+    expect(subjects(graph)).toEqual(
+      expect.arrayContaining(["rel: prepare v1.0.3", "rel: shared backport"])
+    );
+    expect(subjects(graph).filter((s) => s === "rel: fix X")).toHaveLength(2);
+  });
+
   it("covers the focused worktree's branch even when the active cap hides it", async () => {
     const fixture = makeDivergedRelease();
     // 31 branches newer than releases/1.0 push it past ACTIVE_DRAW_CAP (30).

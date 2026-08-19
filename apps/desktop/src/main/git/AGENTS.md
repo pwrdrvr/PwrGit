@@ -62,10 +62,14 @@ than a sentence git may translate.
 
 Two rules follow, and `graph-lanes.test.ts` pins both:
 
-- Every drawn branch contributes its upstream to the walk when it is behind,
-  and that ref joins `shownBranches` so the renderer dashes it as
-  fetched-but-unapplied (`lane-layout.ts` handles the drawing already — it
-  needs the data, not new logic).
+- Every drawn branch contributes its upstream to the walk when it is behind.
+  That ref rides in `upstreamRefs`, NOT `shownBranches` — the toolbar counts
+  the latter as active branches — and the renderer draws the union, dashing it
+  as fetched-but-unapplied. `lane-layout.ts` handles the drawing already: it
+  needs the data, not new logic. A diverged branch forks at the merge base,
+  below the local tip, so the dashed leg runs past our own rows and bends into
+  our lane there; `lane-layout.test.ts` pins that geometry, including the
+  rewritten-SHA case where both legs carry the same work.
 - **The focused worktree's own branch is never skipped.** It can fall out of
   the repo-level set entirely (`ACTIVE_DRAW_CAP` keeps 30 branches by
   recency), so the per-worktree step re-adds its upstream. Anything scoped

@@ -556,6 +556,86 @@ describe("layoutLanes with refs (branch-aware lanes)", () => {
     expect(rows[3].bottom).toEqual([{ from: 0, to: 0 }]);
   });
 
+  it("forks a diverged branch's remote leg off below the local tip", () => {
+    // releases/1.0 is ahead 1 / behind 1: P is ours, U is theirs, and they
+    // fork at S — BELOW our tip. The dash must branch off at S, not hang from
+    // the top of the graph, and history at and under S is solid because it is
+    // reachable from a local ref.
+    const { rows } = layoutLanes(
+      [c("M", "B"), c("P", "S"), c("U", "S"), c("S", "B"), c("B")],
+      {
+        tips: {
+          M: ["main", "origin/main"],
+          P: ["releases/1.0"],
+          U: ["origin/releases/1.0"]
+        },
+        defaultBranch: "main",
+        defaultRefTips: ["M"],
+        localRefTips: ["M", "P"],
+        remoteBranches: ["origin/releases/1.0"],
+        headBranch: "releases/1.0",
+        shownBranches: ["releases/1.0", "origin/releases/1.0"]
+      }
+    );
+
+    const [, ours, theirs, fork] = rows;
+    // Three lines: trunk, ours, theirs — ours pinned to lane 1 as HEAD.
+    expect(ours.lane).toBe(1);
+    expect(theirs.lane).toBe(2);
+    // Their commit carries a dashed line down toward the fork...
+    expect(theirs.bottom).toContainEqual({ from: 2, to: 2, dashed: 1 });
+    // ...which bends into our lane AT the fork, and goes solid below it.
+    expect(fork.lane).toBe(1);
+    expect(fork.top).toContainEqual({ from: 2, to: 1, dashed: 1 });
+    expect(fork.bottom).toEqual(
+      expect.arrayContaining([{ from: 0, to: 0 }, { from: 1, to: 1 }])
+    );
+    expect(fork.bottom.some((seg) => seg.dashed !== undefined)).toBe(false);
+  });
+
+  it("keeps both legs of a rewritten divergence drawn to the merge base", () => {
+    // The same two changes on each side with different SHAs — a rebase or a
+    // cherry-pick onto another base. Git sees a genuine fork, so both legs are
+    // drawn: ours solid, theirs dashed, converging only at S.
+    const { rows } = layoutLanes(
+      [
+        c("M", "B"),
+        c("L2", "L1"),
+        c("R2", "R1"),
+        c("L1", "S"),
+        c("R1", "S"),
+        c("S", "B"),
+        c("B")
+      ],
+      {
+        tips: {
+          M: ["main", "origin/main"],
+          L2: ["releases/1.0"],
+          R2: ["origin/releases/1.0"]
+        },
+        defaultBranch: "main",
+        defaultRefTips: ["M"],
+        localRefTips: ["M", "L2"],
+        remoteBranches: ["origin/releases/1.0"],
+        headBranch: "releases/1.0",
+        shownBranches: ["releases/1.0", "origin/releases/1.0"]
+      }
+    );
+
+    const byName = Object.fromEntries(
+      ["M", "L2", "R2", "L1", "R1", "S", "B"].map((n, i) => [n, rows[i]])
+    );
+    // Ours stays one solid line; theirs stays one dashed line beside it.
+    expect([byName.L2.lane, byName.L1.lane]).toEqual([1, 1]);
+    expect([byName.R2.lane, byName.R1.lane]).toEqual([2, 2]);
+    expect(byName.R1.bottom).toContainEqual({ from: 2, to: 2, dashed: 1 });
+    // Their dash passes our older commit's row rather than merging early.
+    expect(byName.L1.top).toContainEqual({ from: 2, to: 2, dashed: 1 });
+    // Convergence happens at the merge base, and only there.
+    expect(byName.S.top).toContainEqual({ from: 2, to: 1, dashed: 1 });
+    expect(byName.S.bottom.some((seg) => seg.dashed !== undefined)).toBe(false);
+  });
+
   it("ends a remote-only dash at history reachable from another local ref", () => {
     const { rows } = layoutLanes(
       [
