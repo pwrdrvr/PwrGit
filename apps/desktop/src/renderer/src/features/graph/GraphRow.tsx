@@ -394,13 +394,10 @@ export function GraphRow({
         </div>
         <div className="commit-meta">
           {pullRequest !== undefined && (
-            <PrChip
-              pr={pullRequest}
-              hoverIntent={hoverIntent}
-              onShowContext={showContextFor}
-              onHideContext={onHideContext}
-              onFocusContext={onFocusContext}
-            />
+            // Hovering a PR chip shows the PR, here as everywhere else. It
+            // used to open this row's commit card instead, which made the same
+            // chip mean two different things depending on where it sat.
+            <PrChip pr={pullRequest} hoverIntent={hoverIntent} />
           )}
           {isHead && <span className="commit-tag commit-tag--head">HEAD</span>}
           {/* Chips are capped — a commit tipped by dozens of stale branches

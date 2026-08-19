@@ -20,19 +20,12 @@ import { PrStatusCard } from "./PrStatusCard";
  *  arrives through main's `pr:changed` deltas like everything else. */
 export function PrChip({
   pr,
-  hoverIntent: sharedIntent,
-  onShowContext,
-  onHideContext,
-  onFocusContext
+  hoverIntent: sharedIntent
 }: {
   pr: PrSummary;
   /** Callers rendering many chips (commit rows) pass their own gate; a lone
    *  sidebar chip falls back to its own. */
   hoverIntent?: HoverIntent;
-  /** Commit rows can replace the small text tooltip with their shared card. */
-  onShowContext?: (target: HTMLElement) => void;
-  onHideContext?: () => void;
-  onFocusContext?: () => boolean;
 }) {
   const {
     show: showTooltip,
@@ -59,14 +52,8 @@ export function PrChip({
     if (altKey) void copyText(pr.url);
     else open();
   };
-  const show = (target: HTMLElement): void => {
-    if (onShowContext !== undefined) onShowContext(target);
-    else showTooltip(target, card);
-  };
-  const hide = (): void => {
-    if (onHideContext !== undefined) onHideContext();
-    else hideTooltip();
-  };
+  const show = (target: HTMLElement): void => showTooltip(target, card);
+  const hide = (): void => hideTooltip();
   // Sweeping the pointer past a row of chips must not leave popups in its
   // wake; keyboard focus still acts at once, and a click takes its tooltip
   // with it on the way to the browser.
@@ -98,14 +85,6 @@ export function PrChip({
           chip.leave();
         }}
         onKeyDown={(e) => {
-          if (
-            e.key === "Tab" &&
-            !e.shiftKey &&
-            onFocusContext?.() === true
-          ) {
-            e.preventDefault();
-            return;
-          }
           if (e.key === "Enter" || e.key === " ") {
             e.stopPropagation();
             e.preventDefault();
@@ -120,7 +99,7 @@ export function PrChip({
           <span className="pr-chip__draft-bar" aria-hidden="true" />
         )}
       </span>
-      {onShowContext === undefined ? tooltipNode : null}
+      {tooltipNode}
     </>
   );
 }
