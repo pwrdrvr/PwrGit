@@ -124,6 +124,18 @@ test("menu opens the Settings window; panes render and settings persist", async 
     )
   ).toEqual([]);
 
+  // Forges: real status from main's probe. Which forges are logged in varies
+  // by machine, so assert the pane resolved to a real state rather than a
+  // particular one — the point is that it consumes forge:status at all.
+  await settings.locator(".settings-nav__button", { hasText: "Forges" }).click();
+  const forgePanel = settings.locator("section[aria-label='Forges']");
+  await expect(forgePanel).toBeVisible();
+  await expect(forgePanel).toContainText("GitHub");
+  await expect(forgePanel).toContainText("GitLab");
+  await expect(forgePanel.locator(".settings-card__chip").first()).not.toHaveText(
+    "Probing"
+  );
+
   // Experimental: the lineage-scope toggle round-trips through
   // settings:update (button state comes from the returned snapshot).
   await settings

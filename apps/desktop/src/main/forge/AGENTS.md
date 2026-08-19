@@ -55,6 +55,11 @@ speaks `PrSummary` and never learns which forge answered.
   React StrictMode: every effect runs twice in dev, so one careless `useEffect`
   is two calls per mount per chip, and a sweep across a commit list becomes a
   burst that gets rate limited.
+- **`forge:status` has one consumer: Settings → Forges** (`ForgesSettings.tsx`),
+  which is the point of the channel — it names the exact command that unblocks a
+  signed-out or missing CLI, and lists capabilities so a feature this forge
+  cannot do reads as a known limit rather than a bug. A channel with no consumer
+  is how the `github:status` it replaced ended up dead.
 - **`forge:status` is answered from a cached probe** (`status.ts`). Probing
   spawns a subprocess, so the cache is the point — repeat reads collapse onto
   one value and one in-flight promise. A broken forge re-probes sooner than a
