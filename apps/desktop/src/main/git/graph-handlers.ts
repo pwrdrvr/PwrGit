@@ -6,6 +6,7 @@ import {
   type PrSummary
 } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
+import { prSummaryFromRow, prSummarySelect } from "../forge/pr-row";
 import type { DB } from "../persistence/db";
 import { execGit } from "./dugite";
 import {
@@ -206,26 +207,17 @@ export function registerGraphHandlers(
       }
       const prRows = db
         .prepare(
-          `SELECT branch, number, url, title, state, is_draft
+          `SELECT branch, ${prSummarySelect("branch_pr", "")}
            FROM branch_pr WHERE repo_id = ? AND number IS NOT NULL`
         )
-        .all(wt.repo_id) as {
-        branch: string;
-        number: number;
-        url: string | null;
-        title: string | null;
-        state: string | null;
-        is_draft: number;
-      }[];
+        .all(wt.repo_id) as (Record<string, unknown> & { branch: string })[];
       for (const row of prRows) {
+        // Same projection the sidebar uses: a branch chip's card has to carry
+        // the same detail as the same PR's chip anywhere else.
+        const pr = prSummaryFromRow(row, "");
+        if (pr === undefined) continue;
         const entry = (branchInfo[row.branch] ??= {});
-        entry.pr = {
-          number: row.number,
-          url: row.url ?? "",
-          title: row.title ?? "",
-          state: (row.state ?? "open") as PrSummary["state"],
-          isDraft: row.is_draft === 1
-        };
+        entry.pr = pr;
       }
 
       cached = {

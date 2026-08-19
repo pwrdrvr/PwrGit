@@ -2,6 +2,7 @@ import type { PrSummary } from "@pwrgit/shared";
 import type { GitExec } from "../git/dugite";
 import type { DB } from "../persistence/db";
 import { resolveForge, type ResolvedForge } from "../forge/providers";
+import { PR_DETAIL_COLUMNS, prSummaryFromRow } from "../forge/pr-row";
 
 const REPO_REFRESH_TTL_MS = 10 * 60_000;
 const SCHEDULED_BRANCH_REFRESH_TTL_MS = 60_000;
@@ -36,22 +37,10 @@ type CachedPr = {
   closed_at: number | null;
 };
 
-/** Column list shared by every read/write of a cached change request. */
-const PR_DETAIL_COLUMN_NAMES = [
-  "forge",
-  "host",
-  "repo_path",
-  "head_ref",
-  "base_ref",
-  "additions",
-  "deletions",
-  "changed_files",
-  "commit_count",
-  "opened_at",
-  "merged_at",
-  "closed_at"
-] as const;
-const PR_DETAIL_COLUMNS = PR_DETAIL_COLUMN_NAMES.join(", ");
+// Derived from the single column list in ../forge/pr-row, so a new column
+// cannot be added there and silently never written here.
+const PR_DETAIL_COLUMN_NAMES = PR_DETAIL_COLUMNS;
+const PR_DETAIL_COLUMNS_SQL = PR_DETAIL_COLUMN_NAMES.join(", ");
 const PR_DETAIL_PARAMS = PR_DETAIL_COLUMN_NAMES.map((c) => `@${c}`).join(", ");
 const PR_DETAIL_ASSIGNMENTS = PR_DETAIL_COLUMN_NAMES.map(
   (c) => `${c} = excluded.${c}`
@@ -144,7 +133,7 @@ export class PrService {
     const marks = hashes.map(() => "?").join(", ");
     const rows = this.db
       .prepare(
-        `SELECT commit_sha, number, url, title, state, is_draft, ${PR_DETAIL_COLUMNS}
+        `SELECT commit_sha, number, url, title, state, is_draft, ${PR_DETAIL_COLUMNS_SQL}
          FROM commit_pr WHERE repo_id = ? AND commit_sha IN (${marks})`
       )
       .all(repoId, ...hashes) as (CachedPr & { commit_sha: string })[];
@@ -154,7 +143,7 @@ export class PrService {
   cachedBranchPr(repoId: string, branch: string): PrSummary | null | undefined {
     const row = this.db
       .prepare(
-        `SELECT number, url, title, state, is_draft, ${PR_DETAIL_COLUMNS}
+        `SELECT number, url, title, state, is_draft, ${PR_DETAIL_COLUMNS_SQL}
          FROM branch_pr WHERE repo_id = ? AND branch = ?`
       )
       .get(repoId, branch) as CachedPr | undefined;
@@ -463,14 +452,14 @@ export class PrService {
       (
         this.db
           .prepare(
-            `SELECT branch, number, url, title, state, is_draft, ${PR_DETAIL_COLUMNS} FROM branch_pr WHERE repo_id = ?`
+            `SELECT branch, number, url, title, state, is_draft, ${PR_DETAIL_COLUMNS_SQL} FROM branch_pr WHERE repo_id = ?`
           )
           .all(repoId) as (CachedPr & { branch: string })[]
       ).map(({ branch, ...pr }) => [branch, pr] as const)
     );
     const stmt = this.db.prepare(
       `INSERT INTO branch_pr
-         (repo_id, branch, number, url, title, state, is_draft, ${PR_DETAIL_COLUMNS}, fetched_at)
+         (repo_id, branch, number, url, title, state, is_draft, ${PR_DETAIL_COLUMNS_SQL}, fetched_at)
        VALUES
          (@repo_id, @branch, @number, @url, @title, @state, @is_draft, ${PR_DETAIL_PARAMS}, @fetched_at)
        ON CONFLICT(repo_id, branch) DO UPDATE SET
@@ -507,7 +496,7 @@ export class PrService {
       const marks = hashes.map(() => "?").join(", ");
       const rows = this.db
         .prepare(
-          `SELECT commit_sha, number, url, title, state, is_draft, ${PR_DETAIL_COLUMNS}
+          `SELECT commit_sha, number, url, title, state, is_draft, ${PR_DETAIL_COLUMNS_SQL}
            FROM commit_pr WHERE repo_id = ? AND commit_sha IN (${marks})`
         )
         .all(repoId, ...hashes) as (CachedPr & { commit_sha: string })[];
@@ -515,7 +504,7 @@ export class PrService {
     }
     const stmt = this.db.prepare(
       `INSERT INTO commit_pr
-         (repo_id, commit_sha, number, url, title, state, is_draft, ${PR_DETAIL_COLUMNS}, fetched_at)
+         (repo_id, commit_sha, number, url, title, state, is_draft, ${PR_DETAIL_COLUMNS_SQL}, fetched_at)
        VALUES
          (@repo_id, @commit_sha, @number, @url, @title, @state, @is_draft, ${PR_DETAIL_PARAMS}, @fetched_at)
        ON CONFLICT(repo_id, commit_sha) DO UPDATE SET
@@ -546,13 +535,13 @@ export class PrService {
     const marks = numbers.map(() => "?").join(", ");
     const branchRows = this.db
       .prepare(
-        `SELECT branch, number, url, title, state, is_draft, ${PR_DETAIL_COLUMNS}
+        `SELECT branch, number, url, title, state, is_draft, ${PR_DETAIL_COLUMNS_SQL}
          FROM branch_pr WHERE repo_id = ? AND number IN (${marks})`
       )
       .all(repoId, ...numbers) as (CachedPr & { branch: string; number: number })[];
     const commitRows = this.db
       .prepare(
-        `SELECT commit_sha, number, url, title, state, is_draft, ${PR_DETAIL_COLUMNS}
+        `SELECT commit_sha, number, url, title, state, is_draft, ${PR_DETAIL_COLUMNS_SQL}
          FROM commit_pr WHERE repo_id = ? AND number IN (${marks})`
       )
       .all(repoId, ...numbers) as (CachedPr & {
@@ -642,33 +631,9 @@ function sameCachedPr(before: CachedPr | undefined, next: CachedPr): boolean {
   );
 }
 
+/** One mapper for both tables and for the joined reads in repo-indexer. */
 function summaryFromCached(cached: CachedPr): PrSummary | null {
-  if (cached.number === null) return null;
-  return {
-    number: cached.number,
-    url: cached.url ?? "",
-    title: cached.title ?? "",
-    state: (cached.state ?? "open") as PrSummary["state"],
-    isDraft: cached.is_draft === 1,
-    // NULL means "not known" and must stay absent: a row cached before these
-    // columns existed, or frozen at a terminal state, will never gain them.
-    ...optional("forge", cached.forge as PrSummary["forge"]),
-    ...optional("host", cached.host),
-    ...optional("repoPath", cached.repo_path),
-    ...optional("headRefName", cached.head_ref),
-    ...optional("baseRefName", cached.base_ref),
-    ...optional("additions", cached.additions),
-    ...optional("deletions", cached.deletions),
-    ...optional("changedFiles", cached.changed_files),
-    ...optional("commitCount", cached.commit_count),
-    ...optional("createdAt", cached.opened_at),
-    ...optional("mergedAt", cached.merged_at),
-    ...optional("closedAt", cached.closed_at)
-  };
-}
-
-function optional<T>(key: string, value: T | null): Record<string, T> {
-  return value === null || value === undefined ? {} : { [key]: value };
+  return prSummaryFromRow(cached as unknown as Record<string, unknown>, "") ?? null;
 }
 
 function emptyPrStatusDeltas(): PrStatusDeltas {

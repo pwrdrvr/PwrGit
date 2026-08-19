@@ -8,12 +8,16 @@ import type { ForgeKind, PrSummary } from "@pwrgit/shared";
  * able to show a card that could never have anything in it. Anything reading
  * `branch_pr` or `commit_pr` for a summary should build its projection here.
  */
-export const PR_SUMMARY_COLUMNS = [
+export const PR_CORE_COLUMNS = [
   "number",
   "url",
   "title",
   "state",
-  "is_draft",
+  "is_draft"
+] as const;
+
+/** The hover-card detail. Split out because the writer needs it on its own. */
+export const PR_DETAIL_COLUMNS = [
   "forge",
   "host",
   "repo_path",
@@ -26,6 +30,11 @@ export const PR_SUMMARY_COLUMNS = [
   "opened_at",
   "merged_at",
   "closed_at"
+] as const;
+
+export const PR_SUMMARY_COLUMNS = [
+  ...PR_CORE_COLUMNS,
+  ...PR_DETAIL_COLUMNS
 ] as const;
 
 /** `p.number AS pr_number, p.url AS pr_url, …` for a joined PR row. */
