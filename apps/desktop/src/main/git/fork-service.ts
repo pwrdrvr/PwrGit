@@ -306,6 +306,29 @@ export class ForkService {
       });
     }
 
+    if (input.upstream !== null) {
+      // Derived from the fork the forge just reported rather than another
+      // round trip: its parent is the repository it was forked from, and its
+      // root the head of that network — which, with the source itself, is
+      // exactly what the preflight offered.
+      const candidates = [
+        fork.parent?.nameWithOwner,
+        fork.root?.nameWithOwner,
+        source
+      ].filter((slug): slug is string => slug !== undefined);
+      if (
+        !candidates.some(
+          (slug) => slug.toLowerCase() === input.upstream!.toLowerCase()
+        )
+      ) {
+        return err({
+          kind: "validation",
+          code: "invalid_repository",
+          message: `${input.upstream} is not one of the repositories ${source} was forked from.`
+        });
+      }
+    }
+
     const cloned = await this.clones.runClone(
       {
         host: fork.host,

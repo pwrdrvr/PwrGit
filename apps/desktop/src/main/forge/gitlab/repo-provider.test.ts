@@ -314,7 +314,12 @@ describe("GitLabRepoProvider", () => {
         path: "billing-api",
         path_with_namespace: "huntharo/billing-api",
         web_url: "https://gitlab.com/huntharo/billing-api",
-        import_status: "finished"
+        import_status: "finished",
+        // A real already-forked project carries its lineage; without it this
+        // is indistinguishable from an unrelated repo squatting the path.
+        forked_from_project: {
+          path_with_namespace: "acme/platform/billing-api"
+        }
       });
     });
     const provider = new GitLabRepoProvider(glab);
@@ -328,6 +333,35 @@ describe("GitLabRepoProvider", () => {
     });
 
     expect(repository.nameWithOwner).toBe("huntharo/billing-api");
+  });
+
+  it("does not accept an unrelated project sitting at the target path", async () => {
+    // The 409 path exists for "you already forked this". Any other failure
+    // can leave a project there that is nobody's fork of the source, and
+    // returning it would have the caller clone a stranger's repository.
+    const glab = vi.fn(async (args: string[]) => {
+      if (args[1] === "--method") {
+        throw new Error("403 Forbidden: forking is disabled for this group");
+      }
+      return JSON.stringify({
+        ...PROJECT,
+        path: "billing-api",
+        path_with_namespace: "huntharo/billing-api",
+        web_url: "https://gitlab.com/huntharo/billing-api",
+        import_status: "finished"
+        // note: no forked_from_project — unrelated to the source
+      });
+    });
+
+    await expect(
+      new GitLabRepoProvider(glab).fork({
+        source: "acme/platform/billing-api",
+        targetOwner: "huntharo",
+        targetOwnerKind: "user",
+        targetName: "billing-api",
+        defaultBranchOnly: false
+      })
+    ).rejects.toThrow(/forking is disabled/);
   });
 
   it("does not swallow an authentication failure as an existing fork", async () => {

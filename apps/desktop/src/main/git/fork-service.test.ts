@@ -209,6 +209,14 @@ function services(): {
         full_name: "facebook/react",
         name: "react",
         visibility: "public"
+      },
+      // The fork `provider.fork()` reads back after creating it.
+      "huntharo/react": {
+        full_name: "huntharo/react",
+        name: "react",
+        visibility: "public",
+        fork: true,
+        parent: { full_name: "facebook/react" }
       }
     })
   );
@@ -599,6 +607,30 @@ describe("ForkService.fork", () => {
     expect(result).toMatchObject({
       ok: false,
       error: { code: "destination_outside_roots" }
+    });
+  });
+
+  it("refuses an upstream unrelated to what was forked", async () => {
+    const { forks, profileId, parentPath } = services();
+    const result = await forks.fork({
+      profileId,
+      source: "facebook/react",
+      host: "github",
+      hostname: "github.com",
+      targetOwner: "huntharo",
+      targetOwnerKind: "user",
+      targetName: "react",
+      protocol: "ssh",
+      parentPath,
+      defaultBranchOnly: false,
+      // A stale dialog could send this: shape-valid, but not a repository
+      // this fork descends from. Wiring it would make `git fetch upstream`
+      // pull unrelated history.
+      upstream: "someone-else/unrelated"
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "invalid_repository" }
     });
   });
 

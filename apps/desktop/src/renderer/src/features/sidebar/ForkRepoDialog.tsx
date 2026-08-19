@@ -172,6 +172,18 @@ export function ForkRepoDialog({
 
   useEffect(() => setSourceSelection(0), [sourceQuery]);
 
+  // What preflight is actually keyed on. Strings, deliberately: the effect
+  // writes its own answer back into `selectedSource` (to upgrade an
+  // unverified placeholder), and an IPC response is a fresh object every
+  // time — depending on the object itself made the effect re-trigger itself
+  // for as long as the dialog stayed open, two forge calls per lap.
+  const preflightSource = selectedSource?.nameWithOwner ?? null;
+  const preflightHost = selectedSource?.host ?? null;
+  const preflightTargetName =
+    forkNameTouched && debouncedForkName.trim() !== ""
+      ? debouncedForkName.trim()
+      : null;
+
   // Preflight runs on the *chosen* source, not on every keystroke: it costs
   // two forge round trips, and its answers only matter once a source is real.
   useEffect(() => {
@@ -191,9 +203,9 @@ export function ForkRepoDialog({
       // Only once the user has actually named it: before that the service's
       // default (the source's name) is the right guess, and sending an empty
       // string mid-edit would probe a nonexistent repository.
-      ...(forkNameTouched && debouncedForkName.trim() !== ""
-        ? { targetName: debouncedForkName.trim() }
-        : {})
+      ...(preflightTargetName === null
+        ? {}
+        : { targetName: preflightTargetName })
     }).then((result) => {
       if (!active) return;
       setChecking(false);
@@ -223,7 +235,13 @@ export function ForkRepoDialog({
     return () => {
       active = false;
     };
-  }, [selectedSource, targetOwner, debouncedForkName, profile.id]);
+  }, [
+    preflightSource,
+    preflightHost,
+    preflightTargetName,
+    targetOwner?.login,
+    profile.id
+  ]);
 
   const targets = useMemo(
     () => forkTargets(forges, selectedSource, host),
@@ -272,6 +290,22 @@ export function ForkRepoDialog({
   // GitLab's fork API has no default-branch-only equivalent, so the switch is
   // hidden there rather than accepted and silently ignored.
   const supportsDefaultBranchOnly = sourceHost !== "gitlab";
+
+  /** Switching forge abandons the selection, because it belonged to the other
+   *  one. Keeping it left the picker claiming GITLAB while the targets, URLs
+   *  and upstream all still described a GitHub repository. */
+  const selectHost = (candidate: ForgeHost): void => {
+    if (candidate === host) return;
+    setHost(candidate);
+    setSelectedSource(null);
+    setPreflight(null);
+    setCheckError(null);
+    setSourceQuery("");
+    setForkName("");
+    setDebouncedForkName("");
+    setForkNameTouched(false);
+    setSubmitError(null);
+  };
 
   const chooseSource = (repository: CloneRepository): void => {
     setSelectedSource(repository);
@@ -381,7 +415,7 @@ export function ForkRepoDialog({
                       className={`fork-host${host === candidate ? " is-active" : ""}`}
                       aria-pressed={host === candidate}
                       disabled={busy}
-                      onClick={() => setHost(candidate)}
+                      onClick={() => selectHost(candidate)}
                     >
                       {candidate === "gitlab" ? "GitLab" : "GitHub"}
                     </button>

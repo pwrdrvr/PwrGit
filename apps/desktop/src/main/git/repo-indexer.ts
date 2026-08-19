@@ -371,7 +371,7 @@ export class RepoIndexer {
     // under two repos, which renders as two "selected" rows at once.
     const identities = this.identityRows(profileId);
     return claimWorktreeOwnership(
-      repoRows.map((r) => this.repoFromRow(r, identities.get(r.id)))
+      repoRows.map((r) => this.repoFromRow(r, identities.get(r.id) ?? null))
     );
   }
 
@@ -865,7 +865,11 @@ export class RepoIndexer {
 
   private repoFromRow(
     r: RepoRow,
-    identity?: RepoIdentityRow | undefined
+    // `null` means a batch read already answered "this repo has none";
+    // `undefined` means nothing looked yet. Collapsing the two made every
+    // repository without an identity cost its own query, which is the N+1
+    // the batch read exists to remove.
+    identity?: RepoIdentityRow | null
   ): Repo {
     const worktrees = (
       this.db
@@ -927,8 +931,10 @@ export class RepoIndexer {
     // `repo:list` or the sidebar paints once without them and again a moment
     // later. `identity` is passed in so a list read costs one query for the
     // whole profile rather than one prepare+get per repository.
-    const row = identity ?? this.identityRow(r.id);
-    if (row !== undefined) repo.identity = repoIdentityFromRow(row);
+    const row = identity === undefined ? this.identityRow(r.id) : identity;
+    if (row !== undefined && row !== null) {
+      repo.identity = repoIdentityFromRow(row);
+    }
     return repo;
   }
 

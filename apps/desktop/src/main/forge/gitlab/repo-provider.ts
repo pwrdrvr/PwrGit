@@ -276,9 +276,17 @@ export class GitLabRepoProvider implements ForgeRepoProvider {
       if (this.isAuthError(cause)) throw cause;
       // A name already taken in the namespace comes back as a 409 with a
       // "already exists"/"has already been taken" body. That is the
-      // already-forked case, and the existing project is the right answer.
+      // already-forked case — but only if the project sitting there actually
+      // descends from the source. Any other failure (a group that forbids
+      // forking, say) can leave an unrelated project at that path, and
+      // returning it would have the caller clone a stranger's repository.
       const existing = await this.project(target).catch(() => null);
-      if (existing === null) throw cause;
+      const parsed =
+        existing === null ? null : parseGitLabProject(existing, this.hostname);
+      const descends =
+        parsed?.parent?.nameWithOwner.toLowerCase() ===
+        input.source.toLowerCase();
+      if (!descends) throw cause;
       created = existing;
     }
 
