@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { dispatch } from "../../lib/pwrgit";
 import { DiffViewer } from "./DiffViewer";
 import type { ImageDiffRevisions } from "./ImageDiff";
@@ -9,7 +9,7 @@ export type DiffTarget =
   | { kind: "commitFile"; hash: string; path: string; subject: string };
 
 /** Full-pane diff: fetches the patch for a working-tree file or a commit and
- *  renders it, with a header + a back-to-lineage control. */
+ *  renders it, with a header + a close control that returns to the graph. */
 export function DiffPane({
   worktreeId,
   target,
@@ -21,6 +21,29 @@ export function DiffPane({
 }) {
   const [patch, setPatch] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const paneRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  // Escape closes the pane unless something else owns the keystroke. The
+  // repo switcher and the dialogs sit over this pane and preventDefault the
+  // Escape that dismisses them; focus inside another overlay is theirs too.
+  // Focus inside the pane, or nowhere in particular, is ours (see
+  // BranchFromCommitDialog for why a subtree-scoped handler is too narrow).
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const focused = document.activeElement;
+      const ownsFocus =
+        focused === null ||
+        focused === document.body ||
+        paneRef.current?.contains(focused) === true;
+      if (!ownsFocus) return;
+      onCloseRef.current();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const key =
     target.kind === "file"
@@ -93,16 +116,24 @@ export function DiffPane({
         : `commit ${target.hash}`;
 
   return (
-    <div className="diff-pane">
+    <div className="diff-pane" ref={paneRef}>
       <div className="diff-pane__head">
-        <button className="diff-pane__back" onClick={onClose}>
-          ‹ Lineage
-        </button>
         <span className="diff-pane__title" title={title}>
           {title}
         </span>
         <span style={{ flex: 1 }} />
         <span className="diff-pane__sub">{sub}</span>
+        <button
+          className="diff-pane__close"
+          onClick={onClose}
+          aria-label="Close"
+          title="Close (Esc)"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
       </div>
       <div className="diff-pane__body">
         {loading ? (

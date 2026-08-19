@@ -5908,16 +5908,32 @@ body.is-col-resizing {
   padding: 10px 20px;
   border-bottom: 1px solid var(--border-subtle);
 }
-.diff-pane__back {
+/* The pane's one way out, at the far right where a dismiss is expected. It
+   sits on the accent tint so it reads as the header's action rather than as
+   chrome — the same --accent-soft / --accent-bright pairing the sidebar's
+   active row uses, which is the only rung --accent-bright is contrast-floored
+   for (see tokens.css). Hover deepens the tint one notch instead of swapping
+   to a neutral wash, so it stays the same object under the pointer. */
+.diff-pane__close {
+  width: 26px;
   height: 26px;
-  padding: 0 10px;
+  padding: 0;
   flex: 0 0 auto;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-default);
-  background: var(--bg-panel-elevated);
-  color: var(--text-secondary);
-  font: 600 11.5px/1 var(--font-sans);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-bright);
   cursor: pointer;
+}
+.diff-pane__close:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.diff-pane__close:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 .diff-pane__title {
   min-width: 0;
