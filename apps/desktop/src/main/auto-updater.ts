@@ -763,7 +763,25 @@ async function readAppUpdateReleaseForChannel(
   return releaseForSelection(selectAppUpdateReleases(releases), channel, train);
 }
 
+function unavailableReleaseVersions(reason: string): AppUpdateReleaseVersions {
+  const unavailable = { unavailableReason: reason };
+  return {
+    fetchedAt: Date.now(),
+    stable: { latest: unavailable, prerelease: unavailable },
+    beta: { latest: unavailable, prerelease: unavailable }
+  };
+}
+
 export async function readAppUpdateReleaseVersions(): Promise<AppUpdateReleaseVersions> {
+  // An unpackaged build can never install what it finds, so reading the list
+  // is pure cost: every dev launch and every e2e run that opens Settings →
+  // Updates would spend one of the 60 anonymous requests per hour this
+  // machine's IP gets, and make the panel depend on the network.
+  if (!productionUpdatesEnabled()) {
+    return unavailableReleaseVersions(
+      "Release versions are not fetched in development builds."
+    );
+  }
   try {
     const releases = await readGitHubReleases();
     const selected = selectPublishedUpdateReleases(releases);
@@ -791,13 +809,9 @@ export async function readAppUpdateReleaseVersions(): Promise<AppUpdateReleaseVe
       }
     };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const unavailable = { unavailableReason: message };
-    return {
-      fetchedAt: Date.now(),
-      stable: { latest: unavailable, prerelease: unavailable },
-      beta: { latest: unavailable, prerelease: unavailable }
-    };
+    return unavailableReleaseVersions(
+      err instanceof Error ? err.message : String(err)
+    );
   }
 }
 

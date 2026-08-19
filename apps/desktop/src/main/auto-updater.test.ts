@@ -28,9 +28,11 @@ const autoUpdaterMock = {
   setFeedURL: setFeedURLMock
 };
 
-vi.mock("electron", () => ({
-  app: { isPackaged: true }
-}));
+// Mutable so a test can take the unpackaged path — dev and e2e launches run
+// unpackaged, and must not reach GitHub.
+const electronMock = vi.hoisted(() => ({ app: { isPackaged: true } }));
+
+vi.mock("electron", () => electronMock);
 
 vi.mock("electron-updater", () => ({
   default: {
@@ -161,6 +163,7 @@ describe("auto updater", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.useFakeTimers();
+    electronMock.app.isPackaged = true;
     setPlatform("darwin");
     process.env.NODE_ENV = "production";
     delete process.env.GH_TOKEN;
@@ -519,6 +522,23 @@ describe("auto updater", () => {
       status: "downloaded",
       version: "1.0.0-beta.8"
     });
+  });
+
+  it("does not reach GitHub from an unpackaged build", async () => {
+    // Dev launches and the Playwright e2e harness both run unpackaged, and
+    // Settings -> Updates reads release versions on mount.
+    electronMock.app.isPackaged = false;
+    const updater = await importAutoUpdater();
+
+    const versions = await updater.readAppUpdateReleaseVersions();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(versions.stable.latest.unavailableReason).toBe(
+      "Release versions are not fetched in development builds."
+    );
+    expect(versions.beta.prerelease.unavailableReason).toBe(
+      "Release versions are not fetched in development builds."
+    );
   });
 
   it("serves renderer release reads from the main-process cache", async () => {

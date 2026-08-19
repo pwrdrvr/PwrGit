@@ -33,9 +33,37 @@ async function openSettingsFromMenu(app: AppHandle["app"]): Promise<void> {
   });
 }
 
+/** Wrap main's `fetch` so a spec can prove the UI made no network call.
+ *  e2e launches are unpackaged, and an unpackaged build must never spend one
+ *  of the 60 anonymous GitHub requests per hour this machine's IP gets. */
+async function recordMainFetches(app: AppHandle["app"]): Promise<void> {
+  await app.evaluate(() => {
+    const scope = globalThis as unknown as {
+      __fetchedUrls?: string[];
+      fetch: typeof fetch;
+    };
+    scope.__fetchedUrls = [];
+    const original = scope.fetch;
+    scope.fetch = ((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      scope.__fetchedUrls?.push(
+        typeof input === "string" ? input : String((input as Request).url ?? input)
+      );
+      return original(input, init);
+    }) as typeof fetch;
+  });
+}
+
+async function mainFetchedUrls(app: AppHandle["app"]): Promise<string[]> {
+  return await app.evaluate(
+    () =>
+      (globalThis as unknown as { __fetchedUrls?: string[] }).__fetchedUrls ?? []
+  );
+}
+
 test("menu opens the Settings window; panes render and settings persist", async () => {
   handle = await launchApp();
   const { app } = handle;
+  await recordMainFetches(app);
 
   const settingsWindowPromise = app.waitForEvent("window");
   await openSettingsFromMenu(app);
@@ -81,6 +109,14 @@ test("menu opens the Settings window; panes render and settings persist", async 
   await expect(
     settings.getByRole("radio", { name: "Beta" })
   ).toHaveAttribute("aria-checked", "true");
+
+  // Mounting the pane must not check GitHub for release versions: this build
+  // is unpackaged and could not install what it found anyway.
+  expect(
+    (await mainFetchedUrls(app)).filter(
+      (url) => url.includes("api.github.com") && url.includes("/releases")
+    )
+  ).toEqual([]);
 
   // Experimental: the lineage-scope toggle round-trips through
   // settings:update (button state comes from the returned snapshot).
