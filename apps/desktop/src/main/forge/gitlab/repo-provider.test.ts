@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { capabilitiesFor } from "../capabilities";
 import {
   encodeProjectPath,
   forkImportFailed,
@@ -139,34 +140,8 @@ describe("encodeProjectPath", () => {
 });
 
 describe("GitLabRepoProvider", () => {
-  it("reports not installed when glab is missing", async () => {
-    const provider = new GitLabRepoProvider(async () => {
-      throw new Error("spawn glab ENOENT");
-    });
-    expect(await provider.status()).toEqual({
-      host: "gitlab",
-      installed: false,
-      loggedIn: false,
-      owners: []
-    });
-  });
-
-  it("distinguishes installed-but-signed-out from not installed", async () => {
-    const provider = new GitLabRepoProvider(async (args) => {
-      if (args[0] === "--version") return "glab 1.42.0";
-      throw new Error("401 Unauthorized");
-    });
-    expect(await provider.status()).toEqual({
-      host: "gitlab",
-      installed: true,
-      loggedIn: false,
-      owners: []
-    });
-  });
-
   it("lists the user first, then groups it may create projects in", async () => {
     const provider = new GitLabRepoProvider(async (args) => {
-      if (args[0] === "--version") return "glab 1.42.0";
       if (args[1] === "user") return '{"username":"huntharo"}';
       if (args[1]?.startsWith("groups?")) {
         // Developer (30) is the floor for creating a project in a group.
@@ -175,7 +150,7 @@ describe("GitLabRepoProvider", () => {
       }
       return "[]";
     });
-    expect((await provider.status()).owners).toEqual([
+    expect(await provider.owners()).toEqual([
       { login: "huntharo", kind: "user", host: "gitlab" },
       { login: "acme/platform", kind: "organization", host: "gitlab" }
     ]);
@@ -183,11 +158,10 @@ describe("GitLabRepoProvider", () => {
 
   it("still reports a personal target when the group listing fails", async () => {
     const provider = new GitLabRepoProvider(async (args) => {
-      if (args[0] === "--version") return "glab 1.42.0";
       if (args[1] === "user") return '{"username":"huntharo"}';
       throw new Error("403 Forbidden");
     });
-    expect((await provider.status()).owners).toEqual([
+    expect(await provider.owners()).toEqual([
       { login: "huntharo", kind: "user", host: "gitlab" }
     ]);
   });
@@ -380,9 +354,11 @@ describe("GitLabRepoProvider", () => {
     ).rejects.toThrow();
   });
 
-  it("declares that GitLab has no default-branch-only fork option", () => {
-    // GitLab's fork API has no equivalent; the switch is hidden rather than
-    // accepted and silently ignored.
-    expect(new GitLabRepoProvider().capabilities.defaultBranchOnly).toBe(false);
+  it("is declared as unable to fork just the default branch", () => {
+    // GitLab's fork API has no equivalent. The claim lives in the one
+    // capabilities table so Settings → Forges and the fork dialog read the
+    // same answer.
+    expect(capabilitiesFor("gitlab").forkDefaultBranchOnly).toBe(false);
+    expect(capabilitiesFor("github").forkDefaultBranchOnly).toBe(true);
   });
 });

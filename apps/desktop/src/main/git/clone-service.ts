@@ -33,6 +33,7 @@ import type {
   ForgeRepoProvider,
   ForgeRepoRegistry
 } from "../forge/repo-provider";
+import { ForgeStatusService } from "../forge/status";
 import { requireExit0, type GitExec } from "./dugite";
 import type { RepoIndexer } from "./repo-indexer";
 
@@ -332,7 +333,8 @@ export class CloneService {
     private readonly git: GitExec,
     private readonly indexer: RepoIndexer,
     private readonly profiles: ProfileService,
-    private readonly forges: ForgeRepoRegistry
+    private readonly forges: ForgeRepoRegistry,
+    private readonly forgeStatus: ForgeStatusService = new ForgeStatusService()
   ) {}
 
   async catalog(profileId: string): Promise<Result<CloneCatalog>> {
@@ -352,7 +354,7 @@ export class CloneService {
     const usable = new Set(
       forgeStatuses
         .filter((status) => status.installed && status.loggedIn)
-        .map((status) => status.host)
+        .map((status) => status.kind)
     );
 
     const owners = dedupeOwners([
@@ -483,8 +485,10 @@ export class CloneService {
         message: `PwrGit cannot look up repositories on ${host}.`
       });
     }
-    const status = await provider.status();
-    if (!status.installed) {
+    const status = (await this.statuses()).find(
+      (candidate) => candidate.kind === host
+    );
+    if (status === undefined || !status.installed) {
       return err({
         kind: "remote",
         code: "forge_cli_missing",
@@ -677,9 +681,24 @@ export class CloneService {
       .run(profileId, parentPath);
   }
 
-  /** Every forge PwrGit knows about, whether or not its CLI is present. */
+  /** Every forge PwrGit knows about, whether or not its CLI is present.
+   *  Delegated to the app-wide cached probe rather than asking each provider:
+   *  a probe is a subprocess, and this runs on every catalog read. */
   async statuses(): Promise<ForgeStatus[]> {
-    return Promise.all(this.forges.all().map((provider) => provider.status()));
+    return this.forgeStatus.list();
+  }
+
+  /** Fork targets for one forge, or none when it cannot answer. */
+  private async ownersFor(host: ForgeHost): Promise<ForgeOwner[]> {
+    const provider = this.forges.get(host);
+    if (provider === null) return [];
+    try {
+      return await provider.owners();
+    } catch {
+      // Best-effort: a forge that will not name its accounts still lists
+      // repositories for owners discovered from local remotes.
+      return [];
+    }
   }
 
   private async repositoriesForOwner(

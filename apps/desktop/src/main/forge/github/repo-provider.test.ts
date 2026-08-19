@@ -163,20 +163,10 @@ describe("GitHubRepoProvider", () => {
       return "[]";
     });
 
-  it("reports not installed when gh is missing", async () => {
-    const provider = new GitHubRepoProvider(async () => {
-      throw new Error("spawn gh ENOENT");
-    });
-    expect(await provider.status()).toEqual({
-      host: "github",
-      installed: false,
-      loggedIn: false,
-      owners: []
-    });
-  });
-
   it("lists the personal account first, then organizations", async () => {
-    expect((await new GitHubRepoProvider(baseGh()).status()).owners).toEqual([
+    // Availability is ForgeStatusService's job; a repo provider only answers
+    // "which accounts can this user fork into".
+    expect(await new GitHubRepoProvider(baseGh()).owners()).toEqual([
       { login: "huntharo", kind: "user", host: "github" },
       { login: "pwr-family", kind: "organization", host: "github" }
     ]);
@@ -188,7 +178,7 @@ describe("GitHubRepoProvider", () => {
       if (args.join(" ") === "api user") return '{"login":"huntharo"}';
       throw new Error("403 Forbidden: missing read:org");
     });
-    expect((await new GitHubRepoProvider(gh).status()).owners).toEqual([
+    expect(await new GitHubRepoProvider(gh).owners()).toEqual([
       { login: "huntharo", kind: "user", host: "github" }
     ]);
   });

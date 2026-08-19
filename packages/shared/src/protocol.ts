@@ -18,6 +18,8 @@ import type {
   CloneProtocol,
   CloneRepository,
   ForgeHost,
+  ForgeKind,
+  ForgeOwner,
   ForkPreflight,
   ForkProgress,
   RepoIdentity,
@@ -502,6 +504,18 @@ export interface Commands {
       targetName?: string;
     };
     res: ForkPreflight;
+  };
+  /**
+   * Accounts the signed-in user can create a fork in, on one forge.
+   *
+   * Deliberately not part of `repo:cloneCatalog`: that answers "whose
+   * repositories should the search offer", which comes from local remotes and
+   * the profile's org and has nothing to do with where a fork may land. The
+   * clone dialog would pay for a lookup it never reads.
+   */
+  "repo:forkTargets": {
+    req: { host: ForgeKind };
+    res: ForgeOwner[];
   };
   /** Create a fork, check it out, wire `upstream`, and index the checkout. */
   "repo:fork": {

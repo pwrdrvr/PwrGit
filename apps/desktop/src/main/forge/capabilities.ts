@@ -14,7 +14,8 @@ export const FORGE_CAPABILITIES: Readonly<Record<ForgeKind, ForgeCapabilities>> 
     // `associatedPullRequests` takes many commit OIDs in one aliased query.
     batchedCommitAssociation: true,
     changeSizeAndTimeline: true,
-    commitAuthorIdentity: true
+    commitAuthorIdentity: true,
+    forkDefaultBranchOnly: true
   },
   gitlab: {
     // `mergeRequests(sourceBranches: [...])` batches natively.
@@ -23,7 +24,10 @@ export const FORGE_CAPABILITIES: Readonly<Record<ForgeKind, ForgeCapabilities>> 
     // SHA, which is why callers must cap the visible set rather than fan out.
     batchedCommitAssociation: false,
     changeSizeAndTimeline: true,
-    commitAuthorIdentity: true
+    commitAuthorIdentity: true,
+    // GitLab's fork API takes no branch filter; offering the switch would be
+    // offering a control that does nothing.
+    forkDefaultBranchOnly: false
   }
 };
 

@@ -6,6 +6,8 @@ import {
   type CloneProtocol,
   type CloneRepository,
   type ForgeHost,
+  type ForgeKind,
+  type ForgeOwner,
   type ForgeRepoRef,
   type ForkPreflight,
   type ForkProgress,
@@ -18,6 +20,8 @@ import type {
   ForgeRepoProvider,
   ForgeRepoRegistry
 } from "../forge/repo-provider";
+import { capabilitiesFor } from "../forge/capabilities";
+import { ForgeStatusService } from "../forge/status";
 import type { GitExec } from "./dugite";
 import { requireExit0 } from "./dugite";
 import {
@@ -114,7 +118,8 @@ export class ForkService {
     private readonly indexer: RepoIndexer,
     private readonly profiles: ProfileService,
     private readonly forges: ForgeRepoRegistry,
-    private readonly clones: CloneService
+    private readonly clones: CloneService,
+    private readonly forgeStatus: ForgeStatusService = new ForgeStatusService()
   ) {}
 
   /**
@@ -153,8 +158,10 @@ export class ForkService {
         message: `PwrGit cannot fork on ${input.host} yet.`
       });
     }
-    const status = await provider.status();
-    if (!status.installed) {
+    const status = (await this.forgeStatus.list()).find(
+      (candidate) => candidate.kind === input.host
+    );
+    if (status === undefined || !status.installed) {
       return this.blocked(source, input.targetOwner, {
         code: "cli_missing",
         message: `Forking on ${forgeName(input.host)} needs the ${forgeName(input.host)} CLI.`
@@ -178,8 +185,9 @@ export class ForkService {
       });
     }
 
+    const owners = await provider.owners().catch(() => []);
     const targetOwner =
-      input.targetOwner ?? status.owners[0]?.login ?? repository.owner;
+      input.targetOwner ?? owners[0]?.login ?? repository.owner;
     // The fork name is editable, and every answer below — the existing fork,
     // the collision — is about the name actually being created.
     const targetName = input.targetName?.trim() || repository.name;
@@ -229,6 +237,25 @@ export class ForkService {
       }
     }
     return ok(preflight);
+  }
+
+  /** Accounts a fork can be created in on one forge, or none when its CLI
+   *  cannot answer. Best-effort: an empty list disables the picker rather
+   *  than failing the dialog. */
+  async targets(host: ForgeKind): Promise<Result<ForgeOwner[]>> {
+    const provider = this.forges.get(host);
+    if (provider === null) return ok([]);
+    const status = (await this.forgeStatus.list()).find(
+      (candidate) => candidate.kind === host
+    );
+    if (status === undefined || !status.installed || !status.loggedIn) {
+      return ok([]);
+    }
+    try {
+      return ok(await provider.owners());
+    } catch {
+      return ok([]);
+    }
   }
 
   /** Create the fork, clone it, wire `upstream`, and index the checkout. */
@@ -288,7 +315,8 @@ export class ForkService {
         targetOwnerKind: input.targetOwnerKind,
         targetName: input.targetName,
         defaultBranchOnly:
-          input.defaultBranchOnly && provider.capabilities.defaultBranchOnly,
+          input.defaultBranchOnly &&
+          capabilitiesFor(provider.host).forkDefaultBranchOnly,
         onPhase: (phase) => onProgress({ phase, percent: null })
       });
     } catch (cause) {

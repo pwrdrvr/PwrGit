@@ -10,6 +10,7 @@ export function registerForkHandlers(
   identities: IdentityService,
   indexer: RepoIndexer
 ): void {
+  bus.register("repo:forkTargets", (req) => forks.targets(req.host));
   bus.register("repo:forkPreflight", (req) => forks.preflight(req));
   bus.register("repo:fork", async (req) => {
     const result = await forks.fork(req, (progress) => {

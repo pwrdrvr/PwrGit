@@ -51,7 +51,7 @@ export function forkAction(preflight: ForkPreflight | null): ForkAction {
  *  source's own owner is dropped: neither forge will fork a repository into
  *  the account that owns it, so offering it is offering a guaranteed error. */
 export function forkTargets(
-  statuses: ForgeStatus[],
+  owners: ForgeOwner[],
   source: CloneRepository | null,
   // The forge picker's current value, used until a source pins the host. It
   // was defaulted to GitHub, so switching the picker to GitLab with nothing
@@ -59,12 +59,11 @@ export function forkTargets(
   activeHost: ForgeHost = "github"
 ): ForgeOwner[] {
   const host = source?.host ?? activeHost;
-  const status = statuses.find((candidate) => candidate.host === host);
-  if (status === undefined) return [];
-  return status.owners.filter(
+  return owners.filter(
     (owner) =>
-      source === null ||
-      owner.login.toLowerCase() !== source.owner.toLowerCase()
+      owner.host === host &&
+      (source === null ||
+        owner.login.toLowerCase() !== source.owner.toLowerCase())
   );
 }
 
@@ -123,20 +122,24 @@ export function cliProtocolLabel(host: CloneRepository["host"]): {
   };
 }
 
-/** The status entry for one forge, or a "not installed" stand-in so callers
- *  never have to branch on undefined. */
+/** The status entry for one forge, or undefined when main has not reported
+ *  it. Deliberately not a fabricated stand-in: `ForgeStatus` now carries the
+ *  forge's capabilities, and inventing those would let the UI claim a forge
+ *  can do something nobody asked. */
 export function statusFor(
   statuses: ForgeStatus[],
-  host: CloneRepository["host"]
-): ForgeStatus {
-  return (
-    statuses.find((status) => status.host === host) ?? {
-      host,
-      installed: false,
-      loggedIn: false,
-      owners: []
-    }
-  );
+  host: ForgeHost
+): ForgeStatus | undefined {
+  return statuses.find((status) => status.kind === host);
+}
+
+/** Whether the fork dialog should offer the default-branch-only switch. Read
+ *  from the forge's reported capability rather than hardcoding a host, so a
+ *  forge that gains the ability needs no change here. */
+export function supportsDefaultBranchOnly(
+  status: ForgeStatus | undefined
+): boolean {
+  return status?.capabilities.forkDefaultBranchOnly === true;
 }
 
 /** What the source list should say when it has no rows to show.
@@ -147,13 +150,15 @@ export function statusFor(
 export function sourceEmptyMessage(input: {
   catalogLoaded: boolean;
   catalogError: string | null;
-  status: ForgeStatus;
+  status: ForgeStatus | undefined;
   cliLabel: string;
   query: string;
 }): string | null {
   if (input.catalogError !== null) return input.catalogError;
   if (!input.catalogLoaded) return "Loading repositories…";
-  if (!input.status.installed) return `Install the ${input.cliLabel} to search.`;
+  if (input.status?.installed !== true) {
+    return `Install the ${input.cliLabel} to search.`;
+  }
   if (!input.status.loggedIn) return `Sign in with the ${input.cliLabel} to search.`;
   // An empty query has nothing to "not match" — this is the state a signed-in
   // forge with no discovered owners lands in, and quoting the empty string at

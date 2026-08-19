@@ -222,6 +222,10 @@ export type ForgeCapabilities = {
   changeSizeAndTimeline: boolean;
   /** Can prove the forge account behind an exact commit's Git author. */
   commitAuthorIdentity: boolean;
+  /** Forking can copy only the default branch. GitLab's fork API has no
+   *  equivalent, so the fork dialog hides the switch rather than accepting a
+   *  control it would silently ignore. */
+  forkDefaultBranchOnly: boolean;
 };
 
 /** Whether one forge is usable right now, and what it can do when it is. */
@@ -311,10 +315,10 @@ export type GitLfsStatus =
       version?: string;
     };
 
-/** Hosting services PwrGit can read repository metadata from. A remote that
- *  matches neither forge is `other` — its identity stays unknown, which is a
- *  fact the UI renders, not a failure. */
-export type ForgeHost = "github" | "gitlab" | "other";
+/** A remote's forge, or `other` when no provider claims its host — which is a
+ *  fact the identity marks render, not a failure. `ForgeKind` is the set of
+ *  forges PwrGit can actually talk to; this is that set plus "cannot say". */
+export type ForgeHost = ForgeKind | "other";
 
 /** Who can see a repository. GitHub only has `internal` on Enterprise; GitLab
  *  has it on every tier. `unknown` is load-bearing rather than a null stand-in:
@@ -411,22 +415,13 @@ export type CloneDestination = {
   lastUsedAt?: string;
 };
 
-/** Whether one forge CLI is usable right now. Both dialogs render the same
- *  three-state answer, so both forges report it the same way. */
-export type ForgeStatus = {
-  host: ForgeHost;
-  installed: boolean;
-  loggedIn: boolean;
-  /** Accounts the signed-in user can create repositories in — the fork
-   *  targets. Empty until a status read succeeds. */
-  owners: ForgeOwner[];
-};
-
 /** An account a fork can be created in. */
 export type ForgeOwner = {
   login: string;
   kind: "user" | "organization";
-  host: ForgeHost;
+  /** Which forge the account lives on. Always a real forge — an account on
+   *  `other` is not something a fork can be created in. */
+  host: ForgeKind;
 };
 
 export type CloneCatalog = {

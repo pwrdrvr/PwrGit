@@ -4,7 +4,7 @@ import type {
   CloneCatalog,
   CloneProtocol,
   CloneRepository,
-  ForgeHost,
+  ForgeKind,
   ForgeOwner,
   ForkPreflight,
   ForkProgress,
@@ -31,6 +31,7 @@ import {
   FORK_PROGRESS_LABELS,
   needsUpstreamChoice,
   ownerKindLabel,
+  supportsDefaultBranchOnly,
   repositoriesOnHost,
   sourceEmptyMessage,
   statusFor
@@ -62,7 +63,7 @@ export function ForkRepoDialog({
   const [destinationsLoading, setDestinationsLoading] = useState(true);
   const [sourceQuery, setSourceQuery] = useState("");
   const [sourceSelection, setSourceSelection] = useState(0);
-  const [host, setHost] = useState<ForgeHost>("github");
+  const [host, setHost] = useState<ForgeKind>("github");
   const [selectedSource, setSelectedSource] = useState<CloneRepository | null>(
     null
   );
@@ -70,6 +71,7 @@ export function ForkRepoDialog({
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
   const [targetOwner, setTargetOwner] = useState<ForgeOwner | null>(null);
+  const [forkOwners, setForkOwners] = useState<ForgeOwner[]>([]);
   const [forkName, setForkName] = useState("");
   const [forkNameTouched, setForkNameTouched] = useState(false);
   // Preflight costs two forge round trips, so the name it is keyed on settles
@@ -149,13 +151,26 @@ export function ForkRepoDialog({
   // leads straight to "install the CLI" is a dead end presented as a choice.
   const usableHosts = forges
     .filter((status) => status.installed && status.loggedIn)
-    .map((status) => status.host);
+    .map((status) => status.kind);
 
   useEffect(() => {
     if (usableHosts.length > 0 && !usableHosts.includes(host)) {
       setHost(usableHosts[0]!);
     }
   }, [usableHosts.join(","), host]);
+
+  // Fork targets follow the picker, not the catalog: they are the signed-in
+  // user's own accounts, which the clone catalog has no reason to know.
+  useEffect(() => {
+    let active = true;
+    setForkOwners([]);
+    void dispatch("repo:forkTargets", { host }).then((result) => {
+      if (active && result.ok) setForkOwners(result.value);
+    });
+    return () => {
+      active = false;
+    };
+  }, [host]);
 
   const parsedQuery = useMemo(
     () =>
@@ -244,8 +259,8 @@ export function ForkRepoDialog({
   ]);
 
   const targets = useMemo(
-    () => forkTargets(forges, selectedSource, host),
-    [forges, selectedSource, host]
+    () => forkTargets(forkOwners, selectedSource, host),
+    [forkOwners, selectedSource, host]
   );
   useEffect(() => {
     if (targetOwner === null || !targets.some((o) => o.login === targetOwner.login)) {
@@ -287,14 +302,13 @@ export function ForkRepoDialog({
   const sourceHost = selectedSource?.host ?? host;
   const forgeStatus = statusFor(forges, sourceHost);
   const cliLabel = cliProtocolLabel(sourceHost);
-  // GitLab's fork API has no default-branch-only equivalent, so the switch is
-  // hidden there rather than accepted and silently ignored.
-  const supportsDefaultBranchOnly = sourceHost !== "gitlab";
+  // Read from the forge's reported capability, not a hardcoded host name.
+  const defaultBranchOnlySupported = supportsDefaultBranchOnly(forgeStatus);
 
   /** Switching forge abandons the selection, because it belonged to the other
    *  one. Keeping it left the picker claiming GITLAB while the targets, URLs
    *  and upstream all still described a GitHub repository. */
-  const selectHost = (candidate: ForgeHost): void => {
+  const selectHost = (candidate: ForgeKind): void => {
     if (candidate === host) return;
     setHost(candidate);
     setSelectedSource(null);
@@ -346,7 +360,7 @@ export function ForkRepoDialog({
       targetName: forkName,
       protocol,
       parentPath: activeDestination.path,
-      defaultBranchOnly: defaultBranchOnly && supportsDefaultBranchOnly,
+      defaultBranchOnly: defaultBranchOnly && defaultBranchOnlySupported,
       upstream: addUpstream ? upstream : null
     });
     activeForkIdRef.current = null;
@@ -656,7 +670,7 @@ export function ForkRepoDialog({
                   </div>
                 )}
 
-                {supportsDefaultBranchOnly && (
+                {defaultBranchOnlySupported && (
                   <label
                     className={`fork-option${defaultBranchOnly ? " is-on" : ""}`}
                   >
@@ -689,7 +703,7 @@ export function ForkRepoDialog({
                 {(["ssh", "https", "cli"] as const).map((candidate) => {
                   const disabled =
                     candidate === "cli" &&
-                    (!forgeStatus.installed || !forgeStatus.loggedIn);
+                    (forgeStatus?.installed !== true || !forgeStatus.loggedIn);
                   const slug =
                     preflight?.target.nameWithOwner ??
                     selectedSource?.nameWithOwner ??

@@ -6,6 +6,7 @@ import type {
   CloneProtocol,
   CloneRepository,
   ForgeHost,
+  ForgeKind,
   Profile,
   Repo
 } from "@pwrgit/shared";
@@ -109,7 +110,7 @@ export function CloneRepoDialog({
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
   const [protocol, setProtocol] = useState<CloneProtocol>("ssh");
-  const [host, setHost] = useState<ForgeHost>("github");
+  const [host, setHost] = useState<ForgeKind>("github");
   const [destinationQuery, setDestinationQuery] = useState("");
   const [selectedDestination, setSelectedDestination] =
     useState<CloneDestination | null>(null);
@@ -308,11 +309,12 @@ export function CloneRepoDialog({
   // as a choice.
   const usableHosts = (catalog?.forges ?? [])
     .filter((status) => status.installed && status.loggedIn)
-    .map((status) => status.host);
+    .map((status) => status.kind);
   const activeHost = selectedRepository?.host ?? host;
   const forgeStatus = statusFor(catalog?.forges ?? [], activeHost);
   const cliDisabled =
-    catalog !== null && (!forgeStatus.installed || !forgeStatus.loggedIn);
+    catalog !== null &&
+    (forgeStatus?.installed !== true || !forgeStatus.loggedIn);
 
   return (
     <div

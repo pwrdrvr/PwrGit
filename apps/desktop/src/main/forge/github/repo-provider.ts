@@ -1,10 +1,14 @@
-import { forgeWebUrl, type CloneRepository, type ForgeStatus, type RepoVisibility } from "@pwrgit/shared";
+import {
+  forgeWebUrl,
+  type CloneRepository,
+  type ForgeOwner,
+  type RepoVisibility
+} from "@pwrgit/shared";
 import { logMain } from "../../logs";
 import {
   ownersFrom,
   parseJsonObject,
   splitNameWithOwner,
-  UNAVAILABLE_STATUS,
   type ForgeRepoProvider,
   type ForkInput
 } from "../repo-provider";
@@ -176,46 +180,20 @@ export function parseGhOrgLogins(stdout: string): string[] {
 export class GitHubRepoProvider implements ForgeRepoProvider {
   readonly host = "github" as const;
   readonly hostname = HOSTNAME;
-  readonly capabilities = { defaultBranchOnly: true };
 
   constructor(private readonly gh: GhRunner = runGh) {}
 
-  async status(): Promise<ForgeStatus> {
-    try {
-      await this.gh(["--version"]);
-    } catch (cause) {
-      // Silent here once cost an hour chasing a dialog that said "install the
-      // CLI" for an installed CLI. The status itself stays best-effort.
-      logMain(
-        "debug",
-        "forge",
-        `gh is not usable:`,
-        this.errorMessage(cause)
-      );
-      return UNAVAILABLE_STATUS("github");
-    }
-    let login: string | null = null;
-    try {
-      login = parseGhLogin(await this.gh(["api", "user"]));
-    } catch {
-      // Installed but not signed in — the dialogs render that distinctly from
-      // "not installed", so it is not an error here.
-      return { host: "github", installed: true, loggedIn: false, owners: [] };
-    }
+  async owners(): Promise<ForgeOwner[]> {
+    const login = parseGhLogin(await this.gh(["api", "user"]));
     let organizations: string[] = [];
     try {
       organizations = parseGhOrgLogins(
         await this.gh(["api", "user/orgs", "--paginate"])
       );
     } catch {
-      // A token without `read:org` still forks into the personal account.
+      // A token without `read:org` can still fork into the personal account.
     }
-    return {
-      host: "github",
-      installed: true,
-      loggedIn: true,
-      owners: ownersFrom("github", login, organizations)
-    };
+    return ownersFrom("github", login, organizations);
   }
 
   async viewRepo(nameWithOwner: string): Promise<CloneRepository> {

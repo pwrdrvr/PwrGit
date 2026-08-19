@@ -27,7 +27,8 @@ function forge(overrides: Partial<ForgeStatus> = {}): ForgeStatus {
       batchedBranchLookup: true,
       batchedCommitAssociation: true,
       changeSizeAndTimeline: true,
-      commitAuthorIdentity: true
+      commitAuthorIdentity: true,
+      forkDefaultBranchOnly: true
     },
     ...overrides
   };
@@ -97,7 +98,8 @@ describe("ForgesSettings", () => {
           batchedBranchLookup: true,
           batchedCommitAssociation: false,
           changeSizeAndTimeline: true,
-          commitAuthorIdentity: true
+          commitAuthorIdentity: true,
+          forkDefaultBranchOnly: false
         }
       })
     ]);

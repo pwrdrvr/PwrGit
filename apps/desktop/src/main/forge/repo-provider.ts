@@ -1,9 +1,9 @@
 import type {
   CloneRepository,
   ForgeHost,
+  ForgeKind,
   ForgeOwner,
-  ForgeRepoRef,
-  ForgeStatus
+  ForgeRepoRef
 } from "@pwrgit/shared";
 
 /** What one forge must answer for the clone and fork dialogs.
@@ -17,15 +17,18 @@ import type {
  *  and `errorMessage` rather than inspecting the cause, so nothing above this
  *  layer needs to know which CLI produced it. */
 export type ForgeRepoProvider = {
-  host: ForgeHost;
+  /** Always a real forge — `other` has no provider, which is what makes
+   *  `registry.get()` return null for it. */
+  host: ForgeKind;
   /** The forge's canonical hostname. Self-hosted instances override it. */
   hostname: string;
-  /** Fork options this forge actually supports. GitLab's fork API has no
-   *  default-branch-only equivalent, and offering a switch that silently does
-   *  nothing is worse than not offering it. */
-  capabilities: { defaultBranchOnly: boolean };
-  /** Is the CLI installed and signed in, and which accounts may it fork into? */
-  status(): Promise<ForgeStatus>;
+  /** Accounts this forge can create a fork in, for the signed-in user.
+   *
+   *  Availability (installed / logged in) is deliberately NOT here:
+   *  `ForgeStatusService` already answers that for the whole app, from one
+   *  cached probe. A provider that probed again would spawn a second
+   *  subprocess to learn something main already knew. */
+  owners(): Promise<ForgeOwner[]>;
   /** Read one repository's full metadata, including fork lineage. */
   viewRepo(nameWithOwner: string): Promise<CloneRepository>;
   /** Repositories owned by one account, newest activity first. */
@@ -55,8 +58,8 @@ export type ForkInput = {
   targetOwnerKind: "user" | "organization";
   /** Name for the fork; defaults to the source's name. */
   targetName: string;
-  /** Copy only the default branch (`--default-branch-only`). Ignored by a
-   *  provider whose `capabilities.defaultBranchOnly` is false. */
+  /** Copy only the default branch. Ignored where the forge's
+   *  `forkDefaultBranchOnly` capability is false. */
   defaultBranchOnly: boolean;
   /** Called as the forge moves between its two unmetered steps, so the dialog
    *  can name the step instead of showing a bar that does not move. */
@@ -111,7 +114,7 @@ export function parseJsonObject(stdout: string, what: string): unknown {
 }
 
 export function ownersFrom(
-  host: ForgeHost,
+  host: ForgeKind,
   user: string | null,
   organizations: string[]
 ): ForgeOwner[] {
@@ -133,9 +136,3 @@ export function ownersFrom(
   return owners;
 }
 
-export const UNAVAILABLE_STATUS = (host: ForgeHost): ForgeStatus => ({
-  host,
-  installed: false,
-  loggedIn: false,
-  owners: []
-});

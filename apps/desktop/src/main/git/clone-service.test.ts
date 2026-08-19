@@ -21,6 +21,7 @@ import {
   sanitizeCloneStderr
 } from "./clone-service";
 import { ForgeRepoRegistry } from "../forge/repo-provider";
+import { ForgeStatusService } from "../forge/status";
 import { GitHubRepoProvider } from "../forge/github/repo-provider";
 import { GitLabRepoProvider } from "../forge/gitlab/repo-provider";
 import type { GitExec, GitExecOptions, GitOutput } from "./dugite";
@@ -92,6 +93,28 @@ function fakeGh(
     }
     return "";
   };
+}
+
+/** Forge availability with no subprocesses: GitHub usable, GitLab absent.
+ *  Without this the service falls back to the real probes and the suite starts
+ *  depending on whether the machine running it has `gh`/`glab` signed in. */
+function fakeForgeStatus(): ForgeStatusService {
+  return new ForgeStatusService({
+    probes: [
+      {
+        kind: "github",
+        cli: "gh",
+        installed: async () => true,
+        loggedIn: async () => true
+      },
+      {
+        kind: "gitlab",
+        cli: "glab",
+        installed: async () => false,
+        loggedIn: async () => false
+      }
+    ]
+  });
 }
 
 /** A registry holding only GitHub, backed by the given runner. GitLab is
@@ -316,7 +339,8 @@ describe("CloneService", () => {
       systemGit,
       indexer,
       profiles,
-      githubOnly(gh)
+      githubOnly(gh),
+      fakeForgeStatus()
     );
 
     const result = await service.catalog(profile.id);
@@ -351,19 +375,30 @@ describe("CloneService", () => {
       systemGit,
       new RepoIndexer(db, systemGit),
       profiles,
-      githubOnly(fakeGh())
+      githubOnly(fakeGh()),
+      fakeForgeStatus()
     );
 
     const result = await service.catalog(profile.id);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.forges).toEqual([
-      { host: "github", installed: true, loggedIn: true, owners: [
-        { login: "huntharo", kind: "user", host: "github" }
-      ] },
-      { host: "gitlab", installed: false, loggedIn: false, owners: [] }
+    expect(
+      result.value.forges.map(({ kind, cli, installed, loggedIn }) => ({
+        kind,
+        cli,
+        installed,
+        loggedIn
+      }))
+    ).toEqual([
+      { kind: "github", cli: "gh", installed: true, loggedIn: true },
+      { kind: "gitlab", cli: "glab", installed: false, loggedIn: false }
     ]);
+    // The catalog's owners are whose repositories to offer — from local
+    // remotes and the profile org. Fork targets are a different question and
+    // have their own command (`repo:forkTargets`), so a profile with no repos
+    // and no org lists nobody here.
+    expect(result.value.owners).toEqual([]);
   });
 
   it("checks an exact owner/name that is outside the known owner catalogs", async () => {
@@ -405,7 +440,8 @@ describe("CloneService", () => {
       systemGit,
       indexer,
       profiles,
-      githubOnly(gh)
+      githubOnly(gh),
+      fakeForgeStatus()
     );
 
     const result = await service.checkSource(
@@ -495,7 +531,8 @@ describe("CloneService", () => {
       systemGit,
       indexer,
       profiles,
-      githubOnly(gh)
+      githubOnly(gh),
+      fakeForgeStatus()
     );
 
     const result = await service.checkSource(profile.id, "huntharo/private");
@@ -581,7 +618,8 @@ describe("CloneService", () => {
       cloneGit,
       indexer,
       profiles,
-      githubOnly(fakeGh())
+      githubOnly(fakeGh()),
+      fakeForgeStatus()
     );
 
     const result = await service.clone({
@@ -640,7 +678,8 @@ describe("CloneService", () => {
       systemGit,
       indexer,
       profiles,
-      githubOnly(gh)
+      githubOnly(gh),
+      fakeForgeStatus()
     );
 
     const result = await service.clone({
@@ -697,7 +736,8 @@ describe("CloneService", () => {
       gitExec,
       indexer,
       profiles,
-      githubOnly(fakeGh())
+      githubOnly(fakeGh()),
+      fakeForgeStatus()
     );
 
     const result = await service.clone({
@@ -747,7 +787,8 @@ describe("CloneService", () => {
       systemGit,
       indexer,
       profiles,
-      githubOnly(gh)
+      githubOnly(gh),
+      fakeForgeStatus()
     );
 
     const result = await service.clone({
@@ -787,7 +828,8 @@ describe("CloneService", () => {
       gitExec,
       indexer,
       profiles,
-      githubOnly(fakeGh())
+      githubOnly(fakeGh()),
+      fakeForgeStatus()
     );
 
     const result = await service.clone({

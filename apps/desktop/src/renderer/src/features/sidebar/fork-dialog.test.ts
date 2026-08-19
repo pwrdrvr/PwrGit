@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type {
   CloneRepository,
+  ForgeOwner,
   ForgeStatus,
   ForkPreflight
 } from "@pwrgit/shared";
@@ -45,18 +46,30 @@ const preflight = (over: Partial<ForkPreflight> = {}): ForkPreflight => ({
   ...over
 });
 
+const CAPS = {
+  batchedBranchLookup: true,
+  batchedCommitAssociation: true,
+  changeSizeAndTimeline: true,
+  commitAuthorIdentity: true,
+  forkDefaultBranchOnly: true
+};
+
 const statuses: ForgeStatus[] = [
+  { kind: "github", cli: "gh", installed: true, loggedIn: true, capabilities: CAPS },
   {
-    host: "github",
-    installed: true,
-    loggedIn: true,
-    owners: [
-      { login: "huntharo", kind: "user", host: "github" },
-      { login: "pwr-family", kind: "organization", host: "github" },
-      { login: "facebook", kind: "organization", host: "github" }
-    ]
-  },
-  { host: "gitlab", installed: false, loggedIn: false, owners: [] }
+    kind: "gitlab",
+    cli: "glab",
+    installed: false,
+    loggedIn: false,
+    capabilities: { ...CAPS, forkDefaultBranchOnly: false }
+  }
+];
+
+/** Fork targets now travel in the catalog, not inside the status. */
+const githubOwners: ForgeOwner[] = [
+  { login: "huntharo", kind: "user", host: "github" },
+  { login: "pwr-family", kind: "organization", host: "github" },
+  { login: "facebook", kind: "organization", host: "github" }
 ];
 
 describe("forkAction", () => {
@@ -114,7 +127,7 @@ describe("forkAction", () => {
 
 describe("forkTargets", () => {
   it("drops the source's own owner — no forge forks into itself", () => {
-    expect(forkTargets(statuses, source).map((o) => o.login)).toEqual([
+    expect(forkTargets(githubOwners, source).map((o) => o.login)).toEqual([
       "huntharo",
       "pwr-family"
     ]);
@@ -126,11 +139,11 @@ describe("forkTargets", () => {
       host: "gitlab",
       hostname: "gitlab.com"
     };
-    expect(forkTargets(statuses, gitlabSource)).toEqual([]);
+    expect(forkTargets(githubOwners, gitlabSource)).toEqual([]);
   });
 
   it("prefers the personal account as the default target", () => {
-    expect(defaultForkTarget(forkTargets(statuses, source))?.login).toBe(
+    expect(defaultForkTarget(forkTargets(githubOwners, source))?.login).toBe(
       "huntharo"
     );
     // With no personal account listed, the first organization stands in.
@@ -207,13 +220,12 @@ describe("forge labelling", () => {
     );
   });
 
-  it("stands in a not-installed status rather than returning undefined", () => {
-    expect(statusFor([], "gitlab")).toEqual({
-      host: "gitlab",
-      installed: false,
-      loggedIn: false,
-      owners: []
-    });
+  it("returns nothing for a forge main has not reported", () => {
+    // Deliberately not a fabricated stand-in: ForgeStatus now carries the
+    // forge's capabilities, and inventing those would let the UI claim a
+    // forge can do something nobody asked it about.
+    expect(statusFor([], "gitlab")).toBeUndefined();
+    expect(statusFor(statuses, "gitlab")?.cli).toBe("glab");
   });
 });
 
@@ -321,27 +333,20 @@ describe("ownerKindLabel", () => {
 });
 
 describe("the forge picker is authoritative until a source pins the host", () => {
-  const gitlabStatuses: ForgeStatus[] = [
-    statuses[0]!,
-    {
-      host: "gitlab",
-      installed: true,
-      loggedIn: true,
-      owners: [
-        { login: "huntharo", kind: "user", host: "gitlab" },
-        { login: "pwrdrvr/qa/forge", kind: "organization", host: "gitlab" }
-      ]
-    }
+  const allOwners: ForgeOwner[] = [
+    ...githubOwners,
+    { login: "huntharo", kind: "user", host: "gitlab" },
+    { login: "pwrdrvr/qa/forge", kind: "organization", host: "gitlab" }
   ];
 
   it("lists the picked forge's accounts, not GitHub's, with nothing selected", () => {
     // Seen in the running app: switching the picker to GitLab still offered
     // GitHub organizations, which cannot receive a GitLab fork.
-    expect(forkTargets(gitlabStatuses, null, "gitlab").map((o) => o.login)).toEqual([
+    expect(forkTargets(allOwners, null, "gitlab").map((o) => o.login)).toEqual([
       "huntharo",
       "pwrdrvr/qa/forge"
     ]);
-    expect(forkTargets(gitlabStatuses, null, "github").map((o) => o.login)).toEqual([
+    expect(forkTargets(allOwners, null, "github").map((o) => o.login)).toEqual([
       "huntharo",
       "pwr-family",
       "facebook"
@@ -349,7 +354,7 @@ describe("the forge picker is authoritative until a source pins the host", () =>
   });
 
   it("still lets a selected source win over the picker", () => {
-    expect(forkTargets(gitlabStatuses, source, "gitlab").map((o) => o.login)).toEqual([
+    expect(forkTargets(allOwners, source, "gitlab").map((o) => o.login)).toEqual([
       "huntharo",
       "pwr-family"
     ]);

@@ -7,6 +7,10 @@ dist/
 out/
 build/
 *.tsbuildinfo
+# A stray bundle at the workspace root: this repo has no root entry point, so
+# an index.js here is always something a build wrote by accident. One was
+# committed that way once.
+/index.js
 
 # electron-builder buildResources (entitlements, icons) are source, not output —
 # carve them out of the blanket build/ ignore above.

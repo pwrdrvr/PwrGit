@@ -132,10 +132,17 @@ creating a fork — so they hang off `ForgeRepoProvider` (`repo-provider.ts`)
 rather than widening the four-method seam `PrService` depends on. Same two
 forges, same CLI clients, disjoint questions.
 
-- **`capabilities` states what a forge cannot do.** GitLab's fork API has no
-  `--default-branch-only` equivalent, so its provider declares
-  `defaultBranchOnly: false` and the dialog hides the switch. A control that is
-  accepted and silently ignored is worse than one that is absent.
+- **What a forge cannot do belongs in `capabilities.ts`**, the one table both
+  Settings → Forges and the dialogs read. GitLab's fork API has no
+  default-branch-only equivalent, so `forkDefaultBranchOnly` is false there and
+  the fork dialog hides the switch — a control that is accepted and silently
+  ignored is worse than one that is absent. Add a capability there, not as a
+  property on a provider, or the settings screen will not know about it.
+- **Availability is `status.ts`'s job, not a provider's.** `ForgeRepoProvider`
+  answers `owners()` and nothing about installed/logged-in: probing is a
+  subprocess, `ForgeStatusService` already caches one answer for the whole
+  app, and a provider that probed again would spawn a second to learn what
+  main already knew.
 - **Identity is read from `origin`, specifically.** A fork checkout has `origin`
   (your fork) and `upstream` (the original); the marks describe what you push
   to. Results persist in `repo_identity` and are joined onto `repo:list` by

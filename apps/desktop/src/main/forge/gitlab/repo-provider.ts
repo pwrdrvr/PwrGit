@@ -1,7 +1,7 @@
 import {
   forgeWebUrl,
   type CloneRepository,
-  type ForgeStatus,
+  type ForgeOwner,
   type RepoVisibility
 } from "@pwrgit/shared";
 import { logMain } from "../../logs";
@@ -9,7 +9,6 @@ import {
   ownersFrom,
   parseJsonObject,
   splitNameWithOwner,
-  UNAVAILABLE_STATUS,
   type ForgeRepoProvider,
   type ForkInput
 } from "../repo-provider";
@@ -156,35 +155,14 @@ const sleep = (ms: number): Promise<void> =>
 
 export class GitLabRepoProvider implements ForgeRepoProvider {
   readonly host = "gitlab" as const;
-  // GitLab has no default-branch-only fork option; the switch is hidden
-  // rather than accepted and ignored.
-  readonly capabilities = { defaultBranchOnly: false };
 
   constructor(
     private readonly glab: GlabRunner = runGlab,
     readonly hostname: string = DEFAULT_HOSTNAME
   ) {}
 
-  async status(): Promise<ForgeStatus> {
-    try {
-      await this.glab(["--version"]);
-    } catch (cause) {
-      // Silent here once cost an hour chasing a dialog that said "install the
-      // CLI" for an installed CLI. The status itself stays best-effort.
-      logMain(
-        "debug",
-        "forge",
-        `glab is not usable:`,
-        this.errorMessage(cause)
-      );
-      return UNAVAILABLE_STATUS("gitlab");
-    }
-    let username: string | null = null;
-    try {
-      username = parseGitLabUsername(await this.glab(["api", "user"]));
-    } catch {
-      return { host: "gitlab", installed: true, loggedIn: false, owners: [] };
-    }
+  async owners(): Promise<ForgeOwner[]> {
+    const username = parseGitLabUsername(await this.glab(["api", "user"]));
     let groups: string[] = [];
     try {
       // min_access_level 30 is Developer — the floor for creating a project
@@ -198,12 +176,7 @@ export class GitLabRepoProvider implements ForgeRepoProvider {
     } catch {
       // Personal-namespace forks still work without the group listing.
     }
-    return {
-      host: "gitlab",
-      installed: true,
-      loggedIn: true,
-      owners: ownersFrom("gitlab", username, groups)
-    };
+    return ownersFrom("gitlab", username, groups);
   }
 
   async viewRepo(nameWithOwner: string): Promise<CloneRepository> {
