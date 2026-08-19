@@ -32,7 +32,12 @@ export function PrChip({
     hide: hideTooltip,
     update: updateTooltip,
     tooltipNode
-  } = useViewportTooltip("pr-status-card", { interactive: true });
+  } = useViewportTooltip("pr-status-card", {
+    interactive: true,
+    // The card is a dialog to assistive tech, so it must announce what it
+    // actually shows — each forge's own word for the thing, as the card does.
+    label: pr.forge === "gitlab" ? "Merge request" : "Pull request"
+  });
   // The hook is cheap and must be called unconditionally; a caller-supplied
   // gate simply wins over this instance's own.
   const ownIntent = useHoverIntent();

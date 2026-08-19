@@ -17,6 +17,17 @@ const CAPABILITY_LABELS: Record<keyof ForgeCapabilities, string> = {
 };
 
 /**
+ * How often this pane asks main to re-examine its probe while it is open.
+ *
+ * Main answers most of these from cache without spawning anything: its TTL is
+ * what decides when a real probe happens (a minute for a broken forge, five for
+ * a working one). Something has to ask, though — main never probes on its own,
+ * so without this tick `forge:statusChanged` would have nothing to announce and
+ * a terminal-side `gh auth login` would never reach an open pane.
+ */
+const RECHECK_MS = 30_000;
+
+/**
  * Which forges PwrGit can read right now, and what each one can do.
  *
  * Everything here comes from main's cached probe over `forge:status`; this pane
@@ -29,18 +40,29 @@ export function ForgesSettings() {
 
   useEffect(() => {
     let canceled = false;
-    let receivedEvent = false;
+    // Counted rather than latched: a read must defer to a push that overtook
+    // it, but a push that landed before the read even started says nothing
+    // about that read, and latching would silence every later one.
+    let pushes = 0;
     const unsubscribe = subscribe("forge:statusChanged", ({ forges: next }) => {
-      receivedEvent = true;
+      pushes += 1;
       setForges(next);
     });
     // A pushed change always wins: the read below may have been in flight while
     // the user was signing in, and landing it late would show stale state.
-    void dispatch("forge:status", undefined).then((result) => {
-      if (!canceled && !receivedEvent && result.ok) setForges(result.value.forges);
-    });
+    const read = (): void => {
+      const startedAfter = pushes;
+      void dispatch("forge:status", undefined).then((result) => {
+        if (!canceled && pushes === startedAfter && result.ok) {
+          setForges(result.value.forges);
+        }
+      });
+    };
+    read();
+    const timer = window.setInterval(read, RECHECK_MS);
     return () => {
       canceled = true;
+      window.clearInterval(timer);
       unsubscribe();
     };
   }, []);

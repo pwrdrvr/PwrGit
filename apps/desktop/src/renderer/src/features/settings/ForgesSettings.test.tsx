@@ -143,6 +143,45 @@ describe("ForgesSettings", () => {
     expect(container.textContent).not.toContain("Signed out");
   });
 
+  it("keeps asking while open, so a terminal sign-in can reach the pane", async () => {
+    // Main never probes on its own: `forge:statusChanged` only has something to
+    // announce because somebody asked again. Without this tick the pane would
+    // sit on "Signed out" forever while the user ran `gh auth login`.
+    vi.useFakeTimers();
+    try {
+      await render([forge({ loggedIn: false })]);
+      expect(mocks.dispatch).toHaveBeenCalledTimes(1);
+
+      mocks.dispatch.mockResolvedValue(ok({ forges: [forge({ loggedIn: true })] }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+
+      expect(mocks.dispatch.mock.calls.length).toBeGreaterThan(1);
+      expect(container.textContent).toContain("Connected");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops asking once the pane closes", async () => {
+    vi.useFakeTimers();
+    try {
+      await render([forge()]);
+      act(() => root.unmount());
+      root = createRoot(container);
+      const afterUnmount = mocks.dispatch.mock.calls.length;
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(120_000);
+      });
+
+      expect(mocks.dispatch.mock.calls.length).toBe(afterUnmount);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("unsubscribes on unmount", async () => {
     await render([forge()]);
     act(() => root.unmount());
