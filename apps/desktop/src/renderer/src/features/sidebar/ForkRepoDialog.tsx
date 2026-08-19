@@ -68,6 +68,9 @@ export function ForkRepoDialog({
   const [targetOwner, setTargetOwner] = useState<ForgeOwner | null>(null);
   const [forkName, setForkName] = useState("");
   const [forkNameTouched, setForkNameTouched] = useState(false);
+  // Preflight costs two forge round trips, so the name it is keyed on settles
+  // before it re-runs rather than firing on every keystroke.
+  const [debouncedForkName, setDebouncedForkName] = useState("");
   const [addUpstream, setAddUpstream] = useState(true);
   const [upstream, setUpstream] = useState<string | null>(null);
   const [defaultBranchOnly, setDefaultBranchOnly] = useState(false);
@@ -99,6 +102,14 @@ export function ForkRepoDialog({
       active = false;
     };
   }, [profile.id]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(
+      () => setDebouncedForkName(forkName),
+      300
+    );
+    return () => window.clearTimeout(timeout);
+  }, [forkName]);
 
   useEffect(
     () =>
@@ -167,13 +178,33 @@ export function ForkRepoDialog({
       profileId: profile.id,
       source: selectedSource.nameWithOwner,
       host: selectedSource.host,
-      ...(targetOwner === null ? {} : { targetOwner: targetOwner.login })
+      ...(targetOwner === null ? {} : { targetOwner: targetOwner.login }),
+      // Only once the user has actually named it: before that the service's
+      // default (the source's name) is the right guess, and sending an empty
+      // string mid-edit would probe a nonexistent repository.
+      ...(forkNameTouched && debouncedForkName.trim() !== ""
+        ? { targetName: debouncedForkName.trim() }
+        : {})
     }).then((result) => {
       if (!active) return;
       setChecking(false);
       if (result.ok) {
         setPreflight(result.value);
-        if (!forkNameTouched) setForkName(result.value.target.name);
+        // A slug typed rather than picked from a catalog was selected as an
+        // `unknown` placeholder. Preflight has since read the real thing, so
+        // the row stops claiming PwrGit could not determine what it just read.
+        if (result.value.blocked?.code === undefined) {
+          setSelectedSource((current) =>
+            current !== null &&
+            current.nameWithOwner === result.value.source.nameWithOwner
+              ? result.value.source
+              : current
+          );
+        }
+        if (!forkNameTouched) {
+          setForkName(result.value.target.name);
+          setDebouncedForkName(result.value.target.name);
+        }
         setUpstream(defaultUpstream(result.value));
       } else {
         setPreflight(null);
@@ -183,7 +214,7 @@ export function ForkRepoDialog({
     return () => {
       active = false;
     };
-  }, [selectedSource, targetOwner, profile.id]);
+  }, [selectedSource, targetOwner, debouncedForkName, profile.id]);
 
   const targets = useMemo(
     () => forkTargets(forges, selectedSource),
@@ -268,6 +299,7 @@ export function ForkRepoDialog({
       host: selectedSource.host,
       hostname: selectedSource.hostname,
       targetOwner: targetOwner.login,
+      targetOwnerKind: targetOwner.kind,
       targetName: forkName,
       protocol,
       parentPath: activeDestination.path,

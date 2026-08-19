@@ -312,6 +312,122 @@ describe("ForkService.preflight", () => {
     });
   });
 
+  it("does not claim a prefix-sharing checkout as the fork's location", async () => {
+    const root = temporaryRoot();
+    // `huntharo/react` is a substring of `huntharo/react-native`; matching the
+    // remote URL by substring would point "Reveal checkout" at this repo.
+    const decoy = join(root, "react-native");
+    initRepo(decoy);
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "git@github.com:huntharo/react-native.git"],
+      { cwd: decoy, stdio: "ignore" }
+    );
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "Personal",
+      email: "t@pwrgit.dev",
+      roots: [root]
+    });
+    const indexer = new RepoIndexer(db, systemGit);
+    await indexer.indexRepoAt(profile.id, decoy);
+    const registry = new ForgeRegistry();
+    registry.register(
+      new GitHubProvider(
+        fakeGh({
+          "facebook/react": { full_name: "facebook/react", visibility: "public" },
+          "huntharo/react": {
+            full_name: "huntharo/react",
+            visibility: "public",
+            fork: true,
+            parent: { full_name: "facebook/react" }
+          }
+        })
+      )
+    );
+    const forks = new ForkService(
+      systemGit,
+      indexer,
+      profiles,
+      registry,
+      new CloneService(db, systemGit, indexer, profiles, registry)
+    );
+
+    const result = await forks.preflight({
+      profileId: profile.id,
+      source: "facebook/react",
+      host: "github"
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.existing?.nameWithOwner).toBe("huntharo/react");
+    expect(result.value.existing?.localPaths).toEqual([]);
+  });
+
+  it("checks the fork name the user actually typed", async () => {
+    const probed: string[] = [];
+    const root = temporaryRoot();
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "Personal",
+      email: "t@pwrgit.dev",
+      roots: [root]
+    });
+    const registry = new ForgeRegistry();
+    registry.register(
+      new GitHubProvider(
+        fakeGh(
+          {
+            "facebook/react": {
+              full_name: "facebook/react",
+              name: "react",
+              visibility: "public"
+            },
+            // The user's pre-existing fork, under the DEFAULT name.
+            "huntharo/react": {
+              full_name: "huntharo/react",
+              visibility: "public",
+              fork: true,
+              parent: { full_name: "facebook/react" }
+            }
+          },
+          (args) => {
+            if (args[1]?.startsWith("repos/")) {
+              probed.push(args[1].slice("repos/".length));
+            }
+          }
+        )
+      )
+    );
+    const indexer = new RepoIndexer(db, systemGit);
+    const forks = new ForkService(
+      systemGit,
+      indexer,
+      profiles,
+      registry,
+      new CloneService(db, systemGit, indexer, profiles, registry)
+    );
+
+    const result = await forks.preflight({
+      profileId: profile.id,
+      source: "facebook/react",
+      host: "github",
+      targetName: "react-fork"
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.target.nameWithOwner).toBe("huntharo/react-fork");
+    // The existing `huntharo/react` is NOT this fork: reporting it would make
+    // the dialog offer to reveal/clone a repository the user did not ask for.
+    expect(result.value.existing).toBeUndefined();
+    expect(probed).toContain("huntharo/react-fork");
+    expect(probed).not.toContain("huntharo/react");
+  });
+
   it("refuses a name taken by an unrelated repository", async () => {
     const root = temporaryRoot();
     const db = openDatabase(":memory:");
@@ -412,6 +528,7 @@ describe("ForkService.fork", () => {
         host: "github",
         hostname: "github.com",
         targetOwner: "huntharo",
+        targetOwnerKind: "user",
         targetName: "react",
         protocol: "ssh",
         parentPath,
@@ -445,6 +562,7 @@ describe("ForkService.fork", () => {
       host: "github",
       hostname: "github.com",
       targetOwner: "huntharo",
+      targetOwnerKind: "user",
       targetName: "react",
       protocol: "ssh",
       parentPath,
@@ -466,6 +584,7 @@ describe("ForkService.fork", () => {
       host: "github",
       hostname: "github.com",
       targetOwner: "huntharo",
+      targetOwnerKind: "user",
       targetName: "react",
       protocol: "ssh",
       parentPath: outside,
@@ -487,6 +606,7 @@ describe("ForkService.fork", () => {
         host: "github",
         hostname: "github.com",
         targetOwner: "huntharo",
+        targetOwnerKind: "user",
         targetName,
         protocol: "ssh",
         parentPath,

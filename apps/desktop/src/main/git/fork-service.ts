@@ -2,6 +2,7 @@ import {
   err,
   forgeWebUrl,
   ok,
+  parseForgeRemote,
   type CloneProtocol,
   type CloneRepository,
   type ForgeHost,
@@ -12,6 +13,7 @@ import {
   type Result
 } from "@pwrgit/shared";
 import type { ProfileService } from "../profiles/profile-service";
+import { mapLimit } from "../util/map-limit";
 import type { ForgeProvider, ForgeRegistry } from "../forge/provider";
 import type { GitExec } from "./dugite";
 import { requireExit0 } from "./dugite";
@@ -27,6 +29,10 @@ import type { RepoIndexer } from "./repo-indexer";
  *  checkout it made itself a moment earlier. */
 export const UPSTREAM_REMOTE = "upstream";
 
+/** `git remote get-url` per indexed repo, bounded the way every other scan in
+ *  this codebase is — the preflight runs while the user waits on the dialog. */
+const ORIGIN_CONCURRENCY = 8;
+
 export type ForkRequest = {
   profileId: string;
   /** The repository being forked. */
@@ -35,6 +41,8 @@ export type ForkRequest = {
   hostname: string;
   /** Account the fork is created in. */
   targetOwner: string;
+  /** Whether that account is the signed-in user or an organization. */
+  targetOwnerKind: "user" | "organization";
   /** Name for the fork. */
   targetName: string;
   protocol: CloneProtocol;
@@ -118,6 +126,7 @@ export class ForkService {
     source: string;
     host: ForgeHost;
     targetOwner?: string;
+    targetName?: string;
   }): Promise<Result<ForkPreflight>> {
     if (this.profiles.get(input.profileId) === null) {
       return err({
@@ -168,7 +177,9 @@ export class ForkService {
 
     const targetOwner =
       input.targetOwner ?? status.owners[0]?.login ?? repository.owner;
-    const targetName = repository.name;
+    // The fork name is editable, and every answer below — the existing fork,
+    // the collision — is about the name actually being created.
+    const targetName = input.targetName?.trim() || repository.name;
     const target = {
       owner: targetOwner,
       name: targetName,
@@ -271,6 +282,7 @@ export class ForkService {
       fork = await provider.fork({
         source,
         targetOwner: input.targetOwner,
+        targetOwnerKind: input.targetOwnerKind,
         targetName: input.targetName,
         defaultBranchOnly:
           input.defaultBranchOnly && provider.capabilities.defaultBranchOnly,
@@ -375,17 +387,30 @@ export class ForkService {
     repository: CloneRepository
   ): Promise<string[]> {
     const paths: string[] = [];
-    for (const repo of this.indexer.listRepos(profileId)) {
-      const result = await this.git(["remote", "get-url", "origin"], repo.path);
-      if (!result.ok || result.value.exitCode !== 0) continue;
-      if (
-        result.value.stdout
-          .toLowerCase()
-          .includes(repository.nameWithOwner.toLowerCase())
-      ) {
-        paths.push(repo.path);
+    // Parsed, not substring-matched: `huntharo/react` is a substring of
+    // `huntharo/react-native`, and of a gitlab.com URL carrying the same slug.
+    // Either false positive points "Reveal checkout" at the wrong folder.
+    await mapLimit(
+      this.indexer.listRepos(profileId),
+      ORIGIN_CONCURRENCY,
+      async (repo) => {
+        const result = await this.git(
+          ["remote", "get-url", "origin"],
+          repo.path
+        );
+        if (!result.ok || result.value.exitCode !== 0) return;
+        const origin = parseForgeRemote(result.value.stdout.trim());
+        if (origin === null) return;
+        if (
+          origin.host === repository.host &&
+          origin.hostname === repository.hostname &&
+          origin.nameWithOwner.toLowerCase() ===
+            repository.nameWithOwner.toLowerCase()
+        ) {
+          paths.push(repo.path);
+        }
       }
-    }
+    );
     return paths;
   }
 
@@ -420,5 +445,3 @@ export class ForkService {
     });
   }
 }
-
-export type { ForgeProvider };

@@ -86,6 +86,17 @@ export function parseGhRepoJson(raw: unknown): CloneRepository | null {
   return repository;
 }
 
+/** REST reports `visibility` on every plan; the older `private` boolean is
+ *  the fallback for an Enterprise API that omits it. Absent both, the answer
+ *  is `unknown` — never `public`, which would understate where code can go. */
+function restVisibility(row: Record<string, unknown>): RepoVisibility {
+  const stated = visibilityFrom(row["visibility"]);
+  if (stated !== "unknown") return stated;
+  if (row["private"] === true) return "private";
+  if (row["private"] === false) return "public";
+  return "unknown";
+}
+
 export function parseGhRepoList(stdout: string): CloneRepository[] {
   const parsed = parseJsonObject(stdout, "GitHub repository list");
   const rows = Array.isArray(parsed) ? parsed : [parsed];
@@ -109,16 +120,7 @@ export function parseGhRestRepo(stdout: string): CloneRepository | null {
     name: text(row["name"]) ?? split.name,
     owner: split.owner,
     nameWithOwner,
-    // REST reports `visibility` on every plan; `private` is the fallback for
-    // an older Enterprise API that omits it.
-    visibility:
-      visibilityFrom(row["visibility"]) === "unknown"
-        ? row["private"] === true
-          ? "private"
-          : row["private"] === false
-            ? "public"
-            : "unknown"
-        : visibilityFrom(row["visibility"]),
+    visibility: restVisibility(row),
     host: "github",
     hostname: HOSTNAME,
     sshUrl: text(row["ssh_url"]) ?? `git@${HOSTNAME}:${nameWithOwner}.git`,
@@ -234,7 +236,7 @@ export class GitHubProvider implements ForgeProvider {
     const args = ["repo", "fork", input.source, "--clone=false"];
     // `gh` forks into the authenticated user unless told otherwise, so --org
     // is passed only for an organization target.
-    if (input.targetOwner.toLowerCase() !== (await this.login())?.toLowerCase()) {
+    if (input.targetOwnerKind === "organization") {
       args.push("--org", input.targetOwner);
     }
     const sourceName = splitNameWithOwner(input.source)?.name;
@@ -272,17 +274,5 @@ export class GitHubProvider implements ForgeProvider {
 
   errorMessage(cause: unknown): string {
     return ghErrorMessage(cause);
-  }
-
-  private cachedLogin: string | null | undefined;
-
-  private async login(): Promise<string | null> {
-    if (this.cachedLogin !== undefined) return this.cachedLogin;
-    try {
-      this.cachedLogin = parseGhLogin(await this.gh(["api", "user"]));
-    } catch {
-      this.cachedLogin = null;
-    }
-    return this.cachedLogin;
   }
 }

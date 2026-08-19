@@ -279,6 +279,7 @@ describe("GitLabProvider", () => {
     const forked = provider.fork({
       source: "acme/platform/billing-api",
       targetOwner: "huntharo",
+      targetOwnerKind: "user",
       targetName: "billing-api",
       defaultBranchOnly: false,
       onPhase: (phase) => phases.push(phase)
@@ -321,6 +322,7 @@ describe("GitLabProvider", () => {
     const repository = await provider.fork({
       source: "acme/platform/billing-api",
       targetOwner: "huntharo",
+      targetOwnerKind: "user",
       targetName: "billing-api",
       defaultBranchOnly: false
     });
@@ -337,6 +339,7 @@ describe("GitLabProvider", () => {
       provider.fork({
         source: "acme/api",
         targetOwner: "huntharo",
+        targetOwnerKind: "user",
         targetName: "api",
         defaultBranchOnly: false
       })

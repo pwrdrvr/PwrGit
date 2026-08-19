@@ -215,6 +215,7 @@ describe("GitHubProvider", () => {
     await new GitHubProvider(gh).fork({
       source: "facebook/react",
       targetOwner: "huntharo",
+      targetOwnerKind: "user",
       targetName: "react",
       defaultBranchOnly: false
     });
@@ -232,6 +233,7 @@ describe("GitHubProvider", () => {
     await new GitHubProvider(gh).fork({
       source: "facebook/react",
       targetOwner: "pwr-family",
+      targetOwnerKind: "organization",
       targetName: "react-fork",
       defaultBranchOnly: true
     });
@@ -256,6 +258,7 @@ describe("GitHubProvider", () => {
     const repository = await new GitHubProvider(gh).fork({
       source: "facebook/react",
       targetOwner: "huntharo",
+      targetOwnerKind: "user",
       targetName: "react",
       defaultBranchOnly: false
     });
@@ -267,6 +270,7 @@ describe("GitHubProvider", () => {
     await new GitHubProvider(baseGh()).fork({
       source: "facebook/react",
       targetOwner: "huntharo",
+      targetOwnerKind: "user",
       targetName: "react",
       defaultBranchOnly: false,
       onPhase: (phase) => phases.push(phase)

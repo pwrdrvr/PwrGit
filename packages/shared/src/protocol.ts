@@ -495,6 +495,11 @@ export interface Commands {
       host: ForgeHost;
       /** Account to fork into; defaults to the signed-in user. */
       targetOwner?: string;
+      /** Name the fork will be given. Defaults to the source's name — but it
+       *  is editable, and the existing-fork answer is about THIS name, so a
+       *  preflight that assumed the source's name would describe a different
+       *  repository than the one about to be created. */
+      targetName?: string;
     };
     res: ForkPreflight;
   };
@@ -507,6 +512,9 @@ export interface Commands {
       host: ForgeHost;
       hostname: string;
       targetOwner: string;
+      /** Whether the target account is the signed-in user or an organization
+       *  — the forges take a different flag for each. */
+      targetOwnerKind: "user" | "organization";
       targetName: string;
       protocol: CloneProtocol;
       parentPath: string;

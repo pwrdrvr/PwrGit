@@ -1,7 +1,6 @@
 import {
   parseForgeRemote,
   type ForgeHost,
-  type ProfileId,
   type Repo,
   type RepoIdentity
 } from "@pwrgit/shared";
@@ -271,5 +270,3 @@ export function sameIdentity(
     a.root?.nameWithOwner === b.root?.nameWithOwner
   );
 }
-
-export type { ProfileId };

@@ -59,6 +59,7 @@ type RepoRow = {
   custom_order: number | null;
 };
 type RepoIdentityRow = {
+  repo_id: string;
   host: string;
   hostname: string;
   owner: string;
@@ -368,7 +369,10 @@ export class RepoIndexer {
       .all(profileId) as RepoRow[];
     // Ownership filter: a fossil DB (older builds) can hold the same worktree
     // under two repos, which renders as two "selected" rows at once.
-    return claimWorktreeOwnership(repoRows.map((r) => this.repoFromRow(r)));
+    const identities = this.identityRows(profileId);
+    return claimWorktreeOwnership(
+      repoRows.map((r) => this.repoFromRow(r, identities.get(r.id)))
+    );
   }
 
   getRepo(repoId: string): Repo | null {
@@ -859,7 +863,10 @@ export class RepoIndexer {
     }));
   }
 
-  private repoFromRow(r: RepoRow): Repo {
+  private repoFromRow(
+    r: RepoRow,
+    identity?: RepoIdentityRow | undefined
+  ): Repo {
     const worktrees = (
       this.db
         .prepare(
@@ -915,18 +922,39 @@ export class RepoIndexer {
       worktrees
     };
     if (r.custom_order !== null) repo.order = r.custom_order;
-    // Joined here rather than fetched by the renderer: the identity marks sit
-    // on every repo row, so they have to arrive with the first `repo:list`
-    // or the sidebar paints once without them and again a moment later.
-    const identity = this.db
+    // Attached here rather than fetched by the renderer: the identity marks
+    // sit on every repo row, so they have to arrive with the first
+    // `repo:list` or the sidebar paints once without them and again a moment
+    // later. `identity` is passed in so a list read costs one query for the
+    // whole profile rather than one prepare+get per repository.
+    const row = identity ?? this.identityRow(r.id);
+    if (row !== undefined) repo.identity = repoIdentityFromRow(row);
+    return repo;
+  }
+
+  private identityRow(repoId: string): RepoIdentityRow | undefined {
+    return this.db
       .prepare(
-        `SELECT host, hostname, owner, name, visibility,
+        `SELECT repo_id, host, hostname, owner, name, visibility,
                 parent_slug, parent_url, root_slug, root_url, fetched_at
          FROM repo_identity WHERE repo_id = ?`
       )
-      .get(r.id) as RepoIdentityRow | undefined;
-    if (identity !== undefined) repo.identity = repoIdentityFromRow(identity);
-    return repo;
+      .get(repoId) as RepoIdentityRow | undefined;
+  }
+
+  /** Every stored identity for one profile, keyed by repo id. */
+  private identityRows(profileId: ProfileId): Map<string, RepoIdentityRow> {
+    const rows = this.db
+      .prepare(
+        `SELECT i.repo_id, i.host, i.hostname, i.owner, i.name, i.visibility,
+                i.parent_slug, i.parent_url, i.root_slug, i.root_url,
+                i.fetched_at
+         FROM repo_identity i
+         JOIN repos r ON r.id = i.repo_id
+         WHERE r.profile_id = ?`
+      )
+      .all(profileId) as RepoIdentityRow[];
+    return new Map(rows.map((row) => [row.repo_id, row]));
   }
 
   private upsertRepoRow(

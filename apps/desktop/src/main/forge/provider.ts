@@ -43,6 +43,11 @@ export type ForkInput = {
   source: string;
   /** Account the fork is created in. */
   targetOwner: string;
+  /** Whether that account is the signed-in user or an organization. Passed
+   *  rather than re-derived: `status()` already established it, and a
+   *  provider that re-asks has to decide what to do when the second answer
+   *  fails — which is how a personal fork ends up with `--org <user>`. */
+  targetOwnerKind: "user" | "organization";
   /** Name for the fork; defaults to the source's name. */
   targetName: string;
   /** Copy only the default branch (`--default-branch-only`). Ignored by a
@@ -129,7 +134,3 @@ export const UNAVAILABLE_STATUS = (host: ForgeHost): ForgeStatus => ({
   loggedIn: false,
   owners: []
 });
-
-export function repoRef(nameWithOwner: string, url: string): ForgeRepoRef {
-  return { nameWithOwner, url };
-}
