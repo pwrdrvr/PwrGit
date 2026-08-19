@@ -251,6 +251,10 @@ export function useViewportTooltip(
     // not want it needs a way out that is not "move the mouse and wait".
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
+      // This listener only exists while a card is showing, so the Escape is
+      // spent on the card. Say so: surfaces underneath (the diff pane) defer
+      // to a claimed Escape rather than closing on the same keystroke.
+      event.preventDefault();
       // A keyboard user may have tabbed into the card. Dismissing it must not
       // drop them at the top of the document — send them back to the trigger
       // they opened it from.

@@ -5900,6 +5900,11 @@ body.is-col-resizing {
   display: flex;
   flex-direction: column;
 }
+/* The pane takes focus on open so Escape lands on it (DiffPane.tsx). It is a
+   region, not a control — no ring around the whole column. */
+.diff-pane:focus {
+  outline: none;
+}
 .diff-pane__head {
   flex: 0 0 auto;
   display: flex;
@@ -5910,10 +5915,11 @@ body.is-col-resizing {
 }
 /* The pane's one way out, at the far right where a dismiss is expected. It
    sits on the accent tint so it reads as the header's action rather than as
-   chrome — the same --accent-soft / --accent-bright pairing the sidebar's
-   active row uses, which is the only rung --accent-bright is contrast-floored
-   for (see tokens.css). Hover deepens the tint one notch instead of swapping
-   to a neutral wash, so it stays the same object under the pointer. */
+   chrome: --accent-bright on --accent-soft, one of the two surfaces the
+   contrast tests floor that colour against (see tokens.css and
+   sidebar-contrast.test.ts). Hover keeps that floored surface and firms the
+   ring to solid accent, so it stays the same object under the pointer and
+   never paints the icon on an unmeasured tint. */
 .diff-pane__close {
   width: 26px;
   height: 26px;
@@ -5929,7 +5935,7 @@ body.is-col-resizing {
   cursor: pointer;
 }
 .diff-pane__close:hover {
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: var(--accent);
 }
 .diff-pane__close:focus-visible {
   outline: 2px solid var(--focus-ring);

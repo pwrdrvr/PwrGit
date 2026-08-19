@@ -104,6 +104,7 @@ export function App() {
     "squash" | "reorder" | null
   >(null);
   const [diffTarget, setDiffTarget] = useState<DiffTarget | null>(null);
+  const closeDiff = useCallback(() => setDiffTarget(null), []);
   // A commit clicked in the lineage — the rail shows its file list, scoped
   // like the WIP Changes tab; files open one-file diffs in the main pane.
   const [commitFocus, setCommitFocus] = useState<{
@@ -509,7 +510,7 @@ export function App() {
                 <DiffPane
                   worktreeId={selectedWorktree.id}
                   target={diffTarget}
-                  onClose={() => setDiffTarget(null)}
+                  onClose={closeDiff}
                 />
               )}
             </>

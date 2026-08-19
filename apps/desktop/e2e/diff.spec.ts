@@ -56,7 +56,7 @@ test("clicking a changed file opens its diff, then close returns to lineage", as
   await expect(window.locator(".graph-toolbar")).toBeVisible();
 });
 
-test("Escape closes the diff pane when nothing else owns the keystroke", async () => {
+test("Escape closes the diff pane only while the pane owns the keystroke", async () => {
   sandbox = createGitSandbox();
   const repo = sandbox.makeRepo("escrepo");
   writeFileSync(join(repo.path, "README.md"), "# escrepo\nbrand new line\n");
@@ -66,11 +66,25 @@ test("Escape closes the diff pane when nothing else owns the keystroke", async (
   await addRootAndExpand(window, handle, sandbox, "escrepo");
 
   await expect(window.locator(".changes-wip")).toBeVisible({ timeout: 20_000 });
-  await window.locator(".file-row", { hasText: "README.md" }).click();
+  const fileRow = window.locator(".file-row", { hasText: "README.md" });
+  await fileRow.click();
   await expect(window.locator(".diff-pane")).toBeVisible({ timeout: 20_000 });
 
-  // Escape with focus nowhere in particular is the pane's to handle.
-  await window.locator(".diff-pane__close").focus();
+  // The row is a plain div, so the click alone would leave focus on <body>;
+  // the pane takes it on open, and that is what makes the next Escape its own.
+  await expect(window.locator(".diff-pane")).toBeFocused();
+
+  // An overlay that has taken focus keeps its Escape: the repo switcher
+  // closes, the pane underneath does not.
+  await window.keyboard.press("Meta+k");
+  await expect(window.locator(".overlay-panel")).toBeVisible();
+  await window.keyboard.press("Escape");
+  await expect(window.locator(".overlay-panel")).toBeHidden();
+  await expect(window.locator(".diff-pane")).toBeVisible();
+
+  // Clicking anywhere in the pane hands it focus again; then Escape closes it.
+  await window.locator(".diff-pane__body").click();
+  await expect(window.locator(".diff-pane")).toBeFocused();
   await window.keyboard.press("Escape");
   await expect(window.locator(".diff-pane")).toHaveCount(0);
   await expect(window.locator(".graph-toolbar")).toBeVisible();

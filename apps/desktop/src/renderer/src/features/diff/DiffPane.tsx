@@ -22,28 +22,6 @@ export function DiffPane({
   const [patch, setPatch] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const paneRef = useRef<HTMLDivElement>(null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-
-  // Escape closes the pane unless something else owns the keystroke. The
-  // repo switcher and the dialogs sit over this pane and preventDefault the
-  // Escape that dismisses them; focus inside another overlay is theirs too.
-  // Focus inside the pane, or nowhere in particular, is ours (see
-  // BranchFromCommitDialog for why a subtree-scoped handler is too narrow).
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      const focused = document.activeElement;
-      const ownsFocus =
-        focused === null ||
-        focused === document.body ||
-        paneRef.current?.contains(focused) === true;
-      if (!ownsFocus) return;
-      onCloseRef.current();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
 
   const key =
     target.kind === "file"
@@ -82,6 +60,32 @@ export function DiffPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [worktreeId, key]);
 
+  // The pane takes focus when it opens and whenever it is pointed at a new
+  // target, so Escape works right after the click that opened it — whether
+  // that click landed on a non-focusable file row (focus would otherwise fall
+  // to <body>) or on the commit tab's "Full diff" button (which would keep
+  // it). Escape is scoped to that focus: it closes the pane only while focus
+  // is inside it, so a modal that has taken focus, or a rail control the user
+  // is working in, keeps its own Escape. Overlays that leave focus where it
+  // was (a hover tooltip) claim the key with preventDefault instead — and
+  // since their window listeners are registered after this one, the check
+  // is deferred a tick so the claim has been made by the time it is read.
+  useEffect(() => {
+    paneRef.current?.focus({ preventScroll: true });
+  }, [key]);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      const focused = document.activeElement;
+      if (paneRef.current?.contains(focused) !== true) return;
+      window.setTimeout(() => {
+        if (!event.defaultPrevented) onClose();
+      }, 0);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
   // Binary image files carry no patch text, so the viewer needs to know which
   // two revisions this diff compares in order to fetch the bytes itself.
   const images: ImageDiffRevisions = useMemo(
@@ -116,7 +120,7 @@ export function DiffPane({
         : `commit ${target.hash}`;
 
   return (
-    <div className="diff-pane" ref={paneRef}>
+    <div className="diff-pane" ref={paneRef} tabIndex={-1}>
       <div className="diff-pane__head">
         <span className="diff-pane__title" title={title}>
           {title}
