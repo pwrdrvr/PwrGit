@@ -1,11 +1,18 @@
 # github — AGENTS.md
 
-Bulk GitHub PR status for local branches (including non-worktree refs needed by
-the lineage graph). Best-effort: silently no-ops when
-origin isn't github.com, `gh` isn't logged in, or the network fails.
+Bulk change-request status for local branches (including non-worktree refs
+needed by the lineage graph). Best-effort: silently no-ops when no provider
+claims `origin`'s host, the CLI isn't logged in, or the network fails.
 
+- **`PrService` is forge-agnostic** — see `../forge/AGENTS.md`. It resolves one
+  `ForgeProvider` per call from `origin` and speaks only `PrSummary`, so GitLab
+  merge requests use the same cache, deltas, and TTLs as GitHub pull requests.
+  Everything below describes the GitHub provider's half.
 - **Auth**: `getGitHubToken()` prefers `GITHUB_TOKEN`, else `gh auth token`
   (reuses the user's gh login — no separate flow). Cached ~5 min.
+- **`gh-cli.ts` is a thin binding** over the shared, audited spawner in
+  `../forge/cli-runner.ts`; it holds GitHub's vocabulary (binary, token shapes,
+  sensitive env names) and nothing else. Its test still covers the runner.
 - **Bulk query**: `pr-query.ts` builds ONE GraphQL query per ~50 branches via
   aliased `pullRequests(headRefName: $bN)` — so 100 branches ≈ 2 requests, not
   100. Matching by `headRefName` (not the live ref) still finds PRs whose branch
@@ -43,5 +50,9 @@ origin isn't github.com, `gh` isn't logged in, or the network fails.
   Stale proof and thumbnail refreshes are internally queued two at a time. Use
   its update event to repaint a card, never to block hover. Its `gh api`
   transport deliberately does not share the PR client's token-extraction flow.
+  GitLab's half of this lives in `../forge/gitlab/commit-author-transport.ts`.
+- **Commit-author identity is forge-wide** — see `../forge/AGENTS.md`. The
+  service keeps its historical `GitHub*` names and IPC channel, but resolves any
+  recognized `origin` and routes to that forge's credential-opaque transport.
 - A **merged PR** makes a branch prunable at any age (`isPrunableWorktree`) —
   catches squash/rebase merges the git-ancestry "in default" check can't see.

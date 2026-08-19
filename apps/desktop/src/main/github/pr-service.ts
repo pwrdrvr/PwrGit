@@ -1,13 +1,7 @@
 import type { PrSummary } from "@pwrgit/shared";
 import type { GitExec } from "../git/dugite";
 import type { DB } from "../persistence/db";
-import {
-  fetchPrsByNumbers,
-  fetchPrsForCommits,
-  fetchPrsForRepo,
-  getGitHubToken
-} from "./pr-client";
-import { parseGitHubRemote, type GitHubRepo } from "./remote";
+import { resolveForge, type ResolvedForge } from "../forge/providers";
 
 const REPO_REFRESH_TTL_MS = 10 * 60_000;
 const SCHEDULED_BRANCH_REFRESH_TTL_MS = 60_000;
@@ -17,10 +11,8 @@ const TERMINAL_USER_BRANCH_REFRESH_TTL_MS = 60_000;
 type PrRefreshTrigger = "scheduled" | "user";
 
 type PrServiceDeps = {
-  getGitHubToken?: typeof getGitHubToken;
-  fetchPrsForRepo?: typeof fetchPrsForRepo;
-  fetchPrsForCommits?: typeof fetchPrsForCommits;
-  fetchPrsByNumbers?: typeof fetchPrsByNumbers;
+  /** Swap in a fake forge; the default reads `origin` and picks a provider. */
+  resolveForge?: typeof resolveForge;
   now?: () => number;
 };
 
@@ -38,15 +30,18 @@ export type PrStatusDeltas = {
 };
 
 /**
- * Fetches GitHub PR status for a repo's branches and caches it in branch_pr.
- * Best-effort: silently no-ops when origin isn't github.com, gh isn't logged in,
- * or the network fails — cached data just stays put.
+ * Fetches change-request status for a repo's branches and caches it in
+ * branch_pr. Best-effort: silently no-ops when `origin` is on a host no
+ * provider claims, the CLI isn't logged in, or the network fails — cached data
+ * just stays put.
+ *
+ * Everything here is forge-agnostic. Which forge answers is decided once per
+ * call by `resolveForge`, and the provider it returns speaks only in
+ * `PrSummary`, so GitLab merge requests flow through the same cache, deltas,
+ * and TTLs as GitHub pull requests.
  */
 export class PrService {
-  private readonly getToken: typeof getGitHubToken;
-  private readonly fetchPrs: typeof fetchPrsForRepo;
-  private readonly fetchCommitPrs: typeof fetchPrsForCommits;
-  private readonly fetchPrNumbers: typeof fetchPrsByNumbers;
+  private readonly resolveForge: typeof resolveForge;
   private readonly now: () => number;
   // A bulk lookup and a focused branch lookup may overlap for the same repo.
   // They must share one request: otherwise an older bulk response can land
@@ -69,10 +64,7 @@ export class PrService {
     private readonly git: GitExec,
     deps: PrServiceDeps = {}
   ) {
-    this.getToken = deps.getGitHubToken ?? getGitHubToken;
-    this.fetchPrs = deps.fetchPrsForRepo ?? fetchPrsForRepo;
-    this.fetchCommitPrs = deps.fetchPrsForCommits ?? fetchPrsForCommits;
-    this.fetchPrNumbers = deps.fetchPrsByNumbers ?? fetchPrsByNumbers;
+    this.resolveForge = deps.resolveForge ?? resolveForge;
     this.now = deps.now ?? (() => Date.now());
   }
 
@@ -188,12 +180,16 @@ export class PrService {
       .prepare("SELECT path FROM repos WHERE id = ?")
       .get(repoId) as { path: string } | undefined;
     if (repo === undefined) return emptyPrStatusDeltas();
-    const remote = await this.originRemote(repo.path);
-    if (remote === null) return emptyPrStatusDeltas();
-    const token = await this.getToken();
+    const forge = await this.originForge(repo.path);
+    if (forge === null) return emptyPrStatusDeltas();
+    const token = await forge.provider.getToken(forge.repo.host);
     if (token === null) return emptyPrStatusDeltas();
     try {
-      const prs = await this.fetchPrNumbers(token, remote.owner, remote.repo, numbers);
+      const prs = await forge.provider.fetchPrsByNumbers(
+        token,
+        forge.repo,
+        numbers
+      );
       return this.upsertPrNumberStatuses(repoId, prs);
     } catch {
       return emptyPrStatusDeltas();
@@ -214,16 +210,15 @@ export class PrService {
       : this.staleCommitHashes(repoId, commitHashes, opts.trigger);
     if (stale.length === 0) return new Map();
 
-    const remote = await this.originRemote(repo.path);
-    if (remote === null) return new Map();
-    const token = await this.getToken();
+    const forge = await this.originForge(repo.path);
+    if (forge === null) return new Map();
+    const token = await forge.provider.getToken(forge.repo.host);
     if (token === null) return new Map();
 
     try {
-      const prs = await this.fetchCommitPrs(
+      const prs = await forge.provider.fetchPrsForCommits(
         token,
-        remote.owner,
-        remote.repo,
+        forge.repo,
         stale
       );
       return this.upsertCommits(repoId, prs);
@@ -315,14 +310,18 @@ export class PrService {
       return empty;
     }
 
-    const remote = await this.originRemote(repo.path);
-    if (remote === null) return empty;
-    const token = await this.getToken();
+    const forge = await this.originForge(repo.path);
+    if (forge === null) return empty;
+    const token = await forge.provider.getToken(forge.repo.host);
     if (token === null) return empty;
 
     let prs: Map<string, PrSummary | null>;
     try {
-      prs = await this.fetchPrs(token, remote.owner, remote.repo, branches);
+      prs = await forge.provider.fetchPrsForBranches(
+        token,
+        forge.repo,
+        branches
+      );
     } catch {
       return empty; // best-effort; keep whatever's cached
     }
@@ -380,10 +379,10 @@ export class PrService {
     );
   }
 
-  private async originRemote(repoPath: string): Promise<GitHubRepo | null> {
+  private async originForge(repoPath: string): Promise<ResolvedForge | null> {
     const out = await this.git(["remote", "get-url", "origin"], repoPath);
     if (!out.ok || out.value.exitCode !== 0) return null;
-    return parseGitHubRemote(out.value.stdout);
+    return this.resolveForge(out.value.stdout);
   }
 
   private async branchesToCheck(
