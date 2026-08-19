@@ -130,12 +130,16 @@ function makeDivergedRelease(): Fixture {
 }
 
 /** Commit onto `branch` without checking it out — cheap enough to build the
- *  dozens of branches the active-cap case needs. Dates are pinned and strictly
- *  increasing; git's 1-second resolution would otherwise tie the sort. */
-function commitOnto(repo: string, branch: string, message: string, at: number): void {
+ *  dozens of branches the active-cap case needs. Dates are strictly increasing
+ *  because git's 1-second resolution would otherwise tie the sort, and are
+ *  offset from the repo's OWN newest commit rather than a fixed epoch: an
+ *  absolute date stops being "newer than the fixture" the day the clock
+ *  passes it. */
+function commitOnto(repo: string, branch: string, message: string, step: number): void {
   const tree = git(repo, "rev-parse", "main^{tree}").trim();
   const parent = git(repo, "rev-parse", "main").trim();
-  const when = `${at} +0000`;
+  const newest = Number(git(repo, "log", "-1", "--format=%ct", "main").trim());
+  const when = `${newest + 60 * (step + 1)} +0000`;
   const sha = execFileSync(
     "git",
     ["commit-tree", tree, "-p", parent, "-m", message],
@@ -240,7 +244,7 @@ describe("graph:lanes — unapplied upstream work on non-default branches", () =
     commit(fixture.repo, "fix-x.txt", "rel: fix X");
     commit(fixture.repo, "fix-y.txt", "rel: fix Y");
     git(fixture.repo, "push", "origin", "their-rewrite:releases/1.0");
-    const theirs = git(fixture.repo, "rev-list", "origin/releases/1.0~2..their-rewrite")
+    const theirs = git(fixture.repo, "rev-list", "-n", "2", "origin/releases/1.0")
       .trim()
       .split("\n");
     git(fixture.repo, "checkout", "-q", "main");
@@ -275,7 +279,7 @@ describe("graph:lanes — unapplied upstream work on non-default branches", () =
     const extra: WorktreeRow[] = [];
     for (let i = 0; i < 31; i += 1) {
       const branch = `feature/${i}`;
-      commitOnto(fixture.repo, branch, `feature ${i}`, 1_800_000_000 + i * 60);
+      commitOnto(fixture.repo, branch, `feature ${i}`, i);
       extra.push({ id: `wt-f${i}`, branch, path: fixture.repo });
     }
 

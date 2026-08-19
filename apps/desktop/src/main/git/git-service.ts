@@ -460,6 +460,13 @@ export async function readLogRefs(
  * fetch here runs `--prune`: a ref can vanish between being listed and being
  * walked. Without it one pruned ref is `fatal: bad revision`, which fails the
  * whole graph — a view should lose that segment, not go blank.
+ *
+ * Caveat: the flag covers `notRef` too. If the default ref itself disappears
+ * (a renamed remote default, say) the exclusion quietly stops applying and
+ * this returns plain history up to `limit` rather than erroring. Callers on
+ * the repo-level path walk the trunk first, which has no such flag and fails
+ * loudly there; the cached per-worktree path can serve one stale graph before
+ * the TTL refreshes it.
  */
 export async function readUniqueCommits(
   git: GitExec,

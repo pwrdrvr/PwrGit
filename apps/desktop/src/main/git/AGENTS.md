@@ -60,7 +60,9 @@ sidebar says "↓1", and the row the user wants is simply absent.
 the short form, not `%(upstream:track)`: it is a fixed set of symbols rather
 than a sentence git may translate.
 
-Two rules follow, and `graph-lanes.test.ts` pins both:
+Two rules follow. `graph-lanes.test.ts` pins which commits get walked;
+`lane-layout.test.ts` pins how the result is drawn — run both when you touch
+either half:
 
 - Every drawn branch contributes its upstream to the walk when it is behind.
   That ref rides in `upstreamRefs`, NOT `shownBranches` — the toolbar counts
