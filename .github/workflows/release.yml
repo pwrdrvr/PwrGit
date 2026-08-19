@@ -54,20 +54,16 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      # vitest runs under Node, but the postinstall electron-rebuild leaves
-      # better-sqlite3 built for Electron's ABI. Rebuild for Node before the
-      # unit suite; must run from apps/desktop.
-      - name: Rebuild better-sqlite3 for Node
-        working-directory: apps/desktop
-        run: pnpm rebuild better-sqlite3
+      # A fresh `pnpm i` already leaves better-sqlite3 built for both ABIs
+      # (see the root AGENTS.md); this repairs a restored node_modules cache
+      # where one half is stale. Nothing has to be restored afterwards for
+      # packaging: electron-builder runs @electron/rebuild inside the release
+      # stage, once per packed arch.
+      - name: Ensure better-sqlite3 native builds are current
+        run: pnpm --filter @pwrgit/desktop run rebuild:electron-native
 
       - name: Test (unit)
         run: pnpm test
-
-      # Restore the Electron-ABI native build before staging — the release
-      # stage ships whatever better-sqlite3 binary is in node_modules.
-      - name: Restore Electron-ABI native build
-        run: pnpm --filter @pwrgit/desktop run rebuild:electron-native
 
       - name: Prepare release stage
         run: node apps/desktop/scripts/release.mjs --prepare-only

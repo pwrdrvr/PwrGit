@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
+import { getNativeBinding } from "./native-binding";
 
 export type DB = Database.Database;
 
@@ -22,7 +23,7 @@ export function openDatabase(
   dbPath: string,
   migrationsDir: string = DEFAULT_MIGRATIONS_DIR
 ): DB {
-  const db = new Database(dbPath);
+  const db = new Database(dbPath, { nativeBinding: getNativeBinding() });
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   runMigrations(db, migrationsDir);

@@ -158,16 +158,16 @@ still allowed when the user explicitly asks for one.
    ```bash
    RELEASE_TAG=v<version> pnpm release:check
    pnpm typecheck
-   pnpm --dir apps/desktop rebuild better-sqlite3
    pnpm test
-   pnpm --filter @pwrgit/desktop run rebuild:electron-native
    pnpm build
    ```
 
    Run `pnpm --filter @pwrgit/desktop package:dryrun` when a local macOS
-   packaging smoke is appropriate. Remember that Node tests and Electron
-   packaging cannot share the same `better-sqlite3` native build; restore the
-   Electron ABI after tests, as shown above.
+   packaging smoke is appropriate. No native rebuild belongs in that sequence:
+   one `pnpm i` leaves `better-sqlite3` built for both ABIs, so tests and
+   packaging share an install. If a native ABI error does surface,
+   `pnpm --filter @pwrgit/desktop run rebuild:electron-native` repairs
+   whichever half is stale (see the root `AGENTS.md`).
 
 ## Commit And Land
 
