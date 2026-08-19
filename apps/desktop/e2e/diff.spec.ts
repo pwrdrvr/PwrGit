@@ -29,7 +29,7 @@ test.afterEach(async () => {
   sandbox = null;
 });
 
-test("clicking a changed file opens its diff, then back returns to lineage", async () => {
+test("clicking a changed file opens its diff, then close returns to lineage", async () => {
   sandbox = createGitSandbox();
   const repo = sandbox.makeRepo("diffrepo");
   // Uncommitted modification to the committed README (adds a line).
@@ -51,8 +51,28 @@ test("clicking a changed file opens its diff, then back returns to lineage", asy
     window.locator(".diff-row--add", { hasText: "brand new line" })
   ).toBeVisible();
 
-  // Back returns to the lineage graph.
-  await window.locator(".diff-pane__back").click();
+  // Close returns to the lineage graph.
+  await window.locator(".diff-pane__close").click();
+  await expect(window.locator(".graph-toolbar")).toBeVisible();
+});
+
+test("Escape closes the diff pane when nothing else owns the keystroke", async () => {
+  sandbox = createGitSandbox();
+  const repo = sandbox.makeRepo("escrepo");
+  writeFileSync(join(repo.path, "README.md"), "# escrepo\nbrand new line\n");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, sandbox, "escrepo");
+
+  await expect(window.locator(".changes-wip")).toBeVisible({ timeout: 20_000 });
+  await window.locator(".file-row", { hasText: "README.md" }).click();
+  await expect(window.locator(".diff-pane")).toBeVisible({ timeout: 20_000 });
+
+  // Escape with focus nowhere in particular is the pane's to handle.
+  await window.locator(".diff-pane__close").focus();
+  await window.keyboard.press("Escape");
+  await expect(window.locator(".diff-pane")).toHaveCount(0);
   await expect(window.locator(".graph-toolbar")).toBeVisible();
 });
 
@@ -89,8 +109,8 @@ test("clicking a commit scopes the rail to its files; a file opens its diff", as
   ).toBeVisible();
   await expect(window.locator(".diff-pane__sub")).toContainText("in ");
 
-  // Back → lineage; ‹ Changes → the working-tree view returns.
-  await window.locator(".diff-pane__back").click();
+  // Close → lineage; ‹ Changes → the working-tree view returns.
+  await window.locator(".diff-pane__close").click();
   await expect(window.locator(".graph-toolbar")).toBeVisible();
   await commitTab.locator(".commit-tab__close").click();
   await expect(window.locator(".commit-tab")).toHaveCount(0);
