@@ -65,7 +65,16 @@ function commit(dir: string, file: string, message: string): void {
 
 type WorktreeRow = { id: string; branch: string; path: string };
 
-type Fixture = { repo: string; release: string; worktrees: WorktreeRow[] };
+type Fixture = {
+  repo: string;
+  release: string;
+  /** Unique per fixture: `laneCache` is module-level and keyed on the repo id,
+   *  so sharing one would let a test read the previous test's graph. */
+  repoId: string;
+  worktrees: WorktreeRow[];
+};
+
+let repoSeq = 0;
 
 /**
  * A repo whose `releases/1.0` worktree has diverged from its upstream: one
@@ -73,6 +82,8 @@ type Fixture = { repo: string; release: string; worktrees: WorktreeRow[] };
  * applied. The shape a release branch takes mid-backport.
  */
 function makeDivergedRelease(): Fixture {
+  repoSeq += 1;
+  const repoId = `repo-${repoSeq}`;
   const root = mkdtempSync(join(tmpdir(), "pwrgit-lanes-"));
   const repo = join(root, "repo");
   const remote = join(root, "remote.git");
@@ -110,6 +121,7 @@ function makeDivergedRelease(): Fixture {
   return {
     repo,
     release,
+    repoId,
     worktrees: [
       { id: "wt-main", branch: "main", path: repo },
       { id: "wt-rel", branch: "releases/1.0", path: release }
@@ -137,7 +149,7 @@ function commitOnto(repo: string, branch: string, message: string, at: number): 
 }
 
 /** A db that answers each of graph:lanes' statements from in-memory rows. */
-function fakeDb(worktrees: WorktreeRow[]): DB {
+function fakeDb(repoId: string, worktrees: WorktreeRow[]): DB {
   return {
     prepare: (sql: string) => ({
       get: (id: string) => {
@@ -145,7 +157,7 @@ function fakeDb(worktrees: WorktreeRow[]): DB {
         if (row === undefined) return undefined;
         return {
           path: row.path,
-          repo_id: "repo-1",
+          repo_id: repoId,
           branch: row.branch,
           email: "t@t.com"
         };
@@ -159,12 +171,16 @@ function fakeDb(worktrees: WorktreeRow[]): DB {
   } as unknown as DB;
 }
 
-function harness(worktrees: WorktreeRow[]): CommandBus {
+function harness(fixture: Fixture, extra: WorktreeRow[] = []): CommandBus {
   const bus = new CommandBus();
   const state = {
     resolveDefaultBranch: async () => ({ name: "main", ref: "origin/main" })
   } as unknown as WorktreeStateService;
-  registerGraphHandlers(bus, fakeDb(worktrees), state);
+  registerGraphHandlers(
+    bus,
+    fakeDb(fixture.repoId, [...fixture.worktrees, ...extra]),
+    state
+  );
   return bus;
 }
 
@@ -190,7 +206,7 @@ describe("graph:lanes — unapplied upstream work on non-default branches", () =
     "draws the upstream's unapplied commits for a diverged release branch (%s scope)",
     async (scope) => {
       const fixture = makeDivergedRelease();
-      const graph = await lanes(harness(fixture.worktrees), scope);
+      const graph = await lanes(harness(fixture), scope);
 
       // The commit only origin/releases/1.0 reaches must be in the window —
       // the point of "you are 1 behind" is being able to see what it is.
@@ -203,7 +219,7 @@ describe("graph:lanes — unapplied upstream work on non-default branches", () =
 
   it("keeps the local-only commit too, so the divergence reads as a fork", async () => {
     const fixture = makeDivergedRelease();
-    const graph = await lanes(harness(fixture.worktrees), "active");
+    const graph = await lanes(harness(fixture), "active");
 
     expect(subjects(graph)).toEqual(
       expect.arrayContaining([
@@ -225,7 +241,7 @@ describe("graph:lanes — unapplied upstream work on non-default branches", () =
       extra.push({ id: `wt-f${i}`, branch, path: fixture.repo });
     }
 
-    const graph = await lanes(harness([...fixture.worktrees, ...extra]), "active");
+    const graph = await lanes(harness(fixture, extra), "active");
     expect(graph.shownBranches).not.toContain("releases/1.0");
     expect(subjects(graph)).toContain("rel: upstream fix nobody has locally");
     expect(graph.upstreamRefs).toContain("origin/releases/1.0");
@@ -242,8 +258,7 @@ describe("graph:lanes — unapplied upstream work on non-default branches", () =
     git(fixture.repo, "checkout", "-q", "main");
 
     const graph = await lanes(
-      harness([
-        ...fixture.worktrees,
+      harness(fixture, [
         { id: "wt-tracks", branch: "tracks-main", path: fixture.repo }
       ]),
       "active"
@@ -254,9 +269,26 @@ describe("graph:lanes — unapplied upstream work on non-default branches", () =
     expect(graph.shownBranches).not.toContain("origin/main");
   });
 
+  it("draws a ref once when it is already shown as a branch of its own", async () => {
+    const fixture = makeDivergedRelease();
+    // Merge the release branch into main and push: the local branch now fails
+    // `--no-merged`, so "all" scope never sees it and keeps the *remote* as a
+    // branch in its own right. The focused worktree still tracks that remote
+    // and is still behind it, so the per-worktree step must not add it again.
+    git(fixture.repo, "merge", "--no-ff", "-m", "merge release", "releases/1.0");
+    git(fixture.repo, "push", "origin", "main");
+    git(fixture.repo, "fetch", "origin");
+
+    const graph = await lanes(harness(fixture), "all");
+
+    expect(graph.shownBranches).toContain("origin/releases/1.0");
+    const drawn = [...graph.shownBranches, ...graph.upstreamRefs];
+    expect(drawn.filter((r) => r === "origin/releases/1.0")).toHaveLength(1);
+  });
+
   it("keeps upstream refs out of the branch count the toolbar reports", async () => {
     const fixture = makeDivergedRelease();
-    const graph = await lanes(harness(fixture.worktrees), "active");
+    const graph = await lanes(harness(fixture), "active");
 
     // "N of M active branches" reads shownBranches.length. An upstream ref is
     // not an active branch, so folding it in there would inflate the count.
@@ -274,8 +306,7 @@ describe("graph:lanes — unapplied upstream work on non-default branches", () =
     git(fixture.repo, "checkout", "-q", "main");
 
     const graph = await lanes(
-      harness([
-        ...fixture.worktrees,
+      harness(fixture, [
         { id: "wt-sync", branch: "in-sync", path: fixture.repo }
       ]),
       "active"

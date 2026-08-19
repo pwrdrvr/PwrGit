@@ -73,11 +73,9 @@ export type GitSandbox = {
   /**
    * A release branch in its own worktree, diverged from its upstream: one
    * commit of ours that was never pushed, one of theirs we fetched but never
-   * applied. Returns the release worktree's path alongside the repo.
+   * applied.
    */
-  makeRepoWithDivergedReleaseBranch: (
-    name: string
-  ) => TestRepo & { releasePath: string };
+  makeRepoWithDivergedReleaseBranch: (name: string) => TestRepo;
   /** Rewritten commits plus work unique to both local and upstream. */
   makeRepoWithRewrittenDivergence: (
     name: string,
@@ -210,9 +208,7 @@ export function createGitSandbox(): GitSandbox {
     };
   };
 
-  const makeRepoWithDivergedReleaseBranch = (
-    name: string
-  ): TestRepo & { releasePath: string } => {
+  const makeRepoWithDivergedReleaseBranch = (name: string): TestRepo => {
     const repoPath = initRepo(name);
     const remotePath = join(remotesDir, `${name}.git`);
     git(remotesDir, "init", "--bare", `${name}.git`);
@@ -246,7 +242,6 @@ export function createGitSandbox(): GitSandbox {
     return {
       name,
       path: repoPath,
-      releasePath,
       addWorktree,
       createBranch: (branch: string) => git(repoPath, "branch", branch)
     };

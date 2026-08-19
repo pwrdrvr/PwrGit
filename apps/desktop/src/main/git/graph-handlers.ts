@@ -185,8 +185,9 @@ export function registerGraphHandlers(
       // without the same for every other drawn branch, origin/releases/1.0's
       // commits sit in the object store and are never drawn — the lane reads
       // as current when it is a commit short, and the "↓1" in the sidebar has
-      // nothing to point at. Their refs join `shownBranches` too, so the
-      // renderer dashes them as fetched-but-unapplied.
+      // nothing to point at. Their refs ride in `upstreamRefs` — NOT in
+      // `shownBranches`, which the toolbar counts as active branches — and the
+      // renderer draws that union, dashing them as fetched-but-unapplied.
       const unapplied = await unappliedUpstreams(execGit, wt.path);
       if (!unapplied.ok) return unapplied;
       // The trunk's own remotes are already walked and drawn as the spine.
@@ -319,8 +320,13 @@ export function registerGraphHandlers(
       headBranch === "" ? undefined : cached.upstreamOf[headBranch];
     // The upstream ref to add, or undefined when the repo-level walk already
     // drew it (or there is nothing unapplied to draw).
+    // Checked against both lists: in "all" scope a remote whose local branch is
+    // merged is drawn as a branch in its own right, and appending it again
+    // would draw the same ref twice.
     const missingUpstream =
-      headUpstream !== undefined && !cached.upstreamRefs.includes(headUpstream)
+      headUpstream !== undefined &&
+      !cached.upstreamRefs.includes(headUpstream) &&
+      !cached.shownBranches.includes(headUpstream)
         ? headUpstream
         : undefined;
     const missingHead =

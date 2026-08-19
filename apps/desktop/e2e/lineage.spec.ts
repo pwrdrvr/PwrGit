@@ -691,7 +691,7 @@ test("a focused branch behind its upstream draws the commits it is missing", asy
   const s = sandbox;
   // releases/1.0 is ahead 1 / behind 1 — the shape a release branch takes
   // mid-backport, and the one the trunk's remote-ahead handling never covered.
-  const repo = s.makeRepoWithDivergedReleaseBranch("diverged-release");
+  s.makeRepoWithDivergedReleaseBranch("diverged-release");
 
   handle = await launchApp();
   const { window } = handle;

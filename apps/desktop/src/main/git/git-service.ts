@@ -455,6 +455,11 @@ export async function readLogRefs(
  * trunk), silently dropping branch tips — fetching only the not-in-trunk
  * commits guarantees every branch's work is present no matter how noisy the
  * default branch is.
+ *
+ * `--ignore-missing` because callers pass remote-tracking refs, and every
+ * fetch here runs `--prune`: a ref can vanish between being listed and being
+ * walked. Without it one pruned ref is `fatal: bad revision`, which fails the
+ * whole graph — a view should lose that segment, not go blank.
  */
 export async function readUniqueCommits(
   git: GitExec,
@@ -468,6 +473,7 @@ export async function readUniqueCommits(
     [
       "log",
       "--topo-order",
+      "--ignore-missing",
       `--pretty=format:${LOG_FORMAT}`,
       "-n",
       String(limit),
