@@ -603,6 +603,71 @@ describe("auto updater", () => {
     expect(versions.stable.latest.unavailableReason).not.toMatch(/403/);
   });
 
+  it("backs off on a secondary rate limit, which keeps its hourly budget", async () => {
+    const updater = await importAutoUpdater();
+    // GitHub's abuse-detection limit answers 403 with Retry-After and leaves
+    // x-ratelimit-remaining untouched.
+    fetchMock.mockResolvedValue(
+      githubResponse(
+        { message: "You have exceeded a secondary rate limit" },
+        {
+          headers: { "retry-after": "60", "x-ratelimit-remaining": "59" },
+          status: 403
+        }
+      )
+    );
+
+    const versions = await updater.readAppUpdateReleaseVersions();
+
+    expect(versions.stable.latest.unavailableReason).toMatch(
+      /GitHub rate limit reached\. Update checks resume at /
+    );
+    expect(versions.stable.latest.unavailableReason).not.toMatch(/403/);
+
+    // The window has not passed, so a follow-up read must not re-request.
+    await updater.readAppUpdateReleaseVersions();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("still reports a plain 403 that carries no rate-limit headers", async () => {
+    const updater = await importAutoUpdater();
+    fetchMock.mockResolvedValue(
+      githubResponse({ message: "Forbidden" }, { status: 403 })
+    );
+
+    const versions = await updater.readAppUpdateReleaseVersions();
+
+    expect(versions.stable.latest.unavailableReason).toBe(
+      "GitHub releases request failed with 403"
+    );
+  });
+
+  it("does not reject a background check when rate limited with no cache", async () => {
+    // Nothing awaits the startup/periodic checks, so a rejection here would
+    // surface as an unhandled rejection in main.
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown): void => {
+      rejections.push(reason);
+    };
+    process.on("unhandledRejection", onRejection);
+    try {
+      fetchMock.mockResolvedValue(
+        rateLimitedResponse(Date.now() + 30 * 60 * 1_000)
+      );
+      const updater = await startUpdater();
+      await vi.waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+      });
+      // The hourly tick throws from the backoff branch without a request.
+      await vi.advanceTimersByTimeAsync(updater.APP_UPDATE_CHECK_INTERVAL_MS);
+      await Promise.resolve();
+    } finally {
+      process.off("unhandledRejection", onRejection);
+    }
+
+    expect(rejections).toEqual([]);
+  });
+
   it("stops requesting while rate limited and serves the last good list", async () => {
     const updater = await importAutoUpdater();
     await updater.readAppUpdateReleaseVersions();

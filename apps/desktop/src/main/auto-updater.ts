@@ -374,10 +374,25 @@ async function runUpdateCheck(
   return { status: "available", version: result.updateInfo.version };
 }
 
+// Nobody awaits a background check, so its failure has to die here. Rate
+// limiting makes a rejection routine rather than exceptional — without this
+// the startup check and every hourly tick raise an unhandled rejection in
+// main, which has no process-level handler.
+function runBackgroundUpdateCheck(trigger: "startup" | "periodic"): void {
+  void checkForAppUpdatesNow(trigger).catch((err: unknown) => {
+    logMain(
+      "warn",
+      "updater",
+      `${trigger} update check failed`,
+      err instanceof Error ? err.message : String(err)
+    );
+  });
+}
+
 function startPeriodicUpdateChecks(): void {
   if (periodicUpdateCheckTimer) return;
   periodicUpdateCheckTimer = setInterval(() => {
-    void checkForAppUpdatesNow("periodic");
+    runBackgroundUpdateCheck("periodic");
   }, APP_UPDATE_CHECK_INTERVAL_MS);
   periodicUpdateCheckTimer.unref?.();
 }
@@ -668,28 +683,46 @@ function rateLimitedError(resetAt: number): Error {
   );
 }
 
-// A 403 here reads like an auth failure but is almost always the anonymous
-// rate limit. Record the reset time so later reads back off instead of
-// spending requests GitHub will reject anyway.
-function releaseRequestError(response: Response): Error {
-  const status = response.status;
-  const rateLimited =
-    (status === 403 || status === 429) &&
-    readResponseHeader(response, "x-ratelimit-remaining") === "0";
-  if (!rateLimited) {
-    return new Error(`GitHub releases request failed with ${status}`);
-  }
-  const resetSeconds = Number(readResponseHeader(response, "x-ratelimit-reset"));
-  rateLimitResetAt =
-    Number.isFinite(resetSeconds) && resetSeconds > 0
+// When does this 403/429 mean "rate limited", and until when? The primary
+// hourly limit reports a spent budget in x-ratelimit-remaining and the window
+// end in x-ratelimit-reset. The secondary ("abuse detection") limit leaves the
+// hourly budget intact and sends Retry-After instead, so keying only off
+// x-ratelimit-remaining would miss it. Undefined means this is a real 403.
+function rateLimitResetFromResponse(response: Response): number | undefined {
+  if (readResponseHeader(response, "x-ratelimit-remaining") === "0") {
+    const resetSeconds = Number(
+      readResponseHeader(response, "x-ratelimit-reset")
+    );
+    return Number.isFinite(resetSeconds) && resetSeconds > 0
       ? resetSeconds * 1_000
       : Date.now() + RATE_LIMIT_FALLBACK_BACKOFF_MS;
+  }
+  const retryAfterSeconds = Number(readResponseHeader(response, "retry-after"));
+  if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+    return Date.now() + retryAfterSeconds * 1_000;
+  }
+  return undefined;
+}
+
+// A 403 here reads like an auth failure but is almost always a rate limit.
+// Record the reset time so later reads back off instead of spending requests
+// GitHub will reject anyway.
+function releaseRequestError(response: Response): Error {
+  const status = response.status;
+  const resetAt =
+    status === 403 || status === 429
+      ? rateLimitResetFromResponse(response)
+      : undefined;
+  if (resetAt === undefined) {
+    return new Error(`GitHub releases request failed with ${status}`);
+  }
+  rateLimitResetAt = resetAt;
   logMain(
     "warn",
     "updater",
-    `GitHub release rate limit reached status=${status} resetAt=${new Date(rateLimitResetAt).toISOString()}`
+    `GitHub release rate limit reached status=${status} resetAt=${new Date(resetAt).toISOString()}`
   );
-  return rateLimitedError(rateLimitResetAt);
+  return rateLimitedError(resetAt);
 }
 
 async function fetchGitHubReleases(): Promise<GitHubRelease[]> {
@@ -888,7 +921,7 @@ export function initAutoUpdater(options: AutoUpdaterOptions): void {
   });
 
   startPeriodicUpdateChecks();
-  void checkForAppUpdatesNow("startup");
+  runBackgroundUpdateCheck("startup");
 }
 
 export async function installDownloadedAppUpdate(): Promise<AppUpdateInstallResult> {

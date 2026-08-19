@@ -54,10 +54,16 @@ async function recordMainFetches(app: AppHandle["app"]): Promise<void> {
 }
 
 async function mainFetchedUrls(app: AppHandle["app"]): Promise<string[]> {
-  return await app.evaluate(
-    () =>
-      (globalThis as unknown as { __fetchedUrls?: string[] }).__fetchedUrls ?? []
+  const recorded = await app.evaluate(
+    () => (globalThis as unknown as { __fetchedUrls?: string[] }).__fetchedUrls
   );
+  // Never fall back to an empty list: that would let this guard "pass" by
+  // recording nothing at all, which is exactly the state it exists to catch.
+  expect(
+    Array.isArray(recorded),
+    "fetch recorder was not installed in main — this assertion proves nothing"
+  ).toBe(true);
+  return recorded as string[];
 }
 
 test("menu opens the Settings window; panes render and settings persist", async () => {
