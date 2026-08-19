@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ok, type PrSummary } from "@pwrgit/shared";
 import { openDatabase, type DB } from "../persistence/db";
 import type { GitExec } from "../git/dugite";
+import type { ResolvedForge } from "../forge/providers";
+import type { ForgeProvider, ForgeRepo } from "../forge/types";
 import { PrService } from "./pr-service";
 
 const REMOTE = "git@github.com:pwrdrvr/PwrGit.git\n";
@@ -12,6 +14,32 @@ const git: GitExec = async (args) =>
     stderr: "",
     exitCode: 0
   });
+
+const GITHUB_ORIGIN: ForgeRepo = {
+  kind: "github",
+  host: "github.com",
+  path: "pwrdrvr/PwrGit"
+};
+
+/**
+ * A provider the service cannot tell from a real one. Only the methods a test
+ * cares about are supplied; the rest answer with nothing, so a test that starts
+ * exercising a new path fails loudly rather than hitting the network.
+ */
+function fakeForge(
+  overrides: Partial<Omit<ForgeProvider, "kind">> = {},
+  repo: ForgeRepo = GITHUB_ORIGIN
+): () => ResolvedForge {
+  const provider: ForgeProvider = {
+    kind: repo.kind,
+    getToken: async () => "token",
+    fetchPrsForBranches: async () => new Map(),
+    fetchPrsForCommits: async () => new Map(),
+    fetchPrsByNumbers: async () => new Map(),
+    ...overrides
+  };
+  return () => ({ provider, repo });
+}
 
 function pr(overrides: Partial<PrSummary> = {}): PrSummary {
   return {
@@ -55,25 +83,26 @@ describe("PrService", () => {
     statusResponse = new Map();
     statusFetches = [];
     service = new PrService(db, git, {
-      getGitHubToken: async () => "token",
-      fetchPrsForRepo: async (_token, _owner, _repo, branches) => {
-        fetches.push(branches);
-        return response;
-      },
-      fetchPrsForCommits: async (_token, _owner, _repo, commitHashes) => {
-        commitFetches.push(commitHashes);
-        return new Map(commitHashes.map((hash) => [
-          hash,
-          commitResponse.get(hash) ?? null
-        ]));
-      },
-      fetchPrsByNumbers: async (_token, _owner, _repo, numbers) => {
-        statusFetches.push(numbers);
-        return new Map(numbers.map((number) => [
-          number,
-          statusResponse.get(number) ?? null
-        ]));
-      },
+      resolveForge: fakeForge({
+        fetchPrsForBranches: async (_token, _repo, branches) => {
+          fetches.push(branches);
+          return response;
+        },
+        fetchPrsForCommits: async (_token, _repo, commitHashes) => {
+          commitFetches.push(commitHashes);
+          return new Map(commitHashes.map((hash) => [
+            hash,
+            commitResponse.get(hash) ?? null
+          ]));
+        },
+        fetchPrsByNumbers: async (_token, _repo, numbers) => {
+          statusFetches.push(numbers);
+          return new Map(numbers.map((number) => [
+            number,
+            statusResponse.get(number) ?? null
+          ]));
+        }
+      }),
       now: () => now
     });
   });
@@ -148,12 +177,13 @@ describe("PrService", () => {
     });
     fetches = [];
     service = new PrService(db, git, {
-      getGitHubToken: async () => "token",
-      fetchPrsForRepo: async (_token, _owner, _repo, branches) => {
-        fetches.push(branches);
-        fetchStarted?.();
-        return await fetchResult;
-      },
+      resolveForge: fakeForge({
+        fetchPrsForBranches: async (_token, _repo, branches) => {
+          fetches.push(branches);
+          fetchStarted?.();
+          return await fetchResult;
+        }
+      }),
       now: () => now
     });
 
@@ -192,11 +222,14 @@ describe("PrService", () => {
       ["feature/squashed", pr({ state: "merged", isDraft: false })]
     ]);
     service = new PrService(db, localGit, {
-      getGitHubToken: async () => "token",
-      fetchPrsForRepo: async (_token, _owner, _repo, branches) => {
-        fetches.push(branches);
-        return new Map(branches.map((branch) => [branch, response.get(branch) ?? null]));
-      },
+      resolveForge: fakeForge({
+        fetchPrsForBranches: async (_token, _repo, branches) => {
+          fetches.push(branches);
+          return new Map(
+            branches.map((branch) => [branch, response.get(branch) ?? null])
+          );
+        }
+      }),
       now: () => now
     });
 
@@ -308,5 +341,123 @@ describe("PrService", () => {
       ["feature/pr-state"]
     ]);
     expect(service.cachedBranchPr("repo", "feature/pr-state")?.number).toBe(43);
+  });
+});
+
+describe("PrService across forges", () => {
+  const GITLAB_REMOTE = "git@gitlab.com:pwrdrvr/qa/forge/PwrGit-Test.git\n";
+  const gitlabGit: GitExec = async (args) =>
+    ok({
+      stdout: args[0] === "for-each-ref" ? "feat-merged\n" : GITLAB_REMOTE,
+      stderr: "",
+      exitCode: 0
+    });
+
+  let db: DB;
+
+  beforeEach(() => {
+    db = openDatabase(":memory:");
+    db.prepare(
+      "INSERT INTO profiles (id, name, email) VALUES ('profile', 'Profile', 'profile@example.com')"
+    ).run();
+    db.prepare(
+      "INSERT INTO repos (id, profile_id, name, path) VALUES ('repo', 'profile', 'PwrGit-Test', '/repo')"
+    ).run();
+    db.prepare(
+      "INSERT INTO worktrees (id, repo_id, branch, path) VALUES ('wt', 'repo', 'feat-merged', '/repo/wt')"
+    ).run();
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  /**
+   * The whole point of the abstraction: a merge request lands in the same
+   * branch_pr cache, with the same delta semantics, as a pull request. Nothing
+   * below mentions GitLab except the origin URL and the provider behind it.
+   */
+  it("caches a GitLab merge request through the same path as a PR", async () => {
+    const seen: { host: string; path: string; branches: string[] }[] = [];
+    const service = new PrService(db, gitlabGit, {
+      resolveForge: fakeForge(
+        {
+          getToken: async (host) => `token-for-${host}`,
+          fetchPrsForBranches: async (_token, repo, branches) => {
+            seen.push({ host: repo.host, path: repo.path, branches });
+            return new Map([
+              [
+                "feat-merged",
+                pr({
+                  number: 4,
+                  state: "merged",
+                  isDraft: false,
+                  url: "https://gitlab.com/pwrdrvr/qa/forge/PwrGit-Test/-/merge_requests/4"
+                })
+              ]
+            ]);
+          }
+        },
+        {
+          kind: "gitlab",
+          host: "gitlab.com",
+          path: "pwrdrvr/qa/forge/PwrGit-Test"
+        }
+      ),
+      now: () => 1_000_000
+    });
+
+    const changed = await service.refreshRepo("repo");
+
+    // The nested group path must survive intact — a two-field owner/repo
+    // shape could not have carried it.
+    expect(seen).toEqual([
+      {
+        host: "gitlab.com",
+        path: "pwrdrvr/qa/forge/PwrGit-Test",
+        branches: ["feat-merged"]
+      }
+    ]);
+    expect(changed.get("feat-merged")).toMatchObject({ number: 4 });
+    expect(service.cachedBranchPr("repo", "feat-merged")).toMatchObject({
+      number: 4,
+      state: "merged",
+      isDraft: false
+    });
+  });
+
+  it("no-ops when origin is on a host no provider claims", async () => {
+    const unknownGit: GitExec = async (args) =>
+      ok({
+        stdout:
+          args[0] === "for-each-ref"
+            ? "feat-merged\n"
+            : "git@bitbucket.org:team/repo.git\n",
+        stderr: "",
+        exitCode: 0
+      });
+    const service = new PrService(db, unknownGit, { now: () => 1_000_000 });
+
+    await expect(service.refreshRepo("repo")).resolves.toEqual(new Map());
+    expect(service.cachedBranchPr("repo", "feat-merged")).toBeUndefined();
+  });
+
+  it("asks the provider for a token per host", async () => {
+    const hosts: string[] = [];
+    const service = new PrService(db, gitlabGit, {
+      resolveForge: fakeForge(
+        {
+          getToken: async (host) => {
+            hosts.push(host);
+            return null; // logged out — the refresh must simply do nothing
+          }
+        },
+        { kind: "gitlab", host: "gitlab.example.com", path: "g/s/p" }
+      ),
+      now: () => 1_000_000
+    });
+
+    await expect(service.refreshRepo("repo")).resolves.toEqual(new Map());
+    expect(hosts).toEqual(["gitlab.example.com"]);
   });
 });
