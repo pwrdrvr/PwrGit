@@ -199,15 +199,79 @@ export type PullProgressPhase =
   | "reapply"
   | "refresh";
 
-/** Lifecycle of a pull request — the only status we track in the first cut. */
+/** Hosting products PwrGit can read change-request status from. */
+export type ForgeKind = "github" | "gitlab";
+
+/**
+ * What a forge can actually answer, so the UI states facts rather than guesses.
+ *
+ * These are properties of the *provider*, not of a login: they say what the
+ * integration is able to report at all, which is why a capability being false
+ * means "never ask" rather than "ask and handle the failure".
+ */
+export type ForgeCapabilities = {
+  /** Resolves many branches per request rather than one at a time. */
+  batchedBranchLookup: boolean;
+  /**
+   * Resolves many commit associations per request. GitLab has no batch
+   * endpoint for this, so its association lookups are one request per commit
+   * and callers must keep the visible set small.
+   */
+  batchedCommitAssociation: boolean;
+  /** Reports diff size, commit count, and lifecycle timestamps. */
+  changeSizeAndTimeline: boolean;
+  /** Can prove the forge account behind an exact commit's Git author. */
+  commitAuthorIdentity: boolean;
+};
+
+/** Whether one forge is usable right now, and what it can do when it is. */
+export type ForgeStatus = {
+  kind: ForgeKind;
+  /** The CLI PwrGit shells out to, e.g. `gh` or `glab`. */
+  cli: string;
+  installed: boolean;
+  loggedIn: boolean;
+  capabilities: ForgeCapabilities;
+};
+
+/** Lifecycle of a change request, in the vocabulary both forges collapse into. */
 export type PrLifecycle = "open" | "merged" | "closed";
 
+/**
+ * One change request — a GitHub pull request or a GitLab merge request.
+ *
+ * "PR" is this app's neutral term for both; `forge` is what decides the wording
+ * the UI shows. Everything below `isDraft` is OPTIONAL and must stay that way:
+ * a row cached before those fields existed will never gain them, because a
+ * change request that has already reached a terminal state stops being
+ * refreshed. Readers MUST treat absence as "not known" and render nothing —
+ * never as zero, which is a different and much stronger claim.
+ */
 export type PrSummary = {
   number: number;
   url: string;
   title: string;
   state: PrLifecycle;
   isDraft: boolean;
+  /** Which forge issued this number; decides PR vs MR wording. */
+  forge?: ForgeKind;
+  /** Forge host — a number is only unique within one instance. */
+  host?: string;
+  /** Namespace path, e.g. `pwrdrvr/PwrGit` or `group/sub/project`. */
+  repoPath?: string;
+  /** Branch holding the changes. */
+  headRefName?: string;
+  /** Branch the changes are proposed into. */
+  baseRefName?: string;
+  additions?: number;
+  deletions?: number;
+  changedFiles?: number;
+  commitCount?: number;
+  /** Epoch milliseconds. Immutable, so age stays exact without re-polling. */
+  createdAt?: number;
+  /** Epoch milliseconds; set only on the matching terminal state. */
+  mergedAt?: number;
+  closedAt?: number;
 };
 
 export type Repo = {

@@ -27,6 +27,7 @@ import type {
   GraphLog,
   GitLfsStatus,
   LaneGraph,
+  ForgeStatus,
   PrSummary,
   Profile,
   ProfileId,
@@ -532,9 +533,17 @@ export interface Commands {
     };
     res: null;
   };
-  "github:status": {
+  /**
+   * Which forges are usable right now, and what each can do.
+   *
+   * Answered entirely from main's cached probe: the renderer must never shell a
+   * forge CLI or call a vendor API itself. Under React StrictMode every effect
+   * runs twice, so a renderer-side probe becomes a duplicated subprocess per
+   * mount; here a repeated request is just a cache read.
+   */
+  "forge:status": {
     req: void;
-    res: { installed: boolean; loggedIn: boolean };
+    res: { forges: ForgeStatus[] };
   };
   /**
    * Return immediately and start any eligible identity verification in the
@@ -952,6 +961,13 @@ export interface Events {
     repoId: string;
     prs: Record<string, PrSummary | null>;
   };
+  /**
+   * A forge became usable, stopped being usable, or changed what it can do.
+   *
+   * Pushed by main so the renderer never has to poll for it — the UI repaints
+   * the affected surfaces instead of re-probing.
+   */
+  "forge:statusChanged": { forges: ForgeStatus[] };
   /**
    * A non-blocking proof-backed identity lookup settled. Consumers that
    * requested this commit can repaint without polling or blocking hover.

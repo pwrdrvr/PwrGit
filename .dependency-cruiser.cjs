@@ -33,6 +33,8 @@ const TEST_FILE = "\\.(test|spec)\\.tsx?$";
  * `electron-updater/`.
  */
 const ELECTRON_PACKAGE = "node_modules/electron/";
+/** Forge SDKs, matched the same trailing-segment way as ELECTRON_PACKAGE. */
+const FORGE_SDK_PACKAGES = "node_modules/(@octokit|@gitbeaker)/";
 
 module.exports = {
   forbidden: [
@@ -104,6 +106,25 @@ module.exports = {
       },
       to: {
         path: "^apps/desktop/src/main/",
+      },
+    },
+    {
+      name: "renderer-does-not-call-forge-apis",
+      severity: "error",
+      comment:
+        "The renderer must not talk to a forge (GitHub/GitLab) itself. Forge " +
+        "reads are owned by main, which caches them, coalesces them, and pushes " +
+        "deltas back over the bus. A renderer-side call defeats all three, and " +
+        "under React StrictMode every effect runs twice, so one careless " +
+        "useEffect becomes two API calls per mount per chip — a sweep across a " +
+        "commit list would fan out into a burst and get rate limited. Ask main " +
+        "via `pr:refresh` / `forge:status` and render from `pr:changed`.",
+      from: {
+        path: "^apps/desktop/src/renderer/",
+        pathNot: TEST_FILE,
+      },
+      to: {
+        path: FORGE_SDK_PACKAGES,
       },
     },
     {

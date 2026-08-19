@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { prSummaryFromRow, prSummarySelect } from "../forge/pr-row";
 import { type Dirent, readdirSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
@@ -637,8 +638,7 @@ export class RepoIndexer {
         .prepare(
           `SELECT w.id, w.branch, w.path, w.pinned, r.id AS repo_id, r.name AS repo_name,
                   r.profile_id, p.name AS profile_name,
-                  pr.number AS pr_number, pr.url AS pr_url, pr.title AS pr_title,
-                  pr.state AS pr_state, pr.is_draft AS pr_is_draft
+                  ${prSummarySelect("pr")}
            FROM worktrees w
            JOIN repos r ON r.id = w.repo_id
            JOIN profiles p ON p.id = r.profile_id
@@ -674,15 +674,8 @@ export class RepoIndexer {
           worktreeId: w.id,
           repoName: w.repo_name
         };
-        if (w.pr_number !== null) {
-          hit.pr = {
-            number: w.pr_number,
-            url: w.pr_url ?? "",
-            title: w.pr_title ?? "",
-            state: (w.pr_state ?? "open") as PrSummary["state"],
-            isDraft: w.pr_is_draft === 1
-          };
-        }
+        const pr = prSummaryFromRow(w as unknown as Record<string, unknown>);
+        if (pr !== undefined) hit.pr = pr;
         wtHits.set(w.id, hit);
       }
     }
@@ -828,8 +821,7 @@ export class RepoIndexer {
                   s.diverged_from_default AS diverged_from_default,
                   s.is_default_branch AS is_default_branch,
                   s.last_activity_at AS last_activity_at,
-                  p.number AS pr_number, p.url AS pr_url, p.title AS pr_title,
-                  p.state AS pr_state, p.is_draft AS pr_is_draft
+                  ${prSummarySelect("p")}
            FROM worktrees w
            LEFT JOIN worktree_state s ON s.worktree_id = w.id
            LEFT JOIN branch_pr p ON p.repo_id = w.repo_id AND p.branch = w.branch
@@ -857,20 +849,9 @@ export class RepoIndexer {
       };
       if (w.last_activity_at !== null) wt.lastActivityAt = w.last_activity_at;
       if (w.custom_order !== null) wt.order = w.custom_order;
-      if (w.pr_number !== null && w.pr_url !== null) {
-        const state =
-          w.pr_state === "merged"
-            ? "merged"
-            : w.pr_state === "closed"
-              ? "closed"
-              : "open";
-        wt.pr = {
-          number: w.pr_number,
-          url: w.pr_url,
-          title: w.pr_title ?? "",
-          state,
-          isDraft: w.pr_is_draft === 1
-        };
+      const pr = prSummaryFromRow(w as unknown as Record<string, unknown>);
+      if (pr !== undefined) {
+        wt.pr = pr;
       }
       return wt;
     });

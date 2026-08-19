@@ -14,7 +14,13 @@ import { toPrLifecycle } from "../types";
  *    `PrSummary.number` is a number — every read goes through `toNumber`.
  */
 
-const MR_FIELDS = "iid title webUrl state draft sourceBranch createdAt";
+/**
+ * `diffStatsSummary` is GitLab's equivalent of GitHub's additions/deletions/
+ * changedFiles triple; `fileCount` is the field GitHub calls `changedFiles`.
+ */
+const MR_FIELDS = `iid title webUrl state draft sourceBranch targetBranch
+        createdAt mergedAt closedAt commitCount
+        diffStatsSummary { additions deletions fileCount }`;
 
 export type MrNode = {
   iid: string | number;
@@ -23,7 +29,16 @@ export type MrNode = {
   state: string;
   draft: boolean | null;
   sourceBranch?: string | null;
+  targetBranch?: string | null;
   createdAt?: string | null;
+  mergedAt?: string | null;
+  closedAt?: string | null;
+  commitCount?: number | null;
+  diffStatsSummary?: {
+    additions?: number | null;
+    deletions?: number | null;
+    fileCount?: number | null;
+  } | null;
 };
 
 export type MrPage = { nodes: MrNode[]; endCursor: string | null; hasNextPage: boolean };
@@ -149,8 +164,47 @@ export function toSummary(node: MrNode): PrSummary {
     state: toPrLifecycle(node.state),
     // GitLab exposes draft as a boolean; the legacy `WIP:` title prefix is
     // reflected in that same field, so the title never needs parsing.
-    isDraft: node.draft === true
+    isDraft: node.draft === true,
+    ...optionalText("headRefName", node.sourceBranch),
+    ...optionalText("baseRefName", node.targetBranch),
+    ...optionalCount("additions", node.diffStatsSummary?.additions),
+    ...optionalCount("deletions", node.diffStatsSummary?.deletions),
+    ...optionalCount("changedFiles", node.diffStatsSummary?.fileCount),
+    ...optionalCount("commitCount", node.commitCount),
+    ...optionalTime("createdAt", node.createdAt),
+    ...optionalTime("mergedAt", node.mergedAt),
+    ...optionalTime("closedAt", node.closedAt)
   };
+}
+
+/**
+ * Absent stays absent. A missing count is "not known", which is a different
+ * claim from zero, and the hover card renders nothing rather than a false 0.
+ */
+function optionalCount(
+  key: string,
+  value: number | null | undefined
+): Record<string, number> {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? { [key]: value }
+    : {};
+}
+
+function optionalText(
+  key: string,
+  value: string | null | undefined
+): Record<string, string> {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text === "" ? {} : { [key]: text };
+}
+
+function optionalTime(
+  key: string,
+  value: string | null | undefined
+): Record<string, number> {
+  if (typeof value !== "string") return {};
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? { [key]: parsed } : {};
 }
 
 /** GraphQL sends `iid` as a String; REST sends it as a number. */

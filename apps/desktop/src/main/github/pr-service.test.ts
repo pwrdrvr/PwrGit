@@ -461,3 +461,131 @@ describe("PrService across forges", () => {
     expect(hosts).toEqual(["gitlab.example.com"]);
   });
 });
+
+describe("PrService change-request detail", () => {
+  const REMOTE = "git@github.com:pwrdrvr/PwrGit.git\n";
+  const detailGit: GitExec = async (args) =>
+    ok({
+      stdout: args[0] === "for-each-ref" ? "feat\n" : REMOTE,
+      stderr: "",
+      exitCode: 0
+    });
+
+  const DETAILED: PrSummary = {
+    number: 42,
+    url: "https://github.com/pwrdrvr/PwrGit/pull/42",
+    title: "Detailed",
+    state: "open",
+    isDraft: false,
+    forge: "github",
+    host: "github.com",
+    repoPath: "pwrdrvr/PwrGit",
+    headRefName: "feat",
+    baseRefName: "main",
+    additions: 10,
+    deletions: 3,
+    changedFiles: 2,
+    commitCount: 4,
+    createdAt: 1_000
+  };
+
+  let db: DB;
+
+  beforeEach(() => {
+    db = openDatabase(":memory:");
+    db.prepare(
+      "INSERT INTO profiles (id, name, email) VALUES ('p', 'P', 'p@example.com')"
+    ).run();
+    db.prepare(
+      "INSERT INTO repos (id, profile_id, name, path) VALUES ('r', 'p', 'R', '/r')"
+    ).run();
+    db.prepare(
+      "INSERT INTO worktrees (id, repo_id, branch, path) VALUES ('w', 'r', 'feat', '/r/w')"
+    ).run();
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("round-trips every detail column through the branch cache", async () => {
+    const service = new PrService(db, detailGit, {
+      resolveForge: fakeForge({
+        fetchPrsForBranches: async () => new Map([["feat", DETAILED]])
+      }),
+      now: () => 1_000_000
+    });
+
+    await service.refreshRepo("r");
+
+    expect(service.cachedBranchPr("r", "feat")).toMatchObject({
+      forge: "github",
+      host: "github.com",
+      repoPath: "pwrdrvr/PwrGit",
+      headRefName: "feat",
+      baseRefName: "main",
+      additions: 10,
+      deletions: 3,
+      changedFiles: 2,
+      commitCount: 4,
+      createdAt: 1_000
+    });
+  });
+
+  it("keeps detail absent rather than zero when the forge did not report it", async () => {
+    const service = new PrService(db, detailGit, {
+      resolveForge: fakeForge({
+        fetchPrsForBranches: async () =>
+          new Map([
+            [
+              "feat",
+              {
+                number: 7,
+                url: "u",
+                title: "t",
+                state: "open" as const,
+                isDraft: false
+              }
+            ]
+          ])
+      }),
+      now: () => 1_000_000
+    });
+
+    await service.refreshRepo("r");
+
+    const cached = service.cachedBranchPr("r", "feat");
+    // "Not known" must survive the round trip as absent, never as 0.
+    for (const key of ["additions", "deletions", "changedFiles", "commitCount"]) {
+      expect(cached).not.toHaveProperty(key);
+    }
+  });
+
+  it("refreshes detail through the by-number update path", async () => {
+    // This path UPDATEs rather than upserts, so it needs its own coverage:
+    // a merged PR must carry its new diff size and mergedAt onto the branch row.
+    const merged: PrSummary = {
+      ...DETAILED,
+      state: "merged",
+      additions: 99,
+      mergedAt: 2_000
+    };
+    const service = new PrService(db, detailGit, {
+      resolveForge: fakeForge({
+        fetchPrsForBranches: async () => new Map([["feat", DETAILED]]),
+        fetchPrsByNumbers: async () => new Map([[42, merged]])
+      }),
+      now: () => 1_000_000
+    });
+
+    await service.refreshRepo("r");
+    const deltas = await service.refreshPrNumbers("r", [42]);
+
+    expect(deltas.branches.get("feat")).toMatchObject({ state: "merged" });
+    expect(service.cachedBranchPr("r", "feat")).toMatchObject({
+      state: "merged",
+      additions: 99,
+      mergedAt: 2_000
+    });
+  });
+});

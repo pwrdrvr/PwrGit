@@ -428,6 +428,60 @@ describe("RepoIndexer", () => {
     expect(repoA?.worktrees.find((w) => w.isPrimary)?.branch).toBe("main");
   });
 
+  it("carries hover-card detail onto a worktree's PR, not just the number", async () => {
+    // Regression: the sidebar join projected only number/url/title/state/
+    // is_draft, so the PR hover card could never show Changes or Timeline no
+    // matter what the cache held.
+    const profile = profileService.get(profileId);
+    if (profile === null) throw new Error("profile missing");
+    const repos = await indexer.rescanProfile(profile);
+    const repoA = repos.find((r) => r.name === "repoA");
+    if (repoA === undefined) throw new Error("repoA missing");
+
+    db.prepare(
+      `INSERT INTO branch_pr
+         (repo_id, branch, number, url, title, state, is_draft,
+          forge, host, repo_path, head_ref, base_ref,
+          additions, deletions, changed_files, commit_count, opened_at, merged_at)
+       VALUES (?, 'feature', 4242, 'https://x', 'Detailed', 'merged', 0,
+          'gitlab', 'gitlab.com', 'g/s/p', 'feature', 'main',
+          12, 5, 3, 2, 1000, 2000)`
+    ).run(repoA.id);
+    db.prepare(
+      `INSERT INTO branch_pr (repo_id, branch, number, url, title, state, is_draft)
+       VALUES (?, 'main', 7, 'https://y', 'Bare', 'open', 0)`
+    ).run(repoA.id);
+
+    const worktrees = indexer
+      .listRepos(profileId)
+      .find((candidate) => candidate.id === repoA.id)?.worktrees;
+
+    expect(worktrees?.find((w) => w.branch === "feature")?.pr).toMatchObject({
+      number: 4242,
+      state: "merged",
+      forge: "gitlab",
+      host: "gitlab.com",
+      repoPath: "g/s/p",
+      headRefName: "feature",
+      baseRefName: "main",
+      additions: 12,
+      deletions: 5,
+      changedFiles: 3,
+      commitCount: 2,
+      createdAt: 1000,
+      mergedAt: 2000
+    });
+
+    // A row with no detail keeps it absent rather than reporting zero.
+    const bare = worktrees?.find((w) => w.branch === "main")?.pr;
+    expect(bare?.number).toBe(7);
+    for (const key of ["additions", "changedFiles", "commitCount", "createdAt"]) {
+      expect(bare).not.toHaveProperty(key);
+    }
+
+    db.prepare("DELETE FROM branch_pr WHERE repo_id = ?").run(repoA.id);
+  });
+
   it("persists a hand-arranged repo order and survives a rescan", async () => {
     const profile = profileService.get(profileId);
     if (profile === null) throw new Error("profile missing");

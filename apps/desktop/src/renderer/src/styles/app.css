@@ -5801,6 +5801,160 @@ body.is-col-resizing {
 
 /* ---- WIP framing + clickable change/commit rows ---- */
 
+/* ---- PR hover card ----
+   Structured sibling of .commit-context-card: same surface, same eyebrow /
+   title / row rhythm, same tokens. Two hover cards in one app should read as
+   one family, so any change here probably belongs there too. */
+.pr-status-card {
+  position: fixed;
+  z-index: 130;
+  width: 272px;
+  max-width: calc(100vw - 32px);
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-menu);
+  box-shadow: var(--shadow-popover);
+  color: var(--text-primary);
+  pointer-events: auto;
+  text-align: left;
+}
+.pr-status-card__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pr-status-card__eyebrow {
+  color: var(--text-muted);
+  font: 600 10px/1 var(--font-sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.pr-status-card__identity {
+  overflow: hidden;
+  color: var(--text-muted);
+  font: 500 10.5px/1 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pr-status-card__title {
+  margin-top: 6px;
+  color: var(--text-primary);
+  font: 600 12px/1.35 var(--font-sans);
+}
+.pr-status-card__branch {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font: 500 10.5px/1.3 var(--font-mono);
+}
+.pr-status-card__branch-name {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pr-status-card__branch-arrow,
+.pr-status-card__branch-base {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+.pr-status-card__status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font: 500 10.5px/1 var(--font-sans);
+  text-transform: capitalize;
+}
+.pr-status-card__dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+/* Mirrors .pr-chip__dot exactly — a card that disagreed with the chip it is
+   anchored to would just look broken. */
+.pr-status-card__dot--open,
+.pr-status-card__dot--draft {
+  background: var(--status-suspended);
+}
+.pr-status-card__dot--merged {
+  background: var(--brand-purple);
+}
+.pr-status-card__dot--closed {
+  background: var(--status-closed);
+  box-shadow: 0 0 0 1px var(--pr-dot-ring);
+}
+.pr-status-card__section {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+.pr-status-card__section-title {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text-muted);
+  font: 600 9.5px/1 var(--font-sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.pr-status-card__diff {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font: 500 10.5px/1.25 var(--font-mono);
+}
+.pr-status-card__files {
+  color: var(--text-secondary);
+}
+.pr-status-card__meter {
+  display: flex;
+  overflow: hidden;
+  height: 3px;
+  margin-top: 6px;
+  border-radius: 2px;
+  background: var(--border-subtle);
+}
+.pr-status-card__meter-additions {
+  background: var(--success-text);
+}
+.pr-status-card__meter-deletions {
+  background: var(--danger-text);
+}
+.pr-status-card__caption {
+  margin-top: 5px;
+  color: var(--text-muted);
+  font: 500 10px/1.25 var(--font-sans);
+}
+.pr-status-card__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+}
+.pr-status-card__row + .pr-status-card__row {
+  margin-top: 3px;
+}
+.pr-status-card__row-label {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font: 500 10.5px/1.25 var(--font-sans);
+}
+.pr-status-card__row-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font: 500 10.5px/1.25 var(--font-mono);
+  text-align: right;
+}
+
 .changes-wip {
   display: flex;
   align-items: center;

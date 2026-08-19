@@ -4,7 +4,7 @@ import {
   fetchMrsForBranches,
   fetchMrsForCommits
 } from "./mr-client";
-import type { ForgeProvider } from "../types";
+import { stampForge, type ForgeProvider } from "../types";
 
 /**
  * GitLab as a `ForgeProvider`.
@@ -16,10 +16,10 @@ import type { ForgeProvider } from "../types";
 export const gitlabProvider: ForgeProvider = {
   kind: "gitlab",
   getToken: async (host) => getGitLabToken(host),
-  fetchPrsForBranches: (token, repo, branches) =>
-    fetchMrsForBranches(token, repo, branches),
-  fetchPrsForCommits: (token, repo, commitHashes) =>
-    fetchMrsForCommits(token, repo, commitHashes),
-  fetchPrsByNumbers: (token, repo, numbers) =>
-    fetchMrsByNumbers(token, repo, numbers)
+  fetchPrsForBranches: async (token, repo, branches) =>
+    stampForge(await fetchMrsForBranches(token, repo, branches), repo),
+  fetchPrsForCommits: async (token, repo, commitHashes) =>
+    stampForge(await fetchMrsForCommits(token, repo, commitHashes), repo),
+  fetchPrsByNumbers: async (token, repo, numbers) =>
+    stampForge(await fetchMrsByNumbers(token, repo, numbers), repo)
 };

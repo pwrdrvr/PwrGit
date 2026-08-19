@@ -10,6 +10,7 @@ import { DiagnosticsSettings } from "./DiagnosticsSettings";
 import { ExperimentalSettings } from "./ExperimentalSettings";
 import { GeneralSettings } from "./GeneralSettings";
 import { ProfilesSettings } from "./ProfilesSettings";
+import { ForgesSettings } from "./ForgesSettings";
 import { UpdatesSettings } from "./UpdatesSettings";
 import { useAppSettings, type AppSettingsState } from "./useAppSettings";
 
@@ -19,12 +20,14 @@ export type SettingsSection =
   | "profiles"
   | "experimental"
   | "diagnostics"
+  | "forges"
   | "about";
 
 const SECTIONS: Array<{ id: SettingsSection; label: string }> = [
   { id: "general", label: "General" },
   { id: "updates", label: "Updates" },
   { id: "profiles", label: "Profiles" },
+  { id: "forges", label: "Forges" },
   { id: "experimental", label: "Experimental" },
   { id: "diagnostics", label: "Memory / CPU" },
   { id: "about", label: "About" }
@@ -137,6 +140,10 @@ function SettingsSectionBody(props: {
         }}
       />
     );
+  }
+
+  if (props.section === "forges") {
+    return <ForgesSettings />;
   }
 
   if (props.section === "experimental") {
