@@ -17,6 +17,7 @@ import {
   needsUpstreamChoice,
   ownerKindLabel,
   repositoriesOnHost,
+  ownersPhrase,
   sourceEmptyMessage,
   statusFor
 } from "./fork-dialog";
@@ -257,19 +258,22 @@ describe("sourceEmptyMessage", () => {
     catalogError: null,
     status: signedIn,
     cliLabel: "GitHub CLI",
-    query: "react"
+    query: "react",
+    searching: false,
+    searchError: null,
+    owners: ["pwrdrvr", "huntharo"]
   };
 
-  it("says it is loading while the catalog is still in flight", () => {
+  it("says what it is doing while the catalog is still in flight", () => {
     // Regression: this state was reported as "Install the GitHub CLI to
     // search." on a machine with gh installed and signed in — the dialog
-    // spends its first seconds here, so it was the first thing users saw.
+    // spends its first moment here, so it was the first thing users saw.
     expect(sourceEmptyMessage({ ...base, catalogLoaded: false })).toBe(
-      "Loading repositories…"
+      "Checking which forges are signed in…"
     );
     expect(
       sourceEmptyMessage({ ...base, catalogLoaded: false, status: notInstalled })
-    ).toBe("Loading repositories…");
+    ).toBe("Checking which forges are signed in…");
   });
 
   it("only blames the CLI once the catalog has actually answered", () => {
@@ -297,16 +301,49 @@ describe("sourceEmptyMessage", () => {
 
   it("falls through to no-matches when everything is fine", () => {
     expect(sourceEmptyMessage({ ...base, catalogLoaded: true })).toBe(
-      "No repositories match \u201Creact\u201D."
+      "No repositories match “react”."
     );
   });
 
-  it("does not quote an empty query back at the user", () => {
-    // What a signed-in forge with no discovered owners actually shows — seen
-    // on the GitLab tab, which renders `No repositories match ""`.
+  it("prompts on an empty box instead of reporting a failed search", () => {
+    // Nothing has been asked yet: no search runs until the box has something
+    // in it, so "no repositories found" would be a claim about a lookup that
+    // never happened. Naming the owners also says what typing will reach.
     expect(
       sourceEmptyMessage({ ...base, catalogLoaded: true, query: "" })
-    ).toBe("No repositories found for the known owners.");
+    ).toBe("Type to search pwrdrvr, huntharo, or paste any owner/name.");
+    expect(
+      sourceEmptyMessage({
+        ...base,
+        catalogLoaded: true,
+        query: "",
+        owners: []
+      })
+    ).toBe("Type a name to search, or paste owner/name.");
+  });
+
+  it("says a search is running rather than leaving “no matches” standing", () => {
+    expect(
+      sourceEmptyMessage({ ...base, catalogLoaded: true, searching: true })
+    ).toBe("Searching…");
+  });
+
+  it("reports why a search failed, once it has stopped running", () => {
+    expect(
+      sourceEmptyMessage({
+        ...base,
+        catalogLoaded: true,
+        searchError: "GitHub search is rate limited."
+      })
+    ).toBe("GitHub search is rate limited.");
+  });
+});
+
+describe("ownersPhrase", () => {
+  it("shortens a long owner list instead of running off the row", () => {
+    expect(ownersPhrase([])).toBe("");
+    expect(ownersPhrase(["a", "b", "c"])).toBe("a, b, c");
+    expect(ownersPhrase(["a", "b", "c", "d", "e"])).toBe("a, b, c and 2 more");
   });
 });
 

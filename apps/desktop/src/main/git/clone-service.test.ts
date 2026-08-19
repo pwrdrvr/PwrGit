@@ -62,7 +62,7 @@ function fakeGh(
   overrides: {
     login?: string;
     orgs?: string[];
-    list?: (owner: string) => unknown[];
+    search?: (args: string[]) => unknown[];
     view?: (nameWithOwner: string) => unknown;
     onCall?: (args: string[]) => void;
   } = {}
@@ -88,10 +88,35 @@ function fakeGh(
         }
       );
     }
-    if (args[0] === "repo" && args[1] === "list") {
-      return JSON.stringify(overrides.list?.(args[2] ?? "") ?? []);
+    if (args[0] === "search" && args[1] === "repos") {
+      return JSON.stringify(overrides.search?.(args) ?? []);
     }
     return "";
+  };
+}
+
+/** The `repo_identity` row the background refresh writes at launch. Written
+ *  directly rather than through `IdentityService` because what is under test
+ *  is that the clone dialog reads this table instead of spawning `git remote`
+ *  per repository — how the row got there is that service's own suite. */
+function storeIdentity(
+  db: ReturnType<typeof openDatabase>,
+  repoId: string,
+  identity: { owner: string; name: string; parent?: string }
+): void {
+  db.prepare(
+    `INSERT INTO repo_identity
+       (repo_id, host, hostname, owner, name, visibility, parent_slug)
+     VALUES (?, 'github', 'github.com', ?, ?, 'public', ?)`
+  ).run(repoId, identity.owner, identity.name, identity.parent ?? null);
+}
+
+/** A `GitExec` that records every invocation and runs nothing. Any call at all
+ *  is the failure the test is looking for. */
+function countingGit(calls: string[][]): GitExec {
+  return async (args) => {
+    calls.push([...args]);
+    return ok({ stdout: "", stderr: "", exitCode: 0 });
   };
 }
 
@@ -287,24 +312,10 @@ describe("clone destinations", () => {
 });
 
 describe("CloneService", () => {
-  it("loads profile org and existing remote owners, then marks local checkouts", async () => {
+  it("opens on stored identities alone — no forge call, no git subprocess", async () => {
     const root = temporaryRoot();
     const existingPath = join(root, "services", "existing");
     initRepo(existingPath);
-    git(
-      existingPath,
-      "remote",
-      "add",
-      "origin",
-      "git@github.com:pwrdrvr/existing.git"
-    );
-    git(
-      existingPath,
-      "remote",
-      "add",
-      "upstream",
-      "https://github.com/huntharo/existing.git"
-    );
 
     const db = openDatabase(":memory:");
     const profiles = new ProfileService(db);
@@ -315,20 +326,76 @@ describe("CloneService", () => {
       roots: [root]
     });
     const indexer = new RepoIndexer(db, systemGit);
-    await indexer.indexRepoAt(profile.id, existingPath);
-    const listed: string[] = [];
+    const indexed = await indexer.indexRepoAt(profile.id, existingPath);
+    expect(indexed.ok).toBe(true);
+    if (!indexed.ok) return;
+    // The identity the background refresh writes at launch. `huntharo` is
+    // reached only through the fork parent, which is how the remote scan this
+    // replaced saw it — through the same checkout's `upstream`.
+    storeIdentity(db, indexed.value.id, {
+      owner: "pwrdrvr",
+      name: "existing",
+      parent: "huntharo/existing"
+    });
+
+    const gh = vi.fn(fakeGh());
+    const gitCalls: string[][] = [];
+    const service = new CloneService(
+      db,
+      countingGit(gitCalls),
+      indexer,
+      profiles,
+      githubOnly(gh),
+      fakeForgeStatus()
+    );
+
+    const result = await service.catalog(profile.id);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.owners.map((owner) => owner.login).sort()).toEqual([
+      "huntharo",
+      "pwrdrvr"
+    ]);
+    // The point of the whole change: opening a dialog asks the forge nothing
+    // and spawns no git. The version this replaced ran `git remote -v` in
+    // every indexed repository and then `gh repo list` once per owner.
+    expect(gh).not.toHaveBeenCalled();
+    expect(gitCalls).toEqual([]);
+  });
+
+  it("searches once for every scoped owner, and marks local checkouts", async () => {
+    const root = temporaryRoot();
+    const existingPath = join(root, "services", "existing");
+    initRepo(existingPath);
+
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "PwrDrvr",
+      email: "test@pwrgit.dev",
+      org: "pwrdrvr",
+      roots: [root]
+    });
+    const indexer = new RepoIndexer(db, systemGit);
+    const indexed = await indexer.indexRepoAt(profile.id, existingPath);
+    expect(indexed.ok).toBe(true);
+    if (!indexed.ok) return;
+    storeIdentity(db, indexed.value.id, {
+      owner: "pwrdrvr",
+      name: "existing"
+    });
+
+    const calls: string[][] = [];
     const gh = vi.fn(
       fakeGh({
-        onCall: (args) => {
-          if (args[0] === "repo" && args[1] === "list") listed.push(args[2]!);
-        },
-        list: (owner) => [
+        onCall: (args) => calls.push(args),
+        search: () => [
           {
             name: "existing",
-            nameWithOwner: `${owner}/existing`,
-            visibility: "PUBLIC",
-            sshUrl: `git@github.com:${owner}/existing.git`,
-            url: `https://github.com/${owner}/existing`,
+            fullName: "pwrdrvr/existing",
+            visibility: "public",
+            url: "https://github.com/pwrdrvr/existing",
             updatedAt: "2026-08-01T12:00:00Z"
           }
         ]
@@ -343,22 +410,78 @@ describe("CloneService", () => {
       fakeForgeStatus()
     );
 
-    const result = await service.catalog(profile.id);
+    const result = await service.searchSources(profile.id, "existing");
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.owners.map((owner) => owner.login)).toEqual([
-      "pwrdrvr",
-      "huntharo"
-    ]);
+    expect(result.value[0]?.localPaths).toEqual([realpathSync(existingPath)]);
+    // One search, not one listing per owner. The profile org duplicates
+    // `pwrdrvr`, which is deduped rather than passed twice.
+    const searches = calls.filter(
+      (args) => args[0] === "search" && args[1] === "repos"
+    );
+    expect(searches).toHaveLength(1);
+    expect(searches[0]).toContain("existing");
     expect(
-      result.value.repositories.find(
-        (repository) => repository.nameWithOwner === "pwrdrvr/existing"
-      )?.localPaths
-    ).toEqual([existingPath]);
-    // One listing per distinct owner — the profile org duplicates `pwrdrvr`,
-    // which is deduped rather than fetched twice.
-    expect(listed.sort()).toEqual(["huntharo", "pwrdrvr"]);
+      searches[0]?.filter((arg) => arg.startsWith("--owner="))
+    ).toEqual(["--owner=pwrdrvr"]);
+  });
+
+  it("scopes to the owner an owner/prefix names, and searches the rest", async () => {
+    const root = temporaryRoot();
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "Personal",
+      email: "test@pwrgit.dev",
+      roots: [root]
+    });
+    const calls: string[][] = [];
+    const gh = vi.fn(fakeGh({ onCall: (args) => calls.push(args) }));
+    const service = new CloneService(
+      db,
+      systemGit,
+      new RepoIndexer(db, systemGit),
+      profiles,
+      githubOnly(gh),
+      fakeForgeStatus()
+    );
+
+    // A half-typed slug is the case the exact check alone cannot serve: it
+    // would 404. Scoping the search to the owner is what makes it useful.
+    expect((await service.searchSources(profile.id, "pwrdrvr/micro")).ok).toBe(
+      true
+    );
+    const searched = calls.find((args) => args[0] === "search");
+    expect(searched).toContain("micro");
+    expect(searched).toContain("--owner=pwrdrvr");
+  });
+
+  it("asks nothing when the box is empty", async () => {
+    const root = temporaryRoot();
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "Personal",
+      email: "test@pwrgit.dev",
+      roots: [root]
+    });
+    const calls: string[][] = [];
+    const gh = vi.fn(fakeGh({ onCall: (args) => calls.push(args) }));
+    const service = new CloneService(
+      db,
+      systemGit,
+      new RepoIndexer(db, systemGit),
+      profiles,
+      githubOnly(gh),
+      fakeForgeStatus()
+    );
+
+    expect(await service.searchSources(profile.id, "   ")).toEqual({
+      ok: true,
+      value: []
+    });
+    expect(calls.some((args) => args[0] === "search")).toBe(false);
   });
 
   it("reports both forges, so a dialog can say which CLI is missing", async () => {
@@ -550,7 +673,7 @@ describe("CloneService", () => {
     expect(JSON.stringify(result)).not.toContain("secretShouldNotLeak");
   });
 
-  it("surfaces authentication expiry instead of flattening catalog failures", async () => {
+  it("surfaces authentication expiry from a search rather than an empty list", async () => {
     const root = temporaryRoot();
     const db = openDatabase(":memory:");
     const profiles = new ProfileService(db);
@@ -577,12 +700,13 @@ describe("CloneService", () => {
       fakeForgeStatus()
     );
 
-    const result = await service.catalog(profile.id);
+    const result = await service.searchSources(profile.id, "anything");
 
     expect(result).toMatchObject({
-      ok: true,
-      value: {
-        warning:
+      ok: false,
+      error: {
+        code: "forge_login_required",
+        message:
           "GitHub authentication is required. Run gh auth login and verify your Git/SSH credentials, then try again."
       }
     });

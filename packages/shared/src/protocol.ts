@@ -458,8 +458,26 @@ export interface Commands {
     res: RepoWorktreeRefresh;
   };
   "repo:add": { req: { profileId: ProfileId; path: string }; res: Repo };
-  /** Forge repositories shown by the clone and fork dialogs. */
+  /** What the clone and fork dialogs need to open: known owners and forge
+   *  availability. Answered from SQLite and a cached probe — no forge call. */
   "repo:cloneCatalog": { req: { profileId: ProfileId }; res: CloneCatalog };
+  /**
+   * Repositories matching what the user typed, asked of the forge's own
+   * search.
+   *
+   * The only channel that lists repositories, and it is driven by debounced
+   * input alone. Its predecessor loaded every owner's repositories when the
+   * dialog opened and filtered them client-side, which made the first paint
+   * wait on one round trip per account.
+   *
+   * `query` is what is in the box: a bare term searches the known owners, and
+   * `owner/term` scopes to that owner — so a partial slug still finds
+   * something instead of only 404-ing the exact check.
+   */
+  "repo:searchCloneSources": {
+    req: { profileId: ProfileId; query: string; host?: ForgeHost };
+    res: CloneRepository[];
+  };
   /** Clone destinations, loaded in a fast roots/MRU pass before nested prefixes. */
   "repo:cloneDestinations": {
     req: { profileId: ProfileId; includeNested: boolean };

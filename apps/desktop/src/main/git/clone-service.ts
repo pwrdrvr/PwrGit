@@ -13,7 +13,6 @@ import {
   isSafeForgeHostname,
   isSafeProjectPath,
   ok,
-  parseForgeRemote,
   type CloneCatalog,
   type CloneDestination,
   type CloneProgress,
@@ -22,13 +21,14 @@ import {
   type ForgeHost,
   type ForgeOwner,
   type ForgeStatus,
+  type Err,
   type Profile,
+  type PwrGitError,
   type Repo,
   type Result
 } from "@pwrgit/shared";
 import type { DB } from "../persistence/db";
 import type { ProfileService } from "../profiles/profile-service";
-import { mapLimit } from "../util/map-limit";
 import type {
   ForgeRepoProvider,
   ForgeRepoRegistry
@@ -37,21 +37,13 @@ import type { ForgeStatusService } from "../forge/status";
 import { requireExit0, type GitExec } from "./dugite";
 import type { RepoIndexer } from "./repo-indexer";
 
-const OWNER_CONCURRENCY = 3;
-const REMOTE_CONCURRENCY = 8;
-const OWNER_REPO_LIMIT = 200;
-const OWNER_CACHE_TTL_MS = 5 * 60_000;
-
-/** An owner discovered from a local remote, or configured on the profile. */
-type OwnerCandidate = ForgeOwner & {
-  /** Owners that came only from `profile.org` are a guess — the org may not
-   *  exist on that forge at all — so a failure to list them is not reported
-   *  as a warning the way a locally-observed owner's would be. */
-  probed: boolean;
-};
+/** How many repositories one search asks the forge for. A search result the
+ *  user scrolls past 40 rows of is a query that needs narrowing, not a longer
+ *  page. */
+const SEARCH_LIMIT = 40;
 
 type LocalForgeState = {
-  owners: OwnerCandidate[];
+  owners: ForgeOwner[];
   /** Keyed `host:nameWithOwner`, lowercased — two forges can host the same
    *  slug, and merging them would attach the wrong checkout to a repository. */
   pathsByRepo: Map<string, string[]>;
@@ -323,11 +315,6 @@ function cloneMessageFromUnknown(
 }
 
 export class CloneService {
-  private readonly ownerCache = new Map<
-    string,
-    { fetchedAt: number; repositories: CloneRepository[] }
-  >();
-
   constructor(
     private readonly db: DB,
     private readonly git: GitExec,
@@ -337,6 +324,16 @@ export class CloneService {
     private readonly forgeStatus: ForgeStatusService
   ) {}
 
+  /**
+   * What the dialogs need to open: which accounts to scope a search to, and
+   * which forges can answer one.
+   *
+   * Costs no forge call and no subprocess. It used to list every owner's
+   * repositories here — one `gh repo list` per account, three at a time —
+   * which is why the dialog sat on "Loading repositories…" for ten seconds
+   * before the user had typed anything. Repositories now come from
+   * `searchSources`, on settled input.
+   */
   async catalog(profileId: string): Promise<Result<CloneCatalog>> {
     const profile = this.profiles.get(profileId);
     if (profile === null) {
@@ -346,94 +343,113 @@ export class CloneService {
         message: `No profile "${profileId}"`
       });
     }
-    const repos = this.indexer.listRepos(profileId);
-    const [forgeStatuses, local] = await Promise.all([
-      this.statuses(),
-      this.localForgeState(repos)
-    ]);
+    const forges = await this.statuses();
+    return ok({ owners: this.knownOwners(profile, forges), forges });
+  }
+
+  /**
+   * Repositories matching what the user typed, from the forge's own search.
+   *
+   * `owner/term` scopes to that owner, which is what makes a half-typed slug
+   * useful — `pwrdrvr/micro` lists the account's matches instead of only
+   * 404-ing as an exact name. A bare term searches the accounts already in
+   * this profile, or the whole forge when there are none yet.
+   */
+  async searchSources(
+    profileId: string,
+    input: string,
+    host: ForgeHost = "github"
+  ): Promise<Result<CloneRepository[]>> {
+    const profile = this.profiles.get(profileId);
+    if (profile === null) {
+      return err({
+        kind: "profile",
+        code: "not_found",
+        message: `No profile "${profileId}"`
+      });
+    }
+    const provider = this.forges.get(host);
+    if (provider === null) {
+      return err({
+        kind: "remote",
+        code: "unsupported_host",
+        message: `PwrGit cannot search repositories on ${host}.`
+      });
+    }
+    const forges = await this.statuses();
+    const unavailable = forgeUnavailable(forges, host);
+    if (unavailable !== null) return unavailable;
+
+    const parsed = parseSearchInput(input);
+    if (parsed === null) return ok([]);
+    const owners =
+      parsed.owner !== null
+        ? [parsed.owner]
+        : this.knownOwners(profile, forges)
+            .filter((owner) => owner.host === host)
+            .map((owner) => owner.login);
+
+    try {
+      const found = await provider.searchRepos({
+        query: parsed.term,
+        owners,
+        limit: SEARCH_LIMIT
+      });
+      const local = localForgeState(this.indexer.listRepos(profileId));
+      return ok(
+        found.map((repository) => ({
+          ...repository,
+          localPaths:
+            local.pathsByRepo.get(
+              repoKey(repository.host, repository.nameWithOwner)
+            ) ?? []
+        }))
+      );
+    } catch (cause) {
+      if (provider.isAuthError(cause)) {
+        return err({
+          kind: "remote",
+          code: "forge_login_required",
+          message: provider.errorMessage(cause)
+        });
+      }
+      return err({
+        kind: "remote",
+        code: "search_failed",
+        message: messageFromUnknown(provider, cause)
+      });
+    }
+  }
+
+  /** Accounts this profile has already used, plus its configured default org.
+   *
+   *  Read entirely from what `repo:list` already carries — `repo_identity`,
+   *  joined on in SQLite — so it costs one query the indexer has run anyway.
+   *  Fork parents count: a checkout of your fork of `openai/codex` is how you
+   *  came to care about `openai`, and the old owner scan saw the same account
+   *  through that checkout's `upstream` remote. */
+  private knownOwners(profile: Profile, forges: ForgeStatus[]): ForgeOwner[] {
     const usable = new Set(
-      forgeStatuses
+      forges
         .filter((status) => status.installed && status.loggedIn)
         .map((status) => status.kind)
     );
-
-    const owners = dedupeOwners([
+    const local = localForgeState(this.indexer.listRepos(profile.id));
+    return dedupeOwners([
       ...local.owners,
       // The profile's default org is a guess about every signed-in forge: it
       // was a GitHub-only setting, and a person with both CLIs signed in
       // usually means the same org name on whichever one has it.
       ...(profile.org?.trim()
         ? [...usable].map(
-            (host): OwnerCandidate => ({
+            (candidate): ForgeOwner => ({
               login: profile.org!.trim(),
               kind: "organization",
-              host,
-              probed: true
+              host: candidate
             })
           )
         : [])
-    ]);
-
-    const base: CloneCatalog = {
-      owners: owners.map(({ login, kind, host }) => ({ login, kind, host })),
-      repositories: [],
-      forges: forgeStatuses
-    };
-    const listable = owners.filter((owner) => usable.has(owner.host));
-    if (listable.length === 0) return ok(base);
-
-    const failures: string[] = [];
-    let authenticationMessage: string | undefined;
-    const repositoriesByOwner = new Map<string, CloneRepository[]>();
-    await mapLimit(listable, OWNER_CONCURRENCY, async (owner) => {
-      const provider = this.forges.get(owner.host);
-      if (provider === null) return;
-      try {
-        repositoriesByOwner.set(
-          repoKey(owner.host, owner.login),
-          await this.repositoriesForOwner(provider, owner.login)
-        );
-      } catch (cause) {
-        if (
-          authenticationMessage === undefined &&
-          provider.isAuthError(cause)
-        ) {
-          authenticationMessage = provider.errorMessage(cause);
-        } else if (!owner.probed) {
-          failures.push(owner.login);
-        }
-        repositoriesByOwner.set(repoKey(owner.host, owner.login), []);
-      }
-    });
-
-    const repositories = listable
-      .flatMap(
-        (owner) => repositoriesByOwner.get(repoKey(owner.host, owner.login)) ?? []
-      )
-      .filter(
-        (repository, index, all) =>
-          all.findIndex(
-            (candidate) =>
-              repoKey(candidate.host, candidate.nameWithOwner) ===
-              repoKey(repository.host, repository.nameWithOwner)
-          ) === index
-      )
-      .map((repository) => ({
-        ...repository,
-        localPaths:
-          local.pathsByRepo.get(
-            repoKey(repository.host, repository.nameWithOwner)
-          ) ?? []
-      }))
-      .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
-
-    const catalog: CloneCatalog = { ...base, repositories };
-    if (authenticationMessage !== undefined) {
-      catalog.warning = authenticationMessage;
-    } else if (failures.length > 0) {
-      catalog.warning = `Couldn't load repositories for ${failures.join(", ")}.`;
-    }
-    return ok(catalog);
+    ]).filter((owner) => usable.has(owner.host));
   }
 
   destinations(
@@ -485,26 +501,11 @@ export class CloneService {
         message: `PwrGit cannot look up repositories on ${host}.`
       });
     }
-    const status = (await this.statuses()).find(
-      (candidate) => candidate.kind === host
-    );
-    if (status === undefined || !status.installed) {
-      return err({
-        kind: "remote",
-        code: "forge_cli_missing",
-        message: `Install the ${host === "gitlab" ? "GitLab" : "GitHub"} CLI to look up repositories.`
-      });
-    }
-    if (!status.loggedIn) {
-      return err({
-        kind: "remote",
-        code: "forge_login_required",
-        message: `Sign in with the ${host === "gitlab" ? "GitLab" : "GitHub"} CLI to look up repositories.`
-      });
-    }
+    const unavailable = forgeUnavailable(await this.statuses(), host);
+    if (unavailable !== null) return unavailable;
     try {
       const repository = await provider.viewRepo(nameWithOwner);
-      const local = await this.localForgeState(this.indexer.listRepos(profileId));
+      const local = localForgeState(this.indexer.listRepos(profileId));
       repository.localPaths =
         local.pathsByRepo.get(
           repoKey(repository.host, repository.nameWithOwner)
@@ -683,76 +684,123 @@ export class CloneService {
 
   /** Every forge PwrGit knows about, whether or not its CLI is present.
    *  Delegated to the app-wide cached probe rather than asking each provider:
-   *  a probe is a subprocess, and this runs on every catalog read. */
+   *  a probe is a subprocess, and this runs every time a dialog opens. */
   async statuses(): Promise<ForgeStatus[]> {
     return this.forgeStatus.list();
   }
+}
 
-  private async repositoriesForOwner(
-    provider: ForgeRepoProvider,
-    owner: string
-  ): Promise<CloneRepository[]> {
-    const key = repoKey(provider.host, owner);
-    const cached = this.ownerCache.get(key);
-    if (
-      cached !== undefined &&
-      Date.now() - cached.fetchedAt < OWNER_CACHE_TTL_MS
-    ) {
-      return cached.repositories;
-    }
-    const repositories = await provider.listRepos(owner, OWNER_REPO_LIMIT);
-    this.ownerCache.set(key, { fetchedAt: Date.now(), repositories });
-    return repositories;
-  }
+/** Split what is in the search box into an optional owner and a term.
+ *
+ *  `pwrdrvr/micro` scopes to `pwrdrvr` and searches for `micro`; `pwrdrvr/`
+ *  scopes with nothing to match, which the forges answer with that account's
+ *  most recent repositories. A bare term has no owner. Returns null when
+ *  there is nothing to search at all — an empty box must not become a request
+ *  for everything.
+ *
+ *  GitLab nests subgroups, so the owner is everything before the LAST slash;
+ *  `group/sub/proj` searches `proj` inside `group/sub`. */
+export function parseSearchInput(
+  input: string
+): { owner: string | null; term: string } | null {
+  const trimmed = input.trim().replace(/^\/+/, "");
+  if (trimmed === "") return null;
+  const lastSlash = trimmed.lastIndexOf("/");
+  if (lastSlash <= 0) return { owner: null, term: trimmed };
+  const owner = trimmed.slice(0, lastSlash);
+  const term = trimmed.slice(lastSlash + 1).replace(/\.git$/i, "");
+  return isSafeProjectPath(`${owner}/x`) ? { owner, term } : null;
+}
 
-  private async localForgeState(repos: Repo[]): Promise<LocalForgeState> {
-    const pathsByRepo = new Map<string, string[]>();
-    const owners: OwnerCandidate[] = [];
-    await mapLimit(repos, REMOTE_CONCURRENCY, async (repo) => {
-      const result = await this.git(["remote", "-v"], repo.path);
-      if (!result.ok || result.value.exitCode !== 0) return;
-      const seen = new Set<string>();
-      for (const line of result.value.stdout.split("\n")) {
-        const url = /^\S+\s+(\S+)\s+\((?:fetch|push)\)$/.exec(line)?.[1];
-        if (url === undefined) continue;
-        const parsed = parseForgeRemote(url);
-        // `other` hosts have no provider, so listing their owners would offer
-        // repositories nothing can fetch.
-        if (parsed === null || parsed.host === "other") continue;
-        const key = repoKey(parsed.host, parsed.nameWithOwner);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        if (
-          !owners.some(
-            (owner) =>
-              owner.host === parsed.host &&
-              owner.login.toLowerCase() === parsed.owner.toLowerCase()
-          )
-        ) {
-          owners.push({
-            login: parsed.owner,
-            // A local remote cannot tell a user apart from an organization,
-            // and nothing downstream needs the distinction for listing.
-            kind: "organization",
-            host: parsed.host,
-            probed: false
-          });
-        }
-        const paths = pathsByRepo.get(key) ?? [];
-        const path = canonicalExistingPath(repo.path);
-        if (!paths.includes(path)) paths.push(path);
-        pathsByRepo.set(key, paths);
-      }
+/** The forge-availability error, or null when the forge can answer.
+ *
+ *  Shared by every read that talks to a provider so the two cannot drift: the
+ *  dialogs key off these exact codes to fall back to an unverified row rather
+ *  than showing a failure. */
+function forgeUnavailable(
+  statuses: ForgeStatus[],
+  host: ForgeHost
+): Err<PwrGitError> | null {
+  const status = statuses.find((candidate) => candidate.kind === host);
+  const label = host === "gitlab" ? "GitLab" : "GitHub";
+  if (status === undefined || !status.installed) {
+    return err({
+      kind: "remote",
+      code: "forge_cli_missing",
+      message: `Install the ${label} CLI to look up repositories.`
     });
-    return { owners, pathsByRepo };
   }
+  if (!status.loggedIn) {
+    return err({
+      kind: "remote",
+      code: "forge_login_required",
+      message: `Sign in with the ${label} CLI to look up repositories.`
+    });
+  }
+  return null;
+}
+
+/** Owners and existing checkouts, read from the identities already joined onto
+ *  `repo:list`.
+ *
+ *  Pure and synchronous, and that is the point: the version this replaced ran
+ *  `git remote -v` in every indexed repository — 52 subprocesses on this
+ *  author's profile — on every catalog read AND on every exact-name check.
+ *  `repo_identity` holds the same answer, written by the background refresh
+ *  that already runs at launch.
+ *
+ *  Fork parents count as owners. A checkout of your fork of `openai/codex` is
+ *  how you came to care about `openai`, and the remote scan saw that account
+ *  through the same checkout's `upstream`. */
+function localForgeState(repos: Repo[]): LocalForgeState {
+  const pathsByRepo = new Map<string, string[]>();
+  const owners: ForgeOwner[] = [];
+  const addOwner = (host: ForgeHost, login: string): void => {
+    // `other` hosts have no provider, so offering their owners would scope a
+    // search to accounts nothing can search.
+    if (host === "other" || login === "") return;
+    if (
+      !owners.some(
+        (owner) =>
+          owner.host === host &&
+          owner.login.toLowerCase() === login.toLowerCase()
+      )
+    ) {
+      // A stored identity cannot tell a user apart from an organization, and
+      // nothing downstream needs the distinction for searching.
+      owners.push({ login, kind: "organization", host });
+    }
+  };
+
+  for (const repo of repos) {
+    const identity = repo.identity;
+    if (identity === undefined) continue;
+    addOwner(identity.host, identity.owner);
+    for (const related of [identity.parent, identity.root]) {
+      if (related === undefined) continue;
+      const split = splitOwner(related.nameWithOwner);
+      if (split !== null) addOwner(identity.host, split);
+    }
+    if (identity.host === "other") continue;
+    const key = repoKey(identity.host, identity.nameWithOwner);
+    const paths = pathsByRepo.get(key) ?? [];
+    const path = canonicalExistingPath(repo.path);
+    if (!paths.includes(path)) paths.push(path);
+    pathsByRepo.set(key, paths);
+  }
+  return { owners, pathsByRepo };
+}
+
+function splitOwner(nameWithOwner: string): string | null {
+  const lastSlash = nameWithOwner.lastIndexOf("/");
+  return lastSlash <= 0 ? null : nameWithOwner.slice(0, lastSlash);
 }
 
 function defaultHostname(host: ForgeHost): string {
   return host === "gitlab" ? "gitlab.com" : "github.com";
 }
 
-function dedupeOwners(owners: OwnerCandidate[]): OwnerCandidate[] {
+function dedupeOwners(owners: ForgeOwner[]): ForgeOwner[] {
   return owners.filter(
     (owner, index, all) =>
       all.findIndex(

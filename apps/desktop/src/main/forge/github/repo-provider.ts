@@ -10,7 +10,8 @@ import {
   parseJsonObject,
   splitNameWithOwner,
   type ForgeRepoProvider,
-  type ForkInput
+  type ForkInput,
+  type RepoSearch
 } from "../repo-provider";
 import {
   ghErrorMessage,
@@ -21,11 +22,12 @@ import {
 
 const HOSTNAME = "github.com";
 
-/** Fields `gh repo list` and `gh repo view` are asked for. `visibility` (not
- *  `isPrivate`) is the one that can say "internal"; `parent` is what makes a
- *  fork legible without a second call. */
-export const REPO_JSON_FIELDS =
-  "name,nameWithOwner,description,visibility,isFork,parent,sshUrl,url,updatedAt";
+/** `gh search repos` is a different command with a different vocabulary: the
+ *  slug is `fullName`, there is no `sshUrl`, and there is no `parent` — the
+ *  search index does not carry fork lineage. Both gaps are filled in when a
+ *  row is picked and `viewRepo` reads the repository properly. */
+export const SEARCH_JSON_FIELDS =
+  "name,fullName,description,visibility,isPrivate,updatedAt,url";
 
 type GhRunner = (args: string[], options?: GhRunOptions) => Promise<string>;
 
@@ -46,51 +48,6 @@ function text(raw: unknown): string | undefined {
   return typeof raw === "string" && raw.trim() !== "" ? raw : undefined;
 }
 
-/** One row of `gh repo list --json` / `gh repo view --json`. */
-export function parseGhRepoJson(raw: unknown): CloneRepository | null {
-  if (raw === null || typeof raw !== "object") return null;
-  const row = raw as Record<string, unknown>;
-  const nameWithOwner = text(row["nameWithOwner"]);
-  if (nameWithOwner === undefined) return null;
-  const split = splitNameWithOwner(nameWithOwner);
-  if (split === null) return null;
-
-  const repository: CloneRepository = {
-    name: text(row["name"]) ?? split.name,
-    owner: split.owner,
-    nameWithOwner,
-    visibility: visibilityFrom(row["visibility"]),
-    host: "github",
-    hostname: HOSTNAME,
-    sshUrl: text(row["sshUrl"]) ?? `git@${HOSTNAME}:${nameWithOwner}.git`,
-    httpsUrl: text(row["url"]) ?? forgeWebUrl(HOSTNAME, nameWithOwner),
-    localPaths: []
-  };
-  const description = text(row["description"]);
-  if (description !== undefined) repository.description = description;
-  const updatedAt = text(row["updatedAt"]);
-  if (updatedAt !== undefined) repository.updatedAt = updatedAt;
-
-  // `parent` is only populated when the repo is a fork; `isFork` without a
-  // parent happens when the parent was deleted or is not visible to this
-  // token — still a fork, with an unnameable origin.
-  const parent = row["parent"];
-  if (parent !== null && typeof parent === "object") {
-    const parentRow = parent as Record<string, unknown>;
-    const owner = parentRow["owner"];
-    const login =
-      owner !== null && typeof owner === "object"
-        ? text((owner as Record<string, unknown>)["login"])
-        : undefined;
-    const parentName = text(parentRow["name"]);
-    if (login !== undefined && parentName !== undefined) {
-      const slug = `${login}/${parentName}`;
-      repository.parent = { nameWithOwner: slug, url: forgeWebUrl(HOSTNAME, slug) };
-    }
-  }
-  return repository;
-}
-
 /** REST reports `visibility` on every plan; the older `private` boolean is
  *  the fallback for an Enterprise API that omits it. Absent both, the answer
  *  is `unknown` — never `public`, which would understate where code can go. */
@@ -102,11 +59,54 @@ function restVisibility(row: Record<string, unknown>): RepoVisibility {
   return "unknown";
 }
 
-export function parseGhRepoList(stdout: string): CloneRepository[] {
-  const parsed = parseJsonObject(stdout, "GitHub repository list");
+/** Search reports `visibility` like the rest of `gh`, with `isPrivate` as the
+ *  older boolean beside it. Same rule as `restVisibility`: absent both, the
+ *  answer is `unknown` rather than `public`. */
+function searchVisibility(row: Record<string, unknown>): RepoVisibility {
+  const stated = visibilityFrom(row["visibility"]);
+  if (stated !== "unknown") return stated;
+  if (row["isPrivate"] === true) return "private";
+  if (row["isPrivate"] === false) return "public";
+  return "unknown";
+}
+
+/** One row of `gh search repos --json`. Kept apart from `parseGhRestRepo`
+ *  rather than made tolerant of both shapes: a parser that accepts either key
+ *  for the slug silently returns `[]` when a field is renamed, instead of
+ *  failing where the command was invoked. */
+export function parseGhSearchRepoJson(raw: unknown): CloneRepository | null {
+  if (raw === null || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  const nameWithOwner = text(row["fullName"]);
+  if (nameWithOwner === undefined) return null;
+  const split = splitNameWithOwner(nameWithOwner);
+  if (split === null) return null;
+
+  const repository: CloneRepository = {
+    name: text(row["name"]) ?? split.name,
+    owner: split.owner,
+    nameWithOwner,
+    visibility: searchVisibility(row),
+    host: "github",
+    hostname: HOSTNAME,
+    // Search does not return clone URLs; both forms are a pure function of the
+    // slug on github.com, so deriving them costs nothing and invents nothing.
+    sshUrl: `git@${HOSTNAME}:${nameWithOwner}.git`,
+    httpsUrl: text(row["url"]) ?? forgeWebUrl(HOSTNAME, nameWithOwner),
+    localPaths: []
+  };
+  const description = text(row["description"]);
+  if (description !== undefined) repository.description = description;
+  const updatedAt = text(row["updatedAt"]);
+  if (updatedAt !== undefined) repository.updatedAt = updatedAt;
+  return repository;
+}
+
+export function parseGhSearchRepos(stdout: string): CloneRepository[] {
+  const parsed = parseJsonObject(stdout, "GitHub repository search");
   const rows = Array.isArray(parsed) ? parsed : [parsed];
   return rows
-    .map((row) => parseGhRepoJson(row))
+    .map((row) => parseGhSearchRepoJson(row))
     .filter((row): row is CloneRepository => row !== null);
 }
 
@@ -205,18 +205,25 @@ export class GitHubRepoProvider implements ForgeRepoProvider {
     return repository;
   }
 
-  async listRepos(owner: string, limit: number): Promise<CloneRepository[]> {
-    return parseGhRepoList(
-      await this.gh([
-        "repo",
-        "list",
-        owner,
-        "--limit",
-        String(limit),
-        "--json",
-        REPO_JSON_FIELDS
-      ])
-    );
+  async searchRepos({
+    query,
+    owners,
+    limit
+  }: RepoSearch): Promise<CloneRepository[]> {
+    const term = query.trim();
+    // `gh search repos` rejects a call with neither a term nor a qualifier,
+    // and rightly so — that is a request for all of GitHub.
+    if (term === "" && owners.length === 0) return [];
+    const args = ["search", "repos"];
+    if (term !== "") args.push(term);
+    for (const owner of owners) args.push(`--owner=${owner}`);
+    // `gh`'s default sort is best-match, which is what puts a typed name at
+    // the top. With no term there is nothing to match on, so recency is the
+    // only ordering that means anything — that is the `owner/` case, where the
+    // user has named an account and wants to see what is in it.
+    if (term === "") args.push("--sort", "updated");
+    args.push("--limit", String(limit), "--json", SEARCH_JSON_FIELDS);
+    return parseGhSearchRepos(await this.gh(args));
   }
 
   async fork(input: ForkInput): Promise<CloneRepository> {

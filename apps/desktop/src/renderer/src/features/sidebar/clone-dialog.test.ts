@@ -4,11 +4,10 @@ import {
   cloneDestinationLabel,
   cloneDestinationSelectionIndex,
   cloneRepositoryAtSelection,
-  cloneSourceQuery,
   exactRepository,
   filterCloneDestinations,
-  filterCloneRepositories,
   moveCloneSelection,
+  rankCloneRepositories,
   unverifiedCloneRepository
 } from "./clone-dialog";
 
@@ -55,16 +54,20 @@ const destinations: CloneDestination[] = [
 ];
 
 describe("clone dialog filtering", () => {
-  it("searches repository names, owners, and descriptions", () => {
-    expect(filterCloneRepositories(repositories, "billing")[0]?.name).toBe(
-      "billing-service"
-    );
-    expect(filterCloneRepositories(repositories, "huntharo")[0]?.name).toBe(
+  it("ranks the typed name to the top without dropping the other rows", () => {
+    // Ranking, not filtering: the forge did the matching and can hit a
+    // description or a topic this scoring knows nothing about, so a row it
+    // returned must never disappear here.
+    const ranked = rankCloneRepositories(repositories, "billing-service");
+    expect(ranked[0]?.name).toBe("billing-service");
+    expect(ranked).toHaveLength(repositories.length);
+
+    expect(rankCloneRepositories(repositories, "x-code")[0]?.name).toBe(
       "x-code-clone"
     );
-    expect(filterCloneRepositories(repositories, "payments")[0]?.name).toBe(
-      "billing-service"
-    );
+    expect(
+      rankCloneRepositories(repositories, "huntharo/x-code-clone")[0]?.name
+    ).toBe("x-code-clone");
   });
 
   it("matches a nested destination from a short prefix", () => {
@@ -157,7 +160,7 @@ describe("clone dialog filtering", () => {
     });
   });
 
-  it("bypasses catalog search for every exact input form", () => {
+  it("recognizes every exact input form as one repository", () => {
     expect(
       [
         "huntharo/x-code-clone",
@@ -165,24 +168,14 @@ describe("clone dialog filtering", () => {
         "ssh://git@github.com/huntharo/x-code-clone.git",
         "https://github.com/huntharo/x-code-clone",
         "gh repo clone huntharo/x-code-clone"
-      ].map((input) => cloneSourceQuery(repositories, input))
+      ].map((input) => exactRepository(input))
     ).toEqual(
       Array.from({ length: 5 }, () => ({
-        kind: "exact",
-        repository: {
-          host: "github",
-          hostname: "github.com",
-          nameWithOwner: "huntharo/x-code-clone"
-        }
+        host: "github",
+        hostname: "github.com",
+        nameWithOwner: "huntharo/x-code-clone"
       }))
     );
-  });
-
-  it("uses catalog search for non-exact input", () => {
-    expect(cloneSourceQuery(repositories, "payments")).toEqual({
-      kind: "search",
-      repositories: [repositories[0]]
-    });
   });
 
   it("builds direct clone metadata without a forge CLI lookup", () => {

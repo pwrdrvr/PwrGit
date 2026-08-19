@@ -31,8 +31,13 @@ export type ForgeRepoProvider = {
   owners(): Promise<ForgeOwner[]>;
   /** Read one repository's full metadata, including fork lineage. */
   viewRepo(nameWithOwner: string): Promise<CloneRepository>;
-  /** Repositories owned by one account, newest activity first. */
-  listRepos(owner: string, limit: number): Promise<CloneRepository[]>;
+  /** Repositories matching a query, answered by the forge's own search.
+   *
+   *  There is deliberately no "list everything this account owns": the clone
+   *  dialog used to call one per known owner as it opened, which is one round
+   *  trip per account before the user has typed a character. Searching is a
+   *  single call and only ever runs on settled input. */
+  searchRepos(input: RepoSearch): Promise<CloneRepository[]>;
   /** Create a fork, or return the caller's existing one. Resolves to the fork
    *  as the forge reports it after creation. */
   fork(input: ForkInput): Promise<CloneRepository>;
@@ -44,6 +49,18 @@ export type ForgeRepoProvider = {
   ): Promise<void>;
   isAuthError(cause: unknown): boolean;
   errorMessage(cause: unknown): string;
+};
+
+/** One repository search. Both fields may be empty in isolation but not
+ *  together — a search with neither a term nor an owner is an enumeration of
+ *  the whole forge, which is what this seam exists to prevent. */
+export type RepoSearch = {
+  /** Free text from the input box, already stripped of any owner prefix. */
+  query: string;
+  /** Accounts to restrict the search to. Empty searches the whole forge, which
+   *  is what a profile with nothing indexed yet gets. */
+  owners: string[];
+  limit: number;
 };
 
 export type ForkInput = {

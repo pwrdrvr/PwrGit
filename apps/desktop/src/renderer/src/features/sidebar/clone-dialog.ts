@@ -6,9 +6,6 @@ import {
   type ForgeHost
 } from "@pwrgit/shared";
 
-const repoText = (repository: CloneRepository): string =>
-  `${repository.nameWithOwner} ${repository.description ?? ""}`.toLowerCase();
-
 /** `gh repo clone X` / `glab repo clone X` pasted straight from a terminal.
  *  The CLI in the command names the forge, which is worth honouring — it is
  *  more specific than the dialog's current host. */
@@ -18,34 +15,32 @@ export function defaultHostname(host: ForgeHost): string {
   return host === "gitlab" ? "gitlab.com" : "github.com";
 }
 
-export function filterCloneRepositories(
+/**
+ * Order search results for display. Ranks, never filters.
+ *
+ * The forge did the matching — it can hit a description or a topic this
+ * scoring knows nothing about — so a row that survived the search always
+ * survives this. All this decides is what lands under the cursor: an exact
+ * slug first, then a name that starts with what was typed.
+ */
+export function rankCloneRepositories(
   repositories: CloneRepository[],
   query: string,
   limit = 80
 ): CloneRepository[] {
-  const terms = query
-    .trim()
-    .toLowerCase()
-    .split(/[^a-z0-9_.-]+/)
-    .filter(Boolean);
-  const scored = repositories
+  const exact = query.trim().toLowerCase();
+  return repositories
     .map((repository) => {
-      const text = repoText(repository);
-      if (!terms.every((term) => text.includes(term))) return null;
       const name = repository.name.toLowerCase();
       const full = repository.nameWithOwner.toLowerCase();
-      const exact = query.trim().toLowerCase();
       const score =
         (full === exact ? 100 : 0) +
+        (name === exact ? 60 : 0) +
         (name.startsWith(exact) ? 40 : 0) +
         (full.startsWith(exact) ? 20 : 0) +
         (name.includes(exact) ? 10 : 0);
       return { repository, score };
     })
-    .filter(
-      (entry): entry is { repository: CloneRepository; score: number } =>
-        entry !== null
-    )
     .sort(
       (a, b) =>
         b.score - a.score ||
@@ -53,8 +48,9 @@ export function filterCloneRepositories(
           a.repository.updatedAt ?? ""
         ) ||
         a.repository.nameWithOwner.localeCompare(b.repository.nameWithOwner)
-    );
-  return scored.slice(0, limit).map((entry) => entry.repository);
+    )
+    .slice(0, limit)
+    .map((entry) => entry.repository);
 }
 
 function pathSegments(path: string): string[] {
@@ -141,24 +137,6 @@ export function exactRepository(
   if (!isSafeProjectPath(nameWithOwner)) return null;
   const host = cliHost ?? defaultHost;
   return { host, hostname: defaultHostname(host), nameWithOwner };
-}
-
-export type CloneSourceQuery =
-  | { kind: "exact"; repository: ExactRepository }
-  | { kind: "search"; repositories: CloneRepository[] };
-
-export function cloneSourceQuery(
-  repositories: CloneRepository[],
-  input: string,
-  defaultHost: ForgeHost = "github"
-): CloneSourceQuery {
-  const exact = exactRepository(input, defaultHost);
-  return exact === null
-    ? {
-        kind: "search",
-        repositories: filterCloneRepositories(repositories, input)
-      }
-    : { kind: "exact", repository: exact };
 }
 
 /** A stand-in for a repository the forge would not confirm — no CLI, or not

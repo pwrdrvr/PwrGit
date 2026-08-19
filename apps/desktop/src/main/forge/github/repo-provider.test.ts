@@ -3,25 +3,22 @@ import {
   GitHubRepoProvider,
   parseGhLogin,
   parseGhOrgLogins,
-  parseGhRepoList,
   parseGhRestRepo,
-  REPO_JSON_FIELDS
+  parseGhSearchRepos,
+  SEARCH_JSON_FIELDS
 } from "./repo-provider";
 
-describe("parseGhRepoList", () => {
-  it("reads visibility and fork lineage from `gh repo list --json`", () => {
+describe("parseGhSearchRepos", () => {
+  it("reads one `gh search repos --json` row", () => {
     expect(
-      parseGhRepoList(
+      parseGhSearchRepos(
         JSON.stringify([
           {
             name: "react",
-            nameWithOwner: "huntharo/react",
+            fullName: "huntharo/react",
             description: "UI library",
-            // gh reports the enum uppercased here and lowercased elsewhere.
-            visibility: "PUBLIC",
-            isFork: true,
-            parent: { name: "react", owner: { login: "facebook" } },
-            sshUrl: "git@github.com:huntharo/react.git",
+            visibility: "public",
+            isPrivate: false,
             url: "https://github.com/huntharo/react",
             updatedAt: "2026-08-01T12:00:00Z"
           }
@@ -36,10 +33,7 @@ describe("parseGhRepoList", () => {
         visibility: "public",
         host: "github",
         hostname: "github.com",
-        parent: {
-          nameWithOwner: "facebook/react",
-          url: "https://github.com/facebook/react"
-        },
+        // Search returns no clone URLs; both are derived from the slug.
         sshUrl: "git@github.com:huntharo/react.git",
         httpsUrl: "https://github.com/huntharo/react",
         updatedAt: "2026-08-01T12:00:00Z",
@@ -50,35 +44,40 @@ describe("parseGhRepoList", () => {
 
   it("reads GitHub Enterprise's internal tier", () => {
     expect(
-      parseGhRepoList(
-        JSON.stringify([
-          { nameWithOwner: "acme/api", visibility: "INTERNAL" }
-        ])
+      parseGhSearchRepos(
+        JSON.stringify([{ fullName: "acme/api", visibility: "internal" }])
       )[0]?.visibility
     ).toBe("internal");
   });
 
-  it("reports a missing or unrecognized visibility as unknown", () => {
+  it("falls back to isPrivate, and reports neither as unknown", () => {
     expect(
-      parseGhRepoList(JSON.stringify([{ nameWithOwner: "acme/api" }]))[0]
+      parseGhSearchRepos(
+        JSON.stringify([{ fullName: "acme/api", isPrivate: true }])
+      )[0]?.visibility
+    ).toBe("private");
+    expect(
+      parseGhSearchRepos(JSON.stringify([{ fullName: "acme/api" }]))[0]
         ?.visibility
     ).toBe("unknown");
   });
 
-  it("survives a fork whose parent it cannot see", () => {
-    // `isFork` with no `parent` is a deleted or invisible original — still a
-    // fork, with an unnameable origin.
-    const parsed = parseGhRepoList(
-      JSON.stringify([
-        { nameWithOwner: "acme/api", visibility: "PUBLIC", isFork: true }
-      ])
-    )[0];
-    expect(parsed?.parent).toBeUndefined();
+  it("carries no fork lineage — search does not report a parent", () => {
+    // Absent, not guessed. `viewRepo` fills it in once a row is picked.
+    expect(
+      parseGhSearchRepos(
+        JSON.stringify([{ fullName: "acme/api", visibility: "public" }])
+      )[0]?.parent
+    ).toBeUndefined();
   });
 
-  it("drops rows with no nameWithOwner, and survives bad JSON shapes", () => {
-    expect(parseGhRepoList(JSON.stringify([{ name: "x" }]))).toEqual([]);
-    expect(parseGhRepoList("null")).toEqual([]);
+  it("drops rows with no fullName, and survives bad JSON shapes", () => {
+    // `nameWithOwner` is `gh repo list`'s key, not search's — a parser that
+    // accepted both would quietly return nothing if the field were renamed.
+    expect(
+      parseGhSearchRepos(JSON.stringify([{ nameWithOwner: "acme/api" }]))
+    ).toEqual([]);
+    expect(parseGhSearchRepos("null")).toEqual([]);
   });
 });
 
@@ -183,21 +182,64 @@ describe("GitHubRepoProvider", () => {
     ]);
   });
 
-  it("asks for the fields the identity marks need", async () => {
+  it("searches every scoped owner in ONE call, not one call per owner", async () => {
+    // The whole point of replacing the per-owner listing: a profile with
+    // sixteen owners cost sixteen round trips before the dialog could paint.
     const gh = baseGh();
-    await new GitHubRepoProvider(gh).listRepos("huntharo", 200);
+    await new GitHubRepoProvider(gh).searchRepos({
+      query: "micro",
+      owners: ["pwrdrvr", "huntharo"],
+      limit: 40
+    });
+    expect(gh).toHaveBeenCalledTimes(1);
     expect(gh).toHaveBeenCalledWith([
-      "repo",
-      "list",
-      "huntharo",
+      "search",
+      "repos",
+      "micro",
+      "--owner=pwrdrvr",
+      "--owner=huntharo",
       "--limit",
-      "200",
+      "40",
       "--json",
-      REPO_JSON_FIELDS
+      SEARCH_JSON_FIELDS
     ]);
-    for (const field of ["visibility", "isFork", "parent"]) {
-      expect(REPO_JSON_FIELDS).toContain(field);
+    for (const field of ["fullName", "visibility"]) {
+      expect(SEARCH_JSON_FIELDS).toContain(field);
     }
+  });
+
+  it("sorts by recency when an owner is named with no term to rank on", async () => {
+    const gh = baseGh();
+    await new GitHubRepoProvider(gh).searchRepos({
+      query: "  ",
+      owners: ["pwrdrvr"],
+      limit: 40
+    });
+    expect(gh.mock.calls[0]?.[0]).toEqual([
+      "search",
+      "repos",
+      "--owner=pwrdrvr",
+      "--sort",
+      "updated",
+      "--limit",
+      "40",
+      "--json",
+      SEARCH_JSON_FIELDS
+    ]);
+  });
+
+  it("refuses a search with neither a term nor an owner", async () => {
+    // That is a request for all of GitHub, which is the enumeration this
+    // seam exists to prevent — decline it rather than let `gh` reject it.
+    const gh = baseGh();
+    expect(
+      await new GitHubRepoProvider(gh).searchRepos({
+        query: "",
+        owners: [],
+        limit: 40
+      })
+    ).toEqual([]);
+    expect(gh).not.toHaveBeenCalled();
   });
 
   it("forks into the personal account without passing --org", async () => {

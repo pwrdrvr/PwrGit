@@ -142,31 +142,48 @@ export function supportsDefaultBranchOnly(
   return status?.capabilities.forkDefaultBranchOnly === true;
 }
 
+/** The owners a search will be scoped to, named for the prompt, and shortened
+ *  once the list is longer than a sentence wants to be. */
+export function ownersPhrase(owners: string[]): string {
+  if (owners.length === 0) return "";
+  if (owners.length <= 3) return owners.join(", ");
+  return `${owners.slice(0, 3).join(", ")} and ${owners.length - 3} more`;
+}
+
 /** What the source list should say when it has no rows to show.
  *
- *  `null` catalog means the owner listings are still in flight — which is the
- *  state the dialog spends its first seconds in, and reporting it as "install
- *  the CLI" tells the user to fix something that is not broken. */
+ *  Ordered by what the user can act on. Availability comes first because it is
+ *  the only state a person must fix elsewhere; an unloaded catalog is next
+ *  because reporting that moment as "install the CLI" tells someone to fix
+ *  something that is not broken. An empty box is not a failed search — nothing
+ *  has been asked yet, so it prompts rather than reporting no matches, and a
+ *  search in flight says so rather than leaving the previous "no matches"
+ *  standing for the length of the round trip. */
 export function sourceEmptyMessage(input: {
   catalogLoaded: boolean;
   catalogError: string | null;
   status: ForgeStatus | undefined;
   cliLabel: string;
   query: string;
+  searching: boolean;
+  searchError: string | null;
+  /** Accounts the search is scoped to, so the prompt can name them. */
+  owners: string[];
 }): string | null {
   if (input.catalogError !== null) return input.catalogError;
-  if (!input.catalogLoaded) return "Loading repositories…";
+  if (!input.catalogLoaded) return "Checking which forges are signed in…";
   if (input.status?.installed !== true) {
     return `Install the ${input.cliLabel} to search.`;
   }
   if (!input.status.loggedIn) return `Sign in with the ${input.cliLabel} to search.`;
-  // An empty query has nothing to "not match" — this is the state a signed-in
-  // forge with no discovered owners lands in, and quoting the empty string at
-  // the user explains nothing.
   if (input.query.trim() === "") {
-    return "No repositories found for the known owners.";
+    return input.owners.length === 0
+      ? "Type a name to search, or paste owner/name."
+      : `Type to search ${ownersPhrase(input.owners)}, or paste any owner/name.`;
   }
-  return `No repositories match \u201C${input.query}\u201D.`;
+  if (input.searching) return "Searching…";
+  if (input.searchError !== null) return input.searchError;
+  return `No repositories match “${input.query}”.`;
 }
 
 /** What to call a fork target under the row. The two forges use different

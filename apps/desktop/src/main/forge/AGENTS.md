@@ -156,6 +156,33 @@ forges, same CLI clients, disjoint questions.
   understate where code can go. A signed-out CLI writes **no** row (signing in
   should produce a fresh read); a 404 writes `unknown` (re-asking every pass is
   noise).
+- **A dialog opens on local state; a forge is asked only on debounced input.**
+  This is the rule the clone dialog broke. `repo:cloneCatalog` used to list
+  every known owner's repositories as it opened — `gh repo list <owner>
+  --limit 200`, three owners at a time — so a profile with sixteen owners sat
+  on "Loading repositories…" for **13 seconds** before the user had typed a
+  character, and typing then only filtered what had already arrived. It now
+  answers from `repo_identity` and the cached status probe (~0ms of forge
+  work), and `repo:searchCloneSources` asks `gh search repos` / GitLab's
+  project search once, 300ms after the box settles. Concretely:
+  - **No `list everything` verb on `ForgeRepoProvider`.** `searchRepos` takes a
+    term and owners together; there is deliberately no way to ask for one
+    account's whole inventory, because that is the call that gets made N times
+    in a loop.
+  - **Owner-scoped in one call, never one call per owner.** `gh search repos`
+    repeats `--owner=`; GitLab has no equivalent, so several owners become one
+    instance-wide search narrowed afterwards, and an empty term with several
+    owners is declined rather than enumerated.
+  - **`owner/term` scopes the search.** A half-typed slug like `pwrdrvr/micro`
+    would only 404 the exact check, so it also runs as an owner-scoped search.
+- **Answer "which local checkouts are this repository?" from SQLite.**
+  `repo_identity` is joined onto `repo:list` already. Both the clone catalog
+  and the fork preflight used to answer it by spawning `git remote -v` /
+  `git remote get-url origin` in **every indexed repository** — 52 subprocesses
+  per call on a mid-size profile, on the exact-name check as well as on open.
+  `localForgeState` (clone-service) and `checkoutsFor` (fork-service) are both
+  pure reads over `Repo.identity` now. Fork parents in that table are what
+  keeps the owner list as wide as the old `upstream`-remote scan made it.
 - **Loading is not unavailable.** The fork dialog once reported an in-flight
   catalog as "install the GitHub CLI" on a machine with `gh` installed and
   signed in — the state it spends its first seconds in. `sourceEmptyMessage`

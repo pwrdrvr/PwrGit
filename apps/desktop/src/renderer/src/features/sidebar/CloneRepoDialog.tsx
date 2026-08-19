@@ -15,13 +15,19 @@ import {
   cloneDestinationLabel,
   cloneDestinationSelectionIndex,
   cloneRepositoryAtSelection,
-  cloneSourceQuery,
   defaultHostname,
+  exactRepository,
   filterCloneDestinations,
   moveCloneSelection,
+  rankCloneRepositories,
   unverifiedCloneRepository
 } from "./clone-dialog";
-import { cliProtocolLabel, statusFor } from "./fork-dialog";
+import {
+  cliProtocolLabel,
+  sourceEmptyMessage,
+  statusFor
+} from "./fork-dialog";
+import { useCloneSearch } from "./useCloneSearch";
 import { RepoIdentityChips } from "./RepoIdentityMarks";
 
 const PROTOCOL_IDS = ["ssh", "https", "cli"] as const;
@@ -195,15 +201,33 @@ export function CloneRepoDialog({
     };
   }, [profile.id]);
 
-  const parsedSourceQuery = useMemo(
-    () => cloneSourceQuery(catalog?.repositories ?? [], sourceQuery, host),
-    [catalog?.repositories, sourceQuery, host]
+  const exactRepo = useMemo(
+    () => exactRepository(sourceQuery, host),
+    [sourceQuery, host]
   );
-  const exactRepo =
-    parsedSourceQuery.kind === "exact" ? parsedSourceQuery.repository : null;
   const exactNameWithOwner = exactRepo?.nameWithOwner ?? null;
-  const catalogMatches =
-    parsedSourceQuery.kind === "search" ? parsedSourceQuery.repositories : [];
+
+  // The host toggle only offers forges whose CLI can actually answer; a
+  // toggle that leads straight to "install the CLI" is a dead end dressed up
+  // as a choice.
+  const usableHosts = (catalog?.forges ?? [])
+    .filter((status) => status.installed && status.loggedIn)
+    .map((status) => status.kind);
+  const activeHost = selectedRepository?.host ?? host;
+  const forgeStatus = statusFor(catalog?.forges ?? [], activeHost);
+  const cliDisabled =
+    catalog !== null &&
+    (forgeStatus?.installed !== true || !forgeStatus.loggedIn);
+
+  // Nothing is asked of the forge until the box settles — and never on open.
+  // The catalog this replaced listed every known owner's repositories up
+  // front, which is one CLI round trip per account before the first paint.
+  const search = useCloneSearch({
+    profileId: profile.id,
+    query: sourceQuery,
+    host,
+    enabled: usableHosts.includes(host)
+  });
 
   useEffect(() => setSourceSelection(0), [sourceQuery]);
 
@@ -245,9 +269,10 @@ export function CloneRepoDialog({
   }, [exactNameWithOwner, exactRepo?.host, host, profile.id]);
 
   const sourceResults = useMemo(() => {
-    const rows = checkedRepository
-      ? [checkedRepository, ...catalogMatches]
-      : catalogMatches;
+    // The verified exact match leads: it is the one row read from the forge
+    // proper, so it carries fork lineage and clone URLs that search omits.
+    const ranked = rankCloneRepositories(search.repositories, sourceQuery);
+    const rows = checkedRepository ? [checkedRepository, ...ranked] : ranked;
     return rows.filter(
       (repository, index, all) =>
         all.findIndex(
@@ -256,7 +281,25 @@ export function CloneRepoDialog({
             repository.nameWithOwner.toLowerCase()
         ) === index
     );
-  }, [catalogMatches, checkedRepository]);
+  }, [search.repositories, sourceQuery, checkedRepository]);
+
+  // One line for every reason the list is empty, so the states cannot
+  // contradict each other. `checkError` wins over a bare "no matches": when
+  // the box holds an exact slug, why THAT lookup failed is the useful answer.
+  const emptyMessage =
+    checkError ??
+    sourceEmptyMessage({
+      catalogLoaded: catalog !== null,
+      catalogError,
+      status: forgeStatus,
+      cliLabel: cliProtocolLabel(activeHost).label,
+      query: sourceQuery,
+      searching: search.searching,
+      searchError: search.error,
+      owners: (catalog?.owners ?? [])
+        .filter((owner) => owner.host === host)
+        .map((owner) => owner.login)
+    });
 
   const destinationResults = useMemo(
     () => filterCloneDestinations(destinations, destinationQuery),
@@ -303,18 +346,6 @@ export function CloneRepoDialog({
       setSubmitError(result.error.message);
     }
   };
-
-  // The host toggle only offers forges whose CLI can actually answer; a
-  // toggle that leads straight to "install the CLI" is a dead end dressed up
-  // as a choice.
-  const usableHosts = (catalog?.forges ?? [])
-    .filter((status) => status.installed && status.loggedIn)
-    .map((status) => status.kind);
-  const activeHost = selectedRepository?.host ?? host;
-  const forgeStatus = statusFor(catalog?.forges ?? [], activeHost);
-  const cliDisabled =
-    catalog !== null &&
-    (forgeStatus?.installed !== true || !forgeStatus.loggedIn);
 
   return (
     <div
@@ -428,7 +459,11 @@ export function CloneRepoDialog({
                   }
                 }}
               />
-              {checking && <span className="clone-input-status">checking…</span>}
+              {(checking || search.searching) && (
+                <span className="clone-input-status">
+                  {checking ? "checking…" : "searching…"}
+                </span>
+              )}
             </div>
 
             <div className="clone-source-results" role="listbox">
@@ -465,41 +500,18 @@ export function CloneRepoDialog({
                   )}
                 </button>
               ))}
-              {parsedSourceQuery.kind === "search" &&
-                catalog === null &&
-                catalogError === null && (
-                  <div className="clone-empty">Loading repositories…</div>
-                )}
-              {catalogError !== null && (
-                <div className="clone-empty clone-empty--error">
-                  {catalogError}
+              {sourceResults.length === 0 && !checking && emptyMessage !== null && (
+                <div
+                  className={`clone-empty${
+                    catalogError ?? checkError ?? search.error
+                      ? " clone-empty--error"
+                      : ""
+                  }`}
+                >
+                  {emptyMessage}
                 </div>
               )}
-              {parsedSourceQuery.kind === "exact" &&
-                sourceResults.length === 0 &&
-                !checking &&
-                checkError !== null && (
-                  <div className="clone-empty clone-empty--error">
-                    {checkError}
-                  </div>
-                )}
-              {parsedSourceQuery.kind === "search" &&
-                catalog !== null &&
-                sourceResults.length === 0 &&
-                !checking && (
-                  <div className="clone-empty">
-                    {sourceQuery.trim() === ""
-                      ? catalog.owners.length === 0
-                        ? "Add a default org to this profile or index a repo with a GitHub remote."
-                        : "No repositories found for the known owners."
-                      : checkError ??
-                        `No repositories match “${sourceQuery}”.`}
-                  </div>
-                )}
             </div>
-            {catalog?.warning !== undefined && (
-              <div className="clone-note">{catalog.warning}</div>
-            )}
           </section>
 
           <section className="clone-section">
