@@ -4,6 +4,7 @@ import {
   type ForgeStatus,
   type RepoVisibility
 } from "@pwrgit/shared";
+import { logMain } from "../logs";
 import {
   ownersFrom,
   parseJsonObject,
@@ -167,7 +168,15 @@ export class GitLabProvider implements ForgeProvider {
   async status(): Promise<ForgeStatus> {
     try {
       await this.glab(["--version"]);
-    } catch {
+    } catch (cause) {
+      // Silent here once cost an hour chasing a dialog that said "install the
+      // CLI" for an installed CLI. The status itself stays best-effort.
+      logMain(
+        "debug",
+        "forge",
+        `glab is not usable:`,
+        this.errorMessage(cause)
+      );
       return UNAVAILABLE_STATUS("gitlab");
     }
     let username: string | null = null;

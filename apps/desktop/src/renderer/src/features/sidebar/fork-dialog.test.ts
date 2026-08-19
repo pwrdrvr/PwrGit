@@ -14,6 +14,7 @@ import {
   FORK_PROGRESS_LABELS,
   isValidForkName,
   needsUpstreamChoice,
+  sourceEmptyMessage,
   statusFor
 } from "./fork-dialog";
 
@@ -232,5 +233,57 @@ describe("progress labels", () => {
     ] as const) {
       expect(FORK_PROGRESS_LABELS[phase]).toBeTruthy();
     }
+  });
+});
+
+describe("sourceEmptyMessage", () => {
+  const signedIn = statuses[0]!;
+  const notInstalled = statuses[1]!;
+  const base = {
+    catalogError: null,
+    status: signedIn,
+    cliLabel: "GitHub CLI",
+    query: "react"
+  };
+
+  it("says it is loading while the catalog is still in flight", () => {
+    // Regression: this state was reported as "Install the GitHub CLI to
+    // search." on a machine with gh installed and signed in — the dialog
+    // spends its first seconds here, so it was the first thing users saw.
+    expect(sourceEmptyMessage({ ...base, catalogLoaded: false })).toBe(
+      "Loading repositories…"
+    );
+    expect(
+      sourceEmptyMessage({ ...base, catalogLoaded: false, status: notInstalled })
+    ).toBe("Loading repositories…");
+  });
+
+  it("only blames the CLI once the catalog has actually answered", () => {
+    expect(
+      sourceEmptyMessage({ ...base, catalogLoaded: true, status: notInstalled })
+    ).toBe("Install the GitHub CLI to search.");
+    expect(
+      sourceEmptyMessage({
+        ...base,
+        catalogLoaded: true,
+        status: { ...signedIn, loggedIn: false }
+      })
+    ).toBe("Sign in with the GitHub CLI to search.");
+  });
+
+  it("reports a real catalog error ahead of everything else", () => {
+    expect(
+      sourceEmptyMessage({
+        ...base,
+        catalogLoaded: false,
+        catalogError: "gh exploded"
+      })
+    ).toBe("gh exploded");
+  });
+
+  it("falls through to no-matches when everything is fine", () => {
+    expect(sourceEmptyMessage({ ...base, catalogLoaded: true })).toBe(
+      "No repositories match \u201Creact\u201D."
+    );
   });
 });

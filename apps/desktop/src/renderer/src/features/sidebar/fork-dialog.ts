@@ -133,3 +133,22 @@ export function statusFor(
     }
   );
 }
+
+/** What the source list should say when it has no rows to show.
+ *
+ *  `null` catalog means the owner listings are still in flight — which is the
+ *  state the dialog spends its first seconds in, and reporting it as "install
+ *  the CLI" tells the user to fix something that is not broken. */
+export function sourceEmptyMessage(input: {
+  catalogLoaded: boolean;
+  catalogError: string | null;
+  status: ForgeStatus;
+  cliLabel: string;
+  query: string;
+}): string | null {
+  if (input.catalogError !== null) return input.catalogError;
+  if (!input.catalogLoaded) return "Loading repositories…";
+  if (!input.status.installed) return `Install the ${input.cliLabel} to search.`;
+  if (!input.status.loggedIn) return `Sign in with the ${input.cliLabel} to search.`;
+  return `No repositories match \u201C${input.query}\u201D.`;
+}

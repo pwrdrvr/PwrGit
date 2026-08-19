@@ -1,4 +1,5 @@
 import { forgeWebUrl, type CloneRepository, type ForgeStatus, type RepoVisibility } from "@pwrgit/shared";
+import { logMain } from "../logs";
 import {
   ownersFrom,
   parseJsonObject,
@@ -182,7 +183,15 @@ export class GitHubProvider implements ForgeProvider {
   async status(): Promise<ForgeStatus> {
     try {
       await this.gh(["--version"]);
-    } catch {
+    } catch (cause) {
+      // Silent here once cost an hour chasing a dialog that said "install the
+      // CLI" for an installed CLI. The status itself stays best-effort.
+      logMain(
+        "debug",
+        "forge",
+        `gh is not usable:`,
+        this.errorMessage(cause)
+      );
       return UNAVAILABLE_STATUS("github");
     }
     let login: string | null = null;

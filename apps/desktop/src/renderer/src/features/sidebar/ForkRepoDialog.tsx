@@ -29,6 +29,7 @@ import {
   forkTargets,
   FORK_PROGRESS_LABELS,
   needsUpstreamChoice,
+  sourceEmptyMessage,
   statusFor
 } from "./fork-dialog";
 import { GitForkIcon, RepoIdentityChips } from "./RepoIdentityMarks";
@@ -449,22 +450,24 @@ export function ForkRepoDialog({
                   <RepoIdentityChips repository={repository} />
                 </button>
               ))}
-              {catalogError !== null && (
-                <div className="clone-empty clone-empty--error">
-                  {catalogError}
+              {/* Loading is NOT "unavailable" — see sourceEmptyMessage. The
+                  wording lives there so it is covered by a test rather than
+                  only by whoever next opens this dialog. */}
+              {sourceResults.length === 0 && !checking && (
+                <div
+                  className={`clone-empty${
+                    catalogError === null ? "" : " clone-empty--error"
+                  }`}
+                >
+                  {sourceEmptyMessage({
+                    catalogLoaded: catalog !== null,
+                    catalogError,
+                    status: forgeStatus,
+                    cliLabel: cliLabel.label,
+                    query: sourceQuery
+                  })}
                 </div>
               )}
-              {catalogError === null &&
-                sourceResults.length === 0 &&
-                !checking && (
-                  <div className="clone-empty">
-                    {forgeStatus.installed
-                      ? forgeStatus.loggedIn
-                        ? `No repositories match “${sourceQuery}”.`
-                        : `Sign in with the ${cliLabel.label} to search.`
-                      : `Install the ${cliLabel.label} to search.`}
-                  </div>
-                )}
             </div>
             {checkError !== null && (
               <div className="clone-note clone-note--error">{checkError}</div>
@@ -516,7 +519,9 @@ export function ForkRepoDialog({
                 ))}
                 {targets.length === 0 && (
                   <div className="clone-empty">
-                    {`Sign in with the ${cliLabel.label} to choose a fork target.`}
+                    {catalog === null
+                      ? "Loading accounts…"
+                      : `Sign in with the ${cliLabel.label} to choose a fork target.`}
                   </div>
                 )}
               </div>
