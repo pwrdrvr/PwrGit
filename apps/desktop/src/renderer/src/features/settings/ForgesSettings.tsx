@@ -125,9 +125,13 @@ function remedyOrCapabilities(forge: ForgeStatus): string {
   const supportedText = supported
     .map((capability) => CAPABILITY_LABELS[capability])
     .join(" · ");
-  return missing.length === 0
-    ? supportedText
-    : `${supportedText}. Not supported by this forge: ${missing
-        .map((capability) => CAPABILITY_LABELS[capability].toLowerCase())
-        .join(", ")}.`;
+  const missingText =
+    missing.length === 0
+      ? ""
+      : `Not supported by this forge: ${missing
+          .map((capability) => CAPABILITY_LABELS[capability].toLowerCase())
+          .join(", ")}.`;
+  // Either half may be empty; joining only the present ones keeps a stray
+  // leading ". " out of the hint.
+  return [supportedText, missingText].filter((part) => part !== "").join(". ");
 }

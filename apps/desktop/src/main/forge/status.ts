@@ -80,14 +80,21 @@ export class ForgeStatusService {
   }
 
   async list(opts: { force?: boolean } = {}): Promise<ForgeStatus[]> {
-    const now = this.now();
-    if (opts.force !== true && this.cached !== null) {
-      const ttl = this.cached.healthy ? this.ttlMs : this.failureTtlMs;
-      if (now - this.cached.at < ttl) return this.cached.statuses;
+    if (opts.force === true) {
+      // A forced read exists to observe something the caller just did — signing
+      // in, installing a CLI. Adopting a probe that STARTED before that action
+      // would answer with pre-action state, so wait it out and run a fresh one.
+      while (this.inFlight !== null) await this.inFlight;
+    } else {
+      const now = this.now();
+      if (this.cached !== null) {
+        const ttl = this.cached.healthy ? this.ttlMs : this.failureTtlMs;
+        if (now - this.cached.at < ttl) return this.cached.statuses;
+      }
+      // Coalesce: several surfaces mount at once and all want this immediately.
+      const existing = this.inFlight;
+      if (existing !== null) return await existing;
     }
-    // Coalesce: several surfaces mount at once and all want this immediately.
-    const existing = this.inFlight;
-    if (existing !== null) return await existing;
 
     const probing = this.probeAll().finally(() => {
       if (this.inFlight === probing) this.inFlight = null;
@@ -113,16 +120,22 @@ export class ForgeStatusService {
 
 async function probeOne(probe: ForgeProbe): Promise<ForgeStatus> {
   const capabilities = capabilitiesFor(probe.kind);
+  const unavailable: ForgeStatus = {
+    kind: probe.kind,
+    cli: probe.cli,
+    installed: false,
+    loggedIn: false,
+    capabilities
+  };
   let installed = false;
   try {
     installed = await probe.installed();
   } catch {
     // A missing binary is an ordinary state, not an error to surface.
-    return { kind: probe.kind, cli: probe.cli, installed: false, loggedIn: false, capabilities };
+    return unavailable;
   }
-  if (!installed) {
-    return { kind: probe.kind, cli: probe.cli, installed: false, loggedIn: false, capabilities };
-  }
+  if (!installed) return unavailable;
+
   let loggedIn = false;
   try {
     loggedIn = await probe.loggedIn();

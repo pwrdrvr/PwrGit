@@ -74,6 +74,45 @@ describe("ForgeStatusService", () => {
     expect(spy.calls).toBe(2);
   });
 
+  it("a forced read never adopts a probe that began before it", async () => {
+    // The point of forcing is to observe something the caller just did, so a
+    // probe already in flight cannot answer it.
+    let loggedIn = false;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let probes = 0;
+    // Each probe answers with the state as of when IT started, which is what
+    // makes "adopted a probe that began earlier" observable.
+    const snapshots: boolean[] = [];
+    const service = new ForgeStatusService({
+      probes: [
+        {
+          kind: "github",
+          cli: "gh",
+          installed: async () => {
+            snapshots[probes] = loggedIn;
+            probes += 1;
+            if (probes === 1) await gate;
+            return true;
+          },
+          loggedIn: async () => snapshots[probes - 1] ?? false
+        }
+      ]
+    });
+
+    const slow = service.list();
+    // The user signs in while that first probe is still running.
+    loggedIn = true;
+    const forced = service.list({ force: true });
+    release?.();
+
+    await expect(slow).resolves.toMatchObject([{ loggedIn: false }]);
+    await expect(forced).resolves.toMatchObject([{ loggedIn: true }]);
+    expect(probes).toBe(2);
+  });
+
   it("treats a missing binary as a state, not an error", async () => {
     const service = new ForgeStatusService({
       probes: [
