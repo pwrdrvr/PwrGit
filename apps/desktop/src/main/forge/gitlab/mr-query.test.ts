@@ -212,6 +212,46 @@ describe("hover-card detail", () => {
     expect(summary.deletions).toBe(0);
   });
 
+  it("reads the REST association's snake_case as well as GraphQL's camelCase", () => {
+    // Commit association is the one GitLab read that goes over REST v4, and
+    // REST names these fields differently. Reading only the GraphQL spelling
+    // left a commit-associated MR with no URL to open and no detail to show.
+    const summary = toSummary({
+      iid: 4,
+      title: "From REST",
+      state: "merged",
+      draft: false,
+      web_url: "https://gitlab.com/g/s/p/-/merge_requests/4",
+      source_branch: "feat-open",
+      target_branch: "main",
+      created_at: "2026-08-19T03:53:53Z",
+      merged_at: "2026-08-19T03:54:16Z"
+    });
+
+    expect(summary).toMatchObject({
+      number: 4,
+      url: "https://gitlab.com/g/s/p/-/merge_requests/4",
+      headRefName: "feat-open",
+      baseRefName: "main",
+      createdAt: Date.parse("2026-08-19T03:53:53Z"),
+      mergedAt: Date.parse("2026-08-19T03:54:16Z")
+    });
+  });
+
+  it("groups a REST-shaped node under its source branch", () => {
+    const best = pickBestByBranch([
+      {
+        iid: 9,
+        title: "t",
+        state: "opened",
+        draft: false,
+        web_url: "u",
+        source_branch: "feat-rest"
+      }
+    ]);
+    expect(best.get("feat-rest")?.summary.number).toBe(9);
+  });
+
   it("ignores an unparseable timestamp", () => {
     expect(toSummary(node({ createdAt: "not a date" }))).not.toHaveProperty(
       "createdAt"

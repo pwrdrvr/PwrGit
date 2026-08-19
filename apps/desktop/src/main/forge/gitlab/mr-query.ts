@@ -22,17 +22,32 @@ const MR_FIELDS = `iid title webUrl state draft sourceBranch targetBranch
         createdAt mergedAt closedAt commitCount
         diffStatsSummary { additions deletions fileCount }`;
 
+/**
+ * A merge request as either transport reports it.
+ *
+ * GraphQL answers in camelCase; the REST commit-association endpoint
+ * (`/repository/commits/:sha/merge_requests`, the only way to associate a
+ * commit on GitLab) answers in snake_case for the same fields. Both spellings
+ * are declared here and read through `either`, because a node reaching
+ * `toSummary` may have come from either one.
+ */
 export type MrNode = {
   iid: string | number;
   title: string | null;
-  webUrl: string | null;
   state: string;
   draft: boolean | null;
+  webUrl?: string | null;
+  web_url?: string | null;
   sourceBranch?: string | null;
+  source_branch?: string | null;
   targetBranch?: string | null;
+  target_branch?: string | null;
   createdAt?: string | null;
+  created_at?: string | null;
   mergedAt?: string | null;
+  merged_at?: string | null;
   closedAt?: string | null;
+  closed_at?: string | null;
   commitCount?: number | null;
   diffStatsSummary?: {
     additions?: number | null;
@@ -125,7 +140,7 @@ export function parseMrPage(data: unknown): MrPage {
 export function pickBestByBranch(nodes: MrNode[]): Map<string, MrSummaryWithBranch> {
   const best = new Map<string, MrSummaryWithBranch>();
   for (const node of nodes) {
-    const branch = node.sourceBranch?.trim();
+    const branch = sourceBranchOf(node)?.trim();
     if (branch === undefined || branch === "") continue;
     const candidate = { branch, summary: toSummary(node) };
     const current = best.get(branch);
@@ -159,22 +174,35 @@ export function pickBestAssociation(nodes: MrNode[]): PrSummary | null {
 export function toSummary(node: MrNode): PrSummary {
   return {
     number: toNumber(node.iid),
-    url: node.webUrl ?? "",
+    url: either(node.webUrl, node.web_url) ?? "",
     title: node.title ?? "",
     state: toPrLifecycle(node.state),
     // GitLab exposes draft as a boolean; the legacy `WIP:` title prefix is
     // reflected in that same field, so the title never needs parsing.
     isDraft: node.draft === true,
-    ...optionalText("headRefName", node.sourceBranch),
-    ...optionalText("baseRefName", node.targetBranch),
+    ...optionalText("headRefName", sourceBranchOf(node)),
+    ...optionalText("baseRefName", either(node.targetBranch, node.target_branch)),
     ...optionalCount("additions", node.diffStatsSummary?.additions),
     ...optionalCount("deletions", node.diffStatsSummary?.deletions),
     ...optionalCount("changedFiles", node.diffStatsSummary?.fileCount),
     ...optionalCount("commitCount", node.commitCount),
-    ...optionalTime("createdAt", node.createdAt),
-    ...optionalTime("mergedAt", node.mergedAt),
-    ...optionalTime("closedAt", node.closedAt)
+    ...optionalTime("createdAt", either(node.createdAt, node.created_at)),
+    ...optionalTime("mergedAt", either(node.mergedAt, node.merged_at)),
+    ...optionalTime("closedAt", either(node.closedAt, node.closed_at))
   };
+}
+
+/** The source branch under whichever spelling this node's transport used. */
+function sourceBranchOf(node: MrNode): string | null | undefined {
+  return either(node.sourceBranch, node.source_branch);
+}
+
+/** GraphQL's camelCase wins when present; REST's snake_case is the fallback. */
+function either<T>(
+  camel: T | null | undefined,
+  snake: T | null | undefined
+): T | null | undefined {
+  return camel ?? snake;
 }
 
 /**

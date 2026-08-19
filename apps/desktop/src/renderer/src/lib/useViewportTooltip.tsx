@@ -51,6 +51,12 @@ export type ViewportTooltip = {
 type ViewportTooltipOptions = {
   /** Interactive cards remain open while the pointer moves from their target. */
   interactive?: boolean;
+  /**
+   * Accessible name for an interactive card. Every consumer names the thing it
+   * is actually showing: this hook serves the commit card and the PR/MR card,
+   * so a hard-coded name would mis-announce one of them.
+   */
+  label?: string;
 };
 
 type TooltipPlacement = {
@@ -148,7 +154,7 @@ const rectOf = (rect: DOMRect): TooltipRect => ({
  */
 export function useViewportTooltip(
   className = "viewport-tooltip",
-  { interactive = false }: ViewportTooltipOptions = {}
+  { interactive = false, label = "Commit context" }: ViewportTooltipOptions = {}
 ): ViewportTooltip {
   const tooltipRef = useRef<HTMLDivElement>(null);
   /** The element this tooltip was opened from, for returning focus. */
@@ -315,7 +321,7 @@ export function useViewportTooltip(
           <div
             ref={tooltipRef}
             role={interactive ? "dialog" : "tooltip"}
-            aria-label={interactive ? "Commit context" : undefined}
+            aria-label={interactive ? label : undefined}
             className={className}
             style={{
               position: "fixed",
