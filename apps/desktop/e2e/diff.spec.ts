@@ -29,7 +29,7 @@ test.afterEach(async () => {
   sandbox = null;
 });
 
-test("clicking a changed file opens its diff, then back returns to lineage", async () => {
+test("clicking a changed file opens its diff, then close returns to lineage", async () => {
   sandbox = createGitSandbox();
   const repo = sandbox.makeRepo("diffrepo");
   // Uncommitted modification to the committed README (adds a line).
@@ -51,8 +51,42 @@ test("clicking a changed file opens its diff, then back returns to lineage", asy
     window.locator(".diff-row--add", { hasText: "brand new line" })
   ).toBeVisible();
 
-  // Back returns to the lineage graph.
-  await window.locator(".diff-pane__back").click();
+  // Close returns to the lineage graph.
+  await window.locator(".diff-pane__close").click();
+  await expect(window.locator(".graph-toolbar")).toBeVisible();
+});
+
+test("Escape closes the diff pane only while the pane owns the keystroke", async () => {
+  sandbox = createGitSandbox();
+  const repo = sandbox.makeRepo("escrepo");
+  writeFileSync(join(repo.path, "README.md"), "# escrepo\nbrand new line\n");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, sandbox, "escrepo");
+
+  await expect(window.locator(".changes-wip")).toBeVisible({ timeout: 20_000 });
+  const fileRow = window.locator(".file-row", { hasText: "README.md" });
+  await fileRow.click();
+  await expect(window.locator(".diff-pane")).toBeVisible({ timeout: 20_000 });
+
+  // The row is a plain div, so the click alone would leave focus on <body>;
+  // the pane takes it on open, and that is what makes the next Escape its own.
+  await expect(window.locator(".diff-pane")).toBeFocused();
+
+  // An overlay that has taken focus keeps its Escape: the repo switcher
+  // closes, the pane underneath does not.
+  await window.keyboard.press("Meta+k");
+  await expect(window.locator(".overlay-panel")).toBeVisible();
+  await window.keyboard.press("Escape");
+  await expect(window.locator(".overlay-panel")).toBeHidden();
+  await expect(window.locator(".diff-pane")).toBeVisible();
+
+  // Clicking anywhere in the pane hands it focus again; then Escape closes it.
+  await window.locator(".diff-pane__body").click();
+  await expect(window.locator(".diff-pane")).toBeFocused();
+  await window.keyboard.press("Escape");
+  await expect(window.locator(".diff-pane")).toHaveCount(0);
   await expect(window.locator(".graph-toolbar")).toBeVisible();
 });
 
@@ -89,8 +123,8 @@ test("clicking a commit scopes the rail to its files; a file opens its diff", as
   ).toBeVisible();
   await expect(window.locator(".diff-pane__sub")).toContainText("in ");
 
-  // Back → lineage; ‹ Changes → the working-tree view returns.
-  await window.locator(".diff-pane__back").click();
+  // Close → lineage; ‹ Changes → the working-tree view returns.
+  await window.locator(".diff-pane__close").click();
   await expect(window.locator(".graph-toolbar")).toBeVisible();
   await commitTab.locator(".commit-tab__close").click();
   await expect(window.locator(".commit-tab")).toHaveCount(0);
