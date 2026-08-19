@@ -126,6 +126,10 @@ export function UpdatesSettings(props: {
     if (result.ok) {
       setUpdateResult(result.value);
       setUpdateStatus(result.value);
+      // The check revalidated the main-process release cache, so this read is
+      // served from memory and clears any stale Unavailable slot labels.
+      const versions = await dispatch("app:readUpdateReleases", undefined);
+      if (versions.ok) setReleaseVersions(versions.value);
     } else {
       setUpdateResult({ status: "error", message: result.error.message });
     }
