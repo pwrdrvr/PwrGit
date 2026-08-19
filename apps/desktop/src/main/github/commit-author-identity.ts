@@ -15,7 +15,7 @@ import type {
 } from "../forge/commit-author";
 import { ForgeCommitAuthorIdentityTransport } from "../forge/commit-author-transport";
 import { resolveForgeRepo } from "../forge/resolve";
-import type { ForgeRepo } from "../forge/types";
+import { forgeOrigin, type ForgeRepo } from "../forge/types";
 import {
   NoopGitHubAvatarThumbnailStore,
   type GitHubAvatarThumbnailStore
@@ -1115,13 +1115,14 @@ function normalizeForgeRepo(value: unknown): ForgeRepo | undefined {
   const path = safeText(value.path, 1_024);
   if (host === undefined || path === undefined) return undefined;
   if (!/^[A-Za-z0-9.-]+$/.test(host)) return undefined;
+  const port = readSafeInteger(value.port);
   const segments = path.split("/");
   if (segments.length < 2) return undefined;
   if (kind === "github" && segments.length !== 2) return undefined;
   if (!segments.every((segment) => /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(segment))) {
     return undefined;
   }
-  return { kind, host, path };
+  return { kind, host, ...(port === undefined ? {} : { port }), path };
 }
 
 function normalizeForgeIdentity(
@@ -1149,7 +1150,7 @@ function normalizeAvatarUrl(value: unknown, repo?: ForgeRepo): string | undefine
   if (raw === undefined) return undefined;
   return normalizeForgeAvatarSourceUrl(
     raw,
-    repo === undefined ? undefined : `https://${repo.host}`
+    repo === undefined ? undefined : forgeOrigin(repo)
   );
 }
 
@@ -1244,15 +1245,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return isRecord(value) ? value : undefined;
-}
 
 
 
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
 
 function readSafeInteger(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0

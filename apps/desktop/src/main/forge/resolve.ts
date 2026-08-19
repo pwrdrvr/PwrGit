@@ -3,7 +3,7 @@ import type { ForgeKind, ForgeRepo } from "./types";
 /** Host → forge, for hosts whose name doesn't announce what they run. */
 export type ForgeHostOverrides = Readonly<Record<string, ForgeKind>>;
 
-type ParsedRemote = { host: string; path: string };
+type ParsedRemote = { host: string; port?: number; path: string };
 
 /**
  * Split any git remote URL into its host and namespace path.
@@ -17,18 +17,52 @@ export function parseRemoteUrl(url: string): ParsedRemote | null {
   const trimmed = url.trim();
   if (trimmed === "") return null;
 
+  // scp syntax (`git@host:path`) has no port field at all.
   const scp = /^(?:([^@/]+)@)?([^@/:]+):(.+)$/.exec(trimmed);
-  const urlLike = /^(?:https?|ssh|git):\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/(.+)$/i
-    .exec(trimmed);
+  const urlLike =
+    /^(https?|ssh|git):\/\/(?:[^@/]+@)?([^/:]+)(?::(\d+))?\/(.+)$/i.exec(trimmed);
 
   const matched = urlLike ?? (isUrlLike(trimmed) ? null : scp);
   if (matched === null) return null;
-  const host = (urlLike ? matched[1] : matched[2])?.toLowerCase();
-  const rawPath = urlLike ? matched[2] : matched[3];
+  // Host is group 2 either way: (user, host, path) for scp, (scheme, host,
+  // port, path) for a URL.
+  const host = canonicalHost(matched[2]);
+  const rawPath = urlLike ? matched[4] : matched[3];
   if (host === undefined || rawPath === undefined) return null;
 
   const path = normalizePath(rawPath);
-  return path === null ? null : { host, path };
+  if (path === null) return null;
+  // A port only tells us where the API lives when the remote is itself a web
+  // URL. An ssh:// port is the SSH daemon's and says nothing about https.
+  const scheme = urlLike?.[1]?.toLowerCase();
+  const port =
+    scheme === "http" || scheme === "https"
+      ? normalizePort(urlLike?.[3])
+      : undefined;
+  return port === undefined ? { host, path } : { host, port, path };
+}
+
+/**
+ * Lowercase, and drop a `www.` prefix.
+ *
+ * `www.github.com` is a perfectly valid remote, but `gh api --hostname
+ * www.github.com` and `https://www.gitlab.com/api/graphql` are not what either
+ * CLI or API expects — the canonical name is the one without it.
+ */
+function canonicalHost(value: string | undefined): string | undefined {
+  const host = value?.trim().toLowerCase();
+  if (host === undefined || host === "") return undefined;
+  const withoutWww = host.startsWith("www.") ? host.slice(4) : host;
+  return withoutWww === "" ? undefined : withoutWww;
+}
+
+function normalizePort(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const port = Number.parseInt(value, 10);
+  if (!Number.isSafeInteger(port) || port <= 0 || port > 65_535) return undefined;
+  // 443 is already implied by https; carrying it would only make two spellings
+  // of the same origin.
+  return port === 443 ? undefined : port;
 }
 
 function isUrlLike(url: string): boolean {
@@ -62,15 +96,11 @@ export function classifyHost(
   host: string,
   overrides: ForgeHostOverrides = {}
 ): ForgeKind | null {
-  const normalized = host.trim().toLowerCase();
+  const normalized = canonicalHost(host) ?? "";
   const override = overrides[normalized];
   if (override !== undefined) return override;
-  if (normalized === "github.com" || normalized === "www.github.com") {
-    return "github";
-  }
-  if (normalized === "gitlab.com" || normalized === "www.gitlab.com") {
-    return "gitlab";
-  }
+  if (normalized === "github.com") return "github";
+  if (normalized === "gitlab.com") return "gitlab";
   if (normalized.startsWith("gitlab.")) return "gitlab";
   return null;
 }
@@ -93,7 +123,12 @@ export function resolveForgeRepo(
   const segments = parsed.path.split("/");
   if (kind === "github" && segments.length !== 2) return null;
   if (kind === "gitlab" && segments.length < 2) return null;
-  return { kind, host: parsed.host, path: parsed.path };
+  return {
+    kind,
+    host: parsed.host,
+    ...(parsed.port === undefined ? {} : { port: parsed.port }),
+    path: parsed.path
+  };
 }
 
 /** Split a GitHub `owner/repo` path for APIs that still want two arguments. */

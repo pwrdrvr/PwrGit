@@ -15,9 +15,22 @@ export type ForgeRepo = {
   kind: ForgeKind;
   /** Hostname only, no scheme or port — `github.com`, `gitlab.example.com`. */
   host: string;
+  /**
+   * Web port, only when the remote named a non-default one over http(s).
+   *
+   * Kept out of `host` on purpose: `host` is compared against URL hostnames and
+   * passed to `gh`/`glab` as `--hostname`, both of which want a bare name. Only
+   * URL building adds the port — see `forgeOrigin`.
+   */
+  port?: number;
   /** Namespace path without leading/trailing slashes or a `.git` suffix. */
   path: string;
 };
+
+/** Base URL for this repo's forge API, including a non-default web port. */
+export function forgeOrigin(repo: Pick<ForgeRepo, "host" | "port">): string {
+  return `https://${repo.host}${repo.port === undefined ? "" : `:${repo.port}`}`;
+}
 
 /**
  * Everything `PrService` needs from a forge, and nothing more.

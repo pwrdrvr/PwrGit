@@ -5,6 +5,7 @@ import {
   parseRemoteUrl,
   resolveForgeRepo
 } from "./resolve";
+import { forgeOrigin } from "./types";
 
 describe("parseRemoteUrl", () => {
   it("keeps every path segment so nested GitLab groups survive", () => {
@@ -88,5 +89,51 @@ describe("githubOwnerAndName", () => {
     expect(
       githubOwnerAndName({ kind: "github", host: "github.com", path: "a/b" })
     ).toEqual({ owner: "a", name: "b" });
+  });
+});
+
+describe("host and port canonicalization", () => {
+  it("drops a www. prefix, which neither CLI nor API accepts", () => {
+    // `gh api --hostname www.github.com` is not a thing.
+    expect(resolveForgeRepo("https://www.github.com/pwrdrvr/PwrGit.git")).toEqual({
+      kind: "github",
+      host: "github.com",
+      path: "pwrdrvr/PwrGit"
+    });
+    expect(resolveForgeRepo("https://www.gitlab.com/g/p.git")?.host).toBe("gitlab.com");
+  });
+
+  it("keeps a non-default web port so a self-managed API is reachable", () => {
+    expect(resolveForgeRepo("https://gitlab.corp.example:8443/g/p.git")).toEqual({
+      kind: "gitlab",
+      host: "gitlab.corp.example",
+      port: 8443,
+      path: "g/p"
+    });
+  });
+
+  it("ignores an ssh port, which says nothing about where https lives", () => {
+    expect(
+      resolveForgeRepo("ssh://git@gitlab.corp.example:2222/g/p.git")
+    ).toEqual({
+      kind: "gitlab",
+      host: "gitlab.corp.example",
+      path: "g/p"
+    });
+  });
+
+  it("does not carry 443, which https already implies", () => {
+    expect(
+      resolveForgeRepo("https://gitlab.corp.example:443/g/p.git")?.port
+    ).toBeUndefined();
+  });
+});
+
+describe("forgeOrigin", () => {
+  it("adds the port only when there is one", () => {
+    expect(forgeOrigin({ host: "gitlab.com" })).toBe("https://gitlab.com");
+    expect(forgeOrigin({ host: "gitlab.corp.example", port: 8443 })).toBe(
+      "https://gitlab.corp.example:8443"
+    );
   });
 });

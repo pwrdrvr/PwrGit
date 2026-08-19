@@ -1,7 +1,7 @@
 import type { PrSummary } from "@pwrgit/shared";
 import { mapLimit } from "../../util/map-limit";
 import type { ForgeRepo } from "../types";
-import { withNullsForMissing } from "../types";
+import { forgeOrigin, withNullsForMissing } from "../types";
 import {
   buildMrBranchQuery,
   buildMrNumberQuery,
@@ -112,7 +112,7 @@ async function graphql(
   query: string,
   variables: Record<string, unknown>
 ): Promise<unknown> {
-  const body = await request(`https://${repo.host}/api/graphql`, token, {
+  const body = await request(`${forgeOrigin(repo)}/api/graphql`, token, {
     method: "POST",
     body: JSON.stringify({ query, variables })
   });
@@ -137,12 +137,17 @@ export async function fetchMrsForBranches(
   const result = new Map<string, PrSummary | null>();
   for (let i = 0; i < branches.length; i += BRANCH_BATCH) {
     const chunk = branches.slice(i, i + BRANCH_BATCH);
+    const requested = new Set(chunk);
     const found = new Map<string, PrSummary>();
     let after: string | null = null;
     for (let page = 0; page < MAX_PAGES; page += 1) {
       const { query, variables } = buildMrBranchQuery(repo.path, chunk, after);
       const parsed = parseMrPage(await graphql(repo, token, query, variables));
       for (const [branch, best] of pickBestByBranch(parsed.nodes)) {
+        // Ignore anything outside the requested set: counting a stray node
+        // toward the early exit below would stop paging while a branch we did
+        // ask about is still unseen, and then negative-cache it.
+        if (!requested.has(branch)) continue;
         const current = found.get(branch);
         // Sorted newest-first, so the first sighting of a branch wins unless a
         // later page turns up the live MR behind a newer terminal one.
@@ -151,7 +156,7 @@ export async function fetchMrsForBranches(
           found.set(branch, best.summary);
         }
       }
-      if (found.size === chunk.length || !parsed.hasNextPage) break;
+      if (found.size === requested.size || !parsed.hasNextPage) break;
       after = parsed.endCursor;
       if (after === null) break;
     }
@@ -199,7 +204,7 @@ export async function fetchMrsForCommits(
   await mapLimit(requested, COMMIT_CONCURRENCY, async (sha) => {
     try {
       const body = await request(
-        `https://${repo.host}/api/v4/projects/${project}/repository/commits/${encodeURIComponent(sha)}/merge_requests`,
+        `${forgeOrigin(repo)}/api/v4/projects/${project}/repository/commits/${encodeURIComponent(sha)}/merge_requests`,
         token,
         {},
         COMMIT_MAX_RETRIES
