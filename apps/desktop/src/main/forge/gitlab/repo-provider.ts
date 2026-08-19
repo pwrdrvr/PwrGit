@@ -10,7 +10,8 @@ import {
   parseJsonObject,
   splitNameWithOwner,
   type ForgeRepoProvider,
-  type ForkInput
+  type ForkInput,
+  type RepoSearch
 } from "../repo-provider";
 import {
   glabErrorMessage,
@@ -197,25 +198,64 @@ export class GitLabRepoProvider implements ForgeRepoProvider {
     return repository;
   }
 
-  async listRepos(owner: string, limit: number): Promise<CloneRepository[]> {
-    const query = `per_page=${Math.min(limit, 100)}&order_by=last_activity_at&sort=desc`;
-    // An owner is a group or a user and the endpoints differ. Groups are tried
-    // first because a subgroup path can never be a username.
-    try {
+  async searchRepos({
+    query,
+    owners,
+    limit
+  }: RepoSearch): Promise<CloneRepository[]> {
+    const term = query.trim();
+    const paging = `per_page=${Math.min(limit, 100)}&order_by=last_activity_at&sort=desc`;
+    const search = term === "" ? "" : `&search=${encodeURIComponent(term)}`;
+
+    // One named account is the case GitLab answers well: its project endpoints
+    // take `search` directly, so the filtering happens server-side.
+    const owner = owners.length === 1 ? owners[0] : undefined;
+    if (owner !== undefined) {
+      // An owner is a group or a user and the endpoints differ. Groups are
+      // tried first because a subgroup path can never be a username.
+      try {
+        return parseGitLabProjects(
+          await this.glab([
+            "api",
+            `groups/${encodeProjectPath(owner)}/projects?include_subgroups=true&${paging}${search}`
+          ]),
+          this.hostname
+        );
+      } catch (cause) {
+        if (this.isAuthError(cause)) throw cause;
+      }
       return parseGitLabProjects(
         await this.glab([
           "api",
-          `groups/${encodeProjectPath(owner)}/projects?include_subgroups=true&${query}`
+          `users/${encodeProjectPath(owner)}/projects?${paging}${search}`
         ]),
         this.hostname
       );
-    } catch (cause) {
-      if (this.isAuthError(cause)) throw cause;
     }
-    return parseGitLabProjects(
-      await this.glab(["api", `users/${encodeProjectPath(owner)}/projects?${query}`]),
+
+    // GitLab has no multi-owner filter, so several owners become one
+    // instance-wide search narrowed back down here. Without a term that would
+    // be a listing of every project the token can see — the enumeration this
+    // whole seam exists to avoid — so it is declined rather than attempted.
+    if (term === "") return [];
+    const found = parseGitLabProjects(
+      await this.glab(["api", `projects?${paging}${search}`]),
       this.hostname
     );
+    if (owners.length === 0) return found;
+    // Namespace prefix, not equality. A project's owner is everything before
+    // its last slash, so `pwrdrvr/qa/forge/PwrGit-Test` has owner
+    // `pwrdrvr/qa/forge` — an equality check against the known owner
+    // `pwrdrvr` would drop it, while the single-owner path above returns it
+    // through `include_subgroups=true`. The same query must not depend on how
+    // many other accounts happen to be indexed.
+    const wanted = owners.map((candidate) => candidate.toLowerCase());
+    return found.filter((project) => {
+      const namespace = project.owner.toLowerCase();
+      return wanted.some(
+        (owner) => namespace === owner || namespace.startsWith(`${owner}/`)
+      );
+    });
   }
 
   async fork(input: ForkInput): Promise<CloneRepository> {

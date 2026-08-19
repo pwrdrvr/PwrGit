@@ -2,7 +2,6 @@ import {
   err,
   forgeWebUrl,
   ok,
-  parseForgeRemote,
   type CloneProtocol,
   type CloneRepository,
   type ForgeHost,
@@ -15,7 +14,6 @@ import {
   type Result
 } from "@pwrgit/shared";
 import type { ProfileService } from "../profiles/profile-service";
-import { mapLimit } from "../util/map-limit";
 import type {
   ForgeRepoProvider,
   ForgeRepoRegistry
@@ -35,10 +33,6 @@ import type { RepoIndexer } from "./repo-indexer";
  *  the near-universal convention, and `ForkService` only ever creates it on a
  *  checkout it made itself a moment earlier. */
 export const UPSTREAM_REMOTE = "upstream";
-
-/** `git remote get-url` per indexed repo, bounded the way every other scan in
- *  this codebase is — the preflight runs while the user waits on the dialog. */
-const ORIGIN_CONCURRENCY = 8;
 
 export type ForkRequest = {
   profileId: string;
@@ -228,10 +222,7 @@ export class ForkService {
       .catch(() => null);
     if (existing !== null) {
       if (isForkOf(existing, repository)) {
-        existing.localPaths = await this.checkoutsFor(
-          input.profileId,
-          existing
-        );
+        existing.localPaths = this.checkoutsFor(input.profileId, existing);
         preflight.existing = existing;
       } else {
         preflight.blocked = {
@@ -440,36 +431,29 @@ export class ForkService {
     return ok(true);
   }
 
-  private async checkoutsFor(
+  private checkoutsFor(
     profileId: string,
     repository: CloneRepository
-  ): Promise<string[]> {
-    const paths: string[] = [];
-    // Parsed, not substring-matched: `huntharo/react` is a substring of
+  ): string[] {
+    // Read from the identities already joined onto `repo:list`, not by asking
+    // Git. The version this replaced spawned `git remote get-url origin` in
+    // every indexed repository — 52 subprocesses on this author's profile —
+    // and preflight runs it again every time the fork name settles.
+    //
+    // Compared, not substring-matched: `huntharo/react` is a substring of
     // `huntharo/react-native`, and of a gitlab.com URL carrying the same slug.
     // Either false positive points "Reveal checkout" at the wrong folder.
-    await mapLimit(
-      this.indexer.listRepos(profileId),
-      ORIGIN_CONCURRENCY,
-      async (repo) => {
-        const result = await this.git(
-          ["remote", "get-url", "origin"],
-          repo.path
-        );
-        if (!result.ok || result.value.exitCode !== 0) return;
-        const origin = parseForgeRemote(result.value.stdout.trim());
-        if (origin === null) return;
-        if (
-          origin.host === repository.host &&
-          origin.hostname === repository.hostname &&
-          origin.nameWithOwner.toLowerCase() ===
+    return this.indexer
+      .listRepos(profileId)
+      .filter(
+        (repo) =>
+          repo.identity !== undefined &&
+          repo.identity.host === repository.host &&
+          repo.identity.hostname === repository.hostname &&
+          repo.identity.nameWithOwner.toLowerCase() ===
             repository.nameWithOwner.toLowerCase()
-        ) {
-          paths.push(repo.path);
-        }
-      }
-    );
-    return paths;
+      )
+      .map((repo) => repo.path);
   }
 
   private blocked(

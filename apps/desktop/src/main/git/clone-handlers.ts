@@ -10,8 +10,11 @@ export function registerCloneHandlers(
   bus.register("repo:cloneDestinations", (req) =>
     clones.destinations(req.profileId, req.includeNested)
   );
+  bus.register("repo:searchCloneSources", (req) =>
+    clones.searchSources(req.profileId, req.query, req.host)
+  );
   bus.register("repo:checkCloneSource", (req) =>
-    clones.checkSource(req.profileId, req.nameWithOwner)
+    clones.checkSource(req.profileId, req.nameWithOwner, req.host)
   );
   bus.register("repo:clone", async (req) => {
     const result = await clones.clone(req, (progress) => {

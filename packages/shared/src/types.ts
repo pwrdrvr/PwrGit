@@ -424,15 +424,21 @@ export type ForgeOwner = {
   host: ForgeKind;
 };
 
+/**
+ * What the clone and fork dialogs need to *open*, and nothing more.
+ *
+ * Deliberately carries no repositories. It once did — the catalog listed every
+ * owner's repositories up front, which cost one forge round trip per account
+ * before the user had typed anything (~13s on a profile with sixteen owners).
+ * Repositories now arrive from `repo:searchCloneSources`, on debounced input.
+ */
 export type CloneCatalog = {
-  /** Accounts whose repositories are offered, across every forge in use. */
+  /** Accounts the search is scoped to, across every forge in use. Read from
+   *  what is already indexed locally, so opening the dialog costs no network. */
   owners: ForgeOwner[];
-  repositories: CloneRepository[];
   /** One entry per forge PwrGit knows how to talk to, so a dialog can say
    *  which CLI is missing rather than assuming GitHub. */
   forges: ForgeStatus[];
-  /** Owner catalogs that could not be loaded; other results remain usable. */
-  warning?: string;
 };
 
 /** Live progress for one fork. The clone phases are shared verbatim with

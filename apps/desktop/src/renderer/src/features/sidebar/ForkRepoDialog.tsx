@@ -12,14 +12,16 @@ import type {
   Repo
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { useCloneSearch } from "./useCloneSearch";
 import {
   cloneDestinationLabel,
   cloneDestinationSelectionIndex,
   cloneRepositoryAtSelection,
-  cloneSourceQuery,
   defaultHostname,
+  exactRepository,
   filterCloneDestinations,
-  moveCloneSelection
+  moveCloneSelection,
+  rankCloneRepositories
 } from "./clone-dialog";
 import {
   cliProtocolLabel,
@@ -180,18 +182,20 @@ export function ForkRepoDialog({
     };
   }, [ownersHost]);
 
-  const parsedQuery = useMemo(
-    () =>
-      cloneSourceQuery(
-        repositoriesOnHost(catalog?.repositories ?? [], host),
-        sourceQuery,
-        host
-      ),
-    [catalog?.repositories, sourceQuery, host]
+  const exact = useMemo(
+    () => exactRepository(sourceQuery, host),
+    [sourceQuery, host]
   );
-  const catalogMatches =
-    parsedQuery.kind === "search" ? parsedQuery.repositories : [];
-  const exact = parsedQuery.kind === "exact" ? parsedQuery.repository : null;
+
+  // Debounced, and only on what was typed. The catalog this replaced listed
+  // every known owner's repositories when the dialog opened — one CLI round
+  // trip per account, before the user had touched the box.
+  const search = useCloneSearch({
+    profileId: profile.id,
+    query: sourceQuery,
+    host,
+    enabled: usableHosts.includes(host)
+  });
 
   useEffect(() => setSourceSelection(0), [sourceQuery]);
 
@@ -277,7 +281,13 @@ export function ForkRepoDialog({
   }, [targets.map((o) => o.login).join(","), targetOwner?.login]);
 
   const sourceResults = useMemo(() => {
-    const rows = [...catalogMatches];
+    // Results can span forges when a pasted URL names one; the picker's tab is
+    // what may be forked into, so anything else would offer a fork that cannot
+    // be created.
+    const rows = rankCloneRepositories(
+      repositoriesOnHost(search.repositories, host),
+      sourceQuery
+    );
     if (exact !== null && !rows.some((r) => r.nameWithOwner === exact.nameWithOwner)) {
       rows.unshift({
         name: exact.nameWithOwner.slice(exact.nameWithOwner.lastIndexOf("/") + 1),
@@ -292,7 +302,7 @@ export function ForkRepoDialog({
       });
     }
     return rows;
-  }, [catalogMatches, exact?.nameWithOwner, exact?.host]);
+  }, [search.repositories, host, sourceQuery, exact?.nameWithOwner, exact?.host]);
 
   const destinationResults = useMemo(
     () => filterCloneDestinations(destinations, destinationQuery),
@@ -535,7 +545,12 @@ export function ForkRepoDialog({
                     catalogError,
                     status: forgeStatus,
                     cliLabel: cliLabel.label,
-                    query: sourceQuery
+                    query: sourceQuery,
+                    searching: search.searching,
+                    searchError: search.error,
+                    owners: (catalog?.owners ?? [])
+                      .filter((owner) => owner.host === host)
+                      .map((owner) => owner.login)
                   })}
                 </div>
               )}
