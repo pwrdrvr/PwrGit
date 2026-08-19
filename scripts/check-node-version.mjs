@@ -7,8 +7,8 @@
 // surface until much later, as a test failure or a launch crash that reads
 // like a broken database. Fail here, where the cause is still obvious.
 
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -28,16 +28,31 @@ if (!wanted.every((part, i) => active[i] === part)) {
 
 // CI installs Node without nvm, so only developer machines that have nvm at
 // all are held to running Node from it — a system Node that happens to match
-// the pinned major still drifts out from under `nvm use` later.
+// the pinned major still drifts out from under `nvm use` later. Both sides are
+// resolved through realpath first: `process.execPath` comes back with symlinks
+// already resolved, so an `~/.nvm` that is itself a symlink (a dev volume, a
+// dotfiles farm) would otherwise fail a Node that nvm really did activate.
 const nvmDir = process.env.NVM_DIR || resolve(process.env.HOME ?? "", ".nvm");
 const inCi = process.env.CI === "true" || process.env.CI === "1";
-if (!inCi && existsSync(nvmDir) && !process.execPath.startsWith(`${resolve(nvmDir)}/`)) {
-  fail([
-    `Node ${process.version} is not running from nvm.`,
-    `  node: ${process.execPath}`,
-    `  nvm:  ${resolve(nvmDir)}`,
-    "Run: source ~/.nvm/nvm.sh && nvm use"
-  ]);
+if (!inCi && existsSync(nvmDir)) {
+  const nvmRoot = realpath(nvmDir);
+  const nodePath = realpath(process.execPath);
+  if (!nodePath.startsWith(nvmRoot.endsWith(sep) ? nvmRoot : `${nvmRoot}${sep}`)) {
+    fail([
+      `Node ${process.version} is not running from nvm.`,
+      `  node: ${nodePath}`,
+      `  nvm:  ${nvmRoot}`,
+      "Run: source ~/.nvm/nvm.sh && nvm use"
+    ]);
+  }
+}
+
+function realpath(path) {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
 }
 
 function fail(lines) {
