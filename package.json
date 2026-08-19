@@ -8,6 +8,7 @@
   "copyright": "Copyright © 2026 PwrDrvr LLC",
   "packageManager": "pnpm@10.33.0",
   "scripts": {
+    "preinstall": "node ./scripts/check-node-version.mjs",
     "build": "pnpm --filter @pwrgit/desktop build",
     "dev": "pnpm --filter @pwrgit/desktop dev",
     "lint": "pnpm lint:colors && pnpm licenses:check && pnpm lint:boundaries && pnpm typecheck",

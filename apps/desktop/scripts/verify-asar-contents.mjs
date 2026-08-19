@@ -84,6 +84,7 @@ const forbidden = [
     /(^|\/)[^/]*(screenshot|screenie|capture|mockup|wireframe|prototype|design)[^/]*\.(png|jpg|jpeg|gif|tiff|psd|sketch|fig)$/i,
   ],
   ["Playwright config", /playwright\.config\./],
+  ["better-sqlite3 dev sidecar", /\/node_modules\/better-sqlite3\/electron-native\//],
   ["Project plan/brainstorm", /\/(plans|brainstorms|design)\//],
 ];
 

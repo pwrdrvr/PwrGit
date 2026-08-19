@@ -60,6 +60,11 @@ files:
   # runtime. If included, @electron/universal sees identical test binaries in
   # both temp app trees and aborts the universal merge.
   - "!**/node_modules/better-sqlite3/build/Release/test_extension.node"
+  # The dev-only Electron-ABI sidecar written by
+  # scripts/rebuild-native-for-electron.mjs. Packaged builds load
+  # build/Release, which electron-builder rebuilds per arch, so a host-arch
+  # sidecar here would be dead weight at best and wrong-arch at worst.
+  - "!**/node_modules/better-sqlite3/electron-native/**"
   # dugite's embedded git distribution ships via extraResources (below), not
   # inside the asar: its ~150 `git-<builtin> → git` symlinks break the
   # universal-merge asar writer if placed under app.asar.unpacked. The main

@@ -103,13 +103,12 @@ jobs:
         with:
           node-version: 24.x
 
-      # vitest runs under Node, but the postinstall electron-rebuild leaves
-      # better-sqlite3 built for Electron's ABI. Rebuild for Node before the
-      # unit suite. Must run from apps/desktop — from the repo root the
-      # rebuild silently no-ops (better-sqlite3 is a desktop dep, not root).
-      - name: Rebuild better-sqlite3 for Node
-        working-directory: apps/desktop
-        run: pnpm rebuild better-sqlite3
+      # A fresh `pnpm i` already leaves better-sqlite3 built for both ABIs
+      # (see the root AGENTS.md), so this exits immediately. It earns its
+      # place on jobs that restore a cached node_modules: the rebuild script
+      # is idempotent and repairs whichever half of the pair is stale.
+      - name: Ensure better-sqlite3 native builds are current
+        run: pnpm --filter @pwrgit/desktop run rebuild:electron-native
 
       - name: Test
         run: pnpm run test
@@ -174,10 +173,9 @@ jobs:
       - name: Check package license policy and third-party notices
         run: pnpm licenses:check
 
-      # Same Node-ABI dance as the Linux test job (see comment there).
-      - name: Rebuild better-sqlite3 for Node
-        working-directory: apps/desktop
-        run: pnpm rebuild better-sqlite3
+      # Same native-build guard as the Linux test job (see comment there).
+      - name: Ensure better-sqlite3 native builds are current
+        run: pnpm --filter @pwrgit/desktop run rebuild:electron-native
 
       - name: Type check
         run: pnpm typecheck

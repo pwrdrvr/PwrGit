@@ -6,37 +6,47 @@ see **Docs & conventions** below.
 
 ## Set up a new checkout or worktree
 
-PwrGit bundles a native module (`better-sqlite3`) that must match **Electron's**
-ABI — which is *not* the same as any plain Node's (Electron 41 ≠ Node 24/26).
-`pnpm i` handles this: a `postinstall` runs `electron-rebuild` to compile native
-modules for the bundled Electron. Use the Node in `.nvmrc` for consistency, then
-install:
+Enter the repo through nvm, then install. **Do not assume `nvm` is
+initialized** — it is a shell function, and a non-interactive agent shell
+usually does not have it, so `node` is whatever the machine defaults to:
 
 ```bash
-nvm install   # first time on a machine
-nvm use       # reads .nvmrc (Node 24)
-pnpm i        # installs, then postinstall rebuilds native modules for Electron
+source ~/.nvm/nvm.sh   # agent shells: nvm is undefined until you source it
+nvm install            # first time on a machine
+nvm use                # reads .nvmrc (Node 24)
+pnpm i                 # every fresh checkout/worktree needs its own
 ```
 
-Each fresh checkout/worktree needs its own `pnpm i`.
+A root `preinstall` guard ([scripts/check-node-version.mjs](scripts/check-node-version.mjs))
+fails the install under a Node that does not match `.nvmrc`, or one that is not
+nvm's on a machine that has nvm. Native modules are compiled against the ABI of
+whichever Node ran the install, and a wrong-ABI build does not announce itself:
+it surfaces much later as a test failure or a launch crash that reads like a
+broken database.
 
-If the app fails to launch with an ABI mismatch — e.g. *"better_sqlite3.node was
-compiled against a different Node.js version using NODE_MODULE_VERSION 147; this
-version requires 145"* — the native build is stale. Fix with `pnpm i`, or
-`pnpm --filter @pwrgit/desktop run rebuild:electron-native`.
+One `pnpm i` serves both runtimes. It leaves `better-sqlite3` built twice — for
+this machine's Node (what `vitest` loads) and for Electron (what the app
+loads) — so `pnpm test` and `pnpm dev` need no rebuild between them, in either
+order. `apps/desktop/AGENTS.md` describes the layout. If a native ABI error
+does appear — *"better_sqlite3.node was compiled against a different Node.js
+version using NODE_MODULE_VERSION 147; this version requires 145"* — one
+command repairs whichever half is stale:
 
-**Running tests:** `vitest` runs under Node, not Electron, so the SQLite unit
-tests need a **Node-ABI** build first: `pnpm rebuild better-sqlite3`. Restore the
-Electron build with `pnpm i` before running the app again. (Both ABIs can't
-coexist in one `node_modules` — rebuild for whichever runtime you're about to
-use.)
+```bash
+pnpm --filter @pwrgit/desktop run rebuild:electron-native
+```
+
+Never `pnpm rebuild better-sqlite3` from the repo root: better-sqlite3 is a
+desktop dependency, not a root one, so the root rebuild silently no-ops.
+`require("better-sqlite3")` keeps working afterwards and only `new Database()`
+fails, which is a confusing place to start debugging.
 
 ## Common commands
 
 ```bash
 pnpm dev        # run the app (electron-vite dev)
 pnpm build      # production build
-pnpm test       # vitest across the workspace (needs a Node-ABI native build)
+pnpm test       # vitest across the workspace
 pnpm typecheck  # tsc across packages
 pnpm lint       # every check CI runs, cheapest-first (see below)
 ```
