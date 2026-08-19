@@ -195,13 +195,14 @@ describe("GitHubRepoProvider", () => {
     expect(gh).toHaveBeenCalledWith([
       "search",
       "repos",
-      "micro",
       "--owner=pwrdrvr",
       "--owner=huntharo",
       "--limit",
       "40",
       "--json",
-      SEARCH_JSON_FIELDS
+      SEARCH_JSON_FIELDS,
+      "--",
+      "micro"
     ]);
     for (const field of ["fullName", "visibility"]) {
       expect(SEARCH_JSON_FIELDS).toContain(field);
@@ -226,6 +227,23 @@ describe("GitHubRepoProvider", () => {
       "--json",
       SEARCH_JSON_FIELDS
     ]);
+  });
+
+  it("passes the term behind `--` so a leading dash is not read as a flag", async () => {
+    // Verified against the real CLI: `gh search repos "-ui"` exits with
+    // "unknown shorthand flag: 'u' in -ui", and a term of `--json` swallows
+    // the argument after it. The box accepts arbitrary text, so the term can
+    // never sit where `gh` is still parsing flags.
+    const gh = baseGh();
+    await new GitHubRepoProvider(gh).searchRepos({
+      query: "-ui",
+      owners: ["pwrdrvr"],
+      limit: 40
+    });
+    const args = gh.mock.calls[0]?.[0] ?? [];
+    expect(args.at(-2)).toBe("--");
+    expect(args.at(-1)).toBe("-ui");
+    expect(args.indexOf("--")).toBeGreaterThan(args.indexOf("--owner=pwrdrvr"));
   });
 
   it("refuses a search with neither a term nor an owner", async () => {

@@ -215,7 +215,6 @@ export class GitHubRepoProvider implements ForgeRepoProvider {
     // and rightly so — that is a request for all of GitHub.
     if (term === "" && owners.length === 0) return [];
     const args = ["search", "repos"];
-    if (term !== "") args.push(term);
     for (const owner of owners) args.push(`--owner=${owner}`);
     // `gh`'s default sort is best-match, which is what puts a typed name at
     // the top. With no term there is nothing to match on, so recency is the
@@ -223,6 +222,12 @@ export class GitHubRepoProvider implements ForgeRepoProvider {
     // user has named an account and wants to see what is in it.
     if (term === "") args.push("--sort", "updated");
     args.push("--limit", String(limit), "--json", SEARCH_JSON_FIELDS);
+    // The term goes last, behind `--`. It is arbitrary user input, and `gh`
+    // reads a leading dash as a flag: searching for `-ui` fails with "unknown
+    // shorthand flag: 'u'", and a term of `--json` swallows the argument after
+    // it. There is no shell involved — the runner spawns an argv array — so
+    // this is about `gh`'s own parser, not injection.
+    if (term !== "") args.push("--", term);
     return parseGhSearchRepos(await this.gh(args));
   }
 

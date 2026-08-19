@@ -213,6 +213,16 @@ export function CloneRepoDialog({
   const usableHosts = (catalog?.forges ?? [])
     .filter((status) => status.installed && status.loggedIn)
     .map((status) => status.kind);
+  // Snap onto a forge that can actually answer. Without this a machine with
+  // only GitLab signed in leaves `host` on its "github" default forever: the
+  // search is disabled, and the toggle that would fix it is not rendered
+  // because there is only one usable host to offer.
+  useEffect(() => {
+    if (usableHosts.length > 0 && !usableHosts.includes(host)) {
+      setHost(usableHosts[0]!);
+    }
+  }, [usableHosts.join(","), host]);
+
   const activeHost = selectedRepository?.host ?? host;
   const forgeStatus = statusFor(catalog?.forges ?? [], activeHost);
   const cliDisabled =
@@ -269,9 +279,13 @@ export function CloneRepoDialog({
   }, [exactNameWithOwner, exactRepo?.host, host, profile.id]);
 
   const sourceResults = useMemo(() => {
-    // The verified exact match leads: it is the one row read from the forge
-    // proper, so it carries fork lineage and clone URLs that search omits.
-    const ranked = rankCloneRepositories(search.repositories, sourceQuery);
+    // Filtered to the picked forge: a host switch keeps the previous results
+    // on screen through the debounce and round trip, and without this the
+    // GitLab tab spends that second listing GitHub repositories.
+    const ranked = rankCloneRepositories(
+      search.repositories.filter((repository) => repository.host === host),
+      sourceQuery
+    );
     const rows = checkedRepository ? [checkedRepository, ...ranked] : ranked;
     return rows.filter(
       (repository, index, all) =>
@@ -281,7 +295,7 @@ export function CloneRepoDialog({
             repository.nameWithOwner.toLowerCase()
         ) === index
     );
-  }, [search.repositories, sourceQuery, checkedRepository]);
+  }, [search.repositories, host, sourceQuery, checkedRepository]);
 
   // One line for every reason the list is empty, so the states cannot
   // contradict each other. `checkError` wins over a bare "no matches": when

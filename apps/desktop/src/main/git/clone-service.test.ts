@@ -427,6 +427,41 @@ describe("CloneService", () => {
     ).toEqual(["--owner=pwrdrvr"]);
   });
 
+  it("reads the repo list once per search, not once per thing it needs", async () => {
+    const root = temporaryRoot();
+    const existingPath = join(root, "services", "existing");
+    initRepo(existingPath);
+
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "PwrDrvr",
+      email: "test@pwrgit.dev",
+      roots: [root]
+    });
+    const indexer = new RepoIndexer(db, systemGit);
+    const indexed = await indexer.indexRepoAt(profile.id, existingPath);
+    expect(indexed.ok).toBe(true);
+    if (!indexed.ok) return;
+    storeIdentity(db, indexed.value.id, { owner: "pwrdrvr", name: "existing" });
+
+    // `listRepos` is two queries plus an ownership pass over every worktree,
+    // and a bare term needs the same state twice — for the owners to scope to
+    // and for the checkouts to mark. Once, not twice, on every keystroke.
+    const listRepos = vi.spyOn(indexer, "listRepos");
+    const service = new CloneService(
+      db,
+      systemGit,
+      indexer,
+      profiles,
+      githubOnly(fakeGh()),
+      fakeForgeStatus()
+    );
+
+    expect((await service.searchSources(profile.id, "existing")).ok).toBe(true);
+    expect(listRepos).toHaveBeenCalledTimes(1);
+  });
+
   it("scopes to the owner an owner/prefix names, and searches the rest", async () => {
     const root = temporaryRoot();
     const db = openDatabase(":memory:");

@@ -243,8 +243,19 @@ export class GitLabRepoProvider implements ForgeRepoProvider {
       this.hostname
     );
     if (owners.length === 0) return found;
-    const wanted = new Set(owners.map((candidate) => candidate.toLowerCase()));
-    return found.filter((project) => wanted.has(project.owner.toLowerCase()));
+    // Namespace prefix, not equality. A project's owner is everything before
+    // its last slash, so `pwrdrvr/qa/forge/PwrGit-Test` has owner
+    // `pwrdrvr/qa/forge` — an equality check against the known owner
+    // `pwrdrvr` would drop it, while the single-owner path above returns it
+    // through `include_subgroups=true`. The same query must not depend on how
+    // many other accounts happen to be indexed.
+    const wanted = owners.map((candidate) => candidate.toLowerCase());
+    return found.filter((project) => {
+      const namespace = project.owner.toLowerCase();
+      return wanted.some(
+        (owner) => namespace === owner || namespace.startsWith(`${owner}/`)
+      );
+    });
   }
 
   async fork(input: ForkInput): Promise<CloneRepository> {

@@ -344,7 +344,8 @@ export class CloneService {
       });
     }
     const forges = await this.statuses();
-    return ok({ owners: this.knownOwners(profile, forges), forges });
+    const local = localForgeState(this.indexer.listRepos(profileId));
+    return ok({ owners: knownOwners(profile, forges, local), forges });
   }
 
   /**
@@ -382,10 +383,15 @@ export class CloneService {
 
     const parsed = parseSearchInput(input);
     if (parsed === null) return ok([]);
+    // Read once and used twice — for the owners a bare term is scoped to, and
+    // for the checkouts each result is marked with. `listRepos` is two queries
+    // plus an ownership pass over every worktree, and this runs on every
+    // settled keystroke.
+    const local = localForgeState(this.indexer.listRepos(profileId));
     const owners =
       parsed.owner !== null
         ? [parsed.owner]
-        : this.knownOwners(profile, forges)
+        : knownOwners(profile, forges, local)
             .filter((owner) => owner.host === host)
             .map((owner) => owner.login);
 
@@ -395,7 +401,6 @@ export class CloneService {
         owners,
         limit: SEARCH_LIMIT
       });
-      const local = localForgeState(this.indexer.listRepos(profileId));
       return ok(
         found.map((repository) => ({
           ...repository,
@@ -419,37 +424,6 @@ export class CloneService {
         message: messageFromUnknown(provider, cause)
       });
     }
-  }
-
-  /** Accounts this profile has already used, plus its configured default org.
-   *
-   *  Read entirely from what `repo:list` already carries — `repo_identity`,
-   *  joined on in SQLite — so it costs one query the indexer has run anyway.
-   *  Fork parents count: a checkout of your fork of `openai/codex` is how you
-   *  came to care about `openai`, and the old owner scan saw the same account
-   *  through that checkout's `upstream` remote. */
-  private knownOwners(profile: Profile, forges: ForgeStatus[]): ForgeOwner[] {
-    const usable = new Set(
-      forges
-        .filter((status) => status.installed && status.loggedIn)
-        .map((status) => status.kind)
-    );
-    const local = localForgeState(this.indexer.listRepos(profile.id));
-    return dedupeOwners([
-      ...local.owners,
-      // The profile's default org is a guess about every signed-in forge: it
-      // was a GitHub-only setting, and a person with both CLIs signed in
-      // usually means the same org name on whichever one has it.
-      ...(profile.org?.trim()
-        ? [...usable].map(
-            (candidate): ForgeOwner => ({
-              login: profile.org!.trim(),
-              kind: "organization",
-              host: candidate
-            })
-          )
-        : [])
-    ]).filter((owner) => usable.has(owner.host));
   }
 
   destinations(
@@ -688,6 +662,43 @@ export class CloneService {
   async statuses(): Promise<ForgeStatus[]> {
     return this.forgeStatus.list();
   }
+}
+
+/** Accounts this profile has already used, plus its configured default org.
+ *
+ *  Read entirely from what `repo:list` already carries — `repo_identity`,
+ *  joined on in SQLite — so it costs one query the indexer has run anyway.
+ *  Takes the local state rather than reading it, so a caller that also needs
+ *  `pathsByRepo` pays for the pass once.
+ *
+ *  Fork parents count: a checkout of your fork of `openai/codex` is how you
+ *  came to care about `openai`, and the old owner scan saw the same account
+ *  through that checkout's `upstream` remote. */
+function knownOwners(
+  profile: Profile,
+  forges: ForgeStatus[],
+  local: LocalForgeState
+): ForgeOwner[] {
+  const usable = new Set(
+    forges
+      .filter((status) => status.installed && status.loggedIn)
+      .map((status) => status.kind)
+  );
+  return dedupeOwners([
+    ...local.owners,
+    // The profile's default org is a guess about every signed-in forge: it
+    // was a GitHub-only setting, and a person with both CLIs signed in
+    // usually means the same org name on whichever one has it.
+    ...(profile.org?.trim()
+      ? [...usable].map(
+          (candidate): ForgeOwner => ({
+            login: profile.org!.trim(),
+            kind: "organization",
+            host: candidate
+          })
+        )
+      : [])
+  ]).filter((owner) => usable.has(owner.host));
 }
 
 /** Split what is in the search box into an optional owner and a term.

@@ -156,6 +156,48 @@ describe("GitLabRepoProvider", () => {
     ]);
   });
 
+  it("keeps subgroup projects when several owners narrow an instance search", async () => {
+    // The fixture is deliberately four deep: `pwrdrvr/qa/forge/PwrGit-Test`
+    // has namespace `pwrdrvr/qa/forge`, so an equality check against the known
+    // owner `pwrdrvr` would drop it — while the single-owner path returns it
+    // through `include_subgroups=true`. The same query must not answer
+    // differently depending on how many other accounts happen to be indexed.
+    const provider = new GitLabRepoProvider(async (args) => {
+      expect(args[1]).toContain("projects?");
+      return JSON.stringify([
+        { path_with_namespace: "pwrdrvr/qa/forge/PwrGit-Test", path: "PwrGit-Test" },
+        { path_with_namespace: "pwrdrvr/PwrGit", path: "PwrGit" },
+        { path_with_namespace: "someone-else/PwrGit", path: "PwrGit" },
+        // A namespace that merely starts with the same characters is a
+        // different account, not a subgroup — the `/` is what separates them.
+        { path_with_namespace: "pwrdrvr-fan/PwrGit", path: "PwrGit" }
+      ]);
+    });
+
+    const found = await provider.searchRepos({
+      query: "PwrGit",
+      owners: ["pwrdrvr", "acme"],
+      limit: 40
+    });
+
+    expect(found.map((project) => project.nameWithOwner)).toEqual([
+      "pwrdrvr/qa/forge/PwrGit-Test",
+      "pwrdrvr/PwrGit"
+    ]);
+  });
+
+  it("declines an owner-less search with no term rather than listing everything", async () => {
+    const glab = vi.fn(async () => "[]");
+    expect(
+      await new GitLabRepoProvider(glab).searchRepos({
+        query: "  ",
+        owners: ["pwrdrvr", "acme"],
+        limit: 40
+      })
+    ).toEqual([]);
+    expect(glab).not.toHaveBeenCalled();
+  });
+
   it("still reports a personal target when the group listing fails", async () => {
     const provider = new GitLabRepoProvider(async (args) => {
       if (args[1] === "user") return '{"username":"huntharo"}';
