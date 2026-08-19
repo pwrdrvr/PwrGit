@@ -159,18 +159,26 @@ export function ForkRepoDialog({
     }
   }, [usableHosts.join(","), host]);
 
-  // Fork targets follow the picker, not the catalog: they are the signed-in
-  // user's own accounts, which the clone catalog has no reason to know.
+  // Fork targets follow the forge actually in play, not the catalog: they are
+  // the signed-in user's own accounts, which the clone catalog has no reason
+  // to know. Keyed on the *source's* forge once one is chosen — a pasted URL
+  // may name a different forge than the picker, and fetching for the picker
+  // then filtering by the source left the list empty.
+  const ownersHost = selectedSource?.host ?? host;
   useEffect(() => {
+    if (ownersHost === "other") {
+      setForkOwners([]);
+      return;
+    }
     let active = true;
     setForkOwners([]);
-    void dispatch("repo:forkTargets", { host }).then((result) => {
+    void dispatch("repo:forkTargets", { host: ownersHost }).then((result) => {
       if (active && result.ok) setForkOwners(result.value);
     });
     return () => {
       active = false;
     };
-  }, [host]);
+  }, [ownersHost]);
 
   const parsedQuery = useMemo(
     () =>
@@ -322,6 +330,13 @@ export function ForkRepoDialog({
   };
 
   const chooseSource = (repository: CloneRepository): void => {
+    // A pasted URL names its own forge, which may not be the one the picker
+    // shows. Follow the selection rather than leaving the two disagreeing —
+    // set `host` directly, not through `selectHost`, which clears the
+    // selection by design.
+    if (repository.host !== "other" && repository.host !== host) {
+      setHost(repository.host);
+    }
     setSelectedSource(repository);
     setSourceQuery(repository.nameWithOwner);
     setForkNameTouched(false);

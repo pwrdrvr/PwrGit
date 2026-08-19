@@ -360,6 +360,23 @@ describe("the forge picker is authoritative until a source pins the host", () =>
     ]);
   });
 
+  it("finds targets for a source whose forge differs from the picker", () => {
+    // A pasted gitlab.com URL wins over the GITHUB picker (see
+    // exactRepository), so the owners in hand must be the source's forge —
+    // fetching for the picker and filtering by the source emptied the list
+    // and left "Fork & clone" permanently disabled.
+    const gitlabSource: CloneRepository = {
+      ...source,
+      nameWithOwner: "acme/api",
+      owner: "acme",
+      host: "gitlab",
+      hostname: "gitlab.com"
+    };
+    expect(
+      forkTargets(allOwners, gitlabSource, "github").map((o) => o.login)
+    ).toEqual(["huntharo", "pwrdrvr/qa/forge"]);
+  });
+
   it("shows only the picked forge's repositories", () => {
     // One catalog spans every signed-in forge; the GitLab tab listing GitHub
     // repos contradicts its own host chips.

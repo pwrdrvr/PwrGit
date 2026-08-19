@@ -688,19 +688,6 @@ export class CloneService {
     return this.forgeStatus.list();
   }
 
-  /** Fork targets for one forge, or none when it cannot answer. */
-  private async ownersFor(host: ForgeHost): Promise<ForgeOwner[]> {
-    const provider = this.forges.get(host);
-    if (provider === null) return [];
-    try {
-      return await provider.owners();
-    } catch {
-      // Best-effort: a forge that will not name its accounts still lists
-      // repositories for owners discovered from local remotes.
-      return [];
-    }
-  }
-
   private async repositoriesForOwner(
     provider: ForgeRepoProvider,
     owner: string

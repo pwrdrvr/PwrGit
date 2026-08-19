@@ -185,9 +185,13 @@ export class ForkService {
       });
     }
 
-    const owners = await provider.owners().catch(() => []);
+    // Only when the caller did not name one: resolving owners costs one or
+    // two more forge calls, and the dialog supplies a target on every
+    // preflight after its picker has a value.
     const targetOwner =
-      input.targetOwner ?? owners[0]?.login ?? repository.owner;
+      input.targetOwner ??
+      (await provider.owners().catch(() => []))[0]?.login ??
+      repository.owner;
     // The fork name is editable, and every answer below — the existing fork,
     // the collision — is about the name actually being created.
     const targetName = input.targetName?.trim() || repository.name;
