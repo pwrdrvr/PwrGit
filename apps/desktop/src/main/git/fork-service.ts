@@ -14,7 +14,10 @@ import {
 } from "@pwrgit/shared";
 import type { ProfileService } from "../profiles/profile-service";
 import { mapLimit } from "../util/map-limit";
-import type { ForgeProvider, ForgeRegistry } from "../forge/provider";
+import type {
+  ForgeRepoProvider,
+  ForgeRepoRegistry
+} from "../forge/repo-provider";
 import type { GitExec } from "./dugite";
 import { requireExit0 } from "./dugite";
 import {
@@ -110,7 +113,7 @@ export class ForkService {
     private readonly git: GitExec,
     private readonly indexer: RepoIndexer,
     private readonly profiles: ProfileService,
-    private readonly forges: ForgeRegistry,
+    private readonly forges: ForgeRepoRegistry,
     private readonly clones: CloneService
   ) {}
 

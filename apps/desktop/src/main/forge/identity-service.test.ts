@@ -8,8 +8,8 @@ import { openDatabase } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
 import { RepoIndexer } from "../git/repo-indexer";
 import type { GitExec, GitOutput } from "../git/dugite";
-import { GitHubProvider } from "../github/github-provider";
-import { ForgeRegistry } from "./provider";
+import { GitHubRepoProvider } from "../forge/github/repo-provider";
+import { ForgeRepoRegistry } from "./repo-provider";
 import { IdentityService, sameIdentity } from "./identity-service";
 
 const systemGit: GitExec = (args, cwd, options) =>
@@ -64,8 +64,8 @@ async function fixture(
   });
   const indexer = new RepoIndexer(db, systemGit);
   await indexer.indexRepoAt(profile.id, repoPath);
-  const registry = new ForgeRegistry();
-  registry.register(new GitHubProvider(gh));
+  const registry = new ForgeRepoRegistry();
+  registry.register(new GitHubRepoProvider(gh));
   return {
     db,
     indexer,

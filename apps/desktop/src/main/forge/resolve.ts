@@ -1,3 +1,4 @@
+import { classifyForgeHost } from "@pwrgit/shared";
 import type { ForgeKind, ForgeRepo } from "./types";
 
 /** Host → forge, for hosts whose name doesn't announce what they run. */
@@ -96,13 +97,11 @@ export function classifyHost(
   host: string,
   overrides: ForgeHostOverrides = {}
 ): ForgeKind | null {
-  const normalized = canonicalHost(host) ?? "";
-  const override = overrides[normalized];
-  if (override !== undefined) return override;
-  if (normalized === "github.com") return "github";
-  if (normalized === "gitlab.com") return "gitlab";
-  if (normalized.startsWith("gitlab.")) return "gitlab";
-  return null;
+  // Delegates to the shared classifier so the clone/fork dialogs — which run
+  // in the renderer and cannot import from main — cannot disagree with this
+  // process about which forge owns a remote. `other` is this function's null.
+  const kind = classifyForgeHost(canonicalHost(host) ?? "", overrides);
+  return kind === "other" ? null : kind;
 }
 
 /**

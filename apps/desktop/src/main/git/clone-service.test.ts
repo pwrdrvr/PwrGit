@@ -20,9 +20,9 @@ import {
   parseCloneProgressLine,
   sanitizeCloneStderr
 } from "./clone-service";
-import { ForgeRegistry } from "../forge/provider";
-import { GitHubProvider } from "../github/github-provider";
-import { GitLabProvider } from "../gitlab/gitlab-provider";
+import { ForgeRepoRegistry } from "../forge/repo-provider";
+import { GitHubRepoProvider } from "../forge/github/repo-provider";
+import { GitLabRepoProvider } from "../forge/gitlab/repo-provider";
 import type { GitExec, GitExecOptions, GitOutput } from "./dugite";
 import { RepoIndexer } from "./repo-indexer";
 
@@ -54,7 +54,7 @@ function git(cwd: string, ...args: string[]): void {
   execFileSync("git", args, { cwd, stdio: "ignore" });
 }
 
-/** A `gh` stand-in that answers the handful of calls GitHubProvider makes.
+/** A `gh` stand-in that answers the handful of calls GitHubRepoProvider makes.
  *  Tests override only the parts they care about; everything else responds
  *  the way a signed-in CLI would, so a test never fails on an unrelated call. */
 function fakeGh(
@@ -97,11 +97,11 @@ function fakeGh(
 /** A registry holding only GitHub, backed by the given runner. GitLab is
  *  registered with a runner that reports "not installed", which is what a
  *  machine without `glab` looks like. */
-function githubOnly(gh: (args: string[]) => Promise<string>): ForgeRegistry {
-  const registry = new ForgeRegistry();
-  registry.register(new GitHubProvider(gh));
+function githubOnly(gh: (args: string[]) => Promise<string>): ForgeRepoRegistry {
+  const registry = new ForgeRepoRegistry();
+  registry.register(new GitHubRepoProvider(gh));
   registry.register(
-    new GitLabProvider(async () => {
+    new GitLabRepoProvider(async () => {
       throw new Error("spawn glab ENOENT");
     })
   );

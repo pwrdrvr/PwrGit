@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  GitHubProvider,
+  GitHubRepoProvider,
   parseGhLogin,
   parseGhOrgLogins,
   parseGhRepoList,
   parseGhRestRepo,
   REPO_JSON_FIELDS
-} from "./github-provider";
+} from "./repo-provider";
 
 describe("parseGhRepoList", () => {
   it("reads visibility and fork lineage from `gh repo list --json`", () => {
@@ -146,7 +146,7 @@ describe("account parsing", () => {
   });
 });
 
-describe("GitHubProvider", () => {
+describe("GitHubRepoProvider", () => {
   const baseGh = (overrides: Record<string, string> = {}) =>
     vi.fn(async (args: string[]) => {
       const key = args.join(" ");
@@ -164,7 +164,7 @@ describe("GitHubProvider", () => {
     });
 
   it("reports not installed when gh is missing", async () => {
-    const provider = new GitHubProvider(async () => {
+    const provider = new GitHubRepoProvider(async () => {
       throw new Error("spawn gh ENOENT");
     });
     expect(await provider.status()).toEqual({
@@ -176,7 +176,7 @@ describe("GitHubProvider", () => {
   });
 
   it("lists the personal account first, then organizations", async () => {
-    expect((await new GitHubProvider(baseGh()).status()).owners).toEqual([
+    expect((await new GitHubRepoProvider(baseGh()).status()).owners).toEqual([
       { login: "huntharo", kind: "user", host: "github" },
       { login: "pwr-family", kind: "organization", host: "github" }
     ]);
@@ -188,14 +188,14 @@ describe("GitHubProvider", () => {
       if (args.join(" ") === "api user") return '{"login":"huntharo"}';
       throw new Error("403 Forbidden: missing read:org");
     });
-    expect((await new GitHubProvider(gh).status()).owners).toEqual([
+    expect((await new GitHubRepoProvider(gh).status()).owners).toEqual([
       { login: "huntharo", kind: "user", host: "github" }
     ]);
   });
 
   it("asks for the fields the identity marks need", async () => {
     const gh = baseGh();
-    await new GitHubProvider(gh).listRepos("huntharo", 200);
+    await new GitHubRepoProvider(gh).listRepos("huntharo", 200);
     expect(gh).toHaveBeenCalledWith([
       "repo",
       "list",
@@ -212,7 +212,7 @@ describe("GitHubProvider", () => {
 
   it("forks into the personal account without passing --org", async () => {
     const gh = baseGh();
-    await new GitHubProvider(gh).fork({
+    await new GitHubRepoProvider(gh).fork({
       source: "facebook/react",
       targetOwner: "huntharo",
       targetOwnerKind: "user",
@@ -230,7 +230,7 @@ describe("GitHubProvider", () => {
 
   it("passes --org for an organization target and --fork-name when renamed", async () => {
     const gh = baseGh();
-    await new GitHubProvider(gh).fork({
+    await new GitHubRepoProvider(gh).fork({
       source: "facebook/react",
       targetOwner: "pwr-family",
       targetOwnerKind: "organization",
@@ -255,7 +255,7 @@ describe("GitHubProvider", () => {
     // `gh repo fork` prints a human line either way and no JSON at all; the
     // read-back is what makes the two outcomes identical to callers.
     const gh = baseGh();
-    const repository = await new GitHubProvider(gh).fork({
+    const repository = await new GitHubRepoProvider(gh).fork({
       source: "facebook/react",
       targetOwner: "huntharo",
       targetOwnerKind: "user",
@@ -267,7 +267,7 @@ describe("GitHubProvider", () => {
 
   it("reports its fork phases in order", async () => {
     const phases: string[] = [];
-    await new GitHubProvider(baseGh()).fork({
+    await new GitHubRepoProvider(baseGh()).fork({
       source: "facebook/react",
       targetOwner: "huntharo",
       targetOwnerKind: "user",

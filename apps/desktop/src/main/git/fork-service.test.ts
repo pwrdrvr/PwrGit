@@ -6,8 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { err, ok, type CloneRepository, type Result } from "@pwrgit/shared";
 import { openDatabase } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
-import { ForgeRegistry } from "../forge/provider";
-import { GitHubProvider } from "../github/github-provider";
+import { ForgeRepoRegistry } from "../forge/repo-provider";
+import { GitHubRepoProvider } from "../forge/github/repo-provider";
 import { CloneService } from "./clone-service";
 import {
   ForkService,
@@ -212,8 +212,8 @@ function services(): {
       }
     })
   );
-  const registry = new ForgeRegistry();
-  registry.register(new GitHubProvider(gh));
+  const registry = new ForgeRepoRegistry();
+  registry.register(new GitHubRepoProvider(gh));
   const clones = new CloneService(db, systemGit, indexer, profiles, registry);
   return {
     root,
@@ -277,9 +277,9 @@ describe("ForkService.preflight", () => {
       email: "t@pwrgit.dev",
       roots: [root]
     });
-    const registry = new ForgeRegistry();
+    const registry = new ForgeRepoRegistry();
     registry.register(
-      new GitHubProvider(
+      new GitHubRepoProvider(
         fakeGh({
           "facebook/react": { full_name: "facebook/react", visibility: "public" },
           "huntharo/react": {
@@ -332,9 +332,9 @@ describe("ForkService.preflight", () => {
     });
     const indexer = new RepoIndexer(db, systemGit);
     await indexer.indexRepoAt(profile.id, decoy);
-    const registry = new ForgeRegistry();
+    const registry = new ForgeRepoRegistry();
     registry.register(
-      new GitHubProvider(
+      new GitHubRepoProvider(
         fakeGh({
           "facebook/react": { full_name: "facebook/react", visibility: "public" },
           "huntharo/react": {
@@ -376,9 +376,9 @@ describe("ForkService.preflight", () => {
       email: "t@pwrgit.dev",
       roots: [root]
     });
-    const registry = new ForgeRegistry();
+    const registry = new ForgeRepoRegistry();
     registry.register(
-      new GitHubProvider(
+      new GitHubRepoProvider(
         fakeGh(
           {
             "facebook/react": {
@@ -437,9 +437,9 @@ describe("ForkService.preflight", () => {
       email: "t@pwrgit.dev",
       roots: [root]
     });
-    const registry = new ForgeRegistry();
+    const registry = new ForgeRepoRegistry();
     registry.register(
-      new GitHubProvider(
+      new GitHubRepoProvider(
         fakeGh({
           "facebook/react": { full_name: "facebook/react", visibility: "public" },
           // Same name, not a fork of it — cloning this would be wrong code.
@@ -495,9 +495,9 @@ describe("ForkService.fork", () => {
       email: "t@pwrgit.dev",
       roots: [root]
     });
-    const registry = new ForgeRegistry();
+    const registry = new ForgeRepoRegistry();
     registry.register(
-      new GitHubProvider(
+      new GitHubRepoProvider(
         fakeGh({
           "facebook/react": { full_name: "facebook/react", visibility: "public" },
           "huntharo/react": {

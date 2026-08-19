@@ -4,15 +4,15 @@ import {
   type ForgeStatus,
   type RepoVisibility
 } from "@pwrgit/shared";
-import { logMain } from "../logs";
+import { logMain } from "../../logs";
 import {
   ownersFrom,
   parseJsonObject,
   splitNameWithOwner,
   UNAVAILABLE_STATUS,
-  type ForgeProvider,
+  type ForgeRepoProvider,
   type ForkInput
-} from "../forge/provider";
+} from "../repo-provider";
 import {
   glabErrorMessage,
   isGlabAuthenticationError,
@@ -154,7 +154,7 @@ export function forkImportFailed(raw: unknown): string | null {
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-export class GitLabProvider implements ForgeProvider {
+export class GitLabRepoProvider implements ForgeRepoProvider {
   readonly host = "gitlab" as const;
   // GitLab has no default-branch-only fork option; the switch is hidden
   // rather than accepted and ignored.

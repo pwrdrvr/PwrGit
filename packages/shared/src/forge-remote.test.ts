@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { forgeWebUrl, parseForgeRemote } from "./forge-remote";
+import {
+  classifyForgeHost,
+  forgeWebUrl,
+  parseForgeRemote
+} from "./forge-remote";
 
 describe("parseForgeRemote", () => {
   it("reads scp, https, ssh and git:// remotes", () => {
@@ -38,16 +42,28 @@ describe("parseForgeRemote", () => {
     );
   });
 
-  it("infers self-hosted forges from the hostname, and admits when it cannot", () => {
+  it("recognizes a self-hosted GitLab, and admits it cannot know otherwise", () => {
+    // `gitlab.*` is a real deployment convention, so it is inferable. GitHub
+    // Enterprise has no equivalent — its hostnames are arbitrary
+    // (`git.acme.com`) — so `github.acme.io` stays `other` rather than being
+    // guessed, which would aim API calls at the wrong product. A self-hosted
+    // GitHub needs an explicit override; see classifyForgeHost.
     expect(parseForgeRemote("git@gitlab.acme.io:acme/api.git")?.host).toBe(
       "gitlab"
     );
     expect(parseForgeRemote("https://github.acme.io/acme/api")?.host).toBe(
-      "github"
+      "other"
     );
     const other = parseForgeRemote("https://code.acme.io/acme/api");
     expect(other?.host).toBe("other");
     expect(other?.hostname).toBe("code.acme.io");
+  });
+
+  it("takes an explicit override for a host no heuristic can place", () => {
+    expect(
+      classifyForgeHost("git.acme.com", { "git.acme.com": "github" })
+    ).toBe("github");
+    expect(classifyForgeHost("git.acme.com")).toBe("other");
   });
 
   it("lowercases the hostname but preserves project-path case", () => {
@@ -70,9 +86,10 @@ describe("parseForgeRemote", () => {
 
   it("refuses a deeper github.com path, which is never a project", () => {
     // `.../issues` and `.../wiki` are pages, not repositories, and GitHub has
-    // no subgroups for them to be mistaken for.
+    // no subgroups for them to be mistaken for. This only applies where the
+    // host is known to be GitHub — on an unclassified host we cannot know the
+    // path depth rules, so the path is returned as given.
     expect(parseForgeRemote("https://github.com/o/r/issues")).toBeNull();
-    expect(parseForgeRemote("https://github.acme.io/o/r/wiki")).toBeNull();
     // The same shape on GitLab is a real project in a subgroup.
     expect(parseForgeRemote("https://gitlab.com/o/r/p")?.nameWithOwner).toBe(
       "o/r/p"

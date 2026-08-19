@@ -6,12 +6,17 @@ import type {
   ForgeStatus
 } from "@pwrgit/shared";
 
-/** What one forge must be able to answer for the clone and fork dialogs.
+/** What one forge must answer for the clone and fork dialogs.
+ *
+ *  Deliberately separate from `types.ts`'s `ForgeProvider`, which answers
+ *  change-request status: these are different questions about the same two
+ *  hosts, and widening that four-method seam would drag `PrService` into
+ *  repository metadata it does not use.
  *
  *  Every method may reject. Callers translate a rejection with `isAuthError`
  *  and `errorMessage` rather than inspecting the cause, so nothing above this
  *  layer needs to know which CLI produced it. */
-export type ForgeProvider = {
+export type ForgeRepoProvider = {
   host: ForgeHost;
   /** The forge's canonical hostname. Self-hosted instances override it. */
   hostname: string;
@@ -61,18 +66,18 @@ export type ForkInput = {
 /** Picks the provider for a host. Registered at startup so a forge with no
  *  usable CLI simply is not in the map — callers then report
  *  `unsupported_host` rather than guessing GitHub. */
-export class ForgeRegistry {
-  private readonly providers = new Map<ForgeHost, ForgeProvider>();
+export class ForgeRepoRegistry {
+  private readonly providers = new Map<ForgeHost, ForgeRepoProvider>();
 
-  register(provider: ForgeProvider): void {
+  register(provider: ForgeRepoProvider): void {
     this.providers.set(provider.host, provider);
   }
 
-  get(host: ForgeHost): ForgeProvider | null {
+  get(host: ForgeHost): ForgeRepoProvider | null {
     return this.providers.get(host) ?? null;
   }
 
-  all(): ForgeProvider[] {
+  all(): ForgeRepoProvider[] {
     return [...this.providers.values()];
   }
 }

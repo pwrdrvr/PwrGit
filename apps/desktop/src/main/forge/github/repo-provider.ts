@@ -1,19 +1,19 @@
 import { forgeWebUrl, type CloneRepository, type ForgeStatus, type RepoVisibility } from "@pwrgit/shared";
-import { logMain } from "../logs";
+import { logMain } from "../../logs";
 import {
   ownersFrom,
   parseJsonObject,
   splitNameWithOwner,
   UNAVAILABLE_STATUS,
-  type ForgeProvider,
+  type ForgeRepoProvider,
   type ForkInput
-} from "../forge/provider";
+} from "../repo-provider";
 import {
   ghErrorMessage,
   isGhAuthenticationError,
   runGh,
   type GhRunOptions
-} from "./gh-cli";
+} from "../../github/gh-cli";
 
 const HOSTNAME = "github.com";
 
@@ -173,7 +173,7 @@ export function parseGhOrgLogins(stdout: string): string[] {
     .filter((login): login is string => login !== undefined);
 }
 
-export class GitHubProvider implements ForgeProvider {
+export class GitHubRepoProvider implements ForgeRepoProvider {
   readonly host = "github" as const;
   readonly hostname = HOSTNAME;
   readonly capabilities = { defaultBranchOnly: true };

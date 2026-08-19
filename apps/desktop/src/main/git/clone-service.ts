@@ -29,7 +29,10 @@ import {
 import type { DB } from "../persistence/db";
 import type { ProfileService } from "../profiles/profile-service";
 import { mapLimit } from "../util/map-limit";
-import type { ForgeProvider, ForgeRegistry } from "../forge/provider";
+import type {
+  ForgeRepoProvider,
+  ForgeRepoRegistry
+} from "../forge/repo-provider";
 import { requireExit0, type GitExec } from "./dugite";
 import type { RepoIndexer } from "./repo-indexer";
 
@@ -234,7 +237,7 @@ export function cloneDestinations(
     });
 }
 
-function messageFromUnknown(provider: ForgeProvider, cause: unknown): string {
+function messageFromUnknown(provider: ForgeRepoProvider, cause: unknown): string {
   const message = provider.errorMessage(cause);
   return message.split("\n")[0] ?? message;
 }
@@ -308,7 +311,7 @@ export function sanitizeCloneStderr(stderr: string): string {
 }
 
 function cloneMessageFromUnknown(
-  provider: ForgeProvider,
+  provider: ForgeRepoProvider,
   cause: unknown
 ): string {
   if (provider.isAuthError(cause)) return provider.errorMessage(cause);
@@ -329,7 +332,7 @@ export class CloneService {
     private readonly git: GitExec,
     private readonly indexer: RepoIndexer,
     private readonly profiles: ProfileService,
-    private readonly forges: ForgeRegistry
+    private readonly forges: ForgeRepoRegistry
   ) {}
 
   async catalog(profileId: string): Promise<Result<CloneCatalog>> {
@@ -680,7 +683,7 @@ export class CloneService {
   }
 
   private async repositoriesForOwner(
-    provider: ForgeProvider,
+    provider: ForgeRepoProvider,
     owner: string
   ): Promise<CloneRepository[]> {
     const key = repoKey(provider.host, owner);

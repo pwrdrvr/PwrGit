@@ -8,7 +8,7 @@ import type { DB } from "../persistence/db";
 import type { GitExec } from "../git/dugite";
 import { mapLimit } from "../util/map-limit";
 import { logMain } from "../logs";
-import type { ForgeRegistry } from "./provider";
+import type { ForgeRepoRegistry } from "./repo-provider";
 
 /** How long a stored identity is trusted before a background refresh. A repo's
  *  visibility and fork status change rarely and never silently break anything
@@ -56,7 +56,7 @@ export class IdentityService {
   constructor(
     private readonly db: DB,
     private readonly git: GitExec,
-    private readonly forges: ForgeRegistry
+    private readonly forges: ForgeRepoRegistry
   ) {}
 
   /** Identities already stored, for the repositories given. */

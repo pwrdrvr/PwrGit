@@ -30,10 +30,10 @@ import { registerCloneHandlers } from "./git/clone-handlers";
 import { CloneService } from "./git/clone-service";
 import { registerForkHandlers } from "./git/fork-handlers";
 import { ForkService } from "./git/fork-service";
-import { ForgeRegistry } from "./forge/provider";
+import { ForgeRepoRegistry } from "./forge/repo-provider";
 import { IdentityService } from "./forge/identity-service";
-import { GitHubProvider } from "./github/github-provider";
-import { GitLabProvider } from "./gitlab/gitlab-provider";
+import { GitHubRepoProvider } from "./forge/github/repo-provider";
+import { GitLabRepoProvider } from "./forge/gitlab/repo-provider";
 import { registerChangesHandlers } from "./git/changes-handlers";
 import {
   ChangeSetWatch,
@@ -252,9 +252,9 @@ if (!gotSingleInstanceLock) {
     // missing reports that through `status()`, which is what the dialogs
     // render — registering conditionally would instead make GitLab look like
     // a host PwrGit has never heard of.
-    const forges = new ForgeRegistry();
-    forges.register(new GitHubProvider());
-    forges.register(new GitLabProvider());
+    const forges = new ForgeRepoRegistry();
+    forges.register(new GitHubRepoProvider());
+    forges.register(new GitLabRepoProvider());
     const identityService = new IdentityService(db, execGit, forges);
     const cloneService = new CloneService(
       db,

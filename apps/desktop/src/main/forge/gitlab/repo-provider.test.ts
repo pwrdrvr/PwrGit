@@ -3,12 +3,12 @@ import {
   encodeProjectPath,
   forkImportFailed,
   forkImportFinished,
-  GitLabProvider,
+  GitLabRepoProvider,
   parseGitLabGroupPaths,
   parseGitLabProject,
   parseGitLabProjects,
   parseGitLabUsername
-} from "./gitlab-provider";
+} from "./repo-provider";
 
 const PROJECT = {
   id: 42,
@@ -138,9 +138,9 @@ describe("encodeProjectPath", () => {
   });
 });
 
-describe("GitLabProvider", () => {
+describe("GitLabRepoProvider", () => {
   it("reports not installed when glab is missing", async () => {
-    const provider = new GitLabProvider(async () => {
+    const provider = new GitLabRepoProvider(async () => {
       throw new Error("spawn glab ENOENT");
     });
     expect(await provider.status()).toEqual({
@@ -152,7 +152,7 @@ describe("GitLabProvider", () => {
   });
 
   it("distinguishes installed-but-signed-out from not installed", async () => {
-    const provider = new GitLabProvider(async (args) => {
+    const provider = new GitLabRepoProvider(async (args) => {
       if (args[0] === "--version") return "glab 1.42.0";
       throw new Error("401 Unauthorized");
     });
@@ -165,7 +165,7 @@ describe("GitLabProvider", () => {
   });
 
   it("lists the user first, then groups it may create projects in", async () => {
-    const provider = new GitLabProvider(async (args) => {
+    const provider = new GitLabRepoProvider(async (args) => {
       if (args[0] === "--version") return "glab 1.42.0";
       if (args[1] === "user") return '{"username":"huntharo"}';
       if (args[1]?.startsWith("groups?")) {
@@ -182,7 +182,7 @@ describe("GitLabProvider", () => {
   });
 
   it("still reports a personal target when the group listing fails", async () => {
-    const provider = new GitLabProvider(async (args) => {
+    const provider = new GitLabRepoProvider(async (args) => {
       if (args[0] === "--version") return "glab 1.42.0";
       if (args[1] === "user") return '{"username":"huntharo"}';
       throw new Error("403 Forbidden");
@@ -221,7 +221,7 @@ describe("GitLabProvider", () => {
         web_url: "https://gitlab.com/root/api"
       }
     };
-    const provider = new GitLabProvider(async (args) => {
+    const provider = new GitLabRepoProvider(async (args) => {
       const key = args[1]?.replace("projects/", "") ?? "";
       return JSON.stringify(projects[key]);
     });
@@ -235,7 +235,7 @@ describe("GitLabProvider", () => {
   });
 
   it("omits root when the parent is already the root", async () => {
-    const provider = new GitLabProvider(async (args) => {
+    const provider = new GitLabRepoProvider(async (args) => {
       const key = args[1]?.replace("projects/", "") ?? "";
       if (key === "acme%2Ffork") {
         return JSON.stringify({
@@ -274,7 +274,7 @@ describe("GitLabProvider", () => {
       });
     });
     vi.useFakeTimers();
-    const provider = new GitLabProvider(glab);
+    const provider = new GitLabRepoProvider(glab);
     const phases: string[] = [];
     const forked = provider.fork({
       source: "acme/platform/billing-api",
@@ -317,7 +317,7 @@ describe("GitLabProvider", () => {
         import_status: "finished"
       });
     });
-    const provider = new GitLabProvider(glab);
+    const provider = new GitLabRepoProvider(glab);
 
     const repository = await provider.fork({
       source: "acme/platform/billing-api",
@@ -331,7 +331,7 @@ describe("GitLabProvider", () => {
   });
 
   it("does not swallow an authentication failure as an existing fork", async () => {
-    const provider = new GitLabProvider(async (args) => {
+    const provider = new GitLabRepoProvider(async (args) => {
       if (args[0] === "--version") return "glab 1.42.0";
       throw new Error("401 Unauthorized: glab auth login");
     });
@@ -349,6 +349,6 @@ describe("GitLabProvider", () => {
   it("declares that GitLab has no default-branch-only fork option", () => {
     // GitLab's fork API has no equivalent; the switch is hidden rather than
     // accepted and silently ignored.
-    expect(new GitLabProvider().capabilities.defaultBranchOnly).toBe(false);
+    expect(new GitLabRepoProvider().capabilities.defaultBranchOnly).toBe(false);
   });
 });

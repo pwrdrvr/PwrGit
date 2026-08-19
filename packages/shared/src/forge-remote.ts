@@ -30,20 +30,29 @@ function splitPath(path: string): { owner: string; repo: string } | null {
   return { owner, repo };
 }
 
-function hostFor(hostname: string): ForgeHost {
-  const lower = hostname.toLowerCase();
-  if (lower === "github.com" || lower === "www.github.com") return "github";
-  if (lower === "gitlab.com" || lower === "www.gitlab.com") return "gitlab";
-  // Self-hosted instances are extremely common for both forges and there is no
-  // way to tell them apart from a URL alone. A `gitlab.`/`github.` prefix or a
-  // matching label is the only honest signal available offline; anything else
-  // stays `other` until a CLI confirms it.
-  if (/(^|\.)gitlab\./.test(lower) || lower.startsWith("gitlab-")) {
-    return "gitlab";
-  }
-  if (/(^|\.)github\./.test(lower) || lower.startsWith("github-")) {
-    return "github";
-  }
+/** Explicit host → forge mapping, for self-hosted instances no heuristic can
+ *  identify. Mirrors `ForgeHostOverrides` in main's `forge/resolve.ts`. */
+export type ForgeHostMap = Readonly<Record<string, "github" | "gitlab">>;
+
+/**
+ * Which forge a hostname belongs to. `other` means "cannot be certain", which
+ * is the honest answer for a self-hosted instance until an override says
+ * otherwise — a wrong guess sends API calls at the wrong product.
+ *
+ * This is the ONE classifier: main's `classifyHost` delegates here, so the
+ * renderer's dialogs and the main process can never disagree about which
+ * provider owns a remote.
+ */
+export function classifyForgeHost(
+  hostname: string,
+  overrides: ForgeHostMap = {}
+): ForgeHost {
+  const normalized = hostname.trim().toLowerCase().replace(/^www\./, "");
+  const override = overrides[normalized];
+  if (override !== undefined) return override;
+  if (normalized === "github.com") return "github";
+  if (normalized === "gitlab.com") return "gitlab";
+  if (normalized.startsWith("gitlab.")) return "gitlab";
   return "other";
 }
 
@@ -64,7 +73,7 @@ export function parseForgeRemote(url: string): ForgeRemote | null {
 
   const split = splitPath(path);
   if (split === null) return null;
-  const host = hostFor(hostname);
+  const host = classifyForgeHost(hostname);
   // GitHub has no subgroups: a project is always exactly `owner/repo`. A
   // deeper path is a wiki, a gist, or a page URL that merely looks like a
   // repository (`.../repo/issues`), and reading it as a project would send a
