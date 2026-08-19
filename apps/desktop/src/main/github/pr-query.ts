@@ -1,6 +1,14 @@
 import type { PrLifecycle, PrSummary } from "@pwrgit/shared";
 
-const PR_FIELDS = "nodes { number title url state isDraft }";
+/**
+ * Fields every PR read shares. The tail beyond `isDraft` feeds the hover card;
+ * all of it is optional downstream, because a PR that reached a terminal state
+ * before this shipped stops being refreshed and will never gain them.
+ */
+const PR_NODE_FIELDS = `number title url state isDraft headRefName baseRefName
+      additions deletions changedFiles commits(first: 0) { totalCount }
+      createdAt mergedAt closedAt`;
+const PR_FIELDS = `nodes { ${PR_NODE_FIELDS} }`;
 
 type PrNode = {
   number: number;
@@ -8,6 +16,15 @@ type PrNode = {
   url: string;
   state: string;
   isDraft: boolean;
+  headRefName?: string | null;
+  baseRefName?: string | null;
+  additions?: number | null;
+  deletions?: number | null;
+  changedFiles?: number | null;
+  commits?: { totalCount?: number | null } | null;
+  createdAt?: string | null;
+  mergedAt?: string | null;
+  closedAt?: string | null;
 };
 
 /**
@@ -70,8 +87,47 @@ function toSummary(node: PrNode): PrSummary {
     url: node.url,
     title: node.title ?? "",
     state,
-    isDraft: Boolean(node.isDraft)
+    isDraft: Boolean(node.isDraft),
+    ...optionalText("headRefName", node.headRefName),
+    ...optionalText("baseRefName", node.baseRefName),
+    ...optionalCount("additions", node.additions),
+    ...optionalCount("deletions", node.deletions),
+    ...optionalCount("changedFiles", node.changedFiles),
+    ...optionalCount("commitCount", node.commits?.totalCount),
+    ...optionalTime("createdAt", node.createdAt),
+    ...optionalTime("mergedAt", node.mergedAt),
+    ...optionalTime("closedAt", node.closedAt)
   };
+}
+
+/**
+ * Absent stays absent. A missing count is "not known", which is a different
+ * claim from zero, and the hover card renders nothing rather than a false 0.
+ */
+function optionalCount(
+  key: string,
+  value: number | null | undefined
+): Record<string, number> {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? { [key]: value }
+    : {};
+}
+
+function optionalText(
+  key: string,
+  value: string | null | undefined
+): Record<string, string> {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text === "" ? {} : { [key]: text };
+}
+
+function optionalTime(
+  key: string,
+  value: string | null | undefined
+): Record<string, number> {
+  if (typeof value !== "string") return {};
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? { [key]: parsed } : {};
 }
 
 /** One GraphQL query asking for the PR associated with many exact commit SHAs. */

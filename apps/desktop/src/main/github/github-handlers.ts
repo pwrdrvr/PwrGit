@@ -7,7 +7,7 @@ import type { CommandBus, CommandContext } from "../command-bus";
 import { emitEvent } from "../ipc";
 import type { GitHubCommitAuthorIdentityService } from "./commit-author-identity";
 import { CommitAssociationMonitor } from "./commit-association-monitor";
-import { getGhStatus } from "./pr-client";
+import { ForgeStatusService } from "../forge/status";
 import { PrStatusMonitor, type PrMonitorTarget } from "./pr-status-monitor";
 import type { PrService, PrStatusDeltas } from "./pr-service";
 
@@ -22,7 +22,8 @@ function boundedCommitHashes(hashes: string[]): string[] {
 export function registerGitHubHandlers(
   bus: CommandBus,
   prs: PrService,
-  commitAuthorIdentities: GitHubCommitAuthorIdentityService
+  commitAuthorIdentities: GitHubCommitAuthorIdentityService,
+  forgeStatus: ForgeStatusService = new ForgeStatusService()
 ): {
   stop: () => void;
   releaseWebContents: (webContentsId: number) => void;
@@ -152,7 +153,14 @@ export function registerGitHubHandlers(
     return ok(null);
   });
 
-  bus.register("github:status", async () => ok(await getGhStatus()));
+  // Answered from main's cache, so a StrictMode double-mount costs one read
+  // rather than two subprocess probes. Changes are pushed, never polled.
+  const stopForgeStatus = forgeStatus.onChange((forges) => {
+    emitEvent("forge:statusChanged", { forges });
+  });
+  bus.register("forge:status", async () =>
+    ok({ forges: await forgeStatus.list() })
+  );
 
   bus.register("pr:replaceVisibleCommits", async (req, ctx) => {
     const hashes = boundedCommitHashes(req.commitHashes);
@@ -340,6 +348,7 @@ export function registerGitHubHandlers(
   };
 
   const stop = (): void => {
+    stopForgeStatus();
     visibleCommitReasons.clear();
     reasonGenerations.clear();
     reasonsByWebContents.clear();

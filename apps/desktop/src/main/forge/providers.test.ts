@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { providerFor, resolveForge } from "./providers";
-import { toPrLifecycle, withNullsForMissing } from "./types";
+import { stampForge, toPrLifecycle, withNullsForMissing } from "./types";
 
 describe("resolveForge", () => {
   it("routes a GitHub origin to the GitHub provider", () => {
@@ -72,5 +72,43 @@ describe("withNullsForMissing", () => {
     expect(filled.get("a")?.number).toBe(1);
     expect(filled.has("b")).toBe(true);
     expect(filled.get("b")).toBeNull();
+  });
+});
+
+describe("stampForge", () => {
+  const repo = {
+    kind: "gitlab" as const,
+    host: "gitlab.com",
+    path: "pwrdrvr/qa/forge/PwrGit-Test"
+  };
+
+  it("attaches the identity that makes a number unambiguous", () => {
+    const stamped = stampForge(
+      new Map([
+        [
+          "b",
+          {
+            number: 4,
+            url: "u",
+            title: "t",
+            state: "merged" as const,
+            isDraft: false
+          }
+        ]
+      ]),
+      repo
+    );
+    expect(stamped.get("b")).toMatchObject({
+      number: 4,
+      forge: "gitlab",
+      host: "gitlab.com",
+      repoPath: "pwrdrvr/qa/forge/PwrGit-Test"
+    });
+  });
+
+  it("leaves a negative result null so it still negative-caches", () => {
+    const stamped = stampForge(new Map([["b", null]]), repo);
+    expect(stamped.has("b")).toBe(true);
+    expect(stamped.get("b")).toBeNull();
   });
 });

@@ -1,7 +1,8 @@
-import type { PrLifecycle, PrSummary } from "@pwrgit/shared";
+import type { ForgeKind, PrLifecycle, PrSummary } from "@pwrgit/shared";
 
-/** Hosting products PwrGit can read change-request status from. */
-export type ForgeKind = "github" | "gitlab";
+// Defined in the shared contract because the renderer needs it too, to label a
+// change request "pull request" or "merge request".
+export type { ForgeKind };
 
 /**
  * A repository on a forge, identified the way that forge identifies it.
@@ -81,6 +82,27 @@ export function toPrLifecycle(state: string): PrLifecycle {
     default:
       return "open";
   }
+}
+
+/**
+ * Stamp forge identity onto summaries a provider produced.
+ *
+ * A number alone is ambiguous — `#4` means different things on two forges and
+ * on two instances of one forge — so the identity travels with the summary
+ * rather than being re-derived by every reader.
+ */
+export function stampForge<K>(
+  summaries: Map<K, PrSummary | null>,
+  repo: ForgeRepo
+): Map<K, PrSummary | null> {
+  return new Map(
+    [...summaries].map(([key, summary]) => [
+      key,
+      summary === null
+        ? null
+        : { ...summary, forge: repo.kind, host: repo.host, repoPath: repo.path }
+    ])
+  );
 }
 
 /** Fill every requested key, so keys a forge omitted negative-cache correctly. */

@@ -161,3 +161,60 @@ describe("pickBestAssociation", () => {
     ).toBe(9);
   });
 });
+
+describe("hover-card detail", () => {
+  it("maps GitLab's diff summary onto the neutral field names", () => {
+    expect(
+      toSummary(
+        node({
+          targetBranch: "main",
+          commitCount: 3,
+          createdAt: "2026-08-19T03:53:53Z",
+          mergedAt: "2026-08-19T03:54:16Z",
+          diffStatsSummary: { additions: 12, deletions: 4, fileCount: 2 }
+        })
+      )
+    ).toMatchObject({
+      headRefName: "feat-open",
+      baseRefName: "main",
+      additions: 12,
+      deletions: 4,
+      // GitLab calls it fileCount; the app calls it changedFiles.
+      changedFiles: 2,
+      commitCount: 3,
+      createdAt: Date.parse("2026-08-19T03:53:53Z"),
+      mergedAt: Date.parse("2026-08-19T03:54:16Z")
+    });
+  });
+
+  it("omits what GitLab did not report rather than reporting zero", () => {
+    const summary = toSummary(node({ sourceBranch: null }));
+    for (const key of [
+      "headRefName",
+      "baseRefName",
+      "additions",
+      "deletions",
+      "changedFiles",
+      "commitCount",
+      "createdAt",
+      "mergedAt",
+      "closedAt"
+    ]) {
+      expect(summary).not.toHaveProperty(key);
+    }
+  });
+
+  it("keeps a real zero, which is a different claim from absent", () => {
+    const summary = toSummary(
+      node({ diffStatsSummary: { additions: 0, deletions: 0, fileCount: 0 } })
+    );
+    expect(summary.additions).toBe(0);
+    expect(summary.deletions).toBe(0);
+  });
+
+  it("ignores an unparseable timestamp", () => {
+    expect(toSummary(node({ createdAt: "not a date" }))).not.toHaveProperty(
+      "createdAt"
+    );
+  });
+});

@@ -6,7 +6,7 @@ import {
   getGitHubToken
 } from "../../github/pr-client";
 import { githubOwnerAndName } from "../resolve";
-import type { ForgeProvider, ForgeRepo } from "../types";
+import { stampForge, type ForgeProvider, type ForgeRepo } from "../types";
 
 /**
  * GitHub as a `ForgeProvider`.
@@ -23,19 +23,28 @@ export const githubProvider: ForgeProvider = {
   fetchPrsForBranches: async (token, repo, branches) => {
     const parts = githubOwnerAndName(repo);
     if (parts === null) return emptyFor(branches);
-    return fetchPrsForRepo(token, parts.owner, parts.name, branches);
+    return stampForge(
+      await fetchPrsForRepo(token, parts.owner, parts.name, branches),
+      repo
+    );
   },
 
   fetchPrsForCommits: async (token, repo, commitHashes) => {
     const parts = githubOwnerAndName(repo);
     if (parts === null) return emptyFor(commitHashes);
-    return fetchPrsForCommits(token, parts.owner, parts.name, commitHashes);
+    return stampForge(
+      await fetchPrsForCommits(token, parts.owner, parts.name, commitHashes),
+      repo
+    );
   },
 
   fetchPrsByNumbers: async (token, repo: ForgeRepo, numbers) => {
     const parts = githubOwnerAndName(repo);
     if (parts === null) return new Map<number, PrSummary | null>();
-    return fetchPrsByNumbers(token, parts.owner, parts.name, numbers);
+    return stampForge(
+      await fetchPrsByNumbers(token, parts.owner, parts.name, numbers),
+      repo
+    );
   }
 };
 
