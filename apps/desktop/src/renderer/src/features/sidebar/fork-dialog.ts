@@ -1,5 +1,6 @@
 import type {
   CloneRepository,
+  ForgeHost,
   ForgeOwner,
   ForgeStatus,
   ForkPreflight,
@@ -51,9 +52,13 @@ export function forkAction(preflight: ForkPreflight | null): ForkAction {
  *  the account that owns it, so offering it is offering a guaranteed error. */
 export function forkTargets(
   statuses: ForgeStatus[],
-  source: CloneRepository | null
+  source: CloneRepository | null,
+  // The forge picker's current value, used until a source pins the host. It
+  // was defaulted to GitHub, so switching the picker to GitLab with nothing
+  // selected still listed GitHub organizations.
+  activeHost: ForgeHost = "github"
 ): ForgeOwner[] {
-  const host = source?.host ?? "github";
+  const host = source?.host ?? activeHost;
   const status = statuses.find((candidate) => candidate.host === host);
   if (status === undefined) return [];
   return status.owners.filter(
@@ -159,4 +164,17 @@ export function sourceEmptyMessage(input: {
 export function ownerKindLabel(owner: ForgeOwner): string {
   if (owner.kind === "user") return "personal account";
   return owner.host === "gitlab" ? "group" : "organization";
+}
+
+/** The catalog rows that belong to the forge currently being browsed.
+ *
+ *  The catalog is a single list spanning every signed-in forge, so without
+ *  this the GitLab tab lists GitHub repositories — which cannot be forked
+ *  into a GitLab group, and whose chips say so while the picker says
+ *  otherwise. */
+export function repositoriesOnHost(
+  repositories: CloneRepository[],
+  host: ForgeHost
+): CloneRepository[] {
+  return repositories.filter((repository) => repository.host === host);
 }

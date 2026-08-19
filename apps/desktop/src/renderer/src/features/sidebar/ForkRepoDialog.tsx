@@ -17,6 +17,7 @@ import {
   cloneDestinationSelectionIndex,
   cloneRepositoryAtSelection,
   cloneSourceQuery,
+  defaultHostname,
   filterCloneDestinations,
   moveCloneSelection
 } from "./clone-dialog";
@@ -30,6 +31,7 @@ import {
   FORK_PROGRESS_LABELS,
   needsUpstreamChoice,
   ownerKindLabel,
+  repositoriesOnHost,
   sourceEmptyMessage,
   statusFor
 } from "./fork-dialog";
@@ -156,7 +158,12 @@ export function ForkRepoDialog({
   }, [usableHosts.join(","), host]);
 
   const parsedQuery = useMemo(
-    () => cloneSourceQuery(catalog?.repositories ?? [], sourceQuery, host),
+    () =>
+      cloneSourceQuery(
+        repositoriesOnHost(catalog?.repositories ?? [], host),
+        sourceQuery,
+        host
+      ),
     [catalog?.repositories, sourceQuery, host]
   );
   const catalogMatches =
@@ -219,8 +226,8 @@ export function ForkRepoDialog({
   }, [selectedSource, targetOwner, debouncedForkName, profile.id]);
 
   const targets = useMemo(
-    () => forkTargets(forges, selectedSource),
-    [forges, selectedSource]
+    () => forkTargets(forges, selectedSource, host),
+    [forges, selectedSource, host]
   );
   useEffect(() => {
     if (targetOwner === null || !targets.some((o) => o.login === targetOwner.login)) {
@@ -653,7 +660,8 @@ export function ForkRepoDialog({
                     preflight?.target.nameWithOwner ??
                     selectedSource?.nameWithOwner ??
                     "owner/name";
-                  const hostname = selectedSource?.hostname ?? "github.com";
+                  const hostname =
+                    selectedSource?.hostname ?? defaultHostname(sourceHost);
                   const detail =
                     candidate === "ssh"
                       ? `git@${hostname}:${slug}.git`

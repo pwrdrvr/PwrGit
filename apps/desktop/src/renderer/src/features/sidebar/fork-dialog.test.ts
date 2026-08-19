@@ -15,6 +15,7 @@ import {
   isValidForkName,
   needsUpstreamChoice,
   ownerKindLabel,
+  repositoriesOnHost,
   sourceEmptyMessage,
   statusFor
 } from "./fork-dialog";
@@ -308,5 +309,56 @@ describe("ownerKindLabel", () => {
     expect(ownerKindLabel({ login: "huntharo", kind: "user", host: "github" })).toBe(
       "personal account"
     );
+  });
+});
+
+describe("the forge picker is authoritative until a source pins the host", () => {
+  const gitlabStatuses: ForgeStatus[] = [
+    statuses[0]!,
+    {
+      host: "gitlab",
+      installed: true,
+      loggedIn: true,
+      owners: [
+        { login: "huntharo", kind: "user", host: "gitlab" },
+        { login: "pwrdrvr/qa/forge", kind: "organization", host: "gitlab" }
+      ]
+    }
+  ];
+
+  it("lists the picked forge's accounts, not GitHub's, with nothing selected", () => {
+    // Seen in the running app: switching the picker to GitLab still offered
+    // GitHub organizations, which cannot receive a GitLab fork.
+    expect(forkTargets(gitlabStatuses, null, "gitlab").map((o) => o.login)).toEqual([
+      "huntharo",
+      "pwrdrvr/qa/forge"
+    ]);
+    expect(forkTargets(gitlabStatuses, null, "github").map((o) => o.login)).toEqual([
+      "huntharo",
+      "pwr-family",
+      "facebook"
+    ]);
+  });
+
+  it("still lets a selected source win over the picker", () => {
+    expect(forkTargets(gitlabStatuses, source, "gitlab").map((o) => o.login)).toEqual([
+      "huntharo",
+      "pwr-family"
+    ]);
+  });
+
+  it("shows only the picked forge's repositories", () => {
+    // One catalog spans every signed-in forge; the GitLab tab listing GitHub
+    // repos contradicts its own host chips.
+    const mixed: CloneRepository[] = [
+      source,
+      { ...source, nameWithOwner: "acme/api", host: "gitlab", hostname: "gitlab.com" }
+    ];
+    expect(repositoriesOnHost(mixed, "gitlab").map((r) => r.nameWithOwner)).toEqual([
+      "acme/api"
+    ]);
+    expect(repositoriesOnHost(mixed, "github").map((r) => r.nameWithOwner)).toEqual([
+      "facebook/react"
+    ]);
   });
 });
