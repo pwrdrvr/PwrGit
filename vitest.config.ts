@@ -15,7 +15,10 @@ export default defineConfig({
     testTimeout: 20_000,
     include: [
       "packages/*/src/**/*.test.ts",
-      "apps/desktop/src/**/*.test.{ts,tsx}"
+      "apps/desktop/src/**/*.test.{ts,tsx}",
+      // Checked-in build assets (the macOS .icns) are guarded next to the
+      // script that generates them, which lives outside `src/`.
+      "apps/desktop/scripts/**/*.test.ts"
     ],
     exclude: ["**/node_modules/**", "**/out/**", "apps/desktop/e2e/**"]
   }
