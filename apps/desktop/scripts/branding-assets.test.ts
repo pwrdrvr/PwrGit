@@ -29,6 +29,9 @@ const buildDir = resolve(here, "../build");
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
+/** Every element header is a 4-char type plus a 4-byte length. */
+const ELEMENT_HEADER = 8;
+
 /**
  * The elements `iconutil` emits for a complete iconset, each with the pixel
  * size it carries and the payload encoding its type implies. `ic04`/`ic05`
@@ -59,27 +62,41 @@ interface Element {
 }
 
 /** Walk the flat element table. An ICNS is `icns`, a big-endian byte count for
- *  the whole file, then `<4-char type><4-byte length incl. header><payload>`. */
+ *  the whole file, then `<4-char type><4-byte length incl. header><payload>`.
+ *
+ *  Every read is bounds-checked first: a truncated file is the likeliest way
+ *  this goes wrong (an interrupted `iconutil`, a partial checkout), and
+ *  `readUInt32BE` past the end throws `ERR_OUT_OF_RANGE`, which says nothing
+ *  about the icns. Throw a sentence naming the problem instead. */
 function readIcns(bytes: Buffer): Element[] {
+  if (bytes.byteLength < ELEMENT_HEADER) {
+    throw new Error(`truncated icns: ${bytes.byteLength} bytes, need at least ${ELEMENT_HEADER}`);
+  }
   expect(bytes.subarray(0, 4).toString("latin1")).toBe("icns");
-  expect(bytes.readUInt32BE(4)).toBe(bytes.byteLength);
+  expect(bytes.readUInt32BE(4), "header byte count").toBe(bytes.byteLength);
 
   const elements: Element[] = [];
-  let offset = 8;
+  let offset = ELEMENT_HEADER;
   while (offset < bytes.byteLength) {
+    if (bytes.byteLength - offset < ELEMENT_HEADER) {
+      throw new Error(
+        `truncated icns: ${bytes.byteLength - offset} trailing bytes cannot hold an element header`
+      );
+    }
     const type = bytes.subarray(offset, offset + 4).toString("latin1");
     const length = bytes.readUInt32BE(offset + 4);
     // A length that under- or overruns would desynchronise every element after
-    // it, so fail here rather than reporting nonsense types further down.
-    expect(length, `element ${type} declares an out-of-range length`)
-      .toBeGreaterThanOrEqual(8);
-    expect(offset + length, `element ${type} overruns the file`)
-      .toBeLessThanOrEqual(bytes.byteLength);
-    elements.push({ type, payload: bytes.subarray(offset + 8, offset + length) });
+    // it, so fail here rather than reporting nonsense types further down. That
+    // also makes the walk terminate: length is always at least the header.
+    if (length < ELEMENT_HEADER || offset + length > bytes.byteLength) {
+      throw new Error(
+        `element ${type} declares ${length} bytes at offset ${offset}, ` +
+          `outside a ${bytes.byteLength}-byte file`
+      );
+    }
+    elements.push({ type, payload: bytes.subarray(offset + ELEMENT_HEADER, offset + length) });
     offset += length;
   }
-  // Elements must tile the file exactly — no gap, no trailing slack.
-  expect(offset).toBe(bytes.byteLength);
   return elements;
 }
 
@@ -93,40 +110,75 @@ function pngPixels(payload: Buffer): number {
   return width;
 }
 
-describe("build/icon.icns", () => {
-  const elements = readIcns(readFileSync(resolve(buildDir, "icon.icns")));
-  const byType = new Map(elements.map((element) => [element.type, element]));
+/**
+ * Square edge length of an `ARGB` element.
+ *
+ * There is no header to read — the size is implied by how much data the
+ * payload decompresses to. Apple packs the four channels back to back with a
+ * PackBits variant: a control byte with the high bit set repeats the next byte
+ * `(c & 0x7f) + 3` times, otherwise the next `c + 1` bytes are literal. Four
+ * channels of N x N pixels means 4 * N^2 bytes out.
+ */
+function argbPixels(payload: Buffer): number {
+  expect(payload.subarray(0, 4).toString("latin1")).toBe("ARGB");
 
+  let decoded = 0;
+  let offset = 4;
+  while (offset < payload.byteLength) {
+    const control = payload[offset];
+    offset += 1;
+    if (control & 0x80) {
+      decoded += (control & 0x7f) + 3;
+      offset += 1; // the byte to repeat
+    } else {
+      decoded += control + 1;
+      offset += control + 1;
+    }
+  }
+  expect(offset, "ARGB run-length data overruns its payload").toBe(payload.byteLength);
+  expect(decoded % 4, "ARGB data is not a whole number of pixels").toBe(0);
+
+  const pixels = Math.sqrt(decoded / 4);
+  expect(Number.isInteger(pixels), `ARGB data decodes to ${decoded / 4} pixels, not a square`)
+    .toBe(true);
+  return pixels;
+}
+
+// Parsed lazily and memoised: reading in a `describe` body turns a missing or
+// malformed asset into a collection error, which registers no tests at all
+// rather than failing the ones written to report it.
+let parsed: Element[] | undefined;
+const icnsElements = (): Element[] =>
+  (parsed ??= readIcns(readFileSync(resolve(buildDir, "icon.icns"))));
+
+describe("build/icon.icns", () => {
   it("carries no element type that CoreServices decodes as raw pixels", () => {
-    const present = FORBIDDEN_ELEMENTS.filter((type) => byType.has(type));
+    const byType = new Set(icnsElements().map((element) => element.type));
     expect(
-      present,
+      FORBIDDEN_ELEMENTS.filter((type) => byType.has(type)),
       "icp4/icp5/icp6 render as colour noise at 16px and 32px — repack the " +
         "iconset with `pnpm --filter @pwrgit/desktop generate:app-icon`"
     ).toEqual([]);
   });
 
   it("carries every element iconutil emits for a full iconset", () => {
-    const missing = Object.keys(EXPECTED_ELEMENTS).filter((type) => !byType.has(type));
-    expect(missing).toEqual([]);
+    const byType = new Set(icnsElements().map((element) => element.type));
+    expect(Object.keys(EXPECTED_ELEMENTS).filter((type) => !byType.has(type))).toEqual([]);
   });
 
-  it("holds the payload encoding each element type implies", () => {
+  it("holds artwork of the encoding and size each element type implies", () => {
+    const byType = new Map(icnsElements().map((element) => [element.type, element]));
     for (const [type, { pixels, payload }] of Object.entries(EXPECTED_ELEMENTS)) {
       const element = byType.get(type);
       if (!element) continue; // reported by the coverage test above
-      if (payload === "PNG") {
-        expect(pngPixels(element.payload), `${type} artwork size`).toBe(pixels);
-      } else {
-        expect(element.payload.subarray(0, 4).toString("latin1"), `${type} payload`)
-          .toBe("ARGB");
-      }
+      const measure = payload === "PNG" ? pngPixels : argbPixels;
+      expect(measure(element.payload), `${type} artwork size`).toBe(pixels);
     }
   });
 
   it("contains nothing beyond the expected artwork and metadata", () => {
     const known = new Set<string>([...Object.keys(EXPECTED_ELEMENTS), ...METADATA_ELEMENTS]);
-    expect(elements.map((element) => element.type).filter((type) => !known.has(type)))
+    expect(icnsElements().map((element) => element.type).filter((type) => !known.has(type)))
       .toEqual([]);
   });
 });
