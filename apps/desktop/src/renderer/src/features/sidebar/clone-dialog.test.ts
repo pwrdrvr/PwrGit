@@ -5,7 +5,7 @@ import {
   cloneDestinationSelectionIndex,
   cloneRepositoryAtSelection,
   cloneSourceQuery,
-  exactGitHubRepository,
+  exactRepository,
   filterCloneDestinations,
   filterCloneRepositories,
   moveCloneSelection,
@@ -18,7 +18,9 @@ const repositories: CloneRepository[] = [
     owner: "pwrdrvr",
     nameWithOwner: "pwrdrvr/billing-service",
     description: "Payments API",
-    isPrivate: true,
+    visibility: "private",
+    host: "github",
+    hostname: "github.com",
     sshUrl: "git@github.com:pwrdrvr/billing-service.git",
     httpsUrl: "https://github.com/pwrdrvr/billing-service",
     localPaths: []
@@ -27,7 +29,9 @@ const repositories: CloneRepository[] = [
     name: "x-code-clone",
     owner: "huntharo",
     nameWithOwner: "huntharo/x-code-clone",
-    isPrivate: false,
+    visibility: "public",
+    host: "github",
+    hostname: "github.com",
     sshUrl: "git@github.com:huntharo/x-code-clone.git",
     httpsUrl: "https://github.com/huntharo/x-code-clone",
     localPaths: []
@@ -101,18 +105,56 @@ describe("clone dialog filtering", () => {
       "huntharo/x-code-clone"
     ]
   ])("parses an exact GitHub repository from %s", (input, expected) => {
-    expect(exactGitHubRepository(input)).toBe(expected);
+    expect(exactRepository(input)?.nameWithOwner).toBe(expected);
+    expect(exactRepository(input)?.host).toBe("github");
   });
 
   it.each([
     "huntharo/",
     "x-code-clone",
-    "https://gitlab.com/huntharo/x-code-clone",
     "https://github.com/huntharo/x-code-clone/issues",
     "git clone https://github.com/huntharo/x-code-clone.git",
     "gh repo clone huntharo/x-code-clone ./destination"
-  ])("does not treat %s as an exact GitHub repository", (input) => {
-    expect(exactGitHubRepository(input)).toBeNull();
+  ])("does not treat %s as an exact repository", (input) => {
+    expect(exactRepository(input)).toBeNull();
+  });
+
+  it("reads the forge out of a URL rather than assuming GitHub", () => {
+    expect(exactRepository("https://gitlab.com/huntharo/x-code-clone")).toEqual({
+      host: "gitlab",
+      hostname: "gitlab.com",
+      nameWithOwner: "huntharo/x-code-clone"
+    });
+    expect(
+      exactRepository("git@gitlab.acme.io:acme/platform/billing.git")
+    ).toEqual({
+      host: "gitlab",
+      hostname: "gitlab.acme.io",
+      nameWithOwner: "acme/platform/billing"
+    });
+  });
+
+  it("lets the CLI in a pasted command name the forge", () => {
+    expect(exactRepository("glab repo clone acme/api")?.host).toBe("gitlab");
+    expect(exactRepository("gh repo clone acme/api")?.host).toBe("github");
+  });
+
+  it("falls back to the dialog's host for a bare owner/name", () => {
+    // The same slug exists on both forges, so a bare path cannot name one —
+    // the host toggle decides, and it must not silently default to GitHub
+    // when the user has switched it.
+    expect(exactRepository("acme/api", "gitlab")).toEqual({
+      host: "gitlab",
+      hostname: "gitlab.com",
+      nameWithOwner: "acme/api"
+    });
+    expect(exactRepository("acme/api")?.host).toBe("github");
+  });
+
+  it("accepts a GitLab subgroup path", () => {
+    expect(exactRepository("acme/platform/team/api", "gitlab")).toMatchObject({
+      nameWithOwner: "acme/platform/team/api"
+    });
   });
 
   it("bypasses catalog search for every exact input form", () => {
@@ -127,7 +169,11 @@ describe("clone dialog filtering", () => {
     ).toEqual(
       Array.from({ length: 5 }, () => ({
         kind: "exact",
-        nameWithOwner: "huntharo/x-code-clone"
+        repository: {
+          host: "github",
+          hostname: "github.com",
+          nameWithOwner: "huntharo/x-code-clone"
+        }
       }))
     );
   });
@@ -139,16 +185,31 @@ describe("clone dialog filtering", () => {
     });
   });
 
-  it("builds direct clone metadata without a GitHub CLI lookup", () => {
+  it("builds direct clone metadata without a forge CLI lookup", () => {
     expect(unverifiedCloneRepository("huntharo/x-code-clone")).toEqual({
       name: "x-code-clone",
       owner: "huntharo",
       nameWithOwner: "huntharo/x-code-clone",
       description: "Not verified — clone with SSH or HTTPS",
-      isPrivate: false,
+      // Not `public`: nothing confirmed this repository, and guessing the
+      // permissive answer is exactly what the third state exists to prevent.
+      visibility: "unknown",
+      host: "github",
+      hostname: "github.com",
       sshUrl: "git@github.com:huntharo/x-code-clone.git",
       httpsUrl: "https://github.com/huntharo/x-code-clone.git",
       localPaths: []
+    });
+  });
+
+  it("builds unverified metadata against the chosen forge", () => {
+    expect(
+      unverifiedCloneRepository("acme/api", "gitlab")
+    ).toMatchObject({
+      host: "gitlab",
+      hostname: "gitlab.com",
+      sshUrl: "git@gitlab.com:acme/api.git",
+      httpsUrl: "https://gitlab.com/acme/api.git"
     });
   });
 

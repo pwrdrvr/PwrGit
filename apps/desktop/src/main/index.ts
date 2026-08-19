@@ -28,6 +28,13 @@ import { execGit } from "./git/dugite";
 import { registerBranchHandlers } from "./git/branch-handlers";
 import { registerCloneHandlers } from "./git/clone-handlers";
 import { CloneService } from "./git/clone-service";
+import { registerForkHandlers } from "./git/fork-handlers";
+import { ForkService } from "./git/fork-service";
+import { ForgeRepoRegistry } from "./forge/repo-provider";
+import { IdentityService } from "./forge/identity-service";
+import { ForgeStatusService } from "./forge/status";
+import { GitHubRepoProvider } from "./forge/github/repo-provider";
+import { GitLabRepoProvider } from "./forge/gitlab/repo-provider";
 import { registerChangesHandlers } from "./git/changes-handlers";
 import {
   ChangeSetWatch,
@@ -242,7 +249,34 @@ if (!gotSingleInstanceLock) {
       roots: []
     });
     const indexer = new RepoIndexer(db, execGit);
-    const cloneService = new CloneService(db, execGit, indexer, profiles);
+    // Both forges are registered unconditionally. A provider whose CLI is
+    // missing reports that through `status()`, which is what the dialogs
+    // render — registering conditionally would instead make GitLab look like
+    // a host PwrGit has never heard of.
+    const forges = new ForgeRepoRegistry();
+    forges.register(new GitHubRepoProvider());
+    forges.register(new GitLabRepoProvider());
+    // One probe for the whole app: `ForgeStatusService` caches and dedups
+    // in-flight reads, and a second instance would quietly undo both by
+    // keeping its own cache and spawning its own `gh`/`glab`.
+    const forgeStatus = new ForgeStatusService();
+    const identityService = new IdentityService(db, execGit, forges);
+    const cloneService = new CloneService(
+      db,
+      execGit,
+      indexer,
+      profiles,
+      forges,
+      forgeStatus
+    );
+    const forkService = new ForkService(
+      execGit,
+      indexer,
+      profiles,
+      forges,
+      cloneService,
+      forgeStatus
+    );
     const worktreeOperations = new WorktreeOperationQueue();
     const stateService = new WorktreeStateService(
       db,
@@ -367,6 +401,7 @@ if (!gotSingleInstanceLock) {
     });
     registerRepoHandlers(bus, indexer, profiles, refresher);
     registerCloneHandlers(bus, cloneService);
+    registerForkHandlers(bus, forkService, identityService, indexer);
     registerWorktreeHandlers(bus, stateService, db, refresher, execGit, (id) => {
       activeWorktreeId = id;
     });
@@ -388,7 +423,8 @@ if (!gotSingleInstanceLock) {
     const githubHandlers = registerGitHubHandlers(
       bus,
       prService,
-      commitAuthorIdentityService
+      commitAuthorIdentityService,
+      forgeStatus
     );
     registerSearchStatusHandlers(bus, db);
     registerSettingsHandlers(bus, settings, {

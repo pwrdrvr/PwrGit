@@ -7,11 +7,14 @@ import {
   err,
   ok,
   type BranchRef,
+  type ForgeHost,
   type Profile,
   type ProfileId,
   type PrSummary,
   type Repo,
+  type RepoIdentity,
   type RepoSearchHit,
+  type RepoVisibility,
   type RepoWorktreeRefresh,
   type Result,
   type Worktree
@@ -55,6 +58,55 @@ type RepoRow = {
   pinned: number;
   custom_order: number | null;
 };
+type RepoIdentityRow = {
+  repo_id: string;
+  host: string;
+  hostname: string;
+  owner: string;
+  name: string;
+  visibility: string;
+  parent_slug: string | null;
+  parent_url: string | null;
+  root_slug: string | null;
+  root_url: string | null;
+  fetched_at: string;
+};
+
+/** Widen the persisted strings back into the union types. A row written by a
+ *  newer build (or edited by hand) degrades to `other`/`unknown` rather than
+ *  producing a Repo whose type is a lie. */
+export function repoIdentityFromRow(row: RepoIdentityRow): RepoIdentity {
+  const host: ForgeHost =
+    row.host === "github" || row.host === "gitlab" ? row.host : "other";
+  const visibility: RepoVisibility =
+    row.visibility === "public" ||
+    row.visibility === "private" ||
+    row.visibility === "internal"
+      ? row.visibility
+      : "unknown";
+  const identity: RepoIdentity = {
+    host,
+    hostname: row.hostname,
+    owner: row.owner,
+    name: row.name,
+    nameWithOwner: `${row.owner}/${row.name}`,
+    visibility,
+    fetchedAt: row.fetched_at
+  };
+  if (row.parent_slug !== null) {
+    identity.parent = {
+      nameWithOwner: row.parent_slug,
+      url: row.parent_url ?? `https://${row.hostname}/${row.parent_slug}`
+    };
+  }
+  if (row.root_slug !== null) {
+    identity.root = {
+      nameWithOwner: row.root_slug,
+      url: row.root_url ?? `https://${row.hostname}/${row.root_slug}`
+    };
+  }
+  return identity;
+}
 type WorktreeRow = {
   id: string;
   repo_id: string;
@@ -317,7 +369,10 @@ export class RepoIndexer {
       .all(profileId) as RepoRow[];
     // Ownership filter: a fossil DB (older builds) can hold the same worktree
     // under two repos, which renders as two "selected" rows at once.
-    return claimWorktreeOwnership(repoRows.map((r) => this.repoFromRow(r)));
+    const identities = this.identityRows(profileId);
+    return claimWorktreeOwnership(
+      repoRows.map((r) => this.repoFromRow(r, identities.get(r.id) ?? null))
+    );
   }
 
   getRepo(repoId: string): Repo | null {
@@ -808,7 +863,14 @@ export class RepoIndexer {
     }));
   }
 
-  private repoFromRow(r: RepoRow): Repo {
+  private repoFromRow(
+    r: RepoRow,
+    // `null` means a batch read already answered "this repo has none";
+    // `undefined` means nothing looked yet. Collapsing the two made every
+    // repository without an identity cost its own query, which is the N+1
+    // the batch read exists to remove.
+    identity?: RepoIdentityRow | null
+  ): Repo {
     const worktrees = (
       this.db
         .prepare(
@@ -864,7 +926,41 @@ export class RepoIndexer {
       worktrees
     };
     if (r.custom_order !== null) repo.order = r.custom_order;
+    // Attached here rather than fetched by the renderer: the identity marks
+    // sit on every repo row, so they have to arrive with the first
+    // `repo:list` or the sidebar paints once without them and again a moment
+    // later. `identity` is passed in so a list read costs one query for the
+    // whole profile rather than one prepare+get per repository.
+    const row = identity === undefined ? this.identityRow(r.id) : identity;
+    if (row !== undefined && row !== null) {
+      repo.identity = repoIdentityFromRow(row);
+    }
     return repo;
+  }
+
+  private identityRow(repoId: string): RepoIdentityRow | undefined {
+    return this.db
+      .prepare(
+        `SELECT repo_id, host, hostname, owner, name, visibility,
+                parent_slug, parent_url, root_slug, root_url, fetched_at
+         FROM repo_identity WHERE repo_id = ?`
+      )
+      .get(repoId) as RepoIdentityRow | undefined;
+  }
+
+  /** Every stored identity for one profile, keyed by repo id. */
+  private identityRows(profileId: ProfileId): Map<string, RepoIdentityRow> {
+    const rows = this.db
+      .prepare(
+        `SELECT i.repo_id, i.host, i.hostname, i.owner, i.name, i.visibility,
+                i.parent_slug, i.parent_url, i.root_slug, i.root_url,
+                i.fetched_at
+         FROM repo_identity i
+         JOIN repos r ON r.id = i.repo_id
+         WHERE r.profile_id = ?`
+      )
+      .all(profileId) as RepoIdentityRow[];
+    return new Map(rows.map((row) => [row.repo_id, row]));
   }
 
   private upsertRepoRow(

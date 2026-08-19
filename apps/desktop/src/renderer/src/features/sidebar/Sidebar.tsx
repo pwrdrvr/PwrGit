@@ -82,6 +82,29 @@ type NewWorktreeState = {
   startPoint?: string;
 };
 
+/** Lucide `git-fork`, at the size the sidebar's ghost buttons use. */
+function ForkGlyph() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="18" r="3" />
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="18" cy="6" r="3" />
+      <path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9" />
+      <path d="M12 12v3" />
+    </svg>
+  );
+}
+
 export function Sidebar({
   profiles,
   activeProfile,
@@ -101,6 +124,7 @@ export function Sidebar({
   onRefreshRepo,
   onRefreshPullRequest,
   onCloneRepo,
+  onForkRepo,
   onAddFolder,
   onOpenSearch,
   onExpandRepo,
@@ -130,6 +154,7 @@ export function Sidebar({
   onRefreshRepo: (repo: Repo) => void;
   onRefreshPullRequest: (repoId: string, branch: string) => void;
   onCloneRepo: () => void;
+  onForkRepo: () => void;
   onAddFolder: () => void;
   onOpenSearch: () => void;
   onExpandRepo: (repoId: string) => void;
@@ -641,18 +666,40 @@ export function Sidebar({
           <button className="add-folder" onClick={onAddFolder}>
             <span className="new-wt__plus">+</span> Add folders…
           </button>
-          <button
-            className="clone-repo"
-            onClick={onCloneRepo}
-            disabled={activeProfile === null || activeProfile.roots.length === 0}
-            title={
-              activeProfile !== null && activeProfile.roots.length === 0
-                ? "Add a repo folder before cloning"
-                : "Clone a GitHub repository"
-            }
-          >
-            <span className="new-wt__plus">↓</span> Clone…
-          </button>
+          {/* Clone and fork share their own row beneath Add folders. Three
+              labels do not fit one row at the 240px width floor — the sizing
+              note above was tuned for two — and both of these bring a
+              repository in, so they read as peers. */}
+          <div className="clone-repo-row">
+            <button
+              className="clone-repo"
+              onClick={onCloneRepo}
+              disabled={
+                activeProfile === null || activeProfile.roots.length === 0
+              }
+              title={
+                activeProfile !== null && activeProfile.roots.length === 0
+                  ? "Add a repo folder before cloning"
+                  : "Clone a repository from GitHub or GitLab"
+              }
+            >
+              <span className="new-wt__plus">↓</span> Clone…
+            </button>
+            <button
+              className="fork-repo"
+              onClick={onForkRepo}
+              disabled={
+                activeProfile === null || activeProfile.roots.length === 0
+              }
+              title={
+                activeProfile !== null && activeProfile.roots.length === 0
+                  ? "Add a repo folder before forking"
+                  : "Fork a repository, then check out your copy"
+              }
+            >
+              <ForkGlyph /> Fork…
+            </button>
+          </div>
         </div>
       </div>
 

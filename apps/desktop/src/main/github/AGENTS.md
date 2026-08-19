@@ -8,6 +8,12 @@ claims `origin`'s host, the CLI isn't logged in, or the network fails.
   `ForgeProvider` per call from `origin` and speaks only `PrSummary`, so GitLab
   merge requests use the same cache, deltas, and TTLs as GitHub pull requests.
   Everything below describes the GitHub provider's half.
+- **`../forge/github/repo-provider.ts` answers the clone/fork dialogs** — a
+  different seam from PR status, see `../forge/AGENTS.md`. `gh repo list --json`
+  for catalogs (it carries `visibility`, `isFork` and `parent`), and
+  `gh api repos/{nwo}` for one repository — REST is the only GitHub response
+  carrying `source`, the fork-network root, alongside `parent`. `fork()` reads
+  the result back, which makes "created" and "already exists" one path.
 - **Auth**: `getGitHubToken()` prefers `GITHUB_TOKEN`, else `gh auth token`
   (reuses the user's gh login — no separate flow). Cached ~5 min.
 - **`gh-cli.ts` is a thin binding** over the shared, audited spawner in

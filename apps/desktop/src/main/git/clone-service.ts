@@ -9,12 +9,19 @@ import {
 } from "node:path";
 import {
   err,
+  forgeCloneUrls,
+  isSafeForgeHostname,
+  isSafeProjectPath,
   ok,
+  parseForgeRemote,
   type CloneCatalog,
   type CloneDestination,
   type CloneProgress,
   type CloneProtocol,
   type CloneRepository,
+  type ForgeHost,
+  type ForgeOwner,
+  type ForgeStatus,
   type Profile,
   type Repo,
   type Result
@@ -22,14 +29,11 @@ import {
 import type { DB } from "../persistence/db";
 import type { ProfileService } from "../profiles/profile-service";
 import { mapLimit } from "../util/map-limit";
-import {
-  ghErrorMessage,
-  isGhAuthenticationError,
-  runGh,
-  type GhRunOptions
-} from "../github/gh-cli";
-import { getGhStatus, type GhStatus } from "../github/pr-client";
-import { parseGitHubRemote } from "../github/remote";
+import type {
+  ForgeRepoProvider,
+  ForgeRepoRegistry
+} from "../forge/repo-provider";
+import type { ForgeStatusService } from "../forge/status";
 import { requireExit0, type GitExec } from "./dugite";
 import type { RepoIndexer } from "./repo-indexer";
 
@@ -37,28 +41,25 @@ const OWNER_CONCURRENCY = 3;
 const REMOTE_CONCURRENCY = 8;
 const OWNER_REPO_LIMIT = 200;
 const OWNER_CACHE_TTL_MS = 5 * 60_000;
-const EXACT_REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
-type GhRunner = (
-  args: string[],
-  options?: GhRunOptions
-) => Promise<string>;
-type GhStatusReader = () => Promise<GhStatus>;
-
-type GitHubRepoJson = {
-  name: string;
-  nameWithOwner: string;
-  description?: string | null;
-  isPrivate: boolean;
-  sshUrl: string;
-  url: string;
-  updatedAt?: string;
+/** An owner discovered from a local remote, or configured on the profile. */
+type OwnerCandidate = ForgeOwner & {
+  /** Owners that came only from `profile.org` are a guess — the org may not
+   *  exist on that forge at all — so a failure to list them is not reported
+   *  as a warning the way a locally-observed owner's would be. */
+  probed: boolean;
 };
 
-type LocalGitHubState = {
-  owners: string[];
+type LocalForgeState = {
+  owners: OwnerCandidate[];
+  /** Keyed `host:nameWithOwner`, lowercased — two forges can host the same
+   *  slug, and merging them would attach the wrong checkout to a repository. */
   pathsByRepo: Map<string, string[]>;
 };
+
+function repoKey(host: ForgeHost, nameWithOwner: string): string {
+  return `${host}:${nameWithOwner}`.toLowerCase();
+}
 
 type RootIdentity = { display: string; canonical: string };
 
@@ -95,9 +96,12 @@ function containingRoot(
     .sort((a, b) => b.canonical.length - a.canonical.length)[0];
 }
 
-export function normalizeGitHubRepository(input: string): string | null {
-  const trimmed = input.trim().replace(/\.git$/i, "");
-  return EXACT_REPOSITORY.test(trimmed) ? trimmed : null;
+/** Accept a project path for either forge. GitLab nests subgroups, so this is
+ *  no longer "exactly two segments" — `isSafeProjectPath` bounds the depth and
+ *  the characters instead. */
+export function normalizeRepositoryPath(input: string): string | null {
+  const trimmed = input.trim().replace(/\.git$/i, "").replace(/^\/+|\/+$/g, "");
+  return isSafeProjectPath(trimmed) ? trimmed : null;
 }
 
 function inferredRecency(path: string): number {
@@ -107,6 +111,48 @@ function inferredRecency(path: string): number {
   } catch {
     return 0;
   }
+}
+
+/** Validate a checkout folder and the repository folder that would be made
+ *  inside it. Shared by clone and fork so the two cannot disagree about what
+ *  counts as a legal destination — the roots check is a real boundary, not a
+ *  nicety. */
+export function validateCheckoutDestination(
+  profile: Profile,
+  parentPathInput: string,
+  repoName: string
+): Result<{ parentPath: string; destination: string }> {
+  const parentPath = canonicalExistingPath(parentPathInput);
+  if (containingRoot(rootsFor(profile), parentPath) === undefined) {
+    return err({
+      kind: "validation",
+      code: "destination_outside_roots",
+      message:
+        "Choose a checkout folder inside one of this profile's repo folders."
+    });
+  }
+  let parentIsDirectory = false;
+  try {
+    parentIsDirectory = statSync(parentPath).isDirectory();
+  } catch {
+    // The validation error below is clearer than a raw fs exception.
+  }
+  if (!parentIsDirectory) {
+    return err({
+      kind: "validation",
+      code: "destination_missing",
+      message: `Checkout folder does not exist: ${parentPath}`
+    });
+  }
+  const destination = join(parentPath, repoName);
+  if (existsSync(destination)) {
+    return err({
+      kind: "validation",
+      code: "destination_exists",
+      message: `A file or folder already exists at ${destination}`
+    });
+  }
+  return ok({ parentPath, destination });
 }
 
 /** Registered roots plus every ancestor prefix between a root and a repo. */
@@ -192,57 +238,8 @@ export function cloneDestinations(
     });
 }
 
-function repositoryFromJson(raw: unknown): CloneRepository | null {
-  if (raw === null || typeof raw !== "object") return null;
-  const candidate = raw as GitHubRepoJson;
-  if (
-    typeof candidate.name !== "string" ||
-    typeof candidate.nameWithOwner !== "string" ||
-    typeof candidate.isPrivate !== "boolean" ||
-    typeof candidate.sshUrl !== "string" ||
-    typeof candidate.url !== "string"
-  ) {
-    return null;
-  }
-  const normalized = normalizeGitHubRepository(candidate.nameWithOwner);
-  if (normalized === null) return null;
-  const slash = normalized.indexOf("/");
-  const repository: CloneRepository = {
-    name: candidate.name,
-    owner: normalized.slice(0, slash),
-    nameWithOwner: normalized,
-    isPrivate: candidate.isPrivate,
-    sshUrl: candidate.sshUrl,
-    httpsUrl: candidate.url,
-    localPaths: []
-  };
-  if (
-    typeof candidate.description === "string" &&
-    candidate.description.trim() !== ""
-  ) {
-    repository.description = candidate.description;
-  }
-  if (typeof candidate.updatedAt === "string") {
-    repository.updatedAt = candidate.updatedAt;
-  }
-  return repository;
-}
-
-export function parseCloneRepositories(stdout: string): CloneRepository[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stdout);
-  } catch {
-    return [];
-  }
-  const rows = Array.isArray(parsed) ? parsed : [parsed];
-  return rows
-    .map((row) => repositoryFromJson(row))
-    .filter((row): row is CloneRepository => row !== null);
-}
-
-function messageFromUnknown(cause: unknown): string {
-  const message = ghErrorMessage(cause);
+function messageFromUnknown(provider: ForgeRepoProvider, cause: unknown): string {
+  const message = provider.errorMessage(cause);
   return message.split("\n")[0] ?? message;
 }
 
@@ -314,12 +311,15 @@ export function sanitizeCloneStderr(stderr: string): string {
     .join("\n");
 }
 
-function cloneMessageFromUnknown(cause: unknown): string {
-  if (isGhAuthenticationError(cause)) return ghErrorMessage(cause);
-  if (!(cause instanceof Error)) return ghErrorMessage(cause);
+function cloneMessageFromUnknown(
+  provider: ForgeRepoProvider,
+  cause: unknown
+): string {
+  if (provider.isAuthError(cause)) return provider.errorMessage(cause);
+  if (!(cause instanceof Error)) return provider.errorMessage(cause);
   const stderr = (cause as Error & { stderr?: string }).stderr;
   const sanitized = sanitizeCloneStderr(stderr ?? "");
-  return ghErrorMessage(sanitized || cause.message);
+  return provider.errorMessage(sanitized || cause.message);
 }
 
 export class CloneService {
@@ -333,8 +333,8 @@ export class CloneService {
     private readonly git: GitExec,
     private readonly indexer: RepoIndexer,
     private readonly profiles: ProfileService,
-    private readonly gh: GhRunner = runGh,
-    private readonly readGhStatus: GhStatusReader = getGhStatus
+    private readonly forges: ForgeRepoRegistry,
+    private readonly forgeStatus: ForgeStatusService
   ) {}
 
   async catalog(profileId: string): Promise<Result<CloneCatalog>> {
@@ -347,65 +347,89 @@ export class CloneService {
       });
     }
     const repos = this.indexer.listRepos(profileId);
-    const [github, local] = await Promise.all([
-      this.readGhStatus(),
-      this.localGitHubState(repos)
+    const [forgeStatuses, local] = await Promise.all([
+      this.statuses(),
+      this.localForgeState(repos)
     ]);
-    const owners = [
-      ...(profile.org?.trim() ? [profile.org.trim()] : []),
-      ...local.owners
-    ].filter(
-      (owner, index, all) =>
-        all.findIndex(
-          (candidate) => candidate.toLowerCase() === owner.toLowerCase()
-        ) === index
+    const usable = new Set(
+      forgeStatuses
+        .filter((status) => status.installed && status.loggedIn)
+        .map((status) => status.kind)
     );
+
+    const owners = dedupeOwners([
+      ...local.owners,
+      // The profile's default org is a guess about every signed-in forge: it
+      // was a GitHub-only setting, and a person with both CLIs signed in
+      // usually means the same org name on whichever one has it.
+      ...(profile.org?.trim()
+        ? [...usable].map(
+            (host): OwnerCandidate => ({
+              login: profile.org!.trim(),
+              kind: "organization",
+              host,
+              probed: true
+            })
+          )
+        : [])
+    ]);
+
     const base: CloneCatalog = {
-      owners,
+      owners: owners.map(({ login, kind, host }) => ({ login, kind, host })),
       repositories: [],
-      github
+      forges: forgeStatuses
     };
-    if (!github.installed || !github.loggedIn || owners.length === 0) {
-      return ok(base);
-    }
+    const listable = owners.filter((owner) => usable.has(owner.host));
+    if (listable.length === 0) return ok(base);
 
     const failures: string[] = [];
-    let authenticationCause: unknown;
+    let authenticationMessage: string | undefined;
     const repositoriesByOwner = new Map<string, CloneRepository[]>();
-    await mapLimit(owners, OWNER_CONCURRENCY, async (owner) => {
+    await mapLimit(listable, OWNER_CONCURRENCY, async (owner) => {
+      const provider = this.forges.get(owner.host);
+      if (provider === null) return;
       try {
-        repositoriesByOwner.set(owner, await this.repositoriesForOwner(owner));
+        repositoriesByOwner.set(
+          repoKey(owner.host, owner.login),
+          await this.repositoriesForOwner(provider, owner.login)
+        );
       } catch (cause) {
         if (
-          authenticationCause === undefined &&
-          isGhAuthenticationError(cause)
+          authenticationMessage === undefined &&
+          provider.isAuthError(cause)
         ) {
-          authenticationCause = cause;
+          authenticationMessage = provider.errorMessage(cause);
+        } else if (!owner.probed) {
+          failures.push(owner.login);
         }
-        failures.push(owner);
-        repositoriesByOwner.set(owner, []);
+        repositoriesByOwner.set(repoKey(owner.host, owner.login), []);
       }
     });
-    const repositories = owners
-      .flatMap((owner) => repositoriesByOwner.get(owner) ?? [])
+
+    const repositories = listable
+      .flatMap(
+        (owner) => repositoriesByOwner.get(repoKey(owner.host, owner.login)) ?? []
+      )
       .filter(
         (repository, index, all) =>
           all.findIndex(
             (candidate) =>
-              candidate.nameWithOwner.toLowerCase() ===
-              repository.nameWithOwner.toLowerCase()
+              repoKey(candidate.host, candidate.nameWithOwner) ===
+              repoKey(repository.host, repository.nameWithOwner)
           ) === index
       )
       .map((repository) => ({
         ...repository,
         localPaths:
-          local.pathsByRepo.get(repository.nameWithOwner.toLowerCase()) ?? []
+          local.pathsByRepo.get(
+            repoKey(repository.host, repository.nameWithOwner)
+          ) ?? []
       }))
       .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
 
     const catalog: CloneCatalog = { ...base, repositories };
-    if (authenticationCause !== undefined) {
-      catalog.warning = ghErrorMessage(authenticationCause);
+    if (authenticationMessage !== undefined) {
+      catalog.warning = authenticationMessage;
     } else if (failures.length > 0) {
       catalog.warning = `Couldn't load repositories for ${failures.join(", ")}.`;
     }
@@ -435,7 +459,8 @@ export class CloneService {
 
   async checkSource(
     profileId: string,
-    input: string
+    input: string,
+    host: ForgeHost = "github"
   ): Promise<Result<CloneRepository>> {
     if (this.profiles.get(profileId) === null) {
       return err({
@@ -444,57 +469,59 @@ export class CloneService {
         message: `No profile "${profileId}"`
       });
     }
-    const nameWithOwner = normalizeGitHubRepository(input);
+    const nameWithOwner = normalizeRepositoryPath(input);
     if (nameWithOwner === null) {
       return err({
         kind: "validation",
         code: "invalid_repository",
-        message: "Enter a GitHub repository as owner/name."
+        message: "Enter a repository as owner/name."
       });
     }
-    const status = await this.readGhStatus();
-    if (!status.installed) {
+    const provider = this.forges.get(host);
+    if (provider === null) {
       return err({
         kind: "remote",
-        code: "github_cli_missing",
-        message: "Install GitHub CLI to look up repositories."
+        code: "unsupported_host",
+        message: `PwrGit cannot look up repositories on ${host}.`
+      });
+    }
+    const status = (await this.statuses()).find(
+      (candidate) => candidate.kind === host
+    );
+    if (status === undefined || !status.installed) {
+      return err({
+        kind: "remote",
+        code: "forge_cli_missing",
+        message: `Install the ${host === "gitlab" ? "GitLab" : "GitHub"} CLI to look up repositories.`
       });
     }
     if (!status.loggedIn) {
       return err({
         kind: "remote",
-        code: "github_login_required",
-        message: "Sign in with GitHub CLI to look up repositories."
+        code: "forge_login_required",
+        message: `Sign in with the ${host === "gitlab" ? "GitLab" : "GitHub"} CLI to look up repositories.`
       });
     }
     try {
-      const stdout = await this.gh([
-        "repo",
-        "view",
-        nameWithOwner,
-        "--json",
-        "name,nameWithOwner,description,isPrivate,sshUrl,url,updatedAt"
-      ]);
-      const repository = parseCloneRepositories(stdout)[0];
-      if (repository === undefined) {
-        throw new Error("GitHub returned no repository");
-      }
-      const local = await this.localGitHubState(this.indexer.listRepos(profileId));
+      const repository = await provider.viewRepo(nameWithOwner);
+      const local = await this.localForgeState(this.indexer.listRepos(profileId));
       repository.localPaths =
-        local.pathsByRepo.get(repository.nameWithOwner.toLowerCase()) ?? [];
+        local.pathsByRepo.get(
+          repoKey(repository.host, repository.nameWithOwner)
+        ) ?? [];
       return ok(repository);
     } catch (cause) {
-      if (isGhAuthenticationError(cause)) {
+      if (provider.isAuthError(cause)) {
         return err({
           kind: "remote",
-          code: "github_login_required",
-          message: ghErrorMessage(cause)
+          code: "forge_login_required",
+          message: provider.errorMessage(cause)
         });
       }
       return err({
         kind: "remote",
         code: "repository_not_found",
-        message: `Couldn't find ${nameWithOwner} on GitHub. ${messageFromUnknown(cause)}`
+        message: `Couldn't find ${nameWithOwner}. ${messageFromUnknown(provider, cause)}`
       });
     }
   }
@@ -505,6 +532,8 @@ export class CloneService {
       nameWithOwner: string;
       protocol: CloneProtocol;
       parentPath: string;
+      host?: ForgeHost;
+      hostname?: string;
     },
     onProgress: (progress: CloneProgress) => void = () => undefined
   ): Promise<Result<Repo>> {
@@ -516,98 +545,51 @@ export class CloneService {
         message: `No profile "${input.profileId}"`
       });
     }
-    const nameWithOwner = normalizeGitHubRepository(input.nameWithOwner);
+    const nameWithOwner = normalizeRepositoryPath(input.nameWithOwner);
     if (nameWithOwner === null) {
       return err({
         kind: "validation",
         code: "invalid_repository",
-        message: "Enter a GitHub repository as owner/name."
+        message: "Enter a repository as owner/name."
       });
     }
-    if (!(["ssh", "https", "gh_cli"] as const).includes(input.protocol)) {
+    if (!(["ssh", "https", "cli"] as const).includes(input.protocol)) {
       return err({
         kind: "validation",
         code: "invalid_clone_protocol",
-        message: "Choose SSH, HTTPS, or GitHub CLI."
+        message: "Choose SSH, HTTPS, or the forge CLI."
+      });
+    }
+    const host = input.host ?? "github";
+    const hostname = input.hostname ?? defaultHostname(host);
+    // The hostname reaches this method from the renderer, and it is
+    // interpolated straight into a git remote. Anything outside a bare
+    // hostname could smuggle options or another host into the URL.
+    if (!isSafeForgeHostname(hostname)) {
+      return err({
+        kind: "validation",
+        code: "invalid_repository",
+        message: `Not a usable host: ${hostname}`
       });
     }
 
-    const parentPath = canonicalExistingPath(input.parentPath);
-    if (containingRoot(rootsFor(profile), parentPath) === undefined) {
-      return err({
-        kind: "validation",
-        code: "destination_outside_roots",
-        message: "Choose a checkout folder inside one of this profile's repo folders."
-      });
-    }
-    let parentIsDirectory = false;
-    try {
-      parentIsDirectory = statSync(parentPath).isDirectory();
-    } catch {
-      // The validation error below is clearer than a raw fs exception.
-    }
-    if (!parentIsDirectory) {
-      return err({
-        kind: "validation",
-        code: "destination_missing",
-        message: `Checkout folder does not exist: ${parentPath}`
-      });
-    }
-
-    const repoName = nameWithOwner.slice(nameWithOwner.indexOf("/") + 1);
-    const destination = join(parentPath, repoName);
-    if (existsSync(destination)) {
-      return err({
-        kind: "validation",
-        code: "destination_exists",
-        message: `A file or folder already exists at ${destination}`
-      });
-    }
+    const repoName = nameWithOwner.slice(nameWithOwner.lastIndexOf("/") + 1);
+    const resolved = validateCheckoutDestination(
+      profile,
+      input.parentPath,
+      repoName
+    );
+    if (!resolved.ok) return resolved;
+    const { parentPath, destination } = resolved.value;
 
     onProgress({ phase: "starting", percent: null });
-    const readProgress = createCloneProgressParser(onProgress);
-
-    if (input.protocol === "gh_cli") {
-      try {
-        await this.gh(
-          ["repo", "clone", nameWithOwner, destination, "--", "--progress"],
-          {
-            timeoutMs: 10 * 60_000,
-            onStderr: readProgress,
-            env: CLONE_ENV
-          }
-        );
-      } catch (cause) {
-        if (isGhAuthenticationError(cause)) {
-          return err({
-            kind: "remote",
-            code: "github_login_required",
-            message: ghErrorMessage(cause)
-          });
-        }
-        return err({
-          kind: "git",
-          code: "clone_failed",
-          message: cloneMessageFromUnknown(cause)
-        });
-      }
-    } else {
-      const remote =
-        input.protocol === "ssh"
-          ? `git@github.com:${nameWithOwner}.git`
-          : `https://github.com/${nameWithOwner}.git`;
-      const cloned = await this.git(
-        ["clone", "--progress", "--", remote, destination],
-        parentPath,
-        { onStderr: readProgress, env: CLONE_ENV }
-      );
-      if (!cloned.ok) return cloned;
-      const checked = requireExit0(
-        { ...cloned.value, stderr: sanitizeCloneStderr(cloned.value.stderr) },
-        ["clone"]
-      );
-      if (!checked.ok) return checked;
-    }
+    const cloned = await this.runClone(
+      { host, hostname, nameWithOwner, protocol: input.protocol },
+      destination,
+      parentPath,
+      onProgress
+    );
+    if (!cloned.ok) return cloned;
 
     onProgress({ phase: "indexing", percent: null });
     const indexed = await this.indexer.indexRepoAt(input.profileId, destination);
@@ -618,47 +600,114 @@ export class CloneService {
         message: `Cloned to ${destination}, but couldn't add it to PwrGit: ${indexed.error.message}`
       });
     }
-    this.db
-      .prepare(
-        `INSERT INTO clone_destinations (profile_id, path, last_used_at)
-         VALUES (?, ?, datetime('now'))
-         ON CONFLICT(profile_id, path) DO UPDATE SET last_used_at = datetime('now')`
-      )
-      .run(input.profileId, parentPath);
+    this.rememberDestination(input.profileId, parentPath);
     return ok({
       ...indexed.value,
       path: canonicalExistingPath(indexed.value.path)
     });
   }
 
-  private async repositoriesForOwner(owner: string): Promise<CloneRepository[]> {
-    const cached = this.ownerCache.get(owner.toLowerCase());
+  /** Shared by clone and fork: run the transfer itself and normalize failure.
+   *  Exposed so `ForkService` reuses the exact same protocol handling rather
+   *  than growing a second copy that drifts. */
+  async runClone(
+    source: {
+      host: ForgeHost;
+      hostname: string;
+      nameWithOwner: string;
+      protocol: CloneProtocol;
+    },
+    destination: string,
+    workingDirectory: string,
+    onProgress: (progress: CloneProgress) => void
+  ): Promise<Result<true>> {
+    const readProgress = createCloneProgressParser(onProgress);
+    const provider = this.forges.get(source.host);
+
+    if (source.protocol === "cli") {
+      if (provider === null) {
+        return err({
+          kind: "remote",
+          code: "unsupported_host",
+          message: `PwrGit has no CLI for ${source.host}. Clone with SSH or HTTPS.`
+        });
+      }
+      try {
+        await provider.cloneWithCli(source.nameWithOwner, destination, {
+          onStderr: readProgress,
+          env: CLONE_ENV
+        });
+      } catch (cause) {
+        if (provider.isAuthError(cause)) {
+          return err({
+            kind: "remote",
+            code: "forge_login_required",
+            message: provider.errorMessage(cause)
+          });
+        }
+        return err({
+          kind: "git",
+          code: "clone_failed",
+          message: cloneMessageFromUnknown(provider, cause)
+        });
+      }
+      return ok(true);
+    }
+
+    const urls = forgeCloneUrls(source.hostname, source.nameWithOwner);
+    const remote = source.protocol === "ssh" ? urls.sshUrl : urls.httpsUrl;
+    const cloned = await this.git(
+      ["clone", "--progress", "--", remote, destination],
+      workingDirectory,
+      { onStderr: readProgress, env: CLONE_ENV }
+    );
+    if (!cloned.ok) return cloned;
+    const checked = requireExit0(
+      { ...cloned.value, stderr: sanitizeCloneStderr(cloned.value.stderr) },
+      ["clone"]
+    );
+    if (!checked.ok) return checked;
+    return ok(true);
+  }
+
+  /** Record an explicit checkout-folder choice for the MRU ordering. */
+  rememberDestination(profileId: string, parentPath: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO clone_destinations (profile_id, path, last_used_at)
+         VALUES (?, ?, datetime('now'))
+         ON CONFLICT(profile_id, path) DO UPDATE SET last_used_at = datetime('now')`
+      )
+      .run(profileId, parentPath);
+  }
+
+  /** Every forge PwrGit knows about, whether or not its CLI is present.
+   *  Delegated to the app-wide cached probe rather than asking each provider:
+   *  a probe is a subprocess, and this runs on every catalog read. */
+  async statuses(): Promise<ForgeStatus[]> {
+    return this.forgeStatus.list();
+  }
+
+  private async repositoriesForOwner(
+    provider: ForgeRepoProvider,
+    owner: string
+  ): Promise<CloneRepository[]> {
+    const key = repoKey(provider.host, owner);
+    const cached = this.ownerCache.get(key);
     if (
       cached !== undefined &&
       Date.now() - cached.fetchedAt < OWNER_CACHE_TTL_MS
     ) {
       return cached.repositories;
     }
-    const stdout = await this.gh([
-      "repo",
-      "list",
-      owner,
-      "--limit",
-      String(OWNER_REPO_LIMIT),
-      "--json",
-      "name,nameWithOwner,description,isPrivate,sshUrl,url,updatedAt"
-    ]);
-    const repositories = parseCloneRepositories(stdout);
-    this.ownerCache.set(owner.toLowerCase(), {
-      fetchedAt: Date.now(),
-      repositories
-    });
+    const repositories = await provider.listRepos(owner, OWNER_REPO_LIMIT);
+    this.ownerCache.set(key, { fetchedAt: Date.now(), repositories });
     return repositories;
   }
 
-  private async localGitHubState(repos: Repo[]): Promise<LocalGitHubState> {
+  private async localForgeState(repos: Repo[]): Promise<LocalForgeState> {
     const pathsByRepo = new Map<string, string[]>();
-    const owners: string[] = [];
+    const owners: OwnerCandidate[] = [];
     await mapLimit(repos, REMOTE_CONCURRENCY, async (repo) => {
       const result = await this.git(["remote", "-v"], repo.path);
       if (!result.ok || result.value.exitCode !== 0) return;
@@ -666,17 +715,28 @@ export class CloneService {
       for (const line of result.value.stdout.split("\n")) {
         const url = /^\S+\s+(\S+)\s+\((?:fetch|push)\)$/.exec(line)?.[1];
         if (url === undefined) continue;
-        const parsed = parseGitHubRemote(url);
-        if (parsed === null) continue;
-        const key = `${parsed.owner}/${parsed.repo}`.toLowerCase();
+        const parsed = parseForgeRemote(url);
+        // `other` hosts have no provider, so listing their owners would offer
+        // repositories nothing can fetch.
+        if (parsed === null || parsed.host === "other") continue;
+        const key = repoKey(parsed.host, parsed.nameWithOwner);
         if (seen.has(key)) continue;
         seen.add(key);
         if (
           !owners.some(
-            (owner) => owner.toLowerCase() === parsed.owner.toLowerCase()
+            (owner) =>
+              owner.host === parsed.host &&
+              owner.login.toLowerCase() === parsed.owner.toLowerCase()
           )
         ) {
-          owners.push(parsed.owner);
+          owners.push({
+            login: parsed.owner,
+            // A local remote cannot tell a user apart from an organization,
+            // and nothing downstream needs the distinction for listing.
+            kind: "organization",
+            host: parsed.host,
+            probed: false
+          });
         }
         const paths = pathsByRepo.get(key) ?? [];
         const path = canonicalExistingPath(repo.path);
@@ -686,4 +746,19 @@ export class CloneService {
     });
     return { owners, pathsByRepo };
   }
+}
+
+function defaultHostname(host: ForgeHost): string {
+  return host === "gitlab" ? "gitlab.com" : "github.com";
+}
+
+function dedupeOwners(owners: OwnerCandidate[]): OwnerCandidate[] {
+  return owners.filter(
+    (owner, index, all) =>
+      all.findIndex(
+        (candidate) =>
+          candidate.host === owner.host &&
+          candidate.login.toLowerCase() === owner.login.toLowerCase()
+      ) === index
+  );
 }

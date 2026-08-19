@@ -19,6 +19,10 @@ import {
   type DropPosition,
   type SelectionModifiers
 } from "./repo-view";
+import {
+  identityDescription,
+  RepoIdentityGlyphs
+} from "./RepoIdentityMarks";
 import { useListReorder } from "./useListReorder";
 import { PinIcon, WorktreeRow } from "./WorktreeRow";
 import { RepoRefsSections } from "./RepoRefsSections";
@@ -356,6 +360,9 @@ export function RepoRow({
         ? "1 linked worktree"
         : `${wtCount} linked worktrees`,
     behind > 0 ? `primary branch ${behind} behind upstream` : null,
+    // The identity glyphs are aria-hidden and carry only titles, which are not
+    // reliably announced — this is how they reach a screen reader at all.
+    repo.identity === undefined ? null : identityDescription(repo.identity),
     arrangeable && pinSource === "worktree"
       ? "in Pinned because one of its worktrees is pinned"
       : null
@@ -425,6 +432,14 @@ export function RepoRow({
           {repo.name}
         </span>
         {behind > 0 && <span className="badge badge--warn">↓{behind}</span>}
+        {/* Forge marks sit between the name and the counts: they qualify the
+            repository (what it is), where the counts describe its contents.
+            Absent `identity` means "not looked up yet" and draws nothing —
+            distinct from a read that came back `unknown`, which draws the
+            dashed glyph. */}
+        {repo.identity !== undefined && (
+          <RepoIdentityGlyphs identity={repo.identity} />
+        )}
         {wtCount > 0 && (
           <span className="repo-row__wtcount">
             {wtCount} {wtCount === 1 ? "wt" : "wts"}

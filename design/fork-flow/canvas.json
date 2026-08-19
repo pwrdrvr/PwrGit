@@ -1,0 +1,12 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 776, "h": 1010, "title": "Fork dialog" },
+    { "file": "ForkStates.dc.html", "x": 836, "y": 0, "w": 560, "h": 1010, "title": "States" },
+    { "file": "Identity.dc.html", "x": 0, "y": 1070, "w": 880, "h": 900, "title": "Identity marks" },
+    { "file": "Sidebar.dc.html", "x": 940, "y": 1070, "w": 380, "h": 900, "title": "Sidebar in situ" }
+  ],
+  "annotations": [
+    { "id": "brief", "x": 0, "y": -150, "w": 480, "text": "PwrGit — fork flow + repo identity\n\nMatched to the shipped UI: tokens.css (Tangerine Terminal), Geist/Geist Mono, the clone dialog's exact metrics.\n\nOpen question marked on the Sidebar artboard: draw the globe on every public repo, or draw nothing?" }
+  ],
+  "launch": { "view": "canvas" }
+}

@@ -123,3 +123,43 @@ Note that the **imported** `pwrdrvr/PwrGit` mirror is *not* a substitute: its
 MRs carry no `merge_commit_sha`/`squash_commit_sha`, so mainline commits there
 resolve to no MR and would look like a bug in this code. Use it only for
 branch→MR at scale.
+
+## Repository metadata: a second seam, deliberately separate
+
+`ForgeProvider` above answers change-request status. Clone, fork and the repo
+identity marks need different verbs — visibility, fork lineage, listing,
+creating a fork — so they hang off `ForgeRepoProvider` (`repo-provider.ts`)
+rather than widening the four-method seam `PrService` depends on. Same two
+forges, same CLI clients, disjoint questions.
+
+- **What a forge cannot do belongs in `capabilities.ts`**, the one table both
+  Settings → Forges and the dialogs read. GitLab's fork API has no
+  default-branch-only equivalent, so `forkDefaultBranchOnly` is false there and
+  the fork dialog hides the switch — a control that is accepted and silently
+  ignored is worse than one that is absent. Add a capability there, not as a
+  property on a provider, or the settings screen will not know about it.
+- **Availability is `status.ts`'s job, not a provider's.** `ForgeRepoProvider`
+  answers `owners()` and nothing about installed/logged-in: probing is a
+  subprocess, `ForgeStatusService` already caches one answer for the whole
+  app, and a provider that probed again would spawn a second to learn what
+  main already knew.
+- **Identity is read from `origin`, specifically.** A fork checkout has `origin`
+  (your fork) and `upstream` (the original); the marks describe what you push
+  to. Results persist in `repo_identity` and are joined onto `repo:list` by
+  `RepoIndexer`, so the sidebar paints marks on the first frame instead of
+  arriving blank and filling in. Refreshes answer a `repo:identityChanged`
+  delta the renderer patches in place — a full reload would collapse every
+  expanded repo.
+- **Three states, not two.** No `repo_identity` row means *never looked up*;
+  `visibility: "unknown"` means *asked, and the forge would not say*. They
+  render differently, and neither collapses into `public` — that would
+  understate where code can go. A signed-out CLI writes **no** row (signing in
+  should produce a fresh read); a 404 writes `unknown` (re-asking every pass is
+  noise).
+- **Loading is not unavailable.** The fork dialog once reported an in-flight
+  catalog as "install the GitHub CLI" on a machine with `gh` installed and
+  signed in — the state it spends its first seconds in. `sourceEmptyMessage`
+  owns that wording so a test pins it.
+- **GitLab calls them groups, not organizations.** `ownerKindLabel` picks the
+  noun by host; the fork-target list is the one place the user chooses between
+  them.

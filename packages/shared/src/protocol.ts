@@ -17,6 +17,12 @@ import type {
   CloneProgress,
   CloneProtocol,
   CloneRepository,
+  ForgeHost,
+  ForgeKind,
+  ForgeOwner,
+  ForkPreflight,
+  ForkProgress,
+  RepoIdentity,
   PushRefPlan,
   PushRefResult,
   ChangeSet,
@@ -452,7 +458,7 @@ export interface Commands {
     res: RepoWorktreeRefresh;
   };
   "repo:add": { req: { profileId: ProfileId; path: string }; res: Repo };
-  /** GitHub repositories shown by the clone dialog. */
+  /** Forge repositories shown by the clone and fork dialogs. */
   "repo:cloneCatalog": { req: { profileId: ProfileId }; res: CloneCatalog };
   /** Clone destinations, loaded in a fast roots/MRU pass before nested prefixes. */
   "repo:cloneDestinations": {
@@ -461,7 +467,7 @@ export interface Commands {
   };
   /** Verify an exact `owner/name` that was not in the loaded owner catalogs. */
   "repo:checkCloneSource": {
-    req: { profileId: ProfileId; nameWithOwner: string };
+    req: { profileId: ProfileId; nameWithOwner: string; host?: ForgeHost };
     res: CloneRepository;
   };
   /** Clone into a registered profile root/prefix and index the new checkout. */
@@ -472,8 +478,71 @@ export interface Commands {
       nameWithOwner: string;
       protocol: CloneProtocol;
       parentPath: string;
+      /** Which forge to clone from. Defaults to GitHub for older callers. */
+      host?: ForgeHost;
+      /** The forge's hostname, so a self-hosted instance clones from itself. */
+      hostname?: string;
     };
     res: Repo;
+  };
+  /**
+   * Everything the fork dialog needs before it creates anything: the source,
+   * where the fork would land, whether it is already there, the candidate
+   * `upstream` remotes, and any reason forking is blocked.
+   */
+  "repo:forkPreflight": {
+    req: {
+      profileId: ProfileId;
+      source: string;
+      host: ForgeHost;
+      /** Account to fork into; defaults to the signed-in user. */
+      targetOwner?: string;
+      /** Name the fork will be given. Defaults to the source's name — but it
+       *  is editable, and the existing-fork answer is about THIS name, so a
+       *  preflight that assumed the source's name would describe a different
+       *  repository than the one about to be created. */
+      targetName?: string;
+    };
+    res: ForkPreflight;
+  };
+  /**
+   * Accounts the signed-in user can create a fork in, on one forge.
+   *
+   * Deliberately not part of `repo:cloneCatalog`: that answers "whose
+   * repositories should the search offer", which comes from local remotes and
+   * the profile's org and has nothing to do with where a fork may land. The
+   * clone dialog would pay for a lookup it never reads.
+   */
+  "repo:forkTargets": {
+    req: { host: ForgeKind };
+    res: ForgeOwner[];
+  };
+  /** Create a fork, check it out, wire `upstream`, and index the checkout. */
+  "repo:fork": {
+    req: {
+      operationId: string;
+      profileId: ProfileId;
+      source: string;
+      host: ForgeHost;
+      hostname: string;
+      targetOwner: string;
+      /** Whether the target account is the signed-in user or an organization
+       *  — the forges take a different flag for each. */
+      targetOwnerKind: "user" | "organization";
+      targetName: string;
+      protocol: CloneProtocol;
+      parentPath: string;
+      defaultBranchOnly: boolean;
+      /** `owner/name` for the `upstream` remote, or null to add none. */
+      upstream: string | null;
+    };
+    res: Repo;
+  };
+  /** Re-read forge identity (visibility, fork lineage) for a profile's repos.
+   *  Answers the changed rows; the rest of the tree is left alone. */
+  "repo:refreshIdentities": {
+    req: { profileId: ProfileId; force?: boolean };
+    res: { changed: number };
   };
   "repo:search": { req: { query: string }; res: RepoSearchHit[] };
   /** Lazy per-hit status for ⌘F results (cached worktree_state when present;
@@ -933,6 +1002,20 @@ export interface Events {
     operationId: string;
     profileId: ProfileId;
     progress: CloneProgress;
+  };
+  /** Live progress for one fork, correlated by operation id. Carries the two
+   *  forge-side phases the clone event has no vocabulary for. */
+  "repo:forkProgress": {
+    operationId: string;
+    profileId: ProfileId;
+    progress: ForkProgress;
+  };
+  /** Forge identities that changed, as a delta the renderer patches onto the
+   *  tree in place — the same shape `pr:changed` uses, and for the same
+   *  reason: a full `repo:list` reload would collapse the sidebar. */
+  "repo:identityChanged": {
+    profileId: ProfileId;
+    identities: { repoId: string; identity: RepoIdentity }[];
   };
   "worktree:changed": { worktreeId: string };
   /**
