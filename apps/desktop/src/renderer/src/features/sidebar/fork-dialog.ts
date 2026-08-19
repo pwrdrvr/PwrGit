@@ -152,3 +152,11 @@ export function sourceEmptyMessage(input: {
   if (!input.status.loggedIn) return `Sign in with the ${input.cliLabel} to search.`;
   return `No repositories match \u201C${input.query}\u201D.`;
 }
+
+/** What to call a fork target under the row. The two forges use different
+ *  nouns for the same thing, and calling a GitLab group an "organization" is
+ *  wrong in the one place the user is choosing between them. */
+export function ownerKindLabel(owner: ForgeOwner): string {
+  if (owner.kind === "user") return "personal account";
+  return owner.host === "gitlab" ? "group" : "organization";
+}

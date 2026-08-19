@@ -29,6 +29,7 @@ import {
   forkTargets,
   FORK_PROGRESS_LABELS,
   needsUpstreamChoice,
+  ownerKindLabel,
   sourceEmptyMessage,
   statusFor
 } from "./fork-dialog";
@@ -512,9 +513,7 @@ export function ForkRepoDialog({
                     onClick={() => setTargetOwner(owner)}
                   >
                     <strong>{owner.login}</strong>
-                    <small>
-                      {owner.kind === "user" ? "personal account" : "organization"}
-                    </small>
+                    <small>{ownerKindLabel(owner)}</small>
                   </button>
                 ))}
                 {targets.length === 0 && (

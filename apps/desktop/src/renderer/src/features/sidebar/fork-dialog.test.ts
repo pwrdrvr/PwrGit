@@ -14,6 +14,7 @@ import {
   FORK_PROGRESS_LABELS,
   isValidForkName,
   needsUpstreamChoice,
+  ownerKindLabel,
   sourceEmptyMessage,
   statusFor
 } from "./fork-dialog";
@@ -284,6 +285,28 @@ describe("sourceEmptyMessage", () => {
   it("falls through to no-matches when everything is fine", () => {
     expect(sourceEmptyMessage({ ...base, catalogLoaded: true })).toBe(
       "No repositories match \u201Creact\u201D."
+    );
+  });
+});
+
+describe("ownerKindLabel", () => {
+  it("calls a GitLab namespace a group, not an organization", () => {
+    // Verified against a real account: `glab api groups` returns nested
+    // namespaces like `pwrdrvr/qa/forge`, which GitLab calls groups.
+    expect(
+      ownerKindLabel({ login: "pwrdrvr/qa/forge", kind: "organization", host: "gitlab" })
+    ).toBe("group");
+    expect(
+      ownerKindLabel({ login: "pwr-family", kind: "organization", host: "github" })
+    ).toBe("organization");
+  });
+
+  it("calls the signed-in account personal on either forge", () => {
+    expect(ownerKindLabel({ login: "huntharo", kind: "user", host: "gitlab" })).toBe(
+      "personal account"
+    );
+    expect(ownerKindLabel({ login: "huntharo", kind: "user", host: "github" })).toBe(
+      "personal account"
     );
   });
 });
