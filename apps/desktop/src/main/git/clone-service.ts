@@ -33,7 +33,7 @@ import type {
   ForgeRepoProvider,
   ForgeRepoRegistry
 } from "../forge/repo-provider";
-import { ForgeStatusService } from "../forge/status";
+import type { ForgeStatusService } from "../forge/status";
 import { requireExit0, type GitExec } from "./dugite";
 import type { RepoIndexer } from "./repo-indexer";
 
@@ -334,7 +334,7 @@ export class CloneService {
     private readonly indexer: RepoIndexer,
     private readonly profiles: ProfileService,
     private readonly forges: ForgeRepoRegistry,
-    private readonly forgeStatus: ForgeStatusService = new ForgeStatusService()
+    private readonly forgeStatus: ForgeStatusService
   ) {}
 
   async catalog(profileId: string): Promise<Result<CloneCatalog>> {

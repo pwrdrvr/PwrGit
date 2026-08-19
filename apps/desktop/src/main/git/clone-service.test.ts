@@ -490,7 +490,8 @@ describe("CloneService", () => {
             source: { full_name: "facebook/react" }
           })
         })
-      )
+      ),
+      fakeForgeStatus()
     );
 
     const result = await service.checkSource(profile.id, "huntharo/react");
@@ -572,7 +573,8 @@ describe("CloneService", () => {
         }
         if (args[0] === "api" && args[1] === "user/orgs") return "[]";
         throw new Error("not logged into any GitHub hosts; run gh auth login");
-      })
+      }),
+      fakeForgeStatus()
     );
 
     const result = await service.catalog(profile.id);

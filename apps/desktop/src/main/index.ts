@@ -32,6 +32,7 @@ import { registerForkHandlers } from "./git/fork-handlers";
 import { ForkService } from "./git/fork-service";
 import { ForgeRepoRegistry } from "./forge/repo-provider";
 import { IdentityService } from "./forge/identity-service";
+import { ForgeStatusService } from "./forge/status";
 import { GitHubRepoProvider } from "./forge/github/repo-provider";
 import { GitLabRepoProvider } from "./forge/gitlab/repo-provider";
 import { registerChangesHandlers } from "./git/changes-handlers";
@@ -255,20 +256,26 @@ if (!gotSingleInstanceLock) {
     const forges = new ForgeRepoRegistry();
     forges.register(new GitHubRepoProvider());
     forges.register(new GitLabRepoProvider());
+    // One probe for the whole app: `ForgeStatusService` caches and dedups
+    // in-flight reads, and a second instance would quietly undo both by
+    // keeping its own cache and spawning its own `gh`/`glab`.
+    const forgeStatus = new ForgeStatusService();
     const identityService = new IdentityService(db, execGit, forges);
     const cloneService = new CloneService(
       db,
       execGit,
       indexer,
       profiles,
-      forges
+      forges,
+      forgeStatus
     );
     const forkService = new ForkService(
       execGit,
       indexer,
       profiles,
       forges,
-      cloneService
+      cloneService,
+      forgeStatus
     );
     const worktreeOperations = new WorktreeOperationQueue();
     const stateService = new WorktreeStateService(
@@ -416,7 +423,8 @@ if (!gotSingleInstanceLock) {
     const githubHandlers = registerGitHubHandlers(
       bus,
       prService,
-      commitAuthorIdentityService
+      commitAuthorIdentityService,
+      forgeStatus
     );
     registerSearchStatusHandlers(bus, db);
     registerSettingsHandlers(bus, settings, {

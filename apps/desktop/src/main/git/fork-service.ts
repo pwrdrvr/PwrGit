@@ -21,7 +21,7 @@ import type {
   ForgeRepoRegistry
 } from "../forge/repo-provider";
 import { capabilitiesFor } from "../forge/capabilities";
-import { ForgeStatusService } from "../forge/status";
+import type { ForgeStatusService } from "../forge/status";
 import type { GitExec } from "./dugite";
 import { requireExit0 } from "./dugite";
 import {
@@ -119,7 +119,7 @@ export class ForkService {
     private readonly profiles: ProfileService,
     private readonly forges: ForgeRepoRegistry,
     private readonly clones: CloneService,
-    private readonly forgeStatus: ForgeStatusService = new ForgeStatusService()
+    private readonly forgeStatus: ForgeStatusService
   ) {}
 
   /**

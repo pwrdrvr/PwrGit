@@ -17,6 +17,7 @@ import {
 } from "./fork-service";
 import type { GitExec, GitOutput } from "./dugite";
 import { RepoIndexer } from "./repo-indexer";
+import { ForgeStatusService } from "../forge/status";
 
 const systemGit: GitExec = (args, cwd, options) =>
   new Promise<Result<GitOutput>>((resolve) => {
@@ -39,6 +40,29 @@ const systemGit: GitExec = (args, cwd, options) =>
       resolve(err({ kind: "git", code: "spawn_failed", message: error.message }))
     );
   });
+
+/** Forge availability with no subprocesses. Without this the services fall
+ *  back to the real probes and the suite starts depending on whether the
+ *  machine running it has `gh`/`glab` installed and signed in — which is
+ *  exactly how these passed locally and failed on CI. */
+function fakeForgeStatus(): ForgeStatusService {
+  return new ForgeStatusService({
+    probes: [
+      {
+        kind: "github",
+        cli: "gh",
+        installed: async () => true,
+        loggedIn: async () => true
+      },
+      {
+        kind: "gitlab",
+        cli: "glab",
+        installed: async () => false,
+        loggedIn: async () => false
+      }
+    ]
+  });
+}
 
 const created: string[] = [];
 function temporaryRoot(): string {
@@ -222,13 +246,13 @@ function services(): {
   );
   const registry = new ForgeRepoRegistry();
   registry.register(new GitHubRepoProvider(gh));
-  const clones = new CloneService(db, systemGit, indexer, profiles, registry);
+  const clones = new CloneService(db, systemGit, indexer, profiles, registry, fakeForgeStatus());
   return {
     root,
     parentPath,
     profileId: profile.id,
     gh,
-    forks: new ForkService(systemGit, indexer, profiles, registry, clones)
+    forks: new ForkService(systemGit, indexer, profiles, registry, clones, fakeForgeStatus())
   };
 }
 
@@ -305,7 +329,8 @@ describe("ForkService.preflight", () => {
       indexer,
       profiles,
       registry,
-      new CloneService(db, systemGit, indexer, profiles, registry)
+      new CloneService(db, systemGit, indexer, profiles, registry, fakeForgeStatus()),
+      fakeForgeStatus()
     );
 
     const result = await forks.preflight({
@@ -359,7 +384,8 @@ describe("ForkService.preflight", () => {
       indexer,
       profiles,
       registry,
-      new CloneService(db, systemGit, indexer, profiles, registry)
+      new CloneService(db, systemGit, indexer, profiles, registry, fakeForgeStatus()),
+      fakeForgeStatus()
     );
 
     const result = await forks.preflight({
@@ -416,7 +442,8 @@ describe("ForkService.preflight", () => {
       indexer,
       profiles,
       registry,
-      new CloneService(db, systemGit, indexer, profiles, registry)
+      new CloneService(db, systemGit, indexer, profiles, registry, fakeForgeStatus()),
+      fakeForgeStatus()
     );
 
     const result = await forks.preflight({
@@ -461,7 +488,8 @@ describe("ForkService.preflight", () => {
       indexer,
       profiles,
       registry,
-      new CloneService(db, systemGit, indexer, profiles, registry)
+      new CloneService(db, systemGit, indexer, profiles, registry, fakeForgeStatus()),
+      fakeForgeStatus()
     );
 
     const result = await forks.preflight({
@@ -525,7 +553,8 @@ describe("ForkService.fork", () => {
       indexer,
       profiles,
       registry,
-      new CloneService(db, forkGit, indexer, profiles, registry)
+      new CloneService(db, forkGit, indexer, profiles, registry, fakeForgeStatus()),
+      fakeForgeStatus()
     );
 
     const phases: string[] = [];
