@@ -50,8 +50,9 @@ claims `origin`'s host, the CLI isn't logged in, or the network fails.
   Stale proof and thumbnail refreshes are internally queued two at a time. Use
   its update event to repaint a card, never to block hover. Its `gh api`
   transport deliberately does not share the PR client's token-extraction flow.
-- **Commit-author identity stays GitHub-only** on purpose: it is gated on a
-  recognized GitHub `origin` and does not go through `ForgeProvider`. Porting it
-  (and its avatar cache) to another forge is a separate project.
+  GitLab's half of this lives in `../forge/gitlab/commit-author-transport.ts`.
+- **Commit-author identity is forge-wide** — see `../forge/AGENTS.md`. The
+  service keeps its historical `GitHub*` names and IPC channel, but resolves any
+  recognized `origin` and routes to that forge's credential-opaque transport.
 - A **merged PR** makes a branch prunable at any age (`isPrunableWorktree`) —
   catches squash/rebase merges the git-ancestry "in default" check can't see.

@@ -45,6 +45,38 @@ speaks `PrSummary` and never learns which forge answered.
 - **No schema migration was needed.** `branch_pr`/`commit_pr` already store only
   `number/url/title/state/is_draft`, which is forge-agnostic.
 
+## Commit-author identity
+
+Identity is forge-wide too (`commit-author.ts`, `commit-author-transport.ts`).
+Both transports stay **credential-opaque**: each delegates auth to its own CLI
+(`gh api` / `glab api`) rather than extracting a token, so adding a forge never
+widens what the identity service can see.
+
+- **GitLab's REST commit response has no linked-account field at all** — only
+  raw Git trailers. The link exists only in GraphQL, as
+  `project.repository.commit.author`, which is why the GitLab transport speaks
+  GraphQL where the GitHub one speaks REST. Values go as GraphQL *variables*,
+  never interpolated into the query.
+- The tri-state matches GitHub exactly: an account object resolves, `null` is
+  an authoritative "no linked account", and an absent/unreadable commit is
+  inconclusive and caches nothing.
+- **Account ids are GIDs** (`gid://gitlab/User/35145513`) — parse, don't cast.
+- **Cache keys are scoped per forge instance.** The identity key carries
+  kind+host+path, and the reusable email→account key carries kind+host. The
+  same email is a different person on github.com than on a GitLab instance, so
+  a global key would paint one forge's avatar onto the other's commits.
+- The associated-change-request fallback is guarded identically on both forges
+  (`associatedAuthorMatches`): a handle is accepted only if it equals the Git
+  author name or the email local part. It declines far more often on GitLab,
+  where usernames rarely resemble either — that is the intended failure mode.
+- **`avatar-source.ts` is the allowlist** for every URL that may reach SQLite,
+  the on-disk thumbnail cache, or an image request. https only, no credentials,
+  no fragment, and every query parameter dropped except `v` (GitHub revision)
+  and `d` (Gravatar fallback image) — so a signed or tokenized URL can never be
+  persisted. GitHub URLs normalize byte-identically to before, so existing
+  thumbnail cache keys stay valid. A self-managed host becomes trusted only
+  once `rememberForgeAvatarHost` has seen it on a real `origin`.
+
 ## Test fixture
 
 `pwrdrvr/qa/forge/PwrGit-Test` (private, gitlab.com) exists to exercise this:

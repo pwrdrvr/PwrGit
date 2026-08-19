@@ -3,15 +3,16 @@ import { ok } from "@pwrgit/shared";
 import type { GitExec } from "../git/dugite";
 import { openDatabase, type DB } from "../persistence/db";
 import {
-  associatedPullAuthorMatches,
   buildGitHubCommitAuthorAccountCacheKey,
   buildGitHubCommitAuthorIdentityCacheKey,
-  GhCliCommitAuthorIdentityTransport,
   GitHubCommitAuthorIdentityService,
   type GitHubCommitAuthorProof,
   type GitHubCommitAuthorRemoteCommit,
   type GitHubCommitAuthorIdentityTransport
 } from "./commit-author-identity";
+import { associatedAuthorMatches } from "../forge/commit-author";
+import { GhCliCommitAuthorIdentityTransport } from "../forge/github/commit-author-transport";
+import type { ForgeRepo } from "../forge/types";
 import type { GitHubAvatarThumbnailStore } from "./avatar-thumbnail-cache";
 
 const AUTHOR = {
@@ -21,9 +22,13 @@ const AUTHOR = {
 const COMMIT_SHA = "0123456789abcdef0123456789abcdef01234567";
 const CACHED_AVATAR_URL =
   "pwrgit-avatar://thumbnail/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?v=1000000";
+const GITHUB_REPO: ForgeRepo = {
+  kind: "github",
+  host: "github.com",
+  path: "octo-org/example-repo"
+};
 const PROOF = {
-  owner: "octo-org",
-  repo: "example-repo",
+  repo: GITHUB_REPO,
   commitSha: COMMIT_SHA
 };
 const INPUT = {
@@ -109,7 +114,7 @@ describe("GitHubCommitAuthorIdentityService", () => {
     expect(JSON.stringify(row)).not.toContain("gho_");
     expect(JSON.stringify(row)).toContain("https://avatars.githubusercontent.com/u/1?v=4");
 
-    const authorKey = buildGitHubCommitAuthorAccountCacheKey(AUTHOR)!;
+    const authorKey = buildGitHubCommitAuthorAccountCacheKey(AUTHOR, GITHUB_REPO)!;
     const account = db
       .prepare("SELECT * FROM github_commit_author_account_cache WHERE author_key = ?")
       .get(authorKey) as Record<string, unknown>;
@@ -308,7 +313,7 @@ describe("GitHubCommitAuthorIdentityService", () => {
     fetchImpl = async () => ({
       sha: COMMIT_SHA,
       author: AUTHOR,
-      githubAuthor: null
+      account: null
     });
 
     expect(await requireCompletion(service.request(INPUT).completion)).toEqual({
@@ -335,7 +340,7 @@ describe("GitHubCommitAuthorIdentityService", () => {
     fetchImpl = async () => ({
       sha: negativeHash,
       author: AUTHOR,
-      githubAuthor: null
+      account: null
     });
     let resolveUpdated: ((lookup: unknown) => void) | undefined;
     const updated = new Promise<unknown>((resolve) => {
@@ -429,7 +434,7 @@ describe("GitHubCommitAuthorIdentityService", () => {
     expect(fetchCalls).toBe(2);
     releaseFetch?.({
       ...resolvedRemoteCommit(),
-      githubAuthor: {
+      account: {
         id: 1,
         login: "ada-lovelace",
         avatarUrl: "https://avatars.githubusercontent.com/u/2?v=4"
@@ -455,7 +460,7 @@ describe("GitHubCommitAuthorIdentityService", () => {
     fetchImpl = async () => ({
       ...resolvedRemoteCommit(),
       sha: conflictingHash,
-      githubAuthor: {
+      account: {
         id: 2,
         login: "different-account",
         avatarUrl: "https://avatars.githubusercontent.com/u/2?v=4"
@@ -480,7 +485,7 @@ describe("GitHubCommitAuthorIdentityService", () => {
       cacheState: "fresh"
     });
 
-    const authorKey = buildGitHubCommitAuthorAccountCacheKey(AUTHOR)!;
+    const authorKey = buildGitHubCommitAuthorAccountCacheKey(AUTHOR, GITHUB_REPO)!;
     expect(db.prepare(
       "SELECT status, github_user_id, github_login FROM github_commit_author_account_cache WHERE author_key = ?"
     ).get(authorKey)).toEqual({
@@ -522,7 +527,7 @@ describe("GitHubCommitAuthorIdentityService", () => {
       cacheState: "fresh"
     });
 
-    const authorKey = buildGitHubCommitAuthorAccountCacheKey(AUTHOR)!;
+    const authorKey = buildGitHubCommitAuthorAccountCacheKey(AUTHOR, GITHUB_REPO)!;
     expect(db.prepare(
       "SELECT status, github_user_id, github_login FROM github_commit_author_account_cache WHERE author_key = ?"
     ).get(authorKey)).toEqual({
@@ -603,7 +608,7 @@ describe("GitHubCommitAuthorIdentityService", () => {
     expect(cachedRow().next_retry_at).toBe(now + 2_000);
   });
 
-  it("reuses a proven author across GitHub repos but never on a non-GitHub remote", async () => {
+  it("reuses a proven author across repos on one forge, but not on an unclaimed remote", async () => {
     await requireCompletion(service.request(INPUT).completion);
     expect(fetchCalls).toBe(1);
 
@@ -612,21 +617,25 @@ describe("GitHubCommitAuthorIdentityService", () => {
     });
     expect(fetchCalls).toBe(1);
 
-    remoteUrl = "git@gitlab.com:octo-org/example-repo.git\n";
-    const nonGitHub = service.request(INPUT);
-    expect(nonGitHub.lookup).toEqual({
+    // A host no provider claims stays ineligible and costs nothing.
+    remoteUrl = "git@bitbucket.org:octo-org/example-repo.git\n";
+    const unclaimed = service.request(INPUT);
+    expect(unclaimed.lookup).toEqual({
       cacheState: "miss",
       refreshState: "in-flight"
     });
-    expect(await requireCompletion(nonGitHub.completion)).toEqual({
+    expect(await requireCompletion(unclaimed.completion)).toEqual({
       cacheState: "miss",
       refreshState: "not-eligible"
     });
     expect(fetchCalls).toBe(1);
 
     const otherProof = {
-      owner: "other-org",
-      repo: "other-repo",
+      repo: {
+        kind: "github",
+        host: "github.com",
+        path: "other-org/other-repo"
+      } satisfies ForgeRepo,
       commitSha: COMMIT_SHA
     };
     remoteUrl = "git@github.com:other-org/other-repo.git\n";
@@ -650,13 +659,59 @@ describe("GitHubCommitAuthorIdentityService", () => {
     expect(cachedRowOrUndefined(otherProof)).toBeUndefined();
     expect(cacheRowCount()).toBe(1);
   });
+
+  /**
+   * The same namespace path exists on both forges and means different people.
+   * A GitHub proof must never paint a GitLab commit, so this costs its own
+   * fetch and writes its own row rather than reusing the account association.
+   */
+  it("never reuses one forge's proven account on another forge", async () => {
+    await requireCompletion(service.request(INPUT).completion);
+    expect(fetchCalls).toBe(1);
+
+    remoteUrl = "git@gitlab.com:octo-org/example-repo.git\n";
+    const gitlab = service.request(INPUT);
+    expect(gitlab.lookup).toEqual({
+      cacheState: "miss",
+      refreshState: "in-flight"
+    });
+    await requireCompletion(gitlab.completion);
+
+    expect(fetchCalls).toBe(2);
+    expect(requestedProofs.at(-1)?.repo).toEqual({
+      kind: "gitlab",
+      host: "gitlab.com",
+      path: "octo-org/example-repo"
+    });
+    expect(cacheRowCount()).toBe(2);
+    // Two forges, two independent email -> account associations.
+    expect(
+      buildGitHubCommitAuthorAccountCacheKey(AUTHOR, GITHUB_REPO)
+    ).not.toBe(
+      buildGitHubCommitAuthorAccountCacheKey(AUTHOR, {
+        kind: "gitlab",
+        host: "gitlab.com"
+      })
+    );
+  });
+
+  it("scopes a nested GitLab project path into the proof", async () => {
+    remoteUrl = "git@gitlab.com:pwrdrvr/qa/forge/PwrGit-Test.git\n";
+    await requireCompletion(service.request(INPUT).completion);
+
+    expect(requestedProofs.at(-1)?.repo).toEqual({
+      kind: "gitlab",
+      host: "gitlab.com",
+      path: "pwrdrvr/qa/forge/PwrGit-Test"
+    });
+  });
 });
 
 describe("GhCliCommitAuthorIdentityTransport", () => {
   it("uses gh api without token extraction or a credential parameter", async () => {
     const calls: string[][] = [];
     const transport = new GhCliCommitAuthorIdentityTransport({
-      run: async (args) => {
+      run: async (args: string[]) => {
         calls.push(args);
         return JSON.stringify({
           sha: COMMIT_SHA,
@@ -671,11 +726,7 @@ describe("GhCliCommitAuthorIdentityTransport", () => {
     });
 
     await expect(
-      transport.fetchCommit({
-        owner: "octo-org",
-        repo: "example-repo",
-        commitSha: COMMIT_SHA
-      })
+      transport.fetchCommit({ repo: GITHUB_REPO, commitSha: COMMIT_SHA })
     ).resolves.toEqual(resolvedRemoteCommit());
     expect(calls).toEqual([
       [
@@ -698,7 +749,7 @@ describe("GhCliCommitAuthorIdentityTransport", () => {
   it("corroborates a unique associated-PR author when GitHub leaves author null", async () => {
     const calls: string[][] = [];
     const transport = new GhCliCommitAuthorIdentityTransport({
-      run: async (args) => {
+      run: async (args: string[]) => {
         calls.push(args);
         const endpoint = args[3];
         if (endpoint === `repos/openclaw/openclaw/commits/${COMMIT_SHA}`) {
@@ -722,13 +773,12 @@ describe("GhCliCommitAuthorIdentityTransport", () => {
     });
 
     await expect(transport.fetchCommit({
-      owner: "openclaw",
-      repo: "openclaw",
+      repo: { kind: "github", host: "github.com", path: "openclaw/openclaw" },
       commitSha: COMMIT_SHA
     })).resolves.toEqual({
       sha: COMMIT_SHA,
       author: { name: "Peter Steinberger", email: "steipete@macos.shared" },
-      githubAuthor: {
+      account: {
         id: 58493,
         login: "steipete",
         avatarUrl: "https://avatars.githubusercontent.com/u/58493?v=4"
@@ -739,21 +789,21 @@ describe("GhCliCommitAuthorIdentityTransport", () => {
   });
 });
 
-describe("associatedPullAuthorMatches", () => {
+describe("associatedAuthorMatches", () => {
   it("requires the Git name or email local part to match the PR login", () => {
-    expect(associatedPullAuthorMatches(
-      { login: "steipete", name: "Peter Steinberger" },
+    expect(associatedAuthorMatches(
+      { login: "steipete" },
       { name: "Peter Steinberger", email: "steipete@macos.shared" }
     )).toBe(true);
-    expect(associatedPullAuthorMatches(
-      { login: "somebody-else", name: "Peter Steinberger" },
+    expect(associatedAuthorMatches(
+      { login: "somebody-else" },
       { name: "Peter Steinberger", email: "steipete@macos.shared" }
     )).toBe(false);
-    expect(associatedPullAuthorMatches(
-      { login: "steipete", name: "Different Person" },
+    expect(associatedAuthorMatches(
+      { login: "steipete" },
       { name: "Peter Steinberger", email: "different@macos.shared" }
     )).toBe(false);
-    expect(associatedPullAuthorMatches(
+    expect(associatedAuthorMatches(
       { login: "steipete" },
       { name: "steipete", email: "different@macos.shared" }
     )).toBe(true);
@@ -827,7 +877,7 @@ function resolvedRemoteCommit(): GitHubCommitAuthorRemoteCommit {
   return {
     sha: COMMIT_SHA,
     author: AUTHOR,
-    githubAuthor: {
+    account: {
       id: 1,
       login: "ada",
       avatarUrl: "https://avatars.githubusercontent.com/u/1?v=4"

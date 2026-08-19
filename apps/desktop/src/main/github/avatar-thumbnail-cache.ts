@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { normalizeForgeAvatarSourceUrl } from "../forge/avatar-source";
 import type { DB } from "../persistence/db";
 
 /** A small, renderer-safe GitHub avatar is revalidated at most monthly. */
@@ -532,36 +533,15 @@ export function parseGitHubAvatarThumbnailUrl(url: string): string | undefined {
   }
 }
 
-export function normalizeGitHubAvatarSourceUrl(sourceUrl: string): string | undefined {
-  try {
-    const url = new URL(sourceUrl);
-    const hostname = url.hostname.toLowerCase();
-    const trustedHost =
-      hostname === "avatars.githubusercontent.com" || hostname.endsWith(".githubusercontent.com");
-    if (
-      url.protocol !== "https:" ||
-      url.username !== "" ||
-      url.password !== "" ||
-      !trustedHost
-    ) {
-      return undefined;
-    }
-    url.hash = "";
-    // GitHub's public REST avatar URLs use `v` for a cache-busting revision.
-    // Drop every other query parameter so a surprising signed/tokenized URL
-    // can never enter SQLite, the on-disk cache, or a later image request.
-    const version = url.searchParams.get("v");
-    url.search = "";
-    if (version !== null && /^[A-Za-z0-9._-]{1,64}$/.test(version)) {
-      url.searchParams.set("v", version);
-    }
-    // GitHub's avatar endpoint accepts `s`; keeping this tiny makes thousands
-    // of cache files genuinely cheap while preserving a crisp 28px UI image.
-    url.searchParams.set("s", "64");
-    return url.toString();
-  } catch {
-    return undefined;
-  }
+/**
+ * Kept as the store's entry point; the rule itself is forge-wide now and lives
+ * in `../forge/avatar-source`. GitHub URLs normalize to the exact same string
+ * as before, so existing thumbnail cache keys stay valid.
+ */
+export function normalizeGitHubAvatarSourceUrl(
+  sourceUrl: string
+): string | undefined {
+  return normalizeForgeAvatarSourceUrl(sourceUrl);
 }
 
 function prepareAvatarSource(sourceUrl: string): AvatarSource | undefined {

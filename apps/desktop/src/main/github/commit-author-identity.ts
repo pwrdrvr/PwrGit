@@ -6,13 +6,20 @@ import type {
 } from "@pwrgit/shared";
 import type { GitExec } from "../git/dugite";
 import type { DB } from "../persistence/db";
+import { normalizeForgeAvatarSourceUrl, rememberForgeAvatarHost } from "../forge/avatar-source";
+import type {
+  CommitAuthorIdentityTransport,
+  CommitAuthorProof,
+  CommitAuthorRemoteCommit,
+  ForgeAccountProfile
+} from "../forge/commit-author";
+import { ForgeCommitAuthorIdentityTransport } from "../forge/commit-author-transport";
+import { resolveForgeRepo } from "../forge/resolve";
+import type { ForgeRepo } from "../forge/types";
 import {
   NoopGitHubAvatarThumbnailStore,
-  normalizeGitHubAvatarSourceUrl,
   type GitHubAvatarThumbnailStore
 } from "./avatar-thumbnail-cache";
-import { runGh } from "./gh-cli";
-import { parseGitHubRemote } from "./remote";
 
 /** How long a proven GitHub identity remains fresh before revalidation. */
 export const GITHUB_COMMIT_AUTHOR_IDENTITY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -34,130 +41,13 @@ const ACCOUNT_RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 const ACCESS_TOUCH_INTERVAL_MS = 60 * 60 * 1000;
 
-export type GitHubCommitAuthorProof = {
-  owner: string;
-  repo: string;
-  commitSha: string;
-};
-
-/** Canonical subset of GitHub's REST commit response used for verification. */
-export type GitHubCommitAuthorRemoteCommit = {
-  sha?: string | null;
-  author?: {
-    name?: string | null;
-    email?: string | null;
-  } | null;
-  /** `null` means GitHub authoritatively has no associated account. */
-  githubAuthor?: {
-    id?: number | null;
-    login?: string | null;
-    avatarUrl?: string | null;
-  } | null;
-};
-
-type GitHubAccountProfile = {
-  id?: number;
-  login: string;
-  name?: string;
-  avatarUrl?: string;
-};
-
-/** Credential-opaque seam for fetching one exact GitHub commit. */
-export type GitHubCommitAuthorIdentityTransport = {
-  fetchCommit(proof: GitHubCommitAuthorProof): Promise<GitHubCommitAuthorRemoteCommit>;
-};
-
-export type GhCliCommitAuthorIdentityTransportOptions = {
-  /** Test/non-desktop seam. The production path delegates auth to `gh`. */
-  run?: (args: string[]) => Promise<string>;
-};
-
 /**
- * Fetches exact commit metadata through `gh api` without extracting a token.
- *
- * `gh` reads its own credential store; no token enters this class, the service,
- * cache, shared protocol, logs, or renderer process.
+ * Re-exported under their historical names; the definitions are forge-wide now
+ * and live in `../forge/commit-author`.
  */
-export class GhCliCommitAuthorIdentityTransport
-  implements GitHubCommitAuthorIdentityTransport {
-  private readonly run: (args: string[]) => Promise<string>;
-
-  constructor(options: GhCliCommitAuthorIdentityTransportOptions = {}) {
-    this.run = options.run ?? runGh;
-  }
-
-  async fetchCommit(
-    proof: GitHubCommitAuthorProof
-  ): Promise<GitHubCommitAuthorRemoteCommit> {
-    const commitEndpoint = [
-      "repos",
-      encodeURIComponent(proof.owner),
-      encodeURIComponent(proof.repo),
-      "commits",
-      encodeURIComponent(proof.commitSha)
-    ].join("/");
-    const stdout = await this.run([
-      "api",
-      "--hostname",
-      "github.com",
-      commitEndpoint,
-      "--method",
-      "GET",
-      "--header",
-      "Accept: application/vnd.github+json",
-      "--header",
-      "X-GitHub-Api-Version: 2022-11-28"
-    ]);
-    const commit = parseGitHubCommitResponse(JSON.parse(stdout));
-    if (commit.githubAuthor !== null || commit.author == null) return commit;
-
-    const fallback = await this.fetchAssociatedPullAuthor(proof, commit.author);
-    return fallback === undefined ? commit : { ...commit, githubAuthor: fallback };
-  }
-
-  /**
-   * GitHub links ordinary command-line commits by account email. For a custom
-   * unlinked email, accept a unique associated-PR author only when its handle
-   * matches the exact commit author's Git name or email local part.
-   */
-  private async fetchAssociatedPullAuthor(
-    proof: GitHubCommitAuthorProof,
-    author: NonNullable<GitHubCommitAuthorRemoteCommit["author"]>
-  ): Promise<GitHubCommitAuthorRemoteCommit["githubAuthor"] | undefined> {
-    const pullsEndpoint = [
-      "repos",
-      encodeURIComponent(proof.owner),
-      encodeURIComponent(proof.repo),
-      "commits",
-      encodeURIComponent(proof.commitSha),
-      "pulls"
-    ].join("/");
-    const pulls = parseAssociatedPullAuthors(JSON.parse(await this.run([
-      "api",
-      "--hostname",
-      "github.com",
-      pullsEndpoint,
-      "--method",
-      "GET",
-      "--header",
-      "Accept: application/vnd.github+json",
-      "--header",
-      "X-GitHub-Api-Version: 2022-11-28"
-    ])));
-    if (pulls.length !== 1) return undefined;
-
-    const pullAuthor = pulls[0]!;
-    return associatedPullAuthorMatches(pullAuthor, author)
-      ? {
-          ...(pullAuthor.id === undefined ? {} : { id: pullAuthor.id }),
-          login: pullAuthor.login,
-          ...(pullAuthor.avatarUrl === undefined
-            ? {}
-            : { avatarUrl: pullAuthor.avatarUrl })
-        }
-      : undefined;
-  }
-}
+export type GitHubCommitAuthorProof = CommitAuthorProof;
+export type GitHubCommitAuthorRemoteCommit = CommitAuthorRemoteCommit;
+export type GitHubCommitAuthorIdentityTransport = CommitAuthorIdentityTransport;
 
 export type GitHubCommitAuthorIdentityRequest = {
   lookup: GitHubCommitAuthorIdentityLookup;
@@ -257,7 +147,7 @@ export class GitHubCommitAuthorIdentityService {
   /** Coalesce only concurrent local `git remote` checks; never cache an origin. */
   private readonly originLookupsInFlight = new Map<
     string,
-    Promise<{ owner: string; repo: string } | null | undefined>
+    Promise<ForgeRepo | null | undefined>
   >();
   private readonly queuedRevalidations: Array<() => void> = [];
   private activeRevalidations = 0;
@@ -272,7 +162,7 @@ export class GitHubCommitAuthorIdentityService {
     private readonly git: GitExec,
     options: GitHubCommitAuthorIdentityServiceOptions = {}
   ) {
-    this.transport = options.transport ?? new GhCliCommitAuthorIdentityTransport();
+    this.transport = options.transport ?? new ForgeCommitAuthorIdentityTransport();
     this.thumbnails = options.thumbnailStore ?? new NoopGitHubAvatarThumbnailStore();
     this.now = options.now ?? Date.now;
     this.resolvedTtlMs = positiveDuration(
@@ -382,14 +272,10 @@ export class GitHubCommitAuthorIdentityService {
         return { cacheState: "miss", refreshState: "backing-off" };
       }
 
-      const proof = normalizeProof({
-        owner: remote.owner,
-        repo: remote.repo,
-        commitSha: prepared.commitSha
-      });
+      const proof = normalizeProof({ repo: remote, commitSha: prepared.commitSha });
       if (proof === undefined) return notEligibleLookup();
       identityKey = buildGitHubCommitAuthorIdentityCacheKey(prepared.author, proof);
-      authorKey = buildGitHubCommitAuthorAccountCacheKey(prepared.author);
+      authorKey = buildGitHubCommitAuthorAccountCacheKey(prepared.author, proof.repo);
       if (identityKey === undefined || authorKey === undefined) return notEligibleLookup();
 
       const now = this.now();
@@ -495,7 +381,7 @@ export class GitHubCommitAuthorIdentityService {
       const refreshed = await this.revalidate(prepared, proof, identityKey);
       const completedAt = this.now();
       return await this.lookupBestAvailable(
-        prepared.author,
+        authorKey,
         refreshed,
         completedAt,
         refreshStateFor(refreshed, completedAt),
@@ -509,7 +395,7 @@ export class GitHubCommitAuthorIdentityService {
       this.recordFailure(identityKey, now);
       const cached = this.readCache(identityKey);
       return await this.lookupBestAvailable(
-        prepared.author,
+        authorKey,
         cached,
         now,
         "backing-off",
@@ -530,7 +416,7 @@ export class GitHubCommitAuthorIdentityService {
         const now = this.now();
         onBackgroundUpdate(
           await this.lookupBestAvailable(
-            prepared.author,
+            buildGitHubCommitAuthorAccountCacheKey(prepared.author, proof.repo),
             entry,
             now,
             refreshStateFor(entry, now),
@@ -563,7 +449,7 @@ export class GitHubCommitAuthorIdentityService {
             fetchedAt: completedAt,
             expiresAt: completedAt + this.resolvedTtlMs
           });
-          const authorKey = buildGitHubCommitAuthorAccountCacheKey(prepared.author);
+          const authorKey = buildGitHubCommitAuthorAccountCacheKey(prepared.author, proof.repo);
           if (authorKey !== undefined) {
             this.writeAuthorAccount(
               authorKey,
@@ -678,7 +564,7 @@ export class GitHubCommitAuthorIdentityService {
   }
 
   private async lookupBestAvailable(
-    author: NormalizedAuthor,
+    authorKey: string | undefined,
     exact: CacheEntry | undefined,
     now: number,
     refreshState: GitHubCommitAuthorIdentityLookup["refreshState"],
@@ -689,7 +575,6 @@ export class GitHubCommitAuthorIdentityService {
     if (exact?.status === "resolved" || exact?.status === "negative") {
       return await this.lookupFromCache(exact, now, refreshState, onBackgroundUpdate);
     }
-    const authorKey = buildGitHubCommitAuthorAccountCacheKey(author);
     const account = authorKey === undefined
       ? undefined
       : this.readAuthorAccount(authorKey);
@@ -738,10 +623,10 @@ export class GitHubCommitAuthorIdentityService {
       });
   }
 
-  /** `null` is a recognized non-GitHub remote; `undefined` is a transient Git failure. */
+  /** `null` is a remote no forge claims; `undefined` is a transient Git failure. */
   private originRemote(
     worktreePath: string
-  ): Promise<{ owner: string; repo: string } | null | undefined> {
+  ): Promise<ForgeRepo | null | undefined> {
     const existing = this.originLookupsInFlight.get(worktreePath);
     if (existing !== undefined) return existing;
 
@@ -749,7 +634,11 @@ export class GitHubCommitAuthorIdentityService {
       .then(async () => {
         const result = await this.git(["remote", "get-url", "origin"], worktreePath);
         if (!result.ok || result.value.exitCode !== 0) return undefined;
-        return parseGitHubRemote(result.value.stdout);
+        const repo = resolveForgeRepo(result.value.stdout);
+        // Trust this instance to serve its own users' avatars. Needed for a
+        // self-managed host, whose name is only knowable at runtime.
+        if (repo !== null) rememberForgeAvatarHost(repo.host);
+        return repo;
       })
       .finally(() => {
         if (this.originLookupsInFlight.get(worktreePath) === completion) {
@@ -1083,23 +972,31 @@ export function buildGitHubCommitAuthorIdentityCacheKey(
   if (normalized === undefined || normalizedProof === undefined) return undefined;
   return createHash("sha256")
     .update(
-      `pwrgit-github-commit-author-identity:v2\0${normalizedProof.owner}\0${normalizedProof.repo}\0${normalizedProof.commitSha}\0${normalized.email}\0${normalized.name}`
+      `pwrgit-forge-commit-author-identity:v3\0${normalizedProof.repo.kind}\0${normalizedProof.repo.host}\0${normalizedProof.repo.path}\0${normalizedProof.commitSha}\0${normalized.email}\0${normalized.name}`
     )
     .digest("hex");
 }
 
 /**
- * Opaque global key for GitHub's author-email account association. Git author
- * names may vary (`huntharo` vs `Harold Hunt`), while the normalized email is
- * the field GitHub itself uses to associate command-line commits.
+ * Opaque key for a forge's author-email account association. Git author names
+ * may vary (`huntharo` vs `Harold Hunt`), while the normalized email is the
+ * field both forges use to associate command-line commits.
+ *
+ * Scoped per forge instance on purpose: the same email is a different account
+ * on github.com than on a GitLab instance, so a global key would paint one
+ * forge's avatar onto the other's commits.
  */
 export function buildGitHubCommitAuthorAccountCacheKey(
-  author: { name: string; email: string }
+  author: { name: string; email: string },
+  repo: Pick<ForgeRepo, "kind" | "host">
 ): string | undefined {
   const normalized = normalizeAuthor(author);
-  if (normalized === undefined) return undefined;
+  const host = safeText(repo.host, 255)?.toLowerCase();
+  if (normalized === undefined || host === undefined) return undefined;
   return createHash("sha256")
-    .update(`pwrgit-github-commit-author-account:v1\0${normalized.email}`)
+    .update(
+      `pwrgit-forge-commit-author-account:v2\0${repo.kind}\0${host}\0${normalized.email}`
+    )
     .digest("hex");
 }
 
@@ -1109,67 +1006,6 @@ function buildRequestKey(prepared: PreparedRequest): string {
       `pwrgit-github-commit-author-request:v2\0${prepared.cacheOnly ? "cache-only" : "lookup"}\0${prepared.worktreeId}\0${prepared.commitSha}\0${prepared.author.email}\0${prepared.author.name}`
     )
     .digest("hex");
-}
-
-function parseGitHubCommitResponse(value: unknown): GitHubCommitAuthorRemoteCommit {
-  const response = asRecord(value);
-  const commit = asRecord(response?.commit);
-  const commitAuthor = asRecord(commit?.author);
-  const githubAuthor = response?.author === null ? null : asRecord(response?.author);
-  const sha = readString(response?.sha);
-  const author =
-    commitAuthor === undefined
-      ? undefined
-      : toRemoteCommitAuthor(commitAuthor);
-  const identity =
-    githubAuthor === null
-      ? null
-      : githubAuthor === undefined
-        ? undefined
-        : toRemoteGitHubAuthor(githubAuthor);
-
-  return {
-    ...(sha === undefined ? {} : { sha }),
-    ...(author === undefined ? {} : { author }),
-    ...(identity === undefined ? {} : { githubAuthor: identity })
-  };
-}
-
-function parseAssociatedPullAuthors(value: unknown): GitHubAccountProfile[] {
-  if (!Array.isArray(value)) return [];
-  const authors = new Map<string, GitHubAccountProfile>();
-  for (const item of value) {
-    const user = asRecord(asRecord(item)?.user);
-    const login = readString(user?.login);
-    if (login === undefined) continue;
-    const id = readSafeInteger(user?.id);
-    const avatarUrl = readString(user?.avatar_url);
-    authors.set(login.toLowerCase(), {
-      ...(id === undefined ? {} : { id }),
-      login,
-      ...(avatarUrl === undefined ? {} : { avatarUrl })
-    });
-  }
-  return [...authors.values()];
-}
-
-/** Strong fallback for GitHub commits whose custom email is not account-linked. */
-export function associatedPullAuthorMatches(
-  profile: GitHubAccountProfile,
-  author: { name?: string | null; email?: string | null }
-): boolean {
-  const login = safeText(profile.login, 255)?.toLowerCase();
-  const authorName = safeText(author.name, 512)?.normalize("NFC").toLowerCase();
-  const authorEmail = safeText(author.email, 320)?.normalize("NFC").toLowerCase();
-  if (login === undefined || authorName === undefined || authorEmail === undefined) {
-    return false;
-  }
-  if (authorName === login) return true;
-
-  const separator = authorEmail.indexOf("@");
-  if (separator <= 0) return false;
-  const emailLocalPart = authorEmail.slice(0, separator);
-  return emailLocalPart === login;
 }
 
 function evaluateRemoteCommit(
@@ -1188,8 +1024,8 @@ function evaluateRemoteCommit(
   ) {
     return { kind: "inconclusive" };
   }
-  if (response.githubAuthor === null) return { kind: "negative" };
-  const identity = normalizeGitHubIdentity(response.githubAuthor);
+  if (response.account === null) return { kind: "negative" };
+  const identity = normalizeForgeIdentity(response.account, expectedProof.repo);
   return identity === undefined
     ? { kind: "inconclusive" }
     : { kind: "resolved", identity };
@@ -1257,31 +1093,46 @@ function normalizeCommitSha(value: unknown): string | undefined {
   return sha !== undefined && /^[a-f0-9]{40}$/.test(sha) ? sha : undefined;
 }
 
-function normalizeProof(value: unknown): GitHubCommitAuthorProof | undefined {
+function normalizeProof(value: unknown): CommitAuthorProof | undefined {
   if (!isRecord(value)) return undefined;
-  const owner = normalizeGitHubPathSegment(value.owner);
-  const repo = normalizeGitHubPathSegment(value.repo);
+  const repo = normalizeForgeRepo(value.repo);
   const commitSha = normalizeCommitSha(value.commitSha);
-  return owner === undefined || repo === undefined || commitSha === undefined
+  return repo === undefined || commitSha === undefined
     ? undefined
-    : { owner, repo, commitSha };
+    : { repo, commitSha };
 }
 
-function normalizeGitHubPathSegment(value: unknown): string | undefined {
-  const segment = safeText(value, 100);
-  return segment !== undefined && /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(segment)
-    ? segment
-    : undefined;
+/**
+ * A GitLab project can sit at any depth, so the path is validated per segment
+ * rather than as a single one. Every segment still has to look like a namespace
+ * segment, which keeps traversal and query fragments out of an API endpoint.
+ */
+function normalizeForgeRepo(value: unknown): ForgeRepo | undefined {
+  if (!isRecord(value)) return undefined;
+  const kind = value.kind;
+  if (kind !== "github" && kind !== "gitlab") return undefined;
+  const host = safeText(value.host, 255)?.toLowerCase();
+  const path = safeText(value.path, 1_024);
+  if (host === undefined || path === undefined) return undefined;
+  if (!/^[A-Za-z0-9.-]+$/.test(host)) return undefined;
+  const segments = path.split("/");
+  if (segments.length < 2) return undefined;
+  if (kind === "github" && segments.length !== 2) return undefined;
+  if (!segments.every((segment) => /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(segment))) {
+    return undefined;
+  }
+  return { kind, host, path };
 }
 
-function normalizeGitHubIdentity(
-  value: GitHubCommitAuthorRemoteCommit["githubAuthor"]
+function normalizeForgeIdentity(
+  value: ForgeAccountProfile | undefined,
+  repo: ForgeRepo
 ): CachedIdentity | undefined {
   if (!isRecord(value)) return undefined;
   const login = safeText(value.login, 255);
   if (login === undefined) return undefined;
   const userId = readSafeInteger(value.id);
-  const avatarSourceUrl = normalizeAvatarUrl(value.avatarUrl);
+  const avatarSourceUrl = normalizeAvatarUrl(value.avatarUrl, repo);
   return {
     ...(userId === undefined ? {} : { userId }),
     login,
@@ -1289,9 +1140,17 @@ function normalizeGitHubIdentity(
   };
 }
 
-function normalizeAvatarUrl(value: unknown): string | undefined {
+/**
+ * `repo` supplies the base for a relative avatar path, which GitLab returns for
+ * an uploaded picture. Cached rows already hold an absolute, normalized URL.
+ */
+function normalizeAvatarUrl(value: unknown, repo?: ForgeRepo): string | undefined {
   const raw = safeText(value, 2_048);
-  return raw === undefined ? undefined : normalizeGitHubAvatarSourceUrl(raw);
+  if (raw === undefined) return undefined;
+  return normalizeForgeAvatarSourceUrl(
+    raw,
+    repo === undefined ? undefined : `https://${repo.host}`
+  );
 }
 
 function toLookup(
@@ -1389,29 +1248,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return isRecord(value) ? value : undefined;
 }
 
-function toRemoteCommitAuthor(
-  value: Record<string, unknown>
-): NonNullable<GitHubCommitAuthorRemoteCommit["author"]> {
-  const name = readString(value.name);
-  const email = readString(value.email);
-  return {
-    ...(name === undefined ? {} : { name }),
-    ...(email === undefined ? {} : { email })
-  };
-}
 
-function toRemoteGitHubAuthor(
-  value: Record<string, unknown>
-): NonNullable<GitHubCommitAuthorRemoteCommit["githubAuthor"]> {
-  const id = readSafeInteger(value.id);
-  const login = readString(value.login);
-  const avatarUrl = readString(value.avatar_url);
-  return {
-    ...(id === undefined ? {} : { id }),
-    ...(login === undefined ? {} : { login }),
-    ...(avatarUrl === undefined ? {} : { avatarUrl })
-  };
-}
 
 function readString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
