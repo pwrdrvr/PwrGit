@@ -604,6 +604,51 @@ export async function listLocalBranchNames(
   );
 }
 
+/** A local branch paired with the upstream it tracks. */
+export type BranchUpstream = { branch: string; upstream: string };
+
+/**
+ * Local branches whose upstream holds commits the branch does not, read from
+ * `%(upstream:trackshort)`: `<` is behind, `<>` is diverged, and both mean
+ * fetched work that no local ref reaches. `=` and `>` have nothing unapplied;
+ * a branch with no upstream — or a gone one — reports an empty field. The
+ * short form is used rather than `%(upstream:track)` because it is a fixed set
+ * of symbols instead of a sentence git may translate.
+ */
+export function parseUnappliedUpstreams(stdout: string): BranchUpstream[] {
+  const out: BranchUpstream[] = [];
+  for (const line of stdout.split("\n")) {
+    if (line.trim() === "") continue;
+    const parts = line.split("\t");
+    const branch = (parts[0] ?? "").trim();
+    const upstream = (parts[1] ?? "").trim();
+    const track = (parts[2] ?? "").trim();
+    if (branch === "" || upstream === "") continue;
+    if (track !== "<" && track !== "<>") continue;
+    out.push({ branch, upstream });
+  }
+  return out;
+}
+
+/** One `for-each-ref` answering "which branches are behind their upstream?" */
+export async function unappliedUpstreams(
+  git: GitExec,
+  cwd: string
+): Promise<Result<BranchUpstream[]>> {
+  const raw = await git(
+    [
+      "for-each-ref",
+      "--format=%(refname:short)%09%(upstream:short)%09%(upstream:trackshort)",
+      "refs/heads"
+    ],
+    cwd
+  );
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["for-each-ref"]);
+  if (!checked.ok) return checked;
+  return ok(parseUnappliedUpstreams(checked.value.stdout));
+}
+
 /** Branch tips for graph ref labels, split by where the ref lives. */
 export type BranchTips = {
   /** commit hash → local branch names tipped there. */

@@ -17,7 +17,8 @@ import {
   readUniqueCommits,
   selectActiveBranches,
   selectAllGraphBranches,
-  topoMergeCommits
+  topoMergeCommits,
+  unappliedUpstreams
 } from "./git-service";
 import type { WorktreeStateService } from "./worktree-state";
 
@@ -34,7 +35,11 @@ type CachedLanes = {
   defaultRef: string;
   /** Tips of each remote's copy of the default branch. */
   defaultRefTips: string[];
+  /** Local branch → its upstream, for branches holding unapplied upstream
+   *  work. Repo-level, so the per-worktree step can consult it for free. */
+  upstreamOf: Record<string, string>;
   shownBranches: string[];
+  upstreamRefs: string[];
   matchedBranches: number;
   hiddenBranches: number;
   at: number;
@@ -84,14 +89,15 @@ export function registerGraphHandlers(
   bus.register("graph:lanes", async (req) => {
     const wt = db
       .prepare(
-        `SELECT w.path AS path, w.repo_id AS repo_id, p.email AS email
+        `SELECT w.path AS path, w.repo_id AS repo_id, w.branch AS branch,
+                p.email AS email
          FROM worktrees w
          JOIN repos r ON r.id = w.repo_id
          JOIN profiles p ON p.id = r.profile_id
          WHERE w.id = ?`
       )
       .get(req.worktreeId) as
-      | { path: string; repo_id: string; email: string }
+      | { path: string; repo_id: string; branch: string | null; email: string }
       | undefined;
     if (wt === undefined) {
       return err({ kind: "repo", code: "not_found", message: "worktree not found" });
@@ -174,6 +180,35 @@ export function registerGraphHandlers(
         }
       }
 
+      // A branch behind its upstream has fetched commits that no local ref
+      // reaches. The trunk already gets this through `remoteDefaultRefs`;
+      // without the same for every other drawn branch, origin/releases/1.0's
+      // commits sit in the object store and are never drawn — the lane reads
+      // as current when it is a commit short, and the "↓1" in the sidebar has
+      // nothing to point at. Their refs join `shownBranches` too, so the
+      // renderer dashes them as fetched-but-unapplied.
+      const unapplied = await unappliedUpstreams(execGit, wt.path);
+      if (!unapplied.ok) return unapplied;
+      // The trunk's own remotes are already walked and drawn as the spine.
+      // Re-adding one here would hand the default branch's ref to a feature
+      // branch's lane, so any branch TRACKING the trunk — common for branches
+      // cut from main and never pushed — contributes nothing extra.
+      const trunkRefs = new Set([def.ref, ...remoteDefaultRefs]);
+      const upstreamOf: Record<string, string> = {};
+      for (const u of unapplied.value) {
+        if (u.branch === def.name || trunkRefs.has(u.upstream)) continue;
+        upstreamOf[u.branch] = u.upstream;
+      }
+      const drawn = new Set(shown);
+      const upstreamRefs = [
+        ...new Set(
+          shown
+            .map((b) => upstreamOf[b])
+            .filter((r): r is string => r !== undefined && !drawn.has(r))
+        )
+      ];
+      const walkRefs = [...shown, ...upstreamRefs];
+
       // Compose the log from segments instead of one flat window: a busy trunk
       // would otherwise flood `git log refs -n N` and silently drop every
       // branch tip older than the trunk's newest N commits. Trunk and branch
@@ -190,7 +225,7 @@ export function registerGraphHandlers(
         execGit,
         wt.path,
         def.ref,
-        shown,
+        walkRefs,
         UNIQUE_CAP
       );
       if (!uniques.ok) return uniques;
@@ -228,7 +263,9 @@ export function registerGraphHandlers(
         defaultBranch: def.name,
         defaultRef: def.ref,
         defaultRefTips: [...defaultRefTips],
+        upstreamOf,
         shownBranches: shown,
+        upstreamRefs,
         matchedBranches,
         hiddenBranches,
         at: Date.now()
@@ -266,13 +303,32 @@ export function registerGraphHandlers(
       if (headOnly.ok) headOnlyCommits = headOnly.value.map((commit) => commit.hash);
     }
 
-    // The worktree may sit on a commit no drawn branch reaches — a detached
-    // checkout, or a branch the active filter hid (e.g. merged via PR). The
-    // graph must still show "you are here", so widen the log with HEAD itself.
-    // Cached per head SHA; repos with few odd worktrees pay this rarely.
+    // Two things the repo-level walk can miss for THIS worktree:
+    //
+    //   • HEAD itself — a detached checkout, or a branch the active filter hid
+    //     (merged via PR, or past the recency cap). The graph must still show
+    //     "you are here".
+    //   • the checked-out branch's unapplied upstream work, when that branch
+    //     did not make the drawn set. The branch the user is focused on is the
+    //     one place we must never skip this: being told "↓1" while the graph
+    //     omits the commit is the whole complaint.
+    //
+    // Cached per head SHA + upstream; repos with few odd worktrees pay rarely.
+    const headBranch = wt.branch ?? "";
+    const headUpstream =
+      headBranch === "" ? undefined : cached.upstreamOf[headBranch];
+    // The upstream ref to add, or undefined when the repo-level walk already
+    // drew it (or there is nothing unapplied to draw).
+    const missingUpstream =
+      headUpstream !== undefined && !cached.upstreamRefs.includes(headUpstream)
+        ? headUpstream
+        : undefined;
+    const missingHead =
+      head !== "" && !cached.commits.some((c) => c.hash === head);
+
     let out = cached;
-    if (head !== "" && !cached.commits.some((c) => c.hash === head)) {
-      const supKey = `${key}:${head}`;
+    if (missingHead || missingUpstream !== undefined) {
+      const supKey = `${key}:${head}:${missingUpstream ?? ""}`;
       const supCached = laneCache.get(supKey);
       if (
         supCached !== undefined &&
@@ -281,25 +337,34 @@ export function registerGraphHandlers(
       ) {
         out = supCached;
       } else {
-        // HEAD's own line (commits not in the trunk), topo-merged into the
-        // cached graph. A HEAD that IS old trunk history has no unique
-        // commits — fall back to the lone commit so "you are here" resolves.
+        // This worktree's own line (commits not in the trunk), topo-merged
+        // into the cached graph. A HEAD that IS old trunk history has no
+        // unique commits — fall back to the lone commit so "you are here"
+        // resolves.
+        const supRefs = [
+          ...(missingHead ? [head] : []),
+          ...(missingUpstream !== undefined ? [missingUpstream] : [])
+        ];
         const line = await readUniqueCommits(
           execGit,
           wt.path,
           cached.defaultRef,
-          [head],
+          supRefs,
           80
         );
         if (!line.ok) return line;
         let extra = line.value;
-        if (!extra.some((c) => c.hash === head)) {
+        if (missingHead && !extra.some((c) => c.hash === head)) {
           const self = await readLogRefs(execGit, wt.path, [head], 1);
           if (self.ok) extra = [...extra, ...self.value];
         }
         out = {
           ...cached,
           commits: topoMergeCommits([cached.commits, extra]),
+          upstreamRefs:
+            missingUpstream !== undefined
+              ? [...cached.upstreamRefs, missingUpstream]
+              : cached.upstreamRefs,
           at: Date.now()
         };
         laneCache.set(supKey, out);
@@ -317,6 +382,7 @@ export function registerGraphHandlers(
       defaultRef: out.defaultRef,
       defaultRefTips: out.defaultRefTips,
       shownBranches: out.shownBranches,
+      upstreamRefs: out.upstreamRefs,
       matchedBranches: out.matchedBranches,
       hiddenBranches: out.hiddenBranches
     });
