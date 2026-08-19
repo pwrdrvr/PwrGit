@@ -155,6 +155,12 @@ export function sourceEmptyMessage(input: {
   if (!input.catalogLoaded) return "Loading repositories…";
   if (!input.status.installed) return `Install the ${input.cliLabel} to search.`;
   if (!input.status.loggedIn) return `Sign in with the ${input.cliLabel} to search.`;
+  // An empty query has nothing to "not match" — this is the state a signed-in
+  // forge with no discovered owners lands in, and quoting the empty string at
+  // the user explains nothing.
+  if (input.query.trim() === "") {
+    return "No repositories found for the known owners.";
+  }
   return `No repositories match \u201C${input.query}\u201D.`;
 }
 

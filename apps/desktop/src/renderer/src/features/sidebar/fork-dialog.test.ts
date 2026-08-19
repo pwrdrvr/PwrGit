@@ -288,6 +288,14 @@ describe("sourceEmptyMessage", () => {
       "No repositories match \u201Creact\u201D."
     );
   });
+
+  it("does not quote an empty query back at the user", () => {
+    // What a signed-in forge with no discovered owners actually shows — seen
+    // on the GitLab tab, which renders `No repositories match ""`.
+    expect(
+      sourceEmptyMessage({ ...base, catalogLoaded: true, query: "" })
+    ).toBe("No repositories found for the known owners.");
+  });
 });
 
 describe("ownerKindLabel", () => {
