@@ -1002,6 +1002,7 @@ textarea,
 .new-wt:focus-visible,
 .add-folder:focus-visible,
 .clone-repo:focus-visible,
+.fork-repo:focus-visible,
 .jump-btn:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
@@ -1708,6 +1709,7 @@ textarea,
 
 .new-wt,
 .clone-repo,
+.fork-repo,
 .add-folder {
   display: flex;
   align-items: center;
@@ -1723,7 +1725,8 @@ textarea,
   font: 500 11px/1 var(--font-sans);
   cursor: pointer;
 }
-.clone-repo {
+.clone-repo,
+.fork-repo {
   height: 32px;
   margin-top: 8px;
   /* Was an accent-bordered, accent-filled bar. Cloning is a secondary action
@@ -1738,11 +1741,13 @@ textarea,
   font-weight: 600;
 }
 .clone-repo:hover:not(:disabled),
+.fork-repo:hover:not(:disabled),
 .add-folder:hover {
   border-color: var(--accent);
   color: var(--text-primary);
 }
-.clone-repo:disabled {
+.clone-repo:disabled,
+.fork-repo:disabled {
   opacity: 0.42;
   cursor: default;
 }
@@ -1750,18 +1755,23 @@ textarea,
   height: 32px;
   margin-top: 8px;
 }
-/* Add folders and Clone share the row under the jump field. Add folders is the
-   prerequisite — Clone stays disabled until a root exists — so it leads, takes
-   the larger share, and is the solid-bordered one. It used to be a dashed
-   whisper at the very bottom of the list, which on a first-run sidebar made the
-   only working control the quietest thing on screen. */
+/* The bring-a-repo-in actions, under the jump field. Add folders is the
+   prerequisite — Clone and Fork stay disabled until a root exists — so it
+   leads on its own row and is the solid-bordered one. It used to be a dashed
+   whisper at the very bottom of the list, which on a first-run sidebar made
+   the only working control the quietest thing on screen.
+
+   This wraps: Clone and Fork take the second row (`.clone-repo-row`), because
+   three labels do not fit one row at the 240px resize floor. */
 .sidebar__actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: stretch;
   gap: 8px;
 }
 .sidebar__actions .add-folder,
-.sidebar__actions .clone-repo {
+.sidebar__actions .clone-repo,
+.sidebar__actions .fork-repo {
   /* Both labels are single-line. `flex-basis: auto` (not 0) is what keeps that
      true: an even 0-basis split hands each button half the row, and at the
      240px resize floor half is ~104px against the ~117px "+ Add folders…"
@@ -1777,7 +1787,8 @@ textarea,
   color: var(--text-secondary);
   font-weight: 600;
 }
-.sidebar__actions .clone-repo {
+.sidebar__actions .clone-repo,
+.sidebar__actions .fork-repo {
   flex-grow: 0;
   border-style: dashed;
   background: transparent;
@@ -1785,10 +1796,12 @@ textarea,
   font-weight: 500;
 }
 /* Once there is somewhere to clone INTO, the two are peers. */
-.sidebar__actions:has(.clone-repo:not(:disabled)) .clone-repo {
+.sidebar__actions:has(.clone-repo:not(:disabled)) .clone-repo,
+.sidebar__actions:has(.clone-repo:not(:disabled)) .fork-repo {
   flex-grow: 1;
 }
-.sidebar__actions:has(.clone-repo:not(:disabled)) .clone-repo {
+.sidebar__actions:has(.clone-repo:not(:disabled)) .clone-repo,
+.sidebar__actions:has(.clone-repo:not(:disabled)) .fork-repo {
   border-style: solid;
   background: var(--bg-panel-elevated);
   color: var(--text-secondary);
@@ -2257,12 +2270,18 @@ textarea,
 
 /* ---- Fork dialog ---- */
 
+/* Clone and Fork take a full row of their own. Three labels cannot share one
+   row at the 240px resize floor (see .sidebar__actions' sizing note, tuned
+   when there were two), and wrapping mid-label inside a fixed-height ghost
+   button is the failure it warns about. */
 .clone-repo-row {
+  flex: 1 1 100%;
   display: flex;
   gap: 6px;
 }
-.clone-repo-row .clone-repo {
-  flex: 1;
+.clone-repo-row .clone-repo,
+.clone-repo-row .fork-repo {
+  flex: 1 1 auto;
   min-width: 0;
 }
 

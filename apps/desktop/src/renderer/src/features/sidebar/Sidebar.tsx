@@ -666,9 +666,10 @@ export function Sidebar({
           <button className="add-folder" onClick={onAddFolder}>
             <span className="new-wt__plus">+</span> Add folders…
           </button>
-          {/* Clone and fork share a row: both bring a repository in, and a
-              second full-width ghost bar below the first would read as a
-              second, more important action than it is. */}
+          {/* Clone and fork share their own row beneath Add folders. Three
+              labels do not fit one row at the 240px width floor — the sizing
+              note above was tuned for two — and both of these bring a
+              repository in, so they read as peers. */}
           <div className="clone-repo-row">
             <button
               className="clone-repo"
@@ -685,7 +686,7 @@ export function Sidebar({
               <span className="new-wt__plus">↓</span> Clone…
             </button>
             <button
-              className="clone-repo"
+              className="fork-repo"
               onClick={onForkRepo}
               disabled={
                 activeProfile === null || activeProfile.roots.length === 0

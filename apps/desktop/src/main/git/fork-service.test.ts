@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { err, ok, type CloneRepository, type Result } from "@pwrgit/shared";
 import { openDatabase } from "../persistence/db";
@@ -540,8 +540,13 @@ describe("ForkService.fork", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    const checkout = join(parentPath, "react");
-    expect(result.value.path).toBe(checkout);
+    // Assert the shape, not a path rebuilt with node:path: git normalises
+    // separators, so on Windows the indexed path comes back with forward
+    // slashes while `join` produces backslashes. Drive the rest off the
+    // indexer's own answer.
+    const checkout = result.value.path;
+    expect(basename(checkout)).toBe("react");
+    expect(checkout.replaceAll("\\", "/")).toContain("/forks/react");
     // `upstream` points at the original; `origin` stays the fork.
     const remotes = await systemGit(["remote", "-v"], checkout);
     expect(remotes.ok && remotes.value.stdout).toContain(
