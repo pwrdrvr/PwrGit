@@ -480,6 +480,11 @@ export function LineageGraph({
       (tips[h] ??= []).push(...ns);
     }
     const remoteNames = new Set(Object.values(data.remoteTips).flat());
+    // Lanes are drawn for the branch selection PLUS the upstream refs a drawn
+    // branch is behind — the latter carry the fetched-but-unapplied commits,
+    // so they need lanes and dashes even though they are not "branches" the
+    // toolbar counts.
+    const drawnRefs = [...data.shownBranches, ...data.upstreamRefs];
     return layoutLanes(
       data.commits.map((c) => ({ hash: c.hash, parents: c.parents })),
       {
@@ -487,14 +492,12 @@ export function LineageGraph({
         defaultBranch: data.defaultBranch,
         defaultRefTips: data.defaultRefTips,
         localRefTips: Object.keys(data.tips),
-        remoteBranches: data.shownBranches.filter((name) =>
-          remoteNames.has(name)
-        ),
+        remoteBranches: drawnRefs.filter((name) => remoteNames.has(name)),
         // This worktree's checked-out branch — pinned to lane 1.
         headBranch: Object.entries(data.branches).find(
           ([, info]) => info.worktreeId === worktreeId
         )?.[0],
-        shownBranches: data.shownBranches
+        shownBranches: drawnRefs
       }
     );
   }, [data, worktreeId]);
@@ -520,7 +523,11 @@ export function LineageGraph({
     const headOnlyCommits = new Set(data?.headOnlyCommits ?? []);
     // Drawn branches (and the default) win the capped chip slots on a commit
     // tipped by many branches; stale hangers-on collapse into the +N pill.
-    const drawn = new Set([...(data?.shownBranches ?? []), defaultBranch]);
+    const drawn = new Set([
+      ...(data?.shownBranches ?? []),
+      ...(data?.upstreamRefs ?? []),
+      defaultBranch
+    ]);
     const localTipByName = new Map<string, string>();
     for (const [h, ns] of Object.entries(tips)) {
       for (const n of ns) localTipByName.set(n, h);
@@ -997,7 +1004,10 @@ export function LineageGraph({
                 onClick={() => setBranchesOpen(false)}
               />
               <div className="branch-pop" role="menu">
-                {(data?.shownBranches ?? []).map((name) => {
+                {[
+                  ...(data?.shownBranches ?? []),
+                  ...(data?.upstreamRefs ?? [])
+                ].map((name) => {
                   const tipHash = tipByName.get(name);
                   const vm =
                     tipHash !== undefined ? vmByHash.get(tipHash) : undefined;

@@ -710,8 +710,14 @@ export type LaneGraph = {
    *  upstream/main, …) — the trunk is drawn through them so remote-ahead
    *  history renders as a dashed spine ending at the remote ref's chip. */
   defaultRefTips: string[];
-  /** Branches drawn besides the default spine. */
+  /** Branches drawn besides the default spine. This is the branch *selection*
+   *  — the toolbar's "N of M" counts it, so supplementary refs stay out. */
   shownBranches: string[];
+  /** Remote-tracking refs drawn on top of `shownBranches` because a drawn
+   *  branch (or this worktree's own) is behind them. Their commits are fetched
+   *  but unapplied, so the graph dashes them, the way the trunk's
+   *  `defaultRefTips` are drawn above local main. */
+  upstreamRefs: string[];
   /** Branches that qualified for this scope before the draw cap. */
   matchedBranches: number;
   /** Branches the "active" filter hid (merged/inactive) — for the reveal hint. */

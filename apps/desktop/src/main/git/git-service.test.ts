@@ -7,6 +7,7 @@ import {
   parseNameStatus,
   parseNumstat,
   parseRepoRefRows,
+  parseUnappliedUpstreams,
   parseWorktreeList,
   readChanges,
   readCommit,
@@ -150,6 +151,46 @@ describe("parseBranchRefs", () => {
     );
     expect(out).toHaveLength(1);
     expect(out[0].name).toBe("origin/main");
+  });
+});
+
+describe("parseUnappliedUpstreams", () => {
+  const row = (branch: string, upstream: string, track: string): string =>
+    [branch, upstream, track].join("\t");
+
+  it("keeps branches behind or diverged, and drops the rest", () => {
+    expect(
+      parseUnappliedUpstreams(
+        [
+          row("main", "origin/main", "<"),
+          row("releases/1.0", "origin/releases/1.0", "<>"),
+          row("in-sync", "origin/in-sync", "="),
+          row("ahead-only", "origin/ahead-only", ">"),
+          ""
+        ].join("\n")
+      )
+    ).toEqual([
+      { branch: "main", upstream: "origin/main" },
+      { branch: "releases/1.0", upstream: "origin/releases/1.0" }
+    ]);
+  });
+
+  it("skips branches with no upstream, and ones whose upstream is gone", () => {
+    // A gone upstream reports an empty track field, same as a fresh branch
+    // that never tracked anything — neither has fetched work to draw.
+    expect(
+      parseUnappliedUpstreams(
+        [row("local-only", "", ""), row("stale", "origin/stale", ""), ""].join(
+          "\n"
+        )
+      )
+    ).toEqual([]);
+  });
+
+  it("tolerates CRLF, which git can emit through a Windows pipe", () => {
+    expect(
+      parseUnappliedUpstreams("feat/x\torigin/feat/x\t<>\r\nmain\torigin/main\t=\r\n")
+    ).toEqual([{ branch: "feat/x", upstream: "origin/feat/x" }]);
   });
 });
 

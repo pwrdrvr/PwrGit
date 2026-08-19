@@ -70,6 +70,12 @@ export type GitSandbox = {
     name: string,
     opts?: { mainAheadBy?: number; backports?: number }
   ) => TestRepo;
+  /**
+   * A release branch in its own worktree, diverged from its upstream: one
+   * commit of ours that was never pushed, one of theirs we fetched but never
+   * applied.
+   */
+  makeRepoWithDivergedReleaseBranch: (name: string) => TestRepo;
   /** Rewritten commits plus work unique to both local and upstream. */
   makeRepoWithRewrittenDivergence: (
     name: string,
@@ -202,6 +208,45 @@ export function createGitSandbox(): GitSandbox {
     };
   };
 
+  const makeRepoWithDivergedReleaseBranch = (name: string): TestRepo => {
+    const repoPath = initRepo(name);
+    const remotePath = join(remotesDir, `${name}.git`);
+    git(remotesDir, "init", "--bare", `${name}.git`);
+    git(remotePath, "symbolic-ref", "HEAD", "refs/heads/main");
+    git(repoPath, "remote", "add", "origin", remotePath);
+    git(repoPath, "push", "-u", "origin", "main");
+    git(repoPath, "remote", "set-head", "origin", "--auto");
+
+    const addWorktree = worktreeAdder(name, repoPath);
+    const releasePath = addWorktree("releases/1.0");
+    writeFileSync(join(releasePath, "backport-0.txt"), "0\n");
+    git(releasePath, "add", "-A");
+    git(releasePath, "commit", "-m", "shared backport");
+    git(releasePath, "push", "-u", "origin", "releases/1.0");
+
+    // Another machine lands a fix on the release branch and pushes it.
+    git(repoPath, "checkout", "-q", "-b", "their-push", "origin/releases/1.0");
+    writeFileSync(join(repoPath, "their-fix.txt"), "fix\n");
+    git(repoPath, "add", "-A");
+    git(repoPath, "commit", "-m", "upstream release fix");
+    git(repoPath, "push", "origin", "their-push:releases/1.0");
+    git(repoPath, "checkout", "-q", "main");
+    git(repoPath, "branch", "-D", "their-push");
+
+    // We commit locally without pushing, then fetch: ahead 1, behind 1.
+    writeFileSync(join(releasePath, "prepare.txt"), "prep\n");
+    git(releasePath, "add", "-A");
+    git(releasePath, "commit", "-m", "prepare release");
+    git(repoPath, "fetch", "origin");
+
+    return {
+      name,
+      path: repoPath,
+      addWorktree,
+      createBranch: (branch: string) => git(repoPath, "branch", branch)
+    };
+  };
+
   const commit = (cwd: string, file: string, message: string): void => {
     writeFileSync(join(cwd, file), `${message}\n`);
     git(cwd, "add", "-A");
@@ -302,6 +347,7 @@ export function createGitSandbox(): GitSandbox {
     makeRepo,
     makeRepoBehindRemote,
     makeRepoWithSyncedReleaseBranch,
+    makeRepoWithDivergedReleaseBranch,
     makeRepoWithRewrittenDivergence,
     cleanup
   };

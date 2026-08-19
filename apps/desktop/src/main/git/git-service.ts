@@ -455,6 +455,18 @@ export async function readLogRefs(
  * trunk), silently dropping branch tips — fetching only the not-in-trunk
  * commits guarantees every branch's work is present no matter how noisy the
  * default branch is.
+ *
+ * `--ignore-missing` because callers pass remote-tracking refs, and every
+ * fetch here runs `--prune`: a ref can vanish between being listed and being
+ * walked. Without it one pruned ref is `fatal: bad revision`, which fails the
+ * whole graph — a view should lose that segment, not go blank.
+ *
+ * Caveat: the flag covers `notRef` too. If the default ref itself disappears
+ * (a renamed remote default, say) the exclusion quietly stops applying and
+ * this returns plain history up to `limit` rather than erroring. Callers on
+ * the repo-level path walk the trunk first, which has no such flag and fails
+ * loudly there; the cached per-worktree path can serve one stale graph before
+ * the TTL refreshes it.
  */
 export async function readUniqueCommits(
   git: GitExec,
@@ -468,6 +480,7 @@ export async function readUniqueCommits(
     [
       "log",
       "--topo-order",
+      "--ignore-missing",
       `--pretty=format:${LOG_FORMAT}`,
       "-n",
       String(limit),
@@ -602,6 +615,51 @@ export async function listLocalBranchNames(
   return ok(
     checked.value.stdout.split("\n").map((s) => s.trim()).filter((s) => s !== "")
   );
+}
+
+/** A local branch paired with the upstream it tracks. */
+export type BranchUpstream = { branch: string; upstream: string };
+
+/**
+ * Local branches whose upstream holds commits the branch does not, read from
+ * `%(upstream:trackshort)`: `<` is behind, `<>` is diverged, and both mean
+ * fetched work that no local ref reaches. `=` and `>` have nothing unapplied;
+ * a branch with no upstream — or a gone one — reports an empty field. The
+ * short form is used rather than `%(upstream:track)` because it is a fixed set
+ * of symbols instead of a sentence git may translate.
+ */
+export function parseUnappliedUpstreams(stdout: string): BranchUpstream[] {
+  const out: BranchUpstream[] = [];
+  for (const line of stdout.split("\n")) {
+    if (line.trim() === "") continue;
+    const parts = line.split("\t");
+    const branch = (parts[0] ?? "").trim();
+    const upstream = (parts[1] ?? "").trim();
+    const track = (parts[2] ?? "").trim();
+    if (branch === "" || upstream === "") continue;
+    if (track !== "<" && track !== "<>") continue;
+    out.push({ branch, upstream });
+  }
+  return out;
+}
+
+/** One `for-each-ref` answering "which branches are behind their upstream?" */
+export async function unappliedUpstreams(
+  git: GitExec,
+  cwd: string
+): Promise<Result<BranchUpstream[]>> {
+  const raw = await git(
+    [
+      "for-each-ref",
+      "--format=%(refname:short)%09%(upstream:short)%09%(upstream:trackshort)",
+      "refs/heads"
+    ],
+    cwd
+  );
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["for-each-ref"]);
+  if (!checked.ok) return checked;
+  return ok(parseUnappliedUpstreams(checked.value.stdout));
 }
 
 /** Branch tips for graph ref labels, split by where the ref lives. */

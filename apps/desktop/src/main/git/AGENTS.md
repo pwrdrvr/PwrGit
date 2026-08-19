@@ -4,7 +4,7 @@ Notes for the git layer. See `apps/desktop/AGENTS.md` for app-wide facts.
 
 ## Real-git tests run on Windows CI too
 
-Eleven suites here drive the system `git` against temp repos. Two hazards only
+Many suites here drive the system `git` against temp repos. Two hazards only
 ever fail on the Windows runner, so a green local run proves nothing about
 them:
 
@@ -46,3 +46,34 @@ command line at ~32 KB). Two consequences worth holding onto:
 - A failure in a later batch leaves earlier ones applied. A caller that
   reports "nothing happened" on error is wrong; announce the change either
   way (`notifyChanged` in `changes-handlers.ts`).
+
+## The lane graph draws fetched work, not just local work
+
+`graph-handlers.ts` composes the lineage from a trunk walk plus one
+not-in-trunk walk over the drawn branches. A branch that is BEHIND its upstream
+has commits sitting in the object store that no local ref reaches, so walking
+local tips alone silently omits them — the lane reads as current while the
+sidebar says "↓1", and the row the user wants is simply absent.
+
+`unappliedUpstreams` (git-service) answers "which branches are behind?" in one
+`for-each-ref`, via `%(upstream:trackshort)` — `<` behind, `<>` diverged. Use
+the short form, not `%(upstream:track)`: it is a fixed set of symbols rather
+than a sentence git may translate.
+
+Two rules follow. `graph-lanes.test.ts` pins which commits get walked;
+`lane-layout.test.ts` pins how the result is drawn — run both when you touch
+either half:
+
+- Every drawn branch contributes its upstream to the walk when it is behind.
+  That ref rides in `upstreamRefs`, NOT `shownBranches` — the toolbar counts
+  the latter as active branches — and the renderer draws the union, dashing it
+  as fetched-but-unapplied. `lane-layout.ts` handles the drawing already: it
+  needs the data, not new logic. A diverged branch forks at the merge base,
+  below the local tip, so the dashed leg runs past our own rows and bends into
+  our lane there; `lane-layout.test.ts` pins that geometry, including the
+  rewritten-SHA case where both legs carry the same work.
+- **The focused worktree's own branch is never skipped.** It can fall out of
+  the repo-level set entirely (`ACTIVE_DRAW_CAP` keeps 30 branches by
+  recency), so the per-worktree step re-adds its upstream. Anything scoped
+  "what the user is looking at right now" belongs there, not in the
+  repo-level cache, which is deliberately shared across a repo's worktrees.

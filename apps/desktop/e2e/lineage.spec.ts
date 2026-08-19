@@ -685,3 +685,37 @@ test("All-branches scope reveals remote (teammate) branches", async () => {
     window.locator(".graph-row", { hasText: "teammate rocket work" })
   ).toHaveCount(1);
 });
+
+test("a focused branch behind its upstream draws the commits it is missing", async () => {
+  sandbox = createGitSandbox();
+  const s = sandbox;
+  // releases/1.0 is ahead 1 / behind 1 — the shape a release branch takes
+  // mid-backport, and the one the trunk's remote-ahead handling never covered.
+  s.makeRepoWithDivergedReleaseBranch("diverged-release");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, s, "diverged-release");
+
+  // Focus the release worktree: this is the branch the user is looking at, so
+  // its fetched-but-unapplied work has to be on screen, not just counted.
+  const release = branchRow(window, "releases/1.0");
+  await expect(release).toBeVisible({ timeout: 20_000 });
+  await release.click();
+
+  const upstreamRow = window.locator(".graph-row", {
+    hasText: "upstream release fix"
+  });
+  await expect(upstreamRow).toBeVisible({ timeout: 20_000 });
+  // Fetched but not applied — same dashed lineage the trunk gets when
+  // origin/main runs ahead of local main.
+  await expect(upstreamRow.locator('[stroke-dasharray="4 4"]')).not.toHaveCount(0);
+  await expect(
+    upstreamRow.locator(".ref-chip--remote", { hasText: "origin/releases/1.0" })
+  ).toBeVisible();
+
+  // Our unpushed commit stays too: the divergence has to read as a fork.
+  await expect(
+    window.locator(".graph-row", { hasText: "prepare release" })
+  ).toBeVisible();
+});
