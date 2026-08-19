@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: #000000; color: #f7f3eb; font-family: "Geist","SF Pro Text",system-ui,sans-serif; -webkit-font-smoothing: antialiased; }
+  a { color: #ff8a1f; } a:hover { color: #ffb35c; }
+  .card { display:flex; flex-direction:column; gap:10px; padding:16px; border:1px solid rgba(247,243,235,0.1); border-radius:11px; background:#0a0a0a; }
+  .ttl { color:#f7f3eb; font:700 12px/1.2 'Geist',system-ui,sans-serif; }
+  .sub { color:#8c857a; font:500 10.5px/1.45 'Geist',system-ui,sans-serif; }
+  .mono { font-family:'Geist Mono',monospace; }
+  .eyebrow { color:#b8b0a5; font:700 10px/1 'Geist',system-ui,sans-serif; letter-spacing:0.06em; text-transform:uppercase; }
+</style>
+</helmet>
+
+<div style="width:560px; padding:26px 24px 30px; background:#000000; display:flex; flex-direction:column; gap:14px;">
+
+  <div style="display:flex; flex-direction:column; gap:5px; margin-bottom:2px;">
+    <div style="color:#f7f3eb; font:800 15px/1.2 'Geist',system-ui,sans-serif;">The states that decide whether this feature is good</div>
+    <div class="sub">Forking is mostly edge cases. Each of these is a place the dialog either explains itself or wastes a round trip to github.com.</div>
+  </div>
+
+  <!-- 1. already forked -->
+  <div class="card" style="border-color:rgba(255,138,31,0.42);">
+    <div style="display:flex; align-items:center; gap:8px;">
+      <span class="eyebrow" style="color:#ffb35c;">01 &mdash; you already have it</span>
+    </div>
+    <div class="ttl">Detected before you press anything</div>
+    <div style="display:flex; align-items:center; gap:9px; min-height:38px; padding:8px 10px; border:1px solid rgba(255,138,31,0.42); border-radius:8px; background:rgba(255,138,31,0.08);">
+      <span style="flex:0 0 auto; color:#ffb35c;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"/><path d="M12 12v3"/></svg></span>
+      <span style="flex:1; min-width:0; display:flex; flex-direction:column; gap:3px;">
+        <strong style="color:#f7f3eb; font:600 11.5px/1.15 'Geist Mono',monospace;">huntharo/react</strong>
+        <small class="sub" style="font-size:10px;">Your fork already exists, made 2 years ago. Forking again returns this same repo.</small>
+      </span>
+    </div>
+    <div class="sub">So the button changes rather than lying: <strong style="color:#b8b0a5;">Fork &amp; clone</strong> becomes <strong style="color:#ffb35c;">Clone your fork</strong>, and the <span class="mono">upstream</span> option stays on. If it is <em>also</em> already checked out locally, the row carries the existing path and the button becomes <strong style="color:#b8b0a5;">Reveal checkout</strong>.</div>
+  </div>
+
+  <!-- 2. forking a fork -->
+  <div class="card">
+    <span class="eyebrow">02 &mdash; forking a fork</span>
+    <div class="ttl">Which repo should <span class="mono" style="color:#ffb35c;">upstream</span> point at?</div>
+    <div class="sub">You picked <span class="mono" style="color:#f7f3eb;">gaearon/react</span>, itself a fork. GitHub will put your fork under it, but the branch you actually want to rebase on is almost always the root.</div>
+    <div style="display:flex; flex-direction:column; gap:6px;">
+      <label style="display:flex; align-items:center; gap:9px; padding:9px 11px; border:1px solid rgba(255,138,31,0.42); border-radius:8px; background:rgba(255,138,31,0.08); cursor:pointer;">
+        <span style="flex:0 0 auto; width:8px; height:8px; border:1.5px solid #ff8a1f; border-radius:999px; background:#ff8a1f;"></span>
+        <span style="flex:1; min-width:0; display:flex; flex-direction:column; gap:2px;">
+          <strong style="color:#f7f3eb; font:600 11px/1.15 'Geist Mono',monospace;">facebook/react</strong>
+          <small class="sub" style="font-size:9.5px;">root repository &mdash; the usual answer</small>
+        </span>
+      </label>
+      <label style="display:flex; align-items:center; gap:9px; padding:9px 11px; border:1px solid rgba(247,243,235,0.1); border-radius:8px; background:#080808; cursor:pointer;">
+        <span style="flex:0 0 auto; width:8px; height:8px; border:1.5px solid rgba(247,243,235,0.54); border-radius:999px;"></span>
+        <span style="flex:1; min-width:0; display:flex; flex-direction:column; gap:2px;">
+          <strong style="color:#b8b0a5; font:600 11px/1.15 'Geist Mono',monospace;">gaearon/react</strong>
+          <small class="sub" style="font-size:9.5px;">immediate parent &mdash; the repo you picked</small>
+        </span>
+      </label>
+    </div>
+  </div>
+
+  <!-- 3. cannot fork -->
+  <div class="card" style="border-color:rgba(185,66,50,0.28);">
+    <span class="eyebrow" style="color:#ffb0a1;">03 &mdash; refused before the request</span>
+    <div class="ttl">Named, not a raw CLI failure</div>
+    <div style="display:flex; flex-direction:column; gap:6px;">
+      <div style="padding:9px 11px; border:1px solid rgba(185,66,50,0.28); border-radius:8px; background:rgba(185,66,50,0.24); color:#ffb0a1; font:500 10.5px/1.45 'Geist',system-ui,sans-serif;">You own <span class="mono">huntharo/dotfiles</span> &mdash; GitHub does not fork a repository into the account that already owns it.</div>
+      <div style="padding:9px 11px; border:1px solid rgba(185,66,50,0.28); border-radius:8px; background:rgba(185,66,50,0.24); color:#ffb0a1; font:500 10.5px/1.45 'Geist',system-ui,sans-serif;">Forking is disabled for <span class="mono">acme-corp/billing-api</span> by its organization policy.</div>
+      <div style="padding:9px 11px; border:1px solid rgba(247,243,235,0.14); border-radius:8px; background:#080808; color:#8c857a; font:500 10.5px/1.45 'Geist',system-ui,sans-serif;">Forking on <span class="mono">gitlab.com</span> needs the GitLab CLI. Clone is available now &mdash; <a href="#">how to set it up</a>.</div>
+    </div>
+  </div>
+
+  <!-- 4. progress -->
+  <div class="card">
+    <span class="eyebrow">04 &mdash; while it runs</span>
+    <div class="ttl">Fork is two remote round trips before a byte transfers</div>
+    <div style="display:flex; flex-direction:column; gap:5px; padding:11px 12px; border:1px solid rgba(247,243,235,0.1); border-radius:8px; background:#080808;">
+      <div style="display:flex; align-items:center; gap:8px; color:#9ce5b3; font:500 10px/1 'Geist Mono',monospace;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Creating huntharo/react on GitHub</div>
+      <div style="display:flex; align-items:center; gap:8px; color:#9ce5b3; font:500 10px/1 'Geist Mono',monospace;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Waiting for GitHub to prepare the fork</div>
+      <div style="display:flex; align-items:center; gap:8px; color:#ff8a1f; font:600 10px/1 'Geist Mono',monospace;"><span style="width:6px; height:6px; margin:0 2.5px; border-radius:999px; background:#ff8a1f;"></span>Receiving objects &mdash; 64%</div>
+      <div style="display:flex; align-items:center; gap:8px; color:rgba(247,243,235,0.54); font:500 10px/1 'Geist Mono',monospace;"><span style="width:6px; height:6px; margin:0 2.5px; border-radius:999px; border:1px solid rgba(247,243,235,0.54);"></span>Adding upstream &rarr; facebook/react</div>
+      <div style="display:flex; align-items:center; gap:8px; color:rgba(247,243,235,0.54); font:500 10px/1 'Geist Mono',monospace;"><span style="width:6px; height:6px; margin:0 2.5px; border-radius:999px; border:1px solid rgba(247,243,235,0.54);"></span>Adding repository to PwrGit</div>
+    </div>
+    <div style="height:4px; border-radius:999px; background:rgba(247,243,235,0.1); overflow:hidden;"><span style="display:block; width:64%; height:100%; border-radius:999px; background:#ff8a1f;"></span></div>
+    <div class="sub">The clone phases already exist and parse from Git&rsquo;s stderr. The two GitHub steps and the <span class="mono">upstream</span> step are new, and they are the ones with no percentage &mdash; so they get a named step, not a stalled bar.</div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

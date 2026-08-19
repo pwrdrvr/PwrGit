@@ -19,6 +19,7 @@ import { ToastHost } from "./features/shell/ToastHost";
 import { Rail } from "./features/rail/Rail";
 import { ProfileModal } from "./features/sidebar/ProfileModal";
 import { CloneRepoDialog } from "./features/sidebar/CloneRepoDialog";
+import { ForkRepoDialog } from "./features/sidebar/ForkRepoDialog";
 import { NewWorktreeModal } from "./features/sidebar/NewWorktreeModal";
 import { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
 import {
@@ -46,6 +47,7 @@ export function App() {
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [overlayOpen, setOverlayOpen] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
+  const [forkOpen, setForkOpen] = useState(false);
   // A ⌘F pick on a branch with no worktree — the New worktree modal, primed to
   // branch from a fetched ref (remote-only) or to check the branch out (local).
   const [searchNewWorktree, setSearchNewWorktree] = useState<{
@@ -418,6 +420,7 @@ export function App() {
             refreshPullRequest(repoId, branch, "user")
           }
           onCloneRepo={() => setCloneOpen(true)}
+          onForkRepo={() => setForkOpen(true)}
           onAddFolder={() => void addFolders()}
           onOpenSearch={() => setOverlayOpen(true)}
           onNewProfile={() => setProfileModal({ mode: "create" })}
@@ -628,6 +631,25 @@ export function App() {
             });
           }}
           onClose={() => setCloneOpen(false)}
+        />
+      )}
+
+      {forkOpen && activeProfile !== null && (
+        <ForkRepoDialog
+          profile={activeProfile}
+          onForked={(repo) => {
+            setForkOpen(false);
+            setPendingReveal({
+              repoId: repo.id,
+              worktreeId: null,
+              branch: null
+            });
+          }}
+          onReveal={(path) => {
+            setForkOpen(false);
+            void dispatch("shell:revealPath", { path });
+          }}
+          onClose={() => setForkOpen(false)}
         />
       )}
 

@@ -16,11 +16,13 @@ import {
   cloneDestinations,
   CloneService,
   createCloneProgressParser,
-  normalizeGitHubRepository,
+  normalizeRepositoryPath,
   parseCloneProgressLine,
-  parseCloneRepositories,
   sanitizeCloneStderr
 } from "./clone-service";
+import { ForgeRegistry } from "../forge/provider";
+import { GitHubProvider } from "../github/github-provider";
+import { GitLabProvider } from "../gitlab/gitlab-provider";
 import type { GitExec, GitExecOptions, GitOutput } from "./dugite";
 import { RepoIndexer } from "./repo-indexer";
 
@@ -52,6 +54,60 @@ function git(cwd: string, ...args: string[]): void {
   execFileSync("git", args, { cwd, stdio: "ignore" });
 }
 
+/** A `gh` stand-in that answers the handful of calls GitHubProvider makes.
+ *  Tests override only the parts they care about; everything else responds
+ *  the way a signed-in CLI would, so a test never fails on an unrelated call. */
+function fakeGh(
+  overrides: {
+    login?: string;
+    orgs?: string[];
+    list?: (owner: string) => unknown[];
+    view?: (nameWithOwner: string) => unknown;
+    onCall?: (args: string[]) => void;
+  } = {}
+): (args: string[]) => Promise<string> {
+  return async (args: string[]) => {
+    overrides.onCall?.(args);
+    if (args[0] === "--version") return "gh version 2.92.0";
+    if (args[0] === "api" && args[1] === "user") {
+      return JSON.stringify({ login: overrides.login ?? "huntharo" });
+    }
+    if (args[0] === "api" && args[1] === "user/orgs") {
+      return JSON.stringify((overrides.orgs ?? []).map((login) => ({ login })));
+    }
+    if (args[0] === "api" && args[1]?.startsWith("repos/")) {
+      const nameWithOwner = args[1].slice("repos/".length);
+      return JSON.stringify(
+        overrides.view?.(nameWithOwner) ?? {
+          full_name: nameWithOwner,
+          name: nameWithOwner.slice(nameWithOwner.lastIndexOf("/") + 1),
+          visibility: "public",
+          ssh_url: `git@github.com:${nameWithOwner}.git`,
+          html_url: `https://github.com/${nameWithOwner}`
+        }
+      );
+    }
+    if (args[0] === "repo" && args[1] === "list") {
+      return JSON.stringify(overrides.list?.(args[2] ?? "") ?? []);
+    }
+    return "";
+  };
+}
+
+/** A registry holding only GitHub, backed by the given runner. GitLab is
+ *  registered with a runner that reports "not installed", which is what a
+ *  machine without `glab` looks like. */
+function githubOnly(gh: (args: string[]) => Promise<string>): ForgeRegistry {
+  const registry = new ForgeRegistry();
+  registry.register(new GitHubProvider(gh));
+  registry.register(
+    new GitLabProvider(async () => {
+      throw new Error("spawn glab ENOENT");
+    })
+  );
+  return registry;
+}
+
 function initRepo(path: string): void {
   mkdirSync(path, { recursive: true });
   git(path, "init", "-b", "main");
@@ -77,40 +133,18 @@ afterEach(() => {
 });
 
 describe("clone source metadata", () => {
-  it("normalizes owner/name and parses GitHub CLI JSON", () => {
-    expect(normalizeGitHubRepository(" pwrdrvr/PwrGit.git ")).toBe(
+  it("normalizes a repository path, including a GitLab subgroup", () => {
+    expect(normalizeRepositoryPath(" pwrdrvr/PwrGit.git ")).toBe(
       "pwrdrvr/PwrGit"
     );
-    expect(normalizeGitHubRepository("not-a-full-name")).toBeNull();
-    expect(parseCloneRepositories("null")).toEqual([]);
-
-    expect(
-      parseCloneRepositories(
-        JSON.stringify([
-          {
-            name: "PwrGit",
-            nameWithOwner: "pwrdrvr/PwrGit",
-            description: "Desktop git client",
-            isPrivate: true,
-            sshUrl: "git@github.com:pwrdrvr/PwrGit.git",
-            url: "https://github.com/pwrdrvr/PwrGit",
-            updatedAt: "2026-08-01T12:00:00Z"
-          }
-        ])
-      )
-    ).toEqual([
-      {
-        name: "PwrGit",
-        owner: "pwrdrvr",
-        nameWithOwner: "pwrdrvr/PwrGit",
-        description: "Desktop git client",
-        isPrivate: true,
-        sshUrl: "git@github.com:pwrdrvr/PwrGit.git",
-        httpsUrl: "https://github.com/pwrdrvr/PwrGit",
-        updatedAt: "2026-08-01T12:00:00Z",
-        localPaths: []
-      }
-    ]);
+    expect(normalizeRepositoryPath("acme/platform/team/api")).toBe(
+      "acme/platform/team/api"
+    );
+    expect(normalizeRepositoryPath("not-a-full-name")).toBeNull();
+    // A path segment that could be read as a flag or an option must not
+    // survive: it is interpolated into a git remote URL.
+    expect(normalizeRepositoryPath("--upload-pack=evil/x")).toBeNull();
+    expect(normalizeRepositoryPath("a/../../etc/passwd")).toBeNull();
   });
 });
 
@@ -259,39 +293,77 @@ describe("CloneService", () => {
     });
     const indexer = new RepoIndexer(db, systemGit);
     await indexer.indexRepoAt(profile.id, existingPath);
-    const gh = vi.fn(async (args: string[]) => {
-      const owner = args[2];
-      return JSON.stringify([
-        {
-          name: "existing",
-          nameWithOwner: `${owner}/existing`,
-          isPrivate: false,
-          sshUrl: `git@github.com:${owner}/existing.git`,
-          url: `https://github.com/${owner}/existing`,
-          updatedAt: "2026-08-01T12:00:00Z"
-        }
-      ]);
-    });
+    const listed: string[] = [];
+    const gh = vi.fn(
+      fakeGh({
+        onCall: (args) => {
+          if (args[0] === "repo" && args[1] === "list") listed.push(args[2]!);
+        },
+        list: (owner) => [
+          {
+            name: "existing",
+            nameWithOwner: `${owner}/existing`,
+            visibility: "PUBLIC",
+            sshUrl: `git@github.com:${owner}/existing.git`,
+            url: `https://github.com/${owner}/existing`,
+            updatedAt: "2026-08-01T12:00:00Z"
+          }
+        ]
+      })
+    );
     const service = new CloneService(
       db,
       systemGit,
       indexer,
       profiles,
-      gh,
-      async () => ({ installed: true, loggedIn: true })
+      githubOnly(gh)
     );
 
     const result = await service.catalog(profile.id);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.owners).toEqual(["pwrdrvr", "huntharo"]);
+    expect(result.value.owners.map((owner) => owner.login)).toEqual([
+      "pwrdrvr",
+      "huntharo"
+    ]);
     expect(
       result.value.repositories.find(
         (repository) => repository.nameWithOwner === "pwrdrvr/existing"
       )?.localPaths
     ).toEqual([existingPath]);
-    expect(gh).toHaveBeenCalledTimes(2);
+    // One listing per distinct owner — the profile org duplicates `pwrdrvr`,
+    // which is deduped rather than fetched twice.
+    expect(listed.sort()).toEqual(["huntharo", "pwrdrvr"]);
+  });
+
+  it("reports both forges, so a dialog can say which CLI is missing", async () => {
+    const root = temporaryRoot();
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "Personal",
+      email: "test@pwrgit.dev",
+      roots: [root]
+    });
+    const service = new CloneService(
+      db,
+      systemGit,
+      new RepoIndexer(db, systemGit),
+      profiles,
+      githubOnly(fakeGh())
+    );
+
+    const result = await service.catalog(profile.id);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.forges).toEqual([
+      { host: "github", installed: true, loggedIn: true, owners: [
+        { login: "huntharo", kind: "user", host: "github" }
+      ] },
+      { host: "gitlab", installed: false, loggedIn: false, owners: [] }
+    ]);
   });
 
   it("checks an exact owner/name that is outside the known owner catalogs", async () => {
@@ -304,15 +376,28 @@ describe("CloneService", () => {
       roots: [root]
     });
     const indexer = new RepoIndexer(db, systemGit);
-    const gh = vi.fn(async () =>
-      JSON.stringify({
-        name: "x-code-clone",
-        nameWithOwner: "huntharo/x-code-clone",
-        description: "Exact lookup",
-        isPrivate: false,
-        sshUrl: "git@github.com:huntharo/x-code-clone.git",
-        url: "https://github.com/huntharo/x-code-clone",
-        updatedAt: "2026-08-04T12:00:00Z"
+    const calls: string[][] = [];
+    const gh = vi.fn(
+      fakeGh({
+        onCall: (args) => calls.push(args),
+        view: (nameWithOwner) => ({
+          full_name: nameWithOwner,
+          name: "x-code-clone",
+          description: "Exact lookup",
+          visibility: "private",
+          fork: true,
+          parent: {
+            full_name: "upstream/x-code-clone",
+            html_url: "https://github.com/upstream/x-code-clone"
+          },
+          source: {
+            full_name: "root/x-code-clone",
+            html_url: "https://github.com/root/x-code-clone"
+          },
+          ssh_url: "git@github.com:huntharo/x-code-clone.git",
+          html_url: "https://github.com/huntharo/x-code-clone",
+          updated_at: "2026-08-04T12:00:00Z"
+        })
       })
     );
     const service = new CloneService(
@@ -320,8 +405,7 @@ describe("CloneService", () => {
       systemGit,
       indexer,
       profiles,
-      gh,
-      async () => ({ installed: true, loggedIn: true })
+      githubOnly(gh)
     );
 
     const result = await service.checkSource(
@@ -329,17 +413,58 @@ describe("CloneService", () => {
       "huntharo/x-code-clone"
     );
 
+    // Visibility and fork lineage both come back from the one REST read —
+    // `source` is the only GitHub response that carries the network root.
     expect(result).toMatchObject({
       ok: true,
-      value: { nameWithOwner: "huntharo/x-code-clone" }
+      value: {
+        nameWithOwner: "huntharo/x-code-clone",
+        visibility: "private",
+        host: "github",
+        hostname: "github.com",
+        parent: { nameWithOwner: "upstream/x-code-clone" },
+        root: { nameWithOwner: "root/x-code-clone" }
+      }
     });
-    expect(gh).toHaveBeenCalledWith([
-      "repo",
-      "view",
-      "huntharo/x-code-clone",
-      "--json",
-      "name,nameWithOwner,description,isPrivate,sshUrl,url,updatedAt"
-    ]);
+    expect(calls).toContainEqual(["api", "repos/huntharo/x-code-clone"]);
+  });
+
+  it("does not record a root that merely repeats the parent", async () => {
+    const root = temporaryRoot();
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "Personal",
+      email: "test@pwrgit.dev",
+      roots: [root]
+    });
+    const service = new CloneService(
+      db,
+      systemGit,
+      new RepoIndexer(db, systemGit),
+      profiles,
+      githubOnly(
+        fakeGh({
+          view: (nameWithOwner) => ({
+            full_name: nameWithOwner,
+            name: "react",
+            visibility: "public",
+            fork: true,
+            parent: { full_name: "facebook/react" },
+            source: { full_name: "facebook/react" }
+          })
+        })
+      )
+    );
+
+    const result = await service.checkSource(profile.id, "huntharo/react");
+
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) return;
+    // A fork of a source repo has parent === source. Recording `root` there
+    // would make every ordinary fork look like it had an ambiguous upstream.
+    expect(result.value.parent?.nameWithOwner).toBe("facebook/react");
+    expect(result.value.root).toBeUndefined();
   });
 
   it("maps expired GitHub CLI authentication during lookup", async () => {
@@ -352,7 +477,12 @@ describe("CloneService", () => {
       roots: [root]
     });
     const indexer = new RepoIndexer(db, systemGit);
-    const gh = vi.fn(async () => {
+    const gh = vi.fn(async (args: string[]) => {
+      if (args[0] === "--version") return "gh version 2.92.0";
+      if (args[0] === "api" && args[1] === "user") {
+        return JSON.stringify({ login: "huntharo" });
+      }
+      if (args[0] === "api" && args[1] === "user/orgs") return "[]";
       const failure = new Error("HTTP 401: Bad credentials") as Error & {
         stderr?: string;
       };
@@ -365,8 +495,7 @@ describe("CloneService", () => {
       systemGit,
       indexer,
       profiles,
-      gh,
-      async () => ({ installed: true, loggedIn: true })
+      githubOnly(gh)
     );
 
     const result = await service.checkSource(profile.id, "huntharo/private");
@@ -375,7 +504,7 @@ describe("CloneService", () => {
       ok: false,
       error: {
         kind: "remote",
-        code: "github_login_required",
+        code: "forge_login_required",
         message:
           "GitHub authentication is required. Run gh auth login and verify your Git/SSH credentials, then try again."
       }
@@ -399,10 +528,14 @@ describe("CloneService", () => {
       systemGit,
       indexer,
       profiles,
-      async () => {
+      githubOnly(async (args: string[]) => {
+        if (args[0] === "--version") return "gh version 2.92.0";
+        if (args[0] === "api" && args[1] === "user") {
+          return JSON.stringify({ login: "huntharo" });
+        }
+        if (args[0] === "api" && args[1] === "user/orgs") return "[]";
         throw new Error("not logged into any GitHub hosts; run gh auth login");
-      },
-      async () => ({ installed: true, loggedIn: true })
+      })
     );
 
     const result = await service.catalog(profile.id);
@@ -448,8 +581,7 @@ describe("CloneService", () => {
       cloneGit,
       indexer,
       profiles,
-      async () => "",
-      async () => ({ installed: true, loggedIn: true })
+      githubOnly(fakeGh())
     );
 
     const result = await service.clone({
@@ -502,20 +634,19 @@ describe("CloneService", () => {
       listRepos: vi.fn(() => []),
       indexRepoAt: vi.fn(async () => ok(indexedRepo))
     } as unknown as RepoIndexer;
-    const gh = vi.fn(async () => "");
+    const gh = vi.fn(fakeGh());
     const service = new CloneService(
       db,
       systemGit,
       indexer,
       profiles,
-      gh,
-      async () => ({ installed: true, loggedIn: true })
+      githubOnly(gh)
     );
 
     const result = await service.clone({
       profileId: profile.id,
       nameWithOwner: "huntharo/x-code-clone",
-      protocol: "gh_cli",
+      protocol: "cli",
       parentPath: root
     });
 
@@ -561,7 +692,13 @@ describe("CloneService", () => {
       listRepos: vi.fn(() => []),
       indexRepoAt: vi.fn()
     } as unknown as RepoIndexer;
-    const service = new CloneService(db, gitExec, indexer, profiles);
+    const service = new CloneService(
+      db,
+      gitExec,
+      indexer,
+      profiles,
+      githubOnly(fakeGh())
+    );
 
     const result = await service.clone({
       profileId: profile.id,
@@ -610,14 +747,13 @@ describe("CloneService", () => {
       systemGit,
       indexer,
       profiles,
-      gh,
-      async () => ({ installed: true, loggedIn: true })
+      githubOnly(gh)
     );
 
     const result = await service.clone({
       profileId: profile.id,
       nameWithOwner: "huntharo/private",
-      protocol: "gh_cli",
+      protocol: "cli",
       parentPath: root
     });
 
@@ -625,7 +761,7 @@ describe("CloneService", () => {
       ok: false,
       error: {
         kind: "remote",
-        code: "github_login_required",
+        code: "forge_login_required",
         message:
           "GitHub authentication is required. Run gh auth login and verify your Git/SSH credentials, then try again."
       }
@@ -646,7 +782,13 @@ describe("CloneService", () => {
     });
     const gitExec = vi.fn<GitExec>(systemGit);
     const indexer = new RepoIndexer(db, gitExec);
-    const service = new CloneService(db, gitExec, indexer, profiles);
+    const service = new CloneService(
+      db,
+      gitExec,
+      indexer,
+      profiles,
+      githubOnly(fakeGh())
+    );
 
     const result = await service.clone({
       profileId: profile.id,

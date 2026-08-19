@@ -2166,6 +2166,258 @@ textarea,
   border-color: var(--border-default);
   color: var(--text-muted);
 }
+/* Identity chips carry a glyph beside their label, so they need a gap the
+   original single-word chip did not. */
+.clone-chip--vis,
+.clone-chip--fork {
+  gap: 4px;
+  letter-spacing: 0;
+}
+/* Visibility takes colour only where colour means something. Public is the
+   quiet default; the coloured two are the ones worth noticing before you
+   push. See RepoIdentityMarks.tsx for why the slot is always drawn. */
+.clone-chip--public {
+  border-color: var(--border-default);
+  color: var(--text-subtle);
+}
+.clone-chip--private {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+.clone-chip--internal {
+  border-color: color-mix(in srgb, var(--info-text) 34%, transparent);
+  color: var(--info-text);
+}
+/* Dashed, because "we asked and could not find out" is not the same shape of
+   fact as the other three — it is an absence, and it reads as one. */
+.clone-chip--unknown {
+  border-style: dashed;
+  border-color: var(--border-default);
+  color: var(--text-subtle);
+}
+.clone-chip--fork {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Repo identity marks (sidebar, dense) ---- */
+
+/* Glyph-only at 320px. `flex: 0 0 auto` so the repo name — the one thing in
+   the row that may shrink — keeps absorbing the width. */
+.repo-mark {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-subtle);
+}
+.repo-mark--fork {
+  color: var(--text-muted);
+}
+.repo-mark--private {
+  color: var(--accent);
+}
+.repo-mark--internal {
+  color: var(--info-text);
+}
+.repo-mark--unknown {
+  color: color-mix(in srgb, var(--text-subtle) 62%, transparent);
+}
+
+/* ---- Forge picker, shared by the clone and fork dialogs ---- */
+
+.fork-hosts {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: auto;
+}
+.fork-host {
+  height: 17px;
+  padding: 0 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-subtle);
+  font: 600 9px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.fork-host:hover:not(:disabled),
+.fork-host.is-active {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+.fork-host:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* ---- Fork dialog ---- */
+
+.clone-repo-row {
+  display: flex;
+  gap: 6px;
+}
+.clone-repo-row .clone-repo {
+  flex: 1;
+  min-width: 0;
+}
+
+.fork-name-wrap {
+  margin-top: 6px;
+}
+.fork-name-owner {
+  flex: 0 0 auto;
+  color: var(--text-subtle);
+  font: 500 12px/1 var(--font-mono);
+}
+.fork-name-wrap input {
+  font-family: var(--font-mono);
+}
+.fork-name-ok {
+  flex: 0 0 auto;
+  color: var(--success-text);
+  font: 500 9.5px/1 var(--font-mono);
+}
+
+/* The already-forked callout. Accent-tinted rather than a warning colour:
+   finding an existing fork is a good outcome that changes what the button
+   does, not a problem. */
+.fork-existing {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--accent-border);
+  border-radius: 8px;
+  background: var(--accent-tint);
+  color: var(--accent-bright);
+}
+.fork-existing > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.fork-existing strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font: 600 11.5px/1.1 var(--font-mono);
+}
+.fork-existing small {
+  color: var(--text-muted);
+  font: 500 10px/1.35 var(--font-sans);
+}
+
+.fork-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fork-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  cursor: pointer;
+}
+.fork-option.is-on {
+  border-color: var(--accent-border);
+  background: var(--accent-tint);
+}
+.fork-option input {
+  flex: 0 0 auto;
+  margin: 1px 0 0;
+  accent-color: var(--accent);
+}
+.fork-option > span {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.fork-option strong {
+  color: var(--text-secondary);
+  font: 600 11px/1.25 var(--font-sans);
+}
+.fork-option.is-on strong {
+  color: var(--text-primary);
+}
+.fork-option small {
+  color: var(--text-muted);
+  font: 500 10px/1.35 var(--font-sans);
+}
+.fork-option code,
+.fork-upstream code {
+  font-family: var(--font-mono);
+  font-size: 0.94em;
+}
+.fork-option__target {
+  color: var(--accent);
+}
+
+/* Shown only when the source is itself a fork — see needsUpstreamChoice. */
+.fork-upstream {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-left: 22px;
+  padding: 9px 11px;
+  border-left: 1px solid var(--border-subtle);
+}
+.fork-upstream__lead {
+  color: var(--text-muted);
+  font: 500 10px/1.4 var(--font-sans);
+}
+.fork-upstream__row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--bg-input);
+  cursor: pointer;
+}
+.fork-upstream__row.is-on {
+  border-color: var(--accent-border);
+  background: var(--accent-tint);
+}
+.fork-upstream__row input {
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+.fork-upstream__row > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fork-upstream__row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font: 600 11px/1.15 var(--font-mono);
+}
+.fork-upstream__row small {
+  color: var(--text-muted);
+  font: 500 9.5px/1 var(--font-sans);
+}
+
+.clone-note--error {
+  color: var(--danger-text);
+}
 .clone-empty {
   padding: 15px 12px;
   color: var(--text-subtle);

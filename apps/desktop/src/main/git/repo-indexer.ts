@@ -7,11 +7,14 @@ import {
   err,
   ok,
   type BranchRef,
+  type ForgeHost,
   type Profile,
   type ProfileId,
   type PrSummary,
   type Repo,
+  type RepoIdentity,
   type RepoSearchHit,
+  type RepoVisibility,
   type RepoWorktreeRefresh,
   type Result,
   type Worktree
@@ -55,6 +58,54 @@ type RepoRow = {
   pinned: number;
   custom_order: number | null;
 };
+type RepoIdentityRow = {
+  host: string;
+  hostname: string;
+  owner: string;
+  name: string;
+  visibility: string;
+  parent_slug: string | null;
+  parent_url: string | null;
+  root_slug: string | null;
+  root_url: string | null;
+  fetched_at: string;
+};
+
+/** Widen the persisted strings back into the union types. A row written by a
+ *  newer build (or edited by hand) degrades to `other`/`unknown` rather than
+ *  producing a Repo whose type is a lie. */
+export function repoIdentityFromRow(row: RepoIdentityRow): RepoIdentity {
+  const host: ForgeHost =
+    row.host === "github" || row.host === "gitlab" ? row.host : "other";
+  const visibility: RepoVisibility =
+    row.visibility === "public" ||
+    row.visibility === "private" ||
+    row.visibility === "internal"
+      ? row.visibility
+      : "unknown";
+  const identity: RepoIdentity = {
+    host,
+    hostname: row.hostname,
+    owner: row.owner,
+    name: row.name,
+    nameWithOwner: `${row.owner}/${row.name}`,
+    visibility,
+    fetchedAt: row.fetched_at
+  };
+  if (row.parent_slug !== null) {
+    identity.parent = {
+      nameWithOwner: row.parent_slug,
+      url: row.parent_url ?? `https://${row.hostname}/${row.parent_slug}`
+    };
+  }
+  if (row.root_slug !== null) {
+    identity.root = {
+      nameWithOwner: row.root_slug,
+      url: row.root_url ?? `https://${row.hostname}/${row.root_slug}`
+    };
+  }
+  return identity;
+}
 type WorktreeRow = {
   id: string;
   repo_id: string;
@@ -864,6 +915,17 @@ export class RepoIndexer {
       worktrees
     };
     if (r.custom_order !== null) repo.order = r.custom_order;
+    // Joined here rather than fetched by the renderer: the identity marks sit
+    // on every repo row, so they have to arrive with the first `repo:list`
+    // or the sidebar paints once without them and again a moment later.
+    const identity = this.db
+      .prepare(
+        `SELECT host, hostname, owner, name, visibility,
+                parent_slug, parent_url, root_slug, root_url, fetched_at
+         FROM repo_identity WHERE repo_id = ?`
+      )
+      .get(r.id) as RepoIdentityRow | undefined;
+    if (identity !== undefined) repo.identity = repoIdentityFromRow(identity);
     return repo;
   }
 

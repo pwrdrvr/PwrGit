@@ -69,6 +69,10 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     }
     setLoading(true);
     void reload();
+    // Identity refresh is fire-and-forget and TTL-throttled in the main
+    // process: stored marks paint with the first repo:list, and anything
+    // stale arrives as a repo:identityChanged delta a moment later.
+    void dispatch("repo:refreshIdentities", { profileId: activeProfileId });
     const off = subscribe("repo:changed", (p) => {
       if (p.profileId === activeProfileId) void reload();
     });
@@ -114,6 +118,24 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
               return next;
             })
           };
+        })
+      );
+    });
+  }, []);
+
+  // Same delta shape, same reason: the identity marks sit on every repo row,
+  // and a full repo:list reload to repaint a lock icon would collapse every
+  // expanded repo in the sidebar.
+  useEffect(() => {
+    return subscribe("repo:identityChanged", ({ identities }) => {
+      if (identities.length === 0) return;
+      const byRepo = new Map(
+        identities.map(({ repoId, identity }) => [repoId, identity])
+      );
+      setRepos((rs) =>
+        rs.map((r) => {
+          const identity = byRepo.get(r.id);
+          return identity === undefined ? r : { ...r, identity };
         })
       );
     });

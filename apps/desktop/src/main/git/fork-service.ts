@@ -1,0 +1,424 @@
+import {
+  err,
+  forgeWebUrl,
+  ok,
+  type CloneProtocol,
+  type CloneRepository,
+  type ForgeHost,
+  type ForgeRepoRef,
+  type ForkPreflight,
+  type ForkProgress,
+  type Repo,
+  type Result
+} from "@pwrgit/shared";
+import type { ProfileService } from "../profiles/profile-service";
+import type { ForgeProvider, ForgeRegistry } from "../forge/provider";
+import type { GitExec } from "./dugite";
+import { requireExit0 } from "./dugite";
+import {
+  CloneService,
+  normalizeRepositoryPath,
+  validateCheckoutDestination
+} from "./clone-service";
+import type { RepoIndexer } from "./repo-indexer";
+
+/** The remote name a fork's original is added under. Not configurable: it is
+ *  the near-universal convention, and `ForkService` only ever creates it on a
+ *  checkout it made itself a moment earlier. */
+export const UPSTREAM_REMOTE = "upstream";
+
+export type ForkRequest = {
+  profileId: string;
+  /** The repository being forked. */
+  source: string;
+  host: ForgeHost;
+  hostname: string;
+  /** Account the fork is created in. */
+  targetOwner: string;
+  /** Name for the fork. */
+  targetName: string;
+  protocol: CloneProtocol;
+  parentPath: string;
+  defaultBranchOnly: boolean;
+  /** `owner/name` of the repository `upstream` should point at, or null to
+   *  add no upstream remote. Must be one of the preflight's choices. */
+  upstream: string | null;
+};
+
+function forgeName(host: ForgeHost): string {
+  return host === "gitlab" ? "GitLab" : "GitHub";
+}
+
+/** The candidates for `upstream`, best answer first.
+ *
+ *  A source that is not a fork yields exactly one entry and the dialog asks
+ *  nothing. A fork yields the network root first — rebasing on the root is
+ *  almost always what someone forking a fork wants — then the intermediate
+ *  parent, then the repository actually picked. */
+export function upstreamChoicesFor(source: CloneRepository): ForgeRepoRef[] {
+  const choices: ForgeRepoRef[] = [];
+  if (source.parent !== undefined) {
+    if (source.root !== undefined) choices.push(source.root);
+    choices.push(source.parent);
+  }
+  choices.push({
+    nameWithOwner: source.nameWithOwner,
+    url: forgeWebUrl(source.hostname, source.nameWithOwner)
+  });
+  return choices.filter(
+    (choice, index, all) =>
+      all.findIndex(
+        (candidate) =>
+          candidate.nameWithOwner.toLowerCase() ===
+          choice.nameWithOwner.toLowerCase()
+      ) === index
+  );
+}
+
+/** Whether `candidate` is this account's existing fork of `source` — rather
+ *  than an unrelated repository that merely occupies the name. Getting this
+ *  wrong would offer to "clone your fork" for a stranger's namesake repo. */
+export function isForkOf(
+  candidate: CloneRepository,
+  source: CloneRepository
+): boolean {
+  const slug = source.nameWithOwner.toLowerCase();
+  return (
+    candidate.parent?.nameWithOwner.toLowerCase() === slug ||
+    candidate.root?.nameWithOwner.toLowerCase() === slug ||
+    // Forking a fork puts the new repo under the picked repo but leaves the
+    // root pointing at the original, so a shared root also identifies it.
+    (source.root !== undefined &&
+      candidate.root?.nameWithOwner.toLowerCase() ===
+        source.root.nameWithOwner.toLowerCase()) ||
+    (source.parent !== undefined &&
+      candidate.parent?.nameWithOwner.toLowerCase() ===
+        source.parent.nameWithOwner.toLowerCase())
+  );
+}
+
+export class ForkService {
+  constructor(
+    private readonly git: GitExec,
+    private readonly indexer: RepoIndexer,
+    private readonly profiles: ProfileService,
+    private readonly forges: ForgeRegistry,
+    private readonly clones: CloneService
+  ) {}
+
+  /**
+   * Answer everything the dialog needs before anything is created: what the
+   * source is, where the fork would land, whether it is already there, which
+   * repository `upstream` should point at, and whether the whole thing is
+   * blocked. Every one of those costs a round trip the user would otherwise
+   * spend pressing a button and reading a CLI error.
+   */
+  async preflight(input: {
+    profileId: string;
+    source: string;
+    host: ForgeHost;
+    targetOwner?: string;
+  }): Promise<Result<ForkPreflight>> {
+    if (this.profiles.get(input.profileId) === null) {
+      return err({
+        kind: "profile",
+        code: "not_found",
+        message: `No profile "${input.profileId}"`
+      });
+    }
+    const source = normalizeRepositoryPath(input.source);
+    if (source === null) {
+      return err({
+        kind: "validation",
+        code: "invalid_repository",
+        message: "Enter a repository as owner/name."
+      });
+    }
+    const provider = this.forges.get(input.host);
+    if (provider === null) {
+      return this.blocked(source, input.targetOwner, {
+        code: "unsupported_host",
+        message: `PwrGit cannot fork on ${input.host} yet.`
+      });
+    }
+    const status = await provider.status();
+    if (!status.installed) {
+      return this.blocked(source, input.targetOwner, {
+        code: "cli_missing",
+        message: `Forking on ${forgeName(input.host)} needs the ${forgeName(input.host)} CLI.`
+      });
+    }
+    if (!status.loggedIn) {
+      return this.blocked(source, input.targetOwner, {
+        code: "login_required",
+        message: `Sign in with the ${forgeName(input.host)} CLI to fork.`
+      });
+    }
+
+    let repository: CloneRepository;
+    try {
+      repository = await provider.viewRepo(source);
+    } catch (cause) {
+      return err({
+        kind: "remote",
+        code: "repository_not_found",
+        message: `Couldn't find ${source}. ${provider.errorMessage(cause)}`
+      });
+    }
+
+    const targetOwner =
+      input.targetOwner ?? status.owners[0]?.login ?? repository.owner;
+    const targetName = repository.name;
+    const target = {
+      owner: targetOwner,
+      name: targetName,
+      nameWithOwner: `${targetOwner}/${targetName}`
+    };
+    const upstreamChoices = upstreamChoicesFor(repository);
+
+    // Neither forge will fork a repository into the account that owns it.
+    if (repository.owner.toLowerCase() === targetOwner.toLowerCase()) {
+      return ok({
+        source: repository,
+        target,
+        upstreamChoices,
+        blocked: {
+          code: "self_owned",
+          message: `${forgeName(input.host)} does not fork a repository into the account that already owns it. ${repository.nameWithOwner} is yours — clone it instead.`
+        }
+      });
+    }
+
+    const preflight: ForkPreflight = {
+      source: repository,
+      target,
+      upstreamChoices
+    };
+    // A repository already at the target name is only "your fork" if it
+    // actually descends from the source; otherwise it is a name collision the
+    // user has to resolve, and forking would fail server-side.
+    const existing = await provider
+      .viewRepo(target.nameWithOwner)
+      .catch(() => null);
+    if (existing !== null) {
+      if (isForkOf(existing, repository)) {
+        existing.localPaths = await this.checkoutsFor(
+          input.profileId,
+          existing
+        );
+        preflight.existing = existing;
+      } else {
+        preflight.blocked = {
+          code: "forking_disabled",
+          message: `${target.nameWithOwner} already exists and is not a fork of ${repository.nameWithOwner}. Rename the fork, or pick another account.`
+        };
+      }
+    }
+    return ok(preflight);
+  }
+
+  /** Create the fork, clone it, wire `upstream`, and index the checkout. */
+  async fork(
+    input: ForkRequest,
+    onProgress: (progress: ForkProgress) => void = () => undefined
+  ): Promise<Result<Repo>> {
+    const profile = this.profiles.get(input.profileId);
+    if (profile === null) {
+      return err({
+        kind: "profile",
+        code: "not_found",
+        message: `No profile "${input.profileId}"`
+      });
+    }
+    const source = normalizeRepositoryPath(input.source);
+    if (source === null) {
+      return err({
+        kind: "validation",
+        code: "invalid_repository",
+        message: "Enter a repository as owner/name."
+      });
+    }
+    const targetSlug = normalizeRepositoryPath(
+      `${input.targetOwner}/${input.targetName}`
+    );
+    if (targetSlug === null) {
+      return err({
+        kind: "validation",
+        code: "invalid_repository",
+        message: `Not a usable fork name: ${input.targetOwner}/${input.targetName}`
+      });
+    }
+    const provider = this.forges.get(input.host);
+    if (provider === null) {
+      return err({
+        kind: "remote",
+        code: "unsupported_host",
+        message: `PwrGit cannot fork on ${input.host} yet.`
+      });
+    }
+
+    const destinationCheck = validateCheckoutDestination(
+      profile,
+      input.parentPath,
+      input.targetName
+    );
+    if (!destinationCheck.ok) return destinationCheck;
+    const { parentPath, destination } = destinationCheck.value;
+
+    onProgress({ phase: "starting", percent: null });
+    let fork: CloneRepository;
+    try {
+      fork = await provider.fork({
+        source,
+        targetOwner: input.targetOwner,
+        targetName: input.targetName,
+        defaultBranchOnly:
+          input.defaultBranchOnly && provider.capabilities.defaultBranchOnly,
+        onPhase: (phase) => onProgress({ phase, percent: null })
+      });
+    } catch (cause) {
+      if (provider.isAuthError(cause)) {
+        return err({
+          kind: "remote",
+          code: "forge_login_required",
+          message: provider.errorMessage(cause)
+        });
+      }
+      return err({
+        kind: "remote",
+        code: "fork_failed",
+        message: `Couldn't fork ${source}. ${provider.errorMessage(cause)}`
+      });
+    }
+
+    const cloned = await this.clones.runClone(
+      {
+        host: fork.host,
+        hostname: fork.hostname,
+        nameWithOwner: fork.nameWithOwner,
+        protocol: input.protocol
+      },
+      destination,
+      parentPath,
+      (progress) => onProgress(progress)
+    );
+    if (!cloned.ok) {
+      return err({
+        ...cloned.error,
+        // The fork itself succeeded — saying only "clone failed" would leave
+        // the user unsure whether a repository was created on the forge.
+        message: `Forked to ${fork.nameWithOwner}, but the checkout failed: ${cloned.error.message}`
+      });
+    }
+
+    if (input.upstream !== null) {
+      onProgress({ phase: "adding_upstream", percent: null });
+      const added = await this.addUpstream(
+        destination,
+        input.upstream,
+        input.protocol,
+        fork.hostname
+      );
+      if (!added.ok) {
+        return err({
+          ...added.error,
+          message: `Forked and checked out to ${destination}, but couldn't add the ${UPSTREAM_REMOTE} remote: ${added.error.message}`
+        });
+      }
+    }
+
+    onProgress({ phase: "indexing", percent: null });
+    const indexed = await this.indexer.indexRepoAt(input.profileId, destination);
+    if (!indexed.ok) {
+      return err({
+        kind: "repo",
+        code: "clone_index_failed",
+        message: `Forked and checked out to ${destination}, but couldn't add it to PwrGit: ${indexed.error.message}`
+      });
+    }
+    this.clones.rememberDestination(input.profileId, parentPath);
+    return ok(indexed.value);
+  }
+
+  private async addUpstream(
+    destination: string,
+    upstream: string,
+    protocol: CloneProtocol,
+    hostname: string
+  ): Promise<Result<true>> {
+    const slug = normalizeRepositoryPath(upstream);
+    if (slug === null) {
+      return err({
+        kind: "validation",
+        code: "invalid_repository",
+        message: `Not a usable upstream: ${upstream}`
+      });
+    }
+    // SSH for the `cli` protocol too: the CLI cloned `origin`, but `upstream`
+    // is only ever fetched by plain Git, which has no forge CLI to defer to.
+    const url =
+      protocol === "https"
+        ? `https://${hostname}/${slug}.git`
+        : `git@${hostname}:${slug}.git`;
+    const added = await this.git(
+      ["remote", "add", UPSTREAM_REMOTE, url],
+      destination
+    );
+    if (!added.ok) return added;
+    const checked = requireExit0(added.value, ["remote", "add"]);
+    if (!checked.ok) return checked;
+    return ok(true);
+  }
+
+  private async checkoutsFor(
+    profileId: string,
+    repository: CloneRepository
+  ): Promise<string[]> {
+    const paths: string[] = [];
+    for (const repo of this.indexer.listRepos(profileId)) {
+      const result = await this.git(["remote", "get-url", "origin"], repo.path);
+      if (!result.ok || result.value.exitCode !== 0) continue;
+      if (
+        result.value.stdout
+          .toLowerCase()
+          .includes(repository.nameWithOwner.toLowerCase())
+      ) {
+        paths.push(repo.path);
+      }
+    }
+    return paths;
+  }
+
+  private blocked(
+    source: string,
+    targetOwner: string | undefined,
+    blocked: NonNullable<ForkPreflight["blocked"]>
+  ): Result<ForkPreflight> {
+    const lastSlash = source.lastIndexOf("/");
+    const owner = source.slice(0, lastSlash);
+    const name = source.slice(lastSlash + 1);
+    const placeholder: CloneRepository = {
+      name,
+      owner,
+      nameWithOwner: source,
+      visibility: "unknown",
+      host: "other",
+      hostname: "",
+      sshUrl: "",
+      httpsUrl: "",
+      localPaths: []
+    };
+    return ok({
+      source: placeholder,
+      target: {
+        owner: targetOwner ?? owner,
+        name,
+        nameWithOwner: `${targetOwner ?? owner}/${name}`
+      },
+      upstreamChoices: [],
+      blocked
+    });
+  }
+}
+
+export type { ForgeProvider };

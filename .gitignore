@@ -54,3 +54,7 @@ Thumbs.db
 # Claude Design exports (redundant with the extracted source under design/)
 design/*.zip
 design/**/.thumbnail
+# Seeded canvas payloads — ~2MB of editor code wrapped around the artboards.
+# The .dc.html artboards and canvas.json beside them are the source; the
+# seeded page is regenerated from them.
+design/**/pwrgit-*.html

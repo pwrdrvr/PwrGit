@@ -288,6 +288,10 @@ export type Repo = {
    */
   order?: number;
   worktrees: Worktree[];
+  /** Forge identity for the repo's `origin`, when one has been read. Absent
+   *  means "not looked up yet", which the marks render distinctly from
+   *  `visibility: "unknown"` ("looked up, forge would not say"). */
+  identity?: RepoIdentity;
 };
 
 /** Effective Git LFS readiness for one checked-out worktree. Repositories that
@@ -307,8 +311,49 @@ export type GitLfsStatus =
       version?: string;
     };
 
-/** Ways the clone dialog can hand a GitHub repository to the local machine. */
-export type CloneProtocol = "ssh" | "https" | "gh_cli";
+/** Hosting services PwrGit can read repository metadata from. A remote that
+ *  matches neither forge is `other` — its identity stays unknown, which is a
+ *  fact the UI renders, not a failure. */
+export type ForgeHost = "github" | "gitlab" | "other";
+
+/** Who can see a repository. GitHub only has `internal` on Enterprise; GitLab
+ *  has it on every tier. `unknown` is load-bearing rather than a null stand-in:
+ *  it is what an unauthenticated, unreachable, or unsupported forge answers,
+ *  and rendering it as "public" would be a lie about where code can go. */
+export type RepoVisibility = "public" | "private" | "internal" | "unknown";
+
+/** One end of a fork relationship. */
+export type ForgeRepoRef = {
+  nameWithOwner: string;
+  /** Browser URL — what "open on GitHub/GitLab" navigates to. */
+  url: string;
+};
+
+/** What the repo identity marks render from. Stored per repo so the sidebar
+ *  paints on launch without waiting for the network; refreshed best-effort. */
+export type RepoIdentity = {
+  host: ForgeHost;
+  /** The remote's hostname — `github.com`, `gitlab.example.com`. Rendered for
+   *  self-hosted instances, where a bare "GITLAB" would misstate where the
+   *  code actually lives. */
+  hostname: string;
+  owner: string;
+  name: string;
+  nameWithOwner: string;
+  visibility: RepoVisibility;
+  /** Present only when this repo is a fork — its immediate parent. */
+  parent?: ForgeRepoRef;
+  /** Root of the fork network, when that is not the immediate parent. A fork
+   *  of a fork is the case that makes `upstream` ambiguous. */
+  root?: ForgeRepoRef;
+  /** ISO timestamp of the last successful read from the forge. */
+  fetchedAt?: string;
+};
+
+/** Ways the clone dialog can hand a repository to the local machine. `cli`
+ *  defers to the forge's own CLI (and its credential helper) — it was
+ *  `gh_cli` when GitHub was the only forge, and is host-labelled now. */
+export type CloneProtocol = "ssh" | "https" | "cli";
 
 /** Live progress reported by Git while a repository is being cloned. */
 export type CloneProgress = {
@@ -330,13 +375,21 @@ export type CloneProgress = {
   transferRate?: string;
 };
 
-/** GitHub repository metadata used by the clone autocomplete. */
+/** Forge repository metadata used by the clone and fork autocompletes. */
 export type CloneRepository = {
   name: string;
   owner: string;
   nameWithOwner: string;
   description?: string;
-  isPrivate: boolean;
+  /** Replaced the original `isPrivate` boolean: a boolean cannot express
+   *  GitLab's third tier, nor "we could not find out". */
+  visibility: RepoVisibility;
+  host: ForgeHost;
+  hostname: string;
+  /** Immediate parent when this repository is a fork; absent on a source. */
+  parent?: ForgeRepoRef;
+  /** Fork-network root, when it differs from `parent`. */
+  root?: ForgeRepoRef;
   sshUrl: string;
   httpsUrl: string;
   updatedAt?: string;
@@ -358,12 +411,74 @@ export type CloneDestination = {
   lastUsedAt?: string;
 };
 
+/** Whether one forge CLI is usable right now. Both dialogs render the same
+ *  three-state answer, so both forges report it the same way. */
+export type ForgeStatus = {
+  host: ForgeHost;
+  installed: boolean;
+  loggedIn: boolean;
+  /** Accounts the signed-in user can create repositories in — the fork
+   *  targets. Empty until a status read succeeds. */
+  owners: ForgeOwner[];
+};
+
+/** An account a fork can be created in. */
+export type ForgeOwner = {
+  login: string;
+  kind: "user" | "organization";
+  host: ForgeHost;
+};
+
 export type CloneCatalog = {
-  owners: string[];
+  /** Accounts whose repositories are offered, across every forge in use. */
+  owners: ForgeOwner[];
   repositories: CloneRepository[];
-  github: { installed: boolean; loggedIn: boolean };
+  /** One entry per forge PwrGit knows how to talk to, so a dialog can say
+   *  which CLI is missing rather than assuming GitHub. */
+  forges: ForgeStatus[];
   /** Owner catalogs that could not be loaded; other results remain usable. */
   warning?: string;
+};
+
+/** Live progress for one fork. The clone phases are shared verbatim with
+ *  `CloneProgress`; the three forge-side phases are new and unmetered, which
+ *  is why they are named steps rather than a stalled percentage. */
+export type ForkProgress = {
+  phase:
+    | "starting"
+    | "creating"
+    | "awaiting_fork"
+    | CloneProgress["phase"]
+    | "adding_upstream";
+  percent: number | null;
+  completedObjects?: number;
+  totalObjects?: number;
+  bytesReceived?: string;
+  transferRate?: string;
+};
+
+/** What `repo:checkForkSource` answers: the source, plus everything the dialog
+ *  needs to decide what the button should say before anything is created. */
+export type ForkPreflight = {
+  source: CloneRepository;
+  /** The fork that would be created, or the one that already exists. */
+  target: { owner: string; name: string; nameWithOwner: string };
+  /** An existing fork of this source already owned by the target account. */
+  existing?: CloneRepository;
+  /** Candidate `upstream` remotes, best answer first. More than one entry
+   *  means the source is itself a fork and the choice is genuinely open. */
+  upstreamChoices: ForgeRepoRef[];
+  /** Set when forking cannot proceed — the reason, already phrased for a
+   *  human. The dialog renders it instead of enabling the button. */
+  blocked?: {
+    code:
+      | "self_owned"
+      | "forking_disabled"
+      | "cli_missing"
+      | "login_required"
+      | "unsupported_host";
+    message: string;
+  };
 };
 
 /** Result of reconciling one indexed repo with `git worktree list`. Both

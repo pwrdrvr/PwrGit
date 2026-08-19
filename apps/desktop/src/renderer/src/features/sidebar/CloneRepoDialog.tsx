@@ -5,6 +5,7 @@ import type {
   CloneProgress,
   CloneProtocol,
   CloneRepository,
+  ForgeHost,
   Profile,
   Repo
 } from "@pwrgit/shared";
@@ -14,20 +15,15 @@ import {
   cloneDestinationSelectionIndex,
   cloneRepositoryAtSelection,
   cloneSourceQuery,
+  defaultHostname,
   filterCloneDestinations,
   moveCloneSelection,
   unverifiedCloneRepository
 } from "./clone-dialog";
+import { cliProtocolLabel, statusFor } from "./fork-dialog";
+import { RepoIdentityChips } from "./RepoIdentityMarks";
 
-const PROTOCOLS: Array<{
-  id: CloneProtocol;
-  label: string;
-  detail: string;
-}> = [
-  { id: "ssh", label: "SSH", detail: "git@github.com" },
-  { id: "https", label: "HTTPS", detail: "https://github.com" },
-  { id: "gh_cli", label: "GitHub CLI", detail: "gh repo clone" }
-];
+const PROTOCOL_IDS = ["ssh", "https", "cli"] as const;
 
 function CloneIcon() {
   return (
@@ -56,18 +52,26 @@ function destinationMeta(destination: CloneDestination): string {
   }`;
 }
 
+function protocolLabel(protocol: CloneProtocol, host: ForgeHost): string {
+  if (protocol === "ssh") return "SSH";
+  if (protocol === "https") return "HTTPS";
+  return cliProtocolLabel(host).label;
+}
+
 function protocolDetail(
   protocol: CloneProtocol,
-  repository: CloneRepository | null
+  repository: CloneRepository | null,
+  host: ForgeHost
 ): string {
+  const hostname = repository?.hostname ?? defaultHostname(host);
   if (repository === null) {
-    return (
-      PROTOCOLS.find((candidate) => candidate.id === protocol)?.detail ?? ""
-    );
+    if (protocol === "ssh") return `git@${hostname}`;
+    if (protocol === "https") return `https://${hostname}`;
+    return cliProtocolLabel(host).detail("owner/name");
   }
   if (protocol === "ssh") return repository.sshUrl;
   if (protocol === "https") return repository.httpsUrl;
-  return `gh repo clone ${repository.nameWithOwner}`;
+  return cliProtocolLabel(repository.host).detail(repository.nameWithOwner);
 }
 
 const CLONE_PROGRESS_LABELS: Record<CloneProgress["phase"], string> = {
@@ -105,6 +109,7 @@ export function CloneRepoDialog({
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
   const [protocol, setProtocol] = useState<CloneProtocol>("ssh");
+  const [host, setHost] = useState<ForgeHost>("github");
   const [destinationQuery, setDestinationQuery] = useState("");
   const [selectedDestination, setSelectedDestination] =
     useState<CloneDestination | null>(null);
@@ -190,13 +195,12 @@ export function CloneRepoDialog({
   }, [profile.id]);
 
   const parsedSourceQuery = useMemo(
-    () => cloneSourceQuery(catalog?.repositories ?? [], sourceQuery),
-    [catalog?.repositories, sourceQuery]
+    () => cloneSourceQuery(catalog?.repositories ?? [], sourceQuery, host),
+    [catalog?.repositories, sourceQuery, host]
   );
-  const exactNameWithOwner =
-    parsedSourceQuery.kind === "exact"
-      ? parsedSourceQuery.nameWithOwner
-      : null;
+  const exactRepo =
+    parsedSourceQuery.kind === "exact" ? parsedSourceQuery.repository : null;
+  const exactNameWithOwner = exactRepo?.nameWithOwner ?? null;
   const catalogMatches =
     parsedSourceQuery.kind === "search" ? parsedSourceQuery.repositories : [];
 
@@ -215,16 +219,19 @@ export function CloneRepoDialog({
     const timeout = window.setTimeout(() => {
       void dispatch("repo:checkCloneSource", {
         profileId: profile.id,
-        nameWithOwner: exactNameWithOwner
+        nameWithOwner: exactNameWithOwner,
+        host: exactRepo?.host ?? host
       }).then((result) => {
         if (!active) return;
         setChecking(false);
         if (result.ok) setCheckedRepository(result.value);
         else if (
-          result.error.code === "github_cli_missing" ||
-          result.error.code === "github_login_required"
+          result.error.code === "forge_cli_missing" ||
+          result.error.code === "forge_login_required"
         ) {
-          setCheckedRepository(unverifiedCloneRepository(exactNameWithOwner));
+          setCheckedRepository(
+            unverifiedCloneRepository(exactNameWithOwner, exactRepo?.host ?? host)
+          );
         } else {
           setCheckError(result.error.message);
         }
@@ -234,7 +241,7 @@ export function CloneRepoDialog({
       active = false;
       window.clearTimeout(timeout);
     };
-  }, [exactNameWithOwner, profile.id]);
+  }, [exactNameWithOwner, exactRepo?.host, host, profile.id]);
 
   const sourceResults = useMemo(() => {
     const rows = checkedRepository
@@ -283,7 +290,9 @@ export function CloneRepoDialog({
       profileId: profile.id,
       nameWithOwner: selectedRepository.nameWithOwner,
       protocol,
-      parentPath: destination.path
+      parentPath: destination.path,
+      host: selectedRepository.host,
+      hostname: selectedRepository.hostname
     });
     activeCloneIdRef.current = null;
     setBusy(false);
@@ -294,8 +303,16 @@ export function CloneRepoDialog({
     }
   };
 
-  const ghCliDisabled =
-    catalog !== null && (!catalog.github.installed || !catalog.github.loggedIn);
+  // The host toggle only offers forges whose CLI can actually answer; a
+  // toggle that leads straight to "install the CLI" is a dead end dressed up
+  // as a choice.
+  const usableHosts = (catalog?.forges ?? [])
+    .filter((status) => status.installed && status.loggedIn)
+    .map((status) => status.host);
+  const activeHost = selectedRepository?.host ?? host;
+  const forgeStatus = statusFor(catalog?.forges ?? [], activeHost);
+  const cliDisabled =
+    catalog !== null && (!forgeStatus.installed || !forgeStatus.loggedIn);
 
   return (
     <div
@@ -338,7 +355,23 @@ export function CloneRepoDialog({
               Repository
               {catalog !== null && catalog.owners.length > 0 && (
                 <span className="clone-label__hint">
-                  {catalog.owners.join(" · ")}
+                  {catalog.owners.map((owner) => owner.login).join(" · ")}
+                </span>
+              )}
+              {usableHosts.length > 1 && (
+                <span className="fork-hosts" role="group" aria-label="Forge">
+                  {usableHosts.map((candidate) => (
+                    <button
+                      type="button"
+                      key={candidate}
+                      className={`fork-host${host === candidate ? " is-active" : ""}`}
+                      aria-pressed={host === candidate}
+                      disabled={busy}
+                      onClick={() => setHost(candidate)}
+                    >
+                      {candidate === "gitlab" ? "GitLab" : "GitHub"}
+                    </button>
+                  ))}
                 </span>
               )}
             </label>
@@ -419,9 +452,7 @@ export function CloneRepoDialog({
                     <strong>{repository.nameWithOwner}</strong>
                     <small>{repository.description ?? "GitHub repository"}</small>
                   </span>
-                  {repository.isPrivate && (
-                    <span className="clone-chip">private</span>
-                  )}
+                  <RepoIdentityChips repository={repository} />
                   {repository.localPaths.length > 0 && (
                     <span
                       className="clone-chip clone-chip--muted"
@@ -472,25 +503,30 @@ export function CloneRepoDialog({
           <section className="clone-section">
             <div className="clone-label">Clone with</div>
             <div className="clone-protocols">
-              {PROTOCOLS.map((candidate) => {
-                const disabled = candidate.id === "gh_cli" && ghCliDisabled;
-                const detail = protocolDetail(candidate.id, selectedRepository);
+              {PROTOCOL_IDS.map((candidate) => {
+                const disabled = candidate === "cli" && cliDisabled;
+                const detail = protocolDetail(
+                  candidate,
+                  selectedRepository,
+                  activeHost
+                );
+                const label = protocolLabel(candidate, activeHost);
                 return (
                   <button
                     type="button"
-                    key={candidate.id}
+                    key={candidate}
                     disabled={busy || disabled}
                     className={`clone-protocol${
-                      protocol === candidate.id ? " is-active" : ""
+                      protocol === candidate ? " is-active" : ""
                     }`}
                     title={
                       disabled
-                        ? "GitHub CLI must be installed and signed in"
+                        ? `${label} must be installed and signed in`
                         : detail
                     }
-                    onClick={() => setProtocol(candidate.id)}
-                    >
-                      <strong>{candidate.label}</strong>
+                    onClick={() => setProtocol(candidate)}
+                  >
+                    <strong>{label}</strong>
                     <small>{detail}</small>
                   </button>
                 );

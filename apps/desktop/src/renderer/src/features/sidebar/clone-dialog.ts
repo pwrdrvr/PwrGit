@@ -1,24 +1,22 @@
-import type { CloneDestination, CloneRepository } from "@pwrgit/shared";
+import {
+  isSafeProjectPath,
+  parseForgeRemote,
+  type CloneDestination,
+  type CloneRepository,
+  type ForgeHost
+} from "@pwrgit/shared";
 
 const repoText = (repository: CloneRepository): string =>
   `${repository.nameWithOwner} ${repository.description ?? ""}`.toLowerCase();
 
-const REPOSITORY_PART = "[A-Za-z0-9_.-]+";
-const NAME_WITH_OWNER = `${REPOSITORY_PART}/${REPOSITORY_PART}`;
-const EXACT_REPOSITORY = new RegExp(`^${NAME_WITH_OWNER}$`);
-const PLAIN_REPOSITORY = new RegExp(`^(${NAME_WITH_OWNER})(?:\\.git)?$`);
-const SCP_REPOSITORY = new RegExp(
-  `^git@github\\.com:(${NAME_WITH_OWNER})(?:\\.git)?$`,
-  "i"
-);
-const SSH_REPOSITORY = new RegExp(
-  `^ssh://git@github\\.com/(${NAME_WITH_OWNER})(?:\\.git)?/?$`,
-  "i"
-);
-const HTTPS_REPOSITORY = new RegExp(
-  `^https://github\\.com/(${NAME_WITH_OWNER})(?:\\.git)?/?$`,
-  "i"
-);
+/** `gh repo clone X` / `glab repo clone X` pasted straight from a terminal.
+ *  The CLI in the command names the forge, which is worth honouring — it is
+ *  more specific than the dialog's current host. */
+const CLI_CLONE = /^(gh|glab)\s+repo\s+clone\s+(\S+)$/i;
+
+export function defaultHostname(host: ForgeHost): string {
+  return host === "gitlab" ? "gitlab.com" : "github.com";
+}
 
 export function filterCloneRepositories(
   repositories: CloneRepository[],
@@ -95,55 +93,94 @@ export function cloneDestinationSelectionIndex(
   return index === -1 ? 0 : index;
 }
 
-export function exactGitHubRepository(input: string): string | null {
+/** An input that names one exact repository, and the forge it names it on. */
+export type ExactRepository = {
+  host: ForgeHost;
+  hostname: string;
+  nameWithOwner: string;
+};
+
+/**
+ * Resolve an exact repository from what the user typed or pasted.
+ *
+ * A full remote URL names its own forge and wins. A bare `owner/name` cannot
+ * — the same slug exists on both — so it falls back to `defaultHost`, which
+ * is the host toggle's current value.
+ */
+export function exactRepository(
+  input: string,
+  defaultHost: ForgeHost = "github"
+): ExactRepository | null {
   const trimmed = input.trim();
-  const ghClone = /^gh\s+repo\s+clone\s+(\S+)$/i.exec(trimmed);
-  const candidate = ghClone?.[1] ?? trimmed;
-  const nameWithOwner =
-    PLAIN_REPOSITORY.exec(candidate)?.[1] ??
-    SCP_REPOSITORY.exec(candidate)?.[1] ??
-    SSH_REPOSITORY.exec(candidate)?.[1] ??
-    HTTPS_REPOSITORY.exec(candidate)?.[1] ??
-    null;
-  const normalized = nameWithOwner?.replace(/\.git$/i, "") ?? null;
-  return normalized !== null && EXACT_REPOSITORY.test(normalized)
-    ? normalized
-    : null;
+  const cliClone = CLI_CLONE.exec(trimmed);
+  const candidate = cliClone?.[2] ?? trimmed;
+  const cliHost: ForgeHost | null =
+    cliClone?.[1]?.toLowerCase() === "glab"
+      ? "gitlab"
+      : cliClone !== null
+        ? "github"
+        : null;
+
+  // A URL is only parsed as one when it actually carries a scheme or an
+  // scp-style `user@host:` prefix. `parseForgeRemote` would otherwise read a
+  // bare `owner/name` as an scp remote whose host is the owner.
+  const isUrl =
+    /^(?:https?|ssh|git):\/\//i.test(candidate) ||
+    /^[^\s/]+@[^\s:/]+:/.test(candidate);
+  if (isUrl) {
+    const remote = parseForgeRemote(candidate);
+    if (remote === null || !isSafeProjectPath(remote.nameWithOwner)) return null;
+    return {
+      host: remote.host,
+      hostname: remote.hostname,
+      nameWithOwner: remote.nameWithOwner
+    };
+  }
+
+  const nameWithOwner = candidate.replace(/\.git$/i, "").replace(/^\/+|\/+$/g, "");
+  if (!isSafeProjectPath(nameWithOwner)) return null;
+  const host = cliHost ?? defaultHost;
+  return { host, hostname: defaultHostname(host), nameWithOwner };
 }
 
 export type CloneSourceQuery =
-  | { kind: "exact"; nameWithOwner: string }
+  | { kind: "exact"; repository: ExactRepository }
   | { kind: "search"; repositories: CloneRepository[] };
 
 export function cloneSourceQuery(
   repositories: CloneRepository[],
-  input: string
+  input: string,
+  defaultHost: ForgeHost = "github"
 ): CloneSourceQuery {
-  const exact = exactGitHubRepository(input);
+  const exact = exactRepository(input, defaultHost);
   return exact === null
     ? {
         kind: "search",
         repositories: filterCloneRepositories(repositories, input)
       }
-    : { kind: "exact", nameWithOwner: exact };
+    : { kind: "exact", repository: exact };
 }
 
+/** A stand-in for a repository the forge would not confirm — no CLI, or not
+ *  signed in. Its visibility is `unknown`, not `public`: the whole point of
+ *  the third state is that we must not guess this one. */
 export function unverifiedCloneRepository(
-  input: string
+  input: string,
+  defaultHost: ForgeHost = "github"
 ): CloneRepository | null {
-  const nameWithOwner = exactGitHubRepository(input);
-  if (nameWithOwner === null) return null;
-  const slash = nameWithOwner.indexOf("/");
-  const owner = nameWithOwner.slice(0, slash);
-  const name = nameWithOwner.slice(slash + 1);
+  const exact = exactRepository(input, defaultHost);
+  if (exact === null) return null;
+  const slash = exact.nameWithOwner.lastIndexOf("/");
   return {
-    name,
-    owner,
-    nameWithOwner,
+    name: exact.nameWithOwner.slice(slash + 1),
+    owner: exact.nameWithOwner.slice(0, slash),
+    nameWithOwner: exact.nameWithOwner,
     description: "Not verified — clone with SSH or HTTPS",
-    isPrivate: false,
-    sshUrl: `git@github.com:${nameWithOwner}.git`,
-    httpsUrl: `https://github.com/${nameWithOwner}.git`,
+    visibility: "unknown",
+    host: exact.host,
+    hostname: exact.hostname,
+    sshUrl: `git@${exact.hostname}:${exact.nameWithOwner}.git`,
+    httpsUrl: `https://${exact.hostname}/${exact.nameWithOwner}.git`,
     localPaths: []
   };
 }
