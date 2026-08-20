@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.6.0 - 2026-08-20
+
+- Repositories - Added forking from inside PwrGit, plus identity marks showing whether each repository is public, private, or internal, and whether it is a fork.
+- GitLab - Added merge-request status alongside GitHub pull requests, so change-request state appears whichever host a remote points at.
+- Settings - Added a Forges pane that reports each forge's connection state, names the exact command to install it or sign in, and lists what that forge supports.
+- Pull Requests - Improved the pull-request card with diff size, commit count, branch names, and timestamps, so hovering a PR chip shows real detail instead of a bare title.
+- Clone - Opening the clone dialog is now immediate, searching the forge as you type instead of enumerating every owner up front.
+- Commit Graph - Fixed branches that are behind their upstream so the commits they are missing are drawn, not just the trunk's.
+- Diff - Improved the diff pane header with a close (✕) control in place of the back button, and Escape now closes the pane.
+- Updates - Fixed repeated update checks failing with a GitHub error; release information is now cached and shared across the app, and revalidated without spending the request budget.
+- macOS - Fixed the app icon's smallest sizes so PwrGit renders correctly in Finder list view and the sidebar.
+
 ## v0.5.0 - 2026-08-18
 
 - Changes - Added image previews, live refresh after staging or external edits, folder grouping, and safe discard for an entire folder.
