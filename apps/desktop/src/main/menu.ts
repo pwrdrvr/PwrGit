@@ -13,6 +13,7 @@ export function rebuildAppMenu(opts: {
   onOpenProfile: (profileId: string) => void;
   onNewProfile: () => void;
   onManageProfiles: () => void;
+  onCheckForUpdates: () => void;
   onOpenSettings: () => void;
   onOpenLogs: () => void;
   onOpenLicense: () => void;
@@ -118,11 +119,17 @@ export function rebuildAppMenu(opts: {
       ]
     },
     { role: "windowMenu" },
-    // Help › Logs (PwrAgnt convention) — the escape hatch when something
-    // fails without visible UI feedback.
+    // Keep update discovery in the same Help-menu location as PwrAgent and
+    // PwrSnap. Logs remain the escape hatch when something fails without
+    // visible UI feedback.
     {
       role: "help",
       submenu: [
+        {
+          label: "Check for Updates",
+          click: () => opts.onCheckForUpdates()
+        },
+        { type: "separator" },
         {
           label: "View License",
           click: () => opts.onOpenLicense()

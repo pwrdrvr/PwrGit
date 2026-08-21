@@ -18,6 +18,7 @@ import { registerAppDocumentHandlers } from "./app-document-handlers";
 import { wireAppMenuBridge } from "./app-menu-bridge";
 import { openAppDocumentWindow } from "./app-document-window";
 import {
+  checkForAppUpdatesNow,
   initAutoUpdater,
   reconcileDownloadedUpdateEligibility,
   registerAppUpdateHandlers
@@ -347,6 +348,16 @@ if (!gotSingleInstanceLock) {
         onOpenProfile: (profileId) => openProfileWindow(profileId),
         onNewProfile: () => emitEvent("ui:newProfile", {}),
         onManageProfiles: () => emitEvent("ui:manageProfile", {}),
+        onCheckForUpdates: () => {
+          void checkForAppUpdatesNow("menu").catch((err: unknown) => {
+            logMain(
+              "warn",
+              "updater",
+              "menu update check failed",
+              err instanceof Error ? err.message : String(err)
+            );
+          });
+        },
         onOpenSettings: () => openSettingsWindow(),
         onOpenLogs: () => openLogsWindow(),
         onOpenLicense: () => openAppDocumentWindow("license"),
