@@ -137,7 +137,7 @@ export function checkPackageLicensePolicy(root = repoRoot) {
 function trackedMatches(root, name) {
   const result = spawnSync(
     "git",
-    ["grep", "-I", "-i", "-n", "-e", name, "--", "."],
+    ["grep", "--no-color", "-I", "-i", "-n", "-e", name, "--", "."],
     { cwd: root, encoding: "utf8" },
   );
   if (result.error) {

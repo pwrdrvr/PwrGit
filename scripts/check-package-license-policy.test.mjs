@@ -126,7 +126,7 @@ describe("first-party name policy", () => {
     }
   });
 
-  it("limits the public dependency vendor name to its required files", () => {
+  it("limits the public dependency vendor name when Git color is forced", () => {
     const root = createValidRoot();
     runGit(root, ["init", "--quiet"]);
     const vendor = ["shutter", "stock"].join("");
@@ -135,6 +135,7 @@ describe("first-party name policy", () => {
     });
     write(join(root, "README.md"), "first-party project\n");
     runGit(root, ["add", "."]);
+    runGit(root, ["config", "color.grep", "always"]);
     expect(checkFirstPartyNamePolicy(root)).toEqual([]);
 
     write(join(root, "README.md"), `${vendor}\n`);
