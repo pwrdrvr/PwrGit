@@ -82,6 +82,15 @@ describe("package license policy", () => {
     expect(checkPackageLicensePolicy(root)).toEqual([]);
   });
 
+  it("accepts a Windows CRLF checkout of the MIT license", () => {
+    const root = createValidRoot();
+    const licensePath = join(root, "LICENSE");
+    const license = readFileSync(licensePath, "utf8").replace(/\n/g, "\r\n");
+    writeFileSync(licensePath, license);
+
+    expect(checkPackageLicensePolicy(root)).toEqual([]);
+  });
+
   it("reports missing or incorrect first-party ownership metadata", () => {
     const root = createValidRoot();
     const packagePath = join(root, "packages", "shared", "package.json");

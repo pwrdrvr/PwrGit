@@ -104,7 +104,9 @@ export function checkPackageLicensePolicy(root = repoRoot) {
   if (!existsSync(licensePath)) {
     failures.push("LICENSE is missing");
   } else {
-    const license = readFileSync(licensePath, "utf8");
+    // Git may check text files out with CRLF on Windows. Validate canonical
+    // content without making the policy depend on the host line endings.
+    const license = readFileSync(licensePath, "utf8").replace(/\r\n?/g, "\n");
     if (!license.startsWith("MIT License\n")) {
       failures.push("LICENSE must contain the MIT License");
     }
