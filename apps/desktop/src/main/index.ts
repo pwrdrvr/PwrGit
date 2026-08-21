@@ -18,7 +18,6 @@ import { registerAppDocumentHandlers } from "./app-document-handlers";
 import { wireAppMenuBridge } from "./app-menu-bridge";
 import { openAppDocumentWindow } from "./app-document-window";
 import {
-  checkForAppUpdatesNow,
   initAutoUpdater,
   reconcileDownloadedUpdateEligibility,
   registerAppUpdateHandlers
@@ -85,6 +84,7 @@ import {
   startStartupCpuProfiling
 } from "./diagnostics/diagnostics-manager";
 import { rebuildAppMenu } from "./menu";
+import { checkForAppUpdatesFromMenu } from "./menu-update-check";
 import { createProfileWindows } from "./profile-windows";
 import { openSettingsWindow } from "./settings-window";
 import { applyNativeWindowTheme } from "./window-chrome";
@@ -349,14 +349,7 @@ if (!gotSingleInstanceLock) {
         onNewProfile: () => emitEvent("ui:newProfile", {}),
         onManageProfiles: () => emitEvent("ui:manageProfile", {}),
         onCheckForUpdates: () => {
-          void checkForAppUpdatesNow("menu").catch((err: unknown) => {
-            logMain(
-              "warn",
-              "updater",
-              "menu update check failed",
-              err instanceof Error ? err.message : String(err)
-            );
-          });
+          void checkForAppUpdatesFromMenu();
         },
         onOpenSettings: () => openSettingsWindow(),
         onOpenLogs: () => openLogsWindow(),
