@@ -16,6 +16,7 @@ export default defineConfig({
     include: [
       "packages/*/src/**/*.test.ts",
       "apps/desktop/src/**/*.test.{ts,tsx}",
+      "scripts/**/*.test.mjs",
       // Checked-in build assets (the macOS .icns) are guarded next to the
       // script that generates them, which lives outside `src/`.
       "apps/desktop/scripts/**/*.test.ts"
