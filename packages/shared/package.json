@@ -5,6 +5,7 @@
   "description": "Cross-process types shared between main, preload, and renderer in @pwrgit/desktop: typed Commands/Events registry, Result-pattern, domain types.",
   "author": "PwrDrvr LLC",
   "license": "MIT",
+  "copyright": "Copyright © 2026 PwrDrvr LLC",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
