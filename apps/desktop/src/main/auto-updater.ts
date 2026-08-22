@@ -34,6 +34,7 @@ const MAC_UPDATE_CHANNEL_FILE = "latest-mac.yml";
 const WINDOWS_UPDATE_CHANNEL_FILE = "latest.yml";
 
 type UpdateSelectionKey = `${UpdateTrain}:${UpdateChannel}`;
+type AppUpdateCheckTrigger = "startup" | "periodic" | "manual" | "menu";
 
 type GitHubRelease = {
   assets?: GitHubReleaseAsset[];
@@ -247,7 +248,7 @@ function recordPendingDownloadChannel(
 }
 
 export async function checkForAppUpdatesNow(
-  trigger: "startup" | "periodic" | "manual" = "manual"
+  trigger: AppUpdateCheckTrigger = "manual"
 ): Promise<AppUpdateCheckResult> {
   if (!productionUpdatesEnabled()) {
     const result = developmentUpdateCheckResult();
@@ -295,7 +296,7 @@ export async function checkForAppUpdatesNow(
 }
 
 async function runUpdateCheck(
-  trigger: "startup" | "periodic" | "manual"
+  trigger: AppUpdateCheckTrigger
 ): Promise<AppUpdateCheckResult> {
   const selected = currentSelection();
   const selection = updateSelectionKey(selected.train, selected.channel);
@@ -315,13 +316,14 @@ async function runUpdateCheck(
     `checking for updates (${trigger}) train=${selected.train} track=${selected.channel}`
   );
   configureAutoUpdaterChannel(selected);
-  // A manual check should see what shipped a minute ago, so it revalidates the
-  // cache instead of reading it. The conditional request answers 304 while
-  // nothing has changed, which GitHub does not charge against the rate limit.
+  // A user-initiated check should see what shipped a minute ago, so it
+  // revalidates the cache instead of reading it. The conditional request
+  // answers 304 while nothing has changed, which GitHub does not charge
+  // against the rate limit.
   const release = await readAppUpdateReleaseForChannel(
     selected.channel,
     selected.train,
-    trigger === "manual" ? 0 : undefined
+    trigger === "manual" || trigger === "menu" ? 0 : undefined
   );
   const currentVersion = autoUpdater.currentVersion?.version ?? "unknown";
   if (!release?.tag_name) {

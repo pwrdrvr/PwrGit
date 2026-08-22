@@ -579,17 +579,22 @@ describe("auto updater", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("revalidates conditionally and keeps the cached list on 304", async () => {
-    const updater = await importAutoUpdater();
-    await updater.readAppUpdateReleaseVersions();
-    fetchMock.mockResolvedValueOnce(githubResponse(undefined, { status: 304 }));
+  it.each(["manual", "menu"] as const)(
+    "revalidates a %s check conditionally and keeps the cached list on 304",
+    async (trigger) => {
+      const updater = await importAutoUpdater();
+      await updater.readAppUpdateReleaseVersions();
+      fetchMock.mockResolvedValueOnce(
+        githubResponse(undefined, { status: 304 })
+      );
 
-    const result = await updater.checkForAppUpdatesNow("manual");
+      const result = await updater.checkForAppUpdatesNow(trigger);
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(requestHeader(1, "If-None-Match")).toBe('W/"releases"');
-    expect(result.status).not.toBe("error");
-  });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(requestHeader(1, "If-None-Match")).toBe('W/"releases"');
+      expect(result.status).not.toBe("error");
+    }
+  );
 
   it("reports the rate-limit reset time instead of a bare 403", async () => {
     const updater = await importAutoUpdater();

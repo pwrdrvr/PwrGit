@@ -84,6 +84,7 @@ import {
   startStartupCpuProfiling
 } from "./diagnostics/diagnostics-manager";
 import { rebuildAppMenu } from "./menu";
+import { checkForAppUpdatesFromMenu } from "./menu-update-check";
 import { createProfileWindows } from "./profile-windows";
 import { openSettingsWindow } from "./settings-window";
 import { applyNativeWindowTheme } from "./window-chrome";
@@ -347,6 +348,9 @@ if (!gotSingleInstanceLock) {
         onOpenProfile: (profileId) => openProfileWindow(profileId),
         onNewProfile: () => emitEvent("ui:newProfile", {}),
         onManageProfiles: () => emitEvent("ui:manageProfile", {}),
+        onCheckForUpdates: () => {
+          void checkForAppUpdatesFromMenu();
+        },
         onOpenSettings: () => openSettingsWindow(),
         onOpenLogs: () => openLogsWindow(),
         onOpenLicense: () => openAppDocumentWindow("license"),
