@@ -62,6 +62,18 @@ describe("command registry", () => {
       activeProfileId: string;
     }>();
   });
+
+  it("keeps partial index operations typed and snapshot-bound", () => {
+    expectTypeOf<Req<"changes:applySelection">>().toEqualTypeOf<{
+      worktreeId: string;
+      path: string;
+      staged: boolean;
+      fingerprint: string;
+      lineIds: string[];
+    }>();
+    expectTypeOf<Res<"diff:fileSelection">>().toHaveProperty("fingerprint");
+    expectTypeOf<Res<"diff:fileSelection">>().toHaveProperty("hunks");
+  });
 });
 
 describe("inferUpdateSelection", () => {

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { dispatch } from "../../lib/pwrgit";
+import type { PartialFileDiff } from "@pwrgit/shared";
+import { dispatch, subscribe } from "../../lib/pwrgit";
+import { showErrorToast } from "../../lib/toast";
 import { DiffViewer } from "./DiffViewer";
 import type { ImageDiffRevisions } from "./ImageDiff";
 
@@ -20,6 +22,12 @@ export function DiffPane({
   onClose: () => void;
 }) {
   const [patch, setPatch] = useState<string | null>(null);
+  const [selectionDiff, setSelectionDiff] = useState<PartialFileDiff | null>(
+    null
+  );
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [applying, setApplying] = useState(false);
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const [loading, setLoading] = useState(true);
   const paneRef = useRef<HTMLDivElement>(null);
 
@@ -34,9 +42,11 @@ export function DiffPane({
     let active = true;
     setLoading(true);
     setPatch(null);
+    setSelectionDiff(null);
+    setSelectedIds(new Set());
     const req =
       target.kind === "file"
-        ? dispatch("diff:file", {
+        ? dispatch("diff:fileSelection", {
             worktreeId,
             path: target.path,
             staged: target.staged
@@ -50,7 +60,15 @@ export function DiffPane({
           : dispatch("diff:commit", { worktreeId, hash: target.hash });
     void req.then((r) => {
       if (!active) return;
-      setPatch(r.ok ? r.value : "");
+      if (!r.ok) {
+        setPatch("");
+      } else if (target.kind === "file") {
+        const value = r.value as PartialFileDiff;
+        setSelectionDiff(value);
+        setPatch(value.patch);
+      } else {
+        setPatch(r.value as string);
+      }
       setLoading(false);
     });
     return () => {
@@ -58,7 +76,25 @@ export function DiffPane({
     };
     // key encodes the target; re-fetch when it or the worktree changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [worktreeId, key]);
+  }, [worktreeId, key, refreshVersion]);
+
+  // Keep an open working-tree diff interoperable with stage/unstage actions in
+  // the rail and with external Git clients. Every index move gets a fresh
+  // fingerprint; any checked lines are intentionally cleared for re-review.
+  useEffect(() => {
+    if (target.kind !== "file") return;
+    const refresh = (payload: { worktreeId: string }): void => {
+      if (payload.worktreeId === worktreeId) {
+        setRefreshVersion((version) => version + 1);
+      }
+    };
+    const offChanges = subscribe("changes:changed", refresh);
+    const offWorktree = subscribe("worktree:changed", refresh);
+    return () => {
+      offChanges();
+      offWorktree();
+    };
+  }, [target.kind, worktreeId]);
 
   // The pane takes focus when it opens and whenever it is pointed at a new
   // target, so Escape works right after the click that opened it — whether
@@ -113,11 +149,60 @@ export function DiffPane({
   const sub =
     target.kind === "file"
       ? target.staged
-        ? "staged change"
-        : "working-tree change"
+        ? "staged · HEAD → index"
+        : "unstaged · index → working tree"
       : target.kind === "commitFile"
         ? `in ${target.hash.slice(0, 7)} — ${target.subject}`
         : `commit ${target.hash}`;
+
+  const toggleLine = (id: string): void => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const applyLines = (lineIds: string[]): void => {
+    if (
+      target.kind !== "file" ||
+      selectionDiff === null ||
+      lineIds.length === 0 ||
+      applying
+    ) {
+      return;
+    }
+    setApplying(true);
+    void dispatch("changes:applySelection", {
+      worktreeId,
+      path: target.path,
+      staged: target.staged,
+      fingerprint: selectionDiff.fingerprint,
+      lineIds
+    }).then((result) => {
+      setApplying(false);
+      setSelectedIds(new Set());
+      if (!result.ok) {
+        showErrorToast({
+          title:
+            result.error.code === "stale_diff"
+              ? "Diff changed"
+              : target.staged
+                ? "Unstage selection failed"
+                : "Stage selection failed",
+          message: result.error.message,
+          detail: target.path
+        });
+      }
+    });
+  };
+
+  const selectionAvailable =
+    target.kind === "file" && selectionDiff?.capability.available === true;
+  const selectedCount = selectedIds.size;
+  const selectionVerb =
+    target.kind === "file" && target.staged ? "Unstage" : "Stage";
 
   return (
     <div className="diff-pane" ref={paneRef} tabIndex={-1}>
@@ -139,6 +224,36 @@ export function DiffPane({
           </svg>
         </button>
       </div>
+      {target.kind === "file" && selectionDiff !== null && (
+        <div
+          className={`diff-selection-bar${selectionAvailable ? "" : " diff-selection-bar--unavailable"}`}
+          role="status"
+        >
+          {selectionDiff.capability.available ? (
+            <>
+              <span>
+                Select changed lines, or use{" "}
+                <strong>{selectionVerb} hunk</strong>.
+              </span>
+              <span className="diff-selection-bar__count">
+                {selectedCount} selected
+              </span>
+              <button
+                className="diff-selection-bar__apply"
+                disabled={selectedCount === 0 || applying}
+                onClick={() => applyLines([...selectedIds])}
+              >
+                {applying ? `${selectionVerb}…` : `${selectionVerb} selected`}
+              </button>
+            </>
+          ) : (
+            <>
+              <strong>Whole file only.</strong>
+              <span>{selectionDiff.capability.message}</span>
+            </>
+          )}
+        </div>
+      )}
       <div className="diff-pane__body">
         {loading ? (
           <div className="diff-empty">Loading diff…</div>
@@ -146,6 +261,18 @@ export function DiffPane({
           <DiffViewer
             patch={patch ?? ""}
             images={images}
+            {...(selectionAvailable && selectionDiff !== null
+              ? {
+                  selection: {
+                    staged: target.kind === "file" && target.staged,
+                    selectedIds,
+                    applying,
+                    hunks: selectionDiff.hunks,
+                    onToggleLine: toggleLine,
+                    onApply: applyLines
+                  }
+                }
+              : {})}
             emptyLabel={
               target.kind === "commit"
                 ? "This commit has no textual changes."

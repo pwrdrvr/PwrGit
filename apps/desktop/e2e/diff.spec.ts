@@ -56,6 +56,79 @@ test("clicking a changed file opens its diff, then close returns to lineage", as
   await expect(window.locator(".graph-toolbar")).toBeVisible();
 });
 
+test("hunk and line actions move only the selected changes through Git's index", async () => {
+  sandbox = createGitSandbox();
+  const repo = sandbox.makeRepo("partialdiff");
+  const baseline = Array.from({ length: 12 }, (_, index) => `base-${index + 1}`);
+  writeFileSync(join(repo.path, "partial.txt"), `${baseline.join("\n")}\n`);
+  sandbox.git(repo.path, "add", "partial.txt");
+  sandbox.git(repo.path, "commit", "-m", "add partial fixture");
+  const working = [...baseline];
+  working[1] = "FIRST edit";
+  working[9] = "SECOND edit";
+  writeFileSync(join(repo.path, "partial.txt"), `${working.join("\n")}\n`);
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, sandbox, "partialdiff");
+
+  await window.locator(".file-row", { hasText: "partial.txt" }).click();
+  await expect(window.locator(".diff-pane__sub")).toHaveText(
+    "unstaged · index → working tree"
+  );
+  const hunkActions = window.getByRole("button", { name: "Stage hunk" });
+  await expect(hunkActions).toHaveCount(2);
+  await hunkActions.first().click();
+
+  await expect
+    .poll(() => sandbox?.git(repo.path, "diff", "--cached") ?? "")
+    .toContain("FIRST edit");
+  expect(sandbox.git(repo.path, "diff", "--cached")).not.toContain(
+    "SECOND edit"
+  );
+  expect(sandbox.git(repo.path, "diff")).toContain("SECOND edit");
+
+  // The rail presents both sides of the same partially-staged file, and the
+  // staged view makes the HEAD -> index direction explicit.
+  await window.locator(".diff-pane__close").click();
+  await expect(
+    window.locator(".file-row.is-staged", { hasText: "partial.txt" })
+  ).toBeVisible();
+  await expect(
+    window.locator(".file-row:not(.is-staged)", { hasText: "partial.txt" })
+  ).toBeVisible();
+  await window.locator(".file-row.is-staged", { hasText: "partial.txt" }).click();
+  await expect(window.locator(".diff-pane__sub")).toHaveText(
+    "staged · HEAD → index"
+  );
+  await window.getByRole("button", { name: "Unstage hunk" }).click();
+  await expect
+    .poll(() => sandbox?.git(repo.path, "diff", "--cached") ?? "not empty")
+    .toBe("");
+
+  // Line selection is intentionally finer than a replacement pair. Staging
+  // only the added row keeps the old row in the index; Git then reports that
+  // old row as the remaining unstaged deletion.
+  await window.locator(".diff-pane__close").click();
+  await window
+    .locator(".file-row:not(.is-staged)", { hasText: "partial.txt" })
+    .click();
+  const addedFirst = window.locator(".diff-row--add", {
+    hasText: "FIRST edit"
+  });
+  await addedFirst.locator('input[type="checkbox"]').click();
+  await expect(window.locator(".diff-selection-bar__count")).toHaveText(
+    "1 selected"
+  );
+  await window.getByRole("button", { name: "Stage selected" }).click();
+  await expect
+    .poll(() => sandbox?.git(repo.path, "show", ":partial.txt") ?? "")
+    .toContain("base-2\nFIRST edit");
+  expect(sandbox.git(repo.path, "show", ":partial.txt")).not.toContain(
+    "SECOND edit"
+  );
+});
+
 test("Escape closes the diff pane only while the pane owns the keystroke", async () => {
   sandbox = createGitSandbox();
   const repo = sandbox.makeRepo("escrepo");

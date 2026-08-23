@@ -11,6 +11,7 @@ import {
   unstagePaths
 } from "./git-service";
 import { registerChangesHandlers } from "./changes-handlers";
+import { applyPartialSelection, partialFileDiff } from "./partial-staging";
 import type { WorktreeRefresher } from "./worktree-handlers";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
@@ -26,6 +27,10 @@ vi.mock("./git-service", async (importOriginal) => {
     unstagePaths: vi.fn()
   };
 });
+vi.mock("./partial-staging", () => ({
+  applyPartialSelection: vi.fn(),
+  partialFileDiff: vi.fn()
+}));
 
 function setup(operations?: WorktreeOperationQueue) {
   const db = {
@@ -191,5 +196,85 @@ describe("changes mutation events", () => {
     ).resolves.toEqual(failure);
     expect(emitEvent).not.toHaveBeenCalled();
     expect(refresher.refreshWorktree).not.toHaveBeenCalled();
+  });
+});
+
+describe("partial staging handlers", () => {
+  const snapshot = {
+    path: "notes.txt",
+    staged: false,
+    patch: "patch",
+    fingerprint: "snapshot-1",
+    capability: { available: true as const },
+    hunks: []
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(partialFileDiff).mockResolvedValue(ok(snapshot));
+    vi.mocked(applyPartialSelection).mockResolvedValue(ok(undefined));
+  });
+
+  it("reads a typed selection snapshot through the worktree queue", async () => {
+    const { bus } = setup();
+    await expect(
+      bus.dispatch("diff:fileSelection", {
+        worktreeId: "worktree-1",
+        path: "notes.txt",
+        staged: false
+      })
+    ).resolves.toEqual(ok(snapshot));
+    expect(partialFileDiff).toHaveBeenCalledExactlyOnceWith(
+      expect.any(Function),
+      "/repos/project",
+      "notes.txt",
+      false
+    );
+  });
+
+  it("applies trusted line IDs and announces the index move", async () => {
+    const { bus } = setup();
+    await expect(
+      bus.dispatch("changes:applySelection", {
+        worktreeId: "worktree-1",
+        path: "notes.txt",
+        staged: false,
+        fingerprint: "snapshot-1",
+        lineIds: ["line-1"]
+      })
+    ).resolves.toEqual(ok(null));
+    expect(applyPartialSelection).toHaveBeenCalledExactlyOnceWith(
+      expect.any(Function),
+      "/repos/project",
+      "notes.txt",
+      false,
+      "snapshot-1",
+      ["line-1"]
+    );
+    expect(emitEvent).toHaveBeenCalledWith("changes:changed", {
+      worktreeId: "worktree-1"
+    });
+  });
+
+  it("announces a stale external edit so every surface refreshes", async () => {
+    const failure = err({
+      kind: "validation" as const,
+      code: "stale_diff",
+      message: "changed"
+    });
+    vi.mocked(applyPartialSelection).mockResolvedValueOnce(failure);
+    const { bus } = setup();
+    await expect(
+      bus.dispatch("changes:applySelection", {
+        worktreeId: "worktree-1",
+        path: "notes.txt",
+        staged: true,
+        fingerprint: "snapshot-1",
+        lineIds: ["line-1"]
+      })
+    ).resolves.toEqual(failure);
+    expect(emitEvent).toHaveBeenCalledWith("changes:changed", {
+      worktreeId: "worktree-1"
+    });
   });
 });

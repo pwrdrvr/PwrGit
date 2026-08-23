@@ -78,3 +78,102 @@ describe("DiffViewer binary files", () => {
     expect(container.textContent).toContain("Binary file — no preview.");
   });
 });
+
+describe("DiffViewer hunk and line selection", () => {
+  const textPatch = [
+    "diff --git a/file.txt b/file.txt",
+    "--- a/file.txt",
+    "+++ b/file.txt",
+    "@@ -1,3 +1,3 @@",
+    " before",
+    "-old",
+    "+new",
+    " after",
+    ""
+  ].join("\n");
+  const lines = [
+    {
+      id: "h:0:2:2:d:2",
+      kind: "delete" as const,
+      oldLine: 2,
+      newLine: null,
+      text: "old"
+    },
+    {
+      id: "h:0:2:2:a:2",
+      kind: "add" as const,
+      oldLine: null,
+      newLine: 2,
+      text: "new"
+    }
+  ];
+
+  it("routes individual checkboxes and the whole visible hunk through typed IDs", async () => {
+    const onToggleLine = vi.fn();
+    const onApply = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffViewer
+          patch={textPatch}
+          selection={{
+            staged: false,
+            selectedIds: new Set([lines[0]!.id]),
+            applying: false,
+            hunks: [
+              {
+                id: "h:0:2:2",
+                header: "@@ -2 +2 @@",
+                lineSelection: true,
+                lines
+              }
+            ],
+            onToggleLine,
+            onApply
+          }}
+        />
+      );
+    });
+
+    const checkboxes = container.querySelectorAll<HTMLInputElement>(
+      'input[type="checkbox"]'
+    );
+    expect(checkboxes).toHaveLength(2);
+    expect(checkboxes[0]?.checked).toBe(true);
+    await act(async () => checkboxes[1]?.click());
+    expect(onToggleLine).toHaveBeenCalledWith(lines[1]?.id);
+
+    const hunkButton = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Stage hunk"
+    );
+    await act(async () => hunkButton?.click());
+    expect(onApply).toHaveBeenCalledWith(lines.map((line) => line.id));
+  });
+
+  it("keeps an EOF-sensitive change hunk-selectable but hides unsafe line toggles", async () => {
+    await act(async () => {
+      root.render(
+        <DiffViewer
+          patch={textPatch}
+          selection={{
+            staged: true,
+            selectedIds: new Set(),
+            applying: false,
+            hunks: [
+              {
+                id: "h:0:2:2",
+                header: "@@ -2 +2 @@",
+                lineSelection: false,
+                lines
+              }
+            ],
+            onToggleLine: vi.fn(),
+            onApply: vi.fn()
+          }}
+        />
+      );
+    });
+
+    expect(container.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
+    expect(container.textContent).toContain("Unstage hunk");
+  });
+});
