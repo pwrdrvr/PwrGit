@@ -12,7 +12,12 @@ import {
   planRemoteTag
 } from "./git-service";
 
-type RepoRow = { path: string; profile_id: string };
+type RepoRow = {
+  path: string;
+  profile_id: string;
+  email: string;
+  author_name: string | null;
+};
 
 const notFound = {
   kind: "repo" as const,
@@ -23,7 +28,13 @@ const notFound = {
 export function registerTagHandlers(bus: CommandBus, db: DB): void {
   const repoOf = (repoId: string): RepoRow | undefined =>
     db
-      .prepare("SELECT path, profile_id FROM repos WHERE id = ?")
+      .prepare(
+        `SELECT r.path AS path, r.profile_id AS profile_id,
+                p.email AS email, p.author_name AS author_name
+         FROM repos r
+         JOIN profiles p ON p.id = r.profile_id
+         WHERE r.id = ?`
+      )
       .get(repoId) as RepoRow | undefined;
 
   bus.register("repo:tags", async (req) => {
@@ -39,12 +50,20 @@ export function registerTagHandlers(bus: CommandBus, db: DB): void {
   bus.register("tag:create", async (req) => {
     const repo = repoOf(req.repoId);
     if (repo === undefined) return err(notFound);
-    const created = await createTagAt(execGit, repo.path, {
-      name: req.name,
-      targetCommit: req.targetCommit,
-      kind: req.kind,
-      ...(req.message === undefined ? {} : { message: req.message })
-    });
+    const created = await createTagAt(
+      execGit,
+      repo.path,
+      {
+        name: req.name,
+        targetCommit: req.targetCommit,
+        kind: req.kind,
+        ...(req.message === undefined ? {} : { message: req.message })
+      },
+      {
+        email: repo.email,
+        ...(repo.author_name === null ? {} : { name: repo.author_name })
+      }
+    );
     if (!created.ok) return created;
     logMain(
       "info",

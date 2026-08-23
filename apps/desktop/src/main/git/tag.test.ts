@@ -14,10 +14,18 @@ import {
 } from "./git-service";
 
 const roots: string[] = [];
+const identity = { name: "Tag Tester", email: "tags@pwrgit.test" };
 
 const systemGit: GitExec = (args, cwd) =>
   new Promise<Result<GitOutput>>((resolve) => {
-    const proc = spawn("git", args, { cwd });
+    const proc = spawn("git", args, {
+      cwd,
+      env: {
+        ...process.env,
+        GIT_CONFIG_GLOBAL: "/dev/null",
+        GIT_CONFIG_SYSTEM: "/dev/null"
+      }
+    });
     let stdout = "";
     let stderr = "";
     proc.stdout.on("data", (data: Buffer) => (stdout += data.toString()));
@@ -63,11 +71,16 @@ afterEach(() => {
 describe("local Git tags", () => {
   it("creates and lists lightweight and annotated tags with peeled metadata", async () => {
     const fixture = repo();
-    const lightweight = await createTagAt(systemGit, fixture.path, {
-      name: "v1.0-light",
-      targetCommit: fixture.first,
-      kind: "lightweight"
-    });
+    const lightweight = await createTagAt(
+      systemGit,
+      fixture.path,
+      {
+        name: "v1.0-light",
+        targetCommit: fixture.first,
+        kind: "lightweight"
+      },
+      identity
+    );
     expect(lightweight).toEqual(
       ok(
         expect.objectContaining({
@@ -81,12 +94,19 @@ describe("local Git tags", () => {
       )
     );
 
-    const annotated = await createTagAt(systemGit, fixture.path, {
-      name: "v1.0",
-      targetCommit: fixture.second,
-      kind: "annotated",
-      message: "Release 1.0\n\nShips the tag browser.\nWith pagination."
-    });
+    git(fixture.path, "config", "--unset-all", "user.name");
+    git(fixture.path, "config", "--unset-all", "user.email");
+    const annotated = await createTagAt(
+      systemGit,
+      fixture.path,
+      {
+        name: "v1.0",
+        targetCommit: fixture.second,
+        kind: "annotated",
+        message: "Release 1.0\n\nShips the tag browser.\nWith pagination."
+      },
+      identity
+    );
     expect(annotated.ok).toBe(true);
     if (!annotated.ok) return;
     expect(annotated.value).toMatchObject({
@@ -113,20 +133,30 @@ describe("local Git tags", () => {
 
   it("requires an explicit commit object id and an annotation message", async () => {
     const fixture = repo();
-    const symbolic = await createTagAt(systemGit, fixture.path, {
-      name: "symbolic",
-      targetCommit: "HEAD",
-      kind: "lightweight"
-    });
+    const symbolic = await createTagAt(
+      systemGit,
+      fixture.path,
+      {
+        name: "symbolic",
+        targetCommit: "HEAD",
+        kind: "lightweight"
+      },
+      identity
+    );
     expect(symbolic.ok).toBe(false);
     expect(!symbolic.ok && symbolic.error.code).toBe("invalid_target_commit");
 
-    const blank = await createTagAt(systemGit, fixture.path, {
-      name: "blank",
-      targetCommit: fixture.second,
-      kind: "annotated",
-      message: "   "
-    });
+    const blank = await createTagAt(
+      systemGit,
+      fixture.path,
+      {
+        name: "blank",
+        targetCommit: fixture.second,
+        kind: "annotated",
+        message: "   "
+      },
+      identity
+    );
     expect(blank.ok).toBe(false);
     expect(!blank.ok && blank.error.code).toBe("annotation_required");
   });

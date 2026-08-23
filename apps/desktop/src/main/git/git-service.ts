@@ -2567,7 +2567,8 @@ export async function createTagAt(
     targetCommit: string;
     kind: "lightweight" | "annotated";
     message?: string;
-  }
+  },
+  identity: CommitIdentity
 ): Promise<Result<TagSummary>> {
   const valid = await validTagName(git, cwd, input.name);
   if (!valid.ok) return valid;
@@ -2606,10 +2607,27 @@ export async function createTagAt(
       message: "Annotated tags require a message"
     });
   }
-  const args =
-    input.kind === "annotated"
-      ? ["tag", "--annotate", "--message", message, "--", valid.value, commitId]
-      : ["tag", "--", valid.value, commitId];
+  const args: string[] = [];
+  if (input.kind === "annotated") {
+    // Annotated tags need a tagger identity. Use the repository profile as a
+    // per-command override, just like commits, so tag creation neither depends
+    // on a machine-global gitconfig nor writes identity into the repository.
+    args.push("-c", `user.email=${identity.email}`);
+    if (identity.name !== undefined && identity.name !== "") {
+      args.push("-c", `user.name=${identity.name}`);
+    }
+    args.push(
+      "tag",
+      "--annotate",
+      "--message",
+      message,
+      "--",
+      valid.value,
+      commitId
+    );
+  } else {
+    args.push("tag", "--", valid.value, commitId);
+  }
   const created = await git(args, cwd);
   if (!created.ok) return created;
   if (created.value.exitCode !== 0) {
