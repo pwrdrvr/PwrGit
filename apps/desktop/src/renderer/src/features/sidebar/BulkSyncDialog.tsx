@@ -316,6 +316,7 @@ export function BulkSyncDialog({
               className="modal__cancel"
               disabled={cancelling}
               onClick={() => void cancel()}
+              autoFocus
             >
               {cancelling ? "Cancelling…" : "Cancel"}
             </button>

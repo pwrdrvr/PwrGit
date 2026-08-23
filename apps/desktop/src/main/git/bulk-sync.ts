@@ -155,7 +155,7 @@ async function fetchConfiguredRemotes(
       continue;
     }
     const raw = await git(
-      ["fetch", "--prune", remote.name],
+      ["fetch", "--atomic", "--prune", remote.name],
       repo.path,
       signal === undefined ? undefined : { signal }
     );
@@ -238,14 +238,14 @@ async function inspectWorktree(
 
   for (const ref of IN_PROGRESS_REFS) {
     const raw = await git(
-      ["rev-parse", "--verify", "--quiet", ref],
+      ["rev-parse", "--verify", "--quiet", "--symbolic-full-name", ref],
       worktree.path,
       NO_OPTIONAL_LOCKS
     );
     if (!raw.ok) {
       return unsafeProbe(worktree, "Git could not inspect in-progress operations.");
     }
-    if (raw.value.exitCode === 0) {
+    if (raw.value.exitCode === 0 && raw.value.stdout.trim() === ref) {
       return {
         kind: "result",
         value: worktreeResult(worktree, {
@@ -254,6 +254,17 @@ async function inspectWorktree(
           message: "A merge, rebase, cherry-pick, revert, or bisect is in progress."
         })
       };
+    }
+    if (
+      raw.value.exitCode === 0 &&
+      raw.value.stdout.trim().startsWith("refs/")
+    ) {
+      // rev-parse DWIM-resolves ordinary branches and tags with names such as
+      // MERGE_HEAD. Only the literal pseudo-ref denotes an active operation.
+      continue;
+    }
+    if (raw.value.exitCode === 0) {
+      return unsafeProbe(worktree, "Git returned an ambiguous operation state.");
     }
     if (raw.value.exitCode !== 1) {
       return unsafeProbe(worktree, "Git could not verify repository operation state.");
@@ -492,8 +503,22 @@ async function softPullWorktree(
   // is passed to merge, so this never follows a ref that changed after review.
   const second = await inspectWorktree(git, worktree, fetched, first.value);
   if (second.kind === "result") return second.value;
+  if (isAborted(signal)) {
+    return worktreeResult(worktree, {
+      branch: second.value.branch,
+      outcome: "cancelled",
+      reason: "cancelled",
+      message: "Cancelled before the fast-forward started."
+    });
+  }
   const merge = await git(
-    ["merge", "--ff-only", "--no-edit", second.value.upstreamHead],
+    [
+      "merge",
+      "--ff-only",
+      "--no-edit",
+      "--no-overwrite-ignore",
+      second.value.upstreamHead
+    ],
     worktree.path
   );
   if (!merge.ok || merge.value.exitCode !== 0) {
@@ -677,23 +702,22 @@ export async function bulkSyncRepositories(
   ): Promise<void> => {
     results[index] = result;
     completedRepos += 1;
-    const completedAt = completedRepos;
+    options.onProgress?.({
+      operationId: options.operationId,
+      mode: options.mode,
+      phase: "repo_completed",
+      totalRepos,
+      completedRepos,
+      repoId: result.repoId,
+      repoName: result.name,
+      result
+    });
     try {
       await options.onRepoCompleted?.(repos[index]!, result);
     } catch {
       // Refresh/index maintenance is best-effort after Git has completed. It
       // must not erase this repository's result or stop unrelated workers.
     }
-    options.onProgress?.({
-      operationId: options.operationId,
-      mode: options.mode,
-      phase: "repo_completed",
-      totalRepos,
-      completedRepos: completedAt,
-      repoId: result.repoId,
-      repoName: result.name,
-      result
-    });
   };
 
   const worker = async (): Promise<void> => {

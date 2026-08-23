@@ -2,6 +2,7 @@ import { execFile, execFileSync, spawnSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync
@@ -165,8 +166,12 @@ describe("bulk repository synchronization", () => {
     git(repo.input.path, "update-ref", "refs/remotes/origin/release", repo.base);
 
     let fetches = 0;
+    let fetchArgs: string[] | undefined;
     const countedGit: GitExec = (args, cwd, options) => {
-      if (args[0] === "fetch") fetches += 1;
+      if (args[0] === "fetch") {
+        fetches += 1;
+        fetchArgs = args;
+      }
       return systemGit(args, cwd, options);
     };
     const summary = await bulkSyncRepositories(countedGit, [repo.input], {
@@ -175,6 +180,7 @@ describe("bulk repository synchronization", () => {
     });
 
     expect(fetches).toBe(1);
+    expect(fetchArgs).toEqual(["fetch", "--atomic", "--prune", "origin"]);
     expect(summary.counts.worktrees.updated).toBe(2);
     expect(summary.results[0]?.outcome).toBe("success");
     expect(git(repo.input.path, "rev-parse", "HEAD")).toBe(mainHead);
@@ -270,6 +276,78 @@ describe("bulk repository synchronization", () => {
     },
     60_000
   );
+
+  it("does not confuse branches or tags named like operation pseudo-refs with active operations", async () => {
+    const branchNamedLikeRef = trackedRepo("pseudo-branch");
+    const branchUpstream = leaveMainBehind(branchNamedLikeRef);
+    git(branchNamedLikeRef.input.path, "branch", "MERGE_HEAD");
+
+    const tagNamedLikeRef = trackedRepo("pseudo-tag");
+    const tagUpstream = leaveMainBehind(tagNamedLikeRef);
+    git(tagNamedLikeRef.input.path, "tag", "REBASE_HEAD");
+
+    const summary = await bulkSyncRepositories(
+      systemGit,
+      [branchNamedLikeRef.input, tagNamedLikeRef.input],
+      { operationId: "pseudo-ref-names", mode: "soft-pull" }
+    );
+
+    expect(summary.results.map((result) => result.worktrees[0]?.outcome)).toEqual([
+      "updated",
+      "updated"
+    ]);
+    expect(git(branchNamedLikeRef.input.path, "rev-parse", "HEAD")).toBe(
+      branchUpstream
+    );
+    expect(git(tagNamedLikeRef.input.path, "rev-parse", "HEAD")).toBe(
+      tagUpstream
+    );
+  });
+
+  it("refuses a fast-forward that would overwrite an ignored local file", async () => {
+    const repo = trackedRepo("ignored-collision");
+    writeFileSync(join(repo.input.path, ".gitignore"), "ignored-local.txt\n");
+    git(repo.input.path, "add", ".gitignore");
+    git(repo.input.path, "commit", "-m", "ignore generated file");
+    git(repo.input.path, "push", "origin", "main");
+    repo.base = git(repo.input.path, "rev-parse", "HEAD");
+
+    writeFileSync(join(repo.input.path, "ignored-local.txt"), "upstream\n");
+    git(repo.input.path, "add", "-f", "ignored-local.txt");
+    git(repo.input.path, "commit", "-m", "add generated file upstream");
+    git(repo.input.path, "push", "origin", "main");
+    git(repo.input.path, "reset", "--hard", repo.base);
+    git(
+      repo.input.path,
+      "update-ref",
+      "refs/remotes/origin/main",
+      repo.base
+    );
+    writeFileSync(join(repo.input.path, "ignored-local.txt"), "local work\n");
+    expect(
+      git(
+        repo.input.path,
+        "status",
+        "--porcelain=v2",
+        "--untracked-files=all"
+      )
+    ).toBe("");
+
+    const summary = await bulkSyncRepositories(systemGit, [repo.input], {
+      operationId: "ignored-collision",
+      mode: "soft-pull"
+    });
+
+    expect(summary.results[0]?.worktrees[0]).toMatchObject({
+      outcome: "failed",
+      reason: "merge_failed",
+      beforeHead: repo.base
+    });
+    expect(git(repo.input.path, "rev-parse", "HEAD")).toBe(repo.base);
+    expect(readFileSync(join(repo.input.path, "ignored-local.txt"), "utf8")).toBe(
+      "local work\n"
+    );
+  });
 
   it("isolates remote failures, identifies auth, and keeps fetching other remotes", async () => {
     const partial = trackedRepo("partial");
@@ -386,5 +464,129 @@ describe("bulk repository synchronization", () => {
     expect(summary.results.every((result) => result.outcome === "cancelled")).toBe(
       true
     );
+  });
+
+  it("rechecks cancellation after the final safety inspection and before merge", async () => {
+    const controller = new AbortController();
+    let ancestryChecks = 0;
+    let mergeCalls = 0;
+    const fakeGit: GitExec = async (args) => {
+      if (args[0] === "remote") {
+        return ok({ stdout: "origin\n", stderr: "", exitCode: 0 });
+      }
+      if (args[0] === "fetch") {
+        return ok({ stdout: "", stderr: "", exitCode: 0 });
+      }
+      if (args[0] === "status") {
+        return ok({ stdout: "", stderr: "", exitCode: 0 });
+      }
+      if (args[0] === "branch") {
+        return ok({ stdout: "main\n", stderr: "", exitCode: 0 });
+      }
+      if (args[0] === "config") {
+        const isBranchRemote = args.includes("branch.main.remote");
+        return ok({
+          stdout: isBranchRemote ? "origin\n" : "",
+          stderr: "",
+          exitCode: isBranchRemote ? 0 : 1
+        });
+      }
+      if (args[0] === "rev-parse") {
+        const target = args.at(-1);
+        if (target === "HEAD") {
+          return ok({ stdout: "local\n", stderr: "", exitCode: 0 });
+        }
+        if (target === "@{u}") {
+          return ok({ stdout: "upstream\n", stderr: "", exitCode: 0 });
+        }
+        if (args.includes("--abbrev-ref")) {
+          return ok({ stdout: "origin/main\n", stderr: "", exitCode: 0 });
+        }
+        return ok({ stdout: "", stderr: "", exitCode: 1 });
+      }
+      if (args[0] === "merge-base") {
+        ancestryChecks += 1;
+        if (ancestryChecks === 2) controller.abort();
+        return ok({ stdout: "", stderr: "", exitCode: 0 });
+      }
+      if (args[0] === "merge") {
+        mergeCalls += 1;
+        return ok({ stdout: "", stderr: "", exitCode: 0 });
+      }
+      throw new Error(`unexpected git command: ${args.join(" ")}`);
+    };
+    const repo: BulkSyncRepoInput = {
+      id: "cancel-race",
+      name: "cancel-race",
+      path: "/cancel-race",
+      worktrees: [
+        { id: "cancel-race-main", branch: "main", path: "/cancel-race" }
+      ]
+    };
+
+    const summary = await bulkSyncRepositories(fakeGit, [repo], {
+      operationId: "cancel-before-merge",
+      mode: "soft-pull",
+      signal: controller.signal
+    });
+
+    expect(ancestryChecks).toBe(2);
+    expect(mergeCalls).toBe(0);
+    expect(summary.results[0]?.worktrees[0]).toMatchObject({
+      outcome: "cancelled",
+      reason: "cancelled"
+    });
+  });
+
+  it("emits monotonic completion counts while repository maintenance overlaps", async () => {
+    let announceFirstMaintenance!: () => void;
+    const firstMaintenanceStarted = new Promise<void>((resolve) => {
+      announceFirstMaintenance = resolve;
+    });
+    let releaseFirstMaintenance!: () => void;
+    const firstMaintenanceReleased = new Promise<void>((resolve) => {
+      releaseFirstMaintenance = resolve;
+    });
+    const fakeGit: GitExec = async (args, cwd) => {
+      if (args[0] === "remote") {
+        return ok({ stdout: "origin\n", stderr: "", exitCode: 0 });
+      }
+      if (args[0] === "config") {
+        return ok({ stdout: "", stderr: "", exitCode: 1 });
+      }
+      if (args[0] === "fetch") {
+        if (cwd === "/repo-1") await firstMaintenanceStarted;
+        return ok({ stdout: "", stderr: "", exitCode: 0 });
+      }
+      throw new Error(`unexpected git command: ${args.join(" ")}`);
+    };
+    const repos: BulkSyncRepoInput[] = [0, 1].map((index) => ({
+      id: `repo-${index}`,
+      name: `repo-${index}`,
+      path: `/repo-${index}`,
+      worktrees: []
+    }));
+    const completionCounts: number[] = [];
+
+    await bulkSyncRepositories(fakeGit, repos, {
+      operationId: "monotonic-progress",
+      mode: "fetch",
+      concurrency: 2,
+      onProgress: (progress) => {
+        if (progress.phase === "repo_completed") {
+          completionCounts.push(progress.completedRepos);
+        }
+      },
+      onRepoCompleted: async (repo) => {
+        if (repo.id === "repo-0") {
+          announceFirstMaintenance();
+          await firstMaintenanceReleased;
+        } else {
+          releaseFirstMaintenance();
+        }
+      }
+    });
+
+    expect(completionCounts).toEqual([1, 2]);
   });
 });

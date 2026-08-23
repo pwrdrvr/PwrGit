@@ -247,6 +247,7 @@ describe("BulkSyncDialog", () => {
       (button) => button.textContent === "Cancel"
     );
     expect(cancel).toBeDefined();
+    expect(document.activeElement).toBe(cancel);
     await act(async () => cancel!.click());
 
     expect(dispatch).toHaveBeenCalledWith(
