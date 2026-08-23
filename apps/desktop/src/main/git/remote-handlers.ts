@@ -473,6 +473,8 @@ export function registerRemoteHandlers(
       });
     }
     if (!result.ok) {
+      // A failed reapply can leave Pull's ordinary Git auto-stash behind.
+      emitEvent("stash:changed", { repoId: worktree.repoId });
       const classified = classifyPullError(result.error);
       const detail = sanitizeGitLogDetail(result.error.message);
       logMain(
@@ -512,6 +514,10 @@ export function registerRemoteHandlers(
         `pull refresh failed ${path} during ${pullPhaseDescription("refresh")} after ${seconds(startedAt)}: ${sanitizeGitLogDetail(cause)}`
       );
     }
+    // Successful pop normally leaves the stack identical; conflicts keep the
+    // recovery stash. Re-reading is cheap and makes Git's actual outcome the
+    // source of truth without perturbing the pull progress event sequence.
+    emitEvent("stash:changed", { repoId: worktree.repoId });
     logMain(
       "info",
       "remote",

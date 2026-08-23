@@ -74,6 +74,8 @@ import type {
   SearchHitStatus,
   SubmoduleSnapshot,
   SshRemoteRecovery,
+  StashDetails,
+  StashEntry,
   WorktreeState
 } from "./types";
 import type { ImagePreview, ImageRevision } from "./image";
@@ -1218,8 +1220,40 @@ export interface Commands {
     req: { worktreeId: string; path: string; staged: boolean };
     res: PartialFileDiff;
   };
+  // Git-native repository stash stack. Entries live only in refs/stash; the
+  // worktree id selects where create/apply/pop operate.
+  "stash:list": { req: { worktreeId: string }; res: StashEntry[] };
+  "stash:details": {
+    req: { worktreeId: string; stashHash: string };
+    res: StashDetails;
+  };
+  "stash:create": {
+    req: {
+      worktreeId: string;
+      message: string;
+      includeUntracked: boolean;
+    };
+    res: { created: boolean };
+  };
+  "stash:apply": {
+    req: { worktreeId: string; stashHash: string };
+    res: null;
+  };
+  "stash:pop": {
+    req: { worktreeId: string; stashHash: string };
+    res: null;
+  };
+  "stash:drop": {
+    req: { worktreeId: string; stashHash: string };
+    res: null;
+  };
   /** Unified diff of the changes a commit introduced. */
   "diff:commit": { req: { worktreeId: string; hash: string }; res: string };
+  /** Unified diff recorded in one current stash, including untracked files. */
+  "diff:stash": {
+    req: { worktreeId: string; stashHash: string };
+    res: string;
+  };
   /** Resolve a full or abbreviated object ID in the selected repository. */
   "commit:lookup": {
     req: { worktreeId: string; hash: string };
@@ -1386,6 +1420,8 @@ export interface Events {
    * signal or it silently shows a stale set.
    */
   "changes:changed": { worktreeId: string };
+  /** The repository-wide refs/stash reflog moved; re-read `stash:list`. */
+  "stash:changed": { repoId: string };
   /** Coarse live pull progress for one worktree. */
   "worktree:pullProgress": {
     worktreeId: string;

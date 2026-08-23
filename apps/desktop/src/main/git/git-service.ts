@@ -13,6 +13,7 @@ import {
   type PushRefPlan,
   type PushRefResult,
   type PullProgressPhase,
+  PWRGIT_PULL_STASH_MESSAGE,
   type PwrGitError,
   type RemoteBranchPage,
   type RemoteBranchSummary,
@@ -1949,7 +1950,7 @@ export async function pullFastForward(
       "push",
       "--include-untracked",
       "-m",
-      "pwrgit: auto-stash before pull"
+      PWRGIT_PULL_STASH_MESSAGE
     ];
     const stashRaw = await pullGit(stashArgs, cwd);
     if (!stashRaw.ok) return stashRaw;

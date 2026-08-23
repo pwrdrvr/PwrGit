@@ -137,6 +137,37 @@ describe("remote handlers", () => {
       ])
     );
     expect(vi.getTimerCount()).toBe(0);
+    expect(emitEvent).toHaveBeenCalledWith("stash:changed", {
+      repoId: "repo-1"
+    });
+  });
+
+  it("refreshes the stash stack when pull leaves an auto-stash for recovery", async () => {
+    const db = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" }))
+      }))
+    } as unknown as DB;
+    const refresher = {
+      refreshWorktree: vi.fn(async () => undefined),
+      refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    vi.mocked(pullFastForward).mockResolvedValueOnce(
+      err({
+        kind: "git",
+        code: "stash_reapply_failed",
+        message: "the auto-stash was kept"
+      })
+    );
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
+
+    await expect(
+      bus.dispatch("remote:pull", { worktreeId: "worktree-1" })
+    ).resolves.toMatchObject({ ok: false, error: { code: "stash_reapply_failed" } });
+    expect(emitEvent).toHaveBeenCalledWith("stash:changed", {
+      repoId: "repo-1"
+    });
   });
 
   it("logs stalled warnings and returns a typed phase timeout without timer leaks", async () => {
