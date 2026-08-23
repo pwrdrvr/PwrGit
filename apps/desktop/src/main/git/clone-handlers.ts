@@ -16,6 +16,9 @@ export function registerCloneHandlers(
   bus.register("repo:checkCloneSource", (req) =>
     clones.checkSource(req.profileId, req.nameWithOwner, req.host)
   );
+  bus.register("repo:checkLocalCloneSource", (req) =>
+    clones.checkLocalSource(req.profileId, req.path)
+  );
   bus.register("repo:clone", async (req) => {
     const result = await clones.clone(req, (progress) => {
       emitEvent("repo:cloneProgress", {

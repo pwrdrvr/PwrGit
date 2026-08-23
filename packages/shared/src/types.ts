@@ -397,6 +397,9 @@ export type CloneRepository = {
   sshUrl: string;
   httpsUrl: string;
   updatedAt?: string;
+  /** Canonical filesystem source for a plain local `git clone`. Absent for
+   * forge repositories. */
+  localPath?: string;
   /** Existing indexed checkouts, if this repository is already on the machine. */
   localPaths: string[];
 };

@@ -11,6 +11,21 @@ import {
  *  more specific than the dialog's current host. */
 const CLI_CLONE = /^(gh|glab)\s+repo\s+clone\s+(\S+)$/i;
 
+/** Path forms whose meaning does not depend on the app process's cwd. Actual
+ * existence and Git validity are checked in main, where filesystem access
+ * belongs. */
+export function localRepositoryPath(input: string): string | null {
+  const trimmed = input.trim();
+  if (
+    /^~(?:$|[\\/])/.test(trimmed) ||
+    /^[\\/]/.test(trimmed) ||
+    /^[A-Za-z]:[\\/]/.test(trimmed)
+  ) {
+    return trimmed;
+  }
+  return null;
+}
+
 export function defaultHostname(host: ForgeHost): string {
   return host === "gitlab" ? "gitlab.com" : "github.com";
 }
@@ -108,6 +123,7 @@ export function exactRepository(
   defaultHost: ForgeHost = "github"
 ): ExactRepository | null {
   const trimmed = input.trim();
+  if (localRepositoryPath(trimmed) !== null) return null;
   const cliClone = CLI_CLONE.exec(trimmed);
   const candidate = cliClone?.[2] ?? trimmed;
   const cliHost: ForgeHost | null =

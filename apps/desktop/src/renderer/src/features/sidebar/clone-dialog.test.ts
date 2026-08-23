@@ -6,6 +6,7 @@ import {
   cloneRepositoryAtSelection,
   exactRepository,
   filterCloneDestinations,
+  localRepositoryPath,
   moveCloneSelection,
   rankCloneRepositories,
   unverifiedCloneRepository
@@ -158,6 +159,16 @@ describe("clone dialog filtering", () => {
     expect(exactRepository("acme/platform/team/api", "gitlab")).toMatchObject({
       nameWithOwner: "acme/platform/team/api"
     });
+  });
+
+  it.each([
+    "~/pwrdrvr/test-repo",
+    "/Users/huntharo/pwrdrvr/test-repo",
+    "C:\\Users\\huntharo\\test-repo",
+    "\\\\server\\repos\\test-repo"
+  ])("recognizes %s as a local repository path", (input) => {
+    expect(localRepositoryPath(input)).toBe(input);
+    expect(exactRepository(input)).toBeNull();
   });
 
   it("recognizes every exact input form as one repository", () => {

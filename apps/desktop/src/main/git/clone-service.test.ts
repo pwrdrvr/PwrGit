@@ -7,7 +7,7 @@ import {
   writeFileSync
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { err, ok, type CloneProgress, type Result } from "@pwrgit/shared";
 import { openDatabase } from "../persistence/db";
@@ -18,6 +18,7 @@ import {
   createCloneProgressParser,
   normalizeRepositoryPath,
   parseCloneProgressLine,
+  resolveLocalClonePath,
   sanitizeCloneStderr
 } from "./clone-service";
 import { ForgeRepoRegistry } from "../forge/repo-provider";
@@ -193,6 +194,13 @@ describe("clone source metadata", () => {
     // survive: it is interpolated into a git remote URL.
     expect(normalizeRepositoryPath("--upload-pack=evil/x")).toBeNull();
     expect(normalizeRepositoryPath("a/../../etc/passwd")).toBeNull();
+  });
+
+  it("expands a home-relative local source without treating it as a forge slug", () => {
+    expect(resolveLocalClonePath("~/pwrdrvr/test-repo", "/Users/example")).toBe(
+      resolve("/Users/example", "pwrdrvr", "test-repo")
+    );
+    expect(resolveLocalClonePath("pwrdrvr/test-repo", "/Users/example")).toBeNull();
   });
 });
 
@@ -810,6 +818,60 @@ describe("CloneService", () => {
         )
         .get(profile.id)
     ).toEqual({ path: services });
+  });
+
+  it("validates and clones a local repository whose HEAD is unborn", async () => {
+    const root = temporaryRoot();
+    const sources = temporaryRoot();
+    const source = join(sources, "test-repo");
+    mkdirSync(source);
+    git(source, "init", "-b", "main");
+
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "Local",
+      email: "test@pwrgit.dev",
+      roots: [root]
+    });
+    const indexer = new RepoIndexer(db, systemGit);
+    const service = new CloneService(
+      db,
+      systemGit,
+      indexer,
+      profiles,
+      githubOnly(fakeGh()),
+      fakeForgeStatus()
+    );
+
+    const checked = await service.checkLocalSource(profile.id, source);
+    expect(checked).toMatchObject({
+      ok: true,
+      value: {
+        name: "test-repo",
+        nameWithOwner: realpathSync(source),
+        host: "other",
+        localPath: realpathSync(source)
+      }
+    });
+
+    const result = await service.clone({
+      profileId: profile.id,
+      nameWithOwner: realpathSync(source),
+      sourcePath: realpathSync(source),
+      protocol: "ssh",
+      parentPath: root
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        name: "test-repo",
+        path: join(root, "test-repo"),
+        worktrees: [{ branch: "main" }]
+      }
+    });
+    db.close();
   });
 
   it("uses GitHub CLI when that clone method is selected", async () => {

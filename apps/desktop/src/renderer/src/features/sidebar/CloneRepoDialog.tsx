@@ -18,6 +18,7 @@ import {
   defaultHostname,
   exactRepository,
   filterCloneDestinations,
+  localRepositoryPath,
   moveCloneSelection,
   rankCloneRepositories,
   unverifiedCloneRepository
@@ -206,6 +207,10 @@ export function CloneRepoDialog({
     [sourceQuery, host]
   );
   const exactNameWithOwner = exactRepo?.nameWithOwner ?? null;
+  const localSourcePath = useMemo(
+    () => localRepositoryPath(sourceQuery),
+    [sourceQuery]
+  );
 
   // The host toggle only offers forges whose CLI can actually answer; a
   // toggle that leads straight to "install the CLI" is a dead end dressed up
@@ -223,7 +228,8 @@ export function CloneRepoDialog({
     }
   }, [usableHosts.join(","), host]);
 
-  const activeHost = selectedRepository?.host ?? host;
+  const localSelected = selectedRepository?.localPath !== undefined;
+  const activeHost = localSelected ? host : (selectedRepository?.host ?? host);
   const forgeStatus = statusFor(catalog?.forges ?? [], activeHost);
   const cliDisabled =
     catalog !== null &&
@@ -236,7 +242,7 @@ export function CloneRepoDialog({
     profileId: profile.id,
     query: sourceQuery,
     host,
-    enabled: usableHosts.includes(host)
+    enabled: usableHosts.includes(host) && localSourcePath === null
   });
 
   useEffect(() => setSourceSelection(0), [sourceQuery]);
@@ -244,7 +250,7 @@ export function CloneRepoDialog({
   useEffect(() => {
     setCheckedRepository(null);
     setCheckError(null);
-    if (exactNameWithOwner === null) {
+    if (exactNameWithOwner === null && localSourcePath === null) {
       setChecking(false);
       return;
     }
@@ -252,11 +258,18 @@ export function CloneRepoDialog({
     setChecking(true);
     let active = true;
     const timeout = window.setTimeout(() => {
-      void dispatch("repo:checkCloneSource", {
-        profileId: profile.id,
-        nameWithOwner: exactNameWithOwner,
-        host: exactRepo?.host ?? host
-      }).then((result) => {
+      const checked =
+        localSourcePath === null
+          ? dispatch("repo:checkCloneSource", {
+              profileId: profile.id,
+              nameWithOwner: exactNameWithOwner!,
+              host: exactRepo?.host ?? host
+            })
+          : dispatch("repo:checkLocalCloneSource", {
+              profileId: profile.id,
+              path: localSourcePath
+            });
+      void checked.then((result) => {
         if (!active) return;
         setChecking(false);
         if (result.ok) setCheckedRepository(result.value);
@@ -265,7 +278,7 @@ export function CloneRepoDialog({
           result.error.code === "forge_login_required"
         ) {
           setCheckedRepository(
-            unverifiedCloneRepository(exactNameWithOwner, exactRepo?.host ?? host)
+            unverifiedCloneRepository(exactNameWithOwner!, exactRepo?.host ?? host)
           );
         } else {
           setCheckError(result.error.message);
@@ -276,7 +289,7 @@ export function CloneRepoDialog({
       active = false;
       window.clearTimeout(timeout);
     };
-  }, [exactNameWithOwner, exactRepo?.host, host, profile.id]);
+  }, [exactNameWithOwner, exactRepo?.host, host, localSourcePath, profile.id]);
 
   const sourceResults = useMemo(() => {
     // Filtered to the picked forge: a host switch keeps the previous results
@@ -347,6 +360,9 @@ export function CloneRepoDialog({
       operationId,
       profileId: profile.id,
       nameWithOwner: selectedRepository.nameWithOwner,
+      ...(selectedRepository.localPath === undefined
+        ? {}
+        : { sourcePath: selectedRepository.localPath }),
       protocol,
       parentPath: destination.path,
       host: selectedRepository.host,
@@ -431,7 +447,7 @@ export function CloneRepoDialog({
                 disabled={busy}
                 autoComplete="off"
                 spellCheck={false}
-                placeholder="Search repositories or enter owner/name…"
+                placeholder="Search, enter owner/name, or paste a local path…"
                 onChange={(event) => {
                   setSourceQuery(event.target.value);
                   setSelectedRepository(null);
@@ -486,7 +502,7 @@ export function CloneRepoDialog({
                   type="button"
                   role="option"
                   aria-selected={index === sourceSelection}
-                  key={repository.nameWithOwner}
+                  key={repository.localPath ?? repository.nameWithOwner}
                   className={`clone-source-row${
                     index === sourceSelection ? " is-selected" : ""
                   }${
@@ -500,10 +516,12 @@ export function CloneRepoDialog({
                 >
                   <span className="clone-source-row__mark" />
                   <span className="clone-source-row__copy">
-                    <strong>{repository.nameWithOwner}</strong>
-                    <small>{repository.description ?? "GitHub repository"}</small>
+                    <strong>{repository.localPath ?? repository.nameWithOwner}</strong>
+                    <small>{repository.description ?? "Forge repository"}</small>
                   </span>
-                  <RepoIdentityChips repository={repository} />
+                  {repository.localPath === undefined && (
+                    <RepoIdentityChips repository={repository} />
+                  )}
                   {repository.localPaths.length > 0 && (
                     <span
                       className="clone-chip clone-chip--muted"
@@ -531,7 +549,16 @@ export function CloneRepoDialog({
           <section className="clone-section">
             <div className="clone-label">Clone with</div>
             <div className="clone-protocols">
-              {PROTOCOL_IDS.map((candidate) => {
+              {localSelected ? (
+                <button
+                  type="button"
+                  disabled
+                  className="clone-protocol is-active"
+                >
+                  <strong>Local path</strong>
+                  <small>git clone</small>
+                </button>
+              ) : PROTOCOL_IDS.map((candidate) => {
                 const disabled = candidate === "cli" && cliDisabled;
                 const detail = protocolDetail(
                   candidate,

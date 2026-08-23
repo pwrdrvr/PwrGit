@@ -197,6 +197,54 @@ describe("graph:log", () => {
     if (res.ok) return;
     expect(res.error.code).toBe("not_found");
   });
+
+  it("returns empty history for an unborn branch", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-empty-graph-"));
+    const emptyRepo = join(root, "empty");
+    initRepo(emptyRepo);
+
+    const emptyDb = openDatabase(":memory:");
+    const profile = new ProfileService(emptyDb).create({
+      name: "Empty",
+      email: EMAIL,
+      roots: [root]
+    });
+    const indexer = new RepoIndexer(emptyDb, systemGit);
+    const indexed = await indexer.indexRepoAt(profile.id, emptyRepo);
+    if (!indexed.ok) throw new Error(indexed.error.message);
+    const worktreeId = indexed.value.worktrees[0]?.id;
+    if (worktreeId === undefined) throw new Error("empty worktree not indexed");
+    const emptyBus = new CommandBus();
+    registerGraphHandlers(
+      emptyBus,
+      emptyDb,
+      new WorktreeStateService(emptyDb, systemGit)
+    );
+
+    const log = await emptyBus.dispatch("graph:log", { worktreeId });
+    const graph = await emptyBus.dispatch("graph:lanes", {
+      worktreeId,
+      scope: "active",
+      force: true
+    });
+
+    expect(log).toEqual(
+      ok({ commits: [], branchRoot: null, defaultBranch: "main" })
+    );
+    expect(graph).toMatchObject({
+      ok: true,
+      value: {
+        commits: [],
+        head: "",
+        defaultBranch: "main",
+        defaultRef: "main",
+        shownBranches: [],
+        matchedBranches: 0,
+        hiddenBranches: 0
+      }
+    });
+    emptyDb.close();
+  });
 });
 
 describe("graph:lanes branch info", () => {
