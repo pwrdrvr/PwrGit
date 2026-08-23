@@ -41,7 +41,7 @@ function cleanEnv(extra: Record<string, string>): Record<string, string> {
  * `pnpm i`).
  */
 export async function launchApp(
-  opts: { worktreeRoot?: string } = {}
+  opts: { worktreeRoot?: string; forgeFixturePath?: string } = {}
 ): Promise<AppHandle> {
   const userData = mkdtempSync(join(tmpdir(), "pwrgit-e2e-ud-"));
   if (opts.worktreeRoot !== undefined) {
@@ -63,7 +63,10 @@ export async function launchApp(
     args: [MAIN],
     env: cleanEnv({
       PWRGIT_USER_DATA_DIR: userData,
-      PWRGIT_GITCONFIG: gitconfig
+      PWRGIT_GITCONFIG: gitconfig,
+      ...(opts.forgeFixturePath === undefined
+        ? {}
+        : { PWRGIT_E2E_FORGE_FIXTURE: opts.forgeFixturePath })
     })
   });
   const window = await app.firstWindow();

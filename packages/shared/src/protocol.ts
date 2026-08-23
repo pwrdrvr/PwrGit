@@ -510,6 +510,11 @@ export interface Commands {
     };
     res: Repo;
   };
+  /** Cancel an in-flight clone and remove any checkout it only partly made. */
+  "repo:cancelClone": {
+    req: { operationId: string };
+    res: null;
+  };
   /**
    * Everything the fork dialog needs before it creates anything: the source,
    * where the fork would land, whether it is already there, the candidate
@@ -562,6 +567,12 @@ export interface Commands {
       upstream: string | null;
     };
     res: Repo;
+  };
+  /** Cancel an in-flight fork/checkout. A fork already created on the forge is
+   *  kept, while any partial local checkout is removed. */
+  "repo:cancelFork": {
+    req: { operationId: string };
+    res: null;
   };
   /** Re-read forge identity (visibility, fork lineage) for a profile's repos.
    *  Answers the changed rows; the rest of the tree is left alone. */

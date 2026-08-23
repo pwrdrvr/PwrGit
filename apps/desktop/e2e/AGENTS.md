@@ -26,6 +26,11 @@ the Electron build.
 - **Repos**: `fixtures/git-sandbox.ts` builds repos + linked worktrees with the
   system `git`, isolated from your global config (`GIT_CONFIG_GLOBAL=/dev/null`).
   `cleanup()` (in `afterEach`) deletes the whole tree.
+- **Forges**: `fixtures/forge-fixture.ts` writes a mutable, file-backed provider
+  fixture and `launchApp({ forgeFixturePath })` installs it at main's
+  `ForgeRepoProvider` boundary. Renderer, IPC, services, real on-disk Git,
+  indexing, SQLite and selection still run normally; no E2E may contact a real
+  forge. Change fixture errors in place to cover retries without relaunching.
 
 ## Gotchas
 

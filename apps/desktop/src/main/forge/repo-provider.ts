@@ -45,7 +45,11 @@ export type ForgeRepoProvider = {
   cloneWithCli(
     nameWithOwner: string,
     destination: string,
-    options: { onStderr: (chunk: string) => void; env: Record<string, string> }
+    options: {
+      onStderr: (chunk: string) => void;
+      env: Record<string, string>;
+      signal?: AbortSignal;
+    }
   ): Promise<void>;
   isAuthError(cause: unknown): boolean;
   errorMessage(cause: unknown): string;
@@ -81,6 +85,9 @@ export type ForkInput = {
   /** Called as the forge moves between its two unmetered steps, so the dialog
    *  can name the step instead of showing a bar that does not move. */
   onPhase?: (phase: "creating" | "awaiting_fork") => void;
+  /** Cancels the CLI call and any forge-side readiness wait. A forge that
+   *  completed before cancellation is deliberately not deleted. */
+  signal?: AbortSignal;
 };
 
 /** Picks the provider for a host. Registered at startup so a forge with no
@@ -152,4 +159,3 @@ export function ownersFrom(
   }
   return owners;
 }
-

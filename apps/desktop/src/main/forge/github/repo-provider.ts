@@ -247,7 +247,10 @@ export class GitHubRepoProvider implements ForgeRepoProvider {
     // gh prints a human line on both "created" and "already exists"; the fork
     // is read back either way, which makes the two outcomes identical here.
     // `gh repo fork` already waits for GitHub to finish preparing the copy.
-    await this.gh(args, { timeoutMs: 60_000 });
+    await this.gh(args, {
+      timeoutMs: 60_000,
+      ...(input.signal === undefined ? {} : { signal: input.signal })
+    });
     input.onPhase?.("awaiting_fork");
     return this.viewRepo(`${input.targetOwner}/${input.targetName}`);
   }
@@ -255,14 +258,19 @@ export class GitHubRepoProvider implements ForgeRepoProvider {
   async cloneWithCli(
     nameWithOwner: string,
     destination: string,
-    options: { onStderr: (chunk: string) => void; env: Record<string, string> }
+    options: {
+      onStderr: (chunk: string) => void;
+      env: Record<string, string>;
+      signal?: AbortSignal;
+    }
   ): Promise<void> {
     await this.gh(
       ["repo", "clone", nameWithOwner, destination, "--", "--progress"],
       {
         timeoutMs: 10 * 60_000,
         onStderr: options.onStderr,
-        env: options.env
+        env: options.env,
+        ...(options.signal === undefined ? {} : { signal: options.signal })
       }
     );
   }

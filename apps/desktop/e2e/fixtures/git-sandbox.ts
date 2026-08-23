@@ -48,6 +48,8 @@ export type GitSandbox = {
   worktreeRoot: string;
   /** Run a raw git command in a checkout (test setup escape hatch). */
   git: (cwd: string, ...args: string[]) => string;
+  /** Create a bare on-disk remote outside the profile's scanned roots. */
+  makeBareRemote: (name: string) => string;
   /** Write a file and commit it in a checkout. */
   commit: (cwd: string, file: string, message: string) => void;
   /** Like commit, but authored by someone else (tests "not mine" paths). */
@@ -101,10 +103,12 @@ export function createGitSandbox(): GitSandbox {
   const worktreesDir = join(base, "worktrees");
   const worktreeRoot = join(base, "new-worktrees");
   const remotesDir = join(base, "remotes");
+  const sourcesDir = join(base, "sources");
   mkdirSync(reposDir, { recursive: true });
   mkdirSync(worktreesDir, { recursive: true });
   mkdirSync(worktreeRoot, { recursive: true });
   mkdirSync(remotesDir, { recursive: true });
+  mkdirSync(sourcesDir, { recursive: true });
 
   const initRepo = (name: string): string => {
     const repoPath = join(reposDir, name);
@@ -141,6 +145,19 @@ export function createGitSandbox(): GitSandbox {
       addWorktree,
       createBranch: (branch: string) => git(repoPath, "branch", branch)
     };
+  };
+
+  const makeBareRemote = (name: string): string => {
+    const source = join(sourcesDir, name);
+    mkdirSync(source, { recursive: true });
+    git(source, "init", "-b", "main");
+    writeFileSync(join(source, "README.md"), `# ${name}\n`);
+    git(source, "add", "-A");
+    git(source, "commit", "-m", "initial commit");
+    const remote = join(remotesDir, `${name}.git`);
+    git(remotesDir, "clone", "--bare", source, remote);
+    git(remote, "symbolic-ref", "HEAD", "refs/heads/main");
+    return remote;
   };
 
   const makeRepoBehindRemote = (
@@ -341,6 +358,7 @@ export function createGitSandbox(): GitSandbox {
     reposDir,
     worktreeRoot,
     git: (cwd: string, ...args: string[]) => git(cwd, ...args),
+    makeBareRemote,
     commit,
     commitAs,
     commitEmptyAt,

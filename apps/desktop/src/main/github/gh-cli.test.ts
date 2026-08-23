@@ -329,6 +329,25 @@ describe("runGh", () => {
     expect(child.kill).toHaveBeenCalledTimes(1);
   });
 
+  it("terminates an explicitly canceled CLI process", async () => {
+    const child = streamingChild();
+    childProcess.spawn.mockReturnValue(child);
+    const controller = new AbortController();
+
+    const result = runGh(["repo", "clone", "owner/repo"], {
+      onStderr: () => undefined,
+      signal: controller.signal
+    });
+    controller.abort();
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    child.emit("close", null, "SIGTERM");
+
+    await expect(result).rejects.toMatchObject({
+      code: "aborted",
+      message: "GitHub CLI command was canceled."
+    });
+  });
+
   it("types buffered timeouts and force-kills a process that does not close", async () => {
     vi.useFakeTimers();
     const child = streamingChild();
