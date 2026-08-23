@@ -2,12 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   BranchReveal,
   Commit,
+  FileInsightContext,
   Profile,
   Repo,
   RepoSearchHit,
   Worktree
 } from "@pwrgit/shared";
 import { DiffPane, type DiffTarget } from "./features/diff/DiffPane";
+import {
+  FileInsightsPane,
+  type FileInsightTab
+} from "./features/diff/FileInsightsPane";
 import { LineageGraph } from "./features/graph/LineageGraph";
 import { SelectionBar } from "./features/graph/SelectionBar";
 import { TitleBar } from "./features/chrome/TitleBar";
@@ -118,7 +123,15 @@ export function App() {
     "squash" | "reorder" | null
   >(null);
   const [diffTarget, setDiffTarget] = useState<DiffTarget | null>(null);
-  const closeDiff = useCallback(() => setDiffTarget(null), []);
+  const [fileInsightTarget, setFileInsightTarget] = useState<{
+    path: string;
+    context: FileInsightContext;
+    tab: FileInsightTab;
+  } | null>(null);
+  const closeDiff = useCallback(() => {
+    setFileInsightTarget(null);
+    setDiffTarget(null);
+  }, []);
   // A commit clicked in the lineage — the rail shows its file list, scoped
   // like the WIP Changes tab; files open one-file diffs in the main pane.
   const [commitFocus, setCommitFocus] = useState<{
@@ -136,6 +149,7 @@ export function App() {
     setSelectedCommits(new Set());
     setRebaseAction(null);
     setDiffTarget(null);
+    setFileInsightTarget(null);
     setCommitFocus(null);
     setSearchableCommits([]);
     setCommitReveal(null);
@@ -322,11 +336,23 @@ export function App() {
 
   const onPickCommitSearch = useCallback((commit: Commit) => {
     setOverlayOpen(false);
+    setFileInsightTarget(null);
     setDiffTarget(null);
     setCommitFocus({ hash: commit.hash, subject: commit.subject });
     setRailCollapsed(false);
     setCommitReveal((current) => ({
       hash: commit.hash,
+      requestId: (current?.requestId ?? 0) + 1
+    }));
+  }, []);
+
+  const showLineageCommit = useCallback((hash: string, subject: string) => {
+    setFileInsightTarget(null);
+    setDiffTarget(null);
+    setCommitFocus({ hash, subject });
+    setRailCollapsed(false);
+    setCommitReveal((current) => ({
+      hash,
       requestId: (current?.requestId ?? 0) + 1
     }));
   }, []);
@@ -519,7 +545,12 @@ export function App() {
                   query is expensive to re-run). */}
               <div
                 className="graph-wrap"
-                style={{ display: diffTarget !== null ? "none" : "flex" }}
+                style={{
+                  display:
+                    diffTarget !== null || fileInsightTarget !== null
+                      ? "none"
+                      : "flex"
+                }}
               >
                 <LineageGraph
                   repoId={selectedRepo.id}
@@ -570,14 +601,32 @@ export function App() {
                   />
                 )}
               </div>
-              {diffTarget !== null && (
+              {diffTarget !== null && fileInsightTarget === null && (
                 <DiffPane
                   worktreeId={selectedWorktree.id}
                   target={diffTarget}
                   onOpenFile={(path, staged) =>
                     setDiffTarget({ kind: "file", path, staged })
                   }
+                  onOpenFileInsight={(path, context, tab) =>
+                    setFileInsightTarget({ path, context, tab })
+                  }
                   onClose={closeDiff}
+                />
+              )}
+              {fileInsightTarget !== null && (
+                <FileInsightsPane
+                  key={`${fileInsightTarget.path}:${
+                    fileInsightTarget.context.kind === "commit"
+                      ? fileInsightTarget.context.hash
+                      : "working"
+                  }:${fileInsightTarget.tab}`}
+                  worktreeId={selectedWorktree.id}
+                  path={fileInsightTarget.path}
+                  context={fileInsightTarget.context}
+                  initialTab={fileInsightTarget.tab}
+                  onClose={() => setFileInsightTarget(null)}
+                  onShowCommit={showLineageCommit}
                 />
               )}
             </>
@@ -621,6 +670,7 @@ export function App() {
             onCloseCommit={() => setCommitFocus(null)}
             onOpenCommitFile={(path) => {
               if (commitFocus !== null) {
+                setFileInsightTarget(null);
                 setDiffTarget({
                   kind: "commitFile",
                   hash: commitFocus.hash,
@@ -631,6 +681,7 @@ export function App() {
             }}
             onOpenFullCommitDiff={() => {
               if (commitFocus !== null) {
+                setFileInsightTarget(null);
                 setDiffTarget({
                   kind: "commit",
                   hash: commitFocus.hash,
@@ -640,9 +691,10 @@ export function App() {
             }}
             onClearSelection={clearSelection}
             onCollapse={() => setRailCollapsed(true)}
-            onOpenDiff={(path, staged) =>
-              setDiffTarget({ kind: "file", path, staged })
-            }
+            onOpenDiff={(path, staged) => {
+              setFileInsightTarget(null);
+              setDiffTarget({ kind: "file", path, staged });
+            }}
           />
         )}
 

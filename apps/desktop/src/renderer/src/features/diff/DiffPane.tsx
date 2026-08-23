@@ -5,11 +5,12 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent
 } from "react";
-import type { PartialFileDiff } from "@pwrgit/shared";
+import type { FileInsightContext, PartialFileDiff } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { showErrorToast } from "../../lib/toast";
 import { DiffViewer } from "./DiffViewer";
 import type { ImageDiffRevisions } from "./ImageDiff";
+import type { FileInsightTab } from "./FileInsightsPane";
 
 export type DiffTarget =
   | { kind: "file"; path: string; staged: boolean }
@@ -46,6 +47,7 @@ export function DiffPane({
   worktreeId,
   target,
   onOpenFile,
+  onOpenFileInsight,
   onClose
 }: {
   worktreeId: string;
@@ -54,6 +56,11 @@ export function DiffPane({
    *  rail lists a partially staged file twice; without this the only route
    *  between the two halves is closing the diff and finding its twin. */
   onOpenFile: (path: string, staged: boolean) => void;
+  onOpenFileInsight: (
+    path: string,
+    context: FileInsightContext,
+    tab: FileInsightTab
+  ) => void;
   onClose: () => void;
 }) {
   const [patch, setPatch] = useState<string | null>(null);
@@ -224,6 +231,12 @@ export function DiffPane({
       : target.kind === "commitFile"
         ? `in ${target.hash.slice(0, 7)} — ${target.subject}`
         : `commit ${target.hash}`;
+  const fileContext: FileInsightContext | null =
+    target.kind === "file"
+      ? { kind: "workingTree" }
+      : target.kind === "commitFile"
+        ? { kind: "commit", hash: target.hash }
+        : null;
 
   const fingerprint = selectionDiff?.fingerprint ?? "";
   // Ticks survive a refresh that left this file's diff byte-identical, and
@@ -421,6 +434,20 @@ export function DiffPane({
           </span>
         )}
         <span className="diff-pane__sub">{sub}</span>
+        {fileContext !== null && (
+          <div className="diff-pane__tools" aria-label="File details">
+            <button
+              onClick={() => onOpenFileInsight(title, fileContext, "history")}
+            >
+              History
+            </button>
+            <button
+              onClick={() => onOpenFileInsight(title, fileContext, "blame")}
+            >
+              Blame
+            </button>
+          </div>
+        )}
         <button
           className="diff-pane__close"
           onClick={onClose}

@@ -35,6 +35,9 @@ import type {
   Commit,
   CommitFileChange,
   CommitStats,
+  FileBlamePage,
+  FileHistoryPage,
+  FileInsightContext,
   GitHubCommitAuthorIdentityLookup,
   GraphLog,
   GitLfsReport,
@@ -1240,6 +1243,32 @@ export interface Commands {
     req: { worktreeId: string; path: string; rev: ImageRevision };
     res: ImagePreview;
   };
+  /** Rename-aware, bounded commit history for one selected file. */
+  "file:history": {
+    req: {
+      operationId: string;
+      worktreeId: string;
+      path: string;
+      context: FileInsightContext;
+      cursor?: string;
+      limit?: number;
+    };
+    res: FileHistoryPage;
+  };
+  /** Bounded porcelain blame page for current or committed file contents. */
+  "file:blame": {
+    req: {
+      operationId: string;
+      worktreeId: string;
+      path: string;
+      context: FileInsightContext;
+      cursor?: string;
+      limit?: number;
+    };
+    res: FileBlamePage;
+  };
+  /** Stop a history/blame Git process owned by this renderer. */
+  "file:cancelInsight": { req: { operationId: string }; res: null };
 
   // App settings (Settings window)
   "settings:read": { req: void; res: AppSettingsSnapshot };

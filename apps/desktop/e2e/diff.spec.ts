@@ -237,6 +237,55 @@ test("clicking a commit scopes the rail to its files; a file opens its diff", as
   await expect(window.locator(".changes-clean")).toBeVisible();
 });
 
+test("file history follows a rename and blame links back to lineage", async () => {
+  sandbox = createGitSandbox();
+  const repo = sandbox.makeRepo("lineagefile");
+  mkdirSync(join(repo.path, "docs"), { recursive: true });
+  sandbox.git(repo.path, "mv", "README.md", "docs/README.md");
+  sandbox.git(repo.path, "commit", "-m", "move readme into docs");
+  sandbox.commitAs(
+    "historian@pwrgit.dev",
+    repo.path,
+    "docs/README.md",
+    "explain file lineage"
+  );
+  // A current line gives working-tree blame an explicit WIP hunk while the
+  // committed history remains anchored through HEAD.
+  writeFileSync(
+    join(repo.path, "docs", "README.md"),
+    "explain file lineage\nuncommitted follow-up\n"
+  );
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, sandbox, "lineagefile");
+
+  const fileRow = window.locator(".file-row", { hasText: "docs/README.md" });
+  await expect(fileRow).toBeVisible({ timeout: 20_000 });
+  await fileRow.click();
+  await expect(window.locator(".diff-pane")).toBeVisible();
+  await window.getByRole("button", { name: "History" }).click();
+
+  const history = window.getByTestId("file-history");
+  await expect(history).toBeVisible({ timeout: 20_000 });
+  await expect(history).toContainText("explain file lineage");
+  await expect(history).toContainText("move readme into docs");
+  await expect(history).toContainText("README.md → docs/README.md");
+
+  await window.getByRole("tab", { name: "Blame" }).click();
+  const blame = window.getByTestId("file-blame");
+  await expect(blame).toBeVisible({ timeout: 20_000 });
+  await expect(blame).toContainText("WIP");
+  await expect(blame).toContainText("uncommitted follow-up");
+  await expect(blame).toContainText("L2");
+
+  // The commit button uses the lineage graph's existing focus/reveal path.
+  await blame.getByRole("button", { name: /Show commit .* in lineage/ }).click();
+  await expect(window.locator(".graph-row.is-focused")).toContainText(
+    "explain file lineage"
+  );
+});
+
 test("a changed image renders both revisions instead of a binary notice", async () => {
   sandbox = createGitSandbox();
   const repo = sandbox.makeRepo("imagerepo");

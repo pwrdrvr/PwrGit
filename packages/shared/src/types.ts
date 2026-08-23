@@ -854,6 +854,61 @@ export type Commit = {
   isMerge: boolean;
 };
 
+/** The file contents a history/blame view is anchored to. Working-tree
+ *  history walks through HEAD while blame includes uncommitted lines. */
+export type FileInsightContext =
+  | { kind: "workingTree" }
+  | { kind: "commit"; hash: string };
+
+/** One rename-aware commit in a file's lineage. */
+export type FileHistoryEntry = Commit & {
+  /** Path as it existed immediately after this commit. */
+  path: string;
+  status: FileStatus;
+  /** Older path crossed by this rename/copy commit. */
+  previousPath?: string;
+};
+
+/** A bounded page from `git log --follow`. The cursor is opaque to renderers. */
+export type FileHistoryPage = {
+  entries: FileHistoryEntry[];
+  nextCursor: string | null;
+};
+
+/** Contiguous lines attributed to one commit by porcelain blame output. */
+export type FileBlameHunk = {
+  hash: string | null;
+  shortHash: string | null;
+  authorName: string;
+  authorEmail: string;
+  committedAt: string | null;
+  subject: string;
+  /** Path reported by Git for the source lines (may predate a rename). */
+  sourcePath: string;
+  originalStartLine: number;
+  startLine: number;
+  endLine: number;
+  lines: string[];
+  uncommitted: boolean;
+};
+
+export type FileBlameUnavailableReason =
+  | "binary"
+  | "too_large"
+  | "missing";
+
+/** One bounded line page. Deleted files may resolve to the parent revision;
+ *  `notice` makes that fallback explicit rather than silently changing scope. */
+export type FileBlamePage = {
+  path: string;
+  effectiveContext: FileInsightContext;
+  hunks: FileBlameHunk[];
+  nextCursor: string | null;
+  bytes: number | null;
+  unavailableReason?: FileBlameUnavailableReason;
+  notice?: string;
+};
+
 /** GitHub account presentation fields proven for an exact Git commit author. */
 export type GitHubCommitAuthorIdentity = {
   login: string;
