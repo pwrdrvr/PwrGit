@@ -31,7 +31,14 @@ export class ChangeSetWatch {
    */
   async hasChanged(worktreeId: string, cwd: string): Promise<boolean> {
     const raw = await this.git(
-      ["status", "--porcelain=v2", "--untracked-files=all"],
+      [
+        "status",
+        "--porcelain=v2",
+        "--untracked-files=all",
+        // A parent watcher must not recursively scan every child's working
+        // tree. Pin changes remain visible; child dirtiness is a submodule row.
+        "--ignore-submodules=dirty"
+      ],
       cwd,
       NO_OPTIONAL_LOCKS
     );

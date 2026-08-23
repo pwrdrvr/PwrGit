@@ -51,6 +51,7 @@ import { registerRemoteHandlers } from "./git/remote-handlers";
 import { registerRepoHandlers } from "./git/repo-handlers";
 import { RepoIndexer } from "./git/repo-indexer";
 import { registerSearchStatusHandlers } from "./git/search-status-handlers";
+import { registerSubmoduleHandlers } from "./git/submodule-handlers";
 import {
   createWorktreeRefresher,
   registerWorktreeHandlers
@@ -506,6 +507,7 @@ if (!gotSingleInstanceLock) {
     registerRemoteHandlers(bus, db, refresher, worktreeOperations, indexer);
     registerGraphHandlers(bus, db, stateService);
     registerChangesHandlers(bus, db, refresher, worktreeOperations);
+    registerSubmoduleHandlers(bus, db, worktreeOperations);
     registerRebaseHandlers(bus, db, refresher, worktreeOperations);
     registerDialogHandlers(bus);
     registerShellHandlers(bus);

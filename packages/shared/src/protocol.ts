@@ -54,6 +54,7 @@ import type {
   RepoSearchHit,
   RepoWorktreeRefresh,
   SearchHitStatus,
+  SubmoduleSnapshot,
   SshRemoteRecovery,
   WorktreeState
 } from "./types";
@@ -651,6 +652,12 @@ export interface Commands {
   "repo:getGitLfsStatus": {
     req: { repoId: string; worktreeId: string };
     res: GitLfsStatus;
+  };
+  /** Read-only, bounded inspection of the gitlinks/config/checkouts beneath one
+   *  selected worktree. Per-child failures are returned on their row. */
+  "submodules:list": {
+    req: { worktreeId: string };
+    res: SubmoduleSnapshot;
   };
 
   // GitHub PR status. Repo expansion uses the bulk cached lookup; focused

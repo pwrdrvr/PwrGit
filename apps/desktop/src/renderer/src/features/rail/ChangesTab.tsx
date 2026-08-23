@@ -1,6 +1,7 @@
 import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
+  useCallback,
   useEffect,
   useState
 } from "react";
@@ -10,6 +11,7 @@ import { dispatch, subscribe } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { ContextMenu } from "../shell/ContextMenu";
 import { confirmDialog } from "../shell/dialogs";
+import { SubmodulePanel } from "./SubmodulePanel";
 import {
   canIgnore,
   changesRowMenuItems,
@@ -337,12 +339,19 @@ export function ChangesTab({
     y: number;
     target: ChangesRowTarget;
   } | null>(null);
+  const [hasSubmoduleConcern, setHasSubmoduleConcern] = useState(false);
   const wtId = worktree?.id ?? null;
+
+  const receiveSubmoduleConcern = useCallback(
+    (hasConcern: boolean) => setHasSubmoduleConcern(hasConcern),
+    []
+  );
 
   useEffect(() => {
     setMessage("");
     setFolderOpen({});
     setMenu(null);
+    setHasSubmoduleConcern(false);
     if (wtId === null) {
       setChanges(null);
       return;
@@ -466,14 +475,32 @@ export function ChangesTab({
 
   if (!hasChanges) {
     return (
-      <div className="changes-clean">
-        <div className="changes-clean__icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-ok)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="m20 6-11 11-5-5" />
-          </svg>
+      <div className="changes-pane">
+        <div className="changes-list">
+          {wtId !== null && (
+            <SubmodulePanel
+              worktreeId={wtId}
+              onConcernChange={receiveSubmoduleConcern}
+            />
+          )}
+          <div className="changes-clean">
+            <div className="changes-clean__icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-ok)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m20 6-11 11-5-5" />
+              </svg>
+            </div>
+            <div className="changes-clean__title">
+              {hasSubmoduleConcern
+                ? "Parent files are clean."
+                : "Worktree is clean."}
+            </div>
+            <div className="changes-clean__sub">
+              {hasSubmoduleConcern
+                ? "Submodule attention is listed above."
+                : "Nothing to commit."}
+            </div>
+          </div>
         </div>
-        <div className="changes-clean__title">Worktree is clean.</div>
-        <div className="changes-clean__sub">Nothing to commit.</div>
       </div>
     );
   }
@@ -572,6 +599,12 @@ export function ChangesTab({
         </button>
       </div>
       <div className="changes-list">
+        {wtId !== null && (
+          <SubmodulePanel
+            worktreeId={wtId}
+            onConcernChange={receiveSubmoduleConcern}
+          />
+        )}
         {staged.length > 0 && (
           <>
             <div className="changes-section">

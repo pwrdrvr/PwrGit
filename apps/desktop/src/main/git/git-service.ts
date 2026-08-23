@@ -159,7 +159,16 @@ export async function readChanges(
   // click is about to stage, and makes a folder masquerade as a file row. The
   // renderer regroups the flat list back into folders itself.
   const raw = await git(
-    ["status", "--porcelain=v2", "--untracked-files=all"],
+    [
+      "status",
+      "--porcelain=v2",
+      "--untracked-files=all",
+      // Internal child dirtiness is represented by submodules:list. Asking
+      // parent status to recurse into it duplicates that state and can turn a
+      // 20-child parent refresh into a long synchronous walk. Commit-pin
+      // mismatches still appear as changes.
+      "--ignore-submodules=dirty"
+    ],
     cwd,
     NO_OPTIONAL_LOCKS
   );

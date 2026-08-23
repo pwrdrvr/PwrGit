@@ -249,7 +249,14 @@ export class WorktreeStateService {
     if (wt === null) return null;
 
     const statusRaw = await this.git(
-      ["status", "--porcelain=v2", "--branch"],
+      [
+        "status",
+        "--porcelain=v2",
+        "--branch",
+        // Keep the parent probe bounded. Checked-out commit mismatches remain
+        // dirty; uncommitted files inside children are inspected separately.
+        "--ignore-submodules=dirty"
+      ],
       wt.path,
       NO_OPTIONAL_LOCKS
     );

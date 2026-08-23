@@ -129,6 +129,8 @@ textarea,
 .diff-file__path,
 .file-path,
 .folder-row__path,
+.submodule-row__path,
+.submodule-fact__value,
 .commit-msg,
 .commit-sha-chip,
 .commit-context-card__subject,
@@ -5095,6 +5097,202 @@ button.ref-chip:focus-visible {
   font: 500 11px/1.5 var(--font-sans);
   color: var(--text-subtle);
   margin-top: 4px;
+}
+
+/* ---- Submodules: read-only gitlink/config/checkout audit ---- */
+
+.submodule-panel {
+  margin: 0 0 14px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+.submodule-panel__head {
+  min-height: 34px;
+  padding: 7px 9px 7px 11px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font: 700 10px/1 var(--font-sans);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.submodule-panel__count {
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--bg-panel-elevated);
+  color: var(--text-muted);
+  font: 600 9px/1 var(--font-mono);
+}
+.submodule-panel__spacer {
+  flex: 1;
+}
+.submodule-panel__refresh {
+  min-height: 22px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: 600 9px/1 var(--font-sans);
+  cursor: pointer;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.submodule-panel__refresh:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+.submodule-panel__refresh:disabled {
+  cursor: default;
+  opacity: 0.62;
+}
+.submodule-row {
+  margin-left: calc(var(--submodule-depth, 0) * 10px);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.submodule-row__summary {
+  min-height: 36px;
+  padding: 7px 9px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  list-style-position: inside;
+}
+.submodule-row__summary:hover {
+  background: var(--bg-panel-hover);
+}
+.submodule-row__path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font: 600 10.5px/1.25 var(--font-mono);
+}
+.submodule-chip,
+.submodule-tag {
+  flex: 0 0 auto;
+  min-height: 17px;
+  padding: 3px 5px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  font: 600 8.5px/1 var(--font-sans);
+  white-space: nowrap;
+}
+.submodule-chip--ok {
+  background: var(--success-soft);
+  color: var(--success-text);
+}
+.submodule-chip--warn,
+.submodule-tag {
+  background: var(--warn-soft);
+  color: var(--status-warning);
+}
+.submodule-chip--danger {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+.submodule-chip--muted {
+  background: var(--bg-panel-elevated);
+  color: var(--text-muted);
+}
+.submodule-row__body {
+  padding: 1px 10px 10px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.submodule-fact {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+.submodule-fact--stacked {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 3px;
+}
+.submodule-fact__label {
+  flex: 0 0 74px;
+  color: var(--text-subtle);
+  font: 600 8.5px/1.3 var(--font-sans);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.submodule-fact--stacked .submodule-fact__label {
+  flex-basis: auto;
+}
+.submodule-fact__value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+  font: 500 10px/1.35 var(--font-mono);
+}
+.submodule-fact__note {
+  min-width: 0;
+  color: var(--text-muted);
+  font: 500 9px/1.3 var(--font-sans);
+}
+.submodule-tag {
+  min-height: 16px;
+  padding-block: 2px;
+  font-family: var(--font-mono);
+}
+.submodule-issues {
+  margin: 3px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  list-style: none;
+}
+.submodule-issue,
+.submodule-panel__error {
+  padding: 7px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  color: var(--text-secondary);
+  font: 500 9.5px/1.35 var(--font-sans);
+}
+.submodule-issue--error,
+.submodule-panel__error,
+.submodule-panel__error--error {
+  background: var(--danger-soft);
+}
+.submodule-issue small,
+.submodule-panel__error small {
+  color: var(--text-muted);
+  font: 500 9px/1.35 var(--font-sans);
+}
+.submodule-panel__error {
+  margin: 8px;
+}
+.submodule-panel__error--warning {
+  background: var(--warn-soft);
+}
+.submodule-panel__legend {
+  margin: 0;
+  padding: 8px 10px 9px;
+  color: var(--text-subtle);
+  font: 500 9px/1.4 var(--font-sans);
 }
 
 .main-empty {

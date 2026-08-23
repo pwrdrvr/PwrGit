@@ -376,8 +376,9 @@ describe("parseChanges", () => {
   });
 
   it("reads status without taking Git's optional index lock", async () => {
-    const git: GitExec = async (_args, _cwd, options) => {
+    const git: GitExec = async (args, _cwd, options) => {
       expect(options?.env?.["GIT_OPTIONAL_LOCKS"]).toBe("0");
+      expect(args).toContain("--ignore-submodules=dirty");
       return ok({ stdout: "", stderr: "", exitCode: 0 });
     };
 

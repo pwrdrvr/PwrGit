@@ -106,6 +106,26 @@ describe("ChangeSetWatch (system git)", () => {
       watch.hasChanged("worktree-1", join(root, "not-a-repo"))
     ).resolves.toBe(false);
   });
+
+  it("does not recursively fingerprint uncommitted files inside submodules", async () => {
+    const calls: string[][] = [];
+    const git: GitExec = async (args) => {
+      calls.push(args);
+      return ok({ stdout: "", stderr: "", exitCode: 0 });
+    };
+    const watch = new ChangeSetWatch(git);
+
+    await watch.hasChanged("worktree-1", repo);
+
+    expect(calls).toEqual([
+      [
+        "status",
+        "--porcelain=v2",
+        "--untracked-files=all",
+        "--ignore-submodules=dirty"
+      ]
+    ]);
+  });
 });
 
 describe("createChangeSetAnnouncer", () => {
