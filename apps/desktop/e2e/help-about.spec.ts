@@ -1,6 +1,13 @@
+import { readFileSync } from "node:fs";
 import { expect, test, type ElectronApplication, type Page } from "@playwright/test";
 import { PWRGIT_LINKS } from "@pwrgit/shared";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
+
+const DESKTOP_VERSION = (
+  JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8")
+  ) as { version: string }
+).version;
 
 let handle: AppHandle | null = null;
 
@@ -96,15 +103,19 @@ test("Help and About expose identity, canonical support links, and recovery", as
       getSystemVersion: () => string;
     };
     return {
-      version: electronApp.getVersion(),
+      runtimeVersion: electronApp.getVersion(),
+      electronVersion: electronProcess.versions.electron ?? "unknown",
       platformVersion: electronProcess.getSystemVersion(),
       arch: electronProcess.arch
     };
   });
-  await expect(about).toContainText(`v${runtime.version}`);
+  expect(runtime.runtimeVersion).toBe(runtime.electronVersion);
+  expect(DESKTOP_VERSION).not.toBe(runtime.electronVersion);
+  await expect(about).toContainText(`v${DESKTOP_VERSION}`);
   await expect(about).toContainText("Stable · Latest");
   await expect(about).toContainText("Development build");
   await expect(about).toContainText(`${runtime.platformVersion} (${runtime.arch})`);
+  await expect(about).toContainText(`Electron ${runtime.electronVersion}`);
   await expect(about).toContainText(PWRGIT_LINKS.source);
   await expect(about).toContainText("Do not post vulnerabilities publicly");
 
@@ -133,7 +144,8 @@ test("Help and About expose identity, canonical support links, and recovery", as
       (window as unknown as { __pwrgitCopiedIdentity?: string })
         .__pwrgitCopiedIdentity
   );
-  expect(copiedIdentity).toContain(`PwrGit ${runtime.version}`);
+  expect(copiedIdentity).toContain(`PwrGit ${DESKTOP_VERSION}`);
+  expect(copiedIdentity).toContain(`Electron: ${runtime.electronVersion}`);
   expect(copiedIdentity).toContain("Build: Development");
   expect(copiedIdentity).toContain(`${runtime.platformVersion} (${runtime.arch})`);
 

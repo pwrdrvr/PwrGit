@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppIdentity } from "@pwrgit/shared";
+import desktopPackage from "../../package.json";
 
 vi.mock("electron", () => ({
   app: {
@@ -11,7 +12,11 @@ vi.mock("electron", () => ({
 
 vi.mock("./logs", () => ({ logMain: vi.fn() }));
 
-const { createAppIdentity, registerAppIdentityHandlers } =
+const {
+  createAppIdentity,
+  registerAppIdentityHandlers,
+  resolvePwrGitVersion
+} =
   await import("./app-identity");
 const { CommandBus } = await import("./command-bus");
 
@@ -63,6 +68,16 @@ describe("app identity", () => {
     expect(identity.buildType).toBe("development");
     expect(identity.platform.name).toBe("Windows");
     expect(identity.diagnosticsText).toContain("Build: Development");
+  });
+
+  it("uses bundled product metadata when an unpackaged entry reports Electron's version", () => {
+    expect(resolvePwrGitVersion(false, "41.10.5")).toBe(
+      desktopPackage.version
+    );
+    expect(resolvePwrGitVersion(false, "41.10.5")).not.toBe("41.10.5");
+    expect(resolvePwrGitVersion(true, "1.2.3-alpha.4")).toBe(
+      "1.2.3-alpha.4"
+    );
   });
 
   it("registers the copy-ready identity on the typed command bus", async () => {

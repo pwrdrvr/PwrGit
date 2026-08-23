@@ -5,6 +5,7 @@ import {
   type AppIdentity,
   type UpdatesSettings
 } from "@pwrgit/shared";
+import desktopPackage from "../../package.json";
 import type { CommandBus } from "./command-bus";
 
 type AppIdentityInput = {
@@ -27,6 +28,19 @@ function releaseLabel(release: UpdatesSettings): string {
   const train = release.train === "stable" ? "Stable" : "Beta";
   const track = release.channel === "latest" ? "Latest" : "Prerelease";
   return `${train} / ${track}`;
+}
+
+/**
+ * A built-entry development launch points Electron at `out/main`, not at the
+ * desktop package, so Electron falls back to its own runtime version. The
+ * package import is bundled into main and remains the authoritative product
+ * version in that mode; packaged apps use their signed bundle metadata.
+ */
+export function resolvePwrGitVersion(
+  packaged: boolean,
+  runtimeVersion: string
+): string {
+  return packaged ? runtimeVersion : desktopPackage.version;
 }
 
 /** Pure builder keeps formatting stable across the UI, clipboard, and tests. */
@@ -61,7 +75,7 @@ export function createAppIdentity(input: AppIdentityInput): AppIdentity {
 export function readAppIdentity(): AppIdentity {
   return createAppIdentity({
     name: app.getName(),
-    version: app.getVersion(),
+    version: resolvePwrGitVersion(app.isPackaged, app.getVersion()),
     packaged: app.isPackaged,
     platform: process.platform,
     platformVersion: process.getSystemVersion(),
