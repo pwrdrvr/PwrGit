@@ -488,12 +488,19 @@ export interface Commands {
     req: { profileId: ProfileId; nameWithOwner: string; host?: ForgeHost };
     res: CloneRepository;
   };
+  /** Validate a filesystem path as a Git repository clone source. */
+  "repo:checkLocalCloneSource": {
+    req: { profileId: ProfileId; path: string };
+    res: CloneRepository;
+  };
   /** Clone into a registered profile root/prefix and index the new checkout. */
   "repo:clone": {
     req: {
       operationId: string;
       profileId: ProfileId;
       nameWithOwner: string;
+      /** Canonical local repository path; bypasses forge URL construction. */
+      sourcePath?: string;
       protocol: CloneProtocol;
       parentPath: string;
       /** Which forge to clone from. Defaults to GitHub for older callers. */

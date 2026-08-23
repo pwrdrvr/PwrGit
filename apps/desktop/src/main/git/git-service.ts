@@ -31,6 +31,29 @@ import {
 } from "@pwrgit/shared";
 import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
 
+/** A symbolic HEAD whose branch ref does not exist is a valid unborn branch.
+ * Keep this stricter than a failed `rev-parse HEAD`: that can also mean a
+ * corrupt ref, which callers should surface instead of disguising as empty. */
+export async function isUnbornHead(
+  git: GitExec,
+  cwd: string
+): Promise<Result<boolean>> {
+  const symbolicArgs = ["symbolic-ref", "--quiet", "HEAD"];
+  const symbolic = await git(symbolicArgs, cwd);
+  if (!symbolic.ok) return symbolic;
+  if (symbolic.value.exitCode !== 0) return ok(false);
+  const headRef = symbolic.value.stdout.trim();
+  if (!headRef.startsWith("refs/heads/")) return ok(false);
+
+  const refArgs = ["show-ref", "--verify", "--quiet", headRef];
+  const ref = await git(refArgs, cwd);
+  if (!ref.ok) return ref;
+  if (ref.value.exitCode === 0) return ok(false);
+  if (ref.value.exitCode === 1) return ok(true);
+  const checked = requireExit0(ref.value, refArgs);
+  return checked.ok ? ok(false) : checked;
+}
+
 function mapStatusCode(c: string | undefined): FileStatus {
   switch (c) {
     case "A":

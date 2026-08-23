@@ -11,6 +11,7 @@ import type { DB } from "../persistence/db";
 import { execGit } from "./dugite";
 import {
   branchTips,
+  isUnbornHead,
   listLocalBranchNames,
   readLog,
   readLogRefs,
@@ -72,10 +73,16 @@ export function registerGraphHandlers(
       });
     }
 
+    const def = await state.resolveDefaultBranch(wt.repo_id, wt.path);
+    const unborn = await isUnbornHead(execGit, wt.path);
+    if (!unborn.ok) return unborn;
+    if (unborn.value) {
+      return ok({ commits: [], branchRoot: null, defaultBranch: def.name });
+    }
+
     const commits = await readLog(execGit, wt.path, req.limit ?? 200);
     if (!commits.ok) return commits;
 
-    const def = await state.resolveDefaultBranch(wt.repo_id, wt.path);
     let branchRoot: string | null = null;
     const mb = await execGit(["merge-base", "HEAD", def.ref], wt.path);
     if (mb.ok && mb.value.exitCode === 0) {
@@ -101,6 +108,36 @@ export function registerGraphHandlers(
       | undefined;
     if (wt === undefined) {
       return err({ kind: "repo", code: "not_found", message: "worktree not found" });
+    }
+
+    const unborn = await isUnbornHead(execGit, wt.path);
+    if (!unborn.ok) return unborn;
+    if (unborn.value) {
+      const def = await state.resolveDefaultBranch(wt.repo_id, wt.path);
+      return ok({
+        commits: [],
+        tips: {},
+        remoteTips: {},
+        branches: {
+          ...(wt.branch === null
+            ? {}
+            : {
+                [wt.branch]: {
+                  worktreeId: req.worktreeId,
+                  worktreePath: wt.path
+                }
+              })
+        },
+        head: "",
+        headOnlyCommits: [],
+        defaultBranch: def.name,
+        defaultRef: def.ref,
+        defaultRefTips: [],
+        shownBranches: [],
+        upstreamRefs: [],
+        matchedBranches: 0,
+        hiddenBranches: 0
+      });
     }
 
     // The branch set + union log is the same for every worktree in a repo — only

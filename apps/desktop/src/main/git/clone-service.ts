@@ -1,5 +1,7 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import {
+  basename,
   dirname,
   isAbsolute,
   join,
@@ -61,6 +63,22 @@ function canonicalExistingPath(path: string): string {
   } catch {
     return resolve(path);
   }
+}
+
+/** Resolve the absolute/home-relative forms the clone dialog recognizes.
+ * Relative paths are intentionally rejected: the main process's cwd is an
+ * implementation detail and would make the same text clone different repos. */
+export function resolveLocalClonePath(
+  input: string,
+  homePath = homedir()
+): string | null {
+  const trimmed = input.trim();
+  if (trimmed === "~") return resolve(homePath);
+  if (/^~[\\/]/.test(trimmed)) {
+    return resolve(homePath, trimmed.slice(2));
+  }
+  if (!isAbsolute(trimmed)) return null;
+  return resolve(trimmed);
 }
 
 function rootsFor(profile: Profile): RootIdentity[] {
@@ -501,10 +519,75 @@ export class CloneService {
     }
   }
 
+  async checkLocalSource(
+    profileId: string,
+    input: string
+  ): Promise<Result<CloneRepository>> {
+    if (this.profiles.get(profileId) === null) {
+      return err({
+        kind: "profile",
+        code: "not_found",
+        message: `No profile "${profileId}"`
+      });
+    }
+    return this.localSource(input);
+  }
+
+  private async localSource(input: string): Promise<Result<CloneRepository>> {
+    const path = resolveLocalClonePath(input);
+    if (path === null) {
+      return err({
+        kind: "validation",
+        code: "invalid_repository",
+        message: "Enter an absolute repository path or one beginning with ~/."
+      });
+    }
+    let isDirectory = false;
+    try {
+      isDirectory = statSync(path).isDirectory();
+    } catch {
+      // The validation result below keeps raw filesystem errors out of IPC.
+    }
+    if (!isDirectory) {
+      return err({
+        kind: "validation",
+        code: "local_source_missing",
+        message: `No repository folder exists at ${path}`
+      });
+    }
+    const canonical = canonicalExistingPath(path);
+    const probeArgs = ["rev-parse", "--git-dir"];
+    const probe = await this.git(probeArgs, canonical);
+    if (!probe.ok) return probe;
+    const checked = requireExit0(probe.value, probeArgs);
+    if (!checked.ok) {
+      return err({
+        kind: "validation",
+        code: "not_a_repo",
+        message: `No Git repository found at ${canonical}`
+      });
+    }
+    const name = basename(canonical).replace(/\.git$/i, "") || "repository";
+    return ok({
+      name,
+      owner: "Local",
+      nameWithOwner: canonical,
+      description: "Local Git repository",
+      visibility: "unknown",
+      host: "other",
+      hostname: "local",
+      sshUrl: canonical,
+      httpsUrl: canonical,
+      localPath: canonical,
+      localPaths: []
+    });
+  }
+
   async clone(
     input: {
       profileId: string;
       nameWithOwner: string;
+      sourcePath?: string;
       protocol: CloneProtocol;
       parentPath: string;
       host?: ForgeHost;
@@ -520,7 +603,15 @@ export class CloneService {
         message: `No profile "${input.profileId}"`
       });
     }
-    const nameWithOwner = normalizeRepositoryPath(input.nameWithOwner);
+    const local =
+      input.sourcePath === undefined
+        ? null
+        : await this.localSource(input.sourcePath);
+    if (local !== null && !local.ok) return local;
+    const nameWithOwner =
+      local?.ok === true
+        ? local.value.nameWithOwner
+        : normalizeRepositoryPath(input.nameWithOwner);
     if (nameWithOwner === null) {
       return err({
         kind: "validation",
@@ -535,12 +626,13 @@ export class CloneService {
         message: "Choose SSH, HTTPS, or the forge CLI."
       });
     }
-    const host = input.host ?? "github";
-    const hostname = input.hostname ?? defaultHostname(host);
+    const host = local?.ok === true ? "other" : (input.host ?? "github");
+    const hostname =
+      local?.ok === true ? "local" : (input.hostname ?? defaultHostname(host));
     // The hostname reaches this method from the renderer, and it is
     // interpolated straight into a git remote. Anything outside a bare
     // hostname could smuggle options or another host into the URL.
-    if (!isSafeForgeHostname(hostname)) {
+    if (local === null && !isSafeForgeHostname(hostname)) {
       return err({
         kind: "validation",
         code: "invalid_repository",
@@ -548,7 +640,10 @@ export class CloneService {
       });
     }
 
-    const repoName = nameWithOwner.slice(nameWithOwner.lastIndexOf("/") + 1);
+    const repoName =
+      local?.ok === true
+        ? local.value.name
+        : nameWithOwner.slice(nameWithOwner.lastIndexOf("/") + 1);
     const resolved = validateCheckoutDestination(
       profile,
       input.parentPath,
@@ -559,7 +654,13 @@ export class CloneService {
 
     onProgress({ phase: "starting", percent: null });
     const cloned = await this.runClone(
-      { host, hostname, nameWithOwner, protocol: input.protocol },
+      {
+        host,
+        hostname,
+        nameWithOwner,
+        protocol: input.protocol,
+        ...(local?.ok === true ? { localPath: local.value.localPath } : {})
+      },
       destination,
       parentPath,
       onProgress
@@ -591,12 +692,26 @@ export class CloneService {
       hostname: string;
       nameWithOwner: string;
       protocol: CloneProtocol;
+      localPath?: string;
     },
     destination: string,
     workingDirectory: string,
     onProgress: (progress: CloneProgress) => void
   ): Promise<Result<true>> {
     const readProgress = createCloneProgressParser(onProgress);
+    if (source.localPath !== undefined) {
+      const cloned = await this.git(
+        ["clone", "--progress", "--", source.localPath, destination],
+        workingDirectory,
+        { onStderr: readProgress, env: CLONE_ENV }
+      );
+      if (!cloned.ok) return cloned;
+      const checked = requireExit0(
+        { ...cloned.value, stderr: sanitizeCloneStderr(cloned.value.stderr) },
+        ["clone"]
+      );
+      return checked.ok ? ok(true) : checked;
+    }
     const provider = this.forges.get(source.host);
 
     if (source.protocol === "cli") {
