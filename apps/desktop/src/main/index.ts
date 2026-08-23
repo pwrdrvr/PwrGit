@@ -26,6 +26,7 @@ import { CommandBus } from "./command-bus";
 import { registerDialogHandlers } from "./dialog-handlers";
 import { execGit } from "./git/dugite";
 import { registerBranchHandlers } from "./git/branch-handlers";
+import { registerBulkSyncHandlers } from "./git/bulk-sync-handlers";
 import { registerCloneHandlers } from "./git/clone-handlers";
 import { CloneService } from "./git/clone-service";
 import { registerForkHandlers } from "./git/fork-handlers";
@@ -419,6 +420,13 @@ if (!gotSingleInstanceLock) {
       settings
     );
     registerRemoteHandlers(bus, db, refresher, worktreeOperations, indexer);
+    const bulkSyncHandlers = registerBulkSyncHandlers(
+      bus,
+      db,
+      refresher,
+      worktreeOperations,
+      indexer
+    );
     registerGraphHandlers(bus, db, stateService);
     registerChangesHandlers(bus, db, refresher, worktreeOperations);
     registerRebaseHandlers(bus, db, refresher, worktreeOperations);
@@ -443,7 +451,10 @@ if (!gotSingleInstanceLock) {
     diagnostics.sync(); // start any settings-enabled monitors at boot
 
     registerIpc(bus, {
-      onWebContentsDestroyed: githubHandlers.releaseWebContents
+      onWebContentsDestroyed: (webContentsId) => {
+        githubHandlers.releaseWebContents(webContentsId);
+        bulkSyncHandlers.releaseWebContents(webContentsId);
+      }
     });
     registerAppUpdateHandlers(bus);
     settings.onWrite(() => {

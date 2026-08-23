@@ -623,6 +623,101 @@ export type WorktreeState = {
   updatedAt: string;
 };
 
+/** Profile-wide repository synchronization without destructive recovery. */
+export type BulkSyncMode = "fetch" | "soft-pull";
+
+export type BulkSyncRemoteResult = {
+  remote: string;
+  outcome: "fetched" | "skipped" | "failed" | "cancelled";
+  reason?:
+    | "skip_fetch_all"
+    | "authentication"
+    | "fetch_failed"
+    | "cancelled";
+  message?: string;
+};
+
+export type BulkSyncWorktreeResult = {
+  worktreeId: WorktreeId;
+  branch: string;
+  path: string;
+  outcome: "updated" | "up_to_date" | "skipped" | "failed" | "cancelled";
+  reason?:
+    | "dirty"
+    | "conflicts"
+    | "detached_head"
+    | "no_head"
+    | "no_upstream"
+    | "in_progress"
+    | "diverged"
+    | "ahead"
+    | "authentication"
+    | "fetch_failed"
+    | "upstream_not_fetched"
+    | "unsafe_state"
+    | "merge_failed"
+    | "cancelled";
+  message?: string;
+  /** Exact commit ids before and after a successful fast-forward. */
+  beforeHead?: string;
+  afterHead?: string;
+};
+
+export type BulkSyncRepoResult = {
+  repoId: RepoId;
+  name: string;
+  path: string;
+  outcome: "success" | "partial" | "skipped" | "failed" | "cancelled";
+  remotes: BulkSyncRemoteResult[];
+  worktrees: BulkSyncWorktreeResult[];
+  message?: string;
+};
+
+export type BulkSyncCounts = {
+  repos: {
+    success: number;
+    partial: number;
+    skipped: number;
+    failed: number;
+    cancelled: number;
+  };
+  remotes: {
+    fetched: number;
+    skipped: number;
+    failed: number;
+    cancelled: number;
+  };
+  worktrees: {
+    updated: number;
+    upToDate: number;
+    skipped: number;
+    failed: number;
+    cancelled: number;
+  };
+};
+
+export type BulkSyncSummary = {
+  operationId: string;
+  mode: BulkSyncMode;
+  cancelled: boolean;
+  startedAt: string;
+  finishedAt: string;
+  counts: BulkSyncCounts;
+  results: BulkSyncRepoResult[];
+};
+
+/** Incremental progress for a long-running profile-wide sync command. */
+export type BulkSyncProgress = {
+  operationId: string;
+  mode: BulkSyncMode;
+  phase: "starting" | "repo_started" | "repo_completed";
+  totalRepos: number;
+  completedRepos: number;
+  repoId?: RepoId;
+  repoName?: string;
+  result?: BulkSyncRepoResult;
+};
+
 /** A commit that exists on only one side of a diverged tracked branch. */
 export type DivergenceCommit = {
   /** Full object name, used to correlate range-diff output. */

@@ -1003,6 +1003,7 @@ textarea,
 .add-folder:focus-visible,
 .clone-repo:focus-visible,
 .fork-repo:focus-visible,
+.bulk-sync-action:focus-visible,
 .jump-btn:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
@@ -2285,6 +2286,36 @@ textarea,
   min-width: 0;
 }
 
+.bulk-sync-actions {
+  flex: 1 1 100%;
+  display: flex;
+  gap: 6px;
+}
+.bulk-sync-action {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 30px;
+  padding: 0 7px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  font: 600 10.5px/1 var(--font-sans);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.bulk-sync-action:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  background: var(--bg-panel-elevated);
+  color: var(--text-primary);
+}
+.bulk-sync-action:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
 .fork-name-wrap {
   margin-top: 6px;
 }
@@ -2985,6 +3016,149 @@ textarea,
 .modal__create:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ---- Profile-wide repository synchronization ---- */
+
+.bulk-sync-backdrop {
+  padding-top: 8vh;
+}
+.bulk-sync {
+  width: min(720px, 94vw);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+.bulk-sync__head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  padding: 18px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.bulk-sync__head > div {
+  flex: 1;
+  min-width: 0;
+}
+.bulk-sync__head h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font: 700 14px/1.2 var(--font-sans);
+}
+.bulk-sync__head p {
+  margin: 7px 0 0;
+  color: var(--text-muted);
+  font: 500 11px/1.45 var(--font-sans);
+}
+.bulk-sync__count {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-panel-elevated);
+  color: var(--text-secondary);
+  font: 600 10px/1 var(--font-mono);
+}
+.bulk-sync__summary {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin: 12px 18px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--text-secondary);
+  font: 500 11px/1.35 var(--font-sans);
+}
+.bulk-sync__summary strong {
+  color: var(--accent-bright);
+}
+.bulk-sync > .modal__error {
+  margin: 12px 18px 0;
+}
+.bulk-sync__repos {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 18px;
+  overflow-y: auto;
+}
+.bulk-sync__repo {
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+.bulk-sync__repo.is-success {
+  border-color: color-mix(in srgb, var(--success-text) 42%, transparent);
+}
+.bulk-sync__repo.is-partial,
+.bulk-sync__repo.is-skipped {
+  border-color: color-mix(in srgb, var(--status-warning) 44%, transparent);
+}
+.bulk-sync__repo.is-failed {
+  border-color: var(--danger-border);
+}
+.bulk-sync__repo-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.bulk-sync__repo-head > div {
+  flex: 1;
+  min-width: 0;
+}
+.bulk-sync__repo-head strong,
+.bulk-sync__repo-head small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bulk-sync__repo-head strong {
+  color: var(--text-primary);
+  font: 650 12px/1.2 var(--font-sans);
+}
+.bulk-sync__repo-head small {
+  margin-top: 3px;
+  color: var(--text-subtle);
+  font: 500 9px/1.2 var(--font-mono);
+}
+.bulk-sync__repo-head span {
+  flex: 0 0 auto;
+  color: var(--text-subtle);
+  font: 600 9.5px/1 var(--font-mono);
+  text-transform: capitalize;
+}
+.bulk-sync__repo > p {
+  margin: 5px 0 0;
+  color: var(--text-muted);
+  font: 500 10.5px/1.35 var(--font-sans);
+}
+.bulk-sync__details {
+  margin: 8px 0 0;
+  padding: 7px 0 0 17px;
+  border-top: 1px solid var(--border-faint);
+  color: var(--text-muted);
+  font: 500 10px/1.45 var(--font-sans);
+}
+.bulk-sync__details strong {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+.bulk-sync > .modal__actions {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 12px 18px 16px;
+  border-top: 1px solid var(--border-subtle);
 }
 
 /* ---- Repository branch + remote browser ---- */

@@ -12,6 +12,9 @@
 
 import type {
   BranchRef,
+  BulkSyncMode,
+  BulkSyncProgress,
+  BulkSyncSummary,
   CloneCatalog,
   CloneDestination,
   CloneProgress,
@@ -783,6 +786,20 @@ export interface Commands {
     req: { repoId: string; remote?: string };
     res: null;
   };
+  /** Fetch each repository once, optionally applying only proven-safe FFs. */
+  "remote:bulkSync": {
+    req: {
+      operationId: string;
+      profileId: ProfileId;
+      mode: BulkSyncMode;
+    };
+    res: BulkSyncSummary;
+  };
+  /** Request cancellation; an in-flight non-network Git mutation finishes. */
+  "remote:cancelBulkSync": {
+    req: { operationId: string };
+    res: { cancelled: boolean };
+  };
   "remote:add": {
     req: { repoId: string; name: string; fetchUrl: string; pushUrl?: string };
     res: null;
@@ -1056,6 +1073,8 @@ export interface Events {
     worktreeId: string;
     phase: PullProgressPhase;
   };
+  /** Per-repository progress for profile-wide fetch / conservative pull. */
+  "remote:bulkSyncProgress": BulkSyncProgress;
   /** A worktree finished being removed (streamed during a batch remove). */
   "worktree:removed": { worktreeId: string };
   /**

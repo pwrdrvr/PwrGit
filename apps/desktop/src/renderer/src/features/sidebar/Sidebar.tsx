@@ -16,6 +16,7 @@ import { LensFilter } from "./LensFilter";
 import { NewWorktreeModal } from "./NewWorktreeModal";
 import { ProfileChip } from "./ProfileChip";
 import { RepoRow } from "./RepoRow";
+import { BulkSyncDialog } from "./BulkSyncDialog";
 import {
   filterReposByLens,
   groupReposByRoot,
@@ -183,6 +184,9 @@ export function Sidebar({
   const [sortByRepo, setSortByRepo] = useState<Record<string, WorktreeSort>>({});
   const [orderByRepo, setOrderByRepo] = useState<Record<string, string[]>>({});
   const [newWorktree, setNewWorktree] = useState<NewWorktreeState | null>(null);
+  const [bulkSyncMode, setBulkSyncMode] = useState<
+    "fetch" | "soft-pull" | null
+  >(null);
   const [sel, setSel] = useState<Selection>({
     repoId: "",
     ids: EMPTY_IDS,
@@ -700,6 +704,24 @@ export function Sidebar({
               <ForkGlyph /> Fork…
             </button>
           </div>
+          <div className="bulk-sync-actions" aria-label="Synchronize repositories">
+            <button
+              className="bulk-sync-action"
+              disabled={activeProfile === null || repos.length === 0}
+              title="Fetch configured remotes once for every repository"
+              onClick={() => setBulkSyncMode("fetch")}
+            >
+              ↻ Fetch all
+            </button>
+            <button
+              className="bulk-sync-action"
+              disabled={activeProfile === null || repos.length === 0}
+              title="Fast-forward only clean, safe tracked worktrees"
+              onClick={() => setBulkSyncMode("soft-pull")}
+            >
+              ↓ Try pull all
+            </button>
+          </div>
         </div>
       </div>
 
@@ -809,6 +831,15 @@ export function Sidebar({
             onCreateWorktree(newWorktree.repo.id, branch, newBranch, startPoint)
           }
           onClose={() => setNewWorktree(null)}
+        />
+      )}
+
+      {bulkSyncMode !== null && activeProfile !== null && (
+        <BulkSyncDialog
+          profileId={activeProfile.id}
+          repos={repos}
+          mode={bulkSyncMode}
+          onClose={() => setBulkSyncMode(null)}
         />
       )}
 
