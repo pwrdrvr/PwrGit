@@ -208,6 +208,8 @@ export type DiscoveredRoot = RootCandidate & {
 export async function discoverRepositoryRoots(options: {
   requested?: readonly string[];
   includeConventional?: boolean;
+  includeConfigured?: boolean;
+  includeCurrentWorkspace?: boolean;
   maxDepth?: number;
   cwd?: string;
   env?: NodeJS.ProcessEnv;

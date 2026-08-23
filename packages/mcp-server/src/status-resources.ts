@@ -7,6 +7,7 @@ import {
   UnsubscribeRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
 import { changedEvents } from "./live-events.js";
+import { McpAccessError, type McpAuthorizer } from "./access-policy.js";
 import type { LiveStatusLoader } from "./forge-status.js";
 import type { LiveStatusSnapshot } from "./types.js";
 
@@ -55,7 +56,8 @@ export class StatusResourceRegistry {
 
   constructor(
     private readonly mcp: McpServer,
-    private readonly loader: LiveStatusLoader
+    private readonly loader: LiveStatusLoader,
+    private readonly authorizer: McpAuthorizer
   ) {
     mcp.registerResource(
       "pwrgit-live-status",
@@ -68,6 +70,10 @@ export class StatusResourceRegistry {
       },
       async (uri) => {
         const watch = this.requireWatch(uri.toString());
+        await this.authorizer.authorize({
+          capabilities: ["forge.status.read", "status.subscribe"],
+          repositoryPaths: [watch.repositoryPath]
+        });
         if (!watch.subscribed) await this.refresh(watch, false);
         return {
           contents: [
@@ -85,6 +91,10 @@ export class StatusResourceRegistry {
     });
     mcp.server.setRequestHandler(SubscribeRequestSchema, async (request) => {
       const watch = this.requireWatch(request.params.uri);
+      await this.authorizer.authorize({
+        capabilities: ["forge.status.read", "status.subscribe"],
+        repositoryPaths: [watch.repositoryPath]
+      });
       this.subscribe(watch);
       return {};
     });
@@ -99,6 +109,10 @@ export class StatusResourceRegistry {
     repositoryPath: string,
     intervalMs?: number
   ): Promise<StatusResourceDocument> {
+    await this.authorizer.authorize({
+      capabilities: ["forge.status.read", "status.subscribe"],
+      repositoryPaths: [repositoryPath]
+    });
     if (this.watches.size + this.pendingWatches >= MAX_WATCHES) {
       throw new Error(`live status watch limit reached (${MAX_WATCHES})`);
     }
@@ -166,12 +180,19 @@ export class StatusResourceRegistry {
     if (watch.polling) return;
     watch.polling = true;
     try {
+      await this.authorizer.authorize({
+        capabilities: ["forge.status.read", "status.subscribe"],
+        repositoryPaths: [watch.repositoryPath]
+      });
       const current = await this.loader(watch.repositoryPath);
       const changed = changedEvents(watch.snapshot, current).length > 0;
       watch.snapshot = current;
       if (notify && watch.subscribed && changed) {
         await this.mcp.server.sendResourceUpdated({ uri: watch.uri });
       }
+    } catch (cause) {
+      if (cause instanceof McpAccessError) this.unsubscribe(watch);
+      throw cause;
     } finally {
       watch.polling = false;
     }

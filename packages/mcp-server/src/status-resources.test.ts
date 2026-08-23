@@ -2,6 +2,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describe, expect, it } from "vitest";
 import { StatusResourceRegistry } from "./status-resources.js";
 import type { LiveStatusSnapshot } from "./types.js";
+import {
+  FixedMcpAuthorizer,
+  fullAccessAuthorization
+} from "./access-policy.js";
 
 function snapshot(repositoryPath: string): LiveStatusSnapshot {
   return {
@@ -44,7 +48,11 @@ function snapshot(repositoryPath: string): LiveStatusSnapshot {
 
 function registry(loader: (path: string) => Promise<LiveStatusSnapshot>) {
   const mcp = new McpServer({ name: "status-resource-test", version: "1.0.0" });
-  return new StatusResourceRegistry(mcp, loader);
+  return new StatusResourceRegistry(
+    mcp,
+    loader,
+    new FixedMcpAuthorizer(fullAccessAuthorization())
+  );
 }
 
 describe("status resource capacity", () => {

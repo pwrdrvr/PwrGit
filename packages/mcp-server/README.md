@@ -15,6 +15,12 @@ pnpm install
 pnpm --filter @pwrgit/mcp-server build
 ```
 
+Open **PwrGit → Settings → Agents**, create a named Session, and assign its
+role. PwrGit shows the 256-bit Session token once. Built-in roles cover
+repository discovery, local metadata, and live forge status; custom roles can
+choose individual permissions and restrict every path-taking operation to
+specific existing repository roots.
+
 Configure a stdio MCP client with absolute paths:
 
 ```json
@@ -26,6 +32,8 @@ Configure a stdio MCP client with absolute paths:
         "/absolute/path/to/PwrGit/packages/mcp-server/dist/bin.js"
       ],
       "env": {
+        "PWRGIT_MCP_POLICY_FILE": "/Users/me/Library/Application Support/PwrGit/mcp-policy.json",
+        "PWRGIT_MCP_SESSION_TOKEN": "pgmcp_copy-the-one-time-token-here",
         "PWRGIT_MCP_ROOTS": "/Users/me/src:/Users/me/work"
       }
     }
@@ -33,12 +41,20 @@ Configure a stdio MCP client with absolute paths:
 }
 ```
 
+The policy-file variable is optional when the standard PwrGit app-data path is
+used. The Session token is mandatory and is never logged or persisted in
+plaintext; the policy stores only its SHA-256 hash. Revocation, role changes,
+permissions, and repository boundaries are re-read before every tool call,
+resource read/subscription, and WebSocket poll.
+
 `PWRGIT_MCP_ROOTS` uses the platform path delimiter (`:` on macOS/Linux, `;`
 on Windows). It is optional: PwrGit also considers the current repository's
 parent and existing conventional folders such as `~/src`, `~/projects`, and
 `~/work`. It never selects the home directory or a filesystem root
 automatically. A caller can still opt into a broad scan by supplying that path
 explicitly, subject to the same depth and directory budgets.
+Configured and caller-provided roots never expand a restricted role's approved
+repository boundary.
 
 The stdio protocol owns stdout. Diagnostics go only to stderr.
 

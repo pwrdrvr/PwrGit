@@ -47,6 +47,9 @@ importers:
       '@pwrdrvr/codex-discovery':
         specifier: ^0.1.6
         version: 0.1.6
+      '@pwrgit/mcp-server':
+        specifier: workspace:*
+        version: link:../../packages/mcp-server
       '@pwrgit/shared':
         specifier: workspace:*
         version: link:../../packages/shared

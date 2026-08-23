@@ -2,7 +2,12 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server as HttpServer } from "node:http";
 import { isAbsolute } from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
-import { createLiveStatusLoader, type LiveStatusLoader } from "./forge-status.js";
+import {
+  McpAccessError,
+  type McpAuthorization,
+  type McpAuthorizer
+} from "./access-policy.js";
+import type { LiveStatusLoader } from "./forge-status.js";
 import type {
   LiveEventKind,
   LiveStatusEvent,
@@ -71,6 +76,16 @@ export function changedEvents(
 export type LiveEventCapabilities = {
   contract: "pwrgit.live-status";
   version: typeof LIVE_EVENT_CONTRACT_VERSION;
+  authorization: {
+    protocol: "pwrgit.mcp-policy/v1";
+    required: true;
+    sessionId: string;
+    sessionName: string;
+    roleId: string;
+    roleName: string;
+    permissions: readonly string[];
+    repositoryRoots: readonly string[] | null;
+  };
   mcp: {
     transport: "stdio";
     primary: "subscribable_status_resource";
@@ -170,7 +185,11 @@ export class LiveEventServer {
   private sequence = 0;
   private connections = 0;
 
-  constructor(loader: LiveStatusLoader = createLiveStatusLoader()) {
+  constructor(
+    loader: LiveStatusLoader,
+    private readonly authorizer: McpAuthorizer,
+    private readonly initialAuthorization: McpAuthorization
+  ) {
     this.loader = loader;
   }
 
@@ -245,11 +264,26 @@ export class LiveEventServer {
     this.port = address.port;
   }
 
-  capabilities(): LiveEventCapabilities {
+  capabilities(
+    authorization: McpAuthorization = this.initialAuthorization
+  ): LiveEventCapabilities {
     if (this.port === null) throw new Error("live event server is not started");
     return {
       contract: "pwrgit.live-status",
       version: LIVE_EVENT_CONTRACT_VERSION,
+      authorization: {
+        protocol: "pwrgit.mcp-policy/v1",
+        required: true,
+        sessionId: authorization.sessionId,
+        sessionName: authorization.sessionName,
+        roleId: authorization.roleId,
+        roleName: authorization.roleName,
+        permissions: [...authorization.capabilities],
+        repositoryRoots:
+          authorization.repositoryRoots === null
+            ? null
+            : [...authorization.repositoryRoots]
+      },
       mcp: {
         transport: "stdio",
         primary: "subscribable_status_resource",
@@ -350,7 +384,7 @@ export class LiveEventServer {
       this.connections = Math.max(0, this.connections - 1);
     });
     socket.on("error", () => undefined);
-    socket.on("message", (raw, isBinary) => {
+    socket.on("message", async (raw, isBinary) => {
       if (isBinary) {
         send(socket, { type: "error", code: "text_messages_only" });
         return;
@@ -408,6 +442,19 @@ export class LiveEventServer {
         /^[A-Za-z0-9_.-]{1,100}$/.test(input.subscriptionId)
           ? input.subscriptionId
           : randomUUID();
+      try {
+        await this.authorizer.authorize({
+          capabilities: ["forge.status.read", "status.subscribe"],
+          repositoryPaths: repositories
+        });
+      } catch (cause) {
+        send(socket, {
+          type: "error",
+          code: cause instanceof McpAccessError ? cause.code : "access_denied",
+          message: "the assigned PwrGit MCP role does not permit this subscription"
+        });
+        return;
+      }
       stop();
       active = {
         id: requestedId,
@@ -452,6 +499,10 @@ export class LiveEventServer {
     }
     subscription.inFlight.add(repositoryPath);
     try {
+      await this.authorizer.authorize({
+        capabilities: ["forge.status.read", "status.subscribe"],
+        repositoryPaths: [repositoryPath]
+      });
       const current = await this.loader(repositoryPath);
       if (subscription.stopped) return;
       const previous = subscription.previous.get(repositoryPath);
@@ -473,9 +524,14 @@ export class LiveEventServer {
         send(socket, { type: "event", event });
       }
     } catch (cause) {
+      if (cause instanceof McpAccessError) {
+        subscription.stopped = true;
+        for (const timer of subscription.timers) clearInterval(timer);
+        subscription.timers.clear();
+      }
       send(socket, {
         type: "error",
-        code: "status_unavailable",
+        code: cause instanceof McpAccessError ? cause.code : "status_unavailable",
         repositoryPath,
         message: errorMessage(cause)
       });

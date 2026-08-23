@@ -25,3 +25,4 @@ export {
   findRepositoryDirectories
 } from "./discovery.js";
 export type * from "./types.js";
+export * from "./access-policy.js";

@@ -66,6 +66,10 @@ features, and troubleshooting live at
    (`gh`) or GitLab CLI (`glab`) for hosted repository, fork, PR, and MR
    features. **Settings → Forges** shows what is connected and the exact command
    needed when it is not.
+4. **Optionally authorize a local agent.** Settings → Agents creates named,
+   revocable MCP Sessions and shows the Session → role → permission graph.
+   Custom roles can restrict discovery, metadata, forge status, subscriptions,
+   and the repository roots an agent may inspect.
 
 PwrGit includes Git, Git LFS, and Git Credential Manager. A separate system Git
 installation is not required for the packaged app.

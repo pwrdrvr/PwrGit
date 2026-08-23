@@ -1,5 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import {
+  ErrorCode,
+  McpError,
+  type CallToolResult
+} from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { CommandRunner } from "./command.js";
 import {
@@ -13,6 +17,13 @@ import {
 import { readRepositoryInfo } from "./git-metadata.js";
 import { LiveEventServer } from "./live-events.js";
 import { StatusResourceRegistry } from "./status-resources.js";
+import {
+  McpAccessError,
+  PolicyFileAuthorizer,
+  type McpAuthorization,
+  type McpAuthorizationRequirement,
+  type McpAuthorizer
+} from "./access-policy.js";
 
 export const CAPABILITY_RESOURCE_URI = "pwrgit://live-status/capabilities/v1";
 
@@ -21,6 +32,7 @@ export type PwrGitMcpServerOptions = {
   env?: NodeJS.ProcessEnv;
   runner?: CommandRunner;
   liveStatusLoader?: LiveStatusLoader;
+  authorizer?: McpAuthorizer;
 };
 
 export type PwrGitMcpServer = {
@@ -60,9 +72,15 @@ export async function createPwrGitMcpServer(
 ): Promise<PwrGitMcpServer> {
   const cwd = options.cwd ?? process.cwd();
   const env = options.env ?? process.env;
+  const authorizer = options.authorizer ?? PolicyFileAuthorizer.fromEnvironment(env);
+  const initialAuthorization = await requireAccess(authorizer);
   const liveStatusLoader =
     options.liveStatusLoader ?? createLiveStatusLoader(options.runner);
-  const eventServer = new LiveEventServer(liveStatusLoader);
+  const eventServer = new LiveEventServer(
+    liveStatusLoader,
+    authorizer,
+    initialAuthorization
+  );
   await eventServer.start();
 
   const mcp = new McpServer(
@@ -74,7 +92,11 @@ export async function createPwrGitMcpServer(
         "Use the advertised WebSocket only when the host cannot surface standard MCP resource subscriptions."
     }
   );
-  const statusResources = new StatusResourceRegistry(mcp, liveStatusLoader);
+  const statusResources = new StatusResourceRegistry(
+    mcp,
+    liveStatusLoader,
+    authorizer
+  );
 
   mcp.registerResource(
     "pwrgit-live-status-capabilities",
@@ -85,15 +107,20 @@ export async function createPwrGitMcpServer(
         "Capability discovery for standard MCP subscribable status resources and the optional WebSocket fallback.",
       mimeType: "application/json"
     },
-    async (uri) => ({
-      contents: [
-        {
-          uri: uri.toString(),
-          mimeType: "application/json",
-          text: JSON.stringify(eventServer.capabilities())
-        }
-      ]
-    })
+    async (uri) => {
+      const authorization = await requireAccess(authorizer, {
+        capabilities: ["forge.status.read", "status.subscribe"]
+      });
+      return {
+        contents: [
+          {
+            uri: uri.toString(),
+            mimeType: "application/json",
+            text: JSON.stringify(eventServer.capabilities(authorization))
+          }
+        ]
+      };
+    }
   );
 
   mcp.registerTool(
@@ -123,11 +150,28 @@ export async function createPwrGitMcpServer(
       annotations: readOnlyAnnotations
     },
     async (input) => {
+      let authorization = await requireAccess(authorizer, {
+        capabilities: ["repository.roots.read"]
+      });
+      if (input.roots !== undefined) {
+        authorization = await requireAccess(authorizer, {
+          capabilities: ["repository.roots.read"],
+          repositoryPaths: input.roots
+        });
+      }
+      const restricted = authorization.repositoryRoots !== null;
+      const requestedRoots =
+        input.roots ??
+        (authorization.repositoryRoots === null
+          ? undefined
+          : [...authorization.repositoryRoots]);
       const result = await discoverRepositoryRoots({
-        ...(input.roots === undefined ? {} : { requested: input.roots }),
-        ...(input.includeConventional === undefined
-          ? {}
-          : { includeConventional: input.includeConventional }),
+        ...(requestedRoots === undefined ? {} : { requested: requestedRoots }),
+        includeConventional: restricted
+          ? false
+          : (input.includeConventional ?? true),
+        includeConfigured: !restricted,
+        includeCurrentWorkspace: !restricted,
         ...(input.maxDepth === undefined ? {} : { maxDepth: input.maxDepth }),
         cwd,
         env,
@@ -167,10 +211,24 @@ export async function createPwrGitMcpServer(
       annotations: readOnlyAnnotations
     },
     async (input) => {
+      let authorization = await requireAccess(authorizer, {
+        capabilities: ["repository.checkout.locate"]
+      });
+      if (input.roots !== undefined) {
+        authorization = await requireAccess(authorizer, {
+          capabilities: ["repository.checkout.locate"],
+          repositoryPaths: input.roots
+        });
+      }
+      const roots =
+        input.roots ??
+        (authorization.repositoryRoots === null
+          ? undefined
+          : [...authorization.repositoryRoots]);
       const result = await findRepositoryCheckouts({
         repository: input.repository,
         ...(input.provider === undefined ? {} : { provider: input.provider }),
-        ...(input.roots === undefined ? {} : { roots: input.roots }),
+        ...(roots === undefined ? {} : { roots }),
         ...(input.maxDepth === undefined ? {} : { maxDepth: input.maxDepth }),
         ...(input.maxResults === undefined ? {} : { maxResults: input.maxResults }),
         cwd,
@@ -196,6 +254,10 @@ export async function createPwrGitMcpServer(
       annotations: readOnlyAnnotations
     },
     async (input) => {
+      await requireAccess(authorizer, {
+        capabilities: ["repository.metadata.read"],
+        repositoryPaths: [input.path]
+      });
       const result = await readRepositoryInfo(input.path, options.runner);
       return success(
         result,
@@ -223,6 +285,10 @@ export async function createPwrGitMcpServer(
       annotations: liveWatchAnnotations
     },
     async (input) => {
+      await requireAccess(authorizer, {
+        capabilities: ["forge.status.read", "status.subscribe"],
+        repositoryPaths: [input.path]
+      });
       const document = await statusResources.create(input.path, input.intervalMs);
       return {
         content: [
@@ -254,11 +320,15 @@ export async function createPwrGitMcpServer(
       inputSchema: {},
       annotations: readOnlyAnnotations
     },
-    async () =>
-      success(
-        eventServer.capabilities(),
+    async () => {
+      const authorization = await requireAccess(authorizer, {
+        capabilities: ["forge.status.read", "status.subscribe"]
+      });
+      return success(
+        eventServer.capabilities(authorization),
         `PwrGit live status uses standard MCP subscriptions first. The same contract is readable at ${CAPABILITY_RESOURCE_URI}; an optional WebSocket fallback is included in structuredContent.`
-      )
+      );
+    }
   );
 
   let closed = false;
@@ -274,4 +344,21 @@ export async function createPwrGitMcpServer(
       await mcp.close().catch(() => undefined);
     }
   };
+}
+
+async function requireAccess(
+  authorizer: McpAuthorizer,
+  requirement: McpAuthorizationRequirement = {}
+): Promise<McpAuthorization> {
+  try {
+    return await authorizer.authorize(requirement);
+  } catch (cause) {
+    if (cause instanceof McpAccessError) {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        `PwrGit MCP access denied (${cause.code}): ${cause.message}`
+      );
+    }
+    throw cause;
+  }
 }

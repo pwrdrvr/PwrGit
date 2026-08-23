@@ -12,6 +12,7 @@ import { GeneralSettings } from "./GeneralSettings";
 import { ProfilesSettings } from "./ProfilesSettings";
 import { ForgesSettings } from "./ForgesSettings";
 import { UpdatesSettings } from "./UpdatesSettings";
+import { LocalAgentsSettings } from "./LocalAgentsSettings";
 import { useAppSettings, type AppSettingsState } from "./useAppSettings";
 
 export type SettingsSection =
@@ -21,6 +22,7 @@ export type SettingsSection =
   | "experimental"
   | "diagnostics"
   | "forges"
+  | "agents"
   | "about";
 
 const SECTIONS: Array<{ id: SettingsSection; label: string }> = [
@@ -28,6 +30,7 @@ const SECTIONS: Array<{ id: SettingsSection; label: string }> = [
   { id: "updates", label: "Updates" },
   { id: "profiles", label: "Profiles" },
   { id: "forges", label: "Forges" },
+  { id: "agents", label: "Agents" },
   { id: "experimental", label: "Experimental" },
   { id: "diagnostics", label: "Memory / CPU" },
   { id: "about", label: "About" }
@@ -91,6 +94,10 @@ function SettingsSectionBody(props: {
 
   if (props.section === "about") {
     return <AboutSettings />;
+  }
+
+  if (props.section === "agents") {
+    return <LocalAgentsSettings />;
   }
 
   // The remaining panes render from the snapshot.

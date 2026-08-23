@@ -1,4 +1,6 @@
-import { resolve } from "node:path";
+import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ResourceUpdatedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -9,6 +11,12 @@ import {
   type StatusResourceDocument
 } from "./status-resources.js";
 import type { LiveStatusSnapshot } from "./types.js";
+import {
+  FixedMcpAuthorizer,
+  McpAccessError,
+  fullAccessAuthorization,
+  type McpAuthorizer
+} from "./access-policy.js";
 
 function snapshot(ciState: LiveStatusSnapshot["ci"]["state"]): LiveStatusSnapshot {
   return {
@@ -67,7 +75,8 @@ describe("PwrGit MCP integration", () => {
   it("negotiates subscriptions and notifies clients to re-read status resources", async () => {
     let ciState: LiveStatusSnapshot["ci"]["state"] = "running";
     const server = await createPwrGitMcpServer({
-      liveStatusLoader: async () => snapshot(ciState)
+      liveStatusLoader: async () => snapshot(ciState),
+      authorizer: new FixedMcpAuthorizer(fullAccessAuthorization())
     });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await server.mcp.connect(serverTransport);
@@ -114,6 +123,12 @@ describe("PwrGit MCP integration", () => {
           : undefined;
       expect(capabilityText).toBeTypeOf("string");
       expect(JSON.parse(capabilityText!) as unknown).toMatchObject({
+        authorization: {
+          protocol: "pwrgit.mcp-policy/v1",
+          required: true,
+          sessionId: "session_test",
+          roleId: "builtin.live-status"
+        },
         mcp: {
           primary: "subscribable_status_resource",
           resourceSubscriptions: { supported: true }
@@ -150,6 +165,97 @@ describe("PwrGit MCP integration", () => {
       await client.unsubscribeResource({ uri: document.resourceUri });
     } finally {
       vi.useRealTimers();
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("revalidates a revoked Session before standard MCP subscriptions", async () => {
+    const authorization = fullAccessAuthorization();
+    let active = true;
+    let loads = 0;
+    const authorizer: McpAuthorizer = {
+      authorize: async () => {
+        if (!active) throw new McpAccessError("revoked_session", "revoked");
+        return authorization;
+      }
+    };
+    const server = await createPwrGitMcpServer({
+      authorizer,
+      liveStatusLoader: async () => {
+        loads += 1;
+        return snapshot("running");
+      }
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.mcp.connect(serverTransport);
+    const client = new Client(
+      { name: "pwrgit-revocation-test", version: "1.0.0" },
+      { capabilities: {} }
+    );
+    await client.connect(clientTransport);
+
+    try {
+      const watched = await client.callTool({
+        name: "pwrgit_watch_repository",
+        arguments: { path: resolve("/tmp/pwrgit-mcp-integration") }
+      });
+      const document = watched.structuredContent as unknown as StatusResourceDocument;
+      expect(loads).toBe(1);
+      active = false;
+      await expect(
+        client.subscribeResource({ uri: document.resourceUri })
+      ).rejects.toThrow(/revoked/u);
+      expect(loads).toBe(1);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("limits discovery to the roots assigned to the Session role", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-scoped-discovery-"));
+    mkdirSync(join(root, ".git"));
+    const authorization = {
+      sessionId: "session_scoped",
+      sessionName: "Scoped discovery",
+      roleId: "role_scoped",
+      roleName: "One root",
+      capabilities: ["repository.roots.read"] as const,
+      repositoryRoots: [root]
+    };
+    const server = await createPwrGitMcpServer({
+      authorizer: new FixedMcpAuthorizer(authorization),
+      liveStatusLoader: async () => snapshot("none")
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.mcp.connect(serverTransport);
+    const client = new Client(
+      { name: "pwrgit-scope-test", version: "1.0.0" },
+      { capabilities: {} }
+    );
+    await client.connect(clientTransport);
+
+    try {
+      const result = await client.callTool({
+        name: "pwrgit_repository_roots",
+        arguments: {}
+      });
+      expect(result.structuredContent).toMatchObject({
+        roots: [{ path: realpathSync.native(root), source: "requested" }]
+      });
+      const denied = await client.callTool({
+        name: "pwrgit_repository_info",
+        arguments: { path: root }
+      });
+      expect(denied).toMatchObject({ isError: true });
+      expect(denied.content).toContainEqual(
+        expect.objectContaining({
+          type: "text",
+          text: expect.stringMatching(/repository\.metadata\.read/u)
+        })
+      );
+    } finally {
       await client.close();
       await server.close();
     }
