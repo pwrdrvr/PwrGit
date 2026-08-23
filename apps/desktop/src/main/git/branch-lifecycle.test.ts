@@ -130,7 +130,9 @@ describe("safe local branch lifecycle", () => {
 
     expect(!current.ok && current.error.code).toBe("branch_checked_out");
     expect(!linked.ok && linked.error.code).toBe("branch_checked_out");
-    expect(!linked.ok && linked.error.message).toContain(linkedPath);
+    expect(
+      !linked.ok && linked.error.message.replaceAll("\\", "/")
+    ).toContain(linkedPath.replaceAll("\\", "/"));
   });
 
   it("does not treat a detached worktree as occupying its former branch", async () => {
