@@ -13,6 +13,13 @@ test("boots a single window with #root mounted", async () => {
     // One window per profile: the title carries the booted profile's name.
     expect(await handle.window.title()).toMatch(/^PwrGit( — .+)?$/);
     expect(handle.app.windows().length).toBe(1);
+    // `ping` is deliberately transport-only: prove the exposed preload API,
+    // IPC dispatcher, command bus, and main handler complete one round trip.
+    expect(
+      await handle.window.evaluate(() =>
+        window.pwrgit.dispatch("ping", undefined)
+      )
+    ).toEqual({ ok: true, value: "pong" });
   } finally {
     await handle.cleanup();
   }
