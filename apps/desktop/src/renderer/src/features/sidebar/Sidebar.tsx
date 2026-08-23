@@ -9,6 +9,11 @@ import {
 import type { Lens, Profile, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
 import { announce, mountLiveRegion, movedMessage } from "../../lib/announce";
 import { copyText } from "../../lib/copyText";
+import {
+  currentPlatform,
+  hasPrimaryModifier,
+  shortcutLabel
+} from "../../lib/platform";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
 import { revealLabel, revealPath } from "../shell/reveal";
@@ -129,7 +134,8 @@ export function Sidebar({
   onOpenSearch,
   onExpandRepo,
   onNewProfile,
-  onManageProfile
+  onManageProfile,
+  platform = currentPlatform()
 }: {
   profiles: Profile[];
   activeProfile: Profile | null;
@@ -160,6 +166,8 @@ export function Sidebar({
   onExpandRepo: (repoId: string) => void;
   onNewProfile: () => void;
   onManageProfile: () => void;
+  /** Explicit only in deterministic platform component tests. */
+  platform?: string;
 }) {
   const now = useRelativeClock();
   // The reorder gestures announce through a shared live region. Put it in the
@@ -367,7 +375,7 @@ export function Sidebar({
     if (event.target !== event.currentTarget) return;
     const index = filteredIds.indexOf(repo.id);
     if (index === -1) return;
-    if (event.metaKey && event.shiftKey) {
+    if (hasPrimaryModifier(event, platform) && event.shiftKey) {
       if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
       if (!arrangeable) return;
       const step = event.key === "ArrowUp" ? -1 : 1;
@@ -534,7 +542,11 @@ export function Sidebar({
         onSelect: () => void copyText(w.branch)
       },
       { type: "item", label: "Copy path", onSelect: () => void copyText(w.path) },
-      { type: "item", label: revealLabel, onSelect: () => revealPath(w.path) },
+      {
+        type: "item",
+        label: revealLabel(platform),
+        onSelect: () => revealPath(w.path)
+      },
       { type: "sep" },
       {
         type: "item",
@@ -623,6 +635,7 @@ export function Sidebar({
       onRowKeyDown={(event) => handleRepoKeyDown(repo, event)}
       onRowFocus={() => setFocusedRepoId(repo.id)}
       isPostDragClick={repoDrag.isPostDragClick}
+      platform={platform}
     />
   );
 
@@ -653,9 +666,15 @@ export function Sidebar({
             <path d="m21 21-4.3-4.3" />
           </svg>
           <span className="jump-btn__label">Jump to repo…</span>
-          {/* ⌘F is the advertised find shortcut; ⌘K stays as a silent alias. */}
-          <span className="kbd" title="⌘F or ⌘K">
-            ⌘F
+          {/* Find is advertised; the K chord stays as a silent alias. */}
+          <span
+            className="kbd"
+            title={`${shortcutLabel({ key: "F" }, platform)} or ${shortcutLabel(
+              { key: "K" },
+              platform
+            )}`}
+          >
+            {shortcutLabel({ key: "F" }, platform)}
           </span>
         </button>
         {/* Add folders is the prerequisite for everything else — Clone is
