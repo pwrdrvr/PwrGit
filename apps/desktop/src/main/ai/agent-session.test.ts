@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({
@@ -148,7 +149,7 @@ describe("LocalAgentSession", () => {
     expect(clientOptions).toEqual(
       expect.objectContaining({
         command: "/tools/codex",
-        workspaceDir: "/safe/pwrgit-agent/work",
+        workspaceDir: join("/safe/pwrgit-agent", "work"),
         env: expect.objectContaining({
           CODEX_HOME: "/auth/work",
           PWRGIT_PROFILE_ID: "work"
