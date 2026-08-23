@@ -95,6 +95,7 @@ export function registerChangesHandlers(
     const result = await operations.run(req.worktreeId, () =>
       applyPartialSelection(
         execGit,
+        execGitBinary,
         path,
         req.path,
         req.staged,
@@ -220,7 +221,7 @@ export function registerChangesHandlers(
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
     return operations.run(req.worktreeId, () =>
-      partialFileDiff(execGit, path, req.path, req.staged)
+      partialFileDiff(execGit, execGitBinary, path, req.path, req.staged)
     );
   });
 

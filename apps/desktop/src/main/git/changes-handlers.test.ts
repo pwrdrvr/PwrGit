@@ -226,6 +226,7 @@ describe("partial staging handlers", () => {
     ).resolves.toEqual(ok(snapshot));
     expect(partialFileDiff).toHaveBeenCalledExactlyOnceWith(
       expect.any(Function),
+      expect.any(Function),
       "/repos/project",
       "notes.txt",
       false
@@ -244,6 +245,7 @@ describe("partial staging handlers", () => {
       })
     ).resolves.toEqual(ok(null));
     expect(applyPartialSelection).toHaveBeenCalledExactlyOnceWith(
+      expect.any(Function),
       expect.any(Function),
       "/repos/project",
       "notes.txt",

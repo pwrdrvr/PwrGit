@@ -86,8 +86,8 @@ describe("DiffViewer hunk and line selection", () => {
     "+++ b/file.txt",
     "@@ -1,3 +1,3 @@",
     " before",
-    "-old",
-    "+new",
+    "--- old",
+    "+++ new",
     " after",
     ""
   ].join("\n");
@@ -97,14 +97,14 @@ describe("DiffViewer hunk and line selection", () => {
       kind: "delete" as const,
       oldLine: 2,
       newLine: null,
-      text: "old"
+      text: "-- old"
     },
     {
       id: "h:0:2:2:a:2",
       kind: "add" as const,
       oldLine: null,
       newLine: 2,
-      text: "new"
+      text: "++ new"
     }
   ];
 

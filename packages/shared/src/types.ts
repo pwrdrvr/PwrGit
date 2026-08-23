@@ -755,6 +755,8 @@ export type OperationContinueOutcome =
 export type PartialDiffUnavailableReason =
   | "binary"
   | "conflicted"
+  | "gitlink"
+  | "non_utf8"
   | "new_file"
   | "deleted_file"
   | "renamed_file"

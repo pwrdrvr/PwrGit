@@ -66,6 +66,49 @@ export function parseUnifiedDiff(patch: string): ParsedDiff {
     }
     const f = file;
 
+    if (HUNK.test(line)) {
+      const m = HUNK.exec(line) as RegExpExecArray;
+      oldNo = Number(m[1]);
+      newNo = Number(m[2]);
+      hunk = { header: line, lines: [] };
+      f.hunks.push(hunk);
+      continue;
+    }
+
+    // Hunk rows take precedence over file headers. Source content beginning
+    // with "-- " is serialized as "--- ", and added content beginning with
+    // "++ " as "+++ "; interpreting either as metadata drops the visible row
+    // and breaks its typed selection coordinate.
+    if (hunk !== null) {
+      if (line.startsWith("\\")) continue;
+      if (line.startsWith("+")) {
+        hunk.lines.push({ kind: "add", newNo, text: line.slice(1) });
+        newNo += 1;
+        f.additions += 1;
+        continue;
+      }
+      if (line.startsWith("-")) {
+        hunk.lines.push({ kind: "del", oldNo, text: line.slice(1) });
+        oldNo += 1;
+        f.deletions += 1;
+        continue;
+      }
+      if (line.startsWith(" ")) {
+        hunk.lines.push({
+          kind: "ctx",
+          oldNo,
+          newNo,
+          text: line.slice(1)
+        });
+        oldNo += 1;
+        newNo += 1;
+        continue;
+      }
+      // Empty split-tail and the next file's metadata are not context rows.
+      hunk = null;
+      if (line === "") continue;
+    }
+
     if (line.startsWith("new file mode")) {
       f.status = "added";
     } else if (line.startsWith("deleted file mode")) {
@@ -76,7 +119,10 @@ export function parseUnifiedDiff(patch: string): ParsedDiff {
     } else if (line.startsWith("rename to ")) {
       f.path = line.slice("rename to ".length);
       f.status = "renamed";
-    } else if (line.startsWith("Binary files")) {
+    } else if (
+      line.startsWith("Binary files") ||
+      line === "GIT binary patch"
+    ) {
       f.binary = true;
     } else if (line.startsWith("--- ")) {
       const p = line.slice(4);
@@ -86,27 +132,6 @@ export function parseUnifiedDiff(patch: string): ParsedDiff {
       const p = line.slice(4);
       if (p === "/dev/null") f.status = "deleted";
       else if (p !== "") f.path = stripPrefix(p);
-    } else if (HUNK.test(line)) {
-      const m = HUNK.exec(line) as RegExpExecArray;
-      oldNo = Number(m[1]);
-      newNo = Number(m[2]);
-      hunk = { header: line, lines: [] };
-      f.hunks.push(hunk);
-    } else if (hunk !== null && !line.startsWith("\\")) {
-      if (line.startsWith("+")) {
-        hunk.lines.push({ kind: "add", newNo, text: line.slice(1) });
-        newNo += 1;
-        f.additions += 1;
-      } else if (line.startsWith("-")) {
-        hunk.lines.push({ kind: "del", oldNo, text: line.slice(1) });
-        oldNo += 1;
-        f.deletions += 1;
-      } else {
-        const text = line.startsWith(" ") ? line.slice(1) : line;
-        hunk.lines.push({ kind: "ctx", oldNo, newNo, text });
-        oldNo += 1;
-        newNo += 1;
-      }
     }
   }
 

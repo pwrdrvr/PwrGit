@@ -11,11 +11,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { err, ok } from "@pwrgit/shared";
-import type { GitExec, GitOutput } from "./dugite";
+import type {
+  GitBinaryOutput,
+  GitExec,
+  GitExecBinary,
+  GitOutput
+} from "./dugite";
 import {
   applyPartialSelection,
   buildSelectedPatch,
   parseZeroContextDiff,
+  partialDiffCapability,
   partialFileDiff
 } from "./partial-staging";
 
@@ -34,6 +40,27 @@ const systemGit: GitExec = (args, cwd, options) =>
     );
     proc.on("close", (exitCode) =>
       resolve(ok({ stdout, stderr, exitCode: exitCode ?? 1 } satisfies GitOutput))
+    );
+  });
+
+const systemGitBinary: GitExecBinary = (args, cwd) =>
+  new Promise((resolve) => {
+    const proc = spawn("git", args, { cwd });
+    const stdout: Buffer[] = [];
+    let stderr = "";
+    proc.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    proc.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+    proc.on("error", (cause) =>
+      resolve(err({ kind: "git", code: "spawn_failed", message: cause.message }))
+    );
+    proc.on("close", (exitCode) =>
+      resolve(
+        ok({
+          stdout: Buffer.concat(stdout),
+          stderr,
+          exitCode: exitCode ?? 1
+        } satisfies GitBinaryOutput)
+      )
     );
   });
 
@@ -114,6 +141,27 @@ describe("zero-context patch parsing and synthesis", () => {
       }
     }
   });
+
+  it("recognizes gitlink pseudo-lines as a protected entry", () => {
+    const parsed = parseZeroContextDiff(
+      [
+        "diff --git a/vendor/lib b/vendor/lib",
+        "index 1111111..2222222 160000",
+        "--- a/vendor/lib",
+        "+++ b/vendor/lib",
+        "@@ -1 +1 @@",
+        "-Subproject commit 1111111",
+        "+Subproject commit 2222222",
+        ""
+      ].join("\n")
+    );
+
+    expect(parsed.gitlink).toBe(true);
+    expect(partialDiffCapability(parsed, ["M"], true)).toMatchObject({
+      available: false,
+      reason: "gitlink"
+    });
+  });
 });
 
 describe("partial staging with a real Git index", () => {
@@ -145,13 +193,14 @@ describe("partial staging with a real Git index", () => {
       "one\nTWO\nthree\nfour\nfive\nSIX\nseven\n"
     );
 
-    const unstaged = await partialFileDiff(systemGit, repo, "file.txt", false);
+    const unstaged = await partialFileDiff(systemGit, systemGitBinary, repo, "file.txt", false);
     expect(unstaged.ok && unstaged.value.capability.available).toBe(true);
     if (!unstaged.ok) return;
     const firstHunk = unstaged.value.hunks[0];
     expect(firstHunk).toBeDefined();
     const stagedFirst = await applyPartialSelection(
       systemGit,
+      systemGitBinary,
       repo,
       "file.txt",
       false,
@@ -163,7 +212,7 @@ describe("partial staging with a real Git index", () => {
     expect(git(repo, "diff", "--cached")).not.toContain("SIX");
     expect(git(repo, "diff")).toContain("SIX");
 
-    const staged = await partialFileDiff(systemGit, repo, "file.txt", true);
+    const staged = await partialFileDiff(systemGit, systemGitBinary, repo, "file.txt", true);
     expect(staged.ok).toBe(true);
     if (!staged.ok) return;
     const deletion = staged.value.hunks
@@ -172,6 +221,7 @@ describe("partial staging with a real Git index", () => {
     expect(deletion?.text).toBe("two");
     const unstagedDeletion = await applyPartialSelection(
       systemGit,
+      systemGitBinary,
       repo,
       "file.txt",
       true,
@@ -201,7 +251,7 @@ describe("partial staging with a real Git index", () => {
         if ((i + seed) % 3 === 0) expected.push(inserted);
       }
       writeFileSync(join(repo, "file.txt"), `${working.join("\n")}\n`);
-      const diff = await partialFileDiff(systemGit, repo, "file.txt", false);
+      const diff = await partialFileDiff(systemGit, systemGitBinary, repo, "file.txt", false);
       expect(diff.ok).toBe(true);
       if (!diff.ok) continue;
       const chosen = diff.value.hunks
@@ -215,6 +265,7 @@ describe("partial staging with a real Git index", () => {
       expect(
         await applyPartialSelection(
           systemGit,
+          systemGitBinary,
           repo,
           "file.txt",
           false,
@@ -229,13 +280,14 @@ describe("partial staging with a real Git index", () => {
   it("rejects a stale view before changing the index", async () => {
     commitFile("before\n");
     writeFileSync(join(repo, "file.txt"), "first edit\n");
-    const diff = await partialFileDiff(systemGit, repo, "file.txt", false);
+    const diff = await partialFileDiff(systemGit, systemGitBinary, repo, "file.txt", false);
     expect(diff.ok).toBe(true);
     if (!diff.ok) return;
     writeFileSync(join(repo, "file.txt"), "external edit\n");
 
     const result = await applyPartialSelection(
       systemGit,
+      systemGitBinary,
       repo,
       "file.txt",
       false,
@@ -249,6 +301,139 @@ describe("partial staging with a real Git index", () => {
     expect(git(repo, "diff", "--cached")).toBe("");
   });
 
+  it("refuses lossy partial staging for non-UTF-8 text bytes", async () => {
+    writeFileSync(
+      join(repo, "file.txt"),
+      Buffer.from([0x6f, 0x6c, 0x64, 0xff, 0x0a])
+    );
+    git(repo, "add", "file.txt");
+    git(repo, "commit", "-m", "legacy encoding");
+    const indexedBefore = execFileSync("git", ["show", ":file.txt"], {
+      cwd: repo
+    });
+    writeFileSync(
+      join(repo, "file.txt"),
+      Buffer.from([0x6e, 0x65, 0x77, 0xfe, 0x0a])
+    );
+
+    const diff = await partialFileDiff(
+      systemGit,
+      systemGitBinary,
+      repo,
+      "file.txt",
+      false
+    );
+    expect(diff.ok && diff.value.capability).toMatchObject({
+      available: false,
+      reason: "non_utf8"
+    });
+    if (!diff.ok) return;
+    const result = await applyPartialSelection(
+      systemGit,
+      systemGitBinary,
+      repo,
+      "file.txt",
+      false,
+      diff.value.fingerprint,
+      allLineIds(diff)
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "partial_unavailable" }
+    });
+    expect(
+      execFileSync("git", ["show", ":file.txt"], { cwd: repo })
+    ).toEqual(indexedBefore);
+  });
+
+  it("uses the raw no-textconv representation for display and selection", async () => {
+    git(repo, "config", "diff.reorder.textconv", "false");
+    writeFileSync(join(repo, ".gitattributes"), "file.txt diff=reorder\n");
+    writeFileSync(join(repo, "file.txt"), "one\ntwo\n");
+    git(repo, "add", ".gitattributes", "file.txt");
+    git(repo, "commit", "-m", "textconv fixture");
+    writeFileSync(join(repo, "file.txt"), "ONE\ntwo\n");
+
+    const diff = await partialFileDiff(
+      systemGit,
+      systemGitBinary,
+      repo,
+      "file.txt",
+      false
+    );
+    expect(diff.ok && diff.value.capability.available).toBe(true);
+    if (!diff.ok) return;
+    expect(diff.value.patch).toContain("-one\n+ONE");
+    expect(diff.value.hunks.flatMap((hunk) => hunk.lines)).toMatchObject([
+      { kind: "delete", text: "one" },
+      { kind: "add", text: "ONE" }
+    ]);
+  });
+
+  it("replays nested paths when diff.noprefix is configured", async () => {
+    mkdirSync(join(repo, "nested"));
+    writeFileSync(join(repo, "nested", "file.txt"), "old\n");
+    git(repo, "add", "nested/file.txt");
+    git(repo, "commit", "-m", "nested fixture");
+    git(repo, "config", "diff.noprefix", "true");
+    writeFileSync(join(repo, "nested", "file.txt"), "new\n");
+
+    const diff = await partialFileDiff(
+      systemGit,
+      systemGitBinary,
+      repo,
+      "nested/file.txt",
+      false
+    );
+    expect(diff.ok).toBe(true);
+    if (!diff.ok) return;
+    expect(diff.value.patch).toContain("--- a/nested/file.txt");
+    expect(
+      await applyPartialSelection(
+        systemGit,
+        systemGitBinary,
+        repo,
+        "nested/file.txt",
+        false,
+        diff.value.fingerprint,
+        allLineIds(diff)
+      )
+    ).toEqual(ok(undefined));
+    expect(git(repo, "show", ":nested/file.txt")).toBe("new");
+  });
+
+  it("does not let temp cleanup failure mask a completed index update", async () => {
+    commitFile("old\n");
+    writeFileSync(join(repo, "file.txt"), "new\n");
+    const diff = await partialFileDiff(
+      systemGit,
+      systemGitBinary,
+      repo,
+      "file.txt",
+      false
+    );
+    expect(diff.ok).toBe(true);
+    if (!diff.ok) return;
+
+    const result = await applyPartialSelection(
+      systemGit,
+      systemGitBinary,
+      repo,
+      "file.txt",
+      false,
+      diff.value.fingerprint,
+      allLineIds(diff),
+      {
+        removeTemp: (path) => {
+          rmSync(path, { recursive: true, force: true });
+          throw new Error("scanner still holds the patch");
+        }
+      }
+    );
+    expect(result).toEqual(ok(undefined));
+    expect(git(repo, "show", ":file.txt")).toBe("new");
+  });
+
   it("normalizes CRLF through Git while leaving worktree bytes untouched", async () => {
     writeFileSync(join(repo, ".gitattributes"), "file.txt text eol=crlf\n");
     writeFileSync(join(repo, "file.txt"), "one\ntwo\n");
@@ -257,12 +442,13 @@ describe("partial staging with a real Git index", () => {
     git(repo, "checkout", "--", "file.txt");
     writeFileSync(join(repo, "file.txt"), "one\r\nTWO\r\n");
 
-    const diff = await partialFileDiff(systemGit, repo, "file.txt", false);
+    const diff = await partialFileDiff(systemGit, systemGitBinary, repo, "file.txt", false);
     expect(diff.ok).toBe(true);
     if (!diff.ok) return;
     expect(
       await applyPartialSelection(
         systemGit,
+        systemGitBinary,
         repo,
         "file.txt",
         false,
@@ -277,7 +463,7 @@ describe("partial staging with a real Git index", () => {
   it("requires an EOF no-newline replacement to move atomically", async () => {
     commitFile("old tail");
     writeFileSync(join(repo, "file.txt"), "new tail");
-    const diff = await partialFileDiff(systemGit, repo, "file.txt", false);
+    const diff = await partialFileDiff(systemGit, systemGitBinary, repo, "file.txt", false);
     expect(diff.ok).toBe(true);
     if (!diff.ok) return;
     const ids = allLineIds(diff);
@@ -285,6 +471,7 @@ describe("partial staging with a real Git index", () => {
     await expect(
       applyPartialSelection(
         systemGit,
+        systemGitBinary,
         repo,
         "file.txt",
         false,
@@ -298,6 +485,7 @@ describe("partial staging with a real Git index", () => {
     expect(
       await applyPartialSelection(
         systemGit,
+        systemGitBinary,
         repo,
         "file.txt",
         false,
@@ -314,13 +502,14 @@ describe("partial staging with a real Git index", () => {
       commitFile("old content\n");
       chmodSync(join(repo, "file.txt"), 0o755);
       writeFileSync(join(repo, "file.txt"), "new content\n");
-      const diff = await partialFileDiff(systemGit, repo, "file.txt", false);
+      const diff = await partialFileDiff(systemGit, systemGitBinary, repo, "file.txt", false);
       expect(diff.ok && diff.value.capability.available).toBe(true);
       if (!diff.ok) return;
 
       expect(
         await applyPartialSelection(
           systemGit,
+          systemGitBinary,
           repo,
           "file.txt",
           false,
@@ -353,7 +542,7 @@ describe("partial staging with a real Git index", () => {
       // The conflict is the fixture.
     }
 
-    const conflicted = await partialFileDiff(systemGit, repo, "file.txt", false);
+    const conflicted = await partialFileDiff(systemGit, systemGitBinary, repo, "file.txt", false);
     expect(conflicted.ok && conflicted.value.capability).toMatchObject({
       available: false,
       reason: "conflicted"
@@ -366,28 +555,28 @@ describe("partial staging with a real Git index", () => {
     git(repo, "add", "binary.bin");
     git(repo, "commit", "-m", "binary");
     writeFileSync(join(repo, "binary.bin"), Buffer.from([0, 9, 2, 3]));
-    const binary = await partialFileDiff(systemGit, repo, "binary.bin", false);
+    const binary = await partialFileDiff(systemGit, systemGitBinary, repo, "binary.bin", false);
     expect(binary.ok && binary.value.capability).toMatchObject({
       available: false,
       reason: "binary"
     });
 
     git(repo, "mv", "file.txt", "renamed.txt");
-    const renamed = await partialFileDiff(systemGit, repo, "renamed.txt", true);
+    const renamed = await partialFileDiff(systemGit, systemGitBinary, repo, "renamed.txt", true);
     expect(renamed.ok && renamed.value.capability).toMatchObject({
       available: false,
       reason: "renamed_file"
     });
 
     writeFileSync(join(repo, "new.txt"), "new\n");
-    const added = await partialFileDiff(systemGit, repo, "new.txt", false);
+    const added = await partialFileDiff(systemGit, systemGitBinary, repo, "new.txt", false);
     expect(added.ok && added.value.capability).toMatchObject({
       available: false,
       reason: "new_file"
     });
 
     git(repo, "rm", "-f", "binary.bin");
-    const deleted = await partialFileDiff(systemGit, repo, "binary.bin", true);
+    const deleted = await partialFileDiff(systemGit, systemGitBinary, repo, "binary.bin", true);
     expect(deleted.ok && deleted.value.capability).toMatchObject({
       available: false,
       reason: "deleted_file"
@@ -396,7 +585,7 @@ describe("partial staging with a real Git index", () => {
     if (process.platform !== "win32") {
       git(repo, "reset", "--hard", "HEAD");
       chmodSync(join(repo, "file.txt"), 0o755);
-      const mode = await partialFileDiff(systemGit, repo, "file.txt", false);
+      const mode = await partialFileDiff(systemGit, systemGitBinary, repo, "file.txt", false);
       expect(mode.ok && mode.value.capability).toMatchObject({
         available: false,
         reason: "mode_only"

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { TextDecoder } from "node:util";
 import {
   err,
   ok,
@@ -12,7 +13,11 @@ import {
   type PwrGitError,
   type Result
 } from "@pwrgit/shared";
-import { requireExit0, type GitExec } from "./dugite";
+import {
+  requireExit0,
+  type GitExec,
+  type GitExecBinary
+} from "./dugite";
 import { fileDiff, parseChanges } from "./git-service";
 
 const HUNK_HEADER =
@@ -43,6 +48,7 @@ export type ZeroContextPatch = {
   newHeader: string | null;
   hunks: ZeroContextHunk[];
   binary: boolean;
+  gitlink: boolean;
   renamed: boolean;
   modeChanged: boolean;
   unsupported: boolean;
@@ -57,7 +63,7 @@ const fingerprintFor = (
   path: string,
   staged: boolean,
   status: string,
-  patch: string
+  patch: Uint8Array
 ): string =>
   createHash("sha256")
     .update(staged ? "staged\0" : "unstaged\0")
@@ -77,6 +83,7 @@ export function parseZeroContextDiff(patch: string): ZeroContextPatch {
     newHeader: null,
     hunks: [],
     binary: false,
+    gitlink: false,
     renamed: false,
     modeChanged: false,
     unsupported: false
@@ -179,6 +186,13 @@ export function parseZeroContextDiff(patch: string): ZeroContextPatch {
     ) {
       parsed.modeChanged = true;
     }
+    if (
+      /^index \S+\.\.\S+ 160000$/.test(line) ||
+      line === "old mode 160000" ||
+      line === "new mode 160000"
+    ) {
+      parsed.gitlink = true;
+    }
     if (line.startsWith("diff --cc ") || line.startsWith("diff --combined ")) {
       parsed.unsupported = true;
     }
@@ -233,9 +247,10 @@ function publicHunks(parsed: ZeroContextPatch): PartialDiffHunk[] {
   }));
 }
 
-function capabilityFor(
+export function partialDiffCapability(
   parsed: ZeroContextPatch,
-  statuses: FileStatus[]
+  statuses: FileStatus[],
+  utf8Valid: boolean
 ): PartialDiffCapability {
   if (statuses.includes("U")) {
     return {
@@ -274,6 +289,20 @@ function capabilityFor(
       available: false,
       reason: "binary",
       message: "Binary changes can only be staged as a whole file."
+    };
+  }
+  if (parsed.gitlink) {
+    return {
+      available: false,
+      reason: "gitlink",
+      message: "Submodule pointers can only be staged as a whole entry."
+    };
+  }
+  if (!utf8Valid) {
+    return {
+      available: false,
+      reason: "non_utf8",
+      message: "Non-UTF-8 text can only be staged as a whole file to preserve its exact bytes."
     };
   }
   if (parsed.unsupported) {
@@ -317,7 +346,44 @@ async function checkedStdout(
   return checked.ok ? ok(checked.value.stdout) : checked;
 }
 
-const selectionArgs = (path: string, staged: boolean): string[] => [
+async function checkedBinaryStdout(
+  git: GitExecBinary,
+  cwd: string,
+  args: string[]
+): Promise<Result<Buffer>> {
+  const raw = await git(args, cwd);
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode !== 0) {
+    return err({
+      kind: "git",
+      code: `exit_${raw.value.exitCode}`,
+      message:
+        raw.value.stderr.trim() !== ""
+          ? raw.value.stderr.trim()
+          : `git ${args.join(" ")} exited ${raw.value.exitCode}`
+    });
+  }
+  return ok(raw.value.stdout);
+}
+
+const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
+
+function decodePatch(buffer: Buffer): { text: string; valid: boolean } {
+  try {
+    return { text: UTF8_DECODER.decode(buffer), valid: true };
+  } catch {
+    // The display may retain replacement glyphs, but partialDiffCapability refuses to
+    // expose IDs from this lossy representation. Whole-file Git actions keep
+    // operating on the original bytes.
+    return { text: buffer.toString("utf8"), valid: false };
+  }
+}
+
+const diffArgs = (
+  path: string,
+  staged: boolean,
+  context: number
+): string[] => [
   "diff",
   ...(staged ? ["--cached"] : []),
   "--no-color",
@@ -326,7 +392,9 @@ const selectionArgs = (path: string, staged: boolean): string[] => [
   "--binary",
   "--full-index",
   "--find-renames",
-  "--unified=0",
+  "--src-prefix=a/",
+  "--dst-prefix=b/",
+  `--unified=${context}`,
   "--",
   path
 ];
@@ -338,26 +406,41 @@ const statusArgs = (): string[] => [
 ];
 
 /** Read a consistent display/selection snapshot. A tool writing the same file
- * while the three Git reads run either settles within the bounded retry or is
+ * while the snapshot reads run either settles within the bounded retry or is
  * reported instead of returning line IDs from a torn view. */
 async function readSnapshot(
   git: GitExec,
+  gitBinary: GitExecBinary,
   cwd: string,
   path: string,
   staged: boolean
 ): Promise<Result<PartialSnapshot>> {
   for (let attempt = 0; attempt < SNAPSHOT_ATTEMPTS; attempt += 1) {
-    const before = await checkedStdout(git, cwd, selectionArgs(path, staged));
+    const before = await checkedBinaryStdout(
+      gitBinary,
+      cwd,
+      diffArgs(path, staged, 0)
+    );
     if (!before.ok) return before;
-    const display = await fileDiff(git, cwd, path, staged);
+    const display = await checkedBinaryStdout(
+      gitBinary,
+      cwd,
+      diffArgs(path, staged, 3)
+    );
     if (!display.ok) return display;
     const status = await checkedStdout(git, cwd, statusArgs());
     if (!status.ok) return status;
-    const after = await checkedStdout(git, cwd, selectionArgs(path, staged));
+    const after = await checkedBinaryStdout(
+      gitBinary,
+      cwd,
+      diffArgs(path, staged, 0)
+    );
     if (!after.ok) return after;
-    if (before.value !== after.value) continue;
+    if (!before.value.equals(after.value)) continue;
 
-    const parsed = parseZeroContextDiff(after.value);
+    const selectionPatch = decodePatch(after.value);
+    const displayPatch = decodePatch(display.value);
+    const parsed = parseZeroContextDiff(selectionPatch.text);
     const changes = parseChanges(status.value);
     const statuses = [
       ...changes.staged.filter((file) => file.path === path),
@@ -373,14 +456,24 @@ async function readSnapshot(
       statuses.join(","),
       after.value
     );
+    let patch = displayPatch.text;
+    if (!staged && patch === "" && statuses.includes("?")) {
+      const untracked = await fileDiff(git, cwd, path, false);
+      if (!untracked.ok) return untracked;
+      patch = untracked.value;
+    }
     return ok({
       parsed,
       response: {
         path,
         staged,
-        patch: display.value,
+        patch,
         fingerprint,
-        capability: capabilityFor(parsed, statuses),
+        capability: partialDiffCapability(
+          parsed,
+          statuses,
+          selectionPatch.valid && displayPatch.valid
+        ),
         hunks: publicHunks(parsed)
       }
     });
@@ -394,11 +487,12 @@ async function readSnapshot(
 
 export async function partialFileDiff(
   git: GitExec,
+  gitBinary: GitExecBinary,
   cwd: string,
   path: string,
   staged: boolean
 ): Promise<Result<PartialFileDiff>> {
-  const snapshot = await readSnapshot(git, cwd, path, staged);
+  const snapshot = await readSnapshot(git, gitBinary, cwd, path, staged);
   return snapshot.ok ? ok(snapshot.value.response) : snapshot;
 }
 
@@ -539,11 +633,15 @@ export function buildSelectedPatch(
 
 export async function applyPartialSelection(
   git: GitExec,
+  gitBinary: GitExecBinary,
   cwd: string,
   path: string,
   staged: boolean,
   expectedFingerprint: string,
-  lineIds: string[]
+  lineIds: string[],
+  options: {
+    removeTemp?: (path: string) => void;
+  } = {}
 ): Promise<Result<void>> {
   if (lineIds.length === 0) {
     return err({
@@ -552,7 +650,7 @@ export async function applyPartialSelection(
       message: "Select at least one changed line."
     });
   }
-  const snapshot = await readSnapshot(git, cwd, path, staged);
+  const snapshot = await readSnapshot(git, gitBinary, cwd, path, staged);
   if (!snapshot.ok) return snapshot;
   if (snapshot.value.response.fingerprint !== expectedFingerprint) {
     return err({
@@ -599,6 +697,7 @@ export async function applyPartialSelection(
       "--unidiff-zero",
       "--recount",
       "--whitespace=nowarn",
+      "-p1",
       ...(built.value.reverse ? ["--reverse"] : [])
     ];
     const checked = await git([...common, "--check", patchPath], cwd);
@@ -625,6 +724,13 @@ export async function applyPartialSelection(
     }
     return ok(undefined);
   } finally {
-    rmSync(temp, { recursive: true, force: true });
+    try {
+      if (options.removeTemp !== undefined) options.removeTemp(temp);
+      else rmSync(temp, { recursive: true, force: true });
+    } catch {
+      // The patch file is ephemeral. In particular, Windows scanners can hold
+      // it briefly after Git exits; cleanup failure must never turn a completed
+      // atomic index update into a reported command failure.
+    }
   }
 }

@@ -63,4 +63,39 @@ describe("parseUnifiedDiff", () => {
   it("returns no files for an empty patch", () => {
     expect(parseUnifiedDiff("").files).toEqual([]);
   });
+
+  it("keeps prefix-looking source text as hunk rows", () => {
+    const patch = [
+      "diff --git a/odd.txt b/odd.txt",
+      "--- a/odd.txt",
+      "+++ b/odd.txt",
+      "@@ -1 +1 @@",
+      "--- source text",
+      "+++ destination text",
+      ""
+    ].join("\n");
+
+    const file = parseUnifiedDiff(patch).files[0];
+    expect(file?.path).toBe("odd.txt");
+    expect(file?.hunks[0]?.lines).toEqual([
+      { kind: "del", oldNo: 1, text: "-- source text" },
+      { kind: "add", newNo: 1, text: "++ destination text" }
+    ]);
+  });
+
+  it("detects literal Git binary patches", () => {
+    const patch = [
+      "diff --git a/art/dot.png b/art/dot.png",
+      "index 4fb72b6..9e74fe7 100644",
+      "GIT binary patch",
+      "literal 12",
+      "TcmeAS@N?(olHy`uVBq!ia0vp^",
+      ""
+    ].join("\n");
+
+    expect(parseUnifiedDiff(patch).files[0]).toMatchObject({
+      path: "art/dot.png",
+      binary: true
+    });
+  });
 });
