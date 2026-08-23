@@ -6987,6 +6987,13 @@ body.is-col-resizing {
 .settings-button--primary:hover {
   background: var(--accent-bright);
 }
+.settings-button--danger {
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+.settings-button--danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+}
 .settings-pathlink {
   appearance: none;
   border: 0;
@@ -7057,8 +7064,30 @@ body.is-col-resizing {
 }
 .settings-profile-row__actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
   flex: 0 0 auto;
+}
+
+.modal--delete-profile {
+  width: min(480px, 94vw);
+}
+.delete-profile__copy,
+.delete-profile__kept {
+  margin: 0 0 12px;
+  color: var(--text-secondary);
+  font: 500 12.5px/1.5 var(--font-sans);
+}
+.delete-profile__kept {
+  padding: 10px 12px;
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-md);
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+.delete-profile__confirm {
+  margin: 16px 0 0;
 }
 
 /* ---- Sync-button busy spinner (visible even in icon-only narrow mode) ---- */

@@ -461,6 +461,15 @@ if (!gotSingleInstanceLock) {
         refreshMenu();
       },
       openWindow: openProfileWindow,
+      onDeleted: (deletedProfileId, activeProfileId) => {
+        // A renderer's profile binding is immutable, so it cannot survive the
+        // row it represents. Drop ephemeral selections/reveals and close it.
+        pendingReveals.delete(deletedProfileId);
+        activeWorktreeId = null;
+        if (windows.close(deletedProfileId)) {
+          openProfileWindow(activeProfileId);
+        }
+      },
       consumeReveal: (profileId) => {
         const reveal = pendingReveals.get(profileId) ?? null;
         pendingReveals.delete(profileId);

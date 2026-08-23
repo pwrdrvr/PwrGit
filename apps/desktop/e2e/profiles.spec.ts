@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
@@ -24,6 +25,20 @@ test.afterEach(async () => {
   boxA = null;
   boxB = null;
 });
+
+async function openSettingsFromMenu(app: AppHandle["app"]): Promise<void> {
+  await app.evaluate(({ Menu }) => {
+    for (const top of Menu.getApplicationMenu()?.items ?? []) {
+      for (const item of top.submenu?.items ?? []) {
+        if (item.label === "Settings…") {
+          item.click();
+          return;
+        }
+      }
+    }
+    throw new Error("Settings… menu item not found");
+  });
+}
 
 test("creating a profile opens its own window with repos from all roots", async () => {
   boxA = createGitSandbox();
@@ -227,6 +242,73 @@ test("profile menu closes on outside click and Escape", async () => {
   await expect(window.locator(".profile-menu")).toBeVisible();
   await window.keyboard.press("Escape");
   await expect(window.locator(".profile-menu")).toHaveCount(0);
+});
+
+test("deleting an active profile closes its window but keeps its repositories", async () => {
+  boxA = createGitSandbox();
+  const repo = boxA.makeRepo("acme-delete-safe");
+  handle = await launchApp();
+  const { app, window: personalWindow } = handle;
+
+  await personalWindow.locator(".profile-chip").click();
+  await personalWindow
+    .locator(".profile-menu__action", { hasText: "New profile" })
+    .click();
+  await personalWindow
+    .getByPlaceholder("e.g. Acme or Personal")
+    .fill("Acme");
+  await personalWindow
+    .getByPlaceholder("you@company.com")
+    .fill("harold@acme.dev");
+  await handle.setPickDirectory(boxA.reposDir);
+  await personalWindow.locator(".modal--profile .rootlist__add").click();
+  const acmeWindowPromise = app.waitForEvent("window");
+  await personalWindow.locator(".modal--profile .modal__create").click();
+  const acmeWindow = await acmeWindowPromise;
+  await acmeWindow.waitForSelector("#root");
+  await expect(acmeWindow.locator(".profile-chip__name")).toHaveText("Acme");
+
+  const settingsPromise = app.waitForEvent("window");
+  await openSettingsFromMenu(app);
+  const settings = await settingsPromise;
+  await settings.waitForSelector(".settings-screen");
+  await settings
+    .locator(".settings-nav__button", { hasText: "Profiles" })
+    .click();
+  const acmeRow = settings.locator(".settings-profile-row", { hasText: "Acme" });
+  await acmeRow.getByRole("button", { name: "Delete…" }).click();
+
+  const dialog = settings.getByRole("alertdialog", { name: "Delete “Acme”?" });
+  await expect(dialog).toContainText(
+    "Not deleted: repository folders, Git repositories, worktrees, branches, commits, or files on disk."
+  );
+  const deleteButton = dialog.getByRole("button", { name: "Delete profile" });
+  await expect(deleteButton).toBeDisabled();
+  const confirmation = dialog.getByLabel("Type Acme to confirm");
+  await confirmation.fill("acme");
+  await expect(deleteButton).toBeDisabled();
+  await confirmation.fill("Acme");
+  await expect(deleteButton).toBeEnabled();
+
+  const acmeClosed = acmeWindow.waitForEvent("close");
+  await deleteButton.click();
+  await acmeClosed;
+  await expect(acmeRow).toHaveCount(0);
+  const personalRow = settings.locator(".settings-profile-row", {
+    hasText: "Personal"
+  });
+  await expect(personalRow.locator(".settings-card__chip--ok")).toHaveText(
+    "Active"
+  );
+  await expect(
+    personalRow.getByRole("button", { name: "Delete…" })
+  ).toBeDisabled();
+  await expect(personalWindow.locator(".profile-chip__name")).toHaveText(
+    "Personal"
+  );
+  await expect.poll(() => app.windows().length).toBe(2);
+  expect(existsSync(repo.path)).toBe(true);
+  expect(existsSync(`${repo.path}/README.md`)).toBe(true);
 });
 
 test("a cross-profile remote branch opens its new-worktree flow in the owning window", async () => {

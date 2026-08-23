@@ -51,6 +51,17 @@ describe("command registry", () => {
     }>();
     expectTypeOf<Res<"changes:discardAll">>().toEqualTypeOf<null>();
   });
+
+  it("guards profile deletion with the current display name", () => {
+    expectTypeOf<Req<"profile:delete">>().toEqualTypeOf<{
+      profileId: string;
+      expectedName: string;
+    }>();
+    expectTypeOf<Res<"profile:delete">>().toMatchTypeOf<{
+      deletedProfileId: string;
+      activeProfileId: string;
+    }>();
+  });
 });
 
 describe("inferUpdateSelection", () => {
