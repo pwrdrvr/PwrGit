@@ -28,9 +28,10 @@
  *
  * Wire-up:
  *   - `pnpm lint:colors` runs it standalone.
- *   - `pnpm lint` runs it first in the chain — colors, then licenses:check,
- *     lint:boundaries, and typecheck, ordered cheapest-first so a fast failure
- *     doesn't wait on the slow ones. CI's Typecheck job invokes `pnpm lint`.
+ *   - `pnpm lint` runs it first in the chain — colors, package reservation,
+ *     licenses, lint:boundaries, and typecheck, ordered cheapest-first so a
+ *     fast failure doesn't wait on the slow ones. CI's Typecheck job invokes
+ *     `pnpm lint`.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";

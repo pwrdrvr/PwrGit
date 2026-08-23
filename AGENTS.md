@@ -51,10 +51,11 @@ pnpm typecheck  # tsc across packages
 pnpm lint       # every check CI runs, cheapest-first (see below)
 ```
 
-`pnpm lint` chains `lint:colors` → `licenses:check` → `lint:boundaries` →
-`typecheck`, ordered so a fast failure doesn't wait on the slow one. CI's
-Typecheck job runs exactly this one command, so **add new repo-wide checks to
-the chain in the root `package.json`**, not as another CI step.
+`pnpm lint` chains `lint:colors` → `package:reservation:check` →
+`licenses:check` → `lint:boundaries` → `typecheck`, ordered so a fast failure
+doesn't wait on the slow one. CI's Typecheck job runs exactly this one command,
+so **add new repo-wide checks to the chain in the root `package.json`**, not as
+another CI step.
 
 `lint:boundaries` is dependency-cruiser (`.dependency-cruiser.cjs`). It enforces
 that main, preload, and renderer stay three separate bundles sharing only
