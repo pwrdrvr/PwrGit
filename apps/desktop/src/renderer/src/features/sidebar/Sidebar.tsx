@@ -8,9 +8,16 @@ import {
 } from "react";
 import type { Lens, Profile, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
 import { announce, mountLiveRegion, movedMessage } from "../../lib/announce";
+import type { ReadState } from "../../state/readState";
 import { copyText } from "../../lib/copyText";
+import {
+  currentPlatform,
+  hasPrimaryModifier,
+  shortcutLabel
+} from "../../lib/platform";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
+import { ReadError } from "../shell/ReadError";
 import { revealLabel, revealPath } from "../shell/reveal";
 import {
   parseFocusVisits,
@@ -127,9 +134,12 @@ function ForkGlyph() {
 export function Sidebar({
   profiles,
   activeProfile,
+  profileLoadState,
+  onRetryProfiles,
   onSwitchProfile,
   repos,
-  loading,
+  repoLoadState,
+  onRetryRepos,
   selectedWorktreeId,
   onSelectWorktree,
   onSetRepoPin,
@@ -148,13 +158,17 @@ export function Sidebar({
   onOpenSearch,
   onExpandRepo,
   onNewProfile,
-  onManageProfile
+  onManageProfile,
+  platform = currentPlatform()
 }: {
   profiles: Profile[];
   activeProfile: Profile | null;
+  profileLoadState: ReadState;
+  onRetryProfiles: () => void;
   onSwitchProfile: (profileId: string) => void;
   repos: Repo[];
-  loading: boolean;
+  repoLoadState: ReadState;
+  onRetryRepos: () => void;
   selectedWorktreeId: string | null;
   onSelectWorktree: (repo: Repo, worktree: Worktree) => void;
   onSetRepoPin: (repoId: string, pinned: boolean) => void;
@@ -179,6 +193,8 @@ export function Sidebar({
   onExpandRepo: (repoId: string) => void;
   onNewProfile: () => void;
   onManageProfile: () => void;
+  /** Explicit only in deterministic platform component tests. */
+  platform?: string;
 }) {
   const now = useRelativeClock();
   // The reorder gestures announce through a shared live region. Put it in the
@@ -401,6 +417,10 @@ export function Sidebar({
   const focusedPage = focusedRepoPage(allFiltered, showAllFocused);
   const filtered = lens === "Focused" ? focusedPage.repos : allFiltered;
   const hiddenFocused = lens === "Focused" ? focusedPage.hidden : 0;
+  const showFocusNote =
+    lens === "Focused" &&
+    repos.length > 0 &&
+    repoLoadState.status !== "loading";
   const arrangeable = lensIsArrangeable(lens);
   const filteredIds = filtered.map((repo) => repo.id);
 
@@ -454,7 +474,7 @@ export function Sidebar({
     if (event.target !== event.currentTarget) return;
     const index = filteredIds.indexOf(repo.id);
     if (index === -1) return;
-    if (event.metaKey && event.shiftKey) {
+    if (hasPrimaryModifier(event, platform) && event.shiftKey) {
       if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
       if (!arrangeable) return;
       const step = event.key === "ArrowUp" ? -1 : 1;
@@ -621,7 +641,11 @@ export function Sidebar({
         onSelect: () => void copyText(w.branch)
       },
       { type: "item", label: "Copy path", onSelect: () => void copyText(w.path) },
-      { type: "item", label: revealLabel, onSelect: () => revealPath(w.path) },
+      {
+        type: "item",
+        label: revealLabel(platform),
+        onSelect: () => revealPath(w.path)
+      },
       { type: "sep" },
       {
         type: "item",
@@ -722,6 +746,7 @@ export function Sidebar({
         onRowKeyDown={(event) => handleRepoKeyDown(repo, event)}
         onRowFocus={() => setFocusedRepoId(repo.id)}
         isPostDragClick={repoDrag.isPostDragClick}
+        platform={platform}
       />
     );
   };
@@ -729,13 +754,33 @@ export function Sidebar({
   return (
     <aside className="pane pane--sidebar" data-testid="sidebar">
       <div className="sidebar__profile">
-        <ProfileChip
-          profiles={profiles}
-          activeProfile={activeProfile}
-          onSwitch={onSwitchProfile}
-          onNewProfile={onNewProfile}
-          onManageProfile={onManageProfile}
-        />
+        {profileLoadState.status === "error" ? (
+          <ReadError
+            compact
+            title="Profiles couldn’t be loaded"
+            message={profileLoadState.message}
+            onRetry={onRetryProfiles}
+          />
+        ) : profileLoadState.status === "loading" ? (
+          <p className="sidebar__read-status" role="status">
+            Loading profiles…
+          </p>
+        ) : activeProfile === null ? (
+          <div className="sidebar__profile-empty">
+            <span>No profiles yet.</span>
+            <button type="button" onClick={onNewProfile}>
+              Create profile
+            </button>
+          </div>
+        ) : (
+          <ProfileChip
+            profiles={profiles}
+            activeProfile={activeProfile}
+            onSwitch={onSwitchProfile}
+            onNewProfile={onNewProfile}
+            onManageProfile={onManageProfile}
+          />
+        )}
       </div>
 
       <div className="sidebar__search">
@@ -753,9 +798,15 @@ export function Sidebar({
             <path d="m21 21-4.3-4.3" />
           </svg>
           <span className="jump-btn__label">Jump to repo…</span>
-          {/* ⌘F is the advertised find shortcut; ⌘K stays as a silent alias. */}
-          <span className="kbd" title="⌘F or ⌘K">
-            ⌘F
+          {/* Find is advertised; the K chord stays as a silent alias. */}
+          <span
+            className="kbd"
+            title={`${shortcutLabel({ key: "F" }, platform)} or ${shortcutLabel(
+              { key: "K" },
+              platform
+            )}`}
+          >
+            {shortcutLabel({ key: "F" }, platform)}
           </span>
         </button>
         {/* Add folders is the prerequisite for everything else — Clone is
@@ -763,7 +814,16 @@ export function Sidebar({
             at the bottom of the list, where it was the quietest control on a
             first-run sidebar whose only working action it was. */}
         <div className="sidebar__actions">
-          <button className="add-folder" onClick={onAddFolder}>
+          <button
+            className="add-folder"
+            onClick={onAddFolder}
+            disabled={activeProfile === null}
+            title={
+              activeProfile === null
+                ? "Load or create a profile before adding folders"
+                : undefined
+            }
+          >
             <span className="new-wt__plus">+</span> Add folders…
           </button>
           {/* Clone and fork share their own row beneath Add folders. Three
@@ -840,7 +900,7 @@ export function Sidebar({
         )}
       </div>
 
-      {lens === "Focused" && repos.length > 0 && !loading && (
+      {showFocusNote && (
         <div className="sidebar__focus-note" aria-live="polite">
           <span className="sidebar__focus-rules">
             Current · pinned · viewed · changed · 30-day commits
@@ -879,6 +939,14 @@ export function Sidebar({
           and folder groups. It is a plain static block, so it changes no layout
           and the rows still stick to .sidebar__list's scrollport. */}
       <div className="sidebar__list">
+        {repoLoadState.status === "error" && (
+          <ReadError
+            compact
+            title="Repositories couldn’t be loaded"
+            message={repoLoadState.message}
+            onRetry={onRetryRepos}
+          />
+        )}
         <div
           className="sidebar__tree"
           id={REPO_TREE_ID}
@@ -916,7 +984,11 @@ export function Sidebar({
 
         {filtered.length === 0 && (
           <div className="sidebar__empty">
-            {loading ? "Scanning…" : EMPTY_COPY[lens]}
+            {repoLoadState.status === "loading"
+              ? "Scanning…"
+              : repoLoadState.status === "error"
+                ? "The last repository list is still shown above, if one was available."
+                : EMPTY_COPY[lens]}
           </div>
         )}
       </div>

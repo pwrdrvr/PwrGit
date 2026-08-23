@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ok, type ForgeStatus } from "@pwrgit/shared";
+import { err, ok, type ForgeStatus } from "@pwrgit/shared";
 
 const mocks = vi.hoisted(() => ({
   dispatch: vi.fn(),
@@ -74,6 +74,30 @@ describe("ForgesSettings", () => {
     expect(container.textContent).toContain("Connected");
   });
 
+  it("replaces an initial failure with useful retry UI and recovers", async () => {
+    mocks.dispatch.mockResolvedValue(
+      err({
+        kind: "unknown",
+        code: "probe_failed",
+        message: "The local service did not answer."
+      })
+    );
+    await act(async () => root.render(<ForgesSettings />));
+
+    const alert = container.querySelector<HTMLElement>("[role='alert']");
+    expect(alert?.textContent).toContain("Forge connections couldn’t be checked");
+    expect(alert?.textContent).toContain("The local service did not answer.");
+    expect(container.textContent).not.toContain("Checking…");
+
+    mocks.dispatch.mockResolvedValue(ok({ forges: [forge()] }));
+    await act(async () => {
+      alert?.querySelector<HTMLButtonElement>("button")?.click();
+    });
+
+    expect(container.textContent).toContain("Connected");
+    expect(container.querySelector("[role='alert']")).toBeNull();
+  });
+
   it("names the command that unblocks a signed-out forge", async () => {
     await render([forge({ kind: "gitlab", cli: "glab", loggedIn: false })]);
 
@@ -122,7 +146,7 @@ describe("ForgesSettings", () => {
     expect(mocks.dispatch).toHaveBeenCalledTimes(1);
   });
 
-  it("lets a pushed change win over a slower initial read", async () => {
+  it("lets a pushed success win over a slower failed read", async () => {
     let settle: ((value: unknown) => void) | undefined;
     mocks.dispatch.mockReturnValue(
       new Promise((resolve) => {
@@ -138,11 +162,17 @@ describe("ForgesSettings", () => {
       listener?.({ forges: [forge({ loggedIn: true })] });
     });
     await act(async () => {
-      settle?.(ok({ forges: [forge({ loggedIn: false })] }));
+      settle?.(
+        err({
+          kind: "unknown",
+          code: "probe_failed",
+          message: "Stale failure"
+        })
+      );
     });
 
     expect(container.textContent).toContain("Connected");
-    expect(container.textContent).not.toContain("Signed out");
+    expect(container.textContent).not.toContain("Stale failure");
   });
 
   it("keeps asking while open, so a terminal sign-in can reach the pane", async () => {
