@@ -4,6 +4,7 @@ import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import type { SettingsService } from "../settings/settings-service";
+import { deleteLocalBranch, renameLocalBranch } from "./branch-lifecycle";
 import { execGit } from "./dugite";
 import {
   checkoutNewBranchAt,
@@ -35,6 +36,11 @@ type Row = {
   profile_id: string;
 };
 
+type RepoRow = {
+  path: string;
+  profile_id: string;
+};
+
 export function registerBranchHandlers(
   bus: CommandBus,
   db: DB,
@@ -52,6 +58,28 @@ export function registerBranchHandlers(
          WHERE w.id = ?`
       )
       .get(worktreeId) as Row | undefined;
+
+  const repoOf = (repoId: string): RepoRow | undefined =>
+    db
+      .prepare("SELECT path, profile_id FROM repos WHERE id = ?")
+      .get(repoId) as RepoRow | undefined;
+
+  const publishBranchMutation = async (
+    repoId: string,
+    profileId: string
+  ): Promise<void> => {
+    await indexer.refreshRepoWorktrees(repoId);
+    const worktrees = db
+      .prepare("SELECT id FROM worktrees WHERE repo_id = ?")
+      .all(repoId) as { id: string }[];
+    // A local ref moved even though no checkout did. Force every open graph of
+    // this repository to invalidate its repo-level lane cache; repo:changed
+    // reloads the sidebar and command-palette branch indexes separately.
+    for (const worktree of worktrees) {
+      emitEvent("worktree:changed", { worktreeId: worktree.id });
+    }
+    emitEvent("repo:changed", { profileId });
+  };
 
   bus.register("branch:list", async (req) => {
     const row = rowOf(req.worktreeId);
@@ -211,6 +239,52 @@ export function registerBranchHandlers(
     await indexer.refreshRepoWorktrees(row.repo_id);
     refresher.refreshWorktree(req.worktreeId);
     emitEvent("repo:changed", { profileId: row.profile_id });
+    return ok(null);
+  });
+
+  bus.register("branch:rename", async (req) => {
+    const repo = repoOf(req.repoId);
+    if (repo === undefined) {
+      return err({ ...notFound, message: "repo not found" });
+    }
+    const result = await operations.runRepository(req.repoId, () =>
+      renameLocalBranch(
+        execGit,
+        repo.path,
+        { branch: req.branch, expectedHead: req.expectedHead },
+        req.newBranch
+      )
+    );
+    if (!result.ok) return result;
+    logMain(
+      "info",
+      "branch",
+      `renamed local branch ${req.branch} to ${req.newBranch} in ${repo.path}`
+    );
+    await publishBranchMutation(req.repoId, repo.profile_id);
+    return ok(null);
+  });
+
+  bus.register("branch:delete", async (req) => {
+    const repo = repoOf(req.repoId);
+    if (repo === undefined) {
+      return err({ ...notFound, message: "repo not found" });
+    }
+    const result = await operations.runRepository(req.repoId, () =>
+      deleteLocalBranch(
+        execGit,
+        repo.path,
+        { branch: req.branch, expectedHead: req.expectedHead },
+        req.force === true
+      )
+    );
+    if (!result.ok) return result;
+    logMain(
+      "info",
+      "branch",
+      `${req.force === true ? "force-deleted" : "deleted"} local branch ${req.branch} in ${repo.path}`
+    );
+    await publishBranchMutation(req.repoId, repo.profile_id);
     return ok(null);
   });
 }
