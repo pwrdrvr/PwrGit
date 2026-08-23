@@ -17,11 +17,6 @@ export function registerDialogHandlers(bus: CommandBus): void {
     return result.canceled ? [] : result.filePaths;
   };
 
-  bus.register("dialog:pickDirectory", async () => {
-    const paths = await open(["openDirectory"]);
-    return ok(paths[0] ?? null);
-  });
-
   // Multi-select folders in one native dialog (macOS/Linux allow ⌘/Ctrl-click).
   bus.register("dialog:pickDirectories", async () => {
     return ok(await open(["openDirectory", "multiSelections"]));

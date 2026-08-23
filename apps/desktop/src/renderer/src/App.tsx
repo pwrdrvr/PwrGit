@@ -64,6 +64,8 @@ export function App() {
   const {
     profiles,
     activeProfile,
+    loadState: profileLoadState,
+    retry: retryProfiles,
     openProfile,
     createProfile,
     updateProfile,
@@ -75,7 +77,8 @@ export function App() {
   >(null);
   const {
     repos,
-    loading,
+    loadState: repoLoadState,
+    retry: retryRepos,
     removalProgress,
     refreshingRepoIds,
     setRepoPin,
@@ -399,9 +402,12 @@ export function App() {
         <Sidebar
           profiles={profiles}
           activeProfile={activeProfile}
+          profileLoadState={profileLoadState}
+          onRetryProfiles={() => void retryProfiles()}
           onSwitchProfile={(id) => void openProfile(id)}
           repos={repos}
-          loading={loading}
+          repoLoadState={repoLoadState}
+          onRetryRepos={() => void retryRepos()}
           selectedWorktreeId={selection?.worktreeId ?? null}
           onSelectWorktree={selectWorktree}
           onSetRepoPin={setRepoPin}
@@ -517,7 +523,15 @@ export function App() {
             </>
           ) : (
             <div className="main-empty">
-              {loading ? "Scanning repos…" : "Select a worktree from the sidebar"}
+              {profileLoadState.status === "loading"
+                ? "Loading profiles…"
+                : profileLoadState.status === "error"
+                  ? "Profiles couldn’t be loaded. Try again from the sidebar."
+                  : repoLoadState.status === "loading"
+                    ? "Scanning repos…"
+                    : repoLoadState.status === "error"
+                      ? "Repositories couldn’t be loaded. Try again from the sidebar."
+                      : "Select a worktree from the sidebar"}
             </div>
           )}
         </main>

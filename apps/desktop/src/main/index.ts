@@ -360,7 +360,7 @@ if (!gotSingleInstanceLock) {
     publishAppAppearance = (next) => {
       for (const window of BrowserWindow.getAllWindows()) {
         if (windows.profileFor(window) === null) {
-          emitEventToWindow(window, "appearance:changed", next);
+          emitEventToWindow("appearance:changed", next, window);
         }
       }
       windows.syncAllAppearances();
@@ -443,7 +443,6 @@ if (!gotSingleInstanceLock) {
     };
 
     registerProfileHandlers(bus, profiles, {
-      onActivated: rescanInBackground,
       onChanged: (profile) => {
         windows.syncAppearance(profile.id);
         refreshMenu();

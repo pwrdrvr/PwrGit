@@ -10,8 +10,6 @@ import { emitEvent } from "../ipc";
 import type { ProfileService } from "./profile-service";
 
 export type ProfileHandlerDeps = {
-  /** Kick a background rescan when a profile becomes active. */
-  onActivated?: (profile: Profile) => void;
   /** Rebuild profile-derived state and repaint an open profile window. */
   onChanged?: (profile: Profile) => void;
   /** Open-or-focus the window bound to a profile (one window per profile). */
@@ -36,26 +34,9 @@ export function registerProfileHandlers(
   profiles: ProfileService,
   deps: ProfileHandlerDeps
 ): void {
-  const { onActivated, onChanged, openWindow, consumeReveal } = deps;
+  const { onChanged, openWindow, consumeReveal } = deps;
 
   bus.register("profile:list", () => ok(profiles.snapshot()));
-
-  bus.register("profile:switch", (req) => {
-    const profile = profiles.get(req.profileId);
-    if (profile === null) {
-      return err({
-        kind: "profile",
-        code: "not_found",
-        message: `No profile "${req.profileId}"`
-      });
-    }
-    const snapshot = profiles.switch(req.profileId);
-    emitEvent("profile:changed", snapshot);
-    onActivated?.(profile);
-    onChanged?.(profile);
-    return ok(snapshot);
-  });
-
   bus.register("profile:openWindow", (req) => {
     const opened = openWindow(
       req.profileId,

@@ -63,7 +63,7 @@ export function createProfileWindows(options: {
     if (win === null) return;
     const next = options.appearance(profileId);
     repaintWindowChrome(win, next.resolvedTheme);
-    emitEventToWindow(win, "appearance:changed", next);
+    emitEventToWindow("appearance:changed", next, win);
   };
 
   return {

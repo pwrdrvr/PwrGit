@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Profile } from "@pwrgit/shared";
 import { ProfileModal } from "../sidebar/ProfileModal";
+import { ReadError } from "../shell/ReadError";
 import { useProfiles } from "../../state/useProfiles";
 import { SettingsPanelHead, SettingsSection } from "./SettingsLayout";
 
@@ -26,6 +27,7 @@ export function ProfilesSettings() {
           <button
             className="settings-button settings-button--primary"
             type="button"
+            disabled={profiles.loadState.status !== "ready"}
             onClick={() => setModal({ mode: "create" })}
           >
             Add profile
@@ -37,9 +39,25 @@ export function ProfilesSettings() {
         eyebrow="Profiles"
         title="Profile list"
         description="The active profile is the one most recently used; each profile opens in its own window."
-        chip={`${profiles.profiles.length} profile${profiles.profiles.length === 1 ? "" : "s"}`}
+        chip={
+          profiles.loadState.status === "loading"
+            ? "Loading"
+            : profiles.loadState.status === "error"
+              ? "Unavailable"
+              : `${profiles.profiles.length} profile${profiles.profiles.length === 1 ? "" : "s"}`
+        }
       >
-        {profiles.profiles.length === 0 ? (
+        {profiles.loadState.status === "loading" ? (
+          <p className="settings-empty" role="status">
+            Loading profiles…
+          </p>
+        ) : profiles.loadState.status === "error" ? (
+          <ReadError
+            title="Profiles couldn’t be loaded"
+            message={profiles.loadState.message}
+            onRetry={() => void profiles.retry()}
+          />
+        ) : profiles.profiles.length === 0 ? (
           <p className="settings-empty">No profiles yet.</p>
         ) : (
           <div className="settings-profile-list">

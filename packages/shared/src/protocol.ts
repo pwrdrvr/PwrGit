@@ -454,7 +454,6 @@ export interface Commands {
   // Profiles (U5). One window per profile: "switching" means opening (or
   // focusing) that profile's window, never repointing the current one.
   "profile:list": { req: void; res: ProfileList };
-  "profile:switch": { req: { profileId: ProfileId }; res: ProfileList };
   /** Open (or focus) the window bound to a profile; optionally reveal a repo
    *  (and a specific worktree) there once it's up — cross-profile ⌘F picks. */
   "profile:openWindow": {
@@ -485,13 +484,11 @@ export interface Commands {
 
   // Repos & discovery (U6)
   "repo:list": { req: { profileId?: ProfileId }; res: Repo[] };
-  "repo:rescan": { req: { profileId?: ProfileId }; res: Repo[] };
   /** Reconcile one repo with Git, discovering external worktree changes. */
   "repo:refreshWorktrees": {
     req: { repoId: string };
     res: RepoWorktreeRefresh;
   };
-  "repo:add": { req: { profileId: ProfileId; path: string }; res: Repo };
   /** What the clone and fork dialogs need to open: known owners and forge
    *  availability. Answered from SQLite and a cached probe — no forge call. */
   "repo:cloneCatalog": { req: { profileId: ProfileId }; res: CloneCatalog };
@@ -1041,7 +1038,6 @@ export interface Commands {
   "app:readDocument": { req: { kind: AppDocumentKind }; res: AppDocument };
   "app:openDocumentWindow": { req: { kind: AppDocumentKind }; res: null };
 
-  "dialog:pickDirectory": { req: void; res: string | null };
   "dialog:pickDirectories": { req: void; res: string[] };
 
   // Reveal a path in the OS file manager (Finder / Explorer / …).

@@ -1,4 +1,5 @@
 import type { Lens, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
+import { pathLeaf } from "../../lib/platform";
 
 export const LENSES: Lens[] = ["Recent", "Pinned", "Behind", "Stale", "All"];
 
@@ -68,7 +69,7 @@ const comparablePath = (path: string): string => {
  *  because a switch confirm has to name the checkout it would move, and it
  *  names it by folder for the same reason the rows do. */
 export const lastSegment = (path: string): string =>
-  normalizeSlashes(path).split("/").filter(Boolean).pop() ?? path;
+  pathLeaf(path);
 
 const isUnder = (path: string, root: string): boolean => {
   const p = comparablePath(path);

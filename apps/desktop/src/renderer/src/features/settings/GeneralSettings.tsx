@@ -5,6 +5,11 @@ import type {
   SidebarTextSize
 } from "@pwrgit/shared";
 import {
+  currentPlatform,
+  isMacPlatform,
+  shortcutLabel
+} from "../../lib/platform";
+import {
   SettingsField,
   SettingsPanelHead,
   SettingsSection,
@@ -41,11 +46,24 @@ export function GeneralSettings(props: {
   onDeveloperModeChange: (enabled: boolean) => void;
   onSidebarTextSizeChange: (size: SidebarTextSize) => void;
   onSidebarDensityChange: (density: SidebarDensity) => void;
+  /** Explicit only in deterministic platform component tests. */
+  platform?: string;
 }) {
   const developerMode = props.snapshot.general.developerMode;
   const theme = props.snapshot.general.theme;
   const textSize = props.snapshot.general.sidebarTextSize;
   const density = props.snapshot.general.sidebarDensity;
+  const platform = props.platform ?? currentPlatform();
+  const developerShortcuts = [
+    shortcutLabel({ key: "R" }, platform),
+    shortcutLabel({ key: "R", shift: true }, platform),
+    shortcutLabel(
+      isMacPlatform(platform)
+        ? { key: "I", alt: true }
+        : { key: "I", shift: true },
+      platform
+    )
+  ].join(", ");
 
   return (
     <div className="settings-stack" aria-label="General settings">
@@ -132,7 +150,7 @@ export function GeneralSettings(props: {
           <SettingsField
             label="Developer Mode"
             sub="Expose Reload, Force Reload, and Developer Tools in the View menu."
-            help="Also enables their shortcuts (⌘R, ⇧⌘R, ⌥⌘I). Takes effect immediately in every window."
+            help={`Also enables their shortcuts (${developerShortcuts}). Takes effect immediately in every window.`}
             control={
               <SettingsSwitch
                 checked={developerMode}
