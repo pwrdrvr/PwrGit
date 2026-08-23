@@ -11,6 +11,9 @@
 // graph, and rebase entries.
 
 import type {
+  AgentAvailability,
+  AgentRebaseProposal,
+  AgentRequestPhase,
   BranchRef,
   BulkSyncMode,
   BulkSyncProgress,
@@ -1141,6 +1144,27 @@ export interface Commands {
     res: null;
   };
 
+  // Proposal-only local-agent workflow. Agent output is display metadata; the
+  // existing rebase:check -> approvalToken -> rebase:apply path remains the
+  // sole route to a Git mutation.
+  "agent:availability": {
+    req: { profileId: ProfileId; refresh?: boolean };
+    res: AgentAvailability;
+  };
+  "agent:rebaseDraft": {
+    req: {
+      requestId: string;
+      worktreeId: string;
+      commits: RebaseCommitRef[];
+      op: RebaseOperation;
+    };
+    res: AgentRebaseProposal;
+  };
+  "agent:cancel": {
+    req: { requestId: string };
+    res: { cancelled: boolean };
+  };
+
   // Changes (U11 / U12)
   "changes:list": { req: { worktreeId: string }; res: ChangeSet };
   /** Stage the named paths. A folder row sends every file it lists, so the
@@ -1353,6 +1377,13 @@ export type Res<C extends CommandName> = Commands[C]["res"];
 
 /** Server → renderer push events. */
 export interface Events {
+  "agent:requestState": {
+    requestId: string;
+    profileId: ProfileId;
+    worktreeId: string;
+    phase: AgentRequestPhase;
+    message?: string;
+  };
   "profile:changed": ProfileList;
   "repo:changed": { profileId: ProfileId };
   /** Live Git progress for one clone command, correlated by operation id. */

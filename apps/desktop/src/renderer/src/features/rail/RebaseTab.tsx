@@ -1,11 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import type {
+  AgentAvailability,
+  AgentRebaseProposal,
   RebaseCheckResult,
   RebaseCommitRef,
   RebaseOperation,
   RebasePlan
 } from "@pwrgit/shared";
-import { dispatch } from "../../lib/pwrgit";
+import {
+  dispatch,
+  subscribe,
+  windowProfileId
+} from "../../lib/pwrgit";
 
 async function orderedSelection(
   worktreeId: string,
@@ -26,6 +32,139 @@ const STEP_COLOR: Record<string, string> = {
 
 type CheckState = "idle" | "checking" | RebaseCheckResult;
 
+type AvailabilityState =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "resolved"; value: AgentAvailability }
+  | { kind: "error"; message: string };
+
+type ProposalState =
+  | { kind: "idle" }
+  | { kind: "requesting" }
+  | { kind: "complete"; value: AgentRebaseProposal }
+  | { kind: "error"; message: string };
+
+export function AgentProposalPanel({
+  availability,
+  proposal,
+  onRequest,
+  onCancel
+}: {
+  availability: AvailabilityState;
+  proposal: ProposalState;
+  onRequest: () => void;
+  onCancel: () => void;
+}) {
+  const snapshot =
+    availability.kind === "resolved" ? availability.value : null;
+  const codex = snapshot?.providers.find((provider) => provider.id === "codex");
+  const detectedAcp =
+    snapshot?.providers.filter(
+      (provider) => provider.kind === "acp" && provider.status === "unsupported"
+    ) ?? [];
+  const canRequest = snapshot?.status === "ready";
+
+  return (
+    <div className="rebase-agent">
+      <div className="rebase-section">Agent proposal</div>
+      {availability.kind === "idle" || availability.kind === "checking" ? (
+        <div className="rebase-agent__status" role="status">
+          <span>Discovering</span>
+          Looking for a safe local Codex session…
+        </div>
+      ) : availability.kind === "error" ? (
+        <div className="rebase-agent__status rebase-agent__status--warning">
+          <span>Unavailable</span>
+          {availability.message} The deterministic plan remains usable.
+        </div>
+      ) : snapshot?.status === "unavailable" ? (
+        <div className="rebase-agent__status rebase-agent__status--warning">
+          <span>No safe agent</span>
+          <div>
+            {snapshot.message}
+            {detectedAcp.length > 0 && (
+              <div className="rebase-agent__detail">
+                {detectedAcp.map((provider) => provider.displayName).join(", ")} detected,
+                but ACP cannot enforce the no-tools boundary required here.
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="rebase-agent__status rebase-agent__status--ready">
+          <span>Ready</span>
+          {codex?.displayName ?? "Codex"}
+          {codex?.version !== undefined ? ` ${codex.version}` : ""} will review
+          this exact plan without tools or repo access.
+        </div>
+      )}
+
+      {proposal.kind === "complete" && (
+        <div className="rebase-agent__proposal">
+          <div className="rebase-agent__proposal-head">
+            <span>
+              {proposal.value.providerName} proposes · {proposal.value.confidence}
+              {" "}confidence
+            </span>
+            <span
+              className={`rebase-agent__verdict rebase-agent__verdict--${proposal.value.verdict}`}
+            >
+              {proposal.value.verdict === "proceed" ? "Proceed" : "Use caution"}
+            </span>
+          </div>
+          <div className="rebase-agent__title">{proposal.value.title}</div>
+          <div className="rebase-agent__summary">{proposal.value.summary}</div>
+          <ul>
+            {proposal.value.rationale.map((reason, index) => (
+              <li key={`${index}:${reason}`}>{reason}</li>
+            ))}
+          </ul>
+          {proposal.value.risks.length > 0 && (
+            <div className="rebase-agent__risks">
+              <strong>Watch for</strong>
+              <ul>
+                {proposal.value.risks.map((risk, index) => (
+                  <li key={`${index}:${risk}`}>{risk}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <div className="rebase-agent__guard">
+            Proposal only. Codex cannot run Git. PwrGit still requires an isolated
+            check and your explicit Apply click.
+          </div>
+        </div>
+      )}
+
+      {proposal.kind === "error" && (
+        <div className="rebase-agent__status rebase-agent__status--warning" role="status">
+          <span>Agent stopped</span>
+          {proposal.message}
+        </div>
+      )}
+
+      {canRequest && proposal.kind !== "complete" && (
+        <div className="rebase-agent__actions">
+          {proposal.kind === "requesting" ? (
+            <button type="button" className="rebase-agent__cancel" onClick={onCancel}>
+              Cancel proposal
+            </button>
+          ) : (
+            <button type="button" className="rebase-agent__ask" onClick={onRequest}>
+              {proposal.kind === "error" ? "Retry Codex proposal" : "Ask Codex to review"}
+            </button>
+          )}
+        </div>
+      )}
+      {proposal.kind === "requesting" && (
+        <div className="rebase-agent__scan" role="status">
+          Codex is reviewing commit intent and the canonical steps…
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function RebaseTab({
   worktreeId,
   sourceHead,
@@ -44,15 +183,27 @@ export function RebaseTab({
   const [check, setCheck] = useState<CheckState>("idle");
   const [applying, setApplying] = useState(false);
   const [applied, setApplied] = useState(false);
+  const [availability, setAvailability] = useState<AvailabilityState>({
+    kind: "idle"
+  });
+  const [proposal, setProposal] = useState<ProposalState>({ kind: "idle" });
   const checkGeneration = useRef(0);
+  const activeRequestId = useRef<string | null>(null);
+  const profileId = windowProfileId();
 
   const key = selectedHashes.join(",");
   useEffect(() => {
+    const requestId = activeRequestId.current;
+    if (requestId !== null) {
+      activeRequestId.current = null;
+      void dispatch("agent:cancel", { requestId });
+    }
     checkGeneration.current += 1;
     setCheck("idle");
     setApplied(false);
     setPlan(null);
     setCommits([]);
+    setProposal({ kind: "idle" });
     if (worktreeId === null || op === null || selectedHashes.length === 0) {
       return;
     }
@@ -70,6 +221,94 @@ export function RebaseTab({
       active = false;
     };
   }, [worktreeId, sourceHead, op, key]);
+
+  useEffect(() => {
+    if (profileId === null || worktreeId === null || plan?.valid !== true) {
+      setAvailability({ kind: "idle" });
+      return;
+    }
+    let active = true;
+    setAvailability({ kind: "checking" });
+    void dispatch("agent:availability", { profileId }).then((result) => {
+      if (!active) return;
+      setAvailability(
+        result.ok
+          ? { kind: "resolved", value: result.value }
+          : { kind: "error", message: result.error.message }
+      );
+    });
+    return () => {
+      active = false;
+    };
+  }, [profileId, worktreeId, plan?.valid, key]);
+
+  useEffect(
+    () =>
+      subscribe("agent:requestState", (state) => {
+        if (state.requestId !== activeRequestId.current) return;
+        if (
+          state.phase === "cancelled" ||
+          state.phase === "timed_out" ||
+          state.phase === "failed"
+        ) {
+          activeRequestId.current = null;
+          setProposal({
+            kind: "error",
+            message:
+              state.message ??
+              (state.phase === "timed_out"
+                ? "The proposal timed out. Nothing changed."
+                : "The proposal stopped. Nothing changed.")
+          });
+        }
+      }),
+    []
+  );
+
+  useEffect(
+    () => () => {
+      const requestId = activeRequestId.current;
+      if (requestId !== null) {
+        activeRequestId.current = null;
+        void dispatch("agent:cancel", { requestId });
+      }
+    },
+    []
+  );
+
+  const requestProposal = async (): Promise<void> => {
+    if (
+      worktreeId === null ||
+      op === null ||
+      plan?.valid !== true ||
+      availability.kind !== "resolved" ||
+      availability.value.status !== "ready"
+    ) {
+      return;
+    }
+    const requestId = crypto.randomUUID();
+    activeRequestId.current = requestId;
+    setProposal({ kind: "requesting" });
+    const result = await dispatch("agent:rebaseDraft", {
+      requestId,
+      worktreeId,
+      commits,
+      op
+    });
+    if (activeRequestId.current !== requestId) return;
+    activeRequestId.current = null;
+    setProposal(
+      result.ok
+        ? { kind: "complete", value: result.value }
+        : { kind: "error", message: result.error.message }
+    );
+  };
+
+  const cancelProposal = (): void => {
+    const requestId = activeRequestId.current;
+    if (requestId === null) return;
+    void dispatch("agent:cancel", { requestId });
+  };
 
   const runCheck = async (): Promise<void> => {
     if (worktreeId === null || op === null || plan === null || !plan.valid) {
@@ -158,7 +397,7 @@ export function RebaseTab({
             ))}
           </div>
 
-          <div className="rebase-section">Plan</div>
+          <div className="rebase-section">PwrGit safe plan</div>
           <div className="rebase-plan">
             {plan.valid ? (
               <>
@@ -181,6 +420,13 @@ export function RebaseTab({
               <div className="rebase-plan__invalid">{plan.reason}</div>
             )}
           </div>
+
+          <AgentProposalPanel
+            availability={availability}
+            proposal={proposal}
+            onRequest={() => void requestProposal()}
+            onCancel={cancelProposal}
+          />
 
           {check === "checking" && (
             <div className="rebase-check-result" role="status">

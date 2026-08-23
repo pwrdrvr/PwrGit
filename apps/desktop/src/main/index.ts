@@ -20,6 +20,8 @@ import {
 } from "@pwrgit/shared";
 import { registerAppIdentityHandlers } from "./app-identity";
 import { registerAppDocumentHandlers } from "./app-document-handlers";
+import { registerAgentHandlers } from "./ai/agent-handlers";
+import { LocalAgentSession } from "./ai/agent-session";
 import { wireAppMenuBridge } from "./app-menu-bridge";
 import { openAppDocumentWindow } from "./app-document-window";
 import {
@@ -530,6 +532,15 @@ if (!gotSingleInstanceLock) {
     registerSubmoduleHandlers(bus, db);
     const fileInsightHandlers = registerFileInsightHandlers(bus, db);
     registerRebaseHandlers(bus, db, refresher, worktreeOperations);
+    const agentHandlers = registerAgentHandlers(bus, db, {
+      session: new LocalAgentSession({
+        // Built-app E2E can pin the honest unavailable state regardless of the
+        // developer machine's Codex install. Packaged builds ignore this seam.
+        discoveryDisabled:
+          !app.isPackaged &&
+          process.env["PWRGIT_E2E_AGENT_UNAVAILABLE"] === "1"
+      })
+    });
     registerDialogHandlers(bus);
     registerShellHandlers(bus);
     const githubHandlers = registerGitHubHandlers(
@@ -559,6 +570,7 @@ if (!gotSingleInstanceLock) {
         githubHandlers.releaseWebContents(webContentsId);
         bulkSyncHandlers.releaseWebContents(webContentsId);
         fileInsightHandlers.releaseWebContents(webContentsId);
+        agentHandlers.releaseWebContents(webContentsId);
       }
     });
     registerAppUpdateHandlers(bus);
@@ -603,6 +615,7 @@ if (!gotSingleInstanceLock) {
       clearInterval(activeStatePoll);
       githubHandlers.stop();
       appearance.dispose();
+      void agentHandlers.dispose();
     });
 
     // Drain diagnostics before quitting so final monitor-stopped events and

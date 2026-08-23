@@ -41,6 +41,12 @@ importers:
       '@octokit/graphql':
         specifier: ^8.2.1
         version: 8.2.2
+      '@pwrdrvr/agent-acp':
+        specifier: ^0.15.0
+        version: 0.15.0(zod@4.4.3)
+      '@pwrdrvr/agent-client':
+        specifier: ^0.8.2
+        version: 0.8.2
       '@pwrdrvr/agent-core':
         specifier: ^0.2.0
         version: 0.2.0
@@ -130,6 +136,11 @@ importers:
   packages/shared: {}
 
 packages:
+
+  '@agentclientprotocol/sdk@1.3.0':
+    resolution: {integrity: sha512-i3h/efaeuMUFAO1HSfo97QZQnnvMd7wWBYtBsdL6UMZg3a78sk3Ffya5Xu7C7tYsXomXoDXJBAzQF2PcFKAhIQ==}
+    peerDependencies:
+      zod: ^3.25.0 || ^4.0.0
 
   '@asamuzakjp/css-color@6.0.5':
     resolution: {integrity: sha512-mbhpPMmnw/kwW19aRNmSUl1QzLbdGo1SCuE49BT98MNwqF6zaHb3o2owssFc/PEO/4t2UjqtCNwocuDtJornzA==}
@@ -902,11 +913,21 @@ packages:
     engines: {node: '>=20'}
     hasBin: true
 
+  '@pwrdrvr/agent-acp@0.15.0':
+    resolution: {integrity: sha512-xUDZtiOGHQvX2cSlGGQ6KGfh37cLrqgxQgT6F/eh6j4M3xyvLdgr61vIJMltBsmuaYMoCI8gXmsTAoJnQxXo0A==}
+
+  '@pwrdrvr/agent-client@0.8.2':
+    resolution: {integrity: sha512-/g6jEVvRr+vH1iUThORoPUGuEXUN9B3iDWxPmsHmEiLbTo+Eni1YT4fgbL4xQsCcSD8N2g+rYZG4GwoPFoa2ww==}
+
   '@pwrdrvr/agent-core@0.2.0':
     resolution: {integrity: sha512-zTo7vJGekyZX2h9xWYiZfQvt+qKTPhuciWyCouow1shaKgg0Bn6B8S5lTRvMzxvT7feKOZ7zy/To2Cu6+1i1+A==}
 
   '@pwrdrvr/agent-transport@0.1.7':
     resolution: {integrity: sha512-91LJLC+jdWO6v3WIqoWI/CLHkMJebF4hEqk0vOkgK6DlawrA926EP7kHQ1VOE/iQRo5LCRqFqxjtWn6mQcs/EQ==}
+
+  '@pwrdrvr/codex-app-server-protocol@0.144.0':
+    resolution: {integrity: sha512-WmURXzmmNEY8lmnNZunNQj/Bnn3yjzS6Rc0gzlDU7sBHMd0kvtskXE9BCMcR+E7sVJ53V/gwjfksRUli0xUgdA==}
+    engines: {node: '>=20'}
 
   '@pwrdrvr/codex-discovery@0.4.0':
     resolution: {integrity: sha512-5QDeGsSTN6Oo+X2eIA8qOf7anWTIcnNJJzyfD3qFoFZLGS0RvIsMbzK1UwiVZszO3zT9DH6U4umbz2KrIyBv7A==}
@@ -2948,6 +2969,10 @@ packages:
 
 snapshots:
 
+  '@agentclientprotocol/sdk@1.3.0(zod@4.4.3)':
+    dependencies:
+      zod: 4.4.3
+
   '@asamuzakjp/css-color@6.0.5':
     dependencies:
       '@csstools/css-calc': 3.3.0(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)
@@ -3603,11 +3628,29 @@ snapshots:
     dependencies:
       playwright: 1.62.1
 
+  '@pwrdrvr/agent-acp@0.15.0(zod@4.4.3)':
+    dependencies:
+      '@agentclientprotocol/sdk': 1.3.0(zod@4.4.3)
+      '@pwrdrvr/agent-core': 0.2.0
+      '@pwrdrvr/agent-transport': 0.1.7
+    transitivePeerDependencies:
+      - zod
+
+  '@pwrdrvr/agent-client@0.8.2':
+    dependencies:
+      '@pwrdrvr/agent-core': 0.2.0
+      '@pwrdrvr/agent-transport': 0.1.7
+      '@pwrdrvr/codex-app-server-protocol': 0.144.0
+      '@pwrdrvr/codex-discovery': 0.4.0
+      zod: 4.4.3
+
   '@pwrdrvr/agent-core@0.2.0': {}
 
   '@pwrdrvr/agent-transport@0.1.7':
     dependencies:
       '@pwrdrvr/agent-core': 0.2.0
+
+  '@pwrdrvr/codex-app-server-protocol@0.144.0': {}
 
   '@pwrdrvr/codex-discovery@0.4.0':
     dependencies:

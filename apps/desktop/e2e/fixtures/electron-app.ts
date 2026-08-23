@@ -45,6 +45,7 @@ function cleanEnv(extra: Record<string, string>): Record<string, string> {
 export async function launchApp(
   opts: {
     worktreeRoot?: string;
+    agentUnavailable?: boolean;
     gitConfig?: string;
     forgeFixturePath?: string;
     theme?: "system" | "dark" | "light";
@@ -92,6 +93,9 @@ export async function launchApp(
       // signing, merge drivers, or other machine-global behavior.
       GIT_CONFIG_GLOBAL: gitconfig,
       GIT_CONFIG_SYSTEM: "/dev/null",
+      ...(opts.agentUnavailable === true
+        ? { PWRGIT_E2E_AGENT_UNAVAILABLE: "1" }
+        : {}),
       ...(opts.forgeFixturePath === undefined
         ? {}
         : { PWRGIT_E2E_FORGE_FIXTURE: opts.forgeFixturePath }),
