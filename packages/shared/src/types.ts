@@ -156,6 +156,39 @@ export type RemoteBranchPage = {
   total: number;
 };
 
+export type GitObjectType = "commit" | "tree" | "blob" | "tag" | "unknown";
+
+export type TagAnnotation = {
+  /** First paragraph of the annotated tag message. */
+  subject: string;
+  /** Remaining paragraphs, without the subject. */
+  body?: string;
+  taggerName?: string;
+  taggerEmail?: string;
+  taggedAt?: string;
+};
+
+/** A local `refs/tags/*` ref. Tags are never switchable branch refs. */
+export type TagSummary = {
+  name: string;
+  fullName: string;
+  kind: "lightweight" | "annotated";
+  /** Object stored directly in refs/tags/name (a tag object when annotated). */
+  objectId: string;
+  objectType: GitObjectType;
+  /** Fully peeled target object. Equal to objectId for a lightweight tag. */
+  targetId: string;
+  targetType: GitObjectType;
+  annotation?: TagAnnotation;
+};
+
+/** One bounded page of local tags. */
+export type TagPage = {
+  rows: TagSummary[];
+  /** Matches across the whole repository, not just this page. */
+  total: number;
+};
+
 /** Reviewed migration from a GitHub HTTPS fetch URL to its SSH equivalent. */
 export type SshRemoteRecovery = {
   remote: string;
@@ -168,6 +201,9 @@ export type SshRemoteRecovery = {
 /** Repository-wide refs and configured remote endpoints. */
 export type RepoRefs = {
   branches: LocalBranchSummary[];
+  /** Small newest-first slice for the sidebar; browse the rest via repo:tags. */
+  previewTags: TagSummary[];
+  tagCount: number;
   remotes: RemoteSummary[];
 };
 
@@ -246,6 +282,34 @@ export type SubmoduleSnapshot = {
   truncated: boolean;
   /** Parent-level parse/bounds problems not attributable to one child path. */
   issues: SubmoduleIssue[];
+};
+
+export type RemoteTagAction = "push" | "delete";
+
+/**
+ * Exact local/remote tag objects reviewed immediately before a guarded action.
+ * Remote tags have no tracking refs, so this snapshot is deliberately separate
+ * from RemoteSummary and branch push plans.
+ */
+export type RemoteTagPlan = {
+  action: RemoteTagAction;
+  remote: string;
+  tagName: string;
+  fullName: string;
+  /** Present for push. The tag ref must still equal this object at apply time. */
+  localObjectId?: string;
+  localTargetId?: string;
+  /** Absent only when a push reviewed creation of a new remote tag. */
+  remoteObjectId?: string;
+  remoteTargetId?: string;
+  status: "create" | "equal" | "delete";
+};
+
+export type RemoteTagResult = {
+  action: RemoteTagAction;
+  remote: string;
+  tagName: string;
+  outcome: "pushed" | "up_to_date" | "deleted";
 };
 
 export type PushRefRelation =
