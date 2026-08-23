@@ -38,15 +38,60 @@ describe("repo worktree refresh events", () => {
     vi.clearAllMocks();
   });
 
-  it("announces each changed worktree before repainting the repo tree", async () => {
+  it.each([
+    [
+      "upstream presence",
+      { hasUpstream: false },
+      { hasUpstream: true }
+    ],
+    [
+      "resolved default branch",
+      { defaultBranch: "main" },
+      { defaultBranch: "trunk" }
+    ],
+    [
+      "default-branch identity",
+      { isDefaultBranch: false },
+      { isDefaultBranch: true }
+    ]
+  ] satisfies [string, Partial<WorktreeState>, Partial<WorktreeState>][])(
+    "treats %s as a rendered state change",
+    async (_label, beforeOverrides, afterOverrides) => {
+      const before = snapshot("wt-1", beforeOverrides);
+      const fresh = snapshot("wt-1", afterOverrides);
+      const state = {
+        getCached: vi.fn(() => before),
+        compute: vi.fn(async () => fresh)
+      } as unknown as WorktreeStateService;
+      const db = {
+        prepare: () => ({
+          get: () => ({ repo_id: "repo-1", profile_id: "profile-1" })
+        })
+      } as unknown as DB;
+
+      await createWorktreeRefresher(state, db).refreshWorktree("wt-1");
+
+      expect(emitEvent).toHaveBeenNthCalledWith(1, "worktree:changed", {
+        worktreeId: "wt-1"
+      });
+      expect(emitEvent).toHaveBeenNthCalledWith(2, "graph:changed", {
+        repoId: "repo-1"
+      });
+      expect(emitEvent).toHaveBeenNthCalledWith(3, "repo:changed", {
+        profileId: "profile-1"
+      });
+    }
+  );
+
+  it("announces upstream-only changes and invalidates the shared repo graph", async () => {
     const current = new Map([
-      ["wt-changed", snapshot("wt-changed")],
+      ["wt-changed", snapshot("wt-changed", { hasUpstream: false })],
       ["wt-same", snapshot("wt-same")]
     ]);
     const state = {
       getCached: vi.fn((id: string) => current.get(id) ?? null),
       refreshMany: vi.fn(async () => {
-        current.set("wt-changed", snapshot("wt-changed", { dirty: 1 }));
+        current.set("wt-changed", snapshot("wt-changed"));
       })
     } as unknown as WorktreeStateService;
     const db = {
@@ -65,9 +110,15 @@ describe("repo worktree refresh events", () => {
     expect(emitEvent).toHaveBeenNthCalledWith(1, "worktree:changed", {
       worktreeId: "wt-changed"
     });
-    expect(emitEvent).toHaveBeenNthCalledWith(2, "repo:changed", {
+    expect(emitEvent).toHaveBeenNthCalledWith(2, "graph:changed", {
+      repoId: "repo-1"
+    });
+    expect(emitEvent).toHaveBeenNthCalledWith(3, "repo:changed", {
       profileId: "profile-1"
     });
-    expect(emitEvent).toHaveBeenCalledTimes(2);
+    expect(emitEvent).not.toHaveBeenCalledWith("worktree:changed", {
+      worktreeId: "wt-same"
+    });
+    expect(emitEvent).toHaveBeenCalledTimes(3);
   });
 });

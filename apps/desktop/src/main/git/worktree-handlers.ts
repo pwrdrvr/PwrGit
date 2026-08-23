@@ -8,14 +8,17 @@ import type { WorktreeStateService } from "./worktree-state";
 
 function stateChanged(a: WorktreeState, b: WorktreeState): boolean {
   return (
+    a.hasUpstream !== b.hasUpstream ||
     a.dirty !== b.dirty ||
     a.ahead !== b.ahead ||
     a.behind !== b.behind ||
     a.head !== b.head ||
     a.branch !== b.branch ||
     a.behindDefault !== b.behindDefault ||
+    a.defaultBranch !== b.defaultBranch ||
     a.mergedIntoDefault !== b.mergedIntoDefault ||
     a.divergedFromDefault !== b.divergedFromDefault ||
+    a.isDefaultBranch !== b.isDefaultBranch ||
     a.lastActivityAt !== b.lastActivityAt
   );
 }
@@ -43,12 +46,15 @@ export function createWorktreeRefresher(
     emitEvent("worktree:changed", { worktreeId });
     const row = db
       .prepare(
-        `SELECT r.profile_id AS profile_id
+        `SELECT r.id AS repo_id, r.profile_id AS profile_id
          FROM worktrees w JOIN repos r ON r.id = w.repo_id
          WHERE w.id = ?`
       )
-      .get(worktreeId) as { profile_id: string } | undefined;
+      .get(worktreeId) as
+      | { repo_id: string; profile_id: string }
+      | undefined;
     if (row !== undefined) {
+      emitEvent("graph:changed", { repoId: row.repo_id });
       emitEvent("repo:changed", { profileId: row.profile_id });
     }
   };
@@ -77,6 +83,12 @@ export function createWorktreeRefresher(
         emitEvent("worktree:changed", { worktreeId: id });
       }
     }
+    // Lane data is cached per repo, not per worktree. A sibling HEAD/ref can
+    // change the focused graph even when that focused worktree's own snapshot
+    // is identical. Invalidate the repo once after every explicit family
+    // refresh; this also covers newly discovered refs that do not alter any
+    // coarse worktree state.
+    emitEvent("graph:changed", { repoId });
     const repo = db
       .prepare("SELECT profile_id FROM repos WHERE id = ?")
       .get(repoId) as { profile_id: string } | undefined;

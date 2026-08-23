@@ -48,6 +48,7 @@ import type {
   RemoteResetMode,
   RemoteResetSnapshot,
   Repo,
+  RepoId,
   RepoRefs,
   RepoSearchHit,
   RepoWorktreeRefresh,
@@ -1043,6 +1044,8 @@ export interface Events {
     identities: { repoId: string; identity: RepoIdentity }[];
   };
   "worktree:changed": { worktreeId: string };
+  /** Repo-wide commit/ref data moved; invalidate every graph view of this repo. */
+  "graph:changed": { repoId: RepoId };
   /**
    * The index or working tree of one worktree moved — re-read `changes:list`.
    * Distinct from `worktree:changed`, which only fires when the *coarse* state
