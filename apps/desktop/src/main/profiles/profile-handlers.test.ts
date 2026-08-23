@@ -51,7 +51,7 @@ describe("profile handlers", () => {
       profiles: [second]
     });
     expect(deps.onDeleted).toHaveBeenCalledExactlyOnceWith(first.id, second.id);
-    expect(deps.onChanged).toHaveBeenCalledOnce();
+    expect(deps.onChanged).toHaveBeenCalledExactlyOnceWith(second);
     expect(emitEvent).toHaveBeenCalledExactlyOnceWith("profile:changed", {
       activeProfileId: second.id,
       profiles: [second]

@@ -146,7 +146,10 @@ export function registerProfileHandlers(
       activeProfileId: result.value.activeProfileId,
       profiles: result.value.profiles
     });
-    onChanged?.();
+    const activeProfile = result.value.profiles.find(
+      (profile) => profile.id === result.value.activeProfileId
+    );
+    if (activeProfile !== undefined) onChanged?.(activeProfile);
     return result;
   });
 }
