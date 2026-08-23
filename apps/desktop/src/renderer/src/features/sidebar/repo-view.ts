@@ -72,7 +72,10 @@ export function focusReasonForRepo(
   }
   if (
     repo.worktrees.some(
-      (worktree) => worktree.dirty > 0 || worktree.ahead > 0
+      (worktree) =>
+        worktree.dirty > 0 ||
+        worktree.ahead > 0 ||
+        worktree.tracking === "unpublished"
     )
   ) {
     return "changed";
@@ -135,7 +138,13 @@ export function focusReasonForWorktree(
   ) {
     return "viewed";
   }
-  if (worktree.dirty > 0 || worktree.ahead > 0) return "changed";
+  if (
+    worktree.dirty > 0 ||
+    worktree.ahead > 0 ||
+    worktree.tracking === "unpublished"
+  ) {
+    return "changed";
+  }
   return validTime(worktree.lastActivityAt) >= focusThreshold(now)
     ? "recent"
     : null;

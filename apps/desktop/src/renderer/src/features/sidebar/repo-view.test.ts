@@ -183,6 +183,26 @@ describe("Focused lens", () => {
     ).toEqual([]);
   });
 
+  it("keeps clean unpublished work even when its last commit is old", () => {
+    const unpublished = wt({
+      id: "unpublished-wt",
+      branch: "feature/local-only",
+      tracking: "unpublished",
+      lastActivityAt: daysAgo(90)
+    });
+    const unpublishedRepo = repo({
+      id: "unpublished",
+      worktrees: [unpublished]
+    });
+    const context = { selectedWorktreeId: null, visits: {} };
+
+    expect(focusReasonForWorktree(unpublished, context, NOW)).toBe("changed");
+    expect(focusReasonForRepo(unpublishedRepo, context, NOW)).toBe("changed");
+    expect(focusedRepos([unpublishedRepo], context, NOW)).toEqual([
+      unpublishedRepo
+    ]);
+  });
+
   it("caps a large first page and reveals the complete focused set on demand", () => {
     const rows = Array.from({ length: 40 }, (_, index) =>
       repo({ id: `repo-${index}`, pinned: true })

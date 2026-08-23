@@ -39,6 +39,8 @@ export type Worktree = {
   ahead: number;
   /** Commits behind upstream. */
   behind: number;
+  /** Cached local-branch tracking state. Absent until Git state is computed. */
+  tracking?: BranchTrackingStatus;
   /** Commits the repo's default branch is ahead of this worktree (staleness).
    *  0 when the branch shares no history with the default (see divergedFromDefault). */
   behindDefault: number;

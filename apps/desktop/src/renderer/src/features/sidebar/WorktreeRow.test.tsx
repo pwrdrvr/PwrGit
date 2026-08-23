@@ -21,7 +21,7 @@ const worktree = (partial: Partial<Worktree>): Worktree => ({
   ...partial
 });
 
-const render = (wt: Worktree): string =>
+const render = (wt: Worktree, reorderable = true): string =>
   renderToStaticMarkup(
     <WorktreeRow
       worktree={wt}
@@ -32,7 +32,7 @@ const render = (wt: Worktree): string =>
       onContextMenu={() => undefined}
       onTogglePin={() => undefined}
       onRemove={() => undefined}
-      dragProps={{ draggable: true }}
+      dragProps={{ draggable: reorderable }}
       dragging={false}
       dropPosition={null}
       focusable={false}
@@ -85,6 +85,18 @@ describe("WorktreeRow — the folder a worktree lives in", () => {
     expect(markup).toContain('<span class="a11y-sr-only">in folder</span>');
     expect(markup).toContain(
       '<span class="wt-row__folder-name">release-audit</span>'
+    );
+  });
+});
+
+describe("WorktreeRow — reorder affordance", () => {
+  it("does not advertise a drag gesture for a computed row", () => {
+    const markup = render(worktree({ branch: "feature/computed" }), false);
+
+    expect(markup).toContain('draggable="false"');
+    expect(markup).not.toContain("Drag to reorder");
+    expect(markup).toContain(
+      '<span class="wt-row__handle" aria-hidden="true"></span>'
     );
   });
 });

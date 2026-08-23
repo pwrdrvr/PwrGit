@@ -679,6 +679,49 @@ test("a viewed repo remains in Focused after a reload", async () => {
   await expect(window.locator(".repo-row__focus-reason")).toHaveText("Viewed");
 });
 
+test("Focused keeps clean unpublished work after its activity window expires", async () => {
+  sandbox = createGitSandbox();
+  const unpublished = sandbox.makeRepo("old-unpublished");
+  sandbox.commitEmptyAt(
+    unpublished.path,
+    "local work not on a remote",
+    Math.floor(Date.parse("2000-01-01T00:00:00Z") / 1000)
+  );
+
+  handle = await launchApp();
+  const { window } = handle;
+  await handle.setPickDirectory(sandbox.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await lensChip(window, "All").click();
+  await expandRepoGroup(window, "old-unpublished");
+  // This chip is backed by the same completed state probe the repo index reads.
+  await expect(window.locator(".wt-header .sync-chip")).toHaveText(
+    "no upstream",
+    { timeout: 20_000 }
+  );
+
+  // Remove the selection-derived signal and remount the renderer. The only
+  // remaining Focus reason is the persisted unpublished tracking state; the
+  // branch timestamp is intentionally far outside the 30-day window.
+  await window.evaluate(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem("pwrgit.lens", "Focused");
+  });
+  await window.reload();
+
+  await expect(lensChip(window, "Focused")).toHaveAttribute(
+    "aria-selected",
+    "true",
+    { timeout: 20_000 }
+  );
+  await expect(window.locator(".repo-row__name")).toHaveText([
+    "old-unpublished"
+  ]);
+  await expect(window.locator(".repo-row__focus-reason")).toHaveText(
+    "Changes"
+  );
+});
+
 test(
   "Focused elevates the current linked worktree and reveals the rest on demand",
   async () => {
@@ -690,7 +733,8 @@ test(
         "feature/three",
         "feature/four",
         "feature/five",
-        "feature/six"
+        "feature/six",
+        "feature/seven"
       ]
     });
 
@@ -713,12 +757,37 @@ test(
         hasText: "feature/one"
       })
     ).toBeVisible();
-    const more = window.getByRole("button", { name: /^More worktrees 1/ });
+    const working = window.locator(".wt-section__elevated .wt-row", {
+      hasText: "feature/one"
+    });
+    await expect(working).toHaveAttribute("draggable", "false");
+    await expect(working.locator(".wt-row__handle svg")).toHaveCount(0);
+    const workingOrder = await window
+      .locator(".wt-section__elevated .wt-row__branch")
+      .allTextContents();
+    await working.focus();
+    await window.keyboard.press("Meta+Shift+ArrowDown");
+    expect(
+      await window
+        .locator(".wt-section__elevated .wt-row__branch")
+        .allTextContents()
+    ).toEqual(workingOrder);
+
+    const more = window.getByRole("button", { name: /^More worktrees 2/ });
     await expect(more).toHaveAttribute("aria-expanded", "false");
     await expect(window.locator(".wt-section__body .wt-row")).toHaveCount(0);
     await more.click();
     await expect(more).toHaveAttribute("aria-expanded", "true");
-    await expect(window.locator(".wt-section__body .wt-row")).toHaveCount(1);
+    const moreRows = window.locator(".wt-section__body .wt-row");
+    await expect(moreRows).toHaveCount(2);
+    await expect(moreRows.first()).toHaveAttribute("draggable", "true");
+    await expect(moreRows.first().locator(".wt-row__handle svg")).toHaveCount(1);
+    const before = await moreRows.locator(".wt-row__branch").allTextContents();
+    await moreRows.first().focus();
+    await window.keyboard.press("Meta+Shift+ArrowDown");
+    await expect
+      .poll(() => moreRows.locator(".wt-row__branch").allTextContents())
+      .toEqual([...before].reverse());
   }
 );
 

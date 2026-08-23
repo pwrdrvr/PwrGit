@@ -181,7 +181,10 @@ export function RepoRow({
     : { focused: [], remaining: navigation.remaining };
   const focusedWorktrees = focusPartition.focused;
   const remaining = focusPartition.remaining;
-  const orderedIds = [...pinned, ...navigation.remaining].map(
+  // Reorder against the same partition the user sees. In Focused, the Working
+  // block is priority-ranked and intentionally inert; pinned and More rows
+  // still persist meaningful order within their own visible sections.
+  const orderedIds = [...pinned, ...focusedWorktrees, ...remaining].map(
     (worktree) => worktree.id
   );
   const displayIds = [
@@ -303,7 +306,9 @@ export function RepoRow({
     // memory.
     if (event.metaKey && event.shiftKey) {
       if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-      if (worktree.isPrimary) return;
+      // Working is a computed priority section. Persisting a manual move here
+      // would be immediately undone by its Focus reason/activity ranking.
+      if (worktree.isPrimary || sectionFor(worktree.id) === "focused") return;
       const from = orderedIds.indexOf(worktree.id);
       const to = from + (event.key === "ArrowUp" ? -1 : 1);
       const neighbor = orderedIds[to];
@@ -382,7 +387,10 @@ export function RepoRow({
             onRefreshPullRequest: () =>
               onRefreshPullRequest(worktree.branch)
           })}
-      dragProps={wtDrag.rowProps(worktree.id, !worktree.isPrimary)}
+      dragProps={wtDrag.rowProps(
+        worktree.id,
+        !worktree.isPrimary && sectionFor(worktree.id) !== "focused"
+      )}
       dragging={wtDrag.dragId === worktree.id}
       dropPosition={
         wtDrag.target?.id === worktree.id ? wtDrag.target.position : null

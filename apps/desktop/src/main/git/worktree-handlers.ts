@@ -9,6 +9,7 @@ import type { WorktreeStateService } from "./worktree-state";
 function stateChanged(a: WorktreeState, b: WorktreeState): boolean {
   return (
     a.dirty !== b.dirty ||
+    a.hasUpstream !== b.hasUpstream ||
     a.ahead !== b.ahead ||
     a.behind !== b.behind ||
     a.head !== b.head ||

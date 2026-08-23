@@ -7,6 +7,7 @@ import {
   err,
   ok,
   type BranchRef,
+  type BranchTrackingStatus,
   type ForgeHost,
   type Profile,
   type ProfileId,
@@ -117,6 +118,7 @@ type WorktreeRow = {
   dirty: number | null;
   ahead: number | null;
   behind: number | null;
+  has_upstream: number | null;
   behind_default: number | null;
   default_branch: string | null;
   merged_into_default: number | null;
@@ -130,6 +132,26 @@ type WorktreeRow = {
   pr_state: string | null;
   pr_is_draft: number | null;
 };
+
+function trackingFromWorktreeState(
+  worktree: Pick<
+    WorktreeRow,
+    "branch" | "has_upstream" | "ahead" | "behind"
+  >
+): BranchTrackingStatus | undefined {
+  // A null marks an uncomputed LEFT JOIN, not "no upstream". Keeping it
+  // absent preserves the Focused lens's honest first-run state.
+  if (worktree.has_upstream === null) return undefined;
+  // Detached HEAD is not a local branch waiting to be published.
+  if (worktree.branch.startsWith("detached@")) return undefined;
+  if (worktree.has_upstream === 0) return "unpublished";
+  const ahead = worktree.ahead ?? 0;
+  const behind = worktree.behind ?? 0;
+  if (ahead > 0 && behind > 0) return "diverged";
+  if (ahead > 0) return "ahead";
+  if (behind > 0) return "behind";
+  return "up_to_date";
+}
 
 type IndexedBranches = {
   branches: BranchRef[];
@@ -877,6 +899,7 @@ export class RepoIndexer {
           `SELECT w.id, w.repo_id, w.branch, w.path, w.is_primary, w.pinned,
                   w.custom_order AS custom_order,
                   s.dirty AS dirty, s.ahead AS ahead, s.behind AS behind,
+                  s.has_upstream AS has_upstream,
                   s.behind_default AS behind_default,
                   s.default_branch AS default_branch,
                   s.merged_into_default AS merged_into_default,
@@ -909,6 +932,8 @@ export class RepoIndexer {
         pinned: w.pinned === 1,
         isPrimary: w.is_primary === 1
       };
+      const tracking = trackingFromWorktreeState(w);
+      if (tracking !== undefined) wt.tracking = tracking;
       if (w.last_activity_at !== null) wt.lastActivityAt = w.last_activity_at;
       if (w.custom_order !== null) wt.order = w.custom_order;
       const pr = prSummaryFromRow(w as unknown as Record<string, unknown>);
