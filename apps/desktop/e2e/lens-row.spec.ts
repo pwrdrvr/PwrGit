@@ -6,7 +6,8 @@ import {
   collapseWorktrees,
   expandRepoGroup,
   expandWorktrees,
-  lensChip
+  lensChip,
+  primaryShortcut
 } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
@@ -749,6 +750,11 @@ test(
     await collapseWorktrees(window, "working-set");
 
     await lensChip(window, "Focused").click();
+    // State hydration is asynchronous, especially on Windows. Wait until the
+    // five-row Working cap has partitioned the complete seven-worktree list
+    // before asserting that a keyboard gesture itself leaves the order still.
+    const more = window.getByRole("button", { name: /^More worktrees 2/ });
+    await expect(more).toHaveAttribute("aria-expanded", "false");
     await expect(
       window.locator(".wt-subhead", { hasText: "Working" })
     ).toBeVisible();
@@ -766,15 +772,13 @@ test(
       .locator(".wt-section__elevated .wt-row__branch")
       .allTextContents();
     await working.focus();
-    await window.keyboard.press("Meta+Shift+ArrowDown");
+    await window.keyboard.press(primaryShortcut("Shift", "ArrowDown"));
     expect(
       await window
         .locator(".wt-section__elevated .wt-row__branch")
         .allTextContents()
     ).toEqual(workingOrder);
 
-    const more = window.getByRole("button", { name: /^More worktrees 2/ });
-    await expect(more).toHaveAttribute("aria-expanded", "false");
     await expect(window.locator(".wt-section__body .wt-row")).toHaveCount(0);
     await more.click();
     await expect(more).toHaveAttribute("aria-expanded", "true");
@@ -784,7 +788,7 @@ test(
     await expect(moreRows.first().locator(".wt-row__handle svg")).toHaveCount(1);
     const before = await moreRows.locator(".wt-row__branch").allTextContents();
     await moreRows.first().focus();
-    await window.keyboard.press("Meta+Shift+ArrowDown");
+    await window.keyboard.press(primaryShortcut("Shift", "ArrowDown"));
     await expect
       .poll(() => moreRows.locator(".wt-row__branch").allTextContents())
       .toEqual([...before].reverse());
