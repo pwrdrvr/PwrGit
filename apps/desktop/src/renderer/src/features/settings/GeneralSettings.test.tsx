@@ -13,6 +13,7 @@ function render(platform: string): string {
     <GeneralSettings
       saving={false}
       snapshot={snapshot}
+      onThemeChange={() => undefined}
       onDeveloperModeChange={() => undefined}
       onSidebarTextSizeChange={() => undefined}
       onSidebarDensityChange={() => undefined}

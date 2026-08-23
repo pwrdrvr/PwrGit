@@ -46,14 +46,21 @@ export async function launchApp(
   opts: {
     worktreeRoot?: string;
     forgeFixturePath?: string;
+    theme?: "system" | "dark" | "light";
     failReadOnce?: RecoverableBootRead[];
   } = {}
 ): Promise<AppHandle> {
   const userData = mkdtempSync(join(tmpdir(), "pwrgit-e2e-ud-"));
-  if (opts.worktreeRoot !== undefined) {
+  if (opts.worktreeRoot !== undefined || opts.theme !== undefined) {
+    const seededSettings = {
+      ...(opts.worktreeRoot !== undefined
+        ? { worktreeRoot: opts.worktreeRoot }
+        : {}),
+      ...(opts.theme !== undefined ? { general: { theme: opts.theme } } : {})
+    };
     writeFileSync(
       join(userData, "settings.json"),
-      JSON.stringify({ worktreeRoot: opts.worktreeRoot })
+      JSON.stringify(seededSettings)
     );
   }
   // Pin the seeded profile identity to the sandbox's commit identity so

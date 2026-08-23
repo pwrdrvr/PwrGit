@@ -15,6 +15,7 @@ type ProfileRow = {
   mono: string;
   kind: string | null;
   org: string | null;
+  theme: "dark" | "light" | null;
   roots: string;
   last_used_at: string | null;
   sort_order: number;
@@ -43,6 +44,7 @@ function rowToProfile(r: ProfileRow): Profile {
   if (r.author_name !== null) p.authorName = r.author_name;
   if (r.kind !== null) p.kind = r.kind;
   if (r.org !== null) p.org = r.org;
+  if (r.theme !== null) p.theme = r.theme;
   if (r.last_used_at !== null) p.lastUsedAt = r.last_used_at;
   return p;
 }
@@ -94,8 +96,8 @@ export class ProfileService {
 
     this.db
       .prepare(
-        `INSERT INTO profiles (id, name, email, author_name, mono, kind, org, roots, sort_order)
-         VALUES (@id, @name, @email, @author_name, @mono, @kind, @org, @roots, @sort_order)`
+        `INSERT INTO profiles (id, name, email, author_name, mono, kind, org, theme, roots, sort_order)
+         VALUES (@id, @name, @email, @author_name, @mono, @kind, @org, @theme, @roots, @sort_order)`
       )
       .run({
         id,
@@ -105,6 +107,7 @@ export class ProfileService {
         mono,
         kind: input.kind ?? null,
         org: input.org?.trim() ? input.org.trim() : null,
+        theme: input.theme ?? null,
         roots: JSON.stringify(input.roots ?? []),
         sort_order: nextOrder
       });
@@ -145,6 +148,10 @@ export class ProfileService {
     if (patch.org !== undefined) {
       sets.push("org = @org");
       args.org = patch.org.trim() ? patch.org.trim() : null;
+    }
+    if (patch.theme !== undefined) {
+      sets.push("theme = @theme");
+      args.theme = patch.theme;
     }
     if (sets.length > 0) {
       this.db

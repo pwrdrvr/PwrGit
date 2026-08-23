@@ -1,4 +1,8 @@
-import type { SidebarDensity, SidebarTextSize } from "@pwrgit/shared";
+import type {
+  ResolvedAppearanceTheme,
+  SidebarDensity,
+  SidebarTextSize
+} from "@pwrgit/shared";
 import { GENERAL_DEFAULTS } from "@pwrgit/shared";
 import { dispatch, subscribe } from "./pwrgit";
 
@@ -31,6 +35,19 @@ export function applyAppearance(
   }
 }
 
+/** Dark owns the bare :root block; light is the only attributed override. */
+export function applyResolvedTheme(theme: ResolvedAppearanceTheme): void {
+  if (typeof document === "undefined") return;
+  const root = document.documentElement;
+  if (theme === "light") {
+    root.setAttribute("data-theme", "light");
+    root.style.colorScheme = "light";
+  } else {
+    root.removeAttribute("data-theme");
+    root.style.colorScheme = "dark";
+  }
+}
+
 /**
  * Apply the stored appearance once at boot, then track `settings:changed`.
  *
@@ -40,11 +57,21 @@ export function applyAppearance(
  * render, so there's no flash of default sizing.
  */
 export function startAppearanceSync(): () => void {
-  const off = subscribe("settings:changed", (snapshot) => {
+  // The inline head bootstrap already applied this value; repeating it here
+  // makes direct renderer/unit entry points deterministic too.
+  applyResolvedTheme(window.pwrgit.appearance.resolvedTheme);
+
+  const offAppearance = subscribe("appearance:changed", (appearance) => {
+    applyResolvedTheme(appearance.resolvedTheme);
+  });
+  const offSettings = subscribe("settings:changed", (snapshot) => {
     applyAppearance(
       snapshot.general.sidebarTextSize,
       snapshot.general.sidebarDensity
     );
+  });
+  void dispatch("appearance:read", undefined).then((r) => {
+    if (r.ok) applyResolvedTheme(r.value.resolvedTheme);
   });
   void dispatch("settings:read", undefined).then((r) => {
     if (r.ok) {
@@ -54,5 +81,8 @@ export function startAppearanceSync(): () => void {
       );
     }
   });
-  return off;
+  return () => {
+    offAppearance();
+    offSettings();
+  };
 }

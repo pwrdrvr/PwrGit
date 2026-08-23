@@ -1,4 +1,5 @@
 import type {
+  AppearanceTheme,
   AppSettingsSnapshot,
   SidebarDensity,
   SidebarTextSize
@@ -31,10 +32,17 @@ const DENSITIES: Array<{ value: SidebarDensity; label: string }> = [
   { value: "compact", label: "Compact" }
 ];
 
+const THEMES: Array<{ value: AppearanceTheme; label: string }> = [
+  { value: "system", label: "System" },
+  { value: "dark", label: "Dark" },
+  { value: "light", label: "Light" }
+];
+
 /** General pane (PwrAgnt's GeneralSettings pattern, PwrGit-sized). */
 export function GeneralSettings(props: {
   saving: boolean;
   snapshot: AppSettingsSnapshot;
+  onThemeChange: (theme: AppearanceTheme) => void;
   onDeveloperModeChange: (enabled: boolean) => void;
   onSidebarTextSizeChange: (size: SidebarTextSize) => void;
   onSidebarDensityChange: (density: SidebarDensity) => void;
@@ -42,6 +50,7 @@ export function GeneralSettings(props: {
   platform?: string;
 }) {
   const developerMode = props.snapshot.general.developerMode;
+  const theme = props.snapshot.general.theme;
   const textSize = props.snapshot.general.sidebarTextSize;
   const density = props.snapshot.general.sidebarDensity;
   const platform = props.platform ?? currentPlatform();
@@ -61,8 +70,35 @@ export function GeneralSettings(props: {
       <SettingsPanelHead
         eyebrow="General"
         title="General settings"
-        help="Defaults that apply across PwrGit windows."
+        help="Defaults that apply across PwrGit windows unless a profile overrides them."
       />
+
+      <SettingsSection
+        eyebrow="Appearance"
+        title="Color theme"
+        description="Choose a fixed palette or follow the operating system."
+        chip={
+          theme === "system" ? "System" : theme === "light" ? "Light" : "Dark"
+        }
+        chipKind="default"
+      >
+        <div className="settings-fields">
+          <SettingsField
+            label="Theme"
+            sub="Default for PwrGit windows and native window chrome. Profiles can choose their own fixed palette."
+            help="System follows macOS or Windows appearance changes while PwrGit is running; inheriting profiles follow it too."
+            control={
+              <SettingsSegmented
+                aria-label="Color theme"
+                disabled={props.saving}
+                options={THEMES}
+                value={theme}
+                onChange={props.onThemeChange}
+              />
+            }
+          />
+        </div>
+      </SettingsSection>
 
       <SettingsSection
         eyebrow="Appearance"

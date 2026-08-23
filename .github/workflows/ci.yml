@@ -103,7 +103,7 @@ jobs:
         with:
           node-version: 24.x
 
-      # A fresh `pnpm i` already leaves better-sqlite3 built for both ABIs
+      # A fresh `pnpm i` already leaves better-sqlite3 ready for both runtimes
       # (see the root AGENTS.md), so this exits immediately. It earns its
       # place on jobs that restore a cached node_modules: the rebuild script
       # is idempotent and repairs whichever half of the pair is stale.

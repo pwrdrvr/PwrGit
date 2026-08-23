@@ -114,6 +114,37 @@ test("scans a folder and lists a repo with its worktrees", async () => {
   await expect(menu).toHaveCSS("opacity", "1");
 });
 
+test("restores the last selected worktree after a renderer restart", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepo("remembered-selection", {
+    worktrees: ["feature/remembered"]
+  });
+  handle = await launchApp();
+  const { window } = handle;
+
+  await addRootAndExpand(window, handle, sandbox, "remembered-selection");
+  const remembered = branchRow(window, "feature/remembered");
+  await remembered.click();
+  await expect(window.locator(".titlebar__branch-name")).toHaveText(
+    "feature/remembered"
+  );
+
+  // Renderer reload is the same component/localStorage boundary as an app
+  // relaunch, while retaining this test's isolated main-process database.
+  await window.reload();
+  await expect(window.locator(".titlebar__branch-name")).toHaveText(
+    "feature/remembered",
+    { timeout: 20_000 }
+  );
+
+  await expandRepoGroup(window, "remembered-selection");
+  await expandWorktrees(window, "remembered-selection");
+  await expect(branchRow(window, "feature/remembered")).toHaveAttribute(
+    "aria-selected",
+    "true"
+  );
+});
+
 test("keeps the primary and pinned worktrees visible when the remaining list is collapsed", async () => {
   sandbox = createGitSandbox();
   sandbox.makeRepo("navigation", {
