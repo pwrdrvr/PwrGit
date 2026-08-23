@@ -7,14 +7,6 @@
   "license": "MIT",
   "copyright": "Copyright © 2026 PwrDrvr LLC",
   "homepage": "https://pwrgit.com",
-  "bugs": {
-    "url": "https://github.com/pwrdrvr/PwrGit/issues"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/pwrdrvr/PwrGit.git",
-    "directory": "packages/pwrgit"
-  },
   "keywords": [
     "pwrgit",
     "git",
