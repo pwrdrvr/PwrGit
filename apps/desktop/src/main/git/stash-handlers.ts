@@ -1,5 +1,5 @@
 import { err, ok, type Result, type StashEntry } from "@pwrgit/shared";
-import type { CommandBus } from "../command-bus";
+import type { CommandBus, CommandHandler } from "../command-bus";
 import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
@@ -159,12 +159,12 @@ export function registerStashHandlers(
     return ok({ created: result.value });
   });
 
-  const restore = (
-    command: "stash:apply" | "stash:pop",
+  const restoreHandler = <C extends "stash:apply" | "stash:pop">(
+    command: C,
     operation: typeof applyStash,
     requireUniqueOccurrence: boolean
-  ): void => {
-    bus.register(command, async (req) => {
+  ): CommandHandler<C> =>
+    async (req) => {
       const row = rowOf(req.worktreeId);
       if (row === undefined) return notFound("Worktree not found.");
       const result = await operations.runRepository(row.repoId, () =>
@@ -193,11 +193,18 @@ export function registerStashHandlers(
         `${command === "stash:apply" ? "applied" : "popped"} ${req.stashHash.slice(0, 12)} into ${row.path}`
       );
       return ok(null);
-    });
-  };
+    };
 
-  restore("stash:apply", dependencies.apply, false);
-  restore("stash:pop", dependencies.pop, true);
+  // Keep the registration names as direct literals. Protocol reachability
+  // verifies at the AST level that every shared command is wired exactly once.
+  bus.register(
+    "stash:apply",
+    restoreHandler("stash:apply", dependencies.apply, false)
+  );
+  bus.register(
+    "stash:pop",
+    restoreHandler("stash:pop", dependencies.pop, true)
+  );
 
   bus.register("stash:drop", async (req) => {
     const row = rowOf(req.worktreeId);
