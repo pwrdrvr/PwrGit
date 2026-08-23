@@ -1204,11 +1204,6 @@ export interface Commands {
     req: { worktreeId: string; operation: GitOperationKind };
     res: null;
   };
-  /** Unified diff for one working-tree file (staged or unstaged). */
-  "diff:file": {
-    req: { worktreeId: string; path: string; staged: boolean };
-    res: string;
-  };
   /** Contextual display patch and typed zero-context selection snapshot for a
    * single staged or unstaged file. */
   "diff:fileSelection": {

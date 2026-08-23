@@ -13,7 +13,6 @@ import {
   type CommitIdentity,
   discardAllChanges,
   discardPaths,
-  fileDiff,
   readCommit,
   readChanges,
   stagePaths,
@@ -209,12 +208,6 @@ export function registerChangesHandlers(
     );
     notifyChanged(req.worktreeId);
     return ok(null);
-  });
-
-  bus.register("diff:file", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
-    return fileDiff(execGit, path, req.path, req.staged);
   });
 
   bus.register("diff:fileSelection", async (req) => {
