@@ -38,7 +38,7 @@
     "@shutterstock/p-map-iterable": "^1.1.2",
     "better-sqlite3": "^12.10.0",
     "dugite": "^3.2.3",
-    "electron-updater": "^6.8.9",
+    "electron-updater": "6.8.9",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
@@ -51,7 +51,7 @@
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^41.10.5",
-    "electron-builder": "^26.8.1",
+    "electron-builder": "26.15.7",
     "electron-vite": "^5.0.0",
     "sharp": "^0.35.3",
     "vite": "^7.3.5"

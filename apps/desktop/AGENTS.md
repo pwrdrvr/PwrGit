@@ -45,6 +45,21 @@ ships its sidecar and builds a `lipo`-merged universal one for release; PwrGit
 does not need that, because electron-builder's per-arch rebuild already
 produces the universal `build/Release` binary that `release.mjs` verifies.)
 
+## The packaging deps are pinned exact, not caret
+
+`electron-builder` and `electron-updater` carry **exact** versions in
+[package.json](package.json); everything else uses a caret. Packaging behavior
+is verified by reading app-builder-lib's internals — how it derives the Windows
+Add-or-Remove-Programs name, how it lays out the asar, which `electron-builder.yml`
+keys it honors — and that reading is only worth doing once for the Pwr family if
+all three repos resolve the same build. A caret silently re-resolves on any lock
+refresh and quietly invalidates it.
+
+Keep these pinned to the same versions as PwrSnap and PwrAgnt, and bump all
+three together. Note that electron-builder's npm `latest` tag lags the 26.x
+line (it currently points at 26.15.3 while `v26` is 26.15.7), so `npm view
+electron-builder version` is not the version to pin — read the sibling repos.
+
 ## e2e needs a build first
 
 `pnpm test:e2e` (Playwright) launches the BUILT app at `out/main/index.js` —
