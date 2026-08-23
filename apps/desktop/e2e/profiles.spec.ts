@@ -137,6 +137,72 @@ test("creating a profile opens its own window with repos from all roots", async 
   expect(handle.app.windows().length).toBe(2);
 });
 
+test("a profile can override the app theme and return to inheritance live", async () => {
+  handle = await launchApp({ theme: "dark" });
+  const { app, window: mainWindow } = handle;
+
+  await mainWindow.locator(".profile-chip").click();
+  await mainWindow
+    .locator(".profile-menu__action", { hasText: "New profile" })
+    .click();
+  const modal = mainWindow.locator(".modal--profile");
+  await modal.getByPlaceholder("e.g. Acme or Personal").fill("Light workspace");
+  await modal.getByPlaceholder("you@company.com").fill("light@example.com");
+  await modal.getByRole("radio", { name: "Light" }).click();
+
+  const windowPromise = app.waitForEvent("window");
+  await modal.locator(".modal__create").click();
+  const lightWindow = await windowPromise;
+  await lightWindow.waitForSelector("#root");
+
+  await expect(lightWindow.locator("html")).toHaveAttribute(
+    "data-theme",
+    "light"
+  );
+  await expect(mainWindow.locator("html")).not.toHaveAttribute(
+    "data-theme",
+    "light"
+  );
+  expect(
+    await lightWindow.evaluate(() => window.pwrgit.appearance)
+  ).toEqual({ theme: "light", resolvedTheme: "light" });
+
+  const lightTitle = await lightWindow.title();
+  await expect
+    .poll(() =>
+      app.evaluate(({ BrowserWindow }, title) => {
+        const target = BrowserWindow.getAllWindows().find(
+          (candidate) => candidate.getTitle() === title
+        );
+        return target?.getBackgroundColor() ?? null;
+      }, lightTitle)
+    )
+    .toBe("#FFFFFF");
+
+  await lightWindow.locator(".profile-chip").click();
+  await lightWindow
+    .locator(".profile-menu__action", { hasText: "Edit “Light workspace”…" })
+    .click();
+  const editModal = lightWindow.locator(".modal--profile");
+  await editModal.getByRole("radio", { name: "App setting" }).click();
+  await editModal.locator(".modal__create").click();
+
+  await expect(lightWindow.locator("html")).not.toHaveAttribute(
+    "data-theme",
+    "light"
+  );
+  await expect
+    .poll(() =>
+      app.evaluate(({ BrowserWindow }, title) => {
+        const target = BrowserWindow.getAllWindows().find(
+          (candidate) => candidate.getTitle() === title
+        );
+        return target?.getBackgroundColor() ?? null;
+      }, lightTitle)
+    )
+    .toBe("#000000");
+});
+
 test("profile menu closes on outside click and Escape", async () => {
   handle = await launchApp();
   const { window } = handle;

@@ -64,3 +64,20 @@ export function titleBarOverlay(theme: WindowChromeTheme): {
     height: TITLE_BAR_OVERLAY_HEIGHT
   };
 }
+
+export type RepaintableWindowChrome = {
+  isDestroyed: () => boolean;
+  setBackgroundColor: (color: string) => void;
+  setTitleBarOverlay: (options: ReturnType<typeof titleBarOverlay>) => void;
+};
+
+/** Repaint one already-open native frame to match its renderer palette. */
+export function repaintWindowChrome(
+  window: RepaintableWindowChrome,
+  theme: WindowChromeTheme,
+  platform: NodeJS.Platform = process.platform
+): void {
+  if (window.isDestroyed()) return;
+  window.setBackgroundColor(windowChrome(theme).background);
+  if (platform === "win32") window.setTitleBarOverlay(titleBarOverlay(theme));
+}

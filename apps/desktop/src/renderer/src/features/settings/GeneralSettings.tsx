@@ -52,7 +52,7 @@ export function GeneralSettings(props: {
       <SettingsPanelHead
         eyebrow="General"
         title="General settings"
-        help="Defaults that apply across PwrGit windows."
+        help="Defaults that apply across PwrGit windows unless a profile overrides them."
       />
 
       <SettingsSection
@@ -67,8 +67,8 @@ export function GeneralSettings(props: {
         <div className="settings-fields">
           <SettingsField
             label="Theme"
-            sub="Applies to every PwrGit window and native window chrome."
-            help="System follows macOS or Windows appearance changes while PwrGit is running."
+            sub="Default for PwrGit windows and native window chrome. Profiles can choose their own fixed palette."
+            help="System follows macOS or Windows appearance changes while PwrGit is running; inheriting profiles follow it too."
             control={
               <SettingsSegmented
                 aria-label="Color theme"

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseAppearanceArg,
+  resolveProfileAppearance,
   resolveAppearanceTheme,
   serializeAppearanceArg
 } from "./appearance";
@@ -37,5 +38,14 @@ describe("appearance bootstrap argument", () => {
   it("collapses Electron's native theme query", () => {
     expect(resolveAppearanceTheme(true)).toBe("dark");
     expect(resolveAppearanceTheme(false)).toBe("light");
+  });
+
+  it("inherits the app appearance unless a profile fixes its palette", () => {
+    const appAppearance = { theme: "system", resolvedTheme: "dark" } as const;
+    expect(resolveProfileAppearance(undefined, appAppearance)).toBe(appAppearance);
+    expect(resolveProfileAppearance("light", appAppearance)).toEqual({
+      theme: "light",
+      resolvedTheme: "light"
+    });
   });
 });

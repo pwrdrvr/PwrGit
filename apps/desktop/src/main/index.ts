@@ -12,7 +12,9 @@ import {
   GENERAL_DEFAULTS,
   isAppearanceTheme,
   ok,
+  resolveProfileAppearance,
   resolveUpdateSelection,
+  type AppAppearance,
   type Profile,
   type BranchReveal
 } from "@pwrgit/shared";
@@ -62,7 +64,7 @@ import {
 import { GitHubCommitAuthorIdentityService } from "./github/commit-author-identity";
 import { registerGitHubHandlers } from "./github/github-handlers";
 import { PrService } from "./github/pr-service";
-import { emitEvent, registerIpc } from "./ipc";
+import { emitEvent, emitEventToWindow, registerIpc } from "./ipc";
 import {
   initLogFile,
   logMain,
@@ -143,18 +145,21 @@ const settings = new SettingsService(
   join(app.getPath("userData"), "settings.json")
 );
 const storedTheme = settings.get().general?.theme;
+let isProfileWindow = (_window: BrowserWindow): boolean => false;
+let publishAppAppearance = (_next: AppAppearance): void => undefined;
 const appearance = createNativeThemeController({
   nativeTheme,
   initialTheme: isAppearanceTheme(storedTheme)
     ? storedTheme
     : GENERAL_DEFAULTS.theme,
-  windows: () => BrowserWindow.getAllWindows(),
-  onChanged: (next) => emitEvent("appearance:changed", next)
+  // Profile frames can have their own palette; the app controller owns every
+  // unbound window, while the profile registry repaints its own windows below.
+  windows: () => BrowserWindow.getAllWindows().filter((win) => !isProfileWindow(win)),
+  onChanged: (next) => publishAppAppearance(next)
 });
 
 const bus = new CommandBus();
 bus.register("ping", () => ok("pong"));
-bus.register("appearance:read", () => ok(appearance.appearance()));
 
 // Development launches do not pass through electron-builder, so macOS would
 // otherwise show the generic Electron tile in the Dock. Packaged builds use
@@ -345,7 +350,35 @@ if (!gotSingleInstanceLock) {
 
     // One window per profile. Opening a profile that already has a window
     // focuses it; cross-profile reveals are stashed until the new window asks.
-    const windows = createProfileWindows({ appearance: appearance.appearance });
+    const appearanceForProfile = (profileId: string): AppAppearance =>
+      resolveProfileAppearance(
+        profiles.get(profileId)?.theme,
+        appearance.appearance()
+      );
+    const windows = createProfileWindows({ appearance: appearanceForProfile });
+    isProfileWindow = (window) => windows.profileFor(window) !== null;
+    publishAppAppearance = (next) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (windows.profileFor(window) === null) {
+          emitEventToWindow(window, "appearance:changed", next);
+        }
+      }
+      windows.syncAllAppearances();
+    };
+    bus.register("appearance:read", (_req, context) => {
+      const sender =
+        context.webContentsId === undefined
+          ? null
+          : (BrowserWindow.getAllWindows().find(
+              (window) => window.webContents.id === context.webContentsId
+            ) ?? null);
+      const profileId = windows.profileFor(sender);
+      return ok(
+        profileId === null
+          ? appearance.appearance()
+          : appearanceForProfile(profileId)
+      );
+    });
     type Reveal = {
       repoId: string;
       worktreeId: string | null;
@@ -411,7 +444,10 @@ if (!gotSingleInstanceLock) {
 
     registerProfileHandlers(bus, profiles, {
       onActivated: rescanInBackground,
-      onChanged: refreshMenu,
+      onChanged: (profile) => {
+        windows.syncAppearance(profile.id);
+        refreshMenu();
+      },
       openWindow: openProfileWindow,
       consumeReveal: (profileId) => {
         const reveal = pendingReveals.get(profileId) ?? null;

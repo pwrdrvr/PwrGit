@@ -37,6 +37,7 @@ import type {
   PrSummary,
   Profile,
   ProfileId,
+  ProfileThemeOverride,
   PullProgressPhase,
   RebaseCommitRef,
   RebaseCheckResult,
@@ -97,6 +98,8 @@ export type CreateProfileRequest = {
   mono?: string;
   kind?: string;
   org?: string;
+  /** Fixed window palette; omit to inherit the app setting. */
+  theme?: ProfileThemeOverride;
   roots?: string[];
 };
 
@@ -106,6 +109,8 @@ export type UpdateProfileRequest = {
   email?: string;
   authorName?: string;
   org?: string;
+  /** Fixed window palette, null to return to the app setting. */
+  theme?: ProfileThemeOverride | null;
 };
 
 // App settings (Settings window). Experimental + diagnostics sections are
@@ -188,6 +193,12 @@ export function isAppearanceTheme(value: unknown): value is AppearanceTheme {
     typeof value === "string" &&
     (APPEARANCE_THEMES as readonly string[]).includes(value)
   );
+}
+
+export function isProfileThemeOverride(
+  value: unknown
+): value is ProfileThemeOverride {
+  return value === "dark" || value === "light";
 }
 
 export type AppAppearance = {

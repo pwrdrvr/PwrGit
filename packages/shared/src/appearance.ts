@@ -3,6 +3,7 @@ import {
   type AppAppearance,
   type ResolvedAppearanceTheme
 } from "./protocol";
+import type { ProfileThemeOverride } from "./types";
 
 /** Main → preload bootstrap token used before the renderer can make IPC calls. */
 export const APPEARANCE_ARG_PREFIX = "--pwrgit-appearance=";
@@ -11,6 +12,16 @@ export function resolveAppearanceTheme(
   shouldUseDarkColors: boolean
 ): ResolvedAppearanceTheme {
   return shouldUseDarkColors ? "dark" : "light";
+}
+
+/** Resolve one profile window without changing the app-wide preference. */
+export function resolveProfileAppearance(
+  override: ProfileThemeOverride | undefined,
+  appAppearance: AppAppearance
+): AppAppearance {
+  return override === undefined
+    ? appAppearance
+    : { theme: override, resolvedTheme: override };
 }
 
 export function serializeAppearanceArg(appearance: AppAppearance): string {

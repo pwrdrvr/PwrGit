@@ -3,7 +3,7 @@ import {
   type AppAppearance,
   type AppearanceTheme
 } from "@pwrgit/shared";
-import { titleBarOverlay, windowChrome } from "./window-chrome";
+import { repaintWindowChrome } from "./window-chrome";
 
 export type NativeThemeLike = {
   themeSource: AppearanceTheme;
@@ -46,13 +46,8 @@ export function createNativeThemeController(options: {
   );
 
   const repaint = (): void => {
-    const chrome = windowChrome(resolvedTheme);
     for (const window of options.windows()) {
-      if (window.isDestroyed()) continue;
-      window.setBackgroundColor(chrome.background);
-      if (platform === "win32") {
-        window.setTitleBarOverlay(titleBarOverlay(resolvedTheme));
-      }
+      repaintWindowChrome(window, resolvedTheme, platform);
     }
   };
 
