@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: PwrGit website
+    url: https://pwrgit.com
+    about: Download PwrGit and review the current product overview.
+  - name: PwrGit documentation
+    url: https://docs.pwrgit.com
+    about: Read setup instructions, feature reference, and troubleshooting guidance.
+  - name: Security reports
+    url: https://github.com/pwrdrvr/PwrGit/security/policy
+    about: Do not open a public issue; follow the private reporting instructions.

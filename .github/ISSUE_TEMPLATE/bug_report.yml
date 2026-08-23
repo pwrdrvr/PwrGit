@@ -1,0 +1,63 @@
+name: Bug report
+description: Report a reproducible PwrGit problem.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include repository contents, credentials, tokens, or other
+        private data. Report vulnerabilities through the security policy.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Select ...
+        3. See ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: PwrGit version
+      description: Find this in the About window or the downloaded release name.
+      placeholder: "0.6.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux source build
+        - Other source build
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: Operating system version
+      placeholder: "macOS 15.6 or Windows 11 24H2"
+    validations:
+      required: true
+  - type: textarea
+    id: repository-shape
+    attributes:
+      label: Repository shape
+      description: Branch, worktree, remote, and hosting details that matter. Do not include private names or URLs.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs or screenshots
+      description: Attach only sanitized evidence with secrets and private repository data removed.
