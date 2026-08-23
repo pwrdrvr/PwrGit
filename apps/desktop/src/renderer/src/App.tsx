@@ -347,6 +347,7 @@ export function App() {
   }, []);
 
   const showLineageCommit = useCallback((hash: string, subject: string) => {
+    if (!searchableCommits.some((commit) => commit.hash === hash)) return false;
     setFileInsightTarget(null);
     setDiffTarget(null);
     setCommitFocus({ hash, subject });
@@ -355,7 +356,8 @@ export function App() {
       hash,
       requestId: (current?.requestId ?? 0) + 1
     }));
-  }, []);
+    return true;
+  }, [searchableCommits]);
 
   const selectedRepo = useMemo(
     () => repos.find((r) => r.id === selection?.repoId) ?? null,

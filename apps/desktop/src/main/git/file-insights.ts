@@ -1,4 +1,4 @@
-import { lstat, readFile } from "node:fs/promises";
+import { lstat, readFile, readlink } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import {
   err,
@@ -21,8 +21,19 @@ export const FILE_BLAME_PAGE_MAX = 400;
 export const FILE_BLAME_MAX_BYTES = 1_000_000;
 
 const FILE_HISTORY_FORMAT =
-  "%x1e" + ["%H", "%P", "%an", "%ae", "%cI", "%s"].join("%x1f");
+  "%x1e" +
+  ["%H", "%P", "%an", "%ae", "%cI", "%s"].join("%x00") +
+  "%x00";
 const FULL_HASH = /^[0-9a-f]{40,64}$/i;
+
+type HistoryCursor = {
+  version: 1;
+  offset: number;
+  revision: string;
+  lineagePath: string;
+  selectedPath: string;
+  context: string;
+};
 
 function validation(code: string, message: string): Result<never> {
   return err({ kind: "validation", code, message });
@@ -37,16 +48,53 @@ function boundedLimit(
   return Math.max(1, Math.min(max, Math.trunc(requested ?? fallback)));
 }
 
-function cursorValue(cursor: string | undefined): Result<number> {
+function lineCursorValue(cursor: string | undefined): Result<number> {
   if (cursor === undefined) return ok(0);
   if (!/^\d+$/.test(cursor)) {
-    return validation("invalid_cursor", "The file-history cursor is invalid.");
+    return validation("invalid_cursor", "The file-insight cursor is invalid.");
   }
   const parsed = Number(cursor);
   if (!Number.isSafeInteger(parsed) || parsed < 0) {
     return validation("invalid_cursor", "The file-history cursor is invalid.");
   }
   return ok(parsed);
+}
+
+function historyContextKey(context: FileInsightContext): string {
+  return context.kind === "workingTree" ? "workingTree" : context.hash;
+}
+
+function encodeHistoryCursor(cursor: HistoryCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function decodeHistoryCursor(
+  value: string,
+  selectedPath: string,
+  context: FileInsightContext
+): Result<HistoryCursor> {
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(value, "base64url").toString("utf8")
+    ) as Partial<HistoryCursor>;
+    if (
+      parsed.version !== 1 ||
+      !Number.isSafeInteger(parsed.offset) ||
+      (parsed.offset ?? -1) < 0 ||
+      typeof parsed.revision !== "string" ||
+      !FULL_HASH.test(parsed.revision) ||
+      typeof parsed.lineagePath !== "string" ||
+      typeof parsed.selectedPath !== "string" ||
+      parsed.selectedPath !== selectedPath ||
+      typeof parsed.context !== "string" ||
+      parsed.context !== historyContextKey(context)
+    ) {
+      throw new Error("invalid cursor fields");
+    }
+    return ok(parsed as HistoryCursor);
+  } catch {
+    return validation("invalid_cursor", "The file-history cursor is invalid.");
+  }
 }
 
 function safeWorktreeFile(cwd: string, gitPath: string): Result<string> {
@@ -87,22 +135,36 @@ function historyStatus(code: string | undefined): FileStatus {
   }
 }
 
-/** Parse the record-separated `git log --follow --name-status` shape. */
+/** Parse the record- and NUL-separated `git log --follow --name-status -z`
+ * shape. NUL separators keep tabs, newlines, and non-ASCII path bytes out of
+ * Git's quoted-path representation. */
 export function parseFileHistory(stdout: string): FileHistoryEntry[] {
   const entries: FileHistoryEntry[] = [];
   for (const rawRecord of stdout.split("\x1e")) {
-    const record = rawRecord.replace(/^\s*\r?\n/, "").trimEnd();
-    if (record === "") continue;
-    const [header = "", ...statusLines] = record.split(/\r?\n/);
-    const [hash = "", parentsRaw = "", authorName = "", authorEmail = "", committedAt = "", subject = ""] =
-      header.split("\x1f");
+    const fields = rawRecord.split("\0");
+    const [
+      hash = "",
+      parentsRaw = "",
+      authorName = "",
+      authorEmail = "",
+      committedAt = "",
+      subject = ""
+    ] = fields;
     if (!FULL_HASH.test(hash)) continue;
 
-    const statusLine = statusLines.find((line) => /^[A-Z][0-9]*\t/.test(line));
-    if (statusLine === undefined) continue;
-    const [rawStatus = "M", firstPath = "", secondPath] = statusLine.split("\t");
+    let statusIndex = 6;
+    let rawStatus = "";
+    while (statusIndex < fields.length) {
+      rawStatus = (fields[statusIndex] ?? "").replace(/^[\r\n]+/, "");
+      if (/^[A-Z][0-9]*$/.test(rawStatus)) break;
+      statusIndex += 1;
+    }
+    if (!/^[A-Z][0-9]*$/.test(rawStatus)) continue;
     const status = historyStatus(rawStatus[0]);
-    const rename = (status === "R" || status === "C") && secondPath !== undefined;
+    const firstPath = fields[statusIndex + 1] ?? "";
+    const secondPath = fields[statusIndex + 2];
+    const rename =
+      (status === "R" || status === "C") && secondPath !== undefined;
     const path = rename ? secondPath : firstPath;
     if (path === "") continue;
 
@@ -121,6 +183,67 @@ export function parseFileHistory(stdout: string): FileHistoryEntry[] {
     });
   }
   return entries;
+}
+
+type WorkingHeadPath = {
+  revision: string | null;
+  path: string;
+};
+
+/** Resolve a selected working-tree path back to the blob path in HEAD. Status
+ * porcelain v2 emits rename paths as NUL-delimited new/old pairs, avoiding the
+ * quoting ambiguity that exists in the human-readable status formats. */
+async function resolveWorkingHeadPath(
+  git: GitExec,
+  cwd: string,
+  selectedPath: string,
+  signal?: AbortSignal
+): Promise<Result<WorkingHeadPath>> {
+  const headArgs = ["rev-parse", "--verify", "HEAD"];
+  const head = await git(headArgs, cwd, gitOptions(signal));
+  if (!head.ok) return head;
+  if (head.value.exitCode !== 0) {
+    return ok({ revision: null, path: selectedPath });
+  }
+  const revision = head.value.stdout.trim();
+  if (!FULL_HASH.test(revision)) {
+    return err({
+      kind: "git",
+      code: "invalid_head",
+      message: "Git returned an invalid HEAD revision."
+    });
+  }
+
+  // A pathspec causes Git to report the destination as an add and omit the
+  // source, so inspect tracked changes as a cancellable status read and select
+  // only the requested rename pair from its output.
+  const statusArgs = [
+    "-c",
+    "core.quotePath=false",
+    "status",
+    "--porcelain=v2",
+    "-z",
+    "--untracked-files=no"
+  ];
+  const status = await git(statusArgs, cwd, gitOptions(signal));
+  if (!status.ok) return status;
+  const checked = requireExit0(status.value, statusArgs);
+  if (!checked.ok) return checked;
+  const records = checked.value.stdout.split("\0");
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index] ?? "";
+    if (!record.startsWith("2 ")) continue;
+    const renamed = record.match(/^2 (?:[^ ]+ ){8}(.*)$/s);
+    const currentPath = renamed?.[1] ?? "";
+    const previousPath = records[index + 1] ?? "";
+    if (currentPath === selectedPath && previousPath !== "") {
+      const safePrevious = safeWorktreeFile(cwd, previousPath);
+      if (!safePrevious.ok) return safePrevious;
+      return ok({ revision, path: previousPath });
+    }
+    index += 1;
+  }
+  return ok({ revision, path: selectedPath });
 }
 
 function gitOptions(signal?: AbortSignal) {
@@ -145,44 +268,76 @@ export async function readFileHistory(
   if (!context.ok) return context;
   const path = safeWorktreeFile(cwd, request.path);
   if (!path.ok) return path;
-  const offset = cursorValue(request.cursor);
-  if (!offset.ok) return offset;
   const limit = boundedLimit(
     request.limit,
     FILE_HISTORY_PAGE_DEFAULT,
     FILE_HISTORY_PAGE_MAX
   );
-  const revision = context.value.kind === "commit" ? context.value.hash : "HEAD";
+  let cursor: HistoryCursor;
+  if (request.cursor !== undefined) {
+    const decoded = decodeHistoryCursor(
+      request.cursor,
+      request.path,
+      context.value
+    );
+    if (!decoded.ok) return decoded;
+    cursor = decoded.value;
+  } else if (context.value.kind === "commit") {
+    cursor = {
+      version: 1,
+      offset: 0,
+      revision: context.value.hash,
+      lineagePath: request.path,
+      selectedPath: request.path,
+      context: context.value.hash
+    };
+  } else {
+    const headPath = await resolveWorkingHeadPath(
+      git,
+      cwd,
+      request.path,
+      signal
+    );
+    if (!headPath.ok) return headPath;
+    if (headPath.value.revision === null) {
+      return ok({ entries: [], nextCursor: null });
+    }
+    cursor = {
+      version: 1,
+      offset: 0,
+      revision: headPath.value.revision,
+      lineagePath: headPath.value.path,
+      selectedPath: request.path,
+      context: "workingTree"
+    };
+  }
   const args = [
+    "-c",
+    "core.quotePath=false",
     "log",
     "--follow",
     "--find-renames",
     "--no-show-signature",
     `--format=${FILE_HISTORY_FORMAT}`,
     "--name-status",
-    `--skip=${offset.value}`,
+    "-z",
+    `--skip=${cursor.offset}`,
     `-n${limit + 1}`,
-    revision,
+    cursor.revision,
     "--",
-    request.path
+    cursor.lineagePath
   ];
   const raw = await git(args, cwd, gitOptions(signal));
   if (!raw.ok) return raw;
-  if (
-    raw.value.exitCode !== 0 &&
-    context.value.kind === "workingTree" &&
-    /(?:bad revision|does not have any commits yet|unknown revision)/i.test(
-      raw.value.stderr
-    )
-  ) {
-    return ok({ entries: [], nextCursor: null });
-  }
   const checked = requireExit0(raw.value, args);
   if (!checked.ok) return checked;
   const parsed = parseFileHistory(checked.value.stdout);
   return ok({
     entries: parsed.slice(0, limit),
-    nextCursor: parsed.length > limit ? String(offset.value + limit) : null
+    nextCursor:
+      parsed.length > limit
+        ? encodeHistoryCursor({ ...cursor, offset: cursor.offset + limit })
+        : null
   });
 }
 
@@ -287,8 +442,11 @@ type ContentResolution = {
   effectiveContext: FileInsightContext;
   bytes: number;
   content: string;
-  /** Undefined asks blame to compare HEAD against the working tree. */
+  /** Revision and historical path whose committed lines Git should attribute. */
   blameRevision?: string;
+  blamePath: string;
+  /** A regular working-tree file whose bytes should be compared to HEAD. */
+  contentsPath?: string;
   synthetic: boolean;
   notice?: string;
 };
@@ -319,6 +477,7 @@ async function gitObjectContent(
       bytes,
       content: "",
       blameRevision: revision,
+      blamePath: path,
       synthetic: false
     });
   }
@@ -332,6 +491,7 @@ async function gitObjectContent(
     bytes,
     content: checked.value.stdout,
     blameRevision: revision,
+    blamePath: path,
     synthetic: false
   });
 }
@@ -362,21 +522,57 @@ async function resolveBlameContent(
 
   const localPath = safeWorktreeFile(cwd, path);
   if (!localPath.ok) return localPath;
+  const headPath = await resolveWorkingHeadPath(git, cwd, path, signal);
+  if (!headPath.ok) return headPath;
   try {
     const info = await lstat(localPath.value);
-    if (!info.isFile()) return ok(null);
-    const bytes = info.size;
-    const content = bytes <= FILE_BLAME_MAX_BYTES
-      ? await readFile(localPath.value, "utf8")
-      : "";
-    const trackedArgs = ["cat-file", "-e", `HEAD:${path}`];
+    if (!info.isFile() && !info.isSymbolicLink()) return ok(null);
+    const content = info.isSymbolicLink()
+      ? await readlink(localPath.value)
+      : info.size <= FILE_BLAME_MAX_BYTES
+        ? await readFile(localPath.value, "utf8")
+        : "";
+    const bytes = info.isSymbolicLink()
+      ? Buffer.byteLength(content)
+      : info.size;
+    if (headPath.value.revision === null) {
+      return ok({
+        effectiveContext: { kind: "workingTree" },
+        bytes,
+        content,
+        blamePath: path,
+        synthetic: true
+      });
+    }
+    const trackedArgs = [
+      "cat-file",
+      "-e",
+      `${headPath.value.revision}:${headPath.value.path}`
+    ];
     const tracked = await git(trackedArgs, cwd, gitOptions(signal));
     if (!tracked.ok) return tracked;
+    const isTracked = tracked.value.exitCode === 0;
+    let synthetic = !isTracked;
+    if (isTracked && info.isSymbolicLink()) {
+      const committed = await gitObjectContent(
+        git,
+        cwd,
+        headPath.value.revision,
+        headPath.value.path,
+        signal
+      );
+      if (!committed.ok) return committed;
+      synthetic =
+        committed.value === null || committed.value.content !== content;
+    }
     return ok({
       effectiveContext: { kind: "workingTree" },
       bytes,
       content,
-      synthetic: tracked.value.exitCode !== 0
+      blamePath: headPath.value.path,
+      ...(isTracked ? { blameRevision: headPath.value.revision } : {}),
+      ...(isTracked && info.isFile() ? { contentsPath: localPath.value } : {}),
+      synthetic
     });
   } catch (cause) {
     const code =
@@ -392,13 +588,14 @@ async function resolveBlameContent(
     }
   }
 
-  const headArgs = ["rev-parse", "--verify", "HEAD"];
-  const head = await git(headArgs, cwd, gitOptions(signal));
-  if (!head.ok) return head;
-  if (head.value.exitCode !== 0) return ok(null);
-  const headHash = head.value.stdout.trim();
-  if (!FULL_HASH.test(headHash)) return ok(null);
-  const fallback = await gitObjectContent(git, cwd, headHash, path, signal);
+  if (headPath.value.revision === null) return ok(null);
+  const fallback = await gitObjectContent(
+    git,
+    cwd,
+    headPath.value.revision,
+    headPath.value.path,
+    signal
+  );
   if (!fallback.ok || fallback.value === null) return fallback;
   return ok({
     ...fallback.value,
@@ -444,7 +641,7 @@ export async function readFileBlame(
   if (!context.ok) return context;
   const checkedPath = safeWorktreeFile(cwd, request.path);
   if (!checkedPath.ok) return checkedPath;
-  const cursor = cursorValue(request.cursor);
+  const cursor = lineCursorValue(request.cursor);
   if (!cursor.ok) return cursor;
   const startLine = cursor.value + 1;
   const limit = boundedLimit(
@@ -522,9 +719,12 @@ export async function readFileBlame(
     "-C",
     "-L",
     `${startLine},+${limit + 1}`,
+    ...(resolved.contentsPath === undefined
+      ? []
+      : ["--contents", resolved.contentsPath]),
     ...(resolved.blameRevision === undefined ? [] : [resolved.blameRevision]),
     "--",
-    request.path
+    resolved.blamePath
   ];
   const raw = await git(args, cwd, gitOptions(signal));
   if (!raw.ok) return raw;

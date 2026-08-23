@@ -114,7 +114,7 @@ describe("FileInsightsPane", () => {
       }
       return Promise.resolve(ok(null));
     });
-    const showCommit = vi.fn();
+    const showCommit = vi.fn(() => true);
 
     await act(async () => {
       root.render(
@@ -183,7 +183,7 @@ describe("FileInsightsPane", () => {
           context={{ kind: "workingTree" }}
           initialTab="blame"
           onClose={() => undefined}
-          onShowCommit={() => undefined}
+          onShowCommit={() => true}
         />
       );
     });
@@ -223,7 +223,7 @@ describe("FileInsightsPane", () => {
           context={{ kind: "workingTree" }}
           initialTab="history"
           onClose={() => undefined}
-          onShowCommit={() => undefined}
+          onShowCommit={() => true}
         />
       );
     });
@@ -240,5 +240,59 @@ describe("FileInsightsPane", () => {
     });
     // afterEach owns unmount too; give it a fresh root over the same container.
     root = createRoot(container);
+  });
+
+  it("keeps file details open when a commit is outside the lineage window", async () => {
+    dispatchMock.mockImplementation((name: string) => {
+      if (name === "file:history") {
+        return Promise.resolve(
+          ok({
+            entries: [
+              {
+                hash: HASH_A,
+                shortHash: HASH_A.slice(0, 7),
+                parents: [],
+                subject: "old file change",
+                authorName: "Ada Lovelace",
+                authorEmail: "ada@example.test",
+                committedAt: COMMITTED_AT,
+                isMerge: false,
+                path: "docs/guide.txt",
+                status: "A"
+              }
+            ],
+            nextCursor: null
+          })
+        );
+      }
+      if (name === "github:hydrateCommitAuthorIdentities") {
+        return Promise.resolve(ok({}));
+      }
+      return Promise.resolve(ok(null));
+    });
+
+    await act(async () => {
+      root.render(
+        <FileInsightsPane
+          worktreeId="wt-1"
+          path="docs/guide.txt"
+          context={{ kind: "workingTree" }}
+          initialTab="history"
+          onClose={() => undefined}
+          onShowCommit={() => false}
+        />
+      );
+    });
+    await settle();
+
+    const commit = container.querySelector<HTMLButtonElement>(
+      '.file-history [aria-label^="Show commit"]'
+    );
+    await act(async () => commit?.click());
+
+    expect(container.querySelector("[data-testid=file-history]")).not.toBeNull();
+    expect(container.textContent).toContain(
+      "older than the loaded lineage window"
+    );
   });
 });

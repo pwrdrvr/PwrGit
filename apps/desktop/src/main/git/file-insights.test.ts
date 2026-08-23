@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  symlinkSync,
   writeFileSync
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -93,12 +94,12 @@ beforeAll(() => {
   git(repo, "init", "-b", "main");
   git(repo, "config", "core.autocrlf", "false");
 
-  writeFileSync(join(repo, "legacy", "guide.txt"), "alpha\nshared\n");
-  git(repo, "add", "legacy/guide.txt");
+  writeFileSync(join(repo, "legacy", "café.txt"), "alpha\nshared\n");
+  git(repo, "add", "legacy/café.txt");
   commitAs(repo, "add the guide", ADA);
 
   mkdirSync(join(repo, "docs"), { recursive: true });
-  git(repo, "mv", "legacy/guide.txt", "docs/guide.txt");
+  git(repo, "mv", "legacy/café.txt", "docs/guide.txt");
   commitAs(repo, "move guide into docs", ADA);
 
   writeFileSync(
@@ -131,7 +132,7 @@ describe("rename-aware file history", () => {
       path: "docs/guide.txt",
       status: "D"
     });
-    expect(first.value.nextCursor).toBe("2");
+    expect(first.value.nextCursor).not.toBeNull();
     const cursor = first.value.nextCursor;
     if (cursor === null) throw new Error("expected another history page");
 
@@ -147,16 +148,82 @@ describe("rename-aware file history", () => {
       {
         subject: "move guide into docs",
         path: "docs/guide.txt",
-        previousPath: "legacy/guide.txt",
+        previousPath: "legacy/café.txt",
         status: "R"
       },
       {
         subject: "add the guide",
-        path: "legacy/guide.txt",
+        path: "legacy/café.txt",
         status: "A"
       }
     ]);
     expect(second.value.nextCursor).toBeNull();
+  });
+
+  it("anchors later pages to the HEAD used by the first page", async () => {
+    const first = await readFileHistory(systemGit, repo, {
+      path: "docs/guide.txt",
+      context: { kind: "workingTree" },
+      limit: 1
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok || first.value.nextCursor === null) return;
+    expect(first.value.entries[0]?.subject).toBe("remove obsolete guide");
+
+    try {
+      mkdirSync(join(repo, "docs"), { recursive: true });
+      writeFileSync(join(repo, "docs", "guide.txt"), "restored\n");
+      git(repo, "add", "docs/guide.txt");
+      commitAs(repo, "restore guide after paging began", ADA);
+
+      const second = await readFileHistory(systemGit, repo, {
+        path: "docs/guide.txt",
+        context: { kind: "workingTree" },
+        cursor: first.value.nextCursor,
+        limit: 1
+      });
+      expect(second.ok).toBe(true);
+      if (!second.ok) return;
+      expect(second.value.entries[0]?.subject).toBe("clarify the guide");
+    } finally {
+      git(repo, "reset", "--hard", deletedCommit);
+    }
+  });
+
+  it("maps an uncommitted rename back to its HEAD path", async () => {
+    writeFileSync(join(repo, "old-café.txt"), "kept line\n");
+    git(repo, "add", "old-café.txt");
+    const original = commitAs(repo, "add rename candidate", ADA);
+    git(repo, "mv", "old-café.txt", "current.txt");
+
+    const history = await readFileHistory(systemGit, repo, {
+      path: "current.txt",
+      context: { kind: "workingTree" }
+    });
+    expect(history.ok).toBe(true);
+    if (history.ok) {
+      expect(history.value.entries[0]).toMatchObject({
+        hash: original,
+        path: "old-café.txt",
+        subject: "add rename candidate"
+      });
+    }
+
+    const blame = await readFileBlame(systemGit, repo, {
+      path: "current.txt",
+      context: { kind: "workingTree" }
+    });
+    expect(blame.ok).toBe(true);
+    if (blame.ok) {
+      expect(blame.value.hunks[0]).toMatchObject({
+        hash: original,
+        authorName: "Ada Lovelace",
+        lines: ["kept line"],
+        uncommitted: false
+      });
+    }
+
+    git(repo, "reset", "--hard", original);
   });
 });
 
@@ -178,7 +245,7 @@ describe("bounded file blame", () => {
     expect(result.value.hunks[0]).toMatchObject({
       authorName: "Ada Lovelace",
       authorEmail: "ada@example.test",
-      sourcePath: "legacy/guide.txt",
+      sourcePath: "legacy/café.txt",
       startLine: 1,
       endLine: 1
     });
@@ -228,6 +295,29 @@ describe("bounded file blame", () => {
       }
     });
   });
+
+  it.skipIf(process.platform === "win32")(
+    "attributes an unchanged tracked symlink blob",
+    async () => {
+      symlinkSync("target.txt", join(repo, "guide-link"));
+      git(repo, "add", "guide-link");
+      const symlinkCommit = commitAs(repo, "add guide symlink", ADA);
+
+      const result = await readFileBlame(systemGit, repo, {
+        path: "guide-link",
+        context: { kind: "workingTree" }
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.unavailableReason).toBeUndefined();
+      expect(result.value.hunks[0]).toMatchObject({
+        hash: symlinkCommit,
+        authorName: "Ada Lovelace",
+        lines: ["target.txt"],
+        uncommitted: false
+      });
+    }
+  );
 
   it("refuses binary and oversized files without running blame", async () => {
     writeFileSync(join(repo, "binary.dat"), Buffer.from([0, 1, 2, 3]));

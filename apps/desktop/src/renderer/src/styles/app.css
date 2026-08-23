@@ -135,9 +135,11 @@ textarea,
 .commit-sha-chip,
 .commit-context-card__subject,
 .commit-context-card__short-hash,
+.file-insight__commit,
 .file-history__subject,
 .file-history__path,
 .file-blame__line code,
+.file-blame__source,
 .file-blame__subject,
 .file-insight-pane__path,
 .pull-divergence__commit-subject,
@@ -7335,10 +7337,6 @@ body.is-col-resizing {
   border-radius: var(--radius-md);
   background: var(--bg-panel-elevated);
   font: 500 11px/1.45 var(--font-sans);
-}
-.file-history {
-  max-width: 980px;
-  margin: 0 auto;
 }
 .file-history__row {
   min-height: 64px;

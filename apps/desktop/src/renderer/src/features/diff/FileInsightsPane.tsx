@@ -117,7 +117,7 @@ function HistoryView({
   worktreeId: string;
   path: string;
   context: FileInsightContext;
-  onShowCommit: (hash: string, subject: string) => void;
+  onShowCommit: (hash: string, subject: string) => boolean;
 }) {
   const [entries, setEntries] = useState<FileHistoryEntry[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -299,7 +299,7 @@ function BlameView({
   worktreeId: string;
   path: string;
   context: FileInsightContext;
-  onShowCommit: (hash: string, subject: string) => void;
+  onShowCommit: (hash: string, subject: string) => boolean;
 }) {
   const [pages, setPages] = useState<FileBlamePage[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -460,13 +460,23 @@ export function FileInsightsPane({
   context: FileInsightContext;
   initialTab: FileInsightTab;
   onClose: () => void;
-  onShowCommit: (hash: string, subject: string) => void;
+  onShowCommit: (hash: string, subject: string) => boolean;
 }) {
   const [tab, setTab] = useState<FileInsightTab>(initialTab);
+  const [revealError, setRevealError] = useState<string | null>(null);
   const contextLabel =
     context.kind === "workingTree"
       ? "Working tree · through HEAD"
       : `Commit ${context.hash.slice(0, 7)}`;
+  const showCommit = (hash: string, subject: string): boolean => {
+    const revealed = onShowCommit(hash, subject);
+    setRevealError(
+      revealed
+        ? null
+        : "That commit is older than the loaded lineage window. File details remain open."
+    );
+    return revealed;
+  };
 
   return (
     <section className="file-insight-pane" aria-label={`File ${tab}`}>
@@ -498,19 +508,24 @@ export function FileInsightsPane({
         </button>
       </div>
       <div className="file-insight-pane__body">
+        {revealError !== null && (
+          <div className="file-insight__notice" role="status">
+            {revealError}
+          </div>
+        )}
         {tab === "history" ? (
           <HistoryView
             worktreeId={worktreeId}
             path={path}
             context={context}
-            onShowCommit={onShowCommit}
+            onShowCommit={showCommit}
           />
         ) : (
           <BlameView
             worktreeId={worktreeId}
             path={path}
             context={context}
-            onShowCommit={onShowCommit}
+            onShowCommit={showCommit}
           />
         )}
       </div>
