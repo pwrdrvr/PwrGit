@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Stage one better-sqlite3 v13 Node-API binary at the package's conventional
  * build/Release path before electron-builder collects production files.
