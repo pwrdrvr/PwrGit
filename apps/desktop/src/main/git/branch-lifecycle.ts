@@ -134,7 +134,7 @@ async function gitDirectory(
 async function guardWorktrees(
   git: GitExec,
   cwd: string,
-  branch: string
+  branches: readonly string[]
 ): Promise<Result<void>> {
   const listed = await listWorktrees(git, cwd);
   if (!listed.ok) return listed;
@@ -152,11 +152,15 @@ async function guardWorktrees(
         )
       );
     }
-    if (!worktree.detached && !worktree.bare && worktree.branch === branch) {
+    if (
+      !worktree.detached &&
+      !worktree.bare &&
+      branches.includes(worktree.branch)
+    ) {
       return err(
         lifecycleError(
           "branch_checked_out",
-          `${branch} is checked out in ${worktree.path}. Switch that worktree to another branch before renaming or deleting it.`
+          `${worktree.branch} is checked out in ${worktree.path}. Switch that worktree to another branch before renaming or deleting it.`
         )
       );
     }
@@ -184,10 +188,11 @@ async function guardRenameTarget(
   const checked = requireExit0(raw.value, args);
   if (!checked.ok) return checked;
   const target = `refs/heads/${newBranch}`;
+  const source = `refs/heads/${branch}`;
   const refs = checked.value.stdout
     .split("\n")
     .map((ref) => ref.trim())
-    .filter((ref) => ref !== "");
+    .filter((ref) => ref !== "" && ref !== source);
   if (refs.includes(target)) {
     return err(
       lifecycleError("already_exists", `A local branch named ${newBranch} already exists.`)
@@ -202,6 +207,71 @@ async function guardRenameTarget(
       lifecycleError(
         "ref_conflict",
         `${newBranch} conflicts with an existing local branch namespace.`
+      )
+    );
+  }
+  return ok(undefined);
+}
+
+function partialMutationFailure(
+  operation: "rename" | "delete",
+  branch: string,
+  error: PwrGitError
+): PwrGitError {
+  return lifecycleError(
+    `branch_${operation}_partial`,
+    error.message.trim() !== ""
+      ? error.message
+      : `The local branch ${branch} changed, but Git could not finish updating its metadata.`
+  );
+}
+
+async function forceDeleteExpectedRef(
+  git: GitExec,
+  cwd: string,
+  reviewed: ReviewedBranch
+): Promise<Result<void>> {
+  const fullName = `refs/heads/${reviewed.branch}`;
+  // Supplying the reviewed object ID makes deletion a compare-and-swap: Git
+  // holds the ref lock while it verifies the old value, so an external ref
+  // move cannot turn this into deletion of an unreviewed tip.
+  const deleted = await git(
+    ["update-ref", "-d", fullName, reviewed.expectedHead],
+    cwd
+  );
+  if (!deleted.ok) return deleted;
+  if (deleted.value.exitCode !== 0) {
+    // Prefer the product's stable stale/not-found errors over update-ref's
+    // platform- and Git-version-specific lock failure text.
+    const current = await reviewedLocalHead(git, cwd, reviewed);
+    if (!current.ok) return current;
+    return err(mutationFailure("delete", reviewed.branch, deleted.value.stderr));
+  }
+
+  // `git branch -D` also removes branch.<name> metadata. update-ref gives us
+  // the required atomic old-value check, so perform that cleanup explicitly.
+  const configured = await git(
+    ["config", "--remove-section", `branch.${reviewed.branch}`],
+    cwd
+  );
+  if (!configured.ok) {
+    return err(
+      partialMutationFailure("delete", reviewed.branch, configured.error)
+    );
+  }
+  // Depending on Git version, a missing section is exit 5 or a fatal
+  // "no such section" response. Both mean the desired cleanup is complete.
+  const noSection = /no such section/i.test(configured.value.stderr);
+  if (
+    configured.value.exitCode !== 0 &&
+    configured.value.exitCode !== 5 &&
+    !noSection
+  ) {
+    return err(
+      partialMutationFailure(
+        "delete",
+        reviewed.branch,
+        mutationFailure("delete", reviewed.branch, configured.value.stderr)
       )
     );
   }
@@ -240,8 +310,6 @@ export async function renameLocalBranch(
 ): Promise<Result<void>> {
   const source = await reviewedLocalHead(git, cwd, reviewed);
   if (!source.ok) return source;
-  const worktrees = await guardWorktrees(git, cwd, reviewed.branch);
-  if (!worktrees.ok) return worktrees;
   const target = await guardRenameTarget(
     git,
     cwd,
@@ -249,6 +317,11 @@ export async function renameLocalBranch(
     newBranch
   );
   if (!target.ok) return target;
+  const worktrees = await guardWorktrees(git, cwd, [
+    reviewed.branch,
+    newBranch
+  ]);
+  if (!worktrees.ok) return worktrees;
   const fresh = await reviewedLocalHead(git, cwd, reviewed);
   if (!fresh.ok) return fresh;
 
@@ -258,7 +331,20 @@ export async function renameLocalBranch(
   );
   if (!raw.ok) return raw;
   if (raw.value.exitCode !== 0) {
-    return err(mutationFailure("rename", reviewed.branch, raw.value.stderr));
+    const failure = mutationFailure("rename", reviewed.branch, raw.value.stderr);
+    const [currentSource, currentTarget] = await Promise.all([
+      refHead(git, cwd, `refs/heads/${reviewed.branch}`),
+      refHead(git, cwd, `refs/heads/${newBranch}`)
+    ]);
+    if (
+      currentSource.ok &&
+      currentTarget.ok &&
+      (currentSource.value !== reviewed.expectedHead ||
+        currentTarget.value !== null)
+    ) {
+      return err(partialMutationFailure("rename", reviewed.branch, failure));
+    }
+    return err(failure);
   }
   return ok(undefined);
 }
@@ -272,13 +358,15 @@ export async function deleteLocalBranch(
 ): Promise<Result<void>> {
   const source = await reviewedLocalHead(git, cwd, reviewed);
   if (!source.ok) return source;
-  const worktrees = await guardWorktrees(git, cwd, reviewed.branch);
+  const worktrees = await guardWorktrees(git, cwd, [reviewed.branch]);
   if (!worktrees.ok) return worktrees;
   const fresh = await reviewedLocalHead(git, cwd, reviewed);
   if (!fresh.ok) return fresh;
 
+  if (force) return forceDeleteExpectedRef(git, cwd, reviewed);
+
   const raw = await git(
-    ["branch", force ? "-D" : "-d", "--", reviewed.branch],
+    ["branch", "-d", "--", reviewed.branch],
     cwd
   );
   if (!raw.ok) return raw;

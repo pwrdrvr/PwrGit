@@ -364,5 +364,37 @@ describe("branch handlers", () => {
       expect(!result.ok && result.error.code).toBe("branch_checked_out");
       expect(indexer.refreshRepoWorktrees).not.toHaveBeenCalled();
     });
+
+    it("refreshes every branch surface after a partial rename failure", async () => {
+      const { bus, indexer } = harness();
+      vi.mocked(renameLocalBranch).mockResolvedValueOnce(
+        err({
+          kind: "repo",
+          code: "branch_rename_partial",
+          message: "branch is renamed, but update of config-file failed"
+        })
+      );
+
+      const result = await bus.dispatch("branch:rename", {
+        repoId: "repo-1",
+        branch: "feature/old",
+        newBranch: "feature/new",
+        expectedHead: "d".repeat(40)
+      });
+
+      expect(!result.ok && result.error.code).toBe("branch_rename_partial");
+      expect(indexer.refreshRepoWorktrees).toHaveBeenCalledExactlyOnceWith(
+        "repo-1"
+      );
+      expect(emitEvent).toHaveBeenCalledWith("worktree:changed", {
+        worktreeId: "worktree-1"
+      });
+      expect(emitEvent).toHaveBeenCalledWith("worktree:changed", {
+        worktreeId: "worktree-2"
+      });
+      expect(emitEvent).toHaveBeenCalledWith("repo:changed", {
+        profileId: "profile-1"
+      });
+    });
   });
 });

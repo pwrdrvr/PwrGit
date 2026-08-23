@@ -101,7 +101,7 @@ describe("BranchRenameDialog", () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
-  it("keeps the dialog open when main rejects a stale reviewed tip", async () => {
+  it("refreshes and closes when main rejects a stale reviewed tip", async () => {
     dispatch.mockResolvedValueOnce(
       err({
         kind: "repo",
@@ -115,7 +115,7 @@ describe("BranchRenameDialog", () => {
     await act(async () => button.click());
 
     expect(container.textContent).toContain("moved after it was shown");
-    expect(onRenamed).not.toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
+    expect(onRenamed).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalledOnce();
   });
 });

@@ -135,6 +135,26 @@ describe("safe local branch lifecycle", () => {
     ).toContain(linkedPath.replaceAll("\\", "/"));
   });
 
+  it("rejects a rename target held by an unborn worktree", async () => {
+    const { root, path } = repo("unborn-target");
+    git(path, "branch", "source");
+    const linkedPath = join(root, "reserved");
+    git(path, "worktree", "add", "--orphan", "-b", "reserved", linkedPath);
+    expect(hasRef(path, "refs/heads/reserved")).toBe(false);
+
+    const result = await renameLocalBranch(
+      systemGit,
+      path,
+      { branch: "source", expectedHead: head(path, "source") },
+      "reserved"
+    );
+
+    expect(!result.ok && result.error.code).toBe("branch_checked_out");
+    expect(!result.ok && result.error.message).toContain("reserved");
+    expect(hasRef(path, "refs/heads/source")).toBe(true);
+    expect(hasRef(path, "refs/heads/reserved")).toBe(false);
+  });
+
   it("does not treat a detached worktree as occupying its former branch", async () => {
     const { root, path } = repo("detached");
     git(path, "branch", "release");
@@ -186,6 +206,33 @@ describe("safe local branch lifecycle", () => {
     expect(hasRef(path, "refs/heads/unmerged")).toBe(false);
   });
 
+  it("atomically refuses to force-delete a tip moved during the mutation", async () => {
+    const { path } = repo("force-delete-race");
+    git(path, "branch", "moving");
+    const reviewedHead = head(path, "moving");
+    commit(path, "later.txt", "later");
+    const movedHead = head(path, "main");
+    let raced = false;
+    const racingGit: GitExec = async (args, cwd) => {
+      if (!raced && args[0] === "update-ref" && args[1] === "-d") {
+        raced = true;
+        git(path, "branch", "-f", "moving", movedHead);
+      }
+      return systemGit(args, cwd);
+    };
+
+    const result = await deleteLocalBranch(
+      racingGit,
+      path,
+      { branch: "moving", expectedHead: reviewedHead },
+      true
+    );
+
+    expect(raced).toBe(true);
+    expect(!result.ok && result.error.code).toBe("stale_branch");
+    expect(head(path, "moving")).toBe(movedHead);
+  });
+
   it("lets Git use a configured upstream as the normal-delete merge authority", async () => {
     const { root, path } = repo("delete-upstream");
     const remote = join(root, "remote.git");
@@ -233,6 +280,49 @@ describe("safe local branch lifecycle", () => {
     expect(!invalid.ok && invalid.error.code).toBe("invalid_branch");
     expect(!conflict.ok && conflict.error.code).toBe("ref_conflict");
     expect(hasRef(path, "refs/heads/source")).toBe(true);
+  });
+
+  it("renames across the source branch's own ref namespace", async () => {
+    const { path } = repo("source-namespace");
+    git(path, "branch", "feature");
+    const expectedHead = head(path, "feature");
+
+    expect(
+      await renameLocalBranch(
+        systemGit,
+        path,
+        { branch: "feature", expectedHead },
+        "feature/subtask"
+      )
+    ).toEqual(ok(undefined));
+    expect(
+      await renameLocalBranch(
+        systemGit,
+        path,
+        { branch: "feature/subtask", expectedHead },
+        "feature"
+      )
+    ).toEqual(ok(undefined));
+    expect(head(path, "feature")).toBe(expectedHead);
+  });
+
+  it("reports when rename moved the ref but config cleanup failed", async () => {
+    const { path } = repo("partial-rename");
+    git(path, "branch", "source");
+    git(path, "config", "branch.source.remote", ".");
+    const expectedHead = head(path, "source");
+    writeFileSync(join(path, ".git", "config.lock"), "locked\n");
+
+    const result = await renameLocalBranch(
+      systemGit,
+      path,
+      { branch: "source", expectedHead },
+      "renamed"
+    );
+
+    expect(!result.ok && result.error.code).toBe("branch_rename_partial");
+    expect(hasRef(path, "refs/heads/source")).toBe(false);
+    expect(head(path, "renamed")).toBe(expectedHead);
   });
 
   it("never confuses a remote-tracking ref with a local branch", async () => {

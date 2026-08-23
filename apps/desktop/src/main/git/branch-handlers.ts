@@ -28,6 +28,11 @@ const notFound = {
   message: "worktree not found"
 };
 
+const partialBranchMutationCodes = new Set([
+  "branch_rename_partial",
+  "branch_delete_partial"
+]);
+
 type Row = {
   path: string;
   repo_id: string;
@@ -255,7 +260,12 @@ export function registerBranchHandlers(
         req.newBranch
       )
     );
-    if (!result.ok) return result;
+    if (!result.ok) {
+      if (partialBranchMutationCodes.has(result.error.code)) {
+        await publishBranchMutation(req.repoId, repo.profile_id);
+      }
+      return result;
+    }
     logMain(
       "info",
       "branch",
@@ -278,7 +288,12 @@ export function registerBranchHandlers(
         req.force === true
       )
     );
-    if (!result.ok) return result;
+    if (!result.ok) {
+      if (partialBranchMutationCodes.has(result.error.code)) {
+        await publishBranchMutation(req.repoId, repo.profile_id);
+      }
+      return result;
+    }
     logMain(
       "info",
       "branch",

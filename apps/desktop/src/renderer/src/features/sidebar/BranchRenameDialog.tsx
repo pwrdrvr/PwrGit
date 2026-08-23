@@ -66,6 +66,10 @@ export function BranchRenameDialog({
         message,
         detail: result.error.message
       });
+      if (result.error.code === "stale_branch") {
+        await onRenamed();
+        onClose();
+      }
       return;
     }
     showInfoToast({
