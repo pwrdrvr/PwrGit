@@ -13,15 +13,18 @@ const EXPECTED_PACKED_FILES = ["LICENSE", "README.md", "package.json"];
 const FORBIDDEN_MANIFEST_FIELDS = [
   "bin",
   "browser",
+  "bugs",
   "bundleDependencies",
   "bundledDependencies",
   "dependencies",
   "devDependencies",
+  "directories",
   "exports",
   "main",
   "module",
   "optionalDependencies",
   "peerDependencies",
+  "repository",
   "scripts",
   "types",
   "typings",
@@ -53,8 +56,17 @@ export function checkReservationManifest(manifest, readme) {
   if (manifest.homepage !== "https://pwrgit.com") {
     failures.push('package homepage must be "https://pwrgit.com"');
   }
-  if (manifest.publishConfig?.access !== "public") {
-    failures.push('package publishConfig.access must be "public"');
+  const publishConfigKeys =
+    manifest.publishConfig !== null &&
+    typeof manifest.publishConfig === "object" &&
+    !Array.isArray(manifest.publishConfig)
+      ? Object.keys(manifest.publishConfig).sort()
+      : [];
+  if (
+    manifest.publishConfig?.access !== "public" ||
+    JSON.stringify(publishConfigKeys) !== JSON.stringify(["access"])
+  ) {
+    failures.push('package publishConfig must be exactly {"access":"public"}');
   }
 
   const declaredFiles = Array.isArray(manifest.files) ? sorted(manifest.files) : [];
@@ -77,10 +89,15 @@ export function checkReservationManifest(manifest, readme) {
     ["state that it does not contain the desktop app", /does not contain the\s+PwrGit application/i],
     ["state that npm install does not install PwrGit", /npm install pwrgit[^\n]*does not install PwrGit/i],
     ["link to the product download site", /https:\/\/pwrgit\.com/i],
+    ["link to the public product documentation", /https:\/\/docs\.pwrgit\.com/i],
   ]) {
     if (!pattern.test(readme)) {
       failures.push(`README must ${description}`);
     }
+  }
+
+  if (/https:\/\/github\.com\/pwrdrvr\/PwrGit/i.test(readme)) {
+    failures.push("README must not link to the private PwrGit repository");
   }
 
   return failures.sort((a, b) => a.localeCompare(b));
