@@ -105,6 +105,8 @@ importers:
         specifier: ^7.3.5
         version: 7.3.6(@types/node@24.12.4)(jiti@2.7.0)
 
+  packages/pwrgit: {}
+
   packages/shared: {}
 
 packages:
