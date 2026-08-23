@@ -20,6 +20,8 @@ export type AppHandle = {
   cleanup: () => Promise<void>;
 };
 
+type RecoverableBootRead = "profile:list" | "repo:list" | "forge:status";
+
 function cleanEnv(extra: Record<string, string>): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
@@ -41,7 +43,7 @@ function cleanEnv(extra: Record<string, string>): Record<string, string> {
  * `pnpm i`).
  */
 export async function launchApp(
-  opts: { worktreeRoot?: string } = {}
+  opts: { worktreeRoot?: string; failReadOnce?: RecoverableBootRead[] } = {}
 ): Promise<AppHandle> {
   const userData = mkdtempSync(join(tmpdir(), "pwrgit-e2e-ud-"));
   if (opts.worktreeRoot !== undefined) {
@@ -63,7 +65,10 @@ export async function launchApp(
     args: [MAIN],
     env: cleanEnv({
       PWRGIT_USER_DATA_DIR: userData,
-      PWRGIT_GITCONFIG: gitconfig
+      PWRGIT_GITCONFIG: gitconfig,
+      ...(opts.failReadOnce === undefined
+        ? {}
+        : { PWRGIT_E2E_FAIL_READ_ONCE: opts.failReadOnce.join(",") })
     })
   });
   const window = await app.firstWindow();
