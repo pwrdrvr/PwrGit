@@ -69,8 +69,8 @@ export async function launchApp(
   const window = await app.firstWindow();
   await window.waitForSelector("#root");
 
-  // Stub dialog.showOpenDialog in the main process; __pickDirs drives the result
-  // (works for both the single and multi-select handlers).
+  // Stub dialog.showOpenDialog in the main process; __pickDirs drives either a
+  // single returned path or a multi-selection through the shared picker.
   await app.evaluate(({ dialog }) => {
     const d = dialog as unknown as {
       __pickDirs: string[];
