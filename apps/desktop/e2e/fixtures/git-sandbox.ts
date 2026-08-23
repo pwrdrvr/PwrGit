@@ -67,6 +67,8 @@ export type GitSandbox = {
    */
   commitEmptyAt: (cwd: string, message: string, epochSeconds: number) => void;
   makeRepo: (name: string, opts?: { worktrees?: string[] }) => TestRepo;
+  /** A primary checkout stopped in a deterministic two-sided merge conflict. */
+  makeRepoWithMergeConflict: (name: string) => TestRepo;
   /** A repo whose main branch is synchronized with a local bare origin. */
   makeRepoWithRemote: (name: string) => RemoteTestRepo;
   /**
@@ -167,6 +169,37 @@ export function createGitSandbox(): GitSandbox {
       name,
       path: repoPath,
       addWorktree,
+      createBranch: (branch: string) => git(repoPath, "branch", branch)
+    };
+  };
+
+  const makeRepoWithMergeConflict = (name: string): TestRepo => {
+    const repoPath = initRepo(name);
+    writeFileSync(join(repoPath, "conflict.txt"), "shared base\n");
+    git(repoPath, "add", "conflict.txt");
+    git(repoPath, "commit", "-m", "add shared conflict base");
+
+    git(repoPath, "switch", "-c", "feature/conflict");
+    writeFileSync(join(repoPath, "conflict.txt"), "feature version\n");
+    git(repoPath, "add", "conflict.txt");
+    git(repoPath, "commit", "-m", "change conflict on feature");
+
+    git(repoPath, "switch", "main");
+    writeFileSync(join(repoPath, "conflict.txt"), "main version\n");
+    git(repoPath, "add", "conflict.txt");
+    git(repoPath, "commit", "-m", "change conflict on main");
+    try {
+      git(repoPath, "merge", "--no-edit", "feature/conflict");
+      throw new Error("fixture merge unexpectedly completed without a conflict");
+    } catch (cause) {
+      const unmerged = git(repoPath, "diff", "--name-only", "--diff-filter=U");
+      if (unmerged !== "conflict.txt") throw cause;
+    }
+
+    return {
+      name,
+      path: repoPath,
+      addWorktree: worktreeAdder(name, repoPath),
       createBranch: (branch: string) => git(repoPath, "branch", branch)
     };
   };
@@ -441,6 +474,7 @@ export function createGitSandbox(): GitSandbox {
     commitAs,
     commitEmptyAt,
     makeRepo,
+    makeRepoWithMergeConflict,
     makeRepoWithRemote,
     makeRepoWithApplyOnlyRebaseFailure,
     makeRepoBehindRemote,

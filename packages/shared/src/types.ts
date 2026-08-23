@@ -627,6 +627,94 @@ export type ChangeSet = {
   };
 };
 
+/** Git operation whose sequencer/index state is still present in a worktree. */
+export type ConflictOperationKind =
+  | "merge"
+  | "rebase"
+  | "cherry-pick"
+  | "revert";
+
+/** One side of an unmerged index entry. Git calls stages 2/3 ours/theirs. */
+export type ConflictStageInfo = {
+  stage: 1 | 2 | 3;
+  oid: string;
+  mode: string;
+};
+
+/** Honest classification from the stages Git actually exposes for one path. */
+export type ConflictPathKind =
+  | "both_modified"
+  | "both_added"
+  | "delete_or_rename_by_ours"
+  | "delete_or_rename_by_theirs"
+  | "added_by_ours"
+  | "added_by_theirs"
+  | "complex";
+
+export type ConflictWorkingTreeInfo = {
+  kind: "file" | "symlink" | "directory" | "other";
+  size: number;
+};
+
+/** A path that still has at least one unmerged index stage. */
+export type ConflictedPath = {
+  path: string;
+  kind: ConflictPathKind;
+  /** Stage 1, absent for add/add and other no-base conflicts. */
+  base: ConflictStageInfo | null;
+  /** Stage 2. Absence is meaningful: accepting ours resolves as a deletion. */
+  ours: ConflictStageInfo | null;
+  /** Stage 3. Absence is meaningful: accepting theirs resolves as a deletion. */
+  theirs: ConflictStageInfo | null;
+  /** Current checkout entry, if one exists. This may contain conflict markers. */
+  workingTree: ConflictWorkingTreeInfo | null;
+};
+
+export type ConflictOperation = {
+  kind: ConflictOperationKind;
+  label: string;
+  /** Rebase step progress, when Git exposes both counters. */
+  progress?: { current: number; total: number };
+};
+
+/** Fresh operation + index truth for the selected worktree. */
+export type ConflictState = {
+  operation: ConflictOperation | null;
+  conflicts: ConflictedPath[];
+};
+
+/** Lazy content payload. Binary and large blobs are never decoded as text. */
+export type ConflictContent =
+  | { kind: "text"; text: string }
+  | { kind: "binary" }
+  | { kind: "too-large"; limit: number }
+  | { kind: "unavailable"; reason: string };
+
+export type ConflictBlobPreview = {
+  size: number;
+  content: ConflictContent;
+};
+
+export type ConflictStagePreview = ConflictStageInfo & ConflictBlobPreview;
+
+export type ConflictWorkingTreePreview = ConflictWorkingTreeInfo &
+  ConflictBlobPreview & {
+    /** Guards an inline save against overwriting a newer external edit. */
+    contentHash: string;
+    /** Only regular, complete UTF-8 text files can be edited inline. */
+    editable: boolean;
+  };
+
+/** Lazy inspection of one still-conflicted path. Missing stages stay null. */
+export type ConflictInspection = {
+  path: string;
+  kind: ConflictPathKind;
+  base: ConflictStagePreview | null;
+  ours: ConflictStagePreview | null;
+  theirs: ConflictStagePreview | null;
+  workingTree: ConflictWorkingTreePreview | null;
+};
+
 /** One file touched by a commit (rail's commit-scoped file list). */
 export type CommitFileChange = {
   path: string;

@@ -29,6 +29,9 @@ import type {
   PushRefPlan,
   PushRefResult,
   ChangeSet,
+  ConflictInspection,
+  ConflictOperationKind,
+  ConflictState,
   Commit,
   CommitFileChange,
   CommitStats,
@@ -1095,6 +1098,54 @@ export interface Commands {
   "changes:discardAll": { req: { worktreeId: string }; res: null };
   "changes:commit": {
     req: { worktreeId: string; message: string; amend?: boolean };
+    res: null;
+  };
+  /** In-progress merge/sequencer state plus every unmerged index path. */
+  "conflict:state": { req: { worktreeId: string }; res: ConflictState };
+  /** Lazy base/ours/theirs + working-copy inspection for one conflicted path. */
+  "conflict:inspect": {
+    req: { worktreeId: string; path: string };
+    res: ConflictInspection;
+  };
+  /** Check out and stage one exact index side. A missing side means deletion. */
+  "conflict:accept": {
+    req: {
+      worktreeId: string;
+      path: string;
+      side: "ours" | "theirs";
+      /** null deliberately selects a side that is absent (a deletion). */
+      expectedOid: string | null;
+    };
+    res: null;
+  };
+  /** Stage the current working-copy resolution for one still-unmerged path. */
+  "conflict:stage": {
+    req: { worktreeId: string; path: string };
+    res: null;
+  };
+  /** Save a reviewed inline edit without staging it. */
+  "conflict:writeWorkingFile": {
+    req: {
+      worktreeId: string;
+      path: string;
+      text: string;
+      expectedContentHash: string;
+    };
+    res: null;
+  };
+  /** Open the current working-copy path in its OS-associated application. */
+  "conflict:openExternal": {
+    req: { worktreeId: string; path: string };
+    res: null;
+  };
+  /** Continue only the exact operation the renderer most recently inspected. */
+  "conflict:continue": {
+    req: { worktreeId: string; operation: ConflictOperationKind };
+    res: null;
+  };
+  /** Abort only the exact operation the renderer most recently inspected. */
+  "conflict:abort": {
+    req: { worktreeId: string; operation: ConflictOperationKind };
     res: null;
   };
   /** Unified diff for one working-tree file (staged or unstaged). */
