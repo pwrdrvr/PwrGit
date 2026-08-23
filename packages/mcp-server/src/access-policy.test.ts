@@ -122,8 +122,14 @@ describe("MCP access policy", () => {
     expect(defaultMcpPolicyFile({ XDG_CONFIG_HOME: "/cfg" }, "linux", "/home/test")).toBe(
       "/cfg/PwrGit/mcp-policy.json"
     );
-    expect(defaultMcpPolicyFile({ APPDATA: "C:\\Users\\test\\AppData\\Roaming" }, "win32", "C:\\Users\\test")).toContain(
-      "PwrGit"
+    expect(
+      defaultMcpPolicyFile(
+        { APPDATA: "C:\\Users\\test\\AppData\\Roaming" },
+        "win32",
+        "C:\\Users\\test"
+      )
+    ).toBe(
+      "C:\\Users\\test\\AppData\\Roaming\\PwrGit\\mcp-policy.json"
     );
   });
 });

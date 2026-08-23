@@ -19,9 +19,10 @@ import {
   dirname,
   isAbsolute,
   join,
+  posix,
   relative,
-  resolve,
-  sep
+  sep,
+  win32
 } from "node:path";
 
 export const MCP_POLICY_PROTOCOL = "pwrgit.mcp-policy/v1" as const;
@@ -199,17 +200,26 @@ export function defaultMcpPolicyFile(
   platform: NodeJS.Platform = process.platform,
   home: string = homedir()
 ): string {
+  const platformPath = platform === "win32" ? win32 : posix;
   const configured = env.PWRGIT_MCP_POLICY_FILE?.trim();
-  if (configured !== undefined && configured !== "") return resolve(configured);
+  if (configured !== undefined && configured !== "") return platformPath.resolve(configured);
   if (platform === "win32") {
     const appData = env.APPDATA?.trim();
-    return join(appData && appData !== "" ? appData : join(home, "AppData", "Roaming"), "PwrGit", "mcp-policy.json");
+    return platformPath.join(
+      appData && appData !== "" ? appData : platformPath.join(home, "AppData", "Roaming"),
+      "PwrGit",
+      "mcp-policy.json"
+    );
   }
   if (platform === "darwin") {
-    return join(home, "Library", "Application Support", "PwrGit", "mcp-policy.json");
+    return platformPath.join(home, "Library", "Application Support", "PwrGit", "mcp-policy.json");
   }
   const configHome = env.XDG_CONFIG_HOME?.trim();
-  return join(configHome && configHome !== "" ? configHome : join(home, ".config"), "PwrGit", "mcp-policy.json");
+  return platformPath.join(
+    configHome && configHome !== "" ? configHome : platformPath.join(home, ".config"),
+    "PwrGit",
+    "mcp-policy.json"
+  );
 }
 
 function tokenHash(token: string): Buffer {
