@@ -16,7 +16,9 @@ import {
   NO_OPTIONAL_LOCKS,
   requireExit0,
   type GitExec,
-  type GitExecOptions
+  type GitExecOptions,
+  type GitRecordExec,
+  type GitRecordOutput
 } from "./dugite";
 
 /** Keep a corrupt/cyclic fixture or huge vendor tree from turning one click
@@ -25,6 +27,7 @@ import {
 export const SUBMODULE_SCAN_LIMIT = 200;
 export const SUBMODULE_DEPTH_LIMIT = 8;
 export const SUBMODULE_INSPECT_CONCURRENCY = 4;
+export const SUBMODULE_METADATA_CHAR_LIMIT = 2_000_000;
 
 type Gitlink = { path: string; commit: string };
 type IndexGitlink = { path: string; commit: string; stage: number };
@@ -41,7 +44,8 @@ type ParentMetadata = {
   indexLinks: Map<string, IndexGitlink[]>;
   entries: ConfigEntry[];
   localEntries: Map<string, ConfigEntry>;
-  commonGitDir: string | null;
+  modulesGitDir: string | null;
+  truncated: boolean;
   issues: SubmoduleIssue[];
 };
 
@@ -59,12 +63,13 @@ type ChildCandidate = {
   pinnedCommit?: string;
   indexLinks: IndexGitlink[];
   localConfig: ConfigEntry | null;
-  commonGitDir: string | null;
+  modulesGitDir: string | null;
 };
 
 type InspectedChild = {
   row: SubmoduleStatus;
   nestedParent: ParentScan | null;
+  depthTruncated: boolean;
 };
 
 const issue = (
@@ -196,11 +201,11 @@ function childGitOptions(parentPath: string): GitExecOptions {
 }
 
 function localModuleGitDir(
-  commonGitDir: string | null,
+  modulesGitDir: string | null,
   name: string
 ): string | null {
-  if (commonGitDir === null || name === "") return null;
-  const root = resolve(commonGitDir, "modules");
+  if (modulesGitDir === null || name === "") return null;
+  const root = modulesGitDir;
   const candidate = resolve(root, ...name.split("/"));
   const fromRoot = relative(root, candidate);
   if (
@@ -247,18 +252,54 @@ async function optionalOutput(
   return raw.ok && raw.value.exitCode === 0 ? raw.value.stdout : null;
 }
 
+function recordsAsOutput(output: GitRecordOutput): string {
+  return output.records.length === 0 ? "" : `${output.records.join("\0")}\0`;
+}
+
+function requireRecordExit0(
+  output: GitRecordOutput,
+  args: string[]
+): Result<GitRecordOutput, PwrGitError> {
+  if (output.exitCode === 0) return ok(output);
+  return err({
+    kind: "git",
+    code: `exit_${output.exitCode}`,
+    message:
+      output.stderr.trim() !== ""
+        ? output.stderr.trim()
+        : `git ${args.join(" ")} exited ${output.exitCode}`
+  });
+}
+
 async function readParentMetadata(
   git: GitExec,
-  parentPath: string
+  recordGit: GitRecordExec,
+  parentPath: string,
+  limit: number
 ): Promise<Result<ParentMetadata, PwrGitError>> {
-  const [indexRaw, headRaw, declaredRaw, localRaw, commonRaw] =
+  const keepGitlink = (record: string): boolean =>
+    record.startsWith("160000 ");
+  const configLimit = Math.max(limit * 4, 4);
+  const [indexRaw, headRaw, declaredRaw, localRaw, modulesRaw] =
     await Promise.all([
-      git(["ls-files", "--stage", "-z"], parentPath, NO_OPTIONAL_LOCKS),
+      recordGit(["ls-files", "--stage", "-z"], parentPath, {
+        ...NO_OPTIONAL_LOCKS,
+        maxRecords: limit,
+        maxChars: SUBMODULE_METADATA_CHAR_LIMIT,
+        matches: keepGitlink
+      }),
       // Recursive is about ordinary parent trees (`modules/…`); traversal
       // stops at a 160000 gitlink and never enters the child repository.
-      git(["ls-tree", "-r", "-z", "HEAD"], parentPath, NO_OPTIONAL_LOCKS),
+      // The streaming reader discards ordinary entries as they arrive, so a
+      // million-file tree never becomes a million-entry JavaScript string.
+      recordGit(["ls-tree", "-r", "-z", "HEAD"], parentPath, {
+        ...NO_OPTIONAL_LOCKS,
+        maxRecords: limit,
+        maxChars: SUBMODULE_METADATA_CHAR_LIMIT,
+        matches: keepGitlink
+      }),
       existsSync(resolve(parentPath, ".gitmodules"))
-        ? git(
+        ? recordGit(
             [
               "config",
               "--null",
@@ -268,10 +309,15 @@ async function readParentMetadata(
               "^submodule\\..*\\.(path|url|branch)$"
             ],
             parentPath,
-            NO_OPTIONAL_LOCKS
+            {
+              ...NO_OPTIONAL_LOCKS,
+              maxRecords: configLimit,
+              maxChars: SUBMODULE_METADATA_CHAR_LIMIT,
+              matches: () => true
+            }
           )
         : Promise.resolve(null),
-      git(
+      recordGit(
         [
           "config",
           "--null",
@@ -280,13 +326,24 @@ async function readParentMetadata(
           "^submodule\\..*\\.(url|branch|active)$"
         ],
         parentPath,
-        NO_OPTIONAL_LOCKS
+        {
+          ...NO_OPTIONAL_LOCKS,
+          maxRecords: configLimit,
+          maxChars: SUBMODULE_METADATA_CHAR_LIMIT,
+          matches: () => true
+        }
       ),
-      git(["rev-parse", "--git-common-dir"], parentPath, NO_OPTIONAL_LOCKS)
+      // --git-path is worktree-aware. In a linked worktree this resolves to
+      // .git/worktrees/<id>/modules rather than the common checkout's store.
+      git(["rev-parse", "--git-path", "modules"], parentPath, NO_OPTIONAL_LOCKS)
     ]);
 
   if (!indexRaw.ok) return indexRaw;
-  const index = requireExit0(indexRaw.value, ["ls-files", "--stage", "-z"]);
+  const index = requireRecordExit0(indexRaw.value, [
+    "ls-files",
+    "--stage",
+    "-z"
+  ]);
   if (!index.ok) return index;
 
   const issues: SubmoduleIssue[] = [];
@@ -305,35 +362,35 @@ async function readParentMetadata(
         )
       );
     } else if (declaredRaw.value.exitCode === 0) {
-      entries = parseSubmoduleConfig(declaredRaw.value.stdout);
+      entries = parseSubmoduleConfig(recordsAsOutput(declaredRaw.value));
     }
   }
 
   const localEntries = new Map<string, ConfigEntry>();
   if (localRaw.ok && localRaw.value.exitCode === 0) {
-    for (const entry of parseSubmoduleConfig(localRaw.value.stdout)) {
+    for (const entry of parseSubmoduleConfig(recordsAsOutput(localRaw.value))) {
       localEntries.set(entry.name, entry);
     }
   }
 
   const headLinks = new Map<string, string>();
   if (headRaw.ok && headRaw.value.exitCode === 0) {
-    for (const link of parseHeadGitlinks(headRaw.value.stdout)) {
+    for (const link of parseHeadGitlinks(recordsAsOutput(headRaw.value))) {
       headLinks.set(link.path, link.commit);
     }
   }
 
   const indexLinks = new Map<string, IndexGitlink[]>();
-  for (const link of parseIndexGitlinks(index.value.stdout)) {
+  for (const link of parseIndexGitlinks(recordsAsOutput(index.value))) {
     const current = indexLinks.get(link.path) ?? [];
     current.push(link);
     indexLinks.set(link.path, current);
   }
 
-  let commonGitDir: string | null = null;
-  if (commonRaw.ok && commonRaw.value.exitCode === 0) {
-    const value = commonRaw.value.stdout.trim();
-    if (value !== "") commonGitDir = resolve(parentPath, value);
+  let modulesGitDir: string | null = null;
+  if (modulesRaw.ok && modulesRaw.value.exitCode === 0) {
+    const value = modulesRaw.value.stdout.trim();
+    if (value !== "") modulesGitDir = resolve(parentPath, value);
   }
 
   return ok({
@@ -341,7 +398,12 @@ async function readParentMetadata(
     indexLinks,
     entries,
     localEntries,
-    commonGitDir,
+    modulesGitDir,
+    truncated:
+      index.value.truncated ||
+      (headRaw.ok && headRaw.value.truncated) ||
+      (declaredRaw?.ok === true && declaredRaw.value.truncated) ||
+      (localRaw.ok && localRaw.value.truncated),
     issues
   });
 }
@@ -379,7 +441,7 @@ function childCandidates(
           config === null
             ? (metadata.localEntries.get(path) ?? null)
             : (metadata.localEntries.get(config.name) ?? null),
-        commonGitDir: metadata.commonGitDir
+        modulesGitDir: metadata.modulesGitDir
       };
     });
 }
@@ -506,7 +568,7 @@ async function inspectChild(
       checkoutState = "checked_out";
       checkout = parseCheckoutStatus(status.value.stdout);
     } else {
-      const moduleDir = localModuleGitDir(candidate.commonGitDir, name);
+      const moduleDir = localModuleGitDir(candidate.modulesGitDir, name);
       const retained = moduleDir !== null && existsSync(moduleDir);
       if (isEmptyDirectory(path)) {
         checkoutState = retained ? "deinitialized" : "uninitialized";
@@ -620,14 +682,17 @@ async function inspectChild(
     ...(initializedUrl === undefined ? {} : { initializedUrl }),
     issues
   };
+  const hasNestedModules =
+    checkoutState === "checked_out" &&
+    existsSync(resolve(path, ".gitmodules"));
+  const canInspectNested = parent.depth + 1 <= SUBMODULE_DEPTH_LIMIT;
   return {
     row,
     nestedParent:
-      checkoutState === "checked_out" &&
-      parent.depth + 1 <= SUBMODULE_DEPTH_LIMIT &&
-      existsSync(resolve(path, ".gitmodules"))
+      hasNestedModules && canInspectNested
         ? { path, displayPrefix: displayPath, depth: parent.depth + 1 }
-        : null
+        : null,
+    depthTruncated: hasNestedModules && !canInspectNested
   };
 }
 
@@ -638,6 +703,7 @@ async function inspectChild(
  */
 export async function inspectSubmodules(
   git: GitExec,
+  recordGit: GitRecordExec,
   worktreePath: string
 ): Promise<Result<SubmoduleSnapshot, PwrGitError>> {
   const rows: SubmoduleStatus[] = [];
@@ -650,7 +716,12 @@ export async function inspectSubmodules(
   while (queue.length > 0 && rows.length < SUBMODULE_SCAN_LIMIT) {
     const parent = queue.shift();
     if (parent === undefined) break;
-    const metadata = await readParentMetadata(git, parent.path);
+    const metadata = await readParentMetadata(
+      git,
+      recordGit,
+      parent.path,
+      SUBMODULE_SCAN_LIMIT - rows.length
+    );
     if (!metadata.ok) {
       if (parent.depth === 0) return metadata;
       const owner = rows.find((row) => row.path === parent.displayPrefix);
@@ -665,6 +736,7 @@ export async function inspectSubmodules(
       continue;
     }
     issues.push(...metadata.value.issues);
+    if (metadata.value.truncated) truncated = true;
     const candidates = childCandidates(parent, metadata.value);
     const room = SUBMODULE_SCAN_LIMIT - rows.length;
     const selected = candidates.slice(0, room);
@@ -704,7 +776,8 @@ export async function inspectSubmodules(
                 )
               ]
             },
-            nestedParent: null
+            nestedParent: null,
+            depthTruncated: false
           });
         }
       }
@@ -713,6 +786,7 @@ export async function inspectSubmodules(
     for (const child of inspected) {
       rows.push(child.row);
       if (child.nestedParent !== null) queue.push(child.nestedParent);
+      if (child.depthTruncated) truncated = true;
     }
   }
 
@@ -722,7 +796,7 @@ export async function inspectSubmodules(
       issue(
         "scan_truncated",
         "warning",
-        `The submodule scan stopped after ${SUBMODULE_SCAN_LIMIT} entries.`,
+        `The submodule scan reached its safety limit (${SUBMODULE_SCAN_LIMIT} entries or ${SUBMODULE_DEPTH_LIMIT} nested levels).`,
         "Inspect the remaining nested repositories with Git directly."
       )
     );

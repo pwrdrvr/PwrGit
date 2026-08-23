@@ -757,6 +757,11 @@ export interface Commands {
     req: { worktreeId: string };
     res: WorktreeState | null;
   };
+  /** Live checkout-safety probe, including dirty initialized submodules. */
+  "worktree:readDirty": {
+    req: { worktreeId: string };
+    res: { dirty: number };
+  };
   "worktree:activate": { req: { worktreeId: string }; res: null };
 
   // Worktree lifecycle (U14)

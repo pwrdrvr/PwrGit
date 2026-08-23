@@ -13,7 +13,7 @@ import {
   listLocalBranchNames,
   listRemoteBranchPage,
   listRepoRefs,
-  readChanges,
+  readCheckoutDirtyCount,
   switchBranch,
   worktreeAdd
 } from "./git-service";
@@ -86,6 +86,16 @@ export function registerBranchHandlers(
     emitEvent("repo:changed", { profileId });
   };
 
+  bus.register("worktree:readDirty", async (req) => {
+    const row = rowOf(req.worktreeId);
+    if (row === undefined) return err(notFound);
+    return operations.run(req.worktreeId, async () => {
+      const dirty = await readCheckoutDirtyCount(execGit, row.path);
+      if (!dirty.ok) return dirty;
+      return ok({ dirty: dirty.value });
+    });
+  });
+
   bus.register("branch:list", async (req) => {
     const row = rowOf(req.worktreeId);
     if (row === undefined) return err(notFound);
@@ -146,9 +156,9 @@ export function registerBranchHandlers(
       const created = await operations.run(
         req.worktreeId,
         async (): Promise<Result<void>> => {
-          const changes = await readChanges(execGit, row.path);
-          if (!changes.ok) return err(changes.error);
-          if (changes.value.staged.length + changes.value.unstaged.length > 0) {
+          const dirty = await readCheckoutDirtyCount(execGit, row.path);
+          if (!dirty.ok) return err(dirty.error);
+          if (dirty.value > 0) {
             return err({
               kind: "repo",
               code: "dirty",

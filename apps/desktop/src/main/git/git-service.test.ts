@@ -10,6 +10,7 @@ import {
   parseUnappliedUpstreams,
   parseWorktreeList,
   readChanges,
+  readCheckoutDirtyCount,
   readCommit,
   topoMergeCommits
 } from "./git-service";
@@ -385,5 +386,25 @@ describe("parseChanges", () => {
     await expect(readChanges(git, "/repo")).resolves.toEqual(
       ok({ staged: [], unstaged: [] })
     );
+  });
+
+  it("uses a child-aware status for live checkout safety", async () => {
+    const git: GitExec = async (args, _cwd, options) => {
+      expect(options?.env?.["GIT_OPTIONAL_LOCKS"]).toBe("0");
+      expect(args).toEqual([
+        "status",
+        "--porcelain=v2",
+        "--untracked-files=normal",
+        "--ignore-submodules=none"
+      ]);
+      return ok({
+        stdout:
+          "1 .M S.M. 160000 160000 160000 aaa aaa modules/child\n",
+        stderr: "",
+        exitCode: 0
+      });
+    };
+
+    await expect(readCheckoutDirtyCount(git, "/repo")).resolves.toEqual(ok(1));
   });
 });

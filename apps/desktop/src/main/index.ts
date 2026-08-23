@@ -507,7 +507,7 @@ if (!gotSingleInstanceLock) {
     registerRemoteHandlers(bus, db, refresher, worktreeOperations, indexer);
     registerGraphHandlers(bus, db, stateService);
     registerChangesHandlers(bus, db, refresher, worktreeOperations);
-    registerSubmoduleHandlers(bus, db, worktreeOperations);
+    registerSubmoduleHandlers(bus, db);
     registerRebaseHandlers(bus, db, refresher, worktreeOperations);
     registerDialogHandlers(bus);
     registerShellHandlers(bus);

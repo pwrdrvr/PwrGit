@@ -35,9 +35,10 @@ export class ChangeSetWatch {
         "status",
         "--porcelain=v2",
         "--untracked-files=all",
-        // A parent watcher must not recursively scan every child's working
-        // tree. Pin changes remain visible; child dirtiness is a submodule row.
-        "--ignore-submodules=dirty"
+        // The Changes list itself suppresses child rows, but this active-only
+        // fingerprint is also the submodule panel's invalidation source. Ask
+        // Git which child paths are dirty so child-only edits trigger refresh.
+        "--ignore-submodules=none"
       ],
       cwd,
       NO_OPTIONAL_LOCKS

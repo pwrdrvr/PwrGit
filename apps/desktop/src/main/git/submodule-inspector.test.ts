@@ -10,13 +10,19 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { err, ok } from "@pwrgit/shared";
-import type { GitExec, GitOutput } from "./dugite";
+import {
+  execGitRecords,
+  type GitExec,
+  type GitOutput,
+  type GitRecordExec
+} from "./dugite";
 import {
   inspectSubmodules,
   parseCheckoutStatus,
   parseHeadGitlinks,
   parseIndexGitlinks,
-  parseSubmoduleConfig
+  parseSubmoduleConfig,
+  SUBMODULE_DEPTH_LIMIT
 } from "./submodule-inspector";
 
 const GIT_ENV: NodeJS.ProcessEnv = {
@@ -54,6 +60,12 @@ const systemGit: GitExec = (args, cwd, options) =>
         } satisfies GitOutput)
       )
     );
+  });
+
+const systemGitRecords: GitRecordExec = (args, cwd, options) =>
+  execGitRecords(args, cwd, {
+    ...options,
+    env: { ...GIT_ENV, ...options.env }
   });
 
 function git(cwd: string, args: string[]): string {
@@ -182,7 +194,9 @@ describe("inspectSubmodules (system git)", () => {
     git(join(parent, "modules/api"), ["checkout", "--detach", newer]);
     writeFileSync(join(parent, "modules/api", "scratch.txt"), "dirty\n");
 
-    const snapshot = expectSnapshot(await inspectSubmodules(systemGit, parent));
+    const snapshot = expectSnapshot(
+      await inspectSubmodules(systemGit, systemGitRecords, parent)
+    );
     expect(snapshot.issues).toEqual([]);
     expect(snapshot.submodules).toHaveLength(1);
     expect(snapshot.submodules[0]).toMatchObject({
@@ -257,7 +271,9 @@ describe("inspectSubmodules (system git)", () => {
     rmSync(uninitializedGitDir, { recursive: true, force: true });
     rmSync(join(parent, "modules/missing"), { recursive: true, force: true });
 
-    const snapshot = expectSnapshot(await inspectSubmodules(systemGit, parent));
+    const snapshot = expectSnapshot(
+      await inspectSubmodules(systemGit, systemGitRecords, parent)
+    );
     expect(snapshot.truncated).toBe(false);
     expect(snapshot.submodules.map((row) => row.path)).toEqual([
       "modules/deinitialized",
@@ -291,6 +307,124 @@ describe("inspectSubmodules (system git)", () => {
       checkoutState: "checked_out",
       relation: "at_pin"
     });
+  });
+
+  it("finds retained submodule data in a linked worktree's Git directory", async () => {
+    const child = join(root, "linked-child");
+    const parent = join(root, "primary");
+    const linked = join(root, "linked");
+    initRepo(child);
+    const childCommit = commitFile(child, "child.txt", "child\n", "child");
+    initRepo(parent);
+    commitFile(parent, "README.md", "parent\n", "parent");
+    writeFileSync(
+      join(parent, ".gitmodules"),
+      `[submodule "modules/child"]\n\tpath = modules/child\n\turl = ${child.replaceAll("\\", "/")}\n`
+    );
+    git(parent, [
+      "update-index",
+      "--add",
+      "--cacheinfo",
+      `160000,${childCommit},modules/child`
+    ]);
+    git(parent, ["add", ".gitmodules"]);
+    git(parent, ["commit", "-m", "record child"]);
+    git(parent, ["worktree", "add", "-b", "linked-audit", linked]);
+    git(linked, [
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "update",
+      "--init",
+      "modules/child"
+    ]);
+    git(linked, ["submodule", "deinit", "-f", "modules/child"]);
+
+    const retainedPath = resolve(
+      linked,
+      git(linked, [
+        "rev-parse",
+        "--git-path",
+        "modules/modules/child"
+      ])
+    );
+    expect(retainedPath).toContain("worktrees");
+
+    const snapshot = expectSnapshot(
+      await inspectSubmodules(systemGit, systemGitRecords, linked)
+    );
+    expect(snapshot.submodules[0]).toMatchObject({
+      path: "modules/child",
+      checkoutState: "deinitialized"
+    });
+  });
+
+  it("marks a checked-out nested chain beyond the depth limit as truncated", async () => {
+    const parent = join(root, "deep-parent");
+    let current = parent;
+    for (let depth = 0; depth <= SUBMODULE_DEPTH_LIMIT + 1; depth += 1) {
+      mkdirSync(current, { recursive: true });
+      writeFileSync(join(current, ".gitmodules"), "nested\n");
+      current = join(current, "next");
+    }
+    const commit = "d".repeat(40);
+    const recordGit: GitRecordExec = async (args) => {
+      if (args[0] === "ls-files") {
+        return ok({
+          records: [`160000 ${commit} 0\tnext`],
+          stderr: "",
+          exitCode: 0,
+          truncated: false
+        });
+      }
+      if (args[0] === "ls-tree") {
+        return ok({
+          records: [`160000 commit ${commit}\tnext`],
+          stderr: "",
+          exitCode: 0,
+          truncated: false
+        });
+      }
+      if (args.includes("--file")) {
+        return ok({
+          records: [
+            "submodule.next.path\nnext",
+            "submodule.next.url\n../next.git"
+          ],
+          stderr: "",
+          exitCode: 0,
+          truncated: false
+        });
+      }
+      return ok({
+        records: [],
+        stderr: "",
+        exitCode: 1,
+        truncated: false
+      });
+    };
+    const gitExec: GitExec = async (args) => {
+      if (args[0] === "status") {
+        return ok({
+          stdout: `# branch.oid ${commit}\0# branch.head main\0`,
+          stderr: "",
+          exitCode: 0
+        });
+      }
+      if (args[0] === "rev-parse") {
+        return ok({ stdout: ".git/modules\n", stderr: "", exitCode: 0 });
+      }
+      return ok({ stdout: "", stderr: "", exitCode: 0 });
+    };
+
+    const snapshot = expectSnapshot(
+      await inspectSubmodules(gitExec, recordGit, parent)
+    );
+    expect(snapshot.submodules).toHaveLength(SUBMODULE_DEPTH_LIMIT + 1);
+    expect(snapshot.truncated).toBe(true);
+    expect(snapshot.issues.map((problem) => problem.code)).toContain(
+      "scan_truncated"
+    );
   });
 
   it("classifies staged pins, behind checkouts, and histories that diverged from the pin", async () => {
@@ -327,7 +461,9 @@ describe("inspectSubmodules (system git)", () => {
     git(divergedCheckout, ["checkout", "--detach", base]);
     commitFile(divergedCheckout, "fork.txt", "fork\n", "fork");
 
-    const snapshot = expectSnapshot(await inspectSubmodules(systemGit, parent));
+    const snapshot = expectSnapshot(
+      await inspectSubmodules(systemGit, systemGitRecords, parent)
+    );
     const byPath = new Map(snapshot.submodules.map((row) => [row.path, row]));
     expect(byPath.get("modules/staged")).toMatchObject({
       pinnedCommit: base,
@@ -348,7 +484,7 @@ describe("inspectSubmodules (system git)", () => {
     // Re-pin diverged to tip without changing its alternate checkout.
     git(parent, ["update-index", "--cacheinfo", "160000", tip, "modules/diverged"]);
     const divergedSnapshot = expectSnapshot(
-      await inspectSubmodules(systemGit, parent)
+      await inspectSubmodules(systemGit, systemGitRecords, parent)
     );
     expect(
       divergedSnapshot.submodules.find((row) => row.path === "modules/diverged")
@@ -391,7 +527,9 @@ describe("inspectSubmodules (system git)", () => {
       git(parent, ["add", ".gitmodules"]);
       git(parent, ["commit", "-m", "add twenty children"]);
 
-      const snapshot = expectSnapshot(await inspectSubmodules(systemGit, parent));
+      const snapshot = expectSnapshot(
+        await inspectSubmodules(systemGit, systemGitRecords, parent)
+      );
       expect(snapshot.truncated).toBe(false);
       expect(snapshot.issues).toEqual([]);
       expect(snapshot.submodules).toHaveLength(20);

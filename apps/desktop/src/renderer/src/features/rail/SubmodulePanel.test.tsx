@@ -6,7 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ok, type SubmoduleSnapshot } from "@pwrgit/shared";
 
 const dispatchMock = vi.hoisted(() => vi.fn());
-const subscribeMock = vi.hoisted(() => vi.fn(() => vi.fn()));
+const subscribeMock = vi.hoisted(() =>
+  vi.fn(
+    (
+      _channel: string,
+      _handler: (event: { worktreeId: string }) => void
+    ) => vi.fn()
+  )
+);
 vi.mock("../../lib/pwrgit", () => ({
   dispatch: dispatchMock,
   subscribe: subscribeMock
@@ -152,5 +159,36 @@ describe("SubmodulePanel", () => {
     expect(
       dispatchMock.mock.calls.every(([command]) => command === "submodules:list")
     ).toBe(true);
+  });
+
+  it("coalesces events during a scan into one trailing refresh", async () => {
+    let resolveFirst!: (value: {
+      ok: true;
+      value: SubmoduleSnapshot;
+    }) => void;
+    dispatchMock
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        })
+      )
+      .mockResolvedValueOnce(ok(SNAPSHOT));
+
+    await act(async () => {
+      root.render(<SubmodulePanel worktreeId="worktree-1" />);
+    });
+    await vi.waitFor(() => expect(dispatchMock).toHaveBeenCalledOnce());
+    const changesHandler = subscribeMock.mock.calls.find(
+      ([channel]) => channel === "changes:changed"
+    )?.[1] as ((event: { worktreeId: string }) => void) | undefined;
+    expect(changesHandler).toBeTypeOf("function");
+
+    await act(async () => {
+      changesHandler?.({ worktreeId: "worktree-1" });
+      changesHandler?.({ worktreeId: "worktree-1" });
+      resolveFirst(ok(SNAPSHOT));
+    });
+
+    await vi.waitFor(() => expect(dispatchMock).toHaveBeenCalledTimes(2));
   });
 });

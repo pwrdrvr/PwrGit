@@ -253,9 +253,10 @@ export class WorktreeStateService {
         "status",
         "--porcelain=v2",
         "--branch",
-        // Keep the parent probe bounded. Checked-out commit mismatches remain
-        // dirty; uncommitted files inside children are inspected separately.
-        "--ignore-submodules=dirty"
+        // Coarse dirtiness is also a checkout-safety signal. Dirty initialized
+        // children must keep this count nonzero or a cached clean state can
+        // suppress the branch-switch confirmation.
+        "--ignore-submodules=none"
       ],
       wt.path,
       NO_OPTIONAL_LOCKS

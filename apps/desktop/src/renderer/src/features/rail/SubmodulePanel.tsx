@@ -204,28 +204,46 @@ export function SubmodulePanel({
   // worktree:changed and changes:changed; those signals describe the same new
   // state and must not queue two 20-child walks back to back.
   const inFlightRef = useRef(false);
+  // An event that lands after the running scan read its state but before the
+  // promise settles represents potentially newer state. Coalesce any number
+  // of such events into exactly one trailing scan instead of dropping them.
+  const pendingRefreshRef = useRef(false);
 
   const load = useCallback(() => {
-    if (inFlightRef.current) return;
+    if (inFlightRef.current) {
+      pendingRefreshRef.current = true;
+      return;
+    }
     inFlightRef.current = true;
-    const request = ++requestRef.current;
-    setLoading(true);
-    void dispatch("submodules:list", { worktreeId })
-      .then((result) => {
-        if (request !== requestRef.current) return;
-        if (result.ok) {
-          setSnapshot(result.value);
-          setError(null);
-          onConcernChange?.(snapshotHasConcern(result.value));
-        } else {
-          setError(result.error.message);
+    const run = async (): Promise<void> => {
+      while (true) {
+        pendingRefreshRef.current = false;
+        const request = ++requestRef.current;
+        setLoading(true);
+        try {
+          const result = await dispatch("submodules:list", { worktreeId });
+          if (request !== requestRef.current) return;
+          if (result.ok) {
+            setSnapshot(result.value);
+            setError(null);
+            onConcernChange?.(snapshotHasConcern(result.value));
+          } else {
+            setError(result.error.message);
+            onConcernChange?.(true);
+          }
+        } catch (cause) {
+          if (request !== requestRef.current) return;
+          setError(cause instanceof Error ? cause.message : String(cause));
           onConcernChange?.(true);
         }
         setLoading(false);
-      })
-      .finally(() => {
-        if (request === requestRef.current) inFlightRef.current = false;
-      });
+        if (!pendingRefreshRef.current) {
+          inFlightRef.current = false;
+          return;
+        }
+      }
+    };
+    void run();
   }, [onConcernChange, worktreeId]);
 
   useEffect(() => {
@@ -242,6 +260,7 @@ export function SubmodulePanel({
     return () => {
       requestRef.current += 1;
       inFlightRef.current = false;
+      pendingRefreshRef.current = false;
       offWorktree();
       offChanges();
     };

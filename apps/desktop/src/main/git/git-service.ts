@@ -179,6 +179,33 @@ export async function readChanges(
 }
 
 /**
+ * Live checkout guard. Unlike the Changes list, this deliberately asks Git to
+ * inspect initialized submodules: branch switches can carry dirty child work
+ * just as they carry dirty parent files, so suppressing those rows here would
+ * bypass the user's confirmation.
+ */
+export async function readCheckoutDirtyCount(
+  git: GitExec,
+  cwd: string
+): Promise<Result<number>> {
+  const args = [
+    "status",
+    "--porcelain=v2",
+    "--untracked-files=normal",
+    "--ignore-submodules=none"
+  ];
+  const raw = await git(args, cwd, NO_OPTIONAL_LOCKS);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, args);
+  if (!checked.ok) return checked;
+  return ok(
+    checked.value.stdout
+      .split("\n")
+      .filter((line) => line !== "" && !line.startsWith("# ")).length
+  );
+}
+
+/**
  * Pathspecs per git invocation. Callers stage whole folders by naming every
  * file in them — exact, unlike passing the directory, which would also sweep in
  * nested folders the user never saw. That trades one long argument list for

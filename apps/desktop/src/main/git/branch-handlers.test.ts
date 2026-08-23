@@ -7,7 +7,7 @@ import type { SettingsService } from "../settings/settings-service";
 import {
   checkoutNewBranchAt,
   createBranchAt,
-  readChanges,
+  readCheckoutDirtyCount,
   switchBranch,
   worktreeAdd
 } from "./git-service";
@@ -30,7 +30,7 @@ vi.mock("./git-service", async (importOriginal) => {
     createBranchAt: vi.fn(),
     checkoutNewBranchAt: vi.fn(),
     worktreeAdd: vi.fn(),
-    readChanges: vi.fn()
+    readCheckoutDirtyCount: vi.fn()
   };
 });
 
@@ -85,7 +85,7 @@ function harness(db: DB = fakeDb()): {
   return { bus, indexer, refresher, operations };
 }
 
-const clean = ok({ staged: [], unstaged: [] });
+const clean = ok(0);
 
 describe("branch handlers", () => {
   beforeEach(() => {
@@ -94,9 +94,22 @@ describe("branch handlers", () => {
     vi.mocked(createBranchAt).mockResolvedValue(ok(undefined));
     vi.mocked(checkoutNewBranchAt).mockResolvedValue(ok(undefined));
     vi.mocked(worktreeAdd).mockResolvedValue(ok(undefined));
-    vi.mocked(readChanges).mockResolvedValue(clean);
+    vi.mocked(readCheckoutDirtyCount).mockResolvedValue(clean);
     vi.mocked(renameLocalBranch).mockResolvedValue(ok(undefined));
     vi.mocked(deleteLocalBranch).mockResolvedValue(ok(undefined));
+  });
+
+  it("serves a live child-aware dirty probe for switch confirmation", async () => {
+    const { bus } = harness();
+    vi.mocked(readCheckoutDirtyCount).mockResolvedValueOnce(ok(2));
+
+    await expect(
+      bus.dispatch("worktree:readDirty", { worktreeId: "worktree-1" })
+    ).resolves.toEqual(ok({ dirty: 2 }));
+    expect(readCheckoutDirtyCount).toHaveBeenCalledWith(
+      expect.anything(),
+      "/repos/project"
+    );
   });
 
   it("holds the shared worktree queue for the complete branch switch", async () => {
@@ -220,7 +233,7 @@ describe("branch handlers", () => {
     it("holds the queue across the dirty check and the checkout", async () => {
       const { bus, operations } = harness();
       let finishStatus!: () => void;
-      vi.mocked(readChanges).mockReturnValueOnce(
+      vi.mocked(readCheckoutDirtyCount).mockReturnValueOnce(
         new Promise((resolve) => {
           finishStatus = () => resolve(clean);
         })
@@ -230,7 +243,9 @@ describe("branch handlers", () => {
         ...request,
         checkout: "here"
       });
-      await vi.waitFor(() => expect(readChanges).toHaveBeenCalledOnce());
+      await vi.waitFor(() =>
+        expect(readCheckoutDirtyCount).toHaveBeenCalledOnce()
+      );
       // Anything that could dirty the tree between the check and the checkout —
       // a pull reapplying its auto-stash — must wait for both.
       let intervened = false;
@@ -249,12 +264,7 @@ describe("branch handlers", () => {
 
     it("refuses an in-place checkout while the worktree is dirty", async () => {
       const { bus } = harness();
-      vi.mocked(readChanges).mockResolvedValue(
-        ok({
-          staged: [],
-          unstaged: [{ path: "a.ts", status: "M", staged: false }]
-        })
-      );
+      vi.mocked(readCheckoutDirtyCount).mockResolvedValue(ok(1));
 
       const result = await bus.dispatch("branch:create", {
         ...request,
