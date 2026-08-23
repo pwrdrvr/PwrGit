@@ -37,6 +37,33 @@ describe("pwrgit npm reservation package", () => {
     );
   });
 
+  it("rejects pnpm artifact overrides and legacy binary directories", () => {
+    const executable = {
+      ...manifest,
+      publishConfig: {
+        access: "public",
+        bin: { pwrgit: "README.md" },
+        directory: "dist",
+      },
+      directories: { bin: "." },
+    };
+
+    expect(checkReservationManifest(executable, readme)).toEqual(
+      expect.arrayContaining([
+        'package publishConfig must be exactly {"access":"public"}',
+        'package must not declare "directories"',
+      ]),
+    );
+  });
+
+  it("rejects links to the private repository from the public README", () => {
+    const privateReadme = `${readme}\nhttps://github.com/pwrdrvr/PwrGit/releases\n`;
+
+    expect(checkReservationManifest(manifest, privateReadme)).toEqual([
+      "README must not link to the private PwrGit repository",
+    ]);
+  });
+
   it("rejects executable files in the published tarball", () => {
     expect(checkPackedFiles(["LICENSE", "README.md", "package.json", "index.js"])).toEqual([
       expect.stringContaining("index.js"),
