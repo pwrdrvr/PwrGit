@@ -7,7 +7,7 @@ import {
   writeFileSync
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { err, ok, type CloneProgress, type Result } from "@pwrgit/shared";
 import { openDatabase } from "../persistence/db";
@@ -198,7 +198,7 @@ describe("clone source metadata", () => {
 
   it("expands a home-relative local source without treating it as a forge slug", () => {
     expect(resolveLocalClonePath("~/pwrdrvr/test-repo", "/Users/example")).toBe(
-      join("/Users/example", "pwrdrvr", "test-repo")
+      resolve("/Users/example", "pwrdrvr", "test-repo")
     );
     expect(resolveLocalClonePath("pwrdrvr/test-repo", "/Users/example")).toBeNull();
   });
