@@ -83,11 +83,12 @@ The block is a **subset** of PwrAgnt's contract on purpose: tokens no PwrGit
 surface paints with are left out, because an unread token drifts silently.
 Pull one back in from PwrAgnt's `docs/UI-THEME.md` when something needs it.
 
-## Light theme is authored but not reachable
+## Theme selection uses one light attribute
 
-The `:root[data-theme="light"]` block is complete; nothing sets `data-theme`
-yet. When the appearance plumbing lands, it flips the attribute and this block
-takes over — no color values should need to move.
+The dark palette is the bare `:root`; Light (including resolved System mode)
+sets `data-theme="light"` on `<html>`. Returning to dark removes the attribute.
+The preload bootstrap and inline `<head>` script apply this before first paint;
+the renderer appearance sync keeps every window live afterwards.
 
 ## Window chrome can't read tokens
 

@@ -1,7 +1,12 @@
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
-import { lensChip } from "./fixtures/steps";
+import {
+  branchRow,
+  expandRepoGroup,
+  expandWorktrees,
+  lensChip
+} from "./fixtures/steps";
 
 // One window per profile: creating/picking a profile opens (or focuses) its
 // own window — it never repoints the window you're in.
@@ -137,6 +142,72 @@ test("creating a profile opens its own window with repos from all roots", async 
   expect(handle.app.windows().length).toBe(2);
 });
 
+test("a profile can override the app theme and return to inheritance live", async () => {
+  handle = await launchApp({ theme: "dark" });
+  const { app, window: mainWindow } = handle;
+
+  await mainWindow.locator(".profile-chip").click();
+  await mainWindow
+    .locator(".profile-menu__action", { hasText: "New profile" })
+    .click();
+  const modal = mainWindow.locator(".modal--profile");
+  await modal.getByPlaceholder("e.g. Acme or Personal").fill("Light workspace");
+  await modal.getByPlaceholder("you@company.com").fill("light@example.com");
+  await modal.getByRole("radio", { name: "Light" }).click();
+
+  const windowPromise = app.waitForEvent("window");
+  await modal.locator(".modal__create").click();
+  const lightWindow = await windowPromise;
+  await lightWindow.waitForSelector("#root");
+
+  await expect(lightWindow.locator("html")).toHaveAttribute(
+    "data-theme",
+    "light"
+  );
+  await expect(mainWindow.locator("html")).not.toHaveAttribute(
+    "data-theme",
+    "light"
+  );
+  expect(
+    await lightWindow.evaluate(() => window.pwrgit.appearance)
+  ).toEqual({ theme: "light", resolvedTheme: "light" });
+
+  const lightTitle = await lightWindow.title();
+  await expect
+    .poll(() =>
+      app.evaluate(({ BrowserWindow }, title) => {
+        const target = BrowserWindow.getAllWindows().find(
+          (candidate) => candidate.getTitle() === title
+        );
+        return target?.getBackgroundColor() ?? null;
+      }, lightTitle)
+    )
+    .toBe("#FFFFFF");
+
+  await lightWindow.locator(".profile-chip").click();
+  await lightWindow
+    .locator(".profile-menu__action", { hasText: "Edit “Light workspace”…" })
+    .click();
+  const editModal = lightWindow.locator(".modal--profile");
+  await editModal.getByRole("radio", { name: "App setting" }).click();
+  await editModal.locator(".modal__create").click();
+
+  await expect(lightWindow.locator("html")).not.toHaveAttribute(
+    "data-theme",
+    "light"
+  );
+  await expect
+    .poll(() =>
+      app.evaluate(({ BrowserWindow }, title) => {
+        const target = BrowserWindow.getAllWindows().find(
+          (candidate) => candidate.getTitle() === title
+        );
+        return target?.getBackgroundColor() ?? null;
+      }, lightTitle)
+    )
+    .toBe("#000000");
+});
+
 test("profile menu closes on outside click and Escape", async () => {
   handle = await launchApp();
   const { window } = handle;
@@ -197,5 +268,70 @@ test("a cross-profile remote branch opens its new-worktree flow in the owning wi
   await expect(modal.locator(".modal__input")).toHaveValue("releases/1.0");
   await expect(modal).toContainText(
     "Starting from refs/remotes/origin/releases/1.0"
+  );
+});
+
+test("a queued cross-profile reveal wins over a stale restored worktree", async () => {
+  boxA = createGitSandbox();
+  boxA.makeRepo("queued-reveal", { worktrees: ["feature/requested"] });
+
+  handle = await launchApp();
+  const { window } = handle;
+  await window.locator(".profile-chip").click();
+  await window
+    .locator(".profile-menu__action", { hasText: "New profile" })
+    .click();
+  await window.getByPlaceholder("e.g. Acme or Personal").fill("Queued team");
+  await window.getByPlaceholder("you@company.com").fill("queued@example.com");
+  await handle.setPickDirectory(boxA.reposDir);
+  await window.locator(".modal--profile .rootlist__add").click();
+
+  const profileWindowPromise = handle.app.waitForEvent("window");
+  await window.locator(".modal--profile .modal__create").click();
+  const profileWindow = await profileWindowPromise;
+  await profileWindow.waitForSelector("#root");
+  await lensChip(profileWindow, "All").click();
+  await expandRepoGroup(profileWindow, "queued-reveal");
+  await expandWorktrees(profileWindow, "queued-reveal");
+
+  const requested = branchRow(profileWindow, "feature/requested");
+  await requested.click();
+  await expect(profileWindow.locator(".titlebar__branch-name")).toHaveText(
+    "feature/requested"
+  );
+  // Preserve the real repo id while modelling a worktree removed since this
+  // profile window was last open.
+  await profileWindow.evaluate(() => {
+    const profileId = (
+      globalThis as typeof globalThis & {
+        pwrgit: { profileId: string | null };
+      }
+    ).pwrgit.profileId;
+    if (profileId === null) throw new Error("profile window is not bound");
+    const key = `pwrgit.worktreeSelection.${profileId}`;
+    const raw = localStorage.getItem(key);
+    if (raw === null) throw new Error("selection was not persisted");
+    const stored = JSON.parse(raw) as { repoId: string };
+    localStorage.setItem(
+      key,
+      JSON.stringify({ repoId: stored.repoId, worktreeId: "deleted-worktree" })
+    );
+  });
+  await profileWindow.close();
+
+  await window.keyboard.press("Meta+k");
+  await window.locator(".overlay-search input").fill("feature/requested");
+  const hit = window.locator(".overlay-result", {
+    hasText: "feature/requested"
+  });
+  await expect(hit).toBeVisible({ timeout: 20_000 });
+  const reopenedPromise = handle.app.waitForEvent("window");
+  await hit.click();
+  const reopened = await reopenedPromise;
+  await reopened.waitForSelector("#root");
+
+  await expect(reopened.locator(".titlebar__branch-name")).toHaveText(
+    "feature/requested",
+    { timeout: 20_000 }
   );
 });

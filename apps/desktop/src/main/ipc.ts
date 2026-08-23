@@ -40,3 +40,13 @@ export function emitEvent<C extends EventChannel>(
     win.webContents.send(IPC_EVENT_CHANNEL, channel, payload);
   }
 }
+
+/** Send a typed server event to one window without disturbing sibling themes. */
+export function emitEventToWindow<C extends EventChannel>(
+  channel: C,
+  payload: EventPayload<C>,
+  window: BrowserWindow
+): void {
+  if (window.isDestroyed()) return;
+  window.webContents.send(IPC_EVENT_CHANNEL, channel, payload);
+}

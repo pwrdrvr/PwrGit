@@ -1,16 +1,23 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import {
+  APPEARANCE_THEME_DEFAULT,
   APP_MENU_MODEL_CHANNEL,
   APP_MENU_POPUP_CHANNEL,
   IPC_DISPATCH_CHANNEL,
   IPC_EVENT_CHANNEL,
   type AppMenuPopupRequest,
+  parseAppearanceArg,
+  type AppAppearance,
   type AppMenuTopLevel
 } from "@pwrgit/shared";
 
 // Each window is bound to one profile, passed by the main process via
 // additionalArguments when the window is created.
 const profileArg = process.argv.find((a) => a.startsWith("--pwrgit-profile="));
+const bootstrapAppearance: AppAppearance = parseAppearanceArg(process.argv) ?? {
+  theme: APPEARANCE_THEME_DEFAULT,
+  resolvedTheme: "dark"
+};
 
 // Playwright can ask the preload bridge to fail selected boot reads once. The
 // allowlist keeps this seam read-only and makes retry recovery deterministic.
@@ -26,6 +33,7 @@ const failOnce = new Set(
 const api = {
   profileId: profileArg?.slice("--pwrgit-profile=".length) ?? null,
   platform: process.platform,
+  appearance: bootstrapAppearance,
 
   dispatch: (name: string, req: unknown): Promise<unknown> => {
     if (failOnce.delete(name)) {

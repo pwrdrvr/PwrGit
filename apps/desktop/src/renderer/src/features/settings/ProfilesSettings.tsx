@@ -7,9 +7,9 @@ import { SettingsPanelHead, SettingsSection } from "./SettingsLayout";
 
 /**
  * Profiles pane (PwrAgnt's ProfilesSettings pattern, on PwrGit's profile
- * model): list every profile with its identity + scan roots, open a profile's
- * window, and create/edit through the existing ProfileModal (which owns the
- * roots editor). PwrGit has no profile delete command, so no delete here.
+ * model): list every profile with its theme, identity + scan roots, open a
+ * profile's window, and create/edit through the existing ProfileModal (which
+ * owns the roots editor). PwrGit has no profile delete command, so no delete.
  */
 export function ProfilesSettings() {
   const profiles = useProfiles();
@@ -22,7 +22,7 @@ export function ProfilesSettings() {
       <SettingsPanelHead
         eyebrow="Profiles"
         title="PwrGit profiles"
-        help="Profiles are workspaces: each has its own commit identity, repo folders, and window. Picking one from the Profiles menu opens its window."
+        help="Profiles are workspaces: each has its own window theme, commit identity, and repo folders. Picking one from the Profiles menu opens its window."
         action={
           <button
             className="settings-button settings-button--primary"
@@ -118,6 +118,11 @@ function ProfileRow(props: {
           {props.active ? (
             <span className="settings-card__chip settings-card__chip--ok">
               Active
+            </span>
+          ) : null}
+          {profile.theme !== undefined ? (
+            <span className="settings-card__chip">
+              {profile.theme === "light" ? "Light" : "Dark"}
             </span>
           ) : null}
         </span>

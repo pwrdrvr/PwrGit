@@ -155,6 +155,14 @@ const THEMES: [string, Map<string, string>][] = [
   ["light", LIGHT]
 ];
 
+describe.each(THEMES)("native chrome contrast — %s theme", (_name, theme) => {
+  it("keeps Windows caption symbols visible on the title bar", () => {
+    expect(
+      round(ratio(theme, "--text-secondary", ["--bg-titlebar"]))
+    ).toBeGreaterThanOrEqual(3);
+  });
+});
+
 describe.each(THEMES)("sidebar contrast — %s theme", (themeName, theme) => {
   // ---- SC 1.4.3, 4.5:1. Every text run in the sidebar is under 18.66px
   // bold / 24px regular, so none of them qualifies for the large-text 3:1.
