@@ -175,6 +175,26 @@ export function isSidebarDensity(value: unknown): value is SidebarDensity {
   );
 }
 
+/** App-level color-theme preference. `system` follows the OS in real time. */
+export const APPEARANCE_THEMES = ["system", "dark", "light"] as const;
+export type AppearanceTheme = (typeof APPEARANCE_THEMES)[number];
+export type ResolvedAppearanceTheme = Exclude<AppearanceTheme, "system">;
+
+/** Preserve the app's historical dark appearance for existing installations. */
+export const APPEARANCE_THEME_DEFAULT: AppearanceTheme = "dark";
+
+export function isAppearanceTheme(value: unknown): value is AppearanceTheme {
+  return (
+    typeof value === "string" &&
+    (APPEARANCE_THEMES as readonly string[]).includes(value)
+  );
+}
+
+export type AppAppearance = {
+  theme: AppearanceTheme;
+  resolvedTheme: ResolvedAppearanceTheme;
+};
+
 /**
  * Where a branch created from a commit gets checked out. "none" leaves the
  * working copies alone (just the ref), "new-worktree" adds one under the
@@ -348,6 +368,8 @@ export type AppUpdateReleaseVersions = {
 };
 
 export type GeneralSettings = {
+  /** Color theme across every app and auxiliary window. */
+  theme: AppearanceTheme;
   /** Expose Reload, Force Reload, and Developer Tools in the View menu. */
   developerMode: boolean;
   /** Sidebar name/branch type scale (`--sidebar-title-size`). */
@@ -377,6 +399,7 @@ export type DiagnosticsSettings = {
 };
 
 export const GENERAL_DEFAULTS: GeneralSettings = {
+  theme: APPEARANCE_THEME_DEFAULT,
   developerMode: false,
   sidebarTextSize: "md",
   sidebarDensity: "comfortable"
@@ -990,6 +1013,8 @@ export interface Commands {
   // App settings (Settings window)
   "settings:read": { req: void; res: AppSettingsSnapshot };
   "settings:update": { req: { patch: AppSettingsPatch }; res: AppSettingsSnapshot };
+  /** Current preference plus native-resolved palette; closes bootstrap races. */
+  "appearance:read": { req: void; res: AppAppearance };
 
   // Desktop auto-update (Settings → Updates)
   "app:readUpdateStatus": { req: void; res: AppUpdateStatus };
@@ -1090,6 +1115,8 @@ export interface Events {
   "ui:manageProfile": Record<string, never>;
   /** App settings changed (any window) — payload is the fresh snapshot. */
   "settings:changed": AppSettingsSnapshot;
+  /** Resolved color theme changed, including a live OS change in System mode. */
+  "appearance:changed": AppAppearance;
   /** Auto-update status changed — Settings and any future banner subscribe. */
   "app:updateStatus": AppUpdateStatus;
   /** Reveal a repo (and optionally a worktree) in the window bound to

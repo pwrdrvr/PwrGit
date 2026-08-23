@@ -1,4 +1,5 @@
 import { BrowserWindow } from "electron";
+import type { AppAppearance } from "@pwrgit/shared";
 import { createMainWindow } from "./window";
 
 /**
@@ -16,7 +17,9 @@ export type ProfileWindows = {
   focusedProfileId: () => string | null;
 };
 
-export function createProfileWindows(): ProfileWindows {
+export function createProfileWindows(options: {
+  appearance: () => AppAppearance;
+}): ProfileWindows {
   const byProfile = new Map<string, BrowserWindow>();
 
   const alive = (profileId: string): BrowserWindow | null => {
@@ -33,7 +36,7 @@ export function createProfileWindows(): ProfileWindows {
       existing.focus();
       return { window: existing, created: false };
     }
-    const win = createMainWindow(profileId);
+    const win = createMainWindow(profileId, options.appearance());
     byProfile.set(profileId, win);
     win.on("closed", () => {
       if (byProfile.get(profileId) === win) byProfile.delete(profileId);

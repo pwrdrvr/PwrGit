@@ -117,6 +117,9 @@ function SettingsSectionBody(props: {
       <GeneralSettings
         saving={settings.saving}
         snapshot={snapshot}
+        onThemeChange={(theme) => {
+          update({ general: { theme } });
+        }}
         onDeveloperModeChange={(enabled) => {
           update({ general: { developerMode: enabled } });
         }}

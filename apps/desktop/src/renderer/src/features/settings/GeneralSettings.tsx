@@ -1,4 +1,5 @@
 import type {
+  AppearanceTheme,
   AppSettingsSnapshot,
   SidebarDensity,
   SidebarTextSize
@@ -26,15 +27,23 @@ const DENSITIES: Array<{ value: SidebarDensity; label: string }> = [
   { value: "compact", label: "Compact" }
 ];
 
+const THEMES: Array<{ value: AppearanceTheme; label: string }> = [
+  { value: "system", label: "System" },
+  { value: "dark", label: "Dark" },
+  { value: "light", label: "Light" }
+];
+
 /** General pane (PwrAgnt's GeneralSettings pattern, PwrGit-sized). */
 export function GeneralSettings(props: {
   saving: boolean;
   snapshot: AppSettingsSnapshot;
+  onThemeChange: (theme: AppearanceTheme) => void;
   onDeveloperModeChange: (enabled: boolean) => void;
   onSidebarTextSizeChange: (size: SidebarTextSize) => void;
   onSidebarDensityChange: (density: SidebarDensity) => void;
 }) {
   const developerMode = props.snapshot.general.developerMode;
+  const theme = props.snapshot.general.theme;
   const textSize = props.snapshot.general.sidebarTextSize;
   const density = props.snapshot.general.sidebarDensity;
 
@@ -45,6 +54,33 @@ export function GeneralSettings(props: {
         title="General settings"
         help="Defaults that apply across PwrGit windows."
       />
+
+      <SettingsSection
+        eyebrow="Appearance"
+        title="Color theme"
+        description="Choose a fixed palette or follow the operating system."
+        chip={
+          theme === "system" ? "System" : theme === "light" ? "Light" : "Dark"
+        }
+        chipKind="default"
+      >
+        <div className="settings-fields">
+          <SettingsField
+            label="Theme"
+            sub="Applies to every PwrGit window and native window chrome."
+            help="System follows macOS or Windows appearance changes while PwrGit is running."
+            control={
+              <SettingsSegmented
+                aria-label="Color theme"
+                disabled={props.saving}
+                options={THEMES}
+                value={theme}
+                onChange={props.onThemeChange}
+              />
+            }
+          />
+        </div>
+      </SettingsSection>
 
       <SettingsSection
         eyebrow="Appearance"

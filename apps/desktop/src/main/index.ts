@@ -9,6 +9,8 @@ import {
   safeStorage
 } from "electron";
 import {
+  GENERAL_DEFAULTS,
+  isAppearanceTheme,
   ok,
   resolveUpdateSelection,
   type Profile,
@@ -87,7 +89,7 @@ import { rebuildAppMenu } from "./menu";
 import { checkForAppUpdatesFromMenu } from "./menu-update-check";
 import { createProfileWindows } from "./profile-windows";
 import { openSettingsWindow } from "./settings-window";
-import { applyNativeWindowTheme } from "./window-chrome";
+import { createNativeThemeController } from "./native-theme";
 
 const APP_NAME = "PwrGit";
 
@@ -108,10 +110,6 @@ protocol.registerSchemesAsPrivileged([
 // carry the product name, but setting it explicitly keeps every launch mode
 // consistent.
 app.setName(APP_NAME);
-// PwrGit currently renders dark-only. Keep Electron-owned popup menus and
-// dialogs on that same theme; the shared chrome helper is ready to switch this
-// alongside the renderer when the authored light theme becomes selectable.
-applyNativeWindowTheme(nativeTheme);
 app.setAboutPanelOptions({
   applicationName: APP_NAME,
   applicationVersion: app.getVersion()
@@ -137,8 +135,26 @@ if (dataDirOverride !== undefined && dataDirOverride !== "") {
   app.setPath("userData", dataDirOverride);
 }
 
+// Settings and native appearance are established before app readiness so the
+// first BrowserWindow, macOS traffic lights, Windows caption buttons, menus,
+// and dialogs all start on the persisted palette. Invalid/legacy storage falls
+// back to PwrGit's historical dark theme.
+const settings = new SettingsService(
+  join(app.getPath("userData"), "settings.json")
+);
+const storedTheme = settings.get().general?.theme;
+const appearance = createNativeThemeController({
+  nativeTheme,
+  initialTheme: isAppearanceTheme(storedTheme)
+    ? storedTheme
+    : GENERAL_DEFAULTS.theme,
+  windows: () => BrowserWindow.getAllWindows(),
+  onChanged: (next) => emitEvent("appearance:changed", next)
+});
+
 const bus = new CommandBus();
 bus.register("ping", () => ok("pong"));
+bus.register("appearance:read", () => ok(appearance.appearance()));
 
 // Development launches do not pass through electron-builder, so macOS would
 // otherwise show the generic Electron tile in the Dock. Packaged builds use
@@ -182,14 +198,10 @@ if (!gotSingleInstanceLock) {
     installDevelopmentDockIcon();
     bus.register("logs:read", () => ok(readLogSnapshot()));
     bus.register("logs:openWindow", () => {
-      openLogsWindow();
+      openLogsWindow(appearance.appearance());
       return ok(null);
     });
-    registerAppDocumentHandlers(bus);
-
-    const settings = new SettingsService(
-      join(app.getPath("userData"), "settings.json")
-    );
+    registerAppDocumentHandlers(bus, appearance.appearance);
     const keychainReady = await ensureMacKeychainAccess({
       platform: process.platform,
       packaged: app.isPackaged,
@@ -333,7 +345,7 @@ if (!gotSingleInstanceLock) {
 
     // One window per profile. Opening a profile that already has a window
     // focuses it; cross-profile reveals are stashed until the new window asks.
-    const windows = createProfileWindows();
+    const windows = createProfileWindows({ appearance: appearance.appearance });
     type Reveal = {
       repoId: string;
       worktreeId: string | null;
@@ -351,11 +363,15 @@ if (!gotSingleInstanceLock) {
         onCheckForUpdates: () => {
           void checkForAppUpdatesFromMenu();
         },
-        onOpenSettings: () => openSettingsWindow(),
-        onOpenLogs: () => openLogsWindow(),
-        onOpenLicense: () => openAppDocumentWindow("license"),
+        onOpenSettings: () => openSettingsWindow(appearance.appearance()),
+        onOpenLogs: () => openLogsWindow(appearance.appearance()),
+        onOpenLicense: () =>
+          openAppDocumentWindow("license", appearance.appearance()),
         onOpenThirdPartyNotices: () =>
-          openAppDocumentWindow("third-party-notices"),
+          openAppDocumentWindow(
+            "third-party-notices",
+            appearance.appearance()
+          ),
         developerMode: settingsSnapshot(settings, diagnosticsOutputRoot).general
           .developerMode
       });
@@ -435,6 +451,7 @@ if (!gotSingleInstanceLock) {
       diagnosticsOutputRoot,
       appVersion: app.getVersion(),
       onChanged: (snapshot) => {
+        appearance.setTheme(snapshot.general.theme);
         emitEvent("settings:changed", snapshot);
         diagnostics.sync();
         refreshMenu(); // Developer Mode toggles View-menu items live
@@ -486,6 +503,7 @@ if (!gotSingleInstanceLock) {
     app.on("before-quit", () => {
       clearInterval(activeStatePoll);
       githubHandlers.stop();
+      appearance.dispose();
     });
 
     // Drain diagnostics before quitting so final monitor-stopped events and

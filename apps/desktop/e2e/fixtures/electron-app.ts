@@ -41,13 +41,22 @@ function cleanEnv(extra: Record<string, string>): Record<string, string> {
  * `pnpm i`).
  */
 export async function launchApp(
-  opts: { worktreeRoot?: string } = {}
+  opts: {
+    worktreeRoot?: string;
+    theme?: "system" | "dark" | "light";
+  } = {}
 ): Promise<AppHandle> {
   const userData = mkdtempSync(join(tmpdir(), "pwrgit-e2e-ud-"));
-  if (opts.worktreeRoot !== undefined) {
+  if (opts.worktreeRoot !== undefined || opts.theme !== undefined) {
+    const seededSettings = {
+      ...(opts.worktreeRoot !== undefined
+        ? { worktreeRoot: opts.worktreeRoot }
+        : {}),
+      ...(opts.theme !== undefined ? { general: { theme: opts.theme } } : {})
+    };
     writeFileSync(
       join(userData, "settings.json"),
-      JSON.stringify({ worktreeRoot: opts.worktreeRoot })
+      JSON.stringify(seededSettings)
     );
   }
   // Pin the seeded profile identity to the sandbox's commit identity so
