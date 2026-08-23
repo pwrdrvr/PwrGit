@@ -33,7 +33,8 @@ test("renderer affordances follow the real OS platform", async () => {
         .pwrgit.platform
   );
   expect(platform).toBe(process.platform);
-  const primary = platform === "darwin" ? "⌘" : "Ctrl";
+  const shortcut = (key: string): string =>
+    platform === "darwin" ? `⌘${key}` : `Ctrl+${key}`;
   const reorder =
     platform === "darwin"
       ? "⇧⌘↑ / ⇧⌘↓"
@@ -46,10 +47,10 @@ test("renderer affordances follow the real OS platform", async () => {
         : "Show in folder";
 
   const searchHint = window.locator(".sidebar__search .kbd");
-  await expect(searchHint).toHaveText(`${primary}F`);
+  await expect(searchHint).toHaveText(shortcut("F"));
   await expect(searchHint).toHaveAttribute(
     "title",
-    `${primary}F or ${primary}K`
+    `${shortcut("F")} or ${shortcut("K")}`
   );
 
   // Drive the advertised chord, not a Mac-only Meta alias. This executes as
@@ -102,5 +103,7 @@ test("renderer affordances follow the real OS platform", async () => {
     name: "Jump to repo, branch, or commit"
   });
   await search.getByRole("textbox").fill("alpha");
-  await expect(search.locator(".overlay-foot")).toContainText(`${primary}P pin`);
+  await expect(search.locator(".overlay-foot")).toContainText(
+    `${shortcut("P")} pin`
+  );
 });
