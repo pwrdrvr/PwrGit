@@ -41,6 +41,8 @@ function profileState(profiles: Profile[]) {
     profiles,
     activeProfileId: profiles[0]?.id ?? null,
     activeProfile: profiles[0] ?? null,
+    loadState: { status: "ready" as const },
+    retry: vi.fn(async () => undefined),
     openProfile: vi.fn(async () => undefined),
     createProfile: vi.fn(async () => null),
     updateProfile: vi.fn(async () => null),
