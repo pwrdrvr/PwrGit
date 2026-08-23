@@ -10,6 +10,7 @@ function installBridge(
     pwrgit: {
       profileId: null,
       platform: "darwin",
+      appearance: { theme: "dark", resolvedTheme: "dark" },
       getAppMenuModel: async () => [],
       popupAppMenu: () => {},
       ...bridge

@@ -165,7 +165,9 @@ describe("shared protocol reachability", () => {
       directCallArguments(
         mainFiles,
         (expression) =>
-          ts.isIdentifier(expression) && expression.text === "emitEvent"
+          ts.isIdentifier(expression) &&
+          (expression.text === "emitEvent" ||
+            expression.text === "emitEventToWindow")
       )
     );
     const subscriptions = new Set(

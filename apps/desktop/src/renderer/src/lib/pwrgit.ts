@@ -1,4 +1,5 @@
 import type {
+  AppAppearance,
   AppMenuPopupRequest,
   AppMenuTopLevel,
   CommandName,
@@ -15,6 +16,8 @@ type PwrGitBridge = {
   profileId: string | null;
   /** OS platform exposed synchronously for pre-render window chrome. */
   platform: string;
+  /** Validated main-process theme hint available before first paint. */
+  appearance: AppAppearance;
   dispatch: (name: string, req: unknown) => Promise<unknown>;
   on: (channel: string, handler: (payload: unknown) => void) => () => void;
   getAppMenuModel: () => Promise<AppMenuTopLevel[]>;

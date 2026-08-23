@@ -2,14 +2,24 @@ import { useState } from "react";
 import type {
   CreateProfileRequest,
   Profile,
+  ProfileThemeOverride,
   UpdateProfileRequest
 } from "@pwrgit/shared";
+import { SettingsSegmented } from "../settings/SettingsLayout";
+
+type ProfileThemeChoice = "inherit" | ProfileThemeOverride;
+
+const PROFILE_THEMES: Array<{ value: ProfileThemeChoice; label: string }> = [
+  { value: "inherit", label: "App setting" },
+  { value: "dark", label: "Dark" },
+  { value: "light", label: "Light" }
+];
 
 /**
- * Create or edit a profile: identity fields (name, commit email, author, default
- * org) plus the set of repo folders scanned for this profile. Roots are edited
- * locally and committed on Save (a single rescan) — in create mode via the new
- * profile, in edit mode via setRoots.
+ * Create or edit a profile: window palette, identity fields, and the set of
+ * repo folders scanned for this profile. Roots are edited locally and committed
+ * on Save (a single rescan) — in create mode via the new profile, in edit mode
+ * via setRoots.
  */
 export function ProfileModal({
   mode,
@@ -32,6 +42,9 @@ export function ProfileModal({
   const [email, setEmail] = useState(profile?.email ?? "");
   const [authorName, setAuthorName] = useState(profile?.authorName ?? "");
   const [org, setOrg] = useState(profile?.org ?? "");
+  const [theme, setTheme] = useState<ProfileThemeChoice>(
+    profile?.theme ?? "inherit"
+  );
   const [roots, setRoots] = useState<string[]>(profile?.roots ?? []);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -68,6 +81,7 @@ export function ProfileModal({
       };
       if (authorName.trim() !== "") req.authorName = authorName.trim();
       if (org.trim() !== "") req.org = org.trim();
+      if (theme !== "inherit") req.theme = theme;
       const msg = await onCreate(req);
       setBusy(false);
       if (msg === null) onClose();
@@ -85,7 +99,8 @@ export function ProfileModal({
       name: name.trim(),
       email: email.trim(),
       authorName: authorName.trim(),
-      org: org.trim()
+      org: org.trim(),
+      theme: theme === "inherit" ? null : theme
     });
     if (msg !== null) {
       setBusy(false);
@@ -121,6 +136,22 @@ export function ProfileModal({
             placeholder="e.g. Acme or Personal"
           />
         </label>
+
+        <div className="field">
+          <span className="field__label">
+            Window theme{" "}
+            <span className="field__hint">
+              · App setting follows General → Color theme
+            </span>
+          </span>
+          <SettingsSegmented
+            aria-label="Profile color theme"
+            disabled={busy}
+            options={PROFILE_THEMES}
+            value={theme}
+            onChange={setTheme}
+          />
+        </div>
 
         <label className="field">
           <span className="field__label">Commit email</span>

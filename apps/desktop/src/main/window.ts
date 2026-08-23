@@ -1,11 +1,7 @@
 import { join } from "node:path";
 import { BrowserWindow, shell } from "electron";
-import {
-  TITLE_BAR_OVERLAY_BACKGROUND,
-  TITLE_BAR_OVERLAY_HEIGHT,
-  TITLE_BAR_OVERLAY_SYMBOL,
-  WINDOW_BACKGROUND
-} from "./window-chrome";
+import { serializeAppearanceArg, type AppAppearance } from "@pwrgit/shared";
+import { titleBarOverlay, windowChrome } from "./window-chrome";
 
 /**
  * Create a profile-bound window (one window per profile). Frameless-inset
@@ -14,23 +10,23 @@ import {
  * in the main process. The bound profile travels via additionalArguments so
  * the preload can expose it before the renderer boots.
  */
-export function createMainWindow(profileId: string): BrowserWindow {
+export function createMainWindow(
+  profileId: string,
+  appearance: AppAppearance
+): BrowserWindow {
+  const chrome = windowChrome(appearance.resolvedTheme);
   const window = new BrowserWindow({
     width: 1360,
     height: 860,
     minWidth: 940,
     minHeight: 600,
     show: false,
-    backgroundColor: WINDOW_BACKGROUND,
+    backgroundColor: chrome.background,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
     trafficLightPosition: { x: 12, y: 10 },
     ...(process.platform === "win32"
       ? {
-          titleBarOverlay: {
-            color: TITLE_BAR_OVERLAY_BACKGROUND,
-            symbolColor: TITLE_BAR_OVERLAY_SYMBOL,
-            height: TITLE_BAR_OVERLAY_HEIGHT
-          }
+          titleBarOverlay: titleBarOverlay(appearance.resolvedTheme)
         }
       : {}),
     webPreferences: {
@@ -38,7 +34,10 @@ export function createMainWindow(profileId: string): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      additionalArguments: [`--pwrgit-profile=${profileId}`]
+      additionalArguments: [
+        `--pwrgit-profile=${profileId}`,
+        serializeAppearanceArg(appearance)
+      ]
     }
   });
 

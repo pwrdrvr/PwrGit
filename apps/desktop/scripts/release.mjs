@@ -37,6 +37,12 @@
  * re-downloads the right slice for each macOS arch pass; @electron/universal
  * then lipo-merges the Mach-O git binaries. The lipo verification below
  * fails the build loudly if that ever regresses.
+ *
+ * better-sqlite3: v13 ships platform/arch Node-API prebuilds and does not let
+ * electron-rebuild populate build/Release. The beforePack hook copies the
+ * target slice to that common runtime path and excludes the multi-arch source
+ * directory; @electron/universal then lipo-merges the two Darwin slices. The
+ * same universal-binary verification below covers the result.
  */
 
 import { spawnSync } from "node:child_process";
