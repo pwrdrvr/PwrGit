@@ -4,7 +4,10 @@ packages:
 
 # Dependencies that need their build scripts to run during install.
 allowBuilds:
-  better-sqlite3: true
+  # v13 ships Node-API binaries. pnpm otherwise infers `node-gyp rebuild` from
+  # binding.gyp even though the package declares `gypfile: false`; PwrGit's
+  # desktop postinstall stages both runtime-owned copies instead.
+  better-sqlite3: false
   dugite: true
   electron: true
   electron-winstaller: true

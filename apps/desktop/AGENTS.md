@@ -19,13 +19,16 @@ const { autoUpdater } = electronUpdater;
 normally. When adding a dependency used in `src/main`, check its `type` — if
 `commonjs`, default-import it.
 
-## better-sqlite3 is built twice, on purpose
+## better-sqlite3 is kept twice, on purpose
 
-PwrGit source-builds the native addon for both runtimes even though
-better-sqlite3 13 uses Node-API: one deterministic build remains selected for
-Node tests and scripts, while a separately targeted Electron build is verified
-for the app. A stale or missing build still reads like a broken test or a broken
-database, not a native setup problem. `postinstall` runs
+PwrGit keeps separately selected native-addon files for both runtimes even
+though better-sqlite3 13 uses Node-API: one deterministic binary remains
+selected for Node tests and scripts, while a separately stamped Electron
+sidecar is verified for the app. macOS/Linux source-build both; Windows stages
+the package's platform/arch Node-API binary into both owned locations so a
+normal install does not require Visual Studio. A stale or missing binary still
+reads like a broken test or a broken database, not a native setup problem.
+`postinstall` runs
 [scripts/rebuild-native-for-electron.mjs](scripts/rebuild-native-for-electron.mjs)
 instead, which brackets the rebuild and keeps both binaries:
 

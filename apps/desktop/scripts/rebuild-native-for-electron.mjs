@@ -14,6 +14,10 @@
  * Dev/test only. Packaged builds never load the sidecar: electron-builder
  * rebuilds build/Release itself, once per arch, and electron-builder.yml
  * excludes electron-native/ from the asar.
+ *
+ * better-sqlite3 13 also ships platform/arch Node-API binaries. On Windows we
+ * verify and stage that binary into both owned locations instead of requiring
+ * a Visual Studio toolchain just to reproduce an ABI-independent artifact.
  */
 
 import { execFileSync, execSync } from "node:child_process";
@@ -38,6 +42,13 @@ const packageJsonPath = require.resolve("better-sqlite3/package.json", { paths: 
 const moduleDir = dirname(packageJsonPath);
 const betterSqlite3Package = require(packageJsonPath);
 const betterSqlite3Version = betterSqlite3Package.version;
+const packagedNodeApiBinary = join(
+  moduleDir,
+  "prebuilds",
+  `${process.platform}-${process.arch}.node`
+);
+const usePackagedNodeApiBinary =
+  betterSqlite3Package.gypfile === false && process.platform === "win32";
 
 const releaseDir = join(moduleDir, "build", "Release");
 const nodeBinary = join(releaseDir, "better_sqlite3.node");
@@ -60,11 +71,15 @@ if (sidecarIsCurrent()) {
   process.exit(0);
 }
 
-console.log(`Rebuilding better-sqlite3 for Electron ${electronVersion} (${process.arch})...`);
+console.log(
+  usePackagedNodeApiBinary
+    ? `Staging better-sqlite3's Node-API binary for Electron ${electronVersion} (${process.arch})...`
+    : `Rebuilding better-sqlite3 for Electron ${electronVersion} (${process.arch})...`
+);
 copyFileSync(nodeBinary, stashedNodeBinary);
 
 try {
-  if (betterSqlite3Package.gypfile === false) {
+  if (!usePackagedNodeApiBinary && betterSqlite3Package.gypfile === false) {
     // v13 opts out of implicit node-gyp rebuilds because it ships N-API
     // prebuilds. Its explicit script forces a source build; target it at
     // Electron so the sidecar remains a separately verified runtime build.
@@ -75,7 +90,7 @@ try {
       npm_config_arch: process.arch,
       npm_config_target_arch: process.arch
     });
-  } else {
+  } else if (!usePackagedNodeApiBinary) {
     const { rebuild } = await import("@electron/rebuild");
     await rebuild({
       buildPath: desktopRoot,
@@ -124,16 +139,29 @@ function ensureNodeBinary() {
     return;
   }
 
-  console.log("better-sqlite3's build/Release binary does not load under this Node; rebuilding it...");
-  const buildScript = betterSqlite3Package.scripts?.["build-release"]
-    ? "build-release"
-    : "install";
-  runBuildScript(buildScript, {
-    npm_config_arch: process.arch,
-    npm_config_runtime: "node",
-    npm_config_target: process.versions.node,
-    npm_config_target_arch: process.arch
-  });
+  if (usePackagedNodeApiBinary) {
+    if (!existsSync(packagedNodeApiBinary)) {
+      throw new Error(
+        `better-sqlite3 has no packaged Node-API binary for ${process.platform}-${process.arch}`
+      );
+    }
+    console.log("Staging better-sqlite3's packaged Node-API binary for Node...");
+    mkdirSync(releaseDir, { recursive: true });
+    copyFileSync(packagedNodeApiBinary, nodeBinary);
+  } else {
+    console.log(
+      "better-sqlite3's build/Release binary does not load under this Node; rebuilding it..."
+    );
+    const buildScript = betterSqlite3Package.scripts?.["build-release"]
+      ? "build-release"
+      : "install";
+    runBuildScript(buildScript, {
+      npm_config_arch: process.arch,
+      npm_config_runtime: "node",
+      npm_config_target: process.versions.node,
+      npm_config_target_arch: process.arch
+    });
+  }
 
   if (!nodeBinaryIsUsable()) {
     throw new Error("better-sqlite3's build/Release binary is still unusable under this Node");

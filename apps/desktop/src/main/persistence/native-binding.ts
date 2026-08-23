@@ -6,12 +6,14 @@ let resolved: string | undefined;
 
 /**
  * Path to the runtime-specific better-sqlite3 binary, or `undefined` when an
- * install has no local source build to select.
+ * install has no local native artifact to select.
  *
- * In a dev tree those two are different builds on purpose: `build/Release`
- * stays compiled for the developer's Node so `vitest` can open a database,
- * and `scripts/rebuild-native-for-electron.mjs` puts the Electron build in
- * `electron-native/` for the app. Packaged builds ship only `build/Release`
+ * In a dev tree those are different runtime-owned files on purpose:
+ * `build/Release` stays selected for the developer's Node so `vitest` can open
+ * a database, and `scripts/rebuild-native-for-electron.mjs` puts the Electron
+ * artifact in `electron-native/` for the app. They are separate source builds
+ * on macOS/Linux; Windows can stage the same ABI-independent Node-API prebuild
+ * into both locations. Packaged builds ship only `build/Release`
  * (already Electron-compatible), which is also the safe fallback now that
  * better-sqlite3 uses Node-API rather than a runtime-specific V8 ABI.
  */

@@ -54,7 +54,7 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      # A fresh `pnpm i` already leaves better-sqlite3 built for both ABIs
+      # A fresh `pnpm i` already leaves better-sqlite3 ready for both runtimes
       # (see the root AGENTS.md); this repairs a restored node_modules cache
       # where one half is stale. Nothing has to be restored afterwards for
       # packaging: electron-builder runs @electron/rebuild inside the release
