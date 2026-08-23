@@ -5,7 +5,8 @@ import {
   addRootAndExpand,
   branchRow,
   expandRepoGroup,
-  lensChip
+  lensChip,
+  primaryShortcut
 } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
@@ -114,18 +115,18 @@ test("dragging a repo row selects no text", async () => {
   expect(selected).toBe("");
 });
 
-test("⌘⇧↓ moves a pinned repo without the mouse", async () => {
+test("the platform reorder shortcut moves a pinned repo without the mouse", async () => {
   const window = await pinnedSandbox();
 
   const alpha = window.locator(".repo-row", { hasText: "alpha" });
   await alpha.focus();
-  await window.keyboard.press("Meta+Shift+ArrowDown");
+  await window.keyboard.press(primaryShortcut("Shift", "ArrowDown"));
 
   expect(await repoNames(window)).toEqual(["bravo", "alpha", "charlie"]);
 
   // And the row keeps focus, so a second press keeps moving the same repo
   // rather than whatever slid into the vacated slot.
-  await window.keyboard.press("Meta+Shift+ArrowDown");
+  await window.keyboard.press(primaryShortcut("Shift", "ArrowDown"));
   expect(await repoNames(window)).toEqual(["bravo", "charlie", "alpha"]);
 });
 
@@ -406,7 +407,7 @@ test("a dragged row is marked without its text being dimmed", async () => {
   await window.mouse.up();
 });
 
-test("⌘⇧↓ announces where the row landed", async () => {
+test("the platform reorder shortcut announces where the row landed", async () => {
   const window = await pinnedSandbox();
 
   // The region has to be in the DOM and EMPTY before anything is said: a
@@ -422,7 +423,7 @@ test("⌘⇧↓ announces where the row landed", async () => {
   // re-announced on its own and the reorder is silent to a screen reader
   // (SC 4.1.3). The region is what says what happened.
   await window.locator(".repo-row", { hasText: "alpha" }).focus();
-  await window.keyboard.press("Meta+Shift+ArrowDown");
+  await window.keyboard.press(primaryShortcut("Shift", "ArrowDown"));
 
   await expect(live).toHaveText("alpha moved to 2 of 3.");
 });

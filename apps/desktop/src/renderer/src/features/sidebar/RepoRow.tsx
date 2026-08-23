@@ -8,6 +8,11 @@ import {
 } from "react";
 import type { Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
 import { announce, movedMessage } from "../../lib/announce";
+import {
+  currentPlatform,
+  hasPrimaryModifier,
+  shortcutLabel
+} from "../../lib/platform";
 import { useViewportTooltip } from "../../lib/useViewportTooltip";
 import {
   groupWorktreesForNavigation,
@@ -67,7 +72,8 @@ export function RepoRow({
   onRowFocus,
   isPostDragClick,
   posinset,
-  setsize
+  setsize,
+  platform = currentPlatform()
 }: {
   repo: Repo;
   expanded: boolean;
@@ -127,6 +133,8 @@ export function RepoRow({
   posinset: number;
   /** How many treeitems that list holds. */
   setsize: number;
+  /** Explicit only in deterministic platform component tests. */
+  platform?: string;
 }) {
   const refreshTooltip = useViewportTooltip();
   const { primary, pinned, remaining, displayIds } =
@@ -230,7 +238,7 @@ export function RepoRow({
     // ⌘⇧↑/↓ moves the row; plain ↑/↓ moves the focus. Same modifier pair as
     // PwrAgnt's pinned-directory reorder, so the two apps stay one muscle
     // memory.
-    if (event.metaKey && event.shiftKey) {
+    if (hasPrimaryModifier(event, platform) && event.shiftKey) {
       if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
       if (worktree.isPrimary) return;
       const from = orderedIds.indexOf(worktree.id);
@@ -319,6 +327,7 @@ export function RepoRow({
       focusable={tabStopId === worktree.id}
       onKeyDown={(event) => handleWorktreeKeyDown(worktree, event)}
       onFocus={() => setFocusedWtId(worktree.id)}
+      platform={platform}
     />
   );
 
@@ -403,7 +412,13 @@ export function RepoRow({
           <span
             className="repo-row__handle"
             aria-hidden="true"
-            title="Drag to reorder — or ⌘⇧↑ / ⌘⇧↓ from the keyboard"
+            title={`Drag to reorder — or ${shortcutLabel(
+              { key: "ArrowUp", shift: true },
+              platform
+            )} / ${shortcutLabel(
+              { key: "ArrowDown", shift: true },
+              platform
+            )} from the keyboard`}
           >
             <svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor">
               <circle cx="2" cy="2" r="1.3" />

@@ -21,7 +21,7 @@ const worktree = (partial: Partial<Worktree>): Worktree => ({
   ...partial
 });
 
-const render = (wt: Worktree): string =>
+const render = (wt: Worktree, platform = "darwin"): string =>
   renderToStaticMarkup(
     <WorktreeRow
       worktree={wt}
@@ -40,6 +40,7 @@ const render = (wt: Worktree): string =>
       onFocus={() => undefined}
       posinset={1}
       setsize={1}
+      platform={platform}
     />
   );
 
@@ -85,6 +86,20 @@ describe("WorktreeRow — the folder a worktree lives in", () => {
     expect(markup).toContain('<span class="a11y-sr-only">in folder</span>');
     expect(markup).toContain(
       '<span class="wt-row__folder-name">release-audit</span>'
+    );
+  });
+});
+
+describe("WorktreeRow — platform shortcut affordance", () => {
+  it("keeps the Command-glyph reorder tooltip on macOS", () => {
+    expect(render(worktree({}), "darwin")).toContain(
+      "Drag to reorder — or ⇧⌘↑ / ⇧⌘↓ from the keyboard"
+    );
+  });
+
+  it("shows the working Ctrl chord on Windows", () => {
+    expect(render(worktree({}), "win32")).toContain(
+      "Drag to reorder — or Ctrl+Shift+↑ / Ctrl+Shift+↓ from the keyboard"
     );
   });
 });
