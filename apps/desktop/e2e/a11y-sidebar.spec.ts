@@ -5,7 +5,8 @@ import {
   addRootAndExpand,
   branchRow,
   expandRepoGroup,
-  lensChip
+  lensChip,
+  primaryShortcut
 } from "./fixtures/steps";
 
 /**
@@ -394,7 +395,7 @@ test("a worktree reorder announces the same position the row reports", async () 
   const row = branchRow(window, "feature/one");
   await expect(row).toBeVisible();
   await row.focus();
-  await window.keyboard.press("Meta+Shift+ArrowDown");
+  await window.keyboard.press(primaryShortcut("Shift", "ArrowDown"));
 
   // The announcement and `aria-posinset` have to agree. They are computed from
   // two different lists — the reorder works over the reorderable worktrees,

@@ -13,7 +13,8 @@
     "./result": "./src/result.ts",
     "./types": "./src/types.ts",
     "./image": "./src/image.ts",
-    "./ipc": "./src/ipc.ts"
+    "./ipc": "./src/ipc.ts",
+    "./appearance": "./src/appearance.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"

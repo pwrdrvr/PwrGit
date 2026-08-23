@@ -9,8 +9,12 @@ import {
   safeStorage
 } from "electron";
 import {
+  GENERAL_DEFAULTS,
+  isAppearanceTheme,
   ok,
+  resolveProfileAppearance,
   resolveUpdateSelection,
+  type AppAppearance,
   type Profile,
   type BranchReveal
 } from "@pwrgit/shared";
@@ -62,7 +66,7 @@ import {
 import { GitHubCommitAuthorIdentityService } from "./github/commit-author-identity";
 import { registerGitHubHandlers } from "./github/github-handlers";
 import { PrService } from "./github/pr-service";
-import { emitEvent, registerIpc } from "./ipc";
+import { emitEvent, emitEventToWindow, registerIpc } from "./ipc";
 import {
   initLogFile,
   logMain,
@@ -89,7 +93,7 @@ import { rebuildAppMenu } from "./menu";
 import { checkForAppUpdatesFromMenu } from "./menu-update-check";
 import { createProfileWindows } from "./profile-windows";
 import { openSettingsWindow } from "./settings-window";
-import { applyNativeWindowTheme } from "./window-chrome";
+import { createNativeThemeController } from "./native-theme";
 
 const APP_NAME = "PwrGit";
 
@@ -110,10 +114,6 @@ protocol.registerSchemesAsPrivileged([
 // carry the product name, but setting it explicitly keeps every launch mode
 // consistent.
 app.setName(APP_NAME);
-// PwrGit currently renders dark-only. Keep Electron-owned popup menus and
-// dialogs on that same theme; the shared chrome helper is ready to switch this
-// alongside the renderer when the authored light theme becomes selectable.
-applyNativeWindowTheme(nativeTheme);
 app.setAboutPanelOptions({
   applicationName: APP_NAME,
   applicationVersion: app.getVersion()
@@ -138,6 +138,27 @@ const dataDirOverride = process.env["PWRGIT_USER_DATA_DIR"];
 if (dataDirOverride !== undefined && dataDirOverride !== "") {
   app.setPath("userData", dataDirOverride);
 }
+
+// Settings and native appearance are established before app readiness so the
+// first BrowserWindow, macOS traffic lights, Windows caption buttons, menus,
+// and dialogs all start on the persisted palette. Invalid/legacy storage falls
+// back to PwrGit's historical dark theme.
+const settings = new SettingsService(
+  join(app.getPath("userData"), "settings.json")
+);
+const storedTheme = settings.get().general?.theme;
+let isProfileWindow = (_window: BrowserWindow): boolean => false;
+let publishAppAppearance = (_next: AppAppearance): void => undefined;
+const appearance = createNativeThemeController({
+  nativeTheme,
+  initialTheme: isAppearanceTheme(storedTheme)
+    ? storedTheme
+    : GENERAL_DEFAULTS.theme,
+  // Profile frames can have their own palette; the app controller owns every
+  // unbound window, while the profile registry repaints its own windows below.
+  windows: () => BrowserWindow.getAllWindows().filter((win) => !isProfileWindow(win)),
+  onChanged: (next) => publishAppAppearance(next)
+});
 
 const bus = new CommandBus();
 bus.register("ping", () => ok("pong"));
@@ -184,15 +205,11 @@ if (!gotSingleInstanceLock) {
     installDevelopmentDockIcon();
     bus.register("logs:read", () => ok(readLogSnapshot()));
     bus.register("logs:openWindow", () => {
-      openLogsWindow();
+      openLogsWindow(appearance.appearance());
       return ok(null);
     });
-    registerAppDocumentHandlers(bus);
+    registerAppDocumentHandlers(bus, appearance.appearance);
     registerAppIdentityHandlers(bus);
-
-    const settings = new SettingsService(
-      join(app.getPath("userData"), "settings.json")
-    );
     const keychainReady = await ensureMacKeychainAccess({
       platform: process.platform,
       packaged: app.isPackaged,
@@ -336,7 +353,35 @@ if (!gotSingleInstanceLock) {
 
     // One window per profile. Opening a profile that already has a window
     // focuses it; cross-profile reveals are stashed until the new window asks.
-    const windows = createProfileWindows();
+    const appearanceForProfile = (profileId: string): AppAppearance =>
+      resolveProfileAppearance(
+        profiles.get(profileId)?.theme,
+        appearance.appearance()
+      );
+    const windows = createProfileWindows({ appearance: appearanceForProfile });
+    isProfileWindow = (window) => windows.profileFor(window) !== null;
+    publishAppAppearance = (next) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (windows.profileFor(window) === null) {
+          emitEventToWindow("appearance:changed", next, window);
+        }
+      }
+      windows.syncAllAppearances();
+    };
+    bus.register("appearance:read", (_req, context) => {
+      const sender =
+        context.webContentsId === undefined
+          ? null
+          : (BrowserWindow.getAllWindows().find(
+              (window) => window.webContents.id === context.webContentsId
+            ) ?? null);
+      const profileId = windows.profileFor(sender);
+      return ok(
+        profileId === null
+          ? appearance.appearance()
+          : appearanceForProfile(profileId)
+      );
+    });
     type Reveal = {
       repoId: string;
       worktreeId: string | null;
@@ -354,11 +399,15 @@ if (!gotSingleInstanceLock) {
         onCheckForUpdates: () => {
           void checkForAppUpdatesFromMenu();
         },
-        onOpenSettings: () => openSettingsWindow(),
-        onOpenLogs: () => openLogsWindow(),
-        onOpenLicense: () => openAppDocumentWindow("license"),
+        onOpenSettings: () => openSettingsWindow(appearance.appearance()),
+        onOpenLogs: () => openLogsWindow(appearance.appearance()),
+        onOpenLicense: () =>
+          openAppDocumentWindow("license", appearance.appearance()),
         onOpenThirdPartyNotices: () =>
-          openAppDocumentWindow("third-party-notices"),
+          openAppDocumentWindow(
+            "third-party-notices",
+            appearance.appearance()
+          ),
         onOpenExternalLink: (label, url) => {
           void openExternalUrlFromMenu(label, url);
         },
@@ -400,8 +449,10 @@ if (!gotSingleInstanceLock) {
     };
 
     registerProfileHandlers(bus, profiles, {
-      onActivated: rescanInBackground,
-      onChanged: refreshMenu,
+      onChanged: (profile) => {
+        windows.syncAppearance(profile.id);
+        refreshMenu();
+      },
       openWindow: openProfileWindow,
       consumeReveal: (profileId) => {
         const reveal = pendingReveals.get(profileId) ?? null;
@@ -441,6 +492,7 @@ if (!gotSingleInstanceLock) {
       diagnosticsOutputRoot,
       appVersion: app.getVersion(),
       onChanged: (snapshot) => {
+        appearance.setTheme(snapshot.general.theme);
         emitEvent("settings:changed", snapshot);
         diagnostics.sync();
         refreshMenu(); // Developer Mode toggles View-menu items live
@@ -492,6 +544,7 @@ if (!gotSingleInstanceLock) {
     app.on("before-quit", () => {
       clearInterval(activeStatePoll);
       githubHandlers.stop();
+      appearance.dispose();
     });
 
     // Drain diagnostics before quitting so final monitor-stopped events and

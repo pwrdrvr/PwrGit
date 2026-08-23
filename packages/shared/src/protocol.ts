@@ -37,6 +37,7 @@ import type {
   PrSummary,
   Profile,
   ProfileId,
+  ProfileThemeOverride,
   PullProgressPhase,
   RebaseCommitRef,
   RebaseCheckResult,
@@ -97,6 +98,8 @@ export type CreateProfileRequest = {
   mono?: string;
   kind?: string;
   org?: string;
+  /** Fixed window palette; omit to inherit the app setting. */
+  theme?: ProfileThemeOverride;
   roots?: string[];
 };
 
@@ -106,6 +109,8 @@ export type UpdateProfileRequest = {
   email?: string;
   authorName?: string;
   org?: string;
+  /** Fixed window palette, null to return to the app setting. */
+  theme?: ProfileThemeOverride | null;
 };
 
 // App settings (Settings window). Experimental + diagnostics sections are
@@ -174,6 +179,32 @@ export function isSidebarDensity(value: unknown): value is SidebarDensity {
     (SIDEBAR_DENSITIES as readonly string[]).includes(value)
   );
 }
+
+/** App-level color-theme preference. `system` follows the OS in real time. */
+export const APPEARANCE_THEMES = ["system", "dark", "light"] as const;
+export type AppearanceTheme = (typeof APPEARANCE_THEMES)[number];
+export type ResolvedAppearanceTheme = Exclude<AppearanceTheme, "system">;
+
+/** Preserve the app's historical dark appearance for existing installations. */
+export const APPEARANCE_THEME_DEFAULT: AppearanceTheme = "dark";
+
+export function isAppearanceTheme(value: unknown): value is AppearanceTheme {
+  return (
+    typeof value === "string" &&
+    (APPEARANCE_THEMES as readonly string[]).includes(value)
+  );
+}
+
+export function isProfileThemeOverride(
+  value: unknown
+): value is ProfileThemeOverride {
+  return value === "dark" || value === "light";
+}
+
+export type AppAppearance = {
+  theme: AppearanceTheme;
+  resolvedTheme: ResolvedAppearanceTheme;
+};
 
 /**
  * Where a branch created from a commit gets checked out. "none" leaves the
@@ -365,6 +396,8 @@ export type AppUpdateReleaseVersions = {
 };
 
 export type GeneralSettings = {
+  /** Color theme across every app and auxiliary window. */
+  theme: AppearanceTheme;
   /** Expose Reload, Force Reload, and Developer Tools in the View menu. */
   developerMode: boolean;
   /** Sidebar name/branch type scale (`--sidebar-title-size`). */
@@ -394,6 +427,7 @@ export type DiagnosticsSettings = {
 };
 
 export const GENERAL_DEFAULTS: GeneralSettings = {
+  theme: APPEARANCE_THEME_DEFAULT,
   developerMode: false,
   sidebarTextSize: "md",
   sidebarDensity: "comfortable"
@@ -437,7 +471,6 @@ export interface Commands {
   // Profiles (U5). One window per profile: "switching" means opening (or
   // focusing) that profile's window, never repointing the current one.
   "profile:list": { req: void; res: ProfileList };
-  "profile:switch": { req: { profileId: ProfileId }; res: ProfileList };
   /** Open (or focus) the window bound to a profile; optionally reveal a repo
    *  (and a specific worktree) there once it's up — cross-profile ⌘F picks. */
   "profile:openWindow": {
@@ -468,13 +501,11 @@ export interface Commands {
 
   // Repos & discovery (U6)
   "repo:list": { req: { profileId?: ProfileId }; res: Repo[] };
-  "repo:rescan": { req: { profileId?: ProfileId }; res: Repo[] };
   /** Reconcile one repo with Git, discovering external worktree changes. */
   "repo:refreshWorktrees": {
     req: { repoId: string };
     res: RepoWorktreeRefresh;
   };
-  "repo:add": { req: { profileId: ProfileId; path: string }; res: Repo };
   /** What the clone and fork dialogs need to open: known owners and forge
    *  availability. Answered from SQLite and a cached probe — no forge call. */
   "repo:cloneCatalog": { req: { profileId: ProfileId }; res: CloneCatalog };
@@ -1007,6 +1038,8 @@ export interface Commands {
   // App settings (Settings window)
   "settings:read": { req: void; res: AppSettingsSnapshot };
   "settings:update": { req: { patch: AppSettingsPatch }; res: AppSettingsSnapshot };
+  /** Current preference plus native-resolved palette; closes bootstrap races. */
+  "appearance:read": { req: void; res: AppAppearance };
 
   // Desktop auto-update (Settings → Updates)
   "app:readIdentity": { req: void; res: AppIdentity };
@@ -1023,7 +1056,6 @@ export interface Commands {
   "app:readDocument": { req: { kind: AppDocumentKind }; res: AppDocument };
   "app:openDocumentWindow": { req: { kind: AppDocumentKind }; res: null };
 
-  "dialog:pickDirectory": { req: void; res: string | null };
   "dialog:pickDirectories": { req: void; res: string[] };
 
   // Reveal a path in the OS file manager (Finder / Explorer / …).
@@ -1108,6 +1140,8 @@ export interface Events {
   "ui:manageProfile": Record<string, never>;
   /** App settings changed (any window) — payload is the fresh snapshot. */
   "settings:changed": AppSettingsSnapshot;
+  /** Resolved color theme changed, including a live OS change in System mode. */
+  "appearance:changed": AppAppearance;
   /** Auto-update status changed — Settings and any future banner subscribe. */
   "app:updateStatus": AppUpdateStatus;
   /** Reveal a repo (and optionally a worktree) in the window bound to

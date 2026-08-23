@@ -4,6 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PwrGit</title>
+    <!-- Main passes the persisted + resolved theme through preload. Stamp it
+         before styles or React load so light windows never paint a dark frame. -->
+    <script>
+      (function () {
+        try {
+          var appearance = window.pwrgit && window.pwrgit.appearance;
+          var resolved = appearance && appearance.resolvedTheme;
+          if (resolved === "light") {
+            document.documentElement.setAttribute("data-theme", "light");
+            document.documentElement.style.colorScheme = "light";
+          } else {
+            document.documentElement.removeAttribute("data-theme");
+            document.documentElement.style.colorScheme = "dark";
+          }
+        } catch (_error) {
+          document.documentElement.style.colorScheme = "dark";
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

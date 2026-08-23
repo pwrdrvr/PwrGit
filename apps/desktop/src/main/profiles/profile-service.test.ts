@@ -57,4 +57,25 @@ describe("ProfileService", () => {
     expect(s.get(a.id)?.email).toBe("a@x.com");
     expect(s.get(b.id)?.email).toBe("b@x.com");
   });
+
+  it("persists a fixed theme and clears it back to app inheritance", () => {
+    const s = service();
+    const profile = s.create({
+      name: "Light workspace",
+      email: "light@example.com",
+      theme: "light"
+    });
+    expect(profile.theme).toBe("light");
+
+    expect(s.update({ profileId: profile.id, theme: "dark" })?.theme).toBe(
+      "dark"
+    );
+    expect(s.update({ profileId: profile.id, theme: null })?.theme).toBeUndefined();
+  });
+
+  it("keeps existing profiles on app theme inheritance", () => {
+    const s = service();
+    const profile = s.create({ name: "Inherited", email: "i@example.com" });
+    expect(profile.theme).toBeUndefined();
+  });
 });

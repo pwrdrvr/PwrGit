@@ -6,6 +6,9 @@ export type ProfileId = string;
 export type RepoId = string;
 export type WorktreeId = string;
 
+/** A fixed palette for one profile window; absence inherits the app setting. */
+export type ProfileThemeOverride = "dark" | "light";
+
 export type Profile = {
   id: ProfileId;
   name: string;
@@ -22,6 +25,8 @@ export type Profile = {
   kind?: string;
   /** Default GitHub org/owner for new repos under this profile, e.g. "pwrdrvr". */
   org?: string;
+  /** Fixed palette for this profile's window; absent means use the app setting. */
+  theme?: ProfileThemeOverride;
   /** Root folders scanned to discover this profile's repos. */
   roots: string[];
   /** ISO-8601 timestamp of the last time this profile was active. */

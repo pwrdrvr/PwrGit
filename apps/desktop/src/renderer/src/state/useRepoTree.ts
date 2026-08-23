@@ -1,8 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Repo } from "@pwrgit/shared";
 import { confirmDialog, notifyDialog } from "../features/shell/dialogs";
 import { dispatch, subscribe } from "../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../lib/toast";
+import {
+  LOADING_READ_STATE,
+  READY_READ_STATE,
+  type ReadState
+} from "./readState";
 
 export type RemovalProgress = { done: number; total: number };
 
@@ -17,7 +22,9 @@ export type CreateWorktreeResult =
 
 export type UseRepoTree = {
   repos: Repo[];
-  loading: boolean;
+  loadState: ReadState;
+  /** Retry a failed repository-list read without discarding the last tree. */
+  retry: () => Promise<void>;
   /** Non-null while a batch removal is in flight (for a progress indicator). */
   removalProgress: RemovalProgress | null;
   /** Repo ids currently being reconciled with `git worktree list`. */
@@ -45,7 +52,10 @@ export type UseRepoTree = {
 /** Repos for the active profile, kept in sync with `repo:changed`. */
 export function useRepoTree(activeProfileId: string | null): UseRepoTree {
   const [repos, setRepos] = useState<Repo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadState, setLoadState] =
+    useState<ReadState>(LOADING_READ_STATE);
+  const mountedRef = useRef(false);
+  const requestRef = useRef(0);
   const [removalProgress, setRemovalProgress] =
     useState<RemovalProgress | null>(null);
   const [refreshingRepoIds, setRefreshingRepoIds] = useState<Set<string>>(
@@ -54,21 +64,36 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
 
   // Always scope to THIS window's profile — with one window per profile, the
   // global "active" profile changes whenever any window opens.
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (showLoading = false): Promise<void> => {
     if (activeProfileId === null) return;
+    const request = ++requestRef.current;
+    if (showLoading) setLoadState(LOADING_READ_STATE);
     const r = await dispatch("repo:list", { profileId: activeProfileId });
-    if (r.ok) setRepos(r.value);
-    setLoading(false);
+    if (!mountedRef.current || request !== requestRef.current) return;
+    if (r.ok) {
+      setRepos(r.value);
+      setLoadState(READY_READ_STATE);
+    } else {
+      // Keep the last good tree. Pinning, ordering, PR refreshes, and removals
+      // update that copy optimistically and a transient read must not erase it.
+      setLoadState({ status: "error", message: r.error.message });
+    }
   }, [activeProfileId]);
 
+  const retry = useCallback(() => reload(true), [reload]);
+
   useEffect(() => {
+    mountedRef.current = true;
     if (activeProfileId === null) {
+      requestRef.current += 1;
       setRepos([]);
-      setLoading(false);
-      return;
+      setLoadState(READY_READ_STATE);
+      return () => {
+        mountedRef.current = false;
+        requestRef.current += 1;
+      };
     }
-    setLoading(true);
-    void reload();
+    void reload(true);
     // Identity refresh is fire-and-forget and TTL-throttled in the main
     // process: stored marks paint with the first repo:list, and anything
     // stale arrives as a repo:identityChanged delta a moment later.
@@ -76,7 +101,11 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     const off = subscribe("repo:changed", (p) => {
       if (p.profileId === activeProfileId) void reload();
     });
-    return off;
+    return () => {
+      mountedRef.current = false;
+      requestRef.current += 1;
+      off();
+    };
   }, [activeProfileId, reload]);
 
   // Prune each worktree from the tree as its removal completes — live feedback
@@ -356,7 +385,8 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
 
   return {
     repos,
-    loading,
+    loadState,
+    retry,
     removalProgress,
     refreshingRepoIds,
     setRepoPin,

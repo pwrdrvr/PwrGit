@@ -1,14 +1,15 @@
 import { useState } from "react";
 import type { Profile } from "@pwrgit/shared";
 import { ProfileModal } from "../sidebar/ProfileModal";
+import { ReadError } from "../shell/ReadError";
 import { useProfiles } from "../../state/useProfiles";
 import { SettingsPanelHead, SettingsSection } from "./SettingsLayout";
 
 /**
  * Profiles pane (PwrAgnt's ProfilesSettings pattern, on PwrGit's profile
- * model): list every profile with its identity + scan roots, open a profile's
- * window, and create/edit through the existing ProfileModal (which owns the
- * roots editor). PwrGit has no profile delete command, so no delete here.
+ * model): list every profile with its theme, identity + scan roots, open a
+ * profile's window, and create/edit through the existing ProfileModal (which
+ * owns the roots editor). PwrGit has no profile delete command, so no delete.
  */
 export function ProfilesSettings() {
   const profiles = useProfiles();
@@ -21,11 +22,12 @@ export function ProfilesSettings() {
       <SettingsPanelHead
         eyebrow="Profiles"
         title="PwrGit profiles"
-        help="Profiles are workspaces: each has its own commit identity, repo folders, and window. Picking one from the Profiles menu opens its window."
+        help="Profiles are workspaces: each has its own window theme, commit identity, and repo folders. Picking one from the Profiles menu opens its window."
         action={
           <button
             className="settings-button settings-button--primary"
             type="button"
+            disabled={profiles.loadState.status !== "ready"}
             onClick={() => setModal({ mode: "create" })}
           >
             Add profile
@@ -37,9 +39,25 @@ export function ProfilesSettings() {
         eyebrow="Profiles"
         title="Profile list"
         description="The active profile is the one most recently used; each profile opens in its own window."
-        chip={`${profiles.profiles.length} profile${profiles.profiles.length === 1 ? "" : "s"}`}
+        chip={
+          profiles.loadState.status === "loading"
+            ? "Loading"
+            : profiles.loadState.status === "error"
+              ? "Unavailable"
+              : `${profiles.profiles.length} profile${profiles.profiles.length === 1 ? "" : "s"}`
+        }
       >
-        {profiles.profiles.length === 0 ? (
+        {profiles.loadState.status === "loading" ? (
+          <p className="settings-empty" role="status">
+            Loading profiles…
+          </p>
+        ) : profiles.loadState.status === "error" ? (
+          <ReadError
+            title="Profiles couldn’t be loaded"
+            message={profiles.loadState.message}
+            onRetry={() => void profiles.retry()}
+          />
+        ) : profiles.profiles.length === 0 ? (
           <p className="settings-empty">No profiles yet.</p>
         ) : (
           <div className="settings-profile-list">
@@ -100,6 +118,11 @@ function ProfileRow(props: {
           {props.active ? (
             <span className="settings-card__chip settings-card__chip--ok">
               Active
+            </span>
+          ) : null}
+          {profile.theme !== undefined ? (
+            <span className="settings-card__chip">
+              {profile.theme === "light" ? "Light" : "Dark"}
             </span>
           ) : null}
         </span>

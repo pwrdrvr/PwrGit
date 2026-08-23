@@ -23,6 +23,7 @@ describe("settings handlers", () => {
     const r = await bus.dispatch("settings:read", undefined);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
+    expect(r.value.general.theme).toBe("dark");
     expect(r.value.general.developerMode).toBe(false);
     expect(r.value.general.sidebarTextSize).toBe("md");
     expect(r.value.general.sidebarDensity).toBe("comfortable");
@@ -103,6 +104,43 @@ describe("settings handlers", () => {
 });
 
 describe("appearance axes", () => {
+  it("round-trips System, Dark, and Light while preserving dark as migration default", async () => {
+    const bus = new CommandBus();
+    const service = freshService();
+    registerSettingsHandlers(bus, service, {
+      diagnosticsOutputRoot: "/diag",
+      onChanged: () => undefined
+    });
+
+    for (const theme of ["system", "light", "dark"] as const) {
+      const r = await bus.dispatch("settings:update", {
+        patch: { general: { theme } }
+      });
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      expect(r.value.general.theme).toBe(theme);
+    }
+    expect(service.get().general).toEqual({ theme: "dark" });
+  });
+
+  it("rejects an invalid persisted or patched theme", async () => {
+    const bus = new CommandBus();
+    const service = freshService();
+    service.update({ general: { theme: "sepia" as never } });
+    registerSettingsHandlers(bus, service, {
+      diagnosticsOutputRoot: "/diag",
+      onChanged: () => undefined
+    });
+
+    const before = await bus.dispatch("settings:read", undefined);
+    expect(before.ok && before.value.general.theme).toBe("dark");
+
+    const after = await bus.dispatch("settings:update", {
+      patch: { general: { theme: "blue" as never } }
+    });
+    expect(after.ok && after.value.general.theme).toBe("dark");
+  });
+
   it("round-trips the sidebar text size and density", async () => {
     const bus = new CommandBus();
     const service = freshService();

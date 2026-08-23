@@ -700,6 +700,74 @@ textarea,
   font: 500 12px/1.5 var(--font-sans);
 }
 
+.sidebar__read-status,
+.sidebar__profile-empty {
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--text-muted);
+  font: 500 11.5px/1.4 var(--font-sans);
+}
+.sidebar__profile-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.sidebar__profile-empty button {
+  border: 0;
+  padding: 3px 0;
+  background: transparent;
+  color: var(--accent);
+  font: 600 11.5px/1 var(--font-sans);
+  cursor: pointer;
+}
+.sidebar__list > .read-error {
+  margin: 8px 4px;
+}
+
+.read-error {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-md);
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+.read-error--compact {
+  display: block;
+  padding: 9px 10px;
+}
+.read-error__copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font: 500 11.5px/1.4 var(--font-sans);
+}
+.read-error__copy strong {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+.read-error__copy span {
+  overflow-wrap: anywhere;
+}
+.read-error__retry {
+  flex: 0 0 auto;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  padding: 6px 9px;
+  background: transparent;
+  color: inherit;
+  font: 650 11px/1 var(--font-sans);
+  cursor: pointer;
+}
+.read-error--compact .read-error__retry {
+  margin-top: 8px;
+}
+
 .repo-block {
   /* PwrAgnt's list gap is 0: the row's own padding is the rhythm. */
   margin-bottom: 0;
@@ -1749,7 +1817,8 @@ textarea,
   color: var(--text-primary);
 }
 .clone-repo:disabled,
-.fork-repo:disabled {
+.fork-repo:disabled,
+.add-folder:disabled {
   opacity: 0.42;
   cursor: default;
 }

@@ -7,9 +7,8 @@
  * hand-mirrored from `renderer/src/styles/tokens.css` and must be updated
  * together with it; `theme-contract.test.ts` fails if they drift.
  *
- * The renderer currently boots in dark mode, but both palettes live here so
- * the upcoming appearance plumbing has one switch point for pre-paint frames,
- * Windows caption buttons, and Electron's native surfaces.
+ * Both palettes live here so BrowserWindow construction and live native-chrome
+ * repainting share one source of truth.
  */
 
 export type WindowChromeTheme = "dark" | "light";
@@ -49,10 +48,36 @@ export const TITLE_BAR_OVERLAY_SYMBOL =
  * Windows caption buttons instead of disappearing under the overlay. */
 export const TITLE_BAR_OVERLAY_HEIGHT = 31;
 
-/** Keep native popup menus and dialogs aligned with the renderer theme. */
-export function applyNativeWindowTheme(
-  nativeTheme: { themeSource: "system" | WindowChromeTheme },
-  theme: WindowChromeTheme = DEFAULT_WINDOW_CHROME_THEME
+export function windowChrome(theme: WindowChromeTheme) {
+  return WINDOW_CHROME_BY_THEME[theme];
+}
+
+export function titleBarOverlay(theme: WindowChromeTheme): {
+  color: string;
+  symbolColor: string;
+  height: number;
+} {
+  const chrome = windowChrome(theme);
+  return {
+    color: chrome.titleBar,
+    symbolColor: chrome.symbol,
+    height: TITLE_BAR_OVERLAY_HEIGHT
+  };
+}
+
+export type RepaintableWindowChrome = {
+  isDestroyed: () => boolean;
+  setBackgroundColor: (color: string) => void;
+  setTitleBarOverlay: (options: ReturnType<typeof titleBarOverlay>) => void;
+};
+
+/** Repaint one already-open native frame to match its renderer palette. */
+export function repaintWindowChrome(
+  window: RepaintableWindowChrome,
+  theme: WindowChromeTheme,
+  platform: NodeJS.Platform = process.platform
 ): void {
-  nativeTheme.themeSource = theme;
+  if (window.isDestroyed()) return;
+  window.setBackgroundColor(windowChrome(theme).background);
+  if (platform === "win32") window.setTitleBarOverlay(titleBarOverlay(theme));
 }

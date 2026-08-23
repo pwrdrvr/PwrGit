@@ -5,3 +5,4 @@ export * from "./image";
 export * from "./protocol";
 export * from "./ipc";
 export * from "./product";
+export * from "./appearance";

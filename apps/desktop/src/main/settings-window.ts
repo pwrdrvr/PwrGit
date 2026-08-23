@@ -1,10 +1,11 @@
 import { join } from "node:path";
 import { BrowserWindow, shell } from "electron";
+import { serializeAppearanceArg, type AppAppearance } from "@pwrgit/shared";
 import {
   auxiliaryWindowChromeOptions,
   hideAuxiliaryWindowMenuBar
 } from "./auxiliary-window-chrome";
-import { WINDOW_BACKGROUND } from "./window-chrome";
+import { windowChrome } from "./window-chrome";
 
 /**
  * Singleton Settings window (same aux-window pattern as the Logs window /
@@ -15,7 +16,7 @@ import { WINDOW_BACKGROUND } from "./window-chrome";
  */
 let settingsWindow: BrowserWindow | undefined;
 
-export function openSettingsWindow(): void {
+export function openSettingsWindow(appearance: AppAppearance): void {
   if (settingsWindow !== undefined && !settingsWindow.isDestroyed()) {
     if (settingsWindow.isMinimized()) settingsWindow.restore();
     settingsWindow.focus();
@@ -29,13 +30,14 @@ export function openSettingsWindow(): void {
     minHeight: 520,
     show: false,
     title: "PwrGit Settings",
-    ...auxiliaryWindowChromeOptions(),
-    backgroundColor: WINDOW_BACKGROUND,
+    ...auxiliaryWindowChromeOptions(appearance.resolvedTheme),
+    backgroundColor: windowChrome(appearance.resolvedTheme).background,
     webPreferences: {
       preload: join(__dirname, "../preload/index.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      additionalArguments: [serializeAppearanceArg(appearance)]
     }
   });
 

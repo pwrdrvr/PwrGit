@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { Commit, RepoSearchHit, SearchHitStatus } from "@pwrgit/shared";
 import { createAsyncFill } from "../../lib/asyncFill";
+import { currentPlatform, shortcutLabel } from "../../lib/platform";
 import { dispatch } from "../../lib/pwrgit";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import { shortWhen } from "../graph/graph-view";
@@ -8,8 +9,6 @@ import { commitHashQuery, searchCommits } from "./commit-search";
 import { PrChip } from "./PrChip";
 import { worktreeFolderLabel } from "./repo-view";
 import { PinIcon } from "./WorktreeRow";
-
-const isMac = navigator.platform.startsWith("Mac");
 
 // The kind's own identity within its repo: a worktree id, a fetched ref, or —
 // for a local branch, which carries neither — the branch name itself. Two local
@@ -133,7 +132,8 @@ export function RepoSwitcherOverlay({
   commitContext,
   onClose,
   onPick,
-  onPickCommit
+  onPickCommit,
+  platform = currentPlatform()
 }: {
   commits: Commit[];
   commitContext: {
@@ -144,6 +144,8 @@ export function RepoSwitcherOverlay({
   onClose: () => void;
   onPick: (hit: RepoSearchHit) => void;
   onPickCommit: (commit: Commit) => void;
+  /** Explicit only in deterministic platform component tests. */
+  platform?: string;
 }) {
   const now = useRelativeClock();
   const [query, setQuery] = useState("");
@@ -587,7 +589,7 @@ export function RepoSwitcherOverlay({
           <span>↵ open</span>
           {items[sel]?.kind === "repo" &&
             !isWorktreelessBranch(items[sel].hit) && (
-              <span>{isMac ? "⌘P" : "ctrl+P"} pin</span>
+              <span>{shortcutLabel({ key: "P" }, platform)} pin</span>
             )}
           <span style={{ flex: 1 }} />
           <span>
