@@ -2583,22 +2583,40 @@ export async function createTagAt(
       message: "Target commit must be an explicit commit object ID"
     });
   }
-  const resolveArgs = [
-    "rev-parse",
-    "--verify",
-    "--end-of-options",
-    `${target}^{commit}`
-  ];
+  // `rev-parse deadbee^{commit}` prefers a ref literally named `deadbee` over
+  // the object whose ID starts with that prefix. Disambiguate in the object
+  // database first so a hex-looking ref can never redirect tag creation.
+  const resolveArgs = ["rev-parse", `--disambiguate=${target}`];
   const resolved = await git(resolveArgs, cwd);
   if (!resolved.ok) return resolved;
-  if (resolved.value.exitCode !== 0) {
+  const candidates = resolved.value.stdout
+    .split(/\r?\n/)
+    .map((value) => value.trim())
+    .filter((value) => value !== "");
+  if (resolved.value.exitCode !== 0 || candidates.length !== 1) {
+    return err({
+      kind: "repo",
+      code: "invalid_target_commit",
+      message:
+        candidates.length > 1
+          ? `${target} is an ambiguous object ID`
+          : `${target} does not resolve to a commit`
+    });
+  }
+  const commitId = candidates[0] ?? "";
+  const typeArgs = ["cat-file", "-t", commitId];
+  const objectType = await git(typeArgs, cwd);
+  if (!objectType.ok) return objectType;
+  if (
+    objectType.value.exitCode !== 0 ||
+    objectType.value.stdout.trim() !== "commit"
+  ) {
     return err({
       kind: "repo",
       code: "invalid_target_commit",
       message: `${target} does not resolve to a commit`
     });
   }
-  const commitId = resolved.value.stdout.trim();
   const message = input.message?.trim() ?? "";
   if (input.kind === "annotated" && message === "") {
     return err({
@@ -2765,8 +2783,10 @@ export async function planRemoteTag(
   if (!valid.ok) return valid;
   const remote = await checkedRemoteName(git, cwd, input.remote);
   if (!remote.ok) return remote;
+  const pushUrl = await remotePushUrl(git, cwd, input.remote);
+  if (!pushUrl.ok) return pushUrl;
   const fullName = `refs/tags/${valid.value}`;
-  const remoteTag = await remoteTagSnapshot(git, cwd, input.remote, fullName);
+  const remoteTag = await remoteTagSnapshot(git, cwd, pushUrl.value, fullName);
   if (!remoteTag.ok) return remoteTag;
 
   if (input.action === "delete") {
@@ -2780,6 +2800,7 @@ export async function planRemoteTag(
     return ok({
       action: "delete",
       remote: input.remote,
+      pushUrl: pushUrl.value,
       tagName: valid.value,
       fullName,
       remoteObjectId: remoteTag.value.objectId,
@@ -2817,6 +2838,7 @@ export async function planRemoteTag(
   return ok({
     action: "push",
     remote: input.remote,
+    pushUrl: pushUrl.value,
     tagName: valid.value,
     fullName,
     localObjectId: localTag.value.objectId,
@@ -2852,10 +2874,17 @@ export async function applyRemoteTagPlan(
   }
   const remote = await checkedRemoteName(git, cwd, plan.remote);
   if (!remote.ok) return remote;
+  const pushUrl = await remotePushUrl(git, cwd, plan.remote);
+  if (!pushUrl.ok) return pushUrl;
+  if (pushUrl.value !== plan.pushUrl) {
+    return staleRemoteTag(
+      "The remote push endpoint changed after review. Refresh and review the action again."
+    );
+  }
   const currentRemote = await remoteTagSnapshot(
     git,
     cwd,
-    plan.remote,
+    plan.pushUrl,
     plan.fullName
   );
   if (!currentRemote.ok) return currentRemote;
@@ -2895,8 +2924,10 @@ export async function applyRemoteTagPlan(
     }
     const args = [
       "push",
+      "--no-follow-tags",
       `--force-with-lease=${plan.fullName}:`,
-      plan.remote,
+      "--",
+      plan.pushUrl,
       `${plan.localObjectId}:${plan.fullName}`
     ];
     const pushed = await git(args, cwd);
@@ -2920,8 +2951,10 @@ export async function applyRemoteTagPlan(
   }
   const args = [
     "push",
+    "--no-follow-tags",
     `--force-with-lease=${plan.fullName}:${plan.remoteObjectId}`,
-    plan.remote,
+    "--",
+    plan.pushUrl,
     `:${plan.fullName}`
   ];
   const deleted = await git(args, cwd);

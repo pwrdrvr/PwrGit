@@ -146,6 +146,20 @@ describe("local Git tags", () => {
     expect(symbolic.ok).toBe(false);
     expect(!symbolic.ok && symbolic.error.code).toBe("invalid_target_commit");
 
+    const prefix = fixture.first.slice(0, 7);
+    git(fixture.path, "branch", prefix, fixture.second);
+    const shadowed = await createTagAt(
+      systemGit,
+      fixture.path,
+      {
+        name: "shadowed-prefix",
+        targetCommit: prefix,
+        kind: "lightweight"
+      },
+      identity
+    );
+    expect(shadowed.ok && shadowed.value.targetId).toBe(fixture.first);
+
     const blank = await createTagAt(
       systemGit,
       fixture.path,
@@ -238,7 +252,17 @@ describe("reviewed remote Git tag actions", () => {
     const bare = join(fixture.root, "origin.git");
     git(fixture.root, "init", "--bare", "origin.git");
     git(fixture.path, "remote", "add", "origin", bare);
+    git(fixture.path, "config", "push.followTags", "true");
     git(fixture.path, "tag", "release", fixture.first);
+    git(
+      fixture.path,
+      "tag",
+      "--annotate",
+      "--message",
+      "Must stay local",
+      "unrelated",
+      fixture.first
+    );
 
     const pushPlan = await planRemoteTag(systemGit, fixture.path, {
       name: "release",
@@ -268,6 +292,9 @@ describe("reviewed remote Git tag actions", () => {
     expect(git(fixture.path, "ls-remote", "--tags", "origin", "refs/tags/release")).toContain(
       fixture.first
     );
+    expect(
+      git(fixture.path, "ls-remote", "--tags", "origin", "refs/tags/unrelated")
+    ).toBe("");
 
     const equal = await planRemoteTag(systemGit, fixture.path, {
       name: "release",
@@ -289,6 +316,7 @@ describe("reviewed remote Git tag actions", () => {
     git(
       fixture.path,
       "push",
+      "--no-follow-tags",
       "--force",
       "origin",
       "refs/tags/remote-replacement:refs/tags/release"
@@ -330,5 +358,66 @@ describe("reviewed remote Git tag actions", () => {
     expect(git(fixture.path, "ls-remote", "--tags", "origin", "refs/tags/release")).toBe(
       ""
     );
+    expect(
+      git(fixture.path, "ls-remote", "--tags", "origin", "refs/tags/unrelated")
+    ).toBe("");
   }, 20_000);
+
+  it("reviews and mutates the configured push endpoint, not the fetch URL", async () => {
+    const fixture = repo();
+    const fetchBare = join(fixture.root, "fetch.git");
+    const pushBare = join(fixture.root, "push.git");
+    git(fixture.root, "init", "--bare", "fetch.git");
+    git(fixture.root, "init", "--bare", "push.git");
+    git(fixture.path, "remote", "add", "origin", fetchBare);
+    git(fixture.path, "remote", "set-url", "--push", "origin", pushBare);
+    git(fixture.path, "tag", "release", fixture.first);
+    git(
+      fixture.path,
+      "push",
+      fetchBare,
+      "refs/tags/release:refs/tags/release"
+    );
+
+    const pushPlan = await planRemoteTag(systemGit, fixture.path, {
+      name: "release",
+      remote: "origin",
+      action: "push"
+    });
+    expect(pushPlan.ok).toBe(true);
+    if (!pushPlan.ok) return;
+    expect(pushPlan.value).toMatchObject({
+      pushUrl: pushBare,
+      status: "create"
+    });
+    const pushed = await applyRemoteTagPlan(
+      systemGit,
+      fixture.path,
+      pushPlan.value
+    );
+    expect(pushed.ok && pushed.value.outcome).toBe("pushed");
+    expect(
+      git(fixture.path, "ls-remote", "--tags", pushBare, "refs/tags/release")
+    ).toContain(fixture.first);
+
+    const deletePlan = await planRemoteTag(systemGit, fixture.path, {
+      name: "release",
+      remote: "origin",
+      action: "delete"
+    });
+    expect(deletePlan.ok).toBe(true);
+    if (!deletePlan.ok) return;
+    const deleted = await applyRemoteTagPlan(
+      systemGit,
+      fixture.path,
+      deletePlan.value
+    );
+    expect(deleted.ok && deleted.value.outcome).toBe("deleted");
+    expect(
+      git(fixture.path, "ls-remote", "--tags", pushBare, "refs/tags/release")
+    ).toBe("");
+    expect(
+      git(fixture.path, "ls-remote", "--tags", fetchBare, "refs/tags/release")
+    ).toContain(fixture.first);
+  });
 });

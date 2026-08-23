@@ -294,6 +294,8 @@ export type RemoteTagAction = "push" | "delete";
 export type RemoteTagPlan = {
   action: RemoteTagAction;
   remote: string;
+  /** Exact effective push endpoint inspected during review. */
+  pushUrl: string;
   tagName: string;
   fullName: string;
   /** Present for push. The tag ref must still equal this object at apply time. */

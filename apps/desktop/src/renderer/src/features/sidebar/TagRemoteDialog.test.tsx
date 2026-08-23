@@ -53,6 +53,7 @@ const remotes: RemoteSummary[] = [
 const pushPlan: RemoteTagPlan = {
   action: "push",
   remote: "origin",
+  pushUrl: "git@example.com:pwr/PwrGit.git",
   tagName: "v1.2.0",
   fullName: "refs/tags/v1.2.0",
   localObjectId: localObject,
@@ -137,6 +138,7 @@ describe("TagRemoteDialog", () => {
     const deletePlan: RemoteTagPlan = {
       action: "delete",
       remote: "origin",
+      pushUrl: "git@example.com:pwr/PwrGit.git",
       tagName: "v1.2.0",
       fullName: "refs/tags/v1.2.0",
       remoteObjectId: localObject,

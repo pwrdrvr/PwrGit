@@ -153,6 +153,7 @@ export function TagRemoteDialog({
                 {shortObject(plan.remoteObjectId)} · target{" "}
                 {shortObject(plan.localTargetId ?? plan.remoteTargetId)}
               </small>
+              <small title={plan.pushUrl}>Push endpoint {plan.pushUrl}</small>
             </div>
             <div className="refs-plan__hint">
               {plan.status === "create"
