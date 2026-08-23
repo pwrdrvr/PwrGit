@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.7.0 - 2026-08-23
+
+- Updates - Added **Help → Check for Updates**, so you can manually recheck for a new PwrGit release at any time.
+- Clone - Added support for cloning local repositories and filesystem paths, including home-relative and Windows/UNC paths; empty repositories now open without history errors.
+- Windows - Fixed the Add or Remove Programs entry to show the clean product name rather than repeating the installed version.
+- Security - Updated transitive dependencies to resolve known vulnerability alerts.
+- Packaging - Pinned the desktop build toolchain for more reproducible signed releases.
+- Open Source - Added the project README, contribution and security guidance, community policies, and issue/PR templates.
+
 ## v0.6.0 - 2026-08-20
 
 - Repositories - Added forking from inside PwrGit, plus identity marks showing whether each repository is public, private, or internal, and whether it is a fork.
