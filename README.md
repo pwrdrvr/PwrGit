@@ -98,6 +98,22 @@ The full development workflow, repository boundaries, checks, and pull-request
 expectations live in **[CONTRIBUTING.md](CONTRIBUTING.md)** and
 **[AGENTS.md](AGENTS.md)**.
 
+### Connect a local agent over MCP
+
+The workspace also ships a read-only stdio MCP server for bounded checkout
+discovery, credential-free GitHub/GitLab identity, worktree metadata, safe
+status summaries, and subscribable PR/MR/CI status:
+
+```bash
+pnpm --filter @pwrgit/mcp-server build
+node packages/mcp-server/dist/bin.js
+```
+
+MCP clients normally spawn that command themselves. Configuration, tools,
+security bounds, the standard `resources/subscribe` flow, and the optional
+WebSocket fallback are documented in the
+[PwrGit MCP server guide](docs/mcp-server.md).
+
 ## How it's built
 
 | Layer | Stack | Where it lives |
@@ -107,6 +123,7 @@ expectations live in **[CONTRIBUTING.md](CONTRIBUTING.md)** and
 | Forge integrations | GitHub and GitLab providers through `gh` and `glab` | `apps/desktop/src/main/forge/` |
 | Local state | SQLite through `better-sqlite3` | `apps/desktop/src/main/persistence/` |
 | Shared contracts | Typed commands, events, domain types, and result envelopes | `packages/shared/` |
+| Local agent access | Read-only stdio MCP, subscribable status resources, optional loopback WebSocket | `packages/mcp-server/` |
 
 Main, preload, and renderer are separate bundles. Cross-process work goes
 through a typed command bus, and dependency-cruiser enforces the process
@@ -133,6 +150,7 @@ is documented in
 | **[docs.pwrgit.com](https://docs.pwrgit.com)** | Setup, features, settings, and troubleshooting. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, repository conventions, checks, and pull requests. |
 | [AGENTS.md](AGENTS.md) | Load-bearing architecture, native-module, launch, and release guidance. |
+| [docs/mcp-server.md](docs/mcp-server.md) | Local agent tools, safe discovery, live-status resources, and fallback event protocol. |
 | [SECURITY.md](SECURITY.md) | Private vulnerability reporting policy. |
 | [docs/desktop-release-runbook.md](docs/desktop-release-runbook.md) | Guarded CI release path, signing environments, assets, and promotion. |
 | [docs/third-party-license-notices.md](docs/third-party-license-notices.md) | Generated dependency notices and embedded Git attribution. |

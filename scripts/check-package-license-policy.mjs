@@ -14,6 +14,7 @@ const LICENSE_COPYRIGHT = `Copyright (c) 2026 ${FIRST_PARTY_OWNER}`;
 const EXPECTED_PACKAGE_POLICIES = new Map([
   ["package.json", { license: "MIT", author: FIRST_PARTY_OWNER }],
   ["apps/desktop/package.json", { license: "MIT", author: FIRST_PARTY_OWNER }],
+  ["packages/mcp-server/package.json", { license: "MIT", author: FIRST_PARTY_OWNER }],
   ["packages/pwrgit/package.json", { license: "MIT", author: FIRST_PARTY_OWNER }],
   ["packages/shared/package.json", { license: "MIT", author: FIRST_PARTY_OWNER }],
 ]);
