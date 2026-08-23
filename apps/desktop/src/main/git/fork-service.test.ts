@@ -1,5 +1,12 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +15,7 @@ import { openDatabase } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
 import { ForgeRepoRegistry } from "../forge/repo-provider";
 import { GitHubRepoProvider } from "../forge/github/repo-provider";
+import { GitLabRepoProvider } from "../forge/gitlab/repo-provider";
 import { CloneService } from "./clone-service";
 import {
   ForkService,
@@ -615,6 +623,87 @@ describe("ForkService.fork", () => {
       ok: false,
       error: { code: "destination_exists" }
     });
+  });
+
+  it("preserves a created GitLab fork when its import wait is canceled", async () => {
+    const root = temporaryRoot();
+    const parentPath = join(root, "forks");
+    mkdirSync(parentPath, { recursive: true });
+    const profile = {
+      id: "profile-id",
+      name: "Personal",
+      email: "t@pwrgit.dev",
+      mono: "P",
+      roots: [root]
+    };
+    const profiles = {
+      get: vi.fn((profileId: string) =>
+        profileId === profile.id ? profile : null
+      )
+    } as unknown as ProfileService;
+    const registry = new ForgeRepoRegistry();
+    registry.register(
+      new GitLabRepoProvider(async (args) => {
+        if (args[1] !== "--method") {
+          throw new Error("GitLab was polled after cancellation");
+        }
+        return JSON.stringify({
+          path: "billing-api",
+          path_with_namespace: "huntharo/billing-api",
+          web_url: "https://gitlab.com/huntharo/billing-api",
+          visibility: "private",
+          import_status: "scheduled",
+          forked_from_project: {
+            path_with_namespace: "acme/platform/billing-api"
+          }
+        });
+      })
+    );
+    const forks = new ForkService(
+      systemGit,
+      {} as RepoIndexer,
+      profiles,
+      registry,
+      {} as CloneService,
+      {} as ForgeStatusService
+    );
+    const controller = new AbortController();
+
+    const result = await forks.fork(
+      {
+        profileId: profile.id,
+        source: "acme/platform/billing-api",
+        host: "gitlab",
+        hostname: "gitlab.com",
+        targetOwner: "huntharo",
+        targetOwnerKind: "user",
+        targetName: "billing-api",
+        protocol: "cli",
+        parentPath,
+        defaultBranchOnly: false,
+        upstream: "acme/platform/billing-api"
+      },
+      (progress) => {
+        if (progress.phase === "awaiting_fork") {
+          controller.abort({
+            kind: "git",
+            code: "aborted",
+            message: "Fork canceled."
+          });
+        }
+      },
+      controller.signal
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "aborted",
+        message:
+          "Forked to huntharo/billing-api, but the local checkout was canceled. GitLab may still be finishing the fork."
+      }
+    });
+    expect(existsSync(join(parentPath, "billing-api"))).toBe(false);
   });
 
   it("refuses a destination outside the profile's roots", async () => {

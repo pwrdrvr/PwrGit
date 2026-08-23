@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { win32 } from "node:path";
 
 /**
  * Generic hardened runner for a forge's command-line client.
@@ -482,6 +483,39 @@ function appendWithinByteLimit(
 }
 
 function terminateChild(child: ChildProcess, signal: NodeJS.Signals): void {
+  if (process.platform === "win32" && child.pid !== undefined) {
+    // Node's ChildProcess.kill() terminates only the CLI process on Windows.
+    // gh/glab launch Git and credential/SSH helpers beneath it, so leaving the
+    // descendants alive lets a canceled clone keep writing into a destination
+    // while the service is trying to remove it. taskkill /T is Windows' native
+    // process-tree operation; /F is required because Windows has no POSIX-like
+    // graceful signal that propagates through this tree.
+    try {
+      const windowsRoot =
+        process.env.SystemRoot ?? process.env.WINDIR ?? "C:\\Windows";
+      const taskkill = spawn(
+        win32.join(windowsRoot, "System32", "taskkill.exe"),
+        ["/pid", String(child.pid), "/T", "/F"],
+        { stdio: "ignore", windowsHide: true }
+      );
+      let fellBack = false;
+      const fallback = (): void => {
+        if (fellBack) return;
+        fellBack = true;
+        killChildHandle(child, signal);
+      };
+      taskkill.once("error", fallback);
+      taskkill.once("close", (code) => {
+        if (code !== 0) fallback();
+      });
+      return;
+    } catch {
+      // A synchronous spawn failure still gets the best available fallback.
+      killChildHandle(child, signal);
+      return;
+    }
+  }
+
   // Detached POSIX children own a process group, so kill the CLI and any
   // Git/SSH helpers together. This also prevents an inherited Terminal from
   // becoming their TTY.
@@ -493,6 +527,10 @@ function terminateChild(child: ChildProcess, signal: NodeJS.Signals): void {
       // The group may have already exited; fall through to the child handle.
     }
   }
+  killChildHandle(child, signal);
+}
+
+function killChildHandle(child: ChildProcess, signal: NodeJS.Signals): void {
   try {
     child.kill(signal);
   } catch {

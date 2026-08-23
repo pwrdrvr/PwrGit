@@ -196,8 +196,14 @@ export class GitHubRepoProvider implements ForgeRepoProvider {
     return ownersFrom("github", login, organizations);
   }
 
-  async viewRepo(nameWithOwner: string): Promise<CloneRepository> {
-    const stdout = await this.gh(["api", `repos/${nameWithOwner}`]);
+  async viewRepo(
+    nameWithOwner: string,
+    signal?: AbortSignal
+  ): Promise<CloneRepository> {
+    const args = ["api", `repos/${nameWithOwner}`];
+    const stdout = await (signal === undefined
+      ? this.gh(args)
+      : this.gh(args, { signal }));
     const repository = parseGhRestRepo(stdout);
     if (repository === null) {
       throw new Error(`GitHub returned no repository for ${nameWithOwner}`);
@@ -252,7 +258,10 @@ export class GitHubRepoProvider implements ForgeRepoProvider {
       ...(input.signal === undefined ? {} : { signal: input.signal })
     });
     input.onPhase?.("awaiting_fork");
-    return this.viewRepo(`${input.targetOwner}/${input.targetName}`);
+    return this.viewRepo(
+      `${input.targetOwner}/${input.targetName}`,
+      input.signal
+    );
   }
 
   async cloneWithCli(

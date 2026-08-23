@@ -308,6 +308,7 @@ export class ForkService {
     if (operationWasCanceled(signal)) return this.canceled(signal);
 
     onProgress({ phase: "starting", percent: null });
+    let remoteCreated = false;
     let fork: CloneRepository;
     try {
       fork = await provider.fork({
@@ -318,11 +319,21 @@ export class ForkService {
         defaultBranchOnly:
           input.defaultBranchOnly &&
           capabilitiesFor(provider.host).forkDefaultBranchOnly,
-        onPhase: (phase) => onProgress({ phase, percent: null }),
+        onPhase: (phase) => {
+          // Both providers enter awaiting_fork only after the remote fork
+          // exists: GitHub is reading it back, while GitLab is waiting for its
+          // queued import. Preserve that fact if either follow-up is canceled.
+          if (phase === "awaiting_fork") remoteCreated = true;
+          onProgress({ phase, percent: null });
+        },
         ...(signal === undefined ? {} : { signal })
       });
     } catch (cause) {
-      if (operationWasCanceled(signal)) return this.canceled(signal);
+      if (operationWasCanceled(signal)) {
+        return remoteCreated
+          ? this.canceledAfterRemoteCreated(signal, targetSlug, input.host)
+          : this.canceled(signal);
+      }
       if (provider.isAuthError(cause)) {
         return err({
           kind: "remote",
@@ -489,6 +500,19 @@ export class ForkService {
       cleaned
         ? `Forked to ${fork.nameWithOwner}, but the checkout was canceled and no partial checkout was kept.`
         : `Forked to ${fork.nameWithOwner}, but the checkout was canceled and PwrGit could not remove ${destination}. Remove it before retrying.`
+    );
+  }
+
+  private canceledAfterRemoteCreated(
+    signal: AbortSignal,
+    targetSlug: string,
+    host: ForgeHost
+  ): Result<Repo> {
+    return this.canceled(
+      signal,
+      host === "gitlab"
+        ? `Forked to ${targetSlug}, but the local checkout was canceled. GitLab may still be finishing the fork.`
+        : `Forked to ${targetSlug}, but the local checkout was canceled.`
     );
   }
 

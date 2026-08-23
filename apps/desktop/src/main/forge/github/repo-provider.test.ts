@@ -327,4 +327,37 @@ describe("GitHubRepoProvider", () => {
     });
     expect(phases).toEqual(["creating", "awaiting_fork"]);
   });
+
+  it("passes cancellation through the fork read-back", async () => {
+    const gh = vi.fn(
+      async (
+        args: string[],
+        _options?: { signal?: AbortSignal }
+      ): Promise<string> => {
+        if (args[0] === "api" && args[1]?.startsWith("repos/")) {
+          const nameWithOwner = args[1].slice("repos/".length);
+          return JSON.stringify({
+            full_name: nameWithOwner,
+            visibility: "public"
+          });
+        }
+        return "";
+      }
+    );
+    const controller = new AbortController();
+
+    await new GitHubRepoProvider(gh).fork({
+      source: "facebook/react",
+      targetOwner: "huntharo",
+      targetOwnerKind: "user",
+      targetName: "react",
+      defaultBranchOnly: false,
+      signal: controller.signal
+    });
+
+    const readBack = gh.mock.calls.find(
+      (call) => call[0][0] === "api" && call[0][1] === "repos/huntharo/react"
+    );
+    expect(readBack?.[1]?.signal).toBe(controller.signal);
+  });
 });

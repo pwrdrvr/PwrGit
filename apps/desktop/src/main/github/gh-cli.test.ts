@@ -362,7 +362,13 @@ describe("runGh", () => {
     });
     await vi.advanceTimersByTimeAsync(100);
     if (process.platform === "win32") {
-      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+      expect(childProcess.spawn).toHaveBeenNthCalledWith(
+        2,
+        expect.stringMatching(/[\\/]taskkill\.exe$/i),
+        ["/pid", "4242", "/T", "/F"],
+        { stdio: "ignore", windowsHide: true }
+      );
+      expect(child.kill).not.toHaveBeenCalled();
       expect(kill).not.toHaveBeenCalled();
     } else {
       expect(kill).toHaveBeenCalledWith(-4_242, "SIGTERM");
@@ -370,7 +376,12 @@ describe("runGh", () => {
     }
     await vi.advanceTimersByTimeAsync(1_000);
     if (process.platform === "win32") {
-      expect(child.kill).toHaveBeenLastCalledWith("SIGKILL");
+      expect(childProcess.spawn).toHaveBeenNthCalledWith(
+        3,
+        expect.stringMatching(/[\\/]taskkill\.exe$/i),
+        ["/pid", "4242", "/T", "/F"],
+        { stdio: "ignore", windowsHide: true }
+      );
     } else {
       expect(kill).toHaveBeenLastCalledWith(-4_242, "SIGKILL");
     }
@@ -379,12 +390,11 @@ describe("runGh", () => {
     kill.mockRestore();
   });
 
-  it("uses the child handle for timeout cleanup on Windows", async () => {
-    vi.useFakeTimers();
+  it("terminates the entire CLI subprocess tree on Windows", async () => {
     const child = streamingChild();
     Object.assign(child, { pid: 4_242 });
-    childProcess.spawn.mockReturnValue(child);
-    const kill = vi.spyOn(process, "kill").mockReturnValue(true);
+    const taskkill = streamingChild();
+    childProcess.spawn.mockReturnValueOnce(child).mockReturnValue(taskkill);
     const actualPlatform = process.platform;
     Object.defineProperty(process, "platform", {
       configurable: true,
@@ -392,23 +402,27 @@ describe("runGh", () => {
     });
 
     try {
-      const result = runGh(["api", "user"], { timeoutMs: 100 });
-      const rejection = expect(result).rejects.toMatchObject({
-        code: "timed_out",
-        message: "gh timed out after 100ms"
+      const controller = new AbortController();
+      const result = runGh(["repo", "clone", "owner/repo"], {
+        onStderr: () => undefined,
+        signal: controller.signal
       });
-      await vi.advanceTimersByTimeAsync(100);
-      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
-      expect(kill).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(1_000);
-      expect(child.kill).toHaveBeenLastCalledWith("SIGKILL");
-      await rejection;
+      controller.abort();
+
+      expect(childProcess.spawn).toHaveBeenNthCalledWith(
+        2,
+        expect.stringMatching(/[\\/]taskkill\.exe$/i),
+        ["/pid", "4242", "/T", "/F"],
+        { stdio: "ignore", windowsHide: true }
+      );
+      expect(child.kill).not.toHaveBeenCalled();
+      child.emit("close", null, "SIGTERM");
+      await expect(result).rejects.toMatchObject({ code: "aborted" });
     } finally {
       Object.defineProperty(process, "platform", {
         configurable: true,
         value: actualPlatform
       });
-      kill.mockRestore();
     }
   });
 });

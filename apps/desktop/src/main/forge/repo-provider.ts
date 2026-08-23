@@ -83,7 +83,9 @@ export type ForkInput = {
    *  `forkDefaultBranchOnly` capability is false. */
   defaultBranchOnly: boolean;
   /** Called as the forge moves between its two unmetered steps, so the dialog
-   *  can name the step instead of showing a bar that does not move. */
+   *  can name the step instead of showing a bar that does not move. Providers
+   *  emit `awaiting_fork` only after the remote repository exists; callers use
+   *  that transition to report an already-created fork after cancellation. */
   onPhase?: (phase: "creating" | "awaiting_fork") => void;
   /** Cancels the CLI call and any forge-side readiness wait. A forge that
    *  completed before cancellation is deliberately not deleted. */
