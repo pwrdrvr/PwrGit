@@ -5,12 +5,10 @@ This package only reserves the npm package name for the
 PwrGit application, an executable or launcher, a command-line interface, a
 library, an SDK, or an API.
 
-`npm install pwrgit` does not install PwrGit. Download the macOS or Windows app
-from [pwrgit.com](https://pwrgit.com) or the
-[GitHub releases page](https://github.com/pwrdrvr/PwrGit/releases).
-
-The source for the desktop application is available in the
-[PwrGit repository](https://github.com/pwrdrvr/PwrGit).
+`npm install pwrgit` does not install PwrGit. The desktop application is
+distributed separately from npm. See [pwrgit.com](https://pwrgit.com) for
+current availability and [docs.pwrgit.com](https://docs.pwrgit.com) for public
+product documentation.
 
 ## License
 
