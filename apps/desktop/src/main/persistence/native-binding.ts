@@ -5,29 +5,31 @@ import { dirname, join } from "node:path";
 let resolved: string | undefined;
 
 /**
- * Path to the Electron-ABI better-sqlite3 binary, or `undefined` to let
- * better-sqlite3 load its default `build/Release` one.
+ * Path to the runtime-specific better-sqlite3 binary, or `undefined` when an
+ * install has no local source build to select.
  *
  * In a dev tree those two are different builds on purpose: `build/Release`
  * stays compiled for the developer's Node so `vitest` can open a database,
  * and `scripts/rebuild-native-for-electron.mjs` puts the Electron build in
  * `electron-native/` for the app. Packaged builds ship only `build/Release`
- * (already Electron's ABI, rebuilt per arch by electron-builder), so this
- * returns `undefined` there.
+ * (already Electron-compatible), which is also the safe fallback now that
+ * better-sqlite3 uses Node-API rather than a runtime-specific V8 ABI.
  */
 export function getNativeBinding(): string | undefined {
   if (resolved !== undefined) {
     return resolved || undefined;
   }
 
-  if (!("electron" in process.versions)) {
-    resolved = "";
-    return undefined;
-  }
-
   const require = createRequire(import.meta.url);
   const packageJsonPath = require.resolve("better-sqlite3/package.json");
   const moduleDir = dirname(packageJsonPath);
+  const sourceBuild = join(moduleDir, "build", "Release", "better_sqlite3.node");
+
+  if (!("electron" in process.versions)) {
+    resolved = existsSync(sourceBuild) ? sourceBuild : "";
+    return resolved || undefined;
+  }
+
   const sidecar = join(moduleDir, "electron-native", "better_sqlite3.node");
   const metadata = join(moduleDir, "electron-native", "metadata.json");
 
@@ -36,8 +38,8 @@ export function getNativeBinding(): string | undefined {
     return sidecar;
   }
 
-  resolved = "";
-  return undefined;
+  resolved = existsSync(sourceBuild) ? sourceBuild : "";
+  return resolved || undefined;
 }
 
 /**

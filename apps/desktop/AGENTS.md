@@ -21,15 +21,17 @@ normally. When adding a dependency used in `src/main`, check its `type` — if
 
 ## better-sqlite3 is built twice, on purpose
 
-`electron-rebuild` can only overwrite `build/Release`, so one binary would have
-to be flipped every time you moved between `pnpm test` (Node's ABI) and
-`pnpm dev` (Electron's) — and a stale flip reads like a broken test or a broken
-database, not a stale build. `postinstall` runs
+PwrGit source-builds the native addon for both runtimes even though
+better-sqlite3 13 uses Node-API: one deterministic build remains selected for
+Node tests and scripts, while a separately targeted Electron build is verified
+for the app. A stale or missing build still reads like a broken test or a broken
+database, not a native setup problem. `postinstall` runs
 [scripts/rebuild-native-for-electron.mjs](scripts/rebuild-native-for-electron.mjs)
 instead, which brackets the rebuild and keeps both binaries:
 
 - `better-sqlite3/build/Release/better_sqlite3.node` — this machine's Node ABI.
-  `vitest` and scripts load it through better-sqlite3's own `bindings()` lookup.
+  `vitest` and scripts select it explicitly through
+  [src/main/persistence/native-binding.ts](src/main/persistence/native-binding.ts).
 - `better-sqlite3/electron-native/better_sqlite3.node` — Electron's ABI, beside
   a `metadata.json` stamping the Electron version, better-sqlite3 version, and
   arch. [src/main/persistence/native-binding.ts](src/main/persistence/native-binding.ts)

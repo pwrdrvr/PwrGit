@@ -5,11 +5,11 @@
  *   electron-native/better_sqlite3.node → Electron's ABI (what the app loads,
  *                                         via src/main/persistence/native-binding.ts)
  *
- * `electron-rebuild` only knows how to overwrite build/Release, so this script
- * brackets it: stash the Node binary, rebuild for Electron, copy the result
- * into electron-native/, put the Node binary back. Without that, the two
- * runtimes take turns invalidating each other's build and a single install
- * cannot serve both `pnpm test` and `pnpm dev`.
+ * The Electron rebuild overwrites build/Release, so this script brackets it:
+ * stash the Node binary, rebuild for Electron, copy the result into
+ * electron-native/, put the Node binary back. Without that, the two runtimes
+ * take turns invalidating each other's build and a single install cannot
+ * serve both `pnpm test` and `pnpm dev`.
  *
  * Dev/test only. Packaged builds never load the sidecar: electron-builder
  * rebuilds build/Release itself, once per arch, and electron-builder.yml
@@ -36,14 +36,17 @@ if (!electronVersion) {
 
 const packageJsonPath = require.resolve("better-sqlite3/package.json", { paths: [desktopRoot] });
 const moduleDir = dirname(packageJsonPath);
-const betterSqlite3Version = require(packageJsonPath).version;
+const betterSqlite3Package = require(packageJsonPath);
+const betterSqlite3Version = betterSqlite3Package.version;
 
 const releaseDir = join(moduleDir, "build", "Release");
 const nodeBinary = join(releaseDir, "better_sqlite3.node");
 // electron-rebuild's "already built for this ABI" marker. It describes
 // build/Release, which we hand back to Node below, so it must not survive.
 const forgeMeta = join(releaseDir, ".forge-meta");
-const stashedNodeBinary = `${nodeBinary}.node-abi`;
+// Keep the stash outside build/: better-sqlite3 13's build-release script
+// starts with node-gyp clean, which removes the whole directory.
+const stashedNodeBinary = join(moduleDir, ".pwrgit-node-abi.node");
 
 const sidecarDir = join(moduleDir, "electron-native");
 const sidecarBinary = join(sidecarDir, "better_sqlite3.node");
@@ -61,14 +64,27 @@ console.log(`Rebuilding better-sqlite3 for Electron ${electronVersion} (${proces
 copyFileSync(nodeBinary, stashedNodeBinary);
 
 try {
-  const { rebuild } = await import("@electron/rebuild");
-  await rebuild({
-    buildPath: desktopRoot,
-    electronVersion,
-    arch: process.arch,
-    onlyModules: ["better-sqlite3"],
-    force: true
-  });
+  if (betterSqlite3Package.gypfile === false) {
+    // v13 opts out of implicit node-gyp rebuilds because it ships N-API
+    // prebuilds. Its explicit script forces a source build; target it at
+    // Electron so the sidecar remains a separately verified runtime build.
+    runBuildScript("build-release", {
+      npm_config_runtime: "electron",
+      npm_config_target: electronVersion,
+      npm_config_dist_url: "https://electronjs.org/headers",
+      npm_config_arch: process.arch,
+      npm_config_target_arch: process.arch
+    });
+  } else {
+    const { rebuild } = await import("@electron/rebuild");
+    await rebuild({
+      buildPath: desktopRoot,
+      electronVersion,
+      arch: process.arch,
+      onlyModules: ["better-sqlite3"],
+      force: true
+    });
+  }
   rmSync(sidecarDir, { force: true, recursive: true });
   mkdirSync(sidecarDir, { recursive: true });
   copyFileSync(nodeBinary, sidecarBinary);
@@ -109,18 +125,14 @@ function ensureNodeBinary() {
   }
 
   console.log("better-sqlite3's build/Release binary does not load under this Node; rebuilding it...");
-  // better-sqlite3's own install script: prebuild-install, falling back to a
-  // node-gyp compile.
-  execSync("npm run install", {
-    cwd: moduleDir,
-    stdio: "inherit",
-    env: {
-      ...process.env,
-      npm_config_arch: process.arch,
-      npm_config_runtime: "node",
-      npm_config_target: process.versions.node,
-      npm_config_target_arch: process.arch
-    }
+  const buildScript = betterSqlite3Package.scripts?.["build-release"]
+    ? "build-release"
+    : "install";
+  runBuildScript(buildScript, {
+    npm_config_arch: process.arch,
+    npm_config_runtime: "node",
+    npm_config_target: process.versions.node,
+    npm_config_target_arch: process.arch
   });
 
   if (!nodeBinaryIsUsable()) {
@@ -138,8 +150,9 @@ function nodeBinaryIsUsable() {
       process.execPath,
       [
         "-e",
-        "const Database = require(process.argv[1]); new Database(':memory:').close();",
-        moduleDir
+        "const Database = require(process.argv[1]); new Database(':memory:', { nativeBinding: process.argv[2] }).close();",
+        moduleDir,
+        nodeBinary
       ],
       { stdio: "ignore" }
     );
@@ -147,6 +160,14 @@ function nodeBinaryIsUsable() {
   } catch {
     return false;
   }
+}
+
+function runBuildScript(script, env) {
+  execSync(`npm run ${script}`, {
+    cwd: moduleDir,
+    stdio: "inherit",
+    env: { ...process.env, ...env }
+  });
 }
 
 function resolveElectronVersion() {
