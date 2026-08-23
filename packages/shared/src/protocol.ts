@@ -235,6 +235,23 @@ export type UpdatesSettings = {
   train: UpdateTrain;
 };
 
+/** Runtime/build identity assembled in main; the renderer has no Node access. */
+export type AppIdentity = {
+  name: string;
+  version: string;
+  /** Release train/track inferred from the installed binary's version suffix. */
+  release: UpdatesSettings;
+  buildType: "packaged" | "development";
+  platform: {
+    name: string;
+    version: string;
+    arch: string;
+  };
+  electronVersion: string;
+  /** Sanitized, copy-ready identity suitable for a bug report. */
+  diagnosticsText: string;
+};
+
 // Last 1.0 core that used `-beta.N` as the Stable prerelease line. Builds
 // at this core stay on Stable so a website Beta download cannot be confused
 // with `v1.0.0-beta.50`.
@@ -992,6 +1009,7 @@ export interface Commands {
   "settings:update": { req: { patch: AppSettingsPatch }; res: AppSettingsSnapshot };
 
   // Desktop auto-update (Settings → Updates)
+  "app:readIdentity": { req: void; res: AppIdentity };
   "app:readUpdateStatus": { req: void; res: AppUpdateStatus };
   "app:readUpdateReleases": { req: void; res: AppUpdateReleaseVersions };
   "app:checkForUpdate": { req: void; res: AppUpdateCheckResult };

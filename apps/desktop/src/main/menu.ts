@@ -1,5 +1,5 @@
 import { Menu, type MenuItemConstructorOptions } from "electron";
-import type { Profile } from "@pwrgit/shared";
+import { PWRGIT_LINKS, type Profile } from "@pwrgit/shared";
 
 /**
  * Application menu with a Profiles submenu (PwrAgnt-style): every profile
@@ -18,6 +18,7 @@ export function rebuildAppMenu(opts: {
   onOpenLogs: () => void;
   onOpenLicense: () => void;
   onOpenThirdPartyNotices: () => void;
+  onOpenExternalLink: (label: string, url: string) => void;
   /** Settings → General → Developer Mode: expose Reload / Force Reload /
    *  Toggle Developer Tools (and their shortcuts) in the View menu. */
   developerMode: boolean;
@@ -119,12 +120,50 @@ export function rebuildAppMenu(opts: {
       ]
     },
     { role: "windowMenu" },
-    // Keep update discovery in the same Help-menu location as PwrAgent and
-    // PwrSnap. Logs remain the escape hatch when something fails without
-    // visible UI feedback.
+    // Product resources live here as well as in Settings → About so help is
+    // reachable even when the Settings window is not already open. Logs
+    // remain the escape hatch when something fails without visible UI feedback.
     {
       role: "help",
       submenu: [
+        {
+          label: "PwrGit Documentation",
+          click: () =>
+            opts.onOpenExternalLink(
+              "PwrGit Documentation",
+              PWRGIT_LINKS.documentation
+            )
+        },
+        {
+          label: "PwrGit Website",
+          click: () =>
+            opts.onOpenExternalLink("PwrGit Website", PWRGIT_LINKS.website)
+        },
+        {
+          label: "Release Notes",
+          click: () =>
+            opts.onOpenExternalLink("Release Notes", PWRGIT_LINKS.releases)
+        },
+        {
+          label: "View Source",
+          click: () =>
+            opts.onOpenExternalLink("PwrGit Source", PWRGIT_LINKS.source)
+        },
+        { type: "separator" },
+        {
+          label: "Report an Issue…",
+          click: () =>
+            opts.onOpenExternalLink("Issue Reporting", PWRGIT_LINKS.issues)
+        },
+        {
+          label: "Security Reporting (Private)…",
+          click: () =>
+            opts.onOpenExternalLink(
+              "Private Security Reporting",
+              PWRGIT_LINKS.security
+            )
+        },
+        { type: "separator" },
         {
           label: "Check for Updates",
           click: () => opts.onCheckForUpdates()
