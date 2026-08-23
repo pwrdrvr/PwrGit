@@ -18,12 +18,15 @@ export function WorktreeMenu({
   worktree,
   className,
   onResetToRemote,
-  onRemove
+  onRemove,
+  platform
 }: {
   worktree: Worktree;
   className?: string;
   onResetToRemote?: () => void;
   onRemove?: () => void;
+  /** Explicit only in deterministic platform component tests. */
+  platform?: string;
 }) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -115,7 +118,7 @@ export function WorktreeMenu({
               role="menuitem"
               onClick={(e) => pick(e, () => revealPath(worktree.path))}
             >
-              {revealLabel}
+              {revealLabel(platform)}
             </button>
             {onResetToRemote !== undefined && (
               <>

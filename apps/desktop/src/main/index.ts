@@ -407,7 +407,6 @@ if (!gotSingleInstanceLock) {
     };
 
     registerProfileHandlers(bus, profiles, {
-      onActivated: rescanInBackground,
       onChanged: refreshMenu,
       openWindow: openProfileWindow,
       consumeReveal: (profileId) => {

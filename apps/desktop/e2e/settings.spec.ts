@@ -89,6 +89,14 @@ test("menu opens the Settings window; panes render and settings persist", async 
   const devModeSwitch = settings.getByRole("switch", {
     name: "Developer Mode"
   });
+  const platform = await settings.evaluate(() => window.pwrgit.platform);
+  const shortcutCopy =
+    platform === "darwin"
+      ? "Also enables their shortcuts (⌘R, ⇧⌘R, ⌥⌘I). Takes effect immediately in every window."
+      : "Also enables their shortcuts (Ctrl+R, Ctrl+Shift+R, Ctrl+Shift+I). Takes effect immediately in every window.";
+  await expect(
+    settings.locator(".settings-field", { hasText: "Developer Mode" })
+  ).toContainText(shortcutCopy);
   await devModeSwitch.click();
   await expect(devModeSwitch).toHaveAttribute("aria-checked", "true");
   // The menu rebuilds live with Reload / Force Reload / Toggle DevTools.

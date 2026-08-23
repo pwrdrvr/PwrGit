@@ -1,16 +1,9 @@
 import { useState } from "react";
 import type { Repo, Worktree } from "@pwrgit/shared";
+import { currentPlatform, pathTail } from "../../lib/platform";
 import { CopyTarget } from "../shell/CopyTarget";
 import { BranchSwitcher } from "../graph/BranchSwitcher";
 import { AppMenuBar } from "./AppMenuBar";
-
-/** Compact path label: the last two segments locate a checkout precisely
- *  ("Acme/search-compare", "pwrdrvr/PwrAgnt") without burning a line on
- *  the full path — that lives in the tooltip, and click copies it. */
-function pathTail(path: string): string {
-  const parts = path.split("/").filter((p) => p !== "");
-  return parts.slice(-2).join("/");
-}
 
 /**
  * The window's top strip: wordmark, then the selected worktree's identity as a
@@ -33,10 +26,13 @@ function pathTail(path: string): string {
  */
 export function TitleBar({
   repo,
-  worktree
+  worktree,
+  platform = currentPlatform()
 }: {
   repo: Repo | null;
   worktree: Worktree | null;
+  /** Explicit only in deterministic platform component tests. */
+  platform?: string;
 }) {
   const [switching, setSwitching] = useState(false);
 
@@ -49,7 +45,7 @@ export function TitleBar({
           Pwr<span className="titlebar__brand-accent">Git</span>
         </p>
 
-        {window.pwrgit.platform === "win32" && <AppMenuBar />}
+        {platform === "win32" && <AppMenuBar />}
 
         {repo !== null && worktree !== null && (
           <div className="titlebar__id">
@@ -90,7 +86,7 @@ export function TitleBar({
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
               </svg>
-              {pathTail(worktree.path)}
+              {pathTail(worktree.path, 2, platform)}
             </CopyTarget>
           </div>
         )}

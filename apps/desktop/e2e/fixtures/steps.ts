@@ -2,6 +2,10 @@ import { expect, type Locator, type Page } from "@playwright/test";
 import type { AppHandle } from "./electron-app";
 import type { GitSandbox } from "./git-sandbox";
 
+/** Playwright chord using the primary modifier of the host under test. */
+export const primaryShortcut = (...keys: string[]): string =>
+  [process.platform === "darwin" ? "Meta" : "Control", ...keys].join("+");
+
 // Every step below is bounded, and the bounds are a budget against
 // playwright.config.ts's 60s per-test timeout: launchApp() and the
 // Add-folders/lens clicks are already charged to it before any of this runs.
