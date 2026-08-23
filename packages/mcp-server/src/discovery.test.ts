@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -61,7 +62,7 @@ describe("bounded repository discovery", () => {
       roots: [root],
       maxDepth: 3
     });
-    const canonicalCheckout = realpathSync(checkout);
+    const canonicalCheckout = await realpath(checkout);
     expect(result.matches).toHaveLength(1);
     expect(result.matches[0]).toMatchObject({
       repositoryPath: canonicalCheckout,

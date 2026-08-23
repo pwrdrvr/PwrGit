@@ -246,7 +246,8 @@ async function repositoryPrimaryPath(
 ): Promise<string> {
   const result = await git(path, ["worktree", "list", "--porcelain", "-z"], runner);
   if (result.exitCode !== 0) return path;
-  return parseWorktreeList(result.stdout)[0]?.path ?? path;
+  const primary = parseWorktreeList(result.stdout)[0]?.path ?? path;
+  return realpath(primary).catch(() => primary);
 }
 
 async function matchRepository(

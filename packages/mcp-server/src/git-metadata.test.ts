@@ -2,10 +2,10 @@ import { execFileSync } from "node:child_process";
 import {
   appendFileSync,
   mkdtempSync,
-  realpathSync,
   rmSync,
   writeFileSync
 } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -80,8 +80,8 @@ describe("safe repository metadata", () => {
     writeFileSync(join(primary, "private.env"), "TOKEN=secret\n");
 
     const info = await readRepositoryInfo(primary);
-    const canonicalPrimary = realpathSync(primary);
-    const canonicalLinked = realpathSync(linked);
+    const canonicalPrimary = await realpath(primary);
+    const canonicalLinked = await realpath(linked);
     expect(info).toMatchObject({
       requestedPath: canonicalPrimary,
       repositoryPath: canonicalPrimary,

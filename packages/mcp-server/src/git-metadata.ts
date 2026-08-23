@@ -262,8 +262,16 @@ export async function readRepositoryInfo(
   const parsedWorktrees = parseWorktreeList(
     requireSuccess(worktreeResult, "listing git worktrees")
   );
-  const repositoryPath = parsedWorktrees[0]?.path ?? topLevel;
-  const visibleWorktrees = parsedWorktrees.slice(0, MAX_WORKTREES);
+  const canonicalWorktrees = await mapLimit(
+    parsedWorktrees,
+    8,
+    async (worktree) => ({
+      ...worktree,
+      path: await realpath(worktree.path).catch(() => worktree.path)
+    })
+  );
+  const repositoryPath = canonicalWorktrees[0]?.path ?? (await realpath(topLevel));
+  const visibleWorktrees = canonicalWorktrees.slice(0, MAX_WORKTREES);
   const worktrees = await mapLimit(visibleWorktrees, 4, async (worktree, index) => ({
     ...worktree,
     primary: index === 0,
@@ -316,7 +324,7 @@ export async function repositoryRootFor(
   const result = await git(path, ["rev-parse", "--show-toplevel"], runner);
   if (result.exitCode !== 0) return null;
   const root = result.stdout.trim();
-  return root === "" ? null : root;
+  return root === "" ? null : realpath(root).catch(() => root);
 }
 
 export function parentOfRepository(repositoryPath: string): string {
