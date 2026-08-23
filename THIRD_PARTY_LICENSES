@@ -98,7 +98,7 @@ MIT
 - Git LFS embedded runtime@3.7.1 | https://github.com/git-lfs/git-lfs/tree/v3.7.1
 - github-from-package@0.0.0 | https://github.com/substack/github-from-package
 - indent-string@4.0.0 | sindresorhus/indent-string
-- js-yaml@4.3.0 | nodeca/js-yaml
+- js-yaml@4.3.1 | nodeca/js-yaml
 - jsonfile@6.2.1 | https://github.com/jprichardson/node-jsonfile
 - lazy-val@1.0.5 | develar/lazy-val
 - lodash.escaperegexp@4.1.2 | lodash/lodash
@@ -2363,13 +2363,13 @@ LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
 OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 PERFORMANCE OF THIS SOFTWARE.
 
-js-yaml@4.3.0 (MIT)
+js-yaml@4.3.1 (MIT)
 -------------------
 
 Applies to:
-- js-yaml@4.3.0 (MIT)
+- js-yaml@4.3.1 (MIT)
 
-Representative file: js-yaml@4.3.0/LICENSE
+Representative file: js-yaml@4.3.1/LICENSE
 
 (The MIT License)
 
