@@ -1,5 +1,4 @@
-import type { CommandRunner } from "./command.js";
-import { runCommand } from "./command.js";
+import { git, runCommand, type CommandRunner } from "./command.js";
 import {
   readConfiguredRemotes,
   readSafeStatus,
@@ -10,6 +9,7 @@ import type {
   CiSummary,
   LiveStatusSnapshot,
   RemoteIdentity,
+  RemoteSummary,
   ReviewState,
   ReviewSummary
 } from "./types.js";
@@ -61,6 +61,10 @@ const PENDING = new Set([
   "waiting_for_resource"
 ]);
 const SKIPPED = new Set(["skipped"]);
+const GITHUB_PR_CANDIDATE_LIMIT = 20;
+const GITLAB_MR_CANDIDATE_LIMIT = 20;
+const GITLAB_JOB_PAGE_SIZE = 100;
+const MAX_GITLAB_JOB_PAGES = 5;
 
 export function summarizeChecks(statuses: readonly string[]): CiSummary {
   let succeeded = 0;
@@ -103,6 +107,25 @@ const EMPTY_REVIEWS: ReviewState = {
   blockingReason: null,
   latest: []
 };
+
+const UNKNOWN_REVIEWS: ReviewState = {
+  decision: "unknown",
+  blocking: false,
+  blockingReason: null,
+  latest: []
+};
+
+function unknownCiSummary(): CiSummary {
+  return {
+    state: "unknown",
+    total: 0,
+    succeeded: 0,
+    failed: 0,
+    running: 0,
+    pending: 0,
+    skipped: 0
+  };
+}
 
 type ForgeSnapshot = {
   changeRequest: ChangeRequestState | null;
@@ -221,7 +244,9 @@ export function githubSnapshotFromJson(
 export function gitlabSnapshotFromJson(input: {
   mergeRequest: unknown;
   approvals?: unknown;
+  approvalsAvailable?: boolean;
   jobs?: unknown;
+  jobsAvailable?: boolean;
   identity: RemoteIdentity;
   sourceBranch: string;
 }): ForgeSnapshot {
@@ -233,7 +258,8 @@ export function gitlabSnapshotFromJson(input: {
   const rawState = string(mr.state)?.toLowerCase();
   const state: ChangeRequestState["state"] =
     rawState === "merged" ? "merged" : rawState === "closed" ? "closed" : "open";
-  const approvals = record(input.approvals);
+  const approvalsAvailable = input.approvalsAvailable !== false;
+  const approvals = approvalsAvailable ? record(input.approvals) : null;
   const approvedBy = Array.isArray(approvals?.approved_by)
     ? approvals.approved_by
     : [];
@@ -254,15 +280,25 @@ export function gitlabSnapshotFromJson(input: {
   const approvalsLeft = number(approvals?.approvals_left);
   const blockingDiscussion = boolean(mr.blocking_discussions_resolved) === false;
   const approvalRequired = approvalsLeft !== null && approvalsLeft > 0;
-  const decision: ReviewState["decision"] = approvalRequired
-    ? "review_required"
-    : latest.length > 0
-      ? "approved"
-      : "none";
+  const decision: ReviewState["decision"] = !approvalsAvailable
+    ? "unknown"
+    : approvalRequired
+      ? "review_required"
+      : latest.length > 0
+        ? "approved"
+        : "none";
   const jobs = Array.isArray(input.jobs) ? input.jobs : [];
   const statuses = jobs.flatMap((entry) => {
-    const status = string(record(entry)?.status);
-    return status === null ? [] : [status];
+    const job = record(entry);
+    const status = string(job?.status)?.toLowerCase();
+    if (status === null || status === undefined) return [];
+    if (
+      boolean(job?.allow_failure) === true &&
+      (FAILURE.has(status) || status === "manual")
+    ) {
+      return ["skipped"];
+    }
+    return [status];
   });
   const detailedMergeStatus =
     string(mr.detailed_merge_status)?.toLowerCase() ??
@@ -283,18 +319,21 @@ export function gitlabSnapshotFromJson(input: {
       sourceBranch: string(mr.source_branch) ?? input.sourceBranch,
       targetBranch: string(mr.target_branch)
     },
-    ci: summarizeChecks(statuses),
+    ci: input.jobsAvailable === false ? unknownCiSummary() : summarizeChecks(statuses),
     mergeConflict: conflict,
-    reviews: {
-      decision,
-      blocking: approvalRequired || blockingDiscussion,
-      blockingReason: blockingDiscussion
-        ? "blocking_discussion"
-        : approvalRequired
-          ? "approval_required"
-          : null,
-      latest
-    }
+    reviews:
+      !approvalsAvailable && !blockingDiscussion
+        ? UNKNOWN_REVIEWS
+        : {
+            decision,
+            blocking: approvalRequired || blockingDiscussion,
+            blockingReason: blockingDiscussion
+              ? "blocking_discussion"
+              : approvalRequired
+                ? "approval_required"
+                : null,
+            latest
+          }
   };
 }
 
@@ -313,109 +352,278 @@ async function jsonCommand(
   }
 }
 
-async function githubStatus(
-  cwd: string,
-  identity: RemoteIdentity,
-  branch: string,
-  runner: CommandRunner
-): Promise<{ available: boolean; snapshot: ForgeSnapshot }> {
-  const repository =
-    identity.host === "github.com"
-      ? identity.path
-      : `${identity.host}/${identity.path}`;
-  const response = await jsonCommand(
-    "gh",
-    [
-      "pr",
-      "list",
-      "--head",
-      branch,
-      "--state",
-      "all",
-      "--limit",
-      "1",
-      "--repo",
-      repository,
-      "--json",
-      "number,url,state,isDraft,headRefName,baseRefName,mergeStateStatus,reviewDecision,latestReviews,statusCheckRollup"
-    ],
-    cwd,
-    runner
-  );
-  const pullRequest = Array.isArray(response.value) ? response.value[0] : null;
-  return {
-    available: response.available,
-    snapshot:
-      pullRequest === null || pullRequest === undefined
-        ? emptyForgeSnapshot()
-        : githubSnapshotFromJson(pullRequest, identity, branch)
-  };
+type ForgeStatusResult = { available: boolean; snapshot: ForgeSnapshot };
+
+function identityFromRemote(remote: RemoteSummary): RemoteIdentity {
+  return { provider: remote.provider, host: remote.host, path: remote.path };
 }
 
-async function gitlabStatus(
-  cwd: string,
-  identity: RemoteIdentity,
-  branch: string,
-  runner: CommandRunner
-): Promise<{ available: boolean; snapshot: ForgeSnapshot }> {
-  const project = encodeURIComponent(identity.path);
-  const mergeRequests = await jsonCommand(
-    "glab",
-    [
-      "api",
-      `projects/${project}/merge_requests?source_branch=${encodeURIComponent(branch)}&state=all&order_by=updated_at&sort=desc&per_page=1`,
-      "--hostname",
-      identity.host
-    ],
-    cwd,
-    runner
+function sameRemoteIdentity(left: RemoteIdentity, right: RemoteIdentity): boolean {
+  return (
+    left.provider === right.provider &&
+    left.host.toLowerCase() === right.host.toLowerCase() &&
+    left.path.toLowerCase() === right.path.toLowerCase()
   );
-  if (!mergeRequests.available || !Array.isArray(mergeRequests.value)) {
-    return { available: false, snapshot: emptyForgeSnapshot() };
+}
+
+export function forgeTargetIdentities(
+  remotes: readonly RemoteSummary[],
+  source: RemoteIdentity
+): RemoteIdentity[] {
+  const upstream = remotes.find((remote) => remote.role === "upstream");
+  const candidates = [
+    ...(upstream === undefined ? [] : [identityFromRemote(upstream)]),
+    source
+  ];
+  const targets: RemoteIdentity[] = [];
+  for (const candidate of candidates) {
+    if (
+      candidate.provider !== source.provider ||
+      candidate.host.toLowerCase() !== source.host.toLowerCase() ||
+      targets.some((target) => sameRemoteIdentity(target, candidate))
+    ) {
+      continue;
+    }
+    targets.push(candidate);
   }
-  const mr = mergeRequests.value[0];
-  const iid = number(record(mr)?.iid);
-  if (mr === undefined || iid === null) {
-    return { available: true, snapshot: emptyForgeSnapshot() };
-  }
-  const pipeline = record(record(mr)?.head_pipeline);
-  const pipelineId = number(pipeline?.id);
-  const [approvals, jobs] = await Promise.all([
-    jsonCommand(
-      "glab",
+  return targets;
+}
+
+function githubHeadIdentity(value: unknown): string | null {
+  const pullRequest = record(value);
+  const repository = record(pullRequest?.headRepository);
+  const direct = string(repository?.nameWithOwner);
+  if (direct !== null) return direct;
+  const owner = record(pullRequest?.headRepositoryOwner);
+  const login = string(owner?.login);
+  const name = string(repository?.name);
+  return login === null || name === null ? null : `${login}/${name}`;
+}
+
+function githubPullRequestMatches(
+  value: unknown,
+  source: RemoteIdentity,
+  branch: string,
+  headOid: string
+): boolean {
+  const pullRequest = record(value);
+  return (
+    string(pullRequest?.headRefName) === branch &&
+    string(pullRequest?.headRefOid)?.toLowerCase() === headOid.toLowerCase() &&
+    githubHeadIdentity(value)?.toLowerCase() === source.path.toLowerCase()
+  );
+}
+
+export async function githubStatus(
+  cwd: string,
+  source: RemoteIdentity,
+  targets: readonly RemoteIdentity[],
+  branch: string,
+  headOid: string,
+  runner: CommandRunner
+): Promise<ForgeStatusResult> {
+  let incomplete = false;
+  for (const target of targets) {
+    const repository =
+      target.host === "github.com" ? target.path : `${target.host}/${target.path}`;
+    const response = await jsonCommand(
+      "gh",
       [
-        "api",
-        `projects/${project}/merge_requests/${iid}/approvals`,
-        "--hostname",
-        identity.host
+        "pr",
+        "list",
+        "--head",
+        branch,
+        "--state",
+        "all",
+        "--limit",
+        String(GITHUB_PR_CANDIDATE_LIMIT),
+        "--repo",
+        repository,
+        "--json",
+        "number,url,state,isDraft,headRefName,headRefOid,headRepository,headRepositoryOwner,baseRefName,mergeStateStatus,reviewDecision,latestReviews,statusCheckRollup"
       ],
       cwd,
       runner
-    ),
-    pipelineId === null
-      ? Promise.resolve({ available: true, value: [] as unknown })
-      : jsonCommand(
-          "glab",
-          [
-            "api",
-            `projects/${project}/pipelines/${pipelineId}/jobs?per_page=100`,
-            "--hostname",
-            identity.host
-          ],
-          cwd,
-          runner
-        )
-  ]);
-  return {
-    available: true,
-    snapshot: gitlabSnapshotFromJson({
-      mergeRequest: mr,
-      approvals: approvals.value,
-      jobs: jobs.value,
-      identity,
-      sourceBranch: branch
-    })
-  };
+    );
+    if (!response.available || !Array.isArray(response.value)) {
+      incomplete = true;
+      continue;
+    }
+    const pullRequest = response.value.find((candidate) =>
+      githubPullRequestMatches(candidate, source, branch, headOid)
+    );
+    if (pullRequest !== undefined) {
+      return {
+        available: true,
+        snapshot: githubSnapshotFromJson(pullRequest, target, branch)
+      };
+    }
+  }
+  return { available: !incomplete, snapshot: emptyForgeSnapshot() };
+}
+
+type JsonCommandResult = Awaited<ReturnType<typeof jsonCommand>>;
+
+export async function loadGitlabPipelineJobs(
+  cwd: string,
+  project: string,
+  pipelineId: number,
+  hostname: string,
+  runner: CommandRunner
+): Promise<JsonCommandResult> {
+  const jobs: unknown[] = [];
+  for (let page = 1; page <= MAX_GITLAB_JOB_PAGES; page += 1) {
+    const response = await jsonCommand(
+      "glab",
+      [
+        "api",
+        `projects/${project}/pipelines/${pipelineId}/jobs?per_page=${GITLAB_JOB_PAGE_SIZE}&page=${page}`,
+        "--hostname",
+        hostname
+      ],
+      cwd,
+      runner
+    );
+    if (!response.available || !Array.isArray(response.value)) {
+      return { available: false, value: null };
+    }
+    jobs.push(...response.value);
+    if (response.value.length < GITLAB_JOB_PAGE_SIZE) {
+      return { available: true, value: jobs };
+    }
+  }
+  return { available: false, value: null };
+}
+
+function gitlabMergeRequestMatches(
+  value: unknown,
+  sourceProjectId: number,
+  branch: string,
+  headOid: string
+): boolean {
+  const mergeRequest = record(value);
+  return (
+    number(mergeRequest?.source_project_id) === sourceProjectId &&
+    string(mergeRequest?.source_branch) === branch &&
+    string(mergeRequest?.sha)?.toLowerCase() === headOid.toLowerCase()
+  );
+}
+
+export async function gitlabStatus(
+  cwd: string,
+  source: RemoteIdentity,
+  targets: readonly RemoteIdentity[],
+  branch: string,
+  headOid: string,
+  runner: CommandRunner
+): Promise<ForgeStatusResult> {
+  const sourceProject = await jsonCommand(
+    "glab",
+    [
+      "api",
+      `projects/${encodeURIComponent(source.path)}`,
+      "--hostname",
+      source.host
+    ],
+    cwd,
+    runner
+  );
+  const sourceProjectId = number(record(sourceProject.value)?.id);
+  if (!sourceProject.available || sourceProjectId === null) {
+    return { available: false, snapshot: emptyForgeSnapshot() };
+  }
+
+  let incomplete = false;
+  for (const target of targets) {
+    const project = encodeURIComponent(target.path);
+    const mergeRequests = await jsonCommand(
+      "glab",
+      [
+        "api",
+        `projects/${project}/merge_requests?scope=all&source_branch=${encodeURIComponent(branch)}&state=all&order_by=updated_at&sort=desc&per_page=${GITLAB_MR_CANDIDATE_LIMIT}`,
+        "--hostname",
+        target.host
+      ],
+      cwd,
+      runner
+    );
+    if (!mergeRequests.available || !Array.isArray(mergeRequests.value)) {
+      incomplete = true;
+      continue;
+    }
+    const listed = mergeRequests.value.find((candidate) =>
+      gitlabMergeRequestMatches(candidate, sourceProjectId, branch, headOid)
+    );
+    const iid = number(record(listed)?.iid);
+    if (iid === null) continue;
+
+    const detail = await jsonCommand(
+      "glab",
+      [
+        "api",
+        `projects/${project}/merge_requests/${iid}?with_merge_status_recheck=true`,
+        "--hostname",
+        target.host
+      ],
+      cwd,
+      runner
+    );
+    if (
+      !detail.available ||
+      !gitlabMergeRequestMatches(detail.value, sourceProjectId, branch, headOid)
+    ) {
+      incomplete = true;
+      continue;
+    }
+    const pipeline = record(record(detail.value)?.head_pipeline);
+    const pipelineId = number(pipeline?.id);
+    const pipelineProjectId = number(pipeline?.project_id);
+    const [approvals, jobs] = await Promise.all([
+      jsonCommand(
+        "glab",
+        [
+          "api",
+          `projects/${project}/merge_requests/${iid}/approvals`,
+          "--hostname",
+          target.host
+        ],
+        cwd,
+        runner
+      ),
+      pipelineId === null
+        ? Promise.resolve({ available: true, value: [] as unknown })
+        : loadGitlabPipelineJobs(
+            cwd,
+            pipelineProjectId === null ? project : String(pipelineProjectId),
+            pipelineId,
+            target.host,
+            runner
+          )
+    ]);
+    return {
+      available: approvals.available && jobs.available,
+      snapshot: gitlabSnapshotFromJson({
+        mergeRequest: detail.value,
+        approvals: approvals.value,
+        approvalsAvailable: approvals.available,
+        jobs: jobs.value,
+        jobsAvailable: jobs.available,
+        identity: target,
+        sourceBranch: branch
+      })
+    };
+  }
+  return { available: !incomplete, snapshot: emptyForgeSnapshot() };
+}
+
+async function readHeadOid(
+  cwd: string,
+  runner: CommandRunner
+): Promise<string | null> {
+  const result = await git(cwd, ["rev-parse", "--verify", "HEAD"], runner);
+  if (result.exitCode !== 0) return null;
+  const oid = result.stdout.trim();
+  return /^[0-9a-f]{40,64}$/i.test(oid) ? oid : null;
 }
 
 export type LiveStatusLoader = (repositoryPath: string) => Promise<LiveStatusSnapshot>;
@@ -426,9 +634,10 @@ export function createLiveStatusLoader(
   return async (repositoryPath) => {
     const root = await repositoryRootFor(repositoryPath, runner);
     if (root === null) throw new Error(`not a git worktree: ${repositoryPath}`);
-    const [local, remotes] = await Promise.all([
+    const [local, remotes, headOid] = await Promise.all([
       readSafeStatus(root, runner),
-      readConfiguredRemotes(root, runner)
+      readConfiguredRemotes(root, runner),
+      readHeadOid(root, runner)
     ]);
     const canonical = remotes.find((remote) => remote.role === "canonical") ?? null;
     const identity: RemoteIdentity | null =
@@ -440,10 +649,33 @@ export function createLiveStatusLoader(
             path: canonical.path
           };
     let forge = { available: false, snapshot: emptyForgeSnapshot() };
-    if (local.branch !== null && identity?.provider === "github") {
-      forge = await githubStatus(root, identity, local.branch, runner);
-    } else if (local.branch !== null && identity?.provider === "gitlab") {
-      forge = await gitlabStatus(root, identity, local.branch, runner);
+    const targets = identity === null ? [] : forgeTargetIdentities(remotes, identity);
+    if (
+      local.branch !== null &&
+      headOid !== null &&
+      identity?.provider === "github"
+    ) {
+      forge = await githubStatus(
+        root,
+        identity,
+        targets,
+        local.branch,
+        headOid,
+        runner
+      );
+    } else if (
+      local.branch !== null &&
+      headOid !== null &&
+      identity?.provider === "gitlab"
+    ) {
+      forge = await gitlabStatus(
+        root,
+        identity,
+        targets,
+        local.branch,
+        headOid,
+        runner
+      );
     }
     return {
       observedAt: new Date().toISOString(),

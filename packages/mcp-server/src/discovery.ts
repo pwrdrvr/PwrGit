@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, parse, resolve } from "node:path";
 import { readdir, realpath, stat } from "node:fs/promises";
 import type { CommandRunner } from "./command.js";
 import { git } from "./command.js";
@@ -120,6 +120,15 @@ async function existingDirectory(path: string): Promise<string | null> {
   }
 }
 
+function comparablePath(path: string): string {
+  return process.platform === "win32" ? path.toLowerCase() : path;
+}
+
+async function canonicalHome(): Promise<string | null> {
+  const home = await existingDirectory(homedir());
+  return home === null ? null : comparablePath(home);
+}
+
 export async function rootCandidates(options: {
   requested?: readonly string[];
   includeConventional?: boolean;
@@ -172,10 +181,17 @@ export async function rootCandidates(options: {
 
   const output: RootCandidate[] = [];
   const seen = new Set<string>();
+  const home = await canonicalHome();
   for (const candidate of candidates) {
     const path = await existingDirectory(resolve(candidate.path));
     if (path === null) continue;
-    const key = process.platform === "win32" ? path.toLowerCase() : path;
+    const key = comparablePath(path);
+    if (
+      candidate.source === "current_workspace" &&
+      (key === home || key === comparablePath(parse(path).root))
+    ) {
+      continue;
+    }
     if (seen.has(key)) continue;
     seen.add(key);
     output.push({ path, source: candidate.source });

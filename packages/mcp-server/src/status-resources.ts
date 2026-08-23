@@ -51,6 +51,7 @@ function normalizedInterval(intervalMs: number | undefined): number {
 
 export class StatusResourceRegistry {
   private readonly watches = new Map<string, Watch>();
+  private pendingWatches = 0;
 
   constructor(
     private readonly mcp: McpServer,
@@ -98,23 +99,28 @@ export class StatusResourceRegistry {
     repositoryPath: string,
     intervalMs?: number
   ): Promise<StatusResourceDocument> {
-    if (this.watches.size >= MAX_WATCHES) {
+    if (this.watches.size + this.pendingWatches >= MAX_WATCHES) {
       throw new Error(`live status watch limit reached (${MAX_WATCHES})`);
     }
-    const id = randomBytes(24).toString("base64url");
-    const snapshot = await this.loader(repositoryPath);
-    const watch: Watch = {
-      id,
-      uri: `pwrgit://status/v1/${id}`,
-      repositoryPath: snapshot.repositoryPath,
-      intervalMs: normalizedInterval(intervalMs),
-      snapshot,
-      timer: null,
-      polling: false,
-      subscribed: false
-    };
-    this.watches.set(id, watch);
-    return this.document(watch);
+    this.pendingWatches += 1;
+    try {
+      const id = randomBytes(24).toString("base64url");
+      const snapshot = await this.loader(repositoryPath);
+      const watch: Watch = {
+        id,
+        uri: `pwrgit://status/v1/${id}`,
+        repositoryPath: snapshot.repositoryPath,
+        intervalMs: normalizedInterval(intervalMs),
+        snapshot,
+        timer: null,
+        polling: false,
+        subscribed: false
+      };
+      this.watches.set(id, watch);
+      return this.document(watch);
+    } finally {
+      this.pendingWatches -= 1;
+    }
   }
 
   close(): void {

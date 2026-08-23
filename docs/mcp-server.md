@@ -37,7 +37,8 @@ the same normalized status as an interoperability fallback.
 
 - roots explicitly supplied by the caller;
 - roots in `PWRGIT_MCP_ROOTS`;
-- the current repository's parent;
+- the current repository's parent, unless that is the home directory or a
+  filesystem root;
 - existing conventional folders under the home directory.
 
 Each scan has a maximum depth of five, a per-root directory budget, a 20,000
@@ -45,6 +46,10 @@ directory total budget, 32 roots, and explicit skip folders (`node_modules`,
 `.git`, build output, caches, `Library`, and similar). Directory symlinks are
 not followed. Checkout matching inspects at most 500 discovered repositories.
 Results say when a budget truncated the scan.
+
+The home directory and filesystem roots are never inferred automatically. A
+caller may explicitly request one, in which case the same depth and directory
+budgets still apply.
 
 `pwrgit_find_checkout` accepts `owner/name`, `host/owner/name`, or a Git remote
 URL. GitLab subgroup paths are retained. GitHub paths remain exactly two
@@ -206,11 +211,18 @@ review events may carry the new normalized review.
 Local Git metadata needs only `git`. Live GitHub status delegates credentials
 to the installed `gh` CLI; GitLab delegates to `glab`. PwrGit never extracts or
 returns their tokens. A signed-out, missing, or failed CLI yields
-`providerAvailable: false` while local status remains usable.
+`providerAvailable: false` while local status remains usable. The same applies
+to an incomplete follow-up query. Provider results are accepted only when the
+change request's source repository and head SHA match the checkout. A distinct
+same-host `upstream` remote is searched before `origin`, covering the usual
+fork workflow without accepting another fork's same-named branch.
 
 GitHub live status reads the most recent PR for the checked-out branch,
-including check rollup and latest review decision. GitLab reads the most recent
-MR, its approval summary, blocking-discussion state, and current pipeline jobs.
+including check rollup and latest review decision. GitLab reads a matching MR's
+detail, approval summary, blocking-discussion state, and pipeline jobs. Jobs
+are fetched in bounded pages up to 500 entries; a follow-up failure or a larger
+pipeline reports unknown CI and provider availability instead of silently
+omitting jobs. Allowed-to-fail failed/manual jobs normalize as skipped.
 GitLab does not expose a GitHub-style change-requested review aggregate, so the
 v1 contract reports the explicit blockers GitLab does expose rather than
 guessing.

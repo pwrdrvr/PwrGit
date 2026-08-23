@@ -36,7 +36,9 @@ Configure a stdio MCP client with absolute paths:
 `PWRGIT_MCP_ROOTS` uses the platform path delimiter (`:` on macOS/Linux, `;`
 on Windows). It is optional: PwrGit also considers the current repository's
 parent and existing conventional folders such as `~/src`, `~/projects`, and
-`~/work`. It never scans the home directory itself.
+`~/work`. It never selects the home directory or a filesystem root
+automatically. A caller can still opt into a broad scan by supplying that path
+explicitly, subject to the same depth and directory budgets.
 
 The stdio protocol owns stdout. Diagnostics go only to stderr.
 

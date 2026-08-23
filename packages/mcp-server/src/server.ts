@@ -48,6 +48,13 @@ const readOnlyAnnotations = {
   openWorldHint: false
 } as const;
 
+const liveWatchAnnotations = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: true
+} as const;
+
 export async function createPwrGitMcpServer(
   options: PwrGitMcpServerOptions = {}
 ): Promise<PwrGitMcpServer> {
@@ -94,7 +101,7 @@ export async function createPwrGitMcpServer(
     {
       title: "Discover repository roots",
       description:
-        "Find bounded folders where this user appears to keep Git repositories. Uses PWRGIT_MCP_ROOTS, caller-provided roots, the current workspace parent, and existing conventional folders; never recursively scans the home directory itself.",
+        "Find bounded folders where this user appears to keep Git repositories. Uses PWRGIT_MCP_ROOTS, caller-provided roots, a safe current-workspace parent, and existing conventional folders; never selects a home directory or filesystem root automatically.",
       inputSchema: {
         roots: z
           .array(z.string().trim().min(1).max(4_096))
@@ -213,7 +220,7 @@ export async function createPwrGitMcpServer(
           .optional()
           .describe("Polling cadence for a subscribed resource (default 15000ms).")
       },
-      annotations: readOnlyAnnotations
+      annotations: liveWatchAnnotations
     },
     async (input) => {
       const document = await statusResources.create(input.path, input.intervalMs);

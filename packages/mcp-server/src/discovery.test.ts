@@ -1,12 +1,14 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { realpath } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { join, parse } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import type { CommandRunner } from "./command.js";
 import {
   findRepositoryCheckouts,
-  findRepositoryDirectories
+  findRepositoryDirectories,
+  rootCandidates
 } from "./discovery.js";
 
 const cleanup: string[] = [];
@@ -71,5 +73,39 @@ describe("bounded repository discovery", () => {
       identity: { provider: "github", host: "github.com", path: "acme/widget" }
     });
     expect(JSON.stringify(result)).not.toContain("do-not-return");
+  });
+
+  it("does not automatically scan the home directory or a filesystem root", async () => {
+    const automaticParent = async (repositoryPath: string) => {
+      const runner: CommandRunner = async () => ({
+        exitCode: 0,
+        stdout: `${repositoryPath}\n`,
+        stderr: ""
+      });
+      return rootCandidates({
+        includeConfigured: false,
+        includeConventional: false,
+        cwd: repositoryPath,
+        env: {},
+        runner
+      });
+    };
+
+    expect(await automaticParent(join(homedir(), "pwrgit-repository"))).toEqual([]);
+    const filesystemRoot = parse(process.cwd()).root;
+    expect(await automaticParent(join(filesystemRoot, "pwrgit-repository"))).toEqual(
+      []
+    );
+
+    const explicitlyRequested = await rootCandidates({
+      requested: [homedir()],
+      includeConfigured: false,
+      includeCurrentWorkspace: false,
+      includeConventional: false,
+      env: {}
+    });
+    expect(explicitlyRequested).toEqual([
+      { path: await realpath(homedir()), source: "requested" }
+    ]);
   });
 });

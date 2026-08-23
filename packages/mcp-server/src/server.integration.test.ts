@@ -96,6 +96,15 @@ describe("PwrGit MCP integration", () => {
           "pwrgit_live_status_capabilities"
         ])
       );
+      expect(
+        tools.tools.find((tool) => tool.name === "pwrgit_watch_repository")
+          ?.annotations
+      ).toMatchObject({
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      });
 
       const capabilities = await client.readResource({ uri: CAPABILITY_RESOURCE_URI });
       const capabilityContent = capabilities.contents[0];
