@@ -175,6 +175,10 @@ export function createGitSandbox(): GitSandbox {
 
   const makeRepoWithMergeConflict = (name: string): TestRepo => {
     const repoPath = initRepo(name);
+    // The app's Git subprocesses do not inherit this fixture's isolated
+    // GIT_CONFIG_* environment. Pin the checkout conversion locally so an
+    // accepted index stage has the same bytes on Windows, macOS, and Linux.
+    git(repoPath, "config", "core.autocrlf", "false");
     writeFileSync(join(repoPath, "conflict.txt"), "shared base\n");
     git(repoPath, "add", "conflict.txt");
     git(repoPath, "commit", "-m", "add shared conflict base");
