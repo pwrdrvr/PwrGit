@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 /**
- * electron-builder beforePack hook: stage the right dugite embedded-git
- * distribution for the arch being packed.
+ * electron-builder beforePack hook: stage native payloads for the architecture
+ * being packed.
+ *
+ * better-sqlite3 v13 ships all platform/arch Node-API prebuilds and its normal
+ * Electron rebuild removes build/Release without replacing it. Every platform
+ * pass copies the target prebuild to build/Release before dependency files are
+ * collected; electron-builder.yml disables the destructive rebuild and drops
+ * the original multi-arch prebuild directory.
  *
  * dugite's postinstall downloads a single-arch git distribution matching the
  * install host (e.g. darwin-arm64 on an Apple Silicon runner), so the
@@ -17,8 +23,8 @@
  * universal binaries. release.mjs verifies the merged git with
  * `lipo -verify_arch x86_64 arm64` afterwards.
  *
- * Windows/Linux packs run on a host whose platform+arch already match the
- * target, so the staged download is correct and the hook is a no-op.
+ * Windows/Linux dugite packs run on a host whose platform+arch already match
+ * the target, so only the better-sqlite3 staging applies there.
  */
 
 import { spawnSync } from "node:child_process";
@@ -26,6 +32,7 @@ import { existsSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stageBetterSqlite3 } from "./stage-better-sqlite3-arch.mjs";
 
 // electron-builder's Arch enum, by value. Not imported from electron-builder
 // because this hook runs inside the production-only release-stage where
@@ -33,9 +40,6 @@ import { fileURLToPath } from "node:url";
 const ARCH_NAMES = { 0: "ia32", 1: "x64", 2: "armv7l", 3: "arm64", 4: "universal" };
 
 export default async function beforePack(context) {
-  if (context.electronPlatformName !== "darwin") {
-    return;
-  }
   const arch = ARCH_NAMES[context.arch];
   if (arch !== "x64" && arch !== "arm64") {
     // The universal pass is the @electron/universal merge of the two real
@@ -49,6 +53,17 @@ export default async function beforePack(context) {
   const appDir =
     context.packager?.info?.appDir ??
     resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+  stageBetterSqlite3({
+    appDir,
+    platform: context.electronPlatformName,
+    arch,
+  });
+
+  if (context.electronPlatformName !== "darwin") {
+    return;
+  }
+
   const dugiteDir = join(appDir, "node_modules", "dugite");
   const downloadScript = join(dugiteDir, "script", "download-git.js");
   if (!existsSync(downloadScript)) {
