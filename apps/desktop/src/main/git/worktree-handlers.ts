@@ -23,7 +23,7 @@ function stateChanged(a: WorktreeState, b: WorktreeState): boolean {
 export type WorktreeRefresher = {
   /** Recompute one worktree; emit worktree:changed only if it actually moved. */
   refreshWorktree: (worktreeId: string) => Promise<void>;
-  /** Recompute all worktrees of a repo; emit repo:changed once when done. */
+  /** Recompute a repo; emit moved worktrees individually, then its tree once. */
   refreshRepoWorktrees: (repoId: string) => void | Promise<void>;
 };
 
@@ -60,7 +60,23 @@ export function createWorktreeRefresher(
         .all(repoId) as { id: string }[]
     ).map((r) => r.id);
     if (ids.length === 0) return;
+    const before = new Map(ids.map((id) => [id, state.getCached(id)]));
     await state.refreshMany(ids);
+    // A repo refresh is also the user's explicit escape hatch when a watcher
+    // misses an external filesystem change. The repo event repaints sidebar
+    // badges, but the header, graph, and Changes rail subscribe to the focused
+    // worktree event. Publish that event for every snapshot that really moved
+    // so all visible surfaces converge on the same refresh.
+    for (const id of ids) {
+      const fresh = state.getCached(id);
+      const previous = before.get(id) ?? null;
+      if (
+        fresh !== null &&
+        (previous === null || stateChanged(previous, fresh))
+      ) {
+        emitEvent("worktree:changed", { worktreeId: id });
+      }
+    }
     const repo = db
       .prepare("SELECT profile_id FROM repos WHERE id = ?")
       .get(repoId) as { profile_id: string } | undefined;

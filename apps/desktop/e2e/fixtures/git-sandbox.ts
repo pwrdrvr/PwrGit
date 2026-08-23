@@ -41,6 +41,11 @@ export type TestRepo = {
   createBranch: (branch: string) => void;
 };
 
+export type RemoteTestRepo = TestRepo & {
+  /** Bare origin, kept outside reposDir so the app never indexes it. */
+  remotePath: string;
+};
+
 export type GitSandbox = {
   /** Directory added as a profile root — the app scans this for repos. */
   reposDir: string;
@@ -60,6 +65,14 @@ export type GitSandbox = {
    */
   commitEmptyAt: (cwd: string, message: string, epochSeconds: number) => void;
   makeRepo: (name: string, opts?: { worktrees?: string[] }) => TestRepo;
+  /** A repo whose main branch is synchronized with a local bare origin. */
+  makeRepoWithRemote: (name: string) => RemoteTestRepo;
+  /**
+   * Two reorderable local commits whose isolated check passes, while a
+   * source-only merge driver makes Apply fail. This exercises rollback after
+   * cherry-pick has started without weakening the production approval gate.
+   */
+  makeRepoWithApplyOnlyRebaseFailure: (name: string) => RemoteTestRepo;
   /** A repo whose primary branch is `behindBy` commits behind its origin. */
   makeRepoBehindRemote: (
     name: string,
@@ -110,10 +123,21 @@ export function createGitSandbox(): GitSandbox {
     const repoPath = join(reposDir, name);
     mkdirSync(repoPath, { recursive: true });
     git(repoPath, "init", "-b", "main");
+    git(repoPath, "config", "core.autocrlf", "false");
     writeFileSync(join(repoPath, "README.md"), `# ${name}\n`);
     git(repoPath, "add", "-A");
     git(repoPath, "commit", "-m", "initial commit");
     return repoPath;
+  };
+
+  const addBareOrigin = (name: string, repoPath: string): string => {
+    const remotePath = join(remotesDir, `${name}.git`);
+    git(remotesDir, "init", "--bare", `${name}.git`);
+    git(remotePath, "symbolic-ref", "HEAD", "refs/heads/main");
+    git(repoPath, "remote", "add", "origin", remotePath);
+    git(repoPath, "push", "-u", "origin", "main");
+    git(repoPath, "remote", "set-head", "origin", "--auto");
+    return remotePath;
   };
 
   const worktreeAdder =
@@ -139,6 +163,60 @@ export function createGitSandbox(): GitSandbox {
       name,
       path: repoPath,
       addWorktree,
+      createBranch: (branch: string) => git(repoPath, "branch", branch)
+    };
+  };
+
+  const makeRepoWithRemote = (name: string): RemoteTestRepo => {
+    const repoPath = initRepo(name);
+    const remotePath = addBareOrigin(name, repoPath);
+    return {
+      name,
+      path: repoPath,
+      remotePath,
+      addWorktree: worktreeAdder(name, repoPath),
+      createBranch: (branch: string) => git(repoPath, "branch", branch)
+    };
+  };
+
+  const makeRepoWithApplyOnlyRebaseFailure = (
+    name: string
+  ): RemoteTestRepo => {
+    const repoPath = initRepo(name);
+    writeFileSync(join(repoPath, ".gitattributes"), "shared.txt merge=reject\n");
+    writeFileSync(
+      join(repoPath, "shared.txt"),
+      "header\nfirst: baseline\nkeep a\nkeep b\nkeep c\nkeep d\nkeep e\nkeep f\nsecond: baseline\nfooter\n"
+    );
+    git(repoPath, "add", "-A");
+    git(repoPath, "commit", "-m", "rebase baseline");
+    const remotePath = addBareOrigin(name, repoPath);
+
+    writeFileSync(
+      join(repoPath, "shared.txt"),
+      "header\nfirst: local one\nkeep a\nkeep b\nkeep c\nkeep d\nkeep e\nkeep f\nsecond: baseline\nfooter\n"
+    );
+    git(repoPath, "add", "shared.txt");
+    git(repoPath, "commit", "-m", "change first setting");
+    writeFileSync(
+      join(repoPath, "shared.txt"),
+      "header\nfirst: local one\nkeep a\nkeep b\nkeep c\nkeep d\nkeep e\nkeep f\nsecond: local two\nfooter\n"
+    );
+    git(repoPath, "add", "shared.txt");
+    git(repoPath, "commit", "-m", "change second setting");
+
+    // The disposable check copies commits, not this source-only override. The
+    // E2E app's isolated global config gives its clone a normal text driver;
+    // Apply sees this local rejection instead, fails after reset/cherry-pick
+    // has begun, and must abort before restoring the checked source HEAD.
+    git(repoPath, "config", "merge.reject.name", "Reject in source checkout");
+    git(repoPath, "config", "merge.reject.driver", "false");
+
+    return {
+      name,
+      path: repoPath,
+      remotePath,
+      addWorktree: worktreeAdder(name, repoPath),
       createBranch: (branch: string) => git(repoPath, "branch", branch)
     };
   };
@@ -345,6 +423,8 @@ export function createGitSandbox(): GitSandbox {
     commitAs,
     commitEmptyAt,
     makeRepo,
+    makeRepoWithRemote,
+    makeRepoWithApplyOnlyRebaseFailure,
     makeRepoBehindRemote,
     makeRepoWithSyncedReleaseBranch,
     makeRepoWithDivergedReleaseBranch,

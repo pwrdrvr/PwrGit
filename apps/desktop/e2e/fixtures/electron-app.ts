@@ -41,7 +41,7 @@ function cleanEnv(extra: Record<string, string>): Record<string, string> {
  * `pnpm i`).
  */
 export async function launchApp(
-  opts: { worktreeRoot?: string } = {}
+  opts: { worktreeRoot?: string; gitConfig?: string } = {}
 ): Promise<AppHandle> {
   const userData = mkdtempSync(join(tmpdir(), "pwrgit-e2e-ud-"));
   if (opts.worktreeRoot !== undefined) {
@@ -56,14 +56,19 @@ export async function launchApp(
   const gitconfig = join(userData, "gitconfig");
   writeFileSync(
     gitconfig,
-    "[user]\n\tname = PwrGit Test\n\temail = test@pwrgit.dev\n"
+    `[user]\n\tname = PwrGit Test\n\temail = test@pwrgit.dev\n${opts.gitConfig ?? ""}`
   );
 
   const app = await electron.launch({
     args: [MAIN],
     env: cleanEnv({
       PWRGIT_USER_DATA_DIR: userData,
-      PWRGIT_GITCONFIG: gitconfig
+      PWRGIT_GITCONFIG: gitconfig,
+      // The app's Git commands must be as deterministic as fixture setup:
+      // neither side may inherit the runner/developer's aliases, identity,
+      // signing, merge drivers, or other machine-global behavior.
+      GIT_CONFIG_GLOBAL: gitconfig,
+      GIT_CONFIG_SYSTEM: "/dev/null"
     })
   });
   const window = await app.firstWindow();
