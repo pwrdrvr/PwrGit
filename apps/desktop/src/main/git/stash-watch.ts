@@ -20,7 +20,11 @@ export class StashWatch {
       .digest("hex");
     const previous = this.fingerprints.get(repoId);
     this.fingerprints.set(repoId, fingerprint);
-    return previous !== undefined && previous !== fingerprint;
+    // The renderer may have loaded before this watcher is first reached. Its
+    // first observation therefore cannot safely be treated as an unchanged
+    // baseline: an ordinary Git command may already have moved refs/stash.
+    // One redundant list refresh is cheaper than preserving a stale stack.
+    return previous === undefined || previous !== fingerprint;
   }
 }
 
