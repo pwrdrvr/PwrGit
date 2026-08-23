@@ -55,6 +55,8 @@ export function AgentProposalPanel({
   onRequest: () => void;
   onCancel: () => void;
 }) {
+  if (availability.kind === "idle") return null;
+
   const snapshot =
     availability.kind === "resolved" ? availability.value : null;
   const codex = snapshot?.providers.find((provider) => provider.id === "codex");
@@ -67,7 +69,7 @@ export function AgentProposalPanel({
   return (
     <div className="rebase-agent">
       <div className="rebase-section">Agent proposal</div>
-      {availability.kind === "idle" || availability.kind === "checking" ? (
+      {availability.kind === "checking" ? (
         <div className="rebase-agent__status" role="status">
           <span>Discovering</span>
           Looking for a safe local Codex session…
@@ -421,12 +423,14 @@ export function RebaseTab({
             )}
           </div>
 
-          <AgentProposalPanel
-            availability={availability}
-            proposal={proposal}
-            onRequest={() => void requestProposal()}
-            onCancel={cancelProposal}
-          />
+          {plan.valid && (
+            <AgentProposalPanel
+              availability={availability}
+              proposal={proposal}
+              onRequest={() => void requestProposal()}
+              onCancel={cancelProposal}
+            />
+          )}
 
           {check === "checking" && (
             <div className="rebase-check-result" role="status">
