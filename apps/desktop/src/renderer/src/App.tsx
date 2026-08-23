@@ -349,7 +349,7 @@ export function App() {
     // keep waiting for) its target before stale boot state chooses a fallback.
     if (
       activeProfile === null ||
-      loading ||
+      repoLoadState.status === "loading" ||
       pendingReveal !== null ||
       restoredSelectionForProfileRef.current === activeProfile.id
     ) {
@@ -374,7 +374,13 @@ export function App() {
     ) {
       setSelection(resolved);
     }
-  }, [activeProfile, loading, pendingReveal, repos, selection]);
+  }, [
+    activeProfile,
+    pendingReveal,
+    repoLoadState.status,
+    repos,
+    selection
+  ]);
 
   useEffect(() => {
     if (activeProfile !== null && selection !== null) {

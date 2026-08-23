@@ -664,11 +664,19 @@ test("a viewed repo remains in Focused after a reload", async () => {
   });
 
   // Expanding selects the primary checkout. Current selection is the first
-  // Focus rule now; after reload, the bounded visit history is the durable one.
+  // Focus rule now. Clear the separately tested selection preference before
+  // reload so this test continues to isolate the durable visit history.
   await expandRepoGroup(window, "alpha");
   await lensChip(window, "Focused").click();
   await expect(window.locator(".repo-row__name")).toHaveText(["alpha"]);
   await expect(window.locator(".repo-row__focus-reason")).toHaveText("Current");
+  await window.evaluate(() => {
+    for (const key of Object.keys(window.localStorage)) {
+      if (key.startsWith("pwrgit.worktreeSelection.")) {
+        window.localStorage.removeItem(key);
+      }
+    }
+  });
 
   await window.reload();
   await expect(lensChip(window, "Focused")).toHaveAttribute(
