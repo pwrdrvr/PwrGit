@@ -11,6 +11,7 @@ import {
   type Result
 } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
+import { emitEvent } from "../ipc";
 import type { DB } from "../persistence/db";
 import type { GitExec } from "../git/dugite";
 import {
@@ -248,24 +249,10 @@ describe("agent rebase command safety", () => {
     await lifecycle.dispose();
   });
 
-  it("turns the request deadline into a clean timeout result", async () => {
+  it("settles at the deadline even when the backend ignores abort", async () => {
     const session = fakeSession({
       proposeRebase: vi.fn(
-        async (input) =>
-          new Promise<Result<AgentRebaseProposal>>((resolve) => {
-            input.signal?.addEventListener(
-              "abort",
-              () =>
-                resolve(
-                  err({
-                    kind: "agent",
-                    code: "cancelled",
-                    message: "cancelled"
-                  })
-                ),
-              { once: true }
-            );
-          })
+        async () => new Promise<Result<AgentRebaseProposal>>(() => undefined)
       )
     });
     const bus = new CommandBus();
@@ -275,15 +262,31 @@ describe("agent rebase command safety", () => {
       requestTimeoutMs: 5
     });
 
-    const result = await bus.dispatch("agent:rebaseDraft", {
-      requestId: "agent-proposal-timeout",
-      worktreeId: "wt-1",
-      commits,
-      op: "squash"
-    });
+    const result = await Promise.race([
+      bus.dispatch("agent:rebaseDraft", {
+        requestId: "agent-proposal-timeout",
+        worktreeId: "wt-1",
+        commits,
+        op: "squash"
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("deadline did not settle")), 500)
+      )
+    ]);
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe("timeout");
+    expect(session.close).toHaveBeenCalledOnce();
+    expect(emitEvent).toHaveBeenCalledWith(
+      "agent:requestState",
+      expect.objectContaining({
+        requestId: "agent-proposal-timeout",
+        phase: "timed_out"
+      })
+    );
+    await expect(
+      bus.dispatch("agent:cancel", { requestId: "agent-proposal-timeout" })
+    ).resolves.toEqual(ok({ cancelled: false }));
     await lifecycle.dispose();
   });
 });

@@ -193,26 +193,63 @@ export function registerAgentHandlers(
     const timeout = setTimeout(() => {
       request.timedOut = true;
       controller.abort();
+      // A backend that ignored abort must not remain pooled for the next
+      // request. Reset it out-of-band so the deadline response is not held up
+      // by an app-server that is itself stuck while closing.
+      void Promise.resolve()
+        .then(() => dependencies.session.close())
+        .catch(() => undefined);
     }, dependencies.requestTimeoutMs);
     timeout.unref?.();
     emitState(req.requestId, request, "running");
 
-    try {
-      let result = await dependencies.session.proposeRebase({
-        requestId: req.requestId,
-        profileId: row.profile_id,
-        commits: req.commits,
-        op: req.op,
-        signal: controller.signal
-      });
-      if (request.timedOut) {
-        result = err(
-          error(
-            "timeout",
-            "The agent proposal timed out. Nothing changed; retry or continue with the deterministic plan."
+    type ProposalResult = Awaited<
+      ReturnType<AgentSession["proposeRebase"]>
+    >;
+    let removeControllerAbort = (): void => undefined;
+    const interrupted = new Promise<ProposalResult>((resolve) => {
+      const onAbort = (): void => {
+        resolve(
+          err(
+            request.timedOut
+              ? error(
+                  "timeout",
+                  "The agent proposal timed out. Nothing changed; retry or continue with the deterministic plan."
+                )
+              : error(
+                  "cancelled",
+                  "The agent proposal was cancelled. Nothing changed."
+                )
           )
         );
-      }
+      };
+      controller.signal.addEventListener("abort", onAbort, { once: true });
+      removeControllerAbort = () =>
+        controller.signal.removeEventListener("abort", onAbort);
+    });
+
+    try {
+      // Keep a rejection handler attached even when the deadline wins; the
+      // backend is then free to settle later without producing an unhandled
+      // rejection or keeping this command in the active-request map.
+      const proposal = dependencies.session
+        .proposeRebase({
+          requestId: req.requestId,
+          profileId: row.profile_id,
+          commits: req.commits,
+          op: req.op,
+          signal: controller.signal
+        })
+        .catch((cause): ProposalResult =>
+          err(
+            error(
+              "session_failed",
+              "The agent proposal failed. Nothing changed; retry or continue with the deterministic plan.",
+              cause
+            )
+          )
+        );
+      const result = await Promise.race([proposal, interrupted]);
       if (result.ok) {
         emitState(req.requestId, request, "completed");
       } else {
@@ -227,6 +264,7 @@ export function registerAgentHandlers(
       return result;
     } finally {
       clearTimeout(timeout);
+      removeControllerAbort();
       context.signal?.removeEventListener("abort", onContextAbort);
       if (active.get(req.requestId) === request) active.delete(req.requestId);
     }

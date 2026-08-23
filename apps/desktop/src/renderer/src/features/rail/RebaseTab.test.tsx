@@ -65,6 +65,20 @@ describe("rebase tool copy", () => {
     expect(panel).not.toContain("Ask Codex to review");
   });
 
+  it("does not claim discovery has started while availability is idle", () => {
+    const panel = renderToStaticMarkup(
+      <AgentProposalPanel
+        availability={{ kind: "idle" }}
+        proposal={{ kind: "idle" }}
+        onRequest={() => undefined}
+        onCancel={() => undefined}
+      />
+    );
+
+    expect(panel).toBe("");
+    expect(panel).not.toContain("Discovering");
+  });
+
   it("labels structured agent output as proposal-only and retains explicit approval", () => {
     const panel = renderToStaticMarkup(
       <AgentProposalPanel
