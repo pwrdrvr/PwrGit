@@ -109,7 +109,9 @@ test("Help and About expose identity, canonical support links, and recovery", as
       arch: electronProcess.arch
     };
   });
-  expect(runtime.runtimeVersion).toBe(runtime.electronVersion);
+  // The built-entry fallback is platform-dependent (Electron on macOS, 0.0
+  // on Linux CI), but it must never be mistaken for the PwrGit version.
+  expect(runtime.runtimeVersion).not.toBe(DESKTOP_VERSION);
   expect(DESKTOP_VERSION).not.toBe(runtime.electronVersion);
   await expect(about).toContainText(`v${DESKTOP_VERSION}`);
   await expect(about).toContainText("Stable · Latest");
