@@ -17,10 +17,11 @@ import { formatLensCount, LENSES } from "./repo-view";
  * count out in the space the icons freed.
  */
 const ICONS: Record<Lens, ReactNode> = {
-  Recent: (
+  Focused: (
     <>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 7v5l3.5 2" />
+      <circle cx="12" cy="12" r="8" />
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
     </>
   ),
   Pinned: <path d="M12 3l2.6 6 6.4.3-5 4.3 1.8 6.4L12 16.6 6.2 20l1.8-6.4-5-4.3 6.4-.3Z" />,
@@ -55,7 +56,7 @@ const ICONS: Record<Lens, ReactNode> = {
 
 /** What each lens answers, for the tooltip — an icon needs its noun spelled out. */
 const DESCRIPTION: Record<Lens, string> = {
-  Recent: "Recently active repos",
+  Focused: "Current, pinned, viewed, changed, or committed in the last 30 days",
   Pinned: "Pinned repos — drag to arrange",
   Behind: "Repos with a worktree behind its upstream",
   Stale: "Repos with worktrees safe to prune",
@@ -105,9 +106,7 @@ export function LensFilter({
             >
               {ICONS[l]}
             </svg>
-            {/* Presence, not quantity — the number is in the accessible name.
-                Recent is always 0 by design (it's the default view, not a
-                filtered set), so it never carries a dot. */}
+            {/* Presence, not quantity — the number is in the accessible name. */}
             {count > 0 && <span className="lens-chip__dot" aria-hidden="true" />}
           </button>
         );

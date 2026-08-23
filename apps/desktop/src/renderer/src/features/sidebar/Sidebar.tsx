@@ -12,12 +12,20 @@ import { copyText } from "../../lib/copyText";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
 import { revealLabel, revealPath } from "../shell/reveal";
+import {
+  parseFocusVisits,
+  recordFocusVisit,
+  type FocusVisits
+} from "./focus-visits";
 import { LensFilter } from "./LensFilter";
 import { NewWorktreeModal } from "./NewWorktreeModal";
 import { ProfileChip } from "./ProfileChip";
 import { RepoRow } from "./RepoRow";
 import {
   filterReposByLens,
+  FOCUS_REPO_LIMIT,
+  focusedRepoPage,
+  focusReasonForRepo,
   groupReposByRoot,
   LENSES,
   lensCounts,
@@ -35,14 +43,25 @@ const EMPTY_IDS: Set<string> = new Set();
 
 /**
  * The lens survives a restart (and an HMR remount) so the app reopens on the
- * view you were actually working in — landing back on Recent every launch means
+ * view you were actually working in — landing back on Focused every launch means
  * re-picking Pinned by hand each time.
  */
 const LENS_KEY = "pwrgit.lens";
 
+function readFocusVisits(key: string): FocusVisits {
+  try {
+    return parseFocusVisits(window.localStorage.getItem(key));
+  } catch {
+    return {};
+  }
+}
+
 function readStoredLens(): Lens {
   try {
     const stored = window.localStorage.getItem(LENS_KEY);
+    // Recent was the pre-Focus default. It showed every repo, so retaining that
+    // name would preserve neither its old semantics nor a useful preference.
+    if (stored === "Recent") return "Focused";
     // Names ship in the store, so a renamed or dropped lens can come back from
     // an older install — fall back rather than filter by a lens that is gone.
     if (stored !== null && (LENSES as string[]).includes(stored)) {
@@ -51,7 +70,7 @@ function readStoredLens(): Lens {
   } catch {
     // ignore private-mode failures
   }
-  return "Recent";
+  return "Focused";
 }
 
 /**
@@ -60,7 +79,7 @@ function readStoredLens(): Lens {
  * of adjective, verb and noun, so no one template fits all five.
  */
 const EMPTY_COPY: Record<Lens, string> = {
-  Recent: "No repos yet — add a folder above and PwrGit will scan it.",
+  Focused: "No focused repos yet. Browse All, then open or pin what matters.",
   All: "No repos yet — add a folder above and PwrGit will scan it.",
   Pinned: "Nothing pinned yet. Star a repo to keep it here.",
   Behind: "No repo is behind its upstream.",
@@ -167,18 +186,67 @@ export function Sidebar({
   // it long before the first ⌘⇧↑/↓ — see lib/announce.
   useEffect(mountLiveRegion, []);
   const [lens, setLens] = useState<Lens>(readStoredLens);
+  const [showAllFocused, setShowAllFocused] = useState(false);
   // Only an explicit pick is worth remembering. The reveal effect below also
   // calls setLens, to widen a lens that would hide the row it is scrolling to
   // — persisting that would let one ⌘K jump into an unpinned repo retire the
   // lens the user actually chose.
   const chooseLens = useCallback((next: Lens) => {
     setLens(next);
+    if (next === "Focused") setShowAllFocused(false);
     try {
       window.localStorage.setItem(LENS_KEY, next);
     } catch {
       // ignore private-mode/quota failures
     }
   }, []);
+  const focusVisitsKey = `pwrgit.focusVisits.${activeProfile?.id ?? "none"}`;
+  const [focusVisitStore, setFocusVisitStore] = useState<{
+    key: string;
+    visits: FocusVisits;
+  }>(() => ({
+    key: focusVisitsKey,
+    visits: readFocusVisits(focusVisitsKey)
+  }));
+  useEffect(() => {
+    setFocusVisitStore((current) => {
+      if (current.key === focusVisitsKey) return current;
+      return {
+        key: focusVisitsKey,
+        visits: readFocusVisits(focusVisitsKey)
+      };
+    });
+  }, [focusVisitsKey]);
+  const focusVisits =
+    focusVisitStore.key === focusVisitsKey
+      ? focusVisitStore.visits
+      : readFocusVisits(focusVisitsKey);
+
+  // Selection is the clearest "I work here" signal. Keep it per profile and
+  // bounded; repo pins and Git activity remain durable in SQLite as before.
+  useEffect(() => {
+    if (selectedWorktreeId === null) return;
+    if (
+      !repos.some((repo) =>
+        repo.worktrees.some((worktree) => worktree.id === selectedWorktreeId)
+      )
+    ) {
+      return;
+    }
+    setFocusVisitStore((current) => {
+      const base =
+        current.key === focusVisitsKey
+          ? current.visits
+          : readFocusVisits(focusVisitsKey);
+      const visits = recordFocusVisit(base, selectedWorktreeId, Date.now());
+      try {
+        window.localStorage.setItem(focusVisitsKey, JSON.stringify(visits));
+      } catch {
+        // Ignore private-mode/quota failures; the in-memory visit still works.
+      }
+      return { key: focusVisitsKey, visits };
+    });
+  }, [focusVisitsKey, repos, selectedWorktreeId]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [sortByRepo, setSortByRepo] = useState<Record<string, WorktreeSort>>({});
   const [orderByRepo, setOrderByRepo] = useState<Record<string, string[]>>({});
@@ -254,14 +322,29 @@ export function Sidebar({
     pendingRevealRef.current = selectedWorktreeId;
     // A lens the repo doesn't pass would hide the row we're about to scroll to,
     // leaving the selection real but invisible — a ⌘K pick or a freshly created
-    // worktree lands nowhere. Widen to the everything-lens rather than
-    // second-guess which filter the user meant to keep.
-    if (filterReposByLens([repo], lens, now).length === 0) setLens("Recent");
+    // worktree lands nowhere. Widen to Focused, whose first rule is the current
+    // selection, rather than dropping the user into the exhaustive index.
+    if (
+      filterReposByLens([repo], lens, now, {
+        selectedWorktreeId,
+        visits: focusVisits
+      }).length === 0
+    ) {
+      setLens("Focused");
+    }
     if (!expanded.has(repo.id)) {
       setExpanded((prev) => new Set(prev).add(repo.id));
       onExpandRepo(repo.id); // lazy badge/state compute, like a manual expand
     }
-  }, [selectedWorktreeId, repos, expanded, lens, now, onExpandRepo]);
+  }, [
+    selectedWorktreeId,
+    repos,
+    expanded,
+    lens,
+    now,
+    onExpandRepo,
+    focusVisits
+  ]);
   useEffect(() => {
     const id = pendingRevealRef.current;
     if (id === null) return;
@@ -312,8 +395,12 @@ export function Sidebar({
   const clearSel = (): void =>
     setSel({ repoId: "", ids: EMPTY_IDS, anchor: null });
 
-  const counts = lensCounts(repos, now);
-  const filtered = filterReposByLens(repos, lens, now);
+  const focusContext = { selectedWorktreeId, visits: focusVisits };
+  const counts = lensCounts(repos, now, focusContext);
+  const allFiltered = filterReposByLens(repos, lens, now, focusContext);
+  const focusedPage = focusedRepoPage(allFiltered, showAllFocused);
+  const filtered = lens === "Focused" ? focusedPage.repos : allFiltered;
+  const hiddenFocused = lens === "Focused" ? focusedPage.hidden : 0;
   const arrangeable = lensIsArrangeable(lens);
   const filteredIds = filtered.map((repo) => repo.id);
 
@@ -563,68 +650,81 @@ export function Sidebar({
   // `map` hands us (repo, index, list), which is exactly the posinset/setsize
   // pair each row needs — within its folder group when grouped, within the
   // filtered list when not. See RepoRow for why they are stated explicitly.
-  const renderRepo = (repo: Repo, index: number, list: Repo[]) => (
-    <RepoRow
-      key={repo.id}
-      posinset={index + 1}
-      setsize={list.length}
-      repo={repo}
-      expanded={expanded.has(repo.id)}
-      containsSelection={repo.worktrees.some(
-        (w) => w.id === selectedWorktreeId
-      )}
-      selectedWorktreeId={selectedWorktreeId}
-      selectedIds={sel.repoId === repo.id ? sel.ids : EMPTY_IDS}
-      sort={sortByRepo[repo.id] ?? "recent"}
-      customOrder={orderByRepo[repo.id]}
-      now={now}
-      onToggleExpand={() => toggleExpand(repo)}
-      onToggleRepoPin={() => onSetRepoPin(repo.id, !repo.pinned)}
-      refreshing={refreshingRepoIds.has(repo.id)}
-      onRefreshWorktrees={() => onRefreshRepo(repo)}
-      onRefreshPullRequest={(branch) => onRefreshPullRequest(repo.id, branch)}
-      onSelectWorktree={(w, e, orderedIds) =>
-        handleRowClick(repo, w, e, orderedIds)
-      }
-      onContextWorktree={(w, e, orderedIds) =>
-        handleRowContext(repo, w, e, orderedIds)
-      }
-      onToggleWorktreePin={onSetWorktreePin}
-      onRemoveWorktree={onRemoveWorktree}
-      onRemoveSelected={() => onRemoveWorktrees(Array.from(sel.ids))}
-      onClearSelected={clearSel}
-      onCycleSort={() => cycleSort(repo.id)}
-      onReorder={(ids) => {
-        setOrderByRepo((prev) => ({ ...prev, [repo.id]: ids }));
-        onPersistOrder(repo.id, ids);
-      }}
-      onNewWorktree={() => setNewWorktree({ repo })}
-      onRevealWorktree={(worktreeId) => {
-        const worktree = repo.worktrees.find((candidate) => candidate.id === worktreeId);
-        if (worktree === undefined) return;
-        clearSel();
-        onSelectWorktree(repo, worktree);
-      }}
-      onCreateWorktreeFromRef={(branch, newBranch, startPoint) =>
-        setNewWorktree({
-          repo,
-          initialBranch: branch,
-          initialNewBranch: newBranch,
-          ...(startPoint === undefined ? {} : { startPoint })
-        })
-      }
-      arrangeable={arrangeable}
-      dragProps={repoDrag.rowProps(repo.id, arrangeable)}
-      dragging={repoDrag.dragId === repo.id}
-      dropPosition={
-        repoDrag.target?.id === repo.id ? repoDrag.target.position : null
-      }
-      focusable={repoTabStopId === repo.id}
-      onRowKeyDown={(event) => handleRepoKeyDown(repo, event)}
-      onRowFocus={() => setFocusedRepoId(repo.id)}
-      isPostDragClick={repoDrag.isPostDragClick}
-    />
-  );
+  const renderRepo = (repo: Repo, index: number, list: Repo[]) => {
+    const focusReason =
+      lens === "Focused"
+        ? focusReasonForRepo(repo, focusContext, now)
+        : null;
+    return (
+      <RepoRow
+        key={repo.id}
+        posinset={index + 1}
+        setsize={list.length}
+        repo={repo}
+        expanded={expanded.has(repo.id)}
+        containsSelection={repo.worktrees.some(
+          (w) => w.id === selectedWorktreeId
+        )}
+        selectedWorktreeId={selectedWorktreeId}
+        selectedIds={sel.repoId === repo.id ? sel.ids : EMPTY_IDS}
+        sort={sortByRepo[repo.id] ?? "recent"}
+        customOrder={orderByRepo[repo.id]}
+        now={now}
+        focused={lens === "Focused"}
+        focusVisits={focusVisits}
+        {...(focusReason === null ? {} : { focusReason })}
+        onToggleExpand={() => toggleExpand(repo)}
+        onToggleRepoPin={() => onSetRepoPin(repo.id, !repo.pinned)}
+        refreshing={refreshingRepoIds.has(repo.id)}
+        onRefreshWorktrees={() => onRefreshRepo(repo)}
+        onRefreshPullRequest={(branch) =>
+          onRefreshPullRequest(repo.id, branch)
+        }
+        onSelectWorktree={(w, e, orderedIds) =>
+          handleRowClick(repo, w, e, orderedIds)
+        }
+        onContextWorktree={(w, e, orderedIds) =>
+          handleRowContext(repo, w, e, orderedIds)
+        }
+        onToggleWorktreePin={onSetWorktreePin}
+        onRemoveWorktree={onRemoveWorktree}
+        onRemoveSelected={() => onRemoveWorktrees(Array.from(sel.ids))}
+        onClearSelected={clearSel}
+        onCycleSort={() => cycleSort(repo.id)}
+        onReorder={(ids) => {
+          setOrderByRepo((prev) => ({ ...prev, [repo.id]: ids }));
+          onPersistOrder(repo.id, ids);
+        }}
+        onNewWorktree={() => setNewWorktree({ repo })}
+        onRevealWorktree={(worktreeId) => {
+          const worktree = repo.worktrees.find(
+            (candidate) => candidate.id === worktreeId
+          );
+          if (worktree === undefined) return;
+          clearSel();
+          onSelectWorktree(repo, worktree);
+        }}
+        onCreateWorktreeFromRef={(branch, newBranch, startPoint) =>
+          setNewWorktree({
+            repo,
+            initialBranch: branch,
+            initialNewBranch: newBranch,
+            ...(startPoint === undefined ? {} : { startPoint })
+          })
+        }
+        arrangeable={arrangeable}
+        dragProps={repoDrag.rowProps(repo.id, arrangeable)}
+        dragging={repoDrag.dragId === repo.id}
+        dropPosition={
+          repoDrag.target?.id === repo.id ? repoDrag.target.position : null
+        }
+        focusable={repoTabStopId === repo.id}
+        onRowKeyDown={(event) => handleRepoKeyDown(repo, event)}
+        onRowFocus={() => setFocusedRepoId(repo.id)}
+        isPostDragClick={repoDrag.isPostDragClick}
+      />
+    );
+  };
 
   return (
     <aside className="pane pane--sidebar" data-testid="sidebar">
@@ -739,6 +839,34 @@ export function Sidebar({
           </button>
         )}
       </div>
+
+      {lens === "Focused" && repos.length > 0 && !loading && (
+        <div className="sidebar__focus-note" aria-live="polite">
+          <span className="sidebar__focus-rules">
+            Current · pinned · viewed · changed · 30-day commits
+          </span>
+          <div className="sidebar__focus-actions">
+            <span className="sidebar__focus-count">
+              {hiddenFocused > 0
+                ? `Showing ${filtered.length} of ${allFiltered.length}`
+                : `${allFiltered.length} focused`}
+            </span>
+            {hiddenFocused > 0 && (
+              <button type="button" onClick={() => setShowAllFocused(true)}>
+                Show all {allFiltered.length} focused
+              </button>
+            )}
+            {showAllFocused && allFiltered.length > FOCUS_REPO_LIMIT && (
+              <button type="button" onClick={() => setShowAllFocused(false)}>
+                Show fewer
+              </button>
+            )}
+            <button type="button" onClick={() => chooseLens("All")}>
+              Browse all {repos.length}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* The scrollport and the tree are two different things. `role="tree"`
           used to sit on .sidebar__list, which also holds the empty state — and

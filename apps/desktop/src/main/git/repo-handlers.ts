@@ -38,8 +38,8 @@ export function registerRepoHandlers(
     if (!result.ok) return result;
     if (result.value.outcome === "reconciled") {
       // A newly discovered worktree has no cached activity timestamp yet.
-      // Compute the reconciled family before the command completes so Recent
-      // sorting does not strand that row at the bottom as "undated".
+      // Compute the reconciled family before the command completes so Focused
+      // can rank a newly discovered worktree by its durable branch activity.
       await refresher.refreshRepoWorktrees(req.repoId);
     } else {
       // Deindexing leaves no worktrees to compute, but the deleted repo row

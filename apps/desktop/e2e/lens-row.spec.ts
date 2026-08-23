@@ -2,7 +2,12 @@ import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
-import { expandRepoGroup, expandWorktrees, lensChip } from "./fixtures/steps";
+import {
+  collapseWorktrees,
+  expandRepoGroup,
+  expandWorktrees,
+  lensChip
+} from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -65,21 +70,36 @@ test("the lens row fits, and names every lens for the keyboard", async () => {
     "aria-label",
     /^All \(15\)$/
   );
-  // The other branch of the same logic: a lens with nothing in it carries no
-  // parenthetical and no dot, so neither is decoration. Stale is the empty one
-  // here — Recent now reports the full list like All, since it holds every repo
-  // and was previously the only lens showing rows under no count at all.
+  // A lens with nothing in it carries no parenthetical and no dot, so neither
+  // is decoration. No repo has been opened, pinned, changed, or state-computed
+  // yet, so the honest first-run Focused set is empty.
   await expect(lensChip(window, "Stale")).toHaveAttribute("aria-label", "Stale");
   await expect(lensChip(window, "Stale").locator(".lens-chip__dot")).toHaveCount(0);
-  await expect(lensChip(window, "Recent")).toHaveAttribute(
+  await expect(lensChip(window, "Focused")).toHaveAttribute(
     "aria-label",
-    /^Recent \(15\)$/
+    "Focused"
   );
+  await expect(
+    lensChip(window, "Focused").locator(".lens-chip__dot")
+  ).toHaveCount(0);
   await expect(lensChip(window, "All").locator(".lens-chip__dot")).toHaveCount(1);
   // The active lens still spells its count out.
   await expect(window.locator(".lens-filter__count")).toHaveText("15");
 
   expect(await lensRowOverflow(window)).toBeLessThanOrEqual(0);
+
+  // A large focused set is bounded without becoming unreachable. Pins are an
+  // explicit Focus rule and update optimistically, so this does not depend on
+  // lazy Git-state computation.
+  const pins = window.locator(".repo-row .pin");
+  for (let index = 0; index < 15; index += 1) await pins.nth(index).click();
+  await lensChip(window, "Focused").click();
+  await expect(window.locator(".repo-row__name")).toHaveCount(12);
+  await expect(
+    window.getByRole("button", { name: "Show all 15 focused" })
+  ).toBeVisible();
+  await window.getByRole("button", { name: "Show all 15 focused" }).click();
+  await expect(window.locator(".repo-row__name")).toHaveCount(15);
 });
 
 test("the lens row survives the narrowest sidebar at the largest text size", async () => {
@@ -203,7 +223,7 @@ test("every lens shares one left edge — the Pinned grip must not indent its ro
   // Pin both and switch lens. The Pinned lens renders a drag grip that the
   // others don't; it is invisible at rest, but it used to be an in-flow flex
   // child, so it shifted every Pinned row's content right by its width and the
-  // list read as indented next to Recent. Out of flow, the edges agree.
+  // list read as indented next to Focused. Out of flow, the edges agree.
   for (const name of ["alpha", "bravo"]) {
     await window.locator(".repo-row", { hasText: name }).locator(".pin").click();
   }
@@ -522,22 +542,30 @@ test("the row controls clear the 24px pointer-target floor", async () => {
   expect(repoHeight).toBeLessThanOrEqual(28);
 });
 
-test("Recent and All are no longer the same list", async () => {
+test("first-run Focused stays honest and offers the exhaustive index", async () => {
   sandbox = createGitSandbox();
-  // Alphabetically zulu is last; by activity it is first.
-  const zulu = sandbox.makeRepo("zulu");
+  sandbox.makeRepo("zulu");
   sandbox.makeRepo("alpha");
   sandbox.makeRepo("mike");
-  sandbox.commitEmptyAt(zulu.path, "recent work", 1_800_000_000);
 
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
   await window.getByRole("button", { name: /Add folders/i }).click();
-  await lensChip(window, "All").click();
-  await expect(window.locator(".repo-row__name")).toHaveCount(3, {
+  await expect(window.locator(".repo-row__name")).toHaveCount(0, {
     timeout: 20_000
   });
+  await expect(window.locator(".sidebar__empty")).toContainText(
+    "No focused repos yet"
+  );
+  const browseAll = window.getByRole("button", { name: "Browse all 3" });
+  await expect(browseAll).toBeVisible();
+  await browseAll.click();
+  await expect(lensChip(window, "All")).toHaveAttribute(
+    "aria-selected",
+    "true"
+  );
+  await expect(window.locator(".repo-row__name")).toHaveCount(3);
 
   // All is the index: position follows name, and pinning must not move it.
   expect(await window.locator(".repo-row__name").allTextContents()).toEqual([
@@ -546,11 +574,9 @@ test("Recent and All are no longer the same list", async () => {
     "zulu"
   ]);
   await window.locator(".repo-row", { hasText: "zulu" }).locator(".pin").click();
-  expect(await window.locator(".repo-row__name").allTextContents()).toEqual([
-    "alpha",
-    "mike",
-    "zulu"
-  ]);
+  await lensChip(window, "Focused").click();
+  await expect(window.locator(".repo-row__name")).toHaveText(["zulu"]);
+  await expect(window.locator(".repo-row__focus-reason")).toHaveText("Pinned");
 });
 
 test("selecting a worktree row does not move it", async () => {
@@ -588,6 +614,7 @@ test("the chosen lens survives a reload", async () => {
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
   await window.getByRole("button", { name: /Add folders/i }).click();
+  await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(2, {
     timeout: 20_000
   });
@@ -606,14 +633,14 @@ test("the chosen lens survives a reload", async () => {
   );
 
   // A reload is the renderer-only restart: the same thing HMR does in dev, and
-  // the same thing a relaunch does to component state. Recent used to win both.
+  // the same thing a relaunch does to component state. Focused must not win.
   await window.reload();
   await expect(lensChip(window, "Pinned")).toHaveAttribute(
     "aria-selected",
     "true",
     { timeout: 20_000 }
   );
-  await expect(lensChip(window, "Recent")).toHaveAttribute(
+  await expect(lensChip(window, "Focused")).toHaveAttribute(
     "aria-selected",
     "false"
   );
@@ -621,6 +648,79 @@ test("the chosen lens survives a reload", async () => {
     timeout: 20_000
   });
 });
+
+test("a viewed repo remains in Focused after a reload", async () => {
+  sandbox = createGitSandbox();
+  for (const name of ["alpha", "bravo"]) sandbox.makeRepo(name);
+
+  handle = await launchApp();
+  const { window } = handle;
+  await handle.setPickDirectory(sandbox.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await lensChip(window, "All").click();
+  await expect(window.locator(".repo-row__name")).toHaveCount(2, {
+    timeout: 20_000
+  });
+
+  // Expanding selects the primary checkout. Current selection is the first
+  // Focus rule now; after reload, the bounded visit history is the durable one.
+  await expandRepoGroup(window, "alpha");
+  await lensChip(window, "Focused").click();
+  await expect(window.locator(".repo-row__name")).toHaveText(["alpha"]);
+  await expect(window.locator(".repo-row__focus-reason")).toHaveText("Current");
+
+  await window.reload();
+  await expect(lensChip(window, "Focused")).toHaveAttribute(
+    "aria-selected",
+    "true",
+    { timeout: 20_000 }
+  );
+  await expect(window.locator(".repo-row__name")).toHaveText(["alpha"]);
+  await expect(window.locator(".repo-row__focus-reason")).toHaveText("Viewed");
+});
+
+test(
+  "Focused elevates the current linked worktree and reveals the rest on demand",
+  async () => {
+    sandbox = createGitSandbox();
+    sandbox.makeRepo("working-set", {
+      worktrees: [
+        "feature/one",
+        "feature/two",
+        "feature/three",
+        "feature/four",
+        "feature/five",
+        "feature/six"
+      ]
+    });
+
+    handle = await launchApp();
+    const { window } = handle;
+    await handle.setPickDirectory(sandbox.reposDir);
+    await window.getByRole("button", { name: /Add folders/i }).click();
+    await lensChip(window, "All").click();
+    await expandRepoGroup(window, "working-set");
+    await expandWorktrees(window, "working-set");
+    await window.locator(".wt-row", { hasText: "feature/one" }).click();
+    await collapseWorktrees(window, "working-set");
+
+    await lensChip(window, "Focused").click();
+    await expect(
+      window.locator(".wt-subhead", { hasText: "Working" })
+    ).toBeVisible();
+    await expect(
+      window.locator(".wt-section__elevated .wt-row", {
+        hasText: "feature/one"
+      })
+    ).toBeVisible();
+    const more = window.getByRole("button", { name: /^More worktrees 1/ });
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+    await expect(window.locator(".wt-section__body .wt-row")).toHaveCount(0);
+    await more.click();
+    await expect(more).toHaveAttribute("aria-expanded", "true");
+    await expect(window.locator(".wt-section__body .wt-row")).toHaveCount(1);
+  }
+);
 
 test("an automatic widen does not retire the lens the user chose", async () => {
   sandbox = createGitSandbox();
@@ -630,6 +730,7 @@ test("an automatic widen does not retire the lens the user chose", async () => {
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
   await window.getByRole("button", { name: /Add folders/i }).click();
+  await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(2, {
     timeout: 20_000
   });
@@ -639,13 +740,13 @@ test("an automatic widen does not retire the lens the user chose", async () => {
     .click();
   await lensChip(window, "Pinned").click();
 
-  // ⌘K into bravo, which Pinned excludes. The sidebar widens to Recent so the
+  // ⌘K into bravo, which Pinned excludes. The sidebar widens to Focused so the
   // selected row is visible — that part is deliberate and must still happen.
   await window.keyboard.press("Meta+f");
   await window.locator(".overlay-search input").fill("bravo");
   await expect(window.locator(".overlay-result").first()).toContainText("bravo");
   await window.keyboard.press("Enter");
-  await expect(lensChip(window, "Recent")).toHaveAttribute(
+  await expect(lensChip(window, "Focused")).toHaveAttribute(
     "aria-selected",
     "true",
     { timeout: 20_000 }

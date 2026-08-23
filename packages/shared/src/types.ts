@@ -287,7 +287,7 @@ export type Repo = {
   /**
    * Persisted drag-order index within the profile; absent until the user
    * arranges the list by hand. Only the Pinned lens honors it — the computed
-   * lenses (Recent/Behind/Stale) answer a question, so a manual order there
+   * lenses (Focused/Behind/Stale) answer a question, so a manual order there
    * would fight the answer.
    */
   order?: number;
@@ -755,7 +755,7 @@ export type RebaseCheckResult =
     }
   | { status: "snag"; code: string; message: string };
 
-export type Lens = "Recent" | "Pinned" | "Behind" | "Stale" | "All";
+export type Lens = "Focused" | "Pinned" | "Behind" | "Stale" | "All";
 export type WorktreeSort = "recent" | "pinned" | "az" | "active" | "custom";
 
 /** Lazily-filled status for a ⌘F search hit (nulls = unknown/uncached). */

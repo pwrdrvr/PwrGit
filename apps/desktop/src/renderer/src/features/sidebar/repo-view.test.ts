@@ -3,6 +3,11 @@ import type { Repo, Worktree } from "@pwrgit/shared";
 import {
   dropPositionWithin,
   filterReposByLens,
+  FOCUS_REPO_LIMIT,
+  focusedRepoPage,
+  focusedRepos,
+  focusReasonForRepo,
+  focusReasonForWorktree,
   groupWorktreesForNavigation,
   groupReposByRoot,
   isPrunableWorktree,
@@ -11,6 +16,7 @@ import {
   linkedWorktreeCount,
   lensIsArrangeable,
   orderWorktrees,
+  partitionFocusedWorktrees,
   reorder,
   repoPinSource,
   repoPrimaryBehind,
@@ -58,9 +64,13 @@ describe("lensCounts / filterReposByLens", () => {
 
   it("counts pinned (repo or worktree), behind, and all", () => {
     const counts = lensCounts(repos);
-    // Recent holds every repo, exactly like All — it used to report 0, which
-    // made the lens the app opens on the only one with no count and no dot.
-    expect(counts).toEqual({ Recent: 3, Pinned: 2, Behind: 1, Stale: 0, All: 3 });
+    expect(counts).toEqual({
+      Focused: 2,
+      Pinned: 2,
+      Behind: 1,
+      Stale: 0,
+      All: 3
+    });
   });
 
   it("Behind lens keeps only repos with a behind worktree", () => {
@@ -101,74 +111,94 @@ describe("lensCounts / filterReposByLens", () => {
   });
 });
 
-describe("Recent lens", () => {
-  const at = (id: string, iso?: string): Repo =>
-    repo({
-      id,
-      name: id,
+describe("Focused lens", () => {
+  const NOW = Date.parse("2026-08-23T12:00:00Z");
+  const daysAgo = (days: number): string =>
+    new Date(NOW - days * 86_400_000).toISOString();
+
+  it("uses a transparent priority ladder and excludes incidental repos", () => {
+    const rows = [
+      repo({
+        id: "recent",
+        worktrees: [
+          wt({ id: "recent-wt", branch: "recent", lastActivityAt: daysAgo(3) })
+        ]
+      }),
+      repo({
+        id: "changed",
+        worktrees: [wt({ id: "changed-wt", branch: "changed", ahead: 1 })]
+      }),
+      repo({
+        id: "viewed",
+        worktrees: [wt({ id: "viewed-wt", branch: "viewed" })]
+      }),
+      repo({ id: "pinned", pinned: true }),
+      repo({
+        id: "current",
+        worktrees: [wt({ id: "current-wt", branch: "current" })]
+      }),
+      repo({
+        id: "incidental",
+        worktrees: [wt({ id: "incidental-wt", branch: "old", behind: 20 })]
+      })
+    ];
+    const context = {
+      selectedWorktreeId: "current-wt",
+      visits: { "viewed-wt": NOW - 2 * 86_400_000 }
+    };
+
+    expect(focusedRepos(rows, context, NOW).map((r) => r.id)).toEqual([
+      "current",
+      "pinned",
+      "viewed",
+      "changed",
+      "recent"
+    ]);
+    expect(
+      filterReposByLens(rows, "Focused", NOW, context).map((r) => r.id)
+    ).toEqual(["current", "pinned", "viewed", "changed", "recent"]);
+    expect(focusReasonForRepo(rows[5] as Repo, context, NOW)).toBeNull();
+  });
+
+  it("expires views and branch activity after 30 days", () => {
+    const viewed = repo({
+      id: "viewed",
+      worktrees: [wt({ id: "viewed-wt", branch: "viewed" })]
+    });
+    const recent = repo({
+      id: "recent",
       worktrees: [
-        wt({
-          id: `${id}-1`,
-          branch: "main",
-          ...(iso === undefined ? {} : { lastActivityAt: iso })
-        })
+        wt({ id: "recent-wt", branch: "recent", lastActivityAt: daysAgo(31) })
       ]
     });
-
-  it("orders by newest worktree activity, not by name", () => {
-    const repos = [
-      at("alpha", "2026-01-01T00:00:00Z"),
-      at("bravo", "2026-08-01T00:00:00Z"),
-      at("charlie", "2026-04-01T00:00:00Z")
-    ];
-    expect(filterReposByLens(repos, "Recent").map((r) => r.id)).toEqual([
-      "bravo",
-      "charlie",
-      "alpha"
-    ]);
+    expect(
+      focusedRepos(
+        [viewed, recent],
+        {
+          selectedWorktreeId: null,
+          visits: { "viewed-wt": NOW - 31 * 86_400_000 }
+        },
+        NOW
+      )
+    ).toEqual([]);
   });
 
-  it("takes a repo's NEWEST worktree, not its first", () => {
-    const stale = repo({
-      id: "stale",
-      name: "stale",
-      worktrees: [
-        wt({ id: "s1", branch: "old", lastActivityAt: "2026-01-01T00:00:00Z" }),
-        wt({ id: "s2", branch: "hot", lastActivityAt: "2026-09-01T00:00:00Z" })
-      ]
+  it("caps a large first page and reveals the complete focused set on demand", () => {
+    const rows = Array.from({ length: 40 }, (_, index) =>
+      repo({ id: `repo-${index}`, pinned: true })
+    );
+    const focused = focusedRepos(
+      rows,
+      { selectedWorktreeId: null, visits: {} },
+      NOW
+    );
+    const page = focusedRepoPage(focused, false);
+    expect(page.repos).toHaveLength(FOCUS_REPO_LIMIT);
+    expect(page.hidden).toBe(40 - FOCUS_REPO_LIMIT);
+    expect(focusedRepoPage(focused, true)).toEqual({
+      repos: focused,
+      hidden: 0
     });
-    const mid = at("mid", "2026-05-01T00:00:00Z");
-    expect(filterReposByLens([mid, stale], "Recent").map((r) => r.id)).toEqual([
-      "stale",
-      "mid"
-    ]);
-  });
-
-  it("sinks repos with no known activity, alphabetical among themselves", () => {
-    // Worktree state is computed lazily, so "unknown" is the normal state for a
-    // repo nobody has opened. Those must not shuffle: -Infinity minus -Infinity
-    // is NaN, and a NaN comparator returns an arbitrary order every call.
-    const repos = [at("zulu"), at("known", "2026-03-01T00:00:00Z"), at("alpha")];
-    expect(filterReposByLens(repos, "Recent").map((r) => r.id)).toEqual([
-      "known",
-      "alpha",
-      "zulu"
-    ]);
-  });
-
-  it("Recent and All disagree — they were the same list before", () => {
-    const repos = [
-      at("zulu", "2026-08-01T00:00:00Z"),
-      at("alpha", "2026-01-01T00:00:00Z")
-    ];
-    expect(filterReposByLens(repos, "Recent").map((r) => r.id)).toEqual([
-      "zulu",
-      "alpha"
-    ]);
-    expect(filterReposByLens(repos, "All").map((r) => r.id)).toEqual([
-      "alpha",
-      "zulu"
-    ]);
   });
 });
 
@@ -312,6 +342,57 @@ describe("groupWorktreesForNavigation", () => {
   });
 });
 
+describe("partitionFocusedWorktrees", () => {
+  const NOW = Date.parse("2026-08-23T12:00:00Z");
+
+  it("elevates selected, viewed, changed, and recently active worktrees", () => {
+    const worktrees = [
+      wt({ id: "old", branch: "old" }),
+      wt({
+        id: "recent",
+        branch: "recent",
+        lastActivityAt: "2026-08-20T00:00:00Z"
+      }),
+      wt({ id: "changed", branch: "changed", dirty: 1 }),
+      wt({ id: "viewed", branch: "viewed" }),
+      wt({ id: "current", branch: "current" })
+    ];
+    const context = {
+      selectedWorktreeId: "current",
+      visits: { viewed: NOW - 86_400_000 }
+    };
+    const partition = partitionFocusedWorktrees(worktrees, context, NOW);
+    expect(partition.focused.map((worktree) => worktree.id)).toEqual([
+      "current",
+      "viewed",
+      "changed",
+      "recent"
+    ]);
+    expect(partition.remaining.map((worktree) => worktree.id)).toEqual(["old"]);
+    expect(
+      focusReasonForWorktree(worktrees[0] as Worktree, context, NOW)
+    ).toBeNull();
+  });
+
+  it("keeps overflow behind the on-demand disclosure", () => {
+    const worktrees = Array.from({ length: 9 }, (_, index) =>
+      wt({
+        id: `wt-${index}`,
+        branch: `feature/${index}`,
+        lastActivityAt: "2026-08-20T00:00:00Z"
+      })
+    );
+    const partition = partitionFocusedWorktrees(
+      worktrees,
+      { selectedWorktreeId: null, visits: {} },
+      NOW,
+      5
+    );
+    expect(partition.focused).toHaveLength(5);
+    expect(partition.remaining).toHaveLength(4);
+  });
+});
+
 describe("reorder", () => {
   it("moves the dragged id in front of the target", () => {
     expect(reorder(["1", "2", "3"], "3", "1")).toEqual(["3", "1", "2"]);
@@ -380,7 +461,7 @@ describe("hand-arranged repo order", () => {
 
   it("only the Pinned lens is arrangeable", () => {
     expect(lensIsArrangeable("Pinned")).toBe(true);
-    for (const lens of ["Recent", "Behind", "Stale", "All"] as const) {
+    for (const lens of ["Focused", "Behind", "Stale", "All"] as const) {
       expect(lensIsArrangeable(lens)).toBe(false);
     }
   });
