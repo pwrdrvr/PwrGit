@@ -102,7 +102,7 @@ export function ProfileChip({
           </button>
           <div className="profile-menu__sep" />
           <div className="profile-menu__hint">
-            Same GitHub identity · commit email &amp; org set per profile
+            Same GitHub identity · theme, commit email &amp; org per profile
           </div>
         </div>
       )}

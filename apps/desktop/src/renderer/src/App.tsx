@@ -38,14 +38,12 @@ import {
 } from "./features/sidebar/worktree-selection";
 import { profileWindowTitle } from "./lib/profileTitle";
 import { dispatch, subscribe, windowProfileId } from "./lib/pwrgit";
-import { useAppearance } from "./lib/useAppearance";
 import { useColumnResize } from "./lib/useColumnResize";
 import { useProfiles } from "./state/useProfiles";
 import { useRepoTree } from "./state/useRepoTree";
 import { useWorktreeState } from "./state/useWorktreeState";
 
 export function App() {
-  useAppearance();
   const sidebar = useColumnResize("pwrgit.sidebarWidth", 320, 240, 520, "left");
   const rail = useColumnResize("pwrgit.railWidth", 344, 280, 560, "right");
   const [railCollapsed, setRailCollapsed] = useState(false);
