@@ -6,6 +6,7 @@ import {
   type MouseEvent as ReactMouseEvent
 } from "react";
 import type { Worktree } from "@pwrgit/shared";
+import { currentPlatform, shortcutLabel } from "../../lib/platform";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
 import { PrChip } from "./PrChip";
 import {
@@ -34,7 +35,8 @@ export function WorktreeRow({
   onKeyDown,
   onFocus,
   posinset,
-  setsize
+  setsize,
+  platform = currentPlatform()
 }: {
   worktree: Worktree;
   selected: boolean;
@@ -68,6 +70,8 @@ export function WorktreeRow({
    *  the position is not derivable from DOM order. */
   posinset: number;
   setsize: number;
+  /** Explicit only in deterministic platform component tests. */
+  platform?: string;
 }) {
   const prunable = isPrunableWorktree(worktree, now);
   // The primary checkout sits in the repo's own directory, which the folder row
@@ -124,7 +128,13 @@ export function WorktreeRow({
         title={
           worktree.isPrimary
             ? undefined
-            : "Drag to reorder — or ⌘⇧↑ / ⌘⇧↓ from the keyboard"
+            : `Drag to reorder — or ${shortcutLabel(
+                { key: "ArrowUp", shift: true },
+                platform
+              )} / ${shortcutLabel(
+                { key: "ArrowDown", shift: true },
+                platform
+              )} from the keyboard`
         }
       >
         {!worktree.isPrimary && (
@@ -321,6 +331,7 @@ export function WorktreeRow({
       <WorktreeMenu
         worktree={worktree}
         className="wt-row__menu"
+        platform={platform}
         {...(worktree.isPrimary ? {} : { onRemove })}
       />
     </div>
