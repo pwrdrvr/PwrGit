@@ -631,6 +631,7 @@ export type ChangeSet = {
 export type ConflictOperationKind =
   | "merge"
   | "rebase"
+  | "am"
   | "cherry-pick"
   | "revert";
 

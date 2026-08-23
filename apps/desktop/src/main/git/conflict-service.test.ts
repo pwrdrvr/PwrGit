@@ -1,9 +1,11 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   abortConflictOperation,
   acceptConflictSide,
+  CONFLICT_TEXT_PREVIEW_LIMIT,
   continueConflictOperation,
   inspectConflict,
   parseUnmergedIndex,
@@ -18,6 +20,7 @@ import {
   type ConflictTestFixture,
   type ConflictTestOperation
 } from "./conflict-test-fixture";
+import type { GitExecBinary } from "./dugite";
 
 let fixture: ConflictTestFixture | null = null;
 
@@ -30,6 +33,7 @@ describe("conflict operation detection (real Git)", () => {
   it.each([
     "merge",
     "rebase",
+    "am",
     "cherry-pick",
     "revert"
   ] satisfies ConflictTestOperation[])("detects an in-progress %s", async (kind) => {
@@ -48,6 +52,21 @@ describe("conflict operation detection (real Git)", () => {
     expect(state.value.conflicts.every((entry) => entry.base !== null)).toBe(true);
     expect(state.value.conflicts.every((entry) => entry.ours !== null)).toBe(true);
     expect(state.value.conflicts.every((entry) => entry.theirs !== null)).toBe(true);
+  });
+
+  it("aborts an in-progress git am with git am --abort", async () => {
+    fixture = createConflictTestFixture();
+    fixture.start("am");
+
+    await expect(
+      abortConflictOperation(conflictSystemGit, fixture.repo, "am")
+    ).resolves.toEqual({ ok: true, value: undefined });
+
+    expect(fixture.run("rev-parse", "HEAD")).toBe(fixture.mainHead);
+    await expect(readConflictState(conflictSystemGit, fixture.repo)).resolves.toEqual({
+      ok: true,
+      value: { operation: null, conflicts: [] }
+    });
   });
 });
 
@@ -95,6 +114,90 @@ describe("conflict resolution (real Git)", () => {
     expect(after.ok && after.value.conflicts.map((entry) => entry.path)).toEqual([
       "beta.txt"
     ]);
+  });
+
+  it("treats a conflicted filename as a literal path when accepting a side", async () => {
+    fixture = createConflictTestFixture();
+    const magicPath = "[partial].txt";
+    const relatedPathspecMatch = "p.txt";
+    writeFileSync(join(fixture.repo, magicPath), "base magic\n");
+    writeFileSync(join(fixture.repo, relatedPathspecMatch), "keep p\n");
+    fixture.run("--literal-pathspecs", "add", "--", magicPath, relatedPathspecMatch);
+    fixture.run("commit", "-m", "add magic path base");
+    fixture.run("switch", "-c", "magic-topic");
+    writeFileSync(join(fixture.repo, magicPath), "topic magic\n");
+    fixture.run("--literal-pathspecs", "add", "--", magicPath);
+    fixture.run("commit", "-m", "topic edits magic path");
+    fixture.run("switch", "main");
+    writeFileSync(join(fixture.repo, magicPath), "main magic\n");
+    fixture.run("--literal-pathspecs", "add", "--", magicPath);
+    fixture.run("commit", "-m", "main edits magic path");
+    expect(() => fixture?.run("merge", "magic-topic")).toThrow();
+    writeFileSync(join(fixture.repo, relatedPathspecMatch), "unrelated edit\n");
+
+    const before = await readConflictState(conflictSystemGit, fixture.repo);
+    if (!before.ok) throw new Error(before.error.message);
+    const conflict = before.value.conflicts.find(
+      (entry) => entry.path === magicPath
+    );
+    if (conflict?.theirs === undefined) throw new Error("magic conflict missing");
+    await expect(
+      acceptConflictSide(conflictSystemGit, fixture.repo, {
+        path: magicPath,
+        side: "theirs",
+        expectedOid: conflict.theirs?.oid ?? null
+      })
+    ).resolves.toEqual({ ok: true, value: undefined });
+
+    expect(readFileSync(join(fixture.repo, magicPath), "utf8")).toBe(
+      "topic magic\n"
+    );
+    expect(readFileSync(join(fixture.repo, relatedPathspecMatch), "utf8")).toBe(
+      "unrelated edit\n"
+    );
+    expect(fixture.run("ls-files", "--unmerged", "--", magicPath)).toBe("");
+    expect(fixture.run("diff", "--cached", "--name-only")).toBe(magicPath);
+    expect(fixture.run("diff", "--name-only")).toBe(relatedPathspecMatch);
+  });
+
+  it("treats a conflicted filename as literal when accepting a deletion", async () => {
+    fixture = createConflictTestFixture();
+    const repo = fixture.repo;
+    const magicPath = "[partial].txt";
+    const relatedPathspecMatch = "p.txt";
+    writeFileSync(join(fixture.repo, magicPath), "base magic\n");
+    writeFileSync(join(fixture.repo, relatedPathspecMatch), "keep p\n");
+    fixture.run("--literal-pathspecs", "add", "--", magicPath, relatedPathspecMatch);
+    fixture.run("commit", "-m", "add delete conflict base");
+    fixture.run("switch", "-c", "delete-topic");
+    writeFileSync(join(fixture.repo, magicPath), "topic modifies magic\n");
+    fixture.run("--literal-pathspecs", "add", "--", magicPath);
+    fixture.run("commit", "-m", "topic modifies magic");
+    fixture.run("switch", "main");
+    fixture.run("--literal-pathspecs", "rm", "--", magicPath);
+    fixture.run("commit", "-m", "main deletes magic");
+    expect(() => fixture?.run("merge", "delete-topic")).toThrow();
+
+    const before = await readConflictState(conflictSystemGit, fixture.repo);
+    if (!before.ok) throw new Error(before.error.message);
+    const conflict = before.value.conflicts.find(
+      (entry) => entry.path === magicPath
+    );
+    expect(conflict?.ours).toBeNull();
+    await expect(
+      acceptConflictSide(conflictSystemGit, fixture.repo, {
+        path: magicPath,
+        side: "ours",
+        expectedOid: null
+      })
+    ).resolves.toEqual({ ok: true, value: undefined });
+
+    expect(() => readFileSync(join(repo, magicPath))).toThrow();
+    expect(readFileSync(join(repo, relatedPathspecMatch), "utf8")).toBe(
+      "keep p\n"
+    );
+    expect(fixture.run("ls-files", "--unmerged", "--", magicPath)).toBe("");
+    expect(fixture.run("diff", "--cached", "--name-only")).toBe("");
   });
 
   it("accepts a genuinely missing side as an explicit staged deletion", async () => {
@@ -176,6 +279,94 @@ describe("conflict resolution (real Git)", () => {
     expect(inspected.value.theirs?.content.kind).toBe("binary");
     expect(inspected.value.workingTree?.content.kind).toBe("binary");
     expect(inspected.value.workingTree?.editable).toBe(false);
+  });
+
+  it("size-checks large stages and working files before reading content", async () => {
+    fixture = createConflictTestFixture();
+    const tail = "unchanged line\n".repeat(
+      Math.ceil(CONFLICT_TEXT_PREVIEW_LIMIT / "unchanged line\n".length)
+    );
+    writeFileSync(join(fixture.repo, "large.txt"), `base line\n${tail}`);
+    fixture.run("add", "large.txt");
+    fixture.run("commit", "-m", "large conflict base");
+    fixture.run("switch", "-c", "large-topic");
+    writeFileSync(join(fixture.repo, "large.txt"), `topic line\n${tail}`);
+    fixture.run("add", "large.txt");
+    fixture.run("commit", "-m", "large topic");
+    fixture.run("switch", "main");
+    writeFileSync(join(fixture.repo, "large.txt"), `main line\n${tail}`);
+    fixture.run("add", "large.txt");
+    fixture.run("commit", "-m", "large main");
+    expect(() => fixture?.run("merge", "large-topic")).toThrow();
+    let binaryReads = 0;
+    const guardedBinary: GitExecBinary = async (args, cwd) => {
+      binaryReads += 1;
+      return conflictSystemGitBinary(args, cwd);
+    };
+
+    const inspected = await inspectConflict(
+      conflictSystemGit,
+      guardedBinary,
+      fixture.repo,
+      "large.txt"
+    );
+
+    expect(inspected.ok).toBe(true);
+    if (!inspected.ok) return;
+    expect(inspected.value.base?.content.kind).toBe("too-large");
+    expect(inspected.value.ours?.content.kind).toBe("too-large");
+    expect(inspected.value.theirs?.content.kind).toBe("too-large");
+    expect(inspected.value.workingTree?.content.kind).toBe("too-large");
+    expect(inspected.value.workingTree?.editable).toBe(false);
+    expect(binaryReads).toBe(0);
+  });
+
+  it("previews and accepts a gitlink by its reviewed index OID", async () => {
+    fixture = createConflictTestFixture();
+    fixture.start("merge");
+    const baseOid = fixture.run("merge-base", "main", "topic");
+    const path = "modules/dependency";
+    const indexInfo = [
+      `160000 ${baseOid} 1\t${path}\n`,
+      `160000 ${fixture.mainHead} 2\t${path}\n`,
+      `160000 ${fixture.topicHead} 3\t${path}\n`
+    ].join("");
+    const updated = spawnSync("git", ["update-index", "--index-info"], {
+      cwd: fixture.repo,
+      input: indexInfo,
+      encoding: "utf8"
+    });
+    if (updated.status !== 0) {
+      throw new Error(updated.stderr || "failed to add gitlink conflict");
+    }
+
+    const inspected = await inspectConflict(
+      conflictSystemGit,
+      conflictSystemGitBinary,
+      fixture.repo,
+      path
+    );
+    expect(inspected.ok).toBe(true);
+    if (!inspected.ok) return;
+    expect(inspected.value.theirs).toMatchObject({
+      mode: "160000",
+      oid: fixture.topicHead,
+      content: {
+        kind: "unavailable",
+        reason: expect.stringContaining(fixture.topicHead)
+      }
+    });
+
+    await expect(
+      acceptConflictSide(conflictSystemGit, fixture.repo, {
+        path,
+        side: "theirs",
+        expectedOid: fixture.topicHead
+      })
+    ).resolves.toEqual({ ok: true, value: undefined });
+    expect(fixture.run("ls-files", "--stage", "--", path)).toBe(
+      `160000 ${fixture.topicHead} 0\t${path}`
+    );
   });
 
   it("reports a deterministic continue failure and leaves the merge recoverable", async () => {
@@ -264,6 +455,34 @@ describe("conflict resolution (real Git)", () => {
     expect(state.ok && state.value.conflicts.map((entry) => entry.path)).toEqual([
       "beta.txt"
     ]);
+  });
+
+  it("stages only a literal conflicted path after an external resolution", async () => {
+    fixture = createConflictTestFixture();
+    const magicPath = "[partial].txt";
+    const relatedPathspecMatch = "p.txt";
+    writeFileSync(join(fixture.repo, magicPath), "base magic\n");
+    writeFileSync(join(fixture.repo, relatedPathspecMatch), "keep p\n");
+    fixture.run("--literal-pathspecs", "add", "--", magicPath, relatedPathspecMatch);
+    fixture.run("commit", "-m", "manual magic base");
+    fixture.run("switch", "-c", "manual-topic");
+    writeFileSync(join(fixture.repo, magicPath), "topic magic\n");
+    fixture.run("--literal-pathspecs", "add", "--", magicPath);
+    fixture.run("commit", "-m", "manual topic");
+    fixture.run("switch", "main");
+    writeFileSync(join(fixture.repo, magicPath), "main magic\n");
+    fixture.run("--literal-pathspecs", "add", "--", magicPath);
+    fixture.run("commit", "-m", "manual main");
+    expect(() => fixture?.run("merge", "manual-topic")).toThrow();
+    writeFileSync(join(fixture.repo, magicPath), "resolved magic\n");
+    writeFileSync(join(fixture.repo, relatedPathspecMatch), "unrelated edit\n");
+
+    await expect(
+      stageConflictResolution(conflictSystemGit, fixture.repo, magicPath)
+    ).resolves.toEqual({ ok: true, value: undefined });
+
+    expect(fixture.run("diff", "--cached", "--name-only")).toBe(magicPath);
+    expect(fixture.run("diff", "--name-only")).toBe(relatedPathspecMatch);
   });
 });
 

@@ -1,5 +1,14 @@
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  writeFileSync
+} from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import {
   err,
@@ -139,10 +148,15 @@ function readCounter(path: string): number | null {
 }
 
 function detectOperation(gitDir: string): ConflictOperation | null {
-  const rebaseDir = existsSync(join(gitDir, "rebase-merge"))
-    ? join(gitDir, "rebase-merge")
-    : existsSync(join(gitDir, "rebase-apply"))
-      ? join(gitDir, "rebase-apply")
+  const rebaseMergeDir = join(gitDir, "rebase-merge");
+  const rebaseApplyDir = join(gitDir, "rebase-apply");
+  if (existsSync(join(rebaseApplyDir, "applying"))) {
+    return { kind: "am", label: "Apply mailbox" };
+  }
+  const rebaseDir = existsSync(rebaseMergeDir)
+    ? rebaseMergeDir
+    : existsSync(join(rebaseApplyDir, "rebasing"))
+      ? rebaseApplyDir
       : null;
   if (rebaseDir !== null) {
     const current =
@@ -235,12 +249,51 @@ function contentPreview(bytes: Buffer): ConflictBlobPreview {
   }
 }
 
+async function objectSize(
+  git: GitExec,
+  cwd: string,
+  oid: string
+): Promise<Result<number>> {
+  const args = ["cat-file", "-s", oid];
+  const raw = await git(args, cwd, NO_OPTIONAL_LOCKS);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, args);
+  if (!checked.ok) return checked;
+  const size = Number(checked.value.stdout.trim());
+  return Number.isSafeInteger(size) && size >= 0
+    ? ok(size)
+    : conflictError(
+        "object_size_invalid",
+        `Git reported an invalid object size for ${oid}.`
+      );
+}
+
 async function inspectStage(
+  git: GitExec,
   gitBinary: GitExecBinary,
   cwd: string,
   info: ConflictStageInfo | null
 ): Promise<Result<ConflictStagePreview | null>> {
   if (info === null) return ok(null);
+  if (info.mode === "160000") {
+    return ok({
+      ...info,
+      size: 0,
+      content: {
+        kind: "unavailable",
+        reason: `Submodule commit ${info.oid}. Submodule contents are not previewed inline.`
+      }
+    });
+  }
+  const sized = await objectSize(git, cwd, info.oid);
+  if (!sized.ok) return sized;
+  if (sized.value > CONFLICT_TEXT_PREVIEW_LIMIT) {
+    return ok({
+      ...info,
+      size: sized.value,
+      content: { kind: "too-large", limit: CONFLICT_TEXT_PREVIEW_LIMIT }
+    });
+  }
   const args = ["cat-file", "blob", info.oid];
   const raw = await gitBinary(args, cwd);
   if (!raw.ok) return raw;
@@ -251,6 +304,32 @@ async function inspectStage(
     );
   }
   return ok({ ...info, ...contentPreview(raw.value.stdout) });
+}
+
+function readWorkingFileCapped(path: string): {
+  bytes: Buffer | null;
+  size: number;
+} {
+  const file = openSync(path, "r");
+  try {
+    const initialSize = fstatSync(file).size;
+    if (initialSize > CONFLICT_TEXT_PREVIEW_LIMIT) {
+      return { bytes: null, size: initialSize };
+    }
+    const buffer = Buffer.allocUnsafe(CONFLICT_TEXT_PREVIEW_LIMIT + 1);
+    let offset = 0;
+    while (offset < buffer.byteLength) {
+      const read = readSync(file, buffer, offset, buffer.byteLength - offset, null);
+      if (read === 0) break;
+      offset += read;
+    }
+    if (offset > CONFLICT_TEXT_PREVIEW_LIMIT) {
+      return { bytes: null, size: Math.max(fstatSync(file).size, offset) };
+    }
+    return { bytes: buffer.subarray(0, offset), size: offset };
+  } finally {
+    closeSync(file);
+  }
 }
 
 function inspectWorkingTree(
@@ -273,7 +352,25 @@ function inspectWorkingTree(
     });
   }
   try {
-    const bytes = readFileSync(target.value);
+    if (info.size > CONFLICT_TEXT_PREVIEW_LIMIT) {
+      return ok({
+        ...info,
+        contentHash: "",
+        content: { kind: "too-large", limit: CONFLICT_TEXT_PREVIEW_LIMIT },
+        editable: false
+      });
+    }
+    const capped = readWorkingFileCapped(target.value);
+    if (capped.bytes === null) {
+      return ok({
+        ...info,
+        size: capped.size,
+        contentHash: "",
+        content: { kind: "too-large", limit: CONFLICT_TEXT_PREVIEW_LIMIT },
+        editable: false
+      });
+    }
+    const bytes = capped.bytes;
     const preview = contentPreview(bytes);
     return ok({
       ...info,
@@ -308,9 +405,9 @@ export async function inspectConflict(
     );
   }
   const [base, ours, theirs] = await Promise.all([
-    inspectStage(gitBinary, cwd, conflict.base),
-    inspectStage(gitBinary, cwd, conflict.ours),
-    inspectStage(gitBinary, cwd, conflict.theirs)
+    inspectStage(git, gitBinary, cwd, conflict.base),
+    inspectStage(git, gitBinary, cwd, conflict.ours),
+    inspectStage(git, gitBinary, cwd, conflict.theirs)
   ]);
   if (!base.ok) return base;
   if (!ours.ok) return ours;
@@ -371,6 +468,7 @@ export async function acceptConflictSide(
   }
   if (selected === null) {
     return checkedMutation(git, cwd, [
+      "--literal-pathspecs",
       "rm",
       "-f",
       "--ignore-unmatch",
@@ -378,7 +476,17 @@ export async function acceptConflictSide(
       input.path
     ]);
   }
+  if (selected.mode === "160000") {
+    return checkedMutation(git, cwd, [
+      "--literal-pathspecs",
+      "update-index",
+      "--add",
+      "--cacheinfo",
+      `${selected.mode},${selected.oid},${input.path}`
+    ]);
+  }
   const checkedOut = await checkedMutation(git, cwd, [
+    "--literal-pathspecs",
     "checkout-index",
     "--force",
     `--stage=${selected.stage}`,
@@ -386,7 +494,13 @@ export async function acceptConflictSide(
     input.path
   ]);
   if (!checkedOut.ok) return checkedOut;
-  return checkedMutation(git, cwd, ["add", "-A", "--", input.path]);
+  return checkedMutation(git, cwd, [
+    "--literal-pathspecs",
+    "add",
+    "-A",
+    "--",
+    input.path
+  ]);
 }
 
 /** Stage a manual/external resolution, including an intentional deletion. */
@@ -397,7 +511,13 @@ export async function stageConflictResolution(
 ): Promise<Result<void>> {
   const current = await currentConflict(git, cwd, path);
   if (!current.ok) return current;
-  return checkedMutation(git, cwd, ["add", "-A", "--", path]);
+  return checkedMutation(git, cwd, [
+    "--literal-pathspecs",
+    "add",
+    "-A",
+    "--",
+    path
+  ]);
 }
 
 /** Save regular UTF-8 text only, refusing to clobber a newer external edit. */
@@ -466,6 +586,7 @@ export async function conflictWorkingPath(
 const CONTINUE_ARGS: Record<ConflictOperationKind, string[]> = {
   merge: ["merge", "--continue"],
   rebase: ["rebase", "--continue"],
+  am: ["am", "--continue"],
   "cherry-pick": ["cherry-pick", "--continue"],
   revert: ["revert", "--continue"]
 };
@@ -473,6 +594,7 @@ const CONTINUE_ARGS: Record<ConflictOperationKind, string[]> = {
 const ABORT_ARGS: Record<ConflictOperationKind, string[]> = {
   merge: ["merge", "--abort"],
   rebase: ["rebase", "--abort"],
+  am: ["am", "--abort"],
   "cherry-pick": ["cherry-pick", "--abort"],
   revert: ["revert", "--abort"]
 };

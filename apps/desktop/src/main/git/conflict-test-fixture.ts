@@ -71,6 +71,7 @@ export const conflictSystemGitBinary: GitExecBinary = (args, cwd) =>
 export type ConflictTestOperation =
   | "merge"
   | "rebase"
+  | "am"
   | "cherry-pick"
   | "revert";
 
@@ -154,6 +155,14 @@ export function createConflictTestFixture(): ConflictTestFixture {
       } else if (operation === "rebase") {
         run("switch", "topic");
         expectConflict("rebase", "main");
+      } else if (operation === "am") {
+        const patch = result("format-patch", "--stdout", "-1", topicHead);
+        if (patch.status !== 0) {
+          throw new Error(patch.stderr || "git format-patch failed");
+        }
+        const patchPath = join(root, "topic.patch");
+        writeFileSync(patchPath, patch.stdout);
+        expectConflict("am", "--3way", patchPath);
       } else if (operation === "cherry-pick") {
         expectConflict("cherry-pick", topicHead);
       } else {

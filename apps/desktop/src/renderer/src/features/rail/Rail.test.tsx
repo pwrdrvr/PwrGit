@@ -3,7 +3,12 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ok, type ConflictState, type Worktree } from "@pwrgit/shared";
+import {
+  ok,
+  type ConflictState,
+  type Result,
+  type Worktree
+} from "@pwrgit/shared";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -51,6 +56,27 @@ describe("Rail conflict refresh", () => {
     Set<(event: { worktreeId: string }) => void>
   >;
 
+  const renderRail = async (worktreeId: string): Promise<void> => {
+    await act(async () => {
+      root.render(
+        <Rail
+          worktree={{ id: worktreeId, dirty: 1 } as Worktree}
+          state={null}
+          activeEmail="test@pwrgit.dev"
+          selectedHashes={[]}
+          rebaseAction={null}
+          commitFocus={null}
+          onCloseCommit={vi.fn()}
+          onOpenCommitFile={vi.fn()}
+          onOpenFullCommitDiff={vi.fn()}
+          onClearSelection={vi.fn()}
+          onCollapse={vi.fn()}
+          onOpenDiff={vi.fn()}
+        />
+      );
+    });
+  };
+
   beforeEach(async () => {
     vi.clearAllMocks();
     currentState = unresolved;
@@ -79,24 +105,7 @@ describe("Rail conflict refresh", () => {
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
-    await act(async () => {
-      root.render(
-        <Rail
-          worktree={{ id: "worktree-1", dirty: 1 } as Worktree}
-          state={null}
-          activeEmail="test@pwrgit.dev"
-          selectedHashes={[]}
-          rebaseAction={null}
-          commitFocus={null}
-          onCloseCommit={vi.fn()}
-          onOpenCommitFile={vi.fn()}
-          onOpenFullCommitDiff={vi.fn()}
-          onClearSelection={vi.fn()}
-          onCollapse={vi.fn()}
-          onOpenDiff={vi.fn()}
-        />
-      );
-    });
+    await renderRail("worktree-1");
   });
 
   afterEach(async () => {
@@ -147,5 +156,57 @@ describe("Rail conflict refresh", () => {
     ).length;
     expect(callsAfter).toBe(callsBefore);
     expect(container.textContent).toContain("1 unresolved path");
+  });
+
+  it("discards a refresh that completes after switching worktrees", async () => {
+    const worktreeB: ConflictState = {
+      operation: { kind: "merge", label: "Merge" },
+      conflicts: [
+        {
+          ...unresolved.conflicts[0],
+          path: "worktree-b.txt"
+        }
+      ]
+    };
+    let resolveOldRefresh!: (result: Result<ConflictState>) => void;
+    const oldRefresh = new Promise<Result<ConflictState>>((resolve) => {
+      resolveOldRefresh = resolve;
+    });
+    mocks.dispatch.mockImplementation(
+      async (command: string, input: { worktreeId?: string }) => {
+        if (command === "conflict:state") {
+          return input.worktreeId === "worktree-1"
+            ? oldRefresh
+            : ok(worktreeB);
+        }
+        if (command === "conflict:inspect") {
+          return ok({
+            ...worktreeB.conflicts[0],
+            base: null,
+            ours: null,
+            theirs: null,
+            workingTree: null
+          });
+        }
+        return ok(null);
+      }
+    );
+
+    const refresh = [...container.querySelectorAll("button")].find(
+      (candidate) => candidate.textContent?.trim() === "Refresh"
+    );
+    if (refresh === undefined) throw new Error("refresh button not found");
+    await act(async () => {
+      refresh.click();
+      await Promise.resolve();
+    });
+    await renderRail("worktree-2");
+    await vi.waitFor(() =>
+      expect(container.textContent).toContain("worktree-b.txt")
+    );
+
+    await act(async () => resolveOldRefresh(ok(unresolved)));
+    expect(container.textContent).toContain("worktree-b.txt");
+    expect(container.textContent).not.toContain("conflict.txt");
   });
 });

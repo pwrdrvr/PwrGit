@@ -12,6 +12,7 @@ import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { confirmDialog } from "../shell/dialogs";
 
 type PreviewSide = "workingTree" | "base" | "ours" | "theirs";
+type EditorLineEnding = "lf" | "crlf" | "mixed";
 
 const KIND_COPY: Record<ConflictedPath["kind"], string> = {
   both_modified: "Both sides changed this path from the common base.",
@@ -39,6 +40,9 @@ function sideLabel(
       ? "Ours · rebased base"
       : "Theirs · replayed commit";
   }
+  if (operation?.kind === "am" && side === "theirs") {
+    return "Theirs · applied patch";
+  }
   if (side === "ours") return "Ours · current branch";
   if (operation?.kind === "cherry-pick") return "Theirs · picked commit";
   if (operation?.kind === "revert") return "Theirs · reverted result";
@@ -50,6 +54,23 @@ function bytesLabel(size: number): string {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KiB`;
   return `${(size / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+function editorLineEnding(text: string): EditorLineEnding {
+  const hasCrlf = text.includes("\r\n");
+  const withoutCrlf = text.replaceAll("\r\n", "");
+  const hasOtherNewline = withoutCrlf.includes("\n") || withoutCrlf.includes("\r");
+  if (hasCrlf && hasOtherNewline) return "mixed";
+  if (hasCrlf) return "crlf";
+  return hasOtherNewline && withoutCrlf.includes("\r") ? "mixed" : "lf";
+}
+
+function editorText(text: string, lineEnding: EditorLineEnding): string {
+  return lineEnding === "crlf" ? text.replaceAll("\r\n", "\n") : text;
+}
+
+function serializedText(text: string, lineEnding: EditorLineEnding): string {
+  return lineEnding === "crlf" ? text.replaceAll("\n", "\r\n") : text;
 }
 
 function PreviewContent({
@@ -113,11 +134,25 @@ export function ConflictResolver({
   const [previewSide, setPreviewSide] = useState<PreviewSide>("workingTree");
   const [draft, setDraft] = useState("");
   const [savedDraft, setSavedDraft] = useState("");
+  const [draftLineEnding, setDraftLineEnding] =
+    useState<EditorLineEnding>("lf");
   const [busy, setBusy] = useState<string | null>(null);
   const [inspectionVersion, setInspectionVersion] = useState(0);
 
   const selected =
     state.conflicts.find((conflict) => conflict.path === selectedPath) ?? null;
+  const selectedStageIdentity =
+    selected === null
+      ? ""
+      : [selected.path, selected.base, selected.ours, selected.theirs]
+          .map((part) =>
+            typeof part === "string"
+              ? part
+              : part === null
+                ? "missing"
+                : `${part.mode}:${part.oid}`
+          )
+          .join("\0");
 
   useEffect(() => {
     if (
@@ -146,10 +181,13 @@ export function ConflictResolver({
           return;
         }
         setInspection(result.value);
-        const text =
+        const rawText =
           result.value.workingTree?.content.kind === "text"
             ? result.value.workingTree.content.text
             : "";
+        const lineEnding = editorLineEnding(rawText);
+        const text = editorText(rawText, lineEnding);
+        setDraftLineEnding(lineEnding);
         setDraft(text);
         setSavedDraft(text);
       }
@@ -157,7 +195,7 @@ export function ConflictResolver({
     return () => {
       active = false;
     };
-  }, [inspectionVersion, selectedPath, worktreeId]);
+  }, [inspectionVersion, selectedPath, selectedStageIdentity, worktreeId]);
 
   const refreshInspection = (): void =>
     setInspectionVersion((version) => version + 1);
@@ -183,8 +221,14 @@ export function ConflictResolver({
   };
 
   const accept = async (side: "ours" | "theirs"): Promise<void> => {
-    if (selected === null) return;
-    const stage = selected[side];
+    if (
+      selected === null ||
+      inspection === null ||
+      inspection.path !== selected.path
+    ) {
+      return;
+    }
+    const stage = inspection[side];
     const deletes = stage === null;
     const yes = await confirmDialog({
       title: `Accept ${side} for this path?`,
@@ -206,7 +250,7 @@ export function ConflictResolver({
   };
 
   const stageCurrent = async (): Promise<void> => {
-    if (selected === null) return;
+    if (selected === null || draft !== savedDraft) return;
     const yes = await confirmDialog({
       title: "Stage this resolution?",
       message: `Mark ${selected.path} resolved by staging its current working-copy state? PwrGit does not guess whether conflict markers or every intended edit have been removed.`,
@@ -221,11 +265,12 @@ export function ConflictResolver({
   const saveDraft = async (): Promise<void> => {
     if (selected === null || inspection?.workingTree == null) return;
     const expectedContentHash = inspection.workingTree.contentHash;
+    const text = serializedText(draft, draftLineEnding);
     const saved = await runAndRefresh("Save working file", () =>
       dispatch("conflict:writeWorkingFile", {
         worktreeId,
         path: selected.path,
-        text: draft,
+        text,
         expectedContentHash
       })
     );
@@ -292,10 +337,20 @@ export function ConflictResolver({
   };
 
   const preview = inspection?.[previewSide] ?? null;
+  const inspectionMatchesSelected =
+    inspection !== null &&
+    selected !== null &&
+    inspection.path === selected.path &&
+    (["base", "ours", "theirs"] as const).every(
+      (side) =>
+        (inspection[side]?.oid ?? null) === (selected[side]?.oid ?? null) &&
+        (inspection[side]?.mode ?? null) === (selected[side]?.mode ?? null)
+    );
   const editableWorking =
     previewSide === "workingTree" &&
     inspection?.workingTree?.editable === true &&
-    inspection.workingTree.content.kind === "text";
+    inspection.workingTree.content.kind === "text" &&
+    draftLineEnding !== "mixed";
 
   return (
     <div className="conflict-pane">
@@ -395,13 +450,13 @@ export function ConflictResolver({
               <div className="conflict-choice-row">
                 <button
                   onClick={() => void accept("ours")}
-                  disabled={busy !== null}
+                  disabled={busy !== null || !inspectionMatchesSelected}
                 >
                   Accept ours{selected.ours === null ? " (delete)" : ""}
                 </button>
                 <button
                   onClick={() => void accept("theirs")}
-                  disabled={busy !== null}
+                  disabled={busy !== null || !inspectionMatchesSelected}
                 >
                   Accept theirs{selected.theirs === null ? " (delete)" : ""}
                 </button>
@@ -426,7 +481,12 @@ export function ConflictResolver({
                 <button
                   className="conflict-stage"
                   onClick={() => void stageCurrent()}
-                  disabled={busy !== null}
+                  disabled={busy !== null || draft !== savedDraft}
+                  title={
+                    draft !== savedDraft
+                      ? "Save the working-file draft before staging this resolution."
+                      : undefined
+                  }
                 >
                   Stage current resolution
                 </button>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ConflictState, Worktree, WorktreeState } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { RebaseTab } from "./RebaseTab";
@@ -45,18 +45,32 @@ export function Rail({
   );
   const dirty = state?.dirty ?? worktree?.dirty ?? 0;
   const worktreeId = worktree?.id ?? null;
+  const activeWorktreeId = useRef(worktreeId);
+  const conflictRequest = useRef(0);
+  activeWorktreeId.current = worktreeId;
   const conflictActive =
     conflictState !== null &&
     (conflictState.operation !== null || conflictState.conflicts.length > 0);
 
   const refreshConflicts = useCallback(async (): Promise<void> => {
-    if (worktreeId === null) {
+    const requestedWorktreeId = worktreeId;
+    const request = ++conflictRequest.current;
+    if (requestedWorktreeId === null) {
       setConflictState(null);
       setConflictCheckError(null);
       return;
     }
+    if (activeWorktreeId.current !== requestedWorktreeId) return;
     setConflictCheckError(null);
-    const result = await dispatch("conflict:state", { worktreeId });
+    const result = await dispatch("conflict:state", {
+      worktreeId: requestedWorktreeId
+    });
+    if (
+      activeWorktreeId.current !== requestedWorktreeId ||
+      conflictRequest.current !== request
+    ) {
+      return;
+    }
     if (result.ok) setConflictState(result.value);
     else setConflictCheckError(result.error.message);
   }, [worktreeId]);
@@ -67,8 +81,13 @@ export function Rail({
     setConflictCheckError(null);
     if (worktreeId === null) return;
     const load = (): void => {
+      const request = ++conflictRequest.current;
       void dispatch("conflict:state", { worktreeId }).then((result) => {
-        if (active) {
+        if (
+          active &&
+          activeWorktreeId.current === worktreeId &&
+          conflictRequest.current === request
+        ) {
           if (result.ok) {
             setConflictState(result.value);
             setConflictCheckError(null);
