@@ -66,6 +66,7 @@ export type PrStatusDeltas = {
 export class PrService {
   private readonly resolveForge: typeof resolveForge;
   private readonly now: () => number;
+  private writeGeneration = 0;
   // A bulk lookup and a focused branch lookup may overlap for the same repo.
   // They must share one request: otherwise an older bulk response can land
   // after the focused response and overwrite its newer PR state.
@@ -91,19 +92,49 @@ export class PrService {
     this.now = deps.now ?? (() => Date.now());
   }
 
+  /**
+   * Prevent every refresh already in flight from writing its response. Profile
+   * deletion calls this after its database transaction; using a generation
+   * instead of an existence-only check also protects an immediately recreated
+   * profile/repository that reuses the same stable ids.
+   */
+  invalidatePendingWrites(): void {
+    this.writeGeneration += 1;
+  }
+
   /** Exact commit hashes whose PR association/status changed. */
   async refreshCommits(
     repoId: string,
     commitHashes: string[],
     opts: { trigger?: PrRefreshTrigger; force?: boolean } = {}
   ): Promise<Map<string, PrSummary | null>> {
+    return await this.refreshCommitsAtGeneration(
+      repoId,
+      commitHashes,
+      opts,
+      this.writeGeneration
+    );
+  }
+
+  private async refreshCommitsAtGeneration(
+    repoId: string,
+    commitHashes: string[],
+    opts: { trigger?: PrRefreshTrigger; force?: boolean },
+    generation: number
+  ): Promise<Map<string, PrSummary | null>> {
     const hashes = normalizeCommitHashes(commitHashes);
-    if (hashes.length === 0) return new Map();
+    if (hashes.length === 0 || !this.isCurrent(generation)) return new Map();
 
     const pendingStatus = this.pendingPrNumberRefreshes.get(repoId);
     if (pendingStatus !== undefined) {
       await pendingStatus;
-      return await this.refreshCommits(repoId, hashes, opts);
+      if (!this.isCurrent(generation)) return new Map();
+      return await this.refreshCommitsAtGeneration(
+        repoId,
+        hashes,
+        opts,
+        generation
+      );
     }
 
     // Serialize per repo. A hover arriving during a viewport batch waits for
@@ -111,10 +142,16 @@ export class PrService {
     const pending = this.pendingCommitRefreshes.get(repoId);
     if (pending !== undefined) {
       await pending;
-      return await this.refreshCommits(repoId, hashes, opts);
+      if (!this.isCurrent(generation)) return new Map();
+      return await this.refreshCommitsAtGeneration(
+        repoId,
+        hashes,
+        opts,
+        generation
+      );
     }
 
-    const refresh = this.refreshCommitHashes(repoId, hashes, opts);
+    const refresh = this.refreshCommitHashes(repoId, hashes, opts, generation);
     this.pendingCommitRefreshes.set(repoId, refresh);
     try {
       return await refresh;
@@ -169,10 +206,24 @@ export class PrService {
     repoId: string,
     numbers: number[]
   ): Promise<PrStatusDeltas> {
+    return await this.refreshPrNumbersAtGeneration(
+      repoId,
+      numbers,
+      this.writeGeneration
+    );
+  }
+
+  private async refreshPrNumbersAtGeneration(
+    repoId: string,
+    numbers: number[],
+    generation: number
+  ): Promise<PrStatusDeltas> {
     const unique = [...new Set(numbers)].filter(
       (number) => Number.isSafeInteger(number) && number > 0
     );
-    if (unique.length === 0) return emptyPrStatusDeltas();
+    if (unique.length === 0 || !this.isCurrent(generation)) {
+      return emptyPrStatusDeltas();
+    }
 
     const pending: Promise<unknown>[] = [];
     const pendingRepo = this.pendingRepoRefreshes.get(repoId);
@@ -183,10 +234,15 @@ export class PrService {
     if (pendingNumbers !== undefined) pending.push(pendingNumbers);
     if (pending.length > 0) {
       await Promise.all(pending);
-      return await this.refreshPrNumbers(repoId, unique);
+      if (!this.isCurrent(generation)) return emptyPrStatusDeltas();
+      return await this.refreshPrNumbersAtGeneration(
+        repoId,
+        unique,
+        generation
+      );
     }
 
-    const refresh = this.refreshPrNumberStatuses(repoId, unique);
+    const refresh = this.refreshPrNumberStatuses(repoId, unique, generation);
     this.pendingPrNumberRefreshes.set(repoId, refresh);
     try {
       return await refresh;
@@ -197,23 +253,28 @@ export class PrService {
 
   private async refreshPrNumberStatuses(
     repoId: string,
-    numbers: number[]
+    numbers: number[],
+    generation: number
   ): Promise<PrStatusDeltas> {
     const repo = this.db
       .prepare("SELECT path FROM repos WHERE id = ?")
       .get(repoId) as { path: string } | undefined;
     if (repo === undefined) return emptyPrStatusDeltas();
     const forge = await this.originForge(repo.path);
-    if (forge === null) return emptyPrStatusDeltas();
+    if (forge === null || !this.isCurrent(generation)) {
+      return emptyPrStatusDeltas();
+    }
     const token = await forge.provider.getToken(forge.repo.host);
-    if (token === null) return emptyPrStatusDeltas();
+    if (token === null || !this.isCurrent(generation)) {
+      return emptyPrStatusDeltas();
+    }
     try {
       const prs = await forge.provider.fetchPrsByNumbers(
         token,
         forge.repo,
         numbers
       );
-      return this.upsertPrNumberStatuses(repoId, prs);
+      return this.upsertPrNumberStatuses(repoId, prs, generation);
     } catch {
       return emptyPrStatusDeltas();
     }
@@ -222,7 +283,8 @@ export class PrService {
   private async refreshCommitHashes(
     repoId: string,
     commitHashes: string[],
-    opts: { trigger?: PrRefreshTrigger; force?: boolean }
+    opts: { trigger?: PrRefreshTrigger; force?: boolean },
+    generation: number
   ): Promise<Map<string, PrSummary | null>> {
     const repo = this.db
       .prepare("SELECT path FROM repos WHERE id = ?")
@@ -234,9 +296,9 @@ export class PrService {
     if (stale.length === 0) return new Map();
 
     const forge = await this.originForge(repo.path);
-    if (forge === null) return new Map();
+    if (forge === null || !this.isCurrent(generation)) return new Map();
     const token = await forge.provider.getToken(forge.repo.host);
-    if (token === null) return new Map();
+    if (token === null || !this.isCurrent(generation)) return new Map();
 
     try {
       const prs = await forge.provider.fetchPrsForCommits(
@@ -244,7 +306,7 @@ export class PrService {
         forge.repo,
         stale
       );
-      return this.upsertCommits(repoId, prs);
+      return this.upsertCommits(repoId, prs, generation);
     } catch {
       return new Map();
     }
@@ -290,20 +352,38 @@ export class PrService {
       force?: boolean;
     } = {}
   ): Promise<Map<string, PrSummary | null>> {
+    return await this.refreshRepoAtGeneration(
+      repoId,
+      opts,
+      this.writeGeneration
+    );
+  }
+
+  private async refreshRepoAtGeneration(
+    repoId: string,
+    opts: {
+      branches?: string[];
+      trigger?: PrRefreshTrigger;
+      force?: boolean;
+    },
+    generation: number
+  ): Promise<Map<string, PrSummary | null>> {
     const branches = await this.branchesToCheck(repoId, opts.branches);
-    if (branches.length === 0) return new Map();
+    if (branches.length === 0 || !this.isCurrent(generation)) return new Map();
     const pendingStatus = this.pendingPrNumberRefreshes.get(repoId);
     if (pendingStatus !== undefined) {
       await pendingStatus;
-      return await this.refreshRepo(repoId, opts);
+      if (!this.isCurrent(generation)) return new Map();
+      return await this.refreshRepoAtGeneration(repoId, opts, generation);
     }
     const pending = this.pendingRepoRefreshes.get(repoId);
     if (pending !== undefined) {
       await pending;
-      return await this.refreshRepo(repoId, opts);
+      if (!this.isCurrent(generation)) return new Map();
+      return await this.refreshRepoAtGeneration(repoId, opts, generation);
     }
 
-    const refresh = this.refreshBranches(repoId, branches, opts);
+    const refresh = this.refreshBranches(repoId, branches, opts, generation);
     this.pendingRepoRefreshes.set(repoId, refresh);
     try {
       return await refresh;
@@ -319,7 +399,8 @@ export class PrService {
       branches?: string[];
       trigger?: PrRefreshTrigger;
       force?: boolean;
-    }
+    },
+    generation: number
   ): Promise<Map<string, PrSummary | null>> {
     const empty = new Map<string, PrSummary | null>();
     const repo = this.db
@@ -334,9 +415,9 @@ export class PrService {
     }
 
     const forge = await this.originForge(repo.path);
-    if (forge === null) return empty;
+    if (forge === null || !this.isCurrent(generation)) return empty;
     const token = await forge.provider.getToken(forge.repo.host);
-    if (token === null) return empty;
+    if (token === null || !this.isCurrent(generation)) return empty;
 
     let prs: Map<string, PrSummary | null>;
     try {
@@ -348,7 +429,7 @@ export class PrService {
     } catch {
       return empty; // best-effort; keep whatever's cached
     }
-    return this.upsert(repoId, prs);
+    return this.upsert(repoId, prs, generation);
   }
 
   private refreshTtlMs(
@@ -446,8 +527,10 @@ export class PrService {
 
   private upsert(
     repoId: string,
-    prs: Map<string, PrSummary | null>
+    prs: Map<string, PrSummary | null>,
+    generation: number
   ): Map<string, PrSummary | null> {
+    if (!this.canWrite(repoId, generation)) return new Map();
     const prev = new Map<string, CachedPr>(
       (
         this.db
@@ -488,8 +571,10 @@ export class PrService {
 
   private upsertCommits(
     repoId: string,
-    prs: Map<string, PrSummary | null>
+    prs: Map<string, PrSummary | null>,
+    generation: number
   ): Map<string, PrSummary | null> {
+    if (!this.canWrite(repoId, generation)) return new Map();
     const hashes = [...prs.keys()];
     const prev = new Map<string, CachedPr>();
     if (hashes.length > 0) {
@@ -528,8 +613,10 @@ export class PrService {
 
   private upsertPrNumberStatuses(
     repoId: string,
-    prs: Map<number, PrSummary | null>
+    prs: Map<number, PrSummary | null>,
+    generation: number
   ): PrStatusDeltas {
+    if (!this.canWrite(repoId, generation)) return emptyPrStatusDeltas();
     const numbers = [...prs.keys()];
     if (numbers.length === 0) return emptyPrStatusDeltas();
     const marks = numbers.map(() => "?").join(", ");
@@ -589,6 +676,18 @@ export class PrService {
       );
     })();
     return changed;
+  }
+
+  private isCurrent(generation: number): boolean {
+    return generation === this.writeGeneration;
+  }
+
+  private canWrite(repoId: string, generation: number): boolean {
+    return (
+      this.isCurrent(generation) &&
+      this.db.prepare("SELECT 1 FROM repos WHERE id = ?").get(repoId) !==
+        undefined
+    );
   }
 }
 

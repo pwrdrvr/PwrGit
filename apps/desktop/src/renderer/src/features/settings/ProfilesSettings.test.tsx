@@ -153,4 +153,32 @@ describe("ProfilesSettings deletion", () => {
       "at least one profile"
     );
   });
+
+  it("cannot dismiss the confirmation backdrop while deletion is pending", async () => {
+    let finishDelete = (_message: string | null): void => undefined;
+    deleteProfile.mockReturnValueOnce(
+      new Promise<string | null>((resolve) => {
+        finishDelete = resolve;
+      })
+    );
+    await render([personal, acme]);
+    await act(async () => button(row("Acme"), "Delete…").click());
+    await typeConfirmation("Acme");
+
+    await act(async () => {
+      button(container, "Delete profile").click();
+      await Promise.resolve();
+    });
+    const backdrop = container.querySelector<HTMLElement>(".overlay-backdrop")!;
+    await act(async () => backdrop.click());
+
+    expect(container.querySelector(".modal--delete-profile")).not.toBeNull();
+    expect(button(container, "Deleting…").disabled).toBe(true);
+
+    await act(async () => {
+      finishDelete(null);
+      await Promise.resolve();
+    });
+    expect(container.querySelector(".modal--delete-profile")).toBeNull();
+  });
 });

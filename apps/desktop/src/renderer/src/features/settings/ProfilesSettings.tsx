@@ -210,7 +210,12 @@ function DeleteProfileDialog(props: {
   };
 
   return (
-    <div className="overlay-backdrop" onClick={props.onClose}>
+    <div
+      className="overlay-backdrop"
+      onClick={() => {
+        if (!busy) props.onClose();
+      }}
+    >
       <div
         className="modal modal--delete-profile"
         role="alertdialog"
