@@ -344,9 +344,12 @@ export function App() {
   // deliberately clear the current timeline instead of silently switching the
   // user to another checkout mid-session.
   useEffect(() => {
+    // A queued reveal is an explicit navigation request. Let it select (or
+    // keep waiting for) its target before stale boot state chooses a fallback.
     if (
       activeProfile === null ||
       loading ||
+      pendingReveal !== null ||
       restoredSelectionForProfileRef.current === activeProfile.id
     ) {
       return;
@@ -370,7 +373,7 @@ export function App() {
     ) {
       setSelection(resolved);
     }
-  }, [activeProfile, loading, repos, selection]);
+  }, [activeProfile, loading, pendingReveal, repos, selection]);
 
   useEffect(() => {
     if (activeProfile !== null && selection !== null) {
