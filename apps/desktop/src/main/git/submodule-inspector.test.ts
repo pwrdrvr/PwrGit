@@ -371,6 +371,8 @@ describe("inspectSubmodules (system git)", () => {
       mkdirSync(join(parent, "modules"));
       const gitmodules: string[] = [];
       const indexArgs = ["update-index", "--add"];
+      const childUrl = child.replaceAll("\\", "/");
+      expect(childUrl).not.toContain("\\");
       for (let index = 0; index < 20; index += 1) {
         const path = `modules/child-${index.toString().padStart(2, "0")}`;
         // One small repository copied into twenty independent checkout paths:
@@ -380,7 +382,7 @@ describe("inspectSubmodules (system git)", () => {
         gitmodules.push(
           `[submodule "${path}"]`,
           `\tpath = ${path}`,
-          `\turl = ${child}`
+          `\turl = ${childUrl}`
         );
         indexArgs.push("--cacheinfo", `160000,${childCommit},${path}`);
       }
