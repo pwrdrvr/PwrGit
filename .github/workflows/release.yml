@@ -57,8 +57,8 @@ jobs:
       # A fresh `pnpm i` already leaves better-sqlite3 ready for both runtimes
       # (see the root AGENTS.md); this repairs a restored node_modules cache
       # where one half is stale. Nothing has to be restored afterwards for
-      # packaging: electron-builder runs @electron/rebuild inside the release
-      # stage, once per packed arch.
+      # packaging: the beforePack hook stages better-sqlite3's target Node-API
+      # prebuild inside the release stage, once per packed arch.
       - name: Ensure better-sqlite3 native builds are current
         run: pnpm --filter @pwrgit/desktop run rebuild:electron-native
 
@@ -85,6 +85,7 @@ jobs:
             apps/desktop/release-stage \
             apps/desktop/scripts/release.mjs \
             apps/desktop/scripts/beforepack-dugite-arch.mjs \
+            apps/desktop/scripts/stage-better-sqlite3-arch.mjs \
             apps/desktop/scripts/verify-asar-contents.mjs \
             apps/desktop/scripts/verify-embedded-git-notices.mjs \
             apps/desktop/node_modules \

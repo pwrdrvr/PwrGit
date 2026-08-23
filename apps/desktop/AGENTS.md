@@ -42,13 +42,15 @@ instead, which brackets the rebuild and keeps both binaries:
   match, and ignores it otherwise — a stale sidecar fails at `new Database()`,
   where no sidecar at all may still work.
 
-Packaged builds ship no sidecar: electron-builder rebuilds `build/Release`
-itself, once per packed arch, so a host-arch sidecar would be dead weight at
-best. `electron-builder.yml` excludes `electron-native/` from the asar and
-`scripts/verify-asar-contents.mjs` fails the build if it leaks in. (PwrSnap
-ships its sidecar and builds a `lipo`-merged universal one for release; PwrGit
-does not need that, because electron-builder's per-arch rebuild already
-produces the universal `build/Release` binary that `release.mjs` verifies.)
+Packaged builds ship no sidecar. better-sqlite3 13 opts out of electron-builder's
+implicit rebuild, so `scripts/beforepack-dugite-arch.mjs` stages the target
+platform/arch prebuild at `build/Release` on each packaging pass and
+`electron-builder.yml` disables the destructive default rebuild. It also
+excludes both the dev-only `electron-native/` sidecar and the package's original
+multi-platform `prebuilds/` directory; `scripts/verify-asar-contents.mjs` fails
+the build if either leaks in. The universal merge combines the two Darwin
+slices at the common `build/Release` path, and `release.mjs` verifies both
+architectures.
 
 ## The packaging deps are pinned exact, not caret
 

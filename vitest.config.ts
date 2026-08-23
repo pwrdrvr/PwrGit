@@ -17,9 +17,9 @@ export default defineConfig({
       "packages/*/src/**/*.test.ts",
       "apps/desktop/src/**/*.test.{ts,tsx}",
       "scripts/**/*.test.mjs",
-      // Checked-in build assets (the macOS .icns) are guarded next to the
-      // script that generates them, which lives outside `src/`.
-      "apps/desktop/scripts/**/*.test.ts"
+      // Checked-in build assets and executable ESM packaging hooks are guarded
+      // next to the scripts that own them, outside `src/`.
+      "apps/desktop/scripts/**/*.test.{ts,mjs}"
     ],
     exclude: ["**/node_modules/**", "**/out/**", "apps/desktop/e2e/**"]
   }
