@@ -37,7 +37,11 @@ metadata required to recover an entry.
   and maps that hash to its current selector immediately before mutation. If a
   terminal added/dropped entries meanwhile, PwrGit either finds the same stash
   at its new index or refuses because it is gone; it cannot act on the entry
-  that inherited a stale index.
+  that inherited a stale index. Git can store the same commit in the reflog
+  more than once, but reflog occurrences have no immutable IDs. PwrGit keeps
+  inspection and Apply available for that shared content and refuses Pop/Drop
+  until the hash has only one occurrence rather than guessing which duplicate
+  to remove.
 - Repository locking nests outside worktree locking, the same order used by
   pull. Stack mutations serialize across linked worktrees; apply/pop/create
   also serialize with operations in their destination worktree.
@@ -58,9 +62,9 @@ inspect or recover it.
 
 PwrGit recognizes that exact public message only to add a **PwrGit pull
 recovery** label. It does not move, rewrite, or privately tag the entry.
-Affected files, full patch, apply, pop, and drop use the same hash-guarded
-paths as every other stash. Pull announces a stack refresh after its
-auto-stash sequence so a kept recovery entry appears immediately.
+Affected files, full patch, apply, pop, and drop use the same guarded paths as
+every other stash. Pull announces a stack refresh after its auto-stash sequence
+so a kept recovery entry appears immediately.
 
 ## Deliberate v1 boundary
 

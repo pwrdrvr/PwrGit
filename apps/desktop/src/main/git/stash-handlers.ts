@@ -61,16 +61,32 @@ export function registerStashHandlers(
 
   const currentEntry = async (
     row: StashRow,
-    hash: string
+    hash: string,
+    requireUniqueOccurrence = false
   ): Promise<Result<StashEntry>> => {
     const listed = await dependencies.list(dependencies.git, row.path);
     if (!listed.ok) return listed;
-    const entry = listed.value.find((candidate) => candidate.hash === hash);
-    return entry === undefined
-      ? notFound(
-          "That stash is no longer in the repository stack. Refresh and choose an existing entry."
-        )
-      : ok(entry);
+    const matches = listed.value.filter((candidate) => candidate.hash === hash);
+    const entry = matches[0];
+    if (entry === undefined) {
+      return notFound(
+        "That stash is no longer in the repository stack. Refresh and choose an existing entry."
+      );
+    }
+    if (requireUniqueOccurrence && matches.length > 1) {
+      // A reflog occurrence has no immutable identity of its own. The same
+      // stash commit can be stored more than once, and selectors can move
+      // between list and action, so guessing would risk dropping the wrong
+      // occurrence. Apply/inspection remain safe because their content is the
+      // same object; pop/drop must wait until Git has one occurrence.
+      return err({
+        kind: "repo",
+        code: "ambiguous_stash",
+        message:
+          "This stash object appears more than once in the repository stack. Use Git to remove a specific duplicate before popping or dropping it in PwrGit."
+      });
+    }
+    return ok(entry);
   };
 
   const announceWorktree = (row: StashRow, worktreeId: string): void => {
@@ -145,7 +161,8 @@ export function registerStashHandlers(
 
   const restore = (
     command: "stash:apply" | "stash:pop",
-    operation: typeof applyStash
+    operation: typeof applyStash,
+    requireUniqueOccurrence: boolean
   ): void => {
     bus.register(command, async (req) => {
       const row = rowOf(req.worktreeId);
@@ -155,7 +172,11 @@ export function registerStashHandlers(
           // Re-resolve the stable hash under the same repository lock as the
           // mutation. A CLI push/drop can renumber stash@{n}; stale UI must
           // never apply or delete the entry that inherited an old selector.
-          const entry = await currentEntry(row, req.stashHash);
+          const entry = await currentEntry(
+            row,
+            req.stashHash,
+            requireUniqueOccurrence
+          );
           if (!entry.ok) return entry;
           return operation(dependencies.git, row.path, entry.value.selector);
         })
@@ -175,14 +196,14 @@ export function registerStashHandlers(
     });
   };
 
-  restore("stash:apply", dependencies.apply);
-  restore("stash:pop", dependencies.pop);
+  restore("stash:apply", dependencies.apply, false);
+  restore("stash:pop", dependencies.pop, true);
 
   bus.register("stash:drop", async (req) => {
     const row = rowOf(req.worktreeId);
     if (row === undefined) return notFound("Worktree not found.");
     const result = await operations.runRepository(row.repoId, async () => {
-      const entry = await currentEntry(row, req.stashHash);
+      const entry = await currentEntry(row, req.stashHash, true);
       if (!entry.ok) return entry;
       return dependencies.drop(dependencies.git, row.path, entry.value.selector);
     });

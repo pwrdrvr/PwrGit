@@ -154,6 +154,30 @@ describe("stash service (system git)", () => {
     });
   });
 
+  it("marks repeated reflog occurrences of the same stash commit", async () => {
+    writeFileSync(join(repo, "README.md"), "repeated stash\n");
+    await createStash(systemGit, repo, "original", false);
+    const original = await listStashes(systemGit, repo);
+    if (!original.ok || original.value[0] === undefined) {
+      throw new Error("expected original stash");
+    }
+    const repeatedHash = original.value[0].hash;
+
+    writeFileSync(join(repo, "other.txt"), "different stash\n");
+    await createStash(systemGit, repo, "between", false);
+    git(repo, ["stash", "store", "-m", "stored again", repeatedHash]);
+
+    const listed = await listStashes(systemGit, repo);
+    expect(listed).toMatchObject({
+      ok: true,
+      value: [
+        { selector: "stash@{0}", hash: repeatedHash, occurrenceCount: 2 },
+        { selector: "stash@{1}", occurrenceCount: 1 },
+        { selector: "stash@{2}", hash: repeatedHash, occurrenceCount: 2 }
+      ]
+    });
+  });
+
   it("keeps a PwrGit pull recovery stash when pop conflicts", async () => {
     writeFileSync(join(repo, "README.md"), "stashed side\n");
     await createStash(systemGit, repo, PWRGIT_PULL_STASH_MESSAGE, false);

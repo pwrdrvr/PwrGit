@@ -3,11 +3,22 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { err, ok, type OperationState, type Worktree } from "@pwrgit/shared";
+import {
+  err,
+  ok,
+  type OperationState,
+  type StashEntry,
+  type Worktree
+} from "@pwrgit/shared";
 
 const mocks = vi.hoisted(() => ({
   dispatch: vi.fn(),
-  subscribe: vi.fn()
+  subscribe: vi.fn(),
+  stashRenders: [] as Array<{
+    entries: StashEntry[];
+    loading: boolean;
+    reload: () => Promise<void>;
+  }>
 }));
 
 vi.mock("../../lib/pwrgit", () => ({
@@ -24,6 +35,20 @@ vi.mock("./CommitTab", () => ({
 }));
 vi.mock("./RebaseTab", () => ({
   RebaseTab: () => <div data-testid="rebase-tab" />
+}));
+vi.mock("./StashesTab", () => ({
+  StashesTab: (props: {
+    entries: StashEntry[];
+    loading: boolean;
+    reload: () => Promise<void>;
+  }) => {
+    mocks.stashRenders.push(props);
+    return (
+      <div data-testid="stash-view">
+        {props.loading ? "loading" : props.entries.map((entry) => entry.name).join(",")}
+      </div>
+    );
+  }
 }));
 
 import { Rail } from "./Rail";
@@ -60,6 +85,7 @@ describe("Rail operation banner", () => {
           onCloseCommit={vi.fn()}
           onOpenCommitFile={vi.fn()}
           onOpenFullCommitDiff={vi.fn()}
+          onOpenStashPatch={vi.fn()}
           onClearSelection={vi.fn()}
           onCollapse={vi.fn()}
           onOpenDiff={vi.fn()}
@@ -86,7 +112,9 @@ describe("Rail operation banner", () => {
         return () => handlers.delete(channel);
       }
     );
-    mocks.dispatch.mockResolvedValue(ok(midRebase));
+    mocks.dispatch.mockImplementation(async (command: string) =>
+      command === "stash:list" ? ok([]) : ok(midRebase)
+    );
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -205,5 +233,96 @@ describe("Rail operation banner", () => {
     });
 
     expect(container.querySelector(".op-banner")).toBeNull();
+  });
+});
+
+const stash = (hash: string, name: string): StashEntry => ({
+  selector: "stash@{0}",
+  hash,
+  occurrenceCount: 1,
+  shortHash: hash.slice(0, 7),
+  baseHash: "b".repeat(40),
+  branch: "main",
+  subject: "On main: " + name,
+  name,
+  kind: "ordinary",
+  createdAt: "2026-08-23T12:00:00Z"
+});
+
+const stashWorktree = (id: string, repoId: string): Worktree =>
+  ({ id, repoId, branch: "main", dirty: 0 }) as Worktree;
+
+describe("Rail stash loading", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  const renderRail = async (selected: Worktree): Promise<void> => {
+    await act(async () => {
+      root.render(
+        <Rail
+          worktree={selected}
+          state={null}
+          activeEmail="test@pwrgit.dev"
+          selectedHashes={[]}
+          rebaseAction={null}
+          commitFocus={null}
+          onCloseCommit={vi.fn()}
+          onOpenCommitFile={vi.fn()}
+          onOpenFullCommitDiff={vi.fn()}
+          onOpenStashPatch={vi.fn()}
+          onClearSelection={vi.fn()}
+          onCollapse={vi.fn()}
+          onOpenDiff={vi.fn()}
+        />
+      );
+    });
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.stashRenders.length = 0;
+    mocks.subscribe.mockImplementation(() => vi.fn());
+    mocks.dispatch.mockImplementation(
+      async (command: string, req: { worktreeId: string }) =>
+        command === "operation:state"
+          ? ok({ operation: null, conflictCount: 0 } satisfies OperationState)
+          : ok([
+              req.worktreeId === "worktree-a"
+                ? stash("a".repeat(40), "repo A")
+                : stash("b".repeat(40), "repo B")
+            ])
+    );
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("ignores an old reload callback after another worktree is selected", async () => {
+    await renderRail(stashWorktree("worktree-a", "repo-a"));
+    const stashesButton = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent?.includes("Stashes") === true
+    );
+    if (stashesButton === undefined) throw new Error("Stashes tab missing");
+    await act(async () => stashesButton.click());
+    const oldReload = mocks.stashRenders.at(-1)?.reload;
+    if (oldReload === undefined) throw new Error("old reload missing");
+
+    await renderRail(stashWorktree("worktree-b", "repo-b"));
+    expect(container.querySelector('[data-testid="stash-view"]')?.textContent).toBe(
+      "repo B"
+    );
+    const callsBefore = mocks.dispatch.mock.calls.length;
+
+    await act(async () => oldReload());
+
+    expect(mocks.dispatch).toHaveBeenCalledTimes(callsBefore);
+    expect(container.querySelector('[data-testid="stash-view"]')?.textContent).toBe(
+      "repo B"
+    );
   });
 });
