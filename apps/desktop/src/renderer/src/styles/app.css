@@ -5775,6 +5775,15 @@ button.ref-chip:focus-visible {
 .stash-details__status--error {
   color: var(--danger-text);
 }
+.stash-details__duplicate {
+  margin-bottom: 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  color: var(--text-secondary);
+  font: 500 9.5px/1.4 var(--font-sans);
+}
 .stash-details__summary {
   margin-bottom: 5px;
   color: var(--text-muted);

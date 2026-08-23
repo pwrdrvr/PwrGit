@@ -63,6 +63,8 @@ export function Rail({
   const [stashes, setStashes] = useState<StashEntry[]>([]);
   const [stashesLoading, setStashesLoading] = useState(false);
   const stashLoadGeneration = useRef(0);
+  const selectedWorktreeId = useRef(worktree?.id ?? null);
+  selectedWorktreeId.current = worktree?.id ?? null;
   const dirty = state?.dirty ?? worktree?.dirty ?? 0;
   const worktreeId = worktree?.id ?? null;
 
@@ -106,27 +108,34 @@ export function Rail({
   }, [refreshOperation, worktreeId]);
 
   const reloadStashes = useCallback(async (): Promise<void> => {
-    const worktreeId = worktree?.id;
+    const worktreeId = worktree?.id ?? null;
+    if (selectedWorktreeId.current !== worktreeId) return;
     const generation = ++stashLoadGeneration.current;
-    if (worktreeId === undefined) {
+    if (worktreeId === null) {
       setStashes([]);
       setStashesLoading(false);
       return;
     }
     setStashesLoading(true);
     const result = await dispatch("stash:list", { worktreeId });
-    if (generation !== stashLoadGeneration.current) return;
+    if (
+      generation !== stashLoadGeneration.current ||
+      selectedWorktreeId.current !== worktreeId
+    ) {
+      return;
+    }
     if (result.ok) setStashes(result.value);
     setStashesLoading(false);
   }, [worktree?.id]);
 
   useEffect(() => {
     void reloadStashes();
-    if (worktree === null) return;
-    return subscribe("stash:changed", ({ repoId }) => {
-      if (repoId === worktree.repoId) void reloadStashes();
+    const repoId = worktree?.repoId;
+    if (repoId === undefined) return;
+    return subscribe("stash:changed", (event) => {
+      if (event.repoId === repoId) void reloadStashes();
     });
-  }, [reloadStashes, worktree]);
+  }, [reloadStashes, worktree?.repoId]);
 
   useEffect(() => {
     if (rebaseAction !== null) setTab("rebase");

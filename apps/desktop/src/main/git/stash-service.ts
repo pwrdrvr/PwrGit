@@ -27,7 +27,7 @@ const STASH_FORMAT = ["%H", "%h", "%P", "%cI", "%gs"].join(
  * tabs, and non-ASCII stash names intact.
  */
 export function parseStashList(stdout: string): StashEntry[] {
-  const entries: StashEntry[] = [];
+  const parsed: Omit<StashEntry, "occurrenceCount">[] = [];
   for (const rawRecord of stdout.split(RECORD_SEPARATOR)) {
     const record = rawRecord.replace(/^\r?\n+/, "");
     if (record === "") continue;
@@ -44,8 +44,8 @@ export function parseStashList(stdout: string): StashEntry[] {
     }
     const identity = /^(WIP on|On) ([^:]+): (.*)$/.exec(subject);
     const named = identity?.[1] === "On" ? identity[3] : undefined;
-    entries.push({
-      selector: `stash@{${entries.length}}`,
+    parsed.push({
+      selector: `stash@{${parsed.length}}`,
       hash,
       shortHash,
       baseHash: parents.split(" ")[0] ?? "",
@@ -59,7 +59,14 @@ export function parseStashList(stdout: string): StashEntry[] {
       createdAt
     });
   }
-  return entries;
+  const occurrences = new Map<string, number>();
+  for (const entry of parsed) {
+    occurrences.set(entry.hash, (occurrences.get(entry.hash) ?? 0) + 1);
+  }
+  return parsed.map((entry) => ({
+    ...entry,
+    occurrenceCount: occurrences.get(entry.hash) ?? 1
+  }));
 }
 
 export async function listStashes(

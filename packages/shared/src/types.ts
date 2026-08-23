@@ -836,8 +836,10 @@ export const PWRGIT_PULL_STASH_MESSAGE = "pwrgit: auto-stash before pull";
 export type StashEntry = {
   /** Current reflog selector. This can move when another entry is added/dropped. */
   selector: string;
-  /** Stable stash commit identity used to guard actions against selector drift. */
+  /** Stable object identity; one reflog can contain this commit more than once. */
   hash: string;
+  /** Number of reflog entries currently pointing at this same stash commit. */
+  occurrenceCount: number;
   shortHash: string;
   /** First parent: HEAD at the time the stash was created. */
   baseHash: string;

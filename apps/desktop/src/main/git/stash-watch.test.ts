@@ -58,6 +58,7 @@ describe("StashWatch (system git)", () => {
 
   it("sees a CLI-created stash made in another linked worktree", async () => {
     const watch = new StashWatch(systemGit);
+    await expect(watch.hasChanged("repo-1", repo)).resolves.toBe(true);
     await expect(watch.hasChanged("repo-1", repo)).resolves.toBe(false);
 
     writeFileSync(join(linked, "tracked.txt"), "from linked worktree\n");

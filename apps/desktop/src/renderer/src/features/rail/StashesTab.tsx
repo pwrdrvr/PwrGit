@@ -18,6 +18,10 @@ function displayName(entry: StashEntry): string {
   return entry.name ?? entry.subject;
 }
 
+function entryKey(entry: StashEntry): string {
+  return entry.selector + ":" + entry.hash;
+}
+
 export function StashesTab({
   worktree,
   entries,
@@ -33,46 +37,57 @@ export function StashesTab({
 }) {
   const [name, setName] = useState("");
   const [includeUntracked, setIncludeUntracked] = useState(true);
-  const [expandedHash, setExpandedHash] = useState<string | null>(null);
+  const [expandedEntryKey, setExpandedEntryKey] = useState<string | null>(null);
   const [details, setDetails] = useState<DetailsState | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const detailsGeneration = useRef(0);
+  const currentWorktreeId = useRef(worktree?.id ?? null);
+  // Update during render rather than in an effect: an old promise can settle
+  // after the selected prop changes but before effects for that render run.
+  currentWorktreeId.current = worktree?.id ?? null;
 
   useEffect(() => {
     detailsGeneration.current += 1;
     setName("");
-    setExpandedHash(null);
+    setExpandedEntryKey(null);
     setDetails(null);
     setBusy(null);
   }, [worktree?.id]);
 
   useEffect(() => {
     if (
-      expandedHash !== null &&
-      !entries.some((entry) => entry.hash === expandedHash)
+      expandedEntryKey !== null &&
+      !entries.some((entry) => entryKey(entry) === expandedEntryKey)
     ) {
       detailsGeneration.current += 1;
-      setExpandedHash(null);
+      setExpandedEntryKey(null);
       setDetails(null);
     }
-  }, [entries, expandedHash]);
+  }, [entries, expandedEntryKey]);
 
   const toggleDetails = (entry: StashEntry): void => {
     if (worktree === null) return;
-    if (expandedHash === entry.hash) {
+    const selectedEntryKey = entryKey(entry);
+    const worktreeId = worktree.id;
+    if (expandedEntryKey === selectedEntryKey) {
       detailsGeneration.current += 1;
-      setExpandedHash(null);
+      setExpandedEntryKey(null);
       setDetails(null);
       return;
     }
-    setExpandedHash(entry.hash);
+    setExpandedEntryKey(selectedEntryKey);
     setDetails({ kind: "loading" });
     const generation = ++detailsGeneration.current;
     void dispatch("stash:details", {
-      worktreeId: worktree.id,
+      worktreeId,
       stashHash: entry.hash
     }).then((result) => {
-      if (detailsGeneration.current !== generation) return;
+      if (
+        detailsGeneration.current !== generation ||
+        currentWorktreeId.current !== worktreeId
+      ) {
+        return;
+      }
       setDetails(
         result.ok
           ? { kind: "ready", value: result.value }
@@ -83,19 +98,23 @@ export function StashesTab({
 
   const create = async (): Promise<void> => {
     if (worktree === null || name.trim() === "") return;
+    const worktreeId = worktree.id;
+    const message = name.trim();
     setBusy("create");
     const result = await dispatch("stash:create", {
-      worktreeId: worktree.id,
-      message: name.trim(),
+      worktreeId,
+      message,
       includeUntracked
     });
+    if (currentWorktreeId.current !== worktreeId) return;
     setBusy(null);
     await reload();
+    if (currentWorktreeId.current !== worktreeId) return;
     if (!result.ok) {
       showErrorToast({
         title: "Could not create stash",
         message: result.error.message,
-        detail: name.trim()
+        detail: message
       });
       return;
     }
@@ -110,7 +129,7 @@ export function StashesTab({
     }
     showInfoToast({
       title: "Stash created",
-      message: name.trim() + " was added to the repository stack."
+      message: message + " was added to the repository stack."
     });
     setName("");
   };
@@ -120,13 +139,16 @@ export function StashesTab({
     command: "stash:apply" | "stash:pop"
   ): Promise<void> => {
     if (worktree === null) return;
+    const worktreeId = worktree.id;
     setBusy(command + ":" + entry.hash);
     const result = await dispatch(command, {
-      worktreeId: worktree.id,
+      worktreeId,
       stashHash: entry.hash
     });
+    if (currentWorktreeId.current !== worktreeId) return;
     setBusy(null);
     await reload();
+    if (currentWorktreeId.current !== worktreeId) return;
     if (!result.ok) {
       showErrorToast({
         title:
@@ -150,7 +172,8 @@ export function StashesTab({
   };
 
   const drop = async (entry: StashEntry): Promise<void> => {
-    if (worktree === null) return;
+    if (worktree === null || entry.occurrenceCount > 1) return;
+    const worktreeId = worktree.id;
     const confirmed = await confirmDialog({
       title: "Drop repository stash?",
       message:
@@ -160,14 +183,16 @@ export function StashesTab({
       confirmLabel: "Drop stash",
       danger: true
     });
-    if (!confirmed) return;
+    if (!confirmed || currentWorktreeId.current !== worktreeId) return;
     setBusy("stash:drop:" + entry.hash);
     const result = await dispatch("stash:drop", {
-      worktreeId: worktree.id,
+      worktreeId,
       stashHash: entry.hash
     });
+    if (currentWorktreeId.current !== worktreeId) return;
     setBusy(null);
     await reload();
+    if (currentWorktreeId.current !== worktreeId) return;
     if (!result.ok) {
       showErrorToast({
         title: "Could not drop stash",
@@ -232,10 +257,11 @@ export function StashesTab({
           </div>
         ) : (
           entries.map((entry) => {
-            const expanded = expandedHash === entry.hash;
+            const renderedEntryKey = entryKey(entry);
+            const expanded = expandedEntryKey === renderedEntryKey;
             const entryBusy = busy?.endsWith(entry.hash) === true;
             return (
-              <article className="stash-entry" key={entry.hash}>
+              <article className="stash-entry" key={renderedEntryKey}>
                 <button
                   className="stash-entry__toggle"
                   onClick={() => toggleDetails(entry)}
@@ -278,8 +304,12 @@ export function StashesTab({
                       </button>
                       <button
                         onClick={() => void restore(entry, "stash:pop")}
-                        disabled={busy !== null}
-                        title="Restore here; Git drops it only if apply succeeds"
+                        disabled={busy !== null || entry.occurrenceCount > 1}
+                        title={
+                          entry.occurrenceCount > 1
+                            ? "Unavailable while this stash object occurs more than once"
+                            : "Restore here; Git drops it only if apply succeeds"
+                        }
                       >
                         Pop
                       </button>
@@ -294,11 +324,25 @@ export function StashesTab({
                       <button
                         className="stash-entry__drop"
                         onClick={() => void drop(entry)}
-                        disabled={busy !== null}
+                        disabled={busy !== null || entry.occurrenceCount > 1}
+                        title={
+                          entry.occurrenceCount > 1
+                            ? "Unavailable while this stash object occurs more than once"
+                            : "Permanently remove this repository stash"
+                        }
                       >
                         Drop
                       </button>
                     </div>
+
+                    {entry.occurrenceCount > 1 && (
+                      <div className="stash-details__duplicate" role="note">
+                        This same Git stash object appears {entry.occurrenceCount} times.
+                        Apply and inspection are safe; Pop and Drop are
+                        disabled because reflog occurrences have no stable
+                        identity.
+                      </div>
+                    )}
 
                     {entryBusy || details?.kind === "loading" ? (
                       <div className="stash-details__status">Working…</div>

@@ -27,6 +27,7 @@ const entry = (
 ): StashEntry => ({
   selector,
   hash,
+  occurrenceCount: 1,
   shortHash: hash.slice(0, 7),
   baseHash: "b".repeat(40),
   branch: "main",
@@ -111,6 +112,39 @@ describe("stash handlers", () => {
       error: { code: "not_found" }
     });
     expect(dependencies.drop).not.toHaveBeenCalled();
+  });
+
+  it("rejects pop and drop when one stash commit has multiple reflog occurrences", async () => {
+    const hash = "d".repeat(40);
+    const newest = { ...entry("stash@{0}", hash, "duplicate"), occurrenceCount: 2 };
+    const older = { ...entry("stash@{2}", hash, "duplicate"), occurrenceCount: 2 };
+    const { bus, dependencies } = setup([
+      newest,
+      entry("stash@{1}", "1".repeat(40), "between"),
+      older
+    ]);
+
+    for (const command of ["stash:pop", "stash:drop"] as const) {
+      await expect(
+        bus.dispatch(command, {
+          worktreeId: "worktree-1",
+          stashHash: hash
+        })
+      ).resolves.toMatchObject({
+        ok: false,
+        error: { code: "ambiguous_stash" }
+      });
+    }
+    expect(dependencies.pop).not.toHaveBeenCalled();
+    expect(dependencies.drop).not.toHaveBeenCalled();
+
+    await expect(
+      bus.dispatch("stash:apply", {
+        worktreeId: "worktree-1",
+        stashHash: hash
+      })
+    ).resolves.toEqual(ok(null));
+    expect(dependencies.apply).toHaveBeenCalledTimes(1);
   });
 
   it("keeps recovery metadata while inspecting an auto-stash", async () => {
