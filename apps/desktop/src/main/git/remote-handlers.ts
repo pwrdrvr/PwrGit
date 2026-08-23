@@ -702,6 +702,8 @@ export function registerRemoteHandlers(
       return result;
     } finally {
       activity.finish();
+      // Pull may leave an ordinary recovery stash after a failed reapply.
+      emitEvent("stash:changed", { repoId: worktree.repoId });
     }
   });
 

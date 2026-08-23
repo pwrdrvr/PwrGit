@@ -816,6 +816,9 @@ export function App() {
                 });
               }
             }}
+            onOpenStashPatch={(hash, subject) =>
+              setDiffTarget({ kind: "stash", hash, subject })
+            }
             onClearSelection={clearSelection}
             onCollapse={() => setRailCollapsed(true)}
             onOpenDiff={(path, staged) => {
