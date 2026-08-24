@@ -208,10 +208,10 @@ export function registerBranchHandlers(
     );
 
     await indexer.refreshRepoWorktrees(row.repo_id);
-    // The branch set this worktree can see changed even though its own checkout
-    // did not, so the lineage graph needs a forced reload to draw the new tip —
-    // refreshWorktree alone stays silent when the worktree state is unmoved.
-    emitEvent("worktree:changed", { worktreeId: req.worktreeId });
+    // The branch set changed even when this checkout did not. Graph caches are
+    // repo-wide, so invalidate the repository instead of pretending one
+    // worktree's own state moved.
+    emitEvent("graph:changed", { repoId: row.repo_id });
     emitEvent("repo:changed", { profileId: row.profile_id });
 
     // A branch is checked out in at most one worktree, so the branch name

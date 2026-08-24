@@ -1,6 +1,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -19,20 +20,26 @@ import {
   validateSelection
 } from "./rebase-assistant";
 
-const systemGit: GitExec = (args, cwd) =>
-  new Promise<Result<GitOutput>>((resolve) => {
-    const proc = spawn("git", args, { cwd });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
-    proc.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-    proc.on("close", (code) =>
-      resolve(ok({ stdout, stderr, exitCode: code ?? 0 }))
-    );
-    proc.on("error", (e) =>
-      resolve(err({ kind: "git", code: "spawn_failed", message: e.message }))
-    );
-  });
+function createSystemGit(
+  env: NodeJS.ProcessEnv = process.env
+): GitExec {
+  return (args, cwd) =>
+    new Promise<Result<GitOutput>>((resolve) => {
+      const proc = spawn("git", args, { cwd, env });
+      let stdout = "";
+      let stderr = "";
+      proc.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
+      proc.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+      proc.on("close", (code) =>
+        resolve(ok({ stdout, stderr, exitCode: code ?? 0 }))
+      );
+      proc.on("error", (e) =>
+        resolve(err({ kind: "git", code: "spawn_failed", message: e.message }))
+      );
+    });
+}
+
+const systemGit = createSystemGit();
 
 function git(dir: string, args: string[]): void {
   execFileSync("git", args, { cwd: dir, stdio: "ignore" });
@@ -72,6 +79,44 @@ function makeConflictingRepo(): string {
     git(dir, ["add", "shared.txt"]);
     git(dir, ["commit", "-m", subject]);
   }
+  return dir;
+}
+
+/**
+ * The selected commits reorder cleanly under a normal text merge. A local
+ * merge-driver override exists only in the source checkout, so an isolated
+ * check can approve the plan while Apply fails after starting cherry-pick.
+ */
+function makeApplyOnlyConflictRepo(): string {
+  const dir = join(
+    mkdtempSync(join(tmpdir(), "pwrgit-rebase-apply-conflict-")),
+    "repo"
+  );
+  mkdirSync(dir, { recursive: true });
+  git(dir, ["init", "-b", "main"]);
+  git(dir, ["config", "core.autocrlf", "false"]);
+  git(dir, ["config", "user.email", "orig@x.com"]);
+  git(dir, ["config", "user.name", "Orig"]);
+  writeFileSync(join(dir, ".gitattributes"), "shared.txt merge=reject\n");
+  writeFileSync(
+    join(dir, "shared.txt"),
+    "header\nfirst: baseline\nkeep a\nkeep b\nkeep c\nkeep d\nkeep e\nkeep f\nsecond: baseline\nfooter\n"
+  );
+  git(dir, ["add", "."]);
+  git(dir, ["commit", "-m", "base"]);
+  writeFileSync(
+    join(dir, "shared.txt"),
+    "header\nfirst: local one\nkeep a\nkeep b\nkeep c\nkeep d\nkeep e\nkeep f\nsecond: baseline\nfooter\n"
+  );
+  git(dir, ["add", "shared.txt"]);
+  git(dir, ["commit", "-m", "change first setting"]);
+  writeFileSync(
+    join(dir, "shared.txt"),
+    "header\nfirst: local one\nkeep a\nkeep b\nkeep c\nkeep d\nkeep e\nkeep f\nsecond: local two\nfooter\n"
+  );
+  git(dir, ["add", "shared.txt"]);
+  git(dir, ["commit", "-m", "change second setting"]);
+  git(dir, ["config", "merge.reject.driver", "false"]);
   return dir;
 }
 
@@ -159,6 +204,56 @@ describe("applyRebase (system git)", () => {
     expect(r.ok).toBe(true);
     expect(gitOut(repo, ["log", "-1", "--format=%s"])).toBe("c1");
     expect(gitOut(repo, ["rev-list", "--count", "HEAD"])).toBe("4");
+  }, 15_000);
+
+  it("aborts a started cherry-pick and restores every visible source outcome", async () => {
+    const repo = makeApplyOnlyConflictRepo();
+    const globalConfigDir = mkdtempSync(
+      join(tmpdir(), "pwrgit-rebase-global-config-")
+    );
+    const globalConfig = join(globalConfigDir, "gitconfig");
+    writeFileSync(
+      globalConfig,
+      '[merge "reject"]\n\tname = Normal text merge in isolated copies\n\tdriver = git merge-file %A %O %B\n'
+    );
+    const configuredGit = createSystemGit({
+      ...process.env,
+      GIT_CONFIG_GLOBAL: globalConfig,
+      GIT_CONFIG_SYSTEM: "/dev/null"
+    });
+    const commits = topCommits(repo, 2);
+    const before = sourceSnapshot(repo);
+
+    const checked = await dryRunRebase(
+      configuredGit,
+      repo,
+      commits,
+      "reorder",
+      { email: "me@acme.io", name: "Me" }
+    );
+    expect(checked.ok).toBe(true);
+    expect(sourceSnapshot(repo)).toEqual(before);
+    if (!checked.ok) return;
+
+    const applied = await applyRebase(
+      configuredGit,
+      repo,
+      commits,
+      "reorder",
+      { email: "me@acme.io", name: "Me" },
+      {
+        head: checked.value.sourceHead,
+        headRef: checked.value.sourceRef
+      }
+    );
+
+    expect(applied.ok).toBe(false);
+    if (!applied.ok) {
+      expect(applied.error.code).toBe("conflict");
+      expect(applied.error.message).toContain("restored unchanged");
+    }
+    expect(sourceSnapshot(repo)).toEqual(before);
+    expect(existsSync(join(repo, ".git", "CHERRY_PICK_HEAD"))).toBe(false);
   }, 15_000);
 
   it("refuses when the worktree is dirty", async () => {

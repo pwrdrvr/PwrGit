@@ -45,6 +45,7 @@ function cleanEnv(extra: Record<string, string>): Record<string, string> {
 export async function launchApp(
   opts: {
     worktreeRoot?: string;
+    gitConfig?: string;
     forgeFixturePath?: string;
     theme?: "system" | "dark" | "light";
     failReadOnce?: RecoverableBootRead[];
@@ -69,7 +70,7 @@ export async function launchApp(
   const gitconfig = join(userData, "gitconfig");
   writeFileSync(
     gitconfig,
-    "[user]\n\tname = PwrGit Test\n\temail = test@pwrgit.dev\n"
+    `[user]\n\tname = PwrGit Test\n\temail = test@pwrgit.dev\n${opts.gitConfig ?? ""}`
   );
 
   const app = await electron.launch({
@@ -77,6 +78,11 @@ export async function launchApp(
     env: cleanEnv({
       PWRGIT_USER_DATA_DIR: userData,
       PWRGIT_GITCONFIG: gitconfig,
+      // The app's Git commands must be as deterministic as fixture setup:
+      // neither side may inherit the runner/developer's aliases, identity,
+      // signing, merge drivers, or other machine-global behavior.
+      GIT_CONFIG_GLOBAL: gitconfig,
+      GIT_CONFIG_SYSTEM: "/dev/null",
       ...(opts.forgeFixturePath === undefined
         ? {}
         : { PWRGIT_E2E_FORGE_FIXTURE: opts.forgeFixturePath }),
