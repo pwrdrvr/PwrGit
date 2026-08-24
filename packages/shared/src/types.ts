@@ -44,6 +44,8 @@ export type Worktree = {
   ahead: number;
   /** Commits behind upstream. */
   behind: number;
+  /** Cached local-branch tracking state. Absent until Git state is computed. */
+  tracking?: BranchTrackingStatus;
   /** Commits the repo's default branch is ahead of this worktree (staleness).
    *  0 when the branch shares no history with the default (see divergedFromDefault). */
   behindDefault: number;
@@ -292,7 +294,7 @@ export type Repo = {
   /**
    * Persisted drag-order index within the profile; absent until the user
    * arranges the list by hand. Only the Pinned lens honors it — the computed
-   * lenses (Recent/Behind/Stale) answer a question, so a manual order there
+   * lenses (Focused/Behind/Stale) answer a question, so a manual order there
    * would fight the answer.
    */
   order?: number;
@@ -760,7 +762,7 @@ export type RebaseCheckResult =
     }
   | { status: "snag"; code: string; message: string };
 
-export type Lens = "Recent" | "Pinned" | "Behind" | "Stale" | "All";
+export type Lens = "Focused" | "Pinned" | "Behind" | "Stale" | "All";
 export type WorktreeSort = "recent" | "pinned" | "az" | "active" | "custom";
 
 /** Lazily-filled status for a ⌘F search hit (nulls = unknown/uncached). */

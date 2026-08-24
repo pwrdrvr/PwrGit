@@ -123,6 +123,20 @@ describe("WorktreeStateService (system git)", () => {
     expect(state?.defaultBranch).toBe("main");
     expect(service.getCached(worktreeId)?.defaultBranch).toBe("main");
     expect(state?.lastActivityAt).toBeTruthy();
+
+    // The sidebar reads the indexed Worktree shape rather than WorktreeState.
+    // A computed no-upstream branch must retain that durable distinction so
+    // Focused can keep clean commits that have never been published.
+    const repoId = (
+      db.prepare("SELECT repo_id FROM worktrees WHERE id = ?").get(worktreeId) as {
+        repo_id: string;
+      }
+    ).repo_id;
+    const indexed = new RepoIndexer(db, systemGit).getRepo(repoId);
+    expect(
+      indexed?.worktrees.find((worktree) => worktree.id === worktreeId)
+        ?.tracking
+    ).toBe("unpublished");
   });
 
   it("reflects a working-tree edit as dirty, and caches it", async () => {

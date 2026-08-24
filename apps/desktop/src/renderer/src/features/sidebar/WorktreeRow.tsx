@@ -48,7 +48,7 @@ export function WorktreeRow({
   onRemove: () => void;
   /** Refresh this branch's PR after deliberate row hover. */
   onRefreshPullRequest?: () => void;
-  /** Drag handlers from useListReorder; `draggable: false` for the primary. */
+  /** Drag handlers from useListReorder; false for fixed/computed rows. */
   dragProps: {
     draggable: boolean;
     onDragStart?: (e: DragEvent) => void;
@@ -121,23 +121,23 @@ export function WorktreeRow({
       onMouseEnter={prefetchPullRequest}
       onMouseLeave={clearPrHoverTimer}
     >
-      {/* The primary checkout is fixed at the top — no drag handle. */}
+      {/* Fixed rows and Focused's computed Working rows have no drag handle. */}
       <span
         className="wt-row__handle"
         aria-hidden="true"
         title={
-          worktree.isPrimary
-            ? undefined
-            : `Drag to reorder — or ${shortcutLabel(
+          dragProps.draggable
+            ? `Drag to reorder — or ${shortcutLabel(
                 { key: "ArrowUp", shift: true },
                 platform
               )} / ${shortcutLabel(
                 { key: "ArrowDown", shift: true },
                 platform
               )} from the keyboard`
+            : undefined
         }
       >
-        {!worktree.isPrimary && (
+        {dragProps.draggable && (
           <svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor">
             <circle cx="2" cy="2" r="1.3" />
             <circle cx="7" cy="2" r="1.3" />
