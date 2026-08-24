@@ -41,7 +41,9 @@ export default defineConfig(({ command }) => {
       // ESM resolver can't follow extensionless `./protocol`-style imports
       // inside source-form packages. Mirrors PwrSnap / PwrAgnt.
       plugins: [
-        externalizeDepsPlugin({ exclude: ["@pwrgit/shared"] }),
+        externalizeDepsPlugin({
+          exclude: ["@pwrgit/shared", "@pwrgit/mcp-server"]
+        }),
         copyMigrationsPlugin()
       ],
       build: {

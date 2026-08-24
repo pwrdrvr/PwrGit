@@ -45,7 +45,11 @@ export type ForgeRepoProvider = {
   cloneWithCli(
     nameWithOwner: string,
     destination: string,
-    options: { onStderr: (chunk: string) => void; env: Record<string, string> }
+    options: {
+      onStderr: (chunk: string) => void;
+      env: Record<string, string>;
+      signal?: AbortSignal;
+    }
   ): Promise<void>;
   isAuthError(cause: unknown): boolean;
   errorMessage(cause: unknown): string;
@@ -79,8 +83,13 @@ export type ForkInput = {
    *  `forkDefaultBranchOnly` capability is false. */
   defaultBranchOnly: boolean;
   /** Called as the forge moves between its two unmetered steps, so the dialog
-   *  can name the step instead of showing a bar that does not move. */
+   *  can name the step instead of showing a bar that does not move. Providers
+   *  emit `awaiting_fork` only after the remote repository exists; callers use
+   *  that transition to report an already-created fork after cancellation. */
   onPhase?: (phase: "creating" | "awaiting_fork") => void;
+  /** Cancels the CLI call and any forge-side readiness wait. A forge that
+   *  completed before cancellation is deliberately not deleted. */
+  signal?: AbortSignal;
 };
 
 /** Picks the provider for a host. Registered at startup so a forge with no
@@ -152,4 +161,3 @@ export function ownersFrom(
   }
   return owners;
 }
-

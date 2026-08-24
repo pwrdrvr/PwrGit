@@ -21,7 +21,10 @@ const worktree = (partial: Partial<Worktree>): Worktree => ({
   ...partial
 });
 
-const render = (wt: Worktree, platform = "darwin"): string =>
+const render = (
+  wt: Worktree,
+  options: { reorderable?: boolean; platform?: string } = {}
+): string =>
   renderToStaticMarkup(
     <WorktreeRow
       worktree={wt}
@@ -32,7 +35,7 @@ const render = (wt: Worktree, platform = "darwin"): string =>
       onContextMenu={() => undefined}
       onTogglePin={() => undefined}
       onRemove={() => undefined}
-      dragProps={{ draggable: true }}
+      dragProps={{ draggable: options.reorderable ?? true }}
       dragging={false}
       dropPosition={null}
       focusable={false}
@@ -40,7 +43,7 @@ const render = (wt: Worktree, platform = "darwin"): string =>
       onFocus={() => undefined}
       posinset={1}
       setsize={1}
-      platform={platform}
+      platform={options.platform ?? "darwin"}
     />
   );
 
@@ -90,15 +93,29 @@ describe("WorktreeRow — the folder a worktree lives in", () => {
   });
 });
 
+describe("WorktreeRow — reorder affordance", () => {
+  it("does not advertise a drag gesture for a computed row", () => {
+    const markup = render(worktree({ branch: "feature/computed" }), {
+      reorderable: false
+    });
+
+    expect(markup).toContain('draggable="false"');
+    expect(markup).not.toContain("Drag to reorder");
+    expect(markup).toContain(
+      '<span class="wt-row__handle" aria-hidden="true"></span>'
+    );
+  });
+});
+
 describe("WorktreeRow — platform shortcut affordance", () => {
   it("keeps the Command-glyph reorder tooltip on macOS", () => {
-    expect(render(worktree({}), "darwin")).toContain(
+    expect(render(worktree({}), { platform: "darwin" })).toContain(
       "Drag to reorder — or ⇧⌘↑ / ⇧⌘↓ from the keyboard"
     );
   });
 
   it("shows the working Ctrl chord on Windows", () => {
-    expect(render(worktree({}), "win32")).toContain(
+    expect(render(worktree({}), { platform: "win32" })).toContain(
       "Drag to reorder — or Ctrl+Shift+↑ / Ctrl+Shift+↓ from the keyboard"
     );
   });

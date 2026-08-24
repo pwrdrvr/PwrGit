@@ -27,6 +27,9 @@ export type ProfileHandlerDeps = {
     worktreeId: string | null;
     branch: BranchReveal | null;
   } | null;
+  /** Close any window bound to the deleted profile and move focus to the
+   *  surviving active profile. */
+  onDeleted?: (deletedProfileId: string, activeProfileId: string) => void;
 };
 
 export function registerProfileHandlers(
@@ -34,7 +37,7 @@ export function registerProfileHandlers(
   profiles: ProfileService,
   deps: ProfileHandlerDeps
 ): void {
-  const { onChanged, openWindow, consumeReveal } = deps;
+  const { onChanged, openWindow, consumeReveal, onDeleted } = deps;
 
   bus.register("profile:list", () => ok(profiles.snapshot()));
   bus.register("profile:openWindow", (req) => {
@@ -129,5 +132,24 @@ export function registerProfileHandlers(
     emitEvent("profile:changed", profiles.snapshot());
     onChanged?.(profile);
     return ok(profile);
+  });
+
+  bus.register("profile:delete", (req) => {
+    const result = profiles.delete(req);
+    if (!result.ok) return result;
+
+    onDeleted?.(
+      result.value.deletedProfileId,
+      result.value.activeProfileId
+    );
+    emitEvent("profile:changed", {
+      activeProfileId: result.value.activeProfileId,
+      profiles: result.value.profiles
+    });
+    const activeProfile = result.value.profiles.find(
+      (profile) => profile.id === result.value.activeProfileId
+    );
+    if (activeProfile !== undefined) onChanged?.(activeProfile);
+    return result;
   });
 }

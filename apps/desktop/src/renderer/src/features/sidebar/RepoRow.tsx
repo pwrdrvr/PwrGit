@@ -14,9 +14,12 @@ import {
   shortcutLabel
 } from "../../lib/platform";
 import { useViewportTooltip } from "../../lib/useViewportTooltip";
+import type { FocusVisits } from "./focus-visits";
 import {
+  type FocusReason,
   groupWorktreesForNavigation,
   linkedWorktreeCount,
+  partitionFocusedWorktrees,
   reorder,
   repoPinSource,
   repoPrimaryBehind,
@@ -38,6 +41,32 @@ const WORKTREE_MIME = "application/x-pwrgit-worktree";
 const REFRESH_WORKTREES_TOOLTIP =
   "Refresh this list — re-read Git for worktrees added, removed, or switched outside PwrGit (does not fetch)";
 
+const FOCUS_REASON_COPY: Record<
+  FocusReason,
+  { short: string; description: string }
+> = {
+  current: {
+    short: "Current",
+    description: "focused because this repo contains the current worktree"
+  },
+  pinned: {
+    short: "Pinned",
+    description: "focused because this repo or one of its worktrees is pinned"
+  },
+  viewed: {
+    short: "Viewed",
+    description: "focused because one of its worktrees was viewed in the last 30 days"
+  },
+  changed: {
+    short: "Changes",
+    description: "focused because a worktree has local or unpushed changes"
+  },
+  recent: {
+    short: "30d",
+    description: "focused because a worktree branch has a commit from the last 30 days"
+  }
+};
+
 export function RepoRow({
   repo,
   expanded,
@@ -47,6 +76,9 @@ export function RepoRow({
   sort,
   customOrder,
   now,
+  focused,
+  focusVisits,
+  focusReason,
   onToggleExpand,
   onToggleRepoPin,
   refreshing,
@@ -83,6 +115,11 @@ export function RepoRow({
   sort: WorktreeSort;
   customOrder: string[] | undefined;
   now: number;
+  /** Focused lens elevates its matching linked worktrees above the disclosure. */
+  focused: boolean;
+  focusVisits: FocusVisits;
+  /** The first transparent rule that admitted this repo to Focused. */
+  focusReason?: FocusReason;
   onToggleExpand: () => void;
   onToggleRepoPin: () => void;
   refreshing: boolean;
@@ -137,9 +174,33 @@ export function RepoRow({
   platform?: string;
 }) {
   const refreshTooltip = useViewportTooltip();
-  const { primary, pinned, remaining, displayIds } =
-    groupWorktreesForNavigation(repo.worktrees, sort, customOrder);
-  const orderedIds = [...pinned, ...remaining].map((worktree) => worktree.id);
+  const navigation = groupWorktreesForNavigation(
+    repo.worktrees,
+    sort,
+    customOrder
+  );
+  const { primary, pinned } = navigation;
+  const focusPartition = focused
+    ? partitionFocusedWorktrees(
+        navigation.remaining,
+        { selectedWorktreeId, visits: focusVisits },
+        now
+      )
+    : { focused: [], remaining: navigation.remaining };
+  const focusedWorktrees = focusPartition.focused;
+  const remaining = focusPartition.remaining;
+  // Reorder against the same partition the user sees. In Focused, the Working
+  // block is priority-ranked and intentionally inert; pinned and More rows
+  // still persist meaningful order within their own visible sections.
+  const orderedIds = [...pinned, ...focusedWorktrees, ...remaining].map(
+    (worktree) => worktree.id
+  );
+  const displayIds = [
+    ...(primary === undefined ? [] : [primary.id]),
+    ...pinned.map((worktree) => worktree.id),
+    ...focusedWorktrees.map((worktree) => worktree.id),
+    ...remaining.map((worktree) => worktree.id)
+  ];
   const [worktreesOpen, setWorktreesOpen] = useState(() => {
     try {
       const stored = window.localStorage.getItem(
@@ -185,22 +246,35 @@ export function RepoRow({
 
   // The disclosure holds every linked worktree only when none are pinned. Once
   // some are, they render above it under their own heading, so the disclosure
-  // says what it actually contains — and the two counts add up to the repo
-  // row's total instead of silently disagreeing with it.
-  const worktreesLabel = pinned.length > 0 ? "Other worktrees" : "Worktrees";
+  // says what it actually contains. In Focused, the Working block is a third
+  // partition; all visible headings still add up to the repo row's total.
+  const worktreesLabel =
+    pinned.length > 0 || focusedWorktrees.length > 0
+      ? focused
+        ? "More worktrees"
+        : "Other worktrees"
+      : "Worktrees";
 
   // The primary checkout is fixed at the top, so it is neither a drag source
   // nor a drop target — `orderedIds` excludes it for the same reason.
   //
-  // Pinned worktrees render in their own section above the disclosure, so a
-  // drop across that boundary would reorder the flat list while the row visibly
-  // snapped back into its own section. Keep the gesture inside one section:
-  // moving a worktree between them is what the pin is for.
+  // Pinned and focused worktrees render in sections above the disclosure, so a
+  // drop across a boundary would reorder the flat list while the row visibly
+  // snapped back into its computed section. Keep the gesture within a section.
   const pinnedIds = new Set(pinned.map((worktree) => worktree.id));
+  const focusedIds = new Set(
+    focusedWorktrees.map((worktree) => worktree.id)
+  );
+  const sectionFor = (worktreeId: string): "pinned" | "focused" | "other" =>
+    pinnedIds.has(worktreeId)
+      ? "pinned"
+      : focusedIds.has(worktreeId)
+        ? "focused"
+        : "other";
   const wtDrag = useListReorder({
     mime: WORKTREE_MIME,
     canDrop: (dragged, targetId) =>
-      pinnedIds.has(dragged) === pinnedIds.has(targetId),
+      sectionFor(dragged) === sectionFor(targetId),
     onCommit: (dragged, targetId, position) => {
       onReorder(reorder(orderedIds, dragged, targetId, position));
     }
@@ -240,7 +314,9 @@ export function RepoRow({
     // memory.
     if (hasPrimaryModifier(event, platform) && event.shiftKey) {
       if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-      if (worktree.isPrimary) return;
+      // Working is a computed priority section. Persisting a manual move here
+      // would be immediately undone by its Focus reason/activity ranking.
+      if (worktree.isPrimary || sectionFor(worktree.id) === "focused") return;
       const from = orderedIds.indexOf(worktree.id);
       const to = from + (event.key === "ArrowUp" ? -1 : 1);
       const neighbor = orderedIds[to];
@@ -248,7 +324,7 @@ export function RepoRow({
       if (
         from === -1 ||
         neighbor === undefined ||
-        pinnedIds.has(neighbor) !== pinnedIds.has(worktree.id)
+        sectionFor(neighbor) !== sectionFor(worktree.id)
       ) {
         return;
       }
@@ -319,7 +395,10 @@ export function RepoRow({
             onRefreshPullRequest: () =>
               onRefreshPullRequest(worktree.branch)
           })}
-      dragProps={wtDrag.rowProps(worktree.id, !worktree.isPrimary)}
+      dragProps={wtDrag.rowProps(
+        worktree.id,
+        !worktree.isPrimary && sectionFor(worktree.id) !== "focused"
+      )}
       dragging={wtDrag.dragId === worktree.id}
       dropPosition={
         wtDrag.target?.id === worktree.id ? wtDrag.target.position : null
@@ -374,7 +453,10 @@ export function RepoRow({
     repo.identity === undefined ? null : identityDescription(repo.identity),
     arrangeable && pinSource === "worktree"
       ? "in Pinned because one of its worktrees is pinned"
-      : null
+      : null,
+    focusReason === undefined
+      ? null
+      : FOCUS_REASON_COPY[focusReason].description
   ]
     .filter((part): part is string => part !== null)
     .join(", ");
@@ -480,6 +562,14 @@ export function RepoRow({
             via wt
           </span>
         )}
+        {focusReason !== undefined && (
+          <span
+            className="repo-row__focus-reason"
+            title={FOCUS_REASON_COPY[focusReason].description}
+          >
+            {FOCUS_REASON_COPY[focusReason].short}
+          </span>
+        )}
         <button
           type="button"
           className={`pin${repo.pinned ? " is-pinned" : ""}`}
@@ -521,6 +611,15 @@ export function RepoRow({
               </div>
             )}
             {pinned.map(renderWorktree)}
+            {focusedWorktrees.length > 0 && (
+              <div className="wt-subhead" aria-hidden="true">
+                <span className="wt-section__label">Working</span>
+                <span className="ref-section__count">
+                  {focusedWorktrees.length}
+                </span>
+              </div>
+            )}
+            {focusedWorktrees.map(renderWorktree)}
           </div>
 
           {selectedIds.size > 1 && (

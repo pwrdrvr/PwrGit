@@ -1,10 +1,18 @@
-import { describe, expect, it } from "vitest";
-import { openDatabase } from "../persistence/db";
+import { afterEach, describe, expect, it } from "vitest";
+import { openDatabase, type DB } from "../persistence/db";
 import { ProfileService } from "./profile-service";
 
+const databases: DB[] = [];
+
 function service(): ProfileService {
-  return new ProfileService(openDatabase(":memory:"));
+  const db = openDatabase(":memory:");
+  databases.push(db);
+  return new ProfileService(db);
 }
+
+afterEach(() => {
+  for (const db of databases.splice(0)) db.close();
+});
 
 describe("ProfileService", () => {
   it("ensureSeed creates exactly one default profile and is idempotent", () => {
@@ -77,5 +85,57 @@ describe("ProfileService", () => {
     const s = service();
     const profile = s.create({ name: "Inherited", email: "i@example.com" });
     expect(profile.theme).toBeUndefined();
+  });
+
+  it("requires an exact current name and protects the final profile", () => {
+    const s = service();
+    const only = s.create({ name: "Personal", email: "me@example.com" });
+
+    const mismatched = s.delete({
+      profileId: only.id,
+      expectedName: "personal"
+    });
+    expect(mismatched.ok).toBe(false);
+    if (!mismatched.ok) expect(mismatched.error.code).toBe("confirmation_mismatch");
+
+    const final = s.delete({ profileId: only.id, expectedName: only.name });
+    expect(final.ok).toBe(false);
+    if (!final.ok) expect(final.error.code).toBe("last_profile");
+    expect(s.snapshot()).toEqual({
+      activeProfileId: only.id,
+      profiles: [only]
+    });
+  });
+
+  it("chooses the next ordered profile, or the previous one at the end", () => {
+    const s = service();
+    const a = s.create({ name: "A", email: "a@example.com" });
+    const b = s.create({ name: "B", email: "b@example.com" });
+    const c = s.create({ name: "C", email: "c@example.com" });
+
+    s.switch(b.id);
+    const middle = s.delete({ profileId: b.id, expectedName: b.name });
+    expect(middle.ok).toBe(true);
+    if (!middle.ok) return;
+    expect(middle.value.activeProfileId).toBe(c.id);
+
+    s.switch(c.id);
+    const end = s.delete({ profileId: c.id, expectedName: c.name });
+    expect(end.ok).toBe(true);
+    if (!end.ok) return;
+    expect(end.value.activeProfileId).toBe(a.id);
+  });
+
+  it("repairs a missing active-profile selection without reseeding", () => {
+    const db = openDatabase(":memory:");
+    databases.push(db);
+    const s = new ProfileService(db);
+    const profile = s.create({ name: "Existing", email: "x@example.com" });
+    db.prepare("DELETE FROM app_meta WHERE key = 'active_profile_id'").run();
+
+    s.ensureSeed({ name: "Default", email: "default@example.com" });
+
+    expect(s.list()).toHaveLength(1);
+    expect(s.getActiveId()).toBe(profile.id);
   });
 });

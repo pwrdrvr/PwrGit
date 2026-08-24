@@ -1,7 +1,190 @@
 import type { Lens, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
 import { pathLeaf } from "../../lib/platform";
+import type { FocusVisits } from "./focus-visits";
 
-export const LENSES: Lens[] = ["Recent", "Pinned", "Behind", "Stale", "All"];
+export const LENSES: Lens[] = [
+  "Focused",
+  "Pinned",
+  "Behind",
+  "Stale",
+  "All"
+];
+
+/** Focus is deliberately a small, explainable window rather than a score. */
+export const FOCUS_RECENCY_DAYS = 30;
+export const FOCUS_REPO_LIMIT = 12;
+export const FOCUS_WORKTREE_LIMIT = 5;
+
+export type FocusContext = {
+  selectedWorktreeId: string | null;
+  visits: FocusVisits;
+};
+
+export type FocusReason =
+  | "current"
+  | "pinned"
+  | "viewed"
+  | "changed"
+  | "recent";
+
+const FOCUS_REASON_RANK: Record<FocusReason, number> = {
+  current: 0,
+  pinned: 1,
+  viewed: 2,
+  changed: 3,
+  recent: 4
+};
+
+const focusThreshold = (now: number): number =>
+  now - FOCUS_RECENCY_DAYS * 24 * 60 * 60 * 1000;
+
+const validTime = (value: string | undefined): number => {
+  if (value === undefined) return Number.NEGATIVE_INFINITY;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
+};
+
+const newestVisit = (worktrees: Worktree[], visits: FocusVisits): number => {
+  let newest = Number.NEGATIVE_INFINITY;
+  for (const worktree of worktrees) {
+    const viewedAt = visits[worktree.id];
+    if (viewedAt !== undefined && viewedAt > newest) newest = viewedAt;
+  }
+  return newest;
+};
+
+/** The first matching rule is the reason rendered beside a focused repo. */
+export function focusReasonForRepo(
+  repo: Repo,
+  context: FocusContext,
+  now: number = Date.now()
+): FocusReason | null {
+  if (
+    context.selectedWorktreeId !== null &&
+    repo.worktrees.some((worktree) => worktree.id === context.selectedWorktreeId)
+  ) {
+    return "current";
+  }
+  if (repo.pinned || repo.worktrees.some((worktree) => worktree.pinned)) {
+    return "pinned";
+  }
+  if (newestVisit(repo.worktrees, context.visits) >= focusThreshold(now)) {
+    return "viewed";
+  }
+  if (
+    repo.worktrees.some(
+      (worktree) =>
+        worktree.dirty > 0 ||
+        worktree.ahead > 0 ||
+        worktree.tracking === "unpublished"
+    )
+  ) {
+    return "changed";
+  }
+  return repoLastActivity(repo) >= focusThreshold(now) ? "recent" : null;
+}
+
+/**
+ * The Focused repo list is a transparent priority ladder, never a weighted
+ * score: current → pinned → viewed → changed/ahead → committed in 30 days.
+ */
+export function focusedRepos(
+  repos: Repo[],
+  context: FocusContext,
+  now: number = Date.now()
+): Repo[] {
+  return repos
+    .map((repo) => ({
+      repo,
+      reason: focusReasonForRepo(repo, context, now),
+      viewedAt: newestVisit(repo.worktrees, context.visits),
+      activityAt: repoLastActivity(repo)
+    }))
+    .filter(
+      (
+        item
+      ): item is typeof item & { reason: FocusReason } => item.reason !== null
+    )
+    .sort((a, b) => {
+      const byReason = FOCUS_REASON_RANK[a.reason] - FOCUS_REASON_RANK[b.reason];
+      if (byReason !== 0) return byReason;
+      const aAt = a.reason === "viewed" ? a.viewedAt : a.activityAt;
+      const bAt = b.reason === "viewed" ? b.viewedAt : b.activityAt;
+      if (aAt !== bAt) return bAt - aAt;
+      return byName(a.repo, b.repo);
+    })
+    .map(({ repo }) => repo);
+}
+
+export function focusedRepoPage(
+  repos: Repo[],
+  showAll: boolean,
+  limit: number = FOCUS_REPO_LIMIT
+): { repos: Repo[]; hidden: number } {
+  const shown = showAll ? repos : repos.slice(0, Math.max(0, limit));
+  return { repos: shown, hidden: Math.max(0, repos.length - shown.length) };
+}
+
+/** Focused linked worktrees use the same ladder, minus repo-level pins. */
+export function focusReasonForWorktree(
+  worktree: Worktree,
+  context: FocusContext,
+  now: number = Date.now()
+): FocusReason | null {
+  if (worktree.id === context.selectedWorktreeId) return "current";
+  if (worktree.pinned) return "pinned";
+  if (
+    (context.visits[worktree.id] ?? Number.NEGATIVE_INFINITY) >=
+    focusThreshold(now)
+  ) {
+    return "viewed";
+  }
+  if (
+    worktree.dirty > 0 ||
+    worktree.ahead > 0 ||
+    worktree.tracking === "unpublished"
+  ) {
+    return "changed";
+  }
+  return validTime(worktree.lastActivityAt) >= focusThreshold(now)
+    ? "recent"
+    : null;
+}
+
+export function partitionFocusedWorktrees(
+  worktrees: Worktree[],
+  context: FocusContext,
+  now: number = Date.now(),
+  limit: number = FOCUS_WORKTREE_LIMIT
+): { focused: Worktree[]; remaining: Worktree[] } {
+  const ranked = worktrees
+    .map((worktree, index) => ({
+      worktree,
+      index,
+      reason: focusReasonForWorktree(worktree, context, now),
+      viewedAt: context.visits[worktree.id] ?? Number.NEGATIVE_INFINITY,
+      activityAt: validTime(worktree.lastActivityAt)
+    }))
+    .filter(
+      (
+        item
+      ): item is typeof item & { reason: FocusReason } => item.reason !== null
+    )
+    .sort((a, b) => {
+      const byReason = FOCUS_REASON_RANK[a.reason] - FOCUS_REASON_RANK[b.reason];
+      if (byReason !== 0) return byReason;
+      const aAt = a.reason === "viewed" ? a.viewedAt : a.activityAt;
+      const bAt = b.reason === "viewed" ? b.viewedAt : b.activityAt;
+      if (aAt !== bAt) return bAt - aAt;
+      return a.index - b.index;
+    })
+    .slice(0, Math.max(0, limit));
+  const focusedIds = new Set(ranked.map(({ worktree }) => worktree.id));
+  return {
+    focused: ranked.map(({ worktree }) => worktree),
+    remaining: worktrees.filter((worktree) => !focusedIds.has(worktree.id))
+  };
+}
 
 /**
  * The folder-row "behind" count reflects the repo's **primary checkout** (its
@@ -142,17 +325,17 @@ function repoHasPrunable(r: Repo, now: number): boolean {
 /**
  * Counts shown on the lens chips.
  *
- * Recent used to be hardcoded 0 on the grounds that it was "the default view,
- * not a filtered set" — but it displayed rows, so the one lens the app opens on
- * was also the only one showing neither a count nor a presence dot. It holds
- * every repo, exactly like All, so it reports the same number.
+ * Focused is contextual, so callers provide the selected worktree and the
+ * bounded durable visit history. Its count is the full matching set even when
+ * the sidebar initially renders only FOCUS_REPO_LIMIT rows.
  */
 export function lensCounts(
   repos: Repo[],
-  now: number = Date.now()
+  now: number = Date.now(),
+  focus: FocusContext = { selectedWorktreeId: null, visits: {} }
 ): Record<Lens, number> {
   return {
-    Recent: repos.length,
+    Focused: focusedRepos(repos, focus, now).length,
     Pinned: repos.filter(repoIsPinned).length,
     Behind: repos.filter((r) => r.worktrees.some((w) => w.behind > 0)).length,
     Stale: repos.filter((r) => repoHasPrunable(r, now)).length,
@@ -184,7 +367,7 @@ export function formatLensCount(count: number): string {
 }
 
 /**
- * Only the Pinned lens is a list the user owns. Recent/Behind/Stale answer a
+ * Only the Pinned lens is a list the user owns. Focused/Behind/Stale answer a
  * question ("what changed", "what's out of date"), so a hand order there would
  * fight the answer the lens exists to give — hence `orderedByHand` rather than
  * a manual order applied everywhere.
@@ -210,28 +393,20 @@ function orderedByHand(list: Repo[]): Repo[] {
 /**
  * Filter by lens, then order it by whatever that lens is *for*.
  *
- * Recent and All used to be the same call: both fell through to the unfiltered
- * list and took the same pinned-first sort, so two of the five lenses were one
- * view wearing two icons. They hold the same repos on purpose — the difference
- * is the question each answers, which is the ordering:
- *
- * - **All** is the index: strict alphabetical, so a name is findable by
- *   position.
- * - **Recent** is the worklist: newest activity first, unknown-activity repos
- *   last (and alphabetical among themselves, so they don't shuffle).
- *
- * Neither floats pinned repos any more. Pinning already has a lens of its own,
- * and a pin hoisted into All broke the one property — position follows name —
- * that makes an alphabetical index worth having. Behind and Stale keep the
- * float: they are short answer-lists where "mine first" still helps.
+ * Focused is the working set described by `focusedRepos`; All remains the
+ * exhaustive alphabetical index. Behind and Stale keep their pinned-first
+ * float because they are short answer-lists rather than indexes.
  */
 export function filterReposByLens(
   repos: Repo[],
   lens: Lens,
-  now: number = Date.now()
+  now: number = Date.now(),
+  focus: FocusContext = { selectedWorktreeId: null, visits: {} }
 ): Repo[] {
   let list = repos;
-  if (lens === "Behind") {
+  if (lens === "Focused") {
+    return focusedRepos(repos, focus, now);
+  } else if (lens === "Behind") {
     list = repos.filter((r) => r.worktrees.some((w) => w.behind > 0));
   } else if (lens === "Pinned") {
     list = repos.filter(repoIsPinned);
@@ -239,16 +414,6 @@ export function filterReposByLens(
     list = repos.filter((r) => repoHasPrunable(r, now));
   }
   if (lens === "All") return [...list].sort(byName);
-  if (lens === "Recent") {
-    return [...list].sort((a, b) => {
-      const ta = repoLastActivity(a);
-      const tb = repoLastActivity(b);
-      // Equal covers "both unknown" (-Infinity === -Infinity), which is what
-      // keeps this from evaluating -Inf − -Inf and sorting by NaN.
-      if (ta !== tb) return tb - ta;
-      return byName(a, b);
-    });
-  }
   const byPin = [...list].sort(
     (a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)
   );

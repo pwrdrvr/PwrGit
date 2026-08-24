@@ -14,7 +14,8 @@
     "./types": "./src/types.ts",
     "./image": "./src/image.ts",
     "./ipc": "./src/ipc.ts",
-    "./appearance": "./src/appearance.ts"
+    "./appearance": "./src/appearance.ts",
+    "./mcp-policy": "./src/mcp-policy.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"

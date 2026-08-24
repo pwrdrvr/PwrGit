@@ -14,6 +14,8 @@ export type ProfileWindows = {
    *  whether a new window was created. */
   open: (profileId: string) => { window: BrowserWindow; created: boolean };
   has: (profileId: string) => boolean;
+  /** Close the window bound to a profile. Returns whether one was open. */
+  close: (profileId: string) => boolean;
   /** The profile bound to a window (null for unknown/none). */
   profileFor: (win: BrowserWindow | null) => string | null;
   /** Re-resolve and repaint one open profile window after an override edit. */
@@ -69,6 +71,12 @@ export function createProfileWindows(options: {
   return {
     open,
     has: (profileId) => alive(profileId) !== null,
+    close: (profileId) => {
+      const window = alive(profileId);
+      if (window === null) return false;
+      window.close();
+      return true;
+    },
     profileFor,
     syncAppearance,
     syncAllAppearances: () => {

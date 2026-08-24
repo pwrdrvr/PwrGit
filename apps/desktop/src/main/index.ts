@@ -37,6 +37,7 @@ import { CloneService } from "./git/clone-service";
 import { registerForkHandlers } from "./git/fork-handlers";
 import { ForkService } from "./git/fork-service";
 import { ForgeRepoRegistry } from "./forge/repo-provider";
+import { createE2EForgeFixtureServices } from "./forge/e2e-forge-fixture";
 import { IdentityService } from "./forge/identity-service";
 import { ForgeStatusService } from "./forge/status";
 import { GitHubRepoProvider } from "./forge/github/repo-provider";
@@ -78,6 +79,10 @@ import { ensureMacKeychainAccess } from "./mac-keychain-access";
 import { openDatabase } from "./persistence/db";
 import { readGitIdentityDefaults } from "./profiles/git-identity";
 import { registerProfileHandlers } from "./profiles/profile-handlers";
+import {
+  ProfileScanCoordinator,
+  survivingActiveWorktreeId
+} from "./profiles/profile-runtime";
 import { ProfileService } from "./profiles/profile-service";
 import { registerShellHandlers } from "./shell-handlers";
 import { SettingsService } from "./settings/settings-service";
@@ -94,6 +99,8 @@ import { checkForAppUpdatesFromMenu } from "./menu-update-check";
 import { createProfileWindows } from "./profile-windows";
 import { openSettingsWindow } from "./settings-window";
 import { createNativeThemeController } from "./native-theme";
+import { McpPolicyStore } from "@pwrgit/mcp-server/access-policy";
+import { registerLocalAgentHandlers } from "./local-agents/local-agent-handlers";
 
 const APP_NAME = "PwrGit";
 
@@ -227,6 +234,9 @@ if (!gotSingleInstanceLock) {
 
     const db = openDatabase(join(app.getPath("userData"), "pwrgit.db"));
     const diagnosticsOutputRoot = join(app.getPath("userData"), "diagnostics");
+    const mcpPolicy = new McpPolicyStore(
+      join(app.getPath("userData"), "mcp-policy.json")
+    );
     const diagnostics = new DiagnosticsManager({
       outputRoot: diagnosticsOutputRoot,
       getDiagnostics: () =>
@@ -274,13 +284,25 @@ if (!gotSingleInstanceLock) {
     // missing reports that through `status()`, which is what the dialogs
     // render — registering conditionally would instead make GitLab look like
     // a host PwrGit has never heard of.
-    const forges = new ForgeRepoRegistry();
-    forges.register(new GitHubRepoProvider());
-    forges.register(new GitLabRepoProvider());
+    // The fixture provider is an unpackaged-test seam, never a packaged-app
+    // configuration surface. Ignore an inherited/user-set variable in a real
+    // installation so production always constructs the real forge clients.
+    const forgeFixturePath = app.isPackaged
+      ? undefined
+      : process.env["PWRGIT_E2E_FORGE_FIXTURE"];
+    const fixtureServices =
+      forgeFixturePath === undefined || forgeFixturePath === ""
+        ? null
+        : createE2EForgeFixtureServices(forgeFixturePath, execGit);
+    const forges = fixtureServices?.forges ?? new ForgeRepoRegistry();
+    if (fixtureServices === null) {
+      forges.register(new GitHubRepoProvider());
+      forges.register(new GitLabRepoProvider());
+    }
     // One probe for the whole app: `ForgeStatusService` caches and dedups
     // in-flight reads, and a second instance would quietly undo both by
     // keeping its own cache and spawning its own `gh`/`glab`.
-    const forgeStatus = new ForgeStatusService();
+    const forgeStatus = fixtureServices?.status ?? new ForgeStatusService();
     const identityService = new IdentityService(db, execGit, forges);
     const cloneService = new CloneService(
       db,
@@ -322,23 +344,20 @@ if (!gotSingleInstanceLock) {
     // interval instead of via filesystem watchers (which peg fseventd on large
     // trees). PwrGit's own git ops refresh directly through the refresher.
     let activeWorktreeId: string | null = null;
-    const rescanningProfiles = new Set<string>();
+    const profileScans = new ProfileScanCoordinator();
 
     const rescanInBackground = (profile: Profile): void => {
-      if (
-        rescanningProfiles.has(profile.id) ||
-        !indexer.shouldRescanProfile(profile.id)
-      ) {
-        return;
-      }
+      if (!indexer.shouldRescanProfile(profile.id)) return;
+      const signal = profileScans.begin(profile.id);
+      if (signal === null) return;
       // Scan lists repos + worktrees (cheap). Per-worktree *state*
       // (dirty/ahead/behind/staleness) is computed lazily per repo when its row
       // is expanded (repo:computeState) — computing all 156 at launch storms git.
       const startedAt = Date.now();
-      rescanningProfiles.add(profile.id);
       void indexer
-        .rescanProfile(profile)
+        .rescanProfile(profile, { signal })
         .then((repos) => {
+          if (signal.aborted) return;
           logMain(
             "info",
             "scan",
@@ -347,8 +366,12 @@ if (!gotSingleInstanceLock) {
           );
           emitEvent("repo:changed", { profileId: profile.id });
         })
-        .catch((cause) => logMain("error", "scan", "rescan failed:", cause))
-        .finally(() => rescanningProfiles.delete(profile.id));
+        .catch((cause) => {
+          if (!signal.aborted) {
+            logMain("error", "scan", "rescan failed:", cause);
+          }
+        })
+        .finally(() => profileScans.finish(profile.id, signal));
     };
 
     // One window per profile. Opening a profile that already has a window
@@ -454,6 +477,17 @@ if (!gotSingleInstanceLock) {
         refreshMenu();
       },
       openWindow: openProfileWindow,
+      onDeleted: (deletedProfileId, activeProfileId) => {
+        // A renderer's profile binding is immutable, so it cannot survive the
+        // row it represents. Drop ephemeral selections/reveals and close it.
+        pendingReveals.delete(deletedProfileId);
+        profileScans.abort(deletedProfileId);
+        prService.invalidatePendingWrites();
+        activeWorktreeId = survivingActiveWorktreeId(db, activeWorktreeId);
+        if (windows.close(deletedProfileId)) {
+          openProfileWindow(activeProfileId);
+        }
+      },
       consumeReveal: (profileId) => {
         const reveal = pendingReveals.get(profileId) ?? null;
         pendingReveals.delete(profileId);
@@ -497,6 +531,9 @@ if (!gotSingleInstanceLock) {
         diagnostics.sync();
         refreshMenu(); // Developer Mode toggles View-menu items live
       }
+    });
+    registerLocalAgentHandlers(bus, mcpPolicy, () => {
+      emitEvent("localAgents:changed", mcpPolicy.snapshot());
     });
     diagnostics.sync(); // start any settings-enabled monitors at boot
 

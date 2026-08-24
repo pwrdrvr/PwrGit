@@ -404,8 +404,10 @@ export function LineageGraph({
       });
     };
     setLoading(true);
-    // A plain worktree/scope switch reuses the repo's cached lanes (fast); an
-    // actual change to this worktree forces a recompute.
+    // A plain worktree/scope switch reuses the repo's cached lanes (fast); a
+    // repo-scoped graph invalidation forces a recompute. Lane data is shared
+    // across sibling worktrees, so filtering this event to one worktree would
+    // leave the focused graph stale when a sibling HEAD moves.
     // A PR delta observed in All remains unconsumed until Active is requested.
     // Once that forced Active load starts, ordinary scope/worktree switches
     // return to the repo-level lane cache.
@@ -416,14 +418,14 @@ export function LineageGraph({
     );
     consumedBranchPrGenerationRef.current = prInvalidation.consumedGeneration;
     load(prInvalidation.force);
-    const off = subscribe("worktree:changed", (p) => {
-      if (p.worktreeId === worktreeId) load(true);
+    const off = subscribe("graph:changed", (p) => {
+      if (p.repoId === repoId) load(true);
     });
     return () => {
       active = false;
       off();
     };
-  }, [branchPrGeneration, onCommitsChange, worktreeId, scope]);
+  }, [branchPrGeneration, onCommitsChange, repoId, worktreeId, scope]);
 
   // The sidebar and graph keep separate view models. Apply the same targeted
   // PR delta to the graph cache so a hover/focused refresh updates both

@@ -34,6 +34,7 @@
     "@octokit/graphql": "^8.2.1",
     "@pwrdrvr/agent-core": "^0.2.0",
     "@pwrdrvr/codex-discovery": "^0.1.6",
+    "@pwrgit/mcp-server": "workspace:*",
     "@pwrgit/shared": "workspace:*",
     "@shutterstock/p-map-iterable": "^1.1.2",
     "better-sqlite3": "^13.0.3",

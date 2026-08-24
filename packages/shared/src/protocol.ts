@@ -49,6 +49,7 @@ import type {
   RemoteResetMode,
   RemoteResetSnapshot,
   Repo,
+  RepoId,
   RepoRefs,
   RepoSearchHit,
   RepoWorktreeRefresh,
@@ -57,6 +58,14 @@ import type {
   WorktreeState
 } from "./types";
 import type { ImagePreview, ImageRevision } from "./image";
+import type {
+  McpAgentPolicySnapshot,
+  McpAgentRole,
+  McpAgentRoleInput,
+  McpAgentRolePatch,
+  McpAgentSession,
+  McpAgentSessionCredential
+} from "./mcp-policy";
 
 export type ProfileList = {
   activeProfileId: ProfileId | null;
@@ -111,6 +120,20 @@ export type UpdateProfileRequest = {
   org?: string;
   /** Fixed window palette, null to return to the app setting. */
   theme?: ProfileThemeOverride | null;
+};
+
+/** Destructive profile operations require the current name as a race-safe,
+ *  human-readable confirmation guard. */
+export type DeleteProfileRequest = {
+  profileId: ProfileId;
+  expectedName: string;
+};
+
+export type ProfileDeletion = {
+  deletedProfileId: ProfileId;
+  /** Deletion is rejected for the final profile, so this is always concrete. */
+  activeProfileId: ProfileId;
+  profiles: Profile[];
 };
 
 // App settings (Settings window). Experimental + diagnostics sections are
@@ -493,6 +516,9 @@ export interface Commands {
   };
   "profile:create": { req: CreateProfileRequest; res: Profile };
   "profile:update": { req: UpdateProfileRequest; res: Profile };
+  /** Remove a profile and its PwrGit-owned index data. Git directories and
+   *  worktrees on disk are never touched. The final profile cannot be deleted. */
+  "profile:delete": { req: DeleteProfileRequest; res: ProfileDeletion };
   /** Replace a profile's scan roots wholesale, then rescan. */
   "profile:setRoots": {
     req: { profileId: ProfileId; roots: string[] };
@@ -558,6 +584,11 @@ export interface Commands {
     };
     res: Repo;
   };
+  /** Cancel an in-flight clone and remove any checkout it only partly made. */
+  "repo:cancelClone": {
+    req: { operationId: string };
+    res: null;
+  };
   /**
    * Everything the fork dialog needs before it creates anything: the source,
    * where the fork would land, whether it is already there, the candidate
@@ -610,6 +641,12 @@ export interface Commands {
       upstream: string | null;
     };
     res: Repo;
+  };
+  /** Cancel an in-flight fork/checkout. A fork already created on the forge is
+   *  kept, while any partial local checkout is removed. */
+  "repo:cancelFork": {
+    req: { operationId: string };
+    res: null;
   };
   /** Re-read forge identity (visibility, fork lineage) for a profile's repos.
    *  Answers the changed rows; the rest of the tree is left alone. */
@@ -802,6 +839,35 @@ export interface Commands {
       /** Path of a worktree added for the branch, else null. */
       worktreePath: string | null;
     };
+  };
+  /**
+   * Rename one local branch. `expectedHead` is the exact tip shown in the refs
+   * browser; main rejects the request if another Git client moved the branch
+   * before the mutation reaches it.
+   */
+  "branch:rename": {
+    req: {
+      repoId: string;
+      branch: string;
+      newBranch: string;
+      expectedHead: string;
+    };
+    res: null;
+  };
+  /**
+   * Delete one local branch at the reviewed tip. The ordinary path preserves
+   * Git's merged/upstream check; `force` is reserved for the renderer's
+   * separately confirmed destructive retry. Remote branches are never in
+   * scope for this command.
+   */
+  "branch:delete": {
+    req: {
+      repoId: string;
+      branch: string;
+      expectedHead: string;
+      force?: boolean;
+    };
+    res: null;
   };
   /** Repository-wide local branches and configured remote-tracking refs. */
   "repo:refs": { req: { repoId: string }; res: RepoRefs };
@@ -1038,6 +1104,23 @@ export interface Commands {
   // App settings (Settings window)
   "settings:read": { req: void; res: AppSettingsSnapshot };
   "settings:update": { req: { patch: AppSettingsPatch }; res: AppSettingsSnapshot };
+  /** Fail-closed standalone MCP authorization policy and effective scopes. */
+  "localAgents:read": { req: void; res: McpAgentPolicySnapshot };
+  "localAgents:createSession": {
+    req: { name: string; roleId: string };
+    res: McpAgentSessionCredential;
+  };
+  "localAgents:revoke": { req: { id: string }; res: McpAgentSession };
+  "localAgents:assignRole": {
+    req: { sessionId: string; roleId: string };
+    res: McpAgentSession;
+  };
+  "localAgents:roleCreate": { req: McpAgentRoleInput; res: McpAgentRole };
+  "localAgents:roleUpdate": {
+    req: { id: string; patch: McpAgentRolePatch };
+    res: McpAgentRole;
+  };
+  "localAgents:roleDelete": { req: { id: string }; res: null };
   /** Current preference plus native-resolved palette; closes bootstrap races. */
   "appearance:read": { req: void; res: AppAppearance };
 
@@ -1093,6 +1176,8 @@ export interface Events {
     identities: { repoId: string; identity: RepoIdentity }[];
   };
   "worktree:changed": { worktreeId: string };
+  /** Repo-wide commit/ref data moved; invalidate every graph view of this repo. */
+  "graph:changed": { repoId: RepoId };
   /**
    * The index or working tree of one worktree moved — re-read `changes:list`.
    * Distinct from `worktree:changed`, which only fires when the *coarse* state
@@ -1140,6 +1225,8 @@ export interface Events {
   "ui:manageProfile": Record<string, never>;
   /** App settings changed (any window) — payload is the fresh snapshot. */
   "settings:changed": AppSettingsSnapshot;
+  /** Sessions, roles, or repository boundaries changed in Settings. */
+  "localAgents:changed": McpAgentPolicySnapshot;
   /** Resolved color theme changed, including a live OS change in System mode. */
   "appearance:changed": AppAppearance;
   /** Auto-update status changed — Settings and any future banner subscribe. */
