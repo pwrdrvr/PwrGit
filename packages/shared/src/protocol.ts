@@ -797,6 +797,35 @@ export interface Commands {
       worktreePath: string | null;
     };
   };
+  /**
+   * Rename one local branch. `expectedHead` is the exact tip shown in the refs
+   * browser; main rejects the request if another Git client moved the branch
+   * before the mutation reaches it.
+   */
+  "branch:rename": {
+    req: {
+      repoId: string;
+      branch: string;
+      newBranch: string;
+      expectedHead: string;
+    };
+    res: null;
+  };
+  /**
+   * Delete one local branch at the reviewed tip. The ordinary path preserves
+   * Git's merged/upstream check; `force` is reserved for the renderer's
+   * separately confirmed destructive retry. Remote branches are never in
+   * scope for this command.
+   */
+  "branch:delete": {
+    req: {
+      repoId: string;
+      branch: string;
+      expectedHead: string;
+      force?: boolean;
+    };
+    res: null;
+  };
   /** Repository-wide local branches and configured remote-tracking refs. */
   "repo:refs": { req: { repoId: string }; res: RepoRefs };
   /**

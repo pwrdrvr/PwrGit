@@ -9,12 +9,13 @@ import type {
 import { shortWhen } from "../graph/graph-view";
 import { confirmDialog } from "../shell/dialogs";
 import { dispatch } from "../../lib/pwrgit";
-import { showErrorToast } from "../../lib/toast";
+import { showErrorToast, showInfoToast } from "../../lib/toast";
 import {
   useRemoteBranchSearch,
   type RemoteBranchSearch
 } from "../../lib/useRemoteBranchSearch";
 import { CopyTarget } from "../shell/CopyTarget";
+import { BranchRenameDialog } from "./BranchRenameDialog";
 import { PushRefsDialog } from "./PushRefsDialog";
 import { RemoteEditorDialog } from "./RemoteEditorDialog";
 
@@ -161,7 +162,7 @@ export function RepoRefsModal({
   refs: RepoRefs;
   now: number;
   initialTab: "branches" | "remotes";
-  onRefresh: () => void;
+  onRefresh: () => void | Promise<void>;
   onRevealWorktree: (worktreeId: string) => void;
   onCreateWorktree: (
     branch: string,
@@ -176,6 +177,8 @@ export function RepoRefsModal({
   const [remoteEditor, setRemoteEditor] = useState<RemoteSummary | "new" | null>(
     null
   );
+  const [renaming, setRenaming] = useState<LocalBranchSummary | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const q = query.trim().toLowerCase();
   // Locals arrive whole on `repo:refs` and are bounded in practice, so they
   // still filter here. Remote branches are not: they page in from main.
@@ -251,17 +254,92 @@ export function RepoRefsModal({
     onRefresh();
   };
 
+  const reportDeleteFailure = async (
+    branch: LocalBranchSummary,
+    message: string
+  ): Promise<void> => {
+    showErrorToast({
+      title: "Delete branch failed",
+      message: message.split("\n")[0] ?? message,
+      detail: message
+    });
+    // Occupancy and expected-tip failures mean the browser snapshot is stale.
+    // Refresh on every failure: it is cheap for locals and avoids special-case
+    // drift between the action labels and main's live Git view.
+    await onRefresh();
+  };
+
+  const deleteBranch = async (branch: LocalBranchSummary): Promise<void> => {
+    if (deleting !== null) return;
+    const confirmed = await confirmDialog({
+      title: `Delete local branch ${branch.name}?`,
+      message:
+        "Git will delete this local branch only if its commits are merged into its upstream (or the current history when it has no upstream). No remote branch is changed.",
+      confirmLabel: "Delete branch",
+      danger: true
+    });
+    if (!confirmed) return;
+
+    setDeleting(branch.name);
+    const result = await dispatch("branch:delete", {
+      repoId: repo.id,
+      branch: branch.name,
+      expectedHead: branch.head
+    });
+    setDeleting(null);
+    if (result.ok) {
+      showInfoToast({
+        title: "Branch deleted",
+        message: `${branch.name} was deleted locally. No remote branch was changed.`
+      });
+      await onRefresh();
+      return;
+    }
+    if (result.error.code !== "unmerged") {
+      await reportDeleteFailure(branch, result.error.message);
+      return;
+    }
+
+    const forced = await confirmDialog({
+      title: `Force delete ${branch.name}?`,
+      message:
+        "Git cannot confirm that this branch's commits are merged. Force deletion can make commits unique to this local branch difficult to recover.\n\nOnly the local branch is deleted. No remote branch is changed.",
+      confirmLabel: "Force delete branch",
+      danger: true
+    });
+    if (!forced) return;
+
+    setDeleting(branch.name);
+    const forcedResult = await dispatch("branch:delete", {
+      repoId: repo.id,
+      branch: branch.name,
+      expectedHead: branch.head,
+      force: true
+    });
+    setDeleting(null);
+    if (!forcedResult.ok) {
+      await reportDeleteFailure(branch, forcedResult.error.message);
+      return;
+    }
+    showInfoToast({
+      title: "Branch force-deleted",
+      message: `${branch.name} was deleted locally. No remote branch was changed.`
+    });
+    await onRefresh();
+  };
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
       event.preventDefault();
-      if (remoteEditor !== null) setRemoteEditor(null);
+      if (renaming !== null) setRenaming(null);
+      else if (remoteEditor !== null) setRemoteEditor(null);
       else if (pushOpen) setPushOpen(false);
       else onClose();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose, pushOpen, remoteEditor]);
+  }, [onClose, pushOpen, remoteEditor, renaming]);
 
   return (
     <div className="overlay-backdrop" onClick={onClose}>
@@ -410,28 +488,59 @@ export function RepoRefsModal({
                         ? "—"
                         : shortWhen(branch.lastCommitAt, now)}
                     </span>
-                    {branch.checkedOutWorktreeIds.length > 0 ? (
+                    <div className="refs-row-actions">
+                      {branch.checkedOutWorktreeIds.length > 0 ? (
+                        <button
+                          className="refs-row-action"
+                          onClick={() => {
+                            const id = branch.checkedOutWorktreeIds[0];
+                            if (id !== undefined) onRevealWorktree(id);
+                            onClose();
+                          }}
+                        >
+                          Show worktree
+                        </button>
+                      ) : (
+                        <button
+                          className="refs-row-action"
+                          onClick={() => {
+                            onCreateWorktree(branch.name, false);
+                            onClose();
+                          }}
+                        >
+                          New worktree
+                        </button>
+                      )}
                       <button
                         className="refs-row-action"
-                        onClick={() => {
-                          const id = branch.checkedOutWorktreeIds[0];
-                          if (id !== undefined) onRevealWorktree(id);
-                          onClose();
-                        }}
+                        aria-label={`Rename local branch ${branch.name}`}
+                        title={
+                          branch.checkedOutWorktreeIds.length > 0
+                            ? "Switch every worktree away from this branch before renaming it"
+                            : "Rename local branch"
+                        }
+                        disabled={branch.checkedOutWorktreeIds.length > 0}
+                        onClick={() => setRenaming(branch)}
                       >
-                        Show worktree
+                        Rename
                       </button>
-                    ) : (
                       <button
-                        className="refs-row-action"
-                        onClick={() => {
-                          onCreateWorktree(branch.name, false);
-                          onClose();
-                        }}
+                        className="refs-row-action is-danger"
+                        aria-label={`Delete local branch ${branch.name}`}
+                        title={
+                          branch.checkedOutWorktreeIds.length > 0
+                            ? "Switch every worktree away from this branch before deleting it"
+                            : "Delete local branch"
+                        }
+                        disabled={
+                          branch.checkedOutWorktreeIds.length > 0 ||
+                          deleting !== null
+                        }
+                        onClick={() => void deleteBranch(branch)}
                       >
-                        New worktree
+                        {deleting === branch.name ? "Deleting…" : "Delete"}
                       </button>
-                    )}
+                    </div>
                   </div>
                 );
               })}
@@ -516,6 +625,15 @@ export function RepoRefsModal({
             {...(remoteEditor === "new" ? {} : { remote: remoteEditor })}
             onSaved={onRefresh}
             onClose={() => setRemoteEditor(null)}
+          />
+        )}
+        {renaming !== null && (
+          <BranchRenameDialog
+            repoId={repo.id}
+            branch={renaming}
+            existingBranches={refs.branches.map((branch) => branch.name)}
+            onRenamed={onRefresh}
+            onClose={() => setRenaming(null)}
           />
         )}
       </div>

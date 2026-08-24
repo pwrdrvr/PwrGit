@@ -3185,7 +3185,7 @@ textarea,
 .refs-table__header,
 .refs-table__row {
   display: grid;
-  grid-template-columns: minmax(220px, 1.7fr) minmax(140px, 1fr) 110px 90px 112px;
+  grid-template-columns: minmax(190px, 1.5fr) minmax(120px, 1fr) 105px 80px minmax(210px, auto);
   gap: 12px;
   align-items: center;
 }
@@ -3321,6 +3321,25 @@ textarea,
   border-color: var(--border-default);
   background: transparent;
   color: var(--text-secondary);
+}
+.refs-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+  min-width: 0;
+}
+.refs-row-actions .refs-row-action {
+  min-width: 0;
+  padding: 0 7px;
+}
+.refs-row-action.is-danger {
+  color: var(--danger-text);
+}
+.refs-row-action:disabled {
+  cursor: not-allowed;
+  color: var(--text-subtle);
+  opacity: 0.62;
 }
 .refs-browser__empty {
   padding: 24px 12px;
