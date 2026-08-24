@@ -28,18 +28,39 @@ describe("createAsyncFill", () => {
   });
 
   it("a key canceled while queued is tossed at pull time", async () => {
-    // concurrency 1 + a slow first task keeps the second stuck in the queue
-    // long enough to cancel it there.
+    // Hold the first task behind an explicit gate. A timer-based "slow" task
+    // can finish before this test resumes on a loaded Windows runner, letting
+    // the victim run before cancel() and turning the assertion into a race.
     const fill = createAsyncFill<string>({ concurrency: 1, debounceMs: 1 });
+    let markSlowStarted!: () => void;
+    const slowStarted = new Promise<void>((resolve) => {
+      markSlowStarted = resolve;
+    });
+    let releaseSlow!: () => void;
+    const slowGate = new Promise<void>((resolve) => {
+      releaseSlow = resolve;
+    });
+    let markQueueDrained!: () => void;
+    const queueDrained = new Promise<void>((resolve) => {
+      markQueueDrained = resolve;
+    });
     let secondRan = false;
-    fill.request("slow", () => sleep(60));
-    await sleep(20); // slow is now RUNNING; queue is free to accept
+    fill.request("slow", async () => {
+      markSlowStarted();
+      await slowGate;
+    });
+    await slowStarted;
     fill.request("victim", async () => {
       secondRan = true;
     });
     await sleep(10); // victim debounced + enqueued behind slow
     fill.cancel("victim");
-    await sleep(100); // slow finishes; victim pulled → tossed
+    fill.request("after-victim", async () => {
+      markQueueDrained();
+    });
+    await sleep(10); // sentinel debounced + enqueued behind victim
+    releaseSlow();
+    await queueDrained; // victim was pulled (and tossed) before the sentinel
     expect(secondRan).toBe(false);
   });
 
