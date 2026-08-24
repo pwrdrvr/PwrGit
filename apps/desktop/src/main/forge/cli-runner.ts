@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { win32 } from "node:path";
 
 /**
  * Generic hardened runner for a forge's command-line client.
@@ -49,10 +50,13 @@ export type CliRunOptions = {
   /** Receive sanitized stderr chunks while retaining only a bounded tail. */
   onStderr?: (chunk: string) => void;
   env?: Record<string, string | undefined>;
+  /** Abort the CLI and its detached process group. */
+  signal?: AbortSignal;
 };
 
 export type CliErrorCode =
   | "authentication_required"
+  | "aborted"
   | "timed_out"
   | "output_too_large"
   | "command_failed";
@@ -232,8 +236,18 @@ export function createCliClient(spec: CliSpec): CliClient {
         : sanitize(stderr, env)
     );
 
-  const run = (args: string[], options: CliRunOptions = {}): Promise<string> =>
-    new Promise((resolve, reject) => {
+  const run = (args: string[], options: CliRunOptions = {}): Promise<string> => {
+    const abortedFailure = (): CliError =>
+      cliError(
+        `${spec.label} command was canceled.`,
+        "aborted",
+        "",
+        ""
+      );
+    if (options.signal?.aborted === true) {
+      return Promise.reject(abortedFailure());
+    }
+    return new Promise((resolve, reject) => {
       const env = environmentWith(options.env);
       const child = spawn(spec.binary, args, {
         env,
@@ -251,6 +265,7 @@ export function createCliClient(spec: CliSpec): CliClient {
       let settled = false;
       let terminationReason:
         | { kind: "timed_out" }
+        | { kind: "aborted" }
         | { kind: "output_too_large"; stream: "stdout" | "stderr" }
         | undefined;
       let forceKillTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -268,6 +283,7 @@ export function createCliClient(spec: CliSpec): CliClient {
         if (settled) return;
         settled = true;
         clearTimeout(timeout);
+        options.signal?.removeEventListener("abort", onAbort);
         if (forceKillTimeout !== undefined) clearTimeout(forceKillTimeout);
         reject(cause);
       };
@@ -281,6 +297,7 @@ export function createCliClient(spec: CliSpec): CliClient {
             env
           );
         }
+        if (terminationReason?.kind === "aborted") return abortedFailure();
         return failure(
           new Error(`${spec.label} did not exit before its timeout.`),
           stdoutTail,
@@ -303,6 +320,8 @@ export function createCliClient(spec: CliSpec): CliClient {
           rejectOnce(terminationFailure());
         }, FORCE_KILL_DELAY_MS);
       };
+      const onAbort = (): void => beginTermination({ kind: "aborted" });
+      options.signal?.addEventListener("abort", onAbort, { once: true });
 
       const flushStreamingStderr = (complete = true): void => {
         if (options.onStderr === undefined || pendingStreamStderr === "") return;
@@ -411,6 +430,7 @@ export function createCliClient(spec: CliSpec): CliClient {
         flushStreamingStderr();
         settled = true;
         clearTimeout(timeout);
+        options.signal?.removeEventListener("abort", onAbort);
         if (forceKillTimeout !== undefined) clearTimeout(forceKillTimeout);
         if (exitCode === 0 && terminationReason === undefined) {
           resolve(stdoutTail.trim());
@@ -435,6 +455,7 @@ export function createCliClient(spec: CliSpec): CliClient {
         );
       });
     });
+  };
 
   return {
     spec,
@@ -462,6 +483,39 @@ function appendWithinByteLimit(
 }
 
 function terminateChild(child: ChildProcess, signal: NodeJS.Signals): void {
+  if (process.platform === "win32" && child.pid !== undefined) {
+    // Node's ChildProcess.kill() terminates only the CLI process on Windows.
+    // gh/glab launch Git and credential/SSH helpers beneath it, so leaving the
+    // descendants alive lets a canceled clone keep writing into a destination
+    // while the service is trying to remove it. taskkill /T is Windows' native
+    // process-tree operation; /F is required because Windows has no POSIX-like
+    // graceful signal that propagates through this tree.
+    try {
+      const windowsRoot =
+        process.env.SystemRoot ?? process.env.WINDIR ?? "C:\\Windows";
+      const taskkill = spawn(
+        win32.join(windowsRoot, "System32", "taskkill.exe"),
+        ["/pid", String(child.pid), "/T", "/F"],
+        { stdio: "ignore", windowsHide: true }
+      );
+      let fellBack = false;
+      const fallback = (): void => {
+        if (fellBack) return;
+        fellBack = true;
+        killChildHandle(child, signal);
+      };
+      taskkill.once("error", fallback);
+      taskkill.once("close", (code) => {
+        if (code !== 0) fallback();
+      });
+      return;
+    } catch {
+      // A synchronous spawn failure still gets the best available fallback.
+      killChildHandle(child, signal);
+      return;
+    }
+  }
+
   // Detached POSIX children own a process group, so kill the CLI and any
   // Git/SSH helpers together. This also prevents an inherited Terminal from
   // becoming their TTY.
@@ -473,6 +527,10 @@ function terminateChild(child: ChildProcess, signal: NodeJS.Signals): void {
       // The group may have already exited; fall through to the child handle.
     }
   }
+  killChildHandle(child, signal);
+}
+
+function killChildHandle(child: ChildProcess, signal: NodeJS.Signals): void {
   try {
     child.kill(signal);
   } catch {

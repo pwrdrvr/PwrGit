@@ -374,7 +374,13 @@ export function App() {
     ) {
       setSelection(resolved);
     }
-  }, [activeProfile, pendingReveal, repoLoadState.status, repos, selection]);
+  }, [
+    activeProfile,
+    pendingReveal,
+    repoLoadState.status,
+    repos,
+    selection
+  ]);
 
   useEffect(() => {
     if (activeProfile !== null && selection !== null) {

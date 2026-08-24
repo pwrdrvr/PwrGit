@@ -90,6 +90,7 @@ export function ForkRepoDialog({
     string | null
   >(null);
   const [busy, setBusy] = useState(false);
+  const [canceling, setCanceling] = useState(false);
   const [progress, setProgress] = useState<ForkProgress | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const activeForkIdRef = useRef<string | null>(null);
@@ -372,6 +373,7 @@ export function ForkRepoDialog({
     const operationId = window.crypto.randomUUID();
     activeForkIdRef.current = operationId;
     setBusy(true);
+    setCanceling(false);
     setProgress({ phase: "starting", percent: null });
     setSubmitError(null);
     const result = await dispatch("repo:fork", {
@@ -390,11 +392,23 @@ export function ForkRepoDialog({
     });
     activeForkIdRef.current = null;
     setBusy(false);
+    setCanceling(false);
     if (result.ok) onForked(result.value);
     else {
       setProgress(null);
       setSubmitError(result.error.message);
     }
+  };
+
+  const cancel = async (): Promise<void> => {
+    if (!busy) {
+      onClose();
+      return;
+    }
+    const operationId = activeForkIdRef.current;
+    if (operationId === null || canceling) return;
+    setCanceling(true);
+    await dispatch("repo:cancelFork", { operationId });
   };
 
   const submitDisabled =
@@ -932,10 +946,14 @@ export function ForkRepoDialog({
           <button
             type="button"
             className="modal__cancel"
-            disabled={busy}
-            onClick={onClose}
+            disabled={canceling || progress?.phase === "indexing"}
+            onClick={() => void cancel()}
           >
-            Cancel
+            {canceling
+              ? "Canceling…"
+              : progress?.phase === "indexing"
+                ? "Finishing…"
+                : "Cancel"}
           </button>
           <button
             type="button"
