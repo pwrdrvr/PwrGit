@@ -1,6 +1,7 @@
 import { shell } from "electron";
 import { ok } from "@pwrgit/shared";
 import type { CommandBus } from "./command-bus";
+import { openExternalUrl } from "./external-links";
 
 export function registerShellHandlers(bus: CommandBus): void {
   bus.register("shell:revealPath", (req) => {
@@ -10,9 +11,5 @@ export function registerShellHandlers(bus: CommandBus): void {
     return ok(null);
   });
 
-  bus.register("shell:openExternal", (req) => {
-    // Only open http(s) URLs — never file:// or other schemes from a link.
-    if (/^https?:\/\//i.test(req.url)) void shell.openExternal(req.url);
-    return ok(null);
-  });
+  bus.register("shell:openExternal", (req) => openExternalUrl(req.url));
 }

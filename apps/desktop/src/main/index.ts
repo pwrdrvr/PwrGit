@@ -18,6 +18,7 @@ import {
   type Profile,
   type BranchReveal
 } from "@pwrgit/shared";
+import { registerAppIdentityHandlers } from "./app-identity";
 import { registerAppDocumentHandlers } from "./app-document-handlers";
 import { wireAppMenuBridge } from "./app-menu-bridge";
 import { openAppDocumentWindow } from "./app-document-window";
@@ -29,6 +30,7 @@ import {
 import { CommandBus } from "./command-bus";
 import { registerDialogHandlers } from "./dialog-handlers";
 import { execGit } from "./git/dugite";
+import { openExternalUrlFromMenu } from "./external-links";
 import { registerBranchHandlers } from "./git/branch-handlers";
 import { registerCloneHandlers } from "./git/clone-handlers";
 import { CloneService } from "./git/clone-service";
@@ -215,6 +217,7 @@ if (!gotSingleInstanceLock) {
       return ok(null);
     });
     registerAppDocumentHandlers(bus, appearance.appearance);
+    registerAppIdentityHandlers(bus);
     const keychainReady = await ensureMacKeychainAccess({
       platform: process.platform,
       packaged: app.isPackaged,
@@ -429,6 +432,9 @@ if (!gotSingleInstanceLock) {
             "third-party-notices",
             appearance.appearance()
           ),
+        onOpenExternalLink: (label, url) => {
+          void openExternalUrlFromMenu(label, url);
+        },
         developerMode: settingsSnapshot(settings, diagnosticsOutputRoot).general
           .developerMode
       });

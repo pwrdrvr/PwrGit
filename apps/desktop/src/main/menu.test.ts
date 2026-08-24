@@ -1,5 +1,6 @@
 import type { MenuItemConstructorOptions } from "electron";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PWRGIT_LINKS } from "@pwrgit/shared";
 
 const electronMock = vi.hoisted(() => ({
   buildFromTemplate: vi.fn(),
@@ -12,7 +13,12 @@ vi.mock("electron", () => ({
 
 const { rebuildAppMenu } = await import("./menu");
 
-function rebuild(overrides: { onCheckForUpdates?: () => void } = {}): void {
+function rebuild(
+  overrides: {
+    onCheckForUpdates?: () => void;
+    onOpenExternalLink?: (label: string, url: string) => void;
+  } = {}
+): void {
   rebuildAppMenu({
     profiles: [],
     currentProfileId: null,
@@ -24,6 +30,7 @@ function rebuild(overrides: { onCheckForUpdates?: () => void } = {}): void {
     onOpenLogs: vi.fn(),
     onOpenLicense: vi.fn(),
     onOpenThirdPartyNotices: vi.fn(),
+    onOpenExternalLink: overrides.onOpenExternalLink ?? vi.fn(),
     developerMode: false
   });
 }
@@ -53,5 +60,40 @@ describe("application menu", () => {
     expect(checkForUpdates).toBeDefined();
     (checkForUpdates?.click as (() => void) | undefined)?.();
     expect(onCheckForUpdates).toHaveBeenCalledOnce();
+  });
+
+  it("opens canonical product and reporting links from Help", () => {
+    const onOpenExternalLink = vi.fn();
+    rebuild({ onOpenExternalLink });
+
+    const help = builtTemplate().find((item) => item.role === "help");
+    const submenu = help?.submenu as MenuItemConstructorOptions[];
+    const expected = [
+      ["PwrGit Documentation", PWRGIT_LINKS.documentation],
+      ["PwrGit Website", PWRGIT_LINKS.website],
+      ["Release Notes", PWRGIT_LINKS.releases],
+      ["View Source", PWRGIT_LINKS.source],
+      ["Report an Issue…", PWRGIT_LINKS.issues],
+      ["Security Reporting (Private)…", PWRGIT_LINKS.security]
+    ] as const;
+
+    for (const [menuLabel] of expected) {
+      const item = submenu.find((candidate) => candidate.label === menuLabel);
+      expect(item, `${menuLabel} should be in Help`).toBeDefined();
+      (item?.click as (() => void) | undefined)?.();
+    }
+
+    expect(onOpenExternalLink.mock.calls).toEqual(
+      expected.map(([menuLabel, url]) => [
+        menuLabel === "View Source"
+          ? "PwrGit Source"
+          : menuLabel === "Report an Issue…"
+            ? "Issue Reporting"
+            : menuLabel === "Security Reporting (Private)…"
+              ? "Private Security Reporting"
+              : menuLabel,
+        url
+      ])
+    );
   });
 });

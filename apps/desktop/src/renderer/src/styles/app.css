@@ -137,6 +137,8 @@ textarea,
 .commit-context-card__short-hash,
 .pull-divergence__commit-subject,
 .pull-divergence__commit code,
+.about-identity-value,
+.about-resource-url,
 .selectable {
   -webkit-user-select: text;
   user-select: text;
@@ -7278,6 +7280,52 @@ body.is-col-resizing {
 }
 .settings-pathlink:hover {
   text-decoration: underline;
+}
+
+/* About: copyable runtime identity + offline-friendly canonical addresses. */
+.about-identity-value {
+  color: var(--text-primary);
+  font: 550 11.5px/1.45 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.about-identity-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 0 2px;
+}
+.about-identity-state p,
+.about-feedback {
+  margin: 0;
+  color: var(--text-muted);
+  font: 500 11.5px/1.45 var(--font-sans);
+}
+.about-identity-state [role="alert"],
+.about-feedback--error {
+  color: var(--danger-text);
+}
+.about-resource-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  min-width: 0;
+  max-width: 100%;
+}
+.about-resource-actions__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.about-resource-url {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--text-subtle);
+  font: 500 10.5px/1.4 var(--font-mono);
+}
+.about-feedback {
+  padding: 0 2px 4px;
 }
 
 /* Settings > Agents — Session → role → effective permission graph. */
