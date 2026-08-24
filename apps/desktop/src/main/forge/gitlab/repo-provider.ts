@@ -151,8 +151,22 @@ export function forkImportFailed(raw: unknown): string | null {
   return text(row["import_error"]) ?? "GitLab could not finish copying the fork.";
 }
 
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (signal?.aborted === true) {
+      reject(signal.reason ?? new Error("GitLab operation was canceled."));
+      return;
+    }
+    const onAbort = (): void => {
+      clearTimeout(timeout);
+      reject(signal?.reason ?? new Error("GitLab operation was canceled."));
+    };
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 
 export class GitLabRepoProvider implements ForgeRepoProvider {
   readonly host = "gitlab" as const;
@@ -281,11 +295,15 @@ export class GitLabRepoProvider implements ForgeRepoProvider {
             "--field",
             `path=${input.targetName}`
           ],
-          { timeoutMs: 60_000 }
+          {
+            timeoutMs: 60_000,
+            ...(input.signal === undefined ? {} : { signal: input.signal })
+          }
         ),
         "GitLab fork"
       );
     } catch (cause) {
+      if (input.signal?.aborted === true) throw cause;
       if (this.isAuthError(cause)) throw cause;
       // A name already taken in the namespace comes back as a 409 with a
       // "already exists"/"has already been taken" body. That is the
@@ -304,7 +322,7 @@ export class GitLabRepoProvider implements ForgeRepoProvider {
     }
 
     input.onPhase?.("awaiting_fork");
-    const ready = await this.awaitImport(target, created);
+    const ready = await this.awaitImport(target, created, input.signal);
     const repository = parseGitLabProject(ready, this.hostname);
     if (repository === null) {
       throw new Error(`GitLab returned no project for ${target}`);
@@ -315,12 +333,17 @@ export class GitLabRepoProvider implements ForgeRepoProvider {
   async cloneWithCli(
     nameWithOwner: string,
     destination: string,
-    options: { onStderr: (chunk: string) => void; env: Record<string, string> }
+    options: {
+      onStderr: (chunk: string) => void;
+      env: Record<string, string>;
+      signal?: AbortSignal;
+    }
   ): Promise<void> {
     await this.glab(["repo", "clone", nameWithOwner, destination, "--", "--progress"], {
       timeoutMs: 10 * 60_000,
       onStderr: options.onStderr,
-      env: options.env
+      env: options.env,
+      ...(options.signal === undefined ? {} : { signal: options.signal })
     });
   }
 
@@ -332,9 +355,15 @@ export class GitLabRepoProvider implements ForgeRepoProvider {
     return glabErrorMessage(cause);
   }
 
-  private async project(nameWithOwner: string): Promise<unknown> {
+  private async project(
+    nameWithOwner: string,
+    signal?: AbortSignal
+  ): Promise<unknown> {
+    const args = ["api", `projects/${encodeProjectPath(nameWithOwner)}`];
     return parseJsonObject(
-      await this.glab(["api", `projects/${encodeProjectPath(nameWithOwner)}`]),
+      await (signal === undefined
+        ? this.glab(args)
+        : this.glab(args, { signal })),
       "GitLab project"
     );
   }
@@ -367,15 +396,16 @@ export class GitLabRepoProvider implements ForgeRepoProvider {
 
   private async awaitImport(
     nameWithOwner: string,
-    created: unknown
+    created: unknown,
+    signal?: AbortSignal
   ): Promise<unknown> {
     let latest = created;
     for (let attempt = 0; attempt < IMPORT_POLL_ATTEMPTS; attempt += 1) {
       const failure = forkImportFailed(latest);
       if (failure !== null) throw new Error(failure);
       if (forkImportFinished(latest)) return latest;
-      await sleep(IMPORT_POLL_INTERVAL_MS);
-      latest = await this.project(nameWithOwner);
+      await sleep(IMPORT_POLL_INTERVAL_MS, signal);
+      latest = await this.project(nameWithOwner, signal);
     }
     throw new Error(
       `GitLab is still copying ${nameWithOwner}. It will appear on GitLab shortly — clone it once the copy finishes.`

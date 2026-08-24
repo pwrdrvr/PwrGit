@@ -10,6 +10,7 @@ import {
   type ForgeRepoRef,
   type ForkPreflight,
   type ForkProgress,
+  type PwrGitError,
   type Repo,
   type Result
 } from "@pwrgit/shared";
@@ -25,6 +26,8 @@ import { requireExit0 } from "./dugite";
 import {
   CloneService,
   normalizeRepositoryPath,
+  operationWasCanceled,
+  removePartialCheckout,
   validateCheckoutDestination
 } from "./clone-service";
 import type { RepoIndexer } from "./repo-indexer";
@@ -256,7 +259,8 @@ export class ForkService {
   /** Create the fork, clone it, wire `upstream`, and index the checkout. */
   async fork(
     input: ForkRequest,
-    onProgress: (progress: ForkProgress) => void = () => undefined
+    onProgress: (progress: ForkProgress) => void = () => undefined,
+    signal?: AbortSignal
   ): Promise<Result<Repo>> {
     const profile = this.profiles.get(input.profileId);
     if (profile === null) {
@@ -301,7 +305,10 @@ export class ForkService {
     if (!destinationCheck.ok) return destinationCheck;
     const { parentPath, destination } = destinationCheck.value;
 
+    if (operationWasCanceled(signal)) return this.canceled(signal);
+
     onProgress({ phase: "starting", percent: null });
+    let remoteCreated = false;
     let fork: CloneRepository;
     try {
       fork = await provider.fork({
@@ -312,9 +319,21 @@ export class ForkService {
         defaultBranchOnly:
           input.defaultBranchOnly &&
           capabilitiesFor(provider.host).forkDefaultBranchOnly,
-        onPhase: (phase) => onProgress({ phase, percent: null })
+        onPhase: (phase) => {
+          // Both providers enter awaiting_fork only after the remote fork
+          // exists: GitHub is reading it back, while GitLab is waiting for its
+          // queued import. Preserve that fact if either follow-up is canceled.
+          if (phase === "awaiting_fork") remoteCreated = true;
+          onProgress({ phase, percent: null });
+        },
+        ...(signal === undefined ? {} : { signal })
       });
     } catch (cause) {
+      if (operationWasCanceled(signal)) {
+        return remoteCreated
+          ? this.canceledAfterRemoteCreated(signal, targetSlug, input.host)
+          : this.canceled(signal);
+      }
       if (provider.isAuthError(cause)) {
         return err({
           kind: "remote",
@@ -327,6 +346,13 @@ export class ForkService {
         code: "fork_failed",
         message: `Couldn't fork ${source}. ${provider.errorMessage(cause)}`
       });
+    }
+
+    if (operationWasCanceled(signal)) {
+      return this.canceled(
+        signal,
+        `Forked to ${fork.nameWithOwner}, but the checkout was canceled.`
+      );
     }
 
     if (input.upstream !== null) {
@@ -361,9 +387,14 @@ export class ForkService {
       },
       destination,
       parentPath,
-      (progress) => onProgress(progress)
+      (progress) => onProgress(progress),
+      signal
     );
     if (!cloned.ok) {
+      if (operationWasCanceled(signal)) {
+        return this.canceledCheckout(signal, fork, destination);
+      }
+      await removePartialCheckout(destination);
       return err({
         ...cloned.error,
         // The fork itself succeeded — saying only "clone failed" would leave
@@ -372,14 +403,22 @@ export class ForkService {
       });
     }
 
+    if (operationWasCanceled(signal)) {
+      return this.canceledCheckout(signal, fork, destination);
+    }
+
     if (input.upstream !== null) {
       onProgress({ phase: "adding_upstream", percent: null });
       const added = await this.addUpstream(
         destination,
         input.upstream,
         input.protocol,
-        fork.hostname
+        fork.hostname,
+        signal
       );
+      if (operationWasCanceled(signal)) {
+        return this.canceledCheckout(signal, fork, destination);
+      }
       if (!added.ok) {
         return err({
           ...added.error,
@@ -405,7 +444,8 @@ export class ForkService {
     destination: string,
     upstream: string,
     protocol: CloneProtocol,
-    hostname: string
+    hostname: string,
+    signal?: AbortSignal
   ): Promise<Result<true>> {
     const slug = normalizeRepositoryPath(upstream);
     if (slug === null) {
@@ -423,12 +463,57 @@ export class ForkService {
         : `git@${hostname}:${slug}.git`;
     const added = await this.git(
       ["remote", "add", UPSTREAM_REMOTE, url],
-      destination
+      destination,
+      signal === undefined ? undefined : { signal }
     );
     if (!added.ok) return added;
     const checked = requireExit0(added.value, ["remote", "add"]);
     if (!checked.ok) return checked;
     return ok(true);
+  }
+
+  private canceled(
+    signal: AbortSignal,
+    message = "Fork canceled."
+  ): Result<Repo> {
+    const reason = signal.reason;
+    if (
+      typeof reason === "object" &&
+      reason !== null &&
+      "kind" in reason &&
+      "code" in reason &&
+      "message" in reason
+    ) {
+      return err({ ...(reason as PwrGitError), message });
+    }
+    return err({ kind: "git", code: "aborted", message, cause: reason });
+  }
+
+  private async canceledCheckout(
+    signal: AbortSignal,
+    fork: CloneRepository,
+    destination: string
+  ): Promise<Result<Repo>> {
+    const cleaned = await removePartialCheckout(destination);
+    return this.canceled(
+      signal,
+      cleaned
+        ? `Forked to ${fork.nameWithOwner}, but the checkout was canceled and no partial checkout was kept.`
+        : `Forked to ${fork.nameWithOwner}, but the checkout was canceled and PwrGit could not remove ${destination}. Remove it before retrying.`
+    );
+  }
+
+  private canceledAfterRemoteCreated(
+    signal: AbortSignal,
+    targetSlug: string,
+    host: ForgeHost
+  ): Result<Repo> {
+    return this.canceled(
+      signal,
+      host === "gitlab"
+        ? `Forked to ${targetSlug}, but the local checkout was canceled. GitLab may still be finishing the fork.`
+        : `Forked to ${targetSlug}, but the local checkout was canceled.`
+    );
   }
 
   private checkoutsFor(

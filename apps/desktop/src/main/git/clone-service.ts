@@ -1,4 +1,5 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import {
   basename,
@@ -332,6 +333,55 @@ function cloneMessageFromUnknown(
   return provider.errorMessage(sanitized || cause.message);
 }
 
+function cancellationError(
+  signal: AbortSignal,
+  fallbackMessage: string
+): PwrGitError {
+  const reason = signal.reason;
+  if (
+    typeof reason === "object" &&
+    reason !== null &&
+    "kind" in reason &&
+    "code" in reason &&
+    "message" in reason
+  ) {
+    return reason as PwrGitError;
+  }
+  return {
+    kind: "git",
+    code: "aborted",
+    message: fallbackMessage,
+    cause: reason
+  };
+}
+
+export function operationWasCanceled(
+  signal: AbortSignal | undefined
+): signal is AbortSignal {
+  return signal?.aborted === true;
+}
+
+/** A validated clone destination did not exist before this operation, so a
+ *  failed/canceled transfer owns everything now at that exact path. */
+export async function removePartialCheckout(
+  destination: string
+): Promise<boolean> {
+  try {
+    await rm(destination, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 50
+    });
+    return true;
+  } catch {
+    // Preserve the actionable transfer error. A locked file on Windows may
+    // prevent best-effort cleanup, but must not turn "authentication failed"
+    // into a raw filesystem diagnostic.
+    return false;
+  }
+}
+
 export class CloneService {
   constructor(
     private readonly db: DB,
@@ -593,7 +643,8 @@ export class CloneService {
       host?: ForgeHost;
       hostname?: string;
     },
-    onProgress: (progress: CloneProgress) => void = () => undefined
+    onProgress: (progress: CloneProgress) => void = () => undefined,
+    signal?: AbortSignal
   ): Promise<Result<Repo>> {
     const profile = this.profiles.get(input.profileId);
     if (profile === null) {
@@ -652,6 +703,10 @@ export class CloneService {
     if (!resolved.ok) return resolved;
     const { parentPath, destination } = resolved.value;
 
+    if (operationWasCanceled(signal)) {
+      return err(cancellationError(signal, "Clone canceled."));
+    }
+
     onProgress({ phase: "starting", percent: null });
     const cloned = await this.runClone(
       {
@@ -663,9 +718,30 @@ export class CloneService {
       },
       destination,
       parentPath,
-      onProgress
+      onProgress,
+      signal
     );
-    if (!cloned.ok) return cloned;
+    if (!cloned.ok) {
+      const cleaned = await removePartialCheckout(destination);
+      if (operationWasCanceled(signal)) {
+        return err({
+          ...cancellationError(signal, "Clone canceled."),
+          message: cleaned
+            ? "Clone canceled. No partial checkout was kept."
+            : `Clone canceled, but PwrGit could not remove ${destination}. Remove it before retrying.`
+        });
+      }
+      return cloned;
+    }
+    if (operationWasCanceled(signal)) {
+      const cleaned = await removePartialCheckout(destination);
+      return err({
+        ...cancellationError(signal, "Clone canceled."),
+        message: cleaned
+          ? "Clone canceled. No partial checkout was kept."
+          : `Clone canceled, but PwrGit could not remove ${destination}. Remove it before retrying.`
+      });
+    }
 
     onProgress({ phase: "indexing", percent: null });
     const indexed = await this.indexer.indexRepoAt(input.profileId, destination);
@@ -696,14 +772,19 @@ export class CloneService {
     },
     destination: string,
     workingDirectory: string,
-    onProgress: (progress: CloneProgress) => void
+    onProgress: (progress: CloneProgress) => void,
+    signal?: AbortSignal
   ): Promise<Result<true>> {
     const readProgress = createCloneProgressParser(onProgress);
     if (source.localPath !== undefined) {
       const cloned = await this.git(
         ["clone", "--progress", "--", source.localPath, destination],
         workingDirectory,
-        { onStderr: readProgress, env: CLONE_ENV }
+        {
+          onStderr: readProgress,
+          env: CLONE_ENV,
+          ...(signal === undefined ? {} : { signal })
+        }
       );
       if (!cloned.ok) return cloned;
       const checked = requireExit0(
@@ -725,9 +806,13 @@ export class CloneService {
       try {
         await provider.cloneWithCli(source.nameWithOwner, destination, {
           onStderr: readProgress,
-          env: CLONE_ENV
+          env: CLONE_ENV,
+          ...(signal === undefined ? {} : { signal })
         });
       } catch (cause) {
+        if (operationWasCanceled(signal)) {
+          return err(cancellationError(signal, "Clone canceled."));
+        }
         if (provider.isAuthError(cause)) {
           return err({
             kind: "remote",
@@ -749,7 +834,11 @@ export class CloneService {
     const cloned = await this.git(
       ["clone", "--progress", "--", remote, destination],
       workingDirectory,
-      { onStderr: readProgress, env: CLONE_ENV }
+      {
+        onStderr: readProgress,
+        env: CLONE_ENV,
+        ...(signal === undefined ? {} : { signal })
+      }
     );
     if (!cloned.ok) return cloned;
     const checked = requireExit0(

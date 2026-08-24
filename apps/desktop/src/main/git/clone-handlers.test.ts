@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ok, type CloneProgress, type Repo } from "@pwrgit/shared";
+import { err, ok, type CloneProgress, type Repo } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import { registerCloneHandlers } from "./clone-handlers";
@@ -51,5 +51,40 @@ describe("clone handlers", () => {
       profileId: "profile-id"
     });
     expect(emitEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels the matching operation without refreshing the tree", async () => {
+    const clone = vi.fn(
+      async (
+        _input: unknown,
+        _onProgress: (progress: CloneProgress) => void,
+        signal: AbortSignal
+      ) =>
+        await new Promise<ReturnType<typeof err>>((resolve) => {
+          signal.addEventListener(
+            "abort",
+            () => resolve(err(signal.reason)),
+            { once: true }
+          );
+        })
+    );
+    const bus = new CommandBus();
+    registerCloneHandlers(bus, { clone } as unknown as CloneService);
+
+    const cloning = bus.dispatch("repo:clone", {
+      operationId: "cancel-me",
+      profileId: "profile-id",
+      nameWithOwner: "pwrdrvr/new-service",
+      protocol: "ssh",
+      parentPath: "/projects/services"
+    });
+    await expect(
+      bus.dispatch("repo:cancelClone", { operationId: "cancel-me" })
+    ).resolves.toEqual(ok(null));
+    await expect(cloning).resolves.toMatchObject({
+      ok: false,
+      error: { code: "aborted" }
+    });
+    expect(emitEvent).not.toHaveBeenCalled();
   });
 });

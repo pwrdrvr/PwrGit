@@ -1,5 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -818,6 +819,52 @@ describe("CloneService", () => {
         )
         .get(profile.id)
     ).toEqual({ path: services });
+  });
+
+  it("removes a partial destination after a failed clone", async () => {
+    const root = temporaryRoot();
+    const sources = temporaryRoot();
+    const source = join(sources, "partial-source");
+    initRepo(source);
+    const destination = join(root, "partial-source");
+    const failingGit: GitExec = async (args, cwd, options) => {
+      if (args[0] !== "clone") return systemGit(args, cwd, options);
+      mkdirSync(destination, { recursive: true });
+      writeFileSync(join(destination, "partial.pack"), "incomplete\n");
+      return ok({
+        stdout: "",
+        stderr: "fatal: fixture transfer failed",
+        exitCode: 128
+      });
+    };
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "Local",
+      email: "test@pwrgit.dev",
+      roots: [root]
+    });
+    const indexer = new RepoIndexer(db, failingGit);
+    const service = new CloneService(
+      db,
+      failingGit,
+      indexer,
+      profiles,
+      githubOnly(fakeGh()),
+      fakeForgeStatus()
+    );
+
+    const result = await service.clone({
+      profileId: profile.id,
+      nameWithOwner: source,
+      sourcePath: source,
+      protocol: "ssh",
+      parentPath: root
+    });
+
+    expect(result).toMatchObject({ ok: false, error: { code: "exit_128" } });
+    expect(existsSync(destination)).toBe(false);
+    db.close();
   });
 
   it("validates and clones a local repository whose HEAD is unborn", async () => {

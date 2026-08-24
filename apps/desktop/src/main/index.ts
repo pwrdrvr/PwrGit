@@ -35,6 +35,7 @@ import { CloneService } from "./git/clone-service";
 import { registerForkHandlers } from "./git/fork-handlers";
 import { ForkService } from "./git/fork-service";
 import { ForgeRepoRegistry } from "./forge/repo-provider";
+import { createE2EForgeFixtureServices } from "./forge/e2e-forge-fixture";
 import { IdentityService } from "./forge/identity-service";
 import { ForgeStatusService } from "./forge/status";
 import { GitHubRepoProvider } from "./forge/github/repo-provider";
@@ -271,13 +272,25 @@ if (!gotSingleInstanceLock) {
     // missing reports that through `status()`, which is what the dialogs
     // render — registering conditionally would instead make GitLab look like
     // a host PwrGit has never heard of.
-    const forges = new ForgeRepoRegistry();
-    forges.register(new GitHubRepoProvider());
-    forges.register(new GitLabRepoProvider());
+    // The fixture provider is an unpackaged-test seam, never a packaged-app
+    // configuration surface. Ignore an inherited/user-set variable in a real
+    // installation so production always constructs the real forge clients.
+    const forgeFixturePath = app.isPackaged
+      ? undefined
+      : process.env["PWRGIT_E2E_FORGE_FIXTURE"];
+    const fixtureServices =
+      forgeFixturePath === undefined || forgeFixturePath === ""
+        ? null
+        : createE2EForgeFixtureServices(forgeFixturePath, execGit);
+    const forges = fixtureServices?.forges ?? new ForgeRepoRegistry();
+    if (fixtureServices === null) {
+      forges.register(new GitHubRepoProvider());
+      forges.register(new GitLabRepoProvider());
+    }
     // One probe for the whole app: `ForgeStatusService` caches and dedups
     // in-flight reads, and a second instance would quietly undo both by
     // keeping its own cache and spawning its own `gh`/`glab`.
-    const forgeStatus = new ForgeStatusService();
+    const forgeStatus = fixtureServices?.status ?? new ForgeStatusService();
     const identityService = new IdentityService(db, execGit, forges);
     const cloneService = new CloneService(
       db,

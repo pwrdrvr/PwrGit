@@ -132,6 +132,11 @@ creating a fork — so they hang off `ForgeRepoProvider` (`repo-provider.ts`)
 rather than widening the four-method seam `PrService` depends on. Same two
 forges, same CLI clients, disjoint questions.
 
+Electron E2E replaces this seam only when `PWRGIT_E2E_FORGE_FIXTURE` names a
+fixture file. Keep that wiring in `e2e-forge-fixture.ts`: tests must exercise
+the real renderer/IPC/services/indexer and must never stub commands above the
+provider or reach a real forge.
+
 - **What a forge cannot do belongs in `capabilities.ts`**, the one table both
   Settings → Forges and the dialogs read. GitLab's fork API has no
   default-branch-only equivalent, so `forkDefaultBranchOnly` is false there and

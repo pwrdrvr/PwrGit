@@ -45,6 +45,7 @@ function cleanEnv(extra: Record<string, string>): Record<string, string> {
 export async function launchApp(
   opts: {
     worktreeRoot?: string;
+    forgeFixturePath?: string;
     theme?: "system" | "dark" | "light";
     failReadOnce?: RecoverableBootRead[];
   } = {}
@@ -76,6 +77,9 @@ export async function launchApp(
     env: cleanEnv({
       PWRGIT_USER_DATA_DIR: userData,
       PWRGIT_GITCONFIG: gitconfig,
+      ...(opts.forgeFixturePath === undefined
+        ? {}
+        : { PWRGIT_E2E_FORGE_FIXTURE: opts.forgeFixturePath }),
       ...(opts.failReadOnce === undefined
         ? {}
         : { PWRGIT_E2E_FAIL_READ_ONCE: opts.failReadOnce.join(",") })
