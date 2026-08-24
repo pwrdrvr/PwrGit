@@ -146,6 +146,54 @@ describe("WorktreeStateService (system git)", () => {
     expect(service.getCached(worktreeId)?.dirty).toBe(1);
   });
 
+  it("keeps cached checkout safety dirty when only a child repository changed", async () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), "pwrgit-state-submodule-"));
+    const parent = join(fixtureRoot, "parent");
+    const child = join(fixtureRoot, "child");
+    for (const repo of [parent, child]) {
+      mkdirSync(repo, { recursive: true });
+      git(repo, ["init", "-b", "main"]);
+      git(repo, ["config", "user.email", "t@t.com"]);
+      git(repo, ["config", "user.name", "Tester"]);
+    }
+    writeFileSync(join(child, "child.txt"), "clean\n");
+    git(child, ["add", "."]);
+    git(child, ["commit", "-m", "child"]);
+    writeFileSync(join(parent, "README.md"), "parent\n");
+    git(parent, ["add", "."]);
+    git(parent, ["commit", "-m", "parent"]);
+    git(parent, [
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "add",
+      child,
+      "modules/child"
+    ]);
+    git(parent, ["commit", "-am", "add child"]);
+
+    const profile = new ProfileService(db).create({
+      name: "Submodule safety",
+      email: "submodule-safety@pwrgit.dev"
+    });
+    const indexed = await new RepoIndexer(db, systemGit).indexRepoAt(
+      profile.id,
+      parent
+    );
+    if (!indexed.ok) throw new Error(indexed.error.message);
+    const indexedWorktree = indexed.value.worktrees[0];
+    if (indexedWorktree === undefined) throw new Error("worktree not indexed");
+    const isolated = new WorktreeStateService(db, systemGit);
+    expect((await isolated.compute(indexedWorktree.id))?.dirty).toBe(0);
+
+    writeFileSync(
+      join(indexedWorktree.path, "modules/child/child.txt"),
+      "dirty\n"
+    );
+    expect((await isolated.compute(indexedWorktree.id))?.dirty).toBe(1);
+    expect(isolated.getCached(indexedWorktree.id)?.dirty).toBe(1);
+  });
+
   it("returns null for an unknown worktree id", async () => {
     expect(await service.compute("nope")).toBeNull();
     expect(service.getCached("nope")).toBeNull();

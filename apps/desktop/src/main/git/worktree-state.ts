@@ -249,7 +249,15 @@ export class WorktreeStateService {
     if (wt === null) return null;
 
     const statusRaw = await this.git(
-      ["status", "--porcelain=v2", "--branch"],
+      [
+        "status",
+        "--porcelain=v2",
+        "--branch",
+        // Coarse dirtiness is also a checkout-safety signal. Dirty initialized
+        // children must keep this count nonzero or a cached clean state can
+        // suppress the branch-switch confirmation.
+        "--ignore-submodules=none"
+      ],
       wt.path,
       NO_OPTIONAL_LOCKS
     );

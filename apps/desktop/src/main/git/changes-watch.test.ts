@@ -106,6 +106,52 @@ describe("ChangeSetWatch (system git)", () => {
       watch.hasChanged("worktree-1", join(root, "not-a-repo"))
     ).resolves.toBe(false);
   });
+
+  it("invalidates the submodule snapshot when only child files change", async () => {
+    const child = join(root, "child");
+    mkdirSync(child);
+    git(child, ["init", "-b", "main"]);
+    git(child, ["config", "user.name", "PwrGit Test"]);
+    git(child, ["config", "user.email", "pwrgit@example.com"]);
+    writeFileSync(join(child, "child.txt"), "baseline\n");
+    git(child, ["add", "."]);
+    git(child, ["commit", "-m", "child baseline"]);
+    git(repo, [
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "add",
+      child,
+      "modules/child"
+    ]);
+    git(repo, ["commit", "-am", "add child"]);
+
+    const watch = new ChangeSetWatch(systemGit);
+    await watch.hasChanged("worktree-1", repo);
+    writeFileSync(join(repo, "modules/child/child.txt"), "dirty\n");
+
+    await expect(watch.hasChanged("worktree-1", repo)).resolves.toBe(true);
+  });
+
+  it("uses child-aware status for the active-worktree fingerprint", async () => {
+    const calls: string[][] = [];
+    const git: GitExec = async (args) => {
+      calls.push(args);
+      return ok({ stdout: "", stderr: "", exitCode: 0 });
+    };
+    const watch = new ChangeSetWatch(git);
+
+    await watch.hasChanged("worktree-1", repo);
+
+    expect(calls).toEqual([
+      [
+        "status",
+        "--porcelain=v2",
+        "--untracked-files=all",
+        "--ignore-submodules=none"
+      ]
+    ]);
+  });
 });
 
 describe("createChangeSetAnnouncer", () => {

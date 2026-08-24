@@ -171,6 +171,83 @@ export type RepoRefs = {
   remotes: RemoteSummary[];
 };
 
+/** How an initialized submodule checkout relates to the commit pinned by its
+ *  parent repository. The parent gitlink is authoritative; `.gitmodules`
+ *  branch configuration is only an update hint. */
+export type SubmoduleRelation =
+  | "at_pin"
+  | "ahead_of_pin"
+  | "behind_pin"
+  | "diverged_from_pin"
+  | "unknown";
+
+/** Whether the submodule path can currently be inspected as a Git checkout. */
+export type SubmoduleCheckoutState =
+  | "checked_out"
+  | "uninitialized"
+  | "deinitialized"
+  | "missing"
+  | "not_repository";
+
+/** A localized problem that does not invalidate the rest of the parent scan. */
+export type SubmoduleIssue = {
+  code:
+    | "checkout_missing"
+    | "checkout_uninitialized"
+    | "checkout_deinitialized"
+    | "checkout_not_repository"
+    | "gitlink_missing"
+    | "gitmodules_entry_missing"
+    | "url_missing"
+    | "url_changed"
+    | "index_conflict"
+    | "commit_unavailable"
+    | "inspect_failed"
+    | "scan_truncated";
+  severity: "warning" | "error";
+  message: string;
+  /** Conservative next step phrased as guidance, never an auto-run mutation. */
+  remedy?: string;
+};
+
+/** One gitlink/config/check-out record in a selected parent worktree. */
+export type SubmoduleStatus = {
+  /** `.gitmodules` section name, or the path when the section is absent. */
+  name: string;
+  /** Forward-slash path relative to the selected top-level worktree. */
+  path: string;
+  /** Zero for direct children, increasing for initialized nested children. */
+  depth: number;
+  /** Commit recorded by the parent repository's HEAD tree. */
+  pinnedCommit?: string;
+  /** Gitlink currently in the parent index (the next commit's pin). */
+  indexCommit?: string;
+  checkedOutCommit?: string;
+  checkoutState: SubmoduleCheckoutState;
+  relation: SubmoduleRelation;
+  /** null when no checkout was available to inspect. */
+  dirty: boolean | null;
+  /** null when no checkout was available; true is normal after submodule update. */
+  detached: boolean | null;
+  checkedOutBranch?: string;
+  /** Tags in the child repository that point at HEAD's pin (or a new index pin). */
+  pinnedTags: string[];
+  /** Values declared by `.gitmodules`; these do not replace the gitlink pin. */
+  configuredUrl?: string;
+  configuredBranch?: string;
+  /** URL copied into the parent's local config when the submodule was initialized. */
+  initializedUrl?: string;
+  issues: SubmoduleIssue[];
+};
+
+/** Bounded, failure-isolated submodule inspection for one selected worktree. */
+export type SubmoduleSnapshot = {
+  submodules: SubmoduleStatus[];
+  truncated: boolean;
+  /** Parent-level parse/bounds problems not attributable to one child path. */
+  issues: SubmoduleIssue[];
+};
+
 export type PushRefRelation =
   | "create"
   | "equal"

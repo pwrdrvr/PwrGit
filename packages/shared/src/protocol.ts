@@ -54,6 +54,7 @@ import type {
   RepoSearchHit,
   RepoWorktreeRefresh,
   SearchHitStatus,
+  SubmoduleSnapshot,
   SshRemoteRecovery,
   WorktreeState
 } from "./types";
@@ -652,6 +653,12 @@ export interface Commands {
     req: { repoId: string; worktreeId: string };
     res: GitLfsStatus;
   };
+  /** Read-only, bounded inspection of the gitlinks/config/checkouts beneath one
+   *  selected worktree. Per-child failures are returned on their row. */
+  "submodules:list": {
+    req: { worktreeId: string };
+    res: SubmoduleSnapshot;
+  };
 
   // GitHub PR status. Repo expansion uses the bulk cached lookup; focused
   // worktrees and deliberate hover prefetches target one branch instead.
@@ -749,6 +756,11 @@ export interface Commands {
   "worktree:getState": {
     req: { worktreeId: string };
     res: WorktreeState | null;
+  };
+  /** Live checkout-safety probe, including dirty initialized submodules. */
+  "worktree:readDirty": {
+    req: { worktreeId: string };
+    res: { dirty: number };
   };
   "worktree:activate": { req: { worktreeId: string }; res: null };
 

@@ -159,7 +159,16 @@ export async function readChanges(
   // click is about to stage, and makes a folder masquerade as a file row. The
   // renderer regroups the flat list back into folders itself.
   const raw = await git(
-    ["status", "--porcelain=v2", "--untracked-files=all"],
+    [
+      "status",
+      "--porcelain=v2",
+      "--untracked-files=all",
+      // Internal child dirtiness is represented by submodules:list. Asking
+      // parent status to recurse into it duplicates that state and can turn a
+      // 20-child parent refresh into a long synchronous walk. Commit-pin
+      // mismatches still appear as changes.
+      "--ignore-submodules=dirty"
+    ],
     cwd,
     NO_OPTIONAL_LOCKS
   );
@@ -167,6 +176,33 @@ export async function readChanges(
   const checked = requireExit0(raw.value, ["status"]);
   if (!checked.ok) return checked;
   return ok(capChangeSet(parseChanges(checked.value.stdout)));
+}
+
+/**
+ * Live checkout guard. Unlike the Changes list, this deliberately asks Git to
+ * inspect initialized submodules: branch switches can carry dirty child work
+ * just as they carry dirty parent files, so suppressing those rows here would
+ * bypass the user's confirmation.
+ */
+export async function readCheckoutDirtyCount(
+  git: GitExec,
+  cwd: string
+): Promise<Result<number>> {
+  const args = [
+    "status",
+    "--porcelain=v2",
+    "--untracked-files=normal",
+    "--ignore-submodules=none"
+  ];
+  const raw = await git(args, cwd, NO_OPTIONAL_LOCKS);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, args);
+  if (!checked.ok) return checked;
+  return ok(
+    checked.value.stdout
+      .split("\n")
+      .filter((line) => line !== "" && !line.startsWith("# ")).length
+  );
 }
 
 /**
