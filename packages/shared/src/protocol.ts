@@ -57,6 +57,14 @@ import type {
   WorktreeState
 } from "./types";
 import type { ImagePreview, ImageRevision } from "./image";
+import type {
+  McpAgentPolicySnapshot,
+  McpAgentRole,
+  McpAgentRoleInput,
+  McpAgentRolePatch,
+  McpAgentSession,
+  McpAgentSessionCredential
+} from "./mcp-policy";
 
 export type ProfileList = {
   activeProfileId: ProfileId | null;
@@ -1061,6 +1069,23 @@ export interface Commands {
   // App settings (Settings window)
   "settings:read": { req: void; res: AppSettingsSnapshot };
   "settings:update": { req: { patch: AppSettingsPatch }; res: AppSettingsSnapshot };
+  /** Fail-closed standalone MCP authorization policy and effective scopes. */
+  "localAgents:read": { req: void; res: McpAgentPolicySnapshot };
+  "localAgents:createSession": {
+    req: { name: string; roleId: string };
+    res: McpAgentSessionCredential;
+  };
+  "localAgents:revoke": { req: { id: string }; res: McpAgentSession };
+  "localAgents:assignRole": {
+    req: { sessionId: string; roleId: string };
+    res: McpAgentSession;
+  };
+  "localAgents:roleCreate": { req: McpAgentRoleInput; res: McpAgentRole };
+  "localAgents:roleUpdate": {
+    req: { id: string; patch: McpAgentRolePatch };
+    res: McpAgentRole;
+  };
+  "localAgents:roleDelete": { req: { id: string }; res: null };
   /** Current preference plus native-resolved palette; closes bootstrap races. */
   "appearance:read": { req: void; res: AppAppearance };
 
@@ -1162,6 +1187,8 @@ export interface Events {
   "ui:manageProfile": Record<string, never>;
   /** App settings changed (any window) — payload is the fresh snapshot. */
   "settings:changed": AppSettingsSnapshot;
+  /** Sessions, roles, or repository boundaries changed in Settings. */
+  "localAgents:changed": McpAgentPolicySnapshot;
   /** Resolved color theme changed, including a live OS change in System mode. */
   "appearance:changed": AppAppearance;
   /** Auto-update status changed — Settings and any future banner subscribe. */

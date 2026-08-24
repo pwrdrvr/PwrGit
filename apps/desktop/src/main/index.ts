@@ -93,6 +93,8 @@ import { checkForAppUpdatesFromMenu } from "./menu-update-check";
 import { createProfileWindows } from "./profile-windows";
 import { openSettingsWindow } from "./settings-window";
 import { createNativeThemeController } from "./native-theme";
+import { McpPolicyStore } from "@pwrgit/mcp-server/access-policy";
+import { registerLocalAgentHandlers } from "./local-agents/local-agent-handlers";
 
 const APP_NAME = "PwrGit";
 
@@ -225,6 +227,9 @@ if (!gotSingleInstanceLock) {
 
     const db = openDatabase(join(app.getPath("userData"), "pwrgit.db"));
     const diagnosticsOutputRoot = join(app.getPath("userData"), "diagnostics");
+    const mcpPolicy = new McpPolicyStore(
+      join(app.getPath("userData"), "mcp-policy.json")
+    );
     const diagnostics = new DiagnosticsManager({
       outputRoot: diagnosticsOutputRoot,
       getDiagnostics: () =>
@@ -504,6 +509,9 @@ if (!gotSingleInstanceLock) {
         diagnostics.sync();
         refreshMenu(); // Developer Mode toggles View-menu items live
       }
+    });
+    registerLocalAgentHandlers(bus, mcpPolicy, () => {
+      emitEvent("localAgents:changed", mcpPolicy.snapshot());
     });
     diagnostics.sync(); // start any settings-enabled monitors at boot
 

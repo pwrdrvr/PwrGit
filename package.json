@@ -9,7 +9,7 @@
   "packageManager": "pnpm@10.33.0",
   "scripts": {
     "preinstall": "node ./scripts/check-node-version.mjs",
-    "build": "pnpm --filter @pwrgit/desktop build",
+    "build": "pnpm --filter @pwrgit/mcp-server build && pnpm --filter @pwrgit/desktop build",
     "dev": "pnpm --filter @pwrgit/desktop dev",
     "lint": "pnpm lint:colors && pnpm licenses:check && pnpm lint:boundaries && pnpm typecheck",
     "lint:boundaries": "depcruise --config .dependency-cruiser.cjs packages/ apps/desktop/src/",
