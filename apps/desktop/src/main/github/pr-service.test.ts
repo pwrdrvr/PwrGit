@@ -207,6 +207,50 @@ describe("PrService", () => {
     expect(fetches).toHaveLength(1);
   });
 
+  it("does not let an invalidated refresh write into reused repository ids", async () => {
+    let announceFetch = (): void => undefined;
+    const fetchStarted = new Promise<void>((resolve) => {
+      announceFetch = resolve;
+    });
+    let releaseFetch = (_value: Map<string, PrSummary | null>): void => undefined;
+    const fetchResult = new Promise<Map<string, PrSummary | null>>((resolve) => {
+      releaseFetch = resolve;
+    });
+    service = new PrService(db, git, {
+      resolveForge: fakeForge({
+        fetchPrsForBranches: async () => {
+          announceFetch();
+          return await fetchResult;
+        }
+      }),
+      now: () => now
+    });
+
+    const refresh = service.refreshRepo("repo", {
+      branches: ["feature/pr-state"],
+      force: true
+    });
+    await fetchStarted;
+
+    // Profile deletion cascades the old repo, then invalidates async writes.
+    // A new profile and index pass may immediately reuse both stable ids.
+    db.prepare("DELETE FROM profiles WHERE id = 'profile'").run();
+    service.invalidatePendingWrites();
+    db.prepare(
+      "INSERT INTO profiles (id, name, email) VALUES ('profile', 'Replacement', 'replacement@example.com')"
+    ).run();
+    db.prepare(
+      "INSERT INTO repos (id, profile_id, name, path) VALUES ('repo', 'profile', 'Replacement', '/replacement')"
+    ).run();
+
+    releaseFetch(new Map([["feature/pr-state", pr()]]));
+
+    await expect(refresh).resolves.toEqual(new Map());
+    expect(
+      db.prepare("SELECT 1 FROM branch_pr WHERE repo_id = 'repo'").get()
+    ).toBeUndefined();
+  });
+
   it("discovers PRs for local branches that are not checked out in worktrees", async () => {
     const localGit: GitExec = async (args) =>
       ok({

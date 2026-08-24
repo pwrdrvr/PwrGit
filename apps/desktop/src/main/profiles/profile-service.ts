@@ -1,10 +1,14 @@
 import type {
   CreateProfileRequest,
+  DeleteProfileRequest,
   Profile,
+  ProfileDeletion,
   ProfileId,
   ProfileList,
+  Result,
   UpdateProfileRequest
 } from "@pwrgit/shared";
+import { err, ok } from "@pwrgit/shared";
 import type { DB } from "../persistence/db";
 
 type ProfileRow = {
@@ -50,6 +54,10 @@ function rowToProfile(r: ProfileRow): Profile {
 }
 
 const ACTIVE_KEY = "active_profile_id";
+
+/** Reserved namespace for selection/presentation state owned by one profile.
+ *  Keeping it here lets deletion clean future keys without learning each key. */
+const profileMetaPrefix = (id: ProfileId): string => `profile:${id}:`;
 
 /**
  * Profiles are an in-app concern (PwrGit is single-instance). Switching just
@@ -162,6 +170,89 @@ export class ProfileService {
   }
 
   /**
+   * Permanently remove a profile from PwrGit's database. This operation never
+   * touches any repository/worktree path stored in the index.
+   *
+   * The exact current name is a confirmation + stale-dialog guard, and the
+   * final profile is protected so callers always receive a concrete next
+   * active profile. Database-owned rows cascade through repos/worktrees; the
+   * legacy branch_pr table is cleaned explicitly because it predates FKs.
+   */
+  delete(input: DeleteProfileRequest): Result<ProfileDeletion> {
+    const existing = this.get(input.profileId);
+    if (existing === null) {
+      return err({
+        kind: "profile",
+        code: "not_found",
+        message: `No profile "${input.profileId}"`
+      });
+    }
+    if (input.expectedName !== existing.name) {
+      return err({
+        kind: "validation",
+        code: "confirmation_mismatch",
+        message: `Type "${existing.name}" exactly to confirm deletion`
+      });
+    }
+
+    const ordered = this.list();
+    if (ordered.length <= 1) {
+      return err({
+        kind: "profile",
+        code: "last_profile",
+        message: "PwrGit must keep at least one profile"
+      });
+    }
+
+    const deletingIndex = ordered.findIndex((p) => p.id === input.profileId);
+    const remaining = ordered.filter((p) => p.id !== input.profileId);
+    const currentActiveId = this.getActiveId();
+    const activeSurvives = remaining.some((p) => p.id === currentActiveId);
+    const replacement =
+      remaining[Math.min(Math.max(deletingIndex, 0), remaining.length - 1)];
+    const nextActiveId = activeSurvives ? currentActiveId : replacement?.id;
+    if (nextActiveId === null || nextActiveId === undefined) {
+      return err({
+        kind: "profile",
+        code: "replacement_missing",
+        message: "Could not choose a surviving profile"
+      });
+    }
+
+    this.db.transaction(() => {
+      // branch_pr intentionally predates the repository FK used by its newer
+      // sibling commit_pr. Clear it while the repo rows still identify owner.
+      this.db
+        .prepare(
+          `DELETE FROM branch_pr
+           WHERE repo_id IN (SELECT id FROM repos WHERE profile_id = ?)`
+        )
+        .run(input.profileId);
+
+      // ON DELETE CASCADE removes repos, worktrees, derived branch/search
+      // indexes, clone destinations, scan state, and repo-owned caches.
+      this.db.prepare("DELETE FROM profiles WHERE id = ?").run(input.profileId);
+
+      // Selection state uses one reserved namespace so new profile-scoped keys
+      // are deletion-safe without adding bespoke cleanup for every feature.
+      const prefix = profileMetaPrefix(input.profileId);
+      this.db
+        .prepare(
+          `DELETE FROM app_meta
+           WHERE substr(key, 1, ?) = ?`
+        )
+        .run(prefix.length, prefix);
+      this.setActiveId(nextActiveId);
+    })();
+
+    return ok({
+      deletedProfileId: input.profileId,
+      activeProfileId: nextActiveId,
+      profiles: this.list()
+    });
+  }
+
+  /**
    * Replace a profile's scan roots wholesale (trimmed + de-duped, order kept).
    * Repos under removed roots are pruned on the next rescan.
    */
@@ -186,7 +277,14 @@ export class ProfileService {
         n: number;
       }
     ).n;
-    if (count > 0) return;
+    if (count > 0) {
+      const current = this.getActiveId();
+      if (current === null || this.get(current) === null) {
+        const first = this.list()[0];
+        if (first !== undefined) this.setActiveId(first.id);
+      }
+      return;
+    }
     this.create(seed);
   }
 

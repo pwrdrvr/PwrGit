@@ -121,6 +121,20 @@ export type UpdateProfileRequest = {
   theme?: ProfileThemeOverride | null;
 };
 
+/** Destructive profile operations require the current name as a race-safe,
+ *  human-readable confirmation guard. */
+export type DeleteProfileRequest = {
+  profileId: ProfileId;
+  expectedName: string;
+};
+
+export type ProfileDeletion = {
+  deletedProfileId: ProfileId;
+  /** Deletion is rejected for the final profile, so this is always concrete. */
+  activeProfileId: ProfileId;
+  profiles: Profile[];
+};
+
 // App settings (Settings window). Experimental + diagnostics sections are
 // stored sparsely in settings.json; reads return a fully-defaulted snapshot.
 
@@ -484,6 +498,9 @@ export interface Commands {
   };
   "profile:create": { req: CreateProfileRequest; res: Profile };
   "profile:update": { req: UpdateProfileRequest; res: Profile };
+  /** Remove a profile and its PwrGit-owned index data. Git directories and
+   *  worktrees on disk are never touched. The final profile cannot be deleted. */
+  "profile:delete": { req: DeleteProfileRequest; res: ProfileDeletion };
   /** Replace a profile's scan roots wholesale, then rescan. */
   "profile:setRoots": {
     req: { profileId: ProfileId; roots: string[] };

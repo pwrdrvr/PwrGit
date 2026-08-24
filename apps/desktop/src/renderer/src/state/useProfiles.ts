@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   CreateProfileRequest,
+  DeleteProfileRequest,
   Profile,
   ProfileList,
   BranchReveal,
@@ -30,6 +31,8 @@ export type UseProfiles = ProfileList & {
   createProfile: (req: CreateProfileRequest) => Promise<string | null>;
   /** Patch an existing profile. Returns an error message or null. */
   updateProfile: (req: UpdateProfileRequest) => Promise<string | null>;
+  /** Permanently remove a profile's PwrGit-owned data. */
+  deleteProfile: (req: DeleteProfileRequest) => Promise<string | null>;
   /** Replace a profile's scan roots (triggers a rescan). */
   setRoots: (profileId: string, roots: string[]) => Promise<void>;
   /** Native multi-select folder picker; [] if cancelled. */
@@ -112,6 +115,14 @@ export function useProfiles(): UseProfiles {
     []
   );
 
+  const deleteProfile = useCallback(
+    async (req: DeleteProfileRequest): Promise<string | null> => {
+      const r = await dispatch("profile:delete", req);
+      return r.ok ? null : r.error.message;
+    },
+    []
+  );
+
   const setRoots = useCallback(async (profileId: string, roots: string[]) => {
     await dispatch("profile:setRoots", { profileId, roots });
   }, []);
@@ -134,6 +145,7 @@ export function useProfiles(): UseProfiles {
     openProfile,
     createProfile,
     updateProfile,
+    deleteProfile,
     setRoots,
     pickDirectories
   };

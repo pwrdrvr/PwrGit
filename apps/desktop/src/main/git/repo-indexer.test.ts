@@ -1,5 +1,11 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, renameSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  renameSync,
+  rmSync,
+  writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -124,6 +130,75 @@ describe("RepoIndexer", () => {
     expect(isolatedIndexer.shouldRescanProfile(profile.id)).toBe(false);
     now += 1;
     expect(isolatedIndexer.shouldRescanProfile(profile.id)).toBe(true);
+  });
+
+  it("stops a deleted profile's scan before reused ids can be written", async () => {
+    const scanRoot = mkdtempSync(join(tmpdir(), "pwrgit-cancel-scan-"));
+    const repoPath = join(scanRoot, "old-root-repo");
+    initRepo(repoPath);
+    const isolatedDb = openDatabase(":memory:");
+    try {
+      const profiles = new ProfileService(isolatedDb);
+      const deleted = profiles.create({
+        name: "Reusable",
+        email: "old@example.com",
+        roots: [scanRoot]
+      });
+      profiles.create({ name: "Survivor", email: "survivor@example.com" });
+
+      let announceYield = (): void => undefined;
+      const reachedWriteBoundary = new Promise<void>((resolve) => {
+        announceYield = resolve;
+      });
+      let resume = (): void => undefined;
+      const resumeScan = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      let paused = false;
+      const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit, {
+        yieldToEventLoop: async () => {
+          if (paused) return;
+          paused = true;
+          announceYield();
+          await resumeScan;
+        }
+      });
+      const controller = new AbortController();
+      const scan = isolatedIndexer.rescanProfile(deleted, {
+        signal: controller.signal
+      });
+      await reachedWriteBoundary;
+
+      const removal = profiles.delete({
+        profileId: deleted.id,
+        expectedName: deleted.name
+      });
+      expect(removal.ok).toBe(true);
+      controller.abort();
+      const replacement = profiles.create({
+        name: "Reusable",
+        email: "new@example.com"
+      });
+      expect(replacement.id).toBe(deleted.id);
+      isolatedDb.prepare(
+        `INSERT INTO repos (id, profile_id, name, path, source)
+         VALUES ('replacement-repo', ?, 'Replacement', '/replacement', 'scan')`
+      ).run(replacement.id);
+
+      resume();
+      await expect(scan).rejects.toMatchObject({ name: "AbortError" });
+      expect(
+        isolatedDb.prepare("SELECT id FROM repos WHERE id = 'replacement-repo'").get()
+      ).toEqual({ id: "replacement-repo" });
+      expect(
+        isolatedDb
+          .prepare("SELECT 1 FROM profile_scan_state WHERE profile_id = ?")
+          .get(replacement.id)
+      ).toBeUndefined();
+    } finally {
+      isolatedDb.close();
+      rmSync(scanRoot, { recursive: true, force: true });
+    }
   });
 
   it("hydrates remote-only search entries for every persisted repo", async () => {
