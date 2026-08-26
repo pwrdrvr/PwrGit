@@ -139,6 +139,30 @@ test("local clone selects a nested destination, indexes and reveals it, and reje
   ).toHaveCount(1);
 });
 
+test("clone uses the visibly selected default destination without a click", async () => {
+  sandbox = createGitSandbox();
+  const source = sandbox.makeBareRemote("default-destination");
+  const checkout = join(sandbox.reposDir, "default-destination");
+  handle = await launchApp();
+  const { window } = handle;
+  await addRoot(window, handle, sandbox);
+
+  await window.locator(".clone-repo").click();
+  const dialog = window.getByRole("dialog", { name: "Clone a repository" });
+  await chooseCloneSource(dialog, source);
+
+  const destination = dialog.getByTitle(sandbox.reposDir, { exact: true });
+  await expect(destination).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.locator(".clone-destination-choice")).toHaveText(
+    `Will create ${checkout}`
+  );
+  await dialog.locator(".clone-dialog__submit").click();
+  await expect(dialog).toBeHidden();
+
+  expect(existsSync(join(checkout, ".git"))).toBe(true);
+  await expectIndexedAndSelected(window, "default-destination");
+});
+
 for (const host of ["github", "gitlab"] as const) {
   test(`${host} fork creates the expected origin/upstream topology and metadata`, async () => {
     sandbox = createGitSandbox();

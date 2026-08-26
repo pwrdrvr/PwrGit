@@ -60,6 +60,14 @@ function destinationMeta(destination: CloneDestination): string {
   }`;
 }
 
+function checkoutPath(
+  destination: CloneDestination,
+  repository: CloneRepository
+): string {
+  const separator = destination.path.includes("\\") ? "\\" : "/";
+  return `${destination.path.replace(/[\\/]+$/, "")}${separator}${repository.name}`;
+}
+
 function protocolLabel(protocol: CloneProtocol, host: ForgeHost): string {
   if (protocol === "ssh") return "SSH";
   if (protocol === "https") return "HTTPS";
@@ -627,6 +635,11 @@ export function CloneRepoDialog({
                 id="clone-destination"
                 ref={destinationInputRef}
                 value={destinationQuery}
+                aria-describedby={
+                  activeDestination === null || selectedRepository === null
+                    ? undefined
+                    : "clone-destination-choice"
+                }
                 disabled={busy || selectedRepository === null}
                 autoComplete="off"
                 spellCheck={false}
@@ -733,6 +746,19 @@ export function CloneRepoDialog({
                 </div>
               )}
             </div>
+            {activeDestination !== null && selectedRepository !== null && (
+              <div
+                id="clone-destination-choice"
+                className="clone-destination-choice"
+                role="status"
+                title={checkoutPath(activeDestination, selectedRepository)}
+              >
+                Will create{" "}
+                <strong>
+                  {checkoutPath(activeDestination, selectedRepository)}
+                </strong>
+              </div>
+            )}
           </section>
 
           {submitError !== null && (

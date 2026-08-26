@@ -30,6 +30,13 @@ test("clone action stays visible above a long scrolling repo list", async () => 
   // made explicit rather than hiding the action entirely.
   await expect(clone).toBeVisible();
   await expect(clone).toBeDisabled();
+  await expect(clone).toHaveAttribute(
+    "title",
+    "Add a repo folder before cloning"
+  );
+  await expect(
+    window.getByText("Add a repo folder to enable clone and fork.")
+  ).toBeVisible();
   await expect(clone).toBeInViewport();
 
   await addRootAndExpand(window, handle, sandbox, repo.name);
