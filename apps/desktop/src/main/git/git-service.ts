@@ -1074,6 +1074,34 @@ export async function worktreeRemove(
   }
 }
 
+function isConcurrentRefUpdate(stderr: string): boolean {
+  return (
+    /incorrect old value provided/i.test(stderr) ||
+    /cannot lock ref\b[^\r\n]*\bis at [0-9a-f]+ but expected [0-9a-f]+/i.test(
+      stderr
+    )
+  );
+}
+
+async function fetchWithRefRaceRetry(
+  git: GitExec,
+  cwd: string,
+  args: string[]
+): Promise<Result<void>> {
+  // A linked worktree or another Git client can update the shared remote ref
+  // after fetch reads its old value but before its ref transaction commits.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const raw = await git(args, cwd);
+    if (!raw.ok) return raw;
+    const checked = requireExit0(raw.value, args);
+    if (checked.ok) return ok(undefined);
+    if (attempt === 0 && isConcurrentRefUpdate(raw.value.stderr)) continue;
+    return checked;
+  }
+  // The loop always returns on its second attempt.
+  return ok(undefined);
+}
+
 /** Fetch the checked-out branch's configured remote (or origin) and prune. */
 export async function fetchRemote(
   git: GitExec,
@@ -1081,10 +1109,7 @@ export async function fetchRemote(
   forceProgress = false
 ): Promise<Result<void>> {
   const args = ["fetch", "--prune", ...(forceProgress ? ["--progress"] : [])];
-  const raw = await git(args, cwd);
-  if (!raw.ok) return raw;
-  const checked = requireExit0(raw.value, ["fetch"]);
-  return checked.ok ? ok(undefined) : checked;
+  return fetchWithRefRaceRetry(git, cwd, args);
 }
 
 /** Fetch one explicit remote and prune its deleted remote-tracking branches. */
@@ -1093,10 +1118,7 @@ export async function fetchNamedRemote(
   cwd: string,
   remote: string
 ): Promise<Result<void>> {
-  const raw = await git(["fetch", "--prune", remote], cwd);
-  if (!raw.ok) return raw;
-  const checked = requireExit0(raw.value, ["fetch", "--prune", remote]);
-  return checked.ok ? ok(undefined) : checked;
+  return fetchWithRefRaceRetry(git, cwd, ["fetch", "--prune", remote]);
 }
 
 /** Fetch every configured remote except those opted out with skipFetchAll. */
@@ -1104,10 +1126,7 @@ export async function fetchAllRemotes(
   git: GitExec,
   cwd: string
 ): Promise<Result<void>> {
-  const raw = await git(["fetch", "--all", "--prune"], cwd);
-  if (!raw.ok) return raw;
-  const checked = requireExit0(raw.value, ["fetch", "--all", "--prune"]);
-  return checked.ok ? ok(undefined) : checked;
+  return fetchWithRefRaceRetry(git, cwd, ["fetch", "--all", "--prune"]);
 }
 
 async function checkedRemoteMutation(
