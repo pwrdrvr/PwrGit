@@ -717,6 +717,85 @@ describe("CloneService", () => {
     expect(JSON.stringify(result)).not.toContain("secretShouldNotLeak");
   });
 
+  it("explains that a GitHub 404 can be a typo or missing private-repo access", async () => {
+    const root = temporaryRoot();
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "Work",
+      email: "test@pwrgit.dev",
+      roots: [root]
+    });
+    const service = new CloneService(
+      db,
+      systemGit,
+      new RepoIndexer(db, systemGit),
+      profiles,
+      githubOnly(async (args: string[]) => {
+        if (args[0] === "--version") return "gh version 2.92.0";
+        if (args[0] === "api" && args[1] === "user") {
+          return JSON.stringify({ login: "huntharo" });
+        }
+        if (args[0] === "api" && args[1] === "user/orgs") return "[]";
+        throw new Error("gh: Not Found (HTTP 404)");
+      }),
+      fakeForgeStatus()
+    );
+
+    const result = await service.checkSource(
+      profile.id,
+      "acme/private-rpeo"
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        kind: "remote",
+        code: "repository_not_found",
+        message:
+          "GitHub couldn't access acme/private-rpeo. Check the repository spelling and confirm the active GitHub CLI account has access by running gh auth status. GitHub also returns 404 for private repositories you cannot access."
+      }
+    });
+  });
+
+  it("does not misreport a network failure as a missing repository", async () => {
+    const root = temporaryRoot();
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "Personal",
+      email: "test@pwrgit.dev",
+      roots: [root]
+    });
+    const service = new CloneService(
+      db,
+      systemGit,
+      new RepoIndexer(db, systemGit),
+      profiles,
+      githubOnly(async (args: string[]) => {
+        if (args[0] === "--version") return "gh version 2.92.0";
+        if (args[0] === "api" && args[1] === "user") {
+          return JSON.stringify({ login: "huntharo" });
+        }
+        if (args[0] === "api" && args[1] === "user/orgs") return "[]";
+        throw new Error("dial tcp: network is unreachable");
+      }),
+      fakeForgeStatus()
+    );
+
+    const result = await service.checkSource(profile.id, "acme/private-repo");
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        kind: "remote",
+        code: "lookup_failed",
+        message:
+          "Couldn't look up acme/private-repo. dial tcp: network is unreachable"
+      }
+    });
+  });
+
   it("surfaces authentication expiry from a search rather than an empty list", async () => {
     const root = temporaryRoot();
     const db = openDatabase(":memory:");

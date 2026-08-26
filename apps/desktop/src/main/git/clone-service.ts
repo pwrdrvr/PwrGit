@@ -254,6 +254,15 @@ function messageFromUnknown(provider: ForgeRepoProvider, cause: unknown): string
   return message.split("\n")[0] ?? message;
 }
 
+function inaccessibleRepositoryMessage(
+  host: ForgeHost,
+  nameWithOwner: string
+): string {
+  const forge = host === "gitlab" ? "GitLab" : "GitHub";
+  const cli = host === "gitlab" ? "glab" : "gh";
+  return `${forge} couldn't access ${nameWithOwner}. Check the repository spelling and confirm the active ${forge} CLI account has access by running ${cli} auth status. ${forge} also returns 404 for private repositories you cannot access.`;
+}
+
 const CLONE_PHASES: Record<string, CloneProgress["phase"]> = {
   "Counting objects": "counting",
   "Compressing objects": "compressing",
@@ -561,10 +570,17 @@ export class CloneService {
           message: provider.errorMessage(cause)
         });
       }
+      if (provider.isNotFoundError(cause)) {
+        return err({
+          kind: "remote",
+          code: "repository_not_found",
+          message: inaccessibleRepositoryMessage(host, nameWithOwner)
+        });
+      }
       return err({
         kind: "remote",
-        code: "repository_not_found",
-        message: `Couldn't find ${nameWithOwner}. ${messageFromUnknown(provider, cause)}`
+        code: "lookup_failed",
+        message: `Couldn't look up ${nameWithOwner}. ${messageFromUnknown(provider, cause)}`
       });
     }
   }

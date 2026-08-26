@@ -74,6 +74,10 @@ export function isGhAuthenticationError(cause: unknown): boolean {
   return gh.isAuthenticationError(cause);
 }
 
+export function isGhNotFoundError(cause: unknown): boolean {
+  return gh.isNotFoundError(cause);
+}
+
 export function ghErrorMessage(cause: unknown): string {
   return gh.errorMessage(cause);
 }
