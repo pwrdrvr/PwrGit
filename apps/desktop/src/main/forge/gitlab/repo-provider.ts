@@ -16,6 +16,7 @@ import {
 import {
   glabErrorMessage,
   isGlabAuthenticationError,
+  isGlabNotFoundError,
   runGlab,
   type GlabRunOptions
 } from "./glab-cli";
@@ -349,6 +350,10 @@ export class GitLabRepoProvider implements ForgeRepoProvider {
 
   isAuthError(cause: unknown): boolean {
     return isGlabAuthenticationError(cause);
+  }
+
+  isNotFoundError(cause: unknown): boolean {
+    return isGlabNotFoundError(cause);
   }
 
   errorMessage(cause: unknown): string {

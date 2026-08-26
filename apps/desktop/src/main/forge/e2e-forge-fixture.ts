@@ -236,6 +236,10 @@ class E2EForgeRepoProvider implements ForgeRepoProvider {
     return cause instanceof FixtureForgeError && cause.authentication;
   }
 
+  isNotFoundError(cause: unknown): boolean {
+    return cause instanceof FixtureForgeError && /\b404\b/.test(cause.message);
+  }
+
   errorMessage(cause: unknown): string {
     return cause instanceof Error ? cause.message : String(cause);
   }

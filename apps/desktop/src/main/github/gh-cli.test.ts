@@ -7,7 +7,7 @@ const childProcess = vi.hoisted(() => ({
 
 vi.mock("node:child_process", () => childProcess);
 
-import { ghEnvironment, runGh } from "./gh-cli";
+import { ghEnvironment, isGhNotFoundError, runGh } from "./gh-cli";
 
 function streamingChild(): EventEmitter & {
   stdout: EventEmitter;
@@ -44,6 +44,13 @@ describe("runGh", () => {
         process.env.GIT_SSH_COMMAND = previousSshCommand;
       }
     }
+  });
+
+  it("recognizes GitHub's private-or-missing repository response", () => {
+    expect(isGhNotFoundError(new Error("gh: Not Found (HTTP 404)"))).toBe(true);
+    expect(isGhNotFoundError(new Error("dial tcp: network is unreachable"))).toBe(
+      false
+    );
   });
 
   it("streams with ignored stdin and protected prompt guards", async () => {

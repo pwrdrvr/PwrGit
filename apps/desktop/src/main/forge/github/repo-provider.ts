@@ -16,6 +16,7 @@ import {
 import {
   ghErrorMessage,
   isGhAuthenticationError,
+  isGhNotFoundError,
   runGh,
   type GhRunOptions
 } from "../../github/gh-cli";
@@ -286,6 +287,10 @@ export class GitHubRepoProvider implements ForgeRepoProvider {
 
   isAuthError(cause: unknown): boolean {
     return isGhAuthenticationError(cause);
+  }
+
+  isNotFoundError(cause: unknown): boolean {
+    return isGhNotFoundError(cause);
   }
 
   errorMessage(cause: unknown): string {

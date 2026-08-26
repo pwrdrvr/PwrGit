@@ -44,6 +44,10 @@ const FORCE_KILL_DELAY_MS = 1_000;
 /** Auth phrasing every forge CLI and the git credential helpers share. */
 const SHARED_AUTHENTICATION_PATTERN =
   /(?:authentication (?:is )?required|authentication failed|bad credentials|not logged (?:in|into)|http 401|status code 401|terminal prompts disabled|could not read (?:username|password)|no credentials (?:found|available)|permission denied \(publickey\))/i;
+/** Both supported forges hide inaccessible private repositories behind the
+ *  same 404 used for a misspelled path. */
+const SHARED_NOT_FOUND_PATTERN =
+  /(?:\bhttp\s*404\b|\bstatus(?:\s+code)?\s*:?[ \t]*404\b|\b404\s+(?:project\s+)?not found\b)/i;
 
 export type CliRunOptions = {
   timeoutMs?: number;
@@ -80,6 +84,7 @@ export type CliClient = {
   environment(): NodeJS.ProcessEnv;
   sanitize(diagnostic: string, environment?: NodeJS.ProcessEnv): string;
   isAuthenticationError(cause: unknown): boolean;
+  isNotFoundError(cause: unknown): boolean;
   errorMessage(cause: unknown): string;
   run(args: string[], options?: CliRunOptions): Promise<string>;
 };
@@ -131,6 +136,14 @@ export function createCliClient(spec: CliSpec): CliClient {
     if (!(cause instanceof Error)) return false;
     const failure = cause as Error & { stdout?: string; stderr?: string };
     return authenticationRequired(
+      `${failure.message}\n${failure.stdout ?? ""}\n${failure.stderr ?? ""}`
+    );
+  };
+
+  const isNotFoundError = (cause: unknown): boolean => {
+    if (!(cause instanceof Error)) return false;
+    const failure = cause as Error & { stdout?: string; stderr?: string };
+    return SHARED_NOT_FOUND_PATTERN.test(
       `${failure.message}\n${failure.stdout ?? ""}\n${failure.stderr ?? ""}`
     );
   };
@@ -462,6 +475,7 @@ export function createCliClient(spec: CliSpec): CliClient {
     environment,
     sanitize,
     isAuthenticationError,
+    isNotFoundError,
     errorMessage,
     run
   };
