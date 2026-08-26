@@ -11,6 +11,7 @@ import type {
   Repo
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { joinDisplayPath } from "../../lib/platform";
 import {
   cloneDestinationLabel,
   cloneDestinationSelectionIndex,
@@ -64,8 +65,7 @@ function checkoutPath(
   destination: CloneDestination,
   repository: CloneRepository
 ): string {
-  const separator = destination.path.includes("\\") ? "\\" : "/";
-  return `${destination.path.replace(/[\\/]+$/, "")}${separator}${repository.name}`;
+  return joinDisplayPath(destination.path, repository.name);
 }
 
 function protocolLabel(protocol: CloneProtocol, host: ForgeHost): string {

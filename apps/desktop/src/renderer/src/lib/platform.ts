@@ -75,3 +75,18 @@ export function pathTail(
   const separator = platform === "win32" ? "\\" : "/";
   return parts.slice(-segmentCount).join(separator);
 }
+
+/** Join a child name for display using the same separator semantics as the
+ * target platform's `path.join()`. A backslash is an ordinary filename
+ * character on POSIX, so path contents cannot safely identify the platform. */
+export function joinDisplayPath(
+  parent: string,
+  child: string,
+  platform: string = currentPlatform()
+): string {
+  if (platform === "win32") {
+    const normalizedParent = parent.replaceAll("/", "\\").replace(/\\+$/, "");
+    return `${normalizedParent}\\${child}`;
+  }
+  return `${parent.replace(/\/+$/, "")}/${child}`;
+}

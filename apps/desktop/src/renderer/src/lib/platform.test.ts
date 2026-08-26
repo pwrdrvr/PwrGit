@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   hasPrimaryModifier,
+  joinDisplayPath,
   pathLeaf,
   pathTail,
   revealPathLabel,
@@ -42,6 +43,18 @@ describe("platform labels", () => {
 });
 
 describe("cross-platform path labels", () => {
+  it("joins child names without treating POSIX backslashes as separators", () => {
+    expect(joinDisplayPath("/repos/team\\alpha", "repo", "darwin")).toBe(
+      "/repos/team\\alpha/repo"
+    );
+    expect(joinDisplayPath("/repos/team\\alpha/", "repo", "linux")).toBe(
+      "/repos/team\\alpha/repo"
+    );
+    expect(joinDisplayPath("C:/repos/team/", "repo", "win32")).toBe(
+      "C:\\repos\\team\\repo"
+    );
+  });
+
   it("reads leaves from POSIX, Windows, mixed, and UNC paths", () => {
     expect(pathLeaf("/Users/me/PwrGit")).toBe("PwrGit");
     expect(pathLeaf("C:\\Users\\me\\PwrGit\\")).toBe("PwrGit");
