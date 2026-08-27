@@ -14,6 +14,8 @@ import {
 import type { GitExec, GitOutput } from "./dugite";
 import {
   addRemote,
+  fetchAllRemotes,
+  fetchNamedRemote,
   fetchRemote,
   inspectRemoteReset,
   inspectRemoteDivergence,
@@ -779,6 +781,100 @@ describe("remote ops (bare-remote fixture)", () => {
   it("fetch succeeds when already up to date", async () => {
     const result = await fetchRemote(systemGit, cloneA);
     expect(result.ok).toBe(true);
+  });
+
+  it.each([
+    {
+      name: "the configured remote",
+      fetch: (git: GitExec) => fetchRemote(git, "/repos/project"),
+      args: ["fetch", "--prune"]
+    },
+    {
+      name: "a named remote",
+      fetch: (git: GitExec) =>
+        fetchNamedRemote(git, "/repos/project", "origin"),
+      args: ["fetch", "--prune", "origin"]
+    },
+    {
+      name: "all remotes",
+      fetch: (git: GitExec) => fetchAllRemotes(git, "/repos/project"),
+      args: ["fetch", "--all", "--prune"]
+    }
+  ])(
+    "retries $name when another process updates a ref first",
+    async ({ fetch, args }) => {
+      const calls: string[][] = [];
+      const racingGit: GitExec = async (actualArgs) => {
+        calls.push(actualArgs);
+        return ok(
+          calls.length === 1
+            ? {
+                stdout: "",
+                stderr:
+                  "error: fetching ref refs/remotes/origin/main failed: incorrect old value provided",
+                exitCode: 1
+              }
+            : { stdout: "", stderr: "", exitCode: 0 }
+        );
+      };
+
+      await expect(fetch(racingGit)).resolves.toEqual(ok(undefined));
+      expect(calls).toEqual([args, args]);
+    }
+  );
+
+  it("also retries Git's cannot-lock stale-value form", async () => {
+    let attempts = 0;
+    const racingGit: GitExec = async () => {
+      attempts += 1;
+      return ok(
+        attempts === 1
+          ? {
+              stdout: "",
+              stderr:
+                "error: cannot lock ref 'refs/remotes/origin/main': is at 8fa2455 but expected 625e993",
+              exitCode: 1
+            }
+          : { stdout: "", stderr: "", exitCode: 0 }
+      );
+    };
+
+    await expect(fetchRemote(racingGit, "/repos/project")).resolves.toEqual(
+      ok(undefined)
+    );
+    expect(attempts).toBe(2);
+  });
+
+  it("does not retry an unrelated fetch failure", async () => {
+    let attempts = 0;
+    const failingGit: GitExec = async () => {
+      attempts += 1;
+      return ok({
+        stdout: "",
+        stderr: "fatal: Authentication failed",
+        exitCode: 128
+      });
+    };
+
+    const result = await fetchRemote(failingGit, "/repos/project");
+    expect(result.ok).toBe(false);
+    expect(attempts).toBe(1);
+  });
+
+  it("stops after one stale-ref retry", async () => {
+    let attempts = 0;
+    const racingGit: GitExec = async () => {
+      attempts += 1;
+      return ok({
+        stdout: "",
+        stderr: "error: incorrect old value provided",
+        exitCode: 1
+      });
+    };
+
+    const result = await fetchRemote(racingGit, "/repos/project");
+    expect(result.ok).toBe(false);
+    expect(attempts).toBe(2);
   });
 
   it("pull refuses (not_fast_forward) when the branch has diverged", async () => {
