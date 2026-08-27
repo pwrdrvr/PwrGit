@@ -45,8 +45,8 @@ importers:
         specifier: ^0.2.0
         version: 0.2.0
       '@pwrdrvr/codex-discovery':
-        specifier: ^0.1.6
-        version: 0.1.6
+        specifier: ^0.4.0
+        version: 0.4.0
       '@pwrgit/mcp-server':
         specifier: workspace:*
         version: link:../../packages/mcp-server
@@ -908,8 +908,8 @@ packages:
   '@pwrdrvr/agent-transport@0.1.7':
     resolution: {integrity: sha512-91LJLC+jdWO6v3WIqoWI/CLHkMJebF4hEqk0vOkgK6DlawrA926EP7kHQ1VOE/iQRo5LCRqFqxjtWn6mQcs/EQ==}
 
-  '@pwrdrvr/codex-discovery@0.1.6':
-    resolution: {integrity: sha512-iC5FGfY7x32xwgEhFuU0YqVspPOYy6s+rfWJOhy6tVJ1L9KmuTM+spl9PEVOK1DDhYRZdQr6u4xWvlHqBwXsSg==}
+  '@pwrdrvr/codex-discovery@0.4.0':
+    resolution: {integrity: sha512-5QDeGsSTN6Oo+X2eIA8qOf7anWTIcnNJJzyfD3qFoFZLGS0RvIsMbzK1UwiVZszO3zT9DH6U4umbz2KrIyBv7A==}
 
   '@rolldown/pluginutils@1.0.0-rc.3':
     resolution: {integrity: sha512-eybk3TjzzzV97Dlj5c+XrBFW57eTNhzod66y9HrBlzJ6NsCrWCp/2kaPS3K9wJmurBC0Tdw4yPjXKZqlznim3Q==}
@@ -3609,7 +3609,7 @@ snapshots:
     dependencies:
       '@pwrdrvr/agent-core': 0.2.0
 
-  '@pwrdrvr/codex-discovery@0.1.6':
+  '@pwrdrvr/codex-discovery@0.4.0':
     dependencies:
       '@pwrdrvr/agent-core': 0.2.0
       '@pwrdrvr/agent-transport': 0.1.7
