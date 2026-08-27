@@ -2261,9 +2261,6 @@ textarea,
 .clone-destination-row.is-picked {
   border-color: var(--accent-border);
 }
-.clone-destination-row.is-selected {
-  border-color: var(--accent-border);
-}
 .clone-source-row:disabled,
 .clone-destination-row:disabled {
   cursor: default;
