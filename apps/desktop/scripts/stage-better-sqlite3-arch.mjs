@@ -22,6 +22,12 @@ import { join } from "node:path";
 
 const SUPPORTED_ARCHES = new Set(["x64", "arm64"]);
 
+export function resolveBetterSqlite3HostPlatform({ platform, reportHeader }) {
+  return platform === "linux" && !reportHeader.glibcVersionRuntime
+    ? "linuxmusl"
+    : platform;
+}
+
 export function stageBetterSqlite3({ appDir, platform, arch }) {
   const sqliteDir = join(appDir, "node_modules", "better-sqlite3");
   const { packageJson, prebuild } = resolveBetterSqlite3Prebuild({

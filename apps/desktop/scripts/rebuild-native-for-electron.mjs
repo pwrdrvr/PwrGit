@@ -25,7 +25,10 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSyn
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveBetterSqlite3Prebuild } from "./stage-better-sqlite3-arch.mjs";
+import {
+  resolveBetterSqlite3HostPlatform,
+  resolveBetterSqlite3Prebuild
+} from "./stage-better-sqlite3-arch.mjs";
 
 const require = createRequire(import.meta.url);
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -47,7 +50,10 @@ const packagedNodeApiBinary =
   betterSqlite3Package.gypfile === false
     ? resolveBetterSqlite3Prebuild({
         sqliteDir: moduleDir,
-        platform: process.platform,
+        platform: resolveBetterSqlite3HostPlatform({
+          platform: process.platform,
+          reportHeader: process.report.getReport().header
+        }),
         arch: process.arch
       }).prebuild
     : undefined;
