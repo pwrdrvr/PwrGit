@@ -22,8 +22,34 @@ import { join } from "node:path";
 
 const SUPPORTED_ARCHES = new Set(["x64", "arm64"]);
 
+export function resolveBetterSqlite3HostPlatform({ platform, reportHeader }) {
+  return platform === "linux" && !reportHeader.glibcVersionRuntime
+    ? "linuxmusl"
+    : platform;
+}
+
 export function stageBetterSqlite3({ appDir, platform, arch }) {
   const sqliteDir = join(appDir, "node_modules", "better-sqlite3");
+  const { packageJson, prebuild } = resolveBetterSqlite3Prebuild({
+    sqliteDir,
+    platform,
+    arch,
+  });
+
+  const buildDir = join(sqliteDir, "build");
+  const releaseDir = join(buildDir, "Release");
+  const target = join(releaseDir, "better_sqlite3.node");
+  rmSync(buildDir, { recursive: true, force: true });
+  mkdirSync(releaseDir, { recursive: true });
+  copyFileSync(prebuild, target);
+
+  console.log(
+    `  beforePack: staged better-sqlite3 ${packageJson.version} prebuild for ${platform}-${arch}`,
+  );
+  return target;
+}
+
+export function resolveBetterSqlite3Prebuild({ sqliteDir, platform, arch }) {
   const packagePath = join(sqliteDir, "package.json");
   if (!existsSync(packagePath)) {
     throw new Error(`better-sqlite3 package is missing at ${sqliteDir}`);
@@ -45,16 +71,5 @@ export function stageBetterSqlite3({ appDir, platform, arch }) {
       `better-sqlite3 has no packaged Node-API binary for ${platform}-${arch}`,
     );
   }
-
-  const buildDir = join(sqliteDir, "build");
-  const releaseDir = join(buildDir, "Release");
-  const target = join(releaseDir, "better_sqlite3.node");
-  rmSync(buildDir, { recursive: true, force: true });
-  mkdirSync(releaseDir, { recursive: true });
-  copyFileSync(prebuild, target);
-
-  console.log(
-    `  beforePack: staged better-sqlite3 ${packageJson.version} prebuild for ${platform}-${arch}`,
-  );
-  return target;
+  return { packageJson, prebuild };
 }

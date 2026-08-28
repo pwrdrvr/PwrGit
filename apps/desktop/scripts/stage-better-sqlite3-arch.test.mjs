@@ -9,7 +9,11 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { stageBetterSqlite3 } from "./stage-better-sqlite3-arch.mjs";
+import {
+  resolveBetterSqlite3HostPlatform,
+  resolveBetterSqlite3Prebuild,
+  stageBetterSqlite3,
+} from "./stage-better-sqlite3-arch.mjs";
 
 const roots = [];
 
@@ -20,6 +24,47 @@ afterEach(() => {
 });
 
 describe("better-sqlite3 package architecture staging", () => {
+  it.each([
+    ["Linux with glibc", "linux", { glibcVersionRuntime: "2.36" }, "linux"],
+    ["Linux with musl", "linux", {}, "linuxmusl"],
+    ["macOS", "darwin", {}, "darwin"],
+  ])(
+    "selects the host prebuild platform for %s",
+    (_, platform, reportHeader, expected) => {
+      expect(resolveBetterSqlite3HostPlatform({ platform, reportHeader })).toBe(
+        expected,
+      );
+    },
+  );
+
+  it("resolves the packaged Darwin binding used by fresh installs", () => {
+    const appDir = createApp();
+
+    const { prebuild } = resolveBetterSqlite3Prebuild({
+      sqliteDir: sqliteDir(appDir),
+      platform: "darwin",
+      arch: "arm64",
+    });
+
+    expect(readFileSync(prebuild, "utf8")).toBe("darwin-arm64");
+  });
+
+  it("resolves the packaged musl binding used by Alpine installs", () => {
+    const appDir = createApp();
+    const platform = resolveBetterSqlite3HostPlatform({
+      platform: "linux",
+      reportHeader: {},
+    });
+
+    const { prebuild } = resolveBetterSqlite3Prebuild({
+      sqliteDir: sqliteDir(appDir),
+      platform,
+      arch: "arm64",
+    });
+
+    expect(readFileSync(prebuild, "utf8")).toBe("linuxmusl-arm64");
+  });
+
   it("replaces build/Release with each requested Node-API prebuild", () => {
     const appDir = createApp();
     const stale = join(sqliteDir(appDir), "build", "Release", ".forge-meta");
@@ -63,6 +108,10 @@ function createApp() {
   );
   for (const arch of ["x64", "arm64"]) {
     write(join(sqlite, "prebuilds", `darwin-${arch}.node`), `darwin-${arch}`);
+    write(
+      join(sqlite, "prebuilds", `linuxmusl-${arch}.node`),
+      `linuxmusl-${arch}`,
+    );
   }
   write(join(sqlite, "prebuilds", "win32-x64.node"), "win32-x64");
   return appDir;

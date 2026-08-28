@@ -15,9 +15,9 @@
  * rebuilds build/Release itself, once per arch, and electron-builder.yml
  * excludes electron-native/ from the asar.
  *
- * better-sqlite3 13 also ships platform/arch Node-API binaries. On Windows we
- * verify and stage that binary into both owned locations instead of requiring
- * a Visual Studio toolchain just to reproduce an ABI-independent artifact.
+ * better-sqlite3 13 also ships platform/arch Node-API binaries. Verify and
+ * stage that binary into both owned locations instead of source-building an
+ * ABI-independent artifact during every fresh install.
  */
 
 import { execFileSync, execSync } from "node:child_process";
@@ -25,6 +25,10 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSyn
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  resolveBetterSqlite3HostPlatform,
+  resolveBetterSqlite3Prebuild
+} from "./stage-better-sqlite3-arch.mjs";
 
 const require = createRequire(import.meta.url);
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -42,13 +46,18 @@ const packageJsonPath = require.resolve("better-sqlite3/package.json", { paths: 
 const moduleDir = dirname(packageJsonPath);
 const betterSqlite3Package = require(packageJsonPath);
 const betterSqlite3Version = betterSqlite3Package.version;
-const packagedNodeApiBinary = join(
-  moduleDir,
-  "prebuilds",
-  `${process.platform}-${process.arch}.node`
-);
-const usePackagedNodeApiBinary =
-  betterSqlite3Package.gypfile === false && process.platform === "win32";
+const packagedNodeApiBinary =
+  betterSqlite3Package.gypfile === false
+    ? resolveBetterSqlite3Prebuild({
+        sqliteDir: moduleDir,
+        platform: resolveBetterSqlite3HostPlatform({
+          platform: process.platform,
+          reportHeader: process.report.getReport().header
+        }),
+        arch: process.arch
+      }).prebuild
+    : undefined;
+const usePackagedNodeApiBinary = packagedNodeApiBinary !== undefined;
 
 const releaseDir = join(moduleDir, "build", "Release");
 const nodeBinary = join(releaseDir, "better_sqlite3.node");
@@ -140,11 +149,6 @@ function ensureNodeBinary() {
   }
 
   if (usePackagedNodeApiBinary) {
-    if (!existsSync(packagedNodeApiBinary)) {
-      throw new Error(
-        `better-sqlite3 has no packaged Node-API binary for ${process.platform}-${process.arch}`
-      );
-    }
     console.log("Staging better-sqlite3's packaged Node-API binary for Node...");
     mkdirSync(releaseDir, { recursive: true });
     copyFileSync(packagedNodeApiBinary, nodeBinary);
