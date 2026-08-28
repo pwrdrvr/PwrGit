@@ -187,10 +187,14 @@ jobs:
         run: pnpm run test
 
   windows-e2e:
-    name: Windows Desktop E2E
+    name: Windows Desktop E2E (${{ matrix.shard }}/4)
     runs-on: windows-latest
     needs: windows-install-deps
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -202,14 +206,17 @@ jobs:
 
       - name: Run desktop Electron E2E specs (Windows)
         # windows-latest provides an interactive desktop session, so (unlike
-        # the Linux job) no xvfb is needed.
-        run: pnpm run test:desktop-e2e
+        # the Linux job) no xvfb is needed. `--fully-parallel` only changes
+        # sharding granularity here: each runner still has workers=1, while
+        # Playwright can balance individual tests 34/34/33/33 instead of
+        # assigning whole, very uneven spec files to a shard.
+        run: pnpm --filter @pwrgit/desktop test:e2e --fully-parallel --shard=${{ matrix.shard }}/4
 
       - name: Upload desktop Playwright artifacts
         uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:
-          name: windows-desktop-e2e-artifacts
+          name: windows-desktop-e2e-artifacts-${{ matrix.shard }}
           path: |
             apps/desktop/playwright-report/
             apps/desktop/test-results/
