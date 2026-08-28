@@ -151,6 +151,25 @@ jobs:
             apps/desktop/test-results/
           retention-days: 30
 
+  desktop-e2e-result:
+    # Preserve the required status-check context while the work runs as two
+    # independently named matrix jobs. `always()` is required so a failed
+    # shard reaches this job and cannot turn the aggregate check into a skip.
+    name: Desktop E2E
+    runs-on: ubuntu-latest
+    needs: desktop-e2e
+    if: ${{ always() }}
+    timeout-minutes: 5
+    steps:
+      - name: Require both Linux Desktop E2E shards
+        env:
+          LINUX_E2E_RESULT: ${{ needs.desktop-e2e.result }}
+        run: |
+          if [[ "$LINUX_E2E_RESULT" != "success" ]]; then
+            echo "Linux Desktop E2E matrix result: $LINUX_E2E_RESULT"
+            exit 1
+          fi
+
   windows:
     name: Windows (typecheck + build + test)
     runs-on: windows-latest
