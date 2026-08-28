@@ -24,9 +24,9 @@ normally. When adding a dependency used in `src/main`, check its `type` — if
 PwrGit keeps separately selected native-addon files for both runtimes even
 though better-sqlite3 13 uses Node-API: one deterministic binary remains
 selected for Node tests and scripts, while a separately stamped Electron
-sidecar is verified for the app. macOS/Linux source-build both; Windows stages
-the package's platform/arch Node-API binary into both owned locations so a
-normal install does not require Visual Studio. A stale or missing binary still
+sidecar is verified for the app. Every supported platform stages the package's
+platform/arch Node-API binary into both owned locations, avoiding a native
+toolchain during a normal install. A stale or missing binary still
 reads like a broken test or a broken database, not a native setup problem.
 `postinstall` runs
 [scripts/rebuild-native-for-electron.mjs](scripts/rebuild-native-for-electron.mjs)

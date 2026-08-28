@@ -9,7 +9,10 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { stageBetterSqlite3 } from "./stage-better-sqlite3-arch.mjs";
+import {
+  resolveBetterSqlite3Prebuild,
+  stageBetterSqlite3,
+} from "./stage-better-sqlite3-arch.mjs";
 
 const roots = [];
 
@@ -20,6 +23,18 @@ afterEach(() => {
 });
 
 describe("better-sqlite3 package architecture staging", () => {
+  it("resolves the packaged Darwin binding used by fresh installs", () => {
+    const appDir = createApp();
+
+    const { prebuild } = resolveBetterSqlite3Prebuild({
+      sqliteDir: sqliteDir(appDir),
+      platform: "darwin",
+      arch: "arm64",
+    });
+
+    expect(readFileSync(prebuild, "utf8")).toBe("darwin-arm64");
+  });
+
   it("replaces build/Release with each requested Node-API prebuild", () => {
     const appDir = createApp();
     const stale = join(sqliteDir(appDir), "build", "Release", ".forge-meta");
