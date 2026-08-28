@@ -4,9 +4,15 @@ Notes for the git layer. See `apps/desktop/AGENTS.md` for app-wide facts.
 
 ## Real-git tests run on Windows CI too
 
-Many suites here drive the system `git` against temp repos. Two hazards only
-ever fail on the Windows runner, so a green local run proves nothing about
-them:
+Many suites here drive the system `git` against temp repos. Some hazards only
+fail on the Windows runner, so a green local run proves nothing about them:
+
+- **Never give a Git process a native cwd inside a directory we may remove.**
+  Git for Windows can hand execution from its launcher to descendant
+  `git.exe` processes; awaiting the launcher does not guarantee every
+  descendant has released that cwd, and removal then fails with `EPERM` or
+  `EBUSY`. Keep the process cwd in a stable directory and address the repo with
+  `git -C <repo>` (use `gitProcessInvocation` in `dugite.ts`).
 
 - **`core.autocrlf` defaults to true on Windows.** Anything restored out of
   HEAD comes back with CRLF, and a test comparing file *contents* against the
