@@ -11,6 +11,7 @@ import type {
   Repo
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { joinDisplayPath } from "../../lib/platform";
 import {
   cloneDestinationLabel,
   cloneDestinationSelectionIndex,
@@ -58,6 +59,13 @@ function destinationMeta(destination: CloneDestination): string {
   return `${destination.repoCount} ${
     destination.repoCount === 1 ? "repo" : "repos"
   }`;
+}
+
+function checkoutPath(
+  destination: CloneDestination,
+  repository: CloneRepository
+): string {
+  return joinDisplayPath(destination.path, repository.name);
 }
 
 function protocolLabel(protocol: CloneProtocol, host: ForgeHost): string {
@@ -627,6 +635,11 @@ export function CloneRepoDialog({
                 id="clone-destination"
                 ref={destinationInputRef}
                 value={destinationQuery}
+                aria-describedby={
+                  activeDestination === null || selectedRepository === null
+                    ? undefined
+                    : "clone-destination-choice"
+                }
                 disabled={busy || selectedRepository === null}
                 autoComplete="off"
                 spellCheck={false}
@@ -733,6 +746,19 @@ export function CloneRepoDialog({
                 </div>
               )}
             </div>
+            {activeDestination !== null && selectedRepository !== null && (
+              <div
+                id="clone-destination-choice"
+                className="clone-destination-choice"
+                role="status"
+                title={checkoutPath(activeDestination, selectedRepository)}
+              >
+                Will create{" "}
+                <strong>
+                  {checkoutPath(activeDestination, selectedRepository)}
+                </strong>
+              </div>
+            )}
           </section>
 
           {submitError !== null && (

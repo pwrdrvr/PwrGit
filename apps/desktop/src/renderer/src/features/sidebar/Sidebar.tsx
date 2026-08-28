@@ -860,6 +860,11 @@ export function Sidebar({
               <ForkGlyph /> Fork…
             </button>
           </div>
+          {activeProfile !== null && activeProfile.roots.length === 0 && (
+            <span className="sidebar__actions-hint">
+              Add a repo folder to enable clone and fork.
+            </span>
+          )}
         </div>
       </div>
 
