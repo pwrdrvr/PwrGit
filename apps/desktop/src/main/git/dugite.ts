@@ -1,6 +1,7 @@
 // dugite is CommonJS; default-import + destructure so the strict-ESM main
 // bundle loads it (a named `import { exec }` throws at runtime).
 import type { ExecFileOptions } from "node:child_process";
+import { tmpdir } from "node:os";
 import dugite from "dugite";
 import { err, ok, type PwrGitError, type Result } from "@pwrgit/shared";
 import { logMain } from "../logs";
@@ -54,6 +55,31 @@ const NON_INTERACTIVE_GIT_ENV = {
   GIT_TERMINAL_PROMPT: "0",
   GCM_INTERACTIVE: "Never"
 } as const;
+
+export type GitProcessInvocation = {
+  args: string[];
+  processCwd: string;
+};
+
+/**
+ * Keep the native Git process out of a worktree that PwrGit may delete.
+ *
+ * Git-for-Windows' `cmd\\git.exe` can hand execution to another process. If
+ * the launcher inherits the worktree as its native cwd, Dugite can report the
+ * immediate child complete while the handed-off process still prevents
+ * `git worktree remove` from deleting that directory. `git -C` preserves Git's
+ * repository-relative behavior while every launcher starts from the stable OS
+ * temp root instead.
+ */
+export function gitProcessInvocation(
+  args: string[],
+  cwd: string
+): GitProcessInvocation {
+  return {
+    args: ["-C", cwd, ...args],
+    processCwd: tmpdir()
+  };
+}
 
 /** Preserve per-command overlays while enforcing the GUI's non-interactive
  * invariant even if a caller accidentally attempts to re-enable prompting. */
@@ -150,7 +176,8 @@ export const execGit: GitExec = async (args, cwd, options) => {
   const alreadyAborted = abortedSignal(options);
   if (alreadyAborted !== null) return err(abortError(alreadyAborted));
   try {
-    const result = await exec(args, cwd, {
+    const invocation = gitProcessInvocation(args, cwd);
+    const result = await exec(invocation.args, invocation.processCwd, {
       env: gitExecutionEnvironment(options?.env),
       ...(options?.signal !== undefined ? { signal: options.signal } : {}),
       ...(options?.killSignal !== undefined
@@ -214,7 +241,8 @@ export const execGitRecords: GitRecordExec = (args, cwd, options) =>
   new Promise((resolveResult) => {
     let child: ReturnType<typeof spawnGit>;
     try {
-      child = spawnGit(args, cwd, {
+      const invocation = gitProcessInvocation(args, cwd);
+      child = spawnGit(invocation.args, invocation.processCwd, {
         env: gitExecutionEnvironment(options.env)
       });
     } catch (cause) {
@@ -321,7 +349,8 @@ export type GitExecBinary = (
 /** Production GitExecBinary backed by dugite's bundled git binary. */
 export const execGitBinary: GitExecBinary = async (args, cwd) => {
   try {
-    const result = await exec(args, cwd, {
+    const invocation = gitProcessInvocation(args, cwd);
+    const result = await exec(invocation.args, invocation.processCwd, {
       encoding: "buffer",
       env: gitExecutionEnvironment(NO_OPTIONAL_LOCKS.env)
     });

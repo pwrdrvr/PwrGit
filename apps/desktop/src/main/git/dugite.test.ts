@@ -8,6 +8,7 @@ import {
   execGit,
   execGitRecords,
   gitExecutionEnvironment,
+  gitProcessInvocation,
   sanitizeGitLogDetail
 } from "./dugite";
 
@@ -35,6 +36,17 @@ describe("gitExecutionEnvironment", () => {
     ).toMatchObject({
       GIT_TERMINAL_PROMPT: "0",
       GCM_INTERACTIVE: "Never"
+    });
+  });
+});
+
+describe("gitProcessInvocation", () => {
+  it("uses git -C without inheriting a deletable worktree as native cwd", () => {
+    const worktree = join(tmpdir(), "fixture", "worktree");
+
+    expect(gitProcessInvocation(["status", "--short"], worktree)).toEqual({
+      args: ["-C", worktree, "status", "--short"],
+      processCwd: tmpdir()
     });
   });
 });
