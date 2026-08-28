@@ -31,7 +31,15 @@ export class ChangeSetWatch {
    */
   async hasChanged(worktreeId: string, cwd: string): Promise<boolean> {
     const raw = await this.git(
-      ["status", "--porcelain=v2", "--untracked-files=all"],
+      [
+        "status",
+        "--porcelain=v2",
+        "--untracked-files=all",
+        // The Changes list itself suppresses child rows, but this active-only
+        // fingerprint is also the submodule panel's invalidation source. Ask
+        // Git which child paths are dirty so child-only edits trigger refresh.
+        "--ignore-submodules=none"
+      ],
       cwd,
       NO_OPTIONAL_LOCKS
     );

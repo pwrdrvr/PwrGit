@@ -1,5 +1,5 @@
 import { app } from "electron";
-import { err, ok, pwrGitError } from "@pwrgit/shared";
+import { err, ok, pwrGitError, type AppAppearance } from "@pwrgit/shared";
 import { isAppDocumentKind, readAppDocument } from "./app-documents";
 import { openAppDocumentWindow } from "./app-document-window";
 import type { CommandBus } from "./command-bus";
@@ -23,7 +23,10 @@ function invalidDocumentKind(value: unknown) {
 }
 
 /** Register the allowlisted read/open surface for bundled legal documents. */
-export function registerAppDocumentHandlers(bus: CommandBus): void {
+export function registerAppDocumentHandlers(
+  bus: CommandBus,
+  appearance: () => AppAppearance
+): void {
   bus.register("app:readDocument", async (req) => {
     if (!isAppDocumentKind(req.kind)) return invalidDocumentKind(req.kind);
     try {
@@ -42,7 +45,7 @@ export function registerAppDocumentHandlers(bus: CommandBus): void {
 
   bus.register("app:openDocumentWindow", (req) => {
     if (!isAppDocumentKind(req.kind)) return invalidDocumentKind(req.kind);
-    openAppDocumentWindow(req.kind);
+    openAppDocumentWindow(req.kind, appearance());
     return ok(null);
   });
 }

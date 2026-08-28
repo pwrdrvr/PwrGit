@@ -46,6 +46,7 @@ function createValidRoot() {
   roots.push(root);
   writePackage(join(root, "package.json"));
   writePackage(join(root, "apps", "desktop", "package.json"));
+  writePackage(join(root, "packages", "mcp-server", "package.json"));
   writePackage(join(root, "packages", "pwrgit", "package.json"));
   writePackage(join(root, "packages", "shared", "package.json"));
   write(

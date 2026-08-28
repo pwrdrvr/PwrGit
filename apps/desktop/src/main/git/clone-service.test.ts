@@ -1,5 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -716,6 +717,85 @@ describe("CloneService", () => {
     expect(JSON.stringify(result)).not.toContain("secretShouldNotLeak");
   });
 
+  it("explains that a GitHub 404 can be a typo or missing private-repo access", async () => {
+    const root = temporaryRoot();
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "Work",
+      email: "test@pwrgit.dev",
+      roots: [root]
+    });
+    const service = new CloneService(
+      db,
+      systemGit,
+      new RepoIndexer(db, systemGit),
+      profiles,
+      githubOnly(async (args: string[]) => {
+        if (args[0] === "--version") return "gh version 2.92.0";
+        if (args[0] === "api" && args[1] === "user") {
+          return JSON.stringify({ login: "huntharo" });
+        }
+        if (args[0] === "api" && args[1] === "user/orgs") return "[]";
+        throw new Error("gh: Not Found (HTTP 404)");
+      }),
+      fakeForgeStatus()
+    );
+
+    const result = await service.checkSource(
+      profile.id,
+      "acme/private-rpeo"
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        kind: "remote",
+        code: "repository_not_found",
+        message:
+          "GitHub couldn't access acme/private-rpeo. Check the repository spelling and confirm the active GitHub CLI account has access by running gh auth status. GitHub also returns 404 for private repositories you cannot access."
+      }
+    });
+  });
+
+  it("does not misreport a network failure as a missing repository", async () => {
+    const root = temporaryRoot();
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "Personal",
+      email: "test@pwrgit.dev",
+      roots: [root]
+    });
+    const service = new CloneService(
+      db,
+      systemGit,
+      new RepoIndexer(db, systemGit),
+      profiles,
+      githubOnly(async (args: string[]) => {
+        if (args[0] === "--version") return "gh version 2.92.0";
+        if (args[0] === "api" && args[1] === "user") {
+          return JSON.stringify({ login: "huntharo" });
+        }
+        if (args[0] === "api" && args[1] === "user/orgs") return "[]";
+        throw new Error("dial tcp: network is unreachable");
+      }),
+      fakeForgeStatus()
+    );
+
+    const result = await service.checkSource(profile.id, "acme/private-repo");
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        kind: "remote",
+        code: "lookup_failed",
+        message:
+          "Couldn't look up acme/private-repo. dial tcp: network is unreachable"
+      }
+    });
+  });
+
   it("surfaces authentication expiry from a search rather than an empty list", async () => {
     const root = temporaryRoot();
     const db = openDatabase(":memory:");
@@ -818,6 +898,52 @@ describe("CloneService", () => {
         )
         .get(profile.id)
     ).toEqual({ path: services });
+  });
+
+  it("removes a partial destination after a failed clone", async () => {
+    const root = temporaryRoot();
+    const sources = temporaryRoot();
+    const source = join(sources, "partial-source");
+    initRepo(source);
+    const destination = join(root, "partial-source");
+    const failingGit: GitExec = async (args, cwd, options) => {
+      if (args[0] !== "clone") return systemGit(args, cwd, options);
+      mkdirSync(destination, { recursive: true });
+      writeFileSync(join(destination, "partial.pack"), "incomplete\n");
+      return ok({
+        stdout: "",
+        stderr: "fatal: fixture transfer failed",
+        exitCode: 128
+      });
+    };
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "Local",
+      email: "test@pwrgit.dev",
+      roots: [root]
+    });
+    const indexer = new RepoIndexer(db, failingGit);
+    const service = new CloneService(
+      db,
+      failingGit,
+      indexer,
+      profiles,
+      githubOnly(fakeGh()),
+      fakeForgeStatus()
+    );
+
+    const result = await service.clone({
+      profileId: profile.id,
+      nameWithOwner: source,
+      sourcePath: source,
+      protocol: "ssh",
+      parentPath: root
+    });
+
+    expect(result).toMatchObject({ ok: false, error: { code: "exit_128" } });
+    expect(existsSync(destination)).toBe(false);
+    db.close();
   });
 
   it("validates and clones a local repository whose HEAD is unborn", async () => {

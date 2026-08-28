@@ -4,10 +4,9 @@
    structure and now tracks the family palette instead. Absolute-black canvas,
    near-black structural surfaces, warm-white text, sparse tangerine signal.
 
-   The dark theme is the unscoped :root block; the light theme is opt-in under
-   :root[data-theme="light"]. Nothing sets data-theme yet — the appearance
-   plumbing lands separately — but every color value for both themes lives
-   here.
+   The dark theme is the unscoped :root block; the light theme is selected by
+   stamping :root[data-theme="light"] before first paint. Every color value
+   for both themes lives here.
 
    These two blocks are the only legal home for raw color literals in the
    renderer. `pnpm lint:colors` enforces it: every other rule must reference
@@ -171,9 +170,7 @@
 
 /* Light theme. Values track PwrAgnt's :root[data-theme="light"] block; the
    PwrGit-only tokens above get light counterparts here so nothing falls
-   through to a dark-tuned value. Not reachable yet — no code sets data-theme
-   — but shipping it alongside the dark palette keeps every color value in one
-   file. */
+   through to a dark-tuned value. */
 :root[data-theme="light"] {
   color-scheme: light;
 

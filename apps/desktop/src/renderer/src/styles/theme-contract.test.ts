@@ -22,6 +22,7 @@ import {
 const here = dirname(fileURLToPath(import.meta.url));
 const tokensCss = readFileSync(resolve(here, "tokens.css"), "utf8");
 const appCss = readFileSync(resolve(here, "app.css"), "utf8");
+const rendererHtml = readFileSync(resolve(here, "../../index.html"), "utf8");
 
 /** Every renderer source that can reference a token — CSS rules and the TSX
  *  that passes `var(--lane-N)` into SVG presentation attributes. */
@@ -91,6 +92,23 @@ const INHERITS_FROM_DARK = new Set([
 ]);
 
 describe("theme contract", () => {
+  it("declares matching browser color schemes for both token blocks", () => {
+    expect(block(":root")).toMatch(/color-scheme:\s*dark;/);
+    expect(block(':root[data-theme="light"]')).toMatch(
+      /color-scheme:\s*light;/
+    );
+  });
+
+  it("runs the appearance bootstrap before the renderer module", () => {
+    const bootstrap = rendererHtml.indexOf("window.pwrgit.appearance");
+    const rendererModule = rendererHtml.indexOf('src="/src/main.tsx"');
+    expect(bootstrap).toBeGreaterThan(-1);
+    expect(rendererModule).toBeGreaterThan(bootstrap);
+    expect(rendererHtml).toContain(
+      'document.documentElement.setAttribute("data-theme", "light")'
+    );
+  });
+
   it("gives every dark token a light counterpart, or an explicit exemption", () => {
     const missing = [...dark].filter(
       (t) => !light.has(t) && !INHERITS_FROM_DARK.has(t)

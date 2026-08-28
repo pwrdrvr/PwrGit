@@ -159,7 +159,16 @@ export async function readChanges(
   // click is about to stage, and makes a folder masquerade as a file row. The
   // renderer regroups the flat list back into folders itself.
   const raw = await git(
-    ["status", "--porcelain=v2", "--untracked-files=all"],
+    [
+      "status",
+      "--porcelain=v2",
+      "--untracked-files=all",
+      // Internal child dirtiness is represented by submodules:list. Asking
+      // parent status to recurse into it duplicates that state and can turn a
+      // 20-child parent refresh into a long synchronous walk. Commit-pin
+      // mismatches still appear as changes.
+      "--ignore-submodules=dirty"
+    ],
     cwd,
     NO_OPTIONAL_LOCKS
   );
@@ -167,6 +176,33 @@ export async function readChanges(
   const checked = requireExit0(raw.value, ["status"]);
   if (!checked.ok) return checked;
   return ok(capChangeSet(parseChanges(checked.value.stdout)));
+}
+
+/**
+ * Live checkout guard. Unlike the Changes list, this deliberately asks Git to
+ * inspect initialized submodules: branch switches can carry dirty child work
+ * just as they carry dirty parent files, so suppressing those rows here would
+ * bypass the user's confirmation.
+ */
+export async function readCheckoutDirtyCount(
+  git: GitExec,
+  cwd: string
+): Promise<Result<number>> {
+  const args = [
+    "status",
+    "--porcelain=v2",
+    "--untracked-files=normal",
+    "--ignore-submodules=none"
+  ];
+  const raw = await git(args, cwd, NO_OPTIONAL_LOCKS);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, args);
+  if (!checked.ok) return checked;
+  return ok(
+    checked.value.stdout
+      .split("\n")
+      .filter((line) => line !== "" && !line.startsWith("# ")).length
+  );
 }
 
 /**
@@ -1038,6 +1074,34 @@ export async function worktreeRemove(
   }
 }
 
+function isConcurrentRefUpdate(stderr: string): boolean {
+  return (
+    /incorrect old value provided/i.test(stderr) ||
+    /cannot lock ref\b[^\r\n]*\bis at [0-9a-f]+ but expected [0-9a-f]+/i.test(
+      stderr
+    )
+  );
+}
+
+async function fetchWithRefRaceRetry(
+  git: GitExec,
+  cwd: string,
+  args: string[]
+): Promise<Result<void>> {
+  // A linked worktree or another Git client can update the shared remote ref
+  // after fetch reads its old value but before its ref transaction commits.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const raw = await git(args, cwd);
+    if (!raw.ok) return raw;
+    const checked = requireExit0(raw.value, args);
+    if (checked.ok) return ok(undefined);
+    if (attempt === 0 && isConcurrentRefUpdate(raw.value.stderr)) continue;
+    return checked;
+  }
+  // The loop always returns on its second attempt.
+  return ok(undefined);
+}
+
 /** Fetch the checked-out branch's configured remote (or origin) and prune. */
 export async function fetchRemote(
   git: GitExec,
@@ -1045,10 +1109,7 @@ export async function fetchRemote(
   forceProgress = false
 ): Promise<Result<void>> {
   const args = ["fetch", "--prune", ...(forceProgress ? ["--progress"] : [])];
-  const raw = await git(args, cwd);
-  if (!raw.ok) return raw;
-  const checked = requireExit0(raw.value, ["fetch"]);
-  return checked.ok ? ok(undefined) : checked;
+  return fetchWithRefRaceRetry(git, cwd, args);
 }
 
 /** Fetch one explicit remote and prune its deleted remote-tracking branches. */
@@ -1057,10 +1118,7 @@ export async function fetchNamedRemote(
   cwd: string,
   remote: string
 ): Promise<Result<void>> {
-  const raw = await git(["fetch", "--prune", remote], cwd);
-  if (!raw.ok) return raw;
-  const checked = requireExit0(raw.value, ["fetch", "--prune", remote]);
-  return checked.ok ? ok(undefined) : checked;
+  return fetchWithRefRaceRetry(git, cwd, ["fetch", "--prune", remote]);
 }
 
 /** Fetch every configured remote except those opted out with skipFetchAll. */
@@ -1068,10 +1126,7 @@ export async function fetchAllRemotes(
   git: GitExec,
   cwd: string
 ): Promise<Result<void>> {
-  const raw = await git(["fetch", "--all", "--prune"], cwd);
-  if (!raw.ok) return raw;
-  const checked = requireExit0(raw.value, ["fetch", "--all", "--prune"]);
-  return checked.ok ? ok(undefined) : checked;
+  return fetchWithRefRaceRetry(git, cwd, ["fetch", "--all", "--prune"]);
 }
 
 async function checkedRemoteMutation(

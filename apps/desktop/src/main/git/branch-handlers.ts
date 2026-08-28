@@ -4,6 +4,7 @@ import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import type { SettingsService } from "../settings/settings-service";
+import { deleteLocalBranch, renameLocalBranch } from "./branch-lifecycle";
 import { execGit } from "./dugite";
 import {
   checkoutNewBranchAt,
@@ -12,7 +13,7 @@ import {
   listLocalBranchNames,
   listRemoteBranchPage,
   listRepoRefs,
-  readChanges,
+  readCheckoutDirtyCount,
   switchBranch,
   worktreeAdd
 } from "./git-service";
@@ -27,11 +28,21 @@ const notFound = {
   message: "worktree not found"
 };
 
+const partialBranchMutationCodes = new Set([
+  "branch_rename_partial",
+  "branch_delete_partial"
+]);
+
 type Row = {
   path: string;
   repo_id: string;
   repo_name: string;
   repo_path: string;
+  profile_id: string;
+};
+
+type RepoRow = {
+  path: string;
   profile_id: string;
 };
 
@@ -52,6 +63,38 @@ export function registerBranchHandlers(
          WHERE w.id = ?`
       )
       .get(worktreeId) as Row | undefined;
+
+  const repoOf = (repoId: string): RepoRow | undefined =>
+    db
+      .prepare("SELECT path, profile_id FROM repos WHERE id = ?")
+      .get(repoId) as RepoRow | undefined;
+
+  const publishBranchMutation = async (
+    repoId: string,
+    profileId: string
+  ): Promise<void> => {
+    await indexer.refreshRepoWorktrees(repoId);
+    const worktrees = db
+      .prepare("SELECT id FROM worktrees WHERE repo_id = ?")
+      .all(repoId) as { id: string }[];
+    // A local ref moved even though no checkout did. Force every open graph of
+    // this repository to invalidate its repo-level lane cache; repo:changed
+    // reloads the sidebar and command-palette branch indexes separately.
+    for (const worktree of worktrees) {
+      emitEvent("worktree:changed", { worktreeId: worktree.id });
+    }
+    emitEvent("repo:changed", { profileId });
+  };
+
+  bus.register("worktree:readDirty", async (req) => {
+    const row = rowOf(req.worktreeId);
+    if (row === undefined) return err(notFound);
+    return operations.run(req.worktreeId, async () => {
+      const dirty = await readCheckoutDirtyCount(execGit, row.path);
+      if (!dirty.ok) return dirty;
+      return ok({ dirty: dirty.value });
+    });
+  });
 
   bus.register("branch:list", async (req) => {
     const row = rowOf(req.worktreeId);
@@ -113,9 +156,9 @@ export function registerBranchHandlers(
       const created = await operations.run(
         req.worktreeId,
         async (): Promise<Result<void>> => {
-          const changes = await readChanges(execGit, row.path);
-          if (!changes.ok) return err(changes.error);
-          if (changes.value.staged.length + changes.value.unstaged.length > 0) {
+          const dirty = await readCheckoutDirtyCount(execGit, row.path);
+          if (!dirty.ok) return err(dirty.error);
+          if (dirty.value > 0) {
             return err({
               kind: "repo",
               code: "dirty",
@@ -175,10 +218,10 @@ export function registerBranchHandlers(
     );
 
     await indexer.refreshRepoWorktrees(row.repo_id);
-    // The branch set this worktree can see changed even though its own checkout
-    // did not, so the lineage graph needs a forced reload to draw the new tip —
-    // refreshWorktree alone stays silent when the worktree state is unmoved.
-    emitEvent("worktree:changed", { worktreeId: req.worktreeId });
+    // The branch set changed even when this checkout did not. Graph caches are
+    // repo-wide, so invalidate the repository instead of pretending one
+    // worktree's own state moved.
+    emitEvent("graph:changed", { repoId: row.repo_id });
     emitEvent("repo:changed", { profileId: row.profile_id });
 
     // A branch is checked out in at most one worktree, so the branch name
@@ -211,6 +254,62 @@ export function registerBranchHandlers(
     await indexer.refreshRepoWorktrees(row.repo_id);
     refresher.refreshWorktree(req.worktreeId);
     emitEvent("repo:changed", { profileId: row.profile_id });
+    return ok(null);
+  });
+
+  bus.register("branch:rename", async (req) => {
+    const repo = repoOf(req.repoId);
+    if (repo === undefined) {
+      return err({ ...notFound, message: "repo not found" });
+    }
+    const result = await operations.runRepository(req.repoId, () =>
+      renameLocalBranch(
+        execGit,
+        repo.path,
+        { branch: req.branch, expectedHead: req.expectedHead },
+        req.newBranch
+      )
+    );
+    if (!result.ok) {
+      if (partialBranchMutationCodes.has(result.error.code)) {
+        await publishBranchMutation(req.repoId, repo.profile_id);
+      }
+      return result;
+    }
+    logMain(
+      "info",
+      "branch",
+      `renamed local branch ${req.branch} to ${req.newBranch} in ${repo.path}`
+    );
+    await publishBranchMutation(req.repoId, repo.profile_id);
+    return ok(null);
+  });
+
+  bus.register("branch:delete", async (req) => {
+    const repo = repoOf(req.repoId);
+    if (repo === undefined) {
+      return err({ ...notFound, message: "repo not found" });
+    }
+    const result = await operations.runRepository(req.repoId, () =>
+      deleteLocalBranch(
+        execGit,
+        repo.path,
+        { branch: req.branch, expectedHead: req.expectedHead },
+        req.force === true
+      )
+    );
+    if (!result.ok) {
+      if (partialBranchMutationCodes.has(result.error.code)) {
+        await publishBranchMutation(req.repoId, repo.profile_id);
+      }
+      return result;
+    }
+    logMain(
+      "info",
+      "branch",
+      `${req.force === true ? "force-deleted" : "deleted"} local branch ${req.branch} in ${repo.path}`
+    );
+    await publishBranchMutation(req.repoId, repo.profile_id);
     return ok(null);
   });
 }

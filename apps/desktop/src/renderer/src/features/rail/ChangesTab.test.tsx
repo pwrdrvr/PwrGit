@@ -24,6 +24,9 @@ vi.mock("../../lib/toast", () => ({
   showInfoToast: mocks.showInfoToast
 }));
 vi.mock("../../lib/copyText", () => ({ copyText: mocks.copyText }));
+// SubmodulePanel owns its own command/event contract and component suite. Keep
+// this file's single-handler event harness focused on ChangesTab's list logic.
+vi.mock("./SubmodulePanel", () => ({ SubmodulePanel: () => null }));
 
 import { ChangesTab, confirmAndDiscardAllChanges, groupChanges } from "./ChangesTab";
 

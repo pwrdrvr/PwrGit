@@ -17,41 +17,19 @@ export function registerRepoHandlers(
     return ok(indexer.listRepos(profileId));
   });
 
-  bus.register("repo:rescan", async (req) => {
-    const profileId = req.profileId ?? profiles.getActiveId();
-    if (profileId === null) return ok([]);
-    const profile = profiles.get(profileId);
-    if (profile === null) {
-      return err({
-        kind: "profile",
-        code: "not_found",
-        message: `No profile "${profileId}"`
-      });
-    }
-    const repos = await indexer.rescanProfile(profile);
-    emitEvent("repo:changed", { profileId });
-    return ok(repos);
-  });
-
   bus.register("repo:refreshWorktrees", async (req) => {
     const result = await indexer.refreshRepoWorktrees(req.repoId);
     if (!result.ok) return result;
     if (result.value.outcome === "reconciled") {
       // A newly discovered worktree has no cached activity timestamp yet.
-      // Compute the reconciled family before the command completes so Recent
-      // sorting does not strand that row at the bottom as "undated".
+      // Compute the reconciled family before the command completes so Focused
+      // can rank a newly discovered worktree by its durable branch activity.
       await refresher.refreshRepoWorktrees(req.repoId);
     } else {
       // Deindexing leaves no worktrees to compute, but the deleted repo row
       // still needs to disappear from this profile's tree.
       emitEvent("repo:changed", { profileId: result.value.profileId });
     }
-    return result;
-  });
-
-  bus.register("repo:add", async (req) => {
-    const result = await indexer.indexRepoAt(req.profileId, req.path);
-    if (result.ok) emitEvent("repo:changed", { profileId: req.profileId });
     return result;
   });
 

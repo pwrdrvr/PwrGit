@@ -624,7 +624,7 @@ export function RepoRefsSections({
           refs={refs}
           now={now}
           initialTab={browser}
-          onRefresh={() => void load()}
+          onRefresh={load}
           onRevealWorktree={onRevealWorktree}
           onCreateWorktree={onCreateWorktree}
           onClose={() => setBrowser(null)}

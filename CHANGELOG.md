@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.8.0 - 2026-08-27
+
+- Repositories - Added a Focused lens that brings your current, pinned, recently viewed, and active repositories and worktrees to the front.
+- Branches - Added safe local branch rename and deletion actions, with protections for checked-out worktrees, unmerged changes, and remote branches.
+- Submodules - Added detailed, read-only submodule status in Changes, including pins, checked-out state, divergence, dirtiness, and configuration drift.
+- Profiles - Added safe profile deletion that removes PwrGit's profile data while leaving your Git repositories on disk untouched.
+- Appearance - Added System, Dark, and Light themes globally and per profile, including synchronized window chrome.
+- Help and Support - Added an About experience with copyable runtime details and direct links to documentation, support, issue reporting, and private security reporting.
+- Clone and Fork - Improved cancellation, cleanup, and retry behavior across clone and fork flows.
+- Reliability - Added recovery controls for failed profile, repository, and forge reads; concurrent fetches now retry once when another Git process advances a remote-tracking ref.
+- Forges - Made private-repository lookup errors clearer, explaining that a 404 can also mean the signed-in account lacks access.
+- Windows - Updated keyboard shortcuts, file-manager wording, and path labels to use Windows-native conventions.
+- Integrations - Added a read-only MCP server for repository and checkout discovery, plus normalized pull-request, CI, conflict, and review status resources.
+- Desktop - Updated the packaged Electron runtime to 41.10.6 and aligned the release build with that runtime.
+
 ## v0.7.0 - 2026-08-23
 
 - Updates - Added **Help → Check for Updates**, so you can manually recheck for a new PwrGit release at any time.

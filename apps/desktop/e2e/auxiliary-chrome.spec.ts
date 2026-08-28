@@ -31,7 +31,8 @@ async function openMenuItem(
 async function expectAuxiliaryChrome(
   app: AppHandle["app"],
   window: Page,
-  expectedTitle: string
+  expectedTitle: string,
+  expectedBackground: string
 ): Promise<void> {
   const titlebar = window.locator(".auxiliary-titlebar");
   await expect(titlebar).toBeVisible();
@@ -51,10 +52,12 @@ async function expectAuxiliaryChrome(
       paddingRight: style.paddingRight
     };
   });
+  expect(layout.backgroundColor).toBe(expectedBackground);
+  await expect(window.locator("html")).toHaveAttribute("data-theme", "light");
 
   if (platform === "win32") {
     expect(layout).toEqual({
-      backgroundColor: "rgb(5, 5, 5)",
+      backgroundColor: expectedBackground,
       gutterDisplay: "none",
       paddingRight: "150px"
     });
@@ -71,16 +74,24 @@ async function expectAuxiliaryChrome(
 }
 
 test("secondary windows share themed platform chrome", async () => {
-  handle = await launchApp();
-  const { app } = handle;
+  handle = await launchApp({ theme: "light" });
+  const { app, window: mainWindow } = handle;
+
+  await expect(mainWindow.locator("html")).toHaveAttribute(
+    "data-theme",
+    "light"
+  );
+  expect(
+    await mainWindow.evaluate(() => window.pwrgit.appearance)
+  ).toEqual({ theme: "light", resolvedTheme: "light" });
 
   const nativeAppearance = await app.evaluate(({ nativeTheme }) => ({
     shouldUseDarkColors: nativeTheme.shouldUseDarkColors,
     themeSource: nativeTheme.themeSource
   }));
   expect(nativeAppearance).toEqual({
-    shouldUseDarkColors: true,
-    themeSource: "dark"
+    shouldUseDarkColors: false,
+    themeSource: "light"
   });
 
   const cases = [
@@ -92,7 +103,19 @@ test("secondary windows share themed platform chrome", async () => {
 
   for (const item of cases) {
     const auxiliary = await openMenuItem(app, item.menu);
-    await expectAuxiliaryChrome(app, auxiliary, item.title);
+    await expectAuxiliaryChrome(
+      app,
+      auxiliary,
+      item.title,
+      "rgb(247, 244, 239)"
+    );
+    const frameBackground = await app.evaluate(({ BrowserWindow }, url) => {
+      const target = BrowserWindow.getAllWindows().find(
+        (candidate) => candidate.webContents.getURL() === url
+      );
+      return target?.getBackgroundColor() ?? null;
+    }, auxiliary.url());
+    expect(frameBackground).toBe("#FFFFFF");
     await auxiliary.close();
   }
 });

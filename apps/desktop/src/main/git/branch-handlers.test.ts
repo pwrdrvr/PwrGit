@@ -1,21 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { err, ok } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
+import { emitEvent } from "../ipc";
 import type { DB } from "../persistence/db";
 import type { SettingsService } from "../settings/settings-service";
 import {
   checkoutNewBranchAt,
   createBranchAt,
-  readChanges,
+  readCheckoutDirtyCount,
   switchBranch,
   worktreeAdd
 } from "./git-service";
+import { deleteLocalBranch, renameLocalBranch } from "./branch-lifecycle";
 import { registerBranchHandlers } from "./branch-handlers";
 import type { RepoIndexer } from "./repo-indexer";
 import type { WorktreeRefresher } from "./worktree-handlers";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 vi.mock("../ipc", () => ({ emitEvent: vi.fn() }));
+vi.mock("./branch-lifecycle", () => ({
+  renameLocalBranch: vi.fn(),
+  deleteLocalBranch: vi.fn()
+}));
 vi.mock("./git-service", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./git-service")>();
   return {
@@ -24,7 +30,7 @@ vi.mock("./git-service", async (importOriginal) => {
     createBranchAt: vi.fn(),
     checkoutNewBranchAt: vi.fn(),
     worktreeAdd: vi.fn(),
-    readChanges: vi.fn()
+    readCheckoutDirtyCount: vi.fn()
   };
 });
 
@@ -40,13 +46,18 @@ const worktreeRow = {
 function fakeDb(addedWorktreeId: string | null = "worktree-2"): DB {
   return {
     prepare: vi.fn((sql: string) => ({
-      get: vi.fn(() =>
-        sql.includes("FROM worktrees WHERE repo_id")
-          ? addedWorktreeId === null
+      get: vi.fn(() => {
+        if (sql.includes("SELECT path, profile_id FROM repos")) {
+          return { path: "/repos/project", profile_id: "profile-1" };
+        }
+        if (sql.includes("FROM worktrees WHERE repo_id")) {
+          return addedWorktreeId === null
             ? undefined
-            : { id: addedWorktreeId }
-          : worktreeRow
-      )
+            : { id: addedWorktreeId };
+        }
+        return worktreeRow;
+      }),
+      all: vi.fn(() => [{ id: "worktree-1" }, { id: "worktree-2" }])
     }))
   } as unknown as DB;
 }
@@ -74,7 +85,7 @@ function harness(db: DB = fakeDb()): {
   return { bus, indexer, refresher, operations };
 }
 
-const clean = ok({ staged: [], unstaged: [] });
+const clean = ok(0);
 
 describe("branch handlers", () => {
   beforeEach(() => {
@@ -83,7 +94,22 @@ describe("branch handlers", () => {
     vi.mocked(createBranchAt).mockResolvedValue(ok(undefined));
     vi.mocked(checkoutNewBranchAt).mockResolvedValue(ok(undefined));
     vi.mocked(worktreeAdd).mockResolvedValue(ok(undefined));
-    vi.mocked(readChanges).mockResolvedValue(clean);
+    vi.mocked(readCheckoutDirtyCount).mockResolvedValue(clean);
+    vi.mocked(renameLocalBranch).mockResolvedValue(ok(undefined));
+    vi.mocked(deleteLocalBranch).mockResolvedValue(ok(undefined));
+  });
+
+  it("serves a live child-aware dirty probe for switch confirmation", async () => {
+    const { bus } = harness();
+    vi.mocked(readCheckoutDirtyCount).mockResolvedValueOnce(ok(2));
+
+    await expect(
+      bus.dispatch("worktree:readDirty", { worktreeId: "worktree-1" })
+    ).resolves.toEqual(ok({ dirty: 2 }));
+    expect(readCheckoutDirtyCount).toHaveBeenCalledWith(
+      expect.anything(),
+      "/repos/project"
+    );
   });
 
   it("holds the shared worktree queue for the complete branch switch", async () => {
@@ -207,7 +233,7 @@ describe("branch handlers", () => {
     it("holds the queue across the dirty check and the checkout", async () => {
       const { bus, operations } = harness();
       let finishStatus!: () => void;
-      vi.mocked(readChanges).mockReturnValueOnce(
+      vi.mocked(readCheckoutDirtyCount).mockReturnValueOnce(
         new Promise((resolve) => {
           finishStatus = () => resolve(clean);
         })
@@ -217,7 +243,9 @@ describe("branch handlers", () => {
         ...request,
         checkout: "here"
       });
-      await vi.waitFor(() => expect(readChanges).toHaveBeenCalledOnce());
+      await vi.waitFor(() =>
+        expect(readCheckoutDirtyCount).toHaveBeenCalledOnce()
+      );
       // Anything that could dirty the tree between the check and the checkout —
       // a pull reapplying its auto-stash — must wait for both.
       let intervened = false;
@@ -236,12 +264,7 @@ describe("branch handlers", () => {
 
     it("refuses an in-place checkout while the worktree is dirty", async () => {
       const { bus } = harness();
-      vi.mocked(readChanges).mockResolvedValue(
-        ok({
-          staged: [],
-          unstaged: [{ path: "a.ts", status: "M", staged: false }]
-        })
-      );
+      vi.mocked(readCheckoutDirtyCount).mockResolvedValue(ok(1));
 
       const result = await bus.dispatch("branch:create", {
         ...request,
@@ -270,6 +293,118 @@ describe("branch handlers", () => {
 
       expect(!result.ok && result.error.code).toBe("already_exists");
       expect(indexer.refreshRepoWorktrees).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("local branch lifecycle", () => {
+    it("renames through the repository queue and refreshes every branch surface", async () => {
+      const { bus, indexer } = harness();
+
+      const result = await bus.dispatch("branch:rename", {
+        repoId: "repo-1",
+        branch: "feature/old",
+        newBranch: "feature/new",
+        expectedHead: "a".repeat(40)
+      });
+
+      expect(result).toEqual(ok(null));
+      expect(renameLocalBranch).toHaveBeenCalledExactlyOnceWith(
+        expect.anything(),
+        "/repos/project",
+        { branch: "feature/old", expectedHead: "a".repeat(40) },
+        "feature/new"
+      );
+      expect(indexer.refreshRepoWorktrees).toHaveBeenCalledExactlyOnceWith(
+        "repo-1"
+      );
+      expect(emitEvent).toHaveBeenCalledWith("worktree:changed", {
+        worktreeId: "worktree-1"
+      });
+      expect(emitEvent).toHaveBeenCalledWith("worktree:changed", {
+        worktreeId: "worktree-2"
+      });
+      expect(emitEvent).toHaveBeenCalledWith("repo:changed", {
+        profileId: "profile-1"
+      });
+    });
+
+    it("passes force only on an explicitly forced delete request", async () => {
+      const { bus } = harness();
+      const request = {
+        repoId: "repo-1",
+        branch: "feature/old",
+        expectedHead: "b".repeat(40)
+      } as const;
+
+      await bus.dispatch("branch:delete", request);
+      await bus.dispatch("branch:delete", { ...request, force: true });
+
+      expect(deleteLocalBranch).toHaveBeenNthCalledWith(
+        1,
+        expect.anything(),
+        "/repos/project",
+        { branch: "feature/old", expectedHead: "b".repeat(40) },
+        false
+      );
+      expect(deleteLocalBranch).toHaveBeenNthCalledWith(
+        2,
+        expect.anything(),
+        "/repos/project",
+        { branch: "feature/old", expectedHead: "b".repeat(40) },
+        true
+      );
+    });
+
+    it("does not refresh when the live Git safety check rejects deletion", async () => {
+      const { bus, indexer } = harness();
+      vi.mocked(deleteLocalBranch).mockResolvedValueOnce(
+        err({
+          kind: "repo",
+          code: "branch_checked_out",
+          message: "checked out elsewhere"
+        })
+      );
+
+      const result = await bus.dispatch("branch:delete", {
+        repoId: "repo-1",
+        branch: "feature/held",
+        expectedHead: "c".repeat(40)
+      });
+
+      expect(!result.ok && result.error.code).toBe("branch_checked_out");
+      expect(indexer.refreshRepoWorktrees).not.toHaveBeenCalled();
+    });
+
+    it("refreshes every branch surface after a partial rename failure", async () => {
+      const { bus, indexer } = harness();
+      vi.mocked(renameLocalBranch).mockResolvedValueOnce(
+        err({
+          kind: "repo",
+          code: "branch_rename_partial",
+          message: "branch is renamed, but update of config-file failed"
+        })
+      );
+
+      const result = await bus.dispatch("branch:rename", {
+        repoId: "repo-1",
+        branch: "feature/old",
+        newBranch: "feature/new",
+        expectedHead: "d".repeat(40)
+      });
+
+      expect(!result.ok && result.error.code).toBe("branch_rename_partial");
+      expect(indexer.refreshRepoWorktrees).toHaveBeenCalledExactlyOnceWith(
+        "repo-1"
+      );
+      expect(emitEvent).toHaveBeenCalledWith("worktree:changed", {
+        worktreeId: "worktree-1"
+      });
+      expect(emitEvent).toHaveBeenCalledWith("worktree:changed", {
+        worktreeId: "worktree-2"
+      });
+      expect(emitEvent).toHaveBeenCalledWith("repo:changed", {
+        profileId: "profile-1"
+      });
     });
   });
 });

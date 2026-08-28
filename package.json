@@ -9,7 +9,7 @@
   "packageManager": "pnpm@10.33.0",
   "scripts": {
     "preinstall": "node ./scripts/check-node-version.mjs",
-    "build": "pnpm --filter @pwrgit/desktop build",
+    "build": "pnpm --filter @pwrgit/mcp-server build && pnpm --filter @pwrgit/desktop build",
     "dev": "pnpm --filter @pwrgit/desktop dev",
     "lint": "pnpm lint:colors && pnpm licenses:check && pnpm lint:boundaries && pnpm typecheck",
     "lint:boundaries": "depcruise --config .dependency-cruiser.cjs packages/ apps/desktop/src/",
@@ -28,7 +28,7 @@
     "dependency-cruiser": "^18.2.0",
     "jsdom": "^30.0.1",
     "typescript": "^6.0.2",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "pnpm": {
     "overrides": {
@@ -36,7 +36,6 @@
       "js-yaml": "4.3.1"
     },
     "onlyBuiltDependencies": [
-      "better-sqlite3",
       "dugite",
       "electron",
       "electron-winstaller",

@@ -13,9 +13,9 @@ import type {
  *  hosts, and widening that four-method seam would drag `PrService` into
  *  repository metadata it does not use.
  *
- *  Every method may reject. Callers translate a rejection with `isAuthError`
- *  and `errorMessage` rather than inspecting the cause, so nothing above this
- *  layer needs to know which CLI produced it. */
+ *  Every method may reject. Callers translate a rejection with the provider's
+ *  classifiers and `errorMessage` rather than inspecting the cause, so nothing
+ *  above this layer needs to know which CLI produced it. */
 export type ForgeRepoProvider = {
   /** Always a real forge — `other` has no provider, which is what makes
    *  `registry.get()` return null for it. */
@@ -45,9 +45,15 @@ export type ForgeRepoProvider = {
   cloneWithCli(
     nameWithOwner: string,
     destination: string,
-    options: { onStderr: (chunk: string) => void; env: Record<string, string> }
+    options: {
+      onStderr: (chunk: string) => void;
+      env: Record<string, string>;
+      signal?: AbortSignal;
+    }
   ): Promise<void>;
   isAuthError(cause: unknown): boolean;
+  /** True for the forge's ambiguous missing-or-inaccessible 404. */
+  isNotFoundError(cause: unknown): boolean;
   errorMessage(cause: unknown): string;
 };
 
@@ -79,8 +85,13 @@ export type ForkInput = {
    *  `forkDefaultBranchOnly` capability is false. */
   defaultBranchOnly: boolean;
   /** Called as the forge moves between its two unmetered steps, so the dialog
-   *  can name the step instead of showing a bar that does not move. */
+   *  can name the step instead of showing a bar that does not move. Providers
+   *  emit `awaiting_fork` only after the remote repository exists; callers use
+   *  that transition to report an already-created fork after cancellation. */
   onPhase?: (phase: "creating" | "awaiting_fork") => void;
+  /** Cancels the CLI call and any forge-side readiness wait. A forge that
+   *  completed before cancellation is deliberately not deleted. */
+  signal?: AbortSignal;
 };
 
 /** Picks the provider for a host. Registered at startup so a forge with no
@@ -152,4 +163,3 @@ export function ownersFrom(
   }
   return owners;
 }
-

@@ -40,6 +40,7 @@ import type {
   PrSummary,
   Profile,
   ProfileId,
+  ProfileThemeOverride,
   PullProgressPhase,
   RebaseCommitRef,
   RebaseCheckResult,
@@ -51,14 +52,24 @@ import type {
   RemoteResetMode,
   RemoteResetSnapshot,
   Repo,
+  RepoId,
   RepoRefs,
   RepoSearchHit,
   RepoWorktreeRefresh,
   SearchHitStatus,
+  SubmoduleSnapshot,
   SshRemoteRecovery,
   WorktreeState
 } from "./types";
 import type { ImagePreview, ImageRevision } from "./image";
+import type {
+  McpAgentPolicySnapshot,
+  McpAgentRole,
+  McpAgentRoleInput,
+  McpAgentRolePatch,
+  McpAgentSession,
+  McpAgentSessionCredential
+} from "./mcp-policy";
 
 export type ProfileList = {
   activeProfileId: ProfileId | null;
@@ -100,6 +111,8 @@ export type CreateProfileRequest = {
   mono?: string;
   kind?: string;
   org?: string;
+  /** Fixed window palette; omit to inherit the app setting. */
+  theme?: ProfileThemeOverride;
   roots?: string[];
 };
 
@@ -109,6 +122,22 @@ export type UpdateProfileRequest = {
   email?: string;
   authorName?: string;
   org?: string;
+  /** Fixed window palette, null to return to the app setting. */
+  theme?: ProfileThemeOverride | null;
+};
+
+/** Destructive profile operations require the current name as a race-safe,
+ *  human-readable confirmation guard. */
+export type DeleteProfileRequest = {
+  profileId: ProfileId;
+  expectedName: string;
+};
+
+export type ProfileDeletion = {
+  deletedProfileId: ProfileId;
+  /** Deletion is rejected for the final profile, so this is always concrete. */
+  activeProfileId: ProfileId;
+  profiles: Profile[];
 };
 
 // App settings (Settings window). Experimental + diagnostics sections are
@@ -178,6 +207,32 @@ export function isSidebarDensity(value: unknown): value is SidebarDensity {
   );
 }
 
+/** App-level color-theme preference. `system` follows the OS in real time. */
+export const APPEARANCE_THEMES = ["system", "dark", "light"] as const;
+export type AppearanceTheme = (typeof APPEARANCE_THEMES)[number];
+export type ResolvedAppearanceTheme = Exclude<AppearanceTheme, "system">;
+
+/** Preserve the app's historical dark appearance for existing installations. */
+export const APPEARANCE_THEME_DEFAULT: AppearanceTheme = "dark";
+
+export function isAppearanceTheme(value: unknown): value is AppearanceTheme {
+  return (
+    typeof value === "string" &&
+    (APPEARANCE_THEMES as readonly string[]).includes(value)
+  );
+}
+
+export function isProfileThemeOverride(
+  value: unknown
+): value is ProfileThemeOverride {
+  return value === "dark" || value === "light";
+}
+
+export type AppAppearance = {
+  theme: AppearanceTheme;
+  resolvedTheme: ResolvedAppearanceTheme;
+};
+
 /**
  * Where a branch created from a commit gets checked out. "none" leaves the
  * working copies alone (just the ref), "new-worktree" adds one under the
@@ -236,6 +291,23 @@ export function isUpdateTrain(value: unknown): value is UpdateTrain {
 export type UpdatesSettings = {
   channel: UpdateChannel;
   train: UpdateTrain;
+};
+
+/** Runtime/build identity assembled in main; the renderer has no Node access. */
+export type AppIdentity = {
+  name: string;
+  version: string;
+  /** Release train/track inferred from the installed binary's version suffix. */
+  release: UpdatesSettings;
+  buildType: "packaged" | "development";
+  platform: {
+    name: string;
+    version: string;
+    arch: string;
+  };
+  electronVersion: string;
+  /** Sanitized, copy-ready identity suitable for a bug report. */
+  diagnosticsText: string;
 };
 
 // Last 1.0 core that used `-beta.N` as the Stable prerelease line. Builds
@@ -351,6 +423,8 @@ export type AppUpdateReleaseVersions = {
 };
 
 export type GeneralSettings = {
+  /** Color theme across every app and auxiliary window. */
+  theme: AppearanceTheme;
   /** Expose Reload, Force Reload, and Developer Tools in the View menu. */
   developerMode: boolean;
   /** Sidebar name/branch type scale (`--sidebar-title-size`). */
@@ -380,6 +454,7 @@ export type DiagnosticsSettings = {
 };
 
 export const GENERAL_DEFAULTS: GeneralSettings = {
+  theme: APPEARANCE_THEME_DEFAULT,
   developerMode: false,
   sidebarTextSize: "md",
   sidebarDensity: "comfortable"
@@ -423,7 +498,6 @@ export interface Commands {
   // Profiles (U5). One window per profile: "switching" means opening (or
   // focusing) that profile's window, never repointing the current one.
   "profile:list": { req: void; res: ProfileList };
-  "profile:switch": { req: { profileId: ProfileId }; res: ProfileList };
   /** Open (or focus) the window bound to a profile; optionally reveal a repo
    *  (and a specific worktree) there once it's up — cross-profile ⌘F picks. */
   "profile:openWindow": {
@@ -446,6 +520,9 @@ export interface Commands {
   };
   "profile:create": { req: CreateProfileRequest; res: Profile };
   "profile:update": { req: UpdateProfileRequest; res: Profile };
+  /** Remove a profile and its PwrGit-owned index data. Git directories and
+   *  worktrees on disk are never touched. The final profile cannot be deleted. */
+  "profile:delete": { req: DeleteProfileRequest; res: ProfileDeletion };
   /** Replace a profile's scan roots wholesale, then rescan. */
   "profile:setRoots": {
     req: { profileId: ProfileId; roots: string[] };
@@ -454,13 +531,11 @@ export interface Commands {
 
   // Repos & discovery (U6)
   "repo:list": { req: { profileId?: ProfileId }; res: Repo[] };
-  "repo:rescan": { req: { profileId?: ProfileId }; res: Repo[] };
   /** Reconcile one repo with Git, discovering external worktree changes. */
   "repo:refreshWorktrees": {
     req: { repoId: string };
     res: RepoWorktreeRefresh;
   };
-  "repo:add": { req: { profileId: ProfileId; path: string }; res: Repo };
   /** What the clone and fork dialogs need to open: known owners and forge
    *  availability. Answered from SQLite and a cached probe — no forge call. */
   "repo:cloneCatalog": { req: { profileId: ProfileId }; res: CloneCatalog };
@@ -512,6 +587,11 @@ export interface Commands {
       hostname?: string;
     };
     res: Repo;
+  };
+  /** Cancel an in-flight clone and remove any checkout it only partly made. */
+  "repo:cancelClone": {
+    req: { operationId: string };
+    res: null;
   };
   /**
    * Everything the fork dialog needs before it creates anything: the source,
@@ -566,6 +646,12 @@ export interface Commands {
     };
     res: Repo;
   };
+  /** Cancel an in-flight fork/checkout. A fork already created on the forge is
+   *  kept, while any partial local checkout is removed. */
+  "repo:cancelFork": {
+    req: { operationId: string };
+    res: null;
+  };
   /** Re-read forge identity (visibility, fork lineage) for a profile's repos.
    *  Answers the changed rows; the rest of the tree is left alone. */
   "repo:refreshIdentities": {
@@ -586,6 +672,12 @@ export interface Commands {
   "repo:getGitLfsStatus": {
     req: { repoId: string; worktreeId: string };
     res: GitLfsStatus;
+  };
+  /** Read-only, bounded inspection of the gitlinks/config/checkouts beneath one
+   *  selected worktree. Per-child failures are returned on their row. */
+  "submodules:list": {
+    req: { worktreeId: string };
+    res: SubmoduleSnapshot;
   };
 
   // GitHub PR status. Repo expansion uses the bulk cached lookup; focused
@@ -685,6 +777,11 @@ export interface Commands {
     req: { worktreeId: string };
     res: WorktreeState | null;
   };
+  /** Live checkout-safety probe, including dirty initialized submodules. */
+  "worktree:readDirty": {
+    req: { worktreeId: string };
+    res: { dirty: number };
+  };
   "worktree:activate": { req: { worktreeId: string }; res: null };
 
   // Worktree lifecycle (U14)
@@ -757,6 +854,35 @@ export interface Commands {
       /** Path of a worktree added for the branch, else null. */
       worktreePath: string | null;
     };
+  };
+  /**
+   * Rename one local branch. `expectedHead` is the exact tip shown in the refs
+   * browser; main rejects the request if another Git client moved the branch
+   * before the mutation reaches it.
+   */
+  "branch:rename": {
+    req: {
+      repoId: string;
+      branch: string;
+      newBranch: string;
+      expectedHead: string;
+    };
+    res: null;
+  };
+  /**
+   * Delete one local branch at the reviewed tip. The ordinary path preserves
+   * Git's merged/upstream check; `force` is reserved for the renderer's
+   * separately confirmed destructive retry. Remote branches are never in
+   * scope for this command.
+   */
+  "branch:delete": {
+    req: {
+      repoId: string;
+      branch: string;
+      expectedHead: string;
+      force?: boolean;
+    };
+    res: null;
   };
   /** Repository-wide local branches and configured remote-tracking refs. */
   "repo:refs": { req: { repoId: string }; res: RepoRefs };
@@ -1007,8 +1133,28 @@ export interface Commands {
   // App settings (Settings window)
   "settings:read": { req: void; res: AppSettingsSnapshot };
   "settings:update": { req: { patch: AppSettingsPatch }; res: AppSettingsSnapshot };
+  /** Fail-closed standalone MCP authorization policy and effective scopes. */
+  "localAgents:read": { req: void; res: McpAgentPolicySnapshot };
+  "localAgents:createSession": {
+    req: { name: string; roleId: string };
+    res: McpAgentSessionCredential;
+  };
+  "localAgents:revoke": { req: { id: string }; res: McpAgentSession };
+  "localAgents:assignRole": {
+    req: { sessionId: string; roleId: string };
+    res: McpAgentSession;
+  };
+  "localAgents:roleCreate": { req: McpAgentRoleInput; res: McpAgentRole };
+  "localAgents:roleUpdate": {
+    req: { id: string; patch: McpAgentRolePatch };
+    res: McpAgentRole;
+  };
+  "localAgents:roleDelete": { req: { id: string }; res: null };
+  /** Current preference plus native-resolved palette; closes bootstrap races. */
+  "appearance:read": { req: void; res: AppAppearance };
 
   // Desktop auto-update (Settings → Updates)
+  "app:readIdentity": { req: void; res: AppIdentity };
   "app:readUpdateStatus": { req: void; res: AppUpdateStatus };
   "app:readUpdateReleases": { req: void; res: AppUpdateReleaseVersions };
   "app:checkForUpdate": { req: void; res: AppUpdateCheckResult };
@@ -1022,7 +1168,6 @@ export interface Commands {
   "app:readDocument": { req: { kind: AppDocumentKind }; res: AppDocument };
   "app:openDocumentWindow": { req: { kind: AppDocumentKind }; res: null };
 
-  "dialog:pickDirectory": { req: void; res: string | null };
   "dialog:pickDirectories": { req: void; res: string[] };
 
   // Reveal a path in the OS file manager (Finder / Explorer / …).
@@ -1060,6 +1205,8 @@ export interface Events {
     identities: { repoId: string; identity: RepoIdentity }[];
   };
   "worktree:changed": { worktreeId: string };
+  /** Repo-wide commit/ref data moved; invalidate every graph view of this repo. */
+  "graph:changed": { repoId: RepoId };
   /**
    * The index or working tree of one worktree moved — re-read `changes:list`.
    * Distinct from `worktree:changed`, which only fires when the *coarse* state
@@ -1109,6 +1256,10 @@ export interface Events {
   "ui:manageProfile": Record<string, never>;
   /** App settings changed (any window) — payload is the fresh snapshot. */
   "settings:changed": AppSettingsSnapshot;
+  /** Sessions, roles, or repository boundaries changed in Settings. */
+  "localAgents:changed": McpAgentPolicySnapshot;
+  /** Resolved color theme changed, including a live OS change in System mode. */
+  "appearance:changed": AppAppearance;
   /** Auto-update status changed — Settings and any future banner subscribe. */
   "app:updateStatus": AppUpdateStatus;
   /** Reveal a repo (and optionally a worktree) in the window bound to

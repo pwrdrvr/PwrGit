@@ -76,6 +76,37 @@ test("menu opens the Settings window; panes render and settings persist", async 
   const settings = await settingsWindowPromise;
   await settings.waitForSelector(".settings-screen");
 
+  // Dark is the safe migration default. Theme changes repaint every renderer
+  // plus Electron-owned/native chrome, and System delegates back to the OS.
+  await expect(settings.getByRole("radio", { name: "Dark" })).toHaveAttribute(
+    "aria-checked",
+    "true"
+  );
+  await settings.getByRole("radio", { name: "System" }).click();
+  await expect.poll(async () =>
+    app.evaluate(({ nativeTheme }) => nativeTheme.themeSource)
+  ).toBe("system");
+  // Electron can publish the resolved OS scheme just after themeSource flips;
+  // poll the renderer/native pair rather than pinning that transient value.
+  await expect
+    .poll(async () => {
+      const [systemUsesDark, dataTheme] = await Promise.all([
+        app.evaluate(({ nativeTheme }) => nativeTheme.shouldUseDarkColors),
+        settings.locator("html").getAttribute("data-theme")
+      ]);
+      return systemUsesDark ? dataTheme === null : dataTheme === "light";
+    })
+    .toBe(true);
+  await settings.getByRole("radio", { name: "Light" }).click();
+  await expect(settings.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(handle.window.locator("html")).toHaveAttribute(
+    "data-theme",
+    "light"
+  );
+  await expect.poll(async () =>
+    app.evaluate(({ nativeTheme }) => nativeTheme.themeSource)
+  ).toBe("light");
+
   // General is the landing section. Developer Mode starts off — the View
   // menu carries no Electron developer items.
   const viewMenuLabels = () =>
@@ -89,6 +120,14 @@ test("menu opens the Settings window; panes render and settings persist", async 
   const devModeSwitch = settings.getByRole("switch", {
     name: "Developer Mode"
   });
+  const platform = await settings.evaluate(() => window.pwrgit.platform);
+  const shortcutCopy =
+    platform === "darwin"
+      ? "Also enables their shortcuts (⌘R, ⇧⌘R, ⌥⌘I). Takes effect immediately in every window."
+      : "Also enables their shortcuts (Ctrl+R, Ctrl+Shift+R, Ctrl+Shift+I). Takes effect immediately in every window.";
+  await expect(
+    settings.locator(".settings-field", { hasText: "Developer Mode" })
+  ).toContainText(shortcutCopy);
   await devModeSwitch.click();
   await expect(devModeSwitch).toHaveAttribute("aria-checked", "true");
   // The menu rebuilds live with Reload / Force Reload / Toggle DevTools.
@@ -171,7 +210,7 @@ test("menu opens the Settings window; panes render and settings persist", async 
   const stored = JSON.parse(
     readFileSync(join(userData, "settings.json"), "utf8")
   ) as Record<string, unknown>;
-  expect(stored["general"]).toEqual({ developerMode: true });
+  expect(stored["general"]).toEqual({ theme: "light", developerMode: true });
   expect(stored["updates"]).toEqual({ train: "beta", channel: "latest" });
   expect(stored["experimental"]).toEqual({ lineageAllBranches: true });
   expect(stored["diagnostics"]).toEqual({ hotCpuProfilingEnabled: true });

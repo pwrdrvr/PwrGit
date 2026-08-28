@@ -24,10 +24,12 @@ whichever Node ran the install, and a wrong-ABI build does not announce itself:
 it surfaces much later as a test failure or a launch crash that reads like a
 broken database.
 
-One `pnpm i` serves both runtimes. It leaves `better-sqlite3` built twice — for
-this machine's Node (what `vitest` loads) and for Electron (what the app
-loads) — so `pnpm test` and `pnpm dev` need no rebuild between them, in either
-order. `apps/desktop/AGENTS.md` describes the layout. If a native ABI error
+One `pnpm i` serves both runtimes. It leaves separate `better-sqlite3` artifacts
+for this machine's Node (what `vitest` loads) and Electron (what the app loads),
+both staged from the package's ABI-independent Node-API prebuild, so `pnpm test`
+and `pnpm dev` need no rebuild between them, in either order.
+`apps/desktop/AGENTS.md` describes the layout. If a
+native ABI error
 does appear — *"better_sqlite3.node was compiled against a different Node.js
 version using NODE_MODULE_VERSION 147; this version requires 145"* — one
 command repairs whichever half is stale:

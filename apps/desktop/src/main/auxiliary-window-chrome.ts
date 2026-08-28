@@ -3,9 +3,9 @@ import type {
   BrowserWindowConstructorOptions
 } from "electron";
 import {
-  TITLE_BAR_OVERLAY_BACKGROUND,
-  TITLE_BAR_OVERLAY_HEIGHT,
-  TITLE_BAR_OVERLAY_SYMBOL
+  DEFAULT_WINDOW_CHROME_THEME,
+  titleBarOverlay,
+  type WindowChromeTheme
 } from "./window-chrome";
 
 type AuxiliaryChromeOptions = Pick<
@@ -20,6 +20,7 @@ type AuxiliaryChromeOptions = Pick<
 
 /** Platform chrome shared by every supporting window. */
 export function auxiliaryWindowChromeOptions(
+  theme: WindowChromeTheme = DEFAULT_WINDOW_CHROME_THEME,
   platform: NodeJS.Platform = process.platform
 ): AuxiliaryChromeOptions {
   if (platform === "darwin") {
@@ -34,11 +35,7 @@ export function auxiliaryWindowChromeOptions(
   if (platform === "win32") {
     return {
       titleBarStyle: "hidden",
-      titleBarOverlay: {
-        color: TITLE_BAR_OVERLAY_BACKGROUND,
-        symbolColor: TITLE_BAR_OVERLAY_SYMBOL,
-        height: TITLE_BAR_OVERLAY_HEIGHT
-      },
+      titleBarOverlay: titleBarOverlay(theme),
       autoHideMenuBar: true
     };
   }

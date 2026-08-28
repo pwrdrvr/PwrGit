@@ -85,6 +85,7 @@ const forbidden = [
   ],
   ["Playwright config", /playwright\.config\./],
   ["better-sqlite3 dev sidecar", /\/node_modules\/better-sqlite3\/electron-native\//],
+  ["better-sqlite3 packaged prebuild", /\/node_modules\/better-sqlite3\/prebuilds\//],
   ["Project plan/brainstorm", /\/(plans|brainstorms|design)\//],
 ];
 

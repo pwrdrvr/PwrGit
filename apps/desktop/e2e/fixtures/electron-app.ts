@@ -20,6 +20,8 @@ export type AppHandle = {
   cleanup: () => Promise<void>;
 };
 
+type RecoverableBootRead = "profile:list" | "repo:list" | "forge:status";
+
 function cleanEnv(extra: Record<string, string>): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
@@ -41,13 +43,25 @@ function cleanEnv(extra: Record<string, string>): Record<string, string> {
  * `pnpm i`).
  */
 export async function launchApp(
-  opts: { worktreeRoot?: string } = {}
+  opts: {
+    worktreeRoot?: string;
+    gitConfig?: string;
+    forgeFixturePath?: string;
+    theme?: "system" | "dark" | "light";
+    failReadOnce?: RecoverableBootRead[];
+  } = {}
 ): Promise<AppHandle> {
   const userData = mkdtempSync(join(tmpdir(), "pwrgit-e2e-ud-"));
-  if (opts.worktreeRoot !== undefined) {
+  if (opts.worktreeRoot !== undefined || opts.theme !== undefined) {
+    const seededSettings = {
+      ...(opts.worktreeRoot !== undefined
+        ? { worktreeRoot: opts.worktreeRoot }
+        : {}),
+      ...(opts.theme !== undefined ? { general: { theme: opts.theme } } : {})
+    };
     writeFileSync(
       join(userData, "settings.json"),
-      JSON.stringify({ worktreeRoot: opts.worktreeRoot })
+      JSON.stringify(seededSettings)
     );
   }
   // Pin the seeded profile identity to the sandbox's commit identity so
@@ -56,21 +70,32 @@ export async function launchApp(
   const gitconfig = join(userData, "gitconfig");
   writeFileSync(
     gitconfig,
-    "[user]\n\tname = PwrGit Test\n\temail = test@pwrgit.dev\n"
+    `[user]\n\tname = PwrGit Test\n\temail = test@pwrgit.dev\n${opts.gitConfig ?? ""}`
   );
 
   const app = await electron.launch({
     args: [MAIN],
     env: cleanEnv({
       PWRGIT_USER_DATA_DIR: userData,
-      PWRGIT_GITCONFIG: gitconfig
+      PWRGIT_GITCONFIG: gitconfig,
+      // The app's Git commands must be as deterministic as fixture setup:
+      // neither side may inherit the runner/developer's aliases, identity,
+      // signing, merge drivers, or other machine-global behavior.
+      GIT_CONFIG_GLOBAL: gitconfig,
+      GIT_CONFIG_SYSTEM: "/dev/null",
+      ...(opts.forgeFixturePath === undefined
+        ? {}
+        : { PWRGIT_E2E_FORGE_FIXTURE: opts.forgeFixturePath }),
+      ...(opts.failReadOnce === undefined
+        ? {}
+        : { PWRGIT_E2E_FAIL_READ_ONCE: opts.failReadOnce.join(",") })
     })
   });
   const window = await app.firstWindow();
   await window.waitForSelector("#root");
 
-  // Stub dialog.showOpenDialog in the main process; __pickDirs drives the result
-  // (works for both the single and multi-select handlers).
+  // Stub dialog.showOpenDialog in the main process; __pickDirs drives either a
+  // single returned path or a multi-selection through the shared picker.
   await app.evaluate(({ dialog }) => {
     const d = dialog as unknown as {
       __pickDirs: string[];

@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outputPath = join(repoRoot, "THIRD_PARTY_LICENSES");
-const desktopFilter = "@pwrgit/desktop";
+const shippedPackageFilters = ["@pwrgit/desktop", "@pwrgit/mcp-server"];
 const embeddedGitNoticeDir = join(
   repoRoot,
   "apps",
@@ -60,7 +60,13 @@ const EMBEDDED_GIT_NOTICE_SOURCES = [
 function runPnpmLicenses(args) {
   const result = spawnSync(
     "pnpm",
-    ["licenses", "list", "--json", "--filter", desktopFilter, ...args],
+    [
+      "licenses",
+      "list",
+      "--json",
+      ...shippedPackageFilters.flatMap((filter) => ["--filter", filter]),
+      ...args,
+    ],
     {
       cwd: repoRoot,
       encoding: "utf8",

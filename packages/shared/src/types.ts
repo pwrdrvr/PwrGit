@@ -6,6 +6,9 @@ export type ProfileId = string;
 export type RepoId = string;
 export type WorktreeId = string;
 
+/** A fixed palette for one profile window; absence inherits the app setting. */
+export type ProfileThemeOverride = "dark" | "light";
+
 export type Profile = {
   id: ProfileId;
   name: string;
@@ -22,6 +25,8 @@ export type Profile = {
   kind?: string;
   /** Default GitHub org/owner for new repos under this profile, e.g. "pwrdrvr". */
   org?: string;
+  /** Fixed palette for this profile's window; absent means use the app setting. */
+  theme?: ProfileThemeOverride;
   /** Root folders scanned to discover this profile's repos. */
   roots: string[];
   /** ISO-8601 timestamp of the last time this profile was active. */
@@ -39,6 +44,8 @@ export type Worktree = {
   ahead: number;
   /** Commits behind upstream. */
   behind: number;
+  /** Cached local-branch tracking state. Absent until Git state is computed. */
+  tracking?: BranchTrackingStatus;
   /** Commits the repo's default branch is ahead of this worktree (staleness).
    *  0 when the branch shares no history with the default (see divergedFromDefault). */
   behindDefault: number;
@@ -164,6 +171,83 @@ export type RepoRefs = {
   remotes: RemoteSummary[];
 };
 
+/** How an initialized submodule checkout relates to the commit pinned by its
+ *  parent repository. The parent gitlink is authoritative; `.gitmodules`
+ *  branch configuration is only an update hint. */
+export type SubmoduleRelation =
+  | "at_pin"
+  | "ahead_of_pin"
+  | "behind_pin"
+  | "diverged_from_pin"
+  | "unknown";
+
+/** Whether the submodule path can currently be inspected as a Git checkout. */
+export type SubmoduleCheckoutState =
+  | "checked_out"
+  | "uninitialized"
+  | "deinitialized"
+  | "missing"
+  | "not_repository";
+
+/** A localized problem that does not invalidate the rest of the parent scan. */
+export type SubmoduleIssue = {
+  code:
+    | "checkout_missing"
+    | "checkout_uninitialized"
+    | "checkout_deinitialized"
+    | "checkout_not_repository"
+    | "gitlink_missing"
+    | "gitmodules_entry_missing"
+    | "url_missing"
+    | "url_changed"
+    | "index_conflict"
+    | "commit_unavailable"
+    | "inspect_failed"
+    | "scan_truncated";
+  severity: "warning" | "error";
+  message: string;
+  /** Conservative next step phrased as guidance, never an auto-run mutation. */
+  remedy?: string;
+};
+
+/** One gitlink/config/check-out record in a selected parent worktree. */
+export type SubmoduleStatus = {
+  /** `.gitmodules` section name, or the path when the section is absent. */
+  name: string;
+  /** Forward-slash path relative to the selected top-level worktree. */
+  path: string;
+  /** Zero for direct children, increasing for initialized nested children. */
+  depth: number;
+  /** Commit recorded by the parent repository's HEAD tree. */
+  pinnedCommit?: string;
+  /** Gitlink currently in the parent index (the next commit's pin). */
+  indexCommit?: string;
+  checkedOutCommit?: string;
+  checkoutState: SubmoduleCheckoutState;
+  relation: SubmoduleRelation;
+  /** null when no checkout was available to inspect. */
+  dirty: boolean | null;
+  /** null when no checkout was available; true is normal after submodule update. */
+  detached: boolean | null;
+  checkedOutBranch?: string;
+  /** Tags in the child repository that point at HEAD's pin (or a new index pin). */
+  pinnedTags: string[];
+  /** Values declared by `.gitmodules`; these do not replace the gitlink pin. */
+  configuredUrl?: string;
+  configuredBranch?: string;
+  /** URL copied into the parent's local config when the submodule was initialized. */
+  initializedUrl?: string;
+  issues: SubmoduleIssue[];
+};
+
+/** Bounded, failure-isolated submodule inspection for one selected worktree. */
+export type SubmoduleSnapshot = {
+  submodules: SubmoduleStatus[];
+  truncated: boolean;
+  /** Parent-level parse/bounds problems not attributable to one child path. */
+  issues: SubmoduleIssue[];
+};
+
 export type PushRefRelation =
   | "create"
   | "equal"
@@ -287,7 +371,7 @@ export type Repo = {
   /**
    * Persisted drag-order index within the profile; absent until the user
    * arranges the list by hand. Only the Pinned lens honors it — the computed
-   * lenses (Recent/Behind/Stale) answer a question, so a manual order there
+   * lenses (Focused/Behind/Stale) answer a question, so a manual order there
    * would fight the answer.
    */
   order?: number;
@@ -850,7 +934,7 @@ export type RebaseCheckResult =
     }
   | { status: "snag"; code: string; message: string };
 
-export type Lens = "Recent" | "Pinned" | "Behind" | "Stale" | "All";
+export type Lens = "Focused" | "Pinned" | "Behind" | "Stale" | "All";
 export type WorktreeSort = "recent" | "pinned" | "az" | "active" | "custom";
 
 /** Lazily-filled status for a ⌘F search hit (nulls = unknown/uncached). */

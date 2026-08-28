@@ -1,5 +1,6 @@
 import {
   err,
+  isProfileThemeOverride,
   ok,
   type Profile,
   type BranchReveal
@@ -9,10 +10,8 @@ import { emitEvent } from "../ipc";
 import type { ProfileService } from "./profile-service";
 
 export type ProfileHandlerDeps = {
-  /** Kick a background rescan when a profile becomes active. */
-  onActivated?: (profile: Profile) => void;
-  /** Rebuild anything derived from the profile list (native Profiles menu). */
-  onChanged?: () => void;
+  /** Rebuild profile-derived state and repaint an open profile window. */
+  onChanged?: (profile: Profile) => void;
   /** Open-or-focus the window bound to a profile (one window per profile). */
   openWindow: (
     profileId: string,
@@ -28,6 +27,9 @@ export type ProfileHandlerDeps = {
     worktreeId: string | null;
     branch: BranchReveal | null;
   } | null;
+  /** Close any window bound to the deleted profile and move focus to the
+   *  surviving active profile. */
+  onDeleted?: (deletedProfileId: string, activeProfileId: string) => void;
 };
 
 export function registerProfileHandlers(
@@ -35,26 +37,9 @@ export function registerProfileHandlers(
   profiles: ProfileService,
   deps: ProfileHandlerDeps
 ): void {
-  const { onActivated, onChanged, openWindow, consumeReveal } = deps;
+  const { onChanged, openWindow, consumeReveal, onDeleted } = deps;
 
   bus.register("profile:list", () => ok(profiles.snapshot()));
-
-  bus.register("profile:switch", (req) => {
-    const profile = profiles.get(req.profileId);
-    if (profile === null) {
-      return err({
-        kind: "profile",
-        code: "not_found",
-        message: `No profile "${req.profileId}"`
-      });
-    }
-    const snapshot = profiles.switch(req.profileId);
-    emitEvent("profile:changed", snapshot);
-    onActivated?.(profile);
-    onChanged?.();
-    return ok(snapshot);
-  });
-
   bus.register("profile:openWindow", (req) => {
     const opened = openWindow(
       req.profileId,
@@ -97,6 +82,17 @@ export function registerProfileHandlers(
         message: "Commit email can't be empty"
       });
     }
+    if (
+      req.theme !== undefined &&
+      req.theme !== null &&
+      !isProfileThemeOverride(req.theme)
+    ) {
+      return err({
+        kind: "validation",
+        code: "theme_invalid",
+        message: "Profile theme must inherit the app setting, Dark, or Light"
+      });
+    }
     const profile = profiles.update(req);
     if (profile === null) {
       return err({
@@ -106,7 +102,7 @@ export function registerProfileHandlers(
       });
     }
     emitEvent("profile:changed", profiles.snapshot());
-    onChanged?.();
+    onChanged?.(profile);
     return ok(profile);
   });
 
@@ -125,9 +121,35 @@ export function registerProfileHandlers(
         message: "Commit email is required"
       });
     }
+    if (req.theme !== undefined && !isProfileThemeOverride(req.theme)) {
+      return err({
+        kind: "validation",
+        code: "theme_invalid",
+        message: "Profile theme must inherit the app setting, Dark, or Light"
+      });
+    }
     const profile = profiles.create(req);
     emitEvent("profile:changed", profiles.snapshot());
-    onChanged?.();
+    onChanged?.(profile);
     return ok(profile);
+  });
+
+  bus.register("profile:delete", (req) => {
+    const result = profiles.delete(req);
+    if (!result.ok) return result;
+
+    onDeleted?.(
+      result.value.deletedProfileId,
+      result.value.activeProfileId
+    );
+    emitEvent("profile:changed", {
+      activeProfileId: result.value.activeProfileId,
+      profiles: result.value.profiles
+    });
+    const activeProfile = result.value.profiles.find(
+      (profile) => profile.id === result.value.activeProfileId
+    );
+    if (activeProfile !== undefined) onChanged?.(activeProfile);
+    return result;
   });
 }
