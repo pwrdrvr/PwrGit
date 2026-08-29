@@ -32,6 +32,24 @@ fail on the Windows runner, so a green local run proves nothing about them:
   everywhere, and a bracket expression exercises glob-escaping just as well
   (see `gitignore.test.ts`). Keep `*` / `?` cases to pure string assertions.
 
+## Main decides how many Git processes exist, not the renderer
+
+`file-insights-handlers.ts` tracks live reads per renderer **and kind**
+(`<webContentsId>:history`), never per operation id. A pane shows one file one
+way, so a second read of a kind supersedes the first.
+
+That keying is the point. Operation ids are unique per request by construction,
+so keying on them capped nothing: a renderer that asked in a loop — a retry that
+never backed off, a bad effect dependency — had this process spawning a Git
+child per iteration for as long as it kept asking. It happened, and the guard
+that stopped it lived in a React hook.
+
+So the rule for anything here that spawns off an IPC message: **bound it on this
+side.** A renderer-side guard is worth having and is not sufficient, because the
+renderer does not own process lifetime and its bugs are exactly the case the
+bound exists for. Fan-out over a list already has `mapLimit` (`util/map-limit.ts`)
+for the same reason; a per-message spawn needs its own ceiling.
+
 ## Paths from git are always forward-slash
 
 `git status`, `ls-files` and `ls-tree` report `a/b/c` on every platform, so
