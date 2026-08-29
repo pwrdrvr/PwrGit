@@ -43,16 +43,14 @@ jobs:
         with:
           node-version: 24.x
 
-      # The capture drives the BUILT app (out/main/index.js) — there is no
-      # dev-server fallback, so this is not optional.
-      - name: Build the app
-        run: pnpm --filter @pwrgit/desktop run build
-
+      # The capture drives the BUILT app (out/main/index.js); the script's
+      # pretest:docs-shots hook builds it, exactly as pretest:e2e does for the
+      # normal suite. No separate build step, so local and CI runs cannot drift.
       - name: Capture
         run: pnpm --filter @pwrgit/desktop run test:docs-shots
 
       - name: Upload screenshots
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: docs-screenshots
           path: apps/desktop/docs-screenshots/*.png
@@ -63,7 +61,7 @@ jobs:
       # the only way to see which one without a local macOS run.
       - name: Upload Playwright trace on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: docs-screenshots-failure
           path: apps/desktop/test-results/

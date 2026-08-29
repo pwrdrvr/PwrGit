@@ -6,7 +6,7 @@
   "description": "Cross-platform desktop git client",
   "author": "PwrDrvr LLC",
   "license": "MIT",
-  "copyright": "Copyright \u00a9 2026 PwrDrvr LLC",
+  "copyright": "Copyright © 2026 PwrDrvr LLC",
   "type": "module",
   "main": "out/main/index.js",
   "scripts": {
@@ -27,6 +27,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "pretest:e2e": "electron-vite build",
     "test:e2e": "playwright test -c playwright.config.ts",
+    "pretest:docs-shots": "electron-vite build",
     "test:docs-shots": "PWRGIT_DOCS_SHOTS=1 playwright test -c playwright.config.ts docs-screenshots.spec.ts"
   },
   "dependencies": {

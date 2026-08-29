@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createGitSandbox, type GitSandbox } from "./git-sandbox";
 
 /**
@@ -110,8 +111,6 @@ export type DocsWorld = {
   box: GitSandbox;
   /** The repo the screenshots centre on. */
   primary: string;
-  /** Its primary checkout, for driving worktree-scoped captures. */
-  primaryPath: string;
   cleanup: () => void;
 };
 
@@ -124,90 +123,104 @@ export function createDocsWorld(): DocsWorld {
   const box = createGitSandbox();
   // Bare origins live outside the scanned roots so the app never indexes them.
   const remotes = mkdtempSync(join(tmpdir(), "pwrgit-docs-remotes-"));
-
-  // The focus repo. Several strands of work in flight is what makes the
-  // sidebar and the lineage graph worth a picture at all.
-  const web = box.makeRepo("acme-web");
-
-  // git-sandbox authored the root commit as "PwrGit Test" and stamped it now.
-  // Re-attribute and back-date it before anything is pushed, so the graph
-  // never shows a test identity or a repository born seconds ago.
-  runGit(
-    DOCS_AUTHOR,
-    web.path,
-    ["commit", "--amend", "--no-edit", "--reset-author"],
-    90
-  );
-
-  // A real origin sharing this history, so ahead/behind are genuinely computed
-  // rather than staged. makeBareRemote() can't be used: it seeds its own
-  // unrelated repo, leaving origin with no common ancestor.
-  const origin = join(remotes, "acme-web.git");
-  runGit(DOCS_AUTHOR, remotes, ["init", "--bare", "acme-web.git"]);
-  runGit(DOCS_AUTHOR, origin, ["symbolic-ref", "HEAD", "refs/heads/main"]);
-  runGit(DOCS_AUTHOR, web.path, ["remote", "add", "origin", origin]);
-  runGit(DOCS_AUTHOR, web.path, ["push", "-u", "origin", "main"]);
-  runGit(DOCS_AUTHOR, web.path, ["remote", "set-head", "origin", "--auto"]);
-
-  // Work in flight, pushed and then advanced — so the branch has a real
-  // upstream and is genuinely one commit ahead of it. Without the push the
-  // header reads "no upstream", which is the least interesting sync state
-  // there is and not what the Sync page describes.
-  const checkout = web.addWorktree("feat/checkout-redesign");
-  commitBy(DOCS_AUTHOR, checkout, "src/checkout/summary.tsx", "Add the order summary panel", 3);
-  runGit(DOCS_AUTHOR, checkout, ["push", "-u", "origin", "feat/checkout-redesign"]);
-  commitBy(DOCS_AUTHOR, checkout, "src/checkout/totals.ts", "Split totals out of the cart", 2);
-
-  // Uncommitted work: fills the Changes rail and puts a dirty badge in the
-  // sidebar. One staged file and one unstaged, so both sections are non-empty.
-  const session = web.addWorktree("fix/session-timeout");
-  commitBy(DOCS_AUTHOR, session, "src/auth/session.ts", "Refresh the token before it expires", 1);
-  runGit(DOCS_AUTHOR, session, ["push", "-u", "origin", "fix/session-timeout"]);
-  leaveDirty(session, "src/auth/session.ts", "// refresh 60s before expiry, not 5\n");
-  leaveDirty(session, "src/auth/retry.ts", "export const MAX_RETRIES = 3;\n");
-  runGit(DOCS_AUTHOR, session, ["add", "src/auth/retry.ts"]);
-
-  // Authored by someone else, so the graph shows a second name.
-  const deps = web.addWorktree("chore/bump-deps");
-  commitBy(DOCS_COLLEAGUE, deps, "package.json", "Bump the pinned toolchain", 6);
-
-  // Merged into main and left alone for well over the 14-day staleness
-  // window, so the Stale lens has something real to find. Clean + merged +
-  // old is exactly the rule the Worktrees page documents.
-  const banner = web.addWorktree("chore/retire-banner");
-  commitBy(DOCS_AUTHOR, banner, "src/home/banner.tsx", "Remove the launch banner", 45);
-  runGit(
-    DOCS_AUTHOR,
-    web.path,
-    ["merge", "--no-ff", "chore/retire-banner", "-m", "Merge chore/retire-banner"],
-    44
-  );
-  // Push the merge. "Merged into the default branch" is evaluated against
-  // `origin/HEAD` — `resolveDefaultBranch` returns `origin/main`, not the local
-  // ref — so a merge that never left the machine leaves the branch looking
-  // unmerged and the Stale lens empty. Landing it upstream is also what
-  // actually makes the worktree safe to prune.
-  runGit(DOCS_AUTHOR, web.path, ["push", "origin", "main"], 44);
-
-  // Neighbouring repositories. Never selected — they exist so the sidebar
-  // reads as a real working set rather than one row, and so the search
-  // overlay has more than one thing to find.
-  box.makeRepo("acme-api", { worktrees: ["feat/rate-limits"] });
-  box.makeRepo("billing-service", { worktrees: ["fix/invoice-rounding"] });
-  box.makeRepo("infra-terraform");
-  box.makeRepo("design-tokens");
-
-  return {
-    box,
-    primary: web.name,
-    primaryPath: web.path,
-    cleanup: () => {
-      box.cleanup();
-      rmSync(remotes, { recursive: true, force: true });
-    }
+  const discard = (): void => {
+    box.cleanup();
+    rmSync(remotes, { recursive: true, force: true });
   };
+
+  // Everything below shells out to git. A failure part-way leaves two temp
+  // trees behind unless they are cleaned here: the caller only records the
+  // world once this returns, so its afterEach has nothing to clean up yet —
+  // and Playwright's retry would double the mess.
+  try {
+    // The focus repo. Several strands of work in flight is what makes the
+    // sidebar and the lineage graph worth a picture at all.
+    const web = box.makeRepo("acme-web");
+
+    // git-sandbox authored the root commit as "PwrGit Test" and stamped it now.
+    // Re-attribute and back-date it before anything is pushed, so the graph
+    // never shows a test identity or a repository born seconds ago.
+    runGit(
+      DOCS_AUTHOR,
+      web.path,
+      ["commit", "--amend", "--no-edit", "--reset-author"],
+      90
+    );
+
+    // A real origin sharing this history, so ahead/behind are genuinely computed
+    // rather than staged. makeBareRemote() can't be used: it seeds its own
+    // unrelated repo, leaving origin with no common ancestor.
+    const origin = join(remotes, "acme-web.git");
+    runGit(DOCS_AUTHOR, remotes, ["init", "--bare", "acme-web.git"]);
+    runGit(DOCS_AUTHOR, origin, ["symbolic-ref", "HEAD", "refs/heads/main"]);
+    runGit(DOCS_AUTHOR, web.path, ["remote", "add", "origin", origin]);
+    runGit(DOCS_AUTHOR, web.path, ["push", "-u", "origin", "main"]);
+    runGit(DOCS_AUTHOR, web.path, ["remote", "set-head", "origin", "--auto"]);
+
+    // Work in flight, pushed and then advanced — so the branch has a real
+    // upstream and is genuinely one commit ahead of it. Without the push the
+    // header reads "no upstream", which is the least interesting sync state
+    // there is and not what the Sync page describes.
+    const checkout = web.addWorktree("feat/checkout-redesign");
+    commitBy(DOCS_AUTHOR, checkout, "src/checkout/summary.tsx", "Add the order summary panel", 3);
+    runGit(DOCS_AUTHOR, checkout, ["push", "-u", "origin", "feat/checkout-redesign"]);
+    commitBy(DOCS_AUTHOR, checkout, "src/checkout/totals.ts", "Split totals out of the cart", 2);
+
+    // Uncommitted work: fills the Changes rail and puts a dirty badge in the
+    // sidebar. One staged file and one unstaged, so both sections are non-empty.
+    const session = web.addWorktree("fix/session-timeout");
+    commitBy(DOCS_AUTHOR, session, "src/auth/session.ts", "Refresh the token before it expires", 1);
+    runGit(DOCS_AUTHOR, session, ["push", "-u", "origin", "fix/session-timeout"]);
+    leaveDirty(session, "src/auth/session.ts", "// refresh 60s before expiry, not 5\n");
+    leaveDirty(session, "src/auth/retry.ts", "export const MAX_RETRIES = 3;\n");
+    runGit(DOCS_AUTHOR, session, ["add", "src/auth/retry.ts"]);
+
+    // Authored by someone else, so the graph shows a second name.
+    const deps = web.addWorktree("chore/bump-deps");
+    commitBy(DOCS_COLLEAGUE, deps, "package.json", "Bump the pinned toolchain", 6);
+
+    // Merged into main and left alone for well over the 14-day staleness
+    // window, so the Stale lens has something real to find. Clean + merged +
+    // old is exactly the rule the Worktrees page documents.
+    const banner = web.addWorktree("chore/retire-banner");
+    commitBy(DOCS_AUTHOR, banner, "src/home/banner.tsx", "Remove the launch banner", 45);
+    runGit(
+      DOCS_AUTHOR,
+      web.path,
+      ["merge", "--no-ff", "chore/retire-banner", "-m", "Merge chore/retire-banner"],
+      44
+    );
+    // Push the merge. "Merged into the default branch" is evaluated against
+    // `origin/HEAD` — `resolveDefaultBranch` returns `origin/main`, not the local
+    // ref — so a merge that never left the machine leaves the branch looking
+    // unmerged and the Stale lens empty. Landing it upstream is also what
+    // actually makes the worktree safe to prune.
+    runGit(DOCS_AUTHOR, web.path, ["push", "origin", "main"], 44);
+
+    // Neighbouring repositories. Never selected — they exist so the sidebar
+    // reads as a real working set rather than one row, and so the search
+    // overlay has more than one thing to find.
+    box.makeRepo("acme-api", { worktrees: ["feat/rate-limits"] });
+    box.makeRepo("billing-service", { worktrees: ["fix/invoice-rounding"] });
+    box.makeRepo("infra-terraform");
+    box.makeRepo("design-tokens");
+
+    return { box, primary: web.name, cleanup: discard };
+  } catch (err) {
+    discard();
+    throw err;
+  }
 }
 
-/** Where captured PNGs land. Overridable so CI can collect them elsewhere. */
+/**
+ * Where captured PNGs land. Overridable so CI can collect them elsewhere.
+ *
+ * Anchored to this file rather than `process.cwd()`: only `.gitignore`'s
+ * `apps/desktop/docs-screenshots/` is ignored, so a run whose cwd is the repo
+ * root (a bare `npx playwright test`, or an IDE runner) would drop six
+ * untracked PNGs at the top of the tree. Specs here use `import.meta.url`
+ * rather than `__dirname` — they run as ESM. See e2e/AGENTS.md.
+ */
 export const shotsDir = (): string =>
-  process.env.PWRGIT_DOCS_SHOTS_DIR ?? join(process.cwd(), "docs-screenshots");
+  process.env.PWRGIT_DOCS_SHOTS_DIR ??
+  join(dirname(fileURLToPath(import.meta.url)), "..", "..", "docs-screenshots");
