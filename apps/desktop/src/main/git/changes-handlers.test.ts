@@ -206,7 +206,8 @@ describe("partial staging handlers", () => {
     patch: "patch",
     fingerprint: "snapshot-1",
     capability: { available: true as const },
-    hunks: []
+    hunks: [],
+    counterpartChanges: false
   };
 
   beforeEach(() => {

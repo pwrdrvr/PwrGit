@@ -74,10 +74,19 @@ test("hunk and line actions move only the selected changes through Git's index",
 
   await window.locator(".file-row", { hasText: "partial.txt" }).click();
   await expect(window.locator(".diff-pane__sub")).toHaveText(
-    "unstaged · index → working tree"
+    "index → working tree"
   );
   const hunkActions = window.getByRole("button", { name: "Stage hunk" });
   await expect(hunkActions).toHaveCount(2);
+
+  // Note where the reader is before the stage, so the check after it can show
+  // the pane held its place rather than reloading to the top of the file.
+  const body = window.locator(".diff-pane__body");
+  await body.evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+  });
+  expect(await body.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+
   await hunkActions.first().click();
 
   await expect
@@ -88,19 +97,30 @@ test("hunk and line actions move only the selected changes through Git's index",
   );
   expect(sandbox.git(repo.path, "diff")).toContain("SECOND edit");
 
-  // The rail presents both sides of the same partially-staged file, and the
-  // staged view makes the HEAD -> index direction explicit.
-  await window.locator(".diff-pane__close").click();
+  // Applying repaints in place. The body is never swapped for a loading
+  // placeholder, so a reader partway down a long file stays where they were
+  // instead of being thrown back to line 1 on every hunk.
+  await expect(window.locator(".diff-empty")).toHaveCount(0);
+  expect(await body.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+
+  // The rail still presents both sides of the partially-staged file, and now
+  // says they are one file split rather than two that share a name.
   await expect(
     window.locator(".file-row.is-staged", { hasText: "partial.txt" })
   ).toBeVisible();
   await expect(
     window.locator(".file-row:not(.is-staged)", { hasText: "partial.txt" })
   ).toBeVisible();
-  await window.locator(".file-row.is-staged", { hasText: "partial.txt" }).click();
-  await expect(window.locator(".diff-pane__sub")).toHaveText(
-    "staged · HEAD → index"
-  );
+  await expect(window.locator(".file-row .file-split")).toHaveCount(2);
+
+  // Crossing to the staged side is a tab in the pane, not a close-and-reopen.
+  // Scoped to the tab group and exact: "Staged" is a substring of "Unstaged",
+  // and the rail carries section headings by those names too.
+  await window
+    .locator(".diff-side")
+    .getByRole("button", { name: "Staged", exact: true })
+    .click();
+  await expect(window.locator(".diff-pane__sub")).toHaveText("HEAD → index");
   await window.getByRole("button", { name: "Unstage hunk" }).click();
   await expect
     .poll(() => sandbox?.git(repo.path, "diff", "--cached") ?? "not empty")
@@ -109,18 +129,21 @@ test("hunk and line actions move only the selected changes through Git's index",
   // Line selection is intentionally finer than a replacement pair. Staging
   // only the added row keeps the old row in the index; Git then reports that
   // old row as the remaining unstaged deletion.
-  await window.locator(".diff-pane__close").click();
   await window
-    .locator(".file-row:not(.is-staged)", { hasText: "partial.txt" })
+    .locator(".diff-side")
+    .getByRole("button", { name: "Unstaged", exact: true })
     .click();
   const addedFirst = window.locator(".diff-row--add", {
     hasText: "FIRST edit"
   });
-  await addedFirst.locator('input[type="checkbox"]').click();
+  // The whole gutter run is the target, not the 13px box inside it.
+  await addedFirst.locator(".diff-gutter").first().click();
   await expect(window.locator(".diff-selection-bar__count")).toHaveText(
     "1 selected"
   );
-  await window.getByRole("button", { name: "Stage selected" }).click();
+  await window
+    .getByRole("button", { name: "Stage 1 line", exact: true })
+    .click();
   await expect
     .poll(() => sandbox?.git(repo.path, "show", ":partial.txt") ?? "")
     .toContain("base-2\nFIRST edit");

@@ -442,10 +442,11 @@ async function readSnapshot(
     const displayPatch = decodePatch(display.value);
     const parsed = parseZeroContextDiff(selectionPatch.text);
     const changes = parseChanges(status.value);
-    const statuses = [
-      ...changes.staged.filter((file) => file.path === path),
-      ...changes.unstaged.filter((file) => file.path === path)
-    ].map((file) => file.status);
+    const onStagedSide = changes.staged.filter((file) => file.path === path);
+    const onUnstagedSide = changes.unstaged.filter((file) => file.path === path);
+    const statuses = [...onStagedSide, ...onUnstagedSide].map(
+      (file) => file.status
+    );
     // Status is read repo-wide so a path-limited query cannot disguise the
     // destination of a rename as a brand-new file. Only this path's decoded
     // statuses enter the token; an edit to an unrelated file should not stale
@@ -474,7 +475,9 @@ async function readSnapshot(
           statuses,
           selectionPatch.valid && displayPatch.valid
         ),
-        hunks: publicHunks(parsed)
+        hunks: publicHunks(parsed),
+        counterpartChanges:
+          (staged ? onUnstagedSide : onStagedSide).length > 0
       }
     });
   }

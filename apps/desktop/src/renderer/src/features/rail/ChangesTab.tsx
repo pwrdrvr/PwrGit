@@ -183,6 +183,7 @@ function TruncationNotice({
 function FileRow({
   file,
   label,
+  split,
   nested,
   onToggle,
   onOpen,
@@ -192,6 +193,10 @@ function FileRow({
   file: FileChange;
   /** Text to show — the basename inside a folder group, the full path outside. */
   label: string;
+  /** The same path is listed in the other section too: this file is partly
+   *  staged. Without a marker the two rows are indistinguishable from two
+   *  unrelated files that happen to share a name. */
+  split: boolean;
   nested: boolean;
   onToggle: () => void;
   onOpen: () => void;
@@ -200,10 +205,10 @@ function FileRow({
 }) {
   return (
     <div
-      className={`file-row is-clickable${file.staged ? " is-staged" : ""}${nested ? " file-row--nested" : ""}`}
+      className={`file-row is-clickable${file.staged ? " is-staged" : ""}${split ? " is-split" : ""}${nested ? " file-row--nested" : ""}`}
       onClick={onOpen}
       onContextMenu={onContextMenu}
-      title="View changes"
+      title={split ? "Partly staged — view these changes" : "View changes"}
     >
       <span
         className={`file-status file-status--${STATUS_TONE[file.status] ?? "muted"}`}
@@ -215,6 +220,14 @@ function FileRow({
       <span className="file-path" title={file.path}>
         {label}
       </span>
+      {split && (
+        <span
+          className="file-split"
+          title={`Partly staged — this file also has ${file.staged ? "unstaged" : "staged"} changes`}
+        >
+          partial
+        </span>
+      )}
       <span className="file-row__actions">
         <button
           className="file-action file-action--discard"
@@ -548,6 +561,14 @@ export function ChangesTab({
     );
   }
 
+  // Paths git reports on both sides of the index. Partial staging makes this
+  // ordinary, and until now it painted as the same filename twice with
+  // nothing to connect the two rows.
+  const unstagedPaths = new Set(unstaged.map((file) => file.path));
+  const splitPaths = new Set(
+    staged.map((file) => file.path).filter((path) => unstagedPaths.has(path))
+  );
+
   const renderEntries = (
     files: FileChange[],
     keyPrefix: string,
@@ -573,6 +594,7 @@ export function ChangesTab({
           key={key}
           file={file}
           label={dir === null ? file.path : file.path.slice(dir.length + 1)}
+          split={splitPaths.has(file.path)}
           nested={dir !== null}
           onToggle={() => run(command, [file.path])}
           onOpen={() => onOpenDiff(file.path, stagedSection)}

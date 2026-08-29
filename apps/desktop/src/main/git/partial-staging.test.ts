@@ -234,6 +234,52 @@ describe("partial staging with a real Git index", () => {
     );
   });
 
+  it("reports whether the other side of the index holds this path too", async () => {
+    commitFile("one\ntwo\nthree\nfour\nfive\nsix\nseven\n");
+    writeFileSync(
+      join(repo, "file.txt"),
+      "one\nTWO\nthree\nfour\nfive\nSIX\nseven\n"
+    );
+
+    // Wholly unstaged: nothing on the staged side to cross to.
+    const before = await partialFileDiff(systemGit, systemGitBinary, repo, "file.txt", false);
+    expect(before.ok && before.value.counterpartChanges).toBe(false);
+    if (!before.ok) return;
+
+    // Stage one of the two hunks — now the file is genuinely on both sides,
+    // which is the case the pane's side tabs exist to make crossable.
+    const firstHunk = before.value.hunks[0];
+    expect(
+      await applyPartialSelection(
+        systemGit,
+        systemGitBinary,
+        repo,
+        "file.txt",
+        false,
+        before.value.fingerprint,
+        firstHunk?.lines.map((line) => line.id) ?? []
+      )
+    ).toEqual(ok(undefined));
+
+    const unstaged = await partialFileDiff(systemGit, systemGitBinary, repo, "file.txt", false);
+    const staged = await partialFileDiff(systemGit, systemGitBinary, repo, "file.txt", true);
+    expect(unstaged.ok && unstaged.value.counterpartChanges).toBe(true);
+    expect(staged.ok && staged.value.counterpartChanges).toBe(true);
+
+    // Stage the rest: the unstaged side settles to "nothing here", and still
+    // knows where the changes went.
+    git(repo, "add", "file.txt");
+    const settled = await partialFileDiff(systemGit, systemGitBinary, repo, "file.txt", false);
+    expect(settled.ok).toBe(true);
+    if (!settled.ok) return;
+    expect(settled.value.counterpartChanges).toBe(true);
+    expect(settled.value.capability).toEqual({
+      available: false,
+      reason: "no_changes",
+      message: "There are no textual hunks to select."
+    });
+  });
+
   it("stages arbitrary added lines while leaving the rest in the worktree", async () => {
     for (let seed = 0; seed < 8; seed += 1) {
       if (seed === 0) {

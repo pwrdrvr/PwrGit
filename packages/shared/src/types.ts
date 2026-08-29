@@ -803,6 +803,12 @@ export type PartialFileDiff = {
   fingerprint: string;
   capability: PartialDiffCapability;
   hunks: PartialDiffHunk[];
+  /** Whether this same path also has changes on the other side of the index.
+   * A partially staged file is two rows in the rail; this is what lets the
+   * open diff offer the round trip between them instead of making the reader
+   * close the pane and hunt for its twin. Read from the status Git already
+   * had to produce for the snapshot, so it costs nothing extra. */
+  counterpartChanges: boolean;
 };
 
 /** One file touched by a commit (rail's commit-scoped file list). */

@@ -26,10 +26,15 @@ const NO_SELECTION: LineSelection = { fingerprint: "", ids: new Set() };
 export function DiffPane({
   worktreeId,
   target,
+  onOpenFile,
   onClose
 }: {
   worktreeId: string;
   target: DiffTarget;
+  /** Point the pane at the other side of the index for the same path. The
+   *  rail lists a partially staged file twice; without this the only route
+   *  between the two halves is closing the diff and finding its twin. */
+  onOpenFile: (path: string, staged: boolean) => void;
   onClose: () => void;
 }) {
   const [patch, setPatch] = useState<string | null>(null);
@@ -166,11 +171,13 @@ export function DiffPane({
     target.kind === "file" || target.kind === "commitFile"
       ? target.path
       : target.subject;
+  // The side's name moves into the tabs below; what is left here is the part
+  // the tabs cannot say — which two revisions this view is comparing.
   const sub =
     target.kind === "file"
       ? target.staged
-        ? "staged · HEAD → index"
-        : "unstaged · index → working tree"
+        ? "HEAD → index"
+        : "index → working tree"
       : target.kind === "commitFile"
         ? `in ${target.hash.slice(0, 7)} — ${target.subject}`
         : `commit ${target.hash}`;
@@ -237,11 +244,44 @@ export function DiffPane({
     });
   };
 
+  const applyFile = (): void => {
+    if (target.kind !== "file" || applying) return;
+    setApplying(true);
+    void dispatch(target.staged ? "changes:unstage" : "changes:stage", {
+      worktreeId,
+      paths: [target.path]
+    }).then((result) => {
+      setApplying(false);
+      setSelection(NO_SELECTION);
+      if (!result.ok) {
+        showErrorToast({
+          title: target.staged ? "Unstage failed" : "Stage failed",
+          message: result.error.message,
+          detail: target.path
+        });
+      }
+    });
+  };
+
   const selectionAvailable =
     target.kind === "file" && selectionDiff?.capability.available === true;
   const selectedCount = selectedIds.size;
   const selectionVerb =
     target.kind === "file" && target.staged ? "Unstage" : "Stage";
+  const capability = selectionDiff?.capability;
+  // "No changes on this side" is the ordinary end of the staging loop, not a
+  // limitation — the reader just moved the last hunk across. It gets its own
+  // bar, pointing at where the changes went.
+  const settled =
+    capability !== undefined &&
+    !capability.available &&
+    capability.reason === "no_changes";
+  const counterpart = selectionDiff?.counterpartChanges === true;
+  const otherSide = target.kind === "file" && target.staged;
+  const otherSideName = otherSide ? "unstaged" : "staged";
+  const showOtherSide = (): void => {
+    if (target.kind === "file") onOpenFile(target.path, !target.staged);
+  };
 
   return (
     <div className="diff-pane" ref={paneRef} tabIndex={-1}>
@@ -250,6 +290,32 @@ export function DiffPane({
           {title}
         </span>
         <span style={{ flex: 1 }} />
+        {target.kind === "file" && (
+          <span
+            className="diff-side"
+            role="group"
+            aria-label="Side of the index to show"
+          >
+            {([false, true] as const).map((staged) => (
+              <button
+                key={String(staged)}
+                className={`diff-side__tab${target.staged === staged ? " is-active" : ""}`}
+                aria-pressed={target.staged === staged}
+                onClick={() => onOpenFile(target.path, staged)}
+                title={
+                  staged
+                    ? "Staged for the next commit (HEAD → index)"
+                    : "Not yet staged (index → working tree)"
+                }
+              >
+                {staged ? "Staged" : "Unstaged"}
+                {target.staged !== staged && counterpart && (
+                  <span className="diff-side__dot" aria-hidden="true" />
+                )}
+              </button>
+            ))}
+          </span>
+        )}
         <span className="diff-pane__sub">{sub}</span>
         <button
           className="diff-pane__close"
@@ -265,29 +331,68 @@ export function DiffPane({
       </div>
       {target.kind === "file" && selectionDiff !== null && (
         <div
-          className={`diff-selection-bar${selectionAvailable ? "" : " diff-selection-bar--unavailable"}`}
+          className={`diff-selection-bar${settled ? " diff-selection-bar--settled" : selectionAvailable ? "" : " diff-selection-bar--unavailable"}`}
         >
-          {selectionDiff.capability.available ? (
+          {settled ? (
             <>
+              <strong>
+                Nothing to {selectionVerb.toLowerCase()} here.
+              </strong>
               <span>
-                Select changed lines, or use{" "}
-                <strong>{selectionVerb} hunk</strong>.
+                {counterpart
+                  ? `Every change to this file is ${otherSideName}.`
+                  : "This file has no changes left."}
               </span>
-              <span className="diff-selection-bar__count" role="status">
-                {selectedCount} selected
-              </span>
-              <button
-                className="diff-selection-bar__apply"
-                disabled={selectedCount === 0 || applying}
-                onClick={() => applyLines([...selectedIds])}
-              >
-                {applying ? `${selectionVerb}…` : `${selectionVerb} selected`}
-              </button>
+              {counterpart && (
+                <button
+                  className="diff-selection-bar__apply"
+                  onClick={showOtherSide}
+                >
+                  View {otherSideName} changes
+                </button>
+              )}
             </>
           ) : (
             <>
-              <strong>Whole file only.</strong>
-              <span>{selectionDiff.capability.message}</span>
+              {/* Whole-file staging lives here too. Reviewing a file and
+                  deciding to take all of it is the commonest way this pane
+                  ends, and sending the reader back to the rail to do it is
+                  the close-and-reopen loop this bar exists to remove. */}
+              <button
+                className="diff-selection-bar__file"
+                disabled={applying}
+                onClick={applyFile}
+                title={`${selectionVerb} every change to this file`}
+              >
+                {selectionVerb} file
+              </button>
+              {selectionDiff.capability.available ? (
+                <>
+                  <button
+                    className="diff-selection-bar__apply"
+                    disabled={selectedCount === 0 || applying}
+                    onClick={() => applyLines([...selectedIds])}
+                  >
+                    {applying
+                      ? `${selectionVerb}…`
+                      : selectedCount === 0
+                        ? `${selectionVerb} selected`
+                        : `${selectionVerb} ${selectedCount} line${selectedCount === 1 ? "" : "s"}`}
+                  </button>
+                  <span className="diff-selection-bar__hint">
+                    Click a line’s gutter to pick it, shift-click for a run, or
+                    use <strong>{selectionVerb} hunk</strong>.
+                  </span>
+                  <span className="diff-selection-bar__count" role="status">
+                    {selectedCount > 0 ? `${selectedCount} selected` : ""}
+                  </span>
+                </>
+              ) : (
+                <span className="diff-selection-bar__hint">
+                  <strong>Whole file only.</strong>{" "}
+                  {selectionDiff.capability.message}
+                </span>
+              )}
             </>
           )}
         </div>
@@ -320,7 +425,9 @@ export function DiffPane({
             emptyLabel={
               target.kind === "commit"
                 ? "This commit has no textual changes."
-                : "No changes in this file."
+                : settled && counterpart
+                  ? `All of this file’s changes are ${otherSideName}.`
+                  : "No changes in this file."
             }
           />
         )}
