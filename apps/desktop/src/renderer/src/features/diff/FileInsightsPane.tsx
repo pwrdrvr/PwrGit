@@ -209,7 +209,6 @@ function HistoryView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const activeOperations = useRef(new Set<string>());
-  const pending = useRef(false);
   const now = useRelativeClock();
   const identities = useAuthorIdentities(
     worktreeId,
@@ -227,9 +226,11 @@ function HistoryView({
   const load = (cursor?: string): void => {
     // `loading` is state, so it has not rendered yet when a click lands in the
     // same tick the observer fires — both would dispatch and both pages would
-    // be appended. This ref is the synchronous gate the button cannot be.
-    if (pending.current) return;
-    pending.current = true;
+    // be appended. This set is the synchronous gate the button cannot be, and
+    // the effect's cleanup clears it: a separate ref did NOT survive
+    // StrictMode's mount/cleanup/mount, so the second pass saw a request still
+    // "in flight", never dispatched, and the view sat on its spinner forever.
+    if (activeOperations.current.size > 0) return;
     const operationId = nextOperationId("history");
     activeOperations.current.add(operationId);
     setLoading(true);
@@ -241,7 +242,6 @@ function HistoryView({
       context,
       ...(cursor === undefined ? {} : { cursor })
     }).then((result) => {
-      pending.current = false;
       if (!activeOperations.current.delete(operationId)) return;
       if (!result.ok) {
         setError(result.error.message);
@@ -429,7 +429,6 @@ function BlameView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const activeOperations = useRef(new Set<string>());
-  const pending = useRef(false);
   const now = useRelativeClock();
   const hunks = useMemo(() => pages.flatMap((page) => page.hunks), [pages]);
   const identities = useAuthorIdentities(
@@ -440,9 +439,11 @@ function BlameView({
   const load = (cursor?: string): void => {
     // `loading` is state, so it has not rendered yet when a click lands in the
     // same tick the observer fires — both would dispatch and both pages would
-    // be appended. This ref is the synchronous gate the button cannot be.
-    if (pending.current) return;
-    pending.current = true;
+    // be appended. This set is the synchronous gate the button cannot be, and
+    // the effect's cleanup clears it: a separate ref did NOT survive
+    // StrictMode's mount/cleanup/mount, so the second pass saw a request still
+    // "in flight", never dispatched, and the view sat on its spinner forever.
+    if (activeOperations.current.size > 0) return;
     const operationId = nextOperationId("blame");
     activeOperations.current.add(operationId);
     setLoading(true);
@@ -454,7 +455,6 @@ function BlameView({
       context,
       ...(cursor === undefined ? {} : { cursor })
     }).then((result) => {
-      pending.current = false;
       if (!activeOperations.current.delete(operationId)) return;
       if (!result.ok) {
         setError(result.error.message);

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
+import { act, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { err, ok } from "@pwrgit/shared";
@@ -576,6 +576,85 @@ describe("FileInsightsPane", () => {
     // The control is gone once there is nothing left to page.
     expect(container.querySelector(".file-insight__more")).toBeNull();
     vi.unstubAllGlobals();
+  });
+
+  it("still loads through the app's StrictMode mount cycle", async () => {
+    // main.tsx renders under StrictMode, so in development every effect mounts,
+    // cleans up, and mounts again on the SAME instance — refs survive that.
+    const settled: (() => void)[] = [];
+    dispatchMock.mockImplementation((name: string) => {
+      if (name !== "file:history") return Promise.resolve(ok({}));
+      return new Promise((resolve) => {
+        settled.push(() =>
+          resolve(ok({ entries: [historyEntry()], nextCursor: null }))
+        );
+      });
+    });
+
+    await act(async () => {
+      root.render(
+        <StrictMode>
+          <FileInsightsPane
+            worktreeId="wt-1"
+            path="docs/guide.txt"
+            context={{ kind: "workingTree" }}
+            initialTab="history"
+            onClose={() => undefined}
+            onShowCommit={() => true}
+          />
+        </StrictMode>
+      );
+    });
+    // The throwaway pass is cancelled; a second read has to take its place.
+    await act(async () => {
+      for (const resolve of settled) resolve();
+    });
+    await settle();
+
+    expect(container.textContent).not.toContain("Loading file history…");
+    expect(container.textContent).toContain("move guide into docs");
+  });
+
+  it("still loads blame through the StrictMode mount cycle", async () => {
+    const settled: (() => void)[] = [];
+    dispatchMock.mockImplementation((name: string) => {
+      if (name !== "file:blame") return Promise.resolve(ok({}));
+      return new Promise((resolve) => {
+        settled.push(() =>
+          resolve(
+            ok({
+              path: "docs/guide.txt",
+              effectiveContext: { kind: "workingTree" },
+              hunks: [blameHunk({ startLine: 1, endLine: 1, lines: ["alpha"] })],
+              nextCursor: null,
+              bytes: 6
+            })
+          )
+        );
+      });
+    });
+
+    await act(async () => {
+      root.render(
+        <StrictMode>
+          <FileInsightsPane
+            worktreeId="wt-1"
+            path="docs/guide.txt"
+            context={{ kind: "workingTree" }}
+            initialTab="blame"
+            onClose={() => undefined}
+            onShowCommit={() => true}
+          />
+        </StrictMode>
+      );
+    });
+    await act(async () => {
+      for (const resolve of settled) resolve();
+    });
+    await settle();
+
+    expect(container.textContent).not.toContain("Loading blame…");
+    expect(container.textContent).toContain("alpha");
   });
 
   it("shows bounded binary and load-error states", async () => {
