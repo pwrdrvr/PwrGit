@@ -93,7 +93,7 @@ function rowToState(r: StateRow): WorktreeState {
  * GitExec is injected (tests drive it against system git).
  */
 export class WorktreeStateService {
-  /** Per-repo default branch (ref + name), resolved once per process. */
+  /** Per-repo default branch (ref + name), cached while its ref resolves. */
   private readonly defaultBranch = new Map<
     string,
     { ref: string; name: string }
@@ -141,14 +141,23 @@ export class WorktreeStateService {
    * currently checked-out branch. Repositories materialized at a commit with
    * no branch refs (for example, build/test sandboxes) use `HEAD` itself so
    * history remains readable instead of passing a nonexistent `main` to Git.
-   * Cached per repo for the process lifetime.
+   * Cached per repo while the chosen ref continues to resolve to a commit.
    */
   async resolveDefaultBranch(
     repoId: string,
     repoPath: string
   ): Promise<{ ref: string; name: string }> {
     const cached = this.defaultBranch.get(repoId);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) {
+      const stillExists = await this.git(
+        ["rev-parse", "--verify", "--quiet", `${cached.ref}^{commit}`],
+        repoPath
+      );
+      // Keep the last known answer when Git itself is unavailable. A normal
+      // nonzero exit specifically means the cached ref disappeared.
+      if (!stillExists.ok || stillExists.value.exitCode === 0) return cached;
+      this.defaultBranch.delete(repoId);
+    }
 
     let resolved: { ref: string; name: string } | null = null;
     const sym = await this.git(
@@ -156,8 +165,25 @@ export class WorktreeStateService {
       repoPath
     );
     if (sym.ok && sym.value.exitCode === 0) {
-      const name = sym.value.stdout.trim().replace("refs/remotes/origin/", "");
-      if (name !== "") resolved = { ref: `origin/${name}`, name };
+      const fullRef = sym.value.stdout.trim();
+      const prefix = "refs/remotes/origin/";
+      const name = fullRef.startsWith(prefix)
+        ? fullRef.slice(prefix.length)
+        : "";
+      const ref = `origin/${name}`;
+      // `fetch --prune` removes a deleted remote branch but can leave
+      // origin/HEAD pointing at it. A symbolic-ref lookup still succeeds in
+      // that state, so verify the target before caching it as the graph base.
+      const target =
+        name === ""
+          ? null
+          : await this.git(
+              ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`],
+              repoPath
+            );
+      if (target?.ok === true && target.value.exitCode === 0) {
+        resolved = { ref, name };
+      }
     }
     if (resolved === null) {
       for (const cand of ["main", "master"]) {

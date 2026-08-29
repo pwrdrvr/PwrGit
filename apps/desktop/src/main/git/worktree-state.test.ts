@@ -247,6 +247,65 @@ describe("WorktreeStateService (system git)", () => {
     ).resolves.toEqual({ ref: "HEAD", name: "HEAD" });
   });
 
+  it("ignores a dangling origin/HEAD when resolving the default branch", async () => {
+    const danglingRepo = join(
+      mkdtempSync(join(tmpdir(), "pwrgit-dangling-origin-head-")),
+      "repo"
+    );
+    mkdirSync(danglingRepo, { recursive: true });
+    git(danglingRepo, ["init", "-b", "main"]);
+    git(danglingRepo, ["config", "user.email", "t@t.com"]);
+    git(danglingRepo, ["config", "user.name", "Tester"]);
+    writeFileSync(join(danglingRepo, "README.md"), "# dangling origin head\n");
+    git(danglingRepo, ["add", "."]);
+    git(danglingRepo, ["commit", "-m", "initial commit"]);
+    git(danglingRepo, [
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/deleted-default"
+    ]);
+
+    const isolated = new WorktreeStateService(db, systemGit);
+    await expect(
+      isolated.resolveDefaultBranch("dangling-origin-head", danglingRepo)
+    ).resolves.toEqual({ ref: "main", name: "main" });
+  });
+
+  it("drops a cached remote default after its target is pruned", async () => {
+    const prunedRepo = join(
+      mkdtempSync(join(tmpdir(), "pwrgit-pruned-default-")),
+      "repo"
+    );
+    mkdirSync(prunedRepo, { recursive: true });
+    git(prunedRepo, ["init", "-b", "main"]);
+    git(prunedRepo, ["config", "user.email", "t@t.com"]);
+    git(prunedRepo, ["config", "user.name", "Tester"]);
+    writeFileSync(join(prunedRepo, "README.md"), "# pruned default\n");
+    git(prunedRepo, ["add", "."]);
+    git(prunedRepo, ["commit", "-m", "initial commit"]);
+    git(prunedRepo, [
+      "update-ref",
+      "refs/remotes/origin/old-default",
+      "HEAD"
+    ]);
+    git(prunedRepo, [
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/old-default"
+    ]);
+
+    const isolated = new WorktreeStateService(db, systemGit);
+    await expect(
+      isolated.resolveDefaultBranch("pruned-default", prunedRepo)
+    ).resolves.toEqual({ ref: "origin/old-default", name: "old-default" });
+
+    git(prunedRepo, ["update-ref", "-d", "refs/remotes/origin/old-default"]);
+
+    await expect(
+      isolated.resolveDefaultBranch("pruned-default", prunedRepo)
+    ).resolves.toEqual({ ref: "main", name: "main" });
+  });
+
   // Windows can't delete a directory that is any process's cwd; the removal
   // lock is what keeps state probes (git spawned with cwd in the worktree)
   // and `git worktree remove` mutually exclusive.
