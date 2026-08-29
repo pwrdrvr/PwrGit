@@ -11,7 +11,6 @@ import {
 import {
   addRootAndExpand,
   branchRow,
-  expandRepoGroup,
   lensChip,
   primaryShortcut
 } from "./fixtures/steps";
@@ -106,21 +105,26 @@ test.describe("documentation screenshots", () => {
     if (w === null) throw new Error("world not built");
 
     await addRootAndExpand(window, h, w.box, w.primary);
-    for (const repo of ["acme-api", "billing-service"]) {
-      await expandRepoGroup(window, repo);
-    }
 
-    // 1. The sidebar: several repositories, their worktrees, and the badges.
-    await shoot(window, "sidebar");
-
-    // 2. The lineage graph for a branch with work in flight. This is also the
-    //    hero: three panes, populated, in one window.
+    // Select before capturing anything. Expanding a repo group also selects
+    // it, so whichever repo was expanded last would otherwise own the graph —
+    // and the neighbours are one-commit repos whose lineage says nothing.
     await branchRow(window, "feat/checkout-redesign").first().click();
     // .first(): the branch now has an upstream, so both the local chip and
     // `origin/feat/checkout-redesign` match — which is the point of pushing it.
     await expect(
       window.locator(".ref-chip", { hasText: "feat/checkout-redesign" }).first()
     ).toBeVisible({ timeout: 20_000 });
+
+    // 1. The sidebar: the whole working set. Only the focus repo is expanded,
+    //    so every repository stays above the fold — a list that scrolls its
+    //    own rows out of frame is a worse advertisement for handling hundreds
+    //    of them than a short one.
+    await expect(window.getByRole("treeitem", { name: "openclaw" })).toBeVisible();
+    await shoot(window, "sidebar");
+
+    // 2. The lineage graph for a branch with work in flight. This is also the
+    //    hero: three panes, populated, in one window.
     await shoot(window, "lineage");
     await shoot(window, "hero");
 

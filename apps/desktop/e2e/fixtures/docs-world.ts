@@ -197,13 +197,48 @@ export function createDocsWorld(): DocsWorld {
     // actually makes the worktree safe to prune.
     runGit(DOCS_AUTHOR, web.path, ["push", "origin", "main"], 44);
 
-    // Neighbouring repositories. Never selected — they exist so the sidebar
-    // reads as a real working set rather than one row, and so the search
-    // overlay has more than one thing to find.
-    box.makeRepo("acme-api", { worktrees: ["feat/rate-limits"] });
-    box.makeRepo("billing-service", { worktrees: ["fix/invoice-rounding"] });
-    box.makeRepo("infra-terraform");
-    box.makeRepo("design-tokens");
+    // Neighbouring repositories: they exist so the sidebar reads as a real
+    // working set rather than one row, and so the search overlay has more than
+    // one thing to find.
+    //
+    // Each gets its root commit re-authored and back-dated, exactly as the
+    // focus repo does. git-sandbox stamps them "PwrGit Test" a second ago, and
+    // although these are not the repo the captures centre on, the app is free
+    // to select one — clicking a repo row to expand it does — at which point
+    // the test identity is what lands in the published image. Ages also stop
+    // every neighbour reading "today", which is the tell that a screenshot was
+    // staged minutes before it was taken.
+    const neighbour = (
+      name: string,
+      daysAgo: number,
+      worktrees: string[] = []
+    ): void => {
+      const repo = box.makeRepo(name, { worktrees });
+      runGit(
+        DOCS_AUTHOR,
+        repo.path,
+        ["commit", "--amend", "--no-edit", "--reset-author"],
+        daysAgo
+      );
+    };
+
+    neighbour("acme-api", 12, ["feat/rate-limits"]);
+    neighbour("billing-service", 20, ["fix/invoice-rounding"]);
+    neighbour("infra-terraform", 34);
+    neighbour("design-tokens", 61);
+
+    // An open-source checkout alongside the work ones, because that is what a
+    // real machine looks like. Named after a real project, but with history of
+    // our own making, and deliberately never the selected repo.
+    //
+    // Its actual history is not imported, and must not be: the lineage graph
+    // renders commit authors, and openclaw has ~3,000 contributors whose names
+    // would then be advertising PwrGit without ever having agreed to. (It is
+    // also 84k commits and 3.8 GB, which the capture job could not clone
+    // anyway — the screenshots have to be reproducible from a bare CI runner,
+    // not from one laptop.) A repository row shows a name, a branch and a
+    // count; none of that requires anyone else's identity.
+    neighbour("openclaw", 8, ["fix/gateway-timeout"]);
 
     return { box, primary: web.name, cleanup: discard };
   } catch (err) {
