@@ -183,6 +183,39 @@ function RewindIcon() {
   );
 }
 
+/**
+ * Page in the next block when the "load more" control scrolls into view.
+ *
+ * The control stays on screen either way: it is the keyboard affordance, the
+ * fallback where IntersectionObserver is unavailable, and the retry after a
+ * page that failed. Re-observing once `loading` clears is what makes this fill
+ * a tall viewport — the button does not move enough to emit a fresh
+ * intersection of its own, so without that the fill would stall after one page.
+ */
+function useAutoPaging(
+  nextCursor: string | null,
+  loading: boolean,
+  load: (cursor: string) => void
+): (node: HTMLButtonElement | null) => void {
+  const [node, setNode] = useState<HTMLButtonElement | null>(null);
+  const loadRef = useRef(load);
+  loadRef.current = load;
+
+  useEffect(() => {
+    if (node === null || nextCursor === null || loading) return;
+    if (typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        loadRef.current(nextCursor);
+      }
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [node, nextCursor, loading]);
+
+  return setNode;
+}
+
 function cancelOperations(operationIds: Set<string>): void {
   for (const operationId of operationIds) {
     void dispatch("file:cancelInsight", { operationId });
@@ -250,6 +283,8 @@ function HistoryView({
     });
   };
 
+  const moreRef = useAutoPaging(nextCursor, loading, load);
+
   useEffect(() => {
     load();
     return () => cancelOperations(activeOperations.current);
@@ -303,6 +338,12 @@ function HistoryView({
                   {entry.shortHash}
                 </span>
                 <span className="file-history__subject">{entry.subject}</span>
+                <AuthorLabel
+                  hash={entry.hash}
+                  name={entry.authorName}
+                  email={entry.authorEmail}
+                  lookups={identities}
+                />
                 <span
                   className="file-insight__time"
                   title={localWhen(entry.committedAt)}
@@ -310,24 +351,19 @@ function HistoryView({
                   {shortWhen(entry.committedAt, now)}
                 </span>
               </span>
-              <span className="file-history__meta">
-                <AuthorLabel
-                  hash={entry.hash}
-                  name={entry.authorName}
-                  email={entry.authorEmail}
-                  lookups={identities}
-                />
-                {/* Only rename rows carry a path worth reading — repeating the
-                    file's own path on every row was pure noise. */}
-                {entry.previousPath !== undefined && (
+              {/* A second line only where there is something to say. Repeating
+                  the file's own path once per row was noise, and reserving the
+                  line for it halved how much history fitted on screen. */}
+              {entry.previousPath !== undefined && (
+                <span className="file-history__meta">
                   <span
                     className="file-history__rename"
                     title={`Renamed from ${entry.previousPath}`}
                   >
                     {entry.previousPath} → {entry.path}
                   </span>
-                )}
-              </span>
+                </span>
+              )}
             </span>
           </button>
           <button
@@ -347,6 +383,7 @@ function HistoryView({
       )}
       {nextCursor !== null && (
         <button
+          ref={moreRef}
           className="file-insight__more"
           disabled={loading}
           onClick={() => load(nextCursor)}
@@ -441,6 +478,8 @@ function BlameView({
       setLoading(false);
     });
   };
+
+  const moreRef = useAutoPaging(nextCursor, loading, load);
 
   useEffect(() => {
     load();
@@ -583,6 +622,7 @@ function BlameView({
       )}
       {nextCursor !== null && (
         <button
+          ref={moreRef}
           className="file-insight__more"
           disabled={loading}
           onClick={() => load(nextCursor)}

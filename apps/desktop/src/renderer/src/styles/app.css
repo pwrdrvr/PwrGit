@@ -7466,7 +7466,7 @@ body.is-col-resizing {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 9px 8px;
+  padding: 7px 8px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -7486,7 +7486,7 @@ body.is-col-resizing {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
 }
 .file-history__title,
 .file-history__meta {

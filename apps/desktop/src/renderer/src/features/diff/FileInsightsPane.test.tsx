@@ -514,6 +514,60 @@ describe("FileInsightsPane", () => {
     expect(tabButton("History")?.getAttribute("aria-selected")).toBe("false");
   });
 
+  it("pages in the next block when the load control scrolls into view", async () => {
+    // jsdom has no IntersectionObserver; this one reports the observed node as
+    // visible the moment it is watched, which is the case the hook exists for.
+    const observers: (() => void)[] = [];
+    class ImmediateObserver {
+      constructor(private readonly cb: (entries: unknown[]) => void) {}
+      observe(): void {
+        observers.push(() => this.cb([{ isIntersecting: true }]));
+        observers[observers.length - 1]?.();
+      }
+      disconnect(): void {}
+      unobserve(): void {}
+    }
+    vi.stubGlobal("IntersectionObserver", ImmediateObserver);
+
+    const cursors: (string | undefined)[] = [];
+    dispatchMock.mockImplementation(
+      (name: string, req: Record<string, unknown>) => {
+        if (name !== "file:history") return Promise.resolve(ok({}));
+        const cursor = req["cursor"] as string | undefined;
+        cursors.push(cursor);
+        return Promise.resolve(
+          ok({
+            entries: [
+              historyEntry({ hash: `${cursors.length}`.repeat(40).slice(0, 40) })
+            ],
+            // Two more pages, then the end — the fill must stop on its own.
+            nextCursor: cursors.length < 3 ? `cursor-${cursors.length}` : null
+          })
+        );
+      }
+    );
+
+    await act(async () => {
+      root.render(
+        <FileInsightsPane
+          worktreeId="wt-1"
+          path="docs/guide.txt"
+          context={{ kind: "workingTree" }}
+          initialTab="history"
+          onClose={() => undefined}
+          onShowCommit={() => true}
+        />
+      );
+    });
+    await settle();
+    await settle();
+
+    expect(cursors).toEqual([undefined, "cursor-1", "cursor-2"]);
+    // The control is gone once there is nothing left to page.
+    expect(container.querySelector(".file-insight__more")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
   it("shows bounded binary and load-error states", async () => {
     dispatchMock.mockImplementation((name: string) => {
       if (name === "file:blame") {
