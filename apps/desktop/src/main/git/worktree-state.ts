@@ -66,6 +66,12 @@ type StateRow = {
   last_activity_at: string | null;
   updated_at: string;
 };
+type ResolvedDefaultBranch = { ref: string; name: string };
+type CachedDefaultBranch = {
+  value: ResolvedDefaultBranch;
+  /** Exact ref used to avoid Git's shorthand revision DWIM during validation. */
+  verifyRef: string;
+};
 
 function rowToState(r: StateRow): WorktreeState {
   const s: WorktreeState = {
@@ -94,10 +100,7 @@ function rowToState(r: StateRow): WorktreeState {
  */
 export class WorktreeStateService {
   /** Per-repo default branch (ref + name), cached while its ref resolves. */
-  private readonly defaultBranch = new Map<
-    string,
-    { ref: string; name: string }
-  >();
+  private readonly defaultBranch = new Map<string, CachedDefaultBranch>();
 
   /** Probes currently running git for a worktree (removal drains these). */
   private readonly inFlight = new Map<string, Set<Promise<unknown>>>();
@@ -146,20 +149,24 @@ export class WorktreeStateService {
   async resolveDefaultBranch(
     repoId: string,
     repoPath: string
-  ): Promise<{ ref: string; name: string }> {
+  ): Promise<ResolvedDefaultBranch> {
     const cached = this.defaultBranch.get(repoId);
     if (cached !== undefined) {
       const stillExists = await this.git(
-        ["rev-parse", "--verify", "--quiet", `${cached.ref}^{commit}`],
+        ["rev-parse", "--verify", "--quiet", `${cached.verifyRef}^{commit}`],
         repoPath
       );
-      // Keep the last known answer when Git itself is unavailable. A normal
-      // nonzero exit specifically means the cached ref disappeared.
-      if (!stillExists.ok || stillExists.value.exitCode === 0) return cached;
+      // `rev-parse --quiet` uses 1 for an unresolved ref. Preserve the last
+      // known answer for operational failures such as an inaccessible cwd,
+      // which start Git successfully but exit 128.
+      if (!stillExists.ok || stillExists.value.exitCode !== 1) {
+        return cached.value;
+      }
       this.defaultBranch.delete(repoId);
     }
 
-    let resolved: { ref: string; name: string } | null = null;
+    let resolved: ResolvedDefaultBranch | null = null;
+    let verifyRef = "";
     const sym = await this.git(
       ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
       repoPath
@@ -178,37 +185,50 @@ export class WorktreeStateService {
         name === ""
           ? null
           : await this.git(
-              ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`],
+              ["rev-parse", "--verify", "--quiet", `${fullRef}^{commit}`],
               repoPath
             );
       if (target?.ok === true && target.value.exitCode === 0) {
         resolved = { ref, name };
+        verifyRef = fullRef;
       }
     }
     if (resolved === null) {
       for (const cand of ["main", "master"]) {
+        const fullRef = `refs/heads/${cand}`;
         const v = await this.git(
-          ["rev-parse", "--verify", "--quiet", cand],
+          ["rev-parse", "--verify", "--quiet", `${fullRef}^{commit}`],
           repoPath
         );
         if (v.ok && v.value.exitCode === 0) {
           resolved = { ref: cand, name: cand };
+          verifyRef = fullRef;
           break;
         }
       }
     }
     if (resolved === null) {
       const current = await this.git(
-        ["symbolic-ref", "--quiet", "--short", "HEAD"],
+        ["symbolic-ref", "--quiet", "HEAD"],
         repoPath
       );
       if (current.ok && current.value.exitCode === 0) {
-        const name = current.value.stdout.trim();
-        if (name !== "") resolved = { ref: name, name };
+        const fullRef = current.value.stdout.trim();
+        const prefix = "refs/heads/";
+        const name = fullRef.startsWith(prefix)
+          ? fullRef.slice(prefix.length)
+          : "";
+        if (name !== "") {
+          resolved = { ref: name, name };
+          verifyRef = fullRef;
+        }
       }
     }
-    resolved ??= { ref: "HEAD", name: "HEAD" };
-    this.defaultBranch.set(repoId, resolved);
+    if (resolved === null) {
+      resolved = { ref: "HEAD", name: "HEAD" };
+      verifyRef = "HEAD";
+    }
+    this.defaultBranch.set(repoId, { value: resolved, verifyRef });
     return resolved;
   }
 

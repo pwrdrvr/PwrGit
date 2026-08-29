@@ -264,6 +264,9 @@ describe("WorktreeStateService (system git)", () => {
       "refs/remotes/origin/HEAD",
       "refs/remotes/origin/deleted-default"
     ]);
+    // The shorthand `origin/deleted-default` still resolves through this local
+    // branch, but the exact remote-tracking ref above remains dangling.
+    git(danglingRepo, ["branch", "origin/deleted-default"]);
 
     const isolated = new WorktreeStateService(db, systemGit);
     await expect(
@@ -304,6 +307,46 @@ describe("WorktreeStateService (system git)", () => {
     await expect(
       isolated.resolveDefaultBranch("pruned-default", prunedRepo)
     ).resolves.toEqual({ ref: "main", name: "main" });
+  });
+
+  it("preserves a cached default when Git cannot inspect the repository", async () => {
+    const cachedRepo = join(
+      mkdtempSync(join(tmpdir(), "pwrgit-default-cache-failure-")),
+      "repo"
+    );
+    mkdirSync(cachedRepo, { recursive: true });
+    git(cachedRepo, ["init", "-b", "main"]);
+    git(cachedRepo, ["config", "user.email", "t@t.com"]);
+    git(cachedRepo, ["config", "user.name", "Tester"]);
+    writeFileSync(join(cachedRepo, "README.md"), "# cached default\n");
+    git(cachedRepo, ["add", "."]);
+    git(cachedRepo, ["commit", "-m", "initial commit"]);
+    git(cachedRepo, [
+      "update-ref",
+      "refs/remotes/origin/remote-default",
+      "HEAD"
+    ]);
+    git(cachedRepo, [
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/remote-default"
+    ]);
+    const notARepo = mkdtempSync(join(tmpdir(), "pwrgit-not-a-repo-"));
+
+    const isolated = new WorktreeStateService(db, systemGit);
+    const expected = {
+      ref: "origin/remote-default",
+      name: "remote-default"
+    };
+    await expect(
+      isolated.resolveDefaultBranch("cache-failure", cachedRepo)
+    ).resolves.toEqual(expected);
+    await expect(
+      isolated.resolveDefaultBranch("cache-failure", notARepo)
+    ).resolves.toEqual(expected);
+    await expect(
+      isolated.resolveDefaultBranch("cache-failure", cachedRepo)
+    ).resolves.toEqual(expected);
   });
 
   // Windows can't delete a directory that is any process's cwd; the removal
