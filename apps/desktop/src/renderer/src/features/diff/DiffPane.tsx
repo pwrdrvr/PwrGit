@@ -47,6 +47,7 @@ export function DiffPane({
   worktreeId,
   target,
   onOpenFile,
+  hidden = false,
   onOpenFileInsight,
   onClose
 }: {
@@ -56,6 +57,9 @@ export function DiffPane({
    *  rail lists a partially staged file twice; without this the only route
    *  between the two halves is closing the diff and finding its twin. */
   onOpenFile: (path: string, staged: boolean) => void;
+  /** Kept mounted but out of view while file details are open, so coming back
+   *  costs no refetch and keeps the reader's scroll position. */
+  hidden?: boolean;
   onOpenFileInsight: (
     path: string,
     context: FileInsightContext,
@@ -231,6 +235,11 @@ export function DiffPane({
       : target.kind === "commitFile"
         ? `in ${target.hash.slice(0, 7)} — ${target.subject}`
         : `commit ${target.hash}`;
+  // History and blame are per-file, so a whole-commit diff offers neither.
+  // The path is read from the target, never from `title` — the two only
+  // happen to agree today, and a title is for reading, not for dispatching.
+  const filePath =
+    target.kind === "file" || target.kind === "commitFile" ? target.path : null;
   const fileContext: FileInsightContext | null =
     target.kind === "file"
       ? { kind: "workingTree" }
@@ -401,6 +410,7 @@ export function DiffPane({
       ref={paneRef}
       tabIndex={-1}
       onKeyDown={onHunkNavigation}
+      style={hidden ? { display: "none" } : undefined}
     >
       <div className="diff-pane__head">
         <span className="diff-pane__title" title={title}>
@@ -434,15 +444,15 @@ export function DiffPane({
           </span>
         )}
         <span className="diff-pane__sub">{sub}</span>
-        {fileContext !== null && (
+        {fileContext !== null && filePath !== null && (
           <div className="diff-pane__tools" aria-label="File details">
             <button
-              onClick={() => onOpenFileInsight(title, fileContext, "history")}
+              onClick={() => onOpenFileInsight(filePath, fileContext, "history")}
             >
               History
             </button>
             <button
-              onClick={() => onOpenFileInsight(title, fileContext, "blame")}
+              onClick={() => onOpenFileInsight(filePath, fileContext, "blame")}
             >
               Blame
             </button>

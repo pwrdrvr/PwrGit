@@ -137,10 +137,9 @@ textarea,
 .commit-context-card__short-hash,
 .file-insight__commit,
 .file-history__subject,
-.file-history__path,
-.file-blame__line code,
+.file-history__rename,
+.file-blame__code,
 .file-blame__source,
-.file-blame__subject,
 .file-insight-pane__path,
 .pull-divergence__commit-subject,
 .pull-divergence__commit code,
@@ -7259,6 +7258,11 @@ body.is-col-resizing {
   flex-direction: column;
   background: var(--bg-app);
 }
+/* Focused on open and on every drill-down level so Escape has somewhere to
+   land. A region, not a control — no ring around the whole column. */
+.file-insight-pane:focus {
+  outline: none;
+}
 .file-insight-pane__head {
   flex: 0 0 auto;
   min-height: 47px;
@@ -7287,6 +7291,16 @@ body.is-col-resizing {
   color: var(--text-subtle);
   font: 500 10.5px/1 var(--font-mono);
 }
+/* Says which revision a drill-down is standing on, so "before abc1234" never
+   reads as the file's current blame. */
+.file-insight-pane__trail {
+  flex: 0 0 auto;
+  padding: 6px 20px;
+  border-bottom: 1px solid var(--border-faint);
+  background: var(--bg-panel);
+  color: var(--text-subtle);
+  font: 500 10.5px/1.4 var(--font-sans);
+}
 .file-insight-tabs {
   flex: 0 0 auto;
   display: flex;
@@ -7308,7 +7322,12 @@ body.is-col-resizing {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 12px 20px 24px;
+  padding: 12px 16px 24px;
+}
+/* Panels stay mounted across tab switches; `hidden` is what hides the
+   inactive one, so nothing here may set `display` on it. */
+.file-insight-pane__body > [hidden] {
+  display: none;
 }
 .file-insight__empty {
   min-height: 120px;
@@ -7338,47 +7357,6 @@ body.is-col-resizing {
   background: var(--bg-panel-elevated);
   font: 500 11px/1.45 var(--font-sans);
 }
-.file-history__row {
-  min-height: 64px;
-  padding: 10px 8px;
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  border-bottom: 1px solid var(--border-faint);
-}
-.file-history__row:hover {
-  background: var(--bg-panel-hover);
-}
-.file-history__row > .file-status {
-  margin-top: 2px;
-}
-.file-history__content {
-  min-width: 0;
-  flex: 1;
-}
-.file-history__title,
-.file-history__meta,
-.file-blame__meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.file-history__subject,
-.file-blame__subject {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-primary);
-  font: 600 12px/1.35 var(--font-sans);
-}
-.file-history__subject {
-  flex: 1;
-}
-.file-history__meta {
-  margin-top: 7px;
-}
 .file-insight__commit {
   flex: 0 0 auto;
   padding: 3px 6px;
@@ -7393,9 +7371,21 @@ body.is-col-resizing {
   border-color: var(--accent-border);
   color: var(--accent);
 }
+/* A label, not a control: the row around it already opens the commit. */
+.file-insight__commit.is-static,
+.file-insight__commit.is-uncommitted {
+  cursor: default;
+}
+.file-insight__commit.is-static:hover {
+  border-color: var(--border-subtle);
+  color: var(--text-muted);
+}
 .file-insight__commit.is-uncommitted {
   color: var(--status-warning);
-  cursor: default;
+}
+.file-insight__commit.is-uncommitted:hover {
+  border-color: var(--border-subtle);
+  color: var(--status-warning);
 }
 .file-insight__author {
   min-width: 0;
@@ -7421,14 +7411,30 @@ body.is-col-resizing {
   color: var(--text-subtle);
   font: 500 10px/1 var(--font-sans);
 }
-.file-history__path {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-muted);
-  font: 500 10px/1.3 var(--font-mono);
+/* Secondary per-row verbs. Held at opacity 0 rather than removed so they keep
+   their space (no reflow on hover) and stay in the tab order for keyboards —
+   :focus-within is what reveals them there. */
+.file-insight__row-action {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-subtle);
+  cursor: pointer;
+}
+.file-insight__row-action:hover {
+  border-color: var(--accent-border);
+  background: var(--bg-panel-hover);
+  color: var(--accent);
+}
+.file-insight__row-action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 .file-insight__more {
   min-width: 160px;
@@ -7441,65 +7447,204 @@ body.is-col-resizing {
   cursor: wait;
   opacity: 0.6;
 }
-.file-blame {
-  min-width: 620px;
-}
-.file-blame__hunk {
-  margin-bottom: 12px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  background: var(--bg-panel);
-}
-.file-blame__hunk.is-uncommitted {
-  border-color: var(--accent-border);
-}
-.file-blame__meta {
-  min-height: 38px;
-  padding: 7px 10px;
-  background: var(--bg-panel-elevated);
+
+/* ---- History list ---- */
+
+.file-history__row {
+  display: flex;
+  align-items: stretch;
   border-bottom: 1px solid var(--border-faint);
 }
-.file-blame__subject {
+.file-history__row:hover {
+  background: var(--bg-panel-hover);
+}
+/* The row IS the control: reading a file's history to find out what changed
+   should not require aiming at a seven-character pill. */
+.file-history__open {
   flex: 1;
-  font-size: 11px;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
 }
-.file-blame__range {
+.file-history__open:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.file-history__open > .file-status {
   flex: 0 0 auto;
+  margin-top: 2px;
+}
+.file-history__content {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.file-history__title,
+.file-history__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.file-history__subject {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font: 600 12px/1.35 var(--font-sans);
+}
+/* Only rename rows render a path, so this line carries information instead of
+   repeating the file's own name once per commit. */
+.file-history__rename {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text-muted);
-  font: 600 10px/1 var(--font-mono);
+  font: 500 10px/1.3 var(--font-mono);
 }
-.file-blame__source {
-  padding: 5px 10px;
-  border-bottom: 1px solid var(--border-faint);
-  color: var(--text-subtle);
-  font: 500 9.5px/1.3 var(--font-mono);
+.file-history__row > .file-insight__row-action {
+  align-self: center;
+  margin-right: 6px;
+  opacity: 0;
 }
+.file-history__row:hover > .file-insight__row-action,
+.file-history__row:focus-within > .file-insight__row-action {
+  opacity: 1;
+}
+
+/* ---- Blame ---- */
+
+/* A gutter, not a card per hunk. Measured across this repo, a 200-line file
+   averages ~9 lines per hunk and the busiest ones average 2 — one bordered
+   card apiece spent more vertical space on chrome than on code. */
 .file-blame__lines {
   overflow-x: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
 }
-.file-blame__line {
-  min-height: 21px;
+/* One scroller for the file. Per-hunk scrollers let a long line slide
+   underneath its neighbours, and the code stopped lining up. */
+.file-blame__body {
+  min-width: max-content;
+}
+.file-blame__row {
   display: grid;
-  grid-template-columns: 56px minmax(max-content, 1fr);
-  border-bottom: 1px solid var(--border-faint);
+  grid-template-columns: 250px 52px 1fr;
+  align-items: center;
+  min-height: 20px;
 }
-.file-blame__line:last-child {
-  border-bottom: 0;
+.file-blame__row:hover {
+  background: var(--bg-panel-hover);
+}
+.file-blame__row.is-hunk-start {
+  border-top: 1px solid var(--border-faint);
+}
+.file-blame__body > .file-blame__row:first-child {
+  border-top: 0;
+}
+.file-blame__gutter {
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  overflow: hidden;
+  border-right: 1px solid var(--border-faint);
+}
+/* Alternating tint groups the lines that share a commit without disturbing
+   the code column's own contrast. */
+.file-blame__row.is-alt .file-blame__gutter {
+  background: var(--bg-panel-elevated);
+}
+.file-blame__row.is-uncommitted .file-blame__gutter {
+  box-shadow: inset 2px 0 0 var(--accent-border);
+}
+.file-blame__actions {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 2px;
+  opacity: 0;
+}
+.file-blame__row:hover .file-blame__actions,
+.file-blame__row:focus-within .file-blame__actions {
+  opacity: 1;
 }
 .file-blame__number {
-  padding: 3px 9px;
+  padding: 0 9px;
   text-align: right;
   border-right: 1px solid var(--border-faint);
   color: var(--text-subtle);
-  font: 500 10px/1.5 var(--font-mono);
+  font: 500 10px/20px var(--font-mono);
+  user-select: none;
 }
-.file-blame__line code {
-  padding: 3px 10px;
+.file-blame__code {
+  padding: 0 12px;
   white-space: pre;
   color: var(--text-secondary);
-  font: 500 11px/1.5 var(--font-mono);
+  font: 500 11px/20px var(--font-mono);
 }
+/* Rare — only where blame crossed a rename — so it earns a full-width line
+   rather than a permanent column. Indented to the code it explains. */
+.file-blame__source {
+  grid-column: 1 / -1;
+  padding: 3px 12px 3px 302px;
+  border-top: 1px dashed var(--border-faint);
+  color: var(--text-subtle);
+  font: 500 9.5px/1.3 var(--font-mono);
+}
+
+/* ---- A commit's diff, inside the pane ---- */
+
+.file-insight-diff {
+  display: flex;
+  flex-direction: column;
+}
+.file-insight-diff__head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: var(--bg-panel-elevated);
+}
+.file-insight-diff__subject {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font: 600 12px/1.35 var(--font-sans);
+}
+.file-insight-diff__head > .file-insight__row-action {
+  opacity: 1;
+}
+.file-insight-diff__body {
+  border: 1px solid var(--border-subtle);
+  border-top: 0;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: var(--bg-panel);
+  overflow-x: auto;
+}
+
 .diff-empty {
   padding: 24px;
   text-align: center;

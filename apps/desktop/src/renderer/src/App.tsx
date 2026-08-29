@@ -603,13 +603,14 @@ export function App() {
                   />
                 )}
               </div>
-              {diffTarget !== null && fileInsightTarget === null && (
+              {diffTarget !== null && (
                 <DiffPane
                   worktreeId={selectedWorktree.id}
                   target={diffTarget}
                   onOpenFile={(path, staged) =>
                     setDiffTarget({ kind: "file", path, staged })
                   }
+                  hidden={fileInsightTarget !== null}
                   onOpenFileInsight={(path, context, tab) =>
                     setFileInsightTarget({ path, context, tab })
                   }

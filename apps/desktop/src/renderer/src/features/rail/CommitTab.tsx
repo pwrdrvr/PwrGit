@@ -1,16 +1,7 @@
 import { useEffect, useState } from "react";
 import type { CommitFileChange } from "@pwrgit/shared";
+import { fileStatusChipProps } from "../../lib/fileStatus";
 import { dispatch } from "../../lib/pwrgit";
-
-const STATUS_TONE: Record<string, string> = {
-  M: "warn",
-  A: "ok",
-  D: "danger",
-  R: "warn",
-  C: "warn",
-  U: "danger",
-  "?": "muted"
-};
 
 /**
  * Commit-scoped file list in the rail — the mirror of the Changes tab for a
@@ -84,11 +75,7 @@ export function CommitTab({
                 onClick={() => onOpenFile(f.path)}
                 title="View this file's changes in the commit"
               >
-                <span
-                  className={`file-status file-status--${STATUS_TONE[f.status] ?? "muted"}`}
-                >
-                  {f.status}
-                </span>
+                <span {...fileStatusChipProps(f.status)}>{f.status}</span>
                 <span className="file-path" title={f.path}>
                   {f.path}
                 </span>

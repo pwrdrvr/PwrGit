@@ -7,6 +7,7 @@ import {
 } from "react";
 import type { ChangeSet, FileChange, Worktree } from "@pwrgit/shared";
 import { copyText } from "../../lib/copyText";
+import { fileStatusChipProps } from "../../lib/fileStatus";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { ContextMenu } from "../shell/ContextMenu";
@@ -20,27 +21,6 @@ import {
   targetPaths,
   type ChangesRowTarget
 } from "./changes-row-menu";
-
-const STATUS_TONE: Record<string, string> = {
-  M: "warn",
-  A: "ok",
-  D: "danger",
-  R: "warn",
-  C: "warn",
-  U: "danger",
-  "?": "muted"
-};
-
-/** Accessible name for the one-letter status chip. */
-const STATUS_LABEL: Record<string, string> = {
-  M: "Modified",
-  A: "Added",
-  D: "Deleted",
-  R: "Renamed",
-  C: "Copied",
-  U: "Conflicted",
-  "?": "Untracked"
-};
 
 /** A folder of new files this big starts collapsed — an untracked tree can be
  *  hundreds of files, and unfolding all of them buries the rest of the list. */
@@ -210,13 +190,7 @@ function FileRow({
       onContextMenu={onContextMenu}
       title={split ? "Partly staged — view these changes" : "View changes"}
     >
-      <span
-        className={`file-status file-status--${STATUS_TONE[file.status] ?? "muted"}`}
-        title={STATUS_LABEL[file.status] ?? "Changed"}
-        aria-label={STATUS_LABEL[file.status] ?? "Changed"}
-      >
-        {file.status}
-      </span>
+      <span {...fileStatusChipProps(file.status)}>{file.status}</span>
       <span className="file-path" title={file.path}>
         {label}
       </span>

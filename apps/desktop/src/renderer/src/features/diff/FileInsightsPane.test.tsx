@@ -19,6 +19,7 @@ import { FileInsightsPane } from "./FileInsightsPane";
 
 const HASH_A = "a".repeat(40);
 const HASH_B = "b".repeat(40);
+const HASH_C = "c".repeat(40);
 const COMMITTED_AT = "2025-06-01T12:00:00.000Z";
 
 let container: HTMLDivElement;
@@ -28,8 +29,59 @@ const settle = async (): Promise<void> => {
   await act(async () => {
     await Promise.resolve();
     await Promise.resolve();
+    await Promise.resolve();
   });
 };
+
+/** Escape is handled on a deferred tick, exactly as DiffPane does it. */
+const pressEscape = async (): Promise<void> => {
+  await act(async () => {
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true
+      })
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+};
+
+const tabButton = (label: string): HTMLButtonElement | undefined =>
+  [...container.querySelectorAll<HTMLButtonElement>("[role=tab]")].find(
+    (button) => button.textContent === label
+  );
+
+const historyEntry = (overrides: Record<string, unknown> = {}) => ({
+  hash: HASH_A,
+  shortHash: HASH_A.slice(0, 7),
+  parents: [HASH_B],
+  subject: "move guide into docs",
+  authorName: "Ada Lovelace",
+  authorEmail: "ada@example.test",
+  committedAt: COMMITTED_AT,
+  isMerge: false,
+  path: "docs/guide.txt",
+  previousPath: "legacy/guide.txt",
+  status: "R",
+  ...overrides
+});
+
+const blameHunk = (overrides: Record<string, unknown> = {}) => ({
+  hash: HASH_B,
+  shortHash: HASH_B.slice(0, 7),
+  authorName: "Grace Hopper",
+  authorEmail: "grace@example.test",
+  committedAt: COMMITTED_AT,
+  subject: "clarify the guide",
+  sourcePath: "legacy/guide.txt",
+  originalStartLine: 1,
+  startLine: 2,
+  endLine: 3,
+  lines: ["shared, clarified", "new line"],
+  uncommitted: false,
+  ...overrides
+});
 
 beforeEach(() => {
   container = document.createElement("div");
@@ -44,29 +96,10 @@ afterEach(async () => {
 });
 
 describe("FileInsightsPane", () => {
-  it("renders rename-aware history, blame ranges, identity, and lineage navigation", async () => {
+  it("renders rename-aware history, blame lines, identity, and lineage navigation", async () => {
     dispatchMock.mockImplementation((name: string) => {
       if (name === "file:history") {
-        return Promise.resolve(
-          ok({
-            entries: [
-              {
-                hash: HASH_A,
-                shortHash: HASH_A.slice(0, 7),
-                parents: [HASH_B],
-                subject: "move guide into docs",
-                authorName: "Ada Lovelace",
-                authorEmail: "ada@example.test",
-                committedAt: COMMITTED_AT,
-                isMerge: false,
-                path: "docs/guide.txt",
-                previousPath: "legacy/guide.txt",
-                status: "R"
-              }
-            ],
-            nextCursor: null
-          })
-        );
+        return Promise.resolve(ok({ entries: [historyEntry()], nextCursor: null }));
       }
       if (name === "file:blame") {
         return Promise.resolve(
@@ -77,22 +110,7 @@ describe("FileInsightsPane", () => {
               "This file is deleted in the selected commit. Showing its parent revision.",
             bytes: 22,
             nextCursor: null,
-            hunks: [
-              {
-                hash: HASH_B,
-                shortHash: HASH_B.slice(0, 7),
-                authorName: "Grace Hopper",
-                authorEmail: "grace@example.test",
-                committedAt: COMMITTED_AT,
-                subject: "clarify the guide",
-                sourcePath: "legacy/guide.txt",
-                originalStartLine: 1,
-                startLine: 2,
-                endLine: 3,
-                lines: ["shared, clarified", "new line"],
-                uncommitted: false
-              }
-            ]
+            hunks: [blameHunk()]
           })
         );
       }
@@ -131,31 +149,369 @@ describe("FileInsightsPane", () => {
     await settle();
 
     expect(container.textContent).toContain("move guide into docs");
-    expect(container.textContent).toContain(
-      "legacy/guide.txt → docs/guide.txt"
-    );
+    expect(container.textContent).toContain("legacy/guide.txt → docs/guide.txt");
     expect(container.textContent).toContain("@ada");
-    const historyCommit = container.querySelector<HTMLButtonElement>(
+    // The status chip carries a name, not just a letter.
+    expect(
+      container.querySelector('.file-status[aria-label="Renamed"]')
+    ).not.toBeNull();
+
+    const lineage = container.querySelector<HTMLButtonElement>(
       '.file-history [aria-label^="Show commit"]'
     );
-    await act(async () => historyCommit?.click());
+    await act(async () => lineage?.click());
     expect(showCommit).toHaveBeenCalledWith(HASH_A, "move guide into docs");
 
-    const blameTab = [...container.querySelectorAll<HTMLButtonElement>("[role=tab]")]
-      .find((button) => button.textContent === "Blame");
-    await act(async () => blameTab?.click());
+    await act(async () => tabButton("Blame")?.click());
     await settle();
 
     expect(container.textContent).toContain("deleted in the selected commit");
-    expect(container.textContent).toContain("L2–3");
     expect(container.textContent).toContain("shared, clarified");
     expect(container.textContent).toContain("from legacy/guide.txt");
     expect(container.textContent).toContain("@grace");
-    const blameCommit = container.querySelector<HTMLButtonElement>(
+    // One line per row, numbered from the hunk's absolute start.
+    expect(
+      [...container.querySelectorAll(".file-blame__number")].map(
+        (node) => node.textContent
+      )
+    ).toEqual(["2", "3"]);
+    // One scroller for the file, not one per hunk.
+    expect(container.querySelectorAll(".file-blame__lines")).toHaveLength(1);
+
+    const blameLineage = container.querySelector<HTMLButtonElement>(
       '.file-blame [aria-label^="Show commit"]'
     );
-    await act(async () => blameCommit?.click());
+    await act(async () => blameLineage?.click());
     expect(showCommit).toHaveBeenLastCalledWith(HASH_B, "clarify the guide");
+  });
+
+  it("opens a commit's diff for the file without losing the history list", async () => {
+    dispatchMock.mockImplementation((name: string) => {
+      if (name === "file:history") {
+        return Promise.resolve(ok({ entries: [historyEntry()], nextCursor: null }));
+      }
+      if (name === "diff:commitFile") {
+        return Promise.resolve(
+          ok(
+            [
+              "diff --git a/docs/guide.txt b/docs/guide.txt",
+              "--- a/docs/guide.txt",
+              "+++ b/docs/guide.txt",
+              "@@ -1 +1 @@",
+              "-shared",
+              "+shared, clarified"
+            ].join("\n")
+          )
+        );
+      }
+      return Promise.resolve(ok({}));
+    });
+
+    await act(async () => {
+      root.render(
+        <FileInsightsPane
+          worktreeId="wt-1"
+          path="docs/guide.txt"
+          context={{ kind: "workingTree" }}
+          initialTab="history"
+          onClose={() => undefined}
+          onShowCommit={() => true}
+        />
+      );
+    });
+    await settle();
+
+    const open = container.querySelector<HTMLButtonElement>(".file-history__open");
+    expect(open?.getAttribute("aria-label")).toBe(
+      `Show what ${HASH_A.slice(0, 7)} changed in docs/guide.txt`
+    );
+    await act(async () => open?.click());
+    await settle();
+
+    expect(dispatchMock).toHaveBeenCalledWith("diff:commitFile", {
+      worktreeId: "wt-1",
+      hash: HASH_A,
+      path: "docs/guide.txt"
+    });
+    expect(container.querySelector("[data-testid=file-insight-diff]")).not.toBeNull();
+    expect(container.textContent).toContain("shared, clarified");
+
+    // Escape pops the diff and puts the list back with no second Git read.
+    const historyReads = dispatchMock.mock.calls.filter(
+      ([name]) => name === "file:history"
+    ).length;
+    await pressEscape();
+    await settle();
+    expect(container.querySelector("[data-testid=file-insight-diff]")).toBeNull();
+    expect(container.querySelector("[data-testid=file-history]")).not.toBeNull();
+    expect(
+      dispatchMock.mock.calls.filter(([name]) => name === "file:history")
+    ).toHaveLength(historyReads);
+  });
+
+  it("closes the pane when Escape is pressed at the base level", async () => {
+    dispatchMock.mockImplementation((name: string) =>
+      name === "file:history"
+        ? Promise.resolve(ok({ entries: [historyEntry()], nextCursor: null }))
+        : Promise.resolve(ok({}))
+    );
+    const onClose = vi.fn();
+
+    await act(async () => {
+      root.render(
+        <FileInsightsPane
+          worktreeId="wt-1"
+          path="docs/guide.txt"
+          context={{ kind: "workingTree" }}
+          initialTab="history"
+          onClose={onClose}
+          onShowCommit={() => true}
+        />
+      );
+    });
+    await settle();
+    await pressEscape();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("blames the file before a commit and unwinds the drill-down", async () => {
+    let blameCalls = 0;
+    dispatchMock.mockImplementation((name: string, req: Record<string, unknown>) => {
+      if (name === "file:blame") {
+        blameCalls += 1;
+        const drilled =
+          (req["context"] as { kind: string; hash?: string }).hash === HASH_C;
+        return Promise.resolve(
+          ok({
+            path: "legacy/guide.txt",
+            effectiveContext: req["context"],
+            hunks: [
+              blameHunk({
+                startLine: 1,
+                endLine: 1,
+                lines: [drilled ? "shared" : "shared, clarified"],
+                sourcePath: "legacy/guide.txt"
+              })
+            ],
+            nextCursor: null,
+            bytes: 12
+          })
+        );
+      }
+      if (name === "commit:lookup") {
+        return Promise.resolve(
+          ok({
+            hash: HASH_B,
+            shortHash: HASH_B.slice(0, 7),
+            parents: [HASH_C],
+            subject: "clarify the guide",
+            authorName: "Grace Hopper",
+            authorEmail: "grace@example.test",
+            committedAt: COMMITTED_AT,
+            isMerge: false
+          })
+        );
+      }
+      return Promise.resolve(ok({}));
+    });
+
+    await act(async () => {
+      root.render(
+        <FileInsightsPane
+          worktreeId="wt-1"
+          path="legacy/guide.txt"
+          context={{ kind: "workingTree" }}
+          initialTab="blame"
+          onClose={() => undefined}
+          onShowCommit={() => true}
+        />
+      );
+    });
+    await settle();
+    expect(blameCalls).toBe(1);
+
+    const before = container.querySelector<HTMLButtonElement>(
+      '[aria-label^="Blame legacy/guide.txt before"]'
+    );
+    expect(before).not.toBeNull();
+    await act(async () => before?.click());
+    await settle();
+
+    expect(blameCalls).toBe(2);
+    const drilled = dispatchMock.mock.calls.filter(
+      ([name]) => name === "file:blame"
+    );
+    expect(drilled[1]?.[1]).toMatchObject({
+      path: "legacy/guide.txt",
+      context: { kind: "commit", hash: HASH_C }
+    });
+    expect(container.textContent).toContain(`before ${HASH_B.slice(0, 7)}`);
+    expect(container.textContent).toContain(`Commit ${HASH_C.slice(0, 7)}`);
+
+    // Escape unwinds one level rather than closing the pane outright.
+    await pressEscape();
+    await settle();
+    expect(container.textContent).not.toContain(`before ${HASH_B.slice(0, 7)}`);
+  });
+
+  it("says so when a line's commit has no parent to blame before", async () => {
+    dispatchMock.mockImplementation((name: string) => {
+      if (name === "file:blame") {
+        return Promise.resolve(
+          ok({
+            path: "docs/guide.txt",
+            effectiveContext: { kind: "workingTree" },
+            hunks: [blameHunk({ startLine: 1, endLine: 1, lines: ["alpha"] })],
+            nextCursor: null,
+            bytes: 6
+          })
+        );
+      }
+      if (name === "commit:lookup") {
+        return Promise.resolve(
+          ok({
+            hash: HASH_B,
+            shortHash: HASH_B.slice(0, 7),
+            parents: [],
+            subject: "root",
+            authorName: "Grace Hopper",
+            authorEmail: "grace@example.test",
+            committedAt: COMMITTED_AT,
+            isMerge: false
+          })
+        );
+      }
+      return Promise.resolve(ok({}));
+    });
+
+    await act(async () => {
+      root.render(
+        <FileInsightsPane
+          worktreeId="wt-1"
+          path="docs/guide.txt"
+          context={{ kind: "workingTree" }}
+          initialTab="blame"
+          onClose={() => undefined}
+          onShowCommit={() => true}
+        />
+      );
+    });
+    await settle();
+
+    const before = container.querySelector<HTMLButtonElement>(
+      '[aria-label^="Blame legacy/guide.txt before"]'
+    );
+    await act(async () => before?.click());
+    await settle();
+    expect(container.textContent).toContain("has no parent commit");
+  });
+
+  it("keeps both panels mounted so switching tabs re-runs no Git read", async () => {
+    dispatchMock.mockImplementation((name: string) => {
+      if (name === "file:history") {
+        return Promise.resolve(ok({ entries: [historyEntry()], nextCursor: null }));
+      }
+      if (name === "file:blame") {
+        return Promise.resolve(
+          ok({
+            path: "docs/guide.txt",
+            effectiveContext: { kind: "workingTree" },
+            hunks: [blameHunk({ startLine: 1, endLine: 1, lines: ["alpha"] })],
+            nextCursor: null,
+            bytes: 6
+          })
+        );
+      }
+      return Promise.resolve(ok({}));
+    });
+
+    await act(async () => {
+      root.render(
+        <FileInsightsPane
+          worktreeId="wt-1"
+          path="docs/guide.txt"
+          context={{ kind: "workingTree" }}
+          initialTab="history"
+          onClose={() => undefined}
+          onShowCommit={() => true}
+        />
+      );
+    });
+    await settle();
+    // Blame has not been asked for yet, so it has not been read.
+    expect(
+      dispatchMock.mock.calls.filter(([name]) => name === "file:blame")
+    ).toHaveLength(0);
+
+    await act(async () => tabButton("Blame")?.click());
+    await settle();
+    await act(async () => tabButton("History")?.click());
+    await settle();
+    await act(async () => tabButton("Blame")?.click());
+    await settle();
+
+    expect(
+      dispatchMock.mock.calls.filter(([name]) => name === "file:history")
+    ).toHaveLength(1);
+    expect(
+      dispatchMock.mock.calls.filter(([name]) => name === "file:blame")
+    ).toHaveLength(1);
+  });
+
+  it("wires the tablist for keyboards and screen readers", async () => {
+    dispatchMock.mockImplementation((name: string) => {
+      if (name === "file:history") {
+        return Promise.resolve(ok({ entries: [historyEntry()], nextCursor: null }));
+      }
+      if (name === "file:blame") {
+        return Promise.resolve(
+          ok({
+            path: "docs/guide.txt",
+            effectiveContext: { kind: "workingTree" },
+            hunks: [],
+            nextCursor: null,
+            bytes: 0
+          })
+        );
+      }
+      return Promise.resolve(ok({}));
+    });
+
+    await act(async () => {
+      root.render(
+        <FileInsightsPane
+          worktreeId="wt-1"
+          path="docs/guide.txt"
+          context={{ kind: "workingTree" }}
+          initialTab="history"
+          onClose={() => undefined}
+          onShowCommit={() => true}
+        />
+      );
+    });
+    await settle();
+
+    const history = tabButton("History");
+    const blame = tabButton("Blame");
+    const panel = container.querySelector("[role=tabpanel]");
+    expect(history?.getAttribute("aria-controls")).toBe(panel?.id);
+    expect(panel?.getAttribute("aria-labelledby")).toBe(history?.id);
+    // Roving tab stop: the tablist is one Tab stop.
+    expect(history?.tabIndex).toBe(0);
+    expect(blame?.tabIndex).toBe(-1);
+
+    await act(async () => {
+      history?.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowRight",
+          bubbles: true,
+          cancelable: true
+        })
+      );
+    });
+    await settle();
+    expect(tabButton("Blame")?.getAttribute("aria-selected")).toBe("true");
+    expect(tabButton("History")?.getAttribute("aria-selected")).toBe("false");
   });
 
   it("shows bounded binary and load-error states", async () => {
@@ -199,9 +555,7 @@ describe("FileInsightsPane", () => {
           )
         : Promise.resolve(ok({}))
     );
-    const historyTab = [...container.querySelectorAll<HTMLButtonElement>("[role=tab]")]
-      .find((button) => button.textContent === "History");
-    await act(async () => historyTab?.click());
+    await act(async () => tabButton("History")?.click());
     await settle();
     expect(container.textContent).toContain(
       "File history couldn’t be loaded. bad revision"
@@ -248,18 +602,12 @@ describe("FileInsightsPane", () => {
         return Promise.resolve(
           ok({
             entries: [
-              {
-                hash: HASH_A,
-                shortHash: HASH_A.slice(0, 7),
-                parents: [],
+              historyEntry({
                 subject: "old file change",
-                authorName: "Ada Lovelace",
-                authorEmail: "ada@example.test",
-                committedAt: COMMITTED_AT,
-                isMerge: false,
-                path: "docs/guide.txt",
-                status: "A"
-              }
+                status: "A",
+                previousPath: undefined,
+                parents: []
+              })
             ],
             nextCursor: null
           })
@@ -285,10 +633,10 @@ describe("FileInsightsPane", () => {
     });
     await settle();
 
-    const commit = container.querySelector<HTMLButtonElement>(
+    const lineage = container.querySelector<HTMLButtonElement>(
       '.file-history [aria-label^="Show commit"]'
     );
-    await act(async () => commit?.click());
+    await act(async () => lineage?.click());
 
     expect(container.querySelector("[data-testid=file-history]")).not.toBeNull();
     expect(container.textContent).toContain(
