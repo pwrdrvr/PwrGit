@@ -214,6 +214,16 @@ async function resolveWorkingHeadPath(
     });
   }
 
+  // Fast path: if the selected path is already in HEAD under this very name,
+  // there is no rename to map and the status scan below would be wasted work —
+  // and that scan walks the whole worktree, on every history and blame read.
+  const trackedArgs = ["cat-file", "-e", `${revision}:${selectedPath}`];
+  const tracked = await git(trackedArgs, cwd, gitOptions(signal));
+  if (!tracked.ok) return tracked;
+  if (tracked.value.exitCode === 0) {
+    return ok({ revision, path: selectedPath });
+  }
+
   // A pathspec causes Git to report the destination as an add and omit the
   // source, so inspect tracked changes as a cancellable status read and select
   // only the requested rename pair from its output.
@@ -715,8 +725,12 @@ export async function readFileBlame(
     "core.quotePath=false",
     "blame",
     "--line-porcelain",
+    // -M follows lines moved WITHIN this file. -C is deliberately absent:
+    // cross-file copy detection attributed boilerplate — an import line, a
+    // closing brace — to whichever unrelated file the same commit touched,
+    // and the resulting "from <path>" note was worse than no note at all.
+    // Whole-file renames are followed by blame's own history walk regardless.
     "-M",
-    "-C",
     "-L",
     `${startLine},+${limit + 1}`,
     ...(resolved.contentsPath === undefined

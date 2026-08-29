@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
-import { addRootAndExpand } from "./fixtures/steps";
+import { addRootAndExpand, primaryShortcut } from "./fixtures/steps";
 
 // Real PNG bytes (4×2 red, then 8×6 blue) — the point of the test is that the
 // blob survives the trip from git to <img> intact, so a placeholder string
@@ -237,7 +237,7 @@ test("clicking a commit scopes the rail to its files; a file opens its diff", as
   await expect(window.locator(".changes-clean")).toBeVisible();
 });
 
-test("file history follows a rename and blame links back to lineage", async () => {
+test("file history follows a rename and opens each commit's change in place", async () => {
   sandbox = createGitSandbox();
   const repo = sandbox.makeRepo("lineagefile");
   mkdirSync(join(repo.path, "docs"), { recursive: true });
@@ -272,18 +272,69 @@ test("file history follows a rename and blame links back to lineage", async () =
   await expect(history).toContainText("move readme into docs");
   await expect(history).toContainText("README.md → docs/README.md");
 
+  // The row itself opens that commit's change to THIS file, in place — the
+  // list stays mounted underneath, so Escape puts it straight back.
+  await history
+    .locator(".file-history__open", { hasText: "explain file lineage" })
+    .click();
+  const commitDiff = window.getByTestId("file-insight-diff");
+  await expect(commitDiff).toBeVisible({ timeout: 20_000 });
+  await expect(commitDiff).toContainText("explain file lineage");
+  await window.keyboard.press("Escape");
+  await expect(commitDiff).toHaveCount(0);
+  await expect(history).toBeVisible();
+
   await window.getByRole("tab", { name: "Blame" }).click();
   const blame = window.getByTestId("file-blame");
   await expect(blame).toBeVisible({ timeout: 20_000 });
   await expect(blame).toContainText("WIP");
   await expect(blame).toContainText("uncommitted follow-up");
-  await expect(blame).toContainText("L2");
+  // A gutter, so every line carries its own number and there is one scroller.
+  await expect(blame.locator(".file-blame__number").nth(1)).toHaveText("2");
+  await expect(blame.locator(".file-blame__lines")).toHaveCount(1);
 
-  // The commit button uses the lineage graph's existing focus/reveal path.
+  // Revealing the commit in the lineage is now an explicit, secondary verb.
   await blame.getByRole("button", { name: /Show commit .* in lineage/ }).click();
   await expect(window.locator(".graph-row.is-focused")).toContainText(
     "explain file lineage"
   );
+});
+
+test("the command palette opens history for a file with no pending change", async () => {
+  sandbox = createGitSandbox();
+  const repo = sandbox.makeRepo("palettefile");
+  mkdirSync(join(repo.path, "docs"), { recursive: true });
+  sandbox.commitAs(
+    "historian@pwrgit.dev",
+    repo.path,
+    "docs/stable.md",
+    "add the stable note"
+  );
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, sandbox, "palettefile");
+  // Nothing is uncommitted, so this file appears in no diff — before the
+  // palette learned about files it could not be reached at all.
+  await expect(window.locator(".changes-clean")).toBeVisible({ timeout: 20_000 });
+
+  // The Windows shard runs this too, so use the host's own primary modifier.
+  await window.keyboard.press(primaryShortcut("k"));
+  await expect(window.locator(".overlay-panel")).toBeVisible();
+  await window.keyboard.type("docs/stable.md");
+
+  const fileHit = window.locator(".overlay-result", { hasText: "stable.md" });
+  await expect(fileHit).toBeVisible({ timeout: 20_000 });
+  await fileHit.click();
+
+  const history = window.getByTestId("file-history");
+  await expect(history).toBeVisible({ timeout: 20_000 });
+  await expect(history).toContainText("add the stable note");
+  // Opened without a diff behind it, so back goes to the lineage.
+  await expect(window.locator(".file-insight-pane__back")).toHaveText("‹ Lineage");
+  await window.keyboard.press("Escape");
+  await expect(window.locator(".file-insight-pane")).toHaveCount(0);
+  await expect(window.locator(".graph-toolbar")).toBeVisible();
 });
 
 test("a changed image renders both revisions instead of a binary notice", async () => {

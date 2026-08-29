@@ -18,6 +18,23 @@ type ActiveOperation = {
 const validOperationId = (value: string): boolean =>
   /^[a-zA-Z0-9:_-]{1,128}$/.test(value);
 
+/**
+ * A cancelled read is an error, not a result.
+ *
+ * This used to answer an aborted blame with a synthetic page carrying
+ * `unavailableReason: "missing"`, which renders as "This file does not exist
+ * in the selected context." — a flat untruth about the user's file. The
+ * renderer drops replies to operations it has already cancelled, so nothing
+ * showed it today, and that is exactly what made it a trap for the next
+ * caller.
+ */
+const canceled = () =>
+  err({
+    kind: "git" as const,
+    code: "canceled",
+    message: "The file-insight read was canceled."
+  });
+
 /** Register cancellable file-insight reads. Each request owns a direct Git
  *  process; replacing the view or destroying its renderer stops that process. */
 export function registerFileInsightHandlers(
@@ -82,9 +99,7 @@ export function registerFileInsightHandlers(
         req,
         operation.controller.signal
       );
-      return operation.controller.signal.aborted
-        ? ok({ entries: [], nextCursor: null })
-        : result;
+      return operation.controller.signal.aborted ? canceled() : result;
     } finally {
       finish(key, operation);
     }
@@ -115,16 +130,7 @@ export function registerFileInsightHandlers(
         req,
         operation.controller.signal
       );
-      return operation.controller.signal.aborted
-        ? ok({
-            path: req.path,
-            effectiveContext: req.context,
-            hunks: [],
-            nextCursor: null,
-            bytes: null,
-            unavailableReason: "missing" as const
-          })
-        : result;
+      return operation.controller.signal.aborted ? canceled() : result;
     } finally {
       finish(key, operation);
     }

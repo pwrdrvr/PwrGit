@@ -349,3 +349,92 @@ describe("bounded file blame", () => {
     });
   });
 });
+
+describe("Git work a read is allowed to do", () => {
+  // Its own repository: the shared fixture ends with the file deleted, and
+  // these assertions are about the argv of a plain tracked-file read.
+  let plainRoot: string;
+  let plain: string;
+
+  beforeAll(() => {
+    plainRoot = mkdtempSync(join(tmpdir(), "pwrgit-file-insights-argv-"));
+    plain = join(plainRoot, "repo");
+    mkdirSync(join(plain, "src"), { recursive: true });
+    git(plain, "init", "-b", "main");
+    git(plain, "config", "core.autocrlf", "false");
+    writeFileSync(join(plain, "src", "app.ts"), "alpha\nbeta\n");
+    git(plain, "add", "src/app.ts");
+    commitAs(plain, "add app", ADA);
+  });
+
+  afterAll(() => rmSync(plainRoot, { recursive: true, force: true }));
+
+  /** Records every argv the module hands to Git, then delegates for real. */
+  const recording = (): { git: GitExec; calls: string[][] } => {
+    const calls: string[][] = [];
+    return {
+      calls,
+      git: (args, cwd, options) => {
+        calls.push([...args]);
+        return systemGit(args, cwd, options);
+      }
+    };
+  };
+
+  it("skips the worktree status scan when HEAD already has the path", async () => {
+    const { git: spy, calls } = recording();
+
+    const result = await readFileBlame(spy, plain, {
+      path: "src/app.ts",
+      context: { kind: "workingTree" },
+      limit: 10
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.hunks[0]).toMatchObject({ uncommitted: false });
+    // `git status` walks the whole worktree, and it was running on every
+    // history and blame read purely to map an uncommitted rename.
+    expect(calls.some((args) => args.includes("status"))).toBe(false);
+  });
+
+  it("still maps a rename that only the worktree knows about", async () => {
+    git(plain, "mv", "src/app.ts", "src/renamed.ts");
+    const { git: spy, calls } = recording();
+
+    const result = await readFileBlame(spy, plain, {
+      path: "src/renamed.ts",
+      context: { kind: "workingTree" },
+      limit: 10
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(calls.some((args) => args.includes("status"))).toBe(true);
+    expect(result.value.unavailableReason).toBeUndefined();
+    // Attributed to the commit that added it under its OLD name, not written
+    // off as uncommitted.
+    expect(result.value.hunks[0]).toMatchObject({
+      uncommitted: false,
+      authorName: "Ada Lovelace"
+    });
+
+    git(plain, "mv", "src/renamed.ts", "src/app.ts");
+  });
+
+  it("does not ask Git for cross-file copy attribution", async () => {
+    const { git: spy, calls } = recording();
+    await readFileBlame(spy, plain, {
+      path: "src/app.ts",
+      context: { kind: "workingTree" },
+      limit: 10
+    });
+
+    const blame = calls.find((args) => args.includes("blame"));
+    expect(blame).toBeDefined();
+    // -M (moves within this file) is wanted; -C attributed boilerplate to
+    // whichever unrelated file the same commit happened to touch.
+    expect(blame).toContain("-M");
+    expect(blame).not.toContain("-C");
+  });
+});
