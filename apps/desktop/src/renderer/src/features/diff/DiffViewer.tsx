@@ -291,7 +291,7 @@ function DiffHunkView({
             className="diff-hunk__action"
             disabled={selection.applying}
             onClick={() => selection.onApply(hunkLines.map((line) => line.id))}
-            title={`${verb} all ${hunkLines.length} changed line${hunkLines.length === 1 ? "" : "s"} in this hunk`}
+            title={`${verb} all ${hunkLines.length} changed line${hunkLines.length === 1 ? "" : "s"} in this hunk — j / k move between hunks`}
           >
             {verb} hunk
           </button>

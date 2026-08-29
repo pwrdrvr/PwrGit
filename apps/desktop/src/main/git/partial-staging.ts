@@ -274,35 +274,40 @@ export function partialDiffCapability(
     return {
       available: false,
       reason: "new_file",
-      message: "New files can only be staged or unstaged as a whole file."
+      message:
+        "A new file has no index entry yet to apply part of a patch against, so PwrGit moves it whole."
     };
   }
   if (statuses.includes("D") || parsed.newHeader === "/dev/null") {
     return {
       available: false,
       reason: "deleted_file",
-      message: "Deleted files can only be staged or unstaged as a whole file."
+      message:
+        "A deletion is one change to the whole path, so PwrGit moves it whole."
     };
   }
   if (parsed.binary) {
     return {
       available: false,
       reason: "binary",
-      message: "Binary changes can only be staged as a whole file."
+      message:
+        "Binary content has no lines to split, so it moves as a whole file."
     };
   }
   if (parsed.gitlink) {
     return {
       available: false,
       reason: "gitlink",
-      message: "Submodule pointers can only be staged as a whole entry."
+      message:
+        "A submodule pointer is a single value, so it moves as a whole entry."
     };
   }
   if (!utf8Valid) {
     return {
       available: false,
       reason: "non_utf8",
-      message: "Non-UTF-8 text can only be staged as a whole file to preserve its exact bytes."
+      message:
+        "This file is not UTF-8, so it moves as a whole file to keep its exact bytes."
     };
   }
   if (parsed.unsupported) {
@@ -317,7 +322,8 @@ export function partialDiffCapability(
       ? {
           available: false,
           reason: "mode_only",
-          message: "File-mode changes can only be staged as a whole file."
+          message:
+            "A mode change carries no content, so it moves as a whole file."
         }
       : {
           available: false,

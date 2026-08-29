@@ -79,13 +79,15 @@ test("hunk and line actions move only the selected changes through Git's index",
   const hunkActions = window.getByRole("button", { name: "Stage hunk" });
   await expect(hunkActions).toHaveCount(2);
 
-  // Note where the reader is before the stage, so the check after it can show
-  // the pane held its place rather than reloading to the top of the file.
-  const body = window.locator(".diff-pane__body");
-  await body.evaluate((node) => {
-    node.scrollTop = node.scrollHeight;
+  // Stamp the rendered diff so the check after the stage can tell a repaint
+  // from a teardown. Scroll position is the thing the reader actually loses
+  // when the body is swapped for a placeholder, but a fixture diff is not
+  // reliably taller than the window; the node's survival is the same fact
+  // measured without that dependency.
+  const view = window.locator(".diff-view");
+  await view.evaluate((node) => {
+    (node as HTMLElement & { pwrgitProbe?: string }).pwrgitProbe = "kept";
   });
-  expect(await body.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
 
   await hunkActions.first().click();
 
@@ -97,11 +99,16 @@ test("hunk and line actions move only the selected changes through Git's index",
   );
   expect(sandbox.git(repo.path, "diff")).toContain("SECOND edit");
 
-  // Applying repaints in place. The body is never swapped for a loading
-  // placeholder, so a reader partway down a long file stays where they were
-  // instead of being thrown back to line 1 on every hunk.
+  // Applying repaints in place: the same node carries the new patch, so a
+  // reader partway down a long file keeps their position instead of being
+  // thrown back to line 1 on every hunk they stage.
   await expect(window.locator(".diff-empty")).toHaveCount(0);
-  expect(await body.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+  await expect(window.getByRole("button", { name: "Stage hunk" })).toHaveCount(1);
+  expect(
+    await view.evaluate(
+      (node) => (node as HTMLElement & { pwrgitProbe?: string }).pwrgitProbe
+    )
+  ).toBe("kept");
 
   // The rail still presents both sides of the partially-staged file, and now
   // says they are one file split rather than two that share a name.

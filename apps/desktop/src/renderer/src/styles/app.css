@@ -7426,8 +7426,10 @@ body.is-col-resizing {
 .diff-row.is-selected .diff-sym {
   color: var(--text-primary);
 }
+/* --accent, not --accent-bright: the row underneath is an add/delete tint,
+   not the --accent-soft surface that colour is floored against. */
 .diff-row.is-selected .diff-gutter {
-  color: var(--accent-bright);
+  color: var(--accent);
 }
 .diff-row--add {
   background: color-mix(in srgb, var(--status-ok) 10%, transparent);

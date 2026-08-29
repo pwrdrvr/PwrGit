@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent
+} from "react";
 import type { PartialFileDiff } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { showErrorToast } from "../../lib/toast";
@@ -244,6 +250,47 @@ export function DiffPane({
     });
   };
 
+  // j / k walk the hunks and land on each one's action button, so the whole
+  // staging loop is reachable without a pointer: j, Enter, j, Enter. Tabbing
+  // is the alternative and it costs one stop per tick — a file with sixty
+  // changed lines puts sixty stops between hunk one and hunk two.
+  const onHunkNavigation = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    if (event.key !== "j" && event.key !== "k") return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    const from = document.activeElement;
+    if (from instanceof HTMLElement && from.isContentEditable) return;
+    // Checkboxes are the pane's only inputs and swallow no letters; a real
+    // text field would, so leave one alone if this pane ever grows one.
+    if (
+      (from instanceof HTMLInputElement && from.type !== "checkbox") ||
+      from instanceof HTMLTextAreaElement
+    ) {
+      return;
+    }
+    const buttons = [
+      ...(paneRef.current?.querySelectorAll<HTMLButtonElement>(
+        ".diff-hunk__action"
+      ) ?? [])
+    ];
+    if (buttons.length === 0) return;
+    event.preventDefault();
+    const hunk = from instanceof Element ? from.closest(".diff-hunk") : null;
+    const here = buttons.findIndex(
+      (button) => button.closest(".diff-hunk") === hunk
+    );
+    // The first press from inside a hunk claims that hunk rather than
+    // skipping past it.
+    const next =
+      here !== -1 && !buttons.includes(from as HTMLButtonElement)
+        ? here
+        : event.key === "j"
+          ? Math.min(here + 1, buttons.length - 1)
+          : Math.max(here === -1 ? buttons.length - 1 : here - 1, 0);
+    const button = buttons[next];
+    button?.focus({ preventScroll: true });
+    button?.closest(".diff-hunk")?.scrollIntoView({ block: "nearest" });
+  };
+
   const applyFile = (): void => {
     if (target.kind !== "file" || applying) return;
     setApplying(true);
@@ -284,7 +331,12 @@ export function DiffPane({
   };
 
   return (
-    <div className="diff-pane" ref={paneRef} tabIndex={-1}>
+    <div
+      className="diff-pane"
+      ref={paneRef}
+      tabIndex={-1}
+      onKeyDown={onHunkNavigation}
+    >
       <div className="diff-pane__head">
         <span className="diff-pane__title" title={title}>
           {title}
