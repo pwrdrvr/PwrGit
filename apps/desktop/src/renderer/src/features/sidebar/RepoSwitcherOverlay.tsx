@@ -264,14 +264,19 @@ export function RepoSwitcherOverlay({
       return;
     }
     let active = true;
-    void dispatch("file:search", {
-      worktreeId: commitWorktreeId,
-      query
-    }).then((result) => {
-      if (active) setFiles(result.ok ? result.value : []);
-    });
+    // Debounced like the commit lookup below: every keystroke otherwise cost an
+    // IPC round trip that ranked the worktree's whole tracked-path list.
+    const timer = window.setTimeout(() => {
+      void dispatch("file:search", {
+        worktreeId: commitWorktreeId,
+        query
+      }).then((result) => {
+        if (active) setFiles(result.ok ? result.value : []);
+      });
+    }, 120);
     return () => {
       active = false;
+      window.clearTimeout(timer);
     };
   }, [commitWorktreeId, query]);
 

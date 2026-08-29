@@ -7,7 +7,7 @@ import {
   createFileListCache,
   FILE_SEARCH_LIMIT_DEFAULT,
   FILE_SEARCH_LIMIT_MAX,
-  rankFilePaths
+  rankIndexedPaths
 } from "./file-search";
 
 type ActiveOperation = {
@@ -146,14 +146,14 @@ export function registerFileInsightHandlers(
       });
     }
     if (req.query.trim() === "") return ok([]);
-    const paths = await fileLists.paths(execGit, req.worktreeId, cwd);
-    if (!paths.ok) return paths;
+    const index = await fileLists.index(execGit, req.worktreeId, cwd);
+    if (!index.ok) return index;
     const limit = Number.isFinite(req.limit)
       ? Math.max(1, Math.min(FILE_SEARCH_LIMIT_MAX, Math.trunc(req.limit ?? 0)))
       : FILE_SEARCH_LIMIT_DEFAULT;
     // Ranked here, never in the renderer: filtering only the rows already
     // fetched would silently hide matches that sort past the first page.
-    return ok(rankFilePaths(paths.value, req.query, limit));
+    return ok(rankIndexedPaths(index.value, req.query, limit));
   });
 
   bus.register("file:cancelInsight", (req, ctx) => {

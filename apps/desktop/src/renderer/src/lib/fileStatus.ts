@@ -28,16 +28,22 @@ const LABEL: Record<string, string> = {
 };
 
 /** The `file-status--*` modifier for a status code. */
-export function fileStatusTone(status: string): string {
+function fileStatusTone(status: string): string {
   return TONE[status] ?? "muted";
 }
 
 /** The chip's accessible name. Never empty — a bare letter is not a name. */
-export function fileStatusLabel(status: string): string {
+function fileStatusLabel(status: string): string {
   return LABEL[status] ?? "Changed";
 }
 
-/** The props every status chip needs, so no call site can forget the name. */
+/**
+ * The props every status chip needs, so no call site can forget the name.
+ *
+ * The only export on purpose: handing out the tone and the label separately
+ * would let a caller rebuild the unlabelled chip by hand, which is the exact
+ * hole this module was extracted to close.
+ */
 export function fileStatusChipProps(status: string): {
   className: string;
   title: string;

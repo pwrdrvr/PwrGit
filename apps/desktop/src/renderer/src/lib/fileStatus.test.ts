@@ -1,23 +1,24 @@
 import { describe, expect, it } from "vitest";
-import {
-  fileStatusChipProps,
-  fileStatusLabel,
-  fileStatusTone
-} from "./fileStatus";
+import { fileStatusChipProps } from "./fileStatus";
+
+/** Exercised through the one export, since that is all a call site can reach. */
+const tone = (status: string): string =>
+  fileStatusChipProps(status).className.replace("file-status file-status--", "");
+const label = (status: string): string => fileStatusChipProps(status).title;
 
 describe("fileStatus", () => {
   it("maps the codes the rail and history both render", () => {
-    expect(fileStatusTone("M")).toBe("warn");
-    expect(fileStatusTone("A")).toBe("ok");
-    expect(fileStatusTone("D")).toBe("danger");
-    expect(fileStatusTone("U")).toBe("danger");
-    expect(fileStatusTone("?")).toBe("muted");
+    expect(tone("M")).toBe("warn");
+    expect(tone("A")).toBe("ok");
+    expect(tone("D")).toBe("danger");
+    expect(tone("U")).toBe("danger");
+    expect(tone("?")).toBe("muted");
   });
 
   it("falls back rather than rendering an unnamed chip", () => {
-    expect(fileStatusTone("Z")).toBe("muted");
-    expect(fileStatusLabel("Z")).toBe("Changed");
-    expect(fileStatusLabel("")).toBe("Changed");
+    expect(tone("Z")).toBe("muted");
+    expect(label("Z")).toBe("Changed");
+    expect(label("")).toBe("Changed");
   });
 
   it("always carries an accessible name alongside the class", () => {

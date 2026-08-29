@@ -1,5 +1,5 @@
 import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
-import { err, ok, type FileSearchHit, type Result } from "@pwrgit/shared";
+import { ok, type FileSearchHit, type Result } from "@pwrgit/shared";
 
 export const FILE_SEARCH_LIMIT_DEFAULT = 8;
 export const FILE_SEARCH_LIMIT_MAX = 50;
@@ -11,15 +11,34 @@ export const FILE_LIST_TTL_MS = 5_000;
  *  doesn't hold every file list it ever read. */
 const FILE_LIST_CACHE_MAX = 3;
 
-const split = (path: string): { name: string; dir: string } => {
-  const cut = path.lastIndexOf("/");
-  return cut === -1
-    ? { name: path, dir: "" }
-    : { name: path.slice(cut + 1), dir: path.slice(0, cut) };
+/**
+ * One tracked path with everything ranking needs precomputed.
+ *
+ * The lowercase forms live here rather than in the ranking loop because that
+ * loop runs on every keystroke: folding a hundred thousand paths per character
+ * typed allocated two strings per path and threw both away.
+ */
+export type IndexedPath = FileSearchHit & {
+  lowerPath: string;
+  lowerName: string;
 };
 
+export function indexFilePaths(paths: readonly string[]): IndexedPath[] {
+  return paths.map((path) => {
+    const cut = path.lastIndexOf("/");
+    const name = cut === -1 ? path : path.slice(cut + 1);
+    return {
+      path,
+      name,
+      dir: cut === -1 ? "" : path.slice(0, cut),
+      lowerPath: path.toLowerCase(),
+      lowerName: name.toLowerCase()
+    };
+  });
+}
+
 /**
- * Rank tracked paths against one query.
+ * Rank indexed paths against one query.
  *
  * Ordered so the thing a person types is the thing they get: a bare filename
  * finds the file, a fragment of a directory finds everything under it, and a
@@ -31,62 +50,59 @@ const split = (path: string): { name: string; dir: string } => {
  * sit ABOVE commits in the palette — a tier that loose would bury every other
  * kind of result behind noise.
  */
-export function rankFilePaths(
-  paths: readonly string[],
+export function rankIndexedPaths(
+  index: readonly IndexedPath[],
   query: string,
   limit: number
 ): FileSearchHit[] {
   const needle = query.trim().toLowerCase();
   if (needle === "") return [];
 
-  const scored: { hit: FileSearchHit; score: number }[] = [];
-  for (const path of paths) {
-    const lower = path.toLowerCase();
-    const { name, dir } = split(path);
-    const lowerName = name.toLowerCase();
+  const scored: { entry: IndexedPath; score: number }[] = [];
+  for (const entry of index) {
     const score =
-      lowerName === needle
+      entry.lowerName === needle
         ? 0
-        : lowerName.startsWith(needle)
+        : entry.lowerName.startsWith(needle)
           ? 1
-          : lower.endsWith(needle)
+          : entry.lowerPath.endsWith(needle)
             ? 2
-            : lowerName.includes(needle)
+            : entry.lowerName.includes(needle)
               ? 3
-              : lower.includes(needle)
+              : entry.lowerPath.includes(needle)
                 ? 4
                 : null;
     if (score === null) continue;
-    scored.push({ hit: { path, name, dir }, score });
+    scored.push({ entry, score });
   }
 
   return scored
     .sort(
       (a, b) =>
         a.score - b.score ||
-        a.hit.path.length - b.hit.path.length ||
-        (a.hit.path < b.hit.path ? -1 : a.hit.path > b.hit.path ? 1 : 0)
+        a.entry.path.length - b.entry.path.length ||
+        (a.entry.path < b.entry.path ? -1 : a.entry.path > b.entry.path ? 1 : 0)
     )
     .slice(0, limit)
-    .map(({ hit }) => hit);
+    .map(({ entry }) => ({ path: entry.path, name: entry.name, dir: entry.dir }));
 }
 
-type CachedList = { paths: string[]; readAt: number };
+type CachedList = { index: IndexedPath[]; readAt: number };
 
-/** Tracked-path lists, keyed by worktree, re-read on a short timer. */
+/** Tracked-path indexes, keyed by worktree, re-read on a short timer. */
 export function createFileListCache(now: () => number = Date.now) {
   const lists = new Map<string, CachedList>();
 
   return {
-    async paths(
+    async index(
       git: GitExec,
       worktreeId: string,
       cwd: string,
       signal?: AbortSignal
-    ): Promise<Result<string[]>> {
+    ): Promise<Result<IndexedPath[]>> {
       const cached = lists.get(worktreeId);
       if (cached !== undefined && now() - cached.readAt < FILE_LIST_TTL_MS) {
-        return ok(cached.paths);
+        return ok(cached.index);
       }
       const args = [
         "-c",
@@ -102,18 +118,20 @@ export function createFileListCache(now: () => number = Date.now) {
       if (!raw.ok) return raw;
       const checked = requireExit0(raw.value, args);
       if (!checked.ok) return checked;
-      const paths = checked.value.stdout.split("\0").filter((p) => p !== "");
+      const index = indexFilePaths(
+        checked.value.stdout.split("\0").filter((path) => path !== "")
+      );
       // Insertion order is the eviction order; re-reading a worktree moves it
       // back to the end so the three most recently used lists are the ones
       // kept.
       lists.delete(worktreeId);
-      lists.set(worktreeId, { paths, readAt: now() });
+      lists.set(worktreeId, { index, readAt: now() });
       while (lists.size > FILE_LIST_CACHE_MAX) {
         const oldest = lists.keys().next();
         if (oldest.done === true) break;
         lists.delete(oldest.value);
       }
-      return ok(paths);
+      return ok(index);
     },
     forget(worktreeId: string): void {
       lists.delete(worktreeId);
@@ -122,14 +140,4 @@ export function createFileListCache(now: () => number = Date.now) {
       return lists.size;
     }
   };
-}
-
-export function invalidQuery(query: unknown): Result<never> | null {
-  return typeof query === "string"
-    ? null
-    : err({
-        kind: "validation",
-        code: "invalid_query",
-        message: "A file-search query is required."
-      });
 }

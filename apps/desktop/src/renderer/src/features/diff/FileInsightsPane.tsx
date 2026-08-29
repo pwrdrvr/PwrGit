@@ -16,6 +16,7 @@ import type {
 } from "@pwrgit/shared";
 import { fileStatusChipProps } from "../../lib/fileStatus";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { useAutoPaging } from "../../lib/useAutoPaging";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import { localWhen, shortWhen } from "../graph/graph-view";
 import { DiffViewer } from "./DiffViewer";
@@ -183,39 +184,6 @@ function RewindIcon() {
   );
 }
 
-/**
- * Page in the next block when the "load more" control scrolls into view.
- *
- * The control stays on screen either way: it is the keyboard affordance, the
- * fallback where IntersectionObserver is unavailable, and the retry after a
- * page that failed. Re-observing once `loading` clears is what makes this fill
- * a tall viewport — the button does not move enough to emit a fresh
- * intersection of its own, so without that the fill would stall after one page.
- */
-function useAutoPaging(
-  nextCursor: string | null,
-  loading: boolean,
-  load: (cursor: string) => void
-): (node: HTMLButtonElement | null) => void {
-  const [node, setNode] = useState<HTMLButtonElement | null>(null);
-  const loadRef = useRef(load);
-  loadRef.current = load;
-
-  useEffect(() => {
-    if (node === null || nextCursor === null || loading) return;
-    if (typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        loadRef.current(nextCursor);
-      }
-    });
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [node, nextCursor, loading]);
-
-  return setNode;
-}
-
 function cancelOperations(operationIds: Set<string>): void {
   for (const operationId of operationIds) {
     void dispatch("file:cancelInsight", { operationId });
@@ -241,6 +209,7 @@ function HistoryView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const activeOperations = useRef(new Set<string>());
+  const pending = useRef(false);
   const now = useRelativeClock();
   const identities = useAuthorIdentities(
     worktreeId,
@@ -256,6 +225,11 @@ function HistoryView({
   );
 
   const load = (cursor?: string): void => {
+    // `loading` is state, so it has not rendered yet when a click lands in the
+    // same tick the observer fires — both would dispatch and both pages would
+    // be appended. This ref is the synchronous gate the button cannot be.
+    if (pending.current) return;
+    pending.current = true;
     const operationId = nextOperationId("history");
     activeOperations.current.add(operationId);
     setLoading(true);
@@ -267,6 +241,7 @@ function HistoryView({
       context,
       ...(cursor === undefined ? {} : { cursor })
     }).then((result) => {
+      pending.current = false;
       if (!activeOperations.current.delete(operationId)) return;
       if (!result.ok) {
         setError(result.error.message);
@@ -283,7 +258,7 @@ function HistoryView({
     });
   };
 
-  const moreRef = useAutoPaging(nextCursor, loading, load);
+  const moreRef = useAutoPaging(nextCursor, loading, error, load);
 
   useEffect(() => {
     load();
@@ -351,16 +326,24 @@ function HistoryView({
                   {shortWhen(entry.committedAt, now)}
                 </span>
               </span>
-              {/* A second line only where there is something to say. Repeating
-                  the file's own path once per row was noise, and reserving the
-                  line for it halved how much history fitted on screen. */}
-              {entry.previousPath !== undefined && (
+              {/* A second line only where there is something to say: the
+                  rename itself, and the older commits that still lived under
+                  the previous name. Repeating the file's CURRENT path on every
+                  row was noise, and reserving the line for it halved how much
+                  history fitted on screen. */}
+              {(entry.previousPath !== undefined || entry.path !== path) && (
                 <span className="file-history__meta">
                   <span
                     className="file-history__rename"
-                    title={`Renamed from ${entry.previousPath}`}
+                    title={
+                      entry.previousPath === undefined
+                        ? `This commit is under ${entry.path}`
+                        : `Renamed from ${entry.previousPath}`
+                    }
                   >
-                    {entry.previousPath} → {entry.path}
+                    {entry.previousPath === undefined
+                      ? entry.path
+                      : `${entry.previousPath} → ${entry.path}`}
                   </span>
                 </span>
               )}
@@ -446,6 +429,7 @@ function BlameView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const activeOperations = useRef(new Set<string>());
+  const pending = useRef(false);
   const now = useRelativeClock();
   const hunks = useMemo(() => pages.flatMap((page) => page.hunks), [pages]);
   const identities = useAuthorIdentities(
@@ -454,6 +438,11 @@ function BlameView({
   );
 
   const load = (cursor?: string): void => {
+    // `loading` is state, so it has not rendered yet when a click lands in the
+    // same tick the observer fires — both would dispatch and both pages would
+    // be appended. This ref is the synchronous gate the button cannot be.
+    if (pending.current) return;
+    pending.current = true;
     const operationId = nextOperationId("blame");
     activeOperations.current.add(operationId);
     setLoading(true);
@@ -465,6 +454,7 @@ function BlameView({
       context,
       ...(cursor === undefined ? {} : { cursor })
     }).then((result) => {
+      pending.current = false;
       if (!activeOperations.current.delete(operationId)) return;
       if (!result.ok) {
         setError(result.error.message);
@@ -479,7 +469,7 @@ function BlameView({
     });
   };
 
-  const moreRef = useAutoPaging(nextCursor, loading, load);
+  const moreRef = useAutoPaging(nextCursor, loading, error, load);
 
   useEffect(() => {
     load();
@@ -748,6 +738,7 @@ export function FileInsightsPane({
   const [notice, setNotice] = useState<string | null>(null);
   const paneRef = useRef<HTMLElement>(null);
   const tabRefs = useRef<Partial<Record<FileInsightTab, HTMLButtonElement>>>({});
+  const pendingBlameBefore = useRef(false);
   const idPrefix = useId();
   const tabId = (value: FileInsightTab): string => `${idPrefix}-tab-${value}`;
   const panelId = (value: FileInsightTab): string => `${idPrefix}-panel-${value}`;
@@ -859,9 +850,13 @@ export function FileInsightsPane({
 
   const blameBefore = (hunk: FileBlameHunk): void => {
     const hash = hunk.hash;
-    if (hash === null) return;
+    // One drill-down at a time: a double-click used to issue two lookups and
+    // push two identical levels, so unwinding one step took two Escapes.
+    if (hash === null || pendingBlameBefore.current) return;
+    pendingBlameBefore.current = true;
     const short = hunk.shortHash ?? hash.slice(0, 7);
     void dispatch("commit:lookup", { worktreeId, hash }).then((result) => {
+      pendingBlameBefore.current = false;
       const parent = result.ok ? result.value?.parents[0] : undefined;
       if (parent === undefined) {
         setNotice(

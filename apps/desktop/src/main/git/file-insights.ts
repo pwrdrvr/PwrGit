@@ -138,6 +138,18 @@ function historyStatus(code: string | undefined): FileStatus {
 /** Parse the record- and NUL-separated `git log --follow --name-status -z`
  * shape. NUL separators keep tabs, newlines, and non-ASCII path bytes out of
  * Git's quoted-path representation. */
+/** Commits Git actually returned, whether or not each one parses. Paging is
+ *  gated on this and not on `parseFileHistory().length`: a record this module
+ *  fails to read is a reason to show less, never a reason to declare the file's
+ *  history finished and strand every older commit. */
+export function countHistoryRecords(stdout: string): number {
+  let records = 0;
+  for (const rawRecord of stdout.split("\x1e")) {
+    if (FULL_HASH.test(rawRecord.split("\0")[0] ?? "")) records += 1;
+  }
+  return records;
+}
+
 export function parseFileHistory(stdout: string): FileHistoryEntry[] {
   const entries: FileHistoryEntry[] = [];
   for (const rawRecord of stdout.split("\x1e")) {
@@ -291,6 +303,11 @@ export async function readFileHistory(
       context.value
     );
     if (!decoded.ok) return decoded;
+    // `selectedPath` is pinned to the request, but `lineagePath` is the value
+    // actually handed to Git — so it gets the same containment every other path
+    // in this module gets, rather than only a typeof check.
+    const lineagePath = safeWorktreeFile(cwd, decoded.value.lineagePath);
+    if (!lineagePath.ok) return lineagePath;
     cursor = decoded.value;
   } else if (context.value.kind === "commit") {
     cursor = {
@@ -324,6 +341,10 @@ export async function readFileHistory(
   const args = [
     "-c",
     "core.quotePath=false",
+    // Paths here are exact files, never patterns. Without this a leading `:`
+    // turns the pathspec magic — `:(glob)**` answers with the whole
+    // repository's history instead of this file's.
+    "--literal-pathspecs",
     "log",
     "--follow",
     "--find-renames",
@@ -342,10 +363,13 @@ export async function readFileHistory(
   const checked = requireExit0(raw.value, args);
   if (!checked.ok) return checked;
   const parsed = parseFileHistory(checked.value.stdout);
+  // `offset` counts commits Git walked, not rows rendered, so it advances by
+  // `limit` even when a record was dropped — the next page resumes where this
+  // one stopped either way.
   return ok({
     entries: parsed.slice(0, limit),
     nextCursor:
-      parsed.length > limit
+      countHistoryRecords(checked.value.stdout) > limit
         ? encodeHistoryCursor({ ...cursor, offset: cursor.offset + limit })
         : null
   });
@@ -723,6 +747,7 @@ export async function readFileBlame(
   const args = [
     "-c",
     "core.quotePath=false",
+    "--literal-pathspecs",
     "blame",
     "--line-porcelain",
     // -M follows lines moved WITHIN this file. -C is deliberately absent:

@@ -4,7 +4,8 @@ import type { GitExec, GitOutput } from "./dugite";
 import {
   createFileListCache,
   FILE_LIST_TTL_MS,
-  rankFilePaths
+  indexFilePaths,
+  rankIndexedPaths
 } from "./file-search";
 
 const PATHS = [
@@ -16,16 +17,21 @@ const PATHS = [
   "packages/shared/src/types.ts"
 ];
 
-describe("rankFilePaths", () => {
+// Built once, exactly as the cache holds it — the ranking loop never folds case.
+const INDEX = indexFilePaths(PATHS);
+const rank = (query: string, limit = 10) =>
+  rankIndexedPaths(INDEX, query, limit);
+
+describe("rankIndexedPaths", () => {
   it("puts an exact filename first and breaks ties on the shorter path", () => {
-    expect(rankFilePaths(PATHS, "App.tsx", 10).map((h) => h.path)).toEqual([
+    expect(rank("App.tsx").map((h) => h.path)).toEqual([
       "apps/desktop/src/renderer/src/App.tsx",
       "apps/desktop/src/legacy/vendor/App.tsx"
     ]);
   });
 
   it("matches a path fragment, so a directory finds what is under it", () => {
-    expect(rankFilePaths(PATHS, "features/diff", 10).map((h) => h.name)).toEqual([
+    expect(rank("features/diff").map((h) => h.name)).toEqual([
       "DiffPane.tsx",
       "FileInsightsPane.tsx"
     ]);
@@ -33,15 +39,15 @@ describe("rankFilePaths", () => {
 
   it("matches a path pasted from a shell prompt end-first", () => {
     expect(
-      rankFilePaths(PATHS, "renderer/src/App.tsx", 10).map((h) => h.path)
+      rank("renderer/src/App.tsx").map((h) => h.path)
     ).toEqual(["apps/desktop/src/renderer/src/App.tsx"]);
   });
 
   it("splits the row's name and directory", () => {
-    expect(rankFilePaths(PATHS, "README.md", 10)).toEqual([
+    expect(rank("README.md")).toEqual([
       { path: "README.md", name: "README.md", dir: "" }
     ]);
-    expect(rankFilePaths(PATHS, "types.ts", 10)[0]).toEqual({
+    expect(rank("types.ts")[0]).toEqual({
       path: "packages/shared/src/types.ts",
       name: "types.ts",
       dir: "packages/shared/src"
@@ -50,12 +56,12 @@ describe("rankFilePaths", () => {
 
   it("stays substring-only so a short query cannot hit the whole repo", () => {
     // "asx" is a subsequence of several of these paths and a substring of none.
-    expect(rankFilePaths(PATHS, "asx", 10)).toEqual([]);
+    expect(rank("asx")).toEqual([]);
   });
 
   it("returns nothing for an empty query and honours the limit", () => {
-    expect(rankFilePaths(PATHS, "   ", 10)).toEqual([]);
-    expect(rankFilePaths(PATHS, "tsx", 2)).toHaveLength(2);
+    expect(rank("   ")).toEqual([]);
+    expect(rank("tsx", 2)).toHaveLength(2);
   });
 });
 
@@ -68,17 +74,36 @@ describe("createFileListCache", () => {
         )
     );
 
+  it("folds case once, when the list is read", async () => {
+    const cache = createFileListCache(() => 0);
+    const result = await cache.index(listing(["Src/App.TSX"]), "wt-1", "/repo");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value[0]).toEqual({
+      path: "Src/App.TSX",
+      name: "App.TSX",
+      dir: "Src",
+      lowerPath: "src/app.tsx",
+      lowerName: "app.tsx"
+    });
+  });
+
   it("re-reads only after the TTL lapses", async () => {
     let clock = 1_000;
     const cache = createFileListCache(() => clock);
     const git = listing(["a.txt", "b.txt"]);
 
-    expect(await cache.paths(git, "wt-1", "/repo")).toEqual(ok(["a.txt", "b.txt"]));
-    expect(await cache.paths(git, "wt-1", "/repo")).toEqual(ok(["a.txt", "b.txt"]));
+    const paths = async (): Promise<string[]> => {
+      const result = await cache.index(git, "wt-1", "/repo");
+      return result.ok ? result.value.map((entry) => entry.path) : [];
+    };
+
+    expect(await paths()).toEqual(["a.txt", "b.txt"]);
+    expect(await paths()).toEqual(["a.txt", "b.txt"]);
     expect(git).toHaveBeenCalledTimes(1);
 
     clock += FILE_LIST_TTL_MS + 1;
-    expect(await cache.paths(git, "wt-1", "/repo")).toEqual(ok(["a.txt", "b.txt"]));
+    expect(await paths()).toEqual(["a.txt", "b.txt"]);
     expect(git).toHaveBeenCalledTimes(2);
   });
 
@@ -86,7 +111,7 @@ describe("createFileListCache", () => {
     const cache = createFileListCache(() => 0);
     const git = listing(["a.txt"]);
     for (const id of ["wt-1", "wt-2", "wt-3", "wt-4"]) {
-      await cache.paths(git, id, "/repo");
+      await cache.index(git, id, "/repo");
     }
     expect(cache.size()).toBe(3);
   });

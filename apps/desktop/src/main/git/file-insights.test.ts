@@ -12,7 +12,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { err, ok, type Result } from "@pwrgit/shared";
 import type { GitExec, GitOutput } from "./dugite";
 import {
+  countHistoryRecords,
   FILE_BLAME_MAX_BYTES,
+  parseFileHistory,
   readFileBlame,
   readFileHistory
 } from "./file-insights";
@@ -400,26 +402,31 @@ describe("Git work a read is allowed to do", () => {
 
   it("still maps a rename that only the worktree knows about", async () => {
     git(plain, "mv", "src/app.ts", "src/renamed.ts");
-    const { git: spy, calls } = recording();
+    // Restored in `finally`: a failing assertion here used to leave the fixture
+    // renamed, so the NEXT test failed for a reason that had nothing to do with
+    // it and pointed at the wrong code.
+    try {
+      const { git: spy, calls } = recording();
 
-    const result = await readFileBlame(spy, plain, {
-      path: "src/renamed.ts",
-      context: { kind: "workingTree" },
-      limit: 10
-    });
+      const result = await readFileBlame(spy, plain, {
+        path: "src/renamed.ts",
+        context: { kind: "workingTree" },
+        limit: 10
+      });
 
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(calls.some((args) => args.includes("status"))).toBe(true);
-    expect(result.value.unavailableReason).toBeUndefined();
-    // Attributed to the commit that added it under its OLD name, not written
-    // off as uncommitted.
-    expect(result.value.hunks[0]).toMatchObject({
-      uncommitted: false,
-      authorName: "Ada Lovelace"
-    });
-
-    git(plain, "mv", "src/renamed.ts", "src/app.ts");
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(calls.some((args) => args.includes("status"))).toBe(true);
+      expect(result.value.unavailableReason).toBeUndefined();
+      // Attributed to the commit that added it under its OLD name, not written
+      // off as uncommitted.
+      expect(result.value.hunks[0]).toMatchObject({
+        uncommitted: false,
+        authorName: "Ada Lovelace"
+      });
+    } finally {
+      git(plain, "mv", "src/renamed.ts", "src/app.ts");
+    }
   });
 
   it("does not ask Git for cross-file copy attribution", async () => {
@@ -438,3 +445,68 @@ describe("Git work a read is allowed to do", () => {
     expect(blame).not.toContain("-C");
   });
 });
+
+describe("hardened history paging", () => {
+  it("counts records Git returned, not rows that parsed", async () => {
+    const FMT = "\x1e" + ["%H", "%P", "%an", "%ae", "%cI", "%s"].join("\0") + "\0";
+    const record = (hash: string, status: string): string =>
+      FMT.replace("%H", hash)
+        .replace("%P", "")
+        .replace("%an", "A")
+        .replace("%ae", "a@a.test")
+        .replace("%cI", "2025-01-01T00:00:00Z")
+        .replace("%s", "s") + status;
+    // Two commits, one of which carries no name-status and so parses to nothing.
+    const stdout = record("a".repeat(40), "M\0f.txt\0") + record("b".repeat(40), "");
+
+    expect(parseFileHistory(stdout)).toHaveLength(1);
+    expect(countHistoryRecords(stdout)).toBe(2);
+  });
+
+  it("refuses a cursor whose lineage path escapes the worktree", async () => {
+    const cursor = Buffer.from(
+      JSON.stringify({
+        version: 1,
+        offset: 0,
+        revision: editedCommit,
+        lineagePath: "../../etc/passwd",
+        selectedPath: "docs/guide.txt",
+        context: editedCommit
+      }),
+      "utf8"
+    ).toString("base64url");
+
+    const result = await readFileHistory(systemGit, repo, {
+      path: "docs/guide.txt",
+      context: { kind: "commit", hash: editedCommit },
+      cursor
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { kind: "validation", code: "invalid_path" }
+    });
+  });
+
+  it("reads pathspecs literally, so a magic prefix cannot widen the query", async () => {
+    const { git: spy, calls } = recording2();
+    await readFileHistory(spy, repo, {
+      path: "docs/guide.txt",
+      context: { kind: "commit", hash: editedCommit }
+    });
+    const log = calls.find((args) => args.includes("log"));
+    expect(log).toContain("--literal-pathspecs");
+  });
+});
+
+/** Same recorder as above; this describe runs against the shared fixture. */
+function recording2(): { git: GitExec; calls: string[][] } {
+  const calls: string[][] = [];
+  return {
+    calls,
+    git: (args, cwd, options) => {
+      calls.push([...args]);
+      return systemGit(args, cwd, options);
+    }
+  };
+}
