@@ -1333,6 +1333,7 @@ textarea,
   padding: 1px 3px 6px;
 }
 .ref-branch-row,
+.ref-tag-row,
 .ref-remote-branch-row {
   display: flex;
   align-items: center;
@@ -1344,6 +1345,7 @@ textarea,
   color: var(--text-secondary);
 }
 .ref-branch-row:hover,
+.ref-tag-row:hover,
 .ref-remote-branch-row:hover {
   background: var(--bg-panel-hover);
 }
@@ -1352,7 +1354,13 @@ textarea,
   color: var(--text-subtle);
   font: 600 12px/1 var(--font-mono);
 }
+.refs-tag-icon {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font: 700 12px/1 var(--font-mono);
+}
 .ref-branch-row__name,
+.ref-tag-row .refs-copyable-name,
 .ref-remote-branch-row > span:nth-child(2) {
   flex: 1;
   min-width: 0;
@@ -1363,6 +1371,7 @@ textarea,
   font: 500 11px/1 var(--font-mono);
 }
 .ref-branch-row__status,
+.ref-tag-row small,
 .ref-remote-branch-row small {
   flex: 0 0 auto;
   max-width: 82px;
@@ -3428,6 +3437,13 @@ textarea,
   font: 600 10.5px/1 var(--font-sans);
   cursor: pointer;
 }
+.refs-row-action.is-danger {
+  color: var(--danger-text);
+}
+.refs-row-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .refs-browser__body {
   flex: 1;
   min-height: 0;
@@ -3463,6 +3479,43 @@ textarea,
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+.refs-tag-table__row {
+  grid-template-columns:
+    minmax(175px, 1.35fr) minmax(105px, 0.8fr) minmax(105px, 0.8fr)
+    minmax(170px, 1.25fr) minmax(175px, auto);
+}
+.refs-tag-object,
+.refs-tag-annotation {
+  min-width: 0;
+}
+.refs-tag-object > span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font: 600 9px/1 var(--font-sans);
+  text-transform: uppercase;
+}
+.refs-tag-annotation strong,
+.refs-tag-annotation small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.refs-tag-annotation strong {
+  color: var(--text-secondary);
+  font: 600 10.5px/1.25 var(--font-sans);
+}
+.refs-tag-annotation small {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font: 500 9.5px/1.25 var(--font-sans);
+}
+.refs-tag-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
 }
 .refs-table__identity > div,
 .refs-remote-branch > div {
@@ -3741,6 +3794,11 @@ textarea,
   max-height: 80vh;
   overflow: auto;
 }
+.refs-tag-dialog {
+  width: min(580px, 92vw);
+  max-height: 80vh;
+  overflow: auto;
+}
 .remote-editor {
   width: min(570px, 92vw);
 }
@@ -3757,7 +3815,8 @@ textarea,
   font: 600 10.5px/1 var(--font-sans);
 }
 .refs-field select,
-.refs-field input {
+.refs-field input,
+.refs-field textarea {
   width: 100%;
   height: 34px;
   padding: 0 9px;
@@ -3767,6 +3826,18 @@ textarea,
   background: var(--bg-input);
   color: var(--text-primary);
   font: 500 11px/1 var(--font-mono);
+}
+.refs-field textarea {
+  min-height: 92px;
+  padding-top: 9px;
+  resize: vertical;
+  line-height: 1.4;
+}
+.refs-field--message {
+  align-items: start;
+}
+.refs-field--message > span {
+  padding-top: 10px;
 }
 .refs-destinations {
   margin-top: 14px;
@@ -3895,6 +3966,13 @@ textarea,
   }
   .refs-browser__toolbar {
     flex-wrap: wrap;
+  }
+  .refs-tag-table__row {
+    grid-template-columns: minmax(180px, 1fr) minmax(150px, 1fr) auto;
+  }
+  .refs-tag-table__row > :nth-child(2),
+  .refs-tag-table__row > :nth-child(4) {
+    display: none;
   }
 }
 

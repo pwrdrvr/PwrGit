@@ -4,12 +4,14 @@ import type {
   RemoteBranchSummary,
   RemoteSummary,
   Repo,
-  RepoRefs
+  RepoRefs,
+  TagSummary
 } from "@pwrgit/shared";
 import { shortWhen } from "../graph/graph-view";
 import { confirmDialog } from "../shell/dialogs";
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
+import { useTagSearch } from "../../lib/useTagSearch";
 import {
   useRemoteBranchSearch,
   type RemoteBranchSearch
@@ -17,7 +19,9 @@ import {
 import { CopyTarget } from "../shell/CopyTarget";
 import { BranchRenameDialog } from "./BranchRenameDialog";
 import { PushRefsDialog } from "./PushRefsDialog";
+import { CreateTagDialog } from "./CreateTagDialog";
 import { RemoteEditorDialog } from "./RemoteEditorDialog";
+import { TagRemoteDialog } from "./TagRemoteDialog";
 
 export function trackingLabel(branch: LocalBranchSummary): string {
   switch (branch.tracking) {
@@ -56,17 +60,22 @@ type BrowserBranch =
 function RefsPageFooter({
   shown,
   total,
-  search
+  search,
+  noun = "branches"
 }: {
   shown: number;
   total: number;
-  search: RemoteBranchSearch;
+  search: Pick<
+    RemoteBranchSearch,
+    "error" | "loading" | "hasMore" | "loadMore"
+  >;
+  noun?: string;
 }) {
   if (search.error !== null) {
     return <div className="refs-page-footer is-error">{search.error}</div>;
   }
   if (search.loading && shown === 0) {
-    return <div className="refs-page-footer">Loading branches…</div>;
+    return <div className="refs-page-footer">Loading {noun}…</div>;
   }
   if (total === 0) return null;
   return (
@@ -161,7 +170,7 @@ export function RepoRefsModal({
   repo: Repo;
   refs: RepoRefs;
   now: number;
-  initialTab: "branches" | "remotes";
+  initialTab: "branches" | "tags" | "remotes";
   onRefresh: () => void | Promise<void>;
   onRevealWorktree: (worktreeId: string) => void;
   onCreateWorktree: (
@@ -174,6 +183,9 @@ export function RepoRefsModal({
   const [tab, setTab] = useState(initialTab);
   const [query, setQuery] = useState("");
   const [pushOpen, setPushOpen] = useState(false);
+  const [createTagOpen, setCreateTagOpen] = useState(false);
+  const [remoteTag, setRemoteTag] = useState<TagSummary | null>(null);
+  const [tagEpoch, setTagEpoch] = useState(0);
   const [remoteEditor, setRemoteEditor] = useState<RemoteSummary | "new" | null>(
     null
   );
@@ -204,6 +216,12 @@ export function RepoRefsModal({
     query,
     enabled: tab === "branches"
   });
+  const tagSearch = useTagSearch({
+    repoId: repo.id,
+    query,
+    enabled: tab === "tags",
+    refreshKey: tagEpoch
+  });
   // A remote branch that shadows a local one is still one branch to the user,
   // so it is dropped — per page, since that is the scope we have.
   const remoteMatches = useMemo<BrowserBranch[]>(
@@ -228,6 +246,35 @@ export function RepoRefsModal({
     else if (local !== undefined) onCreateWorktree(local.name, false);
     else onCreateWorktree(branch.name, true, branch.fullName);
     onClose();
+  };
+
+  const tagsChanged = (): void => {
+    setTagEpoch((value) => value + 1);
+    onRefresh();
+  };
+
+  const deleteLocalTag = async (tag: TagSummary): Promise<void> => {
+    const confirmed = await confirmDialog({
+      title: `Delete local tag ${tag.name}?`,
+      message: `This deletes only local ${tag.fullName} at ${tag.objectId.slice(0, 12)}. Tags on remotes are unchanged.`,
+      confirmLabel: "Delete local tag",
+      danger: true
+    });
+    if (!confirmed) return;
+    const result = await dispatch("tag:deleteLocal", {
+      repoId: repo.id,
+      name: tag.name,
+      expectedObjectId: tag.objectId
+    });
+    if (!result.ok) {
+      showErrorToast({
+        title: "Delete tag failed",
+        message: result.error.message.split("\n")[0],
+        detail: result.error.message
+      });
+      return;
+    }
+    tagsChanged();
   };
 
   const removeRemote = async (remote: RemoteSummary): Promise<void> => {
@@ -333,13 +380,15 @@ export function RepoRefsModal({
       if (event.key !== "Escape" || event.defaultPrevented) return;
       event.preventDefault();
       if (renaming !== null) setRenaming(null);
+      else if (remoteTag !== null) setRemoteTag(null);
+      else if (createTagOpen) setCreateTagOpen(false);
       else if (remoteEditor !== null) setRemoteEditor(null);
       else if (pushOpen) setPushOpen(false);
       else onClose();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose, pushOpen, remoteEditor, renaming]);
+  }, [createTagOpen, onClose, pushOpen, remoteEditor, remoteTag, renaming]);
 
   return (
     <div className="overlay-backdrop" onClick={onClose}>
@@ -370,6 +419,12 @@ export function RepoRefsModal({
               Branches <span>{branchTabCount}</span>
             </button>
             <button
+              className={tab === "tags" ? "is-active" : ""}
+              onClick={() => setTab("tags")}
+            >
+              Tags <span>{refs.tagCount}</span>
+            </button>
+            <button
               className={tab === "remotes" ? "is-active" : ""}
               onClick={() => setTab("remotes")}
             >
@@ -385,9 +440,16 @@ export function RepoRefsModal({
               placeholder={`Filter ${tab}…`}
             />
           </label>
-          <button className="refs-action" onClick={() => setPushOpen(true)}>
-            Push to remotes…
-          </button>
+          {tab !== "tags" && (
+            <button className="refs-action" onClick={() => setPushOpen(true)}>
+              Push to remotes…
+            </button>
+          )}
+          {tab === "tags" && (
+            <button className="refs-action" onClick={() => setCreateTagOpen(true)}>
+              Create tag…
+            </button>
+          )}
           {tab === "remotes" && (
             <button className="refs-action" onClick={() => setRemoteEditor("new")}>
               Add remote…
@@ -560,6 +622,107 @@ export function RepoRefsModal({
             </div>
           )}
 
+          {tab === "tags" && (
+            <div className="refs-table refs-tag-table">
+              <div className="refs-table__header refs-tag-table__row">
+                <span>Tag</span>
+                <span>Object</span>
+                <span>Target</span>
+                <span>Annotation</span>
+                <span>Actions</span>
+              </div>
+              {tagSearch.rows.map((tag) => (
+                <div
+                  className="refs-table__row refs-tag-table__row"
+                  key={tag.fullName}
+                >
+                  <div className="refs-table__identity">
+                    <span className="refs-tag-icon" aria-hidden="true">
+                      #
+                    </span>
+                    <div>
+                      <CopyTarget
+                        value={tag.name}
+                        label={`Copy tag name ${tag.name}`}
+                        hint={`${tag.fullName}\nClick to copy tag name`}
+                        className="refs-copyable-name copyable"
+                      >
+                        <strong>{tag.name}</strong>
+                      </CopyTarget>
+                      <small>{tag.kind}</small>
+                    </div>
+                  </div>
+                  <div className="refs-tag-object">
+                    <span>{tag.objectType}</span>
+                    <CopyTarget
+                      value={tag.objectId}
+                      label={`Copy tag object ${tag.objectId}`}
+                      hint={`${tag.objectId}\nClick to copy tag object`}
+                      className="refs-plan__copy copyable"
+                    >
+                      {tag.objectId.slice(0, 12)}
+                    </CopyTarget>
+                  </div>
+                  <div className="refs-tag-object">
+                    <span>{tag.targetType}</span>
+                    <CopyTarget
+                      value={tag.targetId}
+                      label={`Copy tag target ${tag.targetId}`}
+                      hint={`${tag.targetId}\nClick to copy tag target`}
+                      className="refs-plan__copy copyable"
+                    >
+                      {tag.targetId.slice(0, 12)}
+                    </CopyTarget>
+                  </div>
+                  <div className="refs-tag-annotation">
+                    {tag.annotation === undefined ? (
+                      <span className="refs-table__muted">—</span>
+                    ) : (
+                      <>
+                        <strong>{tag.annotation.subject || "Annotated tag"}</strong>
+                        <small>
+                          {tag.annotation.taggerName ?? "Unknown tagger"}
+                          {tag.annotation.taggedAt === undefined
+                            ? ""
+                            : ` · ${shortWhen(tag.annotation.taggedAt, now)}`}
+                        </small>
+                        {tag.annotation.body !== undefined && (
+                          <small title={tag.annotation.body}>
+                            {tag.annotation.body}
+                          </small>
+                        )}
+                      </>
+                    )}
+                  </div>
+                  <div className="refs-tag-actions">
+                    <button
+                      className="refs-row-action"
+                      disabled={refs.remotes.length === 0}
+                      onClick={() => setRemoteTag(tag)}
+                    >
+                      Remote…
+                    </button>
+                    <button
+                      className="refs-row-action is-danger"
+                      onClick={() => void deleteLocalTag(tag)}
+                    >
+                      Delete local
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {tagSearch.rows.length === 0 && !tagSearch.loading && (
+                <div className="refs-browser__empty">No matching local tags.</div>
+              )}
+              <RefsPageFooter
+                shown={tagSearch.rows.length}
+                total={tagSearch.total}
+                search={tagSearch}
+                noun="tags"
+              />
+            </div>
+          )}
+
           {tab === "remotes" && (
             <div className="refs-remotes">
               {refs.remotes.map((remote) => (
@@ -634,6 +797,22 @@ export function RepoRefsModal({
             existingBranches={refs.branches.map((branch) => branch.name)}
             onRenamed={onRefresh}
             onClose={() => setRenaming(null)}
+          />
+        )}
+        {createTagOpen && (
+          <CreateTagDialog
+            repo={repo}
+            onCreated={tagsChanged}
+            onClose={() => setCreateTagOpen(false)}
+          />
+        )}
+        {remoteTag !== null && (
+          <TagRemoteDialog
+            repo={repo}
+            tag={remoteTag}
+            remotes={refs.remotes}
+            onCompleted={() => undefined}
+            onClose={() => setRemoteTag(null)}
           />
         )}
       </div>

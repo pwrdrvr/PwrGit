@@ -55,6 +55,7 @@ import { registerRepoHandlers } from "./git/repo-handlers";
 import { RepoIndexer } from "./git/repo-indexer";
 import { registerSearchStatusHandlers } from "./git/search-status-handlers";
 import { registerSubmoduleHandlers } from "./git/submodule-handlers";
+import { registerTagHandlers } from "./git/tag-handlers";
 import {
   createWorktreeRefresher,
   registerWorktreeHandlers
@@ -511,6 +512,7 @@ if (!gotSingleInstanceLock) {
       worktreeOperations,
       settings
     );
+    registerTagHandlers(bus, db);
     registerRemoteHandlers(bus, db, refresher, worktreeOperations, indexer);
     const bulkSyncHandlers = registerBulkSyncHandlers(
       bus,

@@ -78,3 +78,9 @@ that fall out of that:
 push source). It stays a sized `<select>` — a native listbox already has the
 keyboard and screen-reader model — and note that a sized select exposes role
 **listbox**, not combobox, which is what Playwright specs must query.
+
+Tags follow the same bounded-IPC rule. `repo:refs` carries only `previewTags`
+plus `tagCount`; tag browsers search and page through `repo:tags` via
+`useTagSearch`. A tag is never a `BranchRef`: do not feed it to branch switching,
+branch pickers, or worktree creation without a separate UI that explicitly
+chooses detached HEAD or a newly named branch.

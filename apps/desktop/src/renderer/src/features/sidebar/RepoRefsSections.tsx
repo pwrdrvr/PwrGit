@@ -25,7 +25,7 @@ import {
   trackingLabel
 } from "./RepoRefsModal";
 
-type RefSection = "branches" | "remotes";
+type RefSection = "branches" | "tags" | "remotes";
 
 /** How many branches the collapsed slice shows before "View all …". */
 const BRANCH_SLICE = 6;
@@ -128,6 +128,7 @@ export function RepoRefsSections({
   };
 
   const branchCount = refs?.branches.length;
+  const tagCount = refs?.tagCount;
   const remoteCount = refs?.remotes.length;
   const worktreesById = useMemo(
     () => new Map(repo.worktrees.map((w) => [w.id, w])),
@@ -425,6 +426,60 @@ export function RepoRefsSections({
                 }}
               >
                 View all {refs.branches.length} branches…
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="ref-section">
+        <button
+          className="ref-section__head"
+          aria-expanded={openSections.has("tags")}
+          onClick={(event) => {
+            event.stopPropagation();
+            toggleSection("tags");
+          }}
+        >
+          <SectionChevron open={openSections.has("tags")} />
+          <span className="ref-section__label">Tags</span>
+          <span className="ref-section__count">
+            {loading ? "…" : (tagCount ?? 0)}
+          </span>
+        </button>
+        {openSections.has("tags") && (
+          <div className="ref-section__body">
+            {refs?.previewTags.map((tag) => (
+              <div className="ref-tag-row" key={tag.fullName}>
+                <span className="refs-tag-icon" aria-hidden="true">
+                  #
+                </span>
+                <CopyTarget
+                  value={tag.name}
+                  label={`Copy tag name ${tag.name}`}
+                  hint={`${tag.fullName}\nClick to copy tag name`}
+                  className="refs-copyable-name copyable"
+                >
+                  <span className="refs-copyable-name__text">{tag.name}</span>
+                </CopyTarget>
+                <small title={`${tag.objectType} → ${tag.targetType}`}>
+                  {tag.kind}
+                </small>
+              </div>
+            ))}
+            {error !== null && <div className="ref-section__error">{error}</div>}
+            {!loading && refs !== null && refs.tagCount === 0 && (
+              <div className="ref-section__empty">No local tags.</div>
+            )}
+            {refs !== null && (
+              <button
+                className="ref-view-all"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setBrowser("tags");
+                }}
+              >
+                View all {refs.tagCount} tags…
               </button>
             )}
           </div>

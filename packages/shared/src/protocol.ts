@@ -47,6 +47,9 @@ import type {
   RebaseOperation,
   RebasePlan,
   RemoteBranchPage,
+  RemoteTagAction,
+  RemoteTagPlan,
+  RemoteTagResult,
   RemoteDivergence,
   BranchReveal,
   RemoteResetMode,
@@ -54,6 +57,8 @@ import type {
   Repo,
   RepoId,
   RepoRefs,
+  TagPage,
+  TagSummary,
   RepoSearchHit,
   RepoWorktreeRefresh,
   SearchHitStatus,
@@ -263,6 +268,13 @@ export const REMOTE_BRANCH_PAGE_SIZE = 50;
 
 /** Upper bound a renderer cannot talk its way past, so one page stays one page. */
 export const REMOTE_BRANCH_PAGE_MAX = 200;
+
+/** Local tags carried inline on repo:refs for the collapsed sidebar. */
+export const TAG_PREVIEW = 6;
+
+/** Default and maximum page sizes for repo:tags. */
+export const TAG_PAGE_SIZE = 50;
+export const TAG_PAGE_MAX = 200;
 
 /** Latest is smoke-checked; Prerelease is newer and may not install. */
 export const UPDATE_CHANNELS = ["latest", "prerelease"] as const;
@@ -903,6 +915,49 @@ export interface Commands {
       limit?: number;
     };
     res: RemoteBranchPage;
+  };
+
+  /** Search and page local tags without sending thousands over IPC at once. */
+  "repo:tags": {
+    req: {
+      repoId: string;
+      /** Case-insensitive substring over name, annotation, and tagger. */
+      query?: string;
+      offset?: number;
+      limit?: number;
+    };
+    res: TagPage;
+  };
+  /** Create a tag at one explicitly supplied commit object. */
+  "tag:create": {
+    req: {
+      repoId: string;
+      name: string;
+      targetCommit: string;
+      kind: "lightweight" | "annotated";
+      message?: string;
+    };
+    res: TagSummary;
+  };
+  /** Delete only the still-reviewed local tag object; remote tags are untouched. */
+  "tag:deleteLocal": {
+    req: { repoId: string; name: string; expectedObjectId: string };
+    res: null;
+  };
+  /** Read the exact local/remote objects for a separate remote-tag review. */
+  "tag:planRemote": {
+    req: {
+      repoId: string;
+      name: string;
+      remote: string;
+      action: RemoteTagAction;
+    };
+    res: RemoteTagPlan;
+  };
+  /** Revalidate and apply exactly one reviewed remote-tag action. */
+  "tag:applyRemote": {
+    req: { repoId: string; plan: RemoteTagPlan };
+    res: RemoteTagResult;
   };
 
   // Remotes (U9 / U13)

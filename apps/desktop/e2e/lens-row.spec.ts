@@ -375,9 +375,15 @@ test("the section headings account for every worktree the repo row claims", asyn
   const pinned = window.locator(".wt-row", { hasText: "feature/pinned-one" });
   await expect(async () => {
     await pinned.hover();
-    await pinned
-      .getByRole("button", { name: "Pin worktree" })
-      .click({ timeout: 1_000 });
+    const pin = pinned.getByRole("button", { name: "Pin worktree" });
+    // A successful pointer action does not prove that Chromium delivered the
+    // click to this hover-only control. Keep the state assertion inside the
+    // retry so a swallowed click is attempted again instead of surfacing much
+    // later as a missing section heading.
+    if (await pin.isVisible()) await pin.click({ timeout: 1_000 });
+    await expect(
+      pinned.getByRole("button", { name: "Unpin worktree" })
+    ).toBeVisible({ timeout: 1_000 });
   }).toPass({ timeout: 20_000 });
 
   await expect(window.locator(".wt-subhead")).toHaveCount(1);
