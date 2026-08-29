@@ -87,7 +87,7 @@ afterEach(() => {
 function initRepo(path: string): void {
   mkdirSync(path, { recursive: true });
   execFileSync("git", ["init", "-b", "main"], { cwd: path, stdio: "ignore" });
-  execFileSync("git", ["config", "user.email", "t@pwrgit.dev"], {
+  execFileSync("git", ["config", "user.email", "t@pwrgit.com"], {
     cwd: path,
     stdio: "ignore"
   });
@@ -231,7 +231,7 @@ function services(): {
   const profiles = new ProfileService(db);
   const profile = profiles.create({
     name: "Personal",
-    email: "t@pwrgit.dev",
+    email: "t@pwrgit.com",
     roots: [root]
   });
   const indexer = new RepoIndexer(db, systemGit);
@@ -314,7 +314,7 @@ describe("ForkService.preflight", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "Personal",
-      email: "t@pwrgit.dev",
+      email: "t@pwrgit.com",
       roots: [root]
     });
     const registry = new ForgeRepoRegistry();
@@ -368,7 +368,7 @@ describe("ForkService.preflight", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "Personal",
-      email: "t@pwrgit.dev",
+      email: "t@pwrgit.com",
       roots: [root]
     });
     const indexer = new RepoIndexer(db, systemGit);
@@ -415,7 +415,7 @@ describe("ForkService.preflight", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "Personal",
-      email: "t@pwrgit.dev",
+      email: "t@pwrgit.com",
       roots: [root]
     });
     const registry = new ForgeRepoRegistry();
@@ -477,7 +477,7 @@ describe("ForkService.preflight", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "Personal",
-      email: "t@pwrgit.dev",
+      email: "t@pwrgit.com",
       roots: [root]
     });
     const registry = new ForgeRepoRegistry();
@@ -536,7 +536,7 @@ describe("ForkService.fork", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "Personal",
-      email: "t@pwrgit.dev",
+      email: "t@pwrgit.com",
       roots: [root]
     });
     const registry = new ForgeRepoRegistry();
@@ -632,7 +632,7 @@ describe("ForkService.fork", () => {
     const profile = {
       id: "profile-id",
       name: "Personal",
-      email: "t@pwrgit.dev",
+      email: "t@pwrgit.com",
       mono: "P",
       roots: [root]
     };

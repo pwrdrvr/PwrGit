@@ -54,7 +54,7 @@ function repo(name: string): { root: string; path: string } {
   const path = join(root, "repo");
   mkdirSync(path);
   git(path, "init", "-b", "main");
-  git(path, "config", "user.email", "test@pwrgit.dev");
+  git(path, "config", "user.email", "test@pwrgit.com");
   git(path, "config", "user.name", "PwrGit Test");
   git(path, "config", "core.autocrlf", "false");
   commit(path, "initial.txt", "initial");

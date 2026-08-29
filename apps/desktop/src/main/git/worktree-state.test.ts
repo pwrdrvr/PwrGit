@@ -174,7 +174,7 @@ describe("WorktreeStateService (system git)", () => {
 
     const profile = new ProfileService(db).create({
       name: "Submodule safety",
-      email: "submodule-safety@pwrgit.dev"
+      email: "submodule-safety@pwrgit.com"
     });
     const indexed = await new RepoIndexer(db, systemGit).indexRepoAt(
       profile.id,

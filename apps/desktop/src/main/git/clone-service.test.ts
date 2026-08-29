@@ -161,7 +161,7 @@ function githubOnly(gh: (args: string[]) => Promise<string>): ForgeRepoRegistry 
 function initRepo(path: string): void {
   mkdirSync(path, { recursive: true });
   git(path, "init", "-b", "main");
-  git(path, "config", "user.email", "test@pwrgit.dev");
+  git(path, "config", "user.email", "test@pwrgit.com");
   git(path, "config", "user.name", "PwrGit Test");
   writeFileSync(join(path, "README.md"), "# test\n");
   git(path, "add", ".");
@@ -271,7 +271,7 @@ describe("clone destinations", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "PwrDrvr",
-      email: "test@pwrgit.dev",
+      email: "test@pwrgit.com",
       roots: [root]
     });
     const indexer = new RepoIndexer(db, systemGit);
@@ -330,7 +330,7 @@ describe("CloneService", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "PwrDrvr",
-      email: "test@pwrgit.dev",
+      email: "test@pwrgit.com",
       org: "pwrdrvr",
       roots: [root]
     });
@@ -382,7 +382,7 @@ describe("CloneService", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "PwrDrvr",
-      email: "test@pwrgit.dev",
+      email: "test@pwrgit.com",
       org: "pwrdrvr",
       roots: [root]
     });
@@ -445,7 +445,7 @@ describe("CloneService", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "PwrDrvr",
-      email: "test@pwrgit.dev",
+      email: "test@pwrgit.com",
       roots: [root]
     });
     const indexer = new RepoIndexer(db, systemGit);
@@ -477,7 +477,7 @@ describe("CloneService", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "Personal",
-      email: "test@pwrgit.dev",
+      email: "test@pwrgit.com",
       roots: [root]
     });
     const calls: string[][] = [];
@@ -507,7 +507,7 @@ describe("CloneService", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "Personal",
-      email: "test@pwrgit.dev",
+      email: "test@pwrgit.com",
       roots: [root]
     });
     const calls: string[][] = [];
@@ -534,7 +534,7 @@ describe("CloneService", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "Personal",
-      email: "test@pwrgit.dev",
+      email: "test@pwrgit.com",
       roots: [root]
     });
     const service = new CloneService(
@@ -574,7 +574,7 @@ describe("CloneService", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "Personal",
-      email: "test@pwrgit.dev",
+      email: "test@pwrgit.com",
       roots: [root]
     });
     const indexer = new RepoIndexer(db, systemGit);
@@ -638,7 +638,7 @@ describe("CloneService", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "Personal",
-      email: "test@pwrgit.dev",
+      email: "test@pwrgit.com",
       roots: [root]
     });
     const service = new CloneService(
@@ -677,7 +677,7 @@ describe("CloneService", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "Personal",
-      email: "test@pwrgit.dev",
+      email: "test@pwrgit.com",
       roots: [root]
     });
     const indexer = new RepoIndexer(db, systemGit);
@@ -723,7 +723,7 @@ describe("CloneService", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "Work",
-      email: "test@pwrgit.dev",
+      email: "test@pwrgit.com",
       roots: [root]
     });
     const service = new CloneService(
@@ -764,7 +764,7 @@ describe("CloneService", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "Personal",
-      email: "test@pwrgit.dev",
+      email: "test@pwrgit.com",
       roots: [root]
     });
     const service = new CloneService(
@@ -802,7 +802,7 @@ describe("CloneService", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "PwrDrvr",
-      email: "test@pwrgit.dev",
+      email: "test@pwrgit.com",
       org: "pwrdrvr",
       roots: [root]
     });
@@ -858,7 +858,7 @@ describe("CloneService", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "PwrDrvr",
-      email: "test@pwrgit.dev",
+      email: "test@pwrgit.com",
       roots: [root]
     });
     const indexer = new RepoIndexer(db, cloneGit);
@@ -920,7 +920,7 @@ describe("CloneService", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "Local",
-      email: "test@pwrgit.dev",
+      email: "test@pwrgit.com",
       roots: [root]
     });
     const indexer = new RepoIndexer(db, failingGit);
@@ -957,7 +957,7 @@ describe("CloneService", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "Local",
-      email: "test@pwrgit.dev",
+      email: "test@pwrgit.com",
       roots: [root]
     });
     const indexer = new RepoIndexer(db, systemGit);
@@ -1006,7 +1006,7 @@ describe("CloneService", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "Personal",
-      email: "test@pwrgit.dev",
+      email: "test@pwrgit.com",
       roots: [root]
     });
     const indexedRepo = {
@@ -1062,7 +1062,7 @@ describe("CloneService", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "Personal",
-      email: "test@pwrgit.dev",
+      email: "test@pwrgit.com",
       roots: [root]
     });
     const gitExec = vi.fn<GitExec>(async () =>
@@ -1118,7 +1118,7 @@ describe("CloneService", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "Personal",
-      email: "test@pwrgit.dev",
+      email: "test@pwrgit.com",
       roots: [root]
     });
     const secret = "gho_secretShouldNotLeak";
@@ -1167,7 +1167,7 @@ describe("CloneService", () => {
     const profiles = new ProfileService(db);
     const profile = profiles.create({
       name: "PwrDrvr",
-      email: "test@pwrgit.dev",
+      email: "test@pwrgit.com",
       roots: [root]
     });
     const gitExec = vi.fn<GitExec>(systemGit);

@@ -62,3 +62,7 @@ design/**/.thumbnail
 # The .dc.html artboards and canvas.json beside them are the source; the
 # seeded page is regenerated from them.
 design/**/pwrgit-*.html
+
+# Documentation screenshots produced by e2e/docs-screenshots.spec.ts.
+# Generated output: they are published from the docs repo, not committed here.
+apps/desktop/docs-screenshots/

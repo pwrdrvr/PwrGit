@@ -48,6 +48,11 @@ export async function launchApp(
     gitConfig?: string;
     forgeFixturePath?: string;
     theme?: "system" | "dark" | "light";
+    /** Override the seeded profile identity. Must REPLACE the default block
+     *  rather than append after it: `readGitIdentityDefaults` regexes the
+     *  first `name`/`email` in the file, so a second [user] section is
+     *  silently ignored (git's own last-wins semantics do not apply). */
+    identity?: { name: string; email: string };
     failReadOnce?: RecoverableBootRead[];
   } = {}
 ): Promise<AppHandle> {
@@ -68,9 +73,13 @@ export async function launchApp(
   // "mine" detection (authored-by-me) is deterministic — never the identity
   // of whatever machine happens to run the tests.
   const gitconfig = join(userData, "gitconfig");
+  const identity = opts.identity ?? {
+    name: "PwrGit Test",
+    email: "test@pwrgit.com"
+  };
   writeFileSync(
     gitconfig,
-    `[user]\n\tname = PwrGit Test\n\temail = test@pwrgit.dev\n${opts.gitConfig ?? ""}`
+    `[user]\n\tname = ${identity.name}\n\temail = ${identity.email}\n${opts.gitConfig ?? ""}`
   );
 
   const app = await electron.launch({
