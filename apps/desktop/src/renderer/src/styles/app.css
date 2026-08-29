@@ -7113,6 +7113,18 @@ body.is-col-resizing {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
+/* Says why a tick vanished. The pane refreshes itself whenever the worktree
+   moves; when that refresh lands on a genuinely different diff the ticks
+   cannot be carried over, and a silent reset reads as the app losing the
+   user's work. */
+.diff-stale-notice {
+  flex: 0 0 auto;
+  padding: 7px 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--warn-soft);
+  color: var(--status-warning);
+  font: 500 10.5px/1.35 var(--font-sans);
+}
 .diff-pane__body {
   flex: 1;
   min-height: 0;
@@ -7250,7 +7262,7 @@ body.is-col-resizing {
   color: var(--text-subtle);
   background: var(--bg-hover-strong);
 }
-.diff-hunk__header > span {
+.diff-hunk__range {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -7279,12 +7291,50 @@ body.is-col-resizing {
   align-self: stretch;
   user-select: none;
 }
+/* The box is a 13px glyph; the target is the whole gutter run. Making the
+   input inert to the pointer puts every click on the row handler, which is
+   what reads the shift modifier for range selection and what keeps a 13px
+   control from being a 13px target (WCAG 2.5.8). Keyboard activation is
+   untouched — the input still focuses, and Space still fires a click that
+   reaches the same handler. */
 .diff-select input {
   width: 13px;
   height: 13px;
   margin: 0;
   accent-color: var(--accent);
+  pointer-events: none;
+}
+.diff-select--hunk {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 2px;
   cursor: pointer;
+}
+/* Only rows that can actually take a tick advertise one. */
+.diff-row.is-tickable .diff-select,
+.diff-row.is-tickable .diff-gutter,
+.diff-row.is-tickable .diff-sym {
+  cursor: pointer;
+}
+.diff-row.is-tickable:hover .diff-select {
+  background: var(--bg-hover-strong);
+}
+.diff-row.is-tickable:hover .diff-select input:not(:checked) {
+  outline: 1px solid var(--accent-border);
+  outline-offset: 1px;
+}
+/* A ticked row has to survive a glance down a long hunk, so it gets a spine
+   in the selection column rather than a heavier fill that would fight the
+   add/delete tint already carrying the row's meaning. */
+.diff-row.is-selected {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.diff-row.is-selected .diff-text,
+.diff-row.is-selected .diff-sym {
+  color: var(--text-primary);
+}
+.diff-row.is-selected .diff-gutter {
+  color: var(--accent-bright);
 }
 .diff-row--add {
   background: color-mix(in srgb, var(--status-ok) 10%, transparent);

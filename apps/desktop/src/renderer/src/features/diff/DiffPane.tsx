@@ -10,6 +10,17 @@ export type DiffTarget =
   | { kind: "commit"; hash: string; subject: string }
   | { kind: "commitFile"; hash: string; path: string; subject: string };
 
+/** Checked line IDs, bound to the fingerprint they were chosen against.
+ *  Line IDs are positional (`h:<i>:<oldStart>:<newStart>:a|d:<n>`), so the
+ *  same ID names a different line as soon as the diff moves. Carrying the
+ *  fingerprint alongside is what lets a refresh tell "same diff, keep the
+ *  ticks" apart from "the file moved, these coordinates mean something else
+ *  now" — the difference between a refresh nobody notices and one that
+ *  quietly stages the wrong line. */
+type LineSelection = { fingerprint: string; ids: ReadonlySet<string> };
+
+const NO_SELECTION: LineSelection = { fingerprint: "", ids: new Set() };
+
 /** Full-pane diff: fetches the patch for a working-tree file or a commit and
  *  renders it, with a header + a close control that returns to the graph. */
 export function DiffPane({
@@ -25,10 +36,9 @@ export function DiffPane({
   const [selectionDiff, setSelectionDiff] = useState<PartialFileDiff | null>(
     null
   );
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selection, setSelection] = useState<LineSelection>(NO_SELECTION);
   const [applying, setApplying] = useState(false);
   const [refreshVersion, setRefreshVersion] = useState(0);
-  const [loading, setLoading] = useState(true);
   const paneRef = useRef<HTMLDivElement>(null);
 
   const key =
@@ -38,12 +48,20 @@ export function DiffPane({
         ? `cf:${target.hash}:${target.path}`
         : `c:${target.hash}`;
 
+  // A refresh replaces the diff in place. Only pointing the pane at a new
+  // target clears what is on screen, so an index move — ours or an external
+  // client's — never blanks the body the user is reading. `key` is in the
+  // dependency list, so this runs before the fetch effect below on a retarget.
+  const shownKey = useRef<string | null>(null);
+  if (shownKey.current !== key) {
+    shownKey.current = key;
+    if (patch !== null) setPatch(null);
+    if (selectionDiff !== null) setSelectionDiff(null);
+    if (selection !== NO_SELECTION) setSelection(NO_SELECTION);
+  }
+
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    setPatch(null);
-    setSelectionDiff(null);
-    setSelectedIds(new Set());
     const req =
       target.kind === "file"
         ? dispatch("diff:fileSelection", {
@@ -62,6 +80,7 @@ export function DiffPane({
       if (!active) return;
       if (!r.ok) {
         setPatch("");
+        setSelectionDiff(null);
       } else if (target.kind === "file") {
         const value = r.value as PartialFileDiff;
         setSelectionDiff(value);
@@ -69,7 +88,6 @@ export function DiffPane({
       } else {
         setPatch(r.value as string);
       }
-      setLoading(false);
     });
     return () => {
       active = false;
@@ -79,8 +97,10 @@ export function DiffPane({
   }, [worktreeId, key, refreshVersion]);
 
   // Keep an open working-tree diff interoperable with stage/unstage actions in
-  // the rail and with external Git clients. Every index move gets a fresh
-  // fingerprint; any checked lines are intentionally cleared for re-review.
+  // the rail and with external Git clients. The watcher behind these events
+  // fingerprints the whole worktree, so it fires for edits to files this pane
+  // is not showing; the refetch is cheap and the fingerprint comparison below
+  // decides whether anything the user chose is actually affected.
   useEffect(() => {
     if (target.kind !== "file") return;
     const refresh = (payload: { worktreeId: string }): void => {
@@ -155,12 +175,31 @@ export function DiffPane({
         ? `in ${target.hash.slice(0, 7)} — ${target.subject}`
         : `commit ${target.hash}`;
 
-  const toggleLine = (id: string): void => {
-    setSelectedIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
+  const fingerprint = selectionDiff?.fingerprint ?? "";
+  // Ticks survive a refresh that left this file's diff byte-identical, and
+  // only that. The fingerprint covers this path's own patch and status, so an
+  // unrelated file's edit — the common case for a worktree-wide watcher —
+  // reads as "same diff" and costs the user nothing.
+  const selectedIds =
+    selection.fingerprint === fingerprint ? selection.ids : new Set<string>();
+  const selectionDropped =
+    selection.ids.size > 0 && selection.fingerprint !== fingerprint;
+
+  const toggleLine = (ids: string[]): void => {
+    setSelection((current) => {
+      const next = new Set(
+        current.fingerprint === fingerprint ? current.ids : []
+      );
+      // A multi-line range follows the lead line: if it is being checked, the
+      // whole range is checked, so a shift-click never half-clears a span.
+      const first = ids[0];
+      if (first === undefined) return current;
+      const checking = !next.has(first);
+      for (const id of ids) {
+        if (checking) next.add(id);
+        else next.delete(id);
+      }
+      return { fingerprint, ids: next };
     });
   };
 
@@ -182,7 +221,7 @@ export function DiffPane({
       lineIds
     }).then((result) => {
       setApplying(false);
-      setSelectedIds(new Set());
+      setSelection(NO_SELECTION);
       if (!result.ok) {
         showErrorToast({
           title:
@@ -227,7 +266,6 @@ export function DiffPane({
       {target.kind === "file" && selectionDiff !== null && (
         <div
           className={`diff-selection-bar${selectionAvailable ? "" : " diff-selection-bar--unavailable"}`}
-          role="status"
         >
           {selectionDiff.capability.available ? (
             <>
@@ -235,7 +273,7 @@ export function DiffPane({
                 Select changed lines, or use{" "}
                 <strong>{selectionVerb} hunk</strong>.
               </span>
-              <span className="diff-selection-bar__count">
+              <span className="diff-selection-bar__count" role="status">
                 {selectedCount} selected
               </span>
               <button
@@ -254,12 +292,18 @@ export function DiffPane({
           )}
         </div>
       )}
+      {selectionDropped && (
+        <div className="diff-stale-notice" role="status">
+          This file changed, so the lines you had ticked were cleared — their
+          positions no longer describe the same edit.
+        </div>
+      )}
       <div className="diff-pane__body">
-        {loading ? (
+        {patch === null ? (
           <div className="diff-empty">Loading diff…</div>
         ) : (
           <DiffViewer
-            patch={patch ?? ""}
+            patch={patch}
             images={images}
             {...(selectionAvailable && selectionDiff !== null
               ? {

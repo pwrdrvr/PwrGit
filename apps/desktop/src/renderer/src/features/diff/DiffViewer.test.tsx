@@ -134,13 +134,15 @@ describe("DiffViewer hunk and line selection", () => {
       );
     });
 
+    // The hunk header's own box leads, then one per changed row.
     const checkboxes = container.querySelectorAll<HTMLInputElement>(
       'input[type="checkbox"]'
     );
-    expect(checkboxes).toHaveLength(2);
-    expect(checkboxes[0]?.checked).toBe(true);
-    await act(async () => checkboxes[1]?.click());
-    expect(onToggleLine).toHaveBeenCalledWith(lines[1]?.id);
+    expect(checkboxes).toHaveLength(3);
+    expect(checkboxes[0]?.indeterminate).toBe(true);
+    expect(checkboxes[1]?.checked).toBe(true);
+    await act(async () => checkboxes[2]?.click());
+    expect(onToggleLine).toHaveBeenCalledWith([lines[1]?.id]);
 
     const hunkButton = [...container.querySelectorAll("button")].find(
       (button) => button.textContent === "Stage hunk"
@@ -149,7 +151,78 @@ describe("DiffViewer hunk and line selection", () => {
     expect(onApply).toHaveBeenCalledWith(lines.map((line) => line.id));
   });
 
-  it("keeps an EOF-sensitive change hunk-selectable but hides unsafe line toggles", async () => {
+  it("selects a whole hunk from its header box, leading with a row that flips", async () => {
+    const onToggleLine = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffViewer
+          patch={textPatch}
+          selection={{
+            staged: false,
+            // One of the two already ticked, so the header box is partial and
+            // its click has to complete the hunk rather than invert it.
+            selectedIds: new Set([lines[0]!.id]),
+            applying: false,
+            hunks: [
+              { id: "h:0:2:2", header: "@@ -2 +2 @@", lineSelection: true, lines }
+            ],
+            onToggleLine,
+            onApply: vi.fn()
+          }}
+        />
+      );
+    });
+
+    const header = container.querySelector(".diff-select--hunk");
+    await act(async () => (header as HTMLElement).click());
+    // Unticked row first: the pane follows the lead, so the run is checked.
+    expect(onToggleLine).toHaveBeenCalledWith([lines[1]?.id, lines[0]?.id]);
+  });
+
+  it("sends the run a shift-click spans, led by the anchor", async () => {
+    const onToggleLine = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffViewer
+          patch={textPatch}
+          selection={{
+            staged: false,
+            selectedIds: new Set(),
+            applying: false,
+            hunks: [
+              { id: "h:0:2:2", header: "@@ -2 +2 @@", lineSelection: true, lines }
+            ],
+            onToggleLine,
+            onApply: vi.fn()
+          }}
+        />
+      );
+    });
+
+    const rows = container.querySelectorAll(".diff-row.is-tickable");
+    expect(rows).toHaveLength(2);
+    // The gutter is part of the target; the code column deliberately is not,
+    // so a click there still starts a text selection.
+    const gutterOf = (row: Element): HTMLElement =>
+      row.querySelector(".diff-gutter") as HTMLElement;
+    await act(async () => gutterOf(rows[0]!).click());
+    expect(onToggleLine).toHaveBeenLastCalledWith([lines[0]?.id]);
+    await act(async () => {
+      gutterOf(rows[1]!).dispatchEvent(
+        new MouseEvent("click", { bubbles: true, shiftKey: true })
+      );
+    });
+    expect(onToggleLine).toHaveBeenLastCalledWith([lines[0]?.id, lines[1]?.id]);
+
+    // The code column is not a toggle: clicking it must stay inert.
+    onToggleLine.mockClear();
+    await act(async () =>
+      (rows[1]!.querySelector(".diff-text") as HTMLElement).click()
+    );
+    expect(onToggleLine).not.toHaveBeenCalled();
+  });
+
+  it("explains an EOF-sensitive line instead of dropping its box", async () => {
     await act(async () => {
       root.render(
         <DiffViewer
@@ -173,7 +246,17 @@ describe("DiffViewer hunk and line selection", () => {
       );
     });
 
-    expect(container.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
+    // The boxes stay, disabled and captioned: a row that silently loses its
+    // control while its neighbours keep theirs reads as a rendering fault.
+    const boxes = container.querySelectorAll<HTMLInputElement>(
+      'input[type="checkbox"]'
+    );
+    expect(boxes).toHaveLength(2);
+    expect([...boxes].every((box) => box.disabled)).toBe(true);
+    expect(boxes[0]?.title).toContain("no trailing newline");
+    // No header box either — there is nothing here to tick.
+    expect(container.querySelector(".diff-select--hunk")).toBeNull();
+    expect(container.querySelector(".diff-row.is-tickable")).toBeNull();
     expect(container.textContent).toContain("Unstage hunk");
   });
 });

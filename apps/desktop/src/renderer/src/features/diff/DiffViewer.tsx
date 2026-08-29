@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, type MouseEvent } from "react";
 import {
   imageMediaType,
   type PartialDiffHunk,
@@ -15,12 +15,28 @@ const STATUS_LABEL: Record<DiffFile["status"], string> = {
   renamed: "renamed"
 };
 
+/** Why a changed line inside an otherwise selectable hunk carries no tick.
+ *  Shown on the disabled box itself: a row that loses its control while its
+ *  neighbours keep theirs reads as a rendering fault, and nothing else on
+ *  screen would tell the user that Git's EOF marker is the reason. */
+const ATOMIC_LINE_TITLE =
+  "This file has no trailing newline, so its last change can only move as a whole hunk.";
+
+/** Clicking the ticks, the line numbers, or the +/− column selects the row.
+ *  All three are `user-select: none`, so widening the target this far costs
+ *  no ability to select the code itself — which is the one thing the text
+ *  column has to keep. */
+const SELECT_TARGET = ".diff-select, .diff-gutter, .diff-sym";
+
 export type DiffSelectionControls = {
   staged: boolean;
   selectedIds: ReadonlySet<string>;
   applying: boolean;
   hunks: PartialDiffHunk[];
-  onToggleLine: (id: string) => void;
+  /** One call per gesture: a plain click sends one ID, a shift-click sends
+   *  the whole run it spans. The lead ID is first — the pane follows its
+   *  check state for the rest, so a range never half-clears. */
+  onToggleLine: (ids: string[]) => void;
   onApply: (lineIds: string[]) => void;
 };
 
@@ -60,6 +76,57 @@ export function DiffViewer({
   );
 }
 
+type DiffLine = DiffFile["hunks"][number]["lines"][number];
+type LineMeta = PartialDiffLine & { lineSelection: boolean };
+
+const selectionKey = (kind: "add" | "delete", line: number | null): string =>
+  `${kind}:${line ?? ""}`;
+
+/** The metadata coordinate for a parsed display row, or null for context. */
+const coordinateOf = (line: DiffLine): string | null =>
+  line.kind === "ctx"
+    ? null
+    : selectionKey(
+        line.kind === "add" ? "add" : "delete",
+        line.kind === "add" ? line.newNo : line.oldNo
+      );
+
+/** A checkbox React cannot express in JSX alone: `indeterminate` is a
+ *  property, not an attribute, so the partial state has to be written to the
+ *  node. The box itself is inert to the pointer (see `.diff-select input` in
+ *  app.css) — the row owns the click so the whole gutter is one target and a
+ *  shift-click can be read for its modifier. Keyboard activation still fires
+ *  a click on the input, which reaches that same handler. */
+function TickBox({
+  checked,
+  indeterminate,
+  disabled,
+  label,
+  title
+}: {
+  checked: boolean;
+  indeterminate: boolean;
+  disabled: boolean;
+  label: string;
+  title?: string;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current !== null) ref.current.indeterminate = indeterminate;
+  }, [indeterminate]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      checked={checked}
+      disabled={disabled}
+      aria-label={label}
+      {...(title === undefined ? {} : { title })}
+      onChange={() => undefined}
+    />
+  );
+}
+
 function DiffFileView({
   file,
   images,
@@ -73,6 +140,57 @@ function DiffFileView({
     file.status === "renamed" && file.oldPath !== undefined
       ? `${file.oldPath} → ${file.path}`
       : file.path;
+
+  const byCoordinate = useMemo(() => {
+    const map = new Map<string, LineMeta>();
+    for (const sourceHunk of selection?.hunks ?? []) {
+      for (const line of sourceHunk.lines) {
+        map.set(
+          selectionKey(
+            line.kind,
+            line.kind === "add" ? line.newLine : line.oldLine
+          ),
+          { ...line, lineSelection: sourceHunk.lineSelection }
+        );
+      }
+    }
+    return map;
+  }, [selection?.hunks]);
+
+  // Every tickable ID in the order it is painted. A shift-click range is a
+  // slice of this list, so a run picked out by eye matches the one applied —
+  // including across a hunk boundary.
+  const orderedIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const hunk of file.hunks) {
+      for (const line of hunk.lines) {
+        const coordinate = coordinateOf(line);
+        if (coordinate === null) continue;
+        const meta = byCoordinate.get(coordinate);
+        if (meta !== undefined && meta.lineSelection) ids.push(meta.id);
+      }
+    }
+    return ids;
+  }, [file.hunks, byCoordinate]);
+
+  // Lead of the last tick, so the next shift-click knows where to start.
+  const anchor = useRef<string | null>(null);
+  const toggle = (id: string, shiftKey: boolean): void => {
+    if (selection === undefined) return;
+    const from = anchor.current;
+    const start = from === null ? -1 : orderedIds.indexOf(from);
+    const end = orderedIds.indexOf(id);
+    if (!shiftKey || start === -1 || end === -1 || from === null) {
+      anchor.current = id;
+      selection.onToggleLine([id]);
+      return;
+    }
+    // The anchor stays the lead, so extending a checked run checks the rest
+    // of it rather than inverting each row it passes over.
+    const run = orderedIds.slice(Math.min(start, end), Math.max(start, end) + 1);
+    selection.onToggleLine([from, ...run.filter((each) => each !== from)]);
+  };
+
   return (
     <div className="diff-file">
       <div className="diff-file__head">
@@ -98,6 +216,8 @@ function DiffFileView({
             key={hi}
             hunk={hunk}
             selection={selection}
+            byCoordinate={byCoordinate}
+            onToggle={toggle}
           />
         ))
       )}
@@ -105,91 +225,124 @@ function DiffFileView({
   );
 }
 
-const selectionKey = (
-  kind: "add" | "delete",
-  line: number | null
-): string => `${kind}:${line ?? ""}`;
-
 function DiffHunkView({
   hunk,
-  selection
+  selection,
+  byCoordinate,
+  onToggle
 }: {
   hunk: DiffFile["hunks"][number];
   selection: DiffSelectionControls | undefined;
+  byCoordinate: Map<string, LineMeta>;
+  onToggle: (id: string, shiftKey: boolean) => void;
 }) {
-  const selectable = useMemo(() => {
-    const byCoordinate = new Map<
-      string,
-      PartialDiffLine & { lineSelection: boolean }
-    >();
-    for (const sourceHunk of selection?.hunks ?? []) {
-      for (const line of sourceHunk.lines) {
-        byCoordinate.set(
-          selectionKey(
-            line.kind,
-            line.kind === "add" ? line.newLine : line.oldLine
-          ),
-          { ...line, lineSelection: sourceHunk.lineSelection }
-        );
-      }
-    }
-    return byCoordinate;
-  }, [selection?.hunks]);
+  const metaFor = (line: DiffLine): LineMeta | undefined => {
+    const coordinate = coordinateOf(line);
+    return coordinate === null ? undefined : byCoordinate.get(coordinate);
+  };
+
+  // Everything this hunk's button moves — including EOF-bound lines that
+  // carry no tick of their own, which is the reason the button has to exist.
   const hunkLines = hunk.lines.flatMap((line) => {
-    if (line.kind === "ctx") return [];
-    const metadata = selectable.get(
-      selectionKey(
-        line.kind === "add" ? "add" : "delete",
-        line.kind === "add" ? line.newNo : line.oldNo
-      )
-    );
-    return metadata === undefined ? [] : [metadata];
+    const meta = metaFor(line);
+    return meta === undefined ? [] : [meta];
   });
+  const tickable = hunkLines.filter((line) => line.lineSelection);
+  const checked = tickable.filter((line) => selection?.selectedIds.has(line.id));
+  const allChecked = tickable.length > 0 && checked.length === tickable.length;
   const verb = selection?.staged === true ? "Unstage" : "Stage";
+
+  const toggleHunk = (): void => {
+    if (selection === undefined) return;
+    // Lead with a row whose state is about to flip, so the pane's
+    // follow-the-lead rule drives the rest the same way.
+    selection.onToggleLine(
+      allChecked
+        ? tickable.map((line) => line.id)
+        : [
+            ...tickable
+              .filter((line) => !selection.selectedIds.has(line.id))
+              .map((line) => line.id),
+            ...checked.map((line) => line.id)
+          ]
+    );
+  };
 
   return (
     <div className="diff-hunk">
       <div className="diff-hunk__header">
-        <span>{hunk.header}</span>
+        {selection !== undefined && tickable.length > 0 && (
+          <span
+            className="diff-select diff-select--hunk"
+            onClick={selection.applying ? undefined : toggleHunk}
+          >
+            <TickBox
+              checked={allChecked}
+              indeterminate={checked.length > 0 && !allChecked}
+              disabled={selection.applying}
+              label={`Select every changed line in hunk ${hunk.header}`}
+              title="Select every changed line in this hunk"
+            />
+          </span>
+        )}
+        <span className="diff-hunk__range">{hunk.header}</span>
         {selection !== undefined && hunkLines.length > 0 && (
           <button
             className="diff-hunk__action"
             disabled={selection.applying}
             onClick={() => selection.onApply(hunkLines.map((line) => line.id))}
+            title={`${verb} all ${hunkLines.length} changed line${hunkLines.length === 1 ? "" : "s"} in this hunk`}
           >
             {verb} hunk
           </button>
         )}
       </div>
       {hunk.lines.map((line, index) => {
-        const metadata =
-          line.kind === "ctx"
-            ? undefined
-            : selectable.get(
-                selectionKey(
-                  line.kind === "add" ? "add" : "delete",
-                  line.kind === "add" ? line.newNo : line.oldNo
-                )
-              );
+        const meta = metaFor(line);
         const lineNo =
           line.kind === "add"
             ? line.newNo
             : line.kind === "del"
               ? line.oldNo
               : null;
+        const isSelected =
+          meta !== undefined && selection?.selectedIds.has(meta.id) === true;
+        const canTick =
+          meta !== undefined && meta.lineSelection && selection !== undefined;
+        const onRowClick =
+          canTick && meta !== undefined && selection?.applying !== true
+            ? (event: MouseEvent<HTMLDivElement>): void => {
+                if (!(event.target as Element).closest(SELECT_TARGET)) return;
+                // The box is controlled; let React own its checked state.
+                event.preventDefault();
+                onToggle(meta.id, event.shiftKey);
+              }
+            : undefined;
         return (
-          <div key={index} className={`diff-row diff-row--${line.kind}`}>
+          <div
+            key={index}
+            className={`diff-row diff-row--${line.kind}${isSelected ? " is-selected" : ""}${canTick ? " is-tickable" : ""}`}
+            {...(onRowClick === undefined ? {} : { onClick: onRowClick })}
+          >
             {selection !== undefined && (
               <span className="diff-select">
-                {metadata !== undefined && metadata.lineSelection && (
-                  <input
-                    type="checkbox"
-                    checked={selection.selectedIds.has(metadata.id)}
-                    disabled={selection.applying}
-                    onChange={() => selection.onToggleLine(metadata.id)}
-                    aria-label={`Select ${metadata.kind === "add" ? "added" : "deleted"} line ${lineNo ?? ""}`}
-                  />
-                )}
+                {meta !== undefined &&
+                  (meta.lineSelection ? (
+                    <TickBox
+                      checked={isSelected}
+                      indeterminate={false}
+                      disabled={selection.applying}
+                      label={`Select ${meta.kind === "add" ? "added" : "deleted"} line ${lineNo ?? ""}`}
+                    />
+                  ) : (
+                    <TickBox
+                      checked={false}
+                      indeterminate={false}
+                      disabled
+                      label={ATOMIC_LINE_TITLE}
+                      title={ATOMIC_LINE_TITLE}
+                    />
+                  ))}
               </span>
             )}
             <span className="diff-gutter">
