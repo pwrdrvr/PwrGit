@@ -31,6 +31,42 @@ export function CreateTagDialog({
   const [resolving, setResolving] = useState(false);
   /** Only the newest resolution may write state; typing outruns git. */
   const generation = useRef(0);
+  /** In-flight resolutions outlive a dismissal; they must not write state. */
+  const mounted = useRef(true);
+  /** Latest close, so the one-shot key listener never calls a stale closure. */
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  /**
+   * Escape dismisses. This used to be RepoRefsModal's job — it kept a stack of
+   * which nested dialog Escape closes — but the commit context menu now opens
+   * this dialog with no RepoRefsModal above it, so the dialog owns it, as
+   * BranchFromCommitDialog does. Focus inside the dialog, or nowhere in
+   * particular, is ours; focus inside another overlay is not.
+   */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const focused = document.activeElement;
+      const ownsFocus =
+        focused === null ||
+        focused === document.body ||
+        dialogRef.current?.contains(focused) === true;
+      if (!ownsFocus) return;
+      event.preventDefault();
+      closeRef.current();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const target = targetCommit.trim();
 
@@ -39,8 +75,14 @@ export function CreateTagDialog({
   // `tag:create`'s explicit-id contract is untouched and the user has seen
   // exactly which commit they are marking.
   useEffect(() => {
+    // Retire the previous resolution HERE, synchronously, not inside the timer.
+    // Bumping it in the callback leaves an already-dispatched request current
+    // for the whole debounce window after the field changed: it would come
+    // back, clear `resolving`, and re-enable Create carrying the OLD commit
+    // while the field on screen reads the new one — the exact "confirm one
+    // commit, tag another" failure the explicit-id contract exists to prevent.
+    const stamp = ++generation.current;
     if (target === "") {
-      generation.current += 1;
       setResolved(null);
       setResolveError(null);
       setResolving(false);
@@ -48,10 +90,9 @@ export function CreateTagDialog({
     }
     setResolving(true);
     const timer = setTimeout(() => {
-      const stamp = ++generation.current;
       void dispatch("tag:resolveCommit", { repoId, revision: target }).then(
         (result) => {
-          if (stamp !== generation.current) return;
+          if (stamp !== generation.current || !mounted.current) return;
           setResolving(false);
           if (result.ok) {
             setResolved(result.value);
@@ -107,6 +148,7 @@ export function CreateTagDialog({
         className="modal refs-tag-dialog"
         role="dialog"
         aria-label={`Create tag in ${repoName}`}
+        ref={dialogRef}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="modal__title">Create tag · {repoName}</div>
@@ -126,15 +168,29 @@ export function CreateTagDialog({
             aria-label="Target"
             value={targetCommit}
             aria-invalid={resolveError !== null}
+            // The button disables on the same condition, so without this there
+            // is no route to WHY the revision was rejected — only that it was.
+            {...(resolveError === null
+              ? {}
+              : { "aria-describedby": "create-tag-resolve-error" })}
             onChange={(event) => setTargetCommit(event.target.value)}
             placeholder="HEAD, a branch, a tag, or a commit ID"
           />
         </label>
         {/* The resolution, always on screen: the field accepts a name, the tag
             is created at an object id, and this is where those two meet. */}
-        <div className="refs-tag-resolved" aria-live="polite">
+        <div
+          className="refs-tag-resolved"
+          aria-live="polite"
+          aria-busy={resolving}
+        >
           {resolveError !== null ? (
-            <span className="refs-tag-resolved__error">{resolveError}</span>
+            <span
+              className="refs-tag-resolved__error"
+              id="create-tag-resolve-error"
+            >
+              {resolveError}
+            </span>
           ) : resolved === null ? (
             <span className="refs-tag-resolved__pending">
               {target === ""

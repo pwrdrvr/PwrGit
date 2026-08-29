@@ -181,6 +181,7 @@ test("tags a commit straight from the lineage graph", async () => {
   box.commit(repo.path, "one.txt", "the commit to tag");
   box.commit(repo.path, "two.txt", "later work on main");
   const target = box.git(repo.path, "rev-parse", "HEAD~1");
+  const headBefore = box.git(repo.path, "rev-parse", "HEAD");
 
   handle = await launchApp({ worktreeRoot: box.worktreeRoot });
   const { window } = handle;
@@ -208,6 +209,7 @@ test("tags a commit straight from the lineage graph", async () => {
   await expect(create).toHaveCount(0);
 
   expect(box.git(repo.path, "rev-parse", "refs/tags/v0.9.0")).toBe(target);
-  // Tagging never moves a checkout.
-  expect(box.git(repo.path, "rev-parse", "HEAD")).not.toBe(target);
+  // Tagging never moves a checkout — HEAD is exactly where it was, not merely
+  // somewhere other than the tagged commit.
+  expect(box.git(repo.path, "rev-parse", "HEAD")).toBe(headBefore);
 });

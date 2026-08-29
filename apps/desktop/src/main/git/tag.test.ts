@@ -479,6 +479,23 @@ describe("resolveTagTarget", () => {
     );
   });
 
+  it("resolves a ref whose name merely looks hexadecimal", async () => {
+    const fixture = repo();
+    // `--disambiguate` searches objects alone, so this branch is invisible to
+    // it — the resolver must fall through to revision resolution rather than
+    // calling a real branch unresolvable.
+    git(fixture.path, "branch", "deadbeef", fixture.first);
+    const result = await resolveTagTarget(systemGit, fixture.path, "deadbeef");
+    expect(result).toEqual(
+      ok(
+        expect.objectContaining({
+          commitId: fixture.first,
+          resolvedFrom: "deadbeef"
+        })
+      )
+    );
+  });
+
   it("rejects an unknown revision, a tree, and an option-looking input", async () => {
     const fixture = repo();
     const tree = git(fixture.path, "rev-parse", "HEAD^{tree}");

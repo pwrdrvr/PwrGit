@@ -721,7 +721,14 @@ export function RepoRefsModal({
                     <button
                       className="refs-row-action is-danger"
                       aria-label={`Delete local tag ${tag.name}`}
-                      disabled={deletingTag !== null}
+                      /* Busy, not unavailable: Chromium blurs an element the
+                         moment it becomes disabled, so a delete started from
+                         the keyboard would throw focus to <body> until it
+                         returned (SC 2.4.3). aria-disabled says the same thing
+                         and keeps the button focusable — the same rule
+                         RepoRefsSections states for .ref-fetch-all. The
+                         in-flight guard lives in deleteLocalTag. */
+                      aria-disabled={deletingTag !== null}
                       onClick={() => void deleteLocalTag(tag)}
                     >
                       {deletingTag === tag.name ? "Deleting…" : "Delete local"}

@@ -140,6 +140,8 @@ textarea,
 .about-identity-value,
 .about-resource-url,
 .clone-destination-choice,
+.refs-tag-resolved__sha,
+.refs-tag-resolved__subject,
 .selectable {
   -webkit-user-select: text;
   user-select: text;
@@ -3440,7 +3442,10 @@ textarea,
 .refs-row-action.is-danger {
   color: var(--danger-text);
 }
-.refs-row-action:disabled {
+/* `disabled` for the statically unavailable case, `aria-disabled` for busy —
+   see the Delete-local button in RepoRefsModal. Both must look unavailable. */
+.refs-row-action:disabled,
+.refs-row-action[aria-disabled="true"] {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -3497,7 +3502,7 @@ textarea,
   text-transform: uppercase;
 }
 .refs-tag-object__via {
-  display: inline-block;
+  display: block;
   margin-top: 4px;
   overflow: hidden;
   color: var(--text-subtle);

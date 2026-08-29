@@ -196,20 +196,67 @@ describe("CreateTagDialog", () => {
     });
   });
 
-  it("only honours the newest resolution when typing outruns git", async () => {
-    const slow: ResolvedCommit = { ...resolved, shortId: "aaaaaaa" };
+  it("discards a resolution that lands after the target changed", async () => {
+    // The real race is a request that is ALREADY IN FLIGHT when the field
+    // changes — not two edits inside one debounce window, which the timer
+    // collapses on its own. Hold the first response open, let the debounce
+    // fire, then edit and release it.
+    const stale: ResolvedCommit = {
+      ...resolved,
+      commitId: "0".repeat(40),
+      shortId: "0000000",
+      subject: "the commit that was typed first",
+      resolvedFrom: "old"
+    };
+    let releaseFirst: (() => void) | null = null;
     dispatchMock.mockImplementation(async (channel: string, req: unknown) => {
       if (channel !== "tag:resolveCommit") return ok(created);
       const { revision } = req as { revision: string };
-      return ok(revision === "main" ? resolved : slow);
+      if (revision !== "old") return ok(resolved);
+      await new Promise<void>((r) => {
+        releaseFirst = r;
+      });
+      return ok(stale);
     });
+
     await render();
     const fields = container.querySelectorAll<HTMLInputElement>("input");
+    await value(fields[0]!, "v1.2.0");
     await value(fields[1]!, "old");
-    await value(fields[1]!, "main");
     await settleResolve();
+    expect(releaseFirst).not.toBeNull();
 
+    // The field moves on while "old" is still outstanding.
+    await value(fields[1]!, "main");
+    await act(async () => {
+      releaseFirst?.();
+    });
+
+    // The superseded response must not paint, and — the part that actually
+    // bites — must not re-enable Create while carrying the old commit.
+    expect(container.textContent).not.toContain("0000000");
+    expect(container.textContent).not.toContain("the commit that was typed first");
+    expect(createButton().disabled).toBe(true);
+
+    // The newest one still lands.
+    await settleResolve();
     expect(container.textContent).toContain("466c894");
-    expect(container.textContent).not.toContain("aaaaaaa");
+    expect(createButton().disabled).toBe(false);
+    await act(async () => createButton().click());
+    expect(dispatchMock).toHaveBeenCalledWith("tag:create", {
+      repoId: "repo-1",
+      name: "v1.2.0",
+      targetCommit: target,
+      kind: "lightweight"
+    });
+  });
+
+  it("stops resolving once the dialog is dismissed", async () => {
+    await render();
+    const fields = container.querySelectorAll<HTMLInputElement>("input");
+    await value(fields[1]!, "main");
+    await act(async () => root.unmount());
+    // Whatever was outstanding must not write to an unmounted tree.
+    await settleResolve();
   });
 });
