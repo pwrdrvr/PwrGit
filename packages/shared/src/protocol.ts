@@ -57,6 +57,7 @@ import type {
   Repo,
   RepoId,
   RepoRefs,
+  ResolvedCommit,
   TagPage,
   TagSummary,
   RepoSearchHit,
@@ -927,6 +928,15 @@ export interface Commands {
       limit?: number;
     };
     res: TagPage;
+  };
+  /**
+   * Resolve a typed revision (HEAD, a branch, a short id) to the one commit a
+   * tag would be created at, so the dialog can confirm it before creating.
+   * `tag:create` still accepts only an explicit object id.
+   */
+  "tag:resolveCommit": {
+    req: { repoId: string; revision: string };
+    res: ResolvedCommit;
   };
   /** Create a tag at one explicitly supplied commit object. */
   "tag:create": {

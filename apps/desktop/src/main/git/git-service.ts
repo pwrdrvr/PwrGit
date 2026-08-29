@@ -27,6 +27,7 @@ import {
   REMOTE_BRANCH_PAGE_SIZE,
   REMOTE_BRANCH_PREVIEW,
   type RepoRefs,
+  type ResolvedCommit,
   type TagPage,
   type TagSummary,
   TAG_PAGE_MAX,
@@ -2556,6 +2557,109 @@ function tagMutationError(stderr: string, fallback: string): {
         : "tag_operation_failed",
     message: message || fallback
   };
+}
+
+const RESOLVE_FORMAT = ["%H", "%h", "%an", "%cI", "%s"].join("%x1f");
+
+/**
+ * Turn whatever the user typed — `HEAD`, a branch, `v1.0~3`, a short id — into
+ * the one full commit object id a tag would be created at, with enough of that
+ * commit to recognise it.
+ *
+ * This is deliberately NOT a relaxation of `createTagAt`'s hex-only rule. That
+ * rule exists because a commit-ish can mean a different commit at execution
+ * time than it did at review time, and it still holds: the caller resolves
+ * here, shows the user the commit, and creates the tag at the returned id. The
+ * resolution the user used to do in their head — with no confirmation, and no
+ * way to do it at all from inside the dialog — now happens once, on screen.
+ */
+export async function resolveTagTarget(
+  git: GitExec,
+  cwd: string,
+  revision: string
+): Promise<Result<ResolvedCommit>> {
+  const rev = revision.trim();
+  if (rev === "") {
+    return err({
+      kind: "repo",
+      code: "invalid_target_commit",
+      message: "Enter a commit, branch, or tag"
+    });
+  }
+  // Arguments reach git as an argv array, so this is not shell injection — but
+  // `rev-parse -n` would still be read as an option rather than a revision.
+  if (rev.startsWith("-")) {
+    return err({
+      kind: "repo",
+      code: "invalid_target_commit",
+      message: `${rev} is not a revision`
+    });
+  }
+
+  // A hex-looking input takes createTagAt's exact path: disambiguate in the
+  // object database first, so a ref literally named `deadbee` can never stand
+  // in for the object whose id starts with those characters. Resolving it as a
+  // revision here and as an object id there would let the dialog confirm one
+  // commit and the create land on another.
+  const hex = /^[0-9a-f]{7,64}$/i.test(rev);
+  const args = hex
+    ? ["rev-parse", `--disambiguate=${rev}`]
+    : ["rev-parse", "--verify", "--quiet", "--end-of-options", `${rev}^{commit}`];
+  const raw = await git(args, cwd);
+  if (!raw.ok) return raw;
+  const candidates = raw.value.stdout
+    .split(/\r?\n/)
+    .map((value) => value.trim())
+    .filter((value) => value !== "");
+  if (raw.value.exitCode !== 0 || candidates.length !== 1) {
+    return err({
+      kind: "repo",
+      code: "invalid_target_commit",
+      message:
+        candidates.length > 1
+          ? `${rev} is an ambiguous object ID`
+          : `${rev} does not resolve to a commit`
+    });
+  }
+  const commitId = candidates[0] ?? "";
+
+  // `--disambiguate` matches objects of any type, and a revision may have
+  // peeled through a tag; either way the tag must land on a commit.
+  const typeRaw = await git(["cat-file", "-t", commitId], cwd);
+  if (!typeRaw.ok) return typeRaw;
+  if (
+    typeRaw.value.exitCode !== 0 ||
+    typeRaw.value.stdout.trim() !== "commit"
+  ) {
+    return err({
+      kind: "repo",
+      code: "invalid_target_commit",
+      message: `${rev} does not resolve to a commit`
+    });
+  }
+
+  const showArgs = [
+    "show",
+    "--no-patch",
+    `--format=${RESOLVE_FORMAT}`,
+    commitId
+  ];
+  const showRaw = await git(showArgs, cwd);
+  if (!showRaw.ok) return showRaw;
+  const checked = requireExit0(showRaw.value, showArgs);
+  if (!checked.ok) return checked;
+  const [hash = commitId, shortId = "", authorName = "", committedAt = "", subject = ""] =
+    checked.value.stdout.trim().split("\x1f");
+  return ok({
+    commitId: hash,
+    shortId,
+    subject,
+    authorName,
+    committedAt,
+    // What the field said versus what it meant. A short id is already the
+    // commit, so echoing it back as a "resolved from" would be noise.
+    ...(hex ? {} : { resolvedFrom: rev })
+  });
 }
 
 /** Create a lightweight or annotated tag at an explicitly supplied commit id. */

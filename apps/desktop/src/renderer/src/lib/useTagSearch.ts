@@ -77,6 +77,10 @@ export function useTagSearch({
       setLoading(false);
       return;
     }
+    // Loading starts when the search is enabled, not when the debounce fires:
+    // between those two moments there are no rows and no request, and callers
+    // read `!loading && rows.length === 0` as "nothing matches".
+    setLoading(true);
     const timer = setTimeout(() => void fetchPage(0, false), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [enabled, fetchPage]);

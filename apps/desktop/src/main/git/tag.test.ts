@@ -10,7 +10,8 @@ import {
   createTagAt,
   deleteLocalTag,
   listTagPage,
-  planRemoteTag
+  planRemoteTag,
+  resolveTagTarget
 } from "./git-service";
 
 const roots: string[] = [];
@@ -419,5 +420,71 @@ describe("reviewed remote Git tag actions", () => {
     expect(
       git(fixture.path, "ls-remote", "--tags", fetchBare, "refs/tags/release")
     ).toContain(fixture.first);
+  });
+});
+
+describe("resolveTagTarget", () => {
+  it("resolves a branch to the commit it points at right now", async () => {
+    const fixture = repo();
+    const result = await resolveTagTarget(systemGit, fixture.path, "main");
+    expect(result).toEqual(
+      ok({
+        commitId: fixture.second,
+        shortId: fixture.second.slice(0, 7),
+        subject: "second commit",
+        authorName: "Tag Tester",
+        committedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+        resolvedFrom: "main"
+      })
+    );
+  });
+
+  it("resolves HEAD and revision expressions", async () => {
+    const fixture = repo();
+    await expect(
+      resolveTagTarget(systemGit, fixture.path, "HEAD")
+    ).resolves.toEqual(ok(expect.objectContaining({ commitId: fixture.second })));
+    await expect(
+      resolveTagTarget(systemGit, fixture.path, "HEAD~1")
+    ).resolves.toEqual(ok(expect.objectContaining({ commitId: fixture.first })));
+  });
+
+  it("peels an annotated tag through to its commit", async () => {
+    const fixture = repo();
+    git(fixture.path, "tag", "-a", "-m", "release", "v1.0", fixture.first);
+    const result = await resolveTagTarget(systemGit, fixture.path, "v1.0");
+    expect(result).toEqual(
+      ok(expect.objectContaining({ commitId: fixture.first }))
+    );
+  });
+
+  it("omits resolvedFrom when the input was already an object id", async () => {
+    const fixture = repo();
+    const result = await resolveTagTarget(systemGit, fixture.path, fixture.first);
+    expect(result.ok && result.value.commitId).toBe(fixture.first);
+    expect(result.ok && "resolvedFrom" in result.value).toBe(false);
+  });
+
+  it("prefers the object database for a hex input, like createTagAt does", async () => {
+    const fixture = repo();
+    // A branch whose name is the short id of a DIFFERENT commit. Resolving the
+    // input as a revision would follow the ref; both this and createTagAt must
+    // read it as the object, or the dialog would confirm one commit and the
+    // create would land on another.
+    const decoy = fixture.second.slice(0, 8);
+    git(fixture.path, "branch", decoy, fixture.first);
+    const result = await resolveTagTarget(systemGit, fixture.path, decoy);
+    expect(result).toEqual(
+      ok(expect.objectContaining({ commitId: fixture.second }))
+    );
+  });
+
+  it("rejects an unknown revision, a tree, and an option-looking input", async () => {
+    const fixture = repo();
+    const tree = git(fixture.path, "rev-parse", "HEAD^{tree}");
+    for (const input of ["no-such-branch", tree, "--output=/tmp/x", ""]) {
+      const result = await resolveTagTarget(systemGit, fixture.path, input);
+      expect(result.ok).toBe(false);
+    }
   });
 });

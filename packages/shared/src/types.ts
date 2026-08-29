@@ -182,6 +182,21 @@ export type TagSummary = {
   annotation?: TagAnnotation;
 };
 
+/**
+ * One commit a tag could be created at, resolved from whatever the user typed.
+ * `resolvedFrom` is present only when the input was a name rather than an
+ * object id, so the dialog can show what it turned into.
+ */
+export type ResolvedCommit = {
+  /** Full commit object id. This, not the typed revision, is what gets tagged. */
+  commitId: string;
+  shortId: string;
+  subject: string;
+  authorName: string;
+  committedAt: string;
+  resolvedFrom?: string;
+};
+
 /** One bounded page of local tags. */
 export type TagPage = {
   rows: TagSummary[];

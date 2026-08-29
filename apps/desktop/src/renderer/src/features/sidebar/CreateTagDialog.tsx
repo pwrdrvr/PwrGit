@@ -1,39 +1,84 @@
-import { useState } from "react";
-import type { Repo, TagSummary } from "@pwrgit/shared";
+import { useEffect, useRef, useState } from "react";
+import type { ResolvedCommit, TagSummary } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 
-const explicitCommit = (value: string): boolean => /^[0-9a-f]{7,64}$/i.test(value);
+/** Long enough that resolution doesn't fire on every keystroke of a pasted id. */
+const RESOLVE_DEBOUNCE_MS = 250;
 
 export function CreateTagDialog({
-  repo,
+  repoId,
+  repoName,
+  initialTarget,
   onCreated,
   onClose
 }: {
-  repo: Repo;
+  repoId: string;
+  repoName: string;
+  /** Seeds the target when the dialog is opened from a commit. */
+  initialTarget?: string;
   onCreated: (tag: TagSummary) => void;
   onClose: () => void;
 }) {
   const [name, setName] = useState("");
-  const [targetCommit, setTargetCommit] = useState("");
+  const [targetCommit, setTargetCommit] = useState(initialTarget ?? "HEAD");
   const [kind, setKind] = useState<"lightweight" | "annotated">("lightweight");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resolved, setResolved] = useState<ResolvedCommit | null>(null);
+  const [resolveError, setResolveError] = useState<string | null>(null);
+  const [resolving, setResolving] = useState(false);
+  /** Only the newest resolution may write state; typing outruns git. */
+  const generation = useRef(0);
+
   const target = targetCommit.trim();
+
+  // Resolve whatever is in the field to one commit, and show it. The tag is
+  // then created at the resolved object id — never at the typed name — so
+  // `tag:create`'s explicit-id contract is untouched and the user has seen
+  // exactly which commit they are marking.
+  useEffect(() => {
+    if (target === "") {
+      generation.current += 1;
+      setResolved(null);
+      setResolveError(null);
+      setResolving(false);
+      return;
+    }
+    setResolving(true);
+    const timer = setTimeout(() => {
+      const stamp = ++generation.current;
+      void dispatch("tag:resolveCommit", { repoId, revision: target }).then(
+        (result) => {
+          if (stamp !== generation.current) return;
+          setResolving(false);
+          if (result.ok) {
+            setResolved(result.value);
+            setResolveError(null);
+            return;
+          }
+          setResolved(null);
+          setResolveError(result.error.message.split("\n")[0] ?? "Unresolved");
+        }
+      );
+    }, RESOLVE_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [repoId, target]);
+
   const valid =
     name.trim() !== "" &&
-    explicitCommit(target) &&
+    resolved !== null &&
     (kind === "lightweight" || message.trim() !== "");
 
   const create = async (): Promise<void> => {
-    if (!valid || busy) return;
+    if (!valid || busy || resolved === null) return;
     setBusy(true);
     setError(null);
     const result = await dispatch("tag:create", {
-      repoId: repo.id,
+      repoId,
       name: name.trim(),
-      targetCommit: target,
+      targetCommit: resolved.commitId,
       kind,
       ...(kind === "annotated" ? { message: message.trim() } : {})
     });
@@ -61,10 +106,10 @@ export function CreateTagDialog({
       <div
         className="modal refs-tag-dialog"
         role="dialog"
-        aria-label={`Create tag in ${repo.name}`}
+        aria-label={`Create tag in ${repoName}`}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="modal__title">Create tag · {repo.name}</div>
+        <div className="modal__title">Create tag · {repoName}</div>
         <label className="refs-field">
           <span>Tag name</span>
           <input
@@ -76,14 +121,45 @@ export function CreateTagDialog({
           />
         </label>
         <label className="refs-field">
-          <span>Target commit</span>
+          <span>Target</span>
           <input
-            aria-label="Target commit"
+            aria-label="Target"
             value={targetCommit}
+            aria-invalid={resolveError !== null}
             onChange={(event) => setTargetCommit(event.target.value)}
-            placeholder="full or unambiguous commit ID"
+            placeholder="HEAD, a branch, a tag, or a commit ID"
           />
         </label>
+        {/* The resolution, always on screen: the field accepts a name, the tag
+            is created at an object id, and this is where those two meet. */}
+        <div className="refs-tag-resolved" aria-live="polite">
+          {resolveError !== null ? (
+            <span className="refs-tag-resolved__error">{resolveError}</span>
+          ) : resolved === null ? (
+            <span className="refs-tag-resolved__pending">
+              {target === ""
+                ? "Enter a commit, branch, or tag to mark."
+                : "Resolving…"}
+            </span>
+          ) : (
+            <>
+              <div className="refs-tag-resolved__top">
+                <span className="refs-tag-resolved__sha">
+                  {resolved.shortId}
+                </span>
+                <span className="refs-tag-resolved__meta">
+                  {resolved.authorName}
+                  {resolved.resolvedFrom === undefined
+                    ? ""
+                    : ` · ${resolved.resolvedFrom} is here now`}
+                </span>
+              </div>
+              <div className="refs-tag-resolved__subject">
+                {resolved.subject}
+              </div>
+            </>
+          )}
+        </div>
         <label className="refs-field">
           <span>Tag kind</span>
           <select
@@ -111,21 +187,21 @@ export function CreateTagDialog({
         )}
         <div className="modal__hint">
           Tags are repository refs, not branches. Creating one never switches a
-          worktree. Supply the exact commit you intend to mark.
+          worktree. The tag is written at the commit shown above, not at the
+          name you typed — a branch that moves later leaves the tag behind.
         </div>
-        {target !== "" && !explicitCommit(target) && (
-          <div className="modal__error">
-            Enter a full or unambiguous commit object ID, not a branch name.
+        {error !== null && (
+          <div className="modal__error" role="alert">
+            {error}
           </div>
         )}
-        {error !== null && <div className="modal__error">{error}</div>}
         <div className="modal__actions">
           <button className="modal__cancel" onClick={onClose}>
             Cancel
           </button>
           <button
             className="modal__create"
-            disabled={!valid || busy}
+            disabled={!valid || busy || resolving}
             onClick={() => void create()}
           >
             {busy ? "Creating…" : "Create tag"}

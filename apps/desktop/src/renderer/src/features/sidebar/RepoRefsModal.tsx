@@ -191,6 +191,7 @@ export function RepoRefsModal({
   );
   const [renaming, setRenaming] = useState<LocalBranchSummary | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [deletingTag, setDeletingTag] = useState<string | null>(null);
   const q = query.trim().toLowerCase();
   // Locals arrive whole on `repo:refs` and are bounded in practice, so they
   // still filter here. Remote branches are not: they page in from main.
@@ -254,6 +255,7 @@ export function RepoRefsModal({
   };
 
   const deleteLocalTag = async (tag: TagSummary): Promise<void> => {
+    if (deletingTag !== null) return;
     const confirmed = await confirmDialog({
       title: `Delete local tag ${tag.name}?`,
       message: `This deletes only local ${tag.fullName} at ${tag.objectId.slice(0, 12)}. Tags on remotes are unchanged.`,
@@ -261,11 +263,13 @@ export function RepoRefsModal({
       danger: true
     });
     if (!confirmed) return;
+    setDeletingTag(tag.name);
     const result = await dispatch("tag:deleteLocal", {
       repoId: repo.id,
       name: tag.name,
       expectedObjectId: tag.objectId
     });
+    setDeletingTag(null);
     if (!result.ok) {
       showErrorToast({
         title: "Delete tag failed",
@@ -395,7 +399,7 @@ export function RepoRefsModal({
       <div
         className="refs-browser"
         role="dialog"
-        aria-label={`${repo.name} branches and remotes`}
+        aria-label={`${repo.name} branches, tags, and remotes`}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="refs-browser__head">
@@ -624,10 +628,16 @@ export function RepoRefsModal({
 
           {tab === "tags" && (
             <div className="refs-table refs-tag-table">
+              {/* Object and Target were separate columns, and for a
+                  lightweight tag they are the same object with the same type —
+                  the overwhelming majority of rows repeated one id twice and
+                  spent a quarter of the table doing it. One "points at" column
+                  carries the peeled commit, which is what the tag marks; the
+                  intermediate tag object an annotated tag adds appears only on
+                  the rows that actually have one. */}
               <div className="refs-table__header refs-tag-table__row">
                 <span>Tag</span>
-                <span>Object</span>
-                <span>Target</span>
+                <span>Points at</span>
                 <span>Annotation</span>
                 <span>Actions</span>
               </div>
@@ -649,22 +659,15 @@ export function RepoRefsModal({
                       >
                         <strong>{tag.name}</strong>
                       </CopyTarget>
-                      <small>{tag.kind}</small>
+                      {/* Lightweight is the default and saying so on 97% of
+                          rows is noise; annotated is the fact worth carrying. */}
+                      {tag.kind === "annotated" && <small>annotated</small>}
                     </div>
                   </div>
                   <div className="refs-tag-object">
-                    <span>{tag.objectType}</span>
-                    <CopyTarget
-                      value={tag.objectId}
-                      label={`Copy tag object ${tag.objectId}`}
-                      hint={`${tag.objectId}\nClick to copy tag object`}
-                      className="refs-plan__copy copyable"
-                    >
-                      {tag.objectId.slice(0, 12)}
-                    </CopyTarget>
-                  </div>
-                  <div className="refs-tag-object">
-                    <span>{tag.targetType}</span>
+                    <span className="refs-tag-object__type">
+                      {tag.targetType}
+                    </span>
                     <CopyTarget
                       value={tag.targetId}
                       label={`Copy tag target ${tag.targetId}`}
@@ -673,6 +676,19 @@ export function RepoRefsModal({
                     >
                       {tag.targetId.slice(0, 12)}
                     </CopyTarget>
+                    {/* Only when the tag ref does not point straight at the
+                        commit — i.e. an annotated tag, where the tag object is
+                        a distinct thing worth being able to copy. */}
+                    {tag.objectId !== tag.targetId && (
+                      <CopyTarget
+                        value={tag.objectId}
+                        label={`Copy tag object ${tag.objectId}`}
+                        hint={`${tag.objectId}\nClick to copy the ${tag.objectType} object`}
+                        className="refs-tag-object__via copyable"
+                      >
+                        via {tag.objectType} {tag.objectId.slice(0, 8)}
+                      </CopyTarget>
+                    )}
                   </div>
                   <div className="refs-tag-annotation">
                     {tag.annotation === undefined ? (
@@ -704,15 +720,24 @@ export function RepoRefsModal({
                     </button>
                     <button
                       className="refs-row-action is-danger"
+                      aria-label={`Delete local tag ${tag.name}`}
+                      disabled={deletingTag !== null}
                       onClick={() => void deleteLocalTag(tag)}
                     >
-                      Delete local
+                      {deletingTag === tag.name ? "Deleting…" : "Delete local"}
                     </button>
                   </div>
                 </div>
               ))}
+              {/* "No matching" is only true when something was filtered out.
+                  A repo with no tags at all is the common case here, and it
+                  wants the answer plus the way forward, not a filter report. */}
               {tagSearch.rows.length === 0 && !tagSearch.loading && (
-                <div className="refs-browser__empty">No matching local tags.</div>
+                <div className="refs-browser__empty">
+                  {q === ""
+                    ? "No local tags yet. Create one here, or right-click a commit in the graph."
+                    : "No local tags match this filter."}
+                </div>
               )}
               <RefsPageFooter
                 shown={tagSearch.rows.length}
@@ -801,7 +826,8 @@ export function RepoRefsModal({
         )}
         {createTagOpen && (
           <CreateTagDialog
-            repo={repo}
+            repoId={repo.id}
+            repoName={repo.name}
             onCreated={tagsChanged}
             onClose={() => setCreateTagOpen(false)}
           />
@@ -811,6 +837,8 @@ export function RepoRefsModal({
             repo={repo}
             tag={remoteTag}
             remotes={refs.remotes}
+            // Nothing to refresh: pushing or deleting a remote tag leaves
+            // every local ref, and so every row of this table, untouched.
             onCompleted={() => undefined}
             onClose={() => setRemoteTag(null)}
           />

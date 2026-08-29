@@ -15,7 +15,7 @@ async function openBranchBrowser(
     .getByRole("button", { name: /^View all \d+ branches…$/ })
     .click();
   return window.getByRole("dialog", {
-    name: `${repoName} branches and remotes`
+    name: `${repoName} branches, tags, and remotes`
   });
 }
 
@@ -82,7 +82,7 @@ test("adds the first remote to a repository with no configured remotes", async (
     .click();
 
   const browser = window.getByRole("dialog", {
-    name: "local-only branches and remotes"
+    name: "local-only branches, tags, and remotes"
   });
   await browser.getByRole("button", { name: "Add remote…" }).click();
   const editor = window.getByRole("dialog", { name: "Add remote" });
@@ -113,7 +113,7 @@ test("closes the repository refs browser with Escape", async () => {
     .getByRole("button", { name: "Manage remotes and remote branches…" })
     .click();
   const browser = window.getByRole("dialog", {
-    name: "escape-refs branches and remotes"
+    name: "escape-refs branches, tags, and remotes"
   });
   await expect(browser).toBeVisible();
 
@@ -137,7 +137,7 @@ test("includes fetched remote-only branches in the branches browser", async () =
     .getByRole("button", { name: "Manage remotes and remote branches…" })
     .click();
   const browser = window.getByRole("dialog", {
-    name: "remote-refs branches and remotes"
+    name: "remote-refs branches, tags, and remotes"
   });
   await browser.getByRole("button", { name: /^Branches/ }).click();
   await browser.getByPlaceholder("Filter branches…").fill("releases/1.0");
@@ -262,7 +262,7 @@ test("browses local branches and nested remotes, then pushes to a test target", 
     .getByRole("button", { name: "Manage remotes and remote branches…" })
     .click();
   const browser = window.getByRole("dialog", {
-    name: "refsrepo branches and remotes"
+    name: "refsrepo branches, tags, and remotes"
   });
   await expect(browser).toBeVisible();
 
@@ -385,7 +385,7 @@ test("bounds the remote branch preview and pages the rest on demand", async () =
 
   await viewAll.click();
   const browser = window.getByRole("dialog", {
-    name: "many-refs branches and remotes"
+    name: "many-refs branches, tags, and remotes"
   });
   const card = browser.locator(".refs-remote-card", { hasText: "origin" });
   await expect(card).toContainText("61 branches");
@@ -419,7 +419,7 @@ test("filters remote branches in the main process rather than in the page", asyn
     .getByRole("button", { name: "Manage remotes and remote branches…" })
     .click();
   const browser = window.getByRole("dialog", {
-    name: "filter-refs branches and remotes"
+    name: "filter-refs branches, tags, and remotes"
   });
   const card = browser.locator(".refs-remote-card", { hasText: "origin" });
   await expect(card.locator(".refs-page-footer")).toContainText("Showing 50 of 62");
@@ -454,7 +454,7 @@ test("the push source picker filters instead of listing every remote branch", as
     .getByRole("button", { name: "Manage remotes and remote branches…" })
     .click();
   const browser = window.getByRole("dialog", {
-    name: "push-picker branches and remotes"
+    name: "push-picker branches, tags, and remotes"
   });
   await browser.getByRole("button", { name: "Push to remotes…" }).click();
 

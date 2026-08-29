@@ -9,7 +9,8 @@ import {
   createTagAt,
   deleteLocalTag,
   listTagPage,
-  planRemoteTag
+  planRemoteTag,
+  resolveTagTarget
 } from "./git-service";
 
 type RepoRow = {
@@ -45,6 +46,12 @@ export function registerTagHandlers(bus: CommandBus, db: DB): void {
       ...(req.offset === undefined ? {} : { offset: req.offset }),
       ...(req.limit === undefined ? {} : { limit: req.limit })
     });
+  });
+
+  bus.register("tag:resolveCommit", async (req) => {
+    const repo = repoOf(req.repoId);
+    if (repo === undefined) return err(notFound);
+    return resolveTagTarget(execGit, repo.path, req.revision);
   });
 
   bus.register("tag:create", async (req) => {
