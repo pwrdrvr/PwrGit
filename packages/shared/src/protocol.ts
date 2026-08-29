@@ -29,6 +29,9 @@ import type {
   PushRefPlan,
   PushRefResult,
   ChangeSet,
+  GitOperationKind,
+  OperationContinueOutcome,
+  OperationState,
   Commit,
   CommitFileChange,
   CommitStats,
@@ -1160,6 +1163,30 @@ export interface Commands {
   "changes:discardAll": { req: { worktreeId: string }; res: null };
   "changes:commit": {
     req: { worktreeId: string; message: string; amend?: boolean };
+    res: null;
+  };
+  /** What Git is mid-operation on, plus how many paths are still unmerged. */
+  "operation:state": { req: { worktreeId: string }; res: OperationState };
+  /**
+   * Continue only the exact operation the renderer last observed. Refuses
+   * while any path is still unmerged, so Git is never asked to commit
+   * conflict markers.
+   */
+  "operation:continue": {
+    req: { worktreeId: string; operation: GitOperationKind };
+    res: OperationContinueOutcome;
+  };
+  /**
+   * Of the given paths, which still contain conflict markers. Used to warn
+   * before staging a "resolved" file that would commit `<<<<<<<` into history.
+   */
+  "operation:markerScan": {
+    req: { worktreeId: string; paths: string[] };
+    res: string[];
+  };
+  /** Abort only the exact operation the renderer last observed. */
+  "operation:abort": {
+    req: { worktreeId: string; operation: GitOperationKind };
     res: null;
   };
   /** Unified diff for one working-tree file (staged or unstaged). */

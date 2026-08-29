@@ -379,19 +379,62 @@ export function ChangesTab({
     };
   }, [wtId]);
 
+  /**
+   * Which of the paths about to be staged are conflicted. "." means "stage
+   * everything", and a directory row carries its subtree, so match by prefix
+   * rather than equality.
+   */
+  const conflictedTargets = (paths: string[]): string[] =>
+    (changes?.unstaged ?? [])
+      .filter((file) => file.status === "U")
+      .map((file) => file.path)
+      .filter((path) =>
+        paths.some(
+          (target) =>
+            target === "." || path === target || path.startsWith(`${target}/`)
+        )
+      );
+
   const run = (
     command: "changes:stage" | "changes:unstage",
     paths: string[]
   ): void => {
     if (wtId === null) return;
-    void dispatch(command, { worktreeId: wtId, paths }).then((r) => {
+    void (async () => {
+      // Staging a file that still has conflict markers is the classic way to
+      // commit `<<<<<<<` into history. Warn, but do not refuse: a file can
+      // legitimately contain marker-shaped lines.
+      if (command === "changes:stage") {
+        const targets = conflictedTargets(paths);
+        if (targets.length > 0) {
+          const scan = await dispatch("operation:markerScan", {
+            worktreeId: wtId,
+            paths: targets
+          });
+          if (scan.ok && scan.value.length > 0) {
+            const shown = scan.value.slice(0, 5).join("\n");
+            const rest =
+              scan.value.length > 5
+                ? `\n…and ${scan.value.length - 5} more`
+                : "";
+            const proceed = await confirmDialog({
+              title: `Still has conflict markers`,
+              message: `${scan.value.length} file${scan.value.length === 1 ? "" : "s"} you are staging still contain conflict markers:\n\n${shown}${rest}\n\nStage anyway?`,
+              confirmLabel: "Stage anyway",
+              danger: true
+            });
+            if (!proceed) return;
+          }
+        }
+      }
+      const r = await dispatch(command, { worktreeId: wtId, paths });
       if (r.ok) return;
       showErrorToast({
         title: command === "changes:stage" ? "Stage failed" : "Unstage failed",
         message: r.error.message,
         detail: `${command} ${paths.join(", ")}`
       });
-    });
+    })();
   };
 
   const commit = (amend: boolean): void => {

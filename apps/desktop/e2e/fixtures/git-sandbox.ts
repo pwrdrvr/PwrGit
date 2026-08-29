@@ -92,6 +92,12 @@ export type GitSandbox = {
    */
   makeRepoWithDivergedReleaseBranch: (name: string) => TestRepo;
   /** Rewritten commits plus work unique to both local and upstream. */
+  /**
+   * A repo stopped mid-rebase with TWO conflicting steps, so continuing the
+   * first one advances the sequencer and stops again — the case where Git
+   * exits non-zero on ordinary progress.
+   */
+  makeRepoWithRebaseConflicts: (name: string) => TestRepo;
   makeRepoWithRewrittenDivergence: (
     name: string,
     opts?: { paired?: number; localOnly?: number; remoteOnly?: number }
@@ -432,6 +438,42 @@ export function createGitSandbox(): GitSandbox {
     rmSync(base, { recursive: true, force: true });
   };
 
+  const makeRepoWithRebaseConflicts = (name: string): TestRepo => {
+    const repo = makeRepo(name);
+    const { path } = repo;
+    // Two files, each rewritten on both branches: rebasing topic onto main
+    // conflicts on the first step, then again on the second.
+    writeFileSync(join(path, "a.txt"), "base\n");
+    writeFileSync(join(path, "b.txt"), "base\n");
+    git(path, "add", "-A");
+    git(path, "commit", "-m", "base files");
+
+    git(path, "checkout", "-b", "topic");
+    writeFileSync(join(path, "a.txt"), "topic a\n");
+    git(path, "add", "-A");
+    git(path, "commit", "-m", "topic a");
+    writeFileSync(join(path, "b.txt"), "topic b\n");
+    git(path, "add", "-A");
+    git(path, "commit", "-m", "topic b");
+
+    git(path, "checkout", "main");
+    writeFileSync(join(path, "a.txt"), "main a\n");
+    git(path, "add", "-A");
+    git(path, "commit", "-m", "main a");
+    writeFileSync(join(path, "b.txt"), "main b\n");
+    git(path, "add", "-A");
+    git(path, "commit", "-m", "main b");
+
+    git(path, "checkout", "topic");
+    // Expected to fail: this is what leaves the rebase in progress.
+    try {
+      git(path, "rebase", "main");
+    } catch {
+      /* conflict is the point */
+    }
+    return repo;
+  };
+
   return {
     reposDir,
     worktreeRoot,
@@ -447,6 +489,7 @@ export function createGitSandbox(): GitSandbox {
     makeRepoWithSyncedReleaseBranch,
     makeRepoWithDivergedReleaseBranch,
     makeRepoWithRewrittenDivergence,
+    makeRepoWithRebaseConflicts,
     cleanup
   };
 }

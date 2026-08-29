@@ -8695,3 +8695,72 @@ button.agent-auth-node {
   font: 500 10.5px/1.45 var(--font-sans);
   overflow-wrap: anywhere;
 }
+
+/* ---- In-progress Git operation banner ---- */
+
+.op-banner {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--warn-soft);
+}
+.op-banner__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.op-banner__eyebrow {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--status-warning);
+  font: 700 9.5px/1.2 var(--font-sans);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.op-banner__count {
+  flex: 0 0 auto;
+  font: 650 10px/1.2 var(--font-sans);
+}
+.op-banner__count.is-blocked {
+  color: var(--danger-text);
+}
+.op-banner__count.is-clear {
+  color: var(--text-muted);
+}
+.op-banner__hint {
+  margin: 0;
+  color: var(--text-secondary);
+  font: 500 10.5px/1.45 var(--font-sans);
+}
+.op-banner__actions {
+  display: flex;
+  gap: 7px;
+}
+.op-banner__actions button {
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  font: 650 10.5px/1.2 var(--font-sans);
+  cursor: pointer;
+}
+.op-banner__actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.op-banner__abort {
+  border: 1px solid var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+.op-banner__continue {
+  flex: 1;
+  border: 1px solid var(--accent-border);
+  background: var(--accent);
+  color: var(--accent-on);
+}
