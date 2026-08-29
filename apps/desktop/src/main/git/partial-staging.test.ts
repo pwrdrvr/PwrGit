@@ -323,6 +323,60 @@ describe("partial staging with a real Git index", () => {
     }
   });
 
+  it("unstages selected lines from several hunks at once", async () => {
+    // priorDelta only accumulates across hunks, and the unstage direction
+    // computes an entirely different source start than staging does. Every
+    // other case here is single-hunk, or staged=false, so this arithmetic
+    // otherwise ships unexercised.
+    const baseline = Array.from({ length: 30 }, (_, i) => `base-${i + 1}`);
+    commitFile(`${baseline.join("\n")}\n`);
+    const working = [...baseline];
+    working[2] = "EDIT one";
+    working[12] = "EDIT two";
+    working[22] = "EDIT three";
+    writeFileSync(join(repo, "file.txt"), `${working.join("\n")}\n`);
+    git(repo, "add", "file.txt");
+
+    const staged = await partialFileDiff(systemGit, systemGitBinary, repo, "file.txt", true);
+    expect(staged.ok && staged.value.capability.available).toBe(true);
+    if (!staged.ok) return;
+    expect(staged.value.hunks.length).toBe(3);
+
+    // Take the added line out of the first and last hunks, leaving the middle
+    // one staged: the third hunk's offsets have to survive the first one's
+    // delta, and the untouched deletions have to stay put.
+    const addedIn = (index: number): string => {
+      const line = staged.value.hunks[index]?.lines.find(
+        (each) => each.kind === "add"
+      );
+      if (line === undefined) throw new Error(`hunk ${index} has no addition`);
+      return line.id;
+    };
+    expect(
+      await applyPartialSelection(
+        systemGit,
+        systemGitBinary,
+        repo,
+        "file.txt",
+        true,
+        staged.value.fingerprint,
+        [addedIn(0), addedIn(2)]
+      )
+    ).toEqual(ok(undefined));
+
+    // Unstaging only the additions leaves their deletions staged, so the index
+    // drops those two source lines and keeps the middle edit.
+    const expected = [...baseline];
+    expected[12] = "EDIT two";
+    expected.splice(22, 1);
+    expected.splice(2, 1);
+    // The git helper trims trailing whitespace, as the other cases here do.
+    expect(git(repo, "show", ":file.txt")).toBe(expected.join("\n"));
+    // The worktree is untouched by an index-only move.
+    expect(git(repo, "show", ":file.txt")).not.toContain("EDIT one");
+    expect(git(repo, "show", ":file.txt")).not.toContain("EDIT three");
+  });
+
   it("rejects a stale view before changing the index", async () => {
     commitFile("before\n");
     writeFileSync(join(repo, "file.txt"), "first edit\n");

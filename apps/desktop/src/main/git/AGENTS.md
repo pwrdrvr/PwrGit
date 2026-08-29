@@ -107,3 +107,42 @@ Two related traps in the same area:
 - **`GIT_AUTHOR_*` / `GIT_COMMITTER_*` outrank `-c user.email`.** Tests that set
   those in the environment cannot prove identity handling; unset them for that
   assertion (see `execGitWithoutIdentityEnv`).
+## Partial staging works through Git, never through renderer patch text
+
+`partial-staging.ts` stages and unstages hunks and lines. Four invariants hold
+it together; breaking any of them corrupts the index quietly.
+
+- **Line IDs are positional, and only valid for their fingerprint.** An ID is
+  `h:<hunkIndex>:<oldStart>:<newStart>:a|d:<lineNo>` — derived from where a
+  line sits in one exact `-U0` snapshot, not from its content. The same ID
+  names a different line as soon as the diff moves, so `applyPartialSelection`
+  refuses any selection whose `fingerprint` no longer matches. The renderer
+  relies on the same token to decide whether ticks survive a refresh: equal
+  fingerprint means the ticks still point at the lines the user chose. Anything
+  that can change what the pane shows must therefore change the fingerprint —
+  which is why it hashes the display patch as well as the selection patch (an
+  untracked file has no `-U0` output at all).
+
+- **The fingerprint covers one path.** Status is read repo-wide so a
+  path-limited query cannot disguise a rename's destination as a new file, but
+  only this path's statuses enter the token. An edit to an unrelated file must
+  not stale a diff the user is reading — the change watcher fingerprints the
+  whole worktree and fires constantly.
+
+- **Unstaging is a forward patch applied in reverse.** `buildSelectedPatch`
+  describes residual-index → current-index and sets `reverse`, rather than
+  inventing an inverted edit script. That keeps replacement ordering and
+  `\ No newline at end of file` markers native to Git. The two directions
+  compute different hunk starts, and `priorDelta` accumulates across hunks in
+  both — the multi-hunk cases are the ones worth testing, since a single-hunk
+  patch leaves that term zero.
+
+- **`git apply` gets `--unidiff-zero --recount`.** `--recount` recomputes hunk
+  counts from the body, so the counts written into the header are advisory;
+  the *starts* are not, and neither is line order. `--unidiff-zero` disables
+  context matching, so a wrong start silently writes to the wrong place instead
+  of failing to apply.
+
+Whole-file actions stay available for every kind partial staging refuses
+(binary, conflicted, submodule, non-UTF-8, new, deleted, renamed, mode-only);
+`partialDiffCapability` names the reason and the pane shows it.

@@ -49,6 +49,7 @@ export function DiffPane({
   );
   const [selection, setSelection] = useState<LineSelection>(NO_SELECTION);
   const [applying, setApplying] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const paneRef = useRef<HTMLDivElement>(null);
 
@@ -61,14 +62,23 @@ export function DiffPane({
 
   // A refresh replaces the diff in place. Only pointing the pane at a new
   // target clears what is on screen, so an index move — ours or an external
-  // client's — never blanks the body the user is reading. `key` is in the
-  // dependency list, so this runs before the fetch effect below on a retarget.
-  const shownKey = useRef<string | null>(null);
-  if (shownKey.current !== key) {
-    shownKey.current = key;
-    if (patch !== null) setPatch(null);
-    if (selectionDiff !== null) setSelectionDiff(null);
-    if (selection !== NO_SELECTION) setSelection(NO_SELECTION);
+  // client's — never blanks the body the user is reading.
+  //
+  // The previous key is held in state, not a ref: under the concurrent root a
+  // render can be discarded and restarted, and state set during a discarded
+  // render is rolled back with it while a mutated ref stays advanced. With a
+  // ref, that restart sees "same key", skips the reset, and paints the last
+  // file's patch and ticks under the new file's name.
+  const [shownKey, setShownKey] = useState(key);
+  if (shownKey !== key) {
+    setShownKey(key);
+    setPatch(null);
+    setSelectionDiff(null);
+    setSelection(NO_SELECTION);
+    setFailed(false);
+    // F9: every other piece of per-target state is cleared here; an apply left
+    // in flight would otherwise render the newly opened side fully disabled.
+    setApplying(false);
   }
 
   useEffect(() => {
@@ -90,9 +100,15 @@ export function DiffPane({
     void req.then((r) => {
       if (!active) return;
       if (!r.ok) {
-        setPatch("");
-        setSelectionDiff(null);
-      } else if (target.kind === "file") {
+        // A failed read says nothing about the file. Keep the last good diff
+        // and its ticks on screen and report the failure as a failure — the
+        // alternative claimed the file was empty and that its lines had been
+        // cleared because it changed, neither of which happened.
+        setFailed(true);
+        return;
+      }
+      setFailed(false);
+      if (target.kind === "file") {
         const value = r.value as PartialFileDiff;
         setSelectionDiff(value);
         setPatch(value.patch);
@@ -449,7 +465,13 @@ export function DiffPane({
           )}
         </div>
       )}
-      {selectionDropped && (
+      {failed && (
+        <div className="diff-stale-notice" role="status">
+          PwrGit couldn’t re-read this diff. What you see is the last good
+          read; it will catch up on the next change.
+        </div>
+      )}
+      {!failed && selectionDropped && (
         <div className="diff-stale-notice" role="status">
           This file changed, so the lines you had ticked were cleared — their
           positions no longer describe the same edit.
@@ -457,7 +479,11 @@ export function DiffPane({
       )}
       <div className="diff-pane__body">
         {patch === null ? (
-          <div className="diff-empty">Loading diff…</div>
+          <div className="diff-empty">
+            {failed
+              ? "This diff couldn’t be read."
+              : "Loading diff…"}
+          </div>
         ) : (
           <DiffViewer
             patch={patch}

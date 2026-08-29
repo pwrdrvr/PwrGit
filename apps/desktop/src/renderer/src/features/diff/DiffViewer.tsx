@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useRef, type MouseEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  type MouseEvent,
+  type RefObject
+} from "react";
 import {
   imageMediaType,
   type PartialDiffHunk,
@@ -66,16 +72,21 @@ export function DiffViewer({
   if (parsed.files.length === 0) {
     return <div className="diff-empty">{emptyLabel ?? "No changes."}</div>;
   }
+  // Line coordinates are keyed by kind and line number with no file dimension,
+  // so a selection snapshot only describes a single-file patch. `diff:fileSelection`
+  // only ever returns one, but nothing in the prop's type says so — and handing
+  // the same map to a second file would tick a row in the wrong one.
+  const scoped = parsed.files.length === 1 ? selection : undefined;
   return (
     <div
-      className={`diff-view${selection === undefined ? "" : " diff-view--selectable"}`}
+      className={`diff-view${scoped === undefined ? "" : " diff-view--selectable"}`}
     >
       {parsed.files.map((file, i) => (
         <DiffFileView
           key={`${file.path}-${i}`}
           file={file}
           images={images}
-          selection={selection}
+          selection={scoped}
         />
       ))}
     </div>
@@ -133,6 +144,15 @@ function TickBox({
   );
 }
 
+/** How far the pointer may travel between press and release and still count
+ *  as a click rather than a drag. A drag that starts in the code column and
+ *  releases over the gutter reports its click on the row, and reading that as
+ *  a tick would throw the selection away and check a line nobody aimed at.
+ *  Measuring the gesture is what separates the two — asking whether anything
+ *  on the page is selected would also block every tick made while an
+ *  unrelated selection happens to be sitting there. */
+const DRAG_SLOP_PX = 4;
+
 function DiffFileView({
   file,
   images,
@@ -181,6 +201,8 @@ function DiffFileView({
 
   // Lead of the last tick, so the next shift-click knows where to start.
   const anchor = useRef<string | null>(null);
+  // Where the pointer went down, to tell a click from a drag on release.
+  const pressedAt = useRef<{ x: number; y: number } | null>(null);
   const toggle = (id: string, shiftKey: boolean): void => {
     if (selection === undefined) return;
     const from = anchor.current;
@@ -223,7 +245,11 @@ function DiffFileView({
             hunk={hunk}
             selection={selection}
             byCoordinate={byCoordinate}
+            pressedAt={pressedAt}
             onToggle={toggle}
+            onAnchor={(id) => {
+              anchor.current = id;
+            }}
           />
         ))
       )}
@@ -235,12 +261,16 @@ function DiffHunkView({
   hunk,
   selection,
   byCoordinate,
-  onToggle
+  pressedAt,
+  onToggle,
+  onAnchor
 }: {
   hunk: DiffFile["hunks"][number];
   selection: DiffSelectionControls | undefined;
   byCoordinate: Map<string, LineMeta>;
+  pressedAt: RefObject<{ x: number; y: number } | null>;
   onToggle: (id: string, shiftKey: boolean) => void;
+  onAnchor: (id: string) => void;
 }) {
   const metaFor = (line: DiffLine): LineMeta | undefined => {
     const coordinate = coordinateOf(line);
@@ -272,6 +302,11 @@ function DiffHunkView({
             ...checked.map((line) => line.id)
           ]
     );
+    // Re-seat the anchor inside this hunk. Left where it was, the next
+    // shift-click would sweep from whatever row was ticked last — possibly
+    // hunks away — and take a run the user never indicated.
+    const last = tickable.at(-1);
+    if (last !== undefined) onAnchor(last.id);
   };
 
   return (
@@ -324,10 +359,17 @@ function DiffHunkView({
           canTick && meta !== undefined
             ? (event: MouseEvent<HTMLDivElement>): void => {
                 if ((event.target as Element).closest(CODE_COLUMN)) return;
-                // A drag that selected code and released over the gutter still
-                // reports a click on the row. Reading it as a tick would throw
-                // the selection away and check a line nobody aimed at.
-                if ((window.getSelection()?.toString() ?? "") !== "") return;
+                // Only a gesture that actually travelled is a drag. Keyboard
+                // activation reports no press position and is a click.
+                const from = pressedAt.current;
+                pressedAt.current = null;
+                if (
+                  from !== null &&
+                  (Math.abs(event.clientX - from.x) > DRAG_SLOP_PX ||
+                    Math.abs(event.clientY - from.y) > DRAG_SLOP_PX)
+                ) {
+                  return;
+                }
                 // The box is controlled; let React own its checked state.
                 event.preventDefault();
                 onToggle(meta.id, event.shiftKey);
@@ -337,7 +379,17 @@ function DiffHunkView({
           <div
             key={index}
             className={`diff-row diff-row--${line.kind}${isSelected ? " is-selected" : ""}${canTick ? " is-tickable" : ""}`}
-            {...(onRowClick === undefined ? {} : { onClick: onRowClick })}
+            {...(onRowClick === undefined
+              ? {}
+              : {
+                  onClick: onRowClick,
+                  onMouseDown: (event: MouseEvent<HTMLDivElement>) => {
+                    pressedAt.current = {
+                      x: event.clientX,
+                      y: event.clientY
+                    };
+                  }
+                })}
           >
             {selection !== undefined && (
               <span className="diff-select">

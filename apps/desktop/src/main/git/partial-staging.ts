@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { Buffer } from "node:buffer";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -59,11 +60,16 @@ type PartialSnapshot = {
   parsed: ZeroContextPatch;
 };
 
+/** Identity of one exact view of one path. Both patches feed it: an untracked
+ * file has no `-U0` output at all, so hashing only the selection patch would
+ * hand every version of it the same token — and the token is what tells a
+ * refresh "nothing moved, keep the ticks" and what gates an apply. */
 const fingerprintFor = (
   path: string,
   staged: boolean,
   status: string,
-  patch: Uint8Array
+  patch: Uint8Array,
+  display: Uint8Array
 ): string =>
   createHash("sha256")
     .update(staged ? "staged\0" : "unstaged\0")
@@ -72,6 +78,8 @@ const fingerprintFor = (
     .update(status)
     .update("\0")
     .update(patch)
+    .update("\0")
+    .update(display)
     .digest("base64url");
 
 /** Parse Git's single-file `--unified=0` output without interpreting paths.
@@ -457,18 +465,23 @@ async function readSnapshot(
     // destination of a rename as a brand-new file. Only this path's decoded
     // statuses enter the token; an edit to an unrelated file should not stale
     // a diff the user is already reviewing.
-    const fingerprint = fingerprintFor(
-      path,
-      staged,
-      statuses.join(","),
-      after.value
-    );
     let patch = displayPatch.text;
+    let displayBytes: Uint8Array = display.value;
     if (!staged && patch === "" && statuses.includes("?")) {
       const untracked = await fileDiff(git, cwd, path, false);
       if (!untracked.ok) return untracked;
       patch = untracked.value;
+      // The only content this view has; without it an untracked file's token
+      // would be a constant across every edit.
+      displayBytes = Buffer.from(patch, "utf8");
     }
+    const fingerprint = fingerprintFor(
+      path,
+      staged,
+      statuses.join(","),
+      after.value,
+      displayBytes
+    );
     return ok({
       parsed,
       response: {

@@ -217,6 +217,34 @@ describe("DiffViewer hunk and line selection", () => {
     });
     expect(onToggleLine).toHaveBeenLastCalledWith([lines[0]?.id, lines[1]?.id]);
 
+    // A pre-existing selection elsewhere on the page must not disable ticking:
+    // the guard measures the gesture, it does not ask whether anything is
+    // selected. Simulated here by a click whose press and release coincide.
+    onToggleLine.mockClear();
+    const g = gutterOf(rows[0]!);
+    g.dispatchEvent(
+      new MouseEvent("mousedown", { bubbles: true, clientX: 10, clientY: 20 })
+    );
+    await act(async () =>
+      g.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 20 })
+      )
+    );
+    expect(onToggleLine).toHaveBeenLastCalledWith([lines[0]?.id]);
+
+    // A press and release far apart is a drag that happened to end over the
+    // gutter, and must not tick.
+    onToggleLine.mockClear();
+    g.dispatchEvent(
+      new MouseEvent("mousedown", { bubbles: true, clientX: 300, clientY: 20 })
+    );
+    await act(async () =>
+      g.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 20 })
+      )
+    );
+    expect(onToggleLine).not.toHaveBeenCalled();
+
     // The code column is not a toggle: clicking it must stay inert.
     onToggleLine.mockClear();
     await act(async () =>
@@ -228,6 +256,90 @@ describe("DiffViewer hunk and line selection", () => {
     // gutter cell leaves behind — still ticks.
     await act(async () => (rows[1] as HTMLElement).click());
     expect(onToggleLine).toHaveBeenLastCalledWith([lines[1]?.id]);
+  });
+
+  it("re-seats the shift anchor when a whole hunk is taken from its header", async () => {
+    const onToggleLine = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffViewer
+          patch={textPatch}
+          selection={{
+            staged: false,
+            selectedIds: new Set(),
+            applying: false,
+            hunks: [
+              { id: "h:0:2:2", header: "@@ -2 +2 @@", lineSelection: true, lines }
+            ],
+            onToggleLine,
+            onApply: vi.fn()
+          }}
+        />
+      );
+    });
+
+    // Tick the first row, so the anchor sits there.
+    const rows = container.querySelectorAll(".diff-row.is-tickable");
+    await act(async () =>
+      (rows[0]!.querySelector(".diff-gutter") as HTMLElement).click()
+    );
+    // Take the hunk from its header box; the anchor must move into the hunk.
+    await act(async () =>
+      (container.querySelector(".diff-select--hunk") as HTMLElement).click()
+    );
+    // A shift-click on the last row now spans from that row, not from row 0.
+    onToggleLine.mockClear();
+    await act(async () =>
+      (rows[1]!.querySelector(".diff-gutter") as HTMLElement).dispatchEvent(
+        new MouseEvent("click", { bubbles: true, shiftKey: true })
+      )
+    );
+    expect(onToggleLine).toHaveBeenLastCalledWith([lines[1]?.id]);
+  });
+
+  it("withholds selection from a patch carrying more than one file", async () => {
+    const twoFiles = [
+      "diff --git a/file.txt b/file.txt",
+      "--- a/file.txt",
+      "+++ b/file.txt",
+      "@@ -1,3 +1,3 @@",
+      " before",
+      "--- old",
+      "+++ new",
+      " after",
+      "diff --git a/other.txt b/other.txt",
+      "--- a/other.txt",
+      "+++ b/other.txt",
+      "@@ -1,3 +1,3 @@",
+      " before",
+      "-gone",
+      "+here",
+      " after",
+      ""
+    ].join("\n");
+    await act(async () => {
+      root.render(
+        <DiffViewer
+          patch={twoFiles}
+          selection={{
+            staged: false,
+            selectedIds: new Set(),
+            applying: false,
+            hunks: [
+              { id: "h:0:2:2", header: "@@ -2 +2 @@", lineSelection: true, lines }
+            ],
+            onToggleLine: vi.fn(),
+            onApply: vi.fn()
+          }}
+        />
+      );
+    });
+
+    // Coordinates carry no file dimension, so file.txt's line 2 would have
+    // ticked other.txt's line 2 as well. Read-only is the safe answer.
+    expect(container.querySelectorAll(".diff-file")).toHaveLength(2);
+    expect(container.querySelector(".diff-view--selectable")).toBeNull();
+    expect(container.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
   });
 
   it("explains an EOF-sensitive line instead of dropping its box", async () => {
