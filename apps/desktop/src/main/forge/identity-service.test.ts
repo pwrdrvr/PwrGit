@@ -40,7 +40,7 @@ function initRepo(path: string, origin: string): void {
   const run = (...args: string[]) =>
     execFileSync("git", args, { cwd: path, stdio: "ignore" });
   run("init", "-b", "main");
-  run("config", "user.email", "t@pwrgit.dev");
+  run("config", "user.email", "t@pwrgit.com");
   run("config", "user.name", "T");
   writeFileSync(join(path, "README.md"), "# t\n");
   run("add", ".");
@@ -59,7 +59,7 @@ async function fixture(
   const profiles = new ProfileService(db);
   const profile = profiles.create({
     name: "Personal",
-    email: "t@pwrgit.dev",
+    email: "t@pwrgit.com",
     roots: [root]
   });
   const indexer = new RepoIndexer(db, systemGit);

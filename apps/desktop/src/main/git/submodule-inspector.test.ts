@@ -30,9 +30,9 @@ const GIT_ENV: NodeJS.ProcessEnv = {
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_SYSTEM: "/dev/null",
   GIT_AUTHOR_NAME: "PwrGit Test",
-  GIT_AUTHOR_EMAIL: "test@pwrgit.dev",
+  GIT_AUTHOR_EMAIL: "test@pwrgit.com",
   GIT_COMMITTER_NAME: "PwrGit Test",
-  GIT_COMMITTER_EMAIL: "test@pwrgit.dev",
+  GIT_COMMITTER_EMAIL: "test@pwrgit.com",
   GIT_ALLOW_PROTOCOL: "file"
 };
 
@@ -80,7 +80,7 @@ function initRepo(path: string): void {
   mkdirSync(path, { recursive: true });
   git(path, ["init", "-b", "main"]);
   git(path, ["config", "user.name", "PwrGit Test"]);
-  git(path, ["config", "user.email", "test@pwrgit.dev"]);
+  git(path, ["config", "user.email", "test@pwrgit.com"]);
   git(path, ["config", "core.autocrlf", "false"]);
 }
 

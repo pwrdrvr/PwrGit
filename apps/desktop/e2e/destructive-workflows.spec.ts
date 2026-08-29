@@ -123,7 +123,7 @@ test("normal commit and amend refresh the graph, preserve objects, and never pus
   );
   expect(box.git(repo.path, "status", "--porcelain=v1")).toBe("");
   expect(box.git(repo.path, "log", "-1", "--format=%an <%ae>")).toBe(
-    "PwrGit Test <test@pwrgit.dev>"
+    "PwrGit Test <test@pwrgit.com>"
   );
   expect(remoteHead(box, repo)).toBe(upstreamBefore);
 

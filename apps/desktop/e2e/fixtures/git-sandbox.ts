@@ -16,9 +16,9 @@ const GIT_ENV: NodeJS.ProcessEnv = {
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_SYSTEM: "/dev/null",
   GIT_AUTHOR_NAME: "PwrGit Test",
-  GIT_AUTHOR_EMAIL: "test@pwrgit.dev",
+  GIT_AUTHOR_EMAIL: "test@pwrgit.com",
   GIT_COMMITTER_NAME: "PwrGit Test",
-  GIT_COMMITTER_EMAIL: "test@pwrgit.dev"
+  GIT_COMMITTER_EMAIL: "test@pwrgit.com"
 };
 
 function git(cwd: string, ...args: string[]): string {
@@ -394,7 +394,7 @@ export function createGitSandbox(): GitSandbox {
     git(repoPath, "reset", "--hard", base);
     for (let index = 0; index < paired; index += 1) {
       commitAs(
-        "rewrite@pwrgit.dev",
+        "rewrite@pwrgit.com",
         repoPath,
         `shared-${index}.txt`,
         `feat: shared change ${index}`
