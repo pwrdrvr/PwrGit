@@ -236,6 +236,16 @@ describe("FileInsightsPane", () => {
     expect(container.querySelector("[data-testid=file-insight-diff]")).not.toBeNull();
     expect(container.textContent).toContain("shared, clarified");
 
+    // Picking a tab means "show me that": the commit diff gets out of the way
+    // rather than leaving the tab looking dead.
+    await act(async () => tabButton("History")?.click());
+    await settle();
+    expect(container.querySelector("[data-testid=file-insight-diff]")).toBeNull();
+
+    await act(async () => open?.click());
+    await settle();
+    expect(container.querySelector("[data-testid=file-insight-diff]")).not.toBeNull();
+
     // Escape pops the diff and puts the list back with no second Git read.
     const historyReads = dispatchMock.mock.calls.filter(
       ([name]) => name === "file:history"

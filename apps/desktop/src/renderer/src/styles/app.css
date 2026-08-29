@@ -7591,7 +7591,6 @@ body.is-col-resizing {
   border-right: 1px solid var(--border-faint);
   color: var(--text-subtle);
   font: 500 10px/20px var(--font-mono);
-  user-select: none;
 }
 .file-blame__code {
   padding: 0 12px;

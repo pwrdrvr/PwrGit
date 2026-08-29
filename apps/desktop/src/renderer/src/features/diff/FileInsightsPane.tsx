@@ -513,11 +513,11 @@ function BlameView({
           {first.notice}
         </div>
       )}
-      {hunks.length === 0 && (
+      {hunks.length === 0 ? (
         <div className="file-insight__empty">This file has no lines to blame.</div>
-      )}
-      {/* ONE horizontal scroller for the whole file. Per-hunk scrollers let a
-          long line slide under its neighbours and the code stopped lining up. */}
+      ) : (
+      /* ONE horizontal scroller for the whole file. Per-hunk scrollers let a
+         long line slide under its neighbours and the code stopped lining up. */
       <div className="file-blame__lines">
         <div className="file-blame__body">
           {hunks.map((hunk, hunkIndex) => {
@@ -615,6 +615,7 @@ function BlameView({
           })}
         </div>
       </div>
+      )}
       {error !== null && (
         <div className="file-insight__page-error" role="alert">
           More blame lines couldn’t be loaded. {error}
@@ -760,6 +761,10 @@ export function FileInsightsPane({
   }`;
 
   const selectTab = useCallback((next: FileInsightTab): void => {
+    // Picking a tab means "show me that". With a commit diff open over the
+    // panels, leaving it there made the tab look dead — it flipped
+    // aria-selected onto a panel the reader could not see.
+    setPreview(null);
     setTab(next);
     setOpened((current) =>
       current.includes(next) ? current : [...current, next]
