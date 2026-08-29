@@ -418,8 +418,8 @@ export function ChangesTab({
                 ? `\n…and ${scan.value.length - 5} more`
                 : "";
             const proceed = await confirmDialog({
-              title: `Still has conflict markers`,
-              message: `${scan.value.length} file${scan.value.length === 1 ? "" : "s"} you are staging still contain conflict markers:\n\n${shown}${rest}\n\nStage anyway?`,
+              title: "Still has conflict markers",
+              message: `${scan.value.length === 1 ? "A file you are staging still contains" : `${scan.value.length} files you are staging still contain`} conflict markers:\n\n${shown}${rest}\n\nStage anyway?`,
               confirmLabel: "Stage anyway",
               danger: true
             });
