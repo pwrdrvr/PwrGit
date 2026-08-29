@@ -143,8 +143,10 @@ test("hunk and line actions move only the selected changes through Git's index",
   const addedFirst = window.locator(".diff-row--add", {
     hasText: "FIRST edit"
   });
-  // The whole gutter run is the target, not the 13px box inside it.
-  await addedFirst.locator(".diff-gutter").first().click();
+  // Everything left of the code is the target, not the 13px box inside it.
+  // The +/− column always carries a glyph, so it is a stable thing to aim at;
+  // an added row's old-line gutter is empty and collapses to no height.
+  await addedFirst.locator(".diff-sym").click();
   await expect(window.locator(".diff-selection-bar__count")).toHaveText(
     "1 selected"
   );

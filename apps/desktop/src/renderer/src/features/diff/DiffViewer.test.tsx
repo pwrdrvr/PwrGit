@@ -202,7 +202,10 @@ describe("DiffViewer hunk and line selection", () => {
     const rows = container.querySelectorAll(".diff-row.is-tickable");
     expect(rows).toHaveLength(2);
     // The gutter is part of the target; the code column deliberately is not,
-    // so a click there still starts a text selection.
+    // so a click there still starts a text selection. Aim at the FIRST gutter
+    // on purpose: on an added row that is the empty old-line cell, which is
+    // baseline-collapsed to no height, so the row — not the cell — is what
+    // actually receives the click.
     const gutterOf = (row: Element): HTMLElement =>
       row.querySelector(".diff-gutter") as HTMLElement;
     await act(async () => gutterOf(rows[0]!).click());
@@ -220,6 +223,11 @@ describe("DiffViewer hunk and line selection", () => {
       (rows[1]!.querySelector(".diff-text") as HTMLElement).click()
     );
     expect(onToggleLine).not.toHaveBeenCalled();
+
+    // A click that lands on the row itself — the gap an empty, height-less
+    // gutter cell leaves behind — still ticks.
+    await act(async () => (rows[1] as HTMLElement).click());
+    expect(onToggleLine).toHaveBeenLastCalledWith([lines[1]?.id]);
   });
 
   it("explains an EOF-sensitive line instead of dropping its box", async () => {

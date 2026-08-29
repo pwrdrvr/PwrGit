@@ -22,11 +22,17 @@ const STATUS_LABEL: Record<DiffFile["status"], string> = {
 const ATOMIC_LINE_TITLE =
   "This file has no trailing newline, so its last change can only move as a whole hunk.";
 
-/** Clicking the ticks, the line numbers, or the +/− column selects the row.
- *  All three are `user-select: none`, so widening the target this far costs
- *  no ability to select the code itself — which is the one thing the text
- *  column has to keep. */
-const SELECT_TARGET = ".diff-select, .diff-gutter, .diff-sym";
+/** The one column a click must NOT toggle on: everything left of the code is
+ *  the tick target, and the code itself stays selectable text.
+ *
+ *  Naming the gutters positively does not work. A row's grid items are
+ *  baseline-aligned, so a cell with no content has no height — and an added
+ *  row's old-line cell, like a deleted row's new-line cell, is exactly that.
+ *  Clicks across those 44px land on the row, not on the cell, so a rule
+ *  written as "hit .diff-gutter" silently loses half its target on the very
+ *  rows that carry the changes. Letting the row own everything but .diff-text
+ *  has no such gaps. */
+const CODE_COLUMN = ".diff-text";
 
 export type DiffSelectionControls = {
   staged: boolean;
@@ -317,7 +323,11 @@ function DiffHunkView({
         const onRowClick =
           canTick && meta !== undefined
             ? (event: MouseEvent<HTMLDivElement>): void => {
-                if (!(event.target as Element).closest(SELECT_TARGET)) return;
+                if ((event.target as Element).closest(CODE_COLUMN)) return;
+                // A drag that selected code and released over the gutter still
+                // reports a click on the row. Reading it as a tick would throw
+                // the selection away and check a line nobody aimed at.
+                if ((window.getSelection()?.toString() ?? "") !== "") return;
                 // The box is controlled; let React own its checked state.
                 event.preventDefault();
                 onToggle(meta.id, event.shiftKey);
