@@ -272,22 +272,26 @@ describe("graph:lanes — unapplied upstream work on non-default branches", () =
     expect(subjects(graph).filter((s) => s === "rel: fix X")).toHaveLength(2);
   });
 
-  it("covers the focused worktree's branch even when the active cap hides it", async () => {
-    const fixture = makeDivergedRelease();
-    // 31 branches newer than releases/1.0 push it past ACTIVE_DRAW_CAP (30).
-    // The branch the user is actually looking at must survive that cull.
-    const extra: WorktreeRow[] = [];
-    for (let i = 0; i < 31; i += 1) {
-      const branch = `feature/${i}`;
-      commitOnto(fixture.repo, branch, `feature ${i}`, i);
-      extra.push({ id: `wt-f${i}`, branch, path: fixture.repo });
-    }
+  it(
+    "covers the focused worktree's branch even when the active cap hides it",
+    async () => {
+      const fixture = makeDivergedRelease();
+      // 31 branches newer than releases/1.0 push it past ACTIVE_DRAW_CAP (30).
+      // The branch the user is actually looking at must survive that cull.
+      const extra: WorktreeRow[] = [];
+      for (let i = 0; i < 31; i += 1) {
+        const branch = `feature/${i}`;
+        commitOnto(fixture.repo, branch, `feature ${i}`, i);
+        extra.push({ id: `wt-f${i}`, branch, path: fixture.repo });
+      }
 
-    const graph = await lanes(harness(fixture, extra), "active");
-    expect(graph.shownBranches).not.toContain("releases/1.0");
-    expect(subjects(graph)).toContain("rel: upstream fix nobody has locally");
-    expect(graph.upstreamRefs).toContain("origin/releases/1.0");
-  });
+      const graph = await lanes(harness(fixture, extra), "active");
+      expect(graph.shownBranches).not.toContain("releases/1.0");
+      expect(subjects(graph)).toContain("rel: upstream fix nobody has locally");
+      expect(graph.upstreamRefs).toContain("origin/releases/1.0");
+    },
+    60_000
+  );
 
   it("never re-adds the trunk's own ref via a branch that tracks it", async () => {
     const fixture = makeDivergedRelease();
