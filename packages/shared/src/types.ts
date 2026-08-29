@@ -909,6 +909,15 @@ export type FileBlamePage = {
   notice?: string;
 };
 
+/** One tracked file matched by the command palette's file search. */
+export type FileSearchHit = {
+  /** Repository-relative, forward-slashed, exactly as Git records it. */
+  path: string;
+  name: string;
+  /** Directory part, or "" for a file at the repository root. */
+  dir: string;
+};
+
 /** GitHub account presentation fields proven for an exact Git commit author. */
 export type GitHubCommitAuthorIdentity = {
   login: string;

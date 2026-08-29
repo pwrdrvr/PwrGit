@@ -1,5 +1,10 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import type { Commit, RepoSearchHit, SearchHitStatus } from "@pwrgit/shared";
+import type {
+  Commit,
+  FileSearchHit,
+  RepoSearchHit,
+  SearchHitStatus
+} from "@pwrgit/shared";
 import { createAsyncFill } from "../../lib/asyncFill";
 import { currentPlatform, shortcutLabel } from "../../lib/platform";
 import { dispatch } from "../../lib/pwrgit";
@@ -33,10 +38,15 @@ const hitFolderLabel = (hit: RepoSearchHit): string | null =>
 
 export type PaletteItem =
   | { kind: "commit"; commit: Commit }
+  | { kind: "file"; hit: FileSearchHit }
   | { kind: "repo"; hit: RepoSearchHit };
 
 export const paletteItemKey = (item: PaletteItem): string =>
-  item.kind === "commit" ? `commit:${item.commit.hash}` : hitKey(item.hit);
+  item.kind === "commit"
+    ? `commit:${item.commit.hash}`
+    : item.kind === "file"
+      ? `file:${item.hit.path}`
+      : hitKey(item.hit);
 
 export function selectedPaletteItemIndex(
   items: PaletteItem[],
@@ -50,7 +60,8 @@ export function selectedPaletteItemIndex(
 export function buildPaletteItems(
   commits: Commit[],
   results: RepoSearchHit[],
-  query: string
+  query: string,
+  files: FileSearchHit[] = []
 ): PaletteItem[] {
   const exactName = query.trim().normalize("NFC").toLowerCase();
   const exactRepos: RepoSearchHit[] = [];
@@ -66,8 +77,12 @@ export function buildPaletteItems(
     }
   }
 
+  // Files sit above commits: the query that produces them is a literal path
+  // substring, so a hit is a strong signal, and the main process caps the list
+  // short enough that it cannot crowd the other kinds out.
   return [
     ...exactRepos.map((hit) => ({ kind: "repo" as const, hit })),
+    ...files.map((hit) => ({ kind: "file" as const, hit })),
     ...commits.map((commit) => ({ kind: "commit" as const, commit })),
     ...otherResults.map((hit) => ({ kind: "repo" as const, hit }))
   ];
@@ -107,6 +122,24 @@ function CommitIcon() {
   );
 }
 
+function FileIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" />
+      <path d="M14 3v5h5" />
+    </svg>
+  );
+}
+
 function BranchIcon() {
   return (
     <svg
@@ -133,6 +166,7 @@ export function RepoSwitcherOverlay({
   onClose,
   onPick,
   onPickCommit,
+  onPickFile,
   platform = currentPlatform()
 }: {
   commits: Commit[];
@@ -144,12 +178,14 @@ export function RepoSwitcherOverlay({
   onClose: () => void;
   onPick: (hit: RepoSearchHit) => void;
   onPickCommit: (commit: Commit) => void;
+  onPickFile: (path: string) => void;
   /** Explicit only in deterministic platform component tests. */
   platform?: string;
 }) {
   const now = useRelativeClock();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<RepoSearchHit[]>([]);
+  const [files, setFiles] = useState<FileSearchHit[]>([]);
   const [selectedItemKey, setSelectedItemKey] = useState<string | null>(null);
   const [statuses, setStatuses] = useState<Map<string, SearchHitStatus>>(
     () => new Map()
@@ -182,8 +218,8 @@ export function RepoSwitcherOverlay({
     [commitResults, directCommit]
   );
   const items = useMemo<PaletteItem[]>(
-    () => buildPaletteItems(allCommitResults, results, query),
-    [allCommitResults, results, query]
+    () => buildPaletteItems(allCommitResults, results, query, files),
+    [allCommitResults, results, query, files]
   );
   const sel = selectedPaletteItemIndex(items, selectedItemKey);
 
@@ -218,6 +254,26 @@ export function RepoSwitcherOverlay({
       active = false;
     };
   }, [query]);
+
+  // Tracked files in the selected worktree. This is the only way into a file
+  // that has not changed recently: the app has no file browser, so history and
+  // blame were otherwise reachable only for files that turned up in a diff.
+  useEffect(() => {
+    if (commitWorktreeId === null || query.trim() === "") {
+      setFiles([]);
+      return;
+    }
+    let active = true;
+    void dispatch("file:search", {
+      worktreeId: commitWorktreeId,
+      query
+    }).then((result) => {
+      if (active) setFiles(result.ok ? result.value : []);
+    });
+    return () => {
+      active = false;
+    };
+  }, [commitWorktreeId, query]);
 
   useEffect(() => {
     if (hashQuery === null || commitWorktreeId === null) {
@@ -257,6 +313,7 @@ export function RepoSwitcherOverlay({
 
   const pickItem = (item: PaletteItem | undefined): void => {
     if (item?.kind === "commit") onPickCommit(item.commit);
+    else if (item?.kind === "file") onPickFile(item.hit.path);
     else if (item?.kind === "repo") onPick(item.hit);
   };
 
@@ -360,7 +417,7 @@ export function RepoSwitcherOverlay({
         className="overlay-panel"
         role="dialog"
         aria-modal="true"
-        aria-label="Jump to repo, branch, or commit"
+        aria-label="Jump to repo, branch, commit, or file"
         onClick={(event) => event.stopPropagation()}
         onKeyDown={handleKeyDown}
         onMouseDown={(event) => {
@@ -378,14 +435,14 @@ export function RepoSwitcherOverlay({
               setQuery(e.target.value);
               setSelectedItemKey(null);
             }}
-            aria-label="Jump to repo, branch, or commit"
+            aria-label="Jump to repo, branch, commit, or file"
             aria-controls={items.length > 0 ? resultsId : undefined}
             aria-activedescendant={
               items.length > 0 ? rowId(sel) : undefined
             }
             autoComplete="off"
             spellCheck={false}
-            placeholder="Search repos, branches & current repo commits…"
+            placeholder="Search repos, branches, commits & files…"
           />
           <span className="kbd">esc</span>
         </div>
@@ -394,7 +451,7 @@ export function RepoSwitcherOverlay({
           className="overlay-results"
           id={resultsId}
           role="listbox"
-          aria-label="Repositories, branches, and commits"
+          aria-label="Repositories, branches, commits, and files"
           ref={resultsRef}
         >
           {items.map((item, i) => {
@@ -425,6 +482,32 @@ export function RepoSwitcherOverlay({
                   <span className="overlay-result__profile">
                     {commit.shortHash}
                   </span>
+                </div>
+              );
+            }
+            if (item.kind === "file") {
+              const file = item.hit;
+              return (
+                <div
+                  key={`file:${file.path}`}
+                  id={rowId(i)}
+                  role="option"
+                  aria-selected={i === sel}
+                  tabIndex={-1}
+                  className={`overlay-result${i === sel ? " is-selected" : ""}`}
+                  title={`${file.path} — open its history and blame`}
+                  onMouseEnter={() => selectItem(i)}
+                  onClick={() => onPickFile(file.path)}
+                >
+                  <FileIcon />
+                  <span className="overlay-result__name">{file.name}</span>
+                  <span className="overlay-result__folder">
+                    <span className="overlay-result__folder-name">
+                      {file.dir === "" ? "repository root" : file.dir}
+                    </span>
+                  </span>
+                  <span style={{ flex: 1 }} />
+                  <span className="overlay-result__meta">file history</span>
                 </div>
               );
             }

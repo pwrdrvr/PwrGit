@@ -22,7 +22,8 @@ export function Rail({
   onOpenFullCommitDiff,
   onClearSelection,
   onCollapse,
-  onOpenDiff
+  onOpenDiff,
+  onOpenFileInsight
 }: {
   worktree: Worktree | null;
   state: WorktreeState | null;
@@ -37,6 +38,7 @@ export function Rail({
   onClearSelection: () => void;
   onCollapse: () => void;
   onOpenDiff: (path: string, staged: boolean) => void;
+  onOpenFileInsight: (path: string, tab: "history" | "blame") => void;
 }) {
   const [tab, setTab] = useState<RailTab>("changes");
   const dirty = state?.dirty ?? worktree?.dirty ?? 0;
@@ -145,6 +147,7 @@ export function Rail({
             worktree={worktree}
             activeEmail={activeEmail}
             onOpenDiff={onOpenDiff}
+            onOpenFileInsight={onOpenFileInsight}
           />
         )
       ) : (

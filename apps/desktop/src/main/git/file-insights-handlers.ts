@@ -3,6 +3,12 @@ import type { CommandBus, CommandContext } from "../command-bus";
 import type { DB } from "../persistence/db";
 import { execGit } from "./dugite";
 import { readFileBlame, readFileHistory } from "./file-insights";
+import {
+  createFileListCache,
+  FILE_SEARCH_LIMIT_DEFAULT,
+  FILE_SEARCH_LIMIT_MAX,
+  rankFilePaths
+} from "./file-search";
 
 type ActiveOperation = {
   controller: AbortController;
@@ -19,6 +25,7 @@ export function registerFileInsightHandlers(
   db: DB
 ): { releaseWebContents: (webContentsId: number) => void } {
   const active = new Map<string, ActiveOperation>();
+  const fileLists = createFileListCache();
   const operationKey = (operationId: string, ctx: CommandContext): string =>
     `${ctx.webContentsId ?? "local"}:${operationId}`;
 
@@ -121,6 +128,26 @@ export function registerFileInsightHandlers(
     } finally {
       finish(key, operation);
     }
+  });
+
+  bus.register("file:search", async (req) => {
+    const cwd = pathOf(req.worktreeId);
+    if (cwd === null) {
+      return err({
+        kind: "repo",
+        code: "not_found",
+        message: "worktree not found"
+      });
+    }
+    if (req.query.trim() === "") return ok([]);
+    const paths = await fileLists.paths(execGit, req.worktreeId, cwd);
+    if (!paths.ok) return paths;
+    const limit = Number.isFinite(req.limit)
+      ? Math.max(1, Math.min(FILE_SEARCH_LIMIT_MAX, Math.trunc(req.limit ?? 0)))
+      : FILE_SEARCH_LIMIT_DEFAULT;
+    // Ranked here, never in the renderer: filtering only the rows already
+    // fetched would silently hide matches that sort past the first page.
+    return ok(rankFilePaths(paths.value, req.query, limit));
   });
 
   bus.register("file:cancelInsight", (req, ctx) => {

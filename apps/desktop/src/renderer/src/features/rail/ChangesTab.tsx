@@ -311,11 +311,13 @@ function FolderRow({
 export function ChangesTab({
   worktree,
   activeEmail,
-  onOpenDiff
+  onOpenDiff,
+  onOpenFileInsight
 }: {
   worktree: Worktree | null;
   activeEmail: string;
   onOpenDiff: (path: string, staged: boolean) => void;
+  onOpenFileInsight: (path: string, tab: "history" | "blame") => void;
 }) {
   const [changes, setChanges] = useState<ChangeSet | null>(null);
   const [message, setMessage] = useState("");
@@ -326,6 +328,14 @@ export function ChangesTab({
     y: number;
     target: ChangesRowTarget;
   } | null>(null);
+
+  const openInsight = (
+    target: ChangesRowTarget,
+    tab: "history" | "blame"
+  ): void => {
+    if (target.kind !== "file") return;
+    onOpenFileInsight(target.file.path, tab);
+  };
   const [hasSubmoduleConcern, setHasSubmoduleConcern] = useState(false);
   const wtId = worktree?.id ?? null;
 
@@ -712,7 +722,9 @@ export function ChangesTab({
               ),
             onDiscard: () => void discardTarget(menu.target),
             onIgnore: () => ignoreTarget(menu.target),
-            onCopyPath: () => void copyText(targetPaths(menu.target).join("\n"))
+            onCopyPath: () => void copyText(targetPaths(menu.target).join("\n")),
+            onHistory: () => openInsight(menu.target, "history"),
+            onBlame: () => openInsight(menu.target, "blame")
           })}
         />
       )}

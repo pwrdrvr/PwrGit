@@ -38,6 +38,7 @@ import type {
   FileBlamePage,
   FileHistoryPage,
   FileInsightContext,
+  FileSearchHit,
   GitHubCommitAuthorIdentityLookup,
   GraphLog,
   GitLfsReport,
@@ -1269,6 +1270,13 @@ export interface Commands {
   };
   /** Stop a history/blame Git process owned by this renderer. */
   "file:cancelInsight": { req: { operationId: string }; res: null };
+  /** Ranked tracked-file matches, so history and blame are reachable for a
+   *  file that has not changed recently — the app has no file browser, and a
+   *  file only ever entered through a diff it happened to appear in. */
+  "file:search": {
+    req: { worktreeId: string; query: string; limit?: number };
+    res: FileSearchHit[];
+  };
 
   // App settings (Settings window)
   "settings:read": { req: void; res: AppSettingsSnapshot };

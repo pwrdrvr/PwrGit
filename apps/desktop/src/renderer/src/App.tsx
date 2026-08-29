@@ -346,6 +346,21 @@ export function App() {
     }));
   }, []);
 
+  // A file picked in the command palette opens its details directly. The diff
+  // behind the pane is dropped: it belongs to whatever the user was looking at
+  // before, and offering to "go back" to an unrelated file's patch is worse
+  // than returning to the lineage.
+  const onPickFileSearch = useCallback((path: string) => {
+    setOverlayOpen(false);
+    setDiffTarget(null);
+    setCommitFocus(null);
+    setFileInsightTarget({
+      path,
+      context: { kind: "workingTree" },
+      tab: "history"
+    });
+  }, []);
+
   const showLineageCommit = useCallback((hash: string, subject: string) => {
     if (!searchableCommits.some((commit) => commit.hash === hash)) return false;
     setFileInsightTarget(null);
@@ -628,6 +643,7 @@ export function App() {
                   path={fileInsightTarget.path}
                   context={fileInsightTarget.context}
                   initialTab={fileInsightTarget.tab}
+                  returnLabel={diffTarget === null ? "Lineage" : "Diff"}
                   onClose={() => setFileInsightTarget(null)}
                   onShowCommit={showLineageCommit}
                 />
@@ -698,6 +714,14 @@ export function App() {
               setFileInsightTarget(null);
               setDiffTarget({ kind: "file", path, staged });
             }}
+            onOpenFileInsight={(path, tab) => {
+              setDiffTarget(null);
+              setFileInsightTarget({
+                path,
+                context: { kind: "workingTree" },
+                tab
+              });
+            }}
           />
         )}
 
@@ -723,6 +747,7 @@ export function App() {
           onClose={() => setOverlayOpen(false)}
           onPick={onPickSearch}
           onPickCommit={onPickCommitSearch}
+          onPickFile={onPickFileSearch}
         />
       )}
 

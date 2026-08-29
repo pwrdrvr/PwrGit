@@ -146,7 +146,12 @@ describe("ChangesTab list", () => {
     root = createRoot(container);
     await act(async () => {
       root.render(
-        <ChangesTab worktree={worktree} activeEmail="a@b.c" onOpenDiff={vi.fn()} />
+        <ChangesTab
+          worktree={worktree}
+          activeEmail="a@b.c"
+          onOpenDiff={vi.fn()}
+          onOpenFileInsight={vi.fn()}
+        />
       );
     });
   });
@@ -321,7 +326,12 @@ describe("ChangesTab truncation notice", () => {
     );
     await act(async () => {
       root.render(
-        <ChangesTab worktree={worktree} activeEmail="a@b.c" onOpenDiff={vi.fn()} />
+        <ChangesTab
+          worktree={worktree}
+          activeEmail="a@b.c"
+          onOpenDiff={vi.fn()}
+          onOpenFileInsight={vi.fn()}
+        />
       );
     });
   };
@@ -449,7 +459,12 @@ describe("ChangesTab folder actions", () => {
     root = createRoot(container);
     await act(async () => {
       root.render(
-        <ChangesTab worktree={worktree} activeEmail="a@b.c" onOpenDiff={vi.fn()} />
+        <ChangesTab
+          worktree={worktree}
+          activeEmail="a@b.c"
+          onOpenDiff={vi.fn()}
+          onOpenFileInsight={vi.fn()}
+        />
       );
     });
   });
@@ -514,7 +529,13 @@ describe("ChangesTab folder actions", () => {
 
     expect(
       [...document.querySelectorAll(".pop-menu__item")].map((b) => b.textContent)
-    ).toEqual(["Stage", "Copy path", "Discard changes…"]);
+    ).toEqual([
+      "Stage",
+      "File history",
+      "Blame",
+      "Copy path",
+      "Discard changes…"
+    ]);
   });
 
   it("says so when the pattern was already there", async () => {

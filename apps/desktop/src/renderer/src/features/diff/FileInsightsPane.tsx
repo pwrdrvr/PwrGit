@@ -679,6 +679,7 @@ export function FileInsightsPane({
   path,
   context,
   initialTab,
+  returnLabel = "Diff",
   onClose,
   onShowCommit
 }: {
@@ -686,6 +687,9 @@ export function FileInsightsPane({
   path: string;
   context: FileInsightContext;
   initialTab: FileInsightTab;
+  /** What closing the pane returns to — a diff when it was opened from one,
+   *  the lineage when it was opened from the command palette. */
+  returnLabel?: string;
   onClose: () => void;
   onShowCommit: (hash: string, subject: string) => boolean;
 }) {
@@ -754,7 +758,7 @@ export function FileInsightsPane({
       ? `‹ ${TAB_LABEL[tab]}`
       : scopes.length > 1
         ? "‹ Back"
-        : "‹ Diff";
+        : `‹ ${returnLabel}`;
 
   useEffect(() => {
     paneRef.current?.focus({ preventScroll: true });

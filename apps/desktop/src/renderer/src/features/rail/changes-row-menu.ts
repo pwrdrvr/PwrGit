@@ -11,6 +11,8 @@ export type ChangesRowActions = {
   onDiscard: () => void;
   onIgnore: () => void;
   onCopyPath: () => void;
+  onHistory: () => void;
+  onBlame: () => void;
 };
 
 /** Paths the row stands for — one file, or every file the folder lists. */
@@ -83,6 +85,16 @@ export function changesRowMenuItems(
           : "Add folder to .gitignore",
       onSelect: actions.onIgnore
     });
+  }
+
+  // History and blame are per-file, and an untracked file has neither: it has
+  // never been committed, so `git log` would return nothing and blame would
+  // attribute every line to the working tree.
+  if (target.kind === "file" && target.file.status !== "?") {
+    items.push(
+      { type: "item", label: "File history", onSelect: actions.onHistory },
+      { type: "item", label: "Blame", onSelect: actions.onBlame }
+    );
   }
 
   items.push(
