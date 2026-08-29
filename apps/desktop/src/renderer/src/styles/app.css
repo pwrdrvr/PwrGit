@@ -7401,6 +7401,8 @@ body.is-col-resizing {
   flex: 0 0 auto;
   align-self: center;
   padding: 2px;
+}
+.diff-select--hunk.is-tickable {
   cursor: pointer;
 }
 /* Only rows that can actually take a tick advertise one. */

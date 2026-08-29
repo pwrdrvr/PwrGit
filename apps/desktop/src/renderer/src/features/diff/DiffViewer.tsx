@@ -273,8 +273,8 @@ function DiffHunkView({
       <div className="diff-hunk__header">
         {selection !== undefined && tickable.length > 0 && (
           <span
-            className="diff-select diff-select--hunk"
-            onClick={selection.applying ? undefined : toggleHunk}
+            className={`diff-select diff-select--hunk${selection.applying ? "" : " is-tickable"}`}
+            {...(selection.applying ? {} : { onClick: toggleHunk })}
           >
             <TickBox
               checked={allChecked}
@@ -307,10 +307,15 @@ function DiffHunkView({
               : null;
         const isSelected =
           meta !== undefined && selection?.selectedIds.has(meta.id) === true;
+        // Drops while an apply is in flight, so the row stops advertising a
+        // click it would ignore.
         const canTick =
-          meta !== undefined && meta.lineSelection && selection !== undefined;
+          meta !== undefined &&
+          meta.lineSelection &&
+          selection !== undefined &&
+          !selection.applying;
         const onRowClick =
-          canTick && meta !== undefined && selection?.applying !== true
+          canTick && meta !== undefined
             ? (event: MouseEvent<HTMLDivElement>): void => {
                 if (!(event.target as Element).closest(SELECT_TARGET)) return;
                 // The box is controlled; let React own its checked state.
