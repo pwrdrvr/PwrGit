@@ -49,10 +49,13 @@ export function registerOperationHandlers(
     return operations.run(req.worktreeId, () => readOperationState(git, path));
   });
 
+  // Deliberately outside `operations.run`: this reads working files and never
+  // touches the index, so queueing it behind a long fetch would only stall the
+  // confirmation dialog the user is waiting on.
   bus.register("operation:markerScan", async (req) => {
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
-    return ok(scanConflictMarkers(path, req.paths));
+    return ok(await scanConflictMarkers(path, req.paths));
   });
 
   bus.register("operation:continue", async (req) => {

@@ -1,5 +1,6 @@
-import { existsSync, lstatSync, readFileSync } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { lstat, readFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   err,
   ok,
@@ -10,6 +11,7 @@ import {
   type Result
 } from "@pwrgit/shared";
 import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
+import { insideWorktree } from "./worktree-path";
 
 /**
  * Reports what Git is in the middle of, and offers only the two ways out that
@@ -283,11 +285,18 @@ export async function abortOperation(
  */
 export function hasConflictMarkers(text: string): boolean {
   let opened = false;
-  for (const line of text.split("\n")) {
+  // Walked by index rather than split("\n"): these files run to megabytes and
+  // the answer is usually decidable long before the end.
+  for (let start = 0; start <= text.length; ) {
+    const newline = text.indexOf("\n", start);
+    const end = newline === -1 ? text.length : newline;
+    const line = text.slice(start, end);
     if (line.startsWith("<<<<<<< ") || line === "<<<<<<<") opened = true;
     else if (opened && (line.startsWith(">>>>>>> ") || line === ">>>>>>>")) {
       return true;
     }
+    if (newline === -1) break;
+    start = newline + 1;
   }
   return false;
 }
@@ -298,37 +307,37 @@ export const MARKER_SCAN_SIZE_LIMIT = 5 * 1024 * 1024;
 /** Total bytes one scan will read, so a huge conflict set cannot stall main. */
 export const MARKER_SCAN_TOTAL_BUDGET = 64 * 1024 * 1024;
 
-/** Resolve a Git path inside `cwd`, refusing anything that escapes it. */
-function insideWorktree(cwd: string, gitPath: string): string | null {
-  const root = resolve(cwd);
-  const target = resolve(root, ...gitPath.split("/"));
-  const rel = relative(root, target);
-  const parentPrefix = process.platform === "win32" ? "..\\" : "../";
-  if (rel === "" || rel === ".." || rel.startsWith(parentPrefix) || isAbsolute(rel)) {
-    return null;
-  }
-  return target;
-}
+/**
+ * How many paths one scan will even stat. The byte budget alone is no cap:
+ * a path that fails to stat reads nothing, so it never charges the budget.
+ */
+export const MARKER_SCAN_PATH_LIMIT = 1_000;
 
 /**
  * Of `paths`, which still contain an unresolved conflict region. Unreadable,
  * oversized, binary, and non-file entries are skipped rather than guessed at:
  * a false warning here trains people to click through it.
  */
-export function scanConflictMarkers(cwd: string, paths: string[]): string[] {
+export async function scanConflictMarkers(
+  cwd: string,
+  paths: string[]
+): Promise<string[]> {
   const flagged: string[] = [];
   let budget = MARKER_SCAN_TOTAL_BUDGET;
-  for (const gitPath of paths) {
+  // Async fs throughout: this runs on the Electron main thread, and a
+  // synchronous read of the byte budget would freeze the window and every
+  // other IPC channel while the user waits on a confirmation dialog.
+  for (const gitPath of paths.slice(0, MARKER_SCAN_PATH_LIMIT)) {
     if (budget <= 0) break;
     const target = insideWorktree(cwd, gitPath);
     if (target === null) continue;
     try {
       // lstat, not stat: a symlink is never the conflicted regular file we
       // want to read, and following one leaves the worktree.
-      const stat = lstatSync(target);
+      const stat = await lstat(target);
       if (!stat.isFile() || stat.size > MARKER_SCAN_SIZE_LIMIT) continue;
       budget -= stat.size;
-      const bytes = readFileSync(target);
+      const bytes = await readFile(target);
       if (bytes.includes(0)) continue;
       if (hasConflictMarkers(bytes.toString("utf8"))) flagged.push(gitPath);
     } catch {

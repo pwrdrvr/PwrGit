@@ -1,5 +1,4 @@
 import { readFile, stat } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
 import {
   err,
   imageMediaType,
@@ -10,6 +9,7 @@ import {
   type Result
 } from "@pwrgit/shared";
 import type { GitExec, GitExecBinary } from "./dugite";
+import { insideWorktree } from "./worktree-path";
 
 /** Git LFS replaces the blob with a small text pointer; `git show` hands back
  *  the pointer, not the picture, because it does not run smudge filters. */
@@ -49,18 +49,6 @@ function preview(mediaType: string, bytes: Buffer): ImagePreview {
     base64: bytes.toString("base64"),
     bytes: bytes.byteLength
   };
-}
-
-/** Reject a path that escapes the worktree before it reaches the filesystem —
- *  the channel exists to show a diff, not to read arbitrary files. */
-function insideWorktree(cwd: string, path: string): string | null {
-  if (isAbsolute(path)) return null;
-  const full = resolve(cwd, path);
-  const rel = relative(resolve(cwd), full);
-  // Only a leading `..` SEGMENT escapes — a plain `startsWith("..")` would
-  // also reject a file that merely begins with two dots (`..cover.png`).
-  if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`)) return null;
-  return full;
 }
 
 async function worktreePreview(

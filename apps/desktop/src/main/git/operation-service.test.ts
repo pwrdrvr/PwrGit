@@ -36,22 +36,22 @@ const GIT_ENV = {
 /** The service takes GitExec by injection, so point it straight at system git. */
 function makeExecGit(base: NodeJS.ProcessEnv = GIT_ENV): GitExec {
   return (args, cwd, options) =>
-  new Promise((resolve) => {
-    const proc = spawn("git", args, {
-      cwd,
-      env: { ...base, ...(options?.env ?? {}) }
+    new Promise((resolve) => {
+      const proc = spawn("git", args, {
+        cwd,
+        env: { ...base, ...(options?.env ?? {}) }
+      });
+      let stdout = "";
+      let stderr = "";
+      proc.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
+      proc.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+      proc.on("close", (code) =>
+        resolve(ok({ stdout, stderr, exitCode: code ?? 0 }))
+      );
+      proc.on("error", (e: Error) =>
+        resolve(err({ kind: "git", code: "spawn_failed", message: e.message }))
+      );
     });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
-    proc.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-    proc.on("close", (code) =>
-      resolve(ok({ stdout, stderr, exitCode: code ?? 0 }))
-    );
-    proc.on("error", (e: Error) =>
-      resolve(err({ kind: "git", code: "spawn_failed", message: e.message }))
-    );
-  });
 }
 
 const execGit = makeExecGit();
@@ -81,6 +81,9 @@ function git(dir: string, args: string[], env: NodeJS.ProcessEnv = {}): string {
     return "";
   }
 }
+
+let idCounter = 0;
+const nextId = (): number => ++idCounter;
 
 function repo(): string {
   const dir = mkdtempSync(join(tmpdir(), "pwrgit-op-"));
@@ -229,6 +232,44 @@ describe("operation detection (real Git)", () => {
     const state = await readOperationState(execGit, dir);
 
     expect(state.ok && state.value.operation?.kind).toBe("am");
+  });
+
+  /**
+   * PwrGit is worktree-centric, and a linked worktree keeps its operation
+   * markers in `.git/worktrees/<name>/`, not the shared common dir. Reading
+   * the common dir instead would report "no operation" for every linked
+   * worktree while still passing every primary-checkout test above.
+   */
+  it("detects an operation inside a linked worktree, not the common dir", async () => {
+    const dir = repo();
+    diverged(dir);
+    const linked = join(dir, "..", `linked-${nextId()}`);
+    git(dir, ["worktree", "add", "-q", linked, "topic"]);
+    git(linked, ["merge", "main"]);
+
+    const state = await readOperationState(execGit, linked);
+
+    expect(state.ok && state.value.operation?.kind).toBe("merge");
+    expect(state.ok && state.value.conflictCount).toBe(1);
+    // The primary checkout is untouched and reports nothing in progress.
+    const primary = await readOperationState(execGit, dir);
+    expect(primary.ok && primary.value.operation).toBeNull();
+  });
+
+  /**
+   * `merge --squash` deliberately writes no MERGE_HEAD, so a conflict leaves
+   * an unmerged index with no operation. Reporting it as a merge would offer
+   * an Abort that Git rejects with "There is no merge to abort".
+   */
+  it("reports a conflicted squash merge as an unmerged index, not a merge", async () => {
+    const dir = repo();
+    diverged(dir);
+    git(dir, ["merge", "--squash", "topic"]);
+
+    const state = await readOperationState(execGit, dir);
+
+    expect(state.ok && state.value.operation).toBeNull();
+    expect(state.ok && state.value.conflictCount).toBe(1);
   });
 
   it("returns null for a git directory with no operation markers", () => {
@@ -474,7 +515,7 @@ describe("conflict marker detection", () => {
     expect(hasConflictMarkers(">>>>>>> topic\n<<<<<<< HEAD\n")).toBe(false);
   });
 
-  it("scans only the paths given, and skips binary and missing files", () => {
+  it("scans only the paths given, and skips binary and missing files", async () => {
     const dir = repo();
     write(dir, "conflicted.txt", "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> t\n");
     write(dir, "clean.txt", "resolved\n");
@@ -484,7 +525,7 @@ describe("conflict marker detection", () => {
       Buffer.from([0x00, 0x3c, 0x3c, 0x00])
     );
 
-    const flagged = scanConflictMarkers(dir, [
+    const flagged = await scanConflictMarkers(dir, [
       "conflicted.txt",
       "clean.txt",
       "binary.bin",
@@ -494,7 +535,7 @@ describe("conflict marker detection", () => {
     expect(flagged).toEqual(["conflicted.txt"]);
   });
 
-  it("refuses to read outside the worktree", () => {
+  it("refuses to read outside the worktree", async () => {
     const dir = repo();
     const outside = mkdtempSync(join(tmpdir(), "pwrgit-outside-"));
     writeFileSync(
@@ -502,27 +543,29 @@ describe("conflict marker detection", () => {
       "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> t\n"
     );
 
-    expect(scanConflictMarkers(dir, ["../secret.txt"])).toEqual([]);
-    expect(scanConflictMarkers(dir, [join(outside, "secret.txt")])).toEqual([]);
+    expect(await scanConflictMarkers(dir, ["../secret.txt"])).toEqual([]);
+    expect(await scanConflictMarkers(dir, [join(outside, "secret.txt")])).toEqual(
+      []
+    );
   });
 });
 
 describe("marker scan limits", () => {
-  it("skips a symlink rather than following it out of the worktree", () => {
+  it("skips a symlink rather than following it out of the worktree", async () => {
     const dir = repo();
     const outside = mkdtempSync(join(tmpdir(), "pwrgit-outside-"));
     const secret = join(outside, "secret.txt");
     writeFileSync(secret, "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> t\n");
     symlinkSync(secret, join(dir, "link.txt"));
 
-    expect(scanConflictMarkers(dir, ["link.txt"])).toEqual([]);
+    expect(await scanConflictMarkers(dir, ["link.txt"])).toEqual([]);
   });
 
-  it("does not read a file past the per-file size limit", () => {
+  it("does not read a file past the per-file size limit", async () => {
     const dir = repo();
     const padding = "x\n".repeat(MARKER_SCAN_SIZE_LIMIT / 2 + 8);
     write(dir, "huge.txt", `<<<<<<< HEAD\na\n=======\nb\n>>>>>>> t\n${padding}`);
 
-    expect(scanConflictMarkers(dir, ["huge.txt"])).toEqual([]);
+    expect(await scanConflictMarkers(dir, ["huge.txt"])).toEqual([]);
   });
 });

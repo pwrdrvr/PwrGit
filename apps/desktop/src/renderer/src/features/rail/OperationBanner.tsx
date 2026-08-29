@@ -107,7 +107,11 @@ export function OperationBanner({
     <section
       className="op-banner"
       data-testid="operation-banner"
-      aria-label="Git operation in progress"
+      aria-label={
+        operation === null
+          ? "Unmerged index"
+          : `${operation.label} in progress`
+      }
     >
       <div className="op-banner__head">
         <span className="op-banner__eyebrow">
@@ -124,9 +128,9 @@ export function OperationBanner({
 
       <p className="op-banner__hint">
         {operation === null
-          ? "Git has unmerged index entries but no operation in progress — this can follow a conflicted stash apply. Resolve each path, then stage it."
+          ? "Git has unmerged index entries but no operation in progress — this can follow a conflicted stash apply or a squashed merge. Resolve each path, then stage it."
           : blocked
-            ? "Resolve the conflicted files below in your editor or agent, then stage each one."
+            ? "Resolve the conflicted files in your editor or agent, then stage each one from the Changes tab."
             : `Everything is staged. Continue to let Git finish the ${noun(operation)}.`}
       </p>
 

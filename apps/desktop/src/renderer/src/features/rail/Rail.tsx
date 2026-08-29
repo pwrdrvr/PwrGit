@@ -57,7 +57,11 @@ export function Rail({
     void dispatch("operation:state", { worktreeId }).then((result) => {
       // Drop anything a newer request or a worktree switch has superseded.
       if (latestRequest.current !== request) return;
-      setOperation(result.ok ? result.value : null);
+      // Keep the last good state on failure. A transient read error (index.lock
+      // contention, a failed spawn) must not take the banner — and with it the
+      // only in-app Abort/Continue — away mid-operation. Switching worktrees
+      // clears it explicitly below, so this cannot leak across checkouts.
+      if (result.ok) setOperation(result.value);
     });
   }, [worktreeId]);
 
