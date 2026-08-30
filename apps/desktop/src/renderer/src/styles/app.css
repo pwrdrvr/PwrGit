@@ -7145,12 +7145,15 @@ body.is-col-resizing {
   background: var(--success-soft);
   color: var(--text-secondary);
 }
+/* Inherits the bar's own text color rather than dropping to --text-muted:
+   muted on the accent-soft bar measures 4.38:1 in light theme — under AA for
+   10.5px text. The unavailable bar sets muted at container level, where its
+   plain background keeps it passing. */
 .diff-selection-bar__hint {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text-muted);
 }
 .diff-selection-bar__count {
   flex: 0 0 auto;
@@ -7428,11 +7431,10 @@ body.is-col-resizing {
 .diff-row.is-selected .diff-sym {
   color: var(--text-primary);
 }
-/* --accent, not --accent-bright: the row underneath is an add/delete tint,
-   not the --accent-soft surface that colour is floored against. */
-.diff-row.is-selected .diff-gutter {
-  color: var(--accent);
-}
+/* The gutter keeps its normal color on a selected row. An accent recolor
+   read as extra emphasis but measured 4.43:1 over the add tint in light
+   theme — LESS legible than the default it replaced. The spine and the
+   primary-text lift carry the selected state. */
 .diff-row--add {
   background: color-mix(in srgb, var(--status-ok) 10%, transparent);
 }
