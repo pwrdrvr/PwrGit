@@ -19,17 +19,22 @@ const { autoUpdater } = electronUpdater;
 normally. When adding a dependency used in `src/main`, check its `type` — if
 `commonjs`, default-import it.
 
-## better-sqlite3 is built twice, on purpose
+## better-sqlite3 is kept twice, on purpose
 
-`electron-rebuild` can only overwrite `build/Release`, so one binary would have
-to be flipped every time you moved between `pnpm test` (Node's ABI) and
-`pnpm dev` (Electron's) — and a stale flip reads like a broken test or a broken
-database, not a stale build. `postinstall` runs
+PwrGit keeps separately selected native-addon files for both runtimes even
+though better-sqlite3 13 uses Node-API: one deterministic binary remains
+selected for Node tests and scripts, while a separately stamped Electron
+sidecar is verified for the app. Every supported platform stages the package's
+platform/arch Node-API binary into both owned locations, avoiding a native
+toolchain during a normal install. A stale or missing binary still
+reads like a broken test or a broken database, not a native setup problem.
+`postinstall` runs
 [scripts/rebuild-native-for-electron.mjs](scripts/rebuild-native-for-electron.mjs)
 instead, which brackets the rebuild and keeps both binaries:
 
 - `better-sqlite3/build/Release/better_sqlite3.node` — this machine's Node ABI.
-  `vitest` and scripts load it through better-sqlite3's own `bindings()` lookup.
+  `vitest` and scripts select it explicitly through
+  [src/main/persistence/native-binding.ts](src/main/persistence/native-binding.ts).
 - `better-sqlite3/electron-native/better_sqlite3.node` — Electron's ABI, beside
   a `metadata.json` stamping the Electron version, better-sqlite3 version, and
   arch. [src/main/persistence/native-binding.ts](src/main/persistence/native-binding.ts)
@@ -37,13 +42,15 @@ instead, which brackets the rebuild and keeps both binaries:
   match, and ignores it otherwise — a stale sidecar fails at `new Database()`,
   where no sidecar at all may still work.
 
-Packaged builds ship no sidecar: electron-builder rebuilds `build/Release`
-itself, once per packed arch, so a host-arch sidecar would be dead weight at
-best. `electron-builder.yml` excludes `electron-native/` from the asar and
-`scripts/verify-asar-contents.mjs` fails the build if it leaks in. (PwrSnap
-ships its sidecar and builds a `lipo`-merged universal one for release; PwrGit
-does not need that, because electron-builder's per-arch rebuild already
-produces the universal `build/Release` binary that `release.mjs` verifies.)
+Packaged builds ship no sidecar. better-sqlite3 13 opts out of electron-builder's
+implicit rebuild, so `scripts/beforepack-dugite-arch.mjs` stages the target
+platform/arch prebuild at `build/Release` on each packaging pass and
+`electron-builder.yml` disables the destructive default rebuild. It also
+excludes both the dev-only `electron-native/` sidecar and the package's original
+multi-platform `prebuilds/` directory; `scripts/verify-asar-contents.mjs` fails
+the build if either leaks in. The universal merge combines the two Darwin
+slices at the common `build/Release` path, and `release.mjs` verifies both
+architectures.
 
 ## The packaging deps are pinned exact, not caret
 

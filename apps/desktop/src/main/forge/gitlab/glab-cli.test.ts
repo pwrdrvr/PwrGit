@@ -9,6 +9,7 @@ import {
   getGitLabToken,
   glabEnvironment,
   isGlabAuthenticationError,
+  isGlabNotFoundError,
   runGlab,
   sanitizeGlabDiagnostic
 } from "./glab-cli";
@@ -91,6 +92,11 @@ describe("runGlab", () => {
     expect(isGlabAuthenticationError(failure)).toBe(true);
     expect((failure as Error).message).toContain("glab auth login");
     expect((failure as Error).name).toBe("GlabCliError");
+  });
+
+  it("recognizes GitLab's private-or-missing project response", () => {
+    expect(isGlabNotFoundError(new Error("404 Project Not Found"))).toBe(true);
+    expect(isGlabNotFoundError(new Error("connection refused"))).toBe(false);
   });
 });
 

@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.9.0 - 2026-08-30
+
+- Sync - Added profile-wide **Fetch all** and **Try pull all**, with per-repository progress, cancellation, and conservative fast-forwards that only update clean, tracked worktrees.
+- Tags - Added fast tag browsing and search, reviewed local and remote tag management, and a direct **Tag this commit…** action in the commit graph.
+- Tags - Improved tag creation so you can select `HEAD`, a branch, an existing tag, or another revision and review the resolved commit before creating the tag.
+- Git Operations - Added a live rail banner for in-progress merges, rebases, cherry-picks, reverts, and patches, with safe Continue and Abort actions and clearer conflict context.
+- Worktrees - Fixed Windows worktree removal so background Git launcher processes do not leave an otherwise removable directory locked.
+- Repositories - Fixed dangling remote default-branch references so pruning a deleted upstream branch no longer breaks the commit graph.
+- Clone - Made the default clone destination and the exact folder PwrGit will create more obvious before you start.
+- Desktop - Improved fresh-install reliability and speed by staging the packaged SQLite binary instead of compiling it locally.
+
+## v0.8.0 - 2026-08-27
+
+- Repositories - Added a Focused lens that brings your current, pinned, recently viewed, and active repositories and worktrees to the front.
+- Branches - Added safe local branch rename and deletion actions, with protections for checked-out worktrees, unmerged changes, and remote branches.
+- Submodules - Added detailed, read-only submodule status in Changes, including pins, checked-out state, divergence, dirtiness, and configuration drift.
+- Profiles - Added safe profile deletion that removes PwrGit's profile data while leaving your Git repositories on disk untouched.
+- Appearance - Added System, Dark, and Light themes globally and per profile, including synchronized window chrome.
+- Help and Support - Added an About experience with copyable runtime details and direct links to documentation, support, issue reporting, and private security reporting.
+- Clone and Fork - Improved cancellation, cleanup, and retry behavior across clone and fork flows.
+- Reliability - Added recovery controls for failed profile, repository, and forge reads; concurrent fetches now retry once when another Git process advances a remote-tracking ref.
+- Forges - Made private-repository lookup errors clearer, explaining that a 404 can also mean the signed-in account lacks access.
+- Windows - Updated keyboard shortcuts, file-manager wording, and path labels to use Windows-native conventions.
+- Integrations - Added a read-only MCP server for repository and checkout discovery, plus normalized pull-request, CI, conflict, and review status resources.
+- Desktop - Updated the packaged Electron runtime to 41.10.6 and aligned the release build with that runtime.
+
 ## v0.7.0 - 2026-08-23
 
 - Updates - Added **Help → Check for Updates**, so you can manually recheck for a new PwrGit release at any time.

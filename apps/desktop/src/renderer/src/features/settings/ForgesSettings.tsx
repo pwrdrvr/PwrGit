@@ -1,6 +1,12 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ForgeCapabilities, ForgeStatus } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import {
+  LOADING_READ_STATE,
+  READY_READ_STATE,
+  type ReadState
+} from "../../state/readState";
+import { ReadError } from "../shell/ReadError";
 import { SettingsField, SettingsSection } from "./SettingsLayout";
 
 const FORGE_LABELS: Record<ForgeStatus["kind"], string> = {
@@ -38,35 +44,55 @@ const RECHECK_MS = 30_000;
  */
 export function ForgesSettings() {
   const [forges, setForges] = useState<ForgeStatus[] | undefined>();
+  const [loadState, setLoadState] =
+    useState<ReadState>(LOADING_READ_STATE);
+  const mountedRef = useRef(false);
+  const requestRef = useRef(0);
+  const pushRef = useRef(0);
+
+  const read = useCallback(async (): Promise<void> => {
+    const request = ++requestRef.current;
+    const startedAfterPush = pushRef.current;
+    // Keep a usable status list in place during its ordinary 30-second probe.
+    // Initial reads and retries still say plainly that work is in progress.
+    setLoadState((current) =>
+      current.status === "ready" ? current : LOADING_READ_STATE
+    );
+    const result = await dispatch("forge:status", undefined);
+    if (
+      !mountedRef.current ||
+      request !== requestRef.current ||
+      pushRef.current !== startedAfterPush
+    ) {
+      return;
+    }
+    if (result.ok) {
+      setForges(result.value.forges);
+      setLoadState(READY_READ_STATE);
+    } else {
+      setLoadState({ status: "error", message: result.error.message });
+    }
+  }, []);
 
   useEffect(() => {
-    let canceled = false;
-    // Counted rather than latched: a read must defer to a push that overtook
-    // it, but a push that landed before the read even started says nothing
-    // about that read, and latching would silence every later one.
-    let pushes = 0;
+    mountedRef.current = true;
     const unsubscribe = subscribe("forge:statusChanged", ({ forges: next }) => {
-      pushes += 1;
+      // A push is newer than every read currently in flight. Invalidating the
+      // request also prevents a late failure from replacing this success.
+      pushRef.current += 1;
+      requestRef.current += 1;
       setForges(next);
+      setLoadState(READY_READ_STATE);
     });
-    // A pushed change always wins: the read below may have been in flight while
-    // the user was signing in, and landing it late would show stale state.
-    const read = (): void => {
-      const startedAfter = pushes;
-      void dispatch("forge:status", undefined).then((result) => {
-        if (!canceled && pushes === startedAfter && result.ok) {
-          setForges(result.value.forges);
-        }
-      });
-    };
-    read();
-    const timer = window.setInterval(read, RECHECK_MS);
+    void read();
+    const timer = window.setInterval(() => void read(), RECHECK_MS);
     return () => {
-      canceled = true;
+      mountedRef.current = false;
+      requestRef.current += 1;
       window.clearInterval(timer);
       unsubscribe();
     };
-  }, []);
+  }, [read]);
 
   const connected = forges?.filter((forge) => forge.loggedIn).length;
 
@@ -76,21 +102,34 @@ export function ForgesSettings() {
       eyebrow="Integrations"
       description="PwrGit reads pull and merge request status through the CLI you already sign in with. It never asks for a password or stores a token of its own."
       chip={
-        forges === undefined
+        loadState.status === "error" && forges === undefined
+          ? "Unavailable"
+          : forges === undefined
           ? undefined
           : connected === 0
             ? "None connected"
             : `${connected} connected`
       }
-      chipKind={connected === undefined || connected > 0 ? "ok" : "warn"}
+      chipKind={
+        loadState.status === "error" || connected === 0 ? "warn" : "ok"
+      }
     >
-      {forges === undefined ? (
+      {loadState.status === "error" && (
+        <ReadError
+          title="Forge connections couldn’t be checked"
+          message={loadState.message}
+          onRetry={() => void read()}
+        />
+      )}
+      {forges === undefined && loadState.status !== "error" ? (
         <SettingsField
           label="Checking…"
           control={<span className="settings-card__chip">Probing</span>}
         />
+      ) : forges?.length === 0 ? (
+        <p className="settings-empty">No forge integrations are available.</p>
       ) : (
-        forges.map((forge) => (
+        forges?.map((forge) => (
           <SettingsField
             key={forge.kind}
             label={FORGE_LABELS[forge.kind]}

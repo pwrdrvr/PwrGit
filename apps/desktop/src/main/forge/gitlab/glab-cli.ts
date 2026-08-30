@@ -89,6 +89,10 @@ export function isGlabAuthenticationError(cause: unknown): boolean {
   return glab.isAuthenticationError(cause);
 }
 
+export function isGlabNotFoundError(cause: unknown): boolean {
+  return glab.isNotFoundError(cause);
+}
+
 export function glabErrorMessage(cause: unknown): string {
   return glab.errorMessage(cause);
 }

@@ -6,6 +6,9 @@ export type ProfileId = string;
 export type RepoId = string;
 export type WorktreeId = string;
 
+/** A fixed palette for one profile window; absence inherits the app setting. */
+export type ProfileThemeOverride = "dark" | "light";
+
 export type Profile = {
   id: ProfileId;
   name: string;
@@ -22,6 +25,8 @@ export type Profile = {
   kind?: string;
   /** Default GitHub org/owner for new repos under this profile, e.g. "pwrdrvr". */
   org?: string;
+  /** Fixed palette for this profile's window; absent means use the app setting. */
+  theme?: ProfileThemeOverride;
   /** Root folders scanned to discover this profile's repos. */
   roots: string[];
   /** ISO-8601 timestamp of the last time this profile was active. */
@@ -39,6 +44,8 @@ export type Worktree = {
   ahead: number;
   /** Commits behind upstream. */
   behind: number;
+  /** Cached local-branch tracking state. Absent until Git state is computed. */
+  tracking?: BranchTrackingStatus;
   /** Commits the repo's default branch is ahead of this worktree (staleness).
    *  0 when the branch shares no history with the default (see divergedFromDefault). */
   behindDefault: number;
@@ -149,6 +156,54 @@ export type RemoteBranchPage = {
   total: number;
 };
 
+export type GitObjectType = "commit" | "tree" | "blob" | "tag" | "unknown";
+
+export type TagAnnotation = {
+  /** First paragraph of the annotated tag message. */
+  subject: string;
+  /** Remaining paragraphs, without the subject. */
+  body?: string;
+  taggerName?: string;
+  taggerEmail?: string;
+  taggedAt?: string;
+};
+
+/** A local `refs/tags/*` ref. Tags are never switchable branch refs. */
+export type TagSummary = {
+  name: string;
+  fullName: string;
+  kind: "lightweight" | "annotated";
+  /** Object stored directly in refs/tags/name (a tag object when annotated). */
+  objectId: string;
+  objectType: GitObjectType;
+  /** Fully peeled target object. Equal to objectId for a lightweight tag. */
+  targetId: string;
+  targetType: GitObjectType;
+  annotation?: TagAnnotation;
+};
+
+/**
+ * One commit a tag could be created at, resolved from whatever the user typed.
+ * `resolvedFrom` is present only when the input was a name rather than an
+ * object id, so the dialog can show what it turned into.
+ */
+export type ResolvedCommit = {
+  /** Full commit object id. This, not the typed revision, is what gets tagged. */
+  commitId: string;
+  shortId: string;
+  subject: string;
+  authorName: string;
+  committedAt: string;
+  resolvedFrom?: string;
+};
+
+/** One bounded page of local tags. */
+export type TagPage = {
+  rows: TagSummary[];
+  /** Matches across the whole repository, not just this page. */
+  total: number;
+};
+
 /** Reviewed migration from a GitHub HTTPS fetch URL to its SSH equivalent. */
 export type SshRemoteRecovery = {
   remote: string;
@@ -161,7 +216,117 @@ export type SshRemoteRecovery = {
 /** Repository-wide refs and configured remote endpoints. */
 export type RepoRefs = {
   branches: LocalBranchSummary[];
+  /** Small newest-first slice for the sidebar; browse the rest via repo:tags. */
+  previewTags: TagSummary[];
+  tagCount: number;
   remotes: RemoteSummary[];
+};
+
+/** How an initialized submodule checkout relates to the commit pinned by its
+ *  parent repository. The parent gitlink is authoritative; `.gitmodules`
+ *  branch configuration is only an update hint. */
+export type SubmoduleRelation =
+  | "at_pin"
+  | "ahead_of_pin"
+  | "behind_pin"
+  | "diverged_from_pin"
+  | "unknown";
+
+/** Whether the submodule path can currently be inspected as a Git checkout. */
+export type SubmoduleCheckoutState =
+  | "checked_out"
+  | "uninitialized"
+  | "deinitialized"
+  | "missing"
+  | "not_repository";
+
+/** A localized problem that does not invalidate the rest of the parent scan. */
+export type SubmoduleIssue = {
+  code:
+    | "checkout_missing"
+    | "checkout_uninitialized"
+    | "checkout_deinitialized"
+    | "checkout_not_repository"
+    | "gitlink_missing"
+    | "gitmodules_entry_missing"
+    | "url_missing"
+    | "url_changed"
+    | "index_conflict"
+    | "commit_unavailable"
+    | "inspect_failed"
+    | "scan_truncated";
+  severity: "warning" | "error";
+  message: string;
+  /** Conservative next step phrased as guidance, never an auto-run mutation. */
+  remedy?: string;
+};
+
+/** One gitlink/config/check-out record in a selected parent worktree. */
+export type SubmoduleStatus = {
+  /** `.gitmodules` section name, or the path when the section is absent. */
+  name: string;
+  /** Forward-slash path relative to the selected top-level worktree. */
+  path: string;
+  /** Zero for direct children, increasing for initialized nested children. */
+  depth: number;
+  /** Commit recorded by the parent repository's HEAD tree. */
+  pinnedCommit?: string;
+  /** Gitlink currently in the parent index (the next commit's pin). */
+  indexCommit?: string;
+  checkedOutCommit?: string;
+  checkoutState: SubmoduleCheckoutState;
+  relation: SubmoduleRelation;
+  /** null when no checkout was available to inspect. */
+  dirty: boolean | null;
+  /** null when no checkout was available; true is normal after submodule update. */
+  detached: boolean | null;
+  checkedOutBranch?: string;
+  /** Tags in the child repository that point at HEAD's pin (or a new index pin). */
+  pinnedTags: string[];
+  /** Values declared by `.gitmodules`; these do not replace the gitlink pin. */
+  configuredUrl?: string;
+  configuredBranch?: string;
+  /** URL copied into the parent's local config when the submodule was initialized. */
+  initializedUrl?: string;
+  issues: SubmoduleIssue[];
+};
+
+/** Bounded, failure-isolated submodule inspection for one selected worktree. */
+export type SubmoduleSnapshot = {
+  submodules: SubmoduleStatus[];
+  truncated: boolean;
+  /** Parent-level parse/bounds problems not attributable to one child path. */
+  issues: SubmoduleIssue[];
+};
+
+export type RemoteTagAction = "push" | "delete";
+
+/**
+ * Exact local/remote tag objects reviewed immediately before a guarded action.
+ * Remote tags have no tracking refs, so this snapshot is deliberately separate
+ * from RemoteSummary and branch push plans.
+ */
+export type RemoteTagPlan = {
+  action: RemoteTagAction;
+  remote: string;
+  /** Exact effective push endpoint inspected during review. */
+  pushUrl: string;
+  tagName: string;
+  fullName: string;
+  /** Present for push. The tag ref must still equal this object at apply time. */
+  localObjectId?: string;
+  localTargetId?: string;
+  /** Absent only when a push reviewed creation of a new remote tag. */
+  remoteObjectId?: string;
+  remoteTargetId?: string;
+  status: "create" | "equal" | "delete";
+};
+
+export type RemoteTagResult = {
+  action: RemoteTagAction;
+  remote: string;
+  tagName: string;
+  outcome: "pushed" | "up_to_date" | "deleted";
 };
 
 export type PushRefRelation =
@@ -287,7 +452,7 @@ export type Repo = {
   /**
    * Persisted drag-order index within the profile; absent until the user
    * arranges the list by hand. Only the Pinned lens honors it — the computed
-   * lenses (Recent/Behind/Stale) answer a question, so a manual order there
+   * lenses (Focused/Behind/Stale) answer a question, so a manual order there
    * would fight the answer.
    */
   order?: number;
@@ -314,6 +479,25 @@ export type GitLfsStatus =
       /** Full `git lfs version` output when the executable was available. */
       version?: string;
     };
+
+/** Whether a checkout that asks for LFS can actually apply it. The single
+ *  definition of "ready" for both processes — main records it, the renderer
+ *  paints it — so the two can never disagree on what counts as working. */
+export function isGitLfsReady(status: GitLfsStatus): boolean {
+  return status.required && status.installed && status.configured;
+}
+
+/** What an LFS check answers. A broken setup nags on every check; a working
+ *  one is announced once per transition into working — the main process keeps
+ *  that record per repo, so every worktree of a repo shares one announcement
+ *  and it survives restarts. */
+export type GitLfsReport = {
+  status: GitLfsStatus;
+  /** True exactly when this check should celebrate a working setup: the
+   *  repo's first LFS-ready check, or the first ready check after a broken
+   *  one. Steady-state ready checks answer false and stay quiet. */
+  announceReady: boolean;
+};
 
 /** A remote's forge, or `other` when no provider claims its host — which is a
  *  fact the identity marks render, not a failure. `ForgeKind` is the set of
@@ -543,6 +727,109 @@ export type ChangeSet = {
   };
 };
 
+/**
+ * A Git operation whose sequencer/merge markers are still present in a
+ * worktree. These are exactly the states that need `--continue`/`--abort` to
+ * leave; PwrGit reports them, it does not resolve the conflicts inside them.
+ */
+export type GitOperationKind =
+  | "merge"
+  | "rebase"
+  | "am"
+  | "cherry-pick"
+  | "revert";
+
+export type GitOperation = {
+  kind: GitOperationKind;
+  /** Human label for the operation, e.g. "Rebase". */
+  label: string;
+  /** Sequencer step progress, only when Git exposes both counters. */
+  progress?: { current: number; total: number };
+};
+
+/**
+ * What Git is in the middle of for one worktree. An operation with zero
+ * conflicts is normal and common: a rebase paused on an `edit` step, or a
+ * `merge --no-commit`, both sit here.
+ */
+export type OperationState = {
+  operation: GitOperation | null;
+  /** Paths with at least one unmerged index stage. */
+  conflictCount: number;
+};
+
+/**
+ * The result of `--continue`. Git exits non-zero both when an operation truly
+ * fails and when it advances and stops on the *next* conflict, so the outcome
+ * is classified against observed state rather than the exit code alone.
+ */
+export type OperationContinueOutcome =
+  /** The operation finished; no markers remain. */
+  | { kind: "completed" }
+  /** The operation moved forward and stopped again. This is progress. */
+  | { kind: "stopped"; state: OperationState; detail: string };
+
+/** Why a working-tree diff cannot safely be applied a hunk at a time. Whole
+ * file stage/unstage remains available for every one of these cases. */
+export type PartialDiffUnavailableReason =
+  | "binary"
+  | "conflicted"
+  | "gitlink"
+  | "non_utf8"
+  | "new_file"
+  | "deleted_file"
+  | "renamed_file"
+  | "mode_only"
+  | "no_changes"
+  | "unsupported_patch";
+
+export type PartialDiffCapability =
+  | { available: true }
+  | {
+      available: false;
+      reason: PartialDiffUnavailableReason;
+      message: string;
+    };
+
+/** A selectable changed line in Git's zero-context view of one file. IDs are
+ * stable for the exact `fingerprint` returned with the diff; applying an ID
+ * against any later version is rejected as stale. */
+export type PartialDiffLine = {
+  id: string;
+  kind: "add" | "delete";
+  oldLine: number | null;
+  newLine: number | null;
+  text: string;
+};
+
+export type PartialDiffHunk = {
+  id: string;
+  header: string;
+  /** False when Git's no-newline marker binds the file boundary to the whole
+   * hunk; splitting those lines would create a patch with impossible EOF
+   * semantics. */
+  lineSelection: boolean;
+  lines: PartialDiffLine[];
+};
+
+/** A display patch plus the exact Git-native selection snapshot behind it.
+ * `patch` carries normal context for reading; `hunks` come from `-U0` so a
+ * command can name changes without trusting renderer-generated patch text. */
+export type PartialFileDiff = {
+  path: string;
+  staged: boolean;
+  patch: string;
+  fingerprint: string;
+  capability: PartialDiffCapability;
+  hunks: PartialDiffHunk[];
+  /** Whether this same path also has changes on the other side of the index.
+   * A partially staged file is two rows in the rail; this is what lets the
+   * open diff offer the round trip between them instead of making the reader
+   * close the pane and hunt for its twin. Read from the status Git already
+   * had to produce for the snapshot, so it costs nothing extra. */
+  counterpartChanges: boolean;
+};
+
 /** One file touched by a commit (rail's commit-scoped file list). */
 export type CommitFileChange = {
   path: string;
@@ -621,6 +908,101 @@ export type WorktreeState = {
   lastActivityAt?: string;
   /** ISO-8601 time the snapshot was computed. */
   updatedAt: string;
+};
+
+/** Profile-wide repository synchronization without destructive recovery. */
+export type BulkSyncMode = "fetch" | "soft-pull";
+
+export type BulkSyncRemoteResult = {
+  remote: string;
+  outcome: "fetched" | "skipped" | "failed" | "cancelled";
+  reason?:
+    | "skip_fetch_all"
+    | "authentication"
+    | "fetch_failed"
+    | "cancelled";
+  message?: string;
+};
+
+export type BulkSyncWorktreeResult = {
+  worktreeId: WorktreeId;
+  branch: string;
+  path: string;
+  outcome: "updated" | "up_to_date" | "skipped" | "failed" | "cancelled";
+  reason?:
+    | "dirty"
+    | "conflicts"
+    | "detached_head"
+    | "no_head"
+    | "no_upstream"
+    | "in_progress"
+    | "diverged"
+    | "ahead"
+    | "authentication"
+    | "fetch_failed"
+    | "upstream_not_fetched"
+    | "unsafe_state"
+    | "merge_failed"
+    | "cancelled";
+  message?: string;
+  /** Exact commit ids before and after a successful fast-forward. */
+  beforeHead?: string;
+  afterHead?: string;
+};
+
+export type BulkSyncRepoResult = {
+  repoId: RepoId;
+  name: string;
+  path: string;
+  outcome: "success" | "partial" | "skipped" | "failed" | "cancelled";
+  remotes: BulkSyncRemoteResult[];
+  worktrees: BulkSyncWorktreeResult[];
+  message?: string;
+};
+
+export type BulkSyncCounts = {
+  repos: {
+    success: number;
+    partial: number;
+    skipped: number;
+    failed: number;
+    cancelled: number;
+  };
+  remotes: {
+    fetched: number;
+    skipped: number;
+    failed: number;
+    cancelled: number;
+  };
+  worktrees: {
+    updated: number;
+    upToDate: number;
+    skipped: number;
+    failed: number;
+    cancelled: number;
+  };
+};
+
+export type BulkSyncSummary = {
+  operationId: string;
+  mode: BulkSyncMode;
+  cancelled: boolean;
+  startedAt: string;
+  finishedAt: string;
+  counts: BulkSyncCounts;
+  results: BulkSyncRepoResult[];
+};
+
+/** Incremental progress for a long-running profile-wide sync command. */
+export type BulkSyncProgress = {
+  operationId: string;
+  mode: BulkSyncMode;
+  phase: "starting" | "repo_started" | "repo_completed";
+  totalRepos: number;
+  completedRepos: number;
+  repoId?: RepoId;
+  repoName?: string;
+  result?: BulkSyncRepoResult;
 };
 
 /** A commit that exists on only one side of a diverged tracked branch. */
@@ -755,7 +1137,7 @@ export type RebaseCheckResult =
     }
   | { status: "snag"; code: string; message: string };
 
-export type Lens = "Recent" | "Pinned" | "Behind" | "Stale" | "All";
+export type Lens = "Focused" | "Pinned" | "Behind" | "Stale" | "All";
 export type WorktreeSort = "recent" | "pinned" | "az" | "active" | "custom";
 
 /** Lazily-filled status for a ⌘F search hit (nulls = unknown/uncached). */

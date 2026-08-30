@@ -6,6 +6,19 @@ import { addRootAndExpand } from "./fixtures/steps";
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
 
+async function openBranchBrowser(
+  window: AppHandle["window"],
+  repoName: string
+) {
+  await window.getByRole("button", { name: /^Branches/ }).click();
+  await window
+    .getByRole("button", { name: /^View all \d+ branches…$/ })
+    .click();
+  return window.getByRole("dialog", {
+    name: `${repoName} branches, tags, and remotes`
+  });
+}
+
 function addRemoteOnlyBranch(
   box: GitSandbox,
   repo: ReturnType<GitSandbox["makeRepoBehindRemote"]>,
@@ -69,7 +82,7 @@ test("adds the first remote to a repository with no configured remotes", async (
     .click();
 
   const browser = window.getByRole("dialog", {
-    name: "local-only branches and remotes"
+    name: "local-only branches, tags, and remotes"
   });
   await browser.getByRole("button", { name: "Add remote…" }).click();
   const editor = window.getByRole("dialog", { name: "Add remote" });
@@ -100,7 +113,7 @@ test("closes the repository refs browser with Escape", async () => {
     .getByRole("button", { name: "Manage remotes and remote branches…" })
     .click();
   const browser = window.getByRole("dialog", {
-    name: "escape-refs branches and remotes"
+    name: "escape-refs branches, tags, and remotes"
   });
   await expect(browser).toBeVisible();
 
@@ -124,7 +137,7 @@ test("includes fetched remote-only branches in the branches browser", async () =
     .getByRole("button", { name: "Manage remotes and remote branches…" })
     .click();
   const browser = window.getByRole("dialog", {
-    name: "remote-refs branches and remotes"
+    name: "remote-refs branches, tags, and remotes"
   });
   await browser.getByRole("button", { name: /^Branches/ }).click();
   await browser.getByPlaceholder("Filter branches…").fill("releases/1.0");
@@ -249,7 +262,7 @@ test("browses local branches and nested remotes, then pushes to a test target", 
     .getByRole("button", { name: "Manage remotes and remote branches…" })
     .click();
   const browser = window.getByRole("dialog", {
-    name: "refsrepo branches and remotes"
+    name: "refsrepo branches, tags, and remotes"
   });
   await expect(browser).toBeVisible();
 
@@ -372,7 +385,7 @@ test("bounds the remote branch preview and pages the rest on demand", async () =
 
   await viewAll.click();
   const browser = window.getByRole("dialog", {
-    name: "many-refs branches and remotes"
+    name: "many-refs branches, tags, and remotes"
   });
   const card = browser.locator(".refs-remote-card", { hasText: "origin" });
   await expect(card).toContainText("61 branches");
@@ -406,7 +419,7 @@ test("filters remote branches in the main process rather than in the page", asyn
     .getByRole("button", { name: "Manage remotes and remote branches…" })
     .click();
   const browser = window.getByRole("dialog", {
-    name: "filter-refs branches and remotes"
+    name: "filter-refs branches, tags, and remotes"
   });
   const card = browser.locator(".refs-remote-card", { hasText: "origin" });
   await expect(card.locator(".refs-page-footer")).toContainText("Showing 50 of 62");
@@ -441,7 +454,7 @@ test("the push source picker filters instead of listing every remote branch", as
     .getByRole("button", { name: "Manage remotes and remote branches…" })
     .click();
   const browser = window.getByRole("dialog", {
-    name: "push-picker branches and remotes"
+    name: "push-picker branches, tags, and remotes"
   });
   await browser.getByRole("button", { name: "Push to remotes…" }).click();
 
@@ -471,4 +484,148 @@ test("the push source picker filters instead of listing every remote branch", as
   await expect(picker.locator(".branch-picker__status")).toContainText(
     "Showing 1 of 1"
   );
+});
+
+test("renames and normally deletes a free merged local branch", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepo("branch-lifecycle");
+  repo.createBranch("feature/old-name");
+
+  handle = await launchApp({ worktreeRoot: box.worktreeRoot });
+  const { window } = handle;
+  await addRootAndExpand(window, handle, box, "branch-lifecycle");
+  const browser = await openBranchBrowser(window, "branch-lifecycle");
+
+  // Main is current, so renderer affordances agree with main's live guard.
+  const main = browser.locator(".refs-table__row", {
+    has: window.getByRole("button", { name: "Copy branch name main" })
+  });
+  await expect(
+    main.getByRole("button", { name: "Rename local branch main" })
+  ).toBeDisabled();
+  await expect(
+    main.getByRole("button", { name: "Delete local branch main" })
+  ).toBeDisabled();
+
+  const old = browser.locator(".refs-table__row", {
+    has: window.getByRole("button", {
+      name: "Copy branch name feature/old-name"
+    })
+  });
+  await old
+    .getByRole("button", { name: "Rename local branch feature/old-name" })
+    .click();
+  const rename = window.getByRole("dialog", {
+    name: "Rename branch feature/old-name"
+  });
+  await rename.getByRole("textbox", { name: "New branch name" }).fill(
+    "feature/new-name"
+  );
+  await rename.getByRole("button", { name: "Rename branch" }).click();
+
+  const renamed = browser.locator(".refs-table__row", {
+    has: window.getByRole("button", {
+      name: "Copy branch name feature/new-name"
+    })
+  });
+  await expect(renamed).toBeVisible({ timeout: 20_000 });
+  await expect
+    .poll(() =>
+      box.git(
+        repo.path,
+        "for-each-ref",
+        "--format=%(refname:short)",
+        "refs/heads"
+      )
+    )
+    .toContain("feature/new-name");
+
+  await renamed
+    .getByRole("button", { name: "Delete local branch feature/new-name" })
+    .click();
+  await window.getByRole("button", { name: "Delete branch" }).click();
+
+  await expect(renamed).toHaveCount(0, { timeout: 20_000 });
+  await expect
+    .poll(() =>
+      box.git(
+        repo.path,
+        "for-each-ref",
+        "--format=%(refname:short)",
+        "refs/heads"
+      )
+    )
+    .not.toContain("feature/new-name");
+});
+
+test("force deletion requires a second confirmation and leaves the remote branch", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepoBehindRemote("force-branch-delete");
+  const worktree = repo.addWorktree("feature/unique");
+  box.commit(worktree, "unique.txt", "unique branch work");
+  box.git(worktree, "push", "origin", "feature/unique");
+  box.git(repo.path, "worktree", "remove", worktree);
+
+  handle = await launchApp({ worktreeRoot: box.worktreeRoot });
+  const { window } = handle;
+  await addRootAndExpand(window, handle, box, "force-branch-delete");
+  const browser = await openBranchBrowser(window, "force-branch-delete");
+  await browser.getByPlaceholder("Filter branches…").fill("feature/unique");
+  const local = browser.locator(".refs-table__row", {
+    has: window.getByRole("button", {
+      name: "Copy branch name feature/unique"
+    })
+  });
+  const remove = local.getByRole("button", {
+    name: "Delete local branch feature/unique"
+  });
+
+  await remove.click();
+  await window.getByRole("button", { name: "Delete branch" }).click();
+  const forceDialog = window.getByRole("alertdialog", {
+    name: "Force delete feature/unique?"
+  });
+  await expect(forceDialog).toContainText("No remote branch is changed");
+  await forceDialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(local).toBeVisible();
+
+  await remove.click();
+  await window.getByRole("button", { name: "Delete branch" }).click();
+  await window.getByRole("button", { name: "Force delete branch" }).click();
+
+  await expect
+    .poll(() =>
+      box.git(
+        repo.path,
+        "for-each-ref",
+        "--format=%(refname:short)",
+        "refs/heads"
+      )
+    )
+    .not.toContain("feature/unique");
+  await expect
+    .poll(() =>
+      box.git(
+        repo.path,
+        "ls-remote",
+        "--heads",
+        "origin",
+        "refs/heads/feature/unique"
+      )
+    )
+    .not.toBe("");
+
+  // Once the local row disappears, the fetched remote row remains and offers
+  // worktree creation only — there is no remote-delete action hidden here.
+  const remote = browser.locator(".refs-table__row", {
+    hasText: "origin/feature/unique"
+  });
+  await expect(remote.getByRole("button", { name: "New worktree" })).toBeVisible({
+    timeout: 20_000
+  });
+  await expect(
+    remote.getByRole("button", { name: /Delete local branch/ })
+  ).toHaveCount(0);
 });

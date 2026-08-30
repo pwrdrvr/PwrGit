@@ -18,6 +18,7 @@ import {
 } from "../../lib/useViewportTooltip";
 import { BranchChipMenu, type BranchChipTarget } from "./BranchChipMenu";
 import { BranchFromCommitDialog } from "./BranchFromCommitDialog";
+import { CreateTagDialog } from "../sidebar/CreateTagDialog";
 import type { CommitSwitchTarget } from "./commit-context-menu";
 import { switchFailureMessage } from "./commit-context-menu";
 import { guardedSwitchBranch } from "../shell/branchSwitch";
@@ -268,6 +269,7 @@ export function LineageGraph({
   // window no longer covers that commit would otherwise unmount the dialog
   // mid-submit — dropping the success toast, the reveal, and anything typed.
   const [branchFromCommit, setBranchFromCommit] = useState<Commit | null>(null);
+  const [tagFromCommit, setTagFromCommit] = useState<Commit | null>(null);
 
   // ⌘F reaches past the dialog's backdrop, so the selected worktree can change
   // under an open dialog. Its commit, dirty check and branch list all belong to
@@ -275,6 +277,7 @@ export function LineageGraph({
   // another one.
   useEffect(() => {
     setBranchFromCommit(null);
+    setTagFromCommit(null);
   }, [worktreeId]);
   const [commitStats, setCommitStats] = useState<
     Record<string, CommitStats | null>
@@ -404,8 +407,10 @@ export function LineageGraph({
       });
     };
     setLoading(true);
-    // A plain worktree/scope switch reuses the repo's cached lanes (fast); an
-    // actual change to this worktree forces a recompute.
+    // A plain worktree/scope switch reuses the repo's cached lanes (fast); a
+    // repo-scoped graph invalidation forces a recompute. Lane data is shared
+    // across sibling worktrees, so filtering this event to one worktree would
+    // leave the focused graph stale when a sibling HEAD moves.
     // A PR delta observed in All remains unconsumed until Active is requested.
     // Once that forced Active load starts, ordinary scope/worktree switches
     // return to the repo-level lane cache.
@@ -416,14 +421,14 @@ export function LineageGraph({
     );
     consumedBranchPrGenerationRef.current = prInvalidation.consumedGeneration;
     load(prInvalidation.force);
-    const off = subscribe("worktree:changed", (p) => {
-      if (p.worktreeId === worktreeId) load(true);
+    const off = subscribe("graph:changed", (p) => {
+      if (p.repoId === repoId) load(true);
     });
     return () => {
       active = false;
       off();
     };
-  }, [branchPrGeneration, onCommitsChange, worktreeId, scope]);
+  }, [branchPrGeneration, onCommitsChange, repoId, worktreeId, scope]);
 
   // The sidebar and graph keep separate view models. Apply the same targeted
   // PR delta to the graph cache so a hover/focused refresh updates both
@@ -1172,6 +1177,7 @@ export function LineageGraph({
             onOpenCommit(menuVm.commit.hash, menuVm.commit.subject)
           }
           onBranchFrom={() => setBranchFromCommit(menuVm.commit)}
+          onTagFrom={() => setTagFromCommit(menuVm.commit)}
           onSwitchBranch={(target) => void switchToBranch(target)}
           onRevealWorktree={onRevealWorktree}
           onClose={() => setCommitMenu(null)}
@@ -1186,6 +1192,15 @@ export function LineageGraph({
           onSwitchBranch={(target) => void switchToBranch(target)}
           onRevealWorktree={onRevealWorktree}
           onClose={() => setBranchMenu(null)}
+        />
+      )}
+      {tagFromCommit !== null && (
+        <CreateTagDialog
+          repoId={repoId}
+          repoName={repoName}
+          initialTarget={tagFromCommit.hash}
+          onCreated={() => undefined}
+          onClose={() => setTagFromCommit(null)}
         />
       )}
       {branchFromCommit !== null && (

@@ -2,27 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const dispatch = vi.hoisted(() => vi.fn());
 const confirmDialog = vi.hoisted(() => vi.fn());
-/** Handlers registered by the code under test, so a test can fire the
- *  `worktree:changed` a real refresh would emit. */
-const listeners = vi.hoisted(() => new Set<(p: { worktreeId: string }) => void>());
-const subscribe = vi.hoisted(() => (_channel: string, handler: (p: { worktreeId: string }) => void) => {
-  listeners.add(handler);
-  return () => listeners.delete(handler);
-});
 
-vi.mock("../../lib/pwrgit", () => ({ dispatch, subscribe }));
+vi.mock("../../lib/pwrgit", () => ({ dispatch }));
 vi.mock("./dialogs", () => ({ confirmDialog }));
-
-/** Stand in for the main process finishing the refresh `worktree:getState`
- *  kicks off. Deferred a tick so it lands while the wait is pending. */
-function emitWorktreeChanged(worktreeId: string): void {
-  queueMicrotask(() => {
-    for (const handler of [...listeners]) handler({ worktreeId });
-  });
-}
-
-/** Short, so a test that genuinely waits out the window does not sit for 5s. */
-const WAIT_MS = 20;
 
 const {
   dirtySwitchMessage,
@@ -30,100 +12,32 @@ const {
   readDirtyState
 } = await import("./branchSwitch");
 
-function stateResult(dirty: number | null) {
-  return {
-    ok: true as const,
-    value:
-      dirty === null
-        ? null
-        : {
-            worktreeId: "wt-1",
-            branch: "main",
-            head: "0".repeat(40),
-            hasUpstream: true,
-            ahead: 0,
-            behind: 0,
-            dirty,
-            behindDefault: 0,
-            defaultBranch: "main",
-            mergedIntoDefault: false,
-            divergedFromDefault: false,
-            isDefaultBranch: true,
-            updatedAt: "2026-08-18T00:00:00.000Z"
-          }
-  };
-}
+const dirtyResult = (dirty: number) => ({
+  ok: true as const,
+  value: { dirty }
+});
 
 beforeEach(() => {
   dispatch.mockReset();
   confirmDialog.mockReset();
-  listeners.clear();
 });
 
 describe("readDirtyState", () => {
-  it("reads a clean tree from a live snapshot", async () => {
-    dispatch.mockResolvedValueOnce(stateResult(0));
-    await expect(readDirtyState("wt-1", WAIT_MS)).resolves.toEqual({
+  it("reads a clean tree from the live checkout-safety probe", async () => {
+    dispatch.mockResolvedValueOnce(dirtyResult(0));
+    await expect(readDirtyState("wt-1")).resolves.toEqual({
       kind: "clean"
+    });
+    expect(dispatch).toHaveBeenCalledWith("worktree:readDirty", {
+      worktreeId: "wt-1"
     });
   });
 
-  it("counts changed files", async () => {
-    dispatch.mockResolvedValueOnce(stateResult(12));
-    await expect(readDirtyState("wt-1", WAIT_MS)).resolves.toEqual({
+  it("counts parent and initialized-child changes", async () => {
+    dispatch.mockResolvedValueOnce(dirtyResult(12));
+    await expect(readDirtyState("wt-1")).resolves.toEqual({
       kind: "dirty",
       files: 12
-    });
-  });
-
-  // `worktree:getState` answers from cache and only KICKS OFF a refresh, so the
-  // first read of a freshly added repo misses. Treating that as unknown would
-  // prompt about uncountable changes on a clean tree — the exact spurious
-  // confirm that broke the Windows e2e run.
-  it("waits for the refresh a cache miss kicks off, then re-reads", async () => {
-    dispatch
-      .mockImplementationOnce(async () => {
-        emitWorktreeChanged("wt-1");
-        return stateResult(null);
-      })
-      .mockResolvedValueOnce(stateResult(0));
-    await expect(readDirtyState("wt-1", WAIT_MS)).resolves.toEqual({
-      kind: "clean"
-    });
-    expect(dispatch).toHaveBeenCalledTimes(2);
-  });
-
-  it("ignores a change for a different worktree", async () => {
-    dispatch.mockImplementationOnce(async () => {
-      emitWorktreeChanged("wt-other");
-      return stateResult(null);
-    });
-    await expect(readDirtyState("wt-1", WAIT_MS)).resolves.toEqual({
-      kind: "unknown"
-    });
-    expect(dispatch).toHaveBeenCalledOnce();
-  });
-
-  // The whole reason this reads a live snapshot instead of the `dirty` already
-  // on the Worktree in the repo tree: that field is `w.dirty ?? 0` over a LEFT
-  // JOIN written lazily, so "no state row" is indistinguishable from "clean"
-  // there. Here it must be unknown, never clean.
-  it("treats a snapshot that never arrives as unknown, not clean", async () => {
-    dispatch.mockResolvedValueOnce(stateResult(null));
-    await expect(readDirtyState("wt-1", WAIT_MS)).resolves.toEqual({
-      kind: "unknown"
-    });
-  });
-
-  it("treats a snapshot still missing after the refresh as unknown", async () => {
-    dispatch
-      .mockImplementationOnce(async () => {
-        emitWorktreeChanged("wt-1");
-        return stateResult(null);
-      })
-      .mockResolvedValueOnce(stateResult(null));
-    await expect(readDirtyState("wt-1", WAIT_MS)).resolves.toEqual({
-      kind: "unknown"
     });
   });
 
@@ -132,7 +46,7 @@ describe("readDirtyState", () => {
       ok: false,
       error: { kind: "repo", code: "not_found", message: "gone" }
     });
-    await expect(readDirtyState("wt-1", WAIT_MS)).resolves.toEqual({
+    await expect(readDirtyState("wt-1")).resolves.toEqual({
       kind: "unknown"
     });
   });
@@ -163,13 +77,12 @@ describe("guardedSwitchBranch", () => {
   const args = {
     worktreeId: "wt-1",
     worktreeLabel: "PwrSnap",
-    branch: "feature/x",
-    snapshotWaitMs: WAIT_MS
+    branch: "feature/x"
   };
 
   it("switches without a dialog when the tree is clean", async () => {
     dispatch
-      .mockResolvedValueOnce(stateResult(0))
+      .mockResolvedValueOnce(dirtyResult(0))
       .mockResolvedValueOnce({ ok: true, value: null });
     await expect(guardedSwitchBranch(args)).resolves.toEqual({
       kind: "switched"
@@ -183,7 +96,7 @@ describe("guardedSwitchBranch", () => {
 
   it("confirms before carrying uncommitted changes over", async () => {
     dispatch
-      .mockResolvedValueOnce(stateResult(4))
+      .mockResolvedValueOnce(dirtyResult(4))
       .mockResolvedValueOnce({ ok: true, value: null });
     confirmDialog.mockResolvedValueOnce(true);
     await expect(guardedSwitchBranch(args)).resolves.toEqual({
@@ -193,7 +106,7 @@ describe("guardedSwitchBranch", () => {
   });
 
   it("does not switch when the confirm is declined", async () => {
-    dispatch.mockResolvedValueOnce(stateResult(4));
+    dispatch.mockResolvedValueOnce(dirtyResult(4));
     confirmDialog.mockResolvedValueOnce(false);
     await expect(guardedSwitchBranch(args)).resolves.toEqual({
       kind: "cancelled"
@@ -203,7 +116,10 @@ describe("guardedSwitchBranch", () => {
 
   it("confirms when dirtiness could not be read", async () => {
     dispatch
-      .mockResolvedValueOnce(stateResult(null))
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { kind: "git", code: "exit_128", message: "status failed" }
+      })
       .mockResolvedValueOnce({ ok: true, value: null });
     confirmDialog.mockResolvedValueOnce(true);
     await expect(guardedSwitchBranch(args)).resolves.toEqual({
@@ -228,7 +144,7 @@ describe("guardedSwitchBranch", () => {
   // a terminal can invalidate. A collision is therefore expected, not an error:
   // the caller goes to whichever worktree holds the branch now.
   it("reports a lost race as held rather than failed", async () => {
-    dispatch.mockResolvedValueOnce(stateResult(0)).mockResolvedValueOnce({
+    dispatch.mockResolvedValueOnce(dirtyResult(0)).mockResolvedValueOnce({
       ok: false,
       error: {
         kind: "repo",
@@ -240,7 +156,7 @@ describe("guardedSwitchBranch", () => {
   });
 
   it("passes any other refusal through with its code", async () => {
-    dispatch.mockResolvedValueOnce(stateResult(0)).mockResolvedValueOnce({
+    dispatch.mockResolvedValueOnce(dirtyResult(0)).mockResolvedValueOnce({
       ok: false,
       error: { kind: "repo", code: "dirty", message: "would be overwritten" }
     });

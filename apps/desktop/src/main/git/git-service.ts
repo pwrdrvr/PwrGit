@@ -20,15 +20,25 @@ import {
   type RemoteResetMode,
   type RemoteResetSnapshot,
   type RemoteSummary,
+  type RemoteTagAction,
+  type RemoteTagPlan,
+  type RemoteTagResult,
   REMOTE_BRANCH_PAGE_MAX,
   REMOTE_BRANCH_PAGE_SIZE,
   REMOTE_BRANCH_PREVIEW,
   type RepoRefs,
+  type ResolvedCommit,
+  type TagPage,
+  type TagSummary,
+  TAG_PAGE_MAX,
+  TAG_PAGE_SIZE,
+  TAG_PREVIEW,
   err,
   type FileStatus,
   ok,
   type Result
 } from "@pwrgit/shared";
+import { delay } from "../util/timing";
 import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
 
 /** A symbolic HEAD whose branch ref does not exist is a valid unborn branch.
@@ -159,7 +169,16 @@ export async function readChanges(
   // click is about to stage, and makes a folder masquerade as a file row. The
   // renderer regroups the flat list back into folders itself.
   const raw = await git(
-    ["status", "--porcelain=v2", "--untracked-files=all"],
+    [
+      "status",
+      "--porcelain=v2",
+      "--untracked-files=all",
+      // Internal child dirtiness is represented by submodules:list. Asking
+      // parent status to recurse into it duplicates that state and can turn a
+      // 20-child parent refresh into a long synchronous walk. Commit-pin
+      // mismatches still appear as changes.
+      "--ignore-submodules=dirty"
+    ],
     cwd,
     NO_OPTIONAL_LOCKS
   );
@@ -167,6 +186,33 @@ export async function readChanges(
   const checked = requireExit0(raw.value, ["status"]);
   if (!checked.ok) return checked;
   return ok(capChangeSet(parseChanges(checked.value.stdout)));
+}
+
+/**
+ * Live checkout guard. Unlike the Changes list, this deliberately asks Git to
+ * inspect initialized submodules: branch switches can carry dirty child work
+ * just as they carry dirty parent files, so suppressing those rows here would
+ * bypass the user's confirmation.
+ */
+export async function readCheckoutDirtyCount(
+  git: GitExec,
+  cwd: string
+): Promise<Result<number>> {
+  const args = [
+    "status",
+    "--porcelain=v2",
+    "--untracked-files=normal",
+    "--ignore-submodules=none"
+  ];
+  const raw = await git(args, cwd, NO_OPTIONAL_LOCKS);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, args);
+  if (!checked.ok) return checked;
+  return ok(
+    checked.value.stdout
+      .split("\n")
+      .filter((line) => line !== "" && !line.startsWith("# ")).length
+  );
 }
 
 /**
@@ -1020,7 +1066,7 @@ export async function worktreeRemove(
       message
     );
     if (transient && attempt < maxAttempts) {
-      await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
+      await delay(300 * attempt);
       continue;
     }
     const code = /modified or untracked|contains modified|is dirty|use --force/i.test(
@@ -1038,6 +1084,34 @@ export async function worktreeRemove(
   }
 }
 
+function isConcurrentRefUpdate(stderr: string): boolean {
+  return (
+    /incorrect old value provided/i.test(stderr) ||
+    /cannot lock ref\b[^\r\n]*\bis at [0-9a-f]+ but expected [0-9a-f]+/i.test(
+      stderr
+    )
+  );
+}
+
+async function fetchWithRefRaceRetry(
+  git: GitExec,
+  cwd: string,
+  args: string[]
+): Promise<Result<void>> {
+  // A linked worktree or another Git client can update the shared remote ref
+  // after fetch reads its old value but before its ref transaction commits.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const raw = await git(args, cwd);
+    if (!raw.ok) return raw;
+    const checked = requireExit0(raw.value, args);
+    if (checked.ok) return ok(undefined);
+    if (attempt === 0 && isConcurrentRefUpdate(raw.value.stderr)) continue;
+    return checked;
+  }
+  // The loop always returns on its second attempt.
+  return ok(undefined);
+}
+
 /** Fetch the checked-out branch's configured remote (or origin) and prune. */
 export async function fetchRemote(
   git: GitExec,
@@ -1045,10 +1119,7 @@ export async function fetchRemote(
   forceProgress = false
 ): Promise<Result<void>> {
   const args = ["fetch", "--prune", ...(forceProgress ? ["--progress"] : [])];
-  const raw = await git(args, cwd);
-  if (!raw.ok) return raw;
-  const checked = requireExit0(raw.value, ["fetch"]);
-  return checked.ok ? ok(undefined) : checked;
+  return fetchWithRefRaceRetry(git, cwd, args);
 }
 
 /** Fetch one explicit remote and prune its deleted remote-tracking branches. */
@@ -1057,10 +1128,7 @@ export async function fetchNamedRemote(
   cwd: string,
   remote: string
 ): Promise<Result<void>> {
-  const raw = await git(["fetch", "--prune", remote], cwd);
-  if (!raw.ok) return raw;
-  const checked = requireExit0(raw.value, ["fetch", "--prune", remote]);
-  return checked.ok ? ok(undefined) : checked;
+  return fetchWithRefRaceRetry(git, cwd, ["fetch", "--prune", remote]);
 }
 
 /** Fetch every configured remote except those opted out with skipFetchAll. */
@@ -1068,10 +1136,7 @@ export async function fetchAllRemotes(
   git: GitExec,
   cwd: string
 ): Promise<Result<void>> {
-  const raw = await git(["fetch", "--all", "--prune"], cwd);
-  if (!raw.ok) return raw;
-  const checked = requireExit0(raw.value, ["fetch", "--all", "--prune"]);
-  return checked.ok ? ok(undefined) : checked;
+  return fetchWithRefRaceRetry(git, cwd, ["fetch", "--all", "--prune"]);
 }
 
 async function checkedRemoteMutation(
@@ -2277,6 +2342,496 @@ export function parseRepoRefRows(stdout: string): RepoRefRow[] {
   return rows;
 }
 
+const TAG_FIELDS = [
+  "%(refname)",
+  "%(refname:short)",
+  "%(objectname)",
+  "%(objecttype)",
+  "%(*objectname)",
+  "%(*objecttype)",
+  "%(taggername)",
+  "%(taggeremail)",
+  "%(taggerdate:iso8601-strict)",
+  "%(contents:subject)",
+  "%(contents:body)"
+];
+
+// Tag messages can contain tabs and newlines. NUL is forbidden in a Git
+// object, so NUL-delimited fields plus a double-NUL record marker preserve the
+// annotation without one `cat-file` process per tag.
+const TAG_FORMAT = `${TAG_FIELDS.join("%00")}%00%00`;
+
+function gitObjectType(value: string): TagSummary["objectType"] {
+  switch (value) {
+    case "commit":
+    case "tree":
+    case "blob":
+    case "tag":
+      return value;
+    default:
+      return "unknown";
+  }
+}
+
+/** Parse the NUL-delimited `for-each-ref` tag format above. */
+export function parseTagRows(stdout: string): TagSummary[] {
+  const tags: TagSummary[] = [];
+  const stream = stdout.split("\0");
+  // Eleven fields plus one intentionally empty token from the second NUL.
+  // Empty metadata fields are why a delimiter-search cannot find records.
+  for (
+    let index = 0;
+    index + TAG_FIELDS.length <= stream.length;
+    index += TAG_FIELDS.length + 1
+  ) {
+    const fields = stream.slice(index, index + TAG_FIELDS.length);
+    const first = fields[0]?.replace(/^\r?\n/, "") ?? "";
+    if (first === "") continue;
+    const [
+      ,
+      name = "",
+      objectId = "",
+      rawObjectType = "",
+      peeledId = "",
+      rawPeeledType = "",
+      taggerName = "",
+      rawTaggerEmail = "",
+      taggedAt = "",
+      subject = "",
+      body = ""
+    ] = fields;
+    const fullName = first;
+    if (!fullName.startsWith("refs/tags/") || name === "" || objectId === "") {
+      continue;
+    }
+    const annotated = rawObjectType === "tag";
+    const targetId = annotated && peeledId !== "" ? peeledId : objectId;
+    const targetType = annotated ? rawPeeledType : rawObjectType;
+    const taggerEmail = rawTaggerEmail.replace(/^</, "").replace(/>$/, "");
+    tags.push({
+      name,
+      fullName,
+      kind: annotated ? "annotated" : "lightweight",
+      objectId,
+      objectType: gitObjectType(rawObjectType),
+      targetId,
+      targetType: gitObjectType(targetType),
+      ...(annotated
+        ? {
+            annotation: {
+              subject,
+              ...(body.trim() === "" ? {} : { body: body.trimEnd() }),
+              ...(taggerName === "" ? {} : { taggerName }),
+              ...(taggerEmail === "" ? {} : { taggerEmail }),
+              ...(taggedAt === "" ? {} : { taggedAt })
+            }
+          }
+        : {})
+    });
+  }
+  return tags;
+}
+
+export type TagPageOptions = {
+  query?: string;
+  offset?: number;
+  limit?: number;
+};
+
+/**
+ * List local tags newest creator date first. Filtering is main-process-wide
+ * and only the requested page crosses IPC.
+ */
+export async function listTagPage(
+  git: GitExec,
+  cwd: string,
+  options: TagPageOptions = {}
+): Promise<Result<TagPage>> {
+  const { query = "", offset = 0, limit = TAG_PAGE_SIZE } = options;
+  const start = Number.isSafeInteger(offset)
+    ? Math.min(Math.max(0, offset), 2_147_483_000)
+    : 0;
+  const size = Number.isSafeInteger(limit)
+    ? Math.min(Math.max(1, limit), TAG_PAGE_MAX)
+    : TAG_PAGE_SIZE;
+  const needle = query.trim().toLowerCase();
+  const args = [
+    "for-each-ref",
+    "--sort=refname",
+    "--sort=-creatordate",
+    ...(needle === "" ? [`--count=${start + size}`] : []),
+    `--format=${TAG_FORMAT}`,
+    "refs/tags"
+  ];
+  // Unfiltered browsing needs only enough rich rows to reach this page. Count
+  // all refs with a name-only format in parallel, avoiding annotation bodies
+  // for thousands of off-page tags. Search still reads all metadata because
+  // tag messages and taggers are part of the searchable contract.
+  const [raw, countRaw] = await Promise.all([
+    git(args, cwd),
+    needle === ""
+      ? git(["for-each-ref", "--format=%(refname)", "refs/tags"], cwd)
+      : Promise.resolve(null)
+  ]);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, args);
+  if (!checked.ok) return checked;
+  if (countRaw !== null && !countRaw.ok) return countRaw;
+  if (countRaw !== null) {
+    const countChecked = requireExit0(countRaw.value, ["for-each-ref"]);
+    if (!countChecked.ok) return countChecked;
+    const total = countChecked.value.stdout
+      .split("\n")
+      .filter((line) => line !== "").length;
+    return ok({
+      rows: parseTagRows(checked.value.stdout).slice(start),
+      total
+    });
+  }
+  const matches = parseTagRows(checked.value.stdout).filter((tag) => {
+    const annotation = tag.annotation;
+    return `${tag.name} ${annotation?.subject ?? ""} ${annotation?.body ?? ""} ${annotation?.taggerName ?? ""} ${annotation?.taggerEmail ?? ""}`
+      .toLowerCase()
+      .includes(needle);
+  });
+  return ok({ rows: matches.slice(start, start + size), total: matches.length });
+}
+
+async function validTagName(
+  git: GitExec,
+  cwd: string,
+  name: string
+): Promise<Result<string>> {
+  const trimmed = name.trim();
+  if (trimmed === "") {
+    return err({
+      kind: "repo",
+      code: "invalid_tag",
+      message: "Tag name is required"
+    });
+  }
+  const fullName = `refs/tags/${trimmed}`;
+  const args = ["check-ref-format", fullName];
+  const raw = await git(args, cwd);
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode !== 0) {
+    return err({
+      kind: "repo",
+      code: "invalid_tag",
+      message: `${trimmed} is not a valid tag name`
+    });
+  }
+  return ok(trimmed);
+}
+
+async function tagByName(
+  git: GitExec,
+  cwd: string,
+  name: string
+): Promise<Result<TagSummary | null>> {
+  const valid = await validTagName(git, cwd, name);
+  if (!valid.ok) return valid;
+  const fullName = `refs/tags/${valid.value}`;
+  const args = ["for-each-ref", `--format=${TAG_FORMAT}`, fullName];
+  const raw = await git(args, cwd);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, args);
+  if (!checked.ok) return checked;
+  return ok(
+    parseTagRows(checked.value.stdout).find((tag) => tag.fullName === fullName) ??
+      null
+  );
+}
+
+function tagMutationError(stderr: string, fallback: string): {
+  kind: "repo";
+  code: string;
+  message: string;
+} {
+  const message = stderr.trim();
+  return {
+    kind: "repo",
+    code: /already exists/i.test(message)
+      ? "already_exists"
+      : /not a valid tag name/i.test(message)
+        ? "invalid_tag"
+        : "tag_operation_failed",
+    message: message || fallback
+  };
+}
+
+const RESOLVE_FORMAT = ["%H", "%h", "%an", "%cI", "%s"].join("%x1f");
+
+/**
+ * Turn whatever the user typed — `HEAD`, a branch, `v1.0~3`, a short id — into
+ * the one full commit object id a tag would be created at, with enough of that
+ * commit to recognise it.
+ *
+ * This is deliberately NOT a relaxation of `createTagAt`'s hex-only rule. That
+ * rule exists because a commit-ish can mean a different commit at execution
+ * time than it did at review time, and it still holds: the caller resolves
+ * here, shows the user the commit, and creates the tag at the returned id. The
+ * resolution the user used to do in their head — with no confirmation, and no
+ * way to do it at all from inside the dialog — now happens once, on screen.
+ */
+export async function resolveTagTarget(
+  git: GitExec,
+  cwd: string,
+  revision: string
+): Promise<Result<ResolvedCommit>> {
+  const rev = revision.trim();
+  if (rev === "") {
+    return err({
+      kind: "repo",
+      code: "invalid_target_commit",
+      message: "Enter a commit, branch, or tag"
+    });
+  }
+  // Arguments reach git as an argv array, so this is not shell injection — but
+  // `rev-parse -n` would still be read as an option rather than a revision.
+  if (rev.startsWith("-")) {
+    return err({
+      kind: "repo",
+      code: "invalid_target_commit",
+      message: `${rev} is not a revision`
+    });
+  }
+
+  // A hex-looking input is offered to the object database FIRST, the way
+  // createTagAt reads it, so a ref literally named `deadbee` can never stand in
+  // for the object whose id starts with those characters — resolving it as a
+  // revision here and as an object id there would let the dialog confirm one
+  // commit and the create land on another. Only when no object matches at all
+  // does it fall through to revision resolution below.
+  const hexish = /^[0-9a-f]{7,64}$/i.test(rev);
+  let asObject: string[] = [];
+  if (hexish) {
+    const raw = await git(["rev-parse", `--disambiguate=${rev}`], cwd);
+    if (!raw.ok) return raw;
+    asObject = raw.value.stdout
+      .split(/\r?\n/)
+      .map((value) => value.trim())
+      .filter((value) => value !== "");
+    // More than one object shares the prefix: refuse rather than pick, and
+    // never fall through to a ref, since the input is genuinely ambiguous.
+    if (asObject.length > 1) {
+      return err({
+        kind: "repo",
+        code: "invalid_target_commit",
+        message: `${rev} is an ambiguous object ID`
+      });
+    }
+  }
+
+  // An object match always wins, so a ref literally named `deadbee` can never
+  // stand in for the object whose id starts with those characters. But
+  // `--disambiguate` searches the object database ALONE: with no such object,
+  // a branch or tag that merely looks hexadecimal would otherwise be reported
+  // as unresolvable, even though it is a perfectly good revision. Fall through
+  // to revision resolution, which also records `resolvedFrom` so the dialog
+  // shows it was read as a name.
+  const fromObject = asObject.length === 1;
+  let commitId = asObject[0] ?? "";
+  if (!fromObject) {
+    const args = [
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      "--end-of-options",
+      `${rev}^{commit}`
+    ];
+    const raw = await git(args, cwd);
+    if (!raw.ok) return raw;
+    const resolvedId = raw.value.stdout.trim();
+    if (raw.value.exitCode !== 0 || resolvedId === "") {
+      return err({
+        kind: "repo",
+        code: "invalid_target_commit",
+        message: `${rev} does not resolve to a commit`
+      });
+    }
+    commitId = resolvedId;
+  }
+
+  // `--disambiguate` matches objects of any type, and a revision may have
+  // peeled through a tag; either way the tag must land on a commit.
+  const typeRaw = await git(["cat-file", "-t", commitId], cwd);
+  if (!typeRaw.ok) return typeRaw;
+  if (
+    typeRaw.value.exitCode !== 0 ||
+    typeRaw.value.stdout.trim() !== "commit"
+  ) {
+    return err({
+      kind: "repo",
+      code: "invalid_target_commit",
+      message: `${rev} does not resolve to a commit`
+    });
+  }
+
+  const showArgs = [
+    "show",
+    "--no-patch",
+    `--format=${RESOLVE_FORMAT}`,
+    commitId
+  ];
+  const showRaw = await git(showArgs, cwd);
+  if (!showRaw.ok) return showRaw;
+  const checked = requireExit0(showRaw.value, showArgs);
+  if (!checked.ok) return checked;
+  const [hash = commitId, shortId = "", authorName = "", committedAt = "", ...rest] =
+    checked.value.stdout.trim().split("\x1f");
+  // %s is the last field, so anything after the fourth separator is still the
+  // subject — rejoin rather than truncating at an embedded separator byte.
+  const subject = rest.join("\x1f");
+  return ok({
+    commitId: hash,
+    shortId,
+    subject,
+    authorName,
+    committedAt,
+    // What the field said versus what it meant. An object id is already the
+    // commit, so echoing it back as a "resolved from" would be noise; a name
+    // — including a hexadecimal-looking one — is worth showing.
+    ...(fromObject ? {} : { resolvedFrom: rev })
+  });
+}
+
+/** Create a lightweight or annotated tag at an explicitly supplied commit id. */
+export async function createTagAt(
+  git: GitExec,
+  cwd: string,
+  input: {
+    name: string;
+    targetCommit: string;
+    kind: "lightweight" | "annotated";
+    message?: string;
+  },
+  identity: CommitIdentity
+): Promise<Result<TagSummary>> {
+  const valid = await validTagName(git, cwd, input.name);
+  if (!valid.ok) return valid;
+  const target = input.targetCommit.trim();
+  // Commit-ish names would make "at this commit" ambiguous and could change
+  // between review and execution. An object id (full or unambiguous short) is
+  // explicit and cannot be interpreted as an option.
+  if (!/^[0-9a-f]{7,64}$/i.test(target)) {
+    return err({
+      kind: "repo",
+      code: "invalid_target_commit",
+      message: "Target commit must be an explicit commit object ID"
+    });
+  }
+  // `rev-parse deadbee^{commit}` prefers a ref literally named `deadbee` over
+  // the object whose ID starts with that prefix. Disambiguate in the object
+  // database first so a hex-looking ref can never redirect tag creation.
+  const resolveArgs = ["rev-parse", `--disambiguate=${target}`];
+  const resolved = await git(resolveArgs, cwd);
+  if (!resolved.ok) return resolved;
+  const candidates = resolved.value.stdout
+    .split(/\r?\n/)
+    .map((value) => value.trim())
+    .filter((value) => value !== "");
+  if (resolved.value.exitCode !== 0 || candidates.length !== 1) {
+    return err({
+      kind: "repo",
+      code: "invalid_target_commit",
+      message:
+        candidates.length > 1
+          ? `${target} is an ambiguous object ID`
+          : `${target} does not resolve to a commit`
+    });
+  }
+  const commitId = candidates[0] ?? "";
+  const typeArgs = ["cat-file", "-t", commitId];
+  const objectType = await git(typeArgs, cwd);
+  if (!objectType.ok) return objectType;
+  if (
+    objectType.value.exitCode !== 0 ||
+    objectType.value.stdout.trim() !== "commit"
+  ) {
+    return err({
+      kind: "repo",
+      code: "invalid_target_commit",
+      message: `${target} does not resolve to a commit`
+    });
+  }
+  const message = input.message?.trim() ?? "";
+  if (input.kind === "annotated" && message === "") {
+    return err({
+      kind: "repo",
+      code: "annotation_required",
+      message: "Annotated tags require a message"
+    });
+  }
+  const args: string[] = [];
+  if (input.kind === "annotated") {
+    // Annotated tags need a tagger identity. Use the repository profile as a
+    // per-command override, just like commits, so tag creation neither depends
+    // on a machine-global gitconfig nor writes identity into the repository.
+    args.push("-c", `user.email=${identity.email}`);
+    if (identity.name !== undefined && identity.name !== "") {
+      args.push("-c", `user.name=${identity.name}`);
+    }
+    args.push(
+      "tag",
+      "--annotate",
+      "--message",
+      message,
+      "--",
+      valid.value,
+      commitId
+    );
+  } else {
+    args.push("tag", "--", valid.value, commitId);
+  }
+  const created = await git(args, cwd);
+  if (!created.ok) return created;
+  if (created.value.exitCode !== 0) {
+    return err(tagMutationError(created.value.stderr, "Could not create the tag"));
+  }
+  const tag = await tagByName(git, cwd, valid.value);
+  if (!tag.ok) return tag;
+  if (tag.value === null) {
+    return err({
+      kind: "repo",
+      code: "tag_not_found",
+      message: "The tag was created but could not be read back"
+    });
+  }
+  return ok(tag.value);
+}
+
+/** Atomically delete only the local tag object the caller confirmed. */
+export async function deleteLocalTag(
+  git: GitExec,
+  cwd: string,
+  name: string,
+  expectedObjectId: string
+): Promise<Result<void>> {
+  const valid = await validTagName(git, cwd, name);
+  if (!valid.ok) return valid;
+  if (!/^[0-9a-f]{40,64}$/i.test(expectedObjectId)) {
+    return err({
+      kind: "repo",
+      code: "invalid_tag_object",
+      message: "Invalid tag object ID"
+    });
+  }
+  const args = ["update-ref", "-d", `refs/tags/${valid.value}`, expectedObjectId];
+  const raw = await git(args, cwd);
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode !== 0) {
+    return err({
+      kind: "repo",
+      code: "tag_changed",
+      message:
+        raw.value.stderr.trim() ||
+        "The tag changed after confirmation. Refresh and review the deletion again."
+    });
+  }
+  return ok(undefined);
+}
+
 function trackingStatus(
   upstream: string,
   track: string
@@ -2310,6 +2865,250 @@ export async function listRemoteNames(
       .map((name) => name.trim())
       .filter((name) => name !== "")
   );
+}
+
+type RemoteTagSnapshot = {
+  objectId: string;
+  targetId: string;
+};
+
+async function remoteTagSnapshot(
+  git: GitExec,
+  cwd: string,
+  remote: string,
+  fullName: string
+): Promise<Result<RemoteTagSnapshot | null>> {
+  const args = ["ls-remote", "--tags", remote, fullName, `${fullName}^{}`];
+  const raw = await git(args, cwd);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, args);
+  if (!checked.ok) return checked;
+  let objectId = "";
+  let targetId = "";
+  for (const line of checked.value.stdout.split("\n")) {
+    const [id = "", ref = ""] = line.trim().split(/\s+/, 2);
+    if (ref === fullName) objectId = id;
+    else if (ref === `${fullName}^{}`) targetId = id;
+  }
+  if (objectId === "") return ok(null);
+  return ok({ objectId, targetId: targetId || objectId });
+}
+
+async function checkedRemoteName(
+  git: GitExec,
+  cwd: string,
+  remote: string
+): Promise<Result<void>> {
+  const names = await listRemoteNames(git, cwd);
+  if (!names.ok) return names;
+  if (!names.value.includes(remote)) {
+    return err({
+      kind: "repo",
+      code: "invalid_remote",
+      message: `Not a configured remote: ${remote}`
+    });
+  }
+  return ok(undefined);
+}
+
+/** Inspect one exact remote tag for an explicit push/delete review. */
+export async function planRemoteTag(
+  git: GitExec,
+  cwd: string,
+  input: { name: string; remote: string; action: RemoteTagAction }
+): Promise<Result<RemoteTagPlan>> {
+  const valid = await validTagName(git, cwd, input.name);
+  if (!valid.ok) return valid;
+  const remote = await checkedRemoteName(git, cwd, input.remote);
+  if (!remote.ok) return remote;
+  const pushUrl = await remotePushUrl(git, cwd, input.remote);
+  if (!pushUrl.ok) return pushUrl;
+  const fullName = `refs/tags/${valid.value}`;
+  const remoteTag = await remoteTagSnapshot(git, cwd, pushUrl.value, fullName);
+  if (!remoteTag.ok) return remoteTag;
+
+  if (input.action === "delete") {
+    if (remoteTag.value === null) {
+      return err({
+        kind: "repo",
+        code: "remote_tag_missing",
+        message: `${input.remote}/${valid.value} does not exist`
+      });
+    }
+    return ok({
+      action: "delete",
+      remote: input.remote,
+      pushUrl: pushUrl.value,
+      tagName: valid.value,
+      fullName,
+      remoteObjectId: remoteTag.value.objectId,
+      remoteTargetId: remoteTag.value.targetId,
+      status: "delete"
+    });
+  }
+
+  if (input.action !== "push") {
+    return err({
+      kind: "repo",
+      code: "invalid_tag_action",
+      message: "Invalid tag action"
+    });
+  }
+  const localTag = await tagByName(git, cwd, valid.value);
+  if (!localTag.ok) return localTag;
+  if (localTag.value === null) {
+    return err({
+      kind: "repo",
+      code: "local_tag_missing",
+      message: `Local tag ${valid.value} does not exist`
+    });
+  }
+  if (
+    remoteTag.value !== null &&
+    remoteTag.value.objectId !== localTag.value.objectId
+  ) {
+    return err({
+      kind: "repo",
+      code: "remote_tag_conflict",
+      message: `${input.remote}/${valid.value} points to ${remoteTag.value.objectId.slice(0, 12)}, not ${localTag.value.objectId.slice(0, 12)}. PwrGit never overwrites a remote tag; delete it through a separate reviewed action first.`
+    });
+  }
+  return ok({
+    action: "push",
+    remote: input.remote,
+    pushUrl: pushUrl.value,
+    tagName: valid.value,
+    fullName,
+    localObjectId: localTag.value.objectId,
+    localTargetId: localTag.value.targetId,
+    ...(remoteTag.value === null
+      ? {}
+      : {
+          remoteObjectId: remoteTag.value.objectId,
+          remoteTargetId: remoteTag.value.targetId
+        }),
+    status: remoteTag.value === null ? "create" : "equal"
+  });
+}
+
+function staleRemoteTag(message: string): Result<never> {
+  return err({ kind: "repo", code: "remote_tag_changed", message });
+}
+
+/** Revalidate and apply one reviewed tag action with an exact remote lease. */
+export async function applyRemoteTagPlan(
+  git: GitExec,
+  cwd: string,
+  plan: RemoteTagPlan
+): Promise<Result<RemoteTagResult>> {
+  const valid = await validTagName(git, cwd, plan.tagName);
+  if (!valid.ok) return valid;
+  if (plan.fullName !== `refs/tags/${valid.value}`) {
+    return err({
+      kind: "repo",
+      code: "invalid_tag_plan",
+      message: "Tag review no longer matches its ref"
+    });
+  }
+  const remote = await checkedRemoteName(git, cwd, plan.remote);
+  if (!remote.ok) return remote;
+  const pushUrl = await remotePushUrl(git, cwd, plan.remote);
+  if (!pushUrl.ok) return pushUrl;
+  if (pushUrl.value !== plan.pushUrl) {
+    return staleRemoteTag(
+      "The remote push endpoint changed after review. Refresh and review the action again."
+    );
+  }
+  const currentRemote = await remoteTagSnapshot(
+    git,
+    cwd,
+    plan.pushUrl,
+    plan.fullName
+  );
+  if (!currentRemote.ok) return currentRemote;
+  if (currentRemote.value?.objectId !== plan.remoteObjectId) {
+    return staleRemoteTag(
+      "The remote tag changed after review. Refresh and review the action again."
+    );
+  }
+
+  if (plan.action === "push") {
+    if (plan.localObjectId === undefined) {
+      return err({
+        kind: "repo",
+        code: "invalid_tag_plan",
+        message: "Push review has no local object"
+      });
+    }
+    const currentLocal = await tagByName(git, cwd, plan.tagName);
+    if (!currentLocal.ok) return currentLocal;
+    if (currentLocal.value?.objectId !== plan.localObjectId) {
+      return err({
+        kind: "repo",
+        code: "local_tag_changed",
+        message: "The local tag changed after review. Refresh and review the push again."
+      });
+    }
+    if (plan.status === "equal") {
+      return ok({
+        action: "push",
+        remote: plan.remote,
+        tagName: plan.tagName,
+        outcome: "up_to_date"
+      });
+    }
+    if (plan.status !== "create" || plan.remoteObjectId !== undefined) {
+      return err({ kind: "repo", code: "invalid_tag_plan", message: "Unsafe remote tag push plan" });
+    }
+    const args = [
+      "push",
+      "--no-follow-tags",
+      `--force-with-lease=${plan.fullName}:`,
+      "--",
+      plan.pushUrl,
+      `${plan.localObjectId}:${plan.fullName}`
+    ];
+    const pushed = await git(args, cwd);
+    if (!pushed.ok) return pushed;
+    if (pushed.value.exitCode !== 0) {
+      return staleRemoteTag(
+        pushed.value.stderr.trim() ||
+          "The remote rejected the tag push because it changed after review."
+      );
+    }
+    return ok({
+      action: "push",
+      remote: plan.remote,
+      tagName: plan.tagName,
+      outcome: "pushed"
+    });
+  }
+
+  if (plan.action !== "delete" || plan.remoteObjectId === undefined) {
+    return err({ kind: "repo", code: "invalid_tag_plan", message: "Unsafe remote tag deletion plan" });
+  }
+  const args = [
+    "push",
+    "--no-follow-tags",
+    `--force-with-lease=${plan.fullName}:${plan.remoteObjectId}`,
+    "--",
+    plan.pushUrl,
+    `:${plan.fullName}`
+  ];
+  const deleted = await git(args, cwd);
+  if (!deleted.ok) return deleted;
+  if (deleted.value.exitCode !== 0) {
+    return staleRemoteTag(
+      deleted.value.stderr.trim() ||
+        "The remote rejected the tag deletion because it changed after review."
+    );
+  }
+  return ok({
+    action: "delete",
+    remote: plan.remote,
+    tagName: plan.tagName,
+    outcome: "deleted"
+  });
 }
 
 async function remoteValue(
@@ -2389,7 +3188,7 @@ export async function listRepoRefs(
   cwd: string,
   checkedOutByBranch: ReadonlyMap<string, string[]> = new Map()
 ): Promise<Result<RepoRefs>> {
-  const [names, raw] = await Promise.all([
+  const [names, raw, tagPage] = await Promise.all([
     listRemoteNames(git, cwd),
     git(
       [
@@ -2400,10 +3199,12 @@ export async function listRepoRefs(
         "refs/remotes"
       ],
       cwd
-    )
+    ),
+    listTagPage(git, cwd, { limit: TAG_PREVIEW })
   ]);
   if (!names.ok) return names;
   if (!raw.ok) return raw;
+  if (!tagPage.ok) return tagPage;
   const checked = requireExit0(raw.value, ["for-each-ref"]);
   if (!checked.ok) return checked;
   const rows = parseRepoRefRows(checked.value.stdout);
@@ -2425,7 +3226,12 @@ export async function listRepoRefs(
   const remotes = await Promise.all(
     names.value.map((name) => remoteSummary(git, cwd, name, rows))
   );
-  return ok({ branches, remotes });
+  return ok({
+    branches,
+    previewTags: tagPage.value.rows,
+    tagCount: tagPage.value.total,
+    remotes
+  });
 }
 
 /**

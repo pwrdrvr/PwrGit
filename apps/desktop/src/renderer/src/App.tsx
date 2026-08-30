@@ -8,7 +8,6 @@ import type {
   Worktree
 } from "@pwrgit/shared";
 import { DiffPane, type DiffTarget } from "./features/diff/DiffPane";
-import { GitLfsNotice } from "./features/graph/GitLfsNotice";
 import { LineageGraph } from "./features/graph/LineageGraph";
 import { SelectionBar } from "./features/graph/SelectionBar";
 import { TitleBar } from "./features/chrome/TitleBar";
@@ -30,18 +29,20 @@ import {
   type PendingRepoReveal
 } from "./features/sidebar/search-reveal";
 import { Sidebar } from "./features/sidebar/Sidebar";
+import {
+  readStoredWorktreeSelection,
+  resolveWorktreeSelection,
+  storeWorktreeSelection,
+  type WorktreeSelection
+} from "./features/sidebar/worktree-selection";
 import { profileWindowTitle } from "./lib/profileTitle";
 import { dispatch, subscribe, windowProfileId } from "./lib/pwrgit";
-import { useAppearance } from "./lib/useAppearance";
 import { useColumnResize } from "./lib/useColumnResize";
 import { useProfiles } from "./state/useProfiles";
 import { useRepoTree } from "./state/useRepoTree";
 import { useWorktreeState } from "./state/useWorktreeState";
 
-type Selection = { repoId: string; worktreeId: string };
-
 export function App() {
-  useAppearance();
   const sidebar = useColumnResize("pwrgit.sidebarWidth", 320, 240, 520, "left");
   const rail = useColumnResize("pwrgit.railWidth", 344, 280, 560, "right");
   const [railCollapsed, setRailCollapsed] = useState(false);
@@ -56,7 +57,15 @@ export function App() {
     newBranch: boolean;
     startPoint?: string;
   } | null>(null);
-  const [selection, setSelection] = useState<Selection | null>(null);
+  // Seed from the window-bound profile synchronously. Besides avoiding an
+  // empty first frame, this lets Sidebar mount with the restored id and treat
+  // it as continuity rather than as a new search jump that should widen the
+  // user's persisted lens.
+  const [selection, setSelection] = useState<WorktreeSelection | null>(() => {
+    const profileId = windowProfileId();
+    return profileId === null ? null : readStoredWorktreeSelection(profileId);
+  });
+  const restoredSelectionForProfileRef = useRef<string | null>(null);
   const worktreePrMonitorIdRef = useRef(crypto.randomUUID());
   // A queued "jump to this repo (and optionally this worktree)" — from ⌘F
   // picks and cross-window reveals — resolved once the repo list has it.
@@ -66,6 +75,8 @@ export function App() {
   const {
     profiles,
     activeProfile,
+    loadState: profileLoadState,
+    retry: retryProfiles,
     openProfile,
     createProfile,
     updateProfile,
@@ -77,7 +88,8 @@ export function App() {
   >(null);
   const {
     repos,
-    loading,
+    loadState: repoLoadState,
+    retry: retryRepos,
     removalProgress,
     refreshingRepoIds,
     setRepoPin,
@@ -326,6 +338,55 @@ export function App() {
   const selectedWorktree =
     selectedRepo?.worktrees.find((w) => w.id === selection?.worktreeId) ?? null;
 
+  // A returning profile opens exactly where it left off. Reconcile once, when
+  // that profile's repository tree first arrives, so an id that went stale
+  // between launches falls back safely. Live removals remain different: they
+  // deliberately clear the current timeline instead of silently switching the
+  // user to another checkout mid-session.
+  useEffect(() => {
+    // A queued reveal is an explicit navigation request. Let it select (or
+    // keep waiting for) its target before stale boot state chooses a fallback.
+    if (
+      activeProfile === null ||
+      repoLoadState.status === "loading" ||
+      pendingReveal !== null ||
+      restoredSelectionForProfileRef.current === activeProfile.id
+    ) {
+      return;
+    }
+    const preferred =
+      selection ?? readStoredWorktreeSelection(activeProfile.id);
+    if (preferred === null) {
+      restoredSelectionForProfileRef.current = activeProfile.id;
+      return;
+    }
+    // A stored selection can outlive every indexed repo. Wait for a real
+    // candidate before choosing a safe fallback instead of clearing it during
+    // a transient empty load.
+    if (repos.length === 0) return;
+    const resolved = resolveWorktreeSelection(repos, preferred);
+    restoredSelectionForProfileRef.current = activeProfile.id;
+    if (
+      resolved !== null &&
+      (resolved.repoId !== selection?.repoId ||
+        resolved.worktreeId !== selection?.worktreeId)
+    ) {
+      setSelection(resolved);
+    }
+  }, [
+    activeProfile,
+    pendingReveal,
+    repoLoadState.status,
+    repos,
+    selection
+  ]);
+
+  useEffect(() => {
+    if (activeProfile !== null && selection !== null) {
+      storeWorktreeSelection(activeProfile.id, selection);
+    }
+  }, [activeProfile, selection]);
+
   // Reconciliation can remove the selected worktree without changing its
   // persisted selection id. Do not leave that vanished timeline searchable.
   useEffect(() => {
@@ -401,9 +462,12 @@ export function App() {
         <Sidebar
           profiles={profiles}
           activeProfile={activeProfile}
+          profileLoadState={profileLoadState}
+          onRetryProfiles={() => void retryProfiles()}
           onSwitchProfile={(id) => void openProfile(id)}
           repos={repos}
-          loading={loading}
+          repoLoadState={repoLoadState}
+          onRetryRepos={() => void retryRepos()}
           selectedWorktreeId={selection?.worktreeId ?? null}
           onSelectWorktree={selectWorktree}
           onSetRepoPin={setRepoPin}
@@ -446,12 +510,9 @@ export function App() {
           {selectedRepo !== null && selectedWorktree !== null ? (
             <>
               <WorktreeHeader
+                repo={selectedRepo}
                 worktree={selectedWorktree}
                 state={worktreeState}
-              />
-              <GitLfsNotice
-                repoId={selectedRepo.id}
-                worktreeId={selectedWorktree.id}
               />
               {/* Keep the lineage graph mounted while a diff is shown — hidden,
                   not unmounted — so returning to it is instant (its multi-branch
@@ -513,13 +574,24 @@ export function App() {
                 <DiffPane
                   worktreeId={selectedWorktree.id}
                   target={diffTarget}
+                  onOpenFile={(path, staged) =>
+                    setDiffTarget({ kind: "file", path, staged })
+                  }
                   onClose={closeDiff}
                 />
               )}
             </>
           ) : (
             <div className="main-empty">
-              {loading ? "Scanning repos…" : "Select a worktree from the sidebar"}
+              {profileLoadState.status === "loading"
+                ? "Loading profiles…"
+                : profileLoadState.status === "error"
+                  ? "Profiles couldn’t be loaded. Try again from the sidebar."
+                  : repoLoadState.status === "loading"
+                    ? "Scanning repos…"
+                    : repoLoadState.status === "error"
+                      ? "Repositories couldn’t be loaded. Try again from the sidebar."
+                      : "Select a worktree from the sidebar"}
             </div>
           )}
         </main>

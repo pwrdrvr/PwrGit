@@ -1,5 +1,6 @@
 import type { PrSummary } from "@pwrgit/shared";
 import { mapLimit } from "../../util/map-limit";
+import { clampRetryDelayMs, delay } from "../../util/timing";
 import type { ForgeRepo } from "../types";
 import { forgeOrigin, withNullsForMissing } from "../types";
 import {
@@ -30,9 +31,6 @@ const MAX_RETRIES = 4;
 const COMMIT_MAX_RETRIES = 1;
 const REQUEST_TIMEOUT_MS = 15_000;
 
-const delay = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
-const clamp = (ms: number): number => Math.max(0, Math.min(ms, 60_000));
 
 class GitLabHttpError extends Error {
   constructor(
@@ -56,15 +54,15 @@ function retryDelayMs(error: unknown, attempt: number): number | null {
   const headers = error instanceof GitLabHttpError ? error.headers : undefined;
 
   const retryAfter = Number(headers?.get("retry-after"));
-  if (Number.isFinite(retryAfter) && retryAfter > 0) return clamp(retryAfter * 1000);
+  if (Number.isFinite(retryAfter) && retryAfter > 0) return clampRetryDelayMs(retryAfter * 1000);
 
   const remaining = Number(headers?.get("ratelimit-remaining"));
   const reset = Number(headers?.get("ratelimit-reset"));
   if (status === 429 && remaining === 0 && Number.isFinite(reset)) {
-    return clamp(reset * 1000 - Date.now());
+    return clampRetryDelayMs(reset * 1000 - Date.now());
   }
   if (status === 429 || status === undefined || status >= 500) {
-    return clamp(1000 * 2 ** (attempt - 1));
+    return clampRetryDelayMs(1000 * 2 ** (attempt - 1));
   }
   return null;
 }

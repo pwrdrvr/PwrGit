@@ -11,6 +11,7 @@ import type {
   Repo
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { joinDisplayPath } from "../../lib/platform";
 import {
   cloneDestinationLabel,
   cloneDestinationSelectionIndex,
@@ -58,6 +59,13 @@ function destinationMeta(destination: CloneDestination): string {
   return `${destination.repoCount} ${
     destination.repoCount === 1 ? "repo" : "repos"
   }`;
+}
+
+function checkoutPath(
+  destination: CloneDestination,
+  repository: CloneRepository
+): string {
+  return joinDisplayPath(destination.path, repository.name);
 }
 
 function protocolLabel(protocol: CloneProtocol, host: ForgeHost): string {
@@ -125,6 +133,7 @@ export function CloneRepoDialog({
     string | null
   >(null);
   const [busy, setBusy] = useState(false);
+  const [canceling, setCanceling] = useState(false);
   const [cloneProgress, setCloneProgress] = useState<CloneProgress | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const activeCloneIdRef = useRef<string | null>(null);
@@ -354,6 +363,7 @@ export function CloneRepoDialog({
     const operationId = window.crypto.randomUUID();
     activeCloneIdRef.current = operationId;
     setBusy(true);
+    setCanceling(false);
     setCloneProgress({ phase: "starting", percent: null });
     setSubmitError(null);
     const result = await dispatch("repo:clone", {
@@ -370,11 +380,23 @@ export function CloneRepoDialog({
     });
     activeCloneIdRef.current = null;
     setBusy(false);
+    setCanceling(false);
     if (result.ok) onCloned(result.value);
     else {
       setCloneProgress(null);
       setSubmitError(result.error.message);
     }
+  };
+
+  const cancel = async (): Promise<void> => {
+    if (!busy) {
+      onClose();
+      return;
+    }
+    const operationId = activeCloneIdRef.current;
+    if (operationId === null || canceling) return;
+    setCanceling(true);
+    await dispatch("repo:cancelClone", { operationId });
   };
 
   return (
@@ -613,6 +635,11 @@ export function CloneRepoDialog({
                 id="clone-destination"
                 ref={destinationInputRef}
                 value={destinationQuery}
+                aria-describedby={
+                  activeDestination === null || selectedRepository === null
+                    ? undefined
+                    : "clone-destination-choice"
+                }
                 disabled={busy || selectedRepository === null}
                 autoComplete="off"
                 spellCheck={false}
@@ -719,6 +746,19 @@ export function CloneRepoDialog({
                 </div>
               )}
             </div>
+            {activeDestination !== null && selectedRepository !== null && (
+              <div
+                id="clone-destination-choice"
+                className="clone-destination-choice"
+                role="status"
+                title={checkoutPath(activeDestination, selectedRepository)}
+              >
+                Will create{" "}
+                <strong>
+                  {checkoutPath(activeDestination, selectedRepository)}
+                </strong>
+              </div>
+            )}
           </section>
 
           {submitError !== null && (
@@ -780,10 +820,14 @@ export function CloneRepoDialog({
           <button
             type="button"
             className="modal__cancel"
-            disabled={busy}
-            onClick={onClose}
+            disabled={canceling || cloneProgress?.phase === "indexing"}
+            onClick={() => void cancel()}
           >
-            Cancel
+            {canceling
+              ? "Canceling…"
+              : cloneProgress?.phase === "indexing"
+                ? "Finishing…"
+                : "Cancel"}
           </button>
           <button
             type="button"

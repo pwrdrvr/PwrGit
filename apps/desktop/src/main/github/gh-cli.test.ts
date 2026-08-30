@@ -7,7 +7,7 @@ const childProcess = vi.hoisted(() => ({
 
 vi.mock("node:child_process", () => childProcess);
 
-import { ghEnvironment, runGh } from "./gh-cli";
+import { ghEnvironment, isGhNotFoundError, runGh } from "./gh-cli";
 
 function streamingChild(): EventEmitter & {
   stdout: EventEmitter;
@@ -44,6 +44,13 @@ describe("runGh", () => {
         process.env.GIT_SSH_COMMAND = previousSshCommand;
       }
     }
+  });
+
+  it("recognizes GitHub's private-or-missing repository response", () => {
+    expect(isGhNotFoundError(new Error("gh: Not Found (HTTP 404)"))).toBe(true);
+    expect(isGhNotFoundError(new Error("dial tcp: network is unreachable"))).toBe(
+      false
+    );
   });
 
   it("streams with ignored stdin and protected prompt guards", async () => {
@@ -329,6 +336,25 @@ describe("runGh", () => {
     expect(child.kill).toHaveBeenCalledTimes(1);
   });
 
+  it("terminates an explicitly canceled CLI process", async () => {
+    const child = streamingChild();
+    childProcess.spawn.mockReturnValue(child);
+    const controller = new AbortController();
+
+    const result = runGh(["repo", "clone", "owner/repo"], {
+      onStderr: () => undefined,
+      signal: controller.signal
+    });
+    controller.abort();
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    child.emit("close", null, "SIGTERM");
+
+    await expect(result).rejects.toMatchObject({
+      code: "aborted",
+      message: "GitHub CLI command was canceled."
+    });
+  });
+
   it("types buffered timeouts and force-kills a process that does not close", async () => {
     vi.useFakeTimers();
     const child = streamingChild();
@@ -343,7 +369,13 @@ describe("runGh", () => {
     });
     await vi.advanceTimersByTimeAsync(100);
     if (process.platform === "win32") {
-      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+      expect(childProcess.spawn).toHaveBeenNthCalledWith(
+        2,
+        expect.stringMatching(/[\\/]taskkill\.exe$/i),
+        ["/pid", "4242", "/T", "/F"],
+        { stdio: "ignore", windowsHide: true }
+      );
+      expect(child.kill).not.toHaveBeenCalled();
       expect(kill).not.toHaveBeenCalled();
     } else {
       expect(kill).toHaveBeenCalledWith(-4_242, "SIGTERM");
@@ -351,7 +383,12 @@ describe("runGh", () => {
     }
     await vi.advanceTimersByTimeAsync(1_000);
     if (process.platform === "win32") {
-      expect(child.kill).toHaveBeenLastCalledWith("SIGKILL");
+      expect(childProcess.spawn).toHaveBeenNthCalledWith(
+        3,
+        expect.stringMatching(/[\\/]taskkill\.exe$/i),
+        ["/pid", "4242", "/T", "/F"],
+        { stdio: "ignore", windowsHide: true }
+      );
     } else {
       expect(kill).toHaveBeenLastCalledWith(-4_242, "SIGKILL");
     }
@@ -360,12 +397,11 @@ describe("runGh", () => {
     kill.mockRestore();
   });
 
-  it("uses the child handle for timeout cleanup on Windows", async () => {
-    vi.useFakeTimers();
+  it("terminates the entire CLI subprocess tree on Windows", async () => {
     const child = streamingChild();
     Object.assign(child, { pid: 4_242 });
-    childProcess.spawn.mockReturnValue(child);
-    const kill = vi.spyOn(process, "kill").mockReturnValue(true);
+    const taskkill = streamingChild();
+    childProcess.spawn.mockReturnValueOnce(child).mockReturnValue(taskkill);
     const actualPlatform = process.platform;
     Object.defineProperty(process, "platform", {
       configurable: true,
@@ -373,23 +409,27 @@ describe("runGh", () => {
     });
 
     try {
-      const result = runGh(["api", "user"], { timeoutMs: 100 });
-      const rejection = expect(result).rejects.toMatchObject({
-        code: "timed_out",
-        message: "gh timed out after 100ms"
+      const controller = new AbortController();
+      const result = runGh(["repo", "clone", "owner/repo"], {
+        onStderr: () => undefined,
+        signal: controller.signal
       });
-      await vi.advanceTimersByTimeAsync(100);
-      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
-      expect(kill).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(1_000);
-      expect(child.kill).toHaveBeenLastCalledWith("SIGKILL");
-      await rejection;
+      controller.abort();
+
+      expect(childProcess.spawn).toHaveBeenNthCalledWith(
+        2,
+        expect.stringMatching(/[\\/]taskkill\.exe$/i),
+        ["/pid", "4242", "/T", "/F"],
+        { stdio: "ignore", windowsHide: true }
+      );
+      expect(child.kill).not.toHaveBeenCalled();
+      child.emit("close", null, "SIGTERM");
+      await expect(result).rejects.toMatchObject({ code: "aborted" });
     } finally {
       Object.defineProperty(process, "platform", {
         configurable: true,
         value: actualPlatform
       });
-      kill.mockRestore();
     }
   });
 });

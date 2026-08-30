@@ -16,9 +16,9 @@ const GIT_ENV: NodeJS.ProcessEnv = {
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_SYSTEM: "/dev/null",
   GIT_AUTHOR_NAME: "PwrGit Test",
-  GIT_AUTHOR_EMAIL: "test@pwrgit.dev",
+  GIT_AUTHOR_EMAIL: "test@pwrgit.com",
   GIT_COMMITTER_NAME: "PwrGit Test",
-  GIT_COMMITTER_EMAIL: "test@pwrgit.dev"
+  GIT_COMMITTER_EMAIL: "test@pwrgit.com"
 };
 
 function git(cwd: string, ...args: string[]): string {
@@ -41,6 +41,11 @@ export type TestRepo = {
   createBranch: (branch: string) => void;
 };
 
+export type RemoteTestRepo = TestRepo & {
+  /** Bare origin, kept outside reposDir so the app never indexes it. */
+  remotePath: string;
+};
+
 export type GitSandbox = {
   /** Directory added as a profile root — the app scans this for repos. */
   reposDir: string;
@@ -48,6 +53,8 @@ export type GitSandbox = {
   worktreeRoot: string;
   /** Run a raw git command in a checkout (test setup escape hatch). */
   git: (cwd: string, ...args: string[]) => string;
+  /** Create a bare on-disk remote outside the profile's scanned roots. */
+  makeBareRemote: (name: string) => string;
   /** Write a file and commit it in a checkout. */
   commit: (cwd: string, file: string, message: string) => void;
   /** Like commit, but authored by someone else (tests "not mine" paths). */
@@ -60,6 +67,14 @@ export type GitSandbox = {
    */
   commitEmptyAt: (cwd: string, message: string, epochSeconds: number) => void;
   makeRepo: (name: string, opts?: { worktrees?: string[] }) => TestRepo;
+  /** A repo whose main branch is synchronized with a local bare origin. */
+  makeRepoWithRemote: (name: string) => RemoteTestRepo;
+  /**
+   * Two reorderable local commits whose isolated check passes, while a
+   * source-only merge driver makes Apply fail. This exercises rollback after
+   * cherry-pick has started without weakening the production approval gate.
+   */
+  makeRepoWithApplyOnlyRebaseFailure: (name: string) => RemoteTestRepo;
   /** A repo whose primary branch is `behindBy` commits behind its origin. */
   makeRepoBehindRemote: (
     name: string,
@@ -77,6 +92,12 @@ export type GitSandbox = {
    */
   makeRepoWithDivergedReleaseBranch: (name: string) => TestRepo;
   /** Rewritten commits plus work unique to both local and upstream. */
+  /**
+   * A repo stopped mid-rebase with TWO conflicting steps, so continuing the
+   * first one advances the sequencer and stops again — the case where Git
+   * exits non-zero on ordinary progress.
+   */
+  makeRepoWithRebaseConflicts: (name: string) => TestRepo;
   makeRepoWithRewrittenDivergence: (
     name: string,
     opts?: { paired?: number; localOnly?: number; remoteOnly?: number }
@@ -101,19 +122,32 @@ export function createGitSandbox(): GitSandbox {
   const worktreesDir = join(base, "worktrees");
   const worktreeRoot = join(base, "new-worktrees");
   const remotesDir = join(base, "remotes");
+  const sourcesDir = join(base, "sources");
   mkdirSync(reposDir, { recursive: true });
   mkdirSync(worktreesDir, { recursive: true });
   mkdirSync(worktreeRoot, { recursive: true });
   mkdirSync(remotesDir, { recursive: true });
+  mkdirSync(sourcesDir, { recursive: true });
 
   const initRepo = (name: string): string => {
     const repoPath = join(reposDir, name);
     mkdirSync(repoPath, { recursive: true });
     git(repoPath, "init", "-b", "main");
+    git(repoPath, "config", "core.autocrlf", "false");
     writeFileSync(join(repoPath, "README.md"), `# ${name}\n`);
     git(repoPath, "add", "-A");
     git(repoPath, "commit", "-m", "initial commit");
     return repoPath;
+  };
+
+  const addBareOrigin = (name: string, repoPath: string): string => {
+    const remotePath = join(remotesDir, `${name}.git`);
+    git(remotesDir, "init", "--bare", `${name}.git`);
+    git(remotePath, "symbolic-ref", "HEAD", "refs/heads/main");
+    git(repoPath, "remote", "add", "origin", remotePath);
+    git(repoPath, "push", "-u", "origin", "main");
+    git(repoPath, "remote", "set-head", "origin", "--auto");
+    return remotePath;
   };
 
   const worktreeAdder =
@@ -141,6 +175,73 @@ export function createGitSandbox(): GitSandbox {
       addWorktree,
       createBranch: (branch: string) => git(repoPath, "branch", branch)
     };
+  };
+
+  const makeRepoWithRemote = (name: string): RemoteTestRepo => {
+    const repoPath = initRepo(name);
+    const remotePath = addBareOrigin(name, repoPath);
+    return {
+      name,
+      path: repoPath,
+      remotePath,
+      addWorktree: worktreeAdder(name, repoPath),
+      createBranch: (branch: string) => git(repoPath, "branch", branch)
+    };
+  };
+
+  const makeRepoWithApplyOnlyRebaseFailure = (
+    name: string
+  ): RemoteTestRepo => {
+    const repoPath = initRepo(name);
+    writeFileSync(join(repoPath, ".gitattributes"), "shared.txt merge=reject\n");
+    writeFileSync(
+      join(repoPath, "shared.txt"),
+      "header\nfirst: baseline\nkeep a\nkeep b\nkeep c\nkeep d\nkeep e\nkeep f\nsecond: baseline\nfooter\n"
+    );
+    git(repoPath, "add", "-A");
+    git(repoPath, "commit", "-m", "rebase baseline");
+    const remotePath = addBareOrigin(name, repoPath);
+
+    writeFileSync(
+      join(repoPath, "shared.txt"),
+      "header\nfirst: local one\nkeep a\nkeep b\nkeep c\nkeep d\nkeep e\nkeep f\nsecond: baseline\nfooter\n"
+    );
+    git(repoPath, "add", "shared.txt");
+    git(repoPath, "commit", "-m", "change first setting");
+    writeFileSync(
+      join(repoPath, "shared.txt"),
+      "header\nfirst: local one\nkeep a\nkeep b\nkeep c\nkeep d\nkeep e\nkeep f\nsecond: local two\nfooter\n"
+    );
+    git(repoPath, "add", "shared.txt");
+    git(repoPath, "commit", "-m", "change second setting");
+
+    // The disposable check copies commits, not this source-only override. The
+    // E2E app's isolated global config gives its clone a normal text driver;
+    // Apply sees this local rejection instead, fails after reset/cherry-pick
+    // has begun, and must abort before restoring the checked source HEAD.
+    git(repoPath, "config", "merge.reject.name", "Reject in source checkout");
+    git(repoPath, "config", "merge.reject.driver", "false");
+
+    return {
+      name,
+      path: repoPath,
+      remotePath,
+      addWorktree: worktreeAdder(name, repoPath),
+      createBranch: (branch: string) => git(repoPath, "branch", branch)
+    };
+  };
+
+  const makeBareRemote = (name: string): string => {
+    const source = join(sourcesDir, name);
+    mkdirSync(source, { recursive: true });
+    git(source, "init", "-b", "main");
+    writeFileSync(join(source, "README.md"), `# ${name}\n`);
+    git(source, "add", "-A");
+    git(source, "commit", "-m", "initial commit");
+    const remote = join(remotesDir, `${name}.git`);
+    git(remotesDir, "clone", "--bare", source, remote);
+    git(remote, "symbolic-ref", "HEAD", "refs/heads/main");
+    return remote;
   };
 
   const makeRepoBehindRemote = (
@@ -299,7 +400,7 @@ export function createGitSandbox(): GitSandbox {
     git(repoPath, "reset", "--hard", base);
     for (let index = 0; index < paired; index += 1) {
       commitAs(
-        "rewrite@pwrgit.dev",
+        "rewrite@pwrgit.com",
         repoPath,
         `shared-${index}.txt`,
         `feat: shared change ${index}`
@@ -337,18 +438,58 @@ export function createGitSandbox(): GitSandbox {
     rmSync(base, { recursive: true, force: true });
   };
 
+  const makeRepoWithRebaseConflicts = (name: string): TestRepo => {
+    const repo = makeRepo(name);
+    const { path } = repo;
+    // Two files, each rewritten on both branches: rebasing topic onto main
+    // conflicts on the first step, then again on the second.
+    writeFileSync(join(path, "a.txt"), "base\n");
+    writeFileSync(join(path, "b.txt"), "base\n");
+    git(path, "add", "-A");
+    git(path, "commit", "-m", "base files");
+
+    git(path, "checkout", "-b", "topic");
+    writeFileSync(join(path, "a.txt"), "topic a\n");
+    git(path, "add", "-A");
+    git(path, "commit", "-m", "topic a");
+    writeFileSync(join(path, "b.txt"), "topic b\n");
+    git(path, "add", "-A");
+    git(path, "commit", "-m", "topic b");
+
+    git(path, "checkout", "main");
+    writeFileSync(join(path, "a.txt"), "main a\n");
+    git(path, "add", "-A");
+    git(path, "commit", "-m", "main a");
+    writeFileSync(join(path, "b.txt"), "main b\n");
+    git(path, "add", "-A");
+    git(path, "commit", "-m", "main b");
+
+    git(path, "checkout", "topic");
+    // Expected to fail: this is what leaves the rebase in progress.
+    try {
+      git(path, "rebase", "main");
+    } catch {
+      /* conflict is the point */
+    }
+    return repo;
+  };
+
   return {
     reposDir,
     worktreeRoot,
     git: (cwd: string, ...args: string[]) => git(cwd, ...args),
+    makeBareRemote,
     commit,
     commitAs,
     commitEmptyAt,
     makeRepo,
+    makeRepoWithRemote,
+    makeRepoWithApplyOnlyRebaseFailure,
     makeRepoBehindRemote,
     makeRepoWithSyncedReleaseBranch,
     makeRepoWithDivergedReleaseBranch,
     makeRepoWithRewrittenDivergence,
+    makeRepoWithRebaseConflicts,
     cleanup
   };
 }

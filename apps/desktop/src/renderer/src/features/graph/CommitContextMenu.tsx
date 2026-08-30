@@ -22,6 +22,7 @@ export function CommitContextMenu({
   worktreeId,
   onViewChanges,
   onBranchFrom,
+  onTagFrom,
   onSwitchBranch,
   onRevealWorktree,
   onClose
@@ -35,6 +36,8 @@ export function CommitContextMenu({
   worktreeId: string;
   onViewChanges: () => void;
   onBranchFrom: () => void;
+  /** Create a tag at this commit. Never moves a worktree. */
+  onTagFrom: () => void;
   /** Check a branch tipped here out in the viewed worktree. */
   onSwitchBranch: (target: CommitSwitchTarget) => void;
   /** Jump to the worktree already holding a branch tipped here. */
@@ -78,6 +81,11 @@ export function CommitContextMenu({
       type: "item",
       label: "Branch from this commit…",
       onSelect: onBranchFrom
+    },
+    {
+      type: "item",
+      label: "Tag this commit…",
+      onSelect: onTagFrom
     },
     { type: "sep" },
     {

@@ -9,11 +9,16 @@ import {
   safeStorage
 } from "electron";
 import {
+  GENERAL_DEFAULTS,
+  isAppearanceTheme,
   ok,
+  resolveProfileAppearance,
   resolveUpdateSelection,
+  type AppAppearance,
   type Profile,
   type BranchReveal
 } from "@pwrgit/shared";
+import { registerAppIdentityHandlers } from "./app-identity";
 import { registerAppDocumentHandlers } from "./app-document-handlers";
 import { wireAppMenuBridge } from "./app-menu-bridge";
 import { openAppDocumentWindow } from "./app-document-window";
@@ -25,17 +30,21 @@ import {
 import { CommandBus } from "./command-bus";
 import { registerDialogHandlers } from "./dialog-handlers";
 import { execGit } from "./git/dugite";
+import { openExternalUrlFromMenu } from "./external-links";
 import { registerBranchHandlers } from "./git/branch-handlers";
+import { registerBulkSyncHandlers } from "./git/bulk-sync-handlers";
 import { registerCloneHandlers } from "./git/clone-handlers";
 import { CloneService } from "./git/clone-service";
 import { registerForkHandlers } from "./git/fork-handlers";
 import { ForkService } from "./git/fork-service";
 import { ForgeRepoRegistry } from "./forge/repo-provider";
+import { createE2EForgeFixtureServices } from "./forge/e2e-forge-fixture";
 import { IdentityService } from "./forge/identity-service";
 import { ForgeStatusService } from "./forge/status";
 import { GitHubRepoProvider } from "./forge/github/repo-provider";
 import { GitLabRepoProvider } from "./forge/gitlab/repo-provider";
 import { registerChangesHandlers } from "./git/changes-handlers";
+import { registerOperationHandlers } from "./git/operation-handlers";
 import {
   ChangeSetWatch,
   createChangeSetAnnouncer
@@ -46,6 +55,8 @@ import { registerRemoteHandlers } from "./git/remote-handlers";
 import { registerRepoHandlers } from "./git/repo-handlers";
 import { RepoIndexer } from "./git/repo-indexer";
 import { registerSearchStatusHandlers } from "./git/search-status-handlers";
+import { registerSubmoduleHandlers } from "./git/submodule-handlers";
+import { registerTagHandlers } from "./git/tag-handlers";
 import {
   createWorktreeRefresher,
   registerWorktreeHandlers
@@ -60,7 +71,8 @@ import {
 import { GitHubCommitAuthorIdentityService } from "./github/commit-author-identity";
 import { registerGitHubHandlers } from "./github/github-handlers";
 import { PrService } from "./github/pr-service";
-import { emitEvent, registerIpc } from "./ipc";
+import { emitEvent, emitEventToWindow, registerIpc } from "./ipc";
+import { delay } from "./util/timing";
 import {
   initLogFile,
   logMain,
@@ -72,6 +84,10 @@ import { ensureMacKeychainAccess } from "./mac-keychain-access";
 import { openDatabase } from "./persistence/db";
 import { readGitIdentityDefaults } from "./profiles/git-identity";
 import { registerProfileHandlers } from "./profiles/profile-handlers";
+import {
+  ProfileScanCoordinator,
+  survivingActiveWorktreeId
+} from "./profiles/profile-runtime";
 import { ProfileService } from "./profiles/profile-service";
 import { registerShellHandlers } from "./shell-handlers";
 import { SettingsService } from "./settings/settings-service";
@@ -87,7 +103,9 @@ import { rebuildAppMenu } from "./menu";
 import { checkForAppUpdatesFromMenu } from "./menu-update-check";
 import { createProfileWindows } from "./profile-windows";
 import { openSettingsWindow } from "./settings-window";
-import { applyNativeWindowTheme } from "./window-chrome";
+import { createNativeThemeController } from "./native-theme";
+import { McpPolicyStore } from "@pwrgit/mcp-server/access-policy";
+import { registerLocalAgentHandlers } from "./local-agents/local-agent-handlers";
 
 const APP_NAME = "PwrGit";
 
@@ -108,10 +126,6 @@ protocol.registerSchemesAsPrivileged([
 // carry the product name, but setting it explicitly keeps every launch mode
 // consistent.
 app.setName(APP_NAME);
-// PwrGit currently renders dark-only. Keep Electron-owned popup menus and
-// dialogs on that same theme; the shared chrome helper is ready to switch this
-// alongside the renderer when the authored light theme becomes selectable.
-applyNativeWindowTheme(nativeTheme);
 app.setAboutPanelOptions({
   applicationName: APP_NAME,
   applicationVersion: app.getVersion()
@@ -136,6 +150,27 @@ const dataDirOverride = process.env["PWRGIT_USER_DATA_DIR"];
 if (dataDirOverride !== undefined && dataDirOverride !== "") {
   app.setPath("userData", dataDirOverride);
 }
+
+// Settings and native appearance are established before app readiness so the
+// first BrowserWindow, macOS traffic lights, Windows caption buttons, menus,
+// and dialogs all start on the persisted palette. Invalid/legacy storage falls
+// back to PwrGit's historical dark theme.
+const settings = new SettingsService(
+  join(app.getPath("userData"), "settings.json")
+);
+const storedTheme = settings.get().general?.theme;
+let isProfileWindow = (_window: BrowserWindow): boolean => false;
+let publishAppAppearance = (_next: AppAppearance): void => undefined;
+const appearance = createNativeThemeController({
+  nativeTheme,
+  initialTheme: isAppearanceTheme(storedTheme)
+    ? storedTheme
+    : GENERAL_DEFAULTS.theme,
+  // Profile frames can have their own palette; the app controller owns every
+  // unbound window, while the profile registry repaints its own windows below.
+  windows: () => BrowserWindow.getAllWindows().filter((win) => !isProfileWindow(win)),
+  onChanged: (next) => publishAppAppearance(next)
+});
 
 const bus = new CommandBus();
 bus.register("ping", () => ok("pong"));
@@ -182,14 +217,11 @@ if (!gotSingleInstanceLock) {
     installDevelopmentDockIcon();
     bus.register("logs:read", () => ok(readLogSnapshot()));
     bus.register("logs:openWindow", () => {
-      openLogsWindow();
+      openLogsWindow(appearance.appearance());
       return ok(null);
     });
-    registerAppDocumentHandlers(bus);
-
-    const settings = new SettingsService(
-      join(app.getPath("userData"), "settings.json")
-    );
+    registerAppDocumentHandlers(bus, appearance.appearance);
+    registerAppIdentityHandlers(bus);
     const keychainReady = await ensureMacKeychainAccess({
       platform: process.platform,
       packaged: app.isPackaged,
@@ -207,6 +239,9 @@ if (!gotSingleInstanceLock) {
 
     const db = openDatabase(join(app.getPath("userData"), "pwrgit.db"));
     const diagnosticsOutputRoot = join(app.getPath("userData"), "diagnostics");
+    const mcpPolicy = new McpPolicyStore(
+      join(app.getPath("userData"), "mcp-policy.json")
+    );
     const diagnostics = new DiagnosticsManager({
       outputRoot: diagnosticsOutputRoot,
       getDiagnostics: () =>
@@ -254,13 +289,25 @@ if (!gotSingleInstanceLock) {
     // missing reports that through `status()`, which is what the dialogs
     // render — registering conditionally would instead make GitLab look like
     // a host PwrGit has never heard of.
-    const forges = new ForgeRepoRegistry();
-    forges.register(new GitHubRepoProvider());
-    forges.register(new GitLabRepoProvider());
+    // The fixture provider is an unpackaged-test seam, never a packaged-app
+    // configuration surface. Ignore an inherited/user-set variable in a real
+    // installation so production always constructs the real forge clients.
+    const forgeFixturePath = app.isPackaged
+      ? undefined
+      : process.env["PWRGIT_E2E_FORGE_FIXTURE"];
+    const fixtureServices =
+      forgeFixturePath === undefined || forgeFixturePath === ""
+        ? null
+        : createE2EForgeFixtureServices(forgeFixturePath, execGit);
+    const forges = fixtureServices?.forges ?? new ForgeRepoRegistry();
+    if (fixtureServices === null) {
+      forges.register(new GitHubRepoProvider());
+      forges.register(new GitLabRepoProvider());
+    }
     // One probe for the whole app: `ForgeStatusService` caches and dedups
     // in-flight reads, and a second instance would quietly undo both by
     // keeping its own cache and spawning its own `gh`/`glab`.
-    const forgeStatus = new ForgeStatusService();
+    const forgeStatus = fixtureServices?.status ?? new ForgeStatusService();
     const identityService = new IdentityService(db, execGit, forges);
     const cloneService = new CloneService(
       db,
@@ -302,23 +349,20 @@ if (!gotSingleInstanceLock) {
     // interval instead of via filesystem watchers (which peg fseventd on large
     // trees). PwrGit's own git ops refresh directly through the refresher.
     let activeWorktreeId: string | null = null;
-    const rescanningProfiles = new Set<string>();
+    const profileScans = new ProfileScanCoordinator();
 
     const rescanInBackground = (profile: Profile): void => {
-      if (
-        rescanningProfiles.has(profile.id) ||
-        !indexer.shouldRescanProfile(profile.id)
-      ) {
-        return;
-      }
+      if (!indexer.shouldRescanProfile(profile.id)) return;
+      const signal = profileScans.begin(profile.id);
+      if (signal === null) return;
       // Scan lists repos + worktrees (cheap). Per-worktree *state*
       // (dirty/ahead/behind/staleness) is computed lazily per repo when its row
       // is expanded (repo:computeState) — computing all 156 at launch storms git.
       const startedAt = Date.now();
-      rescanningProfiles.add(profile.id);
       void indexer
-        .rescanProfile(profile)
+        .rescanProfile(profile, { signal })
         .then((repos) => {
+          if (signal.aborted) return;
           logMain(
             "info",
             "scan",
@@ -327,13 +371,45 @@ if (!gotSingleInstanceLock) {
           );
           emitEvent("repo:changed", { profileId: profile.id });
         })
-        .catch((cause) => logMain("error", "scan", "rescan failed:", cause))
-        .finally(() => rescanningProfiles.delete(profile.id));
+        .catch((cause) => {
+          if (!signal.aborted) {
+            logMain("error", "scan", "rescan failed:", cause);
+          }
+        })
+        .finally(() => profileScans.finish(profile.id, signal));
     };
 
     // One window per profile. Opening a profile that already has a window
     // focuses it; cross-profile reveals are stashed until the new window asks.
-    const windows = createProfileWindows();
+    const appearanceForProfile = (profileId: string): AppAppearance =>
+      resolveProfileAppearance(
+        profiles.get(profileId)?.theme,
+        appearance.appearance()
+      );
+    const windows = createProfileWindows({ appearance: appearanceForProfile });
+    isProfileWindow = (window) => windows.profileFor(window) !== null;
+    publishAppAppearance = (next) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (windows.profileFor(window) === null) {
+          emitEventToWindow("appearance:changed", next, window);
+        }
+      }
+      windows.syncAllAppearances();
+    };
+    bus.register("appearance:read", (_req, context) => {
+      const sender =
+        context.webContentsId === undefined
+          ? null
+          : (BrowserWindow.getAllWindows().find(
+              (window) => window.webContents.id === context.webContentsId
+            ) ?? null);
+      const profileId = windows.profileFor(sender);
+      return ok(
+        profileId === null
+          ? appearance.appearance()
+          : appearanceForProfile(profileId)
+      );
+    });
     type Reveal = {
       repoId: string;
       worktreeId: string | null;
@@ -351,11 +427,18 @@ if (!gotSingleInstanceLock) {
         onCheckForUpdates: () => {
           void checkForAppUpdatesFromMenu();
         },
-        onOpenSettings: () => openSettingsWindow(),
-        onOpenLogs: () => openLogsWindow(),
-        onOpenLicense: () => openAppDocumentWindow("license"),
+        onOpenSettings: () => openSettingsWindow(appearance.appearance()),
+        onOpenLogs: () => openLogsWindow(appearance.appearance()),
+        onOpenLicense: () =>
+          openAppDocumentWindow("license", appearance.appearance()),
         onOpenThirdPartyNotices: () =>
-          openAppDocumentWindow("third-party-notices"),
+          openAppDocumentWindow(
+            "third-party-notices",
+            appearance.appearance()
+          ),
+        onOpenExternalLink: (label, url) => {
+          void openExternalUrlFromMenu(label, url);
+        },
         developerMode: settingsSnapshot(settings, diagnosticsOutputRoot).general
           .developerMode
       });
@@ -394,9 +477,22 @@ if (!gotSingleInstanceLock) {
     };
 
     registerProfileHandlers(bus, profiles, {
-      onActivated: rescanInBackground,
-      onChanged: refreshMenu,
+      onChanged: (profile) => {
+        windows.syncAppearance(profile.id);
+        refreshMenu();
+      },
       openWindow: openProfileWindow,
+      onDeleted: (deletedProfileId, activeProfileId) => {
+        // A renderer's profile binding is immutable, so it cannot survive the
+        // row it represents. Drop ephemeral selections/reveals and close it.
+        pendingReveals.delete(deletedProfileId);
+        profileScans.abort(deletedProfileId);
+        prService.invalidatePendingWrites();
+        activeWorktreeId = survivingActiveWorktreeId(db, activeWorktreeId);
+        if (windows.close(deletedProfileId)) {
+          openProfileWindow(activeProfileId);
+        }
+      },
       consumeReveal: (profileId) => {
         const reveal = pendingReveals.get(profileId) ?? null;
         pendingReveals.delete(profileId);
@@ -418,9 +514,19 @@ if (!gotSingleInstanceLock) {
       worktreeOperations,
       settings
     );
+    registerTagHandlers(bus, db);
     registerRemoteHandlers(bus, db, refresher, worktreeOperations, indexer);
+    const bulkSyncHandlers = registerBulkSyncHandlers(
+      bus,
+      db,
+      refresher,
+      worktreeOperations,
+      indexer
+    );
     registerGraphHandlers(bus, db, stateService);
     registerChangesHandlers(bus, db, refresher, worktreeOperations);
+    registerOperationHandlers(bus, db, refresher, worktreeOperations);
+    registerSubmoduleHandlers(bus, db);
     registerRebaseHandlers(bus, db, refresher, worktreeOperations);
     registerDialogHandlers(bus);
     registerShellHandlers(bus);
@@ -435,15 +541,22 @@ if (!gotSingleInstanceLock) {
       diagnosticsOutputRoot,
       appVersion: app.getVersion(),
       onChanged: (snapshot) => {
+        appearance.setTheme(snapshot.general.theme);
         emitEvent("settings:changed", snapshot);
         diagnostics.sync();
         refreshMenu(); // Developer Mode toggles View-menu items live
       }
     });
+    registerLocalAgentHandlers(bus, mcpPolicy, () => {
+      emitEvent("localAgents:changed", mcpPolicy.snapshot());
+    });
     diagnostics.sync(); // start any settings-enabled monitors at boot
 
     registerIpc(bus, {
-      onWebContentsDestroyed: githubHandlers.releaseWebContents
+      onWebContentsDestroyed: (webContentsId) => {
+        githubHandlers.releaseWebContents(webContentsId);
+        bulkSyncHandlers.releaseWebContents(webContentsId);
+      }
     });
     registerAppUpdateHandlers(bus);
     settings.onWrite(() => {
@@ -486,6 +599,7 @@ if (!gotSingleInstanceLock) {
     app.on("before-quit", () => {
       clearInterval(activeStatePoll);
       githubHandlers.stop();
+      appearance.dispose();
     });
 
     // Drain diagnostics before quitting so final monitor-stopped events and
@@ -498,10 +612,7 @@ if (!gotSingleInstanceLock) {
       event.preventDefault();
       if (diagnosticsQuitState === "draining") return; // drain will re-quit
       diagnosticsQuitState = "draining";
-      const timeout = new Promise<void>((resolve) =>
-        setTimeout(resolve, 1_500)
-      );
-      void Promise.race([diagnostics.shutdown(), timeout]).finally(() => {
+      void Promise.race([diagnostics.shutdown(), delay(1_500)]).finally(() => {
         diagnosticsQuitState = "done";
         app.quit();
         setTimeout(() => app.exit(0), 500);

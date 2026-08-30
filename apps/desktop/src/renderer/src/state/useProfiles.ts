@@ -1,14 +1,23 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   CreateProfileRequest,
+  DeleteProfileRequest,
   Profile,
   ProfileList,
   BranchReveal,
   UpdateProfileRequest
 } from "@pwrgit/shared";
 import { dispatch, subscribe, windowProfileId } from "../lib/pwrgit";
+import {
+  LOADING_READ_STATE,
+  READY_READ_STATE,
+  type ReadState
+} from "./readState";
 
 export type UseProfiles = ProfileList & {
+  loadState: ReadState;
+  /** Retry a failed profile-list read. Later reads and pushed changes win. */
+  retry: () => Promise<void>;
   /** The profile THIS WINDOW is bound to (one window per profile). */
   activeProfile: Profile | null;
   /** Open (or focus) another profile's window; this window is unaffected. */
@@ -22,6 +31,8 @@ export type UseProfiles = ProfileList & {
   createProfile: (req: CreateProfileRequest) => Promise<string | null>;
   /** Patch an existing profile. Returns an error message or null. */
   updateProfile: (req: UpdateProfileRequest) => Promise<string | null>;
+  /** Permanently remove a profile's PwrGit-owned data. */
+  deleteProfile: (req: DeleteProfileRequest) => Promise<string | null>;
   /** Replace a profile's scan roots (triggers a rescan). */
   setRoots: (profileId: string, roots: string[]) => Promise<void>;
   /** Native multi-select folder picker; [] if cancelled. */
@@ -34,18 +45,40 @@ export function useProfiles(): UseProfiles {
     activeProfileId: null,
     profiles: []
   });
+  const [loadState, setLoadState] =
+    useState<ReadState>(LOADING_READ_STATE);
+  const mountedRef = useRef(false);
+  const requestRef = useRef(0);
+
+  const retry = useCallback(async (): Promise<void> => {
+    const request = ++requestRef.current;
+    setLoadState(LOADING_READ_STATE);
+    const r = await dispatch("profile:list", undefined);
+    if (!mountedRef.current || request !== requestRef.current) return;
+    if (r.ok) {
+      setState(r.value);
+      setLoadState(READY_READ_STATE);
+    } else {
+      setLoadState({ status: "error", message: r.error.message });
+    }
+  }, []);
 
   useEffect(() => {
-    let active = true;
-    void dispatch("profile:list", undefined).then((r) => {
-      if (active && r.ok) setState(r.value);
+    mountedRef.current = true;
+    const off = subscribe("profile:changed", (payload) => {
+      // A push is newer than every read already in flight. Invalidate those
+      // requests so a late boot read cannot replace the pushed snapshot.
+      requestRef.current += 1;
+      setState(payload);
+      setLoadState(READY_READ_STATE);
     });
-    const off = subscribe("profile:changed", (payload) => setState(payload));
+    void retry();
     return () => {
-      active = false;
+      mountedRef.current = false;
+      requestRef.current += 1;
       off();
     };
-  }, []);
+  }, [retry]);
 
   const openProfile = useCallback(
     async (
@@ -82,6 +115,14 @@ export function useProfiles(): UseProfiles {
     []
   );
 
+  const deleteProfile = useCallback(
+    async (req: DeleteProfileRequest): Promise<string | null> => {
+      const r = await dispatch("profile:delete", req);
+      return r.ok ? null : r.error.message;
+    },
+    []
+  );
+
   const setRoots = useCallback(async (profileId: string, roots: string[]) => {
     await dispatch("profile:setRoots", { profileId, roots });
   }, []);
@@ -98,10 +139,13 @@ export function useProfiles(): UseProfiles {
 
   return {
     ...state,
+    loadState,
+    retry,
     activeProfile,
     openProfile,
     createProfile,
     updateProfile,
+    deleteProfile,
     setRoots,
     pickDirectories
   };

@@ -4,9 +4,15 @@ Notes for the git layer. See `apps/desktop/AGENTS.md` for app-wide facts.
 
 ## Real-git tests run on Windows CI too
 
-Many suites here drive the system `git` against temp repos. Two hazards only
-ever fail on the Windows runner, so a green local run proves nothing about
-them:
+Many suites here drive the system `git` against temp repos. Some hazards only
+fail on the Windows runner, so a green local run proves nothing about them:
+
+- **Never give a Git process a native cwd inside a directory we may remove.**
+  Git for Windows can hand execution from its launcher to descendant
+  `git.exe` processes; awaiting the launcher does not guarantee every
+  descendant has released that cwd, and removal then fails with `EPERM` or
+  `EBUSY`. Keep the process cwd in a stable directory and address the repo with
+  `git -C <repo>` (use `gitProcessInvocation` in `dugite.ts`).
 
 - **`core.autocrlf` defaults to true on Windows.** Anything restored out of
   HEAD comes back with CRLF, and a test comparing file *contents* against the
@@ -77,3 +83,66 @@ either half:
   recency), so the per-worktree step re-adds its upstream. Anything scoped
   "what the user is looking at right now" belongs there, not in the
   repo-level cache, which is deliberately shared across a repo's worktrees.
+
+## `--continue` exits non-zero on ordinary progress
+
+`git rebase --continue` returns **1** when it successfully commits the current
+step and then stops on the *next* conflict. So does a multi-commit
+`cherry-pick`. Reading the exit code alone reports the normal path of a
+multi-commit rebase as a failure, and dumps Git's `hint:` block into the user's
+face at the exact moment things are going fine.
+
+`operation-service.ts` classifies against observed state instead: it snapshots
+HEAD, the sequencer counter, and the conflict count, runs the command, and calls
+the result `stopped` (progress) when any of them moved. Only a run where
+nothing moved is a real `continue_failed`. `operation-service.test.ts` pins both
+halves against real Git — keep that rebase test if you touch this.
+
+Two related traps in the same area:
+
+- **An operation with zero conflicts is normal.** `rebase -i` paused on `edit`,
+  and `merge --no-commit`, both leave markers with a clean index. Treating
+  "mid-operation" as "conflicted" is wrong, and gating UI on it hides the
+  Changes and Rebase tabs exactly when they are needed.
+- **`GIT_AUTHOR_*` / `GIT_COMMITTER_*` outrank `-c user.email`.** Tests that set
+  those in the environment cannot prove identity handling; unset them for that
+  assertion (see `execGitWithoutIdentityEnv`).
+## Partial staging works through Git, never through renderer patch text
+
+`partial-staging.ts` stages and unstages hunks and lines. Four invariants hold
+it together; breaking any of them corrupts the index quietly.
+
+- **Line IDs are positional, and only valid for their fingerprint.** An ID is
+  `h:<hunkIndex>:<oldStart>:<newStart>:a|d:<lineNo>` — derived from where a
+  line sits in one exact `-U0` snapshot, not from its content. The same ID
+  names a different line as soon as the diff moves, so `applyPartialSelection`
+  refuses any selection whose `fingerprint` no longer matches. The renderer
+  relies on the same token to decide whether ticks survive a refresh: equal
+  fingerprint means the ticks still point at the lines the user chose. Anything
+  that can change what the pane shows must therefore change the fingerprint —
+  which is why it hashes the display patch as well as the selection patch (an
+  untracked file has no `-U0` output at all).
+
+- **The fingerprint covers one path.** Status is read repo-wide so a
+  path-limited query cannot disguise a rename's destination as a new file, but
+  only this path's statuses enter the token. An edit to an unrelated file must
+  not stale a diff the user is reading — the change watcher fingerprints the
+  whole worktree and fires constantly.
+
+- **Unstaging is a forward patch applied in reverse.** `buildSelectedPatch`
+  describes residual-index → current-index and sets `reverse`, rather than
+  inventing an inverted edit script. That keeps replacement ordering and
+  `\ No newline at end of file` markers native to Git. The two directions
+  compute different hunk starts, and `priorDelta` accumulates across hunks in
+  both — the multi-hunk cases are the ones worth testing, since a single-hunk
+  patch leaves that term zero.
+
+- **`git apply` gets `--unidiff-zero --recount`.** `--recount` recomputes hunk
+  counts from the body, so the counts written into the header are advisory;
+  the *starts* are not, and neither is line order. `--unidiff-zero` disables
+  context matching, so a wrong start silently writes to the wrong place instead
+  of failing to apply.
+
+Whole-file actions stay available for every kind partial staging refuses
+(binary, conflicted, submodule, non-UTF-8, new, deleted, renamed, mode-only);
+`partialDiffCapability` names the reason and the pane shows it.

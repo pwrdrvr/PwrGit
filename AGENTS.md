@@ -24,10 +24,12 @@ whichever Node ran the install, and a wrong-ABI build does not announce itself:
 it surfaces much later as a test failure or a launch crash that reads like a
 broken database.
 
-One `pnpm i` serves both runtimes. It leaves `better-sqlite3` built twice — for
-this machine's Node (what `vitest` loads) and for Electron (what the app
-loads) — so `pnpm test` and `pnpm dev` need no rebuild between them, in either
-order. `apps/desktop/AGENTS.md` describes the layout. If a native ABI error
+One `pnpm i` serves both runtimes. It leaves separate `better-sqlite3` artifacts
+for this machine's Node (what `vitest` loads) and Electron (what the app loads),
+both staged from the package's ABI-independent Node-API prebuild, so `pnpm test`
+and `pnpm dev` need no rebuild between them, in either order.
+`apps/desktop/AGENTS.md` describes the layout. If a
+native ABI error
 does appear — *"better_sqlite3.node was compiled against a different Node.js
 version using NODE_MODULE_VERSION 147; this version requires 145"* — one
 command repairs whichever half is stale:
@@ -56,6 +58,11 @@ pnpm lint       # every check CI runs, cheapest-first (see below)
 doesn't wait on the slow one. CI's Typecheck job runs exactly this one command,
 so **add new repo-wide checks to the chain in the root `package.json`**, not as
 another CI step.
+
+`licenses:check` chains three scripts that are easy to mistake for each other;
+[scripts/AGENTS.md](scripts/AGENTS.md) says which one judges a dependency's
+license and which two do not. **Adding a dependency under an unfamiliar license
+is a legal decision — read that file before making the build green.**
 
 `lint:boundaries` is dependency-cruiser (`.dependency-cruiser.cjs`). It enforces
 that main, preload, and renderer stay three separate bundles sharing only

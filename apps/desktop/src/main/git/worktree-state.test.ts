@@ -123,6 +123,20 @@ describe("WorktreeStateService (system git)", () => {
     expect(state?.defaultBranch).toBe("main");
     expect(service.getCached(worktreeId)?.defaultBranch).toBe("main");
     expect(state?.lastActivityAt).toBeTruthy();
+
+    // The sidebar reads the indexed Worktree shape rather than WorktreeState.
+    // A computed no-upstream branch must retain that durable distinction so
+    // Focused can keep clean commits that have never been published.
+    const repoId = (
+      db.prepare("SELECT repo_id FROM worktrees WHERE id = ?").get(worktreeId) as {
+        repo_id: string;
+      }
+    ).repo_id;
+    const indexed = new RepoIndexer(db, systemGit).getRepo(repoId);
+    expect(
+      indexed?.worktrees.find((worktree) => worktree.id === worktreeId)
+        ?.tracking
+    ).toBe("unpublished");
   });
 
   it("reflects a working-tree edit as dirty, and caches it", async () => {
@@ -130,6 +144,54 @@ describe("WorktreeStateService (system git)", () => {
     const state = await service.compute(worktreeId);
     expect(state?.dirty).toBe(1);
     expect(service.getCached(worktreeId)?.dirty).toBe(1);
+  });
+
+  it("keeps cached checkout safety dirty when only a child repository changed", async () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), "pwrgit-state-submodule-"));
+    const parent = join(fixtureRoot, "parent");
+    const child = join(fixtureRoot, "child");
+    for (const repo of [parent, child]) {
+      mkdirSync(repo, { recursive: true });
+      git(repo, ["init", "-b", "main"]);
+      git(repo, ["config", "user.email", "t@t.com"]);
+      git(repo, ["config", "user.name", "Tester"]);
+    }
+    writeFileSync(join(child, "child.txt"), "clean\n");
+    git(child, ["add", "."]);
+    git(child, ["commit", "-m", "child"]);
+    writeFileSync(join(parent, "README.md"), "parent\n");
+    git(parent, ["add", "."]);
+    git(parent, ["commit", "-m", "parent"]);
+    git(parent, [
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "add",
+      child,
+      "modules/child"
+    ]);
+    git(parent, ["commit", "-am", "add child"]);
+
+    const profile = new ProfileService(db).create({
+      name: "Submodule safety",
+      email: "submodule-safety@pwrgit.com"
+    });
+    const indexed = await new RepoIndexer(db, systemGit).indexRepoAt(
+      profile.id,
+      parent
+    );
+    if (!indexed.ok) throw new Error(indexed.error.message);
+    const indexedWorktree = indexed.value.worktrees[0];
+    if (indexedWorktree === undefined) throw new Error("worktree not indexed");
+    const isolated = new WorktreeStateService(db, systemGit);
+    expect((await isolated.compute(indexedWorktree.id))?.dirty).toBe(0);
+
+    writeFileSync(
+      join(indexedWorktree.path, "modules/child/child.txt"),
+      "dirty\n"
+    );
+    expect((await isolated.compute(indexedWorktree.id))?.dirty).toBe(1);
+    expect(isolated.getCached(indexedWorktree.id)?.dirty).toBe(1);
   });
 
   it("returns null for an unknown worktree id", async () => {
@@ -183,6 +245,108 @@ describe("WorktreeStateService (system git)", () => {
     await expect(
       isolated.resolveDefaultBranch("ref-less", detachedRepo)
     ).resolves.toEqual({ ref: "HEAD", name: "HEAD" });
+  });
+
+  it("ignores a dangling origin/HEAD when resolving the default branch", async () => {
+    const danglingRepo = join(
+      mkdtempSync(join(tmpdir(), "pwrgit-dangling-origin-head-")),
+      "repo"
+    );
+    mkdirSync(danglingRepo, { recursive: true });
+    git(danglingRepo, ["init", "-b", "main"]);
+    git(danglingRepo, ["config", "user.email", "t@t.com"]);
+    git(danglingRepo, ["config", "user.name", "Tester"]);
+    writeFileSync(join(danglingRepo, "README.md"), "# dangling origin head\n");
+    git(danglingRepo, ["add", "."]);
+    git(danglingRepo, ["commit", "-m", "initial commit"]);
+    git(danglingRepo, [
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/deleted-default"
+    ]);
+    // The shorthand `origin/deleted-default` still resolves through this local
+    // branch, but the exact remote-tracking ref above remains dangling.
+    git(danglingRepo, ["branch", "origin/deleted-default"]);
+
+    const isolated = new WorktreeStateService(db, systemGit);
+    await expect(
+      isolated.resolveDefaultBranch("dangling-origin-head", danglingRepo)
+    ).resolves.toEqual({ ref: "main", name: "main" });
+  });
+
+  it("drops a cached remote default after its target is pruned", async () => {
+    const prunedRepo = join(
+      mkdtempSync(join(tmpdir(), "pwrgit-pruned-default-")),
+      "repo"
+    );
+    mkdirSync(prunedRepo, { recursive: true });
+    git(prunedRepo, ["init", "-b", "main"]);
+    git(prunedRepo, ["config", "user.email", "t@t.com"]);
+    git(prunedRepo, ["config", "user.name", "Tester"]);
+    writeFileSync(join(prunedRepo, "README.md"), "# pruned default\n");
+    git(prunedRepo, ["add", "."]);
+    git(prunedRepo, ["commit", "-m", "initial commit"]);
+    git(prunedRepo, [
+      "update-ref",
+      "refs/remotes/origin/old-default",
+      "HEAD"
+    ]);
+    git(prunedRepo, [
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/old-default"
+    ]);
+
+    const isolated = new WorktreeStateService(db, systemGit);
+    await expect(
+      isolated.resolveDefaultBranch("pruned-default", prunedRepo)
+    ).resolves.toEqual({ ref: "origin/old-default", name: "old-default" });
+
+    git(prunedRepo, ["update-ref", "-d", "refs/remotes/origin/old-default"]);
+
+    await expect(
+      isolated.resolveDefaultBranch("pruned-default", prunedRepo)
+    ).resolves.toEqual({ ref: "main", name: "main" });
+  });
+
+  it("preserves a cached default when Git cannot inspect the repository", async () => {
+    const cachedRepo = join(
+      mkdtempSync(join(tmpdir(), "pwrgit-default-cache-failure-")),
+      "repo"
+    );
+    mkdirSync(cachedRepo, { recursive: true });
+    git(cachedRepo, ["init", "-b", "main"]);
+    git(cachedRepo, ["config", "user.email", "t@t.com"]);
+    git(cachedRepo, ["config", "user.name", "Tester"]);
+    writeFileSync(join(cachedRepo, "README.md"), "# cached default\n");
+    git(cachedRepo, ["add", "."]);
+    git(cachedRepo, ["commit", "-m", "initial commit"]);
+    git(cachedRepo, [
+      "update-ref",
+      "refs/remotes/origin/remote-default",
+      "HEAD"
+    ]);
+    git(cachedRepo, [
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/remote-default"
+    ]);
+    const notARepo = mkdtempSync(join(tmpdir(), "pwrgit-not-a-repo-"));
+
+    const isolated = new WorktreeStateService(db, systemGit);
+    const expected = {
+      ref: "origin/remote-default",
+      name: "remote-default"
+    };
+    await expect(
+      isolated.resolveDefaultBranch("cache-failure", cachedRepo)
+    ).resolves.toEqual(expected);
+    await expect(
+      isolated.resolveDefaultBranch("cache-failure", notARepo)
+    ).resolves.toEqual(expected);
+    await expect(
+      isolated.resolveDefaultBranch("cache-failure", cachedRepo)
+    ).resolves.toEqual(expected);
   });
 
   // Windows can't delete a directory that is any process's cwd; the removal

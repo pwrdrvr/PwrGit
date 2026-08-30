@@ -66,6 +66,12 @@ type StateRow = {
   last_activity_at: string | null;
   updated_at: string;
 };
+type ResolvedDefaultBranch = { ref: string; name: string };
+type CachedDefaultBranch = {
+  value: ResolvedDefaultBranch;
+  /** Exact ref used to avoid Git's shorthand revision DWIM during validation. */
+  verifyRef: string;
+};
 
 function rowToState(r: StateRow): WorktreeState {
   const s: WorktreeState = {
@@ -93,11 +99,8 @@ function rowToState(r: StateRow): WorktreeState {
  * GitExec is injected (tests drive it against system git).
  */
 export class WorktreeStateService {
-  /** Per-repo default branch (ref + name), resolved once per process. */
-  private readonly defaultBranch = new Map<
-    string,
-    { ref: string; name: string }
-  >();
+  /** Per-repo default branch (ref + name), cached while its ref resolves. */
+  private readonly defaultBranch = new Map<string, CachedDefaultBranch>();
 
   /** Probes currently running git for a worktree (removal drains these). */
   private readonly inFlight = new Map<string, Set<Promise<unknown>>>();
@@ -141,48 +144,91 @@ export class WorktreeStateService {
    * currently checked-out branch. Repositories materialized at a commit with
    * no branch refs (for example, build/test sandboxes) use `HEAD` itself so
    * history remains readable instead of passing a nonexistent `main` to Git.
-   * Cached per repo for the process lifetime.
+   * Cached per repo while the chosen ref continues to resolve to a commit.
    */
   async resolveDefaultBranch(
     repoId: string,
     repoPath: string
-  ): Promise<{ ref: string; name: string }> {
+  ): Promise<ResolvedDefaultBranch> {
     const cached = this.defaultBranch.get(repoId);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) {
+      const stillExists = await this.git(
+        ["rev-parse", "--verify", "--quiet", `${cached.verifyRef}^{commit}`],
+        repoPath
+      );
+      // `rev-parse --quiet` uses 1 for an unresolved ref. Preserve the last
+      // known answer for operational failures such as an inaccessible cwd,
+      // which start Git successfully but exit 128.
+      if (!stillExists.ok || stillExists.value.exitCode !== 1) {
+        return cached.value;
+      }
+      this.defaultBranch.delete(repoId);
+    }
 
-    let resolved: { ref: string; name: string } | null = null;
+    let resolved: ResolvedDefaultBranch | null = null;
+    let verifyRef = "";
     const sym = await this.git(
       ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
       repoPath
     );
     if (sym.ok && sym.value.exitCode === 0) {
-      const name = sym.value.stdout.trim().replace("refs/remotes/origin/", "");
-      if (name !== "") resolved = { ref: `origin/${name}`, name };
+      const fullRef = sym.value.stdout.trim();
+      const prefix = "refs/remotes/origin/";
+      const name = fullRef.startsWith(prefix)
+        ? fullRef.slice(prefix.length)
+        : "";
+      const ref = `origin/${name}`;
+      // `fetch --prune` removes a deleted remote branch but can leave
+      // origin/HEAD pointing at it. A symbolic-ref lookup still succeeds in
+      // that state, so verify the target before caching it as the graph base.
+      const target =
+        name === ""
+          ? null
+          : await this.git(
+              ["rev-parse", "--verify", "--quiet", `${fullRef}^{commit}`],
+              repoPath
+            );
+      if (target?.ok === true && target.value.exitCode === 0) {
+        resolved = { ref, name };
+        verifyRef = fullRef;
+      }
     }
     if (resolved === null) {
       for (const cand of ["main", "master"]) {
+        const fullRef = `refs/heads/${cand}`;
         const v = await this.git(
-          ["rev-parse", "--verify", "--quiet", cand],
+          ["rev-parse", "--verify", "--quiet", `${fullRef}^{commit}`],
           repoPath
         );
         if (v.ok && v.value.exitCode === 0) {
           resolved = { ref: cand, name: cand };
+          verifyRef = fullRef;
           break;
         }
       }
     }
     if (resolved === null) {
       const current = await this.git(
-        ["symbolic-ref", "--quiet", "--short", "HEAD"],
+        ["symbolic-ref", "--quiet", "HEAD"],
         repoPath
       );
       if (current.ok && current.value.exitCode === 0) {
-        const name = current.value.stdout.trim();
-        if (name !== "") resolved = { ref: name, name };
+        const fullRef = current.value.stdout.trim();
+        const prefix = "refs/heads/";
+        const name = fullRef.startsWith(prefix)
+          ? fullRef.slice(prefix.length)
+          : "";
+        if (name !== "") {
+          resolved = { ref: name, name };
+          verifyRef = fullRef;
+        }
       }
     }
-    resolved ??= { ref: "HEAD", name: "HEAD" };
-    this.defaultBranch.set(repoId, resolved);
+    if (resolved === null) {
+      resolved = { ref: "HEAD", name: "HEAD" };
+      verifyRef = "HEAD";
+    }
+    this.defaultBranch.set(repoId, { value: resolved, verifyRef });
     return resolved;
   }
 
@@ -249,7 +295,15 @@ export class WorktreeStateService {
     if (wt === null) return null;
 
     const statusRaw = await this.git(
-      ["status", "--porcelain=v2", "--branch"],
+      [
+        "status",
+        "--porcelain=v2",
+        "--branch",
+        // Coarse dirtiness is also a checkout-safety signal. Dirty initialized
+        // children must keep this count nonzero or a cached clean state can
+        // suppress the branch-switch confirmation.
+        "--ignore-submodules=none"
+      ],
       wt.path,
       NO_OPTIONAL_LOCKS
     );

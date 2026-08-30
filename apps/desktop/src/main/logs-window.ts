@@ -1,10 +1,11 @@
 import { join } from "node:path";
 import { BrowserWindow, shell } from "electron";
+import { serializeAppearanceArg, type AppAppearance } from "@pwrgit/shared";
 import {
   auxiliaryWindowChromeOptions,
   hideAuxiliaryWindowMenuBar
 } from "./auxiliary-window-chrome";
-import { WINDOW_BACKGROUND } from "./window-chrome";
+import { windowChrome } from "./window-chrome";
 
 /**
  * Singleton Logs window (PwrAgnt's app-log-window pattern): the renderer
@@ -13,7 +14,7 @@ import { WINDOW_BACKGROUND } from "./window-chrome";
  */
 let logsWindow: BrowserWindow | undefined;
 
-export function openLogsWindow(): void {
+export function openLogsWindow(appearance: AppAppearance): void {
   if (logsWindow !== undefined && !logsWindow.isDestroyed()) {
     if (logsWindow.isMinimized()) logsWindow.restore();
     logsWindow.focus();
@@ -27,13 +28,14 @@ export function openLogsWindow(): void {
     minHeight: 480,
     show: false,
     title: "PwrGit Logs",
-    ...auxiliaryWindowChromeOptions(),
-    backgroundColor: WINDOW_BACKGROUND,
+    ...auxiliaryWindowChromeOptions(appearance.resolvedTheme),
+    backgroundColor: windowChrome(appearance.resolvedTheme).background,
     webPreferences: {
       preload: join(__dirname, "../preload/index.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      additionalArguments: [serializeAppearanceArg(appearance)]
     }
   });
 

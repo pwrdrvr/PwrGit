@@ -3,6 +3,7 @@ import {
   EXPERIMENTAL_DEFAULTS,
   GENERAL_DEFAULTS,
   HOT_CPU_HEAP_SNAPSHOT_LIMIT_MAX,
+  isAppearanceTheme,
   isHotCpuStartDelayMs,
   isHotCpuTriggerMode,
   isSidebarDensity,
@@ -36,7 +37,13 @@ export function settingsSnapshot(
   // an env-armed monitor is running.
   const off = { enabled: false, outputRoot: diagnosticsOutputRoot };
   return {
-    general: { ...GENERAL_DEFAULTS, ...stored.general },
+    general: {
+      ...GENERAL_DEFAULTS,
+      ...stored.general,
+      theme: isAppearanceTheme(stored.general?.theme)
+        ? stored.general.theme
+        : GENERAL_DEFAULTS.theme
+    },
     experimental: { ...EXPERIMENTAL_DEFAULTS, ...stored.experimental },
     diagnostics: { ...DIAGNOSTICS_DEFAULTS, ...stored.diagnostics },
     updates: resolveUpdateSelection(stored.updates, appVersion),
@@ -63,6 +70,9 @@ function sanitizePatch(patch: AppSettingsPatch): {
 
   const gen = patch.general;
   if (gen !== undefined) {
+    if (isAppearanceTheme(gen.theme)) {
+      general.theme = gen.theme;
+    }
     if (typeof gen.developerMode === "boolean") {
       general.developerMode = gen.developerMode;
     }

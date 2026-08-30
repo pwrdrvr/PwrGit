@@ -114,6 +114,37 @@ test("scans a folder and lists a repo with its worktrees", async () => {
   await expect(menu).toHaveCSS("opacity", "1");
 });
 
+test("restores the last selected worktree after a renderer restart", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepo("remembered-selection", {
+    worktrees: ["feature/remembered"]
+  });
+  handle = await launchApp();
+  const { window } = handle;
+
+  await addRootAndExpand(window, handle, sandbox, "remembered-selection");
+  const remembered = branchRow(window, "feature/remembered");
+  await remembered.click();
+  await expect(window.locator(".titlebar__branch-name")).toHaveText(
+    "feature/remembered"
+  );
+
+  // Renderer reload is the same component/localStorage boundary as an app
+  // relaunch, while retaining this test's isolated main-process database.
+  await window.reload();
+  await expect(window.locator(".titlebar__branch-name")).toHaveText(
+    "feature/remembered",
+    { timeout: 20_000 }
+  );
+
+  await expandRepoGroup(window, "remembered-selection");
+  await expandWorktrees(window, "remembered-selection");
+  await expect(branchRow(window, "feature/remembered")).toHaveAttribute(
+    "aria-selected",
+    "true"
+  );
+});
+
 test("keeps the primary and pinned worktrees visible when the remaining list is collapsed", async () => {
   sandbox = createGitSandbox();
   sandbox.makeRepo("navigation", {
@@ -283,15 +314,31 @@ test("batch-removes worktrees (including a dirty one) via multi-select", async (
   await window.locator(".modal--dialog .modal__create").click();
   await window.locator(".modal--dialog .modal__create").click();
 
+  // The renderer keeps the progress toast mounted until the command has
+  // actually settled. Race it against the failure dialog so a Windows handle
+  // leak reports Git's EPERM immediately instead of burning a path-poll
+  // timeout and hiding the real error.
+  const failureDialog = window.getByRole("alertdialog", {
+    name: "Some worktrees couldn't be removed"
+  });
+  const removalOutcome = await Promise.race([
+    window
+      .locator(".removal-toast")
+      .waitFor({ state: "detached", timeout: 20_000 })
+      .then(() => "removed"),
+    failureDialog
+      .waitFor({ state: "visible", timeout: 20_000 })
+      .then(async () => `failed: ${await failureDialog.innerText()}`)
+  ]);
+  expect(removalOutcome).toBe("removed");
+
   await expect(branchRow(window, "wt/one")).toHaveCount(0, { timeout: 20_000 });
   await expect(branchRow(window, "wt/two")).toHaveCount(0);
   await expect(branchRow(window, "wt/dirty")).toHaveCount(0);
   await expect(branchRow(window, "main")).toBeVisible();
 
-  // ...and they're gone from disk too. Poll: rows disappear per-removal as the
-  // sidebar refreshes, so the last deletion can still be in flight (slow
-  // Windows CI filesystems surfaced this) when the UI already looks done.
-  await expect.poll(() => existsSync(one), { timeout: 20_000 }).toBe(false);
-  await expect.poll(() => existsSync(two), { timeout: 20_000 }).toBe(false);
-  await expect.poll(() => existsSync(dirty), { timeout: 20_000 }).toBe(false);
+  // The settled progress boundary means on-disk deletion is complete too.
+  expect(existsSync(one)).toBe(false);
+  expect(existsSync(two)).toBe(false);
+  expect(existsSync(dirty)).toBe(false);
 });

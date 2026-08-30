@@ -16,6 +16,7 @@ import {
 import type { CommandBus } from "./command-bus";
 import { emitEvent } from "./ipc";
 import { logMain } from "./logs";
+import { delay } from "./util/timing";
 
 const { autoUpdater } = electronUpdater;
 
@@ -32,6 +33,13 @@ const RATE_LIMIT_FALLBACK_BACKOFF_MS = 15 * 60 * 1_000;
 
 const MAC_UPDATE_CHANNEL_FILE = "latest-mac.yml";
 const WINDOWS_UPDATE_CHANNEL_FILE = "latest.yml";
+
+/** Unmistakably not-a-release version the dev/QA fake update reports (see
+ *  `simulateDevUpdateCheck`), so a previewed toast can never be read as a
+ *  genuine offer. */
+const DEV_FAKE_UPDATE_VERSION = "420.0.0";
+/** Long enough to watch each transition land, short enough not to feel hung. */
+const DEV_FAKE_UPDATE_STEP_MS = 300;
 
 type UpdateSelectionKey = `${UpdateTrain}:${UpdateChannel}`;
 type AppUpdateCheckTrigger = "startup" | "periodic" | "manual" | "menu";
@@ -250,17 +258,15 @@ function recordPendingDownloadChannel(
 export async function checkForAppUpdatesNow(
   trigger: AppUpdateCheckTrigger = "manual"
 ): Promise<AppUpdateCheckResult> {
-  if (!productionUpdatesEnabled()) {
-    const result = developmentUpdateCheckResult();
-    setUpdateStatus(result);
-    return result;
-  }
-
+  // Linux is asked first: it never offers an in-app update in any build, so
+  // previewing one there would demo UI that platform cannot reach.
   if (linuxManualPackageUpdatesEnabled()) {
     const result = linuxManualPackageUpdateCheckResult();
     setUpdateStatus(result);
     return result;
   }
+
+  if (!productionUpdatesEnabled()) return simulateDevUpdateCheck(trigger);
 
   const wanted = currentUpdateSelectionKey();
   if (updateCheckInFlight) {
@@ -389,6 +395,62 @@ function runBackgroundUpdateCheck(trigger: "startup" | "periodic"): void {
       err instanceof Error ? err.message : String(err)
     );
   });
+}
+
+/** Dev/QA stand-in for a real update check.
+ *
+ *  Real auto-update only runs in production — the dev binary is unsigned and
+ *  has no release feed — so the update toast could not otherwise be seen
+ *  without cutting a release, which is exactly how v0.7.0 shipped a menu
+ *  check that answered with a modal telling the user to go to Settings.
+ *  A *user-initiated* check therefore walks the status machine to a fake
+ *  `downloaded@420.0.0`, broadcasting each transition so the whole flow —
+ *  checking → available → downloading → downloaded → toast — is exercisable
+ *  in `pnpm dev`.
+ *
+ *  Startup and periodic triggers stay silent (status `skipped`) so a dev
+ *  launch never raises a toast on its own, and neither does the Playwright
+ *  harness, which also runs unpackaged. Restart on the fake update is a
+ *  no-op — see `installDownloadedAppUpdate`. */
+async function simulateDevUpdateCheck(
+  trigger: AppUpdateCheckTrigger
+): Promise<AppUpdateCheckResult> {
+  if (trigger !== "manual" && trigger !== "menu") {
+    const skipped = developmentUpdateCheckResult();
+    setUpdateStatus(skipped);
+    return skipped;
+  }
+  // Join an in-flight simulation so mashing the menu item doesn't stack
+  // overlapping animations racing on setUpdateStatus.
+  if (updateCheckInFlight) return updateCheckInFlight;
+  // A held download ends the real check before it starts (`runUpdateCheck`),
+  // so the fake ends here too — otherwise a second check tears the offer down
+  // to `checking` and rebuilds it, which production never does.
+  const alreadyOffered = downloadedUpdateMatchesChannel(
+    currentUpdateSelectionKey()
+  );
+  if (alreadyOffered) return alreadyOffered;
+  const version = DEV_FAKE_UPDATE_VERSION;
+  logMain("info", "updater", `simulating dev update check (${trigger})`);
+  updateCheckInFlight = (async (): Promise<AppUpdateCheckResult> => {
+    setUpdateStatus({ status: "checking" });
+    await delay(DEV_FAKE_UPDATE_STEP_MS, { unref: true });
+    setUpdateStatus({ status: "available", version });
+    await delay(DEV_FAKE_UPDATE_STEP_MS, { unref: true });
+    setUpdateStatus({ status: "downloading", version, percent: 60 });
+    await delay(DEV_FAKE_UPDATE_STEP_MS, { unref: true });
+    heldDownloadedUpdate = {
+      selection: currentUpdateSelectionKey(),
+      version
+    };
+    reconcileDownloadedUpdateEligibility();
+    return { status: "downloaded", version };
+  })();
+  try {
+    return await updateCheckInFlight;
+  } finally {
+    updateCheckInFlight = undefined;
+  }
 }
 
 function startPeriodicUpdateChecks(): void {
@@ -937,6 +999,17 @@ export async function installDownloadedAppUpdate(): Promise<AppUpdateInstallResu
       message: heldDownloadedUpdate
         ? "The downloaded update is not for the selected channel."
         : "No downloaded update is ready to install."
+    };
+  }
+  if (!productionUpdatesEnabled()) {
+    // The only way to reach `downloaded` outside production is the dev/QA
+    // fake (see `simulateDevUpdateCheck`): there is no payload and the dev
+    // binary is unsigned, so say so in the toast rather than bouncing the app
+    // through quitAndInstall.
+    logMain("info", "updater", `dev fake update ${version} — restart is a no-op`);
+    return {
+      status: "error",
+      message: `Dev preview (v${version}): Restart only works in production builds.`
     };
   }
   try {

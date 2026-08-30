@@ -1,21 +1,27 @@
 import { err, ok, type WorktreeState } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
+import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import type { GitExec } from "./dugite";
 import { inspectGitLfs } from "./git-lfs";
+import { recordLfsOutcome } from "./git-lfs-notice";
 import type { WorktreeStateService } from "./worktree-state";
 
 function stateChanged(a: WorktreeState, b: WorktreeState): boolean {
   return (
+    a.hasUpstream !== b.hasUpstream ||
     a.dirty !== b.dirty ||
+    a.hasUpstream !== b.hasUpstream ||
     a.ahead !== b.ahead ||
     a.behind !== b.behind ||
     a.head !== b.head ||
     a.branch !== b.branch ||
     a.behindDefault !== b.behindDefault ||
+    a.defaultBranch !== b.defaultBranch ||
     a.mergedIntoDefault !== b.mergedIntoDefault ||
     a.divergedFromDefault !== b.divergedFromDefault ||
+    a.isDefaultBranch !== b.isDefaultBranch ||
     a.lastActivityAt !== b.lastActivityAt
   );
 }
@@ -23,7 +29,7 @@ function stateChanged(a: WorktreeState, b: WorktreeState): boolean {
 export type WorktreeRefresher = {
   /** Recompute one worktree; emit worktree:changed only if it actually moved. */
   refreshWorktree: (worktreeId: string) => Promise<void>;
-  /** Recompute all worktrees of a repo; emit repo:changed once when done. */
+  /** Recompute a repo; emit moved worktrees individually, then its tree once. */
   refreshRepoWorktrees: (repoId: string) => void | Promise<void>;
 };
 
@@ -43,12 +49,15 @@ export function createWorktreeRefresher(
     emitEvent("worktree:changed", { worktreeId });
     const row = db
       .prepare(
-        `SELECT r.profile_id AS profile_id
+        `SELECT r.id AS repo_id, r.profile_id AS profile_id
          FROM worktrees w JOIN repos r ON r.id = w.repo_id
          WHERE w.id = ?`
       )
-      .get(worktreeId) as { profile_id: string } | undefined;
+      .get(worktreeId) as
+      | { repo_id: string; profile_id: string }
+      | undefined;
     if (row !== undefined) {
+      emitEvent("graph:changed", { repoId: row.repo_id });
       emitEvent("repo:changed", { profileId: row.profile_id });
     }
   };
@@ -60,7 +69,29 @@ export function createWorktreeRefresher(
         .all(repoId) as { id: string }[]
     ).map((r) => r.id);
     if (ids.length === 0) return;
+    const before = new Map(ids.map((id) => [id, state.getCached(id)]));
     await state.refreshMany(ids);
+    // A repo refresh is also the user's explicit escape hatch when a watcher
+    // misses an external filesystem change. The repo event repaints sidebar
+    // badges, but the header, graph, and Changes rail subscribe to the focused
+    // worktree event. Publish that event for every snapshot that really moved
+    // so all visible surfaces converge on the same refresh.
+    for (const id of ids) {
+      const fresh = state.getCached(id);
+      const previous = before.get(id) ?? null;
+      if (
+        fresh !== null &&
+        (previous === null || stateChanged(previous, fresh))
+      ) {
+        emitEvent("worktree:changed", { worktreeId: id });
+      }
+    }
+    // Lane data is cached per repo, not per worktree. A sibling HEAD/ref can
+    // change the focused graph even when that focused worktree's own snapshot
+    // is identical. Invalidate the repo once after every explicit family
+    // refresh; this also covers newly discovered refs that do not alter any
+    // coarse worktree state.
+    emitEvent("graph:changed", { repoId });
     const repo = db
       .prepare("SELECT profile_id FROM repos WHERE id = ?")
       .get(repoId) as { profile_id: string } | undefined;
@@ -104,7 +135,7 @@ export function registerWorktreeHandlers(
     return ok(null);
   });
 
-  bus.register("repo:getGitLfsStatus", (req) => {
+  bus.register("repo:getGitLfsStatus", async (req) => {
     const row = db
       .prepare("SELECT path FROM worktrees WHERE id = ? AND repo_id = ?")
       .get(req.worktreeId, req.repoId) as { path: string } | undefined;
@@ -115,6 +146,17 @@ export function registerWorktreeHandlers(
         message: "repo or worktree not found"
       });
     }
-    return inspectGitLfs(git, row.path);
+    const inspected = await inspectGitLfs(git, row.path);
+    if (!inspected.ok) return inspected;
+    // Best-effort bookkeeping: the repo row can be pruned while the probe's
+    // git subprocesses run, and the resulting FK violation must lose the
+    // announcement, not destroy the probe's answer.
+    let announceReady = false;
+    try {
+      announceReady = recordLfsOutcome(db, req.repoId, inspected.value);
+    } catch (cause) {
+      logMain("warn", "lfs", "could not record LFS outcome:", cause);
+    }
+    return ok({ status: inspected.value, announceReady });
   });
 }

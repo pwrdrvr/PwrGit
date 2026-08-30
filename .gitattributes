@@ -1,0 +1,41 @@
+# Normalize line endings to LF in every checkout. The repo is authored with
+# LF and nothing in it is currently CRLF, but Git for Windows defaults to
+# `core.autocrlf=true`, so without this a Windows contributor's very first
+# clone rewrites every text file and their first commit is an unreviewable
+# whole-tree diff. It also keeps CRLF out of files that break on a trailing
+# CR — notably the shebang line of the `.mjs` build scripts under scripts/,
+# which esbuild and vitest reject as "SyntaxError: Invalid or unexpected
+# token". This repo builds and tests on Windows in CI, so that path is real.
+* text=auto eol=lf
+
+# Windows batch files are only meaningful with CRLF. None exist today; the
+# rule is here so adding one later doesn't silently produce a broken script.
+# PowerShell is fine with LF and is covered by the blanket rule above.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets — never normalize or diff as text. Covers the packaging
+# icons, fonts, and screenshots under apps/desktop/build/, docs/assets/, and
+# design/uploads/, plus formats a desktop app tends to acquire later.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.icns  binary
+*.webp  binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.pdf   binary
+*.zip   binary
+*.gz    binary
+*.mp3   binary
+*.mp4   binary
+*.mov   binary
+*.node  binary
+
+# design/assets/logo-pwrgit.svg is our own hand-editable artwork, so SVG is
+# deliberately left as text. Vendor brand-kit SVGs, if any are ever vendored
+# in, should be marked binary at that time so refreshes don't diff as XML.

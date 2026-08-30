@@ -1,6 +1,7 @@
 import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
+  useCallback,
   useEffect,
   useState
 } from "react";
@@ -10,6 +11,7 @@ import { dispatch, subscribe } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { ContextMenu } from "../shell/ContextMenu";
 import { confirmDialog } from "../shell/dialogs";
+import { SubmodulePanel } from "./SubmodulePanel";
 import {
   canIgnore,
   changesRowMenuItems,
@@ -181,6 +183,7 @@ function TruncationNotice({
 function FileRow({
   file,
   label,
+  split,
   nested,
   onToggle,
   onOpen,
@@ -190,6 +193,10 @@ function FileRow({
   file: FileChange;
   /** Text to show — the basename inside a folder group, the full path outside. */
   label: string;
+  /** The same path is listed in the other section too: this file is partly
+   *  staged. Without a marker the two rows are indistinguishable from two
+   *  unrelated files that happen to share a name. */
+  split: boolean;
   nested: boolean;
   onToggle: () => void;
   onOpen: () => void;
@@ -198,10 +205,10 @@ function FileRow({
 }) {
   return (
     <div
-      className={`file-row is-clickable${file.staged ? " is-staged" : ""}${nested ? " file-row--nested" : ""}`}
+      className={`file-row is-clickable${file.staged ? " is-staged" : ""}${split ? " is-split" : ""}${nested ? " file-row--nested" : ""}`}
       onClick={onOpen}
       onContextMenu={onContextMenu}
-      title="View changes"
+      title={split ? "Partly staged — view these changes" : "View changes"}
     >
       <span
         className={`file-status file-status--${STATUS_TONE[file.status] ?? "muted"}`}
@@ -213,6 +220,14 @@ function FileRow({
       <span className="file-path" title={file.path}>
         {label}
       </span>
+      {split && (
+        <span
+          className="file-split"
+          title={`Partly staged — this file also has ${file.staged ? "unstaged" : "staged"} changes`}
+        >
+          partial
+        </span>
+      )}
       <span className="file-row__actions">
         <button
           className="file-action file-action--discard"
@@ -337,12 +352,19 @@ export function ChangesTab({
     y: number;
     target: ChangesRowTarget;
   } | null>(null);
+  const [hasSubmoduleConcern, setHasSubmoduleConcern] = useState(false);
   const wtId = worktree?.id ?? null;
+
+  const receiveSubmoduleConcern = useCallback(
+    (hasConcern: boolean) => setHasSubmoduleConcern(hasConcern),
+    []
+  );
 
   useEffect(() => {
     setMessage("");
     setFolderOpen({});
     setMenu(null);
+    setHasSubmoduleConcern(false);
     if (wtId === null) {
       setChanges(null);
       return;
@@ -370,19 +392,62 @@ export function ChangesTab({
     };
   }, [wtId]);
 
+  /**
+   * Which of the paths about to be staged are conflicted. "." means "stage
+   * everything", and a directory row carries its subtree, so match by prefix
+   * rather than equality.
+   */
+  const conflictedTargets = (paths: string[]): string[] =>
+    (changes?.unstaged ?? [])
+      .filter((file) => file.status === "U")
+      .map((file) => file.path)
+      .filter((path) =>
+        paths.some(
+          (target) =>
+            target === "." || path === target || path.startsWith(`${target}/`)
+        )
+      );
+
   const run = (
     command: "changes:stage" | "changes:unstage",
     paths: string[]
   ): void => {
     if (wtId === null) return;
-    void dispatch(command, { worktreeId: wtId, paths }).then((r) => {
+    void (async () => {
+      // Staging a file that still has conflict markers is the classic way to
+      // commit `<<<<<<<` into history. Warn, but do not refuse: a file can
+      // legitimately contain marker-shaped lines.
+      if (command === "changes:stage") {
+        const targets = conflictedTargets(paths);
+        if (targets.length > 0) {
+          const scan = await dispatch("operation:markerScan", {
+            worktreeId: wtId,
+            paths: targets
+          });
+          if (scan.ok && scan.value.length > 0) {
+            const shown = scan.value.slice(0, 5).join("\n");
+            const rest =
+              scan.value.length > 5
+                ? `\n…and ${scan.value.length - 5} more`
+                : "";
+            const proceed = await confirmDialog({
+              title: "Still has conflict markers",
+              message: `${scan.value.length === 1 ? "A file you are staging still contains" : `${scan.value.length} files you are staging still contain`} conflict markers:\n\n${shown}${rest}\n\nStage anyway?`,
+              confirmLabel: "Stage anyway",
+              danger: true
+            });
+            if (!proceed) return;
+          }
+        }
+      }
+      const r = await dispatch(command, { worktreeId: wtId, paths });
       if (r.ok) return;
       showErrorToast({
         title: command === "changes:stage" ? "Stage failed" : "Unstage failed",
         message: r.error.message,
         detail: `${command} ${paths.join(", ")}`
       });
-    });
+    })();
   };
 
   const commit = (amend: boolean): void => {
@@ -466,17 +531,43 @@ export function ChangesTab({
 
   if (!hasChanges) {
     return (
-      <div className="changes-clean">
-        <div className="changes-clean__icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-ok)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="m20 6-11 11-5-5" />
-          </svg>
+      <div className="changes-pane">
+        <div className="changes-list">
+          {wtId !== null && (
+            <SubmodulePanel
+              worktreeId={wtId}
+              onConcernChange={receiveSubmoduleConcern}
+            />
+          )}
+          <div className="changes-clean">
+            <div className="changes-clean__icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-ok)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m20 6-11 11-5-5" />
+              </svg>
+            </div>
+            <div className="changes-clean__title">
+              {hasSubmoduleConcern
+                ? "Parent files are clean."
+                : "Worktree is clean."}
+            </div>
+            <div className="changes-clean__sub">
+              {hasSubmoduleConcern
+                ? "Submodule attention is listed above."
+                : "Nothing to commit."}
+            </div>
+          </div>
         </div>
-        <div className="changes-clean__title">Worktree is clean.</div>
-        <div className="changes-clean__sub">Nothing to commit.</div>
       </div>
     );
   }
+
+  // Paths git reports on both sides of the index. Partial staging makes this
+  // ordinary, and until now it painted as the same filename twice with
+  // nothing to connect the two rows.
+  const unstagedPaths = new Set(unstaged.map((file) => file.path));
+  const splitPaths = new Set(
+    staged.map((file) => file.path).filter((path) => unstagedPaths.has(path))
+  );
 
   const renderEntries = (
     files: FileChange[],
@@ -503,6 +594,7 @@ export function ChangesTab({
           key={key}
           file={file}
           label={dir === null ? file.path : file.path.slice(dir.length + 1)}
+          split={splitPaths.has(file.path)}
           nested={dir !== null}
           onToggle={() => run(command, [file.path])}
           onOpen={() => onOpenDiff(file.path, stagedSection)}
@@ -572,6 +664,12 @@ export function ChangesTab({
         </button>
       </div>
       <div className="changes-list">
+        {wtId !== null && (
+          <SubmodulePanel
+            worktreeId={wtId}
+            onConcernChange={receiveSubmoduleConcern}
+          />
+        )}
         {staged.length > 0 && (
           <>
             <div className="changes-section">

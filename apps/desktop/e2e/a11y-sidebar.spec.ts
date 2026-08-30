@@ -5,7 +5,8 @@ import {
   addRootAndExpand,
   branchRow,
   expandRepoGroup,
-  lensChip
+  lensChip,
+  primaryShortcut
 } from "./fixtures/steps";
 
 /**
@@ -147,6 +148,38 @@ test("sub-24px sidebar controls still expose a 24×24 pointer target", async () 
     .evaluate((el) => el.getBoundingClientRect().height);
   expect(wtHeight, "worktree row height").toBeLessThanOrEqual(24);
 });
+
+test(
+  "the Focused first-run escape is named, keyboard reachable, and target-sized",
+  async () => {
+    sandbox = createGitSandbox();
+    sandbox.makeRepo("alpha");
+
+    handle = await launchApp();
+    const { window } = handle;
+    await handle.setPickDirectory(sandbox.reposDir);
+    await window.getByRole("button", { name: /Add folders/i }).click();
+
+    await expect(lensChip(window, "Focused")).toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
+    const browse = window.getByRole("button", { name: "Browse all 1" });
+    await expect(browse).toBeVisible({ timeout: 20_000 });
+    const size = await targetSize(browse);
+    expect(Math.round(size.height)).toBeGreaterThanOrEqual(24);
+
+    await browse.focus();
+    await window.keyboard.press("Enter");
+    await expect(lensChip(window, "All")).toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
+    await expect(
+      window.getByRole("treeitem", { name: "alpha" })
+    ).toBeVisible();
+  }
+);
 
 test("a repo row describes the counts its label hides", async () => {
   sandbox = createGitSandbox();
@@ -394,7 +427,7 @@ test("a worktree reorder announces the same position the row reports", async () 
   const row = branchRow(window, "feature/one");
   await expect(row).toBeVisible();
   await row.focus();
-  await window.keyboard.press("Meta+Shift+ArrowDown");
+  await window.keyboard.press(primaryShortcut("Shift", "ArrowDown"));
 
   // The announcement and `aria-posinset` have to agree. They are computed from
   // two different lists — the reorder works over the reorderable worktrees,

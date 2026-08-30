@@ -24,6 +24,9 @@ vi.mock("../../lib/toast", () => ({
   showInfoToast: mocks.showInfoToast
 }));
 vi.mock("../../lib/copyText", () => ({ copyText: mocks.copyText }));
+// SubmodulePanel owns its own command/event contract and component suite. Keep
+// this file's single-handler event harness focused on ChangesTab's list logic.
+vi.mock("./SubmodulePanel", () => ({ SubmodulePanel: () => null }));
 
 import { ChangesTab, confirmAndDiscardAllChanges, groupChanges } from "./ChangesTab";
 
@@ -253,6 +256,55 @@ describe("ChangesTab list", () => {
         title: "Stage failed",
         message: "index.lock exists"
       })
+    );
+  });
+});
+
+describe("ChangesTab partially staged files", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  const worktree = { id: "worktree-1" } as Worktree;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mocks.subscribe.mockReturnValue(() => undefined);
+    mocks.dispatch.mockImplementation(async (command: string) =>
+      command === "changes:list" ? ok(changes) : ok(null)
+    );
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <ChangesTab worktree={worktree} activeEmail="a@b.c" onOpenDiff={vi.fn()} />
+      );
+    });
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("marks both rows of a path git lists on either side of the index", () => {
+    // `both.txt` is partly staged, so it is listed twice; the other two files
+    // sit on one side each and must stay unmarked.
+    const marked = [...container.querySelectorAll(".file-row.is-split")];
+    expect(marked).toHaveLength(2);
+    expect(marked.every((row) => row.textContent?.includes("both.txt"))).toBe(
+      true
+    );
+    expect(container.querySelectorAll(".file-split")).toHaveLength(2);
+    // The tag names where the rest of the file went, per side.
+    const titles = [...container.querySelectorAll(".file-split")].map((tag) =>
+      tag.getAttribute("title")
+    );
+    expect(titles).toContain(
+      "Partly staged — this file also has unstaged changes"
+    );
+    expect(titles).toContain(
+      "Partly staged — this file also has staged changes"
     );
   });
 });
@@ -496,5 +548,158 @@ describe("ChangesTab folder actions", () => {
     });
 
     expect(mocks.copyText).toHaveBeenCalledWith("dist/a.js\ndist/b.js");
+  });
+});
+
+describe("ChangesTab conflict marker guard", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  const worktree = { id: "worktree-1" } as Worktree;
+
+  const conflicted: ChangeSet = {
+    staged: [],
+    unstaged: [
+      { path: "src/app.ts", status: "U", staged: false },
+      { path: "src/util.ts", status: "U", staged: false },
+      { path: "README.md", status: "M", staged: false }
+    ]
+  };
+
+  const stageButton = (path: string): HTMLButtonElement => {
+    const found = [...container.querySelectorAll("button")].find(
+      (b) => b.getAttribute("aria-label") === `Stage ${path}`
+    );
+    if (found === undefined) throw new Error(`no stage button for ${path}`);
+    return found;
+  };
+
+  const mount = async (): Promise<void> => {
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <ChangesTab worktree={worktree} activeEmail="a@b.c" onOpenDiff={vi.fn()} />
+      );
+    });
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.subscribe.mockImplementation(() => () => {});
+    mocks.confirmDialog.mockResolvedValue(true);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("warns before staging a conflicted file that still has markers", async () => {
+    mocks.dispatch.mockImplementation(async (command: string) =>
+      command === "changes:list"
+        ? ok(conflicted)
+        : command === "operation:markerScan"
+          ? ok(["src/app.ts"])
+          : ok(null)
+    );
+    await mount();
+
+    await act(async () => stageButton("src/app.ts").click());
+
+    expect(mocks.dispatch).toHaveBeenCalledWith("operation:markerScan", {
+      worktreeId: "worktree-1",
+      paths: ["src/app.ts"]
+    });
+    expect(mocks.confirmDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Still has conflict markers",
+        danger: true,
+        message: expect.stringContaining("src/app.ts")
+      })
+    );
+    expect(mocks.dispatch).toHaveBeenCalledWith("changes:stage", {
+      worktreeId: "worktree-1",
+      paths: ["src/app.ts"]
+    });
+  });
+
+  it("does not stage when the marker warning is declined", async () => {
+    mocks.confirmDialog.mockResolvedValue(false);
+    mocks.dispatch.mockImplementation(async (command: string) =>
+      command === "changes:list"
+        ? ok(conflicted)
+        : command === "operation:markerScan"
+          ? ok(["src/app.ts"])
+          : ok(null)
+    );
+    await mount();
+
+    await act(async () => stageButton("src/app.ts").click());
+
+    expect(mocks.dispatch).not.toHaveBeenCalledWith(
+      "changes:stage",
+      expect.anything()
+    );
+  });
+
+  it("stages a clean resolution without warning", async () => {
+    mocks.dispatch.mockImplementation(async (command: string) =>
+      command === "changes:list"
+        ? ok(conflicted)
+        : command === "operation:markerScan"
+          ? ok([])
+          : ok(null)
+    );
+    await mount();
+
+    await act(async () => stageButton("src/app.ts").click());
+
+    expect(mocks.confirmDialog).not.toHaveBeenCalled();
+    expect(mocks.dispatch).toHaveBeenCalledWith("changes:stage", {
+      worktreeId: "worktree-1",
+      paths: ["src/app.ts"]
+    });
+  });
+
+  /** A non-conflicted file must not pay for a scan it cannot need. */
+  it("does not scan when nothing being staged is conflicted", async () => {
+    mocks.dispatch.mockImplementation(async (command: string) =>
+      command === "changes:list" ? ok(conflicted) : ok(null)
+    );
+    await mount();
+
+    await act(async () => stageButton("README.md").click());
+
+    expect(mocks.dispatch).not.toHaveBeenCalledWith(
+      "operation:markerScan",
+      expect.anything()
+    );
+    expect(mocks.dispatch).toHaveBeenCalledWith("changes:stage", {
+      worktreeId: "worktree-1",
+      paths: ["README.md"]
+    });
+  });
+
+  it("scans every conflicted path when staging everything", async () => {
+    mocks.dispatch.mockImplementation(async (command: string) =>
+      command === "changes:list"
+        ? ok(conflicted)
+        : command === "operation:markerScan"
+          ? ok([])
+          : ok(null)
+    );
+    await mount();
+
+    const stageAll = [...container.querySelectorAll("button")].find((b) =>
+      (b.textContent ?? "").includes("Stage all")
+    );
+    await act(async () => stageAll?.click());
+
+    expect(mocks.dispatch).toHaveBeenCalledWith("operation:markerScan", {
+      worktreeId: "worktree-1",
+      paths: ["src/app.ts", "src/util.ts"]
+    });
   });
 });

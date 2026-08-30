@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { AppUpdateToast } from "../update/AppUpdateToast";
 import { dispatch } from "../../lib/pwrgit";
 import { dismissToast, subscribeToasts, type Toast } from "../../lib/toast";
 
@@ -6,19 +7,34 @@ const AUTO_DISMISS_MS = 9_000;
 
 /** Bottom-right stack of error toasts (adapted from PwrAgnt's AppNoticeToast).
  *  Always visible regardless of pane widths — the fallback surface for errors
- *  whose inline chrome may be collapsed away. */
+ *  whose inline chrome may be collapsed away.
+ *
+ *  The update toast rides at the bottom of the same stack: it outlives every
+ *  transient notice, so anchoring it to the corner keeps it from being shoved
+ *  around as errors come and go. The container is rendered even when empty —
+ *  a childless flex column at a fixed corner has no size and paints nothing. */
 export function ToastHost() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   useEffect(() => subscribeToasts(setToasts), []);
 
-  if (toasts.length === 0) return null;
-
   return (
     <div className="toast-host">
-      {toasts.map((toast) => (
-        <ToastCard key={toast.id} toast={toast} />
-      ))}
+      {/* Keyed by `key` where there is one, so a replacement updates the card
+          in place: remounting would drop the hover-pause of a pointer that is
+          already resting on it and never fires onMouseEnter again.
+
+          Sticky cards sort after the transients for the same reason the
+          update toast anchors the corner: a card that outlives the come-and-go
+          must not be shoved around by it. In this bottom-anchored column the
+          later children sit nearer the corner, and growth above them leaves
+          them still. */}
+      {[...toasts]
+        .sort((a, b) => Number(a.sticky === true) - Number(b.sticky === true))
+        .map((toast) => (
+          <ToastCard key={toast.key ?? toast.id} toast={toast} />
+        ))}
+      <AppUpdateToast />
     </div>
   );
 }
@@ -27,10 +43,10 @@ function ToastCard({ toast }: { toast: Toast }) {
   const [paused, setPaused] = useState(false);
 
   useEffect(() => {
-    if (paused) return;
+    if (paused || toast.sticky === true) return;
     const timer = window.setTimeout(() => dismissToast(toast.id), AUTO_DISMISS_MS);
     return () => window.clearTimeout(timer);
-  }, [paused, toast.id]);
+  }, [paused, toast.id, toast.sticky]);
 
   return (
     <aside
@@ -41,7 +57,15 @@ function ToastCard({ toast }: { toast: Toast }) {
       onMouseLeave={() => setPaused(false)}
     >
       <div className="app-toast__content">
-        <p className="app-toast__eyebrow">{toast.title}</p>
+        <p
+          className={
+            toast.tone === "error"
+              ? "app-toast__eyebrow"
+              : "app-toast__eyebrow app-toast__eyebrow--info"
+          }
+        >
+          {toast.title}
+        </p>
         <p className="app-toast__message">{toast.message}</p>
         {toast.detail !== undefined && toast.detail !== toast.message && (
           <p className="app-toast__detail">{toast.detail}</p>
@@ -85,11 +109,17 @@ function ToastCard({ toast }: { toast: Toast }) {
           ✕
         </button>
       </div>
-      <span
-        className="app-toast__timer"
-        aria-hidden="true"
-        data-paused={paused ? "true" : undefined}
-      />
+      {/* Keyed by id so a replacement restarts the countdown animation, which
+          runs on mount, in step with the timer effect above. A sticky toast
+          has no countdown, so it shows no bar draining toward one. */}
+      {toast.sticky !== true && (
+        <span
+          key={toast.id}
+          className="app-toast__timer"
+          aria-hidden="true"
+          data-paused={paused ? "true" : undefined}
+        />
+      )}
     </aside>
   );
 }

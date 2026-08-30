@@ -1,5 +1,8 @@
 import { BrowserWindow } from "electron";
+import type { AppAppearance } from "@pwrgit/shared";
+import { emitEventToWindow } from "./ipc";
 import { createMainWindow } from "./window";
+import { repaintWindowChrome } from "./window-chrome";
 
 /**
  * One window per profile. Opening a profile that already has a window focuses
@@ -11,12 +14,20 @@ export type ProfileWindows = {
    *  whether a new window was created. */
   open: (profileId: string) => { window: BrowserWindow; created: boolean };
   has: (profileId: string) => boolean;
+  /** Close the window bound to a profile. Returns whether one was open. */
+  close: (profileId: string) => boolean;
   /** The profile bound to a window (null for unknown/none). */
   profileFor: (win: BrowserWindow | null) => string | null;
+  /** Re-resolve and repaint one open profile window after an override edit. */
+  syncAppearance: (profileId: string) => void;
+  /** Re-resolve every profile window after the app default changes. */
+  syncAllAppearances: () => void;
   focusedProfileId: () => string | null;
 };
 
-export function createProfileWindows(): ProfileWindows {
+export function createProfileWindows(options: {
+  appearance: (profileId: string) => AppAppearance;
+}): ProfileWindows {
   const byProfile = new Map<string, BrowserWindow>();
 
   const alive = (profileId: string): BrowserWindow | null => {
@@ -33,7 +44,7 @@ export function createProfileWindows(): ProfileWindows {
       existing.focus();
       return { window: existing, created: false };
     }
-    const win = createMainWindow(profileId);
+    const win = createMainWindow(profileId, options.appearance(profileId));
     byProfile.set(profileId, win);
     win.on("closed", () => {
       if (byProfile.get(profileId) === win) byProfile.delete(profileId);
@@ -49,10 +60,28 @@ export function createProfileWindows(): ProfileWindows {
     return null;
   };
 
+  const syncAppearance = (profileId: string): void => {
+    const win = alive(profileId);
+    if (win === null) return;
+    const next = options.appearance(profileId);
+    repaintWindowChrome(win, next.resolvedTheme);
+    emitEventToWindow("appearance:changed", next, win);
+  };
+
   return {
     open,
     has: (profileId) => alive(profileId) !== null,
+    close: (profileId) => {
+      const window = alive(profileId);
+      if (window === null) return false;
+      window.close();
+      return true;
+    },
     profileFor,
+    syncAppearance,
+    syncAllAppearances: () => {
+      for (const profileId of byProfile.keys()) syncAppearance(profileId);
+    },
     focusedProfileId: () => profileFor(BrowserWindow.getFocusedWindow())
   };
 }

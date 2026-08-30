@@ -56,6 +56,111 @@ test("clicking a changed file opens its diff, then close returns to lineage", as
   await expect(window.locator(".graph-toolbar")).toBeVisible();
 });
 
+test("hunk and line actions move only the selected changes through Git's index", async () => {
+  sandbox = createGitSandbox();
+  const repo = sandbox.makeRepo("partialdiff");
+  const baseline = Array.from({ length: 12 }, (_, index) => `base-${index + 1}`);
+  writeFileSync(join(repo.path, "partial.txt"), `${baseline.join("\n")}\n`);
+  sandbox.git(repo.path, "add", "partial.txt");
+  sandbox.git(repo.path, "commit", "-m", "add partial fixture");
+  const working = [...baseline];
+  working[1] = "FIRST edit";
+  working[9] = "SECOND edit";
+  writeFileSync(join(repo.path, "partial.txt"), `${working.join("\n")}\n`);
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, sandbox, "partialdiff");
+
+  await window.locator(".file-row", { hasText: "partial.txt" }).click();
+  await expect(window.locator(".diff-pane__sub")).toHaveText(
+    "index → working tree"
+  );
+  const hunkActions = window.getByRole("button", { name: "Stage hunk" });
+  await expect(hunkActions).toHaveCount(2);
+
+  // Stamp the rendered diff so the check after the stage can tell a repaint
+  // from a teardown. Scroll position is the thing the reader actually loses
+  // when the body is swapped for a placeholder, but a fixture diff is not
+  // reliably taller than the window; the node's survival is the same fact
+  // measured without that dependency.
+  const view = window.locator(".diff-view");
+  await view.evaluate((node) => {
+    (node as HTMLElement & { pwrgitProbe?: string }).pwrgitProbe = "kept";
+  });
+
+  await hunkActions.first().click();
+
+  await expect
+    .poll(() => sandbox?.git(repo.path, "diff", "--cached") ?? "")
+    .toContain("FIRST edit");
+  expect(sandbox.git(repo.path, "diff", "--cached")).not.toContain(
+    "SECOND edit"
+  );
+  expect(sandbox.git(repo.path, "diff")).toContain("SECOND edit");
+
+  // Applying repaints in place: the same node carries the new patch, so a
+  // reader partway down a long file keeps their position instead of being
+  // thrown back to line 1 on every hunk they stage.
+  await expect(window.locator(".diff-empty")).toHaveCount(0);
+  await expect(window.getByRole("button", { name: "Stage hunk" })).toHaveCount(1);
+  expect(
+    await view.evaluate(
+      (node) => (node as HTMLElement & { pwrgitProbe?: string }).pwrgitProbe
+    )
+  ).toBe("kept");
+
+  // The rail still presents both sides of the partially-staged file, and now
+  // says they are one file split rather than two that share a name.
+  await expect(
+    window.locator(".file-row.is-staged", { hasText: "partial.txt" })
+  ).toBeVisible();
+  await expect(
+    window.locator(".file-row:not(.is-staged)", { hasText: "partial.txt" })
+  ).toBeVisible();
+  await expect(window.locator(".file-row .file-split")).toHaveCount(2);
+
+  // Crossing to the staged side is a tab in the pane, not a close-and-reopen.
+  // Scoped to the tab group and exact: "Staged" is a substring of "Unstaged",
+  // and the rail carries section headings by those names too.
+  await window
+    .locator(".diff-side")
+    .getByRole("button", { name: "Staged", exact: true })
+    .click();
+  await expect(window.locator(".diff-pane__sub")).toHaveText("HEAD → index");
+  await window.getByRole("button", { name: "Unstage hunk" }).click();
+  await expect
+    .poll(() => sandbox?.git(repo.path, "diff", "--cached") ?? "not empty")
+    .toBe("");
+
+  // Line selection is intentionally finer than a replacement pair. Staging
+  // only the added row keeps the old row in the index; Git then reports that
+  // old row as the remaining unstaged deletion.
+  await window
+    .locator(".diff-side")
+    .getByRole("button", { name: "Unstaged", exact: true })
+    .click();
+  const addedFirst = window.locator(".diff-row--add", {
+    hasText: "FIRST edit"
+  });
+  // Everything left of the code is the target, not the 13px box inside it.
+  // The +/− column always carries a glyph, so it is a stable thing to aim at;
+  // an added row's old-line gutter is empty and collapses to no height.
+  await addedFirst.locator(".diff-sym").click();
+  await expect(window.locator(".diff-selection-bar__count")).toHaveText(
+    "1 selected"
+  );
+  await window
+    .getByRole("button", { name: "Stage 1 line", exact: true })
+    .click();
+  await expect
+    .poll(() => sandbox?.git(repo.path, "show", ":partial.txt") ?? "")
+    .toContain("base-2\nFIRST edit");
+  expect(sandbox.git(repo.path, "show", ":partial.txt")).not.toContain(
+    "SECOND edit"
+  );
+});
+
 test("Escape closes the diff pane only while the pane owns the keystroke", async () => {
   sandbox = createGitSandbox();
   const repo = sandbox.makeRepo("escrepo");

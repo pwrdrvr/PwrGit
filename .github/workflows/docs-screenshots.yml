@@ -1,0 +1,68 @@
+# Capture the screenshots published on docs.pwrgit.com and pwrgit.com.
+#
+# Manual only. These images are documentation, not a test: they change when
+# the UI changes, which is a thing to look at rather than a thing to gate a
+# merge on. Run it from the Actions tab, download the artifact, and copy the
+# PNGs into pwrdrvr/docs.pwrgit.com under assets/screenshots/ (that repo's
+# scripts/filter-noise-screenshots.mjs drops any that are pixel-identical, so
+# a refresh only commits what actually changed).
+#
+# Run it against a release tag rather than main when the docs describe a
+# shipped version — `ref` below takes any tag, branch or SHA.
+#
+# macOS because that is the platform the screenshots depict, and because the
+# window chrome differs per platform; a Linux capture would show controls no
+# macOS reader has and vice versa.
+
+name: Documentation screenshots
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Tag, branch or SHA to capture (default: this branch)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+          persist-credentials: false
+
+      - name: Install Node.js and dependencies
+        uses: pwrdrvr/configure-nodejs@v1
+        with:
+          node-version: 24.x
+
+      # The capture drives the BUILT app (out/main/index.js); the script's
+      # pretest:docs-shots hook builds it, exactly as pretest:e2e does for the
+      # normal suite. No separate build step, so local and CI runs cannot drift.
+      - name: Capture
+        run: pnpm --filter @pwrgit/desktop run test:docs-shots
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v7
+        with:
+          name: docs-screenshots
+          path: apps/desktop/docs-screenshots/*.png
+          if-no-files-found: error
+          retention-days: 30
+
+      # A failed capture is almost always a moved selector, and the trace is
+      # the only way to see which one without a local macOS run.
+      - name: Upload Playwright trace on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: docs-screenshots-failure
+          path: apps/desktop/test-results/
+          retention-days: 7

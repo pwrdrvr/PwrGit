@@ -7,6 +7,7 @@ import {
   err,
   ok,
   type BranchRef,
+  type BranchTrackingStatus,
   type ForgeHost,
   type Profile,
   type ProfileId,
@@ -117,6 +118,7 @@ type WorktreeRow = {
   dirty: number | null;
   ahead: number | null;
   behind: number | null;
+  has_upstream: number | null;
   behind_default: number | null;
   default_branch: string | null;
   merged_into_default: number | null;
@@ -130,6 +132,26 @@ type WorktreeRow = {
   pr_state: string | null;
   pr_is_draft: number | null;
 };
+
+function trackingFromWorktreeState(
+  worktree: Pick<
+    WorktreeRow,
+    "branch" | "has_upstream" | "ahead" | "behind"
+  >
+): BranchTrackingStatus | undefined {
+  // A null marks an uncomputed LEFT JOIN, not "no upstream". Keeping it
+  // absent preserves the Focused lens's honest first-run state.
+  if (worktree.has_upstream === null) return undefined;
+  // Detached HEAD is not a local branch waiting to be published.
+  if (worktree.branch.startsWith("detached@")) return undefined;
+  if (worktree.has_upstream === 0) return "unpublished";
+  const ahead = worktree.ahead ?? 0;
+  const behind = worktree.behind ?? 0;
+  if (ahead > 0 && behind > 0) return "diverged";
+  if (ahead > 0) return "ahead";
+  if (behind > 0) return "behind";
+  return "up_to_date";
+}
 
 type IndexedBranches = {
   branches: BranchRef[];
@@ -156,6 +178,10 @@ export type RepoIndexerOptions = {
   profileRescanIntervalMs?: number;
   hydrationRetryIntervalMs?: number;
   now?: () => number;
+};
+
+export type RepoRescanOptions = {
+  signal?: AbortSignal;
 };
 
 const defaultYieldToEventLoop = (): Promise<void> =>
@@ -229,7 +255,11 @@ export class RepoIndexer {
   }
 
   /** Rescan a profile's roots; upsert discovered repos, prune vanished ones. */
-  async rescanProfile(profile: Profile): Promise<Repo[]> {
+  async rescanProfile(
+    profile: Profile,
+    options: RepoRescanOptions = {}
+  ): Promise<Repo[]> {
+    const { signal } = options;
     const found = new Set<string>();
     for (const root of profile.roots) {
       const dirs = await findRepoDirsAsync(root, MAX_SCAN_DEPTH, {
@@ -238,6 +268,7 @@ export class RepoIndexer {
       });
       for (const dir of dirs) found.add(dir);
     }
+    signal?.throwIfAborted();
 
     // Resolve each found dir to its canonical (primary worktree) path via git,
     // deduping repos reachable from more than one worktree dir.
@@ -266,9 +297,11 @@ export class RepoIndexer {
         indexedBranches: listedBranches.ok ? listedBranches.value : null
       });
     });
+    signal?.throwIfAborted();
 
     const seenRepoIds: string[] = [];
     for (const { path, worktrees, indexedBranches } of canonical.values()) {
+      signal?.throwIfAborted();
       const repoId = this.db.transaction(() => {
         const repoId = this.upsertRepoRow(
           profile.id,
@@ -284,16 +317,19 @@ export class RepoIndexer {
         await this.syncBranchIndexChunked(
           repoId,
           indexedBranches.branches,
-          indexedBranches.remoteNames
+          indexedBranches.remoteNames,
+          signal
         );
       } else {
         // Record the attempt so one temporarily unreadable repo does not turn
         // the one-time migration repair into an every-launch full rescan. The
         // daily scan (or an explicit refresh) retries it normally.
+        signal?.throwIfAborted();
         this.markRemoteBranchesIndexed(repoId);
       }
       await this.yieldToEventLoop();
     }
+    signal?.throwIfAborted();
     this.db.transaction(() => {
       this.pruneScannedRepos(profile.id, seenRepoIds);
       this.markProfileScanned(profile.id);
@@ -877,6 +913,7 @@ export class RepoIndexer {
           `SELECT w.id, w.repo_id, w.branch, w.path, w.is_primary, w.pinned,
                   w.custom_order AS custom_order,
                   s.dirty AS dirty, s.ahead AS ahead, s.behind AS behind,
+                  s.has_upstream AS has_upstream,
                   s.behind_default AS behind_default,
                   s.default_branch AS default_branch,
                   s.merged_into_default AS merged_into_default,
@@ -909,6 +946,8 @@ export class RepoIndexer {
         pinned: w.pinned === 1,
         isPrimary: w.is_primary === 1
       };
+      const tracking = trackingFromWorktreeState(w);
+      if (tracking !== undefined) wt.tracking = tracking;
       if (w.last_activity_at !== null) wt.lastActivityAt = w.last_activity_at;
       if (w.custom_order !== null) wt.order = w.custom_order;
       const pr = prSummaryFromRow(w as unknown as Record<string, unknown>);
@@ -1024,17 +1063,22 @@ export class RepoIndexer {
   private async syncBranchIndexChunked(
     repoId: string,
     branches: BranchRef[],
-    remoteNames: string[]
+    remoteNames: string[],
+    signal?: AbortSignal
   ): Promise<void> {
-    await this.syncRemoteBranchRows(repoId, branches, remoteNames);
-    await this.syncLocalBranchRows(repoId, branches);
+    signal?.throwIfAborted();
+    await this.syncRemoteBranchRows(repoId, branches, remoteNames, signal);
+    signal?.throwIfAborted();
+    await this.syncLocalBranchRows(repoId, branches, signal);
+    signal?.throwIfAborted();
     this.markRemoteBranchesIndexed(repoId);
   }
 
   private async syncRemoteBranchRows(
     repoId: string,
     branches: BranchRef[],
-    remoteNames: string[]
+    remoteNames: string[],
+    signal?: AbortSignal
   ): Promise<void> {
     const localNames = new Set(
       branches.filter((branch) => !branch.isRemote).map((branch) => branch.name)
@@ -1085,7 +1129,8 @@ export class RepoIndexer {
        WHERE remote_branches.repo_id <> excluded.repo_id
           OR remote_branches.name <> excluded.name
           OR remote_branches.full_name <> excluded.full_name
-          OR remote_branches.remote_name <> excluded.remote_name`
+          OR remote_branches.remote_name <> excluded.remote_name`,
+      signal
     );
   }
 
@@ -1105,7 +1150,8 @@ export class RepoIndexer {
    */
   private async syncLocalBranchRows(
     repoId: string,
-    branches: BranchRef[]
+    branches: BranchRef[],
+    signal?: AbortSignal
   ): Promise<void> {
     const checkedOut = new Set(
       (
@@ -1138,7 +1184,8 @@ export class RepoIndexer {
          full_name = excluded.full_name
        WHERE local_branches.repo_id <> excluded.repo_id
           OR local_branches.name <> excluded.name
-          OR local_branches.full_name <> excluded.full_name`
+          OR local_branches.full_name <> excluded.full_name`,
+      signal
     );
   }
 
@@ -1154,7 +1201,8 @@ export class RepoIndexer {
     table: "remote_branches" | "local_branches",
     repoId: string,
     rows: { id: string; args: unknown[] }[],
-    upsertSql: string
+    upsertSql: string,
+    signal?: AbortSignal
   ): Promise<void> {
     const upsert = this.db.prepare(upsertSql);
     for (
@@ -1162,6 +1210,7 @@ export class RepoIndexer {
       offset < rows.length;
       offset += this.branchWriteChunkSize
     ) {
+      signal?.throwIfAborted();
       const chunk = rows.slice(offset, offset + this.branchWriteChunkSize);
       this.db.transaction(() => {
         for (const row of chunk) upsert.run(...row.args);
@@ -1169,6 +1218,7 @@ export class RepoIndexer {
       await this.yieldToEventLoop();
     }
 
+    signal?.throwIfAborted();
     const wanted = new Set(rows.map((row) => row.id));
     const stale = (
       this.db
@@ -1180,6 +1230,7 @@ export class RepoIndexer {
       offset < stale.length;
       offset += this.branchWriteChunkSize
     ) {
+      signal?.throwIfAborted();
       const chunk = stale.slice(offset, offset + this.branchWriteChunkSize);
       const placeholders = chunk.map(() => "?").join(",");
       this.db.transaction(() => {

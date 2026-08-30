@@ -3,6 +3,7 @@ import type {
   PwrGitError,
   PullProgressPhase,
   RemoteDivergence,
+  Repo,
   Result,
   SshRemoteRecovery,
   Worktree,
@@ -11,6 +12,7 @@ import type {
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { showErrorToast } from "../../lib/toast";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
+import { GitLfsChip } from "./GitLfsChip";
 import { PullDivergenceDialog } from "./PullDivergenceDialog";
 import { ResetToRemoteDialog } from "./ResetToRemoteDialog";
 import { SshRemoteRecoveryDialog } from "./SshRemoteRecoveryDialog";
@@ -79,9 +81,11 @@ export function pullPhaseLabel(phase: PullProgressPhase): string {
 }
 
 export function WorktreeHeader({
+  repo,
   worktree,
   state
 }: {
+  repo: Pick<Repo, "id" | "name" | "path">;
   worktree: Worktree;
   state: WorktreeState | null;
 }) {
@@ -300,6 +304,14 @@ export function WorktreeHeader({
           degrade ladder. */}
       <div className="wt-header__state">
         {dirty > 0 && <span className="badge badge--warn">●{dirty}</span>}
+        {/* Repo fact, not sync state, so it sits with the dirty badge on the
+            left rather than among the chips the action buttons act on. */}
+        <GitLfsChip
+          repoId={repo.id}
+          repoName={repo.name}
+          repoPath={repo.path}
+          worktreeId={worktree.id}
+        />
         <span style={{ flex: 1 }} />
         {/* Left of the sync chip, which stays adjacent to the buttons it maps
             onto. Hidden mid-pull so the progress label keeps the width it
