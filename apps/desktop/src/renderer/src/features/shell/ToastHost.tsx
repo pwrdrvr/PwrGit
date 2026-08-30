@@ -22,10 +22,18 @@ export function ToastHost() {
     <div className="toast-host">
       {/* Keyed by `key` where there is one, so a replacement updates the card
           in place: remounting would drop the hover-pause of a pointer that is
-          already resting on it and never fires onMouseEnter again. */}
-      {toasts.map((toast) => (
-        <ToastCard key={toast.key ?? toast.id} toast={toast} />
-      ))}
+          already resting on it and never fires onMouseEnter again.
+
+          Sticky cards sort after the transients for the same reason the
+          update toast anchors the corner: a card that outlives the come-and-go
+          must not be shoved around by it. In this bottom-anchored column the
+          later children sit nearer the corner, and growth above them leaves
+          them still. */}
+      {[...toasts]
+        .sort((a, b) => Number(a.sticky === true) - Number(b.sticky === true))
+        .map((toast) => (
+          <ToastCard key={toast.key ?? toast.id} toast={toast} />
+        ))}
       <AppUpdateToast />
     </div>
   );

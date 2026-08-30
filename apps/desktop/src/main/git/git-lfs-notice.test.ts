@@ -18,12 +18,7 @@ const BROKEN: GitLfsStatus = {
   configured: false
 };
 
-let dbPath: string;
-let db: DB;
-
-beforeEach(() => {
-  dbPath = join(mkdtempSync(join(tmpdir(), "pwrgit-lfs-notice-")), "app.db");
-  db = openDatabase(dbPath);
+function seed(db: DB): void {
   db.prepare(
     "INSERT INTO profiles (id, name, email) VALUES ('p1', 'P', 'p@example.com')"
   ).run();
@@ -31,6 +26,13 @@ beforeEach(() => {
     `INSERT INTO repos (id, profile_id, name, path)
      VALUES ('repo-1', 'p1', 'proj', '/repos/proj')`
   ).run();
+}
+
+let db: DB;
+
+beforeEach(() => {
+  db = openDatabase(":memory:");
+  seed(db);
 });
 
 afterEach(() => {
@@ -39,13 +41,24 @@ afterEach(() => {
 
 describe("recordLfsOutcome", () => {
   it("announces a working setup once per repo, surviving restarts", () => {
-    expect(recordLfsOutcome(db, "repo-1", READY)).toBe(true);
-    expect(recordLfsOutcome(db, "repo-1", READY)).toBe(false);
+    // The one test where the file is load-bearing: a relaunch reopens the
+    // same database file, and "once" must hold across it.
+    const dbPath = join(
+      mkdtempSync(join(tmpdir(), "pwrgit-lfs-notice-")),
+      "app.db"
+    );
+    let fileDb = openDatabase(dbPath);
+    try {
+      seed(fileDb);
+      expect(recordLfsOutcome(fileDb, "repo-1", READY)).toBe(true);
+      expect(recordLfsOutcome(fileDb, "repo-1", READY)).toBe(false);
 
-    // A relaunch reopens the same database file; "once" must hold across it.
-    db.close();
-    db = openDatabase(dbPath);
-    expect(recordLfsOutcome(db, "repo-1", READY)).toBe(false);
+      fileDb.close();
+      fileDb = openDatabase(dbPath);
+      expect(recordLfsOutcome(fileDb, "repo-1", READY)).toBe(false);
+    } finally {
+      fileDb.close();
+    }
   });
 
   it("never announces a broken setup, but re-announces the repair", () => {

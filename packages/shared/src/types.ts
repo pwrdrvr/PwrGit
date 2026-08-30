@@ -480,6 +480,13 @@ export type GitLfsStatus =
       version?: string;
     };
 
+/** Whether a checkout that asks for LFS can actually apply it. The single
+ *  definition of "ready" for both processes — main records it, the renderer
+ *  paints it — so the two can never disagree on what counts as working. */
+export function isGitLfsReady(status: GitLfsStatus): boolean {
+  return status.required && status.installed && status.configured;
+}
+
 /** What an LFS check answers. A broken setup nags on every check; a working
  *  one is announced once per transition into working — the main process keeps
  *  that record per repo, so every worktree of a repo shares one announcement

@@ -1,6 +1,7 @@
 import { err, ok, type WorktreeState } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
+import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import type { GitExec } from "./dugite";
 import { inspectGitLfs } from "./git-lfs";
@@ -147,9 +148,15 @@ export function registerWorktreeHandlers(
     }
     const inspected = await inspectGitLfs(git, row.path);
     if (!inspected.ok) return inspected;
-    return ok({
-      status: inspected.value,
-      announceReady: recordLfsOutcome(db, req.repoId, inspected.value)
-    });
+    // Best-effort bookkeeping: the repo row can be pruned while the probe's
+    // git subprocesses run, and the resulting FK violation must lose the
+    // announcement, not destroy the probe's answer.
+    let announceReady = false;
+    try {
+      announceReady = recordLfsOutcome(db, req.repoId, inspected.value);
+    } catch (cause) {
+      logMain("warn", "lfs", "could not record LFS outcome:", cause);
+    }
+    return ok({ status: inspected.value, announceReady });
   });
 }

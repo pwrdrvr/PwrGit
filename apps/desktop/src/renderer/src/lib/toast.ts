@@ -51,16 +51,10 @@ function pushToast(input: Omit<Toast, "id">): void {
   notify();
 }
 
-export function showErrorToast(input: {
-  key?: string;
-  title: string;
-  message: string;
-  detail?: string;
-  sticky?: boolean;
-  /** Opt out when the failure left no trail in the Logs window — an "Open
-   *  Logs" button that lands on unrelated output reads as a broken lead. */
-  showLogsAction?: boolean;
-}): void {
+/** Every Toast field passes through (`showLogsAction: false` when the failure
+ *  left no trail in the Logs window — a button landing on unrelated output
+ *  reads as a broken lead); only the tone and the defaults are fixed here. */
+export function showErrorToast(input: Omit<Toast, "id" | "tone">): void {
   pushToast({
     showLogsAction: true,
     showCopyAction: true,

@@ -4100,18 +4100,23 @@ textarea,
   color: var(--success-text);
 }
 /* The broken chip is a button — clicking re-probes after an outside repair —
-   and the border is its affordance rung. */
+   and the border is its affordance rung. It stays enabled mid-probe (aria-busy
+   carries that state) so activating it never blurs keyboard focus to <body>. */
 .lfs-chip--broken {
   background: var(--danger-soft);
   color: var(--danger-text);
   border-color: var(--danger-border);
   cursor: pointer;
 }
-.lfs-chip--broken:hover:not(:disabled) {
+.lfs-chip--broken:hover {
   border-color: var(--danger-text);
 }
-.lfs-chip--broken:disabled {
-  cursor: default;
+.lfs-chip--broken:focus-visible {
+  outline: 2px solid var(--danger-text);
+  outline-offset: 1px;
+}
+.lfs-chip--broken[aria-busy="true"] {
+  cursor: progress;
   opacity: 0.65;
 }
 .titlebar__repo {
@@ -4352,10 +4357,13 @@ textarea,
   color: var(--accent-bright);
 }
 
-/* Collapse button labels + both chips when the main pane is tight. Below this
-   the buttons are bare icons, so the row has nothing left to give. */
+/* Collapse button labels + every chip when the main pane is tight. Below this
+   the buttons are bare icons, so the row has nothing left to give. The LFS
+   chip goes too — it cannot shrink, and while it is hidden the sticky toast
+   still carries a broken setup at any width. */
 @container (max-width: 540px) {
-  .wt-header__state .sync-chip--drift {
+  .wt-header__state .sync-chip--drift,
+  .wt-header__state .lfs-chip {
     display: none;
   }
   .wt-btn {
@@ -8012,6 +8020,11 @@ button.agent-auth-node {
   align-items: flex-end;
   gap: 10px;
   max-width: min(460px, calc(100vw - 32px));
+  /* Sticky cards made unbounded growth reachable (one standing card per
+     broken repo). Cap the column at the viewport and scroll, so every card's
+     Dismiss stays reachable instead of rising off-screen. */
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
 }
 
 .app-toast {

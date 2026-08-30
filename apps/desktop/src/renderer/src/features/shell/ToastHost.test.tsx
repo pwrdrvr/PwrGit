@@ -105,7 +105,13 @@ describe("ToastHost", () => {
         showInfoToast({ title: "Tag created", message: "v1.2.3" });
       });
 
-      // Only the transient card wears the draining bar.
+      // The standing card renders nearest the corner — after the transient,
+      // whatever order they were raised in — so come-and-go above it never
+      // shoves it around. Only the transient card wears the draining bar.
+      expect(eyebrows()).toEqual([
+        "info:Tag created",
+        "error:Git LFS setup needed"
+      ]);
       expect(container.querySelectorAll(".app-toast__timer")).toHaveLength(1);
 
       await act(async () => {
@@ -117,6 +123,35 @@ describe("ToastHost", () => {
         (button) => button.getAttribute("aria-label") === "Dismiss"
       );
       await act(async () => dismiss?.click());
+      expect(eyebrows()).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("arms the countdown when a keyed confirmation replaces a sticky complaint", async () => {
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        showErrorToast({
+          key: "lfs",
+          title: "Git LFS setup needed",
+          message: "…",
+          sticky: true
+        });
+      });
+      expect(container.querySelectorAll(".app-toast__timer")).toHaveLength(0);
+
+      await act(async () => {
+        showInfoToast({ key: "lfs", title: "Git LFS ready", message: "…" });
+      });
+
+      // The card that never had a countdown must start one now.
+      expect(eyebrows()).toEqual(["info:Git LFS ready"]);
+      expect(container.querySelectorAll(".app-toast__timer")).toHaveLength(1);
+      await act(async () => {
+        vi.advanceTimersByTime(9_000);
+      });
       expect(eyebrows()).toEqual([]);
     } finally {
       vi.useRealTimers();

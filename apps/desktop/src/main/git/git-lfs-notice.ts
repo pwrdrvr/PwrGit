@@ -1,4 +1,4 @@
-import type { GitLfsStatus } from "@pwrgit/shared";
+import { isGitLfsReady, type GitLfsStatus } from "@pwrgit/shared";
 import type { DB } from "../persistence/db";
 
 /** Fold one LFS check into the repo's announcement record and answer whether
@@ -12,12 +12,12 @@ export function recordLfsOutcome(
   status: GitLfsStatus
 ): boolean {
   if (!status.required) return false;
-  const outcome =
-    status.installed && status.configured ? "ready" : "broken";
+  const outcome = isGitLfsReady(status) ? "ready" : "broken";
   const previous = db
     .prepare("SELECT last_outcome FROM repo_lfs_notice WHERE repo_id = ?")
     .get(repoId) as { last_outcome: string } | undefined;
-  if (previous?.last_outcome !== outcome) {
+  const changed = previous?.last_outcome !== outcome;
+  if (changed) {
     db.prepare(
       `INSERT INTO repo_lfs_notice (repo_id, last_outcome, recorded_at)
        VALUES (?, ?, datetime('now'))
@@ -26,5 +26,5 @@ export function recordLfsOutcome(
          recorded_at = excluded.recorded_at`
     ).run(repoId, outcome);
   }
-  return outcome === "ready" && previous?.last_outcome !== "ready";
+  return changed && outcome === "ready";
 }
