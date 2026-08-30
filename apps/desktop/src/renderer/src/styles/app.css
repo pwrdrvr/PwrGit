@@ -6913,6 +6913,15 @@ body.is-col-resizing {
 .file-row.is-clickable:hover {
   background: var(--bg-panel-hover);
 }
+/* The row whose diff the main pane is showing. Same reasoning as
+   `.wt-row.is-selected`: "selected" is a state, so SC 1.4.11 wants it
+   identifiable at 3:1, and --bg-row-active alone reads as a wash — --accent
+   carries it. An inset ring rather than a border because this row is
+   borderless and a real one would shift every sibling by 2px. */
+.file-row.is-selected {
+  background: var(--bg-row-active);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
 .commit-check {
   cursor: pointer;
 }

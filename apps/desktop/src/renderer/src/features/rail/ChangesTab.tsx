@@ -168,7 +168,8 @@ function FileRow({
   onToggle,
   onOpen,
   onDiscard,
-  onContextMenu
+  onContextMenu,
+  selected
 }: {
   file: FileChange;
   /** Text to show — the basename inside a folder group, the full path outside. */
@@ -178,6 +179,8 @@ function FileRow({
    *  unrelated files that happen to share a name. */
   split: boolean;
   nested: boolean;
+  /** This row is what the main pane is currently showing. */
+  selected: boolean;
   onToggle: () => void;
   onOpen: () => void;
   onDiscard: () => void;
@@ -185,7 +188,8 @@ function FileRow({
 }) {
   return (
     <div
-      className={`file-row is-clickable${file.staged ? " is-staged" : ""}${split ? " is-split" : ""}${nested ? " file-row--nested" : ""}`}
+      className={`file-row is-clickable${file.staged ? " is-staged" : ""}${split ? " is-split" : ""}${nested ? " file-row--nested" : ""}${selected ? " is-selected" : ""}`}
+      {...(selected ? { "aria-current": "true" as const } : {})}
       onClick={onOpen}
       onContextMenu={onContextMenu}
       title={split ? "Partly staged — view these changes" : "View changes"}
@@ -312,10 +316,13 @@ export function ChangesTab({
   worktree,
   activeEmail,
   onOpenDiff,
-  onOpenFileInsight
+  onOpenFileInsight,
+  activeFile
 }: {
   worktree: Worktree | null;
   activeEmail: string;
+  /** The file the main pane is showing, so this list can mark it. */
+  activeFile: { path: string; staged: boolean | null } | null;
   onOpenDiff: (path: string, staged: boolean) => void;
   onOpenFileInsight: (path: string, tab: "history" | "blame") => void;
 }) {
@@ -584,6 +591,11 @@ export function ChangesTab({
           onOpen={() => onOpenDiff(file.path, stagedSection)}
           onDiscard={() => void discardTarget(target)}
           onContextMenu={(event) => openMenu(event, target)}
+          selected={
+            activeFile !== null &&
+            activeFile.path === file.path &&
+            (activeFile.staged === null || activeFile.staged === file.staged)
+          }
         />
       );
     };

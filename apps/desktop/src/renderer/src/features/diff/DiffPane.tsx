@@ -620,6 +620,7 @@ export function DiffPane({
                   }
                 }
               : {})}
+            showPaths={target.kind === "commit"}
             emptyLabel={
               target.kind === "commit"
                 ? "This commit has no textual changes."

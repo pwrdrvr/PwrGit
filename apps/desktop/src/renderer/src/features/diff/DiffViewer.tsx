@@ -60,7 +60,8 @@ export function DiffViewer({
   patch,
   emptyLabel,
   images,
-  selection
+  selection,
+  showPaths = true
 }: {
   patch: string;
   emptyLabel?: string;
@@ -69,6 +70,14 @@ export function DiffViewer({
   /** Typed line IDs from the main process. Present only for a selectable
    * working-tree patch; commit and protected file kinds remain read-only. */
   selection?: DiffSelectionControls;
+  /**
+   * Whether each file's strip names the file. True for a whole-commit diff,
+   * where the strip is the only thing separating one file from the next.
+   * False when the pane is already scoped to ONE file and its header names it:
+   * this strip is not sticky, so it is not a second persistent label — just
+   * the same path written twice, one line apart.
+   */
+  showPaths?: boolean;
 }) {
   const parsed = useMemo(() => parseUnifiedDiff(patch), [patch]);
   if (parsed.files.length === 0) {
@@ -89,6 +98,7 @@ export function DiffViewer({
           file={file}
           images={images}
           selection={scoped}
+          showPath={showPaths}
         />
       ))}
     </div>
@@ -158,16 +168,25 @@ const DRAG_SLOP_PX = 4;
 function DiffFileView({
   file,
   images,
-  selection
+  selection,
+  showPath
 }: {
   file: DiffFile;
   images: ImageDiffRevisions | undefined;
   selection: DiffSelectionControls | undefined;
+  showPath: boolean;
 }) {
-  const name =
-    file.status === "renamed" && file.oldPath !== undefined
-      ? `${file.oldPath} → ${file.path}`
-      : file.path;
+  const renamedFrom =
+    file.status === "renamed" && file.oldPath !== undefined ? file.oldPath : null;
+  // Where the pane names the file, the rename SOURCE is the only part of this
+  // label that is not already on screen — so that is the part that stays.
+  const name = showPath
+    ? renamedFrom === null
+      ? file.path
+      : `${renamedFrom} → ${file.path}`
+    : renamedFrom === null
+      ? null
+      : `from ${renamedFrom}`;
 
   const byCoordinate = useMemo(() => {
     const map = new Map<string, LineMeta>();
@@ -232,9 +251,11 @@ function DiffFileView({
         <span className={`diff-file__status diff-file__status--${file.status}`}>
           {STATUS_LABEL[file.status]}
         </span>
-        <span className="diff-file__path" title={file.path}>
-          {name}
-        </span>
+        {name !== null && (
+          <span className="diff-file__path" title={file.path}>
+            {name}
+          </span>
+        )}
         <span style={{ flex: 1 }} />
         <DiffStat additions={file.additions} deletions={file.deletions} />
       </div>

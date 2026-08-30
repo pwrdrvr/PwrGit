@@ -374,6 +374,24 @@ export function App() {
     return true;
   }, [searchableCommits]);
 
+  // What the main pane is showing, so the rail's list can mark that row. File
+  // details win over the diff behind them: that pane is what is on screen.
+  const railActiveFile = useMemo<{
+    path: string;
+    staged: boolean | null;
+  } | null>(() => {
+    if (fileInsightTarget !== null) {
+      return { path: fileInsightTarget.path, staged: null };
+    }
+    if (diffTarget?.kind === "file") {
+      return { path: diffTarget.path, staged: diffTarget.staged };
+    }
+    if (diffTarget?.kind === "commitFile") {
+      return { path: diffTarget.path, staged: null };
+    }
+    return null;
+  }, [fileInsightTarget, diffTarget]);
+
   const selectedRepo = useMemo(
     () => repos.find((r) => r.id === selection?.repoId) ?? null,
     [repos, selection]
@@ -714,6 +732,7 @@ export function App() {
               setFileInsightTarget(null);
               setDiffTarget({ kind: "file", path, staged });
             }}
+            activeFile={railActiveFile}
             onOpenFileInsight={(path, tab) => {
               setDiffTarget(null);
               setFileInsightTarget({

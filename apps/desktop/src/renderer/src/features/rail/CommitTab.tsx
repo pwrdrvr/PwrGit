@@ -15,11 +15,14 @@ export function CommitTab({
   subject,
   onOpenFile,
   onOpenFullDiff,
-  onClose
+  onClose,
+  activePath
 }: {
   worktreeId: string;
   hash: string;
   subject: string;
+  /** The file the main pane is showing, so this list can mark it. */
+  activePath: string | null;
   onOpenFile: (path: string) => void;
   onOpenFullDiff: () => void;
   onClose: () => void;
@@ -71,7 +74,10 @@ export function CommitTab({
             {files.map((f, i) => (
               <div
                 key={`${i}-${f.path}`}
-                className="file-row is-clickable"
+                className={`file-row is-clickable${
+                  f.path === activePath ? " is-selected" : ""
+                }`}
+                {...(f.path === activePath ? { "aria-current": "true" as const } : {})}
                 onClick={() => onOpenFile(f.path)}
                 title="View this file's changes in the commit"
               >

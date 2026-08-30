@@ -151,6 +151,7 @@ describe("ChangesTab list", () => {
           activeEmail="a@b.c"
           onOpenDiff={vi.fn()}
           onOpenFileInsight={vi.fn()}
+          activeFile={null}
         />
       );
     });
@@ -331,6 +332,7 @@ describe("ChangesTab truncation notice", () => {
           activeEmail="a@b.c"
           onOpenDiff={vi.fn()}
           onOpenFileInsight={vi.fn()}
+          activeFile={null}
         />
       );
     });
@@ -464,6 +466,7 @@ describe("ChangesTab folder actions", () => {
           activeEmail="a@b.c"
           onOpenDiff={vi.fn()}
           onOpenFileInsight={vi.fn()}
+          activeFile={null}
         />
       );
     });
@@ -518,6 +521,40 @@ describe("ChangesTab folder actions", () => {
       worktreeId: "worktree-1",
       entries: [{ path: "dist", directory: true }]
     });
+  });
+
+  it("marks the row whose diff the main pane is showing", async () => {
+    await act(async () => {
+      root.render(
+        <ChangesTab
+          worktree={worktree}
+          activeEmail="a@b.c"
+          onOpenDiff={vi.fn()}
+          onOpenFileInsight={vi.fn()}
+          activeFile={{ path: "src/app.ts", staged: false }}
+        />
+      );
+    });
+
+    const selected = [...container.querySelectorAll(".file-row.is-selected")];
+    expect(selected).toHaveLength(1);
+    expect(selected[0]?.textContent).toContain("src/app.ts");
+    expect(selected[0]?.getAttribute("aria-current")).toBe("true");
+  });
+
+  it("does not mark a row when the main pane shows nothing", async () => {
+    await act(async () => {
+      root.render(
+        <ChangesTab
+          worktree={worktree}
+          activeEmail="a@b.c"
+          onOpenDiff={vi.fn()}
+          onOpenFileInsight={vi.fn()}
+          activeFile={null}
+        />
+      );
+    });
+    expect(container.querySelectorAll(".file-row.is-selected")).toHaveLength(0);
   });
 
   it("offers no ignore entry for a tracked file", async () => {
@@ -606,6 +643,7 @@ describe("ChangesTab conflict marker guard", () => {
           activeEmail="a@b.c"
           onOpenDiff={vi.fn()}
           onOpenFileInsight={vi.fn()}
+          activeFile={null}
         />
       );
     });
@@ -729,3 +767,4 @@ describe("ChangesTab conflict marker guard", () => {
     });
   });
 });
+
