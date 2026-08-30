@@ -4,6 +4,11 @@ Repo-wide policy, license, and release checks. Most are wired into `pnpm lint`
 through the root `package.json`; add new repo-wide checks to that chain rather
 than as another CI step.
 
+Every script here is both an importable module (its checks are unit tested) and
+a CLI, so each guards `runCli()` with `isCliEntrypoint(import.meta.url)` from
+[lib/cli-entrypoint.mjs](lib/cli-entrypoint.mjs). Use it rather than
+open-coding the `process.argv[1]` comparison a fourth time.
+
 ## The three license scripts
 
 `pnpm licenses:check` runs them in this order, and they do different jobs:

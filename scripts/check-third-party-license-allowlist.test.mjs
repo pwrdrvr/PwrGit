@@ -20,6 +20,7 @@ import {
   NOTICE_DEV_DEPENDENCIES,
   declaresCopyleft,
   flattenLicenseReport,
+  hasCopyleftDisclosure,
   validateEmbeddedNoticeSource,
 } from "./generate-third-party-licenses.mjs";
 
@@ -399,6 +400,19 @@ describe("embedded Git runtimes", () => {
     expect(failures[0]).toMatch(/not permitted in a shipped artifact/);
   });
 
+  test("reports one line per runtime, not one per broken rule", () => {
+    // A GPL-3.0 entry with no descriptor breaks both rules at once. Reporting
+    // the missing descriptor on top of "not permitted" printed two lines about
+    // one runtime, and the descriptor is beside the point for a license that is
+    // refused either way.
+    const failures = checkEmbeddedRuntimeLicenses(
+      [{ name: "Some other runtime", version: "1.0.0", declaredLicense: "GPL-3.0" }],
+      ENTRIES,
+    );
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toMatch(/not permitted in a shipped artifact/);
+  });
+
   test("an empty runtime list is not a failure", () => {
     expect(checkEmbeddedRuntimeLicenses([], ENTRIES)).toEqual([]);
   });
@@ -416,6 +430,41 @@ describe("embedded Git runtimes", () => {
     expect(copyleft.map((entry) => entry.name)).toEqual(["Git embedded runtime"]);
     expect(copyleft[0].declaredLicense).toBe("GPL-2.0-only");
     expect(copyleft[0].copyleft.correspondingSource).toMatch(/^https:\/\//);
+  });
+});
+
+describe("disclosure predicate", () => {
+  // One predicate, three callers: the gate's carve-out, the generator's
+  // validator, and the notice's Source Availability section. When the notice
+  // asked the laxer `copyleft !== undefined`, a half-written descriptor on a
+  // permissive entry rendered the literal string "undefined" into the committed
+  // legal notice, and the full suite stayed green.
+  test("requires an actual correspondingSource string", () => {
+    expect(hasCopyleftDisclosure({ copyleft: { correspondingSource: "https://x.test" } })).toBe(
+      true,
+    );
+    expect(hasCopyleftDisclosure({ copyleft: {} })).toBe(false);
+    expect(hasCopyleftDisclosure({ copyleft: { correspondingSource: undefined } })).toBe(false);
+    expect(hasCopyleftDisclosure({})).toBe(false);
+  });
+
+  test("every real entry either has a usable URL or none at all", () => {
+    // The Source Availability section emits `correspondingSource` verbatim, so
+    // an entry that qualifies must carry something printable.
+    for (const entry of EMBEDDED_GIT_NOTICE_SOURCES.filter(hasCopyleftDisclosure)) {
+      expect(entry.copyleft.correspondingSource, entry.name).toMatch(/^https:\/\/\S+$/);
+      // The build-scripts half of that line comes from `source`, so it has to
+      // be there too rather than defaulting to "undefined".
+      expect(entry.source, entry.name).toMatch(/^https:\/\/\S+$/);
+    }
+  });
+
+  test("every copyleft entry qualifies, so none can ship undisclosed", () => {
+    for (const entry of EMBEDDED_GIT_NOTICE_SOURCES.filter((candidate) =>
+      declaresCopyleft(candidate.declaredLicense),
+    )) {
+      expect(hasCopyleftDisclosure(entry), entry.name).toBe(true);
+    }
   });
 });
 

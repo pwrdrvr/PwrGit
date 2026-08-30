@@ -50,21 +50,26 @@
  *
  * Strong copyleft (GPL, AGPL) outside the embedded-runtime carve-out, weak
  * copyleft (LGPL) anywhere, and source-available terms (BSL, SSPL, Commons
- * Clause) are permitted nowhere. Neither is an unresolvable string like
- * "UNLICENSED" or "SEE LICENSE IN ...", which fails to parse and is reported.
+ * Clause) are permitted nowhere. Neither is an unresolvable declaration, by
+ * either of two roads to the same closed door: "SEE LICENSE IN LICENSE.md"
+ * cannot be parsed at all and is reported as unparseable, while "UNLICENSED"
+ * parses fine as one identifier and is rejected for not being on the
+ * allowlist. Do not "fix" the second by allowlisting it — a package declaring
+ * UNLICENSED grants no license.
  */
-
-import { pathToFileURL } from "node:url";
 
 import {
   COPYLEFT_PATTERN,
   EMBEDDED_GIT_NOTICE_SOURCES,
   NOTICE_DEV_DEPENDENCIES,
   NOTICE_PNPM_ARGS,
+  PnpmLicensesError,
   declaresCopyleft,
   flattenLicenseReport,
+  hasCopyleftDisclosure,
   runPnpmLicenses,
 } from "./generate-third-party-licenses.mjs";
+import { isCliEntrypoint } from "./lib/cli-entrypoint.mjs";
 
 /**
  * SPDX identifiers that may appear anywhere in the shipped npm tree.
@@ -179,9 +184,11 @@ export function isStructuralToken(token) {
  * option), while "Apache-2.0 AND GPL-3.0" correctly fails (we are bound by
  * both). AND binds tighter than OR.
  *
- * Anything that does not parse — "SEE LICENSE IN LICENSE.md", a bare
- * "UNLICENSED", a WITH exception — throws, and the caller reports it as a
- * failure. Refusing to guess is the safe direction for a legal gate.
+ * Anything that does not parse — "SEE LICENSE IN LICENSE.md", a WITH exception
+ * — throws, and the caller reports it as a failure. Refusing to guess is the
+ * safe direction for a legal gate. Note that a bare "UNLICENSED" does NOT
+ * throw: it is one well-formed identifier, and it fails on the allowlist
+ * instead.
  */
 export function evaluateSpdxExpression(expression, isAllowed) {
   const tokens = tokenizeSpdxExpression(expression);
@@ -265,9 +272,11 @@ export function disallowedIdentifiers(expression, isAllowed) {
  * Both surfaces share this so an identical failure cannot grow different
  * guidance depending on which list the package came from. `subject` prefixes
  * the label ("" for an npm dep, "embedded runtime " for a bundled binary) and
- * `remedy` closes the message.
+ * `remedy` closes the message. `onFailure` lets a caller that adds rules of its
+ * own skip a record this one already rejected, rather than printing two lines
+ * about one package.
  */
-function checkRecords(records, { isAllowed, subject = "", remedy }) {
+function checkRecords(records, { isAllowed, subject = "", remedy, onFailure }) {
   const failures = [];
 
   for (const record of records) {
@@ -276,6 +285,7 @@ function checkRecords(records, { isAllowed, subject = "", remedy }) {
     try {
       allowed = evaluateSpdxExpression(record.declaredLicense, isAllowed);
     } catch (error) {
+      onFailure?.(record);
       failures.push(
         `${label} declares ${JSON.stringify(record.declaredLicense)}, which is not a parseable ` +
           `SPDX expression (${error.message}). A dependency whose license cannot be read ` +
@@ -284,6 +294,7 @@ function checkRecords(records, { isAllowed, subject = "", remedy }) {
       continue;
     }
     if (allowed) continue;
+    onFailure?.(record);
 
     const offenders = disallowedIdentifiers(record.declaredLicense, isAllowed);
     const isCopyleft = offenders.some((id) => COPYLEFT_PATTERN.test(id));
@@ -331,19 +342,22 @@ export function checkNoticeDevDependencyLicenses(allRecords) {
  */
 export function checkEmbeddedRuntimeLicenses(records, entries = EMBEDDED_GIT_NOTICE_SOURCES) {
   const carriesDescriptor = new Map(
-    entries.map((entry) => [
-      entry.name,
-      typeof entry.copyleft?.correspondingSource === "string",
-    ]),
+    entries.map((entry) => [entry.name, hasCopyleftDisclosure(entry)]),
   );
 
+  // Records the id rule already rejected. Reporting the missing descriptor on
+  // top of that would print two lines about one runtime, and the descriptor is
+  // beside the point for a license we would refuse either way.
+  const rejected = new Set();
   const failures = checkRecords(records, {
     isAllowed: isPermissiveOrDisclosedCopyleft,
     subject: "embedded runtime ",
     remedy: "not permitted in a shipped artifact.",
+    onFailure: (record) => rejected.add(record),
   });
 
   for (const record of records) {
+    if (rejected.has(record)) continue;
     if (!declaresCopyleft(record.declaredLicense)) continue;
     if (carriesDescriptor.get(record.name) === true) continue;
     failures.push(
@@ -370,12 +384,21 @@ export function checkThirdPartyLicenseAllowlist({
 }
 
 function runCli() {
-  // Two reports for the same reason the generator takes two: the production
-  // tree, plus the `all` tree that Electron (a devDependency that ships) is
-  // only visible in.
-  const productionRecords = flattenLicenseReport(runPnpmLicenses(NOTICE_PNPM_ARGS.production));
-  const allRecords = flattenLicenseReport(runPnpmLicenses(NOTICE_PNPM_ARGS.all));
-  const failures = checkThirdPartyLicenseAllowlist({ productionRecords, allRecords });
+  let failures;
+  try {
+    // Two reports for the same reason the generator takes two: the production
+    // tree, plus the `all` tree that Electron (a devDependency that ships) is
+    // only visible in.
+    const productionRecords = flattenLicenseReport(runPnpmLicenses(NOTICE_PNPM_ARGS.production));
+    const allRecords = flattenLicenseReport(runPnpmLicenses(NOTICE_PNPM_ARGS.all));
+    failures = checkThirdPartyLicenseAllowlist({ productionRecords, allRecords });
+  } catch (error) {
+    if (!(error instanceof PnpmLicensesError)) throw error;
+    // pnpm already wrote the useful diagnostic. Exiting with its status keeps
+    // an unavailable report distinguishable from a rejected license.
+    process.stderr.write(error.message);
+    process.exit(error.status);
+  }
 
   if (failures.length > 0) {
     console.error("third-party license allowlist check failed:");
@@ -388,9 +411,6 @@ function runCli() {
   console.log("third-party license allowlist check passed");
 }
 
-if (
-  process.argv[1] !== undefined &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
-) {
+if (isCliEntrypoint(import.meta.url)) {
   runCli();
 }

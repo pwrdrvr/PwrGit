@@ -12,6 +12,8 @@ import { createHash } from "node:crypto";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { isCliEntrypoint } from "./lib/cli-entrypoint.mjs";
+
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outputPath = join(repoRoot, "THIRD_PARTY_LICENSES");
 const shippedPackageFilters = ["@pwrgit/desktop", "@pwrgit/mcp-server"];
@@ -85,11 +87,11 @@ export const EMBEDDED_GIT_NOTICE_SOURCES = [
     // separate executable over a process boundary — PwrGit links nothing from
     // it — so PwrGit itself is not a derivative work. Distributing the binary
     // still carries GPL-2.0 section 3, which is what this descriptor records:
-    // the corresponding source for what ships, and the build scripts that
-    // produced it.
+    // where the source for what ships is published. The build scripts and
+    // patches are `source` above, not repeated here — one URL, one place to
+    // update on a Dugite bump.
     copyleft: {
       correspondingSource: "https://github.com/git/git/tree/v2.53.0",
-      buildScripts: "https://github.com/desktop/dugite-native/tree/v2.53.0-4",
     },
   },
   {
@@ -115,6 +117,25 @@ export const EMBEDDED_GIT_NOTICE_SOURCES = [
   },
 ];
 
+/**
+ * A `pnpm licenses list` invocation that failed, carrying pnpm's own exit code.
+ *
+ * Thrown rather than exiting, because this module is imported by two CLIs and
+ * by their tests. Terminating the process from inside an exported function
+ * would take a vitest worker down with it and leave no failing assertion to
+ * point at. Each CLI turns this back into an exit, below.
+ */
+export class PnpmLicensesError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.name = "PnpmLicensesError";
+    this.status = status;
+  }
+}
+
+/**
+ * Run `pnpm licenses list` and parse its JSON.
+ */
 export function runPnpmLicenses(args) {
   const result = spawnSync(
     "pnpm",
@@ -135,12 +156,16 @@ export function runPnpmLicenses(args) {
     },
   );
   if (result.error) {
-    process.stderr.write(`failed to run pnpm licenses: ${result.error.message}\n`);
-    process.exit(1);
+    throw new PnpmLicensesError(
+      `failed to run pnpm licenses: ${result.error.message}\n`,
+      1,
+    );
   }
   if (result.status !== 0) {
-    process.stderr.write(result.stderr ?? "pnpm licenses list failed\n");
-    process.exit(result.status ?? 1);
+    throw new PnpmLicensesError(
+      result.stderr ?? "pnpm licenses list failed\n",
+      result.status ?? 1,
+    );
   }
   return JSON.parse(result.stdout);
 }
@@ -301,6 +326,20 @@ function normalizePathForNotice(path) {
 }
 
 /**
+ * True when an entry carries a usable corresponding-source disclosure.
+ *
+ * The single predicate for "does this entry have disclosure?", because three
+ * places ask: this file's `validateEmbeddedNoticeSource` and Source
+ * Availability section, and the allowlist gate's carve-out. When the notice
+ * asked a laxer question than the other two — merely `copyleft !== undefined` —
+ * a half-written descriptor slipped past the validator on a permissive entry
+ * and rendered the literal string "undefined" into the committed notice.
+ */
+export function hasCopyleftDisclosure(notice) {
+  return typeof notice.copyleft?.correspondingSource === "string";
+}
+
+/**
  * Refuse to generate a notice for a copyleft runtime with no disclosure.
  *
  * The mirror of the allowlist gate's embedded-runtime rule, enforced from the
@@ -312,7 +351,7 @@ export function validateEmbeddedNoticeSource(notice) {
   if (!declaresCopyleft(notice.declaredLicense)) {
     return;
   }
-  if (typeof notice.copyleft?.correspondingSource !== "string") {
+  if (!hasCopyleftDisclosure(notice)) {
     throw new Error(
       [
         `Embedded runtime "${notice.name}" declares ${JSON.stringify(notice.declaredLicense)},`,
@@ -432,7 +471,7 @@ function main() {
   lines.push("-----");
   lines.push("");
   lines.push(
-    "This notice covers npm production dependencies for @pwrgit/desktop plus the Electron runtime package.",
+    `This notice covers npm production dependencies for ${shippedPackageFilters.join(" and ")} plus the Electron runtime package.`,
   );
   lines.push(
     "Electron includes Chromium and Node.js runtime components. PwrGit includes Electron's MIT runtime license here; Chromium's generated credits are maintained upstream by Chromium/Electron and are intentionally not appended to this text notice because Electron's generated LICENSES.chromium.html is large for the pinned runtime.",
@@ -452,9 +491,7 @@ function main() {
   // executable PwrGit invokes over a process boundary, so PwrGit is not a
   // derivative work of it — but PwrGit does distribute the binary, so the
   // notice has to say where its source is.
-  const copyleftNotices = EMBEDDED_GIT_NOTICE_SOURCES.filter(
-    (notice) => notice.copyleft !== undefined,
-  );
+  const copyleftNotices = EMBEDDED_GIT_NOTICE_SOURCES.filter(hasCopyleftDisclosure);
   if (copyleftNotices.length > 0) {
     lines.push("");
     lines.push("Source Availability");
@@ -465,10 +502,7 @@ function main() {
     );
     for (const notice of copyleftNotices) {
       lines.push(
-        `- ${notice.name} ${notice.version} (${notice.declaredLicense}): ${notice.copyleft.correspondingSource}` +
-          (notice.copyleft.buildScripts
-            ? `, built by the scripts and patches at ${notice.copyleft.buildScripts}`
-            : ""),
+        `- ${notice.name} ${notice.version} (${notice.declaredLicense}): ${notice.copyleft.correspondingSource}, built by the scripts and patches at ${notice.source}`,
       );
     }
   }
@@ -539,13 +573,18 @@ function main() {
   }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isCliEntrypoint(import.meta.url)) {
   try {
     main();
   } catch (error) {
     if (error instanceof StaleInstallError) {
       console.error(error.message);
       process.exitCode = 1;
+    } else if (error instanceof PnpmLicensesError) {
+      // pnpm already wrote the useful diagnostic; pass its own status through
+      // rather than burying it under a stack trace.
+      process.stderr.write(error.message);
+      process.exitCode = error.status;
     } else {
       throw error;
     }

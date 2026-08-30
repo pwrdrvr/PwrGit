@@ -8,7 +8,7 @@ software shipped by the desktop app.
 
 The generator includes:
 
-- npm production dependencies for `@pwrgit/desktop`;
+- npm production dependencies for `@pwrgit/desktop` and `@pwrgit/mcp-server`;
 - the Electron runtime and its MIT license;
 - Geist Sans and Geist Mono font assets emitted by the renderer; and
 - the Git, Git LFS, and Git Credential Manager runtimes bundled through
