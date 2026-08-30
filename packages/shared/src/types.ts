@@ -918,6 +918,21 @@ export type FileSearchHit = {
   dir: string;
 };
 
+/** One bounded page of a file's contents at a revision (or the working tree).
+ *  Shares blame's caps and unavailable states: same content resolution, same
+ *  1 MB ceiling, same binary refusal. */
+export type FileContentsPage = {
+  path: string;
+  effectiveContext: FileInsightContext;
+  /** 1-based number of the first line in `lines`. */
+  startLine: number;
+  lines: string[];
+  nextCursor: string | null;
+  bytes: number | null;
+  unavailableReason?: FileBlameUnavailableReason;
+  notice?: string;
+};
+
 /** GitHub account presentation fields proven for an exact Git commit author. */
 export type GitHubCommitAuthorIdentity = {
   login: string;

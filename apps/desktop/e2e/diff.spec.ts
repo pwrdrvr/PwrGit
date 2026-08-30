@@ -294,23 +294,32 @@ test("file history follows a rename and opens each commit's change in place", as
   await expect(window.locator(".diff-pane")).toHaveCount(0);
   await expect(window.locator(".graph-toolbar")).toBeVisible();
 
-  // Re-open and carry on into blame.
+  // Re-open — this time through a gutter line number, which is the "I am
+  // reading line 2, blame line 2" path: blame opens with that line marked.
   await fileRow.click();
   await expect(window.locator(".diff-pane")).toBeVisible();
-  await window.getByRole("button", { name: "History" }).click();
-  await expect(window.getByTestId("file-history")).toBeVisible({
-    timeout: 20_000
-  });
-  await window.getByRole("tab", { name: "Blame" }).click();
+  await window.locator('[title="Blame from line 2"]').click();
   const blame = window.getByTestId("file-blame");
   await expect(blame).toBeVisible({ timeout: 20_000 });
+  await expect(blame.locator(".file-blame__row.is-target")).toContainText(
+    "uncommitted follow-up"
+  );
   await expect(blame).toContainText("WIP");
   await expect(blame).toContainText("uncommitted follow-up");
   // A gutter, so every line carries its own number and there is one scroller.
   await expect(blame.locator(".file-blame__number").nth(1)).toHaveText("2");
   await expect(blame.locator(".file-blame__lines")).toHaveCount(1);
 
+  // The file ITSELF, not its changes — the third tab.
+  await window.getByRole("tab", { name: "File" }).click();
+  const contents = window.getByTestId("file-contents");
+  await expect(contents).toBeVisible({ timeout: 20_000 });
+  await expect(contents).toContainText("explain file lineage");
+  await expect(contents).toContainText("uncommitted follow-up");
+
   // Revealing the commit in the lineage is now an explicit, secondary verb.
+  await window.getByRole("tab", { name: "Blame" }).click();
+  await expect(blame).toBeVisible();
   await blame.getByRole("button", { name: /Show commit .* in lineage/ }).click();
   await expect(window.locator(".graph-row.is-focused")).toContainText(
     "explain file lineage"

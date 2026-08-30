@@ -127,6 +127,8 @@ export function App() {
     path: string;
     context: FileInsightContext;
     tab: FileInsightTab;
+    /** Blame opens with this line in view. */
+    line?: number;
   } | null>(null);
   const closeDiff = useCallback(() => {
     setFileInsightTarget(null);
@@ -666,8 +668,13 @@ export function App() {
                     setDiffTarget({ kind: "file", path, staged })
                   }
                   hidden={fileInsightTarget !== null}
-                  onOpenFileInsight={(path, context, tab) =>
-                    setFileInsightTarget({ path, context, tab })
+                  onOpenFileInsight={(path, context, tab, line) =>
+                    setFileInsightTarget({
+                      path,
+                      context,
+                      tab,
+                      ...(line === undefined ? {} : { line })
+                    })
                   }
                   onClose={closeDiff}
                 />
@@ -678,11 +685,14 @@ export function App() {
                     fileInsightTarget.context.kind === "commit"
                       ? fileInsightTarget.context.hash
                       : "working"
-                  }:${fileInsightTarget.tab}`}
+                  }:${fileInsightTarget.tab}:${fileInsightTarget.line ?? ""}`}
                   worktreeId={selectedWorktree.id}
                   path={fileInsightTarget.path}
                   context={fileInsightTarget.context}
                   initialTab={fileInsightTarget.tab}
+                  {...(fileInsightTarget.line === undefined
+                    ? {}
+                    : { initialLine: fileInsightTarget.line })}
                   returnLabel={diffTarget === null ? "Lineage" : "Diff"}
                   onClose={() => setFileInsightTarget(null)}
                   onShowCommit={showLineageCommit}

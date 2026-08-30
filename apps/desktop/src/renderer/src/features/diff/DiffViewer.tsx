@@ -64,7 +64,8 @@ export function DiffViewer({
   emptyLabel,
   images,
   selection,
-  fileMenuItems
+  fileMenuItems,
+  onBlameFrom
 }: {
   patch: string;
   emptyLabel?: string;
@@ -80,6 +81,9 @@ export function DiffViewer({
    * come back.
    */
   fileMenuItems?: (path: string) => MenuItem[];
+  /** Blame the file from a specific line — wired to the new-side gutter, so
+   *  "I am reading line 248" becomes "blame opens AT line 248". */
+  onBlameFrom?: (path: string, line: number) => void;
 }) {
   const parsed = useMemo(() => parseUnifiedDiff(patch), [patch]);
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(
@@ -103,6 +107,7 @@ export function DiffViewer({
           file={file}
           images={images}
           selection={scoped}
+          {...(onBlameFrom === undefined ? {} : { onBlameFrom })}
           {...(fileMenuItems === undefined
             ? {}
             : {
@@ -190,12 +195,14 @@ function DiffFileView({
   file,
   images,
   selection,
-  onMenu
+  onMenu,
+  onBlameFrom
 }: {
   file: DiffFile;
   images: ImageDiffRevisions | undefined;
   selection: DiffSelectionControls | undefined;
   onMenu?: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+  onBlameFrom?: (path: string, line: number) => void;
 }) {
   const name =
     file.status === "renamed" && file.oldPath !== undefined
@@ -297,6 +304,8 @@ function DiffFileView({
           <DiffHunkView
             key={hi}
             hunk={hunk}
+            filePath={file.path}
+            {...(onBlameFrom === undefined ? {} : { onBlameFrom })}
             selection={selection}
             byCoordinate={byCoordinate}
             pressedAt={pressedAt}
@@ -313,18 +322,22 @@ function DiffFileView({
 
 function DiffHunkView({
   hunk,
+  filePath,
   selection,
   byCoordinate,
   pressedAt,
   onToggle,
-  onAnchor
+  onAnchor,
+  onBlameFrom
 }: {
   hunk: DiffFile["hunks"][number];
+  filePath: string;
   selection: DiffSelectionControls | undefined;
   byCoordinate: Map<string, LineMeta>;
   pressedAt: RefObject<{ x: number; y: number } | null>;
   onToggle: (id: string, shiftKey: boolean) => void;
   onAnchor: (id: string) => void;
+  onBlameFrom?: (path: string, line: number) => void;
 }) {
   const metaFor = (line: DiffLine): LineMeta | undefined => {
     const coordinate = coordinateOf(line);
@@ -462,9 +475,20 @@ function DiffHunkView({
             <span className="diff-gutter">
               {line.kind === "add" ? "" : line.oldNo}
             </span>
-            <span className="diff-gutter">
-              {line.kind === "del" ? "" : line.newNo}
-            </span>
+            {onBlameFrom !== undefined && line.kind !== "del" ? (
+              // The union narrows: add and ctx rows both carry newNo.
+              <button
+                className="diff-gutter diff-gutter--blame"
+                onClick={() => onBlameFrom(filePath, line.newNo)}
+                title={`Blame from line ${line.newNo}`}
+              >
+                {line.newNo}
+              </button>
+            ) : (
+              <span className="diff-gutter">
+                {line.kind === "del" ? "" : line.newNo}
+              </span>
+            )}
             <span className="diff-sym">
               {line.kind === "add" ? "+" : line.kind === "del" ? "−" : ""}
             </span>

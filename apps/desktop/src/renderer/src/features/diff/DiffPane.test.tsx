@@ -616,5 +616,71 @@ describe("DiffPane", () => {
       "history"
     );
   });
+
+  it("opens blame at the line whose gutter number was clicked", async () => {
+    const onOpenFileInsight = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="wt-1"
+          target={TARGET}
+          onOpenFileInsight={onOpenFileInsight}
+          onClose={vi.fn()}
+        />
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // PATCH's one added line is new-side line 1.
+    const gutter = container.querySelector<HTMLButtonElement>(
+      '[title="Blame from line 1"]'
+    );
+    expect(gutter).not.toBeNull();
+    await act(async () => gutter?.click());
+
+    expect(onOpenFileInsight).toHaveBeenCalledWith(
+      "docs/guide.txt",
+      { kind: "workingTree" },
+      "blame",
+      1
+    );
+  });
+
+  it("offers the file at this commit from the per-file menu", async () => {
+    dispatchMock.mockImplementation(respond(""));
+    const onOpenFileInsight = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="wt-1"
+          target={{ kind: "commit", hash: COMMIT.hash, subject: COMMIT.subject }}
+          onOpenFileInsight={onOpenFileInsight}
+          onClose={vi.fn()}
+        />
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>(".diff-file__menu")?.click()
+    );
+    const view = [...document.querySelectorAll(".pop-menu__item")].find(
+      (item) => item.textContent === "View file at this commit"
+    ) as HTMLButtonElement | undefined;
+    expect(view).toBeDefined();
+    await act(async () => view?.click());
+
+    expect(onOpenFileInsight).toHaveBeenCalledWith(
+      "docs/guide.txt",
+      { kind: "commit", hash: COMMIT.hash },
+      "contents"
+    );
+  });
 });
 });

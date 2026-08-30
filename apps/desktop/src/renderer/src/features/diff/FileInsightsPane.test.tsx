@@ -726,6 +726,198 @@ describe("FileInsightsPane", () => {
     expect(container.textContent).toContain("ipc transport failure");
   });
 
+  it("shows the file at the scope's revision on the File tab", async () => {
+    dispatchMock.mockImplementation((name: string) => {
+      if (name === "file:history") {
+        return Promise.resolve(ok({ entries: [historyEntry()], nextCursor: null }));
+      }
+      if (name === "file:contents") {
+        return Promise.resolve(
+          ok({
+            path: "docs/guide.txt",
+            effectiveContext: { kind: "commit", hash: HASH_A },
+            startLine: 1,
+            lines: ["alpha", "shared, clarified"],
+            nextCursor: null,
+            bytes: 24
+          })
+        );
+      }
+      return Promise.resolve(ok({}));
+    });
+
+    await act(async () => {
+      root.render(
+        <FileInsightsPane
+          worktreeId="wt-1"
+          path="docs/guide.txt"
+          context={{ kind: "commit", hash: HASH_A }}
+          initialTab="history"
+          onClose={() => undefined}
+          onShowCommit={() => true}
+        />
+      );
+    });
+    await settle();
+
+    await act(async () => tabButton("File")?.click());
+    await settle();
+
+    const contents = container.querySelector("[data-testid=file-contents]");
+    expect(contents?.textContent).toContain("shared, clarified");
+    expect(
+      [...container.querySelectorAll(".file-blame__number")].map(
+        (node) => node.textContent
+      )
+    ).toEqual(["1", "2"]);
+  });
+
+  it("drills from a history row to the file as of that commit", async () => {
+    dispatchMock.mockImplementation((name: string) => {
+      if (name === "file:history") {
+        return Promise.resolve(ok({ entries: [historyEntry()], nextCursor: null }));
+      }
+      if (name === "file:contents") {
+        return Promise.resolve(
+          ok({
+            path: "docs/guide.txt",
+            effectiveContext: { kind: "commit", hash: HASH_A },
+            startLine: 1,
+            lines: ["alpha"],
+            nextCursor: null,
+            bytes: 6
+          })
+        );
+      }
+      return Promise.resolve(ok({}));
+    });
+
+    await act(async () => {
+      root.render(
+        <FileInsightsPane
+          worktreeId="wt-1"
+          path="docs/guide.txt"
+          context={{ kind: "workingTree" }}
+          initialTab="history"
+          onClose={() => undefined}
+          onShowCommit={() => true}
+        />
+      );
+    });
+    await settle();
+
+    const view = container.querySelector<HTMLButtonElement>(
+      '[aria-label^="View docs/guide.txt as of"]'
+    );
+    expect(view).not.toBeNull();
+    await act(async () => view?.click());
+    await settle();
+
+    const call = dispatchMock.mock.calls.find(([name]) => name === "file:contents");
+    expect(call?.[1]).toMatchObject({
+      path: "docs/guide.txt",
+      context: { kind: "commit", hash: HASH_A }
+    });
+    expect(container.textContent).toContain(`at ${HASH_A.slice(0, 7)}`);
+    expect(container.querySelector("[data-testid=file-contents]")).not.toBeNull();
+  });
+
+  it("opens blame aimed at the line the reader came from", async () => {
+    dispatchMock.mockImplementation((name: string, req: Record<string, unknown>) => {
+      if (name !== "file:blame") return Promise.resolve(ok({}));
+      const cursor = Number((req["cursor"] as string | undefined) ?? "0");
+      return Promise.resolve(
+        ok({
+          path: "docs/guide.txt",
+          effectiveContext: { kind: "workingTree" },
+          hunks: [
+            blameHunk({
+              startLine: cursor + 1,
+              endLine: cursor + 200,
+              lines: Array.from({ length: 200 }, (_, i) => `line ${cursor + 1 + i}`)
+            })
+          ],
+          nextCursor: null,
+          bytes: 4096
+        })
+      );
+    });
+
+    await act(async () => {
+      root.render(
+        <FileInsightsPane
+          worktreeId="wt-1"
+          path="docs/guide.txt"
+          context={{ kind: "workingTree" }}
+          initialTab="blame"
+          initialLine={250}
+          onClose={() => undefined}
+          onShowCommit={() => true}
+        />
+      );
+    });
+    await settle();
+
+    // Line 250 lives in the second 200-line page, so the read starts there.
+    const first = dispatchMock.mock.calls.find(([name]) => name === "file:blame");
+    expect(first?.[1]).toMatchObject({ cursor: "200", limit: 200 });
+    expect(
+      container.querySelector('[data-line="250"]')?.className
+    ).toContain("is-target");
+
+    // The lines above are one press away, prepended without touching the tail.
+    const earlier = container.querySelector<HTMLButtonElement>(
+      ".file-insight__more--earlier"
+    );
+    expect(earlier).not.toBeNull();
+    await act(async () => earlier?.click());
+    await settle();
+    const calls = dispatchMock.mock.calls.filter(([name]) => name === "file:blame");
+    expect(calls[1]?.[1]).toMatchObject({ cursor: "0" });
+    expect(container.querySelector('[data-line="1"]')).not.toBeNull();
+    expect(container.querySelector(".file-insight__more--earlier")).toBeNull();
+  });
+
+  it("lands at the top when the aim overshoots a shorter file", async () => {
+    dispatchMock.mockImplementation((name: string, req: Record<string, unknown>) => {
+      if (name !== "file:blame") return Promise.resolve(ok({}));
+      if (req["cursor"] !== undefined) {
+        return Promise.resolve(
+          err({ kind: "git", code: "exit_128", message: "file has only 3 lines" })
+        );
+      }
+      return Promise.resolve(
+        ok({
+          path: "docs/guide.txt",
+          effectiveContext: { kind: "workingTree" },
+          hunks: [blameHunk({ startLine: 1, endLine: 1, lines: ["alpha"] })],
+          nextCursor: null,
+          bytes: 6
+        })
+      );
+    });
+
+    await act(async () => {
+      root.render(
+        <FileInsightsPane
+          worktreeId="wt-1"
+          path="docs/guide.txt"
+          context={{ kind: "workingTree" }}
+          initialTab="blame"
+          initialLine={999}
+          onClose={() => undefined}
+          onShowCommit={() => true}
+        />
+      );
+    });
+    await settle();
+
+    // The aimed read failed past EOF; the view fell back to the top on its own
+    // instead of stranding the reader on an error for a file that exists.
+    expect(container.textContent).toContain("alpha");
+    expect(container.textContent).not.toContain("couldn’t be loaded");
+  });
+
   it("shows bounded binary and load-error states", async () => {
     dispatchMock.mockImplementation((name: string) => {
       if (name === "file:blame") {

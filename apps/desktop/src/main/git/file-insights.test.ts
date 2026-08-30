@@ -15,6 +15,7 @@ import {
   FILE_BLAME_MAX_BYTES,
   parseFileHistory,
   readFileBlame,
+  readFileContents,
   readFileHistory
 } from "./file-insights";
 
@@ -442,6 +443,63 @@ describe("Git work a read is allowed to do", () => {
     // whichever unrelated file the same commit happened to touch.
     expect(blame).toContain("-M");
     expect(blame).not.toContain("-C");
+  });
+});
+
+describe("the file at a revision", () => {
+  it("pages the committed contents, line-numbered from the cursor", async () => {
+    const first = await readFileContents(systemGit, repo, {
+      path: "docs/guide.txt",
+      context: { kind: "commit", hash: editedCommit },
+      limit: 2
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.value).toMatchObject({
+      startLine: 1,
+      lines: ["alpha", "shared, clarified"],
+      nextCursor: "2"
+    });
+
+    const rest = await readFileContents(systemGit, repo, {
+      path: "docs/guide.txt",
+      context: { kind: "commit", hash: editedCommit },
+      cursor: first.value.nextCursor ?? "",
+      limit: 2
+    });
+    expect(rest.ok).toBe(true);
+    if (!rest.ok) return;
+    expect(rest.value).toMatchObject({
+      startLine: 3,
+      lines: ["new line"],
+      nextCursor: null
+    });
+  });
+
+  it("rides blame's deleted-commit fallback, notice and all", async () => {
+    const result = await readFileContents(systemGit, repo, {
+      path: "docs/guide.txt",
+      context: { kind: "commit", hash: deletedCommit }
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.effectiveContext).toEqual({
+      kind: "commit",
+      hash: editedCommit
+    });
+    expect(result.value.notice).toContain("deleted in the selected commit");
+    expect(result.value.lines).toHaveLength(3);
+  });
+
+  it("refuses what blame refuses", async () => {
+    const missing = await readFileContents(systemGit, repo, {
+      path: "docs/never-existed.txt",
+      context: { kind: "commit", hash: editedCommit }
+    });
+    expect(missing).toMatchObject({
+      ok: true,
+      value: { unavailableReason: "missing", lines: [] }
+    });
   });
 });
 

@@ -2,7 +2,11 @@ import { err, ok } from "@pwrgit/shared";
 import type { CommandBus, CommandContext } from "../command-bus";
 import type { DB } from "../persistence/db";
 import { execGit } from "./dugite";
-import { readFileBlame, readFileHistory } from "./file-insights";
+import {
+  readFileBlame,
+  readFileContents,
+  readFileHistory
+} from "./file-insights";
 import {
   createFileListCache,
   FILE_SEARCH_LIMIT_DEFAULT,
@@ -12,7 +16,7 @@ import {
 
 /** The two reads a renderer can have open. A pane shows one file one way, so
  *  one live read of each kind per renderer is the whole budget. */
-type FileInsightKind = "history" | "blame" | "search";
+type FileInsightKind = "history" | "blame" | "contents" | "search";
 
 type ActiveOperation = {
   operationId: string;
@@ -163,6 +167,37 @@ export function registerFileInsightHandlers(
     const { key, operation } = started;
     try {
       const result = await readFileBlame(
+        execGit,
+        cwd,
+        req,
+        operation.controller.signal
+      );
+      return operation.controller.signal.aborted ? canceled() : result;
+    } finally {
+      finish(key, operation);
+    }
+  });
+
+  bus.register("file:contents", async (req, ctx) => {
+    const cwd = pathOf(req.worktreeId);
+    if (cwd === null) {
+      return err({
+        kind: "repo",
+        code: "not_found",
+        message: "worktree not found"
+      });
+    }
+    const started = begin("contents", req.operationId, ctx);
+    if (started === null) {
+      return err({
+        kind: "validation",
+        code: "invalid_operation_id",
+        message: "A valid file-contents operation id is required."
+      });
+    }
+    const { key, operation } = started;
+    try {
+      const result = await readFileContents(
         execGit,
         cwd,
         req,

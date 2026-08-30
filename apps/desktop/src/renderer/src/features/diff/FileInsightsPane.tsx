@@ -10,6 +10,8 @@ import {
 import type {
   FileBlameHunk,
   FileBlamePage,
+  FileBlameUnavailableReason,
+  FileContentsPage,
   FileHistoryEntry,
   FileInsightContext,
   GitHubCommitAuthorIdentityLookup
@@ -22,13 +24,18 @@ import { localWhen, shortWhen } from "../graph/graph-view";
 import { DiffViewer } from "./DiffViewer";
 import type { ImageDiffRevisions } from "./ImageDiff";
 
-export type FileInsightTab = "history" | "blame";
+export type FileInsightTab = "history" | "blame" | "contents";
 
-const TAB_ORDER: readonly FileInsightTab[] = ["history", "blame"];
+const TAB_ORDER: readonly FileInsightTab[] = ["history", "blame", "contents"];
 const TAB_LABEL: Record<FileInsightTab, string> = {
   history: "History",
-  blame: "Blame"
+  blame: "Blame",
+  contents: "File"
 };
+
+/** Blame and contents pages are asked for at this size, explicitly, so the
+ *  aim arithmetic below owns the answer to "which page holds line N". */
+const PAGE_LINES = 200;
 
 /**
  * One level of the pane's drill-down stack. The base level is the file the
@@ -40,6 +47,8 @@ type InsightScope = {
   context: FileInsightContext;
   /** Why this level exists. Rendered in the trail; absent on the base level. */
   via?: string;
+  /** Land blame with this line in view — the line the reader came from. */
+  line?: number;
 };
 
 /** A single commit's changes to a single file, shown without leaving the pane. */
@@ -173,6 +182,25 @@ function LineageIcon() {
   );
 }
 
+function EyeIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
 function RewindIcon() {
   return (
     <svg
@@ -215,13 +243,15 @@ function HistoryView({
   path,
   context,
   onOpenCommitFile,
-  onShowCommit
+  onShowCommit,
+  onViewFile
 }: {
   worktreeId: string;
   path: string;
   context: FileInsightContext;
   onOpenCommitFile: (preview: CommitFilePreview) => void;
   onShowCommit: (hash: string, subject: string) => void;
+  onViewFile: (entry: FileHistoryEntry) => void;
 }) {
   const [entries, setEntries] = useState<FileHistoryEntry[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -382,6 +412,14 @@ function HistoryView({
           </button>
           <button
             className="file-insight__row-action"
+            onClick={() => onViewFile(entry)}
+            aria-label={`View ${entry.path} as of ${entry.shortHash}`}
+            title="View the file as of this commit"
+          >
+            <EyeIcon />
+          </button>
+          <button
+            className="file-insight__row-action"
             onClick={() => onShowCommit(entry.hash, entry.subject)}
             aria-label={`Show commit ${entry.shortHash} in lineage`}
             title="Show this commit in the lineage"
@@ -409,7 +447,10 @@ function HistoryView({
   );
 }
 
-function unavailableMessage(page: FileBlamePage): string | null {
+function unavailableMessage(page: {
+  unavailableReason?: FileBlameUnavailableReason;
+  bytes: number | null;
+}): string | null {
   if (page.unavailableReason === "binary") {
     return "Blame isn’t available for binary files.";
   }
@@ -444,6 +485,7 @@ function BlameView({
   worktreeId,
   path,
   context,
+  initialLine,
   onOpenCommitFile,
   onShowCommit,
   onBlameBefore
@@ -451,15 +493,26 @@ function BlameView({
   worktreeId: string;
   path: string;
   context: FileInsightContext;
+  /** Open with this line in view — where the reader was before they asked. */
+  initialLine?: number;
   onOpenCommitFile: (preview: CommitFilePreview) => void;
   onShowCommit: (hash: string, subject: string) => void;
   onBlameBefore: (hunk: FileBlameHunk) => void;
 }) {
+  const aimedLine = initialLine ?? null;
+  const aimedCursor =
+    aimedLine === null
+      ? 0
+      : Math.floor((aimedLine - 1) / PAGE_LINES) * PAGE_LINES;
   const [pages, setPages] = useState<FileBlamePage[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  /** Cursor of the earliest loaded page; > 0 offers "load earlier lines". */
+  const [earliestCursor, setEarliestCursor] = useState(aimedCursor);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const activeOperations = useRef(new Set<string>());
+  const containerRef = useRef<HTMLDivElement>(null);
+  const revealed = useRef(false);
   const now = useRelativeClock();
   const hunks = useMemo(() => pages.flatMap((page) => page.hunks), [pages]);
   const identities = useAuthorIdentities(
@@ -467,7 +520,10 @@ function BlameView({
     useMemo(() => blameCandidates(hunks), [hunks])
   );
 
-  const load = (cursor?: string): void => {
+  const load = (
+    cursor?: string,
+    mode: "append" | "prepend" | "aimed" = "append"
+  ): void => {
     // `loading` is state, so it has not rendered yet when a click lands in the
     // same tick the observer fires — both would dispatch and both pages would
     // be appended. This set is the synchronous gate the button cannot be, and
@@ -484,12 +540,28 @@ function BlameView({
       worktreeId,
       path,
       context,
+      limit: PAGE_LINES,
       ...(cursor === undefined ? {} : { cursor })
     }).then(
       (result) => {
         if (!activeOperations.current.delete(operationId)) return;
         if (!result.ok) {
+          // The aim can overshoot a file shorter than the line it targets —
+          // Git refuses an -L range past EOF. Land at the top instead of
+          // stranding the reader on an error for a file that exists.
+          if (mode === "aimed") {
+            setEarliestCursor(0);
+            load();
+            return;
+          }
           setError(result.error.message);
+          setLoading(false);
+          return;
+        }
+        if (mode === "prepend") {
+          setPages((current) => [result.value, ...current]);
+          setEarliestCursor(Number(cursor ?? "0"));
+          // The bottom edge did not move, so nextCursor stays untouched.
           setLoading(false);
           return;
         }
@@ -510,11 +582,25 @@ function BlameView({
   const moreRef = useAutoPaging(nextCursor, loading, error, load);
 
   useEffect(() => {
-    load();
+    if (aimedCursor > 0) load(String(aimedCursor), "aimed");
+    else load();
     return () => cancelOperations(activeOperations.current);
-    // A fresh mounted view owns one immutable file/context tuple.
+    // A fresh mounted view owns one immutable file/context/aim tuple.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Bring the line the reader came from into view, once, when it exists.
+  useEffect(() => {
+    if (revealed.current || aimedLine === null || pages.length === 0) return;
+    revealed.current = true;
+    const row = containerRef.current?.querySelector(
+      `[data-line="${aimedLine}"]`
+    );
+    // Guarded as the palette guards it: jsdom elements carry no scrollIntoView.
+    if (typeof row?.scrollIntoView === "function") {
+      row.scrollIntoView({ block: "center" });
+    }
+  }, [pages, aimedLine]);
 
   if (pages.length === 0 && loading) {
     return <div className="file-insight__empty">Loading blame…</div>;
@@ -535,11 +621,22 @@ function BlameView({
   }
 
   return (
-    <div className="file-blame" data-testid="file-blame">
+    <div className="file-blame" data-testid="file-blame" ref={containerRef}>
       {first.notice !== undefined && (
         <div className="file-insight__notice" role="status">
           {first.notice}
         </div>
+      )}
+      {earliestCursor > 0 && (
+        <button
+          className="file-insight__more file-insight__more--earlier"
+          disabled={loading}
+          onClick={() =>
+            load(String(Math.max(0, earliestCursor - PAGE_LINES)), "prepend")
+          }
+        >
+          {loading ? "Loading…" : "Load earlier lines"}
+        </button>
       )}
       {hunks.length === 0 ? (
         <div className="file-insight__empty">This file has no lines to blame.</div>
@@ -557,12 +654,17 @@ function BlameView({
                 "file-blame__row",
                 opensHunk ? "is-hunk-start" : "",
                 hunk.uncommitted ? "is-uncommitted" : "",
-                hunkIndex % 2 === 1 ? "is-alt" : ""
+                hunkIndex % 2 === 1 ? "is-alt" : "",
+                lineNumber === aimedLine ? "is-target" : ""
               ]
                 .filter(Boolean)
                 .join(" ");
               return (
-                <div className={classes} key={`${lineNumber}:${hash ?? "wip"}`}>
+                <div
+                  className={classes}
+                  key={`${lineNumber}:${hash ?? "wip"}`}
+                  data-line={lineNumber}
+                >
                   {/* Blame metadata belongs in a gutter, not in a card header
                       per hunk: real files run 2–3 lines per commit, and a card
                       apiece spent more vertical space on chrome than on code. */}
@@ -647,6 +749,131 @@ function BlameView({
       {error !== null && (
         <div className="file-insight__page-error" role="alert">
           More blame lines couldn’t be loaded. {error}
+        </div>
+      )}
+      {nextCursor !== null && (
+        <button
+          ref={moreRef}
+          className="file-insight__more"
+          disabled={loading}
+          onClick={() => load(nextCursor)}
+        >
+          {loading ? "Loading…" : "Load more lines"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** The file itself, at the scope's revision — history shows what each commit
+ *  changed; this shows what the file WAS. Same caps and fallbacks as blame,
+ *  because both ride the same content resolution in the main process. */
+function ContentsView({
+  worktreeId,
+  path,
+  context
+}: {
+  worktreeId: string;
+  path: string;
+  context: FileInsightContext;
+}) {
+  const [pages, setPages] = useState<FileContentsPage[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const activeOperations = useRef(new Set<string>());
+
+  const load = (cursor?: string): void => {
+    if (activeOperations.current.size > 0) return;
+    const operationId = nextOperationId("contents");
+    activeOperations.current.add(operationId);
+    setLoading(true);
+    setError(null);
+    void dispatch("file:contents", {
+      operationId,
+      worktreeId,
+      path,
+      context,
+      ...(cursor === undefined ? {} : { cursor })
+    }).then(
+      (result) => {
+        if (!activeOperations.current.delete(operationId)) return;
+        if (!result.ok) {
+          setError(result.error.message);
+          setLoading(false);
+          return;
+        }
+        setPages((current) =>
+          cursor === undefined ? [result.value] : [...current, result.value]
+        );
+        setNextCursor(result.value.nextCursor);
+        setLoading(false);
+      },
+      (cause: unknown) => {
+        if (!activeOperations.current.delete(operationId)) return;
+        setError(settledMessage(cause));
+        setLoading(false);
+      }
+    );
+  };
+
+  const moreRef = useAutoPaging(nextCursor, loading, error, load);
+
+  useEffect(() => {
+    load();
+    return () => cancelOperations(activeOperations.current);
+    // A fresh mounted view owns one immutable file/context tuple.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (pages.length === 0 && loading) {
+    return <div className="file-insight__empty">Loading file…</div>;
+  }
+  if (pages.length === 0 && error !== null) {
+    return (
+      <div className="file-insight__empty file-insight__empty--error" role="alert">
+        <span>The file couldn’t be loaded. {error}</span>
+        <button onClick={() => load()}>Retry</button>
+      </div>
+    );
+  }
+  const first = pages[0];
+  if (first === undefined) return null;
+  const unavailable = unavailableMessage(first);
+  if (unavailable !== null) {
+    return <div className="file-insight__empty">{unavailable}</div>;
+  }
+  const empty = pages.every((page) => page.lines.length === 0);
+
+  return (
+    <div className="file-contents" data-testid="file-contents">
+      {first.notice !== undefined && (
+        <div className="file-insight__notice" role="status">
+          {first.notice}
+        </div>
+      )}
+      {empty ? (
+        <div className="file-insight__empty">This file is empty.</div>
+      ) : (
+        <div className="file-blame__lines">
+          <div className="file-blame__body">
+            {pages.flatMap((page) =>
+              page.lines.map((line, offset) => {
+                const lineNumber = page.startLine + offset;
+                return (
+                  <div className="file-contents__row" key={lineNumber}>
+                    <span className="file-blame__number">{lineNumber}</span>
+                    <code className="file-blame__code">{line || " "}</code>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+      {error !== null && (
+        <div className="file-insight__page-error" role="alert">
+          More of the file couldn’t be loaded. {error}
         </div>
       )}
       {nextCursor !== null && (
@@ -755,6 +982,7 @@ export function FileInsightsPane({
   path,
   context,
   initialTab,
+  initialLine,
   returnLabel = "Diff",
   onClose,
   onShowCommit
@@ -763,6 +991,8 @@ export function FileInsightsPane({
   path: string;
   context: FileInsightContext;
   initialTab: FileInsightTab;
+  /** Open blame with this line in view — the line the reader came from. */
+  initialLine?: number;
   /** What closing the pane returns to — a diff when it was opened from one,
    *  the lineage when it was opened from the command palette. */
   returnLabel?: string;
@@ -777,7 +1007,7 @@ export function FileInsightsPane({
     initialTab
   ]);
   const [scopes, setScopes] = useState<readonly InsightScope[]>(() => [
-    { path, context }
+    { path, context, ...(initialLine === undefined ? {} : { line: initialLine }) }
   ]);
   const [preview, setPreview] = useState<CommitFilePreview | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -913,7 +1143,10 @@ export function FileInsightsPane({
         {
           path: hunk.sourcePath === "" ? scope.path : hunk.sourcePath,
           context: { kind: "commit", hash: parent },
-          via: `before ${short}`
+          via: `before ${short}`,
+          // Land near where the reader was: the hunk's line numbering in the
+          // commit that wrote it, which is the closest thing the parent has.
+          line: hunk.originalStartLine
         },
         "blame"
       );
@@ -1002,15 +1235,34 @@ export function FileInsightsPane({
                     context={scope.context}
                     onOpenCommitFile={openCommitFile}
                     onShowCommit={showCommit}
+                    onViewFile={(entry) =>
+                      pushScope(
+                        {
+                          path: entry.path,
+                          context: { kind: "commit", hash: entry.hash },
+                          via: `at ${entry.shortHash}`
+                        },
+                        "contents"
+                      )
+                    }
                   />
-                ) : (
+                ) : value === "blame" ? (
                   <BlameView
                     worktreeId={worktreeId}
                     path={scope.path}
                     context={scope.context}
+                    {...(scope.line === undefined
+                      ? {}
+                      : { initialLine: scope.line })}
                     onOpenCommitFile={openCommitFile}
                     onShowCommit={showCommit}
                     onBlameBefore={blameBefore}
+                  />
+                ) : (
+                  <ContentsView
+                    worktreeId={worktreeId}
+                    path={scope.path}
+                    context={scope.context}
                   />
                 )}
               </div>

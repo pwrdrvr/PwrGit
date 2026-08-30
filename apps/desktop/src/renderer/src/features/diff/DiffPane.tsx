@@ -65,7 +65,8 @@ export function DiffPane({
   onOpenFileInsight: (
     path: string,
     context: FileInsightContext,
-    tab: FileInsightTab
+    tab: FileInsightTab,
+    line?: number
   ) => void;
   onClose: () => void;
 }) {
@@ -679,6 +680,9 @@ export function DiffPane({
                   }
                 }
               : {})}
+            onBlameFrom={(path, line) =>
+              onOpenFileInsight(path, insightContext, "blame", line)
+            }
             fileMenuItems={(path) => [
               {
                 type: "item",
@@ -690,6 +694,15 @@ export function DiffPane({
                 type: "item",
                 label: "Blame",
                 onSelect: () => onOpenFileInsight(path, insightContext, "blame")
+              },
+              {
+                type: "item",
+                label:
+                  target.kind === "file"
+                    ? "View file"
+                    : "View file at this commit",
+                onSelect: () =>
+                  onOpenFileInsight(path, insightContext, "contents")
               },
               { type: "sep" },
               {

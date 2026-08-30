@@ -36,6 +36,7 @@ import type {
   CommitFileChange,
   CommitStats,
   FileBlamePage,
+  FileContentsPage,
   FileHistoryPage,
   FileInsightContext,
   FileSearchHit,
@@ -1274,6 +1275,19 @@ export interface Commands {
       limit?: number;
     };
     res: FileBlamePage;
+  };
+  /** The file itself at a revision (or in the working tree), paged by line —
+   *  history shows what each commit changed; this shows what the file WAS. */
+  "file:contents": {
+    req: {
+      operationId: string;
+      worktreeId: string;
+      path: string;
+      context: FileInsightContext;
+      cursor?: string;
+      limit?: number;
+    };
+    res: FileContentsPage;
   };
   /** Stop a history/blame Git process owned by this renderer. */
   "file:cancelInsight": { req: { operationId: string }; res: null };

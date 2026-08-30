@@ -3,17 +3,24 @@ import { ok } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import type { DB } from "../persistence/db";
 
-const { execGit, readFileBlame, readFileHistory } = vi.hoisted(() => ({
-  execGit: vi.fn(),
-  readFileBlame: vi.fn(),
-  readFileHistory: vi.fn()
-}));
+const { execGit, readFileBlame, readFileContents, readFileHistory } = vi.hoisted(
+  () => ({
+    execGit: vi.fn(),
+    readFileBlame: vi.fn(),
+    readFileContents: vi.fn(),
+    readFileHistory: vi.fn()
+  })
+);
 
 vi.mock("./dugite", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./dugite")>()),
   execGit
 }));
-vi.mock("./file-insights", () => ({ readFileBlame, readFileHistory }));
+vi.mock("./file-insights", () => ({
+  readFileBlame,
+  readFileContents,
+  readFileHistory
+}));
 
 import { registerFileInsightHandlers } from "./file-insights-handlers";
 

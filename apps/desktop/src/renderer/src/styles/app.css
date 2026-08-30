@@ -7551,6 +7551,9 @@ body.is-col-resizing {
   display: block;
   margin: 14px auto 0;
 }
+.file-insight__more--earlier {
+  margin: 0 auto 12px;
+}
 .file-insight__more:disabled {
   cursor: wait;
   opacity: 0.6;
@@ -7638,12 +7641,12 @@ body.is-col-resizing {
 /* A gutter, not a card per hunk. Measured across this repo, a 200-line file
    averages ~9 lines per hunk and the busiest ones average 2 — one bordered
    card apiece spent more vertical space on chrome than on code. */
-.file-blame {
-  /* The gutter and line-number widths, named because THREE rules have to
-     agree: the row's grid columns and the source line's indent, which has to
-     land exactly where the code column starts. Hard-coded, they drift apart
-     and the "from <path>" note silently stops lining up with the code it
-     explains. */
+.file-insight-pane {
+  /* The gutter and line-number widths, named because FOUR rules have to
+     agree: blame's grid columns, the source line's indent (which must land
+     exactly where the code column starts), and the contents view's own
+     number column. Hard-coded, they drift apart and lines silently stop
+     lining up. On the pane, not .file-blame, so both views inherit them. */
   --blame-gutter: 250px;
   --blame-number: 52px;
 }
@@ -7691,6 +7694,15 @@ body.is-col-resizing {
 .file-blame__row.is-uncommitted .file-blame__gutter {
   box-shadow: inset 2px 0 0 var(--accent-border);
 }
+/* The line the reader came from — blame opened aimed at it, so it should be
+   findable at a glance once the scroll lands. A tint, not a ring: it is
+   context, not a selection. */
+.file-blame__row.is-target {
+  background: var(--accent-soft);
+}
+.file-blame__row.is-target .file-blame__gutter {
+  background: var(--accent-soft);
+}
 .file-blame__actions {
   margin-left: auto;
   flex: 0 0 auto;
@@ -7723,6 +7735,19 @@ body.is-col-resizing {
   border-top: 1px dashed var(--border-faint);
   color: var(--text-subtle);
   font: 500 9.5px/1.3 var(--font-mono);
+}
+
+/* ---- The file at a revision ---- */
+
+/* Rides blame's cell styles (number, code, the bordered scroller) with a
+   two-column grid: same file, same columns, minus the attribution gutter. */
+.file-contents__row {
+  display: grid;
+  grid-template-columns: var(--blame-number) 1fr;
+  min-height: 20px;
+}
+.file-contents__row:hover {
+  background: var(--bg-panel-hover);
 }
 
 /* ---- A commit's diff, inside the pane ---- */
@@ -8022,6 +8047,26 @@ body.is-col-resizing {
   color: var(--text-subtle);
   font-size: 10px;
   user-select: none;
+}
+/* A gutter number that opens blame at that line. Styled as the number it is —
+   the affordance is the hover, not a permanent button — so the diff does not
+   grow a column of chrome. */
+.diff-gutter--blame {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.diff-gutter--blame:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.diff-gutter--blame:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -1px;
+  border-radius: 2px;
 }
 .diff-sym {
   text-align: center;

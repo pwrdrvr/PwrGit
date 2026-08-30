@@ -4,6 +4,7 @@ import {
   ok,
   type FileBlameHunk,
   type FileBlamePage,
+  type FileContentsPage,
   type FileHistoryEntry,
   type FileHistoryPage,
   type FileInsightContext,
@@ -19,6 +20,8 @@ export const FILE_HISTORY_PAGE_MAX = 100;
 export const FILE_BLAME_PAGE_DEFAULT = 200;
 export const FILE_BLAME_PAGE_MAX = 400;
 export const FILE_BLAME_MAX_BYTES = 1_000_000;
+export const FILE_CONTENTS_PAGE_DEFAULT = 400;
+export const FILE_CONTENTS_PAGE_MAX = 800;
 
 const FILE_HISTORY_FORMAT =
   "%x1e" +
@@ -661,6 +664,81 @@ function contentLines(content: string): string[] {
   const lines = content.split(/\r?\n/);
   if (lines[lines.length - 1] === "") lines.pop();
   return lines;
+}
+
+/**
+ * The file's contents at the requested context, paged by line.
+ *
+ * Rides blame's content resolution on purpose: the same rename mapping, the
+ * same deleted-file parent fallback with an explicit notice, the same byte cap
+ * and binary refusal — so "view the file here" and "blame the file here" can
+ * never disagree about what "here" contains.
+ */
+export async function readFileContents(
+  git: GitExec,
+  cwd: string,
+  request: {
+    path: string;
+    context: FileInsightContext;
+    cursor?: string;
+    limit?: number;
+  },
+  signal?: AbortSignal
+): Promise<Result<FileContentsPage>> {
+  const context = checkedContext(request.context);
+  if (!context.ok) return context;
+  const checkedPath = safeWorktreeFile(cwd, request.path);
+  if (!checkedPath.ok) return checkedPath;
+  const cursor = lineCursorValue(request.cursor);
+  if (!cursor.ok) return cursor;
+  const limit = boundedLimit(
+    request.limit,
+    FILE_CONTENTS_PAGE_DEFAULT,
+    FILE_CONTENTS_PAGE_MAX
+  );
+  const resolution = await resolveBlameContent(
+    git,
+    cwd,
+    request.path,
+    context.value,
+    signal
+  );
+  if (!resolution.ok) return resolution;
+  const unavailable = (
+    reason: "binary" | "too_large" | "missing",
+    resolved: ContentResolution | null
+  ): Result<FileContentsPage> =>
+    ok({
+      path: request.path,
+      effectiveContext: resolved?.effectiveContext ?? context.value,
+      startLine: 1,
+      lines: [],
+      nextCursor: null,
+      bytes: resolved?.bytes ?? null,
+      unavailableReason: reason,
+      ...(resolved?.notice === undefined ? {} : { notice: resolved.notice })
+    });
+  if (resolution.value === null) return unavailable("missing", null);
+  const resolved = resolution.value;
+  if (resolved.bytes > FILE_BLAME_MAX_BYTES) {
+    return unavailable("too_large", resolved);
+  }
+  if (resolved.content.includes("\0")) return unavailable("binary", resolved);
+
+  const all = contentLines(resolved.content);
+  const lines = all.slice(cursor.value, cursor.value + limit);
+  return ok({
+    path: request.path,
+    effectiveContext: resolved.effectiveContext,
+    startLine: cursor.value + 1,
+    lines,
+    nextCursor:
+      cursor.value + lines.length < all.length
+        ? String(cursor.value + limit)
+        : null,
+    bytes: resolved.bytes,
+    ...(resolved.notice === undefined ? {} : { notice: resolved.notice })
+  });
 }
 
 export async function readFileBlame(
