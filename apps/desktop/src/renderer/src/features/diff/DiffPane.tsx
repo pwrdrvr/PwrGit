@@ -27,6 +27,19 @@ type LineSelection = { fingerprint: string; ids: ReadonlySet<string> };
 
 const NO_SELECTION: LineSelection = { fingerprint: "", ids: new Set() };
 
+const HINT_SEEN_KEY = "pwrgit.diffHintSeen";
+
+/** The gestures and keys the pane answers to — the ? button's card. Lists
+ *  only what is wired today; a help card advertising a dead key teaches
+ *  distrust of the whole card. */
+const HELP_ROWS: { keys: string[]; label: string }[] = [
+  { keys: ["click"], label: "tick a line — anywhere left of the code" },
+  { keys: ["⇧", "click"], label: "extend the tick range" },
+  { keys: ["j", "k"], label: "next / previous hunk" },
+  { keys: ["⏎"], label: "stage or unstage the focused hunk" },
+  { keys: ["esc"], label: "close the diff" }
+];
+
 /** Full-pane diff: fetches the patch for a working-tree file or a commit and
  *  renders it, with a header + a close control that returns to the graph. */
 export function DiffPane({
@@ -50,6 +63,13 @@ export function DiffPane({
   const [selection, setSelection] = useState<LineSelection>(NO_SELECTION);
   const [applying, setApplying] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  // The gesture hint teaches until the first selection lands, then yields its
+  // 38px of bar to the ? button. Sticky across sessions: re-teaching a gesture
+  // the user has already performed is noise.
+  const [hintSeen, setHintSeen] = useState(
+    () => window.localStorage.getItem(HINT_SEEN_KEY) === "1"
+  );
   const [refreshVersion, setRefreshVersion] = useState(0);
   const paneRef = useRef<HTMLDivElement>(null);
 
@@ -76,6 +96,7 @@ export function DiffPane({
     setSelectionDiff(null);
     setSelection(NO_SELECTION);
     setFailed(false);
+    setHelpOpen(false);
     // F9: every other piece of per-target state is cleared here; an apply left
     // in flight would otherwise render the newly opened side fully disabled.
     setApplying(false);
@@ -251,6 +272,10 @@ export function DiffPane({
     }).then((result) => {
       setApplying(false);
       setSelection(NO_SELECTION);
+      if (result.ok && !hintSeen) {
+        setHintSeen(true);
+        window.localStorage.setItem(HINT_SEEN_KEY, "1");
+      }
       if (!result.ok) {
         showErrorToast({
           title:
@@ -271,7 +296,14 @@ export function DiffPane({
   // is the alternative and it costs one stop per tick — a file with sixty
   // changed lines puts sixty stops between hunk one and hunk two.
   const onHunkNavigation = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
-    if (event.key !== "j" && event.key !== "k") return;
+    if (event.key === "Escape" && helpOpen) {
+      // Claimed here so the window-level listener, which checks
+      // defaultPrevented a tick later, leaves the pane itself open.
+      event.preventDefault();
+      setHelpOpen(false);
+      return;
+    }
+    if (event.key !== "j" && event.key !== "k" && event.key !== "?") return;
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     const from = document.activeElement;
     if (from instanceof HTMLElement && from.isContentEditable) return;
@@ -281,6 +313,10 @@ export function DiffPane({
       (from instanceof HTMLInputElement && from.type !== "checkbox") ||
       from instanceof HTMLTextAreaElement
     ) {
+      return;
+    }
+    if (event.key === "?") {
+      if (selectionAvailable) setHelpOpen((open) => !open);
       return;
     }
     const buttons = [
@@ -413,7 +449,7 @@ export function DiffPane({
               </span>
               {counterpart && (
                 <button
-                  className="diff-selection-bar__apply"
+                  className="diff-selection-bar__file"
                   onClick={showOtherSide}
                 >
                   View {otherSideName} changes
@@ -447,10 +483,21 @@ export function DiffPane({
                         ? `${selectionVerb} selected`
                         : `${selectionVerb} ${selectedCount} line${selectedCount === 1 ? "" : "s"}`}
                   </button>
-                  <span className="diff-selection-bar__hint">
-                    Click a line’s gutter to pick it, shift-click for a run, or
-                    use <strong>{selectionVerb} hunk</strong>.
-                  </span>
+                  <button
+                    className="diff-selection-bar__help"
+                    aria-expanded={helpOpen}
+                    aria-label="Gestures and keyboard shortcuts"
+                    title="Gestures and keyboard shortcuts (?)"
+                    onClick={() => setHelpOpen((open) => !open)}
+                  >
+                    ?
+                  </button>
+                  {!hintSeen && (
+                    <span className="diff-selection-bar__hint">
+                      Click a line’s gutter to pick it, shift-click for a run,
+                      or use <strong>{selectionVerb} hunk</strong>.
+                    </span>
+                  )}
                   <span className="diff-selection-bar__count" role="status">
                     {selectedCount > 0 ? `${selectedCount} selected` : ""}
                   </span>
@@ -475,6 +522,21 @@ export function DiffPane({
         <div className="diff-stale-notice" role="status">
           This file changed, so the lines you had ticked were cleared — their
           positions no longer describe the same edit.
+        </div>
+      )}
+      {helpOpen && selectionAvailable && (
+        <div className="diff-help" aria-label="Gestures and keyboard shortcuts">
+          <div className="diff-help__title">Gestures</div>
+          {HELP_ROWS.map((row) => (
+            <div key={row.label} className="diff-help__row">
+              <span className="diff-help__keys">
+                {row.keys.map((key) => (
+                  <kbd key={key}>{key}</kbd>
+                ))}
+              </span>
+              <span>{row.label}</span>
+            </div>
+          ))}
         </div>
       )}
       <div className="diff-pane__body">

@@ -84,6 +84,7 @@ describe("DiffPane refreshing an open working-tree diff", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    window.localStorage.clear();
     current = snapshot("fingerprint-1");
     handlers = new Map();
     mocks.subscribe.mockImplementation(
@@ -212,6 +213,81 @@ describe("DiffPane refreshing an open working-tree diff", () => {
     });
   });
 
+  it("teaches the gesture hint once, then yields the bar to the ? button", async () => {
+    expect(container.querySelector(".diff-selection-bar__hint")).not.toBeNull();
+    expect(container.querySelector(".diff-selection-bar__help")).not.toBeNull();
+
+    // The first landed selection is proof the gesture is learned.
+    await act(async () => gutterOf(tick()).click());
+    await act(async () =>
+      container
+        .querySelector<HTMLButtonElement>(".diff-selection-bar__apply")
+        ?.click()
+    );
+    expect(container.querySelector(".diff-selection-bar__hint")).toBeNull();
+    expect(window.localStorage.getItem("pwrgit.diffHintSeen")).toBe("1");
+
+    // And it stays retired on the next mount.
+    await act(async () => root.unmount());
+    container.remove();
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="worktree-1"
+          target={{ kind: "file", path: "file.txt", staged: false }}
+          onOpenFile={vi.fn()}
+          onClose={vi.fn()}
+        />
+      );
+    });
+    expect(container.querySelector(".diff-selection-bar__hint")).toBeNull();
+  });
+
+  it("opens the gestures card from ? and closes it with Escape, keeping the pane", async () => {
+    const onClose = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="worktree-1"
+          target={{ kind: "file", path: "file.txt", staged: false }}
+          onOpenFile={vi.fn()}
+          onClose={onClose}
+        />
+      );
+    });
+
+    await act(async () =>
+      container
+        .querySelector<HTMLButtonElement>(".diff-selection-bar__help")
+        ?.click()
+    );
+    const card = container.querySelector(".diff-help");
+    expect(card).not.toBeNull();
+    // Only wired bindings are advertised — no key the pane would ignore.
+    expect(card?.textContent).toContain("next / previous hunk");
+    expect(card?.textContent).not.toContain("space");
+
+    // Escape claims the card first; the pane stays open.
+    await act(async () => {
+      container
+        .querySelector<HTMLElement>(".diff-pane")
+        ?.dispatchEvent(
+          // cancelable, as real key events are — the card claims Escape
+          // via preventDefault and the pane's window listener honors it.
+          new KeyboardEvent("keydown", {
+            key: "Escape",
+            bubbles: true,
+            cancelable: true
+          })
+        );
+    });
+    expect(container.querySelector(".diff-help")).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("offers the way across once this side is settled", async () => {
     const onOpenFile = vi.fn();
     current = {
@@ -242,8 +318,11 @@ describe("DiffPane refreshing an open working-tree diff", () => {
     expect(bar?.textContent).toContain("Every change to this file is staged.");
     expect(container.textContent).not.toContain("Whole file only");
 
+    // Outline, not solid: solid accent is reserved for actions that write to
+    // the index, and this one only navigates.
+    expect(bar?.querySelector(".diff-selection-bar__apply")).toBeNull();
     const across = bar?.querySelector<HTMLButtonElement>(
-      ".diff-selection-bar__apply"
+      ".diff-selection-bar__file"
     );
     expect(across?.textContent).toBe("View staged changes");
     await act(async () => across?.click());

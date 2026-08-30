@@ -7001,6 +7001,7 @@ body.is-col-resizing {
 /* ---- Diff pane + viewer ---- */
 
 .diff-pane {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -7091,8 +7092,8 @@ body.is-col-resizing {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  min-height: 20px;
-  padding: 3px 8px;
+  min-height: 24px;
+  padding: 5px 11px;
   border: 0;
   border-radius: calc(var(--radius-sm) - 1px);
   background: transparent;
@@ -7163,6 +7164,7 @@ body.is-col-resizing {
 }
 .diff-selection-bar__apply,
 .diff-selection-bar__file,
+.diff-selection-bar__help,
 .diff-hunk__action {
   flex: 0 0 auto;
   border: 1px solid var(--accent-border);
@@ -7191,7 +7193,16 @@ body.is-col-resizing {
 .diff-selection-bar__file {
   background: transparent;
 }
+.diff-selection-bar__help {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 999px;
+  background: transparent;
+  font-size: 11px;
+}
 .diff-selection-bar__file:hover:not(:disabled),
+.diff-selection-bar__help:hover:not(:disabled),
 .diff-hunk__action:hover:not(:disabled) {
   border-color: var(--accent);
   background: var(--accent-soft);
@@ -7204,11 +7215,61 @@ body.is-col-resizing {
 }
 .diff-selection-bar__apply:focus-visible,
 .diff-selection-bar__file:focus-visible,
+.diff-selection-bar__help:focus-visible,
 .diff-hunk__action:focus-visible,
 .diff-select input:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
+/* The ? button's card: the pane's gestures and keys, floated over the body
+   so it never reflows the diff under the reader. Lists only wired bindings. */
+.diff-help {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel-elevated);
+  box-shadow: var(--shadow-popover);
+}
+.diff-help__title {
+  margin-bottom: 4px;
+  font: 600 9px/1 var(--font-sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}
+.diff-help__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  font: 500 11px/1.4 var(--font-sans);
+  color: var(--text-secondary);
+}
+.diff-help__keys {
+  display: inline-flex;
+  gap: 3px;
+  min-width: 88px;
+}
+.diff-help__keys kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 3px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+  font: 600 10px/1 var(--font-mono);
+  text-align: center;
+}
+
 /* Says why a tick vanished. The pane refreshes itself whenever the worktree
    moves; when that refresh lands on a genuinely different diff the ticks
    cannot be carried over, and a silent reset reads as the app losing the
