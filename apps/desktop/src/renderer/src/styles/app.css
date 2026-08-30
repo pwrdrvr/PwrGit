@@ -8135,6 +8135,13 @@ button.agent-auth-node {
   color: var(--danger-text);
 }
 
+/* The stack is error-shaped by default. A confirmation or an offered update
+   is not a failure and must not wear the danger color.
+   --accent, not --accent-bright: the toast body is a flat panel surface. */
+.app-toast__eyebrow--info {
+  color: var(--accent);
+}
+
 .app-toast__message {
   margin: 0;
   font: 500 12.5px/1.35 var(--font-sans);
@@ -8173,12 +8180,30 @@ button.agent-auth-node {
   cursor: pointer;
 }
 
+.app-toast__button--primary {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+
 .app-toast__button:hover,
 .app-toast__button:focus-visible {
   border-color: var(--accent-border);
   background: var(--accent-soft);
   color: var(--accent-bright);
   outline: none;
+}
+
+/* After the hover rule: a button that is busy must not still light up. */
+.app-toast__button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.app-toast__error {
+  margin: 8px 0 0;
+  font: 500 11.5px/1.35 var(--font-sans);
+  color: var(--danger-text);
 }
 
 .app-toast__timer {

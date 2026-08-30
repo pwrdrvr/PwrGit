@@ -319,6 +319,96 @@ describe("auto updater", () => {
     });
   });
 
+  describe("dev/QA fake update", () => {
+    // The dev binary is unsigned and has no release feed, so a user-initiated
+    // check walks a fake through the status machine — the only way the update
+    // toast is reachable without cutting a release.
+    async function runDevCheck(
+      updater: Awaited<ReturnType<typeof importAutoUpdater>>,
+      trigger: "manual" | "menu" | "startup" | "periodic"
+    ) {
+      const pending = updater.checkForAppUpdatesNow(trigger);
+      await vi.advanceTimersByTimeAsync(2_000);
+      return await pending;
+    }
+
+    beforeEach(() => {
+      electronMock.app.isPackaged = false;
+    });
+
+    it("offers a fake download to a user-initiated check", async () => {
+      const updater = await importAutoUpdater();
+
+      const result = await runDevCheck(updater, "menu");
+
+      expect(result).toEqual({ status: "downloaded", version: "420.0.0" });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(checkForUpdatesMock).not.toHaveBeenCalled();
+      // Every transition is broadcast, so the whole flow is watchable in dev.
+      expect(
+        emitEventMock.mock.calls
+          .filter(([channel]) => channel === "app:updateStatus")
+          .map(([, payload]) => (payload as { status: string }).status)
+      ).toEqual(["checking", "available", "downloading", "downloaded"]);
+    });
+
+    it("stays silent on startup and periodic checks", async () => {
+      const updater = await importAutoUpdater();
+
+      for (const trigger of ["startup", "periodic"] as const) {
+        expect(await runDevCheck(updater, trigger)).toEqual({
+          status: "skipped",
+          reason: "auto-update disabled in development"
+        });
+      }
+      // A dev launch — and the Playwright harness, also unpackaged — must never
+      // raise an update toast on its own.
+      expect(
+        emitEventMock.mock.calls.some(
+          ([, payload]) =>
+            (payload as { status?: string })?.status === "downloaded"
+        )
+      ).toBe(false);
+    });
+
+    it("leaves a fake offer standing when the check is repeated", async () => {
+      const updater = await importAutoUpdater();
+      await runDevCheck(updater, "menu");
+      emitEventMock.mockReset();
+
+      const second = await runDevCheck(updater, "menu");
+
+      expect(second).toEqual({ status: "downloaded", version: "420.0.0" });
+      // Production short-circuits on a held download; tearing the offer back
+      // down to `checking` would make the preview lie about the real flow.
+      expect(emitEventMock).not.toHaveBeenCalled();
+    });
+
+    it("refuses to restart into a fake update", async () => {
+      const updater = await importAutoUpdater();
+      await runDevCheck(updater, "menu");
+
+      expect(await updater.installDownloadedAppUpdate()).toEqual({
+        status: "error",
+        message:
+          "Dev preview (v420.0.0): Restart only works in production builds."
+      });
+      expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled();
+    });
+
+    it("answers for the platform before offering a Linux preview", async () => {
+      setPlatform("linux");
+      const updater = await importAutoUpdater();
+
+      // Linux never offers an in-app update in any build, so a dev preview
+      // there would demo UI that platform cannot reach.
+      expect(await runDevCheck(updater, "menu")).toEqual({
+        status: "skipped",
+        reason: "Linux builds are updated by installing a newer package."
+      });
+    });
+  });
+
   it("pins electron-updater to the selected GitHub Release download feed", async () => {
     resolveChannel = "prerelease";
     mockGitHubReleases([githubRelease("v1.0.0-beta.36")]);

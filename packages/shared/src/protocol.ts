@@ -1352,8 +1352,13 @@ export interface Events {
   "localAgents:changed": McpAgentPolicySnapshot;
   /** Resolved color theme changed, including a live OS change in System mode. */
   "appearance:changed": AppAppearance;
-  /** Auto-update status changed — Settings and any future banner subscribe. */
+  /** Auto-update status changed — Settings and the update toast subscribe. */
   "app:updateStatus": AppUpdateStatus;
+  /** Outcome of a user-initiated Help → Check for Updates, including the
+   *  `checking` tick raised the moment the item is clicked. Background
+   *  (startup/periodic) checks never emit this: they move `app:updateStatus`
+   *  and stay silent unless what they find is actionable. */
+  "app:updateCheckResult": AppUpdateCheckResult;
   /** Reveal a repo (and optionally a worktree) in the window bound to
    *  `profileId` — cross-profile ⌘F pick landing in an open window. */
   "ui:revealRepo": {

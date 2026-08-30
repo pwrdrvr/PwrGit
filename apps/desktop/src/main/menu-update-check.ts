@@ -1,68 +1,24 @@
-import { dialog, type MessageBoxOptions } from "electron";
 import type { AppUpdateCheckResult } from "@pwrgit/shared";
 import { checkForAppUpdatesNow } from "./auto-updater";
+import { emitEvent } from "./ipc";
 import { logMain } from "./logs";
 
-export function appUpdateCheckDialogOptions(
-  result: AppUpdateCheckResult
-): MessageBoxOptions {
-  const common: Pick<
-    MessageBoxOptions,
-    "buttons" | "defaultId" | "title"
-  > = {
-    buttons: ["OK"],
-    defaultId: 0,
-    title: "PwrGit Updates"
-  };
-
-  if (result.status === "skipped") {
-    return {
-      ...common,
-      type: "info",
-      message: "Updates are unavailable",
-      detail: result.reason
-    };
-  }
-  if (result.status === "error") {
-    return {
-      ...common,
-      type: "error",
-      message: "Unable to check for updates",
-      detail: result.message
-    };
-  }
-  if (result.status === "checking") {
-    return {
-      ...common,
-      type: "info",
-      message: "Checking for updates…"
-    };
-  }
-  if (result.status === "no-update") {
-    return {
-      ...common,
-      type: "info",
-      message: "PwrGit is up to date",
-      detail: `You’re running v${result.version}.`
-    };
-  }
-  if (result.status === "downloaded") {
-    return {
-      ...common,
-      type: "info",
-      message: "Update ready to install",
-      detail: `PwrGit v${result.version} is ready. Open Settings → Updates to restart and install.`
-    };
-  }
-  return {
-    ...common,
-    type: "info",
-    message: "Update available",
-    detail: `PwrGit v${result.version} is downloading in the background.`
-  };
-}
-
+/**
+ * Help → Check for Updates.
+ *
+ * The outcome goes to the windows as an event, not to a modal dialog. A modal
+ * is the wrong shape twice over: "you're up to date" is not worth a box the
+ * user has to dismiss, and a downloaded update is *actionable* — the toast
+ * that reports it carries the Restart button, where the dialog could only
+ * spell out a route to Settings. PwrSnap and PwrAgnt already answer a menu
+ * check this way; PwrGit was the odd one out.
+ *
+ * The `checking` tick goes out first so the click has an immediate answer —
+ * a release read can take a second, and a download rather longer. The
+ * renderer replaces that toast in place with the result.
+ */
 export async function checkForAppUpdatesFromMenu(): Promise<void> {
+  report({ status: "checking" });
   let result: AppUpdateCheckResult;
   try {
     result = await checkForAppUpdatesNow("menu");
@@ -71,14 +27,20 @@ export async function checkForAppUpdatesFromMenu(): Promise<void> {
     logMain("warn", "updater", "menu update check failed", message);
     result = { status: "error", message };
   }
+  report(result);
+}
 
+/** The only caller invokes this whole flow as `void`, and main has no
+ *  process-level rejection handler — a window destroyed mid-broadcast must
+ *  cost the user a toast, not an unhandled rejection with nothing logged. */
+function report(result: AppUpdateCheckResult): void {
   try {
-    await dialog.showMessageBox(appUpdateCheckDialogOptions(result));
+    emitEvent("app:updateCheckResult", result);
   } catch (err) {
     logMain(
       "warn",
       "updater",
-      "failed to show menu update result",
+      "failed to report menu update result",
       err instanceof Error ? err.message : String(err)
     );
   }
