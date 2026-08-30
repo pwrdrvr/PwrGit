@@ -601,7 +601,12 @@ describe("ChangesTab conflict marker guard", () => {
     root = createRoot(container);
     await act(async () => {
       root.render(
-        <ChangesTab worktree={worktree} activeEmail="a@b.c" onOpenDiff={vi.fn()} />
+        <ChangesTab
+          worktree={worktree}
+          activeEmail="a@b.c"
+          onOpenDiff={vi.fn()}
+          onOpenFileInsight={vi.fn()}
+        />
       );
     });
   };

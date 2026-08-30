@@ -1,5 +1,4 @@
 import { lstat, readFile, readlink } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
 import {
   err,
   ok,
@@ -13,6 +12,7 @@ import {
   type Result
 } from "@pwrgit/shared";
 import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
+import { insideWorktree } from "./worktree-path";
 
 export const FILE_HISTORY_PAGE_DEFAULT = 30;
 export const FILE_HISTORY_PAGE_MAX = 100;
@@ -97,21 +97,23 @@ function decodeHistoryCursor(
   }
 }
 
+/**
+ * Containment, as a Result.
+ *
+ * The rule itself lives in `worktree-path.ts`, which every main-process channel
+ * that turns a renderer-supplied Git path into a real file read shares — its
+ * own note says a second implementation would drift, and this module had one.
+ * What stays here is the part that is specific to these commands: an empty or
+ * NUL-bearing path is a malformed request rather than an escape, and says so.
+ */
 function safeWorktreeFile(cwd: string, gitPath: string): Result<string> {
   if (gitPath.trim() === "" || gitPath.includes("\0")) {
     return validation("invalid_path", "A repository-relative file path is required.");
   }
-  const absolute = resolve(cwd, gitPath);
-  const fromRoot = relative(cwd, absolute);
-  if (
-    fromRoot === "" ||
-    fromRoot === ".." ||
-    fromRoot.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) ||
-    isAbsolute(fromRoot)
-  ) {
-    return validation("invalid_path", "The file path must stay inside the worktree.");
-  }
-  return ok(absolute);
+  const absolute = insideWorktree(cwd, gitPath);
+  return absolute === null
+    ? validation("invalid_path", "The file path must stay inside the worktree.")
+    : ok(absolute);
 }
 
 function checkedContext(context: FileInsightContext): Result<FileInsightContext> {
