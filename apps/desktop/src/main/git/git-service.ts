@@ -439,6 +439,36 @@ export function parseLog(stdout: string): Commit[] {
 }
 
 /** Resolve one full or abbreviated SHA without walking the visible graph. */
+/**
+ * One commit's subject and body.
+ *
+ * Deliberately not folded into `LOG_FORMAT`: that format also drives the
+ * 200-commit graph walk, where a body per row is payload nothing reads. A NUL
+ * separates the two halves — a commit message cannot contain one.
+ */
+export async function readCommitMessage(
+  git: GitExec,
+  cwd: string,
+  hash: string
+): Promise<Result<{ subject: string; body: string } | null>> {
+  const candidate = hash.trim();
+  if (!/^[0-9a-f]{4,64}$/i.test(candidate)) return ok(null);
+  const raw = await git(
+    [
+      "show",
+      "--no-patch",
+      "--no-show-signature",
+      "--pretty=format:%s%x00%b",
+      `${candidate}^{commit}`
+    ],
+    cwd
+  );
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode !== 0) return ok(null);
+  const [subject = "", ...rest] = raw.value.stdout.split("\0");
+  return ok({ subject, body: rest.join("\0").trim() });
+}
+
 export async function readCommit(
   git: GitExec,
   cwd: string,

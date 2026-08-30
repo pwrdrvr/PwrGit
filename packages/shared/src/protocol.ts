@@ -1224,6 +1224,13 @@ export interface Commands {
     req: { worktreeId: string; hash: string };
     res: Commit | null;
   };
+  /** One commit's message. Separate from `commit:lookup` because the shared
+   *  log format feeds the 200-commit graph walk, and a body per row there is
+   *  payload nobody reads. */
+  "commit:message": {
+    req: { worktreeId: string; hash: string };
+    res: { subject: string; body: string } | null;
+  };
   /** The files a commit touched (rail's commit-scoped list). */
   "commit:files": {
     req: { worktreeId: string; hash: string };

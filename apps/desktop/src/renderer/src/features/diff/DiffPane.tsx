@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -82,7 +83,12 @@ export function DiffPane({
     () => window.localStorage.getItem(HINT_SEEN_KEY) === "1"
   );
   const [refreshVersion, setRefreshVersion] = useState(0);
+  const [message, setMessage] = useState<{ subject: string; body: string } | null>(
+    null
+  );
+  const [messageOpen, setMessageOpen] = useState(false);
   const paneRef = useRef<HTMLDivElement>(null);
+  const messageBodyId = useId();
 
   const key =
     target.kind === "file"
@@ -175,6 +181,29 @@ export function DiffPane({
     };
   }, [target.kind, worktreeId]);
 
+  // The commit's message. Fetched beside the patch rather than on demand so the
+  // header knows whether there is a body worth offering to expand — a control
+  // that might do nothing is worse than no control.
+  useEffect(() => {
+    if (target.kind === "file") {
+      setMessage(null);
+      return;
+    }
+    let active = true;
+    setMessage(null);
+    setMessageOpen(false);
+    void dispatch("commit:message", { worktreeId, hash: target.hash }).then(
+      (result) => {
+        if (active && result.ok) setMessage(result.value);
+      },
+      () => undefined
+    );
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [worktreeId, key]);
+
   // The pane takes focus when it opens and whenever it is pointed at a new
   // target, so Escape works right after the click that opened it — whether
   // that click landed on a non-focusable file row (focus would otherwise fall
@@ -227,23 +256,18 @@ export function DiffPane({
     [worktreeId, key]
   );
 
-  const title =
-    target.kind === "file" || target.kind === "commitFile"
-      ? target.path
-      : target.subject;
-  // The side's name moves into the tabs below; what is left here is the part
-  // the tabs cannot say — which two revisions this view is comparing. Split
-  // from the subject, which is unbounded context: joined, one long commit
-  // subject pushed History, Blame and the close button off the right edge.
-  const sub =
+  // The pane header names the SCOPE, never the file: every file's own strip in
+  // the body names it already, and for a single-file pane that made the same
+  // path appear twice, one line apart. For a working-tree file the side tabs
+  // carry the side's NAME, so the scope says the comparison instead.
+  const scope =
     target.kind === "file"
       ? target.staged
         ? "HEAD → index"
         : "index → working tree"
-      : target.kind === "commitFile"
-        ? `in ${target.hash.slice(0, 7)}`
-        : `commit ${target.hash.slice(0, 7)}`;
-  const subDetail = target.kind === "file" ? null : target.subject;
+      : `commit ${target.hash.slice(0, 7)}`;
+  const subject = message?.subject ?? (target.kind === "file" ? null : target.subject);
+  const body = message?.body ?? "";
   // History and blame are per-file, so a whole-commit diff offers neither.
   // The path is read from the target, never from `title` — the two only
   // happen to agree today, and a title is for reading, not for dispatching.
@@ -422,74 +446,101 @@ export function DiffPane({
       style={hidden ? { display: "none" } : undefined}
     >
       <div className="diff-pane__head">
-        <span
-          className={`diff-pane__title${
-            target.kind === "commit" ? " diff-pane__title--text" : ""
-          }`}
-          title={title}
-        >
-          {title}
-        </span>
-        <span style={{ flex: 1 }} />
-        {target.kind === "file" && (
-          <span
-            className="diff-side"
-            role="group"
-            aria-label="Side of the index to show"
-          >
-            {([false, true] as const).map((staged) => (
+        <div className="diff-pane__row">
+          <span className="diff-pane__scope">{scope}</span>
+          <span style={{ flex: 1 }} />
+          {target.kind === "file" && (
+            <span
+              className="diff-side"
+              role="group"
+              aria-label="Side of the index to show"
+            >
+              {([false, true] as const).map((staged) => (
+                <button
+                  key={String(staged)}
+                  className={`diff-side__tab${target.staged === staged ? " is-active" : ""}`}
+                  aria-pressed={target.staged === staged}
+                  onClick={() => onOpenFile(target.path, staged)}
+                  title={
+                    staged
+                      ? "Staged for the next commit (HEAD → index)"
+                      : "Not yet staged (index → working tree)"
+                  }
+                >
+                  {staged ? "Staged" : "Unstaged"}
+                  {target.staged !== staged && counterpart && (
+                    <span className="diff-side__dot" aria-hidden="true" />
+                  )}
+                </button>
+              ))}
+            </span>
+          )}
+          {fileContext !== null && filePath !== null && (
+            <div className="diff-pane__tools" aria-label="File details">
               <button
-                key={String(staged)}
-                className={`diff-side__tab${target.staged === staged ? " is-active" : ""}`}
-                aria-pressed={target.staged === staged}
-                onClick={() => onOpenFile(target.path, staged)}
-                title={
-                  staged
-                    ? "Staged for the next commit (HEAD → index)"
-                    : "Not yet staged (index → working tree)"
-                }
+                onClick={() => onOpenFileInsight(filePath, fileContext, "history")}
               >
-                {staged ? "Staged" : "Unstaged"}
-                {target.staged !== staged && counterpart && (
-                  <span className="diff-side__dot" aria-hidden="true" />
-                )}
+                History
               </button>
-            ))}
-          </span>
-        )}
-        <span className="diff-pane__sub" title={target.kind === "file" ? undefined : target.hash}>
-          {sub}
-        </span>
-        {subDetail !== null && (
-          <span className="diff-pane__sub-detail" title={subDetail}>
-            {subDetail}
-          </span>
-        )}
-        {fileContext !== null && filePath !== null && (
-          <div className="diff-pane__tools" aria-label="File details">
-            <button
-              onClick={() => onOpenFileInsight(filePath, fileContext, "history")}
-            >
-              History
-            </button>
-            <button
-              onClick={() => onOpenFileInsight(filePath, fileContext, "blame")}
-            >
-              Blame
-            </button>
-          </div>
-        )}
-        <button
-          className="diff-pane__close"
-          onClick={onClose}
-          aria-label="Close"
-          title="Close (Esc)"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M18 6 6 18" />
-            <path d="m6 6 12 12" />
-          </svg>
-        </button>
+              <button
+                onClick={() => onOpenFileInsight(filePath, fileContext, "blame")}
+              >
+                Blame
+              </button>
+            </div>
+          )}
+          <button
+            className="diff-pane__close"
+            onClick={onClose}
+            aria-label="Close"
+            title="Close (Esc)"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
+        </div>
+        {subject !== null &&
+          (body === "" ? (
+            // Nothing more to read, so nothing to press.
+            <div className="diff-pane__message" title={subject}>
+              {subject}
+            </div>
+          ) : (
+            <>
+              <button
+                className={`diff-pane__message diff-pane__message--toggle${
+                  messageOpen ? " is-open" : ""
+                }`}
+                onClick={() => setMessageOpen((open) => !open)}
+                aria-expanded={messageOpen}
+                aria-controls={messageBodyId}
+                title={messageOpen ? "Hide the full message" : "Show the full message"}
+              >
+                <svg
+                  className="diff-pane__message-caret"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="m9 6 6 6-6 6" />
+                </svg>
+                <span className="diff-pane__message-text">{subject}</span>
+              </button>
+              {messageOpen && (
+                <pre className="diff-pane__message-body" id={messageBodyId}>
+                  {body}
+                </pre>
+              )}
+            </>
+          ))}
       </div>
       {target.kind === "file" && selectionDiff !== null && (
         <div
@@ -620,7 +671,6 @@ export function DiffPane({
                   }
                 }
               : {})}
-            showPaths={target.kind === "commit"}
             emptyLabel={
               target.kind === "commit"
                 ? "This commit has no textual changes."

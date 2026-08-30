@@ -347,6 +347,18 @@ describe("DiffPane focus and header", () => {
   let container: HTMLDivElement;
   let root: Root;
 
+const COMMIT = {
+  kind: "commitFile" as const,
+  hash: "7f856d4".padEnd(40, "0"),
+  path: "docs/guide.txt",
+  subject: "fix(desktop): harden agent request lifecycle"
+};
+
+const respond = (body: string) => (name: string) =>
+  name === "commit:message"
+    ? Promise.resolve(ok({ subject: COMMIT.subject, body }))
+    : Promise.resolve(ok(PATCH));
+
   beforeEach(() => {
   // Route by command: the staging pane fetches `diff:fileSelection` for file
   // targets and crashes on a bare string where a PartialFileDiff belongs.
@@ -456,6 +468,108 @@ describe("DiffPane", () => {
     });
     expect(document.activeElement).toBe(outside);
     outside.remove();
+  });
+
+  it("names the scope, never the file — the strip below does that", async () => {
+    mocks.dispatch.mockImplementation(respond(""));
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="wt-1"
+          target={COMMIT}
+          onOpenFileInsight={() => undefined}
+          onClose={vi.fn()}
+        />
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const head = container.querySelector(".diff-pane__head");
+    expect(head?.textContent).toContain("commit 7f856d4");
+    // The path belongs to the per-file strip; printing it here too put the
+    // same string on two lines, one above the other.
+    expect(head?.textContent).not.toContain("docs/guide.txt");
+    expect(container.querySelector(".diff-file__path")?.textContent).toBe(
+      "docs/guide.txt"
+    );
+  });
+
+  it("puts the subject on its own line and expands the body", async () => {
+    mocks.dispatch.mockImplementation(respond("Why this was needed.\n\n* one\n* two"));
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="wt-1"
+          target={COMMIT}
+          onOpenFileInsight={() => undefined}
+          onClose={vi.fn()}
+        />
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const toggle = container.querySelector<HTMLButtonElement>(
+      ".diff-pane__message--toggle"
+    );
+    expect(toggle?.textContent).toContain(COMMIT.subject);
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector(".diff-pane__message-body")).toBeNull();
+
+    await act(async () => toggle?.click());
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+    const body = container.querySelector(".diff-pane__message-body");
+    expect(body?.textContent).toContain("* two");
+    expect(body?.id).toBe(toggle?.getAttribute("aria-controls"));
+  });
+
+  it("offers no control when the message is only a subject", async () => {
+    mocks.dispatch.mockImplementation(respond(""));
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="wt-1"
+          target={COMMIT}
+          onOpenFileInsight={() => undefined}
+          onClose={vi.fn()}
+        />
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // A control that would do nothing is worse than no control.
+    expect(container.querySelector(".diff-pane__message--toggle")).toBeNull();
+    expect(container.querySelector(".diff-pane__message")?.textContent).toContain(
+      COMMIT.subject
+    );
+  });
+
+  it("shows no message row for a working-tree file", async () => {
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="wt-1"
+          target={TARGET}
+          onOpenFileInsight={() => undefined}
+          onClose={vi.fn()}
+        />
+      );
+    });
+    expect(container.querySelector(".diff-pane__message")).toBeNull();
+    expect(container.querySelector(".diff-pane__scope")?.textContent).toBe(
+      "Working-tree change"
+    );
+    expect(
+      mocks.dispatch.mock.calls.some(([name]) => name === "commit:message")
+    ).toBe(false);
   });
 });
 });
