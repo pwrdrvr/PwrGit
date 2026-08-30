@@ -1,0 +1,10 @@
+# Canonical author identity for `git log`, `git shortlog -sne`, and GitHub's
+# contributor graph.
+#
+# The first PwrGit commits (2026-07-13 through 2026-07-29) were authored from
+# a machine still configured with an old employer address, and a handful more
+# used a bare username instead of a full name. The commits themselves are not
+# rewritten — that would re-point the v0.4.0 through v0.8.0 tags — so this
+# file maps both back onto the identity the rest of the history uses.
+Harold Hunt <harold@pwrdrvr.com>
+Harold Hunt <harold@pwrdrvr.com> <hhunt@giphy.com>
