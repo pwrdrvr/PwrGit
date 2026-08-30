@@ -14,6 +14,18 @@ import { CopyTarget } from "../shell/CopyTarget";
 const shortObject = (value: string | undefined): string =>
   value === undefined ? "absent" : value.slice(0, 12);
 
+/** The plan status as a phrase, not the enum the protocol happens to use. */
+const statusLabel = (plan: RemoteTagPlan): string => {
+  switch (plan.status) {
+    case "create":
+      return "new on remote";
+    case "equal":
+      return "already there";
+    case "delete":
+      return "removing";
+  }
+};
+
 export function TagRemoteDialog({
   repo,
   tag,
@@ -147,7 +159,7 @@ export function TagRemoteDialog({
               >
                 {plan.remote}/{plan.tagName}
               </CopyTarget>
-              <code>{plan.status}</code>
+              <code>{statusLabel(plan)}</code>
               <small>
                 Local object {shortObject(plan.localObjectId)} · remote object{" "}
                 {shortObject(plan.remoteObjectId)} · target{" "}

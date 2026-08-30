@@ -462,8 +462,14 @@ export function RepoRefsSections({
                 >
                   <span className="refs-copyable-name__text">{tag.name}</span>
                 </CopyTarget>
-                <small title={`${tag.objectType} → ${tag.targetType}`}>
-                  {tag.kind}
+                <small
+                  title={
+                    tag.kind === "annotated"
+                      ? `Annotated tag ${tag.objectId.slice(0, 12)} → ${tag.targetType} ${tag.targetId.slice(0, 12)}`
+                      : `Lightweight tag → ${tag.targetType} ${tag.targetId.slice(0, 12)}`
+                  }
+                >
+                  {tag.targetId.slice(0, 7)}
                 </small>
               </div>
             ))}
@@ -471,7 +477,7 @@ export function RepoRefsSections({
             {!loading && refs !== null && refs.tagCount === 0 && (
               <div className="ref-section__empty">No local tags.</div>
             )}
-            {refs !== null && (
+            {refs !== null && refs.tagCount > 0 && (
               <button
                 className="ref-view-all"
                 onClick={(event) => {
@@ -480,6 +486,19 @@ export function RepoRefsSections({
                 }}
               >
                 View all {refs.tagCount} tags…
+              </button>
+            )}
+            {/* With no tags at all there is nothing to browse, but there is
+                still something to do — the browser is where Create tag lives. */}
+            {!loading && refs !== null && refs.tagCount === 0 && (
+              <button
+                className="ref-view-all"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setBrowser("tags");
+                }}
+              >
+                Create a tag…
               </button>
             )}
           </div>

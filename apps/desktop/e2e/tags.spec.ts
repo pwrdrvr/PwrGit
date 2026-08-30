@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
-import { addRootAndExpand } from "./fixtures/steps";
+import { addRootAndExpand, branchRow } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -51,7 +51,7 @@ test("browses, creates, deletes, and explicitly reviews remote tag actions", asy
   await viewAll.click();
 
   const browser = window.getByRole("dialog", {
-    name: "tag-refs branches and remotes"
+    name: "tag-refs branches, tags, and remotes"
   });
   await expect(browser.getByRole("button", { name: /^Tags 62/ })).toHaveClass(
     /is-active/
@@ -86,7 +86,13 @@ test("browses, creates, deletes, and explicitly reviews remote tag actions", asy
   await browser.getByRole("button", { name: "Create tag…" }).click();
   const create = window.getByRole("dialog", { name: "Create tag in tag-refs" });
   await create.getByRole("textbox", { name: "Tag name" }).fill("candidate/2.0");
-  await create.getByRole("textbox", { name: "Target commit" }).fill(target);
+  // A branch name, not an object id: the dialog resolves it and shows the
+  // commit, and the tag is still written at the resolved id.
+  await create.getByRole("textbox", { name: "Target" }).fill("main");
+  await expect(create.locator(".refs-tag-resolved__sha")).toHaveText(
+    target.slice(0, 7)
+  );
+  await expect(create).toContainText("main is here now");
   await create.getByRole("combobox", { name: "Tag kind" }).selectOption(
     "annotated"
   );
@@ -159,7 +165,51 @@ test("browses, creates, deletes, and explicitly reviews remote tag actions", asy
   await remote.getByRole("button", { name: "Close" }).click();
 
   await candidate.getByRole("button", { name: "Delete local" }).click();
-  await window.getByRole("button", { name: "Delete local tag" }).click();
+  // The row's own button now carries an accessible name naming the tag
+  // ("Delete local tag candidate/2.0"), which the confirm label is a prefix
+  // of — reach the confirm by its dialog, as e2e/AGENTS.md prescribes.
+  await window.locator(".modal--dialog .modal__create").click();
   await expect(candidate).toHaveCount(0);
   expect(box.git(repo.path, "tag", "--list", "candidate/2.0")).toBe("");
+});
+
+test("tags a commit straight from the lineage graph", async () => {
+  test.setTimeout(90_000);
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepo("tag-from-graph");
+  box.commit(repo.path, "one.txt", "the commit to tag");
+  box.commit(repo.path, "two.txt", "later work on main");
+  const target = box.git(repo.path, "rev-parse", "HEAD~1");
+  const headBefore = box.git(repo.path, "rev-parse", "HEAD");
+
+  handle = await launchApp({ worktreeRoot: box.worktreeRoot });
+  const { window } = handle;
+  await addRootAndExpand(window, handle, box, "tag-from-graph");
+  await branchRow(window, "main").first().click();
+
+  const row = window.locator(".graph-row", { hasText: "the commit to tag" });
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.click({ button: "right" });
+  await window
+    .getByRole("menu", { name: "Commit actions" })
+    .getByRole("menuitem", { name: "Tag this commit…" })
+    .click();
+
+  const create = window.getByRole("dialog", {
+    name: "Create tag in tag-from-graph"
+  });
+  // Seeded from the commit that was right-clicked — not HEAD, and not blank.
+  await expect(create.locator(".refs-tag-resolved__sha")).toHaveText(
+    target.slice(0, 7)
+  );
+  await expect(create).toContainText("the commit to tag");
+  await create.getByRole("textbox", { name: "Tag name" }).fill("v0.9.0");
+  await create.getByRole("button", { name: "Create tag" }).click();
+  await expect(create).toHaveCount(0);
+
+  expect(box.git(repo.path, "rev-parse", "refs/tags/v0.9.0")).toBe(target);
+  // Tagging never moves a checkout — HEAD is exactly where it was, not merely
+  // somewhere other than the tagged commit.
+  expect(box.git(repo.path, "rev-parse", "HEAD")).toBe(headBefore);
 });

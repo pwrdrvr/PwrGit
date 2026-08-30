@@ -140,6 +140,8 @@ textarea,
 .about-identity-value,
 .about-resource-url,
 .clone-destination-choice,
+.refs-tag-resolved__sha,
+.refs-tag-resolved__subject,
 .selectable {
   -webkit-user-select: text;
   user-select: text;
@@ -3440,7 +3442,10 @@ textarea,
 .refs-row-action.is-danger {
   color: var(--danger-text);
 }
-.refs-row-action:disabled {
+/* `disabled` for the statically unavailable case, `aria-disabled` for busy —
+   see the Delete-local button in RepoRefsModal. Both must look unavailable. */
+.refs-row-action:disabled,
+.refs-row-action[aria-disabled="true"] {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -3482,19 +3487,28 @@ textarea,
 }
 .refs-tag-table__row {
   grid-template-columns:
-    minmax(175px, 1.35fr) minmax(105px, 0.8fr) minmax(105px, 0.8fr)
-    minmax(170px, 1.25fr) minmax(175px, auto);
+    minmax(185px, 1.4fr) minmax(130px, 0.85fr) minmax(190px, 1.35fr)
+    minmax(175px, auto);
 }
 .refs-tag-object,
 .refs-tag-annotation {
   min-width: 0;
 }
-.refs-tag-object > span {
+.refs-tag-object__type {
   display: block;
   margin-bottom: 4px;
   color: var(--text-muted);
   font: 600 9px/1 var(--font-sans);
   text-transform: uppercase;
+}
+.refs-tag-object__via {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--text-subtle);
+  font: 500 9.5px/1 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .refs-tag-annotation strong,
 .refs-tag-annotation small {
@@ -3511,6 +3525,18 @@ textarea,
   margin-top: 3px;
   color: var(--text-muted);
   font: 500 9.5px/1.25 var(--font-sans);
+}
+/* Drop Annotation before the table starts overflowing. 1040px is the viewport
+   at which the browser (min(1120px, 92vw)) stops fitting four columns at their
+   minimums; the app window itself cannot go below 940px, so this is the only
+   breakpoint the tag table can actually reach. */
+@media (max-width: 1040px) {
+  .refs-tag-table__row {
+    grid-template-columns: minmax(185px, 1.4fr) minmax(130px, 0.85fr) auto;
+  }
+  .refs-tag-table__row > :nth-child(3) {
+    display: none;
+  }
 }
 .refs-tag-actions {
   display: flex;
@@ -3794,6 +3820,48 @@ textarea,
   max-height: 80vh;
   overflow: auto;
 }
+.refs-tag-resolved {
+  min-height: 54px;
+  margin: 8px 0 2px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--bg-input);
+}
+.refs-tag-resolved__top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.refs-tag-resolved__sha {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font: 600 11px/1.2 var(--font-mono);
+}
+.refs-tag-resolved__meta {
+  overflow: hidden;
+  color: var(--text-muted);
+  font: 500 10px/1.3 var(--font-sans);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.refs-tag-resolved__subject {
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font: 500 11px/1.35 var(--font-sans);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.refs-tag-resolved__pending {
+  color: var(--text-subtle);
+  font: 500 10.5px/1.35 var(--font-sans);
+}
+.refs-tag-resolved__error {
+  color: var(--danger-text);
+  font: 500 10.5px/1.35 var(--font-sans);
+}
 .refs-tag-dialog {
   width: min(580px, 92vw);
   max-height: 80vh;
@@ -3902,6 +3970,10 @@ textarea,
   overflow: hidden;
   color: var(--text-primary);
   font: 600 10.5px/1.25 var(--font-mono);
+  /* The notice above uppercases its labels; a ref name is a value, and git
+     ref names are case-sensitive. */
+  text-transform: none;
+  letter-spacing: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3934,7 +4006,9 @@ textarea,
 }
 .refs-plan__row--create,
 .refs-plan__row--fast_forward,
-.refs-plan__row--pushed {
+.refs-plan__row--pushed,
+.refs-plan__row--deleted,
+.refs-plan__row--up_to_date {
   color: var(--success-text);
 }
 .refs-plan__row--destination_ahead,
@@ -3966,13 +4040,6 @@ textarea,
   }
   .refs-browser__toolbar {
     flex-wrap: wrap;
-  }
-  .refs-tag-table__row {
-    grid-template-columns: minmax(180px, 1fr) minmax(150px, 1fr) auto;
-  }
-  .refs-tag-table__row > :nth-child(2),
-  .refs-tag-table__row > :nth-child(4) {
-    display: none;
   }
 }
 

@@ -18,6 +18,7 @@ import {
 } from "../../lib/useViewportTooltip";
 import { BranchChipMenu, type BranchChipTarget } from "./BranchChipMenu";
 import { BranchFromCommitDialog } from "./BranchFromCommitDialog";
+import { CreateTagDialog } from "../sidebar/CreateTagDialog";
 import type { CommitSwitchTarget } from "./commit-context-menu";
 import { switchFailureMessage } from "./commit-context-menu";
 import { guardedSwitchBranch } from "../shell/branchSwitch";
@@ -268,6 +269,7 @@ export function LineageGraph({
   // window no longer covers that commit would otherwise unmount the dialog
   // mid-submit — dropping the success toast, the reveal, and anything typed.
   const [branchFromCommit, setBranchFromCommit] = useState<Commit | null>(null);
+  const [tagFromCommit, setTagFromCommit] = useState<Commit | null>(null);
 
   // ⌘F reaches past the dialog's backdrop, so the selected worktree can change
   // under an open dialog. Its commit, dirty check and branch list all belong to
@@ -275,6 +277,7 @@ export function LineageGraph({
   // another one.
   useEffect(() => {
     setBranchFromCommit(null);
+    setTagFromCommit(null);
   }, [worktreeId]);
   const [commitStats, setCommitStats] = useState<
     Record<string, CommitStats | null>
@@ -1174,6 +1177,7 @@ export function LineageGraph({
             onOpenCommit(menuVm.commit.hash, menuVm.commit.subject)
           }
           onBranchFrom={() => setBranchFromCommit(menuVm.commit)}
+          onTagFrom={() => setTagFromCommit(menuVm.commit)}
           onSwitchBranch={(target) => void switchToBranch(target)}
           onRevealWorktree={onRevealWorktree}
           onClose={() => setCommitMenu(null)}
@@ -1188,6 +1192,15 @@ export function LineageGraph({
           onSwitchBranch={(target) => void switchToBranch(target)}
           onRevealWorktree={onRevealWorktree}
           onClose={() => setBranchMenu(null)}
+        />
+      )}
+      {tagFromCommit !== null && (
+        <CreateTagDialog
+          repoId={repoId}
+          repoName={repoName}
+          initialTarget={tagFromCommit.hash}
+          onCreated={() => undefined}
+          onClose={() => setTagFromCommit(null)}
         />
       )}
       {branchFromCommit !== null && (
