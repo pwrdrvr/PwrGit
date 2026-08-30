@@ -45,6 +45,7 @@ import type {
   ProfileId,
   ProfileThemeOverride,
   PullProgressPhase,
+  PartialFileDiff,
   RebaseCommitRef,
   RebaseCheckResult,
   RebaseOperation,
@@ -1141,6 +1142,20 @@ export interface Commands {
     req: { worktreeId: string; paths: string[] };
     res: null;
   };
+  /** Apply selected textual lines to the real Git index. `staged=false`
+   * stages them; `staged=true` reverses them out of the index. The main
+   * process regenerates the zero-context diff and rejects a stale fingerprint
+   * before accepting any line ID. */
+  "changes:applySelection": {
+    req: {
+      worktreeId: string;
+      path: string;
+      staged: boolean;
+      fingerprint: string;
+      lineIds: string[];
+    };
+    res: null;
+  };
   /** Discard uncommitted changes to the named paths (revert to HEAD, or delete
    *  if new). A folder row sends every file it lists. */
   "changes:discard": { req: { worktreeId: string; paths: string[] }; res: null };
@@ -1189,10 +1204,11 @@ export interface Commands {
     req: { worktreeId: string; operation: GitOperationKind };
     res: null;
   };
-  /** Unified diff for one working-tree file (staged or unstaged). */
-  "diff:file": {
+  /** Contextual display patch and typed zero-context selection snapshot for a
+   * single staged or unstaged file. */
+  "diff:fileSelection": {
     req: { worktreeId: string; path: string; staged: boolean };
-    res: string;
+    res: PartialFileDiff;
   };
   /** Unified diff of the changes a commit introduced. */
   "diff:commit": { req: { worktreeId: string; hash: string }; res: string };

@@ -750,6 +750,67 @@ export type OperationContinueOutcome =
   /** The operation moved forward and stopped again. This is progress. */
   | { kind: "stopped"; state: OperationState; detail: string };
 
+/** Why a working-tree diff cannot safely be applied a hunk at a time. Whole
+ * file stage/unstage remains available for every one of these cases. */
+export type PartialDiffUnavailableReason =
+  | "binary"
+  | "conflicted"
+  | "gitlink"
+  | "non_utf8"
+  | "new_file"
+  | "deleted_file"
+  | "renamed_file"
+  | "mode_only"
+  | "no_changes"
+  | "unsupported_patch";
+
+export type PartialDiffCapability =
+  | { available: true }
+  | {
+      available: false;
+      reason: PartialDiffUnavailableReason;
+      message: string;
+    };
+
+/** A selectable changed line in Git's zero-context view of one file. IDs are
+ * stable for the exact `fingerprint` returned with the diff; applying an ID
+ * against any later version is rejected as stale. */
+export type PartialDiffLine = {
+  id: string;
+  kind: "add" | "delete";
+  oldLine: number | null;
+  newLine: number | null;
+  text: string;
+};
+
+export type PartialDiffHunk = {
+  id: string;
+  header: string;
+  /** False when Git's no-newline marker binds the file boundary to the whole
+   * hunk; splitting those lines would create a patch with impossible EOF
+   * semantics. */
+  lineSelection: boolean;
+  lines: PartialDiffLine[];
+};
+
+/** A display patch plus the exact Git-native selection snapshot behind it.
+ * `patch` carries normal context for reading; `hunks` come from `-U0` so a
+ * command can name changes without trusting renderer-generated patch text. */
+export type PartialFileDiff = {
+  path: string;
+  staged: boolean;
+  patch: string;
+  fingerprint: string;
+  capability: PartialDiffCapability;
+  hunks: PartialDiffHunk[];
+  /** Whether this same path also has changes on the other side of the index.
+   * A partially staged file is two rows in the rail; this is what lets the
+   * open diff offer the round trip between them instead of making the reader
+   * close the pane and hunt for its twin. Read from the status Git already
+   * had to produce for the snapshot, so it costs nothing extra. */
+  counterpartChanges: boolean;
+};
+
 /** One file touched by a commit (rail's commit-scoped file list). */
 export type CommitFileChange = {
   path: string;

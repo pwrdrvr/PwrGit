@@ -7001,6 +7001,7 @@ body.is-col-resizing {
 /* ---- Diff pane + viewer ---- */
 
 .diff-pane {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -7059,6 +7060,227 @@ body.is-col-resizing {
   flex: 0 0 auto;
   font: 500 10.5px/1 var(--font-mono);
   color: var(--text-subtle);
+}
+/* Which side of the index the pane is showing, and the way across. A
+   partially staged file is two rows in the rail with nothing to say they are
+   halves of one thing; these tabs are the only place the pair is visible as a
+   pair, so the inactive one carries a dot when it holds changes. */
+/* A path git lists on both sides of the index — partly staged. The rail
+   shows it as two rows; this is what says they are one file split in two
+   rather than two files with the same name. */
+.file-split {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: var(--status-warning);
+  font: 600 8.5px/1.5 var(--font-sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.diff-side {
+  flex: 0 0 auto;
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+}
+.diff-side__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 5px 11px;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 1px);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: 600 10px/1 var(--font-sans);
+}
+.diff-side__tab:hover:not(.is-active) {
+  color: var(--text-secondary);
+  background: var(--bg-hover-strong);
+}
+.diff-side__tab.is-active {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+.diff-side__tab:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.diff-side__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.diff-selection-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 38px;
+  padding: 7px 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--accent-soft);
+  color: var(--text-secondary);
+  font: 500 10.5px/1.35 var(--font-sans);
+}
+.diff-selection-bar strong {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+.diff-selection-bar--unavailable {
+  background: var(--bg-input);
+  color: var(--text-muted);
+}
+/* The staging loop ran to its end — nothing is wrong here, so this reads as
+   an outcome rather than as the disabled bar above. */
+.diff-selection-bar--settled {
+  background: var(--success-soft);
+  color: var(--text-secondary);
+}
+/* Inherits the bar's own text color rather than dropping to --text-muted:
+   muted on the accent-soft bar measures 4.38:1 in light theme — under AA for
+   10.5px text. The unavailable bar sets muted at container level, where its
+   plain background keeps it passing. */
+.diff-selection-bar__hint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.diff-selection-bar__count {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--text-subtle);
+  font-family: var(--font-mono);
+}
+.diff-selection-bar__apply,
+.diff-selection-bar__file,
+.diff-selection-bar__help,
+.diff-hunk__action {
+  flex: 0 0 auto;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+  cursor: pointer;
+  font: 650 10px/1 var(--font-sans);
+}
+.diff-selection-bar__apply,
+.diff-selection-bar__file {
+  min-height: 24px;
+  padding: 5px 9px;
+}
+/* The bar's own fill is --accent-soft, so a button painted the same way is
+   figure and ground at once. The apply action is the bar's primary control
+   and reads as solid; the file-wide action beside it stays an outline. */
+.diff-selection-bar__apply {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-on);
+}
+.diff-selection-bar__apply:hover:not(:disabled) {
+  background: var(--accent-bright);
+}
+.diff-selection-bar__file {
+  background: transparent;
+}
+.diff-selection-bar__help {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 999px;
+  background: transparent;
+  font-size: 11px;
+}
+.diff-selection-bar__file:hover:not(:disabled),
+.diff-selection-bar__help:hover:not(:disabled),
+.diff-hunk__action:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.diff-selection-bar__apply:disabled,
+.diff-selection-bar__file:disabled,
+.diff-hunk__action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.diff-selection-bar__apply:focus-visible,
+.diff-selection-bar__file:focus-visible,
+.diff-selection-bar__help:focus-visible,
+.diff-hunk__action:focus-visible,
+.diff-select input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+/* The ? button's card: the pane's gestures and keys, floated over the body
+   so it never reflows the diff under the reader. Lists only wired bindings. */
+.diff-help {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel-elevated);
+  box-shadow: var(--shadow-popover);
+}
+.diff-help__title {
+  margin-bottom: 4px;
+  font: 600 9px/1 var(--font-sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}
+.diff-help__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  font: 500 11px/1.4 var(--font-sans);
+  color: var(--text-secondary);
+}
+.diff-help__keys {
+  display: inline-flex;
+  gap: 3px;
+  min-width: 88px;
+}
+.diff-help__keys kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 3px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+  font: 600 10px/1 var(--font-mono);
+  text-align: center;
+}
+
+/* Says why a tick vanished. The pane refreshes itself whenever the worktree
+   moves; when that refresh lands on a genuinely different diff the ticks
+   cannot be carried over, and a silent reset reads as the app losing the
+   user's work. */
+.diff-stale-notice {
+  flex: 0 0 auto;
+  padding: 7px 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--warn-soft);
+  color: var(--status-warning);
+  font: 500 10.5px/1.35 var(--font-sans);
 }
 .diff-pane__body {
   flex: 1;
@@ -7189,10 +7411,24 @@ body.is-col-resizing {
   text-align: left;
 }
 .diff-hunk__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 5px 12px;
   font: 500 10.5px/1.4 var(--font-mono);
   color: var(--text-subtle);
   background: var(--bg-hover-strong);
+}
+.diff-hunk__range {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.diff-hunk__action {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 4px 7px;
 }
 .diff-row {
   display: grid;
@@ -7202,6 +7438,64 @@ body.is-col-resizing {
   align-items: baseline;
   font: 500 11.5px/1.55 var(--font-mono);
 }
+.diff-view--selectable .diff-row {
+  grid-template-columns: 24px 44px 44px 14px minmax(0, 1fr);
+}
+.diff-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  user-select: none;
+}
+/* The box is a 13px glyph; the target is the whole gutter run. Making the
+   input inert to the pointer puts every click on the row handler, which is
+   what reads the shift modifier for range selection and what keeps a 13px
+   control from being a 13px target (WCAG 2.5.8). Keyboard activation is
+   untouched — the input still focuses, and Space still fires a click that
+   reaches the same handler. */
+.diff-select input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--accent);
+  pointer-events: none;
+}
+.diff-select--hunk {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 2px;
+}
+.diff-select--hunk.is-tickable {
+  cursor: pointer;
+}
+/* Only rows that can actually take a tick advertise one. */
+.diff-row.is-tickable .diff-select,
+.diff-row.is-tickable .diff-gutter,
+.diff-row.is-tickable .diff-sym {
+  cursor: pointer;
+}
+.diff-row.is-tickable:hover .diff-select {
+  background: var(--bg-hover-strong);
+}
+.diff-row.is-tickable:hover .diff-select input:not(:checked) {
+  outline: 1px solid var(--accent-border);
+  outline-offset: 1px;
+}
+/* A ticked row has to survive a glance down a long hunk, so it gets a spine
+   in the selection column rather than a heavier fill that would fight the
+   add/delete tint already carrying the row's meaning. */
+.diff-row.is-selected {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.diff-row.is-selected .diff-text,
+.diff-row.is-selected .diff-sym {
+  color: var(--text-primary);
+}
+/* The gutter keeps its normal color on a selected row. An accent recolor
+   read as extra emphasis but measured 4.43:1 over the add tint in light
+   theme — LESS legible than the default it replaced. The spine and the
+   primary-text lift carry the selected state. */
 .diff-row--add {
   background: color-mix(in srgb, var(--status-ok) 10%, transparent);
 }

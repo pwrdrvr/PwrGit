@@ -260,6 +260,55 @@ describe("ChangesTab list", () => {
   });
 });
 
+describe("ChangesTab partially staged files", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  const worktree = { id: "worktree-1" } as Worktree;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mocks.subscribe.mockReturnValue(() => undefined);
+    mocks.dispatch.mockImplementation(async (command: string) =>
+      command === "changes:list" ? ok(changes) : ok(null)
+    );
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <ChangesTab worktree={worktree} activeEmail="a@b.c" onOpenDiff={vi.fn()} />
+      );
+    });
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("marks both rows of a path git lists on either side of the index", () => {
+    // `both.txt` is partly staged, so it is listed twice; the other two files
+    // sit on one side each and must stay unmarked.
+    const marked = [...container.querySelectorAll(".file-row.is-split")];
+    expect(marked).toHaveLength(2);
+    expect(marked.every((row) => row.textContent?.includes("both.txt"))).toBe(
+      true
+    );
+    expect(container.querySelectorAll(".file-split")).toHaveLength(2);
+    // The tag names where the rest of the file went, per side.
+    const titles = [...container.querySelectorAll(".file-split")].map((tag) =>
+      tag.getAttribute("title")
+    );
+    expect(titles).toContain(
+      "Partly staged — this file also has unstaged changes"
+    );
+    expect(titles).toContain(
+      "Partly staged — this file also has staged changes"
+    );
+  });
+});
+
 describe("ChangesTab truncation notice", () => {
   let container: HTMLDivElement;
   let root: Root;

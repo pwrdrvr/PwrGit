@@ -578,6 +578,9 @@ export function App() {
                 <DiffPane
                   worktreeId={selectedWorktree.id}
                   target={diffTarget}
+                  onOpenFile={(path, staged) =>
+                    setDiffTarget({ kind: "file", path, staged })
+                  }
                   onClose={closeDiff}
                 />
               )}

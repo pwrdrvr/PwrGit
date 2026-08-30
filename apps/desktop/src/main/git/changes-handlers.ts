@@ -13,7 +13,6 @@ import {
   type CommitIdentity,
   discardAllChanges,
   discardPaths,
-  fileDiff,
   readCommit,
   readChanges,
   stagePaths,
@@ -21,6 +20,7 @@ import {
 } from "./git-service";
 import { appendToGitignore, toGitignorePattern } from "./gitignore";
 import { readImagePreview } from "./image-preview";
+import { applyPartialSelection, partialFileDiff } from "./partial-staging";
 import type { WorktreeRefresher } from "./worktree-handlers";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
@@ -83,6 +83,28 @@ export function registerChangesHandlers(
     const result = await operations.run(req.worktreeId, () =>
       unstagePaths(execGit, path, req.paths)
     );
+    notifyChanged(req.worktreeId);
+    if (!result.ok) return result;
+    return ok(null);
+  });
+
+  bus.register("changes:applySelection", async (req) => {
+    const path = pathOf(req.worktreeId);
+    if (path === null) return err(notFound);
+    const result = await operations.run(req.worktreeId, () =>
+      applyPartialSelection(
+        execGit,
+        execGitBinary,
+        path,
+        req.path,
+        req.staged,
+        req.fingerprint,
+        req.lineIds
+      )
+    );
+    // A stale result means an external tool moved this exact file or index;
+    // repaint from Git immediately. A successful apply also moves only the
+    // index, which the coarse worktree refresher cannot otherwise observe.
     notifyChanged(req.worktreeId);
     if (!result.ok) return result;
     return ok(null);
@@ -188,10 +210,12 @@ export function registerChangesHandlers(
     return ok(null);
   });
 
-  bus.register("diff:file", async (req) => {
+  bus.register("diff:fileSelection", async (req) => {
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
-    return fileDiff(execGit, path, req.path, req.staged);
+    return operations.run(req.worktreeId, () =>
+      partialFileDiff(execGit, execGitBinary, path, req.path, req.staged)
+    );
   });
 
   bus.register("diff:commit", async (req) => {
