@@ -214,16 +214,16 @@ export function DiffPane({
   const selectionDropped =
     selection.ids.size > 0 && selection.fingerprint !== fingerprint;
 
-  const toggleLine = (ids: string[]): void => {
+  const toggleLine = (ids: string[], op?: "check" | "uncheck"): void => {
     setSelection((current) => {
       const next = new Set(
         current.fingerprint === fingerprint ? current.ids : []
       );
-      // A multi-line range follows the lead line: if it is being checked, the
-      // whole range is checked, so a shift-click never half-clears a span.
       const first = ids[0];
       if (first === undefined) return current;
-      const checking = !next.has(first);
+      // A lone click toggles its line; a range gesture arrives with explicit
+      // intent, so a span is set as one thing and never half-inverts.
+      const checking = op === undefined ? !next.has(first) : op === "check";
       for (const id of ids) {
         if (checking) next.add(id);
         else next.delete(id);

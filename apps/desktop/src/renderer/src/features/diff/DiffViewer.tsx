@@ -45,10 +45,12 @@ export type DiffSelectionControls = {
   selectedIds: ReadonlySet<string>;
   applying: boolean;
   hunks: PartialDiffHunk[];
-  /** One call per gesture: a plain click sends one ID, a shift-click sends
-   *  the whole run it spans. The lead ID is first — the pane follows its
-   *  check state for the rest, so a range never half-clears. */
-  onToggleLine: (ids: string[]) => void;
+  /** One call per gesture. With no `op`, the single ID toggles. A range
+   *  gesture names its intent instead: "check" or "uncheck" applies to every
+   *  ID. Intent used to ride implicitly on array order — the lead's toggled
+   *  state drove the run — and that inverted the commonest gesture of all
+   *  (tick a line, shift-click to extend cleared the whole range). */
+  onToggleLine: (ids: string[], op?: "check" | "uncheck") => void;
   onApply: (lineIds: string[]) => void;
 };
 
@@ -213,10 +215,15 @@ function DiffFileView({
       selection.onToggleLine([id]);
       return;
     }
-    // The anchor stays the lead, so extending a checked run checks the rest
-    // of it rather than inverting each row it passes over.
+    // The run follows the anchor's CURRENT state: extending from a ticked
+    // line ticks the span, extending from a just-unticked line clears it —
+    // the same rule every checkbox list follows. The anchor itself is in the
+    // run and keeps its state.
     const run = orderedIds.slice(Math.min(start, end), Math.max(start, end) + 1);
-    selection.onToggleLine([from, ...run.filter((each) => each !== from)]);
+    selection.onToggleLine(
+      run,
+      selection.selectedIds.has(from) ? "check" : "uncheck"
+    );
   };
 
   return (
@@ -290,17 +297,9 @@ function DiffHunkView({
 
   const toggleHunk = (): void => {
     if (selection === undefined) return;
-    // Lead with a row whose state is about to flip, so the pane's
-    // follow-the-lead rule drives the rest the same way.
     selection.onToggleLine(
-      allChecked
-        ? tickable.map((line) => line.id)
-        : [
-            ...tickable
-              .filter((line) => !selection.selectedIds.has(line.id))
-              .map((line) => line.id),
-            ...checked.map((line) => line.id)
-          ]
+      tickable.map((line) => line.id),
+      allChecked ? "uncheck" : "check"
     );
     // Re-seat the anchor inside this hunk. Left where it was, the next
     // shift-click would sweep from whatever row was ticked last — possibly
@@ -364,6 +363,7 @@ function DiffHunkView({
                 const from = pressedAt.current;
                 pressedAt.current = null;
                 if (
+                  event.detail !== 0 &&
                   from !== null &&
                   (Math.abs(event.clientX - from.x) > DRAG_SLOP_PX ||
                     Math.abs(event.clientY - from.y) > DRAG_SLOP_PX)

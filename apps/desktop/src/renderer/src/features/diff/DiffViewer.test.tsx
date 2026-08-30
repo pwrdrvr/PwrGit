@@ -151,7 +151,7 @@ describe("DiffViewer hunk and line selection", () => {
     expect(onApply).toHaveBeenCalledWith(lines.map((line) => line.id));
   });
 
-  it("selects a whole hunk from its header box, leading with a row that flips", async () => {
+  it("selects a whole hunk from its header box with explicit intent", async () => {
     const onToggleLine = vi.fn();
     await act(async () => {
       root.render(
@@ -175,11 +175,14 @@ describe("DiffViewer hunk and line selection", () => {
 
     const header = container.querySelector(".diff-select--hunk");
     await act(async () => (header as HTMLElement).click());
-    // Unticked row first: the pane follows the lead, so the run is checked.
-    expect(onToggleLine).toHaveBeenCalledWith([lines[1]?.id, lines[0]?.id]);
+    // A partially ticked hunk completes: every line, named intent.
+    expect(onToggleLine).toHaveBeenCalledWith(
+      [lines[0]?.id, lines[1]?.id],
+      "check"
+    );
   });
 
-  it("sends the run a shift-click spans, led by the anchor", async () => {
+  it("sends the run a shift-click spans, following the anchor's state", async () => {
     const onToggleLine = vi.fn();
     await act(async () => {
       root.render(
@@ -187,7 +190,9 @@ describe("DiffViewer hunk and line selection", () => {
           patch={textPatch}
           selection={{
             staged: false,
-            selectedIds: new Set(),
+            // The anchor line is already ticked, so extending must CHECK the
+            // run — the inversion this contract replaced cleared it instead.
+            selectedIds: new Set([lines[0]!.id]),
             applying: false,
             hunks: [
               { id: "h:0:2:2", header: "@@ -2 +2 @@", lineSelection: true, lines }
@@ -215,7 +220,10 @@ describe("DiffViewer hunk and line selection", () => {
         new MouseEvent("click", { bubbles: true, shiftKey: true })
       );
     });
-    expect(onToggleLine).toHaveBeenLastCalledWith([lines[0]?.id, lines[1]?.id]);
+    expect(onToggleLine).toHaveBeenLastCalledWith(
+      [lines[0]?.id, lines[1]?.id],
+      "check"
+    );
 
     // A pre-existing selection elsewhere on the page must not disable ticking:
     // the guard measures the gesture, it does not ask whether anything is
@@ -227,7 +235,12 @@ describe("DiffViewer hunk and line selection", () => {
     );
     await act(async () =>
       g.dispatchEvent(
-        new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 20 })
+        new MouseEvent("click", {
+          bubbles: true,
+          detail: 1,
+          clientX: 10,
+          clientY: 20
+        })
       )
     );
     expect(onToggleLine).toHaveBeenLastCalledWith([lines[0]?.id]);
@@ -240,7 +253,12 @@ describe("DiffViewer hunk and line selection", () => {
     );
     await act(async () =>
       g.dispatchEvent(
-        new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 20 })
+        new MouseEvent("click", {
+          bubbles: true,
+          detail: 1,
+          clientX: 10,
+          clientY: 20
+        })
       )
     );
     expect(onToggleLine).not.toHaveBeenCalled();
@@ -287,14 +305,15 @@ describe("DiffViewer hunk and line selection", () => {
     await act(async () =>
       (container.querySelector(".diff-select--hunk") as HTMLElement).click()
     );
-    // A shift-click on the last row now spans from that row, not from row 0.
+    // A shift-click on the last row now spans from that row, not from row 0;
+    // the rendered selection is empty at the anchor, so the intent is uncheck.
     onToggleLine.mockClear();
     await act(async () =>
       (rows[1]!.querySelector(".diff-gutter") as HTMLElement).dispatchEvent(
         new MouseEvent("click", { bubbles: true, shiftKey: true })
       )
     );
-    expect(onToggleLine).toHaveBeenLastCalledWith([lines[1]?.id]);
+    expect(onToggleLine).toHaveBeenLastCalledWith([lines[1]?.id], "uncheck");
   });
 
   it("withholds selection from a patch carrying more than one file", async () => {

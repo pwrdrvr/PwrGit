@@ -139,6 +139,31 @@ describe("DiffPane refreshing an open working-tree diff", () => {
     expect(container.querySelector(".diff-stale-notice")).toBeNull();
   });
 
+  it("extends a tick through shift-click into a fully ticked range", async () => {
+    // The composed regression: DiffViewer decides the gesture, DiffPane owns
+    // the set. The old contract encoded intent in array order and this exact
+    // sequence — tick a line, shift-click to extend — cleared the range
+    // instead of ticking it. Every prior test stopped at one component.
+    const boxes = (): HTMLInputElement[] => [
+      ...container.querySelectorAll<HTMLInputElement>(
+        '.diff-row.is-tickable input[type="checkbox"]'
+      )
+    ];
+    expect(boxes()).toHaveLength(2);
+
+    await act(async () => gutterOf(boxes()[0]!).click());
+    expect(boxes()[0]?.checked).toBe(true);
+
+    await act(async () =>
+      gutterOf(boxes()[1]!).dispatchEvent(
+        new MouseEvent("click", { bubbles: true, shiftKey: true })
+      )
+    );
+    expect(boxes().map((box) => box.checked)).toEqual([true, true]);
+    expect(container.querySelector(".diff-selection-bar__count")?.textContent)
+      .toBe("2 selected");
+  });
+
   it("drops the ticks and says why once the file's diff really moves", async () => {
     await act(async () => gutterOf(tick()).click());
     expect(tick().checked).toBe(true);
