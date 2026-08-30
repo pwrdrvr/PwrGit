@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.9.0 - 2026-08-30
+
+- Sync - Added profile-wide **Fetch all** and **Try pull all**, with per-repository progress, cancellation, and conservative fast-forwards that only update clean, tracked worktrees.
+- Tags - Added fast tag browsing and search, reviewed local and remote tag management, and a direct **Tag this commit…** action in the commit graph.
+- Tags - Improved tag creation so you can select `HEAD`, a branch, an existing tag, or another revision and review the resolved commit before creating the tag.
+- Git Operations - Added a live rail banner for in-progress merges, rebases, cherry-picks, reverts, and patches, with safe Continue and Abort actions and clearer conflict context.
+- Worktrees - Fixed Windows worktree removal so background Git launcher processes do not leave an otherwise removable directory locked.
+- Repositories - Fixed dangling remote default-branch references so pruning a deleted upstream branch no longer breaks the commit graph.
+- Clone - Made the default clone destination and the exact folder PwrGit will create more obvious before you start.
+- Desktop - Improved fresh-install reliability and speed by staging the packaged SQLite binary instead of compiling it locally.
+
 ## v0.8.0 - 2026-08-27
 
 - Repositories - Added a Focused lens that brings your current, pinned, recently viewed, and active repositories and worktrees to the front.
