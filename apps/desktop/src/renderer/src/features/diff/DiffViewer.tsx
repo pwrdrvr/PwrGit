@@ -2,7 +2,9 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   type MouseEvent,
+  type MouseEvent as ReactMouseEvent,
   type RefObject
 } from "react";
 import {
@@ -10,6 +12,7 @@ import {
   type PartialDiffHunk,
   type PartialDiffLine
 } from "@pwrgit/shared";
+import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
 import { DiffStat } from "./DiffStat";
 import { ImageDiff, type ImageDiffRevisions } from "./ImageDiff";
 import { type DiffFile, parseUnifiedDiff } from "./parse-diff";
@@ -60,7 +63,8 @@ export function DiffViewer({
   patch,
   emptyLabel,
   images,
-  selection
+  selection,
+  fileMenuItems
 }: {
   patch: string;
   emptyLabel?: string;
@@ -69,8 +73,18 @@ export function DiffViewer({
   /** Typed line IDs from the main process. Present only for a selectable
    * working-tree patch; commit and protected file kinds remain read-only. */
   selection?: DiffSelectionControls;
+  /**
+   * Per-file actions, offered from a menu on that file's own strip. This is
+   * the only place a WHOLE-COMMIT diff can reach one file's history or blame:
+   * everywhere else you have to leave, find the file in the rail, open it, and
+   * come back.
+   */
+  fileMenuItems?: (path: string) => MenuItem[];
 }) {
   const parsed = useMemo(() => parseUnifiedDiff(patch), [patch]);
+  const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(
+    null
+  );
   if (parsed.files.length === 0) {
     return <div className="diff-empty">{emptyLabel ?? "No changes."}</div>;
   }
@@ -89,8 +103,25 @@ export function DiffViewer({
           file={file}
           images={images}
           selection={scoped}
+          {...(fileMenuItems === undefined
+            ? {}
+            : {
+                onMenu: (event: ReactMouseEvent) => {
+                  const box = event.currentTarget.getBoundingClientRect();
+                  setMenu({ x: box.right, y: box.bottom + 4, path: file.path });
+                }
+              })}
         />
       ))}
+      {menu !== null && fileMenuItems !== undefined && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          label={`Actions for ${menu.path}`}
+          onClose={() => setMenu(null)}
+          items={fileMenuItems(menu.path)}
+        />
+      )}
     </div>
   );
 }
@@ -158,11 +189,13 @@ const DRAG_SLOP_PX = 4;
 function DiffFileView({
   file,
   images,
-  selection
+  selection,
+  onMenu
 }: {
   file: DiffFile;
   images: ImageDiffRevisions | undefined;
   selection: DiffSelectionControls | undefined;
+  onMenu?: (event: ReactMouseEvent<HTMLButtonElement>) => void;
 }) {
   const name =
     file.status === "renamed" && file.oldPath !== undefined
@@ -237,6 +270,20 @@ function DiffFileView({
         </span>
         <span style={{ flex: 1 }} />
         <DiffStat additions={file.additions} deletions={file.deletions} />
+        {onMenu !== undefined && (
+          <button
+            className="diff-file__menu"
+            onClick={onMenu}
+            aria-label={`Actions for ${file.path}`}
+            title="File actions"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <circle cx="12" cy="5" r="1.6" />
+              <circle cx="12" cy="12" r="1.6" />
+              <circle cx="12" cy="19" r="1.6" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {file.binary ? (

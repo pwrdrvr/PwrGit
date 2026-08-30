@@ -403,6 +403,7 @@ export function WorktreeHeader({
           </button>
         </div>
         <WorktreeMenu
+          className="kebab--toolbar"
           worktree={worktree}
           onResetToRemote={() => setResetToRemoteOpen(true)}
         />

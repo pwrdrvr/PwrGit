@@ -571,5 +571,50 @@ describe("DiffPane", () => {
       mocks.dispatch.mock.calls.some(([name]) => name === "commit:message")
     ).toBe(false);
   });
+
+  it("reaches one file's history from a WHOLE-commit diff", async () => {
+    dispatchMock.mockImplementation(respond(""));
+    const onOpenFileInsight = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="wt-1"
+          target={{
+            kind: "commit",
+            hash: COMMIT.hash,
+            subject: COMMIT.subject
+          }}
+          onOpenFileInsight={onOpenFileInsight}
+          onClose={vi.fn()}
+        />
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // No pane-level History/Blame here — a whole commit has no single file.
+    expect(container.querySelector(".diff-pane__tools")).toBeNull();
+
+    const trigger = container.querySelector<HTMLButtonElement>(".diff-file__menu");
+    expect(trigger?.getAttribute("aria-label")).toBe(
+      "Actions for docs/guide.txt"
+    );
+    await act(async () => trigger?.click());
+
+    const history = [...document.querySelectorAll(".pop-menu__item")].find(
+      (item) => item.textContent === "File history"
+    ) as HTMLButtonElement | undefined;
+    expect(history).toBeDefined();
+    await act(async () => history?.click());
+
+    // Blames at THIS commit, not at HEAD.
+    expect(onOpenFileInsight).toHaveBeenCalledWith(
+      "docs/guide.txt",
+      { kind: "commit", hash: COMMIT.hash },
+      "history"
+    );
+  });
 });
 });

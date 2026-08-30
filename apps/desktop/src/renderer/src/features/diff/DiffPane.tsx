@@ -7,6 +7,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent
 } from "react";
 import type { FileInsightContext, PartialFileDiff } from "@pwrgit/shared";
+import { copyText } from "../../lib/copyText";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { showErrorToast } from "../../lib/toast";
 import { DiffViewer } from "./DiffViewer";
@@ -255,6 +256,13 @@ export function DiffPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [worktreeId, key]
   );
+
+  // Per FILE, not per pane: a whole-commit diff has no single file, but each
+  // strip in it does, and each one blames at that commit.
+  const insightContext: FileInsightContext =
+    target.kind === "file"
+      ? { kind: "workingTree" }
+      : { kind: "commit", hash: target.hash };
 
   // The pane header names the SCOPE, never the file: every file's own strip in
   // the body names it already, and for a single-file pane that made the same
@@ -671,6 +679,25 @@ export function DiffPane({
                   }
                 }
               : {})}
+            fileMenuItems={(path) => [
+              {
+                type: "item",
+                label: "File history",
+                onSelect: () =>
+                  onOpenFileInsight(path, insightContext, "history")
+              },
+              {
+                type: "item",
+                label: "Blame",
+                onSelect: () => onOpenFileInsight(path, insightContext, "blame")
+              },
+              { type: "sep" },
+              {
+                type: "item",
+                label: "Copy path",
+                onSelect: () => void copyText(path)
+              }
+            ]}
             emptyLabel={
               target.kind === "commit"
                 ? "This commit has no textual changes."

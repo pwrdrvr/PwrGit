@@ -5823,6 +5823,18 @@ body.is-col-resizing {
   flex: 0 0 auto;
   display: inline-flex;
 }
+/* The kebab's default 24px is the SIDEBAR row's size, where it sits among
+   11px text. Standing in a toolbar beside 32px `.wt-btn`s it read as a
+   different, smaller class of control — so in that context it takes the
+   toolbar's own metrics instead. */
+.kebab--toolbar .kebab__btn {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  border-color: var(--border-default);
+  background: var(--bg-panel-elevated);
+  color: var(--text-primary);
+}
 .kebab__btn {
   width: 24px;
   height: 24px;
@@ -7820,6 +7832,38 @@ body.is-col-resizing {
   border-radius: var(--radius-lg);
   overflow: hidden;
   background: var(--bg-panel);
+}
+/* Per-file actions, on the file's own strip. Held at low opacity rather than
+   hidden so it is discoverable at a glance, and revealed on hover or keyboard
+   focus like the rail's row actions. */
+.diff-file__menu {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  opacity: 0.55;
+  cursor: pointer;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+.diff-file__head:hover .diff-file__menu,
+.diff-file__menu:focus-visible {
+  opacity: 1;
+}
+.diff-file__menu:hover {
+  border-color: var(--accent-border);
+  background: var(--bg-panel-hover);
+  color: var(--accent);
+}
+.diff-file__menu:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 .diff-file__head {
   display: flex;
