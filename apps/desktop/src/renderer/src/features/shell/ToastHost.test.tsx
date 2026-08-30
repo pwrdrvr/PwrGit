@@ -97,6 +97,32 @@ describe("ToastHost", () => {
     ).toBe("true");
   });
 
+  it("keeps a sticky toast standing with no countdown, until dismissed by hand", async () => {
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        showErrorToast({ title: "Git LFS setup needed", message: "…", sticky: true });
+        showInfoToast({ title: "Tag created", message: "v1.2.3" });
+      });
+
+      // Only the transient card wears the draining bar.
+      expect(container.querySelectorAll(".app-toast__timer")).toHaveLength(1);
+
+      await act(async () => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(eyebrows()).toEqual(["error:Git LFS setup needed"]);
+
+      const dismiss = [...container.querySelectorAll("button")].find(
+        (button) => button.getAttribute("aria-label") === "Dismiss"
+      );
+      await act(async () => dismiss?.click());
+      expect(eyebrows()).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("dismisses one toast without disturbing the others", async () => {
     await act(async () => {
       showInfoToast({ title: "Tag created", message: "v1.2.3" });

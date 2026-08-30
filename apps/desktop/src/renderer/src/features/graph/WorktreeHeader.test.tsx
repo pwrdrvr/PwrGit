@@ -26,12 +26,14 @@ vi.mock("../../lib/pwrgit", () => ({
 }));
 vi.mock("../../lib/toast", () => ({
   showErrorToast: vi.fn(),
-  showInfoToast: vi.fn()
+  showInfoToast: vi.fn(),
+  dismissToastKey: vi.fn()
 }));
 vi.mock("../shell/WorktreeMenu", () => ({ WorktreeMenu: () => null }));
 
 import { WorktreeHeader } from "./WorktreeHeader";
 
+const repo = { id: "repo-1", name: "project", path: "/repos/project" };
 const worktree: Worktree = {
   id: "worktree-1",
   repoId: "repo-1",
@@ -62,7 +64,7 @@ beforeEach(async () => {
   document.body.append(container);
   root = createRoot(container);
   await act(async () => {
-    root.render(<WorktreeHeader worktree={worktree} state={null} />);
+    root.render(<WorktreeHeader repo={repo} worktree={worktree} state={null} />);
   });
 });
 
@@ -174,7 +176,7 @@ describe("WorktreeHeader default-branch drift", () => {
     state: WorktreeState | null = null
   ): Promise<void> => {
     await act(async () => {
-      root.render(<WorktreeHeader worktree={w} state={state} />);
+      root.render(<WorktreeHeader repo={repo} worktree={w} state={state} />);
     });
   };
   const drift = (): HTMLElement | null =>

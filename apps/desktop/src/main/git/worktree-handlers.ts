@@ -4,6 +4,7 @@ import { emitEvent } from "../ipc";
 import type { DB } from "../persistence/db";
 import type { GitExec } from "./dugite";
 import { inspectGitLfs } from "./git-lfs";
+import { recordLfsOutcome } from "./git-lfs-notice";
 import type { WorktreeStateService } from "./worktree-state";
 
 function stateChanged(a: WorktreeState, b: WorktreeState): boolean {
@@ -133,7 +134,7 @@ export function registerWorktreeHandlers(
     return ok(null);
   });
 
-  bus.register("repo:getGitLfsStatus", (req) => {
+  bus.register("repo:getGitLfsStatus", async (req) => {
     const row = db
       .prepare("SELECT path FROM worktrees WHERE id = ? AND repo_id = ?")
       .get(req.worktreeId, req.repoId) as { path: string } | undefined;
@@ -144,6 +145,11 @@ export function registerWorktreeHandlers(
         message: "repo or worktree not found"
       });
     }
-    return inspectGitLfs(git, row.path);
+    const inspected = await inspectGitLfs(git, row.path);
+    if (!inspected.ok) return inspected;
+    return ok({
+      status: inspected.value,
+      announceReady: recordLfsOutcome(db, req.repoId, inspected.value)
+    });
   });
 }

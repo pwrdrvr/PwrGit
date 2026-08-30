@@ -14,6 +14,10 @@ export type Toast = {
   /** Errors head the card in the danger color; anything else is not a
    *  failure and must not be dressed as one. */
   tone: "error" | "info";
+  /** Stand until dismissed by hand or replaced by key — no countdown. For
+   *  conditions that stay true until acted on, where auto-hiding would just
+   *  un-report an unresolved problem. */
+  sticky?: boolean;
   /** Offer an "Open Logs" action (default true for errors). */
   showLogsAction?: boolean;
   /** Offer a copy action (default true for errors). */
@@ -52,12 +56,16 @@ export function showErrorToast(input: {
   title: string;
   message: string;
   detail?: string;
+  sticky?: boolean;
+  /** Opt out when the failure left no trail in the Logs window — an "Open
+   *  Logs" button that lands on unrelated output reads as a broken lead. */
+  showLogsAction?: boolean;
 }): void {
   pushToast({
-    ...input,
-    tone: "error",
     showLogsAction: true,
-    showCopyAction: true
+    showCopyAction: true,
+    ...input,
+    tone: "error"
   });
 }
 

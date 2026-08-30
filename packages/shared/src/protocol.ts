@@ -37,7 +37,7 @@ import type {
   CommitStats,
   GitHubCommitAuthorIdentityLookup,
   GraphLog,
-  GitLfsStatus,
+  GitLfsReport,
   LaneGraph,
   ForgeStatus,
   PrSummary,
@@ -684,10 +684,13 @@ export interface Commands {
   };
   "repo:setPin": { req: { repoId: string; pinned: boolean }; res: null };
   "repo:computeState": { req: { repoId: string }; res: null };
-  /** Whether a checkout declares Git LFS rules and can apply them locally. */
+  /** Whether a checkout declares Git LFS rules and can apply them locally,
+   *  plus whether this is the check that announces a newly working setup.
+   *  Asking records the outcome — callers surface the answer, not the
+   *  bookkeeping. */
   "repo:getGitLfsStatus": {
     req: { repoId: string; worktreeId: string };
-    res: GitLfsStatus;
+    res: GitLfsReport;
   };
   /** Read-only, bounded inspection of the gitlinks/config/checkouts beneath one
    *  selected worktree. Per-child failures are returned on their row. */

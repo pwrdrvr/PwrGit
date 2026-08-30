@@ -4079,132 +4079,40 @@ textarea,
   min-width: 0;
 }
 
-/* A repo asks for LFS in tracked .gitattributes: confirm that PwrGit can
-   materialize the files, and keep the repair steps beside the warning. */
-.lfs-notice {
-  flex: 0 0 auto;
-  margin: 12px 20px 0;
-  padding: 11px 13px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--bg-panel-elevated);
-  color: var(--text-secondary);
-  font: 450 12px/1.45 var(--font-sans);
-}
-.lfs-notice--ready {
-  border-color: color-mix(in srgb, var(--status-ok) 36%, transparent);
-  background: var(--success-soft);
-}
-.lfs-notice--warn {
-  border-color: color-mix(in srgb, var(--status-warning) 38%, transparent);
-  background: var(--warn-soft);
-}
-.lfs-notice__summary {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-}
-.lfs-notice__icon {
+/* A repo asks for LFS in tracked .gitattributes: the chip stands for as long
+   as the requirement does — green while PwrGit can materialize the files,
+   danger when it cannot. The news itself (and the repair commands) travels as
+   a toast, so nothing here appears and disappears reflowing the graph below.
+   Sized to the 18px dirty badge it sits beside. */
+.lfs-chip {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  flex: 0 0 auto;
-  border: 1px solid currentColor;
-  border-radius: 50%;
-  color: var(--status-ok);
-  font: 800 11px/1 var(--font-sans);
-}
-.lfs-notice--warn .lfs-notice__icon {
-  color: var(--status-warning);
-}
-.lfs-notice__copy {
-  flex: 1;
-  min-width: 0;
-}
-.lfs-notice__title-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-primary);
-  font: 650 12px/1.3 var(--font-sans);
-}
-.lfs-notice__status {
-  padding: 2px 6px;
+  height: 18px;
+  padding: 0 7px;
+  border: 1px solid transparent;
   border-radius: 999px;
+  font: 700 9.5px/1 var(--font-mono);
+  letter-spacing: 0.05em;
+  flex: 0 0 auto;
+}
+.lfs-chip--ok {
   background: var(--success-soft);
   color: var(--success-text);
-  font: 700 9.5px/1.2 var(--font-sans);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
-.lfs-notice--warn .lfs-notice__status {
-  background: var(--warn-soft);
-  color: var(--status-warning);
-}
-.lfs-notice p {
-  margin: 3px 0 0;
-}
-.lfs-notice__action {
-  flex: 0 0 auto;
-  height: 26px;
-  padding: 0 9px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  font: 600 10.5px/1 var(--font-sans);
+/* The broken chip is a button — clicking re-probes after an outside repair —
+   and the border is its affordance rung. */
+.lfs-chip--broken {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+  border-color: var(--danger-border);
   cursor: pointer;
 }
-.lfs-notice__action:hover:not(:disabled) {
-  border-color: var(--border-default);
-  color: var(--text-primary);
+.lfs-chip--broken:hover:not(:disabled) {
+  border-color: var(--danger-text);
 }
-.lfs-notice__action:disabled {
+.lfs-chip--broken:disabled {
   cursor: default;
   opacity: 0.65;
-}
-.lfs-notice__setup {
-  margin: 9px 0 0 30px;
-  border-top: 1px solid var(--border-subtle);
-  padding-top: 8px;
-}
-.lfs-notice__setup summary {
-  width: fit-content;
-  color: var(--text-primary);
-  font-weight: 650;
-  cursor: pointer;
-}
-.lfs-notice__platforms {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 9px;
-}
-.lfs-notice__platforms section {
-  min-width: 0;
-  padding: 9px 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--bg-panel);
-}
-.lfs-notice__platforms h3 {
-  margin: 0 0 6px;
-  color: var(--text-primary);
-  font: 650 10.5px/1.2 var(--font-sans);
-}
-.lfs-notice__platforms pre {
-  margin: 0;
-  overflow-x: auto;
-  color: var(--text-secondary);
-  font: 400 10.5px/1.45 var(--font-mono);
-  user-select: text;
-}
-@container (max-width: 720px) {
-  .lfs-notice__platforms {
-    grid-template-columns: 1fr;
-  }
 }
 .titlebar__repo {
   /* --accent, not --accent-bright: this is the leading breadcrumb crumb, and
