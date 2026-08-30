@@ -17,6 +17,8 @@ type FileInsightKind = "history" | "blame";
 type ActiveOperation = {
   operationId: string;
   controller: AbortController;
+  /** Who may cancel this read, and whose next read supersedes it. */
+  owner: string;
   webContentsId?: number;
 };
 
@@ -61,10 +63,20 @@ export function registerFileInsightHandlers(
 } {
   const live = new Map<string, ActiveOperation>();
   const fileLists = createFileListCache();
+  // A renderer is identified by its webContents id, which is all the ownership
+  // CommandContext carries. Main-initiated calls have none and therefore share
+  // one slot per kind: two of them would supersede and cancel each other.
+  // Nothing dispatches these outside a renderer today, and giving each call its
+  // own identity is not possible from here — CommandBus builds a fresh context
+  // object per dispatch, so keying on it would stop a caller from cancelling
+  // even its own read. Fixing it properly means an explicit owner on
+  // CommandContext, which is a change to the shared protocol.
+  const ownerId = (ctx: CommandContext): string =>
+    ctx.webContentsId === undefined ? "local" : `wc-${ctx.webContentsId}`;
   const liveKey = (kind: FileInsightKind, ctx: CommandContext): string =>
-    `${ctx.webContentsId ?? "local"}:${kind}`;
+    `${ownerId(ctx)}:${kind}`;
   const ownedBy = (operation: ActiveOperation, ctx: CommandContext): boolean =>
-    operation.webContentsId === ctx.webContentsId;
+    operation.owner === ownerId(ctx);
 
   const pathOf = (worktreeId: string): string | null =>
     (
@@ -85,6 +97,7 @@ export function registerFileInsightHandlers(
     const operation: ActiveOperation = {
       operationId,
       controller: new AbortController(),
+      owner: ownerId(ctx),
       ...(ctx.webContentsId === undefined
         ? {}
         : { webContentsId: ctx.webContentsId })
@@ -201,7 +214,7 @@ export function registerFileInsightHandlers(
         live.delete(key);
       }
     },
-    /** Live Git reads this process is holding. Exposed for tests. */
+    /** Live Git reads this process is holding — the cap this module enforces. */
     liveReads: () => live.size
   };
 }

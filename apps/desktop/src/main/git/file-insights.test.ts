@@ -12,7 +12,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { err, ok, type Result } from "@pwrgit/shared";
 import type { GitExec, GitOutput } from "./dugite";
 import {
-  countHistoryRecords,
   FILE_BLAME_MAX_BYTES,
   parseFileHistory,
   readFileBlame,
@@ -79,6 +78,18 @@ function commitAs(
     stdio: "ignore"
   });
   return git(cwd, "rev-parse", "HEAD");
+}
+
+/** Records every argv the module hands to Git, then delegates for real. */
+function recording(): { git: GitExec; calls: string[][] } {
+  const calls: string[][] = [];
+  return {
+    calls,
+    git: (args, cwd, options) => {
+      calls.push([...args]);
+      return systemGit(args, cwd, options);
+    }
+  };
 }
 
 const ADA = { name: "Ada Lovelace", email: "ada@example.test" };
@@ -371,18 +382,6 @@ describe("Git work a read is allowed to do", () => {
 
   afterAll(() => rmSync(plainRoot, { recursive: true, force: true }));
 
-  /** Records every argv the module hands to Git, then delegates for real. */
-  const recording = (): { git: GitExec; calls: string[][] } => {
-    const calls: string[][] = [];
-    return {
-      calls,
-      git: (args, cwd, options) => {
-        calls.push([...args]);
-        return systemGit(args, cwd, options);
-      }
-    };
-  };
-
   it("skips the worktree status scan when HEAD already has the path", async () => {
     const { git: spy, calls } = recording();
 
@@ -459,8 +458,10 @@ describe("hardened history paging", () => {
     // Two commits, one of which carries no name-status and so parses to nothing.
     const stdout = record("a".repeat(40), "M\0f.txt\0") + record("b".repeat(40), "");
 
-    expect(parseFileHistory(stdout)).toHaveLength(1);
-    expect(countHistoryRecords(stdout)).toBe(2);
+    // One pass reports both, so paging and rendering cannot disagree about
+    // what counts as a record.
+    expect(parseFileHistory(stdout)).toMatchObject({ records: 2 });
+    expect(parseFileHistory(stdout).entries).toHaveLength(1);
   });
 
   it("refuses a cursor whose lineage path escapes the worktree", async () => {
@@ -489,7 +490,7 @@ describe("hardened history paging", () => {
   });
 
   it("reads pathspecs literally, so a magic prefix cannot widen the query", async () => {
-    const { git: spy, calls } = recording2();
+    const { git: spy, calls } = recording();
     await readFileHistory(spy, repo, {
       path: "docs/guide.txt",
       context: { kind: "commit", hash: editedCommit }
@@ -499,14 +500,3 @@ describe("hardened history paging", () => {
   });
 });
 
-/** Same recorder as above; this describe runs against the shared fixture. */
-function recording2(): { git: GitExec; calls: string[][] } {
-  const calls: string[][] = [];
-  return {
-    calls,
-    git: (args, cwd, options) => {
-      calls.push([...args]);
-      return systemGit(args, cwd, options);
-    }
-  };
-}

@@ -138,20 +138,20 @@ function historyStatus(code: string | undefined): FileStatus {
 /** Parse the record- and NUL-separated `git log --follow --name-status -z`
  * shape. NUL separators keep tabs, newlines, and non-ASCII path bytes out of
  * Git's quoted-path representation. */
-/** Commits Git actually returned, whether or not each one parses. Paging is
- *  gated on this and not on `parseFileHistory().length`: a record this module
- *  fails to read is a reason to show less, never a reason to declare the file's
- *  history finished and strand every older commit. */
-export function countHistoryRecords(stdout: string): number {
-  let records = 0;
-  for (const rawRecord of stdout.split("\x1e")) {
-    if (FULL_HASH.test(rawRecord.split("\0")[0] ?? "")) records += 1;
-  }
-  return records;
-}
-
-export function parseFileHistory(stdout: string): FileHistoryEntry[] {
+/**
+ * Entries, plus the commits Git actually returned.
+ *
+ * Paging is gated on `records`, never on `entries.length`: a record this module
+ * fails to read is a reason to show less, never a reason to declare the file's
+ * history finished and strand every older commit. Both come from one pass so
+ * the two can never disagree about what a record is.
+ */
+export function parseFileHistory(stdout: string): {
+  entries: FileHistoryEntry[];
+  records: number;
+} {
   const entries: FileHistoryEntry[] = [];
+  let records = 0;
   for (const rawRecord of stdout.split("\x1e")) {
     const fields = rawRecord.split("\0");
     const [
@@ -163,6 +163,7 @@ export function parseFileHistory(stdout: string): FileHistoryEntry[] {
       subject = ""
     ] = fields;
     if (!FULL_HASH.test(hash)) continue;
+    records += 1;
 
     let statusIndex = 6;
     let rawStatus = "";
@@ -194,7 +195,7 @@ export function parseFileHistory(stdout: string): FileHistoryEntry[] {
       ...(rename && firstPath !== "" ? { previousPath: firstPath } : {})
     });
   }
-  return entries;
+  return { entries, records };
 }
 
 type WorkingHeadPath = {
@@ -367,9 +368,9 @@ export async function readFileHistory(
   // `limit` even when a record was dropped — the next page resumes where this
   // one stopped either way.
   return ok({
-    entries: parsed.slice(0, limit),
+    entries: parsed.entries.slice(0, limit),
     nextCursor:
-      countHistoryRecords(checked.value.stdout) > limit
+      parsed.records > limit
         ? encodeHistoryCursor({ ...cursor, offset: cursor.offset + limit })
         : null
   });

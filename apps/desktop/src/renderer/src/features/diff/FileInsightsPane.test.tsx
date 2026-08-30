@@ -657,6 +657,73 @@ describe("FileInsightsPane", () => {
     expect(container.textContent).toContain("alpha");
   });
 
+  it("recovers when the dispatch itself rejects", async () => {
+    // preload hands back `ipcRenderer.invoke` uncaught, so a transport failure
+    // REJECTS rather than resolving an err Result. Unhandled, that never
+    // released the in-flight guard and the view refused every retry.
+    dispatchMock.mockImplementation((name: string) =>
+      name === "file:history"
+        ? Promise.reject(new Error("ipc transport failure"))
+        : Promise.resolve(ok({}))
+    );
+
+    await act(async () => {
+      root.render(
+        <FileInsightsPane
+          worktreeId="wt-1"
+          path="docs/guide.txt"
+          context={{ kind: "workingTree" }}
+          initialTab="history"
+          onClose={() => undefined}
+          onShowCommit={() => true}
+        />
+      );
+    });
+    await settle();
+
+    expect(container.textContent).not.toContain("Loading file history…");
+    expect(container.textContent).toContain("ipc transport failure");
+
+    // And the guard let go, so Retry actually re-reads.
+    dispatchMock.mockImplementation((name: string) =>
+      name === "file:history"
+        ? Promise.resolve(ok({ entries: [historyEntry()], nextCursor: null }))
+        : Promise.resolve(ok({}))
+    );
+    const retry = container.querySelector<HTMLButtonElement>(
+      ".file-insight__empty button"
+    );
+    expect(retry).not.toBeNull();
+    await act(async () => retry?.click());
+    await settle();
+    expect(container.textContent).toContain("move guide into docs");
+  });
+
+  it("recovers when a blame dispatch rejects", async () => {
+    dispatchMock.mockImplementation((name: string) =>
+      name === "file:blame"
+        ? Promise.reject(new Error("ipc transport failure"))
+        : Promise.resolve(ok({}))
+    );
+
+    await act(async () => {
+      root.render(
+        <FileInsightsPane
+          worktreeId="wt-1"
+          path="docs/guide.txt"
+          context={{ kind: "workingTree" }}
+          initialTab="blame"
+          onClose={() => undefined}
+          onShowCommit={() => true}
+        />
+      );
+    });
+    await settle();
+
+    expect(container.textContent).not.toContain("Loading blame…");
+    expect(container.textContent).toContain("ipc transport failure");
+  });
+
   it("shows bounded binary and load-error states", async () => {
     dispatchMock.mockImplementation((name: string) => {
       if (name === "file:blame") {

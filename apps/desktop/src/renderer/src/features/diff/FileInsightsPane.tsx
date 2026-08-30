@@ -96,11 +96,16 @@ function useAuthorIdentities(
         authorName: candidate.authorName,
         authorEmail: candidate.authorEmail
       }))
-    }).then((result) => {
-      if (active && result.ok) {
-        setLookups((current) => ({ ...current, ...result.value }));
-      }
-    });
+    }).then(
+      (result) => {
+        if (active && result.ok) {
+          setLookups((current) => ({ ...current, ...result.value }));
+        }
+      },
+      // Identities are decoration: a failure leaves the Git author name in
+      // place. Swallowed on purpose, but swallowed — not left unhandled.
+      () => undefined
+    );
     return () => {
       active = false;
     };
@@ -184,6 +189,17 @@ function RewindIcon() {
   );
 }
 
+/**
+ * `dispatch` answers command failures with an err Result, but preload hands
+ * back `ipcRenderer.invoke` uncaught, so a TRANSPORT failure rejects instead.
+ * A rejection that nobody handles never releases the in-flight guard, and the
+ * view then refuses every retry and sits on its spinner forever — so every
+ * read here settles through this, whichever way it ends.
+ */
+function settledMessage(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
 function cancelOperations(operationIds: Set<string>): void {
   for (const operationId of operationIds) {
     void dispatch("file:cancelInsight", { operationId });
@@ -241,21 +257,28 @@ function HistoryView({
       path,
       context,
       ...(cursor === undefined ? {} : { cursor })
-    }).then((result) => {
-      if (!activeOperations.current.delete(operationId)) return;
-      if (!result.ok) {
-        setError(result.error.message);
+    }).then(
+      (result) => {
+        if (!activeOperations.current.delete(operationId)) return;
+        if (!result.ok) {
+          setError(result.error.message);
+          setLoading(false);
+          return;
+        }
+        setEntries((current) =>
+          cursor === undefined
+            ? result.value.entries
+            : [...current, ...result.value.entries]
+        );
+        setNextCursor(result.value.nextCursor);
         setLoading(false);
-        return;
+      },
+      (cause: unknown) => {
+        if (!activeOperations.current.delete(operationId)) return;
+        setError(settledMessage(cause));
+        setLoading(false);
       }
-      setEntries((current) =>
-        cursor === undefined
-          ? result.value.entries
-          : [...current, ...result.value.entries]
-      );
-      setNextCursor(result.value.nextCursor);
-      setLoading(false);
-    });
+    );
   };
 
   const moreRef = useAutoPaging(nextCursor, loading, error, load);
@@ -454,19 +477,26 @@ function BlameView({
       path,
       context,
       ...(cursor === undefined ? {} : { cursor })
-    }).then((result) => {
-      if (!activeOperations.current.delete(operationId)) return;
-      if (!result.ok) {
-        setError(result.error.message);
+    }).then(
+      (result) => {
+        if (!activeOperations.current.delete(operationId)) return;
+        if (!result.ok) {
+          setError(result.error.message);
+          setLoading(false);
+          return;
+        }
+        setPages((current) =>
+          cursor === undefined ? [result.value] : [...current, result.value]
+        );
+        setNextCursor(result.value.nextCursor);
         setLoading(false);
-        return;
+      },
+      (cause: unknown) => {
+        if (!activeOperations.current.delete(operationId)) return;
+        setError(settledMessage(cause));
+        setLoading(false);
       }
-      setPages((current) =>
-        cursor === undefined ? [result.value] : [...current, result.value]
-      );
-      setNextCursor(result.value.nextCursor);
-      setLoading(false);
-    });
+    );
   };
 
   const moreRef = useAutoPaging(nextCursor, loading, error, load);
@@ -648,12 +678,19 @@ function CommitFileDiffView({
       worktreeId,
       hash: preview.hash,
       path: preview.path
-    }).then((result) => {
-      if (!active) return;
-      if (result.ok) setPatch(result.value);
-      else setError(result.error.message);
-      setLoading(false);
-    });
+    }).then(
+      (result) => {
+        if (!active) return;
+        if (result.ok) setPatch(result.value);
+        else setError(result.error.message);
+        setLoading(false);
+      },
+      (cause: unknown) => {
+        if (!active) return;
+        setError(settledMessage(cause));
+        setLoading(false);
+      }
+    );
     return () => {
       active = false;
     };

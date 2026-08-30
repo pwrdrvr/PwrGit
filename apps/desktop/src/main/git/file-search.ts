@@ -12,29 +12,41 @@ export const FILE_LIST_TTL_MS = 5_000;
 const FILE_LIST_CACHE_MAX = 3;
 
 /**
- * One tracked path with everything ranking needs precomputed.
+ * A worktree's tracked paths, in the shape ranking actually reads.
  *
- * The lowercase forms live here rather than in the ranking loop because that
- * loop runs on every keystroke: folding a hundred thousand paths per character
- * typed allocated two strings per path and threw both away.
+ * Parallel arrays rather than one object per path: `name` and `dir` are needed
+ * only for the at-most-`limit` rows that get returned, so materialising them
+ * for every path — and holding them for the session, since the TTL forces a
+ * re-read but never evicts — cost roughly four times the string data of the
+ * path list on a large monorepo. The basename offset is an integer, so scoring
+ * reads the basename without allocating one.
  */
-export type IndexedPath = FileSearchHit & {
-  lowerPath: string;
-  lowerName: string;
+export type PathIndex = {
+  paths: string[];
+  lower: string[];
+  /** Offset of the basename within each path: `lastIndexOf("/") + 1`. */
+  nameStart: Int32Array;
 };
 
-export function indexFilePaths(paths: readonly string[]): IndexedPath[] {
-  return paths.map((path) => {
-    const cut = path.lastIndexOf("/");
-    const name = cut === -1 ? path : path.slice(cut + 1);
-    return {
-      path,
-      name,
-      dir: cut === -1 ? "" : path.slice(0, cut),
-      lowerPath: path.toLowerCase(),
-      lowerName: name.toLowerCase()
-    };
-  });
+export function indexFilePaths(paths: readonly string[]): PathIndex {
+  const nameStart = new Int32Array(paths.length);
+  const lower: string[] = new Array<string>(paths.length);
+  for (let i = 0; i < paths.length; i += 1) {
+    const path = paths[i] ?? "";
+    lower[i] = path.toLowerCase();
+    nameStart[i] = path.lastIndexOf("/") + 1;
+  }
+  return { paths: [...paths], lower, nameStart };
+}
+
+function hit(index: PathIndex, i: number): FileSearchHit {
+  const path = index.paths[i] ?? "";
+  const start = index.nameStart[i] ?? 0;
+  return {
+    path,
+    name: path.slice(start),
+    dir: start === 0 ? "" : path.slice(0, start - 1)
+  };
 }
 
 /**
@@ -51,47 +63,77 @@ export function indexFilePaths(paths: readonly string[]): IndexedPath[] {
  * kind of result behind noise.
  */
 export function rankIndexedPaths(
-  index: readonly IndexedPath[],
+  index: PathIndex,
   query: string,
   limit: number
 ): FileSearchHit[] {
   const needle = query.trim().toLowerCase();
   if (needle === "") return [];
 
-  const scored: { entry: IndexedPath; score: number }[] = [];
-  for (const entry of index) {
+  const scored: { at: number; score: number }[] = [];
+  for (let at = 0; at < index.lower.length; at += 1) {
+    const lower = index.lower[at] ?? "";
+    const start = index.nameStart[at] ?? 0;
+    const nameLength = lower.length - start;
     const score =
-      entry.lowerName === needle
+      nameLength === needle.length && lower.startsWith(needle, start)
         ? 0
-        : entry.lowerName.startsWith(needle)
+        : lower.startsWith(needle, start)
           ? 1
-          : entry.lowerPath.endsWith(needle)
+          : lower.endsWith(needle)
             ? 2
-            : entry.lowerName.includes(needle)
+            : lower.indexOf(needle, start) !== -1
               ? 3
-              : entry.lowerPath.includes(needle)
+              : lower.includes(needle)
                 ? 4
                 : null;
     if (score === null) continue;
-    scored.push({ entry, score });
+    scored.push({ at, score });
   }
 
   return scored
-    .sort(
-      (a, b) =>
-        a.score - b.score ||
-        a.entry.path.length - b.entry.path.length ||
-        (a.entry.path < b.entry.path ? -1 : a.entry.path > b.entry.path ? 1 : 0)
-    )
+    .sort((a, b) => {
+      if (a.score !== b.score) return a.score - b.score;
+      const left = index.paths[a.at] ?? "";
+      const right = index.paths[b.at] ?? "";
+      return (
+        left.length - right.length ||
+        (left < right ? -1 : left > right ? 1 : 0)
+      );
+    })
     .slice(0, limit)
-    .map(({ entry }) => ({ path: entry.path, name: entry.name, dir: entry.dir }));
+    .map(({ at }) => hit(index, at));
 }
 
-type CachedList = { index: IndexedPath[]; readAt: number };
+type CachedList = { index: PathIndex; readAt: number };
+
+/** One `git ls-files` read. A plain function, not a method: the cache object's
+ *  own callers may destructure it, and `this` would not survive that. */
+async function readTrackedPaths(
+  git: GitExec,
+  cwd: string,
+  signal?: AbortSignal
+): Promise<Result<PathIndex>> {
+  const args = ["-c", "core.quotePath=false", "ls-files", "-z", "--cached"];
+  const raw = await git(args, cwd, {
+    ...NO_OPTIONAL_LOCKS,
+    ...(signal === undefined ? {} : { signal })
+  });
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, args);
+  if (!checked.ok) return checked;
+  return ok(
+    indexFilePaths(checked.value.stdout.split("\0").filter((path) => path !== ""))
+  );
+}
 
 /** Tracked-path indexes, keyed by worktree, re-read on a short timer. */
 export function createFileListCache(now: () => number = Date.now) {
   const lists = new Map<string, CachedList>();
+  // Reads in flight, so concurrent queries for one worktree share a single
+  // `git ls-files` instead of spawning one apiece. The palette debounces, but
+  // the debounce lives in the renderer and this process owns process lifetime.
+  const inFlight = new Map<string, Promise<Result<PathIndex>>>();
 
   return {
     async index(
@@ -99,39 +141,33 @@ export function createFileListCache(now: () => number = Date.now) {
       worktreeId: string,
       cwd: string,
       signal?: AbortSignal
-    ): Promise<Result<IndexedPath[]>> {
+    ): Promise<Result<PathIndex>> {
       const cached = lists.get(worktreeId);
       if (cached !== undefined && now() - cached.readAt < FILE_LIST_TTL_MS) {
         return ok(cached.index);
       }
-      const args = [
-        "-c",
-        "core.quotePath=false",
-        "ls-files",
-        "-z",
-        "--cached"
-      ];
-      const raw = await git(args, cwd, {
-        ...NO_OPTIONAL_LOCKS,
-        ...(signal === undefined ? {} : { signal })
-      });
-      if (!raw.ok) return raw;
-      const checked = requireExit0(raw.value, args);
-      if (!checked.ok) return checked;
-      const index = indexFilePaths(
-        checked.value.stdout.split("\0").filter((path) => path !== "")
-      );
-      // Insertion order is the eviction order; re-reading a worktree moves it
-      // back to the end so the three most recently used lists are the ones
-      // kept.
-      lists.delete(worktreeId);
-      lists.set(worktreeId, { index, readAt: now() });
-      while (lists.size > FILE_LIST_CACHE_MAX) {
-        const oldest = lists.keys().next();
-        if (oldest.done === true) break;
-        lists.delete(oldest.value);
+      const running = inFlight.get(worktreeId);
+      if (running !== undefined) return running;
+
+      const read = readTrackedPaths(git, cwd, signal);
+      inFlight.set(worktreeId, read);
+      try {
+        const result = await read;
+        if (!result.ok) return result;
+        // Insertion order is the eviction order; re-reading a worktree moves it
+        // back to the end so the three most recently used lists are the ones
+        // kept.
+        lists.delete(worktreeId);
+        lists.set(worktreeId, { index: result.value, readAt: now() });
+        while (lists.size > FILE_LIST_CACHE_MAX) {
+          const oldest = lists.keys().next();
+          if (oldest.done === true) break;
+          lists.delete(oldest.value);
+        }
+        return result;
+      } finally {
+        inFlight.delete(worktreeId);
       }
-      return ok(index);
     },
     forget(worktreeId: string): void {
       lists.delete(worktreeId);

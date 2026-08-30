@@ -79,13 +79,14 @@ describe("createFileListCache", () => {
     const result = await cache.index(listing(["Src/App.TSX"]), "wt-1", "/repo");
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value[0]).toEqual({
-      path: "Src/App.TSX",
-      name: "App.TSX",
-      dir: "Src",
-      lowerPath: "src/app.tsx",
-      lowerName: "app.tsx"
-    });
+    // Parallel arrays, not one object per path — `name` and `dir` are built
+    // only for the rows that get returned.
+    expect(result.value.paths).toEqual(["Src/App.TSX"]);
+    expect(result.value.lower).toEqual(["src/app.tsx"]);
+    expect([...result.value.nameStart]).toEqual([4]);
+    expect(rankIndexedPaths(result.value, "app.tsx", 5)).toEqual([
+      { path: "Src/App.TSX", name: "App.TSX", dir: "Src" }
+    ]);
   });
 
   it("re-reads only after the TTL lapses", async () => {
@@ -95,7 +96,7 @@ describe("createFileListCache", () => {
 
     const paths = async (): Promise<string[]> => {
       const result = await cache.index(git, "wt-1", "/repo");
-      return result.ok ? result.value.map((entry) => entry.path) : [];
+      return result.ok ? result.value.paths : [];
     };
 
     expect(await paths()).toEqual(["a.txt", "b.txt"]);
@@ -114,5 +115,29 @@ describe("createFileListCache", () => {
       await cache.index(git, id, "/repo");
     }
     expect(cache.size()).toBe(3);
+  });
+
+  it("shares one ls-files between concurrent readers of a worktree", async () => {
+    let reads = 0;
+    const git: GitExec = () => {
+      reads += 1;
+      return new Promise((resolve) =>
+        queueMicrotask(() =>
+          resolve(ok({ stdout: "a.txt\0b.txt\0", stderr: "", exitCode: 0 }))
+        )
+      );
+    };
+    const cache = createFileListCache(() => 0);
+
+    const [first, second] = await Promise.all([
+      cache.index(git, "wt-1", "/repo"),
+      cache.index(git, "wt-1", "/repo")
+    ]);
+
+    // Two IPC messages arriving together used to spawn two Git processes.
+    expect(reads).toBe(1);
+    expect(first.ok && second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(second.value.paths).toEqual(["a.txt", "b.txt"]);
   });
 });
