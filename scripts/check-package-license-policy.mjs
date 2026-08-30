@@ -1,7 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+
+import { isCliEntrypoint } from "./lib/cli-entrypoint.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FIRST_PARTY_OWNER = "PwrDrvr LLC";
@@ -197,9 +199,6 @@ function runCli() {
   console.log("package license policy check passed");
 }
 
-if (
-  process.argv[1] !== undefined &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
-) {
+if (isCliEntrypoint(import.meta.url)) {
   runCli();
 }

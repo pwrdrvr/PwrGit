@@ -58,6 +58,11 @@ pnpm lint       # every check CI runs, cheapest-first (see below)
 Typecheck job runs exactly this one command, so **add new repo-wide checks to
 the chain in the root `package.json`**, not as another CI step.
 
+`licenses:check` chains three scripts that are easy to mistake for each other;
+[scripts/AGENTS.md](scripts/AGENTS.md) says which one judges a dependency's
+license and which two do not. **Adding a dependency under an unfamiliar license
+is a legal decision — read that file before making the build green.**
+
 `lint:boundaries` is dependency-cruiser (`.dependency-cruiser.cjs`). It enforces
 that main, preload, and renderer stay three separate bundles sharing only
 `@pwrgit/shared` — violations there type-check and usually bundle, then fail at
