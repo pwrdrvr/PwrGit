@@ -102,3 +102,9 @@ for the notice scope and embedded Git requirements.
 ## Conduct
 
 Participation is governed by [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
+## Security
+
+Do not report vulnerabilities in public issues or pull requests. Use GitHub
+private vulnerability reporting, or email security@pwrdrvr.com. The full
+policy, including what to put in a report, is in [SECURITY.md](SECURITY.md).
