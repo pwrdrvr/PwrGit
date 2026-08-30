@@ -16,10 +16,14 @@ import type { GitExec, GitOutput } from "./dugite";
 import { findRepoDirs, RepoIndexer, scanRepoRoot } from "./repo-indexer";
 
 // Drive the indexer with system git so the test is independent of dugite's
-// bundled binary.
+// bundled binary. Address the repo with `-C` and keep the process cwd out of
+// it, exactly as `gitProcessInvocation` does in production: several tests here
+// rename a scanned directory out from under a git run, and on Windows a
+// descendant git.exe still holding it as its native cwd fails that rename with
+// EPERM/EBUSY (see this directory's AGENTS.md).
 const systemGit: GitExec = (args, cwd) =>
   new Promise<Result<GitOutput>>((resolve) => {
-    const proc = spawn("git", args, { cwd });
+    const proc = spawn("git", ["-C", cwd, ...args], { cwd: tmpdir() });
     let stdout = "";
     let stderr = "";
     proc.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
@@ -761,6 +765,104 @@ describe("RepoIndexer", () => {
     renameSync(goingPath, movedPath);
     const pruned = await isolatedIndexer.rescanProfile(profile);
     expect(pruned.map((r) => r.name)).toEqual(["staying"]);
+  });
+
+  it("suppresses the prune for every root while any one is unreadable", async () => {
+    const parent = mkdtempSync(join(tmpdir(), "pwrgit-two-roots-"));
+    const healthyRoot = join(parent, "healthy");
+    const detachableRoot = join(parent, "detachable");
+    const detachedRoot = join(parent, "detachable-gone");
+    const goingPath = join(healthyRoot, "going");
+    const movedPath = join(parent, "going-elsewhere");
+    initRepo(join(healthyRoot, "staying"));
+    initRepo(goingPath);
+    initRepo(join(detachableRoot, "onvolume"));
+
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({
+      name: "Two roots",
+      email: "tworoots@example.com",
+      roots: [healthyRoot, detachableRoot]
+    });
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
+    expect(
+      (await isolatedIndexer.rescanProfile(profile)).map((r) => r.name)
+    ).toEqual(["going", "onvolume", "staying"]);
+
+    // One root detaches while a repo is genuinely deleted from the OTHER,
+    // perfectly readable root. The flag is profile-wide deliberately: scoping
+    // the prune per root would mean matching git-normalised repo paths against
+    // configured root strings, and on Windows those come from different sources
+    // with different separators — a false negative there is the data loss this
+    // guard exists to prevent. So `going` lingers rather than risking that.
+    renameSync(detachableRoot, detachedRoot);
+    renameSync(goingPath, movedPath);
+    try {
+      expect(
+        (await isolatedIndexer.rescanProfile(profile)).map((r) => r.name)
+      ).toEqual(["going", "onvolume", "staying"]);
+    } finally {
+      renameSync(detachedRoot, detachableRoot);
+    }
+
+    // Every root readable again, so the scan is believed and the backlog
+    // clears: only the repo that really went away is dropped.
+    expect(
+      (await isolatedIndexer.rescanProfile(profile)).map((r) => r.name)
+    ).toEqual(["onvolume", "staying"]);
+  });
+
+  it("stamps the scan clock only when every root could be listed", async () => {
+    const parent = mkdtempSync(join(tmpdir(), "pwrgit-scan-clock-"));
+    const isolatedRoot = join(parent, "volume");
+    const detachedRoot = join(parent, "volume-detached");
+    const emptyRoot = mkdtempSync(join(tmpdir(), "pwrgit-scan-clock-empty-"));
+    initRepo(join(isolatedRoot, "repo"));
+
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({
+      name: "Clock",
+      email: "clock@example.com",
+      roots: [isolatedRoot]
+    });
+    let now = 1_000;
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit, {
+      profileRescanIntervalMs: 10_000,
+      now: () => now
+    });
+    await isolatedIndexer.rescanProfile(profile);
+    expect(isolatedIndexer.shouldRescanProfile(profile.id)).toBe(false);
+
+    // A scan that could not list its root never completed a pass, so it must
+    // not arm the throttle. Stamping it would leave a volume mounted a minute
+    // later undiscovered for a day — and there is no manual rescan channel to
+    // fall back on, only editing the roots list.
+    renameSync(isolatedRoot, detachedRoot);
+    try {
+      now += 20_000;
+      await isolatedIndexer.rescanProfile(profile);
+      expect(
+        isolatedDb
+          .prepare(
+            "SELECT scanned_at_ms FROM profile_scan_state WHERE profile_id = ?"
+          )
+          .get(profile.id)
+      ).toEqual({ scanned_at_ms: 1_000 });
+      expect(isolatedIndexer.shouldRescanProfile(profile.id)).toBe(true);
+    } finally {
+      renameSync(detachedRoot, isolatedRoot);
+    }
+
+    // A root that reads fine but holds no repos DID complete a pass. It refuses
+    // to prune on that, but it still stamps — otherwise a legitimately empty
+    // root would re-walk on every profile open.
+    const emptied = profiles.setRoots(profile.id, [emptyRoot]);
+    if (emptied === null) throw new Error("profile missing");
+    now += 20_000;
+    await isolatedIndexer.rescanProfile(emptied);
+    expect(isolatedIndexer.shouldRescanProfile(profile.id)).toBe(false);
   });
 
   it("prunes every scanned repo once the last root is removed", async () => {

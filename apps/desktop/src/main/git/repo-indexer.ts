@@ -338,7 +338,13 @@ export class RepoIndexer {
       if (canPruneFromScan(profile, everyRootReadable, seenRepoIds.length)) {
         this.pruneScannedRepos(profile.id, seenRepoIds);
       }
-      this.markProfileScanned(profile.id);
+      // The scan clock records that a discovery pass got to look, which is a
+      // weaker claim than the one pruning needs: a readable root that holds no
+      // repos did complete a pass. A root that could not be listed did not, and
+      // stamping it would arm the 24h throttle in `shouldRescanProfile` off a
+      // scan that saw nothing — leaving the volume undiscovered for a day after
+      // it mounts, with no manual rescan to reach for.
+      if (everyRootReadable) this.markProfileScanned(profile.id);
     })();
 
     return this.listRepos(profile.id);
@@ -1357,7 +1363,14 @@ function worktreeShape(path: string, branch: string, isPrimary: boolean): Worktr
   };
 }
 
-/** Depth-bounded scan for directories containing a `.git` entry. */
+/**
+ * Depth-bounded scan for directories containing a `.git` entry.
+ *
+ * Reference implementation for the depth and skip rules, and the oracle
+ * `scanRepoRoot`'s test compares against — not a production scanner. It cannot
+ * tell an unreadable root from an empty one, so anything whose result feeds
+ * `pruneScannedRepos` must use `scanRepoRoot` instead.
+ */
 export function findRepoDirs(
   root: string,
   maxDepth: number = MAX_SCAN_DEPTH
