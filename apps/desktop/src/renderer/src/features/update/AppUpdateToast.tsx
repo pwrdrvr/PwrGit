@@ -13,9 +13,10 @@
 // Dismissal is per version: a newer update raises the toast again.
 
 import { useEffect, useState } from "react";
-import type { AppUpdateCheckResult, AppUpdateStatus } from "@pwrgit/shared";
-import { dispatch, subscribe } from "../../lib/pwrgit";
+import type { AppUpdateCheckResult } from "@pwrgit/shared";
+import { subscribe } from "../../lib/pwrgit";
 import { dismissToastKey, showErrorToast, showInfoToast } from "../../lib/toast";
+import { useAppUpdateStatus } from "./useAppUpdateStatus";
 
 /** One menu check, one toast — see `Toast.key`. */
 export const UPDATE_CHECK_TOAST_KEY = "app:updateCheckResult";
@@ -61,30 +62,17 @@ export function updateCheckToastCopy(
 }
 
 export function AppUpdateToast() {
-  const [status, setStatus] = useState<AppUpdateStatus>({ status: "idle" });
+  const {
+    downloadedVersion: version,
+    restarting,
+    restartError,
+    restart,
+    resetRestart,
+    setStatus
+  } = useAppUpdateStatus();
   const [dismissedVersion, setDismissedVersion] = useState<
     string | undefined
   >();
-  const [restarting, setRestarting] = useState(false);
-  const [restartError, setRestartError] = useState<string | undefined>();
-
-  // Read the current status once in case main reached `downloaded` before this
-  // window mounted, and let any real event win that race.
-  useEffect(() => {
-    let canceled = false;
-    let receivedEvent = false;
-    const unsubscribe = subscribe("app:updateStatus", (next) => {
-      receivedEvent = true;
-      if (!canceled) setStatus(next);
-    });
-    void dispatch("app:readUpdateStatus", undefined).then((result) => {
-      if (!canceled && !receivedEvent && result.ok) setStatus(result.value);
-    });
-    return () => {
-      canceled = true;
-      unsubscribe();
-    };
-  }, []);
 
   useEffect(
     () =>
@@ -95,8 +83,10 @@ export function AppUpdateToast() {
           // countdown claims a check is still in flight after it finished.
           dismissToastKey(UPDATE_CHECK_TOAST_KEY);
           // Asking again is asking to see the answer again: an update the user
-          // dismissed earlier comes back rather than the check looking dead.
+          // dismissed earlier comes back rather than the check looking dead,
+          // and it comes back without the failed restart that preceded it.
           setDismissedVersion(undefined);
+          resetRestart();
           setStatus(result);
           return;
         }
@@ -115,36 +105,10 @@ export function AppUpdateToast() {
           message: copy.message
         });
       }),
-    []
+    [resetRestart, setStatus]
   );
 
-  const version = status.status === "downloaded" ? status.version : undefined;
-
-  useEffect(() => {
-    if (version === undefined || dismissedVersion === version) return;
-    // A newly offered version arrives with a clean slate — a failed restart of
-    // the previous one has nothing to say about this one.
-    setRestartError(undefined);
-    setRestarting(false);
-  }, [dismissedVersion, version]);
-
   if (version === undefined || dismissedVersion === version) return null;
-
-  const handleRestart = async (): Promise<void> => {
-    setRestarting(true);
-    setRestartError(undefined);
-    const result = await dispatch("app:installUpdate", undefined);
-    if (!result.ok) {
-      setRestartError(result.error.message);
-      setRestarting(false);
-      return;
-    }
-    if (result.value.status === "error") {
-      setRestartError(result.value.message);
-      setRestarting(false);
-    }
-    // `restarting` — main is quitting to install; the window goes away.
-  };
 
   return (
     <aside className="app-toast" role="status" aria-live="polite">
@@ -167,7 +131,7 @@ export function AppUpdateToast() {
           type="button"
           disabled={restarting}
           onClick={() => {
-            void handleRestart();
+            void restart();
           }}
         >
           {restarting ? "Restarting…" : "Restart"}

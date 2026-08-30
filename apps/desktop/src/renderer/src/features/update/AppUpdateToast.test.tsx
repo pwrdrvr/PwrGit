@@ -140,6 +140,24 @@ describe("AppUpdateToast", () => {
     expect(toasts).toHaveLength(0);
   });
 
+  it("brings the offer back without the restart failure that preceded it", async () => {
+    await mount({ status: "downloaded", version: "0.9.0" });
+    dispatchMock.mockResolvedValue(
+      ok({ status: "error", message: "Restart refused." })
+    );
+    await act(async () => button("Restart")?.click());
+    expect(container.textContent).toContain("Restart refused.");
+
+    await act(async () => button("Dismiss")?.click());
+    await emit("app:updateCheckResult", {
+      status: "downloaded",
+      version: "0.9.0"
+    });
+
+    expect(container.textContent).toContain("Restart to update to v0.9.0.");
+    expect(container.textContent).not.toContain("Restart refused.");
+  });
+
   it("replaces its own checking notice with the menu check outcome", async () => {
     await mount({ status: "idle" });
 

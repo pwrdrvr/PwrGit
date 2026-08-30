@@ -16,6 +16,7 @@ import {
 import type { CommandBus } from "./command-bus";
 import { emitEvent } from "./ipc";
 import { logMain } from "./logs";
+import { delay } from "./util/timing";
 
 const { autoUpdater } = electronUpdater;
 
@@ -396,13 +397,6 @@ function runBackgroundUpdateCheck(trigger: "startup" | "periodic"): void {
   });
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    timer.unref?.();
-  });
-}
-
 /** Dev/QA stand-in for a real update check.
  *
  *  Real auto-update only runs in production — the dev binary is unsigned and
@@ -440,11 +434,11 @@ async function simulateDevUpdateCheck(
   logMain("info", "updater", `simulating dev update check (${trigger})`);
   updateCheckInFlight = (async (): Promise<AppUpdateCheckResult> => {
     setUpdateStatus({ status: "checking" });
-    await delay(DEV_FAKE_UPDATE_STEP_MS);
+    await delay(DEV_FAKE_UPDATE_STEP_MS, { unref: true });
     setUpdateStatus({ status: "available", version });
-    await delay(DEV_FAKE_UPDATE_STEP_MS);
+    await delay(DEV_FAKE_UPDATE_STEP_MS, { unref: true });
     setUpdateStatus({ status: "downloading", version, percent: 60 });
-    await delay(DEV_FAKE_UPDATE_STEP_MS);
+    await delay(DEV_FAKE_UPDATE_STEP_MS, { unref: true });
     heldDownloadedUpdate = {
       selection: currentUpdateSelectionKey(),
       version

@@ -4,11 +4,11 @@ import type {
   AppUpdateCheckResult,
   AppUpdateReleaseInfo,
   AppUpdateReleaseVersions,
-  AppUpdateStatus,
   UpdateChannel,
   UpdateTrain
 } from "@pwrgit/shared";
-import { dispatch, subscribe } from "../../lib/pwrgit";
+import { dispatch } from "../../lib/pwrgit";
+import { useAppUpdateStatus } from "../update/useAppUpdateStatus";
 import {
   SettingsField,
   SettingsPanelHead,
@@ -73,13 +73,13 @@ export function UpdatesSettings(props: {
   const [updateResult, setUpdateResult] = useState<
     AppUpdateCheckResult | undefined
   >();
-  const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus>({
-    status: "idle"
-  });
-  const [updateRestarting, setUpdateRestarting] = useState(false);
-  const [updateRestartError, setUpdateRestartError] = useState<
-    string | undefined
-  >();
+  const {
+    downloadedVersion,
+    restarting: updateRestarting,
+    restartError: updateRestartError,
+    restart: handleRestartUpdate,
+    setStatus: setUpdateStatus
+  } = useAppUpdateStatus();
 
   const train = props.snapshot.updates.train;
   const channel = props.snapshot.updates.channel;
@@ -93,31 +93,6 @@ export function UpdatesSettings(props: {
       canceled = true;
     };
   }, []);
-
-  useEffect(() => {
-    let canceled = false;
-    let receivedEvent = false;
-    const unsubscribe = subscribe("app:updateStatus", (status) => {
-      receivedEvent = true;
-      setUpdateStatus(status);
-      if (status.status === "downloaded") {
-        setUpdateRestartError(undefined);
-        setUpdateRestarting(false);
-      }
-    });
-    void dispatch("app:readUpdateStatus", undefined).then((result) => {
-      if (!canceled && !receivedEvent && result.ok) {
-        setUpdateStatus(result.value);
-      }
-    });
-    return () => {
-      canceled = true;
-      unsubscribe();
-    };
-  }, []);
-
-  const downloadedVersion =
-    updateStatus.status === "downloaded" ? updateStatus.version : undefined;
 
   const handleCheckForUpdate = async (): Promise<void> => {
     setUpdateChecking(true);
@@ -134,21 +109,6 @@ export function UpdatesSettings(props: {
       setUpdateResult({ status: "error", message: result.error.message });
     }
     setUpdateChecking(false);
-  };
-
-  const handleRestartUpdate = async (): Promise<void> => {
-    setUpdateRestarting(true);
-    setUpdateRestartError(undefined);
-    const result = await dispatch("app:installUpdate", undefined);
-    if (!result.ok) {
-      setUpdateRestartError(result.error.message);
-      setUpdateRestarting(false);
-      return;
-    }
-    if (result.value.status === "error") {
-      setUpdateRestartError(result.value.message);
-      setUpdateRestarting(false);
-    }
   };
 
   return (
