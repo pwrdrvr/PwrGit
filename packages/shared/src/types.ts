@@ -480,6 +480,25 @@ export type GitLfsStatus =
       version?: string;
     };
 
+/** Whether a checkout that asks for LFS can actually apply it. The single
+ *  definition of "ready" for both processes — main records it, the renderer
+ *  paints it — so the two can never disagree on what counts as working. */
+export function isGitLfsReady(status: GitLfsStatus): boolean {
+  return status.required && status.installed && status.configured;
+}
+
+/** What an LFS check answers. A broken setup nags on every check; a working
+ *  one is announced once per transition into working — the main process keeps
+ *  that record per repo, so every worktree of a repo shares one announcement
+ *  and it survives restarts. */
+export type GitLfsReport = {
+  status: GitLfsStatus;
+  /** True exactly when this check should celebrate a working setup: the
+   *  repo's first LFS-ready check, or the first ready check after a broken
+   *  one. Steady-state ready checks answer false and stay quiet. */
+  announceReady: boolean;
+};
+
 /** A remote's forge, or `other` when no provider claims its host — which is a
  *  fact the identity marks render, not a failure. `ForgeKind` is the set of
  *  forges PwrGit can actually talk to; this is that set plus "cannot say". */

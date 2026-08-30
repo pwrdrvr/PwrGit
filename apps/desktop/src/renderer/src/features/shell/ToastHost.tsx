@@ -22,10 +22,18 @@ export function ToastHost() {
     <div className="toast-host">
       {/* Keyed by `key` where there is one, so a replacement updates the card
           in place: remounting would drop the hover-pause of a pointer that is
-          already resting on it and never fires onMouseEnter again. */}
-      {toasts.map((toast) => (
-        <ToastCard key={toast.key ?? toast.id} toast={toast} />
-      ))}
+          already resting on it and never fires onMouseEnter again.
+
+          Sticky cards sort after the transients for the same reason the
+          update toast anchors the corner: a card that outlives the come-and-go
+          must not be shoved around by it. In this bottom-anchored column the
+          later children sit nearer the corner, and growth above them leaves
+          them still. */}
+      {[...toasts]
+        .sort((a, b) => Number(a.sticky === true) - Number(b.sticky === true))
+        .map((toast) => (
+          <ToastCard key={toast.key ?? toast.id} toast={toast} />
+        ))}
       <AppUpdateToast />
     </div>
   );
@@ -35,10 +43,10 @@ function ToastCard({ toast }: { toast: Toast }) {
   const [paused, setPaused] = useState(false);
 
   useEffect(() => {
-    if (paused) return;
+    if (paused || toast.sticky === true) return;
     const timer = window.setTimeout(() => dismissToast(toast.id), AUTO_DISMISS_MS);
     return () => window.clearTimeout(timer);
-  }, [paused, toast.id]);
+  }, [paused, toast.id, toast.sticky]);
 
   return (
     <aside
@@ -102,13 +110,16 @@ function ToastCard({ toast }: { toast: Toast }) {
         </button>
       </div>
       {/* Keyed by id so a replacement restarts the countdown animation, which
-          runs on mount, in step with the timer effect above. */}
-      <span
-        key={toast.id}
-        className="app-toast__timer"
-        aria-hidden="true"
-        data-paused={paused ? "true" : undefined}
-      />
+          runs on mount, in step with the timer effect above. A sticky toast
+          has no countdown, so it shows no bar draining toward one. */}
+      {toast.sticky !== true && (
+        <span
+          key={toast.id}
+          className="app-toast__timer"
+          aria-hidden="true"
+          data-paused={paused ? "true" : undefined}
+        />
+      )}
     </aside>
   );
 }

@@ -1,8 +1,17 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { WorktreeState } from "@pwrgit/shared";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { err, ok, type Result, type WorktreeState } from "@pwrgit/shared";
+import { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
-import type { DB } from "../persistence/db";
-import { createWorktreeRefresher } from "./worktree-handlers";
+import { openDatabase, type DB } from "../persistence/db";
+import type { GitExec, GitOutput } from "./dugite";
+import {
+  createWorktreeRefresher,
+  registerWorktreeHandlers,
+  type WorktreeRefresher
+} from "./worktree-handlers";
 import type { WorktreeStateService } from "./worktree-state";
 
 vi.mock("../ipc", () => ({
@@ -120,5 +129,121 @@ describe("repo worktree refresh events", () => {
       worktreeId: "wt-same"
     });
     expect(emitEvent).toHaveBeenCalledTimes(3);
+  });
+});
+
+// The seam the LFS surfaces ride on: the {status, announceReady} envelope, the
+// error passthrough, and the fact that this read records an outcome — none of
+// which the chip test (mocked dispatch) or the recordLfsOutcome test (bare DB)
+// can see.
+describe("repo:getGitLfsStatus", () => {
+  const exit0 = (stdout: string): Result<GitOutput> =>
+    ok({ stdout, stderr: "", exitCode: 0 });
+  const FILTERS = [
+    "filter.lfs.required true",
+    "filter.lfs.process git-lfs filter-process",
+    "filter.lfs.clean git-lfs clean -- %f",
+    "filter.lfs.smudge git-lfs smudge -- %f"
+  ].join("\n");
+
+  let db: DB;
+  let bus: CommandBus;
+  let git: GitExec;
+
+  beforeEach(() => {
+    db = openDatabase(":memory:");
+    const checkout = mkdtempSync(join(tmpdir(), "pwrgit-lfs-handler-"));
+    writeFileSync(join(checkout, ".gitattributes"), "*.bin filter=lfs\n");
+    db.prepare(
+      "INSERT INTO profiles (id, name, email) VALUES ('p1', 'P', 'p@x.com')"
+    ).run();
+    db.prepare(
+      `INSERT INTO repos (id, profile_id, name, path)
+       VALUES ('repo-1', 'p1', 'proj', ?)`
+    ).run(checkout);
+    db.prepare(
+      `INSERT INTO worktrees (id, repo_id, branch, path, is_primary)
+       VALUES ('wt-1', 'repo-1', 'main', ?, 1)`
+    ).run(checkout);
+
+    git = vi.fn(async (args: string[]) => {
+      if (args[0] === "ls-files") return exit0(".gitattributes\u0000");
+      if (args[0] === "lfs") return exit0("git-lfs/3.7.1\n");
+      if (args[0] === "config") return exit0(FILTERS);
+      throw new Error(`unexpected git call: ${args.join(" ")}`);
+    });
+
+    bus = new CommandBus();
+    registerWorktreeHandlers(
+      bus,
+      { getCached: () => null } as unknown as WorktreeStateService,
+      db,
+      {
+        refreshWorktree: async () => undefined,
+        refreshRepoWorktrees: () => undefined
+      } satisfies WorktreeRefresher,
+      (args, cwd) => git(args, cwd),
+      () => undefined
+    );
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  const getStatus = () =>
+    bus.dispatch("repo:getGitLfsStatus", {
+      repoId: "repo-1",
+      worktreeId: "wt-1"
+    });
+
+  it("answers the envelope and spends the announcement on the first ready check", async () => {
+    const first = await getStatus();
+    expect(first).toEqual(
+      ok({
+        status: {
+          required: true,
+          installed: true,
+          configured: true,
+          version: "git-lfs/3.7.1"
+        },
+        announceReady: true
+      })
+    );
+
+    const second = await getStatus();
+    expect(second.ok && second.value.announceReady).toBe(false);
+  });
+
+  it("passes a probe failure through without recording an outcome", async () => {
+    vi.mocked(git).mockResolvedValueOnce(
+      err({ kind: "git", code: "spawn_failed", message: "no git" })
+    );
+
+    const result = await getStatus();
+    expect(result.ok).toBe(false);
+    expect(
+      db.prepare("SELECT COUNT(*) AS n FROM repo_lfs_notice").get()
+    ).toEqual({ n: 0 });
+  });
+
+  it("still answers the probe when the repo row vanished mid-probe", async () => {
+    // The bookkeeping INSERT hits a missing repos(id) under foreign_keys=ON;
+    // that must cost the announcement, never the status.
+    vi.mocked(git).mockImplementationOnce(async () => {
+      db.prepare("DELETE FROM repos WHERE id = 'repo-1'").run();
+      return exit0(".gitattributes\u0000");
+    });
+
+    const result = await getStatus();
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.status).toMatchObject({
+        required: true,
+        installed: true,
+        configured: true
+      });
+      expect(result.value.announceReady).toBe(false);
+    }
   });
 });

@@ -8,7 +8,6 @@ import type {
   Worktree
 } from "@pwrgit/shared";
 import { DiffPane, type DiffTarget } from "./features/diff/DiffPane";
-import { GitLfsNotice } from "./features/graph/GitLfsNotice";
 import { LineageGraph } from "./features/graph/LineageGraph";
 import { SelectionBar } from "./features/graph/SelectionBar";
 import { TitleBar } from "./features/chrome/TitleBar";
@@ -511,12 +510,9 @@ export function App() {
           {selectedRepo !== null && selectedWorktree !== null ? (
             <>
               <WorktreeHeader
+                repo={selectedRepo}
                 worktree={selectedWorktree}
                 state={worktreeState}
-              />
-              <GitLfsNotice
-                repoId={selectedRepo.id}
-                worktreeId={selectedWorktree.id}
               />
               {/* Keep the lineage graph mounted while a diff is shown — hidden,
                   not unmounted — so returning to it is instant (its multi-branch
