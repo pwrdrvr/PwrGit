@@ -20,8 +20,11 @@ export function ToastHost() {
 
   return (
     <div className="toast-host">
+      {/* Keyed by `key` where there is one, so a replacement updates the card
+          in place: remounting would drop the hover-pause of a pointer that is
+          already resting on it and never fires onMouseEnter again. */}
       {toasts.map((toast) => (
-        <ToastCard key={toast.id} toast={toast} />
+        <ToastCard key={toast.key ?? toast.id} toast={toast} />
       ))}
       <AppUpdateToast />
     </div>
@@ -98,7 +101,10 @@ function ToastCard({ toast }: { toast: Toast }) {
           ✕
         </button>
       </div>
+      {/* Keyed by id so a replacement restarts the countdown animation, which
+          runs on mount, in step with the timer effect above. */}
       <span
+        key={toast.id}
         className="app-toast__timer"
         aria-hidden="true"
         data-paused={paused ? "true" : undefined}

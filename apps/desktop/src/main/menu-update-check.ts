@@ -18,7 +18,7 @@ import { logMain } from "./logs";
  * renderer replaces that toast in place with the result.
  */
 export async function checkForAppUpdatesFromMenu(): Promise<void> {
-  emitEvent("app:updateCheckResult", { status: "checking" });
+  report({ status: "checking" });
   let result: AppUpdateCheckResult;
   try {
     result = await checkForAppUpdatesNow("menu");
@@ -27,5 +27,21 @@ export async function checkForAppUpdatesFromMenu(): Promise<void> {
     logMain("warn", "updater", "menu update check failed", message);
     result = { status: "error", message };
   }
-  emitEvent("app:updateCheckResult", result);
+  report(result);
+}
+
+/** The only caller invokes this whole flow as `void`, and main has no
+ *  process-level rejection handler — a window destroyed mid-broadcast must
+ *  cost the user a toast, not an unhandled rejection with nothing logged. */
+function report(result: AppUpdateCheckResult): void {
+  try {
+    emitEvent("app:updateCheckResult", result);
+  } catch (err) {
+    logMain(
+      "warn",
+      "updater",
+      "failed to report menu update result",
+      err instanceof Error ? err.message : String(err)
+    );
+  }
 }

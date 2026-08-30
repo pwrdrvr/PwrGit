@@ -15,7 +15,7 @@
 import { useEffect, useState } from "react";
 import type { AppUpdateCheckResult, AppUpdateStatus } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
-import { showErrorToast, showInfoToast } from "../../lib/toast";
+import { dismissToastKey, showErrorToast, showInfoToast } from "../../lib/toast";
 
 /** One menu check, one toast — see `Toast.key`. */
 export const UPDATE_CHECK_TOAST_KEY = "app:updateCheckResult";
@@ -90,6 +90,10 @@ export function AppUpdateToast() {
     () =>
       subscribe("app:updateCheckResult", (result) => {
         if (result.status === "downloaded") {
+          // The sticky toast below carries this outcome, so the transient
+          // notice has said all it is going to say — leaving it to run out its
+          // countdown claims a check is still in flight after it finished.
+          dismissToastKey(UPDATE_CHECK_TOAST_KEY);
           // Asking again is asking to see the answer again: an update the user
           // dismissed earlier comes back rather than the check looking dead.
           setDismissedVersion(undefined);

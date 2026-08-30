@@ -73,6 +73,30 @@ describe("ToastHost", () => {
     expect(eyebrows()).toEqual(["info:Up to date", "error:Push failed"]);
   });
 
+  it("keeps a hovered toast paused across a keyed replacement", async () => {
+    await act(async () => {
+      showInfoToast({ key: "check", title: "Checking", message: "…" });
+    });
+    const card = container.querySelector(".app-toast");
+    await act(async () => {
+      card?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+    expect(
+      container.querySelector(".app-toast__timer")?.getAttribute("data-paused")
+    ).toBe("true");
+
+    await act(async () => {
+      showInfoToast({ key: "check", title: "Up to date", message: "v1.0.0" });
+    });
+
+    // The pointer never left, so it will not fire onMouseEnter again — a
+    // remount here would silently resume the countdown under the cursor.
+    expect(eyebrows()).toEqual(["info:Up to date"]);
+    expect(
+      container.querySelector(".app-toast__timer")?.getAttribute("data-paused")
+    ).toBe("true");
+  });
+
   it("dismisses one toast without disturbing the others", async () => {
     await act(async () => {
       showInfoToast({ title: "Tag created", message: "v1.2.3" });

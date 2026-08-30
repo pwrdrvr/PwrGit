@@ -37,9 +37,9 @@ function pushToast(input: Omit<Toast, "id">): void {
     input.key === undefined
       ? -1
       : toasts.findIndex((toast) => toast.key === input.key);
-  // The fresh id matters: ToastHost keys the card by it, so a replacement
-  // remounts and restarts its auto-dismiss countdown rather than inheriting
-  // however much of the previous toast's had already run down.
+  // The fresh id matters: ToastHost's auto-dismiss keys off it, so a
+  // replacement gets a full countdown rather than inheriting however much of
+  // the previous toast's had already run down.
   toasts =
     replacing === -1
       ? [...toasts, next]
@@ -76,6 +76,15 @@ export function showInfoToast(input: {
 
 export function dismissToast(id: number): void {
   toasts = toasts.filter((toast) => toast.id !== id);
+  notify();
+}
+
+/** Take down a keyed toast whose outcome is now being shown elsewhere. No-op
+ *  when nothing holds the key. */
+export function dismissToastKey(key: string): void {
+  const remaining = toasts.filter((toast) => toast.key !== key);
+  if (remaining.length === toasts.length) return;
+  toasts = remaining;
   notify();
 }
 

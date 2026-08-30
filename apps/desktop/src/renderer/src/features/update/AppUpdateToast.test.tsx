@@ -128,12 +128,15 @@ describe("AppUpdateToast", () => {
     await act(async () => button("Dismiss")?.click());
     expect(container.textContent).toBe("");
 
+    await emit("app:updateCheckResult", { status: "checking" });
     await emit("app:updateCheckResult", {
       status: "downloaded",
       version: "0.9.0"
     });
 
     expect(container.textContent).toContain("Restart to update to v0.9.0.");
+    // The sticky toast carries the outcome, so the transient notice must go
+    // rather than claim a check is still running next to the answer.
     expect(toasts).toHaveLength(0);
   });
 
@@ -154,6 +157,33 @@ describe("AppUpdateToast", () => {
     expect(toasts[0]?.message).toBe("You’re running v0.8.0.");
     // Nothing is broken, so the toast doesn't offer Logs / Copy.
     expect(toasts[0]?.showLogsAction).toBe(false);
+  });
+
+  it("reports an unavailable updater without dressing it as a failure", async () => {
+    await mount({ status: "idle" });
+
+    await emit("app:updateCheckResult", {
+      status: "skipped",
+      reason: "Linux builds are updated by installing a newer package."
+    });
+
+    expect(toasts[0]?.title).toBe("Updates unavailable");
+    expect(toasts[0]?.message).toBe(
+      "Linux builds are updated by installing a newer package."
+    );
+    expect(toasts[0]?.showLogsAction).toBe(false);
+  });
+
+  it("names the version a menu check started downloading", async () => {
+    await mount({ status: "idle" });
+
+    await emit("app:updateCheckResult", {
+      status: "available",
+      version: "1.0.0"
+    });
+
+    expect(toasts[0]?.title).toBe("Update available");
+    expect(toasts[0]?.message).toContain("v1.0.0");
   });
 
   it("reports a failed menu check as an error toast", async () => {

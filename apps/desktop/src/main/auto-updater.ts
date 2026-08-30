@@ -257,13 +257,15 @@ function recordPendingDownloadChannel(
 export async function checkForAppUpdatesNow(
   trigger: AppUpdateCheckTrigger = "manual"
 ): Promise<AppUpdateCheckResult> {
-  if (!productionUpdatesEnabled()) return simulateDevUpdateCheck(trigger);
-
+  // Linux is asked first: it never offers an in-app update in any build, so
+  // previewing one there would demo UI that platform cannot reach.
   if (linuxManualPackageUpdatesEnabled()) {
     const result = linuxManualPackageUpdateCheckResult();
     setUpdateStatus(result);
     return result;
   }
+
+  if (!productionUpdatesEnabled()) return simulateDevUpdateCheck(trigger);
 
   const wanted = currentUpdateSelectionKey();
   if (updateCheckInFlight) {
@@ -427,6 +429,13 @@ async function simulateDevUpdateCheck(
   // Join an in-flight simulation so mashing the menu item doesn't stack
   // overlapping animations racing on setUpdateStatus.
   if (updateCheckInFlight) return updateCheckInFlight;
+  // A held download ends the real check before it starts (`runUpdateCheck`),
+  // so the fake ends here too — otherwise a second check tears the offer down
+  // to `checking` and rebuilds it, which production never does.
+  const alreadyOffered = downloadedUpdateMatchesChannel(
+    currentUpdateSelectionKey()
+  );
+  if (alreadyOffered) return alreadyOffered;
   const version = DEV_FAKE_UPDATE_VERSION;
   logMain("info", "updater", `simulating dev update check (${trigger})`);
   updateCheckInFlight = (async (): Promise<AppUpdateCheckResult> => {
