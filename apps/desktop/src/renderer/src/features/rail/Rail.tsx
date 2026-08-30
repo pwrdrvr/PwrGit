@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
-import type { Worktree, WorktreeState } from "@pwrgit/shared";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { OperationState, Worktree, WorktreeState } from "@pwrgit/shared";
+import { dispatch, subscribe } from "../../lib/pwrgit";
+import { OperationBanner } from "./OperationBanner";
 import { RebaseTab } from "./RebaseTab";
 import { ChangesTab } from "./ChangesTab";
 import { CommitTab } from "./CommitTab";
@@ -38,6 +40,46 @@ export function Rail({
 }) {
   const [tab, setTab] = useState<RailTab>("changes");
   const dirty = state?.dirty ?? worktree?.dirty ?? 0;
+  const worktreeId = worktree?.id ?? null;
+
+  // Operation state is advisory: the banner appears when it arrives and the
+  // rest of the rail never waits on it. Blocking the file list on an extra
+  // git round-trip would tax every worktree switch for a rare state.
+  const [operation, setOperation] = useState<OperationState | null>(null);
+  const latestRequest = useRef(0);
+
+  const refreshOperation = useCallback((): void => {
+    const request = ++latestRequest.current;
+    if (worktreeId === null) {
+      setOperation(null);
+      return;
+    }
+    void dispatch("operation:state", { worktreeId }).then((result) => {
+      // Drop anything a newer request or a worktree switch has superseded.
+      if (latestRequest.current !== request) return;
+      // Keep the last good state on failure. A transient read error (index.lock
+      // contention, a failed spawn) must not take the banner — and with it the
+      // only in-app Abort/Continue — away mid-operation. Switching worktrees
+      // clears it explicitly below, so this cannot leak across checkouts.
+      if (result.ok) setOperation(result.value);
+    });
+  }, [worktreeId]);
+
+  useEffect(() => {
+    setOperation(null);
+    refreshOperation();
+    if (worktreeId === null) return;
+    const offWorktree = subscribe("worktree:changed", (event) => {
+      if (event.worktreeId === worktreeId) refreshOperation();
+    });
+    const offChanges = subscribe("changes:changed", (event) => {
+      if (event.worktreeId === worktreeId) refreshOperation();
+    });
+    return () => {
+      offWorktree();
+      offChanges();
+    };
+  }, [refreshOperation, worktreeId]);
 
   useEffect(() => {
     if (rebaseAction !== null) setTab("rebase");
@@ -79,6 +121,14 @@ export function Rail({
           ›
         </button>
       </div>
+
+      {operation !== null && worktreeId !== null && (
+        <OperationBanner
+          worktreeId={worktreeId}
+          state={operation}
+          onRefresh={refreshOperation}
+        />
+      )}
 
       {tab === "changes" ? (
         commitFocus !== null && worktree !== null ? (

@@ -708,6 +708,48 @@ export type ChangeSet = {
   };
 };
 
+/**
+ * A Git operation whose sequencer/merge markers are still present in a
+ * worktree. These are exactly the states that need `--continue`/`--abort` to
+ * leave; PwrGit reports them, it does not resolve the conflicts inside them.
+ */
+export type GitOperationKind =
+  | "merge"
+  | "rebase"
+  | "am"
+  | "cherry-pick"
+  | "revert";
+
+export type GitOperation = {
+  kind: GitOperationKind;
+  /** Human label for the operation, e.g. "Rebase". */
+  label: string;
+  /** Sequencer step progress, only when Git exposes both counters. */
+  progress?: { current: number; total: number };
+};
+
+/**
+ * What Git is in the middle of for one worktree. An operation with zero
+ * conflicts is normal and common: a rebase paused on an `edit` step, or a
+ * `merge --no-commit`, both sit here.
+ */
+export type OperationState = {
+  operation: GitOperation | null;
+  /** Paths with at least one unmerged index stage. */
+  conflictCount: number;
+};
+
+/**
+ * The result of `--continue`. Git exits non-zero both when an operation truly
+ * fails and when it advances and stops on the *next* conflict, so the outcome
+ * is classified against observed state rather than the exit code alone.
+ */
+export type OperationContinueOutcome =
+  /** The operation finished; no markers remain. */
+  | { kind: "completed" }
+  /** The operation moved forward and stopped again. This is progress. */
+  | { kind: "stopped"; state: OperationState; detail: string };
+
 /** One file touched by a commit (rail's commit-scoped file list). */
 export type CommitFileChange = {
   path: string;

@@ -44,6 +44,7 @@ import { ForgeStatusService } from "./forge/status";
 import { GitHubRepoProvider } from "./forge/github/repo-provider";
 import { GitLabRepoProvider } from "./forge/gitlab/repo-provider";
 import { registerChangesHandlers } from "./git/changes-handlers";
+import { registerOperationHandlers } from "./git/operation-handlers";
 import {
   ChangeSetWatch,
   createChangeSetAnnouncer
@@ -523,6 +524,7 @@ if (!gotSingleInstanceLock) {
     );
     registerGraphHandlers(bus, db, stateService);
     registerChangesHandlers(bus, db, refresher, worktreeOperations);
+    registerOperationHandlers(bus, db, refresher, worktreeOperations);
     registerSubmoduleHandlers(bus, db);
     registerRebaseHandlers(bus, db, refresher, worktreeOperations);
     registerDialogHandlers(bus);

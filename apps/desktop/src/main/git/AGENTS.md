@@ -83,3 +83,27 @@ either half:
   recency), so the per-worktree step re-adds its upstream. Anything scoped
   "what the user is looking at right now" belongs there, not in the
   repo-level cache, which is deliberately shared across a repo's worktrees.
+
+## `--continue` exits non-zero on ordinary progress
+
+`git rebase --continue` returns **1** when it successfully commits the current
+step and then stops on the *next* conflict. So does a multi-commit
+`cherry-pick`. Reading the exit code alone reports the normal path of a
+multi-commit rebase as a failure, and dumps Git's `hint:` block into the user's
+face at the exact moment things are going fine.
+
+`operation-service.ts` classifies against observed state instead: it snapshots
+HEAD, the sequencer counter, and the conflict count, runs the command, and calls
+the result `stopped` (progress) when any of them moved. Only a run where
+nothing moved is a real `continue_failed`. `operation-service.test.ts` pins both
+halves against real Git — keep that rebase test if you touch this.
+
+Two related traps in the same area:
+
+- **An operation with zero conflicts is normal.** `rebase -i` paused on `edit`,
+  and `merge --no-commit`, both leave markers with a clean index. Treating
+  "mid-operation" as "conflicted" is wrong, and gating UI on it hides the
+  Changes and Rebase tabs exactly when they are needed.
+- **`GIT_AUTHOR_*` / `GIT_COMMITTER_*` outrank `-c user.email`.** Tests that set
+  those in the environment cannot prove identity handling; unset them for that
+  assertion (see `execGitWithoutIdentityEnv`).
