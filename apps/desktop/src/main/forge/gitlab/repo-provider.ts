@@ -5,6 +5,7 @@ import {
   type RepoVisibility
 } from "@pwrgit/shared";
 import { logMain } from "../../logs";
+import { delay } from "../../util/timing";
 import {
   ownersFrom,
   parseJsonObject,
@@ -151,23 +152,6 @@ export function forkImportFailed(raw: unknown): string | null {
   if (text(row["import_status"]) !== "failed") return null;
   return text(row["import_error"]) ?? "GitLab could not finish copying the fork.";
 }
-
-const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
-  new Promise((resolve, reject) => {
-    if (signal?.aborted === true) {
-      reject(signal.reason ?? new Error("GitLab operation was canceled."));
-      return;
-    }
-    const onAbort = (): void => {
-      clearTimeout(timeout);
-      reject(signal?.reason ?? new Error("GitLab operation was canceled."));
-    };
-    const timeout = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
 
 export class GitLabRepoProvider implements ForgeRepoProvider {
   readonly host = "gitlab" as const;
@@ -409,7 +393,7 @@ export class GitLabRepoProvider implements ForgeRepoProvider {
       const failure = forkImportFailed(latest);
       if (failure !== null) throw new Error(failure);
       if (forkImportFinished(latest)) return latest;
-      await sleep(IMPORT_POLL_INTERVAL_MS, signal);
+      await delay(IMPORT_POLL_INTERVAL_MS, { signal });
       latest = await this.project(nameWithOwner, signal);
     }
     throw new Error(

@@ -72,6 +72,7 @@ import { GitHubCommitAuthorIdentityService } from "./github/commit-author-identi
 import { registerGitHubHandlers } from "./github/github-handlers";
 import { PrService } from "./github/pr-service";
 import { emitEvent, emitEventToWindow, registerIpc } from "./ipc";
+import { delay } from "./util/timing";
 import {
   initLogFile,
   logMain,
@@ -611,10 +612,7 @@ if (!gotSingleInstanceLock) {
       event.preventDefault();
       if (diagnosticsQuitState === "draining") return; // drain will re-quit
       diagnosticsQuitState = "draining";
-      const timeout = new Promise<void>((resolve) =>
-        setTimeout(resolve, 1_500)
-      );
-      void Promise.race([diagnostics.shutdown(), timeout]).finally(() => {
+      void Promise.race([diagnostics.shutdown(), delay(1_500)]).finally(() => {
         diagnosticsQuitState = "done";
         app.quit();
         setTimeout(() => app.exit(0), 500);

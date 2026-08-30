@@ -38,6 +38,7 @@ import {
   ok,
   type Result
 } from "@pwrgit/shared";
+import { delay } from "../util/timing";
 import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
 
 /** A symbolic HEAD whose branch ref does not exist is a valid unborn branch.
@@ -1065,7 +1066,7 @@ export async function worktreeRemove(
       message
     );
     if (transient && attempt < maxAttempts) {
-      await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
+      await delay(300 * attempt);
       continue;
     }
     const code = /modified or untracked|contains modified|is dirty|use --force/i.test(

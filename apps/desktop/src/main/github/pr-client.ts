@@ -1,5 +1,6 @@
 import { graphql, GraphqlResponseError } from "@octokit/graphql";
 import type { PrSummary } from "@pwrgit/shared";
+import { clampRetryDelayMs, delay } from "../util/timing";
 import { runGh } from "./gh-cli";
 import {
   buildCommitPrQuery,
@@ -53,9 +54,6 @@ export async function getGhStatus(): Promise<GhStatus> {
 const BATCH = 50;
 const MAX_RETRIES = 4;
 
-const delay = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
-const clamp = (ms: number): number => Math.max(0, Math.min(ms, 60_000));
 
 /** ghcrawl-style backoff: respect Retry-After / rate-limit reset, exponential
  *  for transient/5xx, and don't retry GraphQL-level or 4xx errors. */
@@ -65,15 +63,15 @@ function retryDelayMs(error: unknown, attempt: number): number | null {
     (error as { response?: { headers?: Record<string, string> } }).response
       ?.headers ?? {};
   const retryAfter = Number(headers["retry-after"]);
-  if (Number.isFinite(retryAfter) && retryAfter > 0) return clamp(retryAfter * 1000);
+  if (Number.isFinite(retryAfter) && retryAfter > 0) return clampRetryDelayMs(retryAfter * 1000);
 
   const remaining = Number(headers["x-ratelimit-remaining"]);
   const reset = Number(headers["x-ratelimit-reset"]);
   if ((status === 403 || status === 429) && remaining === 0 && Number.isFinite(reset)) {
-    return clamp(reset * 1000 - Date.now());
+    return clampRetryDelayMs(reset * 1000 - Date.now());
   }
   if (status === 429 || status === undefined || (status !== undefined && status >= 500)) {
-    return clamp(1000 * 2 ** (attempt - 1));
+    return clampRetryDelayMs(1000 * 2 ** (attempt - 1));
   }
   return null; // 401/403/404/422 etc. — not worth retrying
 }
