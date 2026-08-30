@@ -16,13 +16,13 @@ export function CommitTab({
   onOpenFile,
   onOpenFullDiff,
   onClose,
-  activePath
+  view
 }: {
   worktreeId: string;
   hash: string;
   subject: string;
-  /** The file the main pane is showing, so this list can mark it. */
-  activePath: string | null;
+  /** What the main pane is showing of THIS commit, so the list can say so. */
+  view: { kind: "full" } | { kind: "file"; path: string } | null;
   onOpenFile: (path: string) => void;
   onOpenFullDiff: () => void;
   onClose: () => void;
@@ -53,7 +53,12 @@ export function CommitTab({
         <span className="commit-tab__hash">{hash.slice(0, 7)}</span>
         <span style={{ flex: 1 }} />
         <button
-          className="commit-tab__full"
+          className={`commit-tab__full${
+            view?.kind === "full" ? " is-active" : ""
+          }`}
+          {...(view?.kind === "full"
+            ? { "aria-current": "true" as const }
+            : {})}
           onClick={onOpenFullDiff}
           title="Open the whole commit as one diff"
         >
@@ -75,9 +80,13 @@ export function CommitTab({
               <div
                 key={`${i}-${f.path}`}
                 className={`file-row is-clickable${
-                  f.path === activePath ? " is-selected" : ""
+                  view?.kind === "file" && view.path === f.path
+                    ? " is-selected"
+                    : ""
                 }`}
-                {...(f.path === activePath ? { "aria-current": "true" as const } : {})}
+                {...(view?.kind === "file" && view.path === f.path
+                  ? { "aria-current": "true" as const }
+                  : {})}
                 onClick={() => onOpenFile(f.path)}
                 title="View this file's changes in the commit"
               >

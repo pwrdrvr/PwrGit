@@ -24,7 +24,8 @@ export function Rail({
   onCollapse,
   onOpenDiff,
   onOpenFileInsight,
-  activeFile
+  activeFile,
+  commitView
 }: {
   worktree: Worktree | null;
   state: WorktreeState | null;
@@ -43,6 +44,8 @@ export function Rail({
   /** What the main pane is showing, so its row can say so. `staged: null`
    *  means the surface has no staged/unstaged notion (a commit, file details). */
   activeFile: { path: string; staged: boolean | null } | null;
+  /** What the main pane shows OF THE FOCUSED COMMIT, if anything. */
+  commitView: { kind: "full" } | { kind: "file"; path: string } | null;
 }) {
   const [tab, setTab] = useState<RailTab>("changes");
   const dirty = state?.dirty ?? worktree?.dirty ?? 0;
@@ -143,7 +146,7 @@ export function Rail({
             hash={commitFocus.hash}
             subject={commitFocus.subject}
             onOpenFile={onOpenCommitFile}
-            activePath={activeFile?.path ?? null}
+            view={commitView}
             onOpenFullDiff={onOpenFullCommitDiff}
             onClose={onCloseCommit}
           />

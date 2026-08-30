@@ -6885,6 +6885,14 @@ body.is-col-resizing {
   border-color: var(--accent-border);
   background: var(--accent-soft);
 }
+/* Showing right now. Same reasoning as the selected file row: --accent is what
+   carries the state, since the soft fill alone is also what hover uses and
+   could not tell "you are here" from "your pointer is here". */
+.commit-tab__full.is-active {
+  color: var(--accent-bright);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
 .commit-tab__hash {
   font: 600 10.5px/1 var(--font-mono);
   color: var(--text-subtle);
@@ -7830,7 +7838,11 @@ body.is-col-resizing {
   margin-bottom: 12px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  /* `clip`, not `hidden`: both round the corners, but `hidden` creates a
+     scroll container, which makes IT the scrollport the head below sticks
+     to — so the head scrolled away with the code and took the file's menu
+     with it. `clip` does not, so the head sticks to the pane instead. */
+  overflow: clip;
   background: var(--bg-panel);
 }
 /* Per-file actions, on the file's own strip. Held at low opacity rather than
@@ -7865,7 +7877,13 @@ body.is-col-resizing {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
+/* Pinned while its own file scrolls, pushed out by the next file's head — so
+   the name, the stat and the file's menu stay reachable however far down you
+   are. Bounded by `.diff-file`, which is what makes the handoff happen. */
 .diff-file__head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 8px;

@@ -374,23 +374,45 @@ export function App() {
     return true;
   }, [searchableCommits]);
 
-  // What the main pane is showing, so the rail's list can mark that row. File
-  // details win over the diff behind them: that pane is what is on screen.
-  const railActiveFile = useMemo<{
+  // What the main pane is showing, so the rail can mark it. Split in two
+  // because the two lists answer different questions, and a single loose
+  // "active path" got the commit list wrong: focusing another commit in the
+  // lineage does NOT close an open diff, so a file open at commit A would
+  // light up in commit B's list wherever B touched the same path.
+  const changesActiveFile = useMemo<{
     path: string;
     staged: boolean | null;
   } | null>(() => {
-    if (fileInsightTarget !== null) {
+    if (fileInsightTarget?.context.kind === "workingTree") {
       return { path: fileInsightTarget.path, staged: null };
     }
     if (diffTarget?.kind === "file") {
       return { path: diffTarget.path, staged: diffTarget.staged };
     }
-    if (diffTarget?.kind === "commitFile") {
-      return { path: diffTarget.path, staged: null };
-    }
     return null;
   }, [fileInsightTarget, diffTarget]);
+
+  const commitView = useMemo<
+    { kind: "full" } | { kind: "file"; path: string } | null
+  >(() => {
+    if (commitFocus === null) return null;
+    if (diffTarget?.kind === "commit" && diffTarget.hash === commitFocus.hash) {
+      return { kind: "full" };
+    }
+    if (
+      diffTarget?.kind === "commitFile" &&
+      diffTarget.hash === commitFocus.hash
+    ) {
+      return { kind: "file", path: diffTarget.path };
+    }
+    if (
+      fileInsightTarget?.context.kind === "commit" &&
+      fileInsightTarget.context.hash === commitFocus.hash
+    ) {
+      return { kind: "file", path: fileInsightTarget.path };
+    }
+    return null;
+  }, [commitFocus, diffTarget, fileInsightTarget]);
 
   const selectedRepo = useMemo(
     () => repos.find((r) => r.id === selection?.repoId) ?? null,
@@ -732,7 +754,8 @@ export function App() {
               setFileInsightTarget(null);
               setDiffTarget({ kind: "file", path, staged });
             }}
-            activeFile={railActiveFile}
+            activeFile={changesActiveFile}
+            commitView={commitView}
             onOpenFileInsight={(path, tab) => {
               setDiffTarget(null);
               setFileInsightTarget({
