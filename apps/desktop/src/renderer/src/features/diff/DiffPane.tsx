@@ -699,7 +699,7 @@ export function DiffPane({
         ) : (
           <DiffViewer
             patch={patch}
-            images={images}
+            {...(images === undefined ? {} : { images })}
             {...(selectionAvailable && selectionDiff !== null
               ? {
                   selection: {
