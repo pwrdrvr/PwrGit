@@ -226,7 +226,7 @@ test("clicking a commit scopes the rail to its files; a file opens its diff", as
   await expect(
     window.locator(".diff-row--add", { hasText: "add second doc" })
   ).toBeVisible();
-  await expect(window.locator(".diff-pane__sub")).toContainText("in ");
+  await expect(window.locator(".diff-pane__scope")).toContainText("in ");
 
   // Close → lineage; ‹ Changes → the working-tree view returns.
   await window.locator(".diff-pane__close").click();

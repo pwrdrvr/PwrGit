@@ -4,7 +4,7 @@ import {
   ok,
   type FileBlameHunk,
   type FileBlamePage,
-  type FileContentsPage,
+  type FileContents,
   type FileHistoryEntry,
   type FileHistoryPage,
   type FileInsightContext,
@@ -20,8 +20,6 @@ export const FILE_HISTORY_PAGE_MAX = 100;
 export const FILE_BLAME_PAGE_DEFAULT = 200;
 export const FILE_BLAME_PAGE_MAX = 400;
 export const FILE_BLAME_MAX_BYTES = 1_000_000;
-export const FILE_CONTENTS_PAGE_DEFAULT = 400;
-export const FILE_CONTENTS_PAGE_MAX = 800;
 
 const FILE_HISTORY_FORMAT =
   "%x1e" +
@@ -652,7 +650,9 @@ function unavailablePage(
   return {
     path,
     effectiveContext: resolution?.effectiveContext ?? requestedContext,
+    startLine: 1,
     hunks: [],
+    previousCursor: null,
     nextCursor: null,
     bytes: resolution?.bytes ?? null,
     unavailableReason: reason,
@@ -667,35 +667,27 @@ function contentLines(content: string): string[] {
 }
 
 /**
- * The file's contents at the requested context, paged by line.
+ * The file's contents at the requested context, complete.
  *
  * Rides blame's content resolution on purpose: the same rename mapping, the
  * same deleted-file parent fallback with an explicit notice, the same byte cap
  * and binary refusal — so "view the file here" and "blame the file here" can
  * never disagree about what "here" contains.
+ *
+ * One answer, not a paged read: the resolution's git read is O(file) whatever
+ * a cursor would say, so paging multiplied I/O by the page count while the
+ * 1 MB cap already bounds the payload. The renderer reveals progressively.
  */
 export async function readFileContents(
   git: GitExec,
   cwd: string,
-  request: {
-    path: string;
-    context: FileInsightContext;
-    cursor?: string;
-    limit?: number;
-  },
+  request: { path: string; context: FileInsightContext },
   signal?: AbortSignal
-): Promise<Result<FileContentsPage>> {
+): Promise<Result<FileContents>> {
   const context = checkedContext(request.context);
   if (!context.ok) return context;
   const checkedPath = safeWorktreeFile(cwd, request.path);
   if (!checkedPath.ok) return checkedPath;
-  const cursor = lineCursorValue(request.cursor);
-  if (!cursor.ok) return cursor;
-  const limit = boundedLimit(
-    request.limit,
-    FILE_CONTENTS_PAGE_DEFAULT,
-    FILE_CONTENTS_PAGE_MAX
-  );
   const resolution = await resolveBlameContent(
     git,
     cwd,
@@ -707,13 +699,11 @@ export async function readFileContents(
   const unavailable = (
     reason: "binary" | "too_large" | "missing",
     resolved: ContentResolution | null
-  ): Result<FileContentsPage> =>
+  ): Result<FileContents> =>
     ok({
       path: request.path,
       effectiveContext: resolved?.effectiveContext ?? context.value,
-      startLine: 1,
       lines: [],
-      nextCursor: null,
       bytes: resolved?.bytes ?? null,
       unavailableReason: reason,
       ...(resolved?.notice === undefined ? {} : { notice: resolved.notice })
@@ -724,18 +714,10 @@ export async function readFileContents(
     return unavailable("too_large", resolved);
   }
   if (resolved.content.includes("\0")) return unavailable("binary", resolved);
-
-  const all = contentLines(resolved.content);
-  const lines = all.slice(cursor.value, cursor.value + limit);
   return ok({
     path: request.path,
     effectiveContext: resolved.effectiveContext,
-    startLine: cursor.value + 1,
-    lines,
-    nextCursor:
-      cursor.value + lines.length < all.length
-        ? String(cursor.value + limit)
-        : null,
+    lines: contentLines(resolved.content),
     bytes: resolved.bytes,
     ...(resolved.notice === undefined ? {} : { notice: resolved.notice })
   });
@@ -748,6 +730,7 @@ export async function readFileBlame(
     path: string;
     context: FileInsightContext;
     cursor?: string;
+    aimLine?: number;
     limit?: number;
   },
   signal?: AbortSignal
@@ -756,14 +739,19 @@ export async function readFileBlame(
   if (!context.ok) return context;
   const checkedPath = safeWorktreeFile(cwd, request.path);
   if (!checkedPath.ok) return checkedPath;
-  const cursor = lineCursorValue(request.cursor);
-  if (!cursor.ok) return cursor;
-  const startLine = cursor.value + 1;
+  const requestedCursor = lineCursorValue(request.cursor);
+  if (!requestedCursor.ok) return requestedCursor;
   const limit = boundedLimit(
     request.limit,
     FILE_BLAME_PAGE_DEFAULT,
     FILE_BLAME_PAGE_MAX
   );
+  if (
+    request.aimLine !== undefined &&
+    (!Number.isSafeInteger(request.aimLine) || request.aimLine < 1)
+  ) {
+    return validation("invalid_aim", "The aimed blame line is invalid.");
+  }
   const resolution = await resolveBlameContent(
     git,
     cwd,
@@ -786,12 +774,36 @@ export async function readFileBlame(
     return ok({
       path: request.path,
       effectiveContext: resolved.effectiveContext,
+      startLine: 1,
       hunks: [],
+      previousCursor: null,
       nextCursor: null,
       bytes: resolved.bytes,
       ...(resolved.notice === undefined ? {} : { notice: resolved.notice })
     });
   }
+
+  // The server owns the page arithmetic: an explicit cursor wins, an aimed
+  // line resolves to the page holding it, and either is CLAMPED to the file's
+  // last page. The clamp is what lets an aim survive a file shorter than the
+  // line it targets — the git `-L` path refuses ranges past EOF, and the
+  // synthetic path used to answer them with a false "no lines" page; landing
+  // on the last real page is the honest answer for both. The content is
+  // already fully materialized here (the NUL sniff above needed it), so the
+  // line count is free.
+  const lineCount = contentLines(resolved.content).length;
+  const lastPageCursor =
+    Math.floor(Math.max(0, lineCount - 1) / limit) * limit;
+  const aimedCursor =
+    request.cursor !== undefined
+      ? requestedCursor.value
+      : request.aimLine !== undefined
+        ? Math.floor((request.aimLine - 1) / limit) * limit
+        : 0;
+  const cursor = { value: Math.min(aimedCursor, lastPageCursor) };
+  const startLine = cursor.value + 1;
+  const previousCursor =
+    cursor.value === 0 ? null : String(Math.max(0, cursor.value - limit));
 
   if (resolved.synthetic) {
     const allLines = contentLines(resolved.content);
@@ -815,7 +827,9 @@ export async function readFileBlame(
     return ok({
       path: request.path,
       effectiveContext: resolved.effectiveContext,
+      startLine,
       hunks: hunk === undefined ? [] : [hunk],
+      previousCursor,
       nextCursor:
         cursor.value + pageLines.length < allLines.length
           ? String(cursor.value + limit)
@@ -854,7 +868,9 @@ export async function readFileBlame(
   return ok({
     path: request.path,
     effectiveContext: resolved.effectiveContext,
+    startLine,
     hunks: coalesceBlame(parsed.slice(0, limit)),
+    previousCursor,
     nextCursor: parsed.length > limit ? String(cursor.value + limit) : null,
     bytes: resolved.bytes,
     ...(resolved.notice === undefined ? {} : { notice: resolved.notice })

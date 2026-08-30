@@ -109,6 +109,8 @@ describe("FileInsightsPane", () => {
             notice:
               "This file is deleted in the selected commit. Showing its parent revision.",
             bytes: 22,
+            startLine: 1,
+            previousCursor: null,
             nextCursor: null,
             hunks: [blameHunk()]
           })
@@ -305,6 +307,8 @@ describe("FileInsightsPane", () => {
                 sourcePath: "legacy/guide.txt"
               })
             ],
+            startLine: 1,
+            previousCursor: null,
             nextCursor: null,
             bytes: 12
           })
@@ -374,6 +378,8 @@ describe("FileInsightsPane", () => {
             path: "docs/guide.txt",
             effectiveContext: { kind: "workingTree" },
             hunks: [blameHunk({ startLine: 1, endLine: 1, lines: ["alpha"] })],
+            startLine: 1,
+            previousCursor: null,
             nextCursor: null,
             bytes: 6
           })
@@ -429,6 +435,8 @@ describe("FileInsightsPane", () => {
             path: "docs/guide.txt",
             effectiveContext: { kind: "workingTree" },
             hunks: [blameHunk({ startLine: 1, endLine: 1, lines: ["alpha"] })],
+            startLine: 1,
+            previousCursor: null,
             nextCursor: null,
             bytes: 6
           })
@@ -480,7 +488,9 @@ describe("FileInsightsPane", () => {
           ok({
             path: "docs/guide.txt",
             effectiveContext: { kind: "workingTree" },
+            startLine: 1,
             hunks: [],
+            previousCursor: null,
             nextCursor: null,
             bytes: 0
           })
@@ -736,9 +746,7 @@ describe("FileInsightsPane", () => {
           ok({
             path: "docs/guide.txt",
             effectiveContext: { kind: "commit", hash: HASH_A },
-            startLine: 1,
             lines: ["alpha", "shared, clarified"],
-            nextCursor: null,
             bytes: 24
           })
         );
@@ -782,9 +790,7 @@ describe("FileInsightsPane", () => {
           ok({
             path: "docs/guide.txt",
             effectiveContext: { kind: "commit", hash: HASH_A },
-            startLine: 1,
             lines: ["alpha"],
-            nextCursor: null,
             bytes: 6
           })
         );
@@ -820,16 +826,37 @@ describe("FileInsightsPane", () => {
     });
     expect(container.textContent).toContain(`at ${HASH_A.slice(0, 7)}`);
     expect(container.querySelector("[data-testid=file-contents]")).not.toBeNull();
+
+    // Back returns to the tab the drill left FROM — the eye action jumps
+    // History → File, and landing on the base scope's File tab stranded the
+    // reader away from the list they were reading.
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          cancelable: true
+        })
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await settle();
+    expect(container.querySelector("[data-testid=file-history]")).not.toBeNull();
+    expect(tabButton("History")?.getAttribute("aria-selected")).toBe("true");
   });
 
   it("opens blame aimed at the line the reader came from", async () => {
     dispatchMock.mockImplementation((name: string, req: Record<string, unknown>) => {
       if (name !== "file:blame") return Promise.resolve(ok({}));
-      const cursor = Number((req["cursor"] as string | undefined) ?? "0");
+      // The SERVER owns the page arithmetic: the renderer sends the aim and
+      // renders whatever position comes back.
+      const cursor = Number((req["cursor"] as string | undefined) ?? "200");
       return Promise.resolve(
         ok({
           path: "docs/guide.txt",
           effectiveContext: { kind: "workingTree" },
+          startLine: cursor + 1,
+          previousCursor: cursor === 0 ? null : String(cursor - 200),
           hunks: [
             blameHunk({
               startLine: cursor + 1,
@@ -858,14 +885,15 @@ describe("FileInsightsPane", () => {
     });
     await settle();
 
-    // Line 250 lives in the second 200-line page, so the read starts there.
     const first = dispatchMock.mock.calls.find(([name]) => name === "file:blame");
-    expect(first?.[1]).toMatchObject({ cursor: "200", limit: 200 });
+    expect(first?.[1]).toMatchObject({ aimLine: 250 });
+    expect((first?.[1] as Record<string, unknown>)["cursor"]).toBeUndefined();
     expect(
       container.querySelector('[data-line="250"]')?.className
     ).toContain("is-target");
 
-    // The lines above are one press away, prepended without touching the tail.
+    // The lines above are one press away — the button exists because the PAGE
+    // said so (previousCursor), not because the renderer did arithmetic.
     const earlier = container.querySelector<HTMLButtonElement>(
       ".file-insight__more--earlier"
     );
@@ -878,18 +906,76 @@ describe("FileInsightsPane", () => {
     expect(container.querySelector(".file-insight__more--earlier")).toBeNull();
   });
 
-  it("lands at the top when the aim overshoots a shorter file", async () => {
+  it("reports a failed prepend at the top edge and keeps paging down", async () => {
     dispatchMock.mockImplementation((name: string, req: Record<string, unknown>) => {
       if (name !== "file:blame") return Promise.resolve(ok({}));
       if (req["cursor"] !== undefined) {
         return Promise.resolve(
-          err({ kind: "git", code: "exit_128", message: "file has only 3 lines" })
+          err({ kind: "git", code: "boom", message: "prepend failed" })
         );
       }
       return Promise.resolve(
         ok({
           path: "docs/guide.txt",
           effectiveContext: { kind: "workingTree" },
+          startLine: 201,
+          previousCursor: "0",
+          hunks: [
+            blameHunk({ startLine: 201, endLine: 201, lines: ["line 201"] })
+          ],
+          nextCursor: "400",
+          bytes: 4096
+        })
+      );
+    });
+
+    await act(async () => {
+      root.render(
+        <FileInsightsPane
+          worktreeId="wt-1"
+          path="docs/guide.txt"
+          context={{ kind: "workingTree" }}
+          initialTab="blame"
+          initialLine={250}
+          onClose={() => undefined}
+          onShowCommit={() => true}
+        />
+      );
+    });
+    await settle();
+
+    await act(async () =>
+      container
+        .querySelector<HTMLButtonElement>(".file-insight__more--earlier")
+        ?.click()
+    );
+    await settle();
+
+    // The failure belongs to the TOP edge: it reports there, the earlier
+    // button stays for retry, and the bottom "load more" is not poisoned.
+    const alerts = [...container.querySelectorAll("[role=alert]")].map(
+      (node) => node.textContent
+    );
+    expect(alerts.join(" ")).toContain("Earlier blame lines couldn’t be loaded");
+    expect(container.querySelector(".file-insight__more--earlier")).not.toBeNull();
+    expect(
+      [...container.querySelectorAll(".file-insight__more")].some((button) =>
+        button.textContent?.includes("Load more lines")
+      )
+    ).toBe(true);
+  });
+
+  it("renders wherever the server landed an overshot aim", async () => {
+    // The clamp lives in the backend now: an aim past EOF comes back as the
+    // last real page, never as an error and never as a false empty page.
+    dispatchMock.mockImplementation((name: string) => {
+      if (name !== "file:blame") return Promise.resolve(ok({}));
+      return Promise.resolve(
+        ok({
+          path: "docs/guide.txt",
+          effectiveContext: { kind: "workingTree" },
+          startLine: 1,
+          previousCursor: null,
           hunks: [blameHunk({ startLine: 1, endLine: 1, lines: ["alpha"] })],
           nextCursor: null,
           bytes: 6
@@ -912,10 +998,43 @@ describe("FileInsightsPane", () => {
     });
     await settle();
 
-    // The aimed read failed past EOF; the view fell back to the top on its own
-    // instead of stranding the reader on an error for a file that exists.
     expect(container.textContent).toContain("alpha");
     expect(container.textContent).not.toContain("couldn’t be loaded");
+    // No phantom "earlier" button: the page said there is nothing above it.
+    expect(container.querySelector(".file-insight__more--earlier")).toBeNull();
+  });
+
+  it("speaks as the File tab, not as blame, when contents are unavailable", async () => {
+    dispatchMock.mockImplementation((name: string) =>
+      name === "file:contents"
+        ? Promise.resolve(
+            ok({
+              path: "asset.bin",
+              effectiveContext: { kind: "workingTree" },
+              lines: [],
+              bytes: 128,
+              unavailableReason: "binary"
+            })
+          )
+        : Promise.resolve(ok({}))
+    );
+
+    await act(async () => {
+      root.render(
+        <FileInsightsPane
+          worktreeId="wt-1"
+          path="asset.bin"
+          context={{ kind: "workingTree" }}
+          initialTab="contents"
+          onClose={() => undefined}
+          onShowCommit={() => true}
+        />
+      );
+    });
+    await settle();
+
+    expect(container.textContent).toContain("Binary files don’t have a text view.");
+    expect(container.textContent).not.toContain("Blame isn’t");
   });
 
   it("shows bounded binary and load-error states", async () => {
@@ -925,7 +1044,9 @@ describe("FileInsightsPane", () => {
           ok({
             path: "asset.bin",
             effectiveContext: { kind: "workingTree" },
+            startLine: 1,
             hunks: [],
+            previousCursor: null,
             nextCursor: null,
             bytes: 128,
             unavailableReason: "binary"

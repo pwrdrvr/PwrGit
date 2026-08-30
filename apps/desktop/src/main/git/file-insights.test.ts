@@ -447,33 +447,20 @@ describe("Git work a read is allowed to do", () => {
 });
 
 describe("the file at a revision", () => {
-  it("pages the committed contents, line-numbered from the cursor", async () => {
-    const first = await readFileContents(systemGit, repo, {
+  it("answers with the whole committed file in one read", async () => {
+    // One answer, not a paged read: the underlying git read is O(file)
+    // whatever a cursor would say, so paging multiplied I/O for nothing.
+    const result = await readFileContents(systemGit, repo, {
       path: "docs/guide.txt",
-      context: { kind: "commit", hash: editedCommit },
-      limit: 2
+      context: { kind: "commit", hash: editedCommit }
     });
-    expect(first.ok).toBe(true);
-    if (!first.ok) return;
-    expect(first.value).toMatchObject({
-      startLine: 1,
-      lines: ["alpha", "shared, clarified"],
-      nextCursor: "2"
-    });
-
-    const rest = await readFileContents(systemGit, repo, {
-      path: "docs/guide.txt",
-      context: { kind: "commit", hash: editedCommit },
-      cursor: first.value.nextCursor ?? "",
-      limit: 2
-    });
-    expect(rest.ok).toBe(true);
-    if (!rest.ok) return;
-    expect(rest.value).toMatchObject({
-      startLine: 3,
-      lines: ["new line"],
-      nextCursor: null
-    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.lines).toEqual([
+      "alpha",
+      "shared, clarified",
+      "new line"
+    ]);
   });
 
   it("rides blame's deleted-commit fallback, notice and all", async () => {
@@ -558,3 +545,60 @@ describe("hardened history paging", () => {
   });
 });
 
+describe("server-owned blame paging", () => {
+  it("answers an aim with the page holding that line", async () => {
+    const result = await readFileBlame(systemGit, repo, {
+      path: "docs/guide.txt",
+      context: { kind: "commit", hash: editedCommit },
+      aimLine: 3,
+      limit: 2
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Line 3 lives on the second 2-line page.
+    expect(result.value.startLine).toBe(3);
+    expect(result.value.previousCursor).toBe("0");
+    expect(result.value.hunks.flatMap((hunk) => hunk.lines)).toEqual([
+      "new line"
+    ]);
+  });
+
+  it("clamps an aim past the end to the last real page", async () => {
+    // Git refuses -L past EOF; the clamp is what keeps an overshot aim from
+    // surfacing as an error for a file that exists.
+    const result = await readFileBlame(systemGit, repo, {
+      path: "docs/guide.txt",
+      context: { kind: "commit", hash: editedCommit },
+      aimLine: 999,
+      limit: 2
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.startLine).toBe(3);
+    expect(result.value.nextCursor).toBeNull();
+  });
+
+  it("clamps the synthetic path identically", async () => {
+    // The untracked path used to slice past EOF and answer a false
+    // "no lines" page instead of erroring — both paths agree now.
+    writeFileSync(join(repo, "scratch.txt"), "one\ntwo\nthree\n");
+    try {
+      const result = await readFileBlame(systemGit, repo, {
+        path: "scratch.txt",
+        context: { kind: "workingTree" },
+        aimLine: 999,
+        limit: 2
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.startLine).toBe(3);
+      expect(result.value.hunks.flatMap((hunk) => hunk.lines)).toEqual([
+        "three"
+      ]);
+      expect(result.value.previousCursor).toBe("0");
+      expect(result.value.nextCursor).toBeNull();
+    } finally {
+      rmSync(join(repo, "scratch.txt"), { force: true });
+    }
+  });
+});

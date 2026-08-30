@@ -40,7 +40,11 @@ export function Rail({
   onClearSelection: () => void;
   onCollapse: () => void;
   onOpenDiff: (path: string, staged: boolean) => void;
-  onOpenFileInsight: (path: string, tab: "history" | "blame") => void;
+  onOpenFileInsight: (
+    path: string,
+    tab: "history" | "blame",
+    staged?: boolean
+  ) => void;
   /** What the main pane is showing, so its row can say so. `staged: null`
    *  means the surface has no staged/unstaged notion (a commit, file details). */
   activeFile: { path: string; staged: boolean | null } | null;

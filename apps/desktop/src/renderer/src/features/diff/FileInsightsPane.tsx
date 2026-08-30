@@ -11,7 +11,7 @@ import type {
   FileBlameHunk,
   FileBlamePage,
   FileBlameUnavailableReason,
-  FileContentsPage,
+  FileContents,
   FileHistoryEntry,
   FileInsightContext,
   GitHubCommitAuthorIdentityLookup
@@ -33,9 +33,9 @@ const TAB_LABEL: Record<FileInsightTab, string> = {
   contents: "File"
 };
 
-/** Blame and contents pages are asked for at this size, explicitly, so the
- *  aim arithmetic below owns the answer to "which page holds line N". */
-const PAGE_LINES = 200;
+/** How many more contents lines each "load more" reveals. Display-only: the
+ *  file arrives whole (capped at 1 MB by the server) and this paces the DOM. */
+const CONTENTS_REVEAL_LINES = 400;
 
 /**
  * One level of the pane's drill-down stack. The base level is the file the
@@ -447,19 +447,29 @@ function HistoryView({
   );
 }
 
-function unavailableMessage(page: {
-  unavailableReason?: FileBlameUnavailableReason;
-  bytes: number | null;
-}): string | null {
+function unavailableMessage(
+  page: {
+    unavailableReason?: FileBlameUnavailableReason;
+    bytes: number | null;
+  },
+  // The caps are shared with blame on purpose; the WORDING must not be. The
+  // File tab saying "Blame isn't available" told the user the wrong feature
+  // failed.
+  surface: "blame" | "contents"
+): string | null {
   if (page.unavailableReason === "binary") {
-    return "Blame isn’t available for binary files.";
+    return surface === "blame"
+      ? "Blame isn’t available for binary files."
+      : "Binary files don’t have a text view.";
   }
   if (page.unavailableReason === "too_large") {
     const size =
       page.bytes === null
         ? "This file"
         : `This file (${(page.bytes / 1_000_000).toFixed(1)} MB)`;
-    return `${size} is over the 1 MB blame limit, so it was not loaded.`;
+    return surface === "blame"
+      ? `${size} is over the 1 MB blame limit, so it was not loaded.`
+      : `${size} is over the 1 MB view limit, so it was not loaded.`;
   }
   if (page.unavailableReason === "missing") {
     return "This file does not exist in the selected context.";
@@ -500,16 +510,15 @@ function BlameView({
   onBlameBefore: (hunk: FileBlameHunk) => void;
 }) {
   const aimedLine = initialLine ?? null;
-  const aimedCursor =
-    aimedLine === null
-      ? 0
-      : Math.floor((aimedLine - 1) / PAGE_LINES) * PAGE_LINES;
   const [pages, setPages] = useState<FileBlamePage[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  /** Cursor of the earliest loaded page; > 0 offers "load earlier lines". */
-  const [earliestCursor, setEarliestCursor] = useState(aimedCursor);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Which edge failed matters: a top (prepend) failure must not read as a
+  // bottom failure, and must not halt downward auto-paging.
+  const [error, setError] = useState<{
+    edge: "top" | "bottom";
+    message: string;
+  } | null>(null);
   const activeOperations = useRef(new Set<string>());
   const containerRef = useRef<HTMLDivElement>(null);
   const revealed = useRef(false);
@@ -520,10 +529,13 @@ function BlameView({
     useMemo(() => blameCandidates(hunks), [hunks])
   );
 
-  const load = (
-    cursor?: string,
-    mode: "append" | "prepend" | "aimed" = "append"
-  ): void => {
+  // The page above the earliest loaded one, straight from the server — the
+  // renderer keeps no cursor arithmetic of its own. The server also clamps an
+  // aim past EOF to the last real page, so an aimed load cannot fail for
+  // being aimed; a failed load is a real failure.
+  const previousCursor = pages[0]?.previousCursor ?? null;
+
+  const load = (cursor?: string, mode: "append" | "prepend" = "append"): void => {
     // `loading` is state, so it has not rendered yet when a click lands in the
     // same tick the observer fires — both would dispatch and both pages would
     // be appended. This set is the synchronous gate the button cannot be, and
@@ -540,27 +552,23 @@ function BlameView({
       worktreeId,
       path,
       context,
-      limit: PAGE_LINES,
-      ...(cursor === undefined ? {} : { cursor })
+      ...(cursor === undefined ? {} : { cursor }),
+      ...(cursor === undefined && aimedLine !== null
+        ? { aimLine: aimedLine }
+        : {})
     }).then(
       (result) => {
         if (!activeOperations.current.delete(operationId)) return;
         if (!result.ok) {
-          // The aim can overshoot a file shorter than the line it targets —
-          // Git refuses an -L range past EOF. Land at the top instead of
-          // stranding the reader on an error for a file that exists.
-          if (mode === "aimed") {
-            setEarliestCursor(0);
-            load();
-            return;
-          }
-          setError(result.error.message);
+          setError({
+            edge: mode === "prepend" ? "top" : "bottom",
+            message: result.error.message
+          });
           setLoading(false);
           return;
         }
         if (mode === "prepend") {
           setPages((current) => [result.value, ...current]);
-          setEarliestCursor(Number(cursor ?? "0"));
           // The bottom edge did not move, so nextCursor stays untouched.
           setLoading(false);
           return;
@@ -573,17 +581,26 @@ function BlameView({
       },
       (cause: unknown) => {
         if (!activeOperations.current.delete(operationId)) return;
-        setError(settledMessage(cause));
+        setError({
+          edge: mode === "prepend" ? "top" : "bottom",
+          message: settledMessage(cause)
+        });
         setLoading(false);
       }
     );
   };
 
-  const moreRef = useAutoPaging(nextCursor, loading, error, load);
+  // Only a BOTTOM-edge failure pauses downward auto-paging; a failed prepend
+  // is the top edge's problem and reports there.
+  const moreRef = useAutoPaging(
+    nextCursor,
+    loading,
+    error?.edge === "bottom" ? error.message : null,
+    load
+  );
 
   useEffect(() => {
-    if (aimedCursor > 0) load(String(aimedCursor), "aimed");
-    else load();
+    load();
     return () => cancelOperations(activeOperations.current);
     // A fresh mounted view owns one immutable file/context/aim tuple.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -608,14 +625,14 @@ function BlameView({
   if (pages.length === 0 && error !== null) {
     return (
       <div className="file-insight__empty file-insight__empty--error" role="alert">
-        <span>Blame couldn’t be loaded. {error}</span>
+        <span>Blame couldn’t be loaded. {error.message}</span>
         <button onClick={() => load()}>Retry</button>
       </div>
     );
   }
   const first = pages[0];
   if (first === undefined) return null;
-  const unavailable = unavailableMessage(first);
+  const unavailable = unavailableMessage(first, "blame");
   if (unavailable !== null) {
     return <div className="file-insight__empty">{unavailable}</div>;
   }
@@ -627,13 +644,16 @@ function BlameView({
           {first.notice}
         </div>
       )}
-      {earliestCursor > 0 && (
+      {error !== null && error.edge === "top" && (
+        <div className="file-insight__page-error" role="alert">
+          Earlier blame lines couldn’t be loaded. {error.message}
+        </div>
+      )}
+      {previousCursor !== null && (
         <button
           className="file-insight__more file-insight__more--earlier"
           disabled={loading}
-          onClick={() =>
-            load(String(Math.max(0, earliestCursor - PAGE_LINES)), "prepend")
-          }
+          onClick={() => load(previousCursor, "prepend")}
         >
           {loading ? "Loading…" : "Load earlier lines"}
         </button>
@@ -746,9 +766,9 @@ function BlameView({
         </div>
       </div>
       )}
-      {error !== null && (
+      {error !== null && error.edge === "bottom" && (
         <div className="file-insight__page-error" role="alert">
-          More blame lines couldn’t be loaded. {error}
+          More blame lines couldn’t be loaded. {error.message}
         </div>
       )}
       {nextCursor !== null && (
@@ -767,7 +787,9 @@ function BlameView({
 
 /** The file itself, at the scope's revision — history shows what each commit
  *  changed; this shows what the file WAS. Same caps and fallbacks as blame,
- *  because both ride the same content resolution in the main process. */
+ *  because both ride the same content resolution in the main process. The
+ *  file arrives WHOLE (the 1 MB cap bounds it); "load more" only paces how
+ *  many rows the DOM holds, so scrolling costs no further Git reads. */
 function ContentsView({
   worktreeId,
   path,
@@ -777,13 +799,13 @@ function ContentsView({
   path: string;
   context: FileInsightContext;
 }) {
-  const [pages, setPages] = useState<FileContentsPage[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [contents, setContents] = useState<FileContents | null>(null);
+  const [shown, setShown] = useState(CONTENTS_REVEAL_LINES);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const activeOperations = useRef(new Set<string>());
 
-  const load = (cursor?: string): void => {
+  const load = (): void => {
     if (activeOperations.current.size > 0) return;
     const operationId = nextOperationId("contents");
     activeOperations.current.add(operationId);
@@ -793,8 +815,7 @@ function ContentsView({
       operationId,
       worktreeId,
       path,
-      context,
-      ...(cursor === undefined ? {} : { cursor })
+      context
     }).then(
       (result) => {
         if (!activeOperations.current.delete(operationId)) return;
@@ -803,10 +824,7 @@ function ContentsView({
           setLoading(false);
           return;
         }
-        setPages((current) =>
-          cursor === undefined ? [result.value] : [...current, result.value]
-        );
-        setNextCursor(result.value.nextCursor);
+        setContents(result.value);
         setLoading(false);
       },
       (cause: unknown) => {
@@ -817,7 +835,11 @@ function ContentsView({
     );
   };
 
-  const moreRef = useAutoPaging(nextCursor, loading, error, load);
+  const total = contents?.lines.length ?? 0;
+  const revealCursor = shown < total ? String(shown) : null;
+  const moreRef = useAutoPaging(revealCursor, loading, error, () =>
+    setShown((current) => current + CONTENTS_REVEAL_LINES)
+  );
 
   useEffect(() => {
     load();
@@ -826,10 +848,10 @@ function ContentsView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (pages.length === 0 && loading) {
+  if (contents === null && loading) {
     return <div className="file-insight__empty">Loading file…</div>;
   }
-  if (pages.length === 0 && error !== null) {
+  if (contents === null && error !== null) {
     return (
       <div className="file-insight__empty file-insight__empty--error" role="alert">
         <span>The file couldn’t be loaded. {error}</span>
@@ -837,53 +859,40 @@ function ContentsView({
       </div>
     );
   }
-  const first = pages[0];
-  if (first === undefined) return null;
-  const unavailable = unavailableMessage(first);
+  if (contents === null) return null;
+  const unavailable = unavailableMessage(contents, "contents");
   if (unavailable !== null) {
     return <div className="file-insight__empty">{unavailable}</div>;
   }
-  const empty = pages.every((page) => page.lines.length === 0);
 
   return (
     <div className="file-contents" data-testid="file-contents">
-      {first.notice !== undefined && (
+      {contents.notice !== undefined && (
         <div className="file-insight__notice" role="status">
-          {first.notice}
+          {contents.notice}
         </div>
       )}
-      {empty ? (
+      {total === 0 ? (
         <div className="file-insight__empty">This file is empty.</div>
       ) : (
         <div className="file-blame__lines">
           <div className="file-blame__body">
-            {pages.flatMap((page) =>
-              page.lines.map((line, offset) => {
-                const lineNumber = page.startLine + offset;
-                return (
-                  <div className="file-contents__row" key={lineNumber}>
-                    <span className="file-blame__number">{lineNumber}</span>
-                    <code className="file-blame__code">{line || " "}</code>
-                  </div>
-                );
-              })
-            )}
+            {contents.lines.slice(0, shown).map((line, index) => (
+              <div className="file-contents__row" key={index + 1}>
+                <span className="file-blame__number">{index + 1}</span>
+                <code className="file-blame__code">{line || " "}</code>
+              </div>
+            ))}
           </div>
         </div>
       )}
-      {error !== null && (
-        <div className="file-insight__page-error" role="alert">
-          More of the file couldn’t be loaded. {error}
-        </div>
-      )}
-      {nextCursor !== null && (
+      {revealCursor !== null && (
         <button
           ref={moreRef}
           className="file-insight__more"
-          disabled={loading}
-          onClick={() => load(nextCursor)}
+          onClick={() => setShown((current) => current + CONTENTS_REVEAL_LINES)}
         >
-          {loading ? "Loading…" : "Load more lines"}
+          Show more lines
         </button>
       )}
     </div>
@@ -1037,15 +1046,20 @@ export function FileInsightsPane({
     );
   }, []);
 
+  // Each drill-down frame remembers the tab it was entered FROM, so Back
+  // returns there: the eye action jumps History → File, and without this the
+  // pop landed on the base scope's File tab with the history list unmounted.
+  const fromTabs = useRef<FileInsightTab[]>([]);
   const pushScope = useCallback(
     (next: InsightScope, nextTab: FileInsightTab): void => {
       setNotice(null);
       setPreview(null);
+      fromTabs.current.push(tab);
       setScopes((current) => [...current, next]);
       setTab(nextTab);
       setOpened([nextTab]);
     },
-    []
+    [tab]
   );
 
   // One back verb for the whole pane: it closes the commit diff, then unwinds
@@ -1057,8 +1071,10 @@ export function FileInsightsPane({
       return;
     }
     if (scopes.length > 1) {
+      const fromTab = fromTabs.current.pop() ?? tab;
       setScopes((current) => current.slice(0, -1));
-      setOpened([tab]);
+      setTab(fromTab);
+      setOpened([fromTab]);
       return;
     }
     onClose();

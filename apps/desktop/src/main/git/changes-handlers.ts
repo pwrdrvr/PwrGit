@@ -14,7 +14,6 @@ import {
   discardAllChanges,
   discardPaths,
   readCommit,
-  readCommitMessage,
   readChanges,
   stagePaths,
   unstagePaths
@@ -229,12 +228,6 @@ export function registerChangesHandlers(
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
     return readCommit(execGit, path, req.hash);
-  });
-
-  bus.register("commit:message", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
-    return readCommitMessage(execGit, path, req.hash);
   });
 
   bus.register("commit:files", async (req) => {

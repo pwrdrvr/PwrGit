@@ -85,7 +85,11 @@ export function DiffPane({
     () => window.localStorage.getItem(HINT_SEEN_KEY) === "1"
   );
   const [refreshVersion, setRefreshVersion] = useState(0);
-  const [message, setMessage] = useState<{ subject: string; body: string } | null>(
+  // The body rides with the hash it belongs to: rendering is guarded on the
+  // match, so switching commits can never paint one frame of the previous
+  // commit's message under the new header. The subject is NOT stored — the
+  // target already carries it.
+  const [message, setMessage] = useState<{ hash: string; body: string } | null>(
     null
   );
   const [messageOpen, setMessageOpen] = useState(false);
@@ -183,28 +187,28 @@ export function DiffPane({
     };
   }, [target.kind, worktreeId]);
 
-  // The commit's message. Fetched beside the patch rather than on demand so the
-  // header knows whether there is a body worth offering to expand — a control
-  // that might do nothing is worse than no control.
+  // The commit's message body. Fetched beside the patch rather than on demand
+  // so the header knows whether there is a body worth offering to expand — a
+  // control that might do nothing is worse than no control. Keyed per COMMIT,
+  // not per target: browsing a commit's files flips the target per click, and
+  // keyed on `key` this refetched an immutable message once per file.
+  const messageHash = target.kind === "file" ? null : target.hash;
   useEffect(() => {
-    if (target.kind === "file") {
-      setMessage(null);
-      return;
-    }
-    let active = true;
-    setMessage(null);
     setMessageOpen(false);
-    void dispatch("commit:message", { worktreeId, hash: target.hash }).then(
+    if (messageHash === null) return;
+    let active = true;
+    void dispatch("commit:message", { worktreeId, hash: messageHash }).then(
       (result) => {
-        if (active && result.ok) setMessage(result.value);
+        if (active && result.ok && result.value !== null) {
+          setMessage({ hash: messageHash, body: result.value.body });
+        }
       },
       () => undefined
     );
     return () => {
       active = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [worktreeId, key]);
+  }, [worktreeId, messageHash]);
 
   // The pane takes focus when it opens and whenever it is pointed at a new
   // target, so Escape works right after the click that opened it — whether
@@ -264,22 +268,31 @@ export function DiffPane({
     target.kind === "file"
       ? { kind: "workingTree" }
       : { kind: "commit", hash: target.hash };
+  // A STAGED diff numbers its new side in INDEX coordinates, and blame reads
+  // the working tree — with unstaged edits above the clicked line those
+  // disagree, and the aim would confidently mark the wrong line. No aim is
+  // better than a wrong one; the header's un-aimed Blame stays available.
+  const gutterBlame = !(target.kind === "file" && target.staged);
 
   // The pane header names the SCOPE, never the file: every file's own strip in
   // the body names it already, and for a single-file pane that made the same
   // path appear twice, one line apart. For a working-tree file the side tabs
-  // carry the side's NAME, so the scope says the comparison instead.
+  // carry the side's NAME, so the scope says the comparison; `in <short>` is a
+  // one-file slice of a commit and `commit <short>` the whole thing —
+  // collapsing those made a single strip read as "this commit touched one
+  // file".
   const scope =
     target.kind === "file"
       ? target.staged
         ? "HEAD → index"
         : "index → working tree"
-      : `commit ${target.hash.slice(0, 7)}`;
-  const subject = message?.subject ?? (target.kind === "file" ? null : target.subject);
-  const body = message?.body ?? "";
-  // History and blame are per-file, so a whole-commit diff offers neither.
-  // The path is read from the target, never from `title` — the two only
-  // happen to agree today, and a title is for reading, not for dispatching.
+      : target.kind === "commitFile"
+        ? `in ${target.hash.slice(0, 7)}`
+        : `commit ${target.hash.slice(0, 7)}`;
+  const subject = target.kind === "file" ? null : target.subject;
+  const body = message !== null && message.hash === messageHash ? message.body : "";
+  // History and blame are per-file, so a whole-commit diff offers neither in
+  // the header; its per-file strips carry them instead.
   const filePath =
     target.kind === "file" || target.kind === "commitFile" ? target.path : null;
   const fileContext: FileInsightContext | null =
@@ -456,7 +469,12 @@ export function DiffPane({
     >
       <div className="diff-pane__head">
         <div className="diff-pane__row">
-          <span className="diff-pane__scope">{scope}</span>
+          <span
+            className="diff-pane__scope"
+            title={target.kind === "file" ? undefined : target.hash}
+          >
+            {scope}
+          </span>
           <span style={{ flex: 1 }} />
           {target.kind === "file" && (
             <span
@@ -524,8 +542,10 @@ export function DiffPane({
                 }`}
                 onClick={() => setMessageOpen((open) => !open)}
                 aria-expanded={messageOpen}
-                aria-controls={messageBodyId}
-                title={messageOpen ? "Hide the full message" : "Show the full message"}
+                // Only while the body exists in the DOM: a dangling
+                // aria-controls id is an axe violation and AT noise.
+                {...(messageOpen ? { "aria-controls": messageBodyId } : {})}
+                title={subject ?? undefined}
               >
                 <svg
                   className="diff-pane__message-caret"
@@ -680,9 +700,12 @@ export function DiffPane({
                   }
                 }
               : {})}
-            onBlameFrom={(path, line) =>
-              onOpenFileInsight(path, insightContext, "blame", line)
-            }
+            {...(gutterBlame
+              ? {
+                  onBlameFrom: (path: string, line: number) =>
+                    onOpenFileInsight(path, insightContext, "blame", line)
+                }
+              : {})}
             fileMenuItems={(path) => [
               {
                 type: "item",

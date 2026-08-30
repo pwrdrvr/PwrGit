@@ -324,7 +324,11 @@ export function ChangesTab({
   /** The file the main pane is showing, so this list can mark it. */
   activeFile: { path: string; staged: boolean | null } | null;
   onOpenDiff: (path: string, staged: boolean) => void;
-  onOpenFileInsight: (path: string, tab: "history" | "blame") => void;
+  onOpenFileInsight: (
+    path: string,
+    tab: "history" | "blame",
+    staged?: boolean
+  ) => void;
 }) {
   const [changes, setChanges] = useState<ChangeSet | null>(null);
   const [message, setMessage] = useState("");
@@ -341,7 +345,9 @@ export function ChangesTab({
     tab: "history" | "blame"
   ): void => {
     if (target.kind !== "file") return;
-    onOpenFileInsight(target.file.path, tab);
+    // The row's side of the index rides along, so a partially staged file
+    // marks ONE row — the one the menu was opened on — not both.
+    onOpenFileInsight(target.file.path, tab, target.file.staged);
   };
   const [hasSubmoduleConcern, setHasSubmoduleConcern] = useState(false);
   const wtId = worktree?.id ?? null;
@@ -559,6 +565,19 @@ export function ChangesTab({
   const splitPaths = new Set(
     staged.map((file) => file.path).filter((path) => unstagedPaths.has(path))
   );
+  // Which side of the index the active file means. Openers that know their
+  // side say so; for those that don't (the palette, a commit-scoped view that
+  // fell back), resolve against the sections — unstaged wins when the path is
+  // in both, since a workingTree-context view shows working-tree content. One
+  // row marks either way; `staged: null` used to match both.
+  const effectiveActiveStaged: boolean | null =
+    activeFile === null
+      ? null
+      : activeFile.staged !== null
+        ? activeFile.staged
+        : changes === null
+          ? null
+          : !changes.unstaged.some((file) => file.path === activeFile.path);
 
   const renderEntries = (
     files: FileChange[],
@@ -594,7 +613,7 @@ export function ChangesTab({
           selected={
             activeFile !== null &&
             activeFile.path === file.path &&
-            (activeFile.staged === null || activeFile.staged === file.staged)
+            effectiveActiveStaged === file.staged
           }
         />
       );

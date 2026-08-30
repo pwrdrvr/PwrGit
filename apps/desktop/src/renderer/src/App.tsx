@@ -129,6 +129,8 @@ export function App() {
     tab: FileInsightTab;
     /** Blame opens with this line in view. */
     line?: number;
+    /** Which side of the index the opener was looking at, when it had one. */
+    staged?: boolean;
   } | null>(null);
   const closeDiff = useCallback(() => {
     setFileInsightTarget(null);
@@ -386,7 +388,10 @@ export function App() {
     staged: boolean | null;
   } | null>(() => {
     if (fileInsightTarget?.context.kind === "workingTree") {
-      return { path: fileInsightTarget.path, staged: null };
+      return {
+        path: fileInsightTarget.path,
+        staged: fileInsightTarget.staged ?? null
+      };
     }
     if (diffTarget?.kind === "file") {
       return { path: diffTarget.path, staged: diffTarget.staged };
@@ -398,6 +403,16 @@ export function App() {
     { kind: "full" } | { kind: "file"; path: string } | null
   >(() => {
     if (commitFocus === null) return null;
+    // File details FIRST, matching changesActiveFile above: they render over
+    // the diff, which stays mounted-but-hidden — checking the diff first kept
+    // "Full diff" marked while the visible pane showed one file's blame.
+    if (
+      fileInsightTarget?.context.kind === "commit" &&
+      fileInsightTarget.context.hash === commitFocus.hash
+    ) {
+      return { kind: "file", path: fileInsightTarget.path };
+    }
+    if (fileInsightTarget !== null) return null;
     if (diffTarget?.kind === "commit" && diffTarget.hash === commitFocus.hash) {
       return { kind: "full" };
     }
@@ -406,12 +421,6 @@ export function App() {
       diffTarget.hash === commitFocus.hash
     ) {
       return { kind: "file", path: diffTarget.path };
-    }
-    if (
-      fileInsightTarget?.context.kind === "commit" &&
-      fileInsightTarget.context.hash === commitFocus.hash
-    ) {
-      return { kind: "file", path: fileInsightTarget.path };
     }
     return null;
   }, [commitFocus, diffTarget, fileInsightTarget]);
@@ -766,12 +775,13 @@ export function App() {
             }}
             activeFile={changesActiveFile}
             commitView={commitView}
-            onOpenFileInsight={(path, tab) => {
+            onOpenFileInsight={(path, tab, staged) => {
               setDiffTarget(null);
               setFileInsightTarget({
                 path,
                 context: { kind: "workingTree" },
-                tab
+                tab,
+                ...(staged === undefined ? {} : { staged })
               });
             }}
           />

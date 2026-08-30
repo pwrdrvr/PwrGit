@@ -488,7 +488,10 @@ describe("DiffPane", () => {
     });
 
     const head = container.querySelector(".diff-pane__head");
-    expect(head?.textContent).toContain("commit 7f856d4");
+    // A one-file slice says "in", the whole commit says "commit" — collapsing
+    // them made a single strip read as "this commit touched one file".
+    expect(head?.textContent).toContain("in 7f856d4");
+    expect(head?.textContent).not.toContain("commit 7f856d4");
     // The path belongs to the per-file strip; printing it here too put the
     // same string on two lines, one above the other.
     expect(head?.textContent).not.toContain("docs/guide.txt");
@@ -681,6 +684,64 @@ describe("DiffPane", () => {
       { kind: "commit", hash: COMMIT.hash },
       "contents"
     );
+  });
+
+  it("fetches one message per commit, not one per file", async () => {
+    dispatchMock.mockImplementation(respond("Some body."));
+    const render = async (path: string): Promise<void> => {
+      await act(async () => {
+        root.render(
+          <DiffPane
+            worktreeId="wt-1"
+            target={{ ...COMMIT, path }}
+            onOpenFileInsight={() => undefined}
+            onClose={vi.fn()}
+          />
+        );
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    };
+
+    await render("docs/guide.txt");
+    await render("docs/other.txt");
+    await render("docs/third.txt");
+
+    // Browsing a commit's files flips the target per click; the message is
+    // per-commit and immutable, so one fetch serves them all.
+    expect(
+      dispatchMock.mock.calls.filter(([name]) => name === "commit:message")
+    ).toHaveLength(1);
+  });
+
+  it("offers no aimed gutter blame on a staged diff", async () => {
+    const onOpenFileInsight = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="wt-1"
+          target={{ kind: "file", path: "docs/guide.txt", staged: true }}
+          onOpenFileInsight={onOpenFileInsight}
+          onClose={vi.fn()}
+        />
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // A staged diff numbers its new side in INDEX coordinates while blame
+    // reads the working tree — an aim would confidently mark the wrong line,
+    // so the gutter offers none. The header's un-aimed Blame remains.
+    expect(container.querySelector('[title^="Blame from line"]')).toBeNull();
+    expect(
+      [...container.querySelectorAll(".diff-pane__tools button")].map(
+        (button) => button.textContent
+      )
+    ).toContain("Blame");
   });
 });
 });

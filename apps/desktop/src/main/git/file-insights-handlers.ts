@@ -7,6 +7,7 @@ import {
   readFileContents,
   readFileHistory
 } from "./file-insights";
+import { readCommitMessage } from "./git-service";
 import {
   createFileListCache,
   FILE_SEARCH_LIMIT_DEFAULT,
@@ -14,9 +15,10 @@ import {
   rankIndexedPaths
 } from "./file-search";
 
-/** The two reads a renderer can have open. A pane shows one file one way, so
- *  one live read of each kind per renderer is the whole budget. */
-type FileInsightKind = "history" | "blame" | "contents" | "search";
+/** The read kinds a renderer can have open — ONE live read of each kind per
+ *  renderer is the whole budget, since a pane shows one file one way and a
+ *  header shows one commit. A newer read of a kind supersedes the older. */
+type FileInsightKind = "history" | "blame" | "contents" | "search" | "message";
 
 type ActiveOperation = {
   operationId: string;
@@ -209,6 +211,35 @@ export function registerFileInsightHandlers(
     }
   });
 
+  // Registered HERE, not in changes-handlers, for the bound: this module's
+  // per-renderer-and-kind supersede map is the ceiling the AGENTS.md rule
+  // demands for anything that spawns off an IPC message. One live message
+  // read per renderer; a newer commit's fetch cancels the older.
+  bus.register("commit:message", async (req, ctx) => {
+    const cwd = pathOf(req.worktreeId);
+    if (cwd === null) {
+      return err({
+        kind: "repo",
+        code: "not_found",
+        message: "worktree not found"
+      });
+    }
+    const started = begin("message", "commit-message", ctx);
+    if (started === null) return ok(null);
+    const { key, operation } = started;
+    try {
+      const result = await readCommitMessage(
+        execGit,
+        cwd,
+        req.hash,
+        operation.controller.signal
+      );
+      return operation.controller.signal.aborted ? canceled() : result;
+    } finally {
+      finish(key, operation);
+    }
+  });
+
   bus.register("file:search", async (req, ctx) => {
     const cwd = pathOf(req.worktreeId);
     if (cwd === null) {
@@ -248,8 +279,8 @@ export function registerFileInsightHandlers(
   });
 
   bus.register("file:cancelInsight", (req, ctx) => {
-    // At most two entries per renderer, so a scan is cheaper than a second
-    // index — and a renderer may only cancel its own reads.
+    // A handful of entries per renderer (one per kind), so a scan is cheaper
+    // than a second index — and a renderer may only cancel its own reads.
     for (const [key, operation] of live) {
       if (!ownedBy(operation, ctx)) continue;
       if (operation.operationId !== req.operationId) continue;

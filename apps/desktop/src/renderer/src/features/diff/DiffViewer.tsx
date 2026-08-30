@@ -86,9 +86,15 @@ export function DiffViewer({
   onBlameFrom?: (path: string, line: number) => void;
 }) {
   const parsed = useMemo(() => parseUnifiedDiff(patch), [patch]);
-  const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(
-    null
-  );
+  // The trigger rides along so ContextMenu can tell "clicked the kebab again"
+  // from an outside click — without it the same click closed and reopened the
+  // menu, which made the kebab impossible to toggle shut.
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    path: string;
+    trigger: HTMLButtonElement;
+  } | null>(null);
   if (parsed.files.length === 0) {
     return <div className="diff-empty">{emptyLabel ?? "No changes."}</div>;
   }
@@ -111,9 +117,14 @@ export function DiffViewer({
           {...(fileMenuItems === undefined
             ? {}
             : {
-                onMenu: (event: ReactMouseEvent) => {
-                  const box = event.currentTarget.getBoundingClientRect();
-                  setMenu({ x: box.right, y: box.bottom + 4, path: file.path });
+                onMenu: (event: ReactMouseEvent<HTMLButtonElement>) => {
+                  const trigger = event.currentTarget;
+                  const box = trigger.getBoundingClientRect();
+                  setMenu((current) =>
+                    current?.path === file.path
+                      ? null
+                      : { x: box.right, y: box.bottom + 4, path: file.path, trigger }
+                  );
                 }
               })}
         />
@@ -123,6 +134,7 @@ export function DiffViewer({
           x={menu.x}
           y={menu.y}
           label={`Actions for ${menu.path}`}
+          triggerRef={{ current: menu.trigger }}
           onClose={() => setMenu(null)}
           items={fileMenuItems(menu.path)}
         />

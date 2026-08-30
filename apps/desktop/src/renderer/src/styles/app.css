@@ -132,6 +132,10 @@ textarea,
 .submodule-row__path,
 .submodule-fact__value,
 .commit-msg,
+.diff-pane__message,
+.diff-pane__message-text,
+.diff-pane__message-body,
+.diff-pane__scope,
 .commit-sha-chip,
 .commit-context-card__subject,
 .commit-context-card__short-hash,
@@ -7783,7 +7787,10 @@ body.is-col-resizing {
   border-top: 0;
   border-radius: 0 0 var(--radius-md) var(--radius-md);
   background: var(--bg-panel);
-  overflow-x: auto;
+  /* `clip`, not `auto`: diff text wraps (pre-wrap), so nothing needs the
+     horizontal scroller — and `auto` made this box a scroll container, which
+     pinned the sticky file head to a box that never scrolls. */
+  overflow-x: clip;
 }
 
 .diff-empty {

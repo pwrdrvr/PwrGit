@@ -898,11 +898,18 @@ export type FileBlameUnavailableReason =
   | "missing";
 
 /** One bounded line page. Deleted files may resolve to the parent revision;
- *  `notice` makes that fallback explicit rather than silently changing scope. */
+ *  `notice` makes that fallback explicit rather than silently changing scope.
+ *  The page says WHERE it landed (`startLine`) and how to reach the page above
+ *  (`previousCursor`), so the renderer never does page arithmetic of its own —
+ *  a request may aim at a line, and the server clamps to the file's end. */
 export type FileBlamePage = {
   path: string;
   effectiveContext: FileInsightContext;
+  /** 1-based number of the first line this page holds (after any clamp). */
+  startLine: number;
   hunks: FileBlameHunk[];
+  /** Cursor for the page ABOVE this one, or null when this page starts at 1. */
+  previousCursor: string | null;
   nextCursor: string | null;
   bytes: number | null;
   unavailableReason?: FileBlameUnavailableReason;
@@ -918,16 +925,15 @@ export type FileSearchHit = {
   dir: string;
 };
 
-/** One bounded page of a file's contents at a revision (or the working tree).
- *  Shares blame's caps and unavailable states: same content resolution, same
- *  1 MB ceiling, same binary refusal. */
-export type FileContentsPage = {
+/** A file's contents at a revision (or the working tree), complete. Shares
+ *  blame's caps and unavailable states — same content resolution, same 1 MB
+ *  ceiling, same binary refusal — and that cap is why this is ONE answer, not
+ *  a paged read: the underlying git read is O(file) whatever the cursor, so
+ *  server-side paging multiplied I/O by the page count and saved nothing. */
+export type FileContents = {
   path: string;
   effectiveContext: FileInsightContext;
-  /** 1-based number of the first line in `lines`. */
-  startLine: number;
   lines: string[];
-  nextCursor: string | null;
   bytes: number | null;
   unavailableReason?: FileBlameUnavailableReason;
   notice?: string;

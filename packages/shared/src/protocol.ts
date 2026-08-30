@@ -36,7 +36,7 @@ import type {
   CommitFileChange,
   CommitStats,
   FileBlamePage,
-  FileContentsPage,
+  FileContents,
   FileHistoryPage,
   FileInsightContext,
   FileSearchHit,
@@ -1264,7 +1264,9 @@ export interface Commands {
     };
     res: FileHistoryPage;
   };
-  /** Bounded porcelain blame page for current or committed file contents. */
+  /** Bounded porcelain blame page for current or committed file contents.
+   *  `aimLine` asks for the page holding that 1-based line; the server owns
+   *  the page arithmetic and clamps past-EOF aims to the file's last page. */
   "file:blame": {
     req: {
       operationId: string;
@@ -1272,11 +1274,12 @@ export interface Commands {
       path: string;
       context: FileInsightContext;
       cursor?: string;
+      aimLine?: number;
       limit?: number;
     };
     res: FileBlamePage;
   };
-  /** The file itself at a revision (or in the working tree), paged by line —
+  /** The file itself at a revision (or in the working tree), complete —
    *  history shows what each commit changed; this shows what the file WAS. */
   "file:contents": {
     req: {
@@ -1284,12 +1287,11 @@ export interface Commands {
       worktreeId: string;
       path: string;
       context: FileInsightContext;
-      cursor?: string;
-      limit?: number;
     };
-    res: FileContentsPage;
+    res: FileContents;
   };
-  /** Stop a history/blame Git process owned by this renderer. */
+  /** Stop a file-insight Git read (history, blame, contents, message)
+   *  owned by this renderer. */
   "file:cancelInsight": { req: { operationId: string }; res: null };
   /** Ranked tracked-file matches, so history and blame are reachable for a
    *  file that has not changed recently — the app has no file browser, and a
