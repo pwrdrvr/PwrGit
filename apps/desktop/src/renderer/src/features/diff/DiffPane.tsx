@@ -232,15 +232,18 @@ export function DiffPane({
       ? target.path
       : target.subject;
   // The side's name moves into the tabs below; what is left here is the part
-  // the tabs cannot say — which two revisions this view is comparing.
+  // the tabs cannot say — which two revisions this view is comparing. Split
+  // from the subject, which is unbounded context: joined, one long commit
+  // subject pushed History, Blame and the close button off the right edge.
   const sub =
     target.kind === "file"
       ? target.staged
         ? "HEAD → index"
         : "index → working tree"
       : target.kind === "commitFile"
-        ? `in ${target.hash.slice(0, 7)} — ${target.subject}`
-        : `commit ${target.hash}`;
+        ? `in ${target.hash.slice(0, 7)}`
+        : `commit ${target.hash.slice(0, 7)}`;
+  const subDetail = target.kind === "file" ? null : target.subject;
   // History and blame are per-file, so a whole-commit diff offers neither.
   // The path is read from the target, never from `title` — the two only
   // happen to agree today, and a title is for reading, not for dispatching.
@@ -419,7 +422,12 @@ export function DiffPane({
       style={hidden ? { display: "none" } : undefined}
     >
       <div className="diff-pane__head">
-        <span className="diff-pane__title" title={title}>
+        <span
+          className={`diff-pane__title${
+            target.kind === "commit" ? " diff-pane__title--text" : ""
+          }`}
+          title={title}
+        >
           {title}
         </span>
         <span style={{ flex: 1 }} />
@@ -449,7 +457,14 @@ export function DiffPane({
             ))}
           </span>
         )}
-        <span className="diff-pane__sub">{sub}</span>
+        <span className="diff-pane__sub" title={target.kind === "file" ? undefined : target.hash}>
+          {sub}
+        </span>
+        {subDetail !== null && (
+          <span className="diff-pane__sub-detail" title={subDetail}>
+            {subDetail}
+          </span>
+        )}
         {fileContext !== null && filePath !== null && (
           <div className="diff-pane__tools" aria-label="File details">
             <button

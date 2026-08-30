@@ -152,20 +152,23 @@ function AuthorLabel({
   );
 }
 
+/* The commit glyph the palette already uses, at the size it uses it. Drawn at
+   12px with a 3.2-unit circle it came out as a ~3px ring with two 2px ticks —
+   present in the DOM, invisible on screen. */
 function LineageIcon() {
   return (
     <svg
-      width="12"
-      height="12"
+      width="15"
+      height="15"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.8"
       strokeLinecap="round"
       aria-hidden="true"
     >
-      <path d="M3 12h5M16 12h5" />
-      <circle cx="12" cy="12" r="3.2" />
+      <path d="M3 12h6M15 12h6" />
+      <circle cx="12" cy="12" r="3" />
     </svg>
   );
 }
@@ -173,12 +176,12 @@ function LineageIcon() {
 function RewindIcon() {
   return (
     <svg
-      width="12"
-      height="12"
+      width="15"
+      height="15"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.8"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
