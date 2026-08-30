@@ -14,7 +14,7 @@ import type {
   FileInsightContext,
   GitHubCommitAuthorIdentityLookup
 } from "@pwrgit/shared";
-import { fileStatusChipProps } from "../../lib/fileStatus";
+import { fileStatusChipProps, fileStatusLabel } from "../../lib/fileStatus";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { useAutoPaging } from "../../lib/useAutoPaging";
 import { useRelativeClock } from "../../lib/useRelativeClock";
@@ -326,7 +326,12 @@ function HistoryView({
                 path: entry.path
               })
             }
-            aria-label={`Show what ${entry.shortHash} changed in ${entry.path}`}
+            // The chip's own label is inside this button, and aria-label on a
+            // button replaces its contents for name computation — so the change
+            // kind has to be said here or it is not announced at all.
+            aria-label={`${fileStatusLabel(entry.status)}: show what ${
+              entry.shortHash
+            } changed in ${entry.path}`}
             title="Show what this commit changed in this file"
           >
             <span {...fileStatusChipProps(entry.status)}>{entry.status}</span>

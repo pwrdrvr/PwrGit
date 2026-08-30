@@ -185,9 +185,15 @@ export function DiffPane({
   // was (a hover tooltip) claim the key with preventDefault instead — and
   // since their window listeners are registered after this one, the check
   // is deferred a tick so the claim has been made by the time it is read.
+  // `hidden` is in the dependencies, not just `key`: file details render OVER
+  // this pane rather than replacing it, so coming back changes neither the
+  // target nor the key. Without it the pane stayed unfocused on return — the
+  // insights pane had taken focus and then unmounted — and Escape, which is
+  // scoped to focus being inside this pane, silently did nothing.
   useEffect(() => {
+    if (hidden) return;
     paneRef.current?.focus({ preventScroll: true });
-  }, [key]);
+  }, [key, hidden]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;

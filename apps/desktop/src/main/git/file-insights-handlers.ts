@@ -12,7 +12,7 @@ import {
 
 /** The two reads a renderer can have open. A pane shows one file one way, so
  *  one live read of each kind per renderer is the whole budget. */
-type FileInsightKind = "history" | "blame";
+type FileInsightKind = "history" | "blame" | "search";
 
 type ActiveOperation = {
   operationId: string;
@@ -174,7 +174,7 @@ export function registerFileInsightHandlers(
     }
   });
 
-  bus.register("file:search", async (req) => {
+  bus.register("file:search", async (req, ctx) => {
     const cwd = pathOf(req.worktreeId);
     if (cwd === null) {
       return err({
@@ -184,7 +184,25 @@ export function registerFileInsightHandlers(
       });
     }
     if (req.query.trim() === "") return ok([]);
-    const index = await fileLists.index(execGit, req.worktreeId, cwd);
+    // Bounded and cancellable like the other two reads: a window that closes
+    // mid-read should not leave `ls-files` running for results nobody will see.
+    // A fixed id, because search-as-you-type has no id of its own and needs
+    // none — the per-renderer/kind key already makes the newest query supersede
+    // the one it replaced, which is exactly what an abandoned keystroke wants.
+    const started = begin("search", "file-search", ctx);
+    if (started === null) return ok([]);
+    const { key, operation } = started;
+    let index;
+    try {
+      index = await fileLists.index(
+        execGit,
+        req.worktreeId,
+        cwd,
+        operation.controller.signal
+      );
+    } finally {
+      finish(key, operation);
+    }
     if (!index.ok) return index;
     const limit = Number.isFinite(req.limit)
       ? Math.max(1, Math.min(FILE_SEARCH_LIMIT_MAX, Math.trunc(req.limit ?? 0)))

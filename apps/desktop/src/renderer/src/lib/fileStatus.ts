@@ -32,17 +32,23 @@ function fileStatusTone(status: string): string {
   return TONE[status] ?? "muted";
 }
 
-/** The chip's accessible name. Never empty — a bare letter is not a name. */
-function fileStatusLabel(status: string): string {
+/**
+ * The chip's accessible name. Never empty — a bare letter is not a name.
+ *
+ * Exported for the one case the chip cannot cover: a row that is itself a
+ * button carries its own aria-label, which replaces everything inside it, so
+ * the change kind has to be folded into that name by hand.
+ */
+export function fileStatusLabel(status: string): string {
   return LABEL[status] ?? "Changed";
 }
 
 /**
  * The props every status chip needs, so no call site can forget the name.
  *
- * The only export on purpose: handing out the tone and the label separately
- * would let a caller rebuild the unlabelled chip by hand, which is the exact
- * hole this module was extracted to close.
+ * Preferred over assembling a chip by hand: the tone stays private so no
+ * caller can rebuild the unlabelled version, which is the hole this module was
+ * extracted to close.
  */
 export function fileStatusChipProps(status: string): {
   className: string;

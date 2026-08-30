@@ -222,8 +222,10 @@ describe("FileInsightsPane", () => {
     await settle();
 
     const open = container.querySelector<HTMLButtonElement>(".file-history__open");
+    // The row is a button, so its aria-label replaces the status chip inside
+    // it — the change kind has to be part of this name or it is never heard.
     expect(open?.getAttribute("aria-label")).toBe(
-      `Show what ${HASH_A.slice(0, 7)} changed in docs/guide.txt`
+      `Renamed: show what ${HASH_A.slice(0, 7)} changed in docs/guide.txt`
     );
     await act(async () => open?.click());
     await settle();

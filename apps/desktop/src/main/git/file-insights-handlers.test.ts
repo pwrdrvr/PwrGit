@@ -139,6 +139,31 @@ describe("file-insight handlers", () => {
     ]);
   });
 
+  it("stops a file search when its renderer goes away", async () => {
+    let seen: AbortSignal | undefined;
+    execGit.mockImplementation(
+      (_args: string[], _cwd: string, options: { signal?: AbortSignal }) => {
+        seen = options.signal;
+        return new Promise(() => undefined);
+      }
+    );
+    const bus = new CommandBus();
+    const handlers = registerFileInsightHandlers(bus, dbWith("/repo"));
+
+    void bus.dispatch(
+      "file:search",
+      { worktreeId: "wt-1", query: "App" },
+      { webContentsId: 3 }
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(seen?.aborted).toBe(false);
+    handlers.releaseWebContents(3);
+    // Previously this ran to completion for a window that no longer existed.
+    expect(seen?.aborted).toBe(true);
+  });
+
   it("says which worktree is missing rather than shelling out", async () => {
     execGit.mockClear();
     const bus = new CommandBus();

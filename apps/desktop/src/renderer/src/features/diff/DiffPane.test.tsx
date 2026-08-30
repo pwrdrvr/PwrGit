@@ -329,3 +329,133 @@ describe("DiffPane refreshing an open working-tree diff", () => {
     expect(onOpenFile).toHaveBeenCalledWith("file.txt", true);
   });
 });
+
+// ---- focus, header, and file-insight behaviour ----
+
+
+const TARGET = { kind: "file" as const, path: "docs/guide.txt", staged: false };
+const PATCH = [
+  "diff --git a/docs/guide.txt b/docs/guide.txt",
+  "--- a/docs/guide.txt",
+  "+++ b/docs/guide.txt",
+  "@@ -1 +1 @@",
+  "-old",
+  "+new"
+].join("\n");
+
+describe("DiffPane focus and header", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+  // Route by command: the staging pane fetches `diff:fileSelection` for file
+  // targets and crashes on a bare string where a PartialFileDiff belongs.
+  mocks.dispatch.mockImplementation(async (command: string) =>
+    command === "diff:fileSelection"
+      ? ok(snapshot("focus-suite"))
+      : command === "commit:message"
+        ? ok(null)
+        : ok(PATCH)
+  );
+  mocks.subscribe.mockImplementation(() => () => undefined);
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+});
+
+afterEach(async () => {
+  await act(async () => root.unmount());
+  container.remove();
+  vi.clearAllMocks();
+});
+
+const pressEscape = async (): Promise<void> => {
+  await act(async () => {
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true
+      })
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+};
+
+describe("DiffPane", () => {
+  it("takes focus on open so Escape is its own", async () => {
+    const onClose = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="wt-1"
+          target={TARGET}
+          onOpenFileInsight={() => undefined}
+          onClose={onClose}
+        />
+      );
+    });
+
+    expect(document.activeElement).toBe(container.querySelector(".diff-pane"));
+    await pressEscape();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes focus back when file details close over it and leave", async () => {
+    const onClose = vi.fn();
+    const render = async (hidden: boolean): Promise<void> => {
+      await act(async () => {
+        root.render(
+          <DiffPane
+            worktreeId="wt-1"
+            target={TARGET}
+            hidden={hidden}
+            onOpenFileInsight={() => undefined}
+            onClose={onClose}
+          />
+        );
+      });
+    };
+
+    await render(false);
+    // File details render OVER the pane and take focus, exactly as
+    // FileInsightsPane's own effect does, then unmount when they close.
+    await render(true);
+    const insights = document.createElement("section");
+    insights.tabIndex = -1;
+    document.body.append(insights);
+    insights.focus();
+    insights.remove();
+
+    await render(false);
+
+    // Neither the target nor the key changed, so nothing but `hidden` can tell
+    // the pane it is back on screen — and Escape is scoped to focus.
+    expect(document.activeElement).toBe(container.querySelector(".diff-pane"));
+    await pressEscape();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not steal focus while it is hidden", async () => {
+    const outside = document.createElement("input");
+    document.body.append(outside);
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="wt-1"
+          target={TARGET}
+          hidden
+          onOpenFileInsight={() => undefined}
+          onClose={vi.fn()}
+        />
+      );
+    });
+    outside.focus();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(document.activeElement).toBe(outside);
+    outside.remove();
+  });
+});
+});

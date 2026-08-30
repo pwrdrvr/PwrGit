@@ -28,7 +28,7 @@ export type PathIndex = {
   nameStart: Int32Array;
 };
 
-export function indexFilePaths(paths: readonly string[]): PathIndex {
+export function indexFilePaths(paths: string[]): PathIndex {
   const nameStart = new Int32Array(paths.length);
   const lower: string[] = new Array<string>(paths.length);
   for (let i = 0; i < paths.length; i += 1) {
@@ -36,7 +36,9 @@ export function indexFilePaths(paths: readonly string[]): PathIndex {
     lower[i] = path.toLowerCase();
     nameStart[i] = path.lastIndexOf("/") + 1;
   }
-  return { paths: [...paths], lower, nameStart };
+  // No defensive copy: the only caller builds this array from `ls-files`
+  // output and keeps no reference, and it is the largest allocation here.
+  return { paths: paths as string[], lower, nameStart };
 }
 
 function hit(index: PathIndex, i: number): FileSearchHit {
@@ -70,7 +72,10 @@ export function rankIndexedPaths(
   const needle = query.trim().toLowerCase();
   if (needle === "") return [];
 
-  const scored: { at: number; score: number }[] = [];
+  // One packed number per match rather than one object: a substring query as
+  // short as "src" matches most of a monorepo, and this runs per query.
+  const total = index.paths.length;
+  const scored: number[] = [];
   for (let at = 0; at < index.lower.length; at += 1) {
     const lower = index.lower[at] ?? "";
     const start = index.nameStart[at] ?? 0;
@@ -88,21 +93,23 @@ export function rankIndexedPaths(
                 ? 4
                 : null;
     if (score === null) continue;
-    scored.push({ at, score });
+    scored.push(score * total + at);
   }
 
   return scored
     .sort((a, b) => {
-      if (a.score !== b.score) return a.score - b.score;
-      const left = index.paths[a.at] ?? "";
-      const right = index.paths[b.at] ?? "";
+      const scoreA = Math.floor(a / total);
+      const scoreB = Math.floor(b / total);
+      if (scoreA !== scoreB) return scoreA - scoreB;
+      const left = index.paths[a % total] ?? "";
+      const right = index.paths[b % total] ?? "";
       return (
         left.length - right.length ||
         (left < right ? -1 : left > right ? 1 : 0)
       );
     })
     .slice(0, limit)
-    .map(({ at }) => hit(index, at));
+    .map((packed) => hit(index, packed % total));
 }
 
 type CachedList = { index: PathIndex; readAt: number };

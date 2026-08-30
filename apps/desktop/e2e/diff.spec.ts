@@ -284,6 +284,23 @@ test("file history follows a rename and opens each commit's change in place", as
   await expect(commitDiff).toHaveCount(0);
   await expect(history).toBeVisible();
 
+  // Back to the diff the pane opened over: it renders UNDER file details
+  // rather than being replaced, so nothing but un-hiding tells it that it is
+  // on screen again — and Escape only works while focus is inside it.
+  await window.locator(".file-insight-pane__back").click();
+  await expect(window.locator(".file-insight-pane")).toHaveCount(0);
+  await expect(window.locator(".diff-pane")).toBeFocused();
+  await window.keyboard.press("Escape");
+  await expect(window.locator(".diff-pane")).toHaveCount(0);
+  await expect(window.locator(".graph-toolbar")).toBeVisible();
+
+  // Re-open and carry on into blame.
+  await fileRow.click();
+  await expect(window.locator(".diff-pane")).toBeVisible();
+  await window.getByRole("button", { name: "History" }).click();
+  await expect(window.getByTestId("file-history")).toBeVisible({
+    timeout: 20_000
+  });
   await window.getByRole("tab", { name: "Blame" }).click();
   const blame = window.getByTestId("file-blame");
   await expect(blame).toBeVisible({ timeout: 20_000 });
