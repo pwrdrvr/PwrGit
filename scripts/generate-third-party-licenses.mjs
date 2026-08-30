@@ -23,16 +23,74 @@ const embeddedGitNoticeDir = join(
   "embedded-git",
 );
 
+/**
+ * The two `pnpm licenses list` invocations the notice is built from.
+ *
+ * Exported so `check-third-party-license-allowlist.mjs` reads exactly the
+ * surfaces the notice discloses. A gate whose input set is narrower than the
+ * notice's contents leaves a shipped component ungated while still printing a
+ * pass.
+ */
+export const NOTICE_PNPM_ARGS = {
+  // Optional dependencies are platform-specific. Excluding them keeps this
+  // committed notice deterministic across macOS, Linux, and Windows CI — and
+  // means an optional dependency that ships is disclosed by neither the notice
+  // nor the gate until someone lists it here deliberately.
+  production: ["--prod", "--no-optional"],
+  all: ["--no-optional"],
+};
+
+/**
+ * devDependencies the notice covers anyway, because they ship.
+ *
+ * Electron is the whole list today: `--prod` never reports it, so the notice
+ * merges it in from the `all` report below. The allowlist gate reads this same
+ * set — a name disclosed here but missing there would be the single largest
+ * shipped component with an unchecked license.
+ */
+export const NOTICE_DEV_DEPENDENCIES = new Set(["electron"]);
+
+/**
+ * Matches GPL, AGPL and LGPL identifiers inside an SPDX expression.
+ *
+ * `[^A-Za-z]` rather than `\b` because the letter before "GPL" is exactly what
+ * distinguishes LGPL/AGPL from a word boundary.
+ */
+export const COPYLEFT_PATTERN = /(^|[^A-Za-z])[AL]?GPL/i;
+
+/**
+ * True when a declared license names a GPL-family identifier.
+ *
+ * Shared with the allowlist gate so the two agree on what needs disclosure:
+ * the gate refuses a copyleft embedded runtime with no `copyleft` descriptor,
+ * and `validateEmbeddedNoticeSource` below refuses to generate a notice for
+ * one. Same rule, both directions.
+ */
+export function declaresCopyleft(declaredLicense) {
+  return COPYLEFT_PATTERN.test(declaredLicense);
+}
+
 // Dugite downloads and ships this runtime outside npm's package inventory.
 // Keep the versions and source URLs in sync with its embedded-git.json when
 // updating the dugite dependency.
-const EMBEDDED_GIT_NOTICE_SOURCES = [
+export const EMBEDDED_GIT_NOTICE_SOURCES = [
   {
     name: "Git embedded runtime",
     version: "2.53.0",
     declaredLicense: "GPL-2.0-only",
     file: "COPYING",
     source: "https://github.com/desktop/dugite-native/tree/v2.53.0-4",
+    // The one strong-copyleft component PwrGit ships, and the only entry the
+    // allowlist gate lets GPL-2.0-only through for. Git is invoked as a
+    // separate executable over a process boundary — PwrGit links nothing from
+    // it — so PwrGit itself is not a derivative work. Distributing the binary
+    // still carries GPL-2.0 section 3, which is what this descriptor records:
+    // the corresponding source for what ships, and the build scripts that
+    // produced it.
+    copyleft: {
+      correspondingSource: "https://github.com/git/git/tree/v2.53.0",
+      buildScripts: "https://github.com/desktop/dugite-native/tree/v2.53.0-4",
+    },
   },
   {
     name: "Git LFS embedded runtime",
@@ -57,7 +115,7 @@ const EMBEDDED_GIT_NOTICE_SOURCES = [
   },
 ];
 
-function runPnpmLicenses(args) {
+export function runPnpmLicenses(args) {
   const result = spawnSync(
     "pnpm",
     [
@@ -87,7 +145,7 @@ function runPnpmLicenses(args) {
   return JSON.parse(result.stdout);
 }
 
-function flattenLicenseReport(report) {
+export function flattenLicenseReport(report) {
   const records = [];
   for (const [declaredLicense, entries] of Object.entries(report)) {
     for (const entry of entries) {
@@ -242,8 +300,33 @@ function normalizePathForNotice(path) {
   return path.split(sep).join("/");
 }
 
+/**
+ * Refuse to generate a notice for a copyleft runtime with no disclosure.
+ *
+ * The mirror of the allowlist gate's embedded-runtime rule, enforced from the
+ * generating side: a GPL entry added here without a `copyleft` descriptor would
+ * otherwise be transcribed into the notice with nothing but its license text,
+ * and no statement of where the corresponding source lives.
+ */
+export function validateEmbeddedNoticeSource(notice) {
+  if (!declaresCopyleft(notice.declaredLicense)) {
+    return;
+  }
+  if (typeof notice.copyleft?.correspondingSource !== "string") {
+    throw new Error(
+      [
+        `Embedded runtime "${notice.name}" declares ${JSON.stringify(notice.declaredLicense)},`,
+        "which requires disclosure of the corresponding source. Add a `copyleft`",
+        "descriptor with a `correspondingSource` URL to EMBEDDED_GIT_NOTICE_SOURCES,",
+        "and confirm the license permits shipping it before doing so.",
+      ].join(" "),
+    );
+  }
+}
+
 function readEmbeddedGitNoticeRecords() {
   return EMBEDDED_GIT_NOTICE_SOURCES.map((notice) => {
+    validateEmbeddedNoticeSource(notice);
     const path = join(embeddedGitNoticeDir, notice.file);
     if (!existsSync(path)) {
       throw new Error(
@@ -297,12 +380,10 @@ function compareRecords(a, b) {
 
 function main() {
   const check = process.argv.includes("--check");
-  // Optional dependencies are platform-specific. Excluding them keeps this
-  // committed notice deterministic across macOS, Linux, and Windows CI.
   const productionRecords = flattenLicenseReport(
-    runPnpmLicenses(["--prod", "--no-optional"]),
+    runPnpmLicenses(NOTICE_PNPM_ARGS.production),
   );
-  const allRecords = flattenLicenseReport(runPnpmLicenses(["--no-optional"]));
+  const allRecords = flattenLicenseReport(runPnpmLicenses(NOTICE_PNPM_ARGS.all));
   const recordsByKey = new Map();
 
   for (const record of productionRecords) {
@@ -310,7 +391,7 @@ function main() {
   }
 
   for (const record of allRecords) {
-    if (record.name === "electron") {
+    if (NOTICE_DEV_DEPENDENCIES.has(record.name)) {
       recordsByKey.set(stableRecordKey(record), record);
     }
   }
@@ -365,6 +446,33 @@ function main() {
   lines.push(
     "PwrGit also bundles Git, Git LFS, and Git Credential Manager through Dugite outside the npm dependency tree. Their COPYING, LICENSE, and NOTICE files are installed beside the runtime under Resources/git and are included below.",
   );
+
+  // GPL-2.0 section 3 asks that a binary distribution be accompanied by the
+  // corresponding source or by an offer for it. Git ships as a separate
+  // executable PwrGit invokes over a process boundary, so PwrGit is not a
+  // derivative work of it — but PwrGit does distribute the binary, so the
+  // notice has to say where its source is.
+  const copyleftNotices = EMBEDDED_GIT_NOTICE_SOURCES.filter(
+    (notice) => notice.copyleft !== undefined,
+  );
+  if (copyleftNotices.length > 0) {
+    lines.push("");
+    lines.push("Source Availability");
+    lines.push("-------------------");
+    lines.push("");
+    lines.push(
+      "PwrGit invokes the components below as separate executables over a process boundary and links no code from them. PwrGit redistributes them as built and published upstream and applies no changes of its own. Their corresponding source, and the build scripts and patches used to produce the shipped binaries, are published at:",
+    );
+    for (const notice of copyleftNotices) {
+      lines.push(
+        `- ${notice.name} ${notice.version} (${notice.declaredLicense}): ${notice.copyleft.correspondingSource}` +
+          (notice.copyleft.buildScripts
+            ? `, built by the scripts and patches at ${notice.copyleft.buildScripts}`
+            : ""),
+      );
+    }
+  }
+
   lines.push("");
   lines.push("Dependency Summary");
   lines.push("------------------");

@@ -13,6 +13,12 @@ For Chromium runtime credits, see https://source.chromium.org/chromium and Elect
 The renderer build emits Geist Sans and Geist Mono webfont assets from @fontsource/geist-sans and @fontsource/geist-mono. Those packages are listed below under OFL-1.1, and their SIL Open Font License text is included in the License Texts section.
 PwrGit also bundles Git, Git LFS, and Git Credential Manager through Dugite outside the npm dependency tree. Their COPYING, LICENSE, and NOTICE files are installed beside the runtime under Resources/git and are included below.
 
+Source Availability
+-------------------
+
+PwrGit invokes the components below as separate executables over a process boundary and links no code from them. PwrGit redistributes them as built and published upstream and applies no changes of its own. Their corresponding source, and the build scripts and patches used to produce the shipped binaries, are published at:
+- Git embedded runtime 2.53.0 (GPL-2.0-only): https://github.com/git/git/tree/v2.53.0, built by the scripts and patches at https://github.com/desktop/dugite-native/tree/v2.53.0-4
+
 Dependency Summary
 ------------------
 
