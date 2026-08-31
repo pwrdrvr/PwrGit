@@ -7,6 +7,7 @@ import {
 } from "react";
 import type { ChangeSet, FileChange, Worktree } from "@pwrgit/shared";
 import { copyText } from "../../lib/copyText";
+import { fileStatusChipProps } from "../../lib/fileStatus";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { ContextMenu } from "../shell/ContextMenu";
@@ -20,27 +21,6 @@ import {
   targetPaths,
   type ChangesRowTarget
 } from "./changes-row-menu";
-
-const STATUS_TONE: Record<string, string> = {
-  M: "warn",
-  A: "ok",
-  D: "danger",
-  R: "warn",
-  C: "warn",
-  U: "danger",
-  "?": "muted"
-};
-
-/** Accessible name for the one-letter status chip. */
-const STATUS_LABEL: Record<string, string> = {
-  M: "Modified",
-  A: "Added",
-  D: "Deleted",
-  R: "Renamed",
-  C: "Copied",
-  U: "Conflicted",
-  "?": "Untracked"
-};
 
 /** A folder of new files this big starts collapsed — an untracked tree can be
  *  hundreds of files, and unfolding all of them buries the rest of the list. */
@@ -188,7 +168,8 @@ function FileRow({
   onToggle,
   onOpen,
   onDiscard,
-  onContextMenu
+  onContextMenu,
+  selected
 }: {
   file: FileChange;
   /** Text to show — the basename inside a folder group, the full path outside. */
@@ -198,6 +179,8 @@ function FileRow({
    *  unrelated files that happen to share a name. */
   split: boolean;
   nested: boolean;
+  /** This row is what the main pane is currently showing. */
+  selected: boolean;
   onToggle: () => void;
   onOpen: () => void;
   onDiscard: () => void;
@@ -205,18 +188,13 @@ function FileRow({
 }) {
   return (
     <div
-      className={`file-row is-clickable${file.staged ? " is-staged" : ""}${split ? " is-split" : ""}${nested ? " file-row--nested" : ""}`}
+      className={`file-row is-clickable${file.staged ? " is-staged" : ""}${split ? " is-split" : ""}${nested ? " file-row--nested" : ""}${selected ? " is-selected" : ""}`}
+      {...(selected ? { "aria-current": "true" as const } : {})}
       onClick={onOpen}
       onContextMenu={onContextMenu}
       title={split ? "Partly staged — view these changes" : "View changes"}
     >
-      <span
-        className={`file-status file-status--${STATUS_TONE[file.status] ?? "muted"}`}
-        title={STATUS_LABEL[file.status] ?? "Changed"}
-        aria-label={STATUS_LABEL[file.status] ?? "Changed"}
-      >
-        {file.status}
-      </span>
+      <span {...fileStatusChipProps(file.status)}>{file.status}</span>
       <span className="file-path" title={file.path}>
         {label}
       </span>
@@ -337,11 +315,20 @@ function FolderRow({
 export function ChangesTab({
   worktree,
   activeEmail,
-  onOpenDiff
+  onOpenDiff,
+  onOpenFileInsight,
+  activeFile
 }: {
   worktree: Worktree | null;
   activeEmail: string;
+  /** The file the main pane is showing, so this list can mark it. */
+  activeFile: { path: string; staged: boolean | null } | null;
   onOpenDiff: (path: string, staged: boolean) => void;
+  onOpenFileInsight: (
+    path: string,
+    tab: "history" | "blame",
+    staged?: boolean
+  ) => void;
 }) {
   const [changes, setChanges] = useState<ChangeSet | null>(null);
   const [message, setMessage] = useState("");
@@ -352,6 +339,16 @@ export function ChangesTab({
     y: number;
     target: ChangesRowTarget;
   } | null>(null);
+
+  const openInsight = (
+    target: ChangesRowTarget,
+    tab: "history" | "blame"
+  ): void => {
+    if (target.kind !== "file") return;
+    // The row's side of the index rides along, so a partially staged file
+    // marks ONE row — the one the menu was opened on — not both.
+    onOpenFileInsight(target.file.path, tab, target.file.staged);
+  };
   const [hasSubmoduleConcern, setHasSubmoduleConcern] = useState(false);
   const wtId = worktree?.id ?? null;
 
@@ -568,6 +565,19 @@ export function ChangesTab({
   const splitPaths = new Set(
     staged.map((file) => file.path).filter((path) => unstagedPaths.has(path))
   );
+  // Which side of the index the active file means. Openers that know their
+  // side say so; for those that don't (the palette, a commit-scoped view that
+  // fell back), resolve against the sections — unstaged wins when the path is
+  // in both, since a workingTree-context view shows working-tree content. One
+  // row marks either way; `staged: null` used to match both.
+  const effectiveActiveStaged: boolean | null =
+    activeFile === null
+      ? null
+      : activeFile.staged !== null
+        ? activeFile.staged
+        : changes === null
+          ? null
+          : !changes.unstaged.some((file) => file.path === activeFile.path);
 
   const renderEntries = (
     files: FileChange[],
@@ -600,6 +610,11 @@ export function ChangesTab({
           onOpen={() => onOpenDiff(file.path, stagedSection)}
           onDiscard={() => void discardTarget(target)}
           onContextMenu={(event) => openMenu(event, target)}
+          selected={
+            activeFile !== null &&
+            activeFile.path === file.path &&
+            effectiveActiveStaged === file.staged
+          }
         />
       );
     };
@@ -738,7 +753,9 @@ export function ChangesTab({
               ),
             onDiscard: () => void discardTarget(menu.target),
             onIgnore: () => ignoreTarget(menu.target),
-            onCopyPath: () => void copyText(targetPaths(menu.target).join("\n"))
+            onCopyPath: () => void copyText(targetPaths(menu.target).join("\n")),
+            onHistory: () => openInsight(menu.target, "history"),
+            onBlame: () => openInsight(menu.target, "blame")
           })}
         />
       )}

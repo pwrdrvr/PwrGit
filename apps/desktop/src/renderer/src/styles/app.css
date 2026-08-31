@@ -132,9 +132,19 @@ textarea,
 .submodule-row__path,
 .submodule-fact__value,
 .commit-msg,
+.diff-pane__message,
+.diff-pane__message-text,
+.diff-pane__message-body,
+.diff-pane__scope,
 .commit-sha-chip,
 .commit-context-card__subject,
 .commit-context-card__short-hash,
+.file-insight__commit,
+.file-history__subject,
+.file-history__rename,
+.file-blame__code,
+.file-blame__source,
+.file-insight-pane__path,
 .pull-divergence__commit-subject,
 .pull-divergence__commit code,
 .about-identity-value,
@@ -5817,6 +5827,18 @@ body.is-col-resizing {
   flex: 0 0 auto;
   display: inline-flex;
 }
+/* The kebab's default 24px is the SIDEBAR row's size, where it sits among
+   11px text. Standing in a toolbar beside 32px `.wt-btn`s it read as a
+   different, smaller class of control — so in that context it takes the
+   toolbar's own metrics instead. */
+.kebab--toolbar .kebab__btn {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  border-color: var(--border-default);
+  background: var(--bg-panel-elevated);
+  color: var(--text-primary);
+}
 .kebab__btn {
   width: 24px;
   height: 24px;
@@ -6867,6 +6889,14 @@ body.is-col-resizing {
   border-color: var(--accent-border);
   background: var(--accent-soft);
 }
+/* Showing right now. Same reasoning as the selected file row: --accent is what
+   carries the state, since the soft fill alone is also what hover uses and
+   could not tell "you are here" from "your pointer is here". */
+.commit-tab__full.is-active {
+  color: var(--accent-bright);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
 .commit-tab__hash {
   font: 600 10.5px/1 var(--font-mono);
   color: var(--text-subtle);
@@ -6907,6 +6937,15 @@ body.is-col-resizing {
 .file-row.is-clickable:hover {
   background: var(--bg-panel-hover);
 }
+/* The row whose diff the main pane is showing. Same reasoning as
+   `.wt-row.is-selected`: "selected" is a state, so SC 1.4.11 wants it
+   identifiable at 3:1, and --bg-row-active alone reads as a wash — --accent
+   carries it. An inset ring rather than a border because this row is
+   borderless and a real one would shift every sibling by 2px. */
+.file-row.is-selected {
+  background: var(--bg-row-active);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
 .commit-check {
   cursor: pointer;
 }
@@ -6928,13 +6967,89 @@ body.is-col-resizing {
 .diff-pane:focus {
   outline: none;
 }
+/* Two rows: what you are looking at, then the commit's message. The message
+   used to share a row with the path and the actions, where an unbounded
+   subject shouldered the controls off the end — on its own line it has the
+   pane's full width and needs no breakpoint ladder to survive a narrow pane. */
 .diff-pane__head {
   flex: 0 0 auto;
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 9px 20px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.diff-pane__row {
+  display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 20px;
-  border-bottom: 1px solid var(--border-subtle);
+  min-width: 0;
+}
+/* The SCOPE, not the file: every file's own strip in the body names it. */
+.diff-pane__scope {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 12.5px/1.3 var(--font-mono);
+  color: var(--text-primary);
+}
+.diff-pane__message {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font: 500 11.5px/1.4 var(--font-sans);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.diff-pane__message--toggle {
+  cursor: pointer;
+}
+.diff-pane__message--toggle:hover {
+  color: var(--text-primary);
+}
+.diff-pane__message--toggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.diff-pane__message-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.diff-pane__message-caret {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  transition: transform 120ms ease;
+}
+.diff-pane__message--toggle.is-open .diff-pane__message-caret {
+  transform: rotate(90deg);
+}
+/* Capped and scrollable: a commit body can be a page long, and the header is
+   chrome above the diff, not a place to lose the diff behind. */
+.diff-pane__message-body {
+  margin: 0;
+  max-height: 168px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  font: 500 11px/1.5 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 /* The pane's one way out, at the far right where a dismiss is expected. It
    sits on the accent tint so it reads as the header's action rather than as
@@ -6963,19 +7078,6 @@ body.is-col-resizing {
 .diff-pane__close:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
-}
-.diff-pane__title {
-  min-width: 0;
-  font: 600 12.5px/1.3 var(--font-mono);
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.diff-pane__sub {
-  flex: 0 0 auto;
-  font: 500 10.5px/1 var(--font-mono);
-  color: var(--text-subtle);
 }
 /* Which side of the index the pane is showing, and the way across. A
    partially staged file is two rows in the rail with nothing to say they are
@@ -7198,12 +7300,502 @@ body.is-col-resizing {
   color: var(--status-warning);
   font: 500 10.5px/1.35 var(--font-sans);
 }
+/* Same ladder the worktree header walks down (720/680/540): drop the widest
+   thing whose signal survives elsewhere. The subject is also on the commit in
+   the rail and on the row that opened this pane; History, Blame and the close
+   button have nowhere else to be. */
+@container (max-width: 620px) {
+  }
+/* The last rung. Both side panes at their maximum leave this one about 200px
+   on a 1280px window, and the order things go is deliberate: the subject
+   first, then the revision, and the title shrinks to nothing before History,
+   Blame or the close button give up a pixel — losing the actions strands the
+   reader in a pane whose only exits are keyboard ones. */
+@container (max-width: 460px) {
+  }
+.diff-pane__tools {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+}
+.diff-pane__tools button,
+.file-insight-pane__back,
+.file-insight-tabs button,
+.file-insight__more,
+.file-insight__empty button {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel-elevated);
+  color: var(--text-secondary);
+  font: 600 10.5px/1 var(--font-sans);
+  cursor: pointer;
+}
+.diff-pane__tools button {
+  height: 26px;
+  padding: 0 9px;
+}
+.diff-pane__tools button:hover,
+.file-insight-pane__back:hover,
+.file-insight-tabs button:hover,
+.file-insight__more:hover,
+.file-insight__empty button:hover {
+  border-color: var(--accent-border);
+  color: var(--text-primary);
+  background: var(--bg-panel-hover);
+}
+.diff-pane__tools button:focus-visible,
+.file-insight-pane__back:focus-visible,
+.file-insight-tabs button:focus-visible,
+.file-insight__commit:focus-visible,
+.file-insight__more:focus-visible,
+.file-insight__empty button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
 .diff-pane__body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 14px 20px 20px;
 }
+
+/* ---- File history + blame ---- */
+
+.file-insight-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-app);
+}
+/* Focused on open and on every drill-down level so Escape has somewhere to
+   land. A region, not a control — no ring around the whole column. */
+.file-insight-pane:focus {
+  outline: none;
+}
+.file-insight-pane__head {
+  flex: 0 0 auto;
+  min-height: 47px;
+  padding: 9px 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.file-insight-pane__back {
+  flex: 0 0 auto;
+  height: 27px;
+  padding: 0 9px;
+}
+.file-insight-pane__path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font: 600 12.5px/1.3 var(--font-mono);
+}
+.file-insight-pane__context {
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: var(--text-subtle);
+  font: 500 10.5px/1 var(--font-mono);
+}
+/* Says which revision a drill-down is standing on, so "before abc1234" never
+   reads as the file's current blame. */
+.file-insight-pane__trail {
+  flex: 0 0 auto;
+  padding: 6px 20px;
+  border-bottom: 1px solid var(--border-faint);
+  background: var(--bg-panel);
+  color: var(--text-subtle);
+  font: 500 10.5px/1.4 var(--font-sans);
+}
+.file-insight-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 5px;
+  padding: 9px 20px;
+  border-bottom: 1px solid var(--border-faint);
+  background: var(--bg-panel);
+}
+.file-insight-tabs button {
+  height: 28px;
+  padding: 0 13px;
+}
+.file-insight-tabs button.is-active {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+.file-insight-pane__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px 24px;
+}
+/* Panels stay mounted across tab switches; `hidden` is what hides the
+   inactive one, so nothing here may set `display` on it. */
+.file-insight-pane__body > [hidden] {
+  display: none;
+}
+.file-insight__empty {
+  min-height: 120px;
+  padding: 30px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  color: var(--text-subtle);
+  font: 500 12px/1.5 var(--font-sans);
+}
+.file-insight__empty--error,
+.file-insight__page-error {
+  color: var(--danger-text);
+}
+.file-insight__empty button {
+  height: 28px;
+  padding: 0 10px;
+}
+.file-insight__notice,
+.file-insight__page-error {
+  margin-bottom: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel-elevated);
+  font: 500 11px/1.45 var(--font-sans);
+}
+.file-insight__commit {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-panel-elevated);
+  color: var(--text-muted);
+  font: 600 9.5px/1 var(--font-mono);
+  cursor: pointer;
+}
+.file-insight__commit:hover {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+/* A label, not a control: the row around it already opens the commit. */
+.file-insight__commit.is-static,
+.file-insight__commit.is-uncommitted {
+  cursor: default;
+}
+.file-insight__commit.is-static:hover {
+  border-color: var(--border-subtle);
+  color: var(--text-muted);
+}
+.file-insight__commit.is-uncommitted {
+  color: var(--status-warning);
+}
+.file-insight__commit.is-uncommitted:hover {
+  border-color: var(--border-subtle);
+  color: var(--status-warning);
+}
+.file-insight__author {
+  min-width: 0;
+  max-width: 180px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font: 600 10.5px/1 var(--font-sans);
+}
+.file-insight__avatar {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  object-fit: cover;
+}
+.file-insight__time {
+  flex: 0 0 auto;
+  color: var(--text-subtle);
+  font: 500 10px/1 var(--font-sans);
+}
+/* Secondary per-row verbs. Held at opacity 0 rather than removed so they keep
+   their space (no reflow on hover) and stay in the tab order for keyboards —
+   :focus-within is what reveals them there. */
+/* Sized and coloured like `.file-action`, the rail's row actions — the same
+   affordance in the same role, and 24px is what it takes for a stroke glyph to
+   read at all. */
+.file-insight__row-action {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+.file-insight__row-action:hover {
+  border-color: var(--accent-border);
+  background: var(--bg-panel-hover);
+  color: var(--accent);
+}
+.file-insight__row-action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.file-insight__more {
+  min-width: 160px;
+  height: 30px;
+  padding: 0 12px;
+  display: block;
+  margin: 14px auto 0;
+}
+.file-insight__more--earlier {
+  margin: 0 auto 12px;
+}
+.file-insight__more:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+/* ---- History list ---- */
+
+.file-history__row {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border-faint);
+}
+.file-history__row:hover {
+  background: var(--bg-panel-hover);
+}
+/* The row IS the control: reading a file's history to find out what changed
+   should not require aiming at a seven-character pill. */
+.file-history__open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.file-history__open:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.file-history__open > .file-status {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+.file-history__content {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.file-history__title,
+.file-history__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.file-history__subject {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font: 600 12px/1.35 var(--font-sans);
+}
+/* Only rename rows render a path, so this line carries information instead of
+   repeating the file's own name once per commit. */
+.file-history__rename {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font: 500 10px/1.3 var(--font-mono);
+}
+.file-history__row > .file-insight__row-action {
+  align-self: center;
+  margin-right: 6px;
+  opacity: 0;
+}
+.file-history__row:hover > .file-insight__row-action,
+.file-history__row:focus-within > .file-insight__row-action {
+  opacity: 1;
+}
+
+/* ---- Blame ---- */
+
+/* A gutter, not a card per hunk. Measured across this repo, a 200-line file
+   averages ~9 lines per hunk and the busiest ones average 2 — one bordered
+   card apiece spent more vertical space on chrome than on code. */
+.file-insight-pane {
+  /* The gutter and line-number widths, named because FOUR rules have to
+     agree: blame's grid columns, the source line's indent (which must land
+     exactly where the code column starts), and the contents view's own
+     number column. Hard-coded, they drift apart and lines silently stop
+     lining up. On the pane, not .file-blame, so both views inherit them. */
+  --blame-gutter: 250px;
+  --blame-number: 52px;
+}
+.file-blame__lines {
+  overflow-x: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+}
+/* One scroller for the file. Per-hunk scrollers let a long line slide
+   underneath its neighbours, and the code stopped lining up. */
+.file-blame__body {
+  min-width: max-content;
+}
+.file-blame__row {
+  display: grid;
+  grid-template-columns: var(--blame-gutter) var(--blame-number) 1fr;
+  align-items: center;
+  min-height: 20px;
+}
+.file-blame__row:hover {
+  background: var(--bg-panel-hover);
+}
+.file-blame__row.is-hunk-start {
+  border-top: 1px solid var(--border-faint);
+}
+.file-blame__body > .file-blame__row:first-child {
+  border-top: 0;
+}
+.file-blame__gutter {
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  overflow: hidden;
+  border-right: 1px solid var(--border-faint);
+}
+/* Alternating tint groups the lines that share a commit without disturbing
+   the code column's own contrast. */
+.file-blame__row.is-alt .file-blame__gutter {
+  background: var(--bg-panel-elevated);
+}
+.file-blame__row.is-uncommitted .file-blame__gutter {
+  box-shadow: inset 2px 0 0 var(--accent-border);
+}
+/* The line the reader came from — blame opened aimed at it, so it should be
+   findable at a glance once the scroll lands. A tint, not a ring: it is
+   context, not a selection. */
+.file-blame__row.is-target {
+  background: var(--accent-soft);
+}
+.file-blame__row.is-target .file-blame__gutter {
+  background: var(--accent-soft);
+}
+.file-blame__actions {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 2px;
+  opacity: 0;
+}
+.file-blame__row:hover .file-blame__actions,
+.file-blame__row:focus-within .file-blame__actions {
+  opacity: 1;
+}
+.file-blame__number {
+  padding: 0 9px;
+  text-align: right;
+  border-right: 1px solid var(--border-faint);
+  color: var(--text-subtle);
+  font: 500 10px/20px var(--font-mono);
+}
+.file-blame__code {
+  padding: 0 12px;
+  white-space: pre;
+  color: var(--text-secondary);
+  font: 500 11px/20px var(--font-mono);
+}
+/* Rare — only where blame crossed a rename — so it earns a full-width line
+   rather than a permanent column. Indented to the code it explains. */
+.file-blame__source {
+  grid-column: 1 / -1;
+  padding: 3px 12px 3px calc(var(--blame-gutter) + var(--blame-number));
+  border-top: 1px dashed var(--border-faint);
+  color: var(--text-subtle);
+  font: 500 9.5px/1.3 var(--font-mono);
+}
+
+/* ---- The file at a revision ---- */
+
+/* Rides blame's cell styles (number, code, the bordered scroller) with a
+   two-column grid: same file, same columns, minus the attribution gutter. */
+.file-contents__row {
+  display: grid;
+  grid-template-columns: var(--blame-number) 1fr;
+  min-height: 20px;
+}
+.file-contents__row:hover {
+  background: var(--bg-panel-hover);
+}
+
+/* ---- A commit's diff, inside the pane ---- */
+
+.file-insight-diff {
+  display: flex;
+  flex-direction: column;
+}
+.file-insight-diff__head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: var(--bg-panel-elevated);
+}
+.file-insight-diff__subject {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font: 600 12px/1.35 var(--font-sans);
+}
+.file-insight-diff__head > .file-insight__row-action {
+  opacity: 1;
+}
+.file-insight-diff__body {
+  border: 1px solid var(--border-subtle);
+  border-top: 0;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: var(--bg-panel);
+  /* `clip`, not `auto`: diff text wraps (pre-wrap), so nothing needs the
+     horizontal scroller — and `auto` made this box a scroll container, which
+     pinned the sticky file head to a box that never scrolls. */
+  overflow-x: clip;
+}
+
 .diff-empty {
   padding: 24px;
   text-align: center;
@@ -7281,10 +7873,52 @@ body.is-col-resizing {
   margin-bottom: 12px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  /* `clip`, not `hidden`: both round the corners, but `hidden` creates a
+     scroll container, which makes IT the scrollport the head below sticks
+     to — so the head scrolled away with the code and took the file's menu
+     with it. `clip` does not, so the head sticks to the pane instead. */
+  overflow: clip;
   background: var(--bg-panel);
 }
+/* Per-file actions, on the file's own strip. Held at low opacity rather than
+   hidden so it is discoverable at a glance, and revealed on hover or keyboard
+   focus like the rail's row actions. */
+.diff-file__menu {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  opacity: 0.55;
+  cursor: pointer;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+.diff-file__head:hover .diff-file__menu,
+.diff-file__menu:focus-visible {
+  opacity: 1;
+}
+.diff-file__menu:hover {
+  border-color: var(--accent-border);
+  background: var(--bg-panel-hover);
+  color: var(--accent);
+}
+.diff-file__menu:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+/* Pinned while its own file scrolls, pushed out by the next file's head — so
+   the name, the stat and the file's menu stay reachable however far down you
+   are. Bounded by `.diff-file`, which is what makes the handoff happen. */
 .diff-file__head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -7423,6 +8057,26 @@ body.is-col-resizing {
   color: var(--text-subtle);
   font-size: 10px;
   user-select: none;
+}
+/* A gutter number that opens blame at that line. Styled as the number it is —
+   the affordance is the hover, not a permanent button — so the diff does not
+   grow a column of chrome. */
+.diff-gutter--blame {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.diff-gutter--blame:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.diff-gutter--blame:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -1px;
+  border-radius: 2px;
 }
 .diff-sym {
   text-align: center;

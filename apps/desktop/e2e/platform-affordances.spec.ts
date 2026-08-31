@@ -57,7 +57,7 @@ test("renderer affordances follow the real OS platform", async () => {
   // Control+F in the Windows E2E job and proves the label still names behavior.
   await window.keyboard.press(primaryShortcut("F"));
   await expect(
-    window.getByRole("dialog", { name: "Jump to repo, branch, or commit" })
+    window.getByRole("dialog", { name: "Jump to repo, branch, commit, or file" })
   ).toBeVisible();
   await window.keyboard.press("Escape");
 
@@ -100,7 +100,7 @@ test("renderer affordances follow the real OS platform", async () => {
 
   await window.keyboard.press(primaryShortcut("F"));
   const search = window.getByRole("dialog", {
-    name: "Jump to repo, branch, or commit"
+    name: "Jump to repo, branch, commit, or file"
   });
   await search.getByRole("textbox").fill("alpha");
   await expect(search.locator(".overlay-foot")).toContainText(

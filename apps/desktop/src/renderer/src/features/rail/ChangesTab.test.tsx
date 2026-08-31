@@ -146,7 +146,13 @@ describe("ChangesTab list", () => {
     root = createRoot(container);
     await act(async () => {
       root.render(
-        <ChangesTab worktree={worktree} activeEmail="a@b.c" onOpenDiff={vi.fn()} />
+        <ChangesTab
+          worktree={worktree}
+          activeEmail="a@b.c"
+          onOpenDiff={vi.fn()}
+          onOpenFileInsight={vi.fn()}
+          activeFile={null}
+        />
       );
     });
   });
@@ -277,7 +283,13 @@ describe("ChangesTab partially staged files", () => {
     root = createRoot(container);
     await act(async () => {
       root.render(
-        <ChangesTab worktree={worktree} activeEmail="a@b.c" onOpenDiff={vi.fn()} />
+        <ChangesTab
+          worktree={worktree}
+          activeEmail="a@b.c"
+          onOpenDiff={vi.fn()}
+          onOpenFileInsight={vi.fn()}
+          activeFile={null}
+        />
       );
     });
   });
@@ -321,7 +333,13 @@ describe("ChangesTab truncation notice", () => {
     );
     await act(async () => {
       root.render(
-        <ChangesTab worktree={worktree} activeEmail="a@b.c" onOpenDiff={vi.fn()} />
+        <ChangesTab
+          worktree={worktree}
+          activeEmail="a@b.c"
+          onOpenDiff={vi.fn()}
+          onOpenFileInsight={vi.fn()}
+          activeFile={null}
+        />
       );
     });
   };
@@ -449,7 +467,13 @@ describe("ChangesTab folder actions", () => {
     root = createRoot(container);
     await act(async () => {
       root.render(
-        <ChangesTab worktree={worktree} activeEmail="a@b.c" onOpenDiff={vi.fn()} />
+        <ChangesTab
+          worktree={worktree}
+          activeEmail="a@b.c"
+          onOpenDiff={vi.fn()}
+          onOpenFileInsight={vi.fn()}
+          activeFile={null}
+        />
       );
     });
   });
@@ -505,6 +529,72 @@ describe("ChangesTab folder actions", () => {
     });
   });
 
+  it("marks the row whose diff the main pane is showing", async () => {
+    await act(async () => {
+      root.render(
+        <ChangesTab
+          worktree={worktree}
+          activeEmail="a@b.c"
+          onOpenDiff={vi.fn()}
+          onOpenFileInsight={vi.fn()}
+          activeFile={{ path: "src/app.ts", staged: false }}
+        />
+      );
+    });
+
+    const selected = [...container.querySelectorAll(".file-row.is-selected")];
+    expect(selected).toHaveLength(1);
+    expect(selected[0]?.textContent).toContain("src/app.ts");
+    expect(selected[0]?.getAttribute("aria-current")).toBe("true");
+  });
+
+  it("marks ONE row for a null-staged active file present on both sides", async () => {
+    // The insight pane's opener may not know its side; a partially staged
+    // file sits in both sections, and `staged: null` used to mark both rows
+    // aria-current at once. Null resolves against the sections — unstaged
+    // wins, since a workingTree-context view shows working-tree content.
+    const partiallyStaged: ChangeSet = {
+      staged: [{ path: "src/app.ts", status: "M", staged: true }],
+      unstaged: [{ path: "src/app.ts", status: "M", staged: false }]
+    };
+    mocks.dispatch.mockImplementation(async (command: string) =>
+      command === "changes:list" ? ok(partiallyStaged) : ok(null)
+    );
+    await act(async () => {
+      root.render(
+        <ChangesTab
+          worktree={worktree}
+          activeEmail="a@b.c"
+          onOpenDiff={vi.fn()}
+          onOpenFileInsight={vi.fn()}
+          activeFile={{ path: "src/app.ts", staged: null }}
+        />
+      );
+    });
+
+    const selected = [...container.querySelectorAll(".file-row.is-selected")];
+    expect(selected).toHaveLength(1);
+    expect(selected[0]?.classList.contains("is-staged")).toBe(false);
+    expect(
+      container.querySelectorAll('[aria-current="true"]')
+    ).toHaveLength(1);
+  });
+
+  it("does not mark a row when the main pane shows nothing", async () => {
+    await act(async () => {
+      root.render(
+        <ChangesTab
+          worktree={worktree}
+          activeEmail="a@b.c"
+          onOpenDiff={vi.fn()}
+          onOpenFileInsight={vi.fn()}
+          activeFile={null}
+        />
+      );
+    });
+    expect(container.querySelectorAll(".file-row.is-selected")).toHaveLength(0);
+  });
+
   it("offers no ignore entry for a tracked file", async () => {
     const row = [...container.querySelectorAll(".file-row")].find((r) =>
       r.textContent?.includes("src/app.ts")
@@ -514,7 +604,13 @@ describe("ChangesTab folder actions", () => {
 
     expect(
       [...document.querySelectorAll(".pop-menu__item")].map((b) => b.textContent)
-    ).toEqual(["Stage", "Copy path", "Discard changes…"]);
+    ).toEqual([
+      "Stage",
+      "File history",
+      "Blame",
+      "Copy path",
+      "Discard changes…"
+    ]);
   });
 
   it("says so when the pattern was already there", async () => {
@@ -580,7 +676,13 @@ describe("ChangesTab conflict marker guard", () => {
     root = createRoot(container);
     await act(async () => {
       root.render(
-        <ChangesTab worktree={worktree} activeEmail="a@b.c" onOpenDiff={vi.fn()} />
+        <ChangesTab
+          worktree={worktree}
+          activeEmail="a@b.c"
+          onOpenDiff={vi.fn()}
+          onOpenFileInsight={vi.fn()}
+          activeFile={null}
+        />
       );
     });
   };
@@ -703,3 +805,4 @@ describe("ChangesTab conflict marker guard", () => {
     });
   });
 });
+

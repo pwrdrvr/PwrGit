@@ -2,12 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   BranchReveal,
   Commit,
+  FileInsightContext,
   Profile,
   Repo,
   RepoSearchHit,
   Worktree
 } from "@pwrgit/shared";
 import { DiffPane, type DiffTarget } from "./features/diff/DiffPane";
+import {
+  FileInsightsPane,
+  type FileInsightTab
+} from "./features/diff/FileInsightsPane";
 import { LineageGraph } from "./features/graph/LineageGraph";
 import { SelectionBar } from "./features/graph/SelectionBar";
 import { TitleBar } from "./features/chrome/TitleBar";
@@ -118,7 +123,19 @@ export function App() {
     "squash" | "reorder" | null
   >(null);
   const [diffTarget, setDiffTarget] = useState<DiffTarget | null>(null);
-  const closeDiff = useCallback(() => setDiffTarget(null), []);
+  const [fileInsightTarget, setFileInsightTarget] = useState<{
+    path: string;
+    context: FileInsightContext;
+    tab: FileInsightTab;
+    /** Blame opens with this line in view. */
+    line?: number;
+    /** Which side of the index the opener was looking at, when it had one. */
+    staged?: boolean;
+  } | null>(null);
+  const closeDiff = useCallback(() => {
+    setFileInsightTarget(null);
+    setDiffTarget(null);
+  }, []);
   // A commit clicked in the lineage — the rail shows its file list, scoped
   // like the WIP Changes tab; files open one-file diffs in the main pane.
   const [commitFocus, setCommitFocus] = useState<{
@@ -136,6 +153,7 @@ export function App() {
     setSelectedCommits(new Set());
     setRebaseAction(null);
     setDiffTarget(null);
+    setFileInsightTarget(null);
     setCommitFocus(null);
     setSearchableCommits([]);
     setCommitReveal(null);
@@ -322,6 +340,7 @@ export function App() {
 
   const onPickCommitSearch = useCallback((commit: Commit) => {
     setOverlayOpen(false);
+    setFileInsightTarget(null);
     setDiffTarget(null);
     setCommitFocus({ hash: commit.hash, subject: commit.subject });
     setRailCollapsed(false);
@@ -330,6 +349,81 @@ export function App() {
       requestId: (current?.requestId ?? 0) + 1
     }));
   }, []);
+
+  // A file picked in the command palette opens its details directly. The diff
+  // behind the pane is dropped: it belongs to whatever the user was looking at
+  // before, and offering to "go back" to an unrelated file's patch is worse
+  // than returning to the lineage.
+  const onPickFileSearch = useCallback((path: string) => {
+    setOverlayOpen(false);
+    setDiffTarget(null);
+    setCommitFocus(null);
+    setFileInsightTarget({
+      path,
+      context: { kind: "workingTree" },
+      tab: "history"
+    });
+  }, []);
+
+  const showLineageCommit = useCallback((hash: string, subject: string) => {
+    if (!searchableCommits.some((commit) => commit.hash === hash)) return false;
+    setFileInsightTarget(null);
+    setDiffTarget(null);
+    setCommitFocus({ hash, subject });
+    setRailCollapsed(false);
+    setCommitReveal((current) => ({
+      hash,
+      requestId: (current?.requestId ?? 0) + 1
+    }));
+    return true;
+  }, [searchableCommits]);
+
+  // What the main pane is showing, so the rail can mark it. Split in two
+  // because the two lists answer different questions, and a single loose
+  // "active path" got the commit list wrong: focusing another commit in the
+  // lineage does NOT close an open diff, so a file open at commit A would
+  // light up in commit B's list wherever B touched the same path.
+  const changesActiveFile = useMemo<{
+    path: string;
+    staged: boolean | null;
+  } | null>(() => {
+    if (fileInsightTarget?.context.kind === "workingTree") {
+      return {
+        path: fileInsightTarget.path,
+        staged: fileInsightTarget.staged ?? null
+      };
+    }
+    if (diffTarget?.kind === "file") {
+      return { path: diffTarget.path, staged: diffTarget.staged };
+    }
+    return null;
+  }, [fileInsightTarget, diffTarget]);
+
+  const commitView = useMemo<
+    { kind: "full" } | { kind: "file"; path: string } | null
+  >(() => {
+    if (commitFocus === null) return null;
+    // File details FIRST, matching changesActiveFile above: they render over
+    // the diff, which stays mounted-but-hidden — checking the diff first kept
+    // "Full diff" marked while the visible pane showed one file's blame.
+    if (
+      fileInsightTarget?.context.kind === "commit" &&
+      fileInsightTarget.context.hash === commitFocus.hash
+    ) {
+      return { kind: "file", path: fileInsightTarget.path };
+    }
+    if (fileInsightTarget !== null) return null;
+    if (diffTarget?.kind === "commit" && diffTarget.hash === commitFocus.hash) {
+      return { kind: "full" };
+    }
+    if (
+      diffTarget?.kind === "commitFile" &&
+      diffTarget.hash === commitFocus.hash
+    ) {
+      return { kind: "file", path: diffTarget.path };
+    }
+    return null;
+  }, [commitFocus, diffTarget, fileInsightTarget]);
 
   const selectedRepo = useMemo(
     () => repos.find((r) => r.id === selection?.repoId) ?? null,
@@ -519,7 +613,12 @@ export function App() {
                   query is expensive to re-run). */}
               <div
                 className="graph-wrap"
-                style={{ display: diffTarget !== null ? "none" : "flex" }}
+                style={{
+                  display:
+                    diffTarget !== null || fileInsightTarget !== null
+                      ? "none"
+                      : "flex"
+                }}
               >
                 <LineageGraph
                   repoId={selectedRepo.id}
@@ -577,7 +676,35 @@ export function App() {
                   onOpenFile={(path, staged) =>
                     setDiffTarget({ kind: "file", path, staged })
                   }
+                  hidden={fileInsightTarget !== null}
+                  onOpenFileInsight={(path, context, tab, line) =>
+                    setFileInsightTarget({
+                      path,
+                      context,
+                      tab,
+                      ...(line === undefined ? {} : { line })
+                    })
+                  }
                   onClose={closeDiff}
+                />
+              )}
+              {fileInsightTarget !== null && (
+                <FileInsightsPane
+                  key={`${fileInsightTarget.path}:${
+                    fileInsightTarget.context.kind === "commit"
+                      ? fileInsightTarget.context.hash
+                      : "working"
+                  }:${fileInsightTarget.tab}:${fileInsightTarget.line ?? ""}`}
+                  worktreeId={selectedWorktree.id}
+                  path={fileInsightTarget.path}
+                  context={fileInsightTarget.context}
+                  initialTab={fileInsightTarget.tab}
+                  {...(fileInsightTarget.line === undefined
+                    ? {}
+                    : { initialLine: fileInsightTarget.line })}
+                  returnLabel={diffTarget === null ? "Lineage" : "Diff"}
+                  onClose={() => setFileInsightTarget(null)}
+                  onShowCommit={showLineageCommit}
                 />
               )}
             </>
@@ -621,6 +748,7 @@ export function App() {
             onCloseCommit={() => setCommitFocus(null)}
             onOpenCommitFile={(path) => {
               if (commitFocus !== null) {
+                setFileInsightTarget(null);
                 setDiffTarget({
                   kind: "commitFile",
                   hash: commitFocus.hash,
@@ -631,6 +759,7 @@ export function App() {
             }}
             onOpenFullCommitDiff={() => {
               if (commitFocus !== null) {
+                setFileInsightTarget(null);
                 setDiffTarget({
                   kind: "commit",
                   hash: commitFocus.hash,
@@ -640,9 +769,21 @@ export function App() {
             }}
             onClearSelection={clearSelection}
             onCollapse={() => setRailCollapsed(true)}
-            onOpenDiff={(path, staged) =>
-              setDiffTarget({ kind: "file", path, staged })
-            }
+            onOpenDiff={(path, staged) => {
+              setFileInsightTarget(null);
+              setDiffTarget({ kind: "file", path, staged });
+            }}
+            activeFile={changesActiveFile}
+            commitView={commitView}
+            onOpenFileInsight={(path, tab, staged) => {
+              setDiffTarget(null);
+              setFileInsightTarget({
+                path,
+                context: { kind: "workingTree" },
+                tab,
+                ...(staged === undefined ? {} : { staged })
+              });
+            }}
           />
         )}
 
@@ -668,6 +809,7 @@ export function App() {
           onClose={() => setOverlayOpen(false)}
           onPick={onPickSearch}
           onPickCommit={onPickCommitSearch}
+          onPickFile={onPickFileSearch}
         />
       )}
 

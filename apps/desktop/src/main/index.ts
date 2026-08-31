@@ -36,6 +36,7 @@ import { registerBulkSyncHandlers } from "./git/bulk-sync-handlers";
 import { registerCloneHandlers } from "./git/clone-handlers";
 import { CloneService } from "./git/clone-service";
 import { registerForkHandlers } from "./git/fork-handlers";
+import { registerFileInsightHandlers } from "./git/file-insights-handlers";
 import { ForkService } from "./git/fork-service";
 import { ForgeRepoRegistry } from "./forge/repo-provider";
 import { createE2EForgeFixtureServices } from "./forge/e2e-forge-fixture";
@@ -527,6 +528,7 @@ if (!gotSingleInstanceLock) {
     registerChangesHandlers(bus, db, refresher, worktreeOperations);
     registerOperationHandlers(bus, db, refresher, worktreeOperations);
     registerSubmoduleHandlers(bus, db);
+    const fileInsightHandlers = registerFileInsightHandlers(bus, db);
     registerRebaseHandlers(bus, db, refresher, worktreeOperations);
     registerDialogHandlers(bus);
     registerShellHandlers(bus);
@@ -556,6 +558,7 @@ if (!gotSingleInstanceLock) {
       onWebContentsDestroyed: (webContentsId) => {
         githubHandlers.releaseWebContents(webContentsId);
         bulkSyncHandlers.releaseWebContents(webContentsId);
+        fileInsightHandlers.releaseWebContents(webContentsId);
       }
     });
     registerAppUpdateHandlers(bus);

@@ -438,6 +438,45 @@ export function parseLog(stdout: string): Commit[] {
     });
 }
 
+/**
+ * One commit's subject and body.
+ *
+ * Deliberately not folded into `LOG_FORMAT`: that format also drives the
+ * 200-commit graph walk, where a body per row is payload nothing reads. A NUL
+ * separates the fields — a commit message cannot contain one. `%H` leads so
+ * the same ref-shadowing guard `readCommit` applies can run here too: Git
+ * prefers an exact all-hex ref NAME over an object-ID prefix, and without the
+ * check a branch named like a hex string answers with the wrong commit.
+ */
+export async function readCommitMessage(
+  git: GitExec,
+  cwd: string,
+  hash: string,
+  signal?: AbortSignal
+): Promise<Result<{ subject: string; body: string } | null>> {
+  const candidate = hash.trim();
+  if (!/^[0-9a-f]{4,64}$/i.test(candidate)) return ok(null);
+  const raw = await git(
+    [
+      "show",
+      "--no-patch",
+      "--no-show-signature",
+      "--pretty=format:%H%x00%s%x00%b",
+      `${candidate}^{commit}`
+    ],
+    cwd,
+    signal === undefined ? undefined : { signal }
+  );
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode !== 0) return ok(null);
+  const [resolvedHash = "", subject = "", ...rest] =
+    raw.value.stdout.split("\0");
+  if (!resolvedHash.toLowerCase().startsWith(candidate.toLowerCase())) {
+    return ok(null);
+  }
+  return ok({ subject, body: rest.join("\0").trim() });
+}
+
 /** Resolve one full or abbreviated SHA without walking the visible graph. */
 export async function readCommit(
   git: GitExec,

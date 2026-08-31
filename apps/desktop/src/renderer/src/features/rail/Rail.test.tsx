@@ -63,6 +63,9 @@ describe("Rail operation banner", () => {
           onClearSelection={vi.fn()}
           onCollapse={vi.fn()}
           onOpenDiff={vi.fn()}
+          onOpenFileInsight={vi.fn()}
+          activeFile={null}
+          commitView={null}
           {...props}
         />
       );

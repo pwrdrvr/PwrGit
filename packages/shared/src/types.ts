@@ -854,6 +854,91 @@ export type Commit = {
   isMerge: boolean;
 };
 
+/** The file contents a history/blame view is anchored to. Working-tree
+ *  history walks through HEAD while blame includes uncommitted lines. */
+export type FileInsightContext =
+  | { kind: "workingTree" }
+  | { kind: "commit"; hash: string };
+
+/** One rename-aware commit in a file's lineage. */
+export type FileHistoryEntry = Commit & {
+  /** Path as it existed immediately after this commit. */
+  path: string;
+  status: FileStatus;
+  /** Older path crossed by this rename/copy commit. */
+  previousPath?: string;
+};
+
+/** A bounded page from `git log --follow`. The cursor is opaque to renderers. */
+export type FileHistoryPage = {
+  entries: FileHistoryEntry[];
+  nextCursor: string | null;
+};
+
+/** Contiguous lines attributed to one commit by porcelain blame output. */
+export type FileBlameHunk = {
+  hash: string | null;
+  shortHash: string | null;
+  authorName: string;
+  authorEmail: string;
+  committedAt: string | null;
+  subject: string;
+  /** Path reported by Git for the source lines (may predate a rename). */
+  sourcePath: string;
+  originalStartLine: number;
+  startLine: number;
+  endLine: number;
+  lines: string[];
+  uncommitted: boolean;
+};
+
+export type FileBlameUnavailableReason =
+  | "binary"
+  | "too_large"
+  | "missing";
+
+/** One bounded line page. Deleted files may resolve to the parent revision;
+ *  `notice` makes that fallback explicit rather than silently changing scope.
+ *  The page says WHERE it landed (`startLine`) and how to reach the page above
+ *  (`previousCursor`), so the renderer never does page arithmetic of its own —
+ *  a request may aim at a line, and the server clamps to the file's end. */
+export type FileBlamePage = {
+  path: string;
+  effectiveContext: FileInsightContext;
+  /** 1-based number of the first line this page holds (after any clamp). */
+  startLine: number;
+  hunks: FileBlameHunk[];
+  /** Cursor for the page ABOVE this one, or null when this page starts at 1. */
+  previousCursor: string | null;
+  nextCursor: string | null;
+  bytes: number | null;
+  unavailableReason?: FileBlameUnavailableReason;
+  notice?: string;
+};
+
+/** One tracked file matched by the command palette's file search. */
+export type FileSearchHit = {
+  /** Repository-relative, forward-slashed, exactly as Git records it. */
+  path: string;
+  name: string;
+  /** Directory part, or "" for a file at the repository root. */
+  dir: string;
+};
+
+/** A file's contents at a revision (or the working tree), complete. Shares
+ *  blame's caps and unavailable states — same content resolution, same 1 MB
+ *  ceiling, same binary refusal — and that cap is why this is ONE answer, not
+ *  a paged read: the underlying git read is O(file) whatever the cursor, so
+ *  server-side paging multiplied I/O by the page count and saved nothing. */
+export type FileContents = {
+  path: string;
+  effectiveContext: FileInsightContext;
+  lines: string[];
+  bytes: number | null;
+  unavailableReason?: FileBlameUnavailableReason;
+  notice?: string;
+};
+
 /** GitHub account presentation fields proven for an exact Git commit author. */
 export type GitHubCommitAuthorIdentity = {
   login: string;

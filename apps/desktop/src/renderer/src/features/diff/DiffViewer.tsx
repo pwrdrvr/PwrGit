@@ -2,7 +2,9 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   type MouseEvent,
+  type MouseEvent as ReactMouseEvent,
   type RefObject
 } from "react";
 import {
@@ -10,6 +12,7 @@ import {
   type PartialDiffHunk,
   type PartialDiffLine
 } from "@pwrgit/shared";
+import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
 import { DiffStat } from "./DiffStat";
 import { ImageDiff, type ImageDiffRevisions } from "./ImageDiff";
 import { type DiffFile, parseUnifiedDiff } from "./parse-diff";
@@ -60,7 +63,9 @@ export function DiffViewer({
   patch,
   emptyLabel,
   images,
-  selection
+  selection,
+  fileMenuItems,
+  onBlameFrom
 }: {
   patch: string;
   emptyLabel?: string;
@@ -69,8 +74,27 @@ export function DiffViewer({
   /** Typed line IDs from the main process. Present only for a selectable
    * working-tree patch; commit and protected file kinds remain read-only. */
   selection?: DiffSelectionControls;
+  /**
+   * Per-file actions, offered from a menu on that file's own strip. This is
+   * the only place a WHOLE-COMMIT diff can reach one file's history or blame:
+   * everywhere else you have to leave, find the file in the rail, open it, and
+   * come back.
+   */
+  fileMenuItems?: (path: string) => MenuItem[];
+  /** Blame the file from a specific line — wired to the new-side gutter, so
+   *  "I am reading line 248" becomes "blame opens AT line 248". */
+  onBlameFrom?: (path: string, line: number) => void;
 }) {
   const parsed = useMemo(() => parseUnifiedDiff(patch), [patch]);
+  // The trigger rides along so ContextMenu can tell "clicked the kebab again"
+  // from an outside click — without it the same click closed and reopened the
+  // menu, which made the kebab impossible to toggle shut.
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    path: string;
+    trigger: HTMLButtonElement;
+  } | null>(null);
   if (parsed.files.length === 0) {
     return <div className="diff-empty">{emptyLabel ?? "No changes."}</div>;
   }
@@ -89,8 +113,32 @@ export function DiffViewer({
           file={file}
           images={images}
           selection={scoped}
+          {...(onBlameFrom === undefined ? {} : { onBlameFrom })}
+          {...(fileMenuItems === undefined
+            ? {}
+            : {
+                onMenu: (event: ReactMouseEvent<HTMLButtonElement>) => {
+                  const trigger = event.currentTarget;
+                  const box = trigger.getBoundingClientRect();
+                  setMenu((current) =>
+                    current?.path === file.path
+                      ? null
+                      : { x: box.right, y: box.bottom + 4, path: file.path, trigger }
+                  );
+                }
+              })}
         />
       ))}
+      {menu !== null && fileMenuItems !== undefined && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          label={`Actions for ${menu.path}`}
+          triggerRef={{ current: menu.trigger }}
+          onClose={() => setMenu(null)}
+          items={fileMenuItems(menu.path)}
+        />
+      )}
     </div>
   );
 }
@@ -158,11 +206,15 @@ const DRAG_SLOP_PX = 4;
 function DiffFileView({
   file,
   images,
-  selection
+  selection,
+  onMenu,
+  onBlameFrom
 }: {
   file: DiffFile;
   images: ImageDiffRevisions | undefined;
   selection: DiffSelectionControls | undefined;
+  onMenu?: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+  onBlameFrom?: (path: string, line: number) => void;
 }) {
   const name =
     file.status === "renamed" && file.oldPath !== undefined
@@ -237,6 +289,20 @@ function DiffFileView({
         </span>
         <span style={{ flex: 1 }} />
         <DiffStat additions={file.additions} deletions={file.deletions} />
+        {onMenu !== undefined && (
+          <button
+            className="diff-file__menu"
+            onClick={onMenu}
+            aria-label={`Actions for ${file.path}`}
+            title="File actions"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <circle cx="12" cy="5" r="1.6" />
+              <circle cx="12" cy="12" r="1.6" />
+              <circle cx="12" cy="19" r="1.6" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {file.binary ? (
@@ -250,6 +316,8 @@ function DiffFileView({
           <DiffHunkView
             key={hi}
             hunk={hunk}
+            filePath={file.path}
+            {...(onBlameFrom === undefined ? {} : { onBlameFrom })}
             selection={selection}
             byCoordinate={byCoordinate}
             pressedAt={pressedAt}
@@ -266,18 +334,22 @@ function DiffFileView({
 
 function DiffHunkView({
   hunk,
+  filePath,
   selection,
   byCoordinate,
   pressedAt,
   onToggle,
-  onAnchor
+  onAnchor,
+  onBlameFrom
 }: {
   hunk: DiffFile["hunks"][number];
+  filePath: string;
   selection: DiffSelectionControls | undefined;
   byCoordinate: Map<string, LineMeta>;
   pressedAt: RefObject<{ x: number; y: number } | null>;
   onToggle: (id: string, shiftKey: boolean) => void;
   onAnchor: (id: string) => void;
+  onBlameFrom?: (path: string, line: number) => void;
 }) {
   const metaFor = (line: DiffLine): LineMeta | undefined => {
     const coordinate = coordinateOf(line);
@@ -415,9 +487,20 @@ function DiffHunkView({
             <span className="diff-gutter">
               {line.kind === "add" ? "" : line.oldNo}
             </span>
-            <span className="diff-gutter">
-              {line.kind === "del" ? "" : line.newNo}
-            </span>
+            {onBlameFrom !== undefined && line.kind !== "del" ? (
+              // The union narrows: add and ctx rows both carry newNo.
+              <button
+                className="diff-gutter diff-gutter--blame"
+                onClick={() => onBlameFrom(filePath, line.newNo)}
+                title={`Blame from line ${line.newNo}`}
+              >
+                {line.newNo}
+              </button>
+            ) : (
+              <span className="diff-gutter">
+                {line.kind === "del" ? "" : line.newNo}
+              </span>
+            )}
             <span className="diff-sym">
               {line.kind === "add" ? "+" : line.kind === "del" ? "−" : ""}
             </span>
