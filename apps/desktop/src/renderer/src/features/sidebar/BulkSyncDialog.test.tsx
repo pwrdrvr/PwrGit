@@ -105,6 +105,22 @@ const partialResult: BulkSyncRepoResult = {
   ]
 };
 
+const failedResult: BulkSyncRepoResult = {
+  repoId: "repo-safe",
+  name: "safe",
+  path: "/repos/safe",
+  outcome: "failed",
+  message: "Git could not fetch this repository.",
+  remotes: [
+    {
+      remote: "origin",
+      outcome: "failed",
+      message: "The remote did not respond."
+    }
+  ],
+  worktrees: []
+};
+
 let container: HTMLDivElement;
 let root: Root;
 let progressHandler: ((event: BulkSyncProgress) => void) | undefined;
@@ -202,6 +218,22 @@ describe("BulkSyncDialog", () => {
         repoId: "repo-safe",
         repoName: "safe"
       });
+    });
+    const activity = container.querySelector(".bulk-sync__activity");
+    expect(activity?.textContent).toContain("Checking safe");
+    expect(activity?.textContent).toContain("/repos/safe");
+    expect(activity?.textContent).toContain("0 terminal");
+    expect(activity?.textContent).toContain("1 in progress");
+    expect(activity?.textContent).toContain("1 queued");
+    expect(activity?.getAttribute("aria-busy")).toBe("true");
+    expect(container.querySelector(".bulk-sync__repos")?.contains(activity)).toBe(
+      false
+    );
+    expect(
+      container.querySelector(".bulk-sync__repo-status.is-running")?.textContent
+    ).toBe("Checking…");
+
+    await act(async () => {
       progressHandler?.({
         operationId,
         mode: "soft-pull",
@@ -215,6 +247,11 @@ describe("BulkSyncDialog", () => {
     });
     expect(container.textContent).toContain("1 / 2");
     expect(container.textContent).toContain("1 updated");
+    expect(container.textContent).toContain("1 terminal");
+    expect(container.textContent).toContain("0 in progress");
+    expect(
+      container.querySelector(".bulk-sync__repo-status.is-success")?.textContent
+    ).toBe("success");
 
     await act(async () => {
       bulk.resolve({ ok: true, value: summary([safeResult, partialResult]) });
@@ -224,6 +261,10 @@ describe("BulkSyncDialog", () => {
     expect(container.textContent).toContain("feature/local-work");
     expect(container.textContent).toContain("uncommitted changes");
     expect(container.querySelector(".bulk-sync__repo.is-partial")).not.toBeNull();
+    expect(container.querySelector(".bulk-sync__activity")).toBeNull();
+    expect(
+      container.querySelector(".bulk-sync__repo-status.is-partial")?.textContent
+    ).toBe("partial");
   });
 
   it("requests cooperative cancellation and keeps results visible until close", async () => {
@@ -255,5 +296,59 @@ describe("BulkSyncDialog", () => {
       expect.objectContaining({ operationId: expect.any(String) })
     );
     expect(container.textContent).toContain("Cancelling…");
+  });
+
+  it("keeps terminal failures distinct while another repository is active", async () => {
+    const bulk = deferred<{ ok: true; value: BulkSyncSummary }>();
+    dispatch.mockImplementation((command: string) =>
+      command === "remote:bulkSync"
+        ? bulk.promise
+        : Promise.resolve({ ok: true, value: { cancelled: true } })
+    );
+    await act(async () => {
+      root.render(
+        <BulkSyncDialog
+          profileId="profile-1"
+          repos={repos}
+          mode="fetch"
+          onClose={vi.fn()}
+        />
+      );
+    });
+    const operationId = dispatch.mock.calls[0]?.[1].operationId as string;
+
+    await act(async () => {
+      progressHandler?.({
+        operationId,
+        mode: "fetch",
+        phase: "repo_completed",
+        totalRepos: 2,
+        completedRepos: 1,
+        repoId: "repo-safe",
+        repoName: "safe",
+        result: failedResult
+      });
+      progressHandler?.({
+        operationId,
+        mode: "fetch",
+        phase: "repo_started",
+        totalRepos: 2,
+        completedRepos: 1,
+        repoId: "repo-partial",
+        repoName: "partial"
+      });
+    });
+
+    expect(container.querySelector(".bulk-sync__activity")?.textContent).toContain(
+      "Fetching partial"
+    );
+    expect(container.textContent).toContain("1 terminal");
+    expect(container.textContent).toContain("1 in progress");
+    expect(
+      container.querySelector(".bulk-sync__repo-status.is-failed")?.textContent
+    ).toBe("failed");
+    expect(
+      container.querySelector(".bulk-sync__repo-status.is-running")?.textContent
+    ).toBe("Fetching…");
   });
 });

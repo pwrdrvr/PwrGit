@@ -102,6 +102,17 @@ function overallSummary(summary: BulkSyncSummary): string {
     .join(" · ");
 }
 
+function repoStatus(
+  state: RepoProgress | undefined,
+  mode: BulkSyncMode
+): string {
+  if (state?.phase === "running") {
+    return mode === "fetch" ? "Fetching…" : "Checking…";
+  }
+  if (state?.phase !== "complete") return "Queued";
+  return state.result.outcome.replace("_", " ");
+}
+
 function RepoResultDetails({ result }: { result: BulkSyncRepoResult }) {
   const remoteDetails = result.remotes.filter(
     (remote) => remote.outcome !== "fetched"
@@ -227,6 +238,19 @@ export function BulkSyncDialog({
   const running = summary === null && error === null;
   const title =
     mode === "fetch" ? "Fetch all repositories" : "Try to pull all safely";
+  const runningRepos = ordered.filter(
+    ({ progress: state }) => state?.phase === "running"
+  );
+  const terminalCount = ordered.filter(
+    ({ progress: state }) => state?.phase === "complete"
+  ).length;
+  const queuedCount = ordered.length - terminalCount - runningRepos.length;
+  const operationVerb = mode === "fetch" ? "Fetching" : "Checking";
+  const activityTitle = cancelling
+    ? "Cancelling after the current Git command…"
+    : runningRepos.length === 0
+      ? "Preparing the next repository…"
+      : `${operationVerb} ${runningRepos.map(({ repo }) => repo.name).join(", ")}`;
 
   const cancel = async (): Promise<void> => {
     setCancelling(true);
@@ -262,6 +286,40 @@ export function BulkSyncDialog({
           </span>
         </div>
 
+        {running && (
+          <div
+            className="bulk-sync__activity"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            aria-busy="true"
+          >
+            <span className="bulk-sync__spinner" aria-hidden="true" />
+            <div className="bulk-sync__activity-copy">
+              <strong>{activityTitle}</strong>
+              <span>
+                {runningRepos.length === 1
+                  ? runningRepos[0]?.repo.path
+                  : "The current repository remains visible while results scroll below."}
+              </span>
+            </div>
+            <div
+              className="bulk-sync__state-counts"
+              aria-label={`${terminalCount} terminal, ${runningRepos.length} in progress, ${queuedCount} queued`}
+            >
+              <span className="is-terminal">
+                <strong>{terminalCount}</strong> terminal
+              </span>
+              <span className="is-running">
+                <strong>{runningRepos.length}</strong> in progress
+              </span>
+              <span>
+                <strong>{queuedCount}</strong> queued
+              </span>
+            </div>
+          </div>
+        )}
+
         {summary !== null && (
           <div className="bulk-sync__summary" role="status">
             <strong>{summary.cancelled ? "Cancelled" : "Finished"}</strong>
@@ -273,19 +331,16 @@ export function BulkSyncDialog({
         <div className="bulk-sync__repos" aria-label="Repository results">
           {ordered.map(({ repo, progress: state }) => {
             const result = state?.phase === "complete" ? state.result : null;
-            const status =
+            const status = repoStatus(state, mode);
+            const stateClass =
               state?.phase === "running"
-                ? mode === "fetch"
-                  ? "Fetching…"
-                  : "Checking…"
+                ? "running"
                 : result === null
-                  ? "Waiting"
+                  ? "queued"
                   : result.outcome;
             return (
               <article
-                className={`bulk-sync__repo${
-                  result === null ? "" : ` is-${result.outcome}`
-                }`}
+                className={`bulk-sync__repo is-${stateClass}`}
                 key={repo.id}
               >
                 <div className="bulk-sync__repo-head">
@@ -295,7 +350,9 @@ export function BulkSyncDialog({
                       {repo.path}
                     </small>
                   </div>
-                  <span>{status.replace("_", " ")}</span>
+                  <span className={`bulk-sync__repo-status is-${stateClass}`}>
+                    {status}
+                  </span>
                 </div>
                 {result === null ? (
                   <p>{state?.phase === "running" ? "Git is working…" : "Queued"}</p>
