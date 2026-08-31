@@ -225,7 +225,10 @@ describe("BulkSyncDialog", () => {
     expect(activity?.textContent).toContain("0 terminal");
     expect(activity?.textContent).toContain("1 in progress");
     expect(activity?.textContent).toContain("1 queued");
-    expect(activity?.getAttribute("aria-busy")).toBe("true");
+    expect(activity?.hasAttribute("aria-busy")).toBe(false);
+    expect(
+      activity?.querySelector(".bulk-sync__activity-copy > span")?.classList
+    ).toContain("selectable");
     expect(container.querySelector(".bulk-sync__repos")?.contains(activity)).toBe(
       false
     );

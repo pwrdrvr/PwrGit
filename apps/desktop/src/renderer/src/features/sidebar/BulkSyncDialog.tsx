@@ -292,12 +292,13 @@ export function BulkSyncDialog({
             role="status"
             aria-live="polite"
             aria-atomic="true"
-            aria-busy="true"
           >
             <span className="bulk-sync__spinner" aria-hidden="true" />
             <div className="bulk-sync__activity-copy">
               <strong>{activityTitle}</strong>
-              <span>
+              <span
+                className={runningRepos.length === 1 ? "selectable" : undefined}
+              >
                 {runningRepos.length === 1
                   ? runningRepos[0]?.repo.path
                   : "The current repository remains visible while results scroll below."}
