@@ -38,7 +38,12 @@ name: Dependabot Licenses
 # every guard below must live here, in the base copy, because nothing the PR
 # head contains can change this file for the run that judges it.
 #
-# Four controls, all load-bearing:
+# THE GOVERNING RULE: this job must never EXECUTE anything the PR controls.
+# `pull_request_target` plus a checkout of the PR head is the "pwn request"
+# shape behind a long line of CI supply-chain compromises, and the only thing
+# that makes it survivable here is that every executable input is pinned to the
+# base branch. The PR supplies data to be READ (dependency metadata), never
+# code to be run. Six controls, all load-bearing:
 #
 #   1. The `guard` job pins the actor to dependabot[bot] and the head to this
 #      repo, so a fork PR can never reach the privileged path.
@@ -48,9 +53,24 @@ name: Dependabot Licenses
 #      carried a script or workflow edit does not get an install. It fails
 #      CLOSED — an unreadable file list is an error, not an empty list of
 #      violations.
-#   3. Only the `regenerate` job holds `contents: write`, and it is reached
+#   3. "Verify the package manager pin is unchanged". package.json HAS to be on
+#      that allowed list — it is what Dependabot edits — and corepack takes the
+#      pnpm build it downloads and runs from that file's `packageManager`
+#      field. Without this the branch would pick the binary performing its own
+#      install.
+#   4. Only the `regenerate` job holds `contents: write`, and it is reached
 #      only through `needs: guard`.
-#   4. `pnpm install --frozen-lockfile --ignore-scripts` (see the step comment).
+#   5. `pnpm install --frozen-lockfile --ignore-scripts` (see the step
+#      comment), and BOTH node scripts are invoked BY PATH rather than through
+#      `pnpm <script-name>` — a package.json `scripts` entry is PR-controlled
+#      executable content, while everything under scripts/ is guard-proven to
+#      match base.
+#   6. `persist-credentials: false`. The push token is never written to
+#      .git/config; it exists only in the environment of the single `git push`.
+#
+# Anything added here that runs PR-supplied content — a build step, a test
+# step, `pnpm run <anything>`, a linter that loads a config from the head —
+# breaks the governing rule above, whatever else it seems to buy.
 #
 # Actions are pinned by commit SHA rather than by tag, matching release.yml —
 # this repo's other privileged workflow. A tag is mutable; this job holds
@@ -142,6 +162,7 @@ jobs:
       number: ${{ steps.pr.outputs.number }}
       head-sha: ${{ steps.pr.outputs.head-sha }}
       head-ref: ${{ steps.pr.outputs.head-ref }}
+      base-sha: ${{ steps.pr.outputs.base-sha }}
     steps:
       - name: Resolve the pull request
         id: pr
@@ -153,16 +174,26 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          # workflow_dispatch takes free text. Anything but digits would be
+          # interpolated into the API path below and could redirect the call
+          # that decides which branch a contents: write job later pushes to.
+          if ! [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Pull request number ${PR_NUMBER} is not a positive integer."
+            exit 1
+          fi
+
           pr_json="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}")"
           head_sha="$(jq -r '.head.sha' <<<"$pr_json")"
           head_ref="$(jq -r '.head.ref' <<<"$pr_json")"
           head_repo="$(jq -r '.head.repo.full_name' <<<"$pr_json")"
+          base_sha="$(jq -r '.base.sha' <<<"$pr_json")"
           state="$(jq -r '.state' <<<"$pr_json")"
 
           {
             echo "number=${PR_NUMBER}"
             echo "head-sha=${head_sha}"
             echo "head-ref=${head_ref}"
+            echo "base-sha=${base_sha}"
           } >>"$GITHUB_OUTPUT"
 
           if [ "$state" != "open" ]; then
@@ -180,7 +211,12 @@ jobs:
           # `paths` filter because the lockfile is part of its diff — so without
           # this every regeneration would cost a second full run that can only
           # discover the notice is already current.
-          subject="$(gh api "repos/${REPO}/commits/${head_sha}" --jq '.commit.message' | head -n 1)"
+          # Split in shell rather than `| head -n 1`: under `set -o pipefail`
+          # head's early exit SIGPIPEs gh (141) once the message outgrows the
+          # pipe buffer, and Dependabot embeds whole changelogs in its commit
+          # bodies. That would fail the guard on exactly the biggest bumps.
+          message="$(gh api "repos/${REPO}/commits/${head_sha}" --jq '.commit.message')"
+          subject="${message%%$'\n'*}"
           if [ "$subject" = "$REGEN_COMMIT_SUBJECT" ]; then
             echo "::notice::PR #${PR_NUMBER} is already at this workflow's own regeneration commit."
             echo "proceed=false" >>"$GITHUB_OUTPUT"
@@ -237,6 +273,41 @@ jobs:
           fi
           echo "Only dependency manifests changed."
 
+      # The allowed list above must include package.json, and corepack reads
+      # the pnpm version to download and RUN from that file's `packageManager`
+      # field — so without this the branch would choose the binary that
+      # performs its own install. `--ignore-scripts` constrains a dependency's
+      # lifecycle scripts, not the package manager executing them.
+      - name: Verify the package manager pin is unchanged
+        if: steps.pr.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          REPO: ${{ github.repository }}
+          BASE_SHA: ${{ steps.pr.outputs.base-sha }}
+          HEAD_SHA: ${{ steps.pr.outputs.head-sha }}
+        run: |
+          set -euo pipefail
+          read_pin() {
+            gh api -H "Accept: application/vnd.github.raw" \
+              "repos/${REPO}/contents/package.json?ref=$1" | jq -r '.packageManager // ""'
+          }
+          base_pin="$(read_pin "$BASE_SHA")"
+          head_pin="$(read_pin "$HEAD_SHA")"
+
+          # Fails closed: an unreadable base pin is an error, not a match.
+          if [ -z "$base_pin" ]; then
+            echo "::error::Could not read packageManager from base ${BASE_SHA}. Refusing to continue."
+            exit 1
+          fi
+          if [ "$base_pin" != "$head_pin" ]; then
+            echo "::error::PR #${PR_NUMBER} changes packageManager from '${base_pin}' to" \
+              "'${head_pin}'. corepack would download and run that build, so this branch does not" \
+              "get a privileged install."
+            exit 1
+          fi
+          echo "packageManager pin unchanged (${base_pin})."
+
   regenerate:
     name: Regenerate THIRD_PARTY_LICENSES
     needs: guard
@@ -253,7 +324,6 @@ jobs:
     # live path in this repo today, not a hypothetical one.
     permissions:
       contents: write
-      pull-requests: read
     # The `secrets` context is NOT available in a step-level `if` (only
     # github/needs/strategy/matrix/job/runner/env/vars/steps/inputs are), and an
     # unavailable context reads as empty — so `if: secrets.RELEASES_PAT == ''`
@@ -295,7 +365,11 @@ jobs:
         with:
           ref: ${{ needs.guard.outputs.head-ref }}
           token: ${{ steps.app-token.outputs.token || secrets.RELEASES_PAT || github.token }}
-          persist-credentials: true
+          # Deliberately NOT persisted: this job resolves PR-specified
+          # dependencies, and a persisted credential sits in .git/config for
+          # the whole install. The push step below supplies the token itself,
+          # so it is only in the environment of the one command that needs it.
+          persist-credentials: false
 
       - name: Confirm the branch still points at the reviewed commit
         id: race
@@ -370,15 +444,22 @@ jobs:
         if: steps.race.outputs.skip != 'true'
         run: node ./scripts/check-third-party-license-allowlist.mjs
 
+      # Invoked by path, NOT as `pnpm licenses:generate`. package.json is on
+      # the file guard's allowed list by necessity (it is what Dependabot
+      # edits), and its `scripts` block is executable content — running the
+      # named script would hand a PR-authored command line a job that holds
+      # contents: write. Both scripts/ files this job runs are outside the
+      # allowed list, so the guard has already proven they match base.
       - name: Regenerate THIRD_PARTY_LICENSES
         if: steps.race.outputs.skip != 'true'
-        run: pnpm licenses:generate
+        run: node ./scripts/generate-third-party-licenses.mjs
 
       - name: Commit and push if the notice changed
         if: steps.race.outputs.skip != 'true'
         env:
           HEAD_REF: ${{ needs.guard.outputs.head-ref }}
           PR_NUMBER: ${{ needs.guard.outputs.number }}
+          GIT_PUSH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RELEASES_PAT || github.token }}
         run: |
           set -euo pipefail
           if git diff --quiet -- THIRD_PARTY_LICENSES; then
@@ -400,7 +481,8 @@ jobs:
           # Plain push: if the branch moved since the race check, this is
           # rejected and the newer run handles it. Never force-push a branch
           # somebody else owns.
-          git push origin "HEAD:${HEAD_REF}"
+          git push "https://x-access-token:${GIT_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}" \
+            "HEAD:${HEAD_REF}"
           echo "Pushed a regenerated \`THIRD_PARTY_LICENSES\` to \`${HEAD_REF}\`." \
             >>"$GITHUB_STEP_SUMMARY"
 
