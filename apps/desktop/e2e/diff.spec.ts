@@ -73,7 +73,7 @@ test("hunk and line actions move only the selected changes through Git's index",
   await addRootAndExpand(window, handle, sandbox, "partialdiff");
 
   await window.locator(".file-row", { hasText: "partial.txt" }).click();
-  await expect(window.locator(".diff-pane__sub")).toHaveText(
+  await expect(window.locator(".diff-pane__scope")).toHaveText(
     "index → working tree"
   );
   const hunkActions = window.getByRole("button", { name: "Stage hunk" });
@@ -127,7 +127,7 @@ test("hunk and line actions move only the selected changes through Git's index",
     .locator(".diff-side")
     .getByRole("button", { name: "Staged", exact: true })
     .click();
-  await expect(window.locator(".diff-pane__sub")).toHaveText("HEAD → index");
+  await expect(window.locator(".diff-pane__scope")).toHaveText("HEAD → index");
   await window.getByRole("button", { name: "Unstage hunk" }).click();
   await expect
     .poll(() => sandbox?.git(repo.path, "diff", "--cached") ?? "not empty")

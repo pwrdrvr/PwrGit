@@ -283,7 +283,13 @@ describe("ChangesTab partially staged files", () => {
     root = createRoot(container);
     await act(async () => {
       root.render(
-        <ChangesTab worktree={worktree} activeEmail="a@b.c" onOpenDiff={vi.fn()} />
+        <ChangesTab
+          worktree={worktree}
+          activeEmail="a@b.c"
+          onOpenDiff={vi.fn()}
+          onOpenFileInsight={vi.fn()}
+          activeFile={null}
+        />
       );
     });
   });

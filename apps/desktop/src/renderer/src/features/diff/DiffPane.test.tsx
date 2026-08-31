@@ -105,6 +105,7 @@ describe("DiffPane refreshing an open working-tree diff", () => {
           worktreeId="worktree-1"
           target={{ kind: "file", path: "file.txt", staged: false }}
           onOpenFile={vi.fn()}
+          onOpenFileInsight={() => undefined}
           onClose={vi.fn()}
         />
       );
@@ -239,6 +240,7 @@ describe("DiffPane refreshing an open working-tree diff", () => {
           worktreeId="worktree-1"
           target={{ kind: "file", path: "file.txt", staged: false }}
           onOpenFile={vi.fn()}
+          onOpenFileInsight={() => undefined}
           onClose={vi.fn()}
         />
       );
@@ -254,6 +256,7 @@ describe("DiffPane refreshing an open working-tree diff", () => {
           worktreeId="worktree-1"
           target={{ kind: "file", path: "file.txt", staged: false }}
           onOpenFile={vi.fn()}
+          onOpenFileInsight={() => undefined}
           onClose={onClose}
         />
       );
@@ -307,6 +310,7 @@ describe("DiffPane refreshing an open working-tree diff", () => {
           worktreeId="worktree-1"
           target={{ kind: "file", path: "file.txt", staged: false }}
           onOpenFile={onOpenFile}
+          onOpenFileInsight={() => undefined}
           onClose={vi.fn()}
         />
       );
@@ -403,6 +407,7 @@ describe("DiffPane", () => {
           worktreeId="wt-1"
           target={TARGET}
           onOpenFileInsight={() => undefined}
+          onOpenFile={vi.fn()}
           onClose={onClose}
         />
       );
@@ -423,7 +428,8 @@ describe("DiffPane", () => {
             target={TARGET}
             hidden={hidden}
             onOpenFileInsight={() => undefined}
-            onClose={onClose}
+            onOpenFile={vi.fn()}
+          onClose={onClose}
           />
         );
       });
@@ -458,6 +464,7 @@ describe("DiffPane", () => {
           target={TARGET}
           hidden
           onOpenFileInsight={() => undefined}
+          onOpenFile={vi.fn()}
           onClose={vi.fn()}
         />
       );
@@ -478,6 +485,7 @@ describe("DiffPane", () => {
           worktreeId="wt-1"
           target={COMMIT}
           onOpenFileInsight={() => undefined}
+          onOpenFile={vi.fn()}
           onClose={vi.fn()}
         />
       );
@@ -508,6 +516,7 @@ describe("DiffPane", () => {
           worktreeId="wt-1"
           target={COMMIT}
           onOpenFileInsight={() => undefined}
+          onOpenFile={vi.fn()}
           onClose={vi.fn()}
         />
       );
@@ -539,6 +548,7 @@ describe("DiffPane", () => {
           worktreeId="wt-1"
           target={COMMIT}
           onOpenFileInsight={() => undefined}
+          onOpenFile={vi.fn()}
           onClose={vi.fn()}
         />
       );
@@ -562,13 +572,15 @@ describe("DiffPane", () => {
           worktreeId="wt-1"
           target={TARGET}
           onOpenFileInsight={() => undefined}
+          onOpenFile={vi.fn()}
           onClose={vi.fn()}
         />
       );
     });
     expect(container.querySelector(".diff-pane__message")).toBeNull();
+    // The side tabs carry the side's NAME, so the scope says the comparison.
     expect(container.querySelector(".diff-pane__scope")?.textContent).toBe(
-      "Working-tree change"
+      "index → working tree"
     );
     expect(
       mocks.dispatch.mock.calls.some(([name]) => name === "commit:message")
@@ -576,7 +588,7 @@ describe("DiffPane", () => {
   });
 
   it("reaches one file's history from a WHOLE-commit diff", async () => {
-    dispatchMock.mockImplementation(respond(""));
+    mocks.dispatch.mockImplementation(respond(""));
     const onOpenFileInsight = vi.fn();
     await act(async () => {
       root.render(
@@ -588,6 +600,7 @@ describe("DiffPane", () => {
             subject: COMMIT.subject
           }}
           onOpenFileInsight={onOpenFileInsight}
+          onOpenFile={vi.fn()}
           onClose={vi.fn()}
         />
       );
@@ -621,6 +634,21 @@ describe("DiffPane", () => {
   });
 
   it("opens blame at the line whose gutter number was clicked", async () => {
+    // A file target renders its selection snapshot, so the snapshot must
+    // carry THIS test's path and patch — the default fixture names file.txt
+    // and the gutter's blame callback reports the rendered file's path.
+    mocks.dispatch.mockImplementation(async (command: string) =>
+      command === "diff:fileSelection"
+        ? ok({
+            ...snapshot("gutter-suite"),
+            path: "docs/guide.txt",
+            patch: PATCH,
+            hunks: []
+          })
+        : command === "commit:message"
+          ? ok(null)
+          : ok(PATCH)
+    );
     const onOpenFileInsight = vi.fn();
     await act(async () => {
       root.render(
@@ -628,6 +656,7 @@ describe("DiffPane", () => {
           worktreeId="wt-1"
           target={TARGET}
           onOpenFileInsight={onOpenFileInsight}
+          onOpenFile={vi.fn()}
           onClose={vi.fn()}
         />
       );
@@ -653,7 +682,7 @@ describe("DiffPane", () => {
   });
 
   it("offers the file at this commit from the per-file menu", async () => {
-    dispatchMock.mockImplementation(respond(""));
+    mocks.dispatch.mockImplementation(respond(""));
     const onOpenFileInsight = vi.fn();
     await act(async () => {
       root.render(
@@ -661,6 +690,7 @@ describe("DiffPane", () => {
           worktreeId="wt-1"
           target={{ kind: "commit", hash: COMMIT.hash, subject: COMMIT.subject }}
           onOpenFileInsight={onOpenFileInsight}
+          onOpenFile={vi.fn()}
           onClose={vi.fn()}
         />
       );
@@ -687,7 +717,7 @@ describe("DiffPane", () => {
   });
 
   it("fetches one message per commit, not one per file", async () => {
-    dispatchMock.mockImplementation(respond("Some body."));
+    mocks.dispatch.mockImplementation(respond("Some body."));
     const render = async (path: string): Promise<void> => {
       await act(async () => {
         root.render(
@@ -695,7 +725,8 @@ describe("DiffPane", () => {
             worktreeId="wt-1"
             target={{ ...COMMIT, path }}
             onOpenFileInsight={() => undefined}
-            onClose={vi.fn()}
+            onOpenFile={vi.fn()}
+          onClose={vi.fn()}
           />
         );
       });
@@ -712,7 +743,7 @@ describe("DiffPane", () => {
     // Browsing a commit's files flips the target per click; the message is
     // per-commit and immutable, so one fetch serves them all.
     expect(
-      dispatchMock.mock.calls.filter(([name]) => name === "commit:message")
+      mocks.dispatch.mock.calls.filter(([name]) => name === "commit:message")
     ).toHaveLength(1);
   });
 
@@ -724,6 +755,7 @@ describe("DiffPane", () => {
           worktreeId="wt-1"
           target={{ kind: "file", path: "docs/guide.txt", staged: true }}
           onOpenFileInsight={onOpenFileInsight}
+          onOpenFile={vi.fn()}
           onClose={vi.fn()}
         />
       );
