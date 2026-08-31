@@ -107,6 +107,37 @@ Two related traps in the same area:
 - **`GIT_AUTHOR_*` / `GIT_COMMITTER_*` outrank `-c user.email`.** Tests that set
   those in the environment cannot prove identity handling; unset them for that
   assertion (see `execGitWithoutIdentityEnv`).
+## A scan that found nothing is not proof anything was deleted
+
+`rescanProfile` prunes the repos a scan did not see, and that delete cascades
+through every table keyed to `repos(id)` — pins, sort and custom order,
+identity, the branch and PR caches, the LFS notice. Re-discovering the same
+directory later re-inserts the row under the same hashed id and rebuilds none
+of it, so a prune driven by a bad scan is unrecoverable.
+
+Discovery skips unreadable directories rather than throwing, so an empty result
+is ambiguous. `scanRepoRoot` reports `rootReadable` to break the tie, and
+`canPruneFromScan` refuses a scan that is too weak to act on: one whose root
+could not be listed (an unmounted volume, a share not up yet at login), or one
+that resolved no repos at all while roots remain configured. Clearing every
+root is the one deliberate route to zero and still prunes.
+
+Two things follow that are easy to undo by accident:
+
+- **The scan clock and the prune answer different questions.** Pruning wants
+  evidence the repos are gone; `profile_scan_state` only records that a pass
+  got to *look*, and a readable-but-empty root did look. Stamping it after an
+  unreadable root arms the 24h throttle in `shouldRescanProfile` off a scan
+  that saw nothing — and there is no manual rescan channel, only
+  `profile:setRoots`, so the volume stays undiscovered for a day after it
+  mounts.
+- **Readability is only observed at the root.** A mount point *below* a
+  configured root that is unmounted still reads as an ordinary empty directory
+  (or throws where discovery ignores it), so repos under it are pruned as long
+  as some other repo resolved. Widening the check to every depth is not the
+  fix: macOS denies a non-FDA app `~/Documents` and friends, and one EACCES
+  would disable pruning for good.
+
 ## Partial staging works through Git, never through renderer patch text
 
 `partial-staging.ts` stages and unstages hunks and lines. Four invariants hold
