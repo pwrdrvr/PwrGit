@@ -7169,6 +7169,11 @@ body.is-col-resizing {
    10.5px text. The unavailable bar sets muted at container level, where its
    plain background keeps it passing. */
 .diff-selection-bar__hint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .diff-selection-bar__count {
   flex: 0 0 auto;
   margin-left: auto;
@@ -7294,8 +7299,6 @@ body.is-col-resizing {
   background: var(--warn-soft);
   color: var(--status-warning);
   font: 500 10.5px/1.35 var(--font-sans);
-  font: 500 10.5px/1.3 var(--font-mono);
-  color: var(--text-subtle);
 }
 /* Same ladder the worktree header walks down (720/680/540): drop the widest
    thing whose signal survives elsewhere. The subject is also on the commit in
