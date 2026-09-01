@@ -152,6 +152,8 @@ export function PullDivergenceDialog({
               localCount={divergence.localCommits.length}
               otherCount={divergence.upstreamCommits.length}
               ariaLabel="Aligned diverged commit histories"
+              otherAbsentLabel="Not present upstream"
+              otherOnlyLabel="Only on the upstream branch"
             />
 
             {!divergence.workingTreeClean && (

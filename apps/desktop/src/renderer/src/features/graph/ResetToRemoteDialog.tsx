@@ -558,6 +558,8 @@ export function ResetToRemoteDialog({
                 localCount={impact.leaving}
                 otherCount={impact.arriving}
                 ariaLabel="Commits leaving the branch, aligned against the target"
+                otherAbsentLabel="Not present on the target"
+                otherOnlyLabel="Only on the target branch"
               />
             )}
 

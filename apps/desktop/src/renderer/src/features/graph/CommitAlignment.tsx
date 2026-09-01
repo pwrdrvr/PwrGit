@@ -14,8 +14,14 @@ import type {
  * shows the same rows rather than a number.
  */
 
+/**
+ * `otherOnlyLabel` is the caller's, not a generic one: this view is read by
+ * screen readers a row at a time, and "only on the other branch" makes the
+ * listener hold a pronoun the rest of the dialog never resolves.
+ */
 export function relationLabel(
-  relation: DivergenceCommitAlignment["relation"]
+  relation: DivergenceCommitAlignment["relation"],
+  otherOnlyLabel: string
 ): string {
   switch (relation) {
     case "equivalent":
@@ -25,7 +31,7 @@ export function relationLabel(
     case "local-only":
       return "Only on the local branch";
     case "upstream-only":
-      return "Only on the other branch";
+      return otherOnlyLabel;
   }
 }
 
@@ -78,7 +84,9 @@ export function CommitAlignment({
   otherHeading,
   localCount,
   otherCount,
-  ariaLabel
+  ariaLabel,
+  otherAbsentLabel,
+  otherOnlyLabel
 }: {
   rows: DivergenceCommitAlignment[];
   localHeading: string;
@@ -86,6 +94,10 @@ export function CommitAlignment({
   localCount: number;
   otherCount: number;
   ariaLabel: string;
+  /** Right-cell text when only the local side has a commit on that row. */
+  otherAbsentLabel: string;
+  /** Relation label for a commit the other side alone carries. */
+  otherOnlyLabel: string;
 }) {
   return (
     <section className="commit-align">
@@ -114,16 +126,13 @@ export function CommitAlignment({
               </div>
               <span
                 className="commit-align__relation"
-                aria-label={relationLabel(row.relation)}
-                title={relationLabel(row.relation)}
+                aria-label={relationLabel(row.relation, otherOnlyLabel)}
+                title={relationLabel(row.relation, otherOnlyLabel)}
               >
                 {relationGlyph(row.relation)}
               </span>
               <div role="cell">
-                <CommitCell
-                  commit={row.upstream}
-                  absentLabel="Not present on the target"
-                />
+                <CommitCell commit={row.upstream} absentLabel={otherAbsentLabel} />
               </div>
             </div>
           ))}
