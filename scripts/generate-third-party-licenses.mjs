@@ -39,11 +39,13 @@ export const SHIPPED_PACKAGE_NAMES = ["@pwrgit/desktop", "@pwrgit/mcp-server"];
  * `<project>...` selects the project plus its dependency projects, which is
  * the set that actually ships.
  *
- * PwrGit's own workspace dependencies (`@pwrgit/shared`, and `@pwrgit/mcp-server`
- * which is selected explicitly anyway) declare no npm dependencies today, so
- * the suffix adds nothing to the current notice. That is precisely why a test
- * pins these strings: dropping it is a one-character edit that leaves every
- * other check in `licenses:check` passing.
+ * `@pwrgit/shared` is the only project the suffix reaches that the bare filters
+ * did not, and it declares no npm dependencies today, so widening left the
+ * notice byte-identical. (`@pwrgit/mcp-server` does declare its own — pnpm
+ * already reported those, because it is named in the filters in its own right.)
+ * A change that discloses nothing is one nobody notices reverting, which is
+ * precisely why a test pins these strings: dropping the suffix is a
+ * one-character edit that leaves every other check in `licenses:check` passing.
  */
 export const NOTICE_PNPM_FILTERS = SHIPPED_PACKAGE_NAMES.map(
   (name) => `${name}...`,
@@ -502,7 +504,10 @@ export function describeNoticeDrift(current, expected) {
   const lineCount = Math.max(currentLines.length, expectedLines.length);
   for (let index = 0; index < lineCount; index += 1) {
     if (currentLines[index] !== expectedLines[index]) {
-      const show = (line) => JSON.stringify(line ?? "<end of file>");
+      // Not JSON.stringify on the sentinel: a quoted "<end of file>" is
+      // indistinguishable from a line whose text is literally that.
+      const show = (line) =>
+        line === undefined ? "<end of file>" : JSON.stringify(line);
       return [
         `same package set; first difference at line ${index + 1}:`,
         `committed ${show(currentLines[index])}`,

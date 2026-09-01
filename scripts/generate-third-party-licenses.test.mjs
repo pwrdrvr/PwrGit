@@ -111,6 +111,21 @@ describe("notice drift description", () => {
     expect(message).toContain("Copyright 2026 Someone");
   });
 
+  // A committed notice truncated by a partial write or a bad merge: same
+  // package set, but the file simply stops.
+  test("says a side ended rather than quoting a sentinel as content", () => {
+    const bullet = "- a@1.0.0 | https://example.test/a";
+    const message = describeNoticeDrift(
+      `${bullet}\nMIT`,
+      `${bullet}\nMIT\nLicense text`,
+    );
+    // Unquoted, so it cannot read as a committed line whose text is
+    // literally "<end of file>".
+    expect(message).toContain("committed <end of file>");
+    expect(message).toContain('generated "License text"');
+    expect(message).not.toContain('"<end of file>"');
+  });
+
   test("reports no difference for identical notices", () => {
     const text = notice("- a@1.0.0 | https://example.test/a");
     expect(describeNoticeDrift(text, text)).toBe("no difference found");
