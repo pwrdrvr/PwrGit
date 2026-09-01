@@ -182,7 +182,7 @@ bus.register("ping", () => ok("pong"));
 function installDevelopmentDockIcon(): void {
   if (process.platform !== "darwin" || app.isPackaged) return;
 
-  const iconPath = join(app.getAppPath(), "build", "icon.png");
+  const iconPath = join(app.getAppPath(), "build", "icon-macos.png");
   const icon = nativeImage.createFromPath(iconPath);
   if (icon.isEmpty()) {
     logMain("warn", "app", "failed to load development Dock icon", { iconPath });

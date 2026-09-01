@@ -14,13 +14,16 @@ lane is everyone else's.
 - Design-system SVG: `assets/logo-pwrgit.svg` (128 viewBox, `currentColor`)
 - App-icon accent: `#e8743a` (sibling app-icon orange)
 - Tray / DMG accent: `#ff8a1f` (design-system tangerine)
-- Tile: 180/1024 corner radius, vertical gradient `rgb(30,26,20)` → `rgb(10,9,8)`
+- Tile: 180/1024 corner radius on Windows/Linux; the macOS variants use
+  Apple's legacy 824/1024 tile with a 100px margin and 185px corner radius.
+  Both use the vertical gradient `rgb(30,26,20)` → `rgb(10,9,8)`.
 
 ## Files
 
 ```
 apps/desktop/build/
-  icon.png                       1024×1024   macOS master + Windows/Linux source
+  icon.png                       1024×1024   Windows/Linux source
+  icon-macos.png                 1024×1024   macOS safe-area development Dock icon
   icon.icns                                  macOS app / Dock
   icon.iconset/                              10 PNGs, iconutil-compatible names
   dmg-background.png             660×400

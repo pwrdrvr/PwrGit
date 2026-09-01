@@ -30,7 +30,7 @@ struct Color {
   static let dimAlpha: CGFloat = 0.55
 }
 
-func renderIcon(size: Int) -> NSBitmapImageRep {
+func renderIcon(size: Int, macOSCanvas: Bool = false) -> NSBitmapImageRep {
   guard let bitmap = NSBitmapImageRep(
     bitmapDataPlanes: nil,
     pixelsWide: size,
@@ -49,26 +49,44 @@ func renderIcon(size: Int) -> NSBitmapImageRep {
   NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
 
   let s = CGFloat(size)
-  let scale = s / 1024.0
+  let canvasScale = s / 1024.0
+  let tileInset = macOSCanvas ? 100 * canvasScale : 0
+  let tileSize = macOSCanvas ? 824 * canvasScale : s
+  let scale = tileSize / 1024.0
   func k(_ v: CGFloat) -> CGFloat { v * scale }
+  func coord(_ v: CGFloat) -> CGFloat { tileInset + k(v) }
 
   // Rounded-rect background — vertical gradient filled per scanline in
   // device-RGB (encoded) space so the ramp is linear in the output pixels.
   // The bitmap context is y-up, so image row 0 (top, lighter) maps to the
   // highest AppKit y.
-  let cornerRadius = k(180)
-  let bg = NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: s, height: s),
+  // Legacy macOS renders the ICNS canvas literally. Apple's 1024px template
+  // puts the rounded tile in an 824px square with a 100px transparent margin;
+  // macOS 26 can normalize old icons automatically, but Sequoia and earlier
+  // cannot. Keep the unpadded master for Windows/Linux and use this safe-area
+  // canvas for the ICNS and the development Dock icon.
+  let cornerRadius = macOSCanvas ? 185 * canvasScale : k(180)
+  let bg = NSBezierPath(roundedRect: NSRect(
+                          x: tileInset,
+                          y: tileInset,
+                          width: tileSize,
+                          height: tileSize),
                         xRadius: cornerRadius, yRadius: cornerRadius)
   NSGraphicsContext.saveGraphicsState()
   bg.addClip()
-  let rows = Int(s)
+  let rows = max(1, Int(tileSize.rounded(.up)))
   for row in 0..<rows {
     let t = rows > 1 ? Double(row) / Double(rows - 1) : 0
     let r = (Color.bgTop.r + (Color.bgBottom.r - Color.bgTop.r) * t) / 255.0
     let g = (Color.bgTop.g + (Color.bgBottom.g - Color.bgTop.g) * t) / 255.0
     let b = (Color.bgTop.b + (Color.bgBottom.b - Color.bgTop.b) * t) / 255.0
     NSColor(deviceRed: CGFloat(r), green: CGFloat(g), blue: CGFloat(b), alpha: 1).setFill()
-    NSRect(x: 0, y: s - CGFloat(row) - 1, width: s, height: 1).fill()
+    NSRect(
+      x: tileInset,
+      y: tileInset + tileSize - CGFloat(row) - 1,
+      width: tileSize,
+      height: 1
+    ).fill()
   }
   NSGraphicsContext.restoreGraphicsState()
 
@@ -80,7 +98,7 @@ func renderIcon(size: Int) -> NSBitmapImageRep {
   let nodeRadius = k(84)
 
   func ring(_ cx: CGFloat, _ cy: CGFloat, _ color: NSColor) {
-    let p = NSBezierPath(ovalIn: NSRect(x: k(cx) - nodeRadius, y: k(cy) - nodeRadius,
+    let p = NSBezierPath(ovalIn: NSRect(x: coord(cx) - nodeRadius, y: coord(cy) - nodeRadius,
                                         width: nodeRadius * 2, height: nodeRadius * 2))
     p.lineWidth = strokeWidth
     color.setStroke()
@@ -94,10 +112,10 @@ func renderIcon(size: Int) -> NSBitmapImageRep {
   cg.setAlpha(Color.dimAlpha)
   cg.beginTransparencyLayer(auxiliaryInfo: nil)
   let branch = NSBezierPath()
-  branch.move(to: NSPoint(x: k(352), y: k(424)))
-  branch.curve(to: NSPoint(x: k(588), y: k(620)),
-               controlPoint1: NSPoint(x: k(352), y: k(554)),
-               controlPoint2: NSPoint(x: k(470), y: k(620)))
+  branch.move(to: NSPoint(x: coord(352), y: coord(424)))
+  branch.curve(to: NSPoint(x: coord(588), y: coord(620)),
+               controlPoint1: NSPoint(x: coord(352), y: coord(554)),
+               controlPoint2: NSPoint(x: coord(470), y: coord(620)))
   branch.lineWidth = strokeWidth
   branch.lineCapStyle = .round
   Color.accent.setStroke()
@@ -108,8 +126,8 @@ func renderIcon(size: Int) -> NSBitmapImageRep {
 
   // Trunk (full)
   let trunk = NSBezierPath()
-  trunk.move(to: NSPoint(x: k(352), y: k(384)))
-  trunk.line(to: NSPoint(x: k(352), y: k(640)))
+  trunk.move(to: NSPoint(x: coord(352), y: coord(384)))
+  trunk.line(to: NSPoint(x: coord(352), y: coord(640)))
   trunk.lineWidth = strokeWidth
   trunk.lineCapStyle = .round
   Color.accent.setStroke()
@@ -138,7 +156,7 @@ let outputURL = URL(fileURLWithPath: outputDir)
 try FileManager.default.createDirectory(at: outputURL, withIntermediateDirectories: true)
 
 for (size, filename) in sizes {
-  let rep = renderIcon(size: size)
+  let rep = renderIcon(size: size, macOSCanvas: true)
   guard let pngData = rep.representation(using: .png, properties: [:]) else {
     fatalError("Unable to create PNG for \(filename)")
   }
@@ -152,5 +170,14 @@ guard let dockIconPngData = dockIconRep.representation(using: .png, properties: 
 }
 try dockIconPngData.write(to: outputURL.deletingLastPathComponent().appendingPathComponent("icon.png"))
 print("  icon.png (1024x1024)")
+
+let macOSDockIconRep = renderIcon(size: 1024, macOSCanvas: true)
+guard let macOSDockIconPngData = macOSDockIconRep.representation(using: .png, properties: [:]) else {
+  fatalError("Unable to create PNG for icon-macos.png")
+}
+try macOSDockIconPngData.write(
+  to: outputURL.deletingLastPathComponent().appendingPathComponent("icon-macos.png")
+)
+print("  icon-macos.png (1024x1024)")
 
 print("Generated \(sizes.count) icon variants in \(outputDir)")
