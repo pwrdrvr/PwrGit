@@ -1,113 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import type {
-  DivergenceCommit,
-  DivergenceCommitAlignment,
-  RemoteDivergence
-} from "@pwrgit/shared";
+import type { RemoteDivergence } from "@pwrgit/shared";
+import {
+  CommitAlignment,
+  commitCountLabel as countLabel,
+  rewrittenCommitCount,
+  strandedCommitCount
+} from "./CommitAlignment";
 
 type RecoveryAction = "rebase" | "reset" | null;
-
-function countLabel(count: number): string {
-  return `${count} ${count === 1 ? "commit" : "commits"}`;
-}
-
-function CommitCell({
-  commit,
-  side
-}: {
-  commit: DivergenceCommit | null;
-  side: "local" | "upstream";
-}) {
-  if (commit === null) {
-    return (
-      <span className="pull-divergence__commit-empty">
-        Not present {side === "local" ? "locally" : "upstream"}
-      </span>
-    );
-  }
-
-  return (
-    <div className="pull-divergence__commit" title={commit.subject}>
-      <code>{commit.shortHash}</code>
-      <span className="pull-divergence__commit-subject">
-        {commit.subject || "(no commit message)"}
-      </span>
-      <span
-        className="pull-divergence__commit-stats"
-        aria-label={`${commit.additions} additions, ${commit.deletions} deletions`}
-      >
-        <span>+{commit.additions}</span>
-        <span>−{commit.deletions}</span>
-      </span>
-    </div>
-  );
-}
-
-function relationLabel(relation: DivergenceCommitAlignment["relation"]): string {
-  switch (relation) {
-    case "equivalent":
-      return "Equivalent patch";
-    case "changed":
-      return "Corresponding commit with changes";
-    case "local-only":
-      return "Only on the local branch";
-    case "upstream-only":
-      return "Only on the upstream branch";
-  }
-}
-
-function CommitComparison({ divergence }: { divergence: RemoteDivergence }) {
-  return (
-    <section className="pull-divergence__comparison">
-      <div className="pull-divergence__comparison-head">
-        <span>
-          Only on this branch{" "}
-          <small>{countLabel(divergence.localCommits.length)}</small>
-        </span>
-        <span aria-hidden="true" />
-        <span>
-          Only on {divergence.upstream}{" "}
-          <small>{countLabel(divergence.upstreamCommits.length)}</small>
-        </span>
-      </div>
-      <div
-        className="pull-divergence__comparison-scroll"
-        tabIndex={0}
-        aria-label="Aligned diverged commit histories"
-      >
-        <div className="pull-divergence__comparison-rows" role="table">
-          {divergence.alignedCommits.map((row, index) => (
-            <div
-              className={`pull-divergence__comparison-row is-${row.relation}`}
-              role="row"
-              key={`${row.local?.hash ?? "none"}-${row.upstream?.hash ?? "none"}-${index}`}
-            >
-              <div role="cell">
-                <CommitCell commit={row.local} side="local" />
-              </div>
-              <span
-                className="pull-divergence__relation"
-                aria-label={relationLabel(row.relation)}
-                title={relationLabel(row.relation)}
-              >
-                {row.relation === "equivalent"
-                  ? "="
-                  : row.relation === "changed"
-                    ? "≈"
-                    : row.relation === "local-only"
-                      ? "←"
-                      : "→"}
-              </span>
-              <div role="cell">
-                <CommitCell commit={row.upstream} side="upstream" />
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
 
 /**
  * A focused recovery decision after a fast-forward-only pull detects two
@@ -119,13 +19,17 @@ export function PullDivergenceDialog({
   busy,
   onClose,
   onRebase,
-  onReset
+  onReset,
+  onResetElsewhere
 }: {
   divergence: RemoteDivergence;
   busy: RecoveryAction;
   onClose: () => void;
   onRebase: () => void;
   onReset: () => void;
+  /** Open the full reset dialog — a different tip, or a hard reset over a
+   *  dirty tree, neither of which the two options here can do. */
+  onResetElsewhere: () => void;
 }) {
   const [confirmingReset, setConfirmingReset] = useState(false);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -146,12 +50,8 @@ export function PullDivergenceDialog({
 
   const canRecover = divergence.workingTreeClean && busy === null;
   const localCount = divergence.localCommits.length;
-  const pairedCount = divergence.alignedCommits.filter(
-    (row) => row.local !== null && row.upstream !== null
-  ).length;
-  const localUnpairedCount = divergence.alignedCommits.filter(
-    (row) => row.relation === "local-only"
-  ).length;
+  const pairedCount = rewrittenCommitCount(divergence.alignedCommits);
+  const localUnpairedCount = strandedCommitCount(divergence.alignedCommits);
   const upstreamUnpairedCount = divergence.alignedCommits.filter(
     (row) => row.relation === "upstream-only"
   ).length;
@@ -245,7 +145,14 @@ export function PullDivergenceDialog({
               </div>
             )}
 
-            <CommitComparison divergence={divergence} />
+            <CommitAlignment
+              rows={divergence.alignedCommits}
+              localHeading="Only on this branch"
+              otherHeading={`Only on ${divergence.upstream}`}
+              localCount={divergence.localCommits.length}
+              otherCount={divergence.upstreamCommits.length}
+              ariaLabel="Aligned diverged commit histories"
+            />
 
             {!divergence.workingTreeClean && (
               <div className="pull-divergence__warning">
@@ -290,6 +197,13 @@ export function PullDivergenceDialog({
             </div>
 
             <div className="modal__actions">
+              <button
+                className="pull-divergence__elsewhere"
+                disabled={busy !== null}
+                onClick={onResetElsewhere}
+              >
+                Reset to a different branch…
+              </button>
               <button
                 ref={closeRef}
                 className="modal__cancel"

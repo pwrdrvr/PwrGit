@@ -10,6 +10,10 @@ vi.mock("../../lib/copyText", () => ({ copyText: copyTextMock }));
 vi.mock("../../lib/pwrgit", () => ({ dispatch: vi.fn() }));
 
 import { BranchChipMenu, type BranchChipTarget } from "./BranchChipMenu";
+import {
+  closeResetToRemote,
+  currentResetToRemote
+} from "./reset-to-remote";
 
 const branchInfo: Record<string, LaneBranchInfo> = {
   "feature/held": { worktreeId: "worktree-2", worktreePath: "/wt/held" },
@@ -43,6 +47,7 @@ async function render(
         target={{ ...target, x: 10, y: 10 }}
         branchInfo={branchInfo}
         viewingBranch="main"
+        repoId="repo-1"
         worktreeId="worktree-1"
         onSwitchBranch={onSwitchBranch}
         onRevealWorktree={onRevealWorktree}
@@ -111,11 +116,28 @@ describe("BranchChipMenu", () => {
     await render({ ref: "origin/feature/theirs", isRemote: true });
     expect(items()).toEqual([
       "Switch to feature/theirs from origin/feature/theirs",
+      "Reset main to origin/feature/theirs…",
       "Copy branch name"
     ]);
 
     // The chip's own text is what gets copied — that is what is on screen.
     click("Copy branch name");
     expect(copyTextMock).toHaveBeenCalledWith("origin/feature/theirs");
+  });
+
+  it("opens the reset dialog on the exact chip that was right-clicked", async () => {
+    await render({ ref: "origin/feature/theirs", isRemote: true });
+    click("Reset main to origin/feature/theirs…");
+
+    expect(currentResetToRemote()).toEqual({
+      worktree: { id: "worktree-1", repoId: "repo-1", branch: "main" },
+      preselectRef: "refs/remotes/origin/feature/theirs"
+    });
+    closeResetToRemote();
+  });
+
+  it("offers no reset from a local chip — the target must be a fetched ref", async () => {
+    await render({ ref: "feature/ready", isRemote: false });
+    expect(items().some((label) => label.startsWith("Reset "))).toBe(false);
   });
 });

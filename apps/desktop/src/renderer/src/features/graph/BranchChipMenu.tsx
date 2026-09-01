@@ -2,6 +2,7 @@ import type { LaneBranchInfo } from "@pwrgit/shared";
 import { copyText } from "../../lib/copyText";
 import { dispatch } from "../../lib/pwrgit";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
+import { openResetToRemote } from "./reset-to-remote";
 import {
   type CommitSwitchTarget,
   localBranchForRef,
@@ -27,6 +28,7 @@ export function BranchChipMenu({
   target,
   branchInfo,
   viewingBranch,
+  repoId,
   worktreeId,
   onSwitchBranch,
   onRevealWorktree,
@@ -36,6 +38,8 @@ export function BranchChipMenu({
   branchInfo: Record<string, LaneBranchInfo>;
   /** Branch checked out in the worktree being viewed. */
   viewingBranch: string;
+  /** The repo whose branches the reset picker would page through. */
+  repoId: string;
   /** The worktree a switch would move — its own checkout, not the repo's. */
   worktreeId: string;
   onSwitchBranch: (target: CommitSwitchTarget) => void;
@@ -72,6 +76,19 @@ export function BranchChipMenu({
     });
   }
   if (items.length > 0) items.push({ type: "sep" });
+
+  if (target.isRemote) {
+    items.push({
+      type: "item",
+      label: `Reset ${viewingBranch} to ${target.ref}…`,
+      onSelect: () =>
+        openResetToRemote({
+          worktree: { id: worktreeId, repoId, branch: viewingBranch },
+          preselectRef: `refs/remotes/${target.ref}`
+        })
+    });
+    items.push({ type: "sep" });
+  }
 
   items.push({
     type: "item",

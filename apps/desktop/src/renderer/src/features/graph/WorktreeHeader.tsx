@@ -14,7 +14,7 @@ import { showErrorToast } from "../../lib/toast";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
 import { GitLfsChip } from "./GitLfsChip";
 import { PullDivergenceDialog } from "./PullDivergenceDialog";
-import { ResetToRemoteDialog } from "./ResetToRemoteDialog";
+import { openResetToRemote } from "./reset-to-remote";
 import { SshRemoteRecoveryDialog } from "./SshRemoteRecoveryDialog";
 
 type Chip = { text: string; tone: "muted" | "ok" | "warn" };
@@ -93,7 +93,6 @@ export function WorktreeHeader({
   const [pullPhase, setPullPhase] = useState<PullProgressPhase>("fetch");
   const [divergence, setDivergence] = useState<RemoteDivergence | null>(null);
   const [recoveryBusy, setRecoveryBusy] = useState<RecoveryBusy>(null);
-  const [resetToRemoteOpen, setResetToRemoteOpen] = useState(false);
   const [sshRecovery, setSshRecovery] = useState<SshRemoteRecovery | null>(null);
   const [flash, setFlash] = useState<Chip | null>(null);
   const activeWorktreeId = useRef(worktree.id);
@@ -112,7 +111,6 @@ export function WorktreeHeader({
     setPullPhase("fetch");
     setDivergence(null);
     setRecoveryBusy(null);
-    setResetToRemoteOpen(false);
     setSshRecovery(null);
   }, [worktree.id]);
 
@@ -405,7 +403,19 @@ export function WorktreeHeader({
         <WorktreeMenu
           className="kebab--toolbar"
           worktree={worktree}
-          onResetToRemote={() => setResetToRemoteOpen(true)}
+          onResetToRemote={() =>
+            openResetToRemote({
+              worktree,
+              onComplete: (mode, remoteBranch) =>
+                showFlash(
+                  {
+                    text: `${mode} reset to ${remoteBranch}`,
+                    tone: mode === "hard" ? "warn" : "ok"
+                  },
+                  2600
+                )
+            })
+          }
         />
       </div>
       {sshRecovery !== null && (
@@ -429,22 +439,10 @@ export function WorktreeHeader({
           onClose={() => setDivergence(null)}
           onRebase={() => void recover("rebase")}
           onReset={() => void recover("reset")}
-        />
-      )}
-      {resetToRemoteOpen && (
-        <ResetToRemoteDialog
-          key={worktree.id}
-          worktree={worktree}
-          onClose={() => setResetToRemoteOpen(false)}
-          onComplete={(mode, remoteBranch) =>
-            showFlash(
-              {
-                text: `${mode} reset to ${remoteBranch}`,
-                tone: mode === "hard" ? "warn" : "ok"
-              },
-              2600
-            )
-          }
+          onResetElsewhere={() => {
+            setDivergence(null);
+            openResetToRemote({ worktree });
+          }}
         />
       )}
     </div>

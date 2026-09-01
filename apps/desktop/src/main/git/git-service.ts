@@ -1,4 +1,5 @@
-import { rmSync } from "node:fs";
+import { rmSync, statSync } from "node:fs";
+import { join } from "node:path";
 import {
   type BranchRef,
   type BranchTrackingStatus,
@@ -18,6 +19,7 @@ import {
   type RemoteBranchSummary,
   type RemoteDivergence,
   type RemoteResetMode,
+  type RemoteResetPreview,
   type RemoteResetSnapshot,
   type RemoteSummary,
   type RemoteTagAction,
@@ -27,6 +29,8 @@ import {
   REMOTE_BRANCH_PAGE_SIZE,
   REMOTE_BRANCH_PREVIEW,
   type RepoRefs,
+  type ResetTargets,
+  type ResetTargetSuggestion,
   type ResolvedCommit,
   type TagPage,
   type TagSummary,
@@ -1563,6 +1567,73 @@ async function requireCleanWorktree(
  * non-fast-forward pull. Commit subjects are compared only as a signal for
  * the UI; object identity remains authoritative.
  */
+/** The two unique commit ranges between HEAD and another tip, plus Git's
+ *  patch-aware correspondence between them. */
+type CommitRangeComparison = {
+  localCommits: DivergenceCommit[];
+  otherCommits: DivergenceCommit[];
+  alignedCommits: DivergenceCommitAlignment[];
+};
+
+/**
+ * Compare HEAD against one other revision the way the recovery dialog does.
+ *
+ * `other` reaches `git` as a single argv entry and is never shell-interpreted,
+ * but it still names three ranges, so callers pass either a literal (`@{u}`)
+ * or a ref they have already verified exists — see `resolveFetchedRemoteBranch`.
+ *
+ * The range-diff is what makes the result honest: a rebased-and-force-pushed
+ * remote shares no object names with the local branch, and a count of the two
+ * ranges alone would report every commit as lost.
+ */
+async function compareCommitRanges(
+  git: GitExec,
+  cwd: string,
+  other: string
+): Promise<Result<CommitRangeComparison>> {
+  const [localRaw, otherRaw, rangeDiffRaw] = await Promise.all([
+    git(
+      ["log", "--numstat", `--format=${DIVERGENCE_LOG_FORMAT}`, `${other}..HEAD`],
+      cwd
+    ),
+    git(
+      ["log", "--numstat", `--format=${DIVERGENCE_LOG_FORMAT}`, `HEAD..${other}`],
+      cwd
+    ),
+    git(
+      [
+        "range-diff",
+        "--no-color",
+        "--no-dual-color",
+        "--abbrev=40",
+        `HEAD...${other}`
+      ],
+      cwd
+    )
+  ]);
+  if (!localRaw.ok) return localRaw;
+  if (!otherRaw.ok) return otherRaw;
+  if (!rangeDiffRaw.ok) return rangeDiffRaw;
+  const local = requireExit0(localRaw.value, ["log"]);
+  if (!local.ok) return local;
+  const remote = requireExit0(otherRaw.value, ["log"]);
+  if (!remote.ok) return remote;
+  const rangeDiff = requireExit0(rangeDiffRaw.value, ["range-diff"]);
+  if (!rangeDiff.ok) return rangeDiff;
+
+  const localCommits = parseDivergenceCommits(local.value.stdout);
+  const otherCommits = parseDivergenceCommits(remote.value.stdout);
+  return ok({
+    localCommits,
+    otherCommits,
+    alignedCommits: parseRangeDiff(
+      rangeDiff.value.stdout,
+      localCommits,
+      otherCommits
+    )
+  });
+}
+
 export async function inspectRemoteDivergence(
   git: GitExec,
   cwd: string
@@ -1572,47 +1643,17 @@ export async function inspectRemoteDivergence(
   const upstream = await resolveUpstream(git, cwd);
   if (!upstream.ok) return upstream;
 
-  const [statusRaw, localRaw, upstreamRaw, rangeDiffRaw] = await Promise.all([
+  const [statusRaw, comparison] = await Promise.all([
     git(["status", "--porcelain"], cwd),
-    git(
-      ["log", "--numstat", `--format=${DIVERGENCE_LOG_FORMAT}`, "@{u}..HEAD"],
-      cwd
-    ),
-    git(
-      ["log", "--numstat", `--format=${DIVERGENCE_LOG_FORMAT}`, "HEAD..@{u}"],
-      cwd
-    ),
-    git(
-      [
-        "range-diff",
-        "--no-color",
-        "--no-dual-color",
-        "--abbrev=40",
-        "HEAD...@{u}"
-      ],
-      cwd
-    )
+    compareCommitRanges(git, cwd, "@{u}")
   ]);
   if (!statusRaw.ok) return statusRaw;
-  if (!localRaw.ok) return localRaw;
-  if (!upstreamRaw.ok) return upstreamRaw;
-  if (!rangeDiffRaw.ok) return rangeDiffRaw;
+  if (!comparison.ok) return comparison;
   const status = requireExit0(statusRaw.value, ["status"]);
   if (!status.ok) return status;
-  const local = requireExit0(localRaw.value, ["log"]);
-  if (!local.ok) return local;
-  const remote = requireExit0(upstreamRaw.value, ["log"]);
-  if (!remote.ok) return remote;
-  const rangeDiff = requireExit0(rangeDiffRaw.value, ["range-diff"]);
-  if (!rangeDiff.ok) return rangeDiff;
 
-  const localCommits = parseDivergenceCommits(local.value.stdout);
-  const upstreamCommits = parseDivergenceCommits(remote.value.stdout);
-  const alignedCommits = parseRangeDiff(
-    rangeDiff.value.stdout,
-    localCommits,
-    upstreamCommits
-  );
+  const { localCommits, otherCommits: upstreamCommits, alignedCommits } =
+    comparison.value;
   const matchingCommitSubjects =
     localCommits.length > 0 &&
     localCommits.length === upstreamCommits.length &&
@@ -1747,21 +1788,186 @@ async function resolveFetchedRemoteBranch(
   return ok(head);
 }
 
-/** Resolve the exact checkout and fetched remote tip presented for reset. */
+/**
+ * Resolve the exact checkout and fetched remote tip presented for reset, with
+ * the commits that would leave the branch and Git's alignment between the two
+ * ranges. The alignment is the difference between "9 commits are destroyed"
+ * and "7 of these 9 are already on the target under new hashes" — the two
+ * cases look identical to a plain ahead/behind count and are not remotely the
+ * same decision.
+ */
 export async function inspectRemoteReset(
   git: GitExec,
   cwd: string,
   remoteRef: string
-): Promise<Result<RemoteResetSnapshot>> {
+): Promise<Result<RemoteResetPreview>> {
   const checkout = await resolveCheckedOutRef(git, cwd);
   if (!checkout.ok) return checkout;
+  // Verify the ref before it reaches the comparison: `compareCommitRanges`
+  // interpolates it into three revision ranges.
   const remoteHead = await resolveFetchedRemoteBranch(git, cwd, remoteRef);
   if (!remoteHead.ok) return remoteHead;
+
+  const [comparison, dirty] = await Promise.all([
+    compareCommitRanges(git, cwd, remoteRef),
+    readCheckoutDirtyCount(git, cwd)
+  ]);
+  if (!comparison.ok) return comparison;
+  if (!dirty.ok) return dirty;
+
+  return ok({
+    snapshot: {
+      branch: checkout.value.branch,
+      head: checkout.value.head,
+      remoteRef,
+      remoteHead: remoteHead.value
+    },
+    leaving: comparison.value.localCommits,
+    arriving: comparison.value.otherCommits,
+    alignedCommits: comparison.value.alignedCommits,
+    dirty: dirty.value
+  });
+}
+
+/** Read one fetched ref's tip, date and subject, or null when it is absent. */
+async function resetTargetOf(
+  git: GitExec,
+  cwd: string,
+  ref: string
+): Promise<ResetTargetSuggestion | null> {
+  const refRaw = await git(
+    ["for-each-ref", `--format=${REMOTE_BRANCH_FORMAT}`, ref],
+    cwd
+  );
+  if (!refRaw.ok || refRaw.value.exitCode !== 0) return null;
+  const line = refRaw.value.stdout.split("\n").find((row) => row.trim() !== "");
+  if (line === undefined) return null;
+  const fields = line.split("\t");
+  const [fullName = "", shortName = "", head = "", lastCommitAt = ""] = fields;
+  if (fullName !== ref || shortName === "" || head === "") return null;
+  const subject = fields.slice(4).join("\t");
+
+  // --left-right counts each side of the symmetric difference: left is HEAD.
+  const countRaw = await git(
+    ["rev-list", "--left-right", "--count", `HEAD...${ref}`],
+    cwd
+  );
+  if (!countRaw.ok || countRaw.value.exitCode !== 0) return null;
+  const [aheadText = "", behindText = ""] = countRaw.value.stdout.trim().split(/\s+/);
+  const ahead = Number.parseInt(aheadText, 10);
+  const behind = Number.parseInt(behindText, 10);
+  if (!Number.isFinite(ahead) || !Number.isFinite(behind)) return null;
+
+  return {
+    ref: fullName,
+    label: shortName,
+    head,
+    ...(lastCommitAt === "" ? {} : { lastCommitAt }),
+    ...(subject === "" ? {} : { subject }),
+    ahead,
+    behind
+  };
+}
+
+/** The remote whose default branch is worth offering, or null when none is. */
+function defaultBranchRemote(
+  remotes: readonly string[],
+  upstreamRef: string | null
+): string | null {
+  if (upstreamRef !== null) {
+    const owner = remotes.find((remote) =>
+      upstreamRef.startsWith(`refs/remotes/${remote}/`)
+    );
+    if (owner !== undefined) return owner;
+  }
+  if (remotes.includes("origin")) return "origin";
+  return remotes[0] ?? null;
+}
+
+/**
+ * When this checkout last fetched, from `FETCH_HEAD`'s mtime.
+ *
+ * Not per-remote on purpose: Git writes one `FETCH_HEAD` per fetch whichever
+ * remote it names, and the per-remote alternative (a loose ref's mtime)
+ * silently becomes wrong the moment refs are packed. It is also per-worktree,
+ * since `FETCH_HEAD` lives in `$GIT_DIR` — a sibling worktree's fetch updates
+ * the shared refs without touching this one's, so the answer can be older than
+ * the truth. Both approximations err toward "more stale than you think", which
+ * is the safe direction for a warning on a destructive screen.
+ */
+async function lastFetchTime(git: GitExec, cwd: string): Promise<string | null> {
+  const dirRaw = await git(["rev-parse", "--absolute-git-dir"], cwd);
+  if (!dirRaw.ok || dirRaw.value.exitCode !== 0) return null;
+  const gitDir = dirRaw.value.stdout.trim();
+  if (gitDir === "") return null;
+  try {
+    return statSync(join(gitDir, "FETCH_HEAD")).mtime.toISOString();
+  } catch {
+    // No FETCH_HEAD at all — a clone that has never fetched since.
+    return null;
+  }
+}
+
+/**
+ * Rank the reset targets worth naming before the full branch list.
+ *
+ * Everything here is best-effort: a branch with no upstream, a remote with no
+ * symbolic HEAD, and a repository that has never fetched are all ordinary
+ * states, and none of them should stop the dialog from opening.
+ */
+export async function resolveResetTargets(
+  git: GitExec,
+  cwd: string
+): Promise<Result<ResetTargets>> {
+  const checkout = await resolveCheckedOutRef(git, cwd);
+  if (!checkout.ok) return checkout;
+
+  const upstreamRaw = await git(
+    ["rev-parse", "--symbolic-full-name", "@{u}"],
+    cwd
+  );
+  if (!upstreamRaw.ok) return upstreamRaw;
+  const upstreamRef =
+    upstreamRaw.value.exitCode === 0 &&
+    upstreamRaw.value.stdout.trim().startsWith("refs/remotes/")
+      ? upstreamRaw.value.stdout.trim()
+      : null;
+
+  const remotes = await listRemoteNames(git, cwd);
+  if (!remotes.ok) return remotes;
+  const owner = defaultBranchRemote(remotes.value, upstreamRef);
+  const headRaw =
+    owner === null
+      ? null
+      : await git(["symbolic-ref", "--quiet", `refs/remotes/${owner}/HEAD`], cwd);
+  const defaultRef =
+    headRaw !== null &&
+    headRaw.ok &&
+    headRaw.value.exitCode === 0 &&
+    headRaw.value.stdout.trim().startsWith("refs/remotes/")
+      ? headRaw.value.stdout.trim()
+      : null;
+
+  const [upstream, defaultBranch, page, lastFetchedAt] = await Promise.all([
+    upstreamRef === null
+      ? Promise.resolve(null)
+      : resetTargetOf(git, cwd, upstreamRef),
+    // The upstream card already names it; a second identical card is noise.
+    defaultRef === null || defaultRef === upstreamRef
+      ? Promise.resolve(null)
+      : resetTargetOf(git, cwd, defaultRef),
+    listRemoteBranchPage(git, cwd, { limit: 1 }),
+    lastFetchTime(git, cwd)
+  ]);
+  if (!page.ok) return page;
+
   return ok({
     branch: checkout.value.branch,
     head: checkout.value.head,
-    remoteRef,
-    remoteHead: remoteHead.value
+    upstream,
+    defaultBranch,
+    branchCount: page.value.total,
+    lastFetchedAt
   });
 }
 

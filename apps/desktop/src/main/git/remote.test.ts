@@ -29,6 +29,7 @@ import {
   removeRemote,
   resetToUpstream,
   resetToRemote,
+  resolveResetTargets,
   updateRemote
 } from "./git-service";
 
@@ -1198,13 +1199,13 @@ describe("remote ops (bare-remote fixture)", () => {
     const reset = await resetToRemote(
       systemGit,
       local,
-      inspected.value,
+      inspected.value.snapshot,
       "soft"
     );
 
     expect(reset.ok).toBe(true);
     expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(
-      inspected.value.remoteHead
+      inspected.value.snapshot.remoteHead
     );
     expect(existsSync(join(local, "local.txt"))).toBe(true);
     expect(existsSync(join(local, "staged.txt"))).toBe(true);
@@ -1239,13 +1240,13 @@ describe("remote ops (bare-remote fixture)", () => {
     const reset = await resetToRemote(
       systemGit,
       local,
-      inspected.value,
+      inspected.value.snapshot,
       "hard"
     );
 
     expect(reset.ok).toBe(true);
     expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(
-      inspected.value.remoteHead
+      inspected.value.snapshot.remoteHead
     );
     expect(existsSync(join(local, "remote.txt"))).toBe(true);
     expect(existsSync(join(local, "local.txt"))).toBe(false);
@@ -1272,7 +1273,7 @@ describe("remote ops (bare-remote fixture)", () => {
     const staleCheckout = await resetToRemote(
       systemGit,
       local,
-      inspected.value,
+      inspected.value.snapshot,
       "soft"
     );
     expect(staleCheckout.ok).toBe(false);
@@ -1293,7 +1294,7 @@ describe("remote ops (bare-remote fixture)", () => {
     const staleRemote = await resetToRemote(
       systemGit,
       local,
-      fresh.value,
+      fresh.value.snapshot,
       "hard"
     );
     expect(staleRemote.ok).toBe(false);
@@ -1631,4 +1632,142 @@ describe("listRemoteBranchPage (paged remote refs)", () => {
       );
     }
   }, 20_000);
+});
+
+describe("reset target ranking", () => {
+  /**
+   * The bug this pins: the picker seeded itself from a list sorted by
+   * committer date across every remote, so an active trunk made `origin/main`
+   * the default target for every branch in the repository — the one answer
+   * that throws a feature branch away.
+   */
+  function makeFeatureBranchFixture(): { local: string; remote: string } {
+    const { local, remote } = makeDivergedFixture();
+    git(local, ["switch", "-c", "feature/media"]);
+    commit(local, "media.txt", "feature commit");
+    git(local, ["push", "-u", "origin", "feature/media"]);
+    // Trunk moves last, so it is newest by committer date everywhere.
+    commit(remote, "trunk.txt", "trunk commit");
+    git(remote, ["push", "origin", "main"]);
+    git(local, ["fetch", "origin"]);
+    return { local, remote };
+  }
+
+  it("ranks the branch's own upstream first, not the newest remote branch", async () => {
+    const { local } = makeFeatureBranchFixture();
+
+    const targets = await resolveResetTargets(systemGit, local);
+    expect(targets.ok).toBe(true);
+    if (!targets.ok) return;
+
+    expect(targets.value.branch).toBe("feature/media");
+    expect(targets.value.upstream?.ref).toBe(
+      "refs/remotes/origin/feature/media"
+    );
+    expect(targets.value.upstream?.label).toBe("origin/feature/media");
+    expect(targets.value.defaultBranch?.label).toBe("origin/main");
+    expect(targets.value.branchCount).toBe(2);
+    expect(targets.value.lastFetchedAt).not.toBeNull();
+  });
+
+  it("counts each side of the divergence against the checkout", async () => {
+    const { local, remote } = makeFeatureBranchFixture();
+    commit(local, "local-only.txt", "local work");
+    git(remote, ["fetch", "origin"]);
+    git(remote, ["switch", "feature/media"]);
+    commit(remote, "remote-1.txt", "remote work");
+    commit(remote, "remote-2.txt", "more remote work");
+    git(remote, ["push", "origin", "feature/media"]);
+    git(local, ["fetch", "origin"]);
+
+    const targets = await resolveResetTargets(systemGit, local);
+    expect(targets.ok).toBe(true);
+    if (!targets.ok) return;
+    expect(targets.value.upstream).toMatchObject({ ahead: 1, behind: 2 });
+  });
+
+  it("opens on a branch with no upstream instead of failing", async () => {
+    const { local } = makeDivergedFixture();
+    git(local, ["fetch", "origin"]);
+    git(local, ["switch", "-c", "local/only"]);
+    commit(local, "solo.txt", "solo");
+
+    const targets = await resolveResetTargets(systemGit, local);
+    expect(targets.ok).toBe(true);
+    if (!targets.ok) return;
+    expect(targets.value.upstream).toBeNull();
+    // The default branch is still worth naming — it is the other answer.
+    expect(targets.value.defaultBranch?.label).toBe("origin/main");
+  });
+
+  it("does not offer the default branch twice when it is the upstream", async () => {
+    const { local } = makeDivergedFixture();
+    git(local, ["fetch", "origin"]);
+    // Without a symbolic HEAD the null below would prove nothing.
+    expect(gitOut(local, ["symbolic-ref", "refs/remotes/origin/HEAD"])).toBe(
+      "refs/remotes/origin/main"
+    );
+
+    const targets = await resolveResetTargets(systemGit, local);
+    expect(targets.ok).toBe(true);
+    if (!targets.ok) return;
+    expect(targets.value.upstream?.label).toBe("origin/main");
+    expect(targets.value.defaultBranch).toBeNull();
+  });
+});
+
+describe("reset preview", () => {
+  it("separates commits the target already carries from ones only here", async () => {
+    const { local, remote } = makeDivergedFixture();
+    // The same patch on both sides under different hashes — a rebase and
+    // force-push, which an ahead/behind count reports as total loss.
+    writeFileSync(join(local, "shared.txt"), "shared work\n");
+    git(local, ["add", "shared.txt"]);
+    git(local, ["commit", "-m", "shared change"]);
+    commit(local, "only-here.txt", "never pushed");
+
+    writeFileSync(join(remote, "shared.txt"), "shared work\n");
+    git(remote, ["add", "shared.txt"]);
+    git(remote, ["commit", "-m", "shared change"]);
+    git(remote, ["push"]);
+    git(local, ["fetch", "origin"]);
+
+    const preview = await inspectRemoteReset(
+      systemGit,
+      local,
+      "refs/remotes/origin/main"
+    );
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) return;
+
+    expect(preview.value.leaving).toHaveLength(2);
+    expect(preview.value.arriving).toHaveLength(1);
+    expect(
+      preview.value.alignedCommits.filter((row) => row.relation === "local-only")
+    ).toHaveLength(1);
+    expect(
+      preview.value.alignedCommits.filter(
+        (row) => row.local !== null && row.upstream !== null
+      )
+    ).toHaveLength(1);
+  }, 15_000);
+
+  it("reports the working-tree entries a hard reset would be weighed against", async () => {
+    const { local, remote } = makeDivergedFixture();
+    commit(remote, "remote.txt", "remote commit");
+    git(remote, ["push"]);
+    git(local, ["fetch", "origin"]);
+    writeFileSync(join(local, "base.txt"), "unstaged work\n");
+    writeFileSync(join(local, "untracked.txt"), "untracked work\n");
+
+    const preview = await inspectRemoteReset(
+      systemGit,
+      local,
+      "refs/remotes/origin/main"
+    );
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) return;
+    expect(preview.value.dirty).toBe(2);
+    expect(preview.value.snapshot.remoteRef).toBe("refs/remotes/origin/main");
+  }, 15_000);
 });
