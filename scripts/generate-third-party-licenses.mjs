@@ -16,7 +16,38 @@ import { isCliEntrypoint } from "./lib/cli-entrypoint.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outputPath = join(repoRoot, "THIRD_PARTY_LICENSES");
-const shippedPackageFilters = ["@pwrgit/desktop", "@pwrgit/mcp-server"];
+/**
+ * The workspace projects whose shipped dependencies this notice covers.
+ *
+ * Names only. These are read verbatim into the notice's Scope prose; the pnpm
+ * selector below is what actually chooses packages.
+ */
+export const SHIPPED_PACKAGE_NAMES = ["@pwrgit/desktop", "@pwrgit/mcp-server"];
+
+/**
+ * The `--filter` values every `pnpm licenses list` invocation here is run with.
+ *
+ * The trailing `...` is load-bearing, and is the whole reason this is a named
+ * constant rather than an inline array. A bare `--filter @pwrgit/desktop`
+ * selects that one project, so pnpm reports only what
+ * `apps/desktop/package.json` declares itself — everything reached *through* a
+ * workspace dependency is invisible. Those packages still ship in the packaged
+ * app, and because the allowlist gate reads this same selector, they would
+ * never be judged against the allowed-license list either: a GPL dependency
+ * arriving under one of them ships with green CI and no new heading in the
+ * notice diff, which is the exact failure the gate exists to prevent.
+ * `<project>...` selects the project plus its dependency projects, which is
+ * the set that actually ships.
+ *
+ * PwrGit's own workspace dependencies (`@pwrgit/shared`, and `@pwrgit/mcp-server`
+ * which is selected explicitly anyway) declare no npm dependencies today, so
+ * the suffix adds nothing to the current notice. That is precisely why a test
+ * pins these strings: dropping it is a one-character edit that leaves every
+ * other check in `licenses:check` passing.
+ */
+export const NOTICE_PNPM_FILTERS = SHIPPED_PACKAGE_NAMES.map(
+  (name) => `${name}...`,
+);
 const embeddedGitNoticeDir = join(
   repoRoot,
   "apps",
@@ -143,7 +174,7 @@ export function runPnpmLicenses(args) {
       "licenses",
       "list",
       "--json",
-      ...shippedPackageFilters.flatMap((filter) => ["--filter", filter]),
+      ...NOTICE_PNPM_FILTERS.flatMap((filter) => ["--filter", filter]),
       ...args,
     ],
     {
@@ -409,6 +440,79 @@ export function enrichRecord(record) {
   };
 }
 
+/**
+ * Package keys (`name@version`) a notice's Dependency Summary lists.
+ *
+ * Parses the committed artifact rather than tracking records, because the two
+ * sides of a `--check` failure are a file and a fresh generation — and when
+ * they disagree it is usually the file that came from another machine.
+ */
+export function noticePackageKeys(notice) {
+  const keys = new Set();
+  for (const line of notice.split("\n")) {
+    // `- name@version | source`. The Source Availability bullets above use
+    // `: url` rather than ` | `, so they do not match.
+    const match = /^- (.+?) \| /.exec(line);
+    if (match) {
+      keys.add(match[1]);
+    }
+  }
+  return keys;
+}
+
+// Enough names to recognize the cause, few enough to stay one readable line
+// when a lockfile bump moves a hundred packages at once.
+const DRIFT_NAME_CAP = 20;
+
+function formatDriftNames(keys) {
+  const sorted = keys.slice().sort();
+  const shown = sorted.slice(0, DRIFT_NAME_CAP);
+  const hidden = sorted.length - shown.length;
+  return hidden > 0 ? `${shown.join(", ")} (+${hidden} more)` : shown.join(", ");
+}
+
+/**
+ * Say *what* drifted, not just that something did.
+ *
+ * `--check` failing with only "out of date" is unactionable when the committed
+ * file and the checking machine disagree, because regenerating locally
+ * reproduces neither side. Naming the packages turns that into an immediate
+ * answer; when the package sets match, the drift is inside a license text or
+ * the prose, so point at the first differing line instead.
+ */
+export function describeNoticeDrift(current, expected) {
+  const currentKeys = noticePackageKeys(current);
+  const expectedKeys = noticePackageKeys(expected);
+  const added = Array.from(expectedKeys).filter((key) => !currentKeys.has(key));
+  const removed = Array.from(currentKeys).filter((key) => !expectedKeys.has(key));
+
+  if (added.length > 0 || removed.length > 0) {
+    const parts = [];
+    if (added.length > 0) {
+      parts.push(`missing from the committed file: ${formatDriftNames(added)}`);
+    }
+    if (removed.length > 0) {
+      parts.push(`no longer generated: ${formatDriftNames(removed)}`);
+    }
+    return parts.join("; ");
+  }
+
+  const currentLines = current.split("\n");
+  const expectedLines = expected.split("\n");
+  const lineCount = Math.max(currentLines.length, expectedLines.length);
+  for (let index = 0; index < lineCount; index += 1) {
+    if (currentLines[index] !== expectedLines[index]) {
+      const show = (line) => JSON.stringify(line ?? "<end of file>");
+      return [
+        `same package set; first difference at line ${index + 1}:`,
+        `committed ${show(currentLines[index])}`,
+        `generated ${show(expectedLines[index])}`,
+      ].join(" ");
+    }
+  }
+  return "no difference found";
+}
+
 function compareRecords(a, b) {
   return (
     a.name.localeCompare(b.name) ||
@@ -471,7 +575,7 @@ function main() {
   lines.push("-----");
   lines.push("");
   lines.push(
-    `This notice covers npm production dependencies for ${shippedPackageFilters.join(" and ")} plus the Electron runtime package.`,
+    `This notice covers npm production dependencies for ${SHIPPED_PACKAGE_NAMES.join(" and ")} plus the Electron runtime package.`,
   );
   lines.push(
     "Electron includes Chromium and Node.js runtime components. PwrGit includes Electron's MIT runtime license here; Chromium's generated credits are maintained upstream by Chromium/Electron and are intentionally not appended to this text notice because Electron's generated LICENSES.chromium.html is large for the pinned runtime.",
@@ -563,6 +667,7 @@ function main() {
       console.error(
         "THIRD_PARTY_LICENSES is out of date. Run `pnpm licenses:generate` and commit the result.",
       );
+      console.error(`Drift: ${describeNoticeDrift(current, output)}`);
       process.exit(1);
     }
     console.log("third-party license notice check passed");
