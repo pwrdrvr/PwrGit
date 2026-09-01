@@ -145,8 +145,8 @@ textarea,
 .file-blame__code,
 .file-blame__source,
 .file-insight-pane__path,
-.pull-divergence__commit-subject,
-.pull-divergence__commit code,
+.commit-align__commit-subject,
+.commit-align__commit code,
 .about-identity-value,
 .about-resource-url,
 .clone-destination-choice,
@@ -3910,9 +3910,28 @@ textarea,
   display: grid;
   gap: 2px;
 }
-.branch-picker__list select {
+/* `size` on the <select> is what makes this a listbox rather than a dropdown,
+   and `.refs-field select`'s 34px single-line height silently defeated it —
+   equal specificity, declared later, so the eight-row list rendered one row
+   over a repository with thousands of refs. The extra class outranks it
+   outright, so neither block's order can re-break this. */
+.branch-picker .branch-picker__list select {
   height: auto;
   padding: 4px;
+}
+/* The list is the widest thing in these dialogs; the 130px label gutter is the
+   narrowest place to put it. Stacked callers get the full width and the label
+   above, as an eyebrow. */
+.branch-picker--stacked .refs-field {
+  display: block;
+  margin-top: 0;
+}
+.branch-picker--stacked .refs-field > span {
+  display: block;
+  margin-bottom: 5px;
+}
+.branch-picker--stacked .refs-field + .refs-field {
+  margin-top: 9px;
 }
 .branch-picker__status {
   display: flex;
@@ -6295,6 +6314,21 @@ body.is-col-resizing {
   color: var(--text-primary);
   font: 600 11.5px/1.35 var(--font-mono);
 }
+.pull-divergence__elsewhere {
+  height: 32px;
+  margin-right: auto;
+  padding: 0 14px;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: 600 12px/1 var(--font-sans);
+  cursor: pointer;
+}
+.pull-divergence__elsewhere:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .pull-divergence__facts {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -6309,7 +6343,7 @@ body.is-col-resizing {
   background: var(--bg-panel);
 }
 .pull-divergence__facts span,
-.pull-divergence__comparison-head {
+.commit-align__head {
   display: block;
   color: var(--text-muted);
   font: 600 9.5px/1.2 var(--font-sans);
@@ -6348,65 +6382,65 @@ body.is-col-resizing {
   background: var(--warn-soft);
   color: var(--status-warning);
 }
-.pull-divergence__comparison {
+.commit-align {
   margin-top: 12px;
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   overflow: hidden;
 }
-.pull-divergence__comparison-head {
+.commit-align__head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr);
   padding: 9px 10px;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-panel);
 }
-.pull-divergence__comparison-head > span:last-child {
+.commit-align__head > span:last-child {
   text-align: right;
 }
-.pull-divergence__comparison-head small {
+.commit-align__head small {
   margin-left: 6px;
   color: var(--text-subtle);
   font: inherit;
 }
-.pull-divergence__comparison-scroll {
+.commit-align__scroll {
   max-height: 280px;
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
 }
-.pull-divergence__comparison-scroll:focus-visible {
+.commit-align__scroll:focus-visible {
   outline: 1px solid var(--accent-border);
   outline-offset: -1px;
 }
-.pull-divergence__comparison-rows {
+.commit-align__rows {
   min-width: 700px;
 }
-.pull-divergence__comparison-row {
+.commit-align__row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr);
   min-height: 38px;
   border-bottom: 1px solid var(--border-subtle);
 }
-.pull-divergence__comparison-row:last-child {
+.commit-align__row:last-child {
   border-bottom: 0;
 }
-.pull-divergence__comparison-row > div {
+.commit-align__row > div {
   display: flex;
   align-items: center;
   min-width: 0;
   padding: 7px 9px;
 }
-.pull-divergence__comparison-row > div:last-child {
+.commit-align__row > div:last-child {
   border-left: 1px solid var(--border-subtle);
 }
-.pull-divergence__comparison-row.is-equivalent > div {
+.commit-align__row.is-equivalent > div {
   background: color-mix(in srgb, var(--success-text) 5%, transparent);
 }
-.pull-divergence__comparison-row.is-changed > div {
+.commit-align__row.is-changed > div {
   background: color-mix(in srgb, var(--accent-bright) 5%, transparent);
 }
-.pull-divergence__commit {
+.commit-align__commit {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: baseline;
@@ -6416,45 +6450,45 @@ body.is-col-resizing {
   color: var(--text-secondary);
   font: 500 10.5px/1.35 var(--font-sans);
 }
-.pull-divergence__commit code {
+.commit-align__commit code {
   color: var(--text-subtle);
   font-size: 10px;
 }
-.pull-divergence__commit-subject {
+.commit-align__commit-subject {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.pull-divergence__commit-stats {
+.commit-align__commit-stats {
   display: flex;
   gap: 4px;
   font: 600 9.5px/1 var(--font-mono);
   white-space: nowrap;
 }
-.pull-divergence__commit-stats span:first-child {
+.commit-align__commit-stats span:first-child {
   color: var(--success-text);
 }
-.pull-divergence__commit-stats span:last-child {
+.commit-align__commit-stats span:last-child {
   color: var(--danger-text);
 }
-.pull-divergence__commit-empty {
+.commit-align__commit-empty {
   width: 100%;
   color: var(--text-subtle);
   font: 500 10px/1.2 var(--font-sans);
   text-align: center;
 }
-.pull-divergence__relation {
+.commit-align__relation {
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text-subtle);
   font: 700 11px/1 var(--font-mono);
 }
-.pull-divergence__comparison-row.is-equivalent .pull-divergence__relation {
+.commit-align__row.is-equivalent .commit-align__relation {
   color: var(--success-text);
 }
-.pull-divergence__comparison-row.is-changed .pull-divergence__relation {
+.commit-align__row.is-changed .commit-align__relation {
   color: var(--accent);
 }
 .pull-divergence__options {
@@ -6616,6 +6650,12 @@ body.is-col-resizing {
   max-height: calc(100vh - 48px);
   overflow-y: auto;
 }
+/* The review step draws the same two-column commit alignment the recovery
+   dialog does, and that view needs the recovery dialog's width to read — at
+   620px the target's commits are cut off by the modal edge. */
+.reset-remote.is-reviewing {
+  width: min(900px, 92vw);
+}
 .reset-remote__intro,
 .reset-remote__history-note {
   margin: 0;
@@ -6634,6 +6674,186 @@ body.is-col-resizing {
   color: var(--text-muted);
   font: 500 11px/1.4 var(--font-sans);
 }
+/* Ranked targets. The upstream and the default branch are the two answers a
+   repository can name for you; everything else is a search, so it sits behind
+   the third card rather than in front of them. */
+.reset-remote__targets {
+  display: grid;
+  gap: 8px;
+  margin: 15px 0 0;
+  padding: 0;
+  border: 0;
+}
+.reset-target {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 9px;
+  background: var(--bg-panel-elevated);
+  cursor: pointer;
+}
+.reset-target.is-selected {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.reset-target input {
+  margin: 2px 0 0;
+}
+.reset-target__body {
+  display: block;
+  min-width: 0;
+  flex: 1;
+}
+.reset-target__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.reset-target__name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font: 650 12px/1.3 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reset-target__tag {
+  flex: none;
+  margin-left: auto;
+  padding: 2px 6px;
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+  font: 700 8.5px/1.35 var(--font-sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.reset-target__tag--quiet {
+  border-color: var(--border-subtle);
+  background: var(--bg-panel);
+  color: var(--text-muted);
+}
+.reset-target__meta {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font: 500 10.5px/1.45 var(--font-mono);
+}
+.reset-target__ahead {
+  color: var(--success-text);
+}
+.reset-target__behind {
+  color: var(--danger-text);
+}
+.reset-target__note {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font: 500 10.5px/1.45 var(--font-sans);
+}
+.reset-remote__browse {
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  background: var(--bg-panel);
+}
+
+/* What the reset actually reads from. Without this the dialog silently acts on
+   whatever the last fetch happened to leave behind. */
+.reset-remote__fetched {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font: 500 10.5px/1.45 var(--font-sans);
+}
+.reset-remote__fetched.is-stale {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--text-secondary);
+}
+.reset-remote__fetched > span {
+  flex: 1;
+  min-width: 0;
+}
+.reset-remote__fetch {
+  flex: none;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: 600 10.5px/1 var(--font-sans);
+  cursor: pointer;
+}
+.reset-remote__fetch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* The counted consequence. `is-hot` is reserved for the two numbers that are
+   genuinely losses -- commits with no counterpart on the target, and working
+   tree changes a hard reset overwrites -- so a rebased upstream, where both
+   are zero, reads as the routine operation it is. */
+.reset-ledger {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+.reset-ledger__cell {
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+.reset-ledger__cell.is-hot {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+.reset-ledger__cell strong {
+  display: block;
+  color: var(--text-primary);
+  font: 700 19px/1.1 var(--font-mono);
+}
+.reset-ledger__cell.is-hot strong {
+  color: var(--danger-text);
+}
+.reset-ledger__cell span {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font: 500 10px/1.35 var(--font-sans);
+}
+.reset-ledger__cell.is-hot span {
+  color: var(--danger-text);
+}
+.reset-remote__ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+  background: var(--danger-soft);
+  color: var(--danger-text);
+  font: 500 11px/1.45 var(--font-sans);
+  cursor: pointer;
+}
+.reset-remote__ack input {
+  margin: 2px 0 0;
+}
 .reset-remote__modes {
   display: grid;
   gap: 8px;
@@ -6641,6 +6861,7 @@ body.is-col-resizing {
   padding: 0;
   border: 0;
 }
+.reset-remote__targets legend,
 .reset-remote__modes legend {
   margin-bottom: 8px;
   color: var(--text-muted);
@@ -6657,6 +6878,25 @@ body.is-col-resizing {
   border-radius: 9px;
   background: var(--bg-panel-elevated);
   cursor: pointer;
+}
+/* Destructive by name and by weight: the neutral card it used to share with
+   Soft made "Hard · destructive" a word rather than a warning. One class more
+   specific than the `.reset-remote__modes label` above, which sets the border
+   these override — keep the extra class, and keep these below it, so neither
+   the cascade nor a reorder can drop the danger weighting. */
+.reset-remote__modes label.reset-remote__mode--hard {
+  border-color: var(--danger-border);
+}
+.reset-remote__modes label.reset-remote__mode--hard.is-selected {
+  border-color: color-mix(
+    in srgb,
+    var(--danger-base) 60%,
+    var(--border-default)
+  );
+  background: var(--danger-soft);
+}
+.reset-remote__modes label.reset-remote__mode--hard.is-selected strong {
+  color: var(--danger-text);
 }
 .reset-remote__modes label.is-selected {
   border-color: var(--accent-border);

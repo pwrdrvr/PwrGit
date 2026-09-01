@@ -24,6 +24,7 @@ import {
   removeRemote,
   resetToRemote,
   resetToUpstream,
+  resolveResetTargets,
   updateRemote
 } from "./git-service";
 import type { WorktreeRefresher } from "./worktree-handlers";
@@ -552,6 +553,12 @@ export function registerRemoteHandlers(
     logMain("info", "remote", `reset ${path} to upstream (${seconds(startedAt)})`);
     refresher.refreshWorktree(req.worktreeId);
     return ok(null);
+  });
+
+  bus.register("remote:resetTargets", async (req) => {
+    const path = pathOf(req.worktreeId);
+    if (path === null) return err(notFound);
+    return resolveResetTargets(execGit, path);
   });
 
   bus.register("remote:inspectReset", async (req) => {

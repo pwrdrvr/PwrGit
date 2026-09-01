@@ -65,10 +65,16 @@ describe("remote handlers", () => {
     vi.mocked(fetchRemote).mockResolvedValue(ok(undefined));
     vi.mocked(inspectRemoteReset).mockResolvedValue(
       ok({
-        branch: "main",
-        head: "1".repeat(40),
-        remoteRef: "refs/remotes/origin/main",
-        remoteHead: "2".repeat(40)
+        snapshot: {
+          branch: "main",
+          head: "1".repeat(40),
+          remoteRef: "refs/remotes/origin/main",
+          remoteHead: "2".repeat(40)
+        },
+        leaving: [],
+        arriving: [],
+        alignedCommits: [],
+        dirty: 0
       })
     );
     vi.mocked(planPushRefs).mockResolvedValue(ok([]));

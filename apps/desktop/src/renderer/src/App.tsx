@@ -18,6 +18,7 @@ import { SelectionBar } from "./features/graph/SelectionBar";
 import { TitleBar } from "./features/chrome/TitleBar";
 import { WorktreeHeader } from "./features/graph/WorktreeHeader";
 import { DialogHost } from "./features/shell/DialogHost";
+import { ResetToRemoteHost } from "./features/graph/ResetToRemoteHost";
 import { PaneResizer } from "./features/shell/PaneResizer";
 import { ToastHost } from "./features/shell/ToastHost";
 import { Rail } from "./features/rail/Rail";
@@ -894,6 +895,7 @@ export function App() {
 
       <ToastHost />
       <DialogHost />
+      <ResetToRemoteHost />
     </div>
   );
 }

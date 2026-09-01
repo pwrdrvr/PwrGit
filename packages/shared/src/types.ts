@@ -130,6 +130,64 @@ export type RemoteResetSnapshot = {
   remoteHead: string;
 };
 
+/** One ranked reset target the dialog names before the full branch list. */
+export type ResetTargetSuggestion = {
+  /** Fully qualified fetched ref, e.g. `refs/remotes/origin/main`. */
+  ref: string;
+  /** Display-qualified name, e.g. `origin/main`. */
+  label: string;
+  head: string;
+  lastCommitAt?: string;
+  subject?: string;
+  /** Commits on the checkout that this tip does not contain. */
+  ahead: number;
+  /** Commits on this tip that the checkout does not contain. */
+  behind: number;
+};
+
+/**
+ * What the reset dialog knows before the user picks anything.
+ *
+ * The ranking is computed in main because only Git knows which ref a branch
+ * tracks. The picker's own list is sorted by committer date, which on an
+ * active repository puts the trunk first no matter which branch is checked
+ * out — the wrong default for the one action that discards history.
+ */
+export type ResetTargets = {
+  branch: string;
+  head: string;
+  /** The checked-out branch's configured upstream, when it is fetched. */
+  upstream: ResetTargetSuggestion | null;
+  /** The remote's default branch. Null when it is already `upstream`. */
+  defaultBranch: ResetTargetSuggestion | null;
+  /** Fetched remote-tracking branches across every remote. */
+  branchCount: number;
+  /** ISO-8601 time this checkout last fetched; null if it never has. */
+  lastFetchedAt: string | null;
+};
+
+/**
+ * The reviewed reset, carrying the two facts prose cannot: which commits
+ * actually leave the branch, and which of those are the same work under a new
+ * object name. An upstream that was rebased and force-pushed strands nothing
+ * even though every commit on both sides has a different hash — a count alone
+ * would report that as total loss.
+ */
+export type RemoteResetPreview = {
+  snapshot: RemoteResetSnapshot;
+  /** Commits on the checkout that the target does not contain. */
+  leaving: DivergenceCommit[];
+  /** Commits on the target that the checkout does not contain. */
+  arriving: DivergenceCommit[];
+  /** Patch-aware correspondence between the two ranges, newest first. */
+  alignedCommits: DivergenceCommitAlignment[];
+  /**
+   * Tracked working-tree entries a hard reset overwrites. Untracked and
+   * ignored files are excluded because `reset --hard` leaves them in place.
+   */
+  dirty: number;
+};
+
 export type RemoteSummary = {
   name: string;
   fetchUrl: string;

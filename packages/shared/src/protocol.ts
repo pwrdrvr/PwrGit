@@ -62,10 +62,12 @@ import type {
   RemoteDivergence,
   BranchReveal,
   RemoteResetMode,
+  RemoteResetPreview,
   RemoteResetSnapshot,
   Repo,
   RepoId,
   RepoRefs,
+  ResetTargets,
   ResolvedCommit,
   TagPage,
   TagSummary,
@@ -1073,10 +1075,24 @@ export interface Commands {
     };
     res: null;
   };
-  /** Resolve a checked-out local branch and one fetched remote ref for review. */
+  /**
+   * Rank the reset targets worth naming before the user opens a 39-row list:
+   * the checked-out branch's own upstream first, then the remote's default
+   * branch. Also reports how stale the fetched view the reset acts on is.
+   */
+  "remote:resetTargets": {
+    req: { worktreeId: string };
+    res: ResetTargets;
+  };
+  /**
+   * Resolve a checked-out local branch and one fetched remote ref for review,
+   * with the commits that would leave the branch and Git's patch-aware
+   * alignment between the two ranges — a rebased upstream strands nothing
+   * even though every hash differs.
+   */
   "remote:inspectReset": {
     req: { worktreeId: string; remoteRef: string };
-    res: RemoteResetSnapshot;
+    res: RemoteResetPreview;
   };
   /** Reset only the still-current checkout/ref pair from the reviewed snapshot. */
   "remote:resetToRemote": {

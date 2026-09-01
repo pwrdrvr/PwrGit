@@ -7,11 +7,12 @@ import {
 } from "react";
 import type { Worktree } from "@pwrgit/shared";
 import { currentPlatform, shortcutLabel } from "../../lib/platform";
+import { relativeAge } from "../../lib/relativeAge";
+import { openResetToRemote } from "../graph/reset-to-remote";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
 import { PrChip } from "./PrChip";
 import {
   isPrunableWorktree,
-  relativeAge,
   worktreeFolderLabel,
   type DropPosition
 } from "./repo-view";
@@ -332,6 +333,7 @@ export function WorktreeRow({
         worktree={worktree}
         className="wt-row__menu"
         platform={platform}
+        onResetToRemote={() => openResetToRemote({ worktree })}
         {...(worktree.isPrimary ? {} : { onRemove })}
       />
     </div>
