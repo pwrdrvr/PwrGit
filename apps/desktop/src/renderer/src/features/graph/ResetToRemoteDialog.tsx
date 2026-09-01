@@ -226,6 +226,20 @@ export function ResetToRemoteDialog({
     setError(null);
   };
 
+  /**
+   * Hand the choice to the list. Clearing the selection is the point: leaving
+   * a ranked card selected underneath left two radios in one group rendering
+   * `checked`, React re-synced the group back to the card, and the reset ran
+   * against the upstream while the picker sat open reading as the target.
+   */
+  const browse = (): void => {
+    setSelected(null);
+    setBrowsing(true);
+    setPreview(null);
+    setAcknowledged(false);
+    setError(null);
+  };
+
   const fetchNow = async (): Promise<void> => {
     setBusy("fetch");
     setError(null);
@@ -303,6 +317,11 @@ export function ResetToRemoteDialog({
   const impact = preview === null ? null : resetImpact(preview, mode);
   const upstreamRef = targets?.upstream?.ref;
   const defaultRef = targets?.defaultBranch?.ref;
+  // With a card to fall back on, the picker must not seed itself — its first
+  // row is whatever committed most recently, which is the wrong default for
+  // the one action that discards history, and is what this dialog set out to
+  // stop doing. With no card at all, that row is the only default there is.
+  const hasRankedTarget = upstreamRef !== undefined || defaultRef !== undefined;
   const listSelected =
     selected !== null &&
     selected.ref !== upstreamRef &&
@@ -373,7 +392,7 @@ export function ResetToRemoteDialog({
                   name="reset-target"
                   checked={listSelected || browsing}
                   disabled={busy !== null}
-                  onChange={() => setBrowsing(true)}
+                  onChange={() => browse()}
                 />
                 <span className="reset-target__body">
                   <span className="reset-target__head">
@@ -401,7 +420,7 @@ export function ResetToRemoteDialog({
                   label="Remote branch"
                   stacked
                   autoFocus={browsing}
-                  autoSelectFirst={selected === null}
+                  autoSelectFirst={selected === null && !hasRankedTarget}
                   disabled={busy !== null}
                   onChange={(option: BranchPickerOption) =>
                     choose(
@@ -572,7 +591,11 @@ export function ResetToRemoteDialog({
                 ? impact.stranded === 0
                   ? "Hard reset will move the branch pointer to this target and reset the index and working tree to match it. Every commit leaving the branch is already on the target under a different object name."
                   : `Hard reset will move the branch pointer to this target and discard tracked staged and unstaged changes. ${commitCountLabel(impact.stranded)} on this branch ${impact.stranded === 1 ? "has" : "have"} no counterpart on the target and will not survive anywhere but the reflog.`
-                : `Soft reset will move the branch pointer to this target and leave the index and working tree untouched. The ${commitCountLabel(impact.leaving)} leaving the branch keep their changes in your working tree as differences against the new HEAD.`}
+                : `Soft reset will move the branch pointer to this target and leave the index and working tree untouched.${
+                    impact.leaving === 0
+                      ? " No commits leave the branch."
+                      : ` The ${commitCountLabel(impact.leaving)} leaving the branch ${impact.leaving === 1 ? "keeps its changes" : "keep their changes"} in your working tree as differences against the new HEAD.`
+                  }`}
             </div>
 
             {impact.needsAcknowledgement && (

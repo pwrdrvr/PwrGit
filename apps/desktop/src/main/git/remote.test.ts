@@ -1700,6 +1700,56 @@ describe("reset target ranking", () => {
     expect(targets.value.defaultBranch?.label).toBe("origin/main");
   });
 
+  /**
+   * `git remote add team/fork` is legal, and `team` is a prefix of it. Picking
+   * the upstream's owning remote in plain array order matched `team` first,
+   * so the card read `refs/remotes/team/HEAD` — a different remote's trunk,
+   * offered as the default branch for a branch tracking team/fork.
+   */
+  it("picks the longest matching remote name, not the first prefix", async () => {
+    const { local, remote } = makeDivergedFixture();
+    const fork = join(local, "..", "prefix-fork.git");
+    git(remote, ["clone", "--bare", ".", fork]);
+    // Written straight to config: `git remote add` refuses to hold a name and
+    // a superset of it since 2.x, but a repository configured under an older
+    // git still carries the pair, which is why `splitRemoteRef` guards it.
+    git(local, ["config", "remote.team.url", remote]);
+    git(local, [
+      "config",
+      "remote.team.fetch",
+      "+refs/heads/*:refs/remotes/team/*"
+    ]);
+    git(local, ["config", "remote.team/fork.url", fork]);
+    git(local, [
+      "config",
+      "remote.team/fork.fetch",
+      "+refs/heads/*:refs/remotes/team/fork/*"
+    ]);
+    git(local, ["fetch", "team"]);
+    git(local, ["fetch", "team/fork"]);
+    git(local, ["remote", "set-head", "team", "main"]);
+    git(local, ["remote", "set-head", "team/fork", "main"]);
+    // `--set-upstream-to` refuses the ambiguity outright ("multiple remotes
+    // whose fetch refspecs map to..."), which is the whole point: the pair can
+    // only exist as config, so the tracking config is written the same way.
+    const branch = gitOut(local, ["rev-parse", "--abbrev-ref", "HEAD"]);
+    git(local, ["config", `branch.${branch}.remote`, "team/fork"]);
+    git(local, ["config", `branch.${branch}.merge`, "refs/heads/main"]);
+    expect(gitOut(local, ["rev-parse", "--symbolic-full-name", "@{u}"])).toBe(
+      "refs/remotes/team/fork/main"
+    );
+
+    const targets = await resolveResetTargets(systemGit, local);
+    expect(targets.ok).toBe(true);
+    if (!targets.ok) return;
+    expect(targets.value.upstream?.label).toBe("team/fork/main");
+    // Its own remote's HEAD, deduped against the upstream — never team/main.
+    expect(targets.value.defaultBranch).toBeNull();
+    // origin/main, team/main, team/fork/main — both `<remote>/HEAD` pointers
+    // drop out of the count, not just the one the short prefix would find.
+    expect(targets.value.branchCount).toBe(3);
+  }, 15_000);
+
   it("does not offer the default branch twice when it is the upstream", async () => {
     const { local } = makeDivergedFixture();
     git(local, ["fetch", "origin"]);
@@ -1752,7 +1802,7 @@ describe("reset preview", () => {
     ).toHaveLength(1);
   }, 15_000);
 
-  it("reports the working-tree entries a hard reset would be weighed against", async () => {
+  it("counts only what a hard reset overwrites, not untracked files", async () => {
     const { local, remote } = makeDivergedFixture();
     commit(remote, "remote.txt", "remote commit");
     git(remote, ["push"]);
@@ -1767,7 +1817,9 @@ describe("reset preview", () => {
     );
     expect(preview.ok).toBe(true);
     if (!preview.ok) return;
-    expect(preview.value.dirty).toBe(2);
+    // The dialog renders this as "N working-tree changes discarded", and
+    // `reset --hard` leaves untracked.txt exactly where it is.
+    expect(preview.value.dirty).toBe(1);
     expect(preview.value.snapshot.remoteRef).toBe("refs/remotes/origin/main");
   }, 15_000);
 });

@@ -181,7 +181,10 @@ export type RemoteResetPreview = {
   arriving: DivergenceCommit[];
   /** Patch-aware correspondence between the two ranges, newest first. */
   alignedCommits: DivergenceCommitAlignment[];
-  /** Entries `git status` reports — what a hard reset is weighed against. */
+  /**
+   * Tracked working-tree entries a hard reset overwrites. Untracked and
+   * ignored files are excluded because `reset --hard` leaves them in place.
+   */
   dirty: number;
 };
 

@@ -1789,6 +1789,39 @@ async function resolveFetchedRemoteBranch(
 }
 
 /**
+ * Working-tree entries a hard reset actually overwrites.
+ *
+ * Deliberately not `readCheckoutDirtyCount`, which counts untracked files
+ * because a branch switch can carry them. `reset --hard` does not: it leaves
+ * untracked and ignored files alone, so counting them here would overstate the
+ * loss on the one screen whose job is to state it exactly — and contradict the
+ * dialog's own mode copy, which says untracked files survive.
+ *
+ * Porcelain v2 marks tracked entries `1` (changed), `2` (renamed/copied) and
+ * `u` (unmerged); `?` and `!` are the untracked and ignored ones we skip.
+ */
+async function readTrackedDirtyCount(
+  git: GitExec,
+  cwd: string
+): Promise<Result<number>> {
+  const args = [
+    "status",
+    "--porcelain=v2",
+    "--untracked-files=no",
+    "--ignore-submodules=none"
+  ];
+  const raw = await git(args, cwd, NO_OPTIONAL_LOCKS);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, args);
+  if (!checked.ok) return checked;
+  return ok(
+    checked.value.stdout
+      .split("\n")
+      .filter((line) => /^[12u] /.test(line)).length
+  );
+}
+
+/**
  * Resolve the exact checkout and fetched remote tip presented for reset, with
  * the commits that would leave the branch and Git's alignment between the two
  * ranges. The alignment is the difference between "9 commits are destroyed"
@@ -1810,7 +1843,7 @@ export async function inspectRemoteReset(
 
   const [comparison, dirty] = await Promise.all([
     compareCommitRanges(git, cwd, remoteRef),
-    readCheckoutDirtyCount(git, cwd)
+    readTrackedDirtyCount(git, cwd)
   ]);
   if (!comparison.ok) return comparison;
   if (!dirty.ok) return dirty;
@@ -1835,10 +1868,12 @@ async function resetTargetOf(
   cwd: string,
   ref: string
 ): Promise<ResetTargetSuggestion | null> {
-  const refRaw = await git(
-    ["for-each-ref", `--format=${REMOTE_BRANCH_FORMAT}`, ref],
-    cwd
-  );
+  // --left-right counts each side of the symmetric difference: left is HEAD.
+  // It does not depend on the ref read, so both go out together.
+  const [refRaw, countRaw] = await Promise.all([
+    git(["for-each-ref", `--format=${REMOTE_BRANCH_FORMAT}`, ref], cwd),
+    git(["rev-list", "--left-right", "--count", `HEAD...${ref}`], cwd)
+  ]);
   if (!refRaw.ok || refRaw.value.exitCode !== 0) return null;
   const line = refRaw.value.stdout.split("\n").find((row) => row.trim() !== "");
   if (line === undefined) return null;
@@ -1847,11 +1882,6 @@ async function resetTargetOf(
   if (fullName !== ref || shortName === "" || head === "") return null;
   const subject = fields.slice(4).join("\t");
 
-  // --left-right counts each side of the symmetric difference: left is HEAD.
-  const countRaw = await git(
-    ["rev-list", "--left-right", "--count", `HEAD...${ref}`],
-    cwd
-  );
   if (!countRaw.ok || countRaw.value.exitCode !== 0) return null;
   const [aheadText = "", behindText = ""] = countRaw.value.stdout.trim().split(/\s+/);
   const ahead = Number.parseInt(aheadText, 10);
@@ -1875,9 +1905,12 @@ function defaultBranchRemote(
   upstreamRef: string | null
 ): string | null {
   if (upstreamRef !== null) {
-    const owner = remotes.find((remote) =>
-      upstreamRef.startsWith(`refs/remotes/${remote}/`)
-    );
+    // Longest first, for the same reason `splitRemoteRef` does it: `team` is a
+    // prefix of `team/fork`, so plain iteration order hands back the wrong
+    // remote and we read the wrong `<remote>/HEAD`.
+    const owner = [...remotes]
+      .sort((a, b) => b.length - a.length)
+      .find((remote) => upstreamRef.startsWith(`refs/remotes/${remote}/`));
     if (owner !== undefined) return owner;
   }
   if (remotes.includes("origin")) return "origin";
@@ -1909,6 +1942,37 @@ async function lastFetchTime(git: GitExec, cwd: string): Promise<string | null> 
 }
 
 /**
+ * How many remote-tracking branches this repository has fetched.
+ *
+ * `listRemoteBranchPage` reports the same total, but reaches it by building a
+ * summary object per ref and re-reading the remote names — on a fetched fork
+ * network that is thousands of allocations and a second git process to render
+ * one integer. Same two exclusions as the page, so the number agrees with the
+ * list the user opens.
+ */
+async function countRemoteBranches(
+  git: GitExec,
+  cwd: string,
+  remotes: readonly string[]
+): Promise<Result<number>> {
+  const args = ["for-each-ref", "--format=%(refname)", "refs/remotes"];
+  const raw = await git(args, cwd);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, args);
+  if (!checked.ok) return checked;
+  const longestFirst = [...remotes].sort((a, b) => b.length - a.length);
+  let total = 0;
+  for (const line of checked.value.stdout.split("\n")) {
+    const fullName = line.trim();
+    if (fullName === "") continue;
+    const split = splitRemoteRef(fullName, longestFirst);
+    if (split === null || split.name === "HEAD") continue;
+    total += 1;
+  }
+  return ok(total);
+}
+
+/**
  * Rank the reset targets worth naming before the full branch list.
  *
  * Everything here is best-effort: a branch with no upstream, a remote with no
@@ -1922,10 +1986,11 @@ export async function resolveResetTargets(
   const checkout = await resolveCheckedOutRef(git, cwd);
   if (!checkout.ok) return checkout;
 
-  const upstreamRaw = await git(
-    ["rev-parse", "--symbolic-full-name", "@{u}"],
-    cwd
-  );
+  // Neither of these reads the other's answer, and the dialog waits on both.
+  const [upstreamRaw, remotes] = await Promise.all([
+    git(["rev-parse", "--symbolic-full-name", "@{u}"], cwd),
+    listRemoteNames(git, cwd)
+  ]);
   if (!upstreamRaw.ok) return upstreamRaw;
   const upstreamRef =
     upstreamRaw.value.exitCode === 0 &&
@@ -1933,7 +1998,6 @@ export async function resolveResetTargets(
       ? upstreamRaw.value.stdout.trim()
       : null;
 
-  const remotes = await listRemoteNames(git, cwd);
   if (!remotes.ok) return remotes;
   const owner = defaultBranchRemote(remotes.value, upstreamRef);
   const headRaw =
@@ -1948,25 +2012,26 @@ export async function resolveResetTargets(
       ? headRaw.value.stdout.trim()
       : null;
 
-  const [upstream, defaultBranch, page, lastFetchedAt] = await Promise.all([
-    upstreamRef === null
-      ? Promise.resolve(null)
-      : resetTargetOf(git, cwd, upstreamRef),
-    // The upstream card already names it; a second identical card is noise.
-    defaultRef === null || defaultRef === upstreamRef
-      ? Promise.resolve(null)
-      : resetTargetOf(git, cwd, defaultRef),
-    listRemoteBranchPage(git, cwd, { limit: 1 }),
-    lastFetchTime(git, cwd)
-  ]);
-  if (!page.ok) return page;
+  const [upstream, defaultBranch, branchCount, lastFetchedAt] =
+    await Promise.all([
+      upstreamRef === null
+        ? Promise.resolve(null)
+        : resetTargetOf(git, cwd, upstreamRef),
+      // The upstream card already names it; a second identical card is noise.
+      defaultRef === null || defaultRef === upstreamRef
+        ? Promise.resolve(null)
+        : resetTargetOf(git, cwd, defaultRef),
+      countRemoteBranches(git, cwd, remotes.value),
+      lastFetchTime(git, cwd)
+    ]);
+  if (!branchCount.ok) return branchCount;
 
   return ok({
     branch: checkout.value.branch,
     head: checkout.value.head,
     upstream,
     defaultBranch,
-    branchCount: page.value.total,
+    branchCount: branchCount.value,
     lastFetchedAt
   });
 }

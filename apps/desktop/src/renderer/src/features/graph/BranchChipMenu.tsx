@@ -77,7 +77,10 @@ export function BranchChipMenu({
   }
   if (items.length > 0) items.push({ type: "sep" });
 
-  if (target.isRemote) {
+  // `branch` is "" for a collapsed chip that names a remote and no branch —
+  // there is no fetched branch tip to reset to, and `refs/remotes/origin`
+  // would only be rejected two clicks later, inside the dialog.
+  if (target.isRemote && branch !== "") {
     items.push({
       type: "item",
       label: `Reset ${viewingBranch} to ${target.ref}…`,

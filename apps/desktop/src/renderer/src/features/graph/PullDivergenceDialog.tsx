@@ -3,6 +3,7 @@ import type { RemoteDivergence } from "@pwrgit/shared";
 import {
   CommitAlignment,
   commitCountLabel as countLabel,
+  otherOnlyCommitCount,
   rewrittenCommitCount,
   strandedCommitCount
 } from "./CommitAlignment";
@@ -52,9 +53,7 @@ export function PullDivergenceDialog({
   const localCount = divergence.localCommits.length;
   const pairedCount = rewrittenCommitCount(divergence.alignedCommits);
   const localUnpairedCount = strandedCommitCount(divergence.alignedCommits);
-  const upstreamUnpairedCount = divergence.alignedCommits.filter(
-    (row) => row.relation === "upstream-only"
-  ).length;
+  const upstreamUnpairedCount = otherOnlyCommitCount(divergence.alignedCommits);
 
   return (
     <div

@@ -19,7 +19,7 @@ import type {
  * screen readers a row at a time, and "only on the other branch" makes the
  * listener hold a pronoun the rest of the dialog never resolves.
  */
-export function relationLabel(
+function relationLabel(
   relation: DivergenceCommitAlignment["relation"],
   otherOnlyLabel: string
 ): string {
@@ -164,4 +164,11 @@ export function rewrittenCommitCount(
 ): number {
   return rows.filter((row) => row.local !== null && row.upstream !== null)
     .length;
+}
+
+/** The mirror of `strandedCommitCount`: rows only the other branch carries. */
+export function otherOnlyCommitCount(
+  rows: readonly DivergenceCommitAlignment[]
+): number {
+  return rows.filter((row) => row.relation === "upstream-only").length;
 }

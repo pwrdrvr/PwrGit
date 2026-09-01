@@ -3913,10 +3913,10 @@ textarea,
 /* `size` on the <select> is what makes this a listbox rather than a dropdown,
    and `.refs-field select`'s 34px single-line height silently defeated it —
    equal specificity, declared later, so the eight-row list rendered one row
-   over a repository with thousands of refs. Pinned here rather than reordered
-   so a future edit to either block cannot re-break it. */
-.branch-picker__list select {
-  height: auto !important;
+   over a repository with thousands of refs. The extra class outranks it
+   outright, so neither block's order can re-break this. */
+.branch-picker .branch-picker__list select {
+  height: auto;
   padding: 4px;
 }
 /* The list is the widest thing in these dialogs; the 130px label gutter is the
@@ -6869,10 +6869,21 @@ body.is-col-resizing {
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
+.reset-remote__modes label {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 9px;
+  background: var(--bg-panel-elevated);
+  cursor: pointer;
+}
 /* Destructive by name and by weight: the neutral card it used to share with
-   Soft made "Hard · destructive" a word rather than a warning. Written at
-   the same specificity as `.reset-remote__modes label`, which sets the border
-   these override. */
+   Soft made "Hard · destructive" a word rather than a warning. One class more
+   specific than the `.reset-remote__modes label` above, which sets the border
+   these override — keep the extra class, and keep these below it, so neither
+   the cascade nor a reorder can drop the danger weighting. */
 .reset-remote__modes label.reset-remote__mode--hard {
   border-color: var(--danger-border);
 }
@@ -6886,16 +6897,6 @@ body.is-col-resizing {
 }
 .reset-remote__modes label.reset-remote__mode--hard.is-selected strong {
   color: var(--danger-text);
-}
-.reset-remote__modes label {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  padding: 10px;
-  border: 1px solid var(--border-default);
-  border-radius: 9px;
-  background: var(--bg-panel-elevated);
-  cursor: pointer;
 }
 .reset-remote__modes label.is-selected {
   border-color: var(--accent-border);

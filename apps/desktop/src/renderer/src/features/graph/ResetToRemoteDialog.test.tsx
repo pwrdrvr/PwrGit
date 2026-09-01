@@ -140,6 +140,40 @@ describe("reset to remote — choosing a target", () => {
     expect(container.querySelector(".branch-picker")).not.toBeNull();
   });
 
+  /**
+   * Both radios rendered `checked` when browsing left the ranked card
+   * selected. React re-synced the group back to the card, so the dialog
+   * showed the upstream selected, opened the picker anyway, and reset to the
+   * upstream if the user pressed Review without picking a row.
+   */
+  it("hands the target to the list rather than keeping the ranked card", async () => {
+    await open();
+
+    const another = container.querySelectorAll<HTMLInputElement>(
+      ".reset-target input"
+    )[2];
+    await act(async () => {
+      another?.click();
+    });
+
+    expect(cards()).toEqual([
+      { name: "origin/feature/local", checked: false },
+      { name: "origin/main", checked: false },
+      { name: "Another fetched branch…", checked: true }
+    ]);
+    // Nothing is chosen yet, and the picker must not choose for us: its first
+    // row is whatever committed most recently.
+    const review = container.querySelector<HTMLButtonElement>(".modal__create");
+    expect(review?.disabled).toBe(true);
+    await act(async () => {
+      review?.click();
+    });
+    expect(dispatchMock).not.toHaveBeenCalledWith(
+      "remote:inspectReset",
+      expect.anything()
+    );
+  });
+
   it("opens on a caller's ref without touching the picker", async () => {
     await open("refs/remotes/upstream/release/next");
 
@@ -365,7 +399,7 @@ describe("reset to remote — reviewing the loss", () => {
 
     expect(container.querySelector(".reset-remote__ack")).toBeNull();
     expect(text()).toContain(
-      "keep their changes in your working tree as differences against the new HEAD"
+      "The 1 commit leaving the branch keeps its changes in your working tree"
     );
     // The working-tree cell is a hard-reset fact; soft leaves the tree alone.
     expect(ledger().some((cell) => cell.includes("working-tree"))).toBe(false);
