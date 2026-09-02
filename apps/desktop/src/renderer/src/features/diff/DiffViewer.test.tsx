@@ -229,7 +229,28 @@ describe("DiffViewer hunk and line selection", () => {
     }
   ];
 
-  it("routes individual checkboxes and the whole visible hunk through typed IDs", async () => {
+  /** The line lane is the pointer target — the 16px + inside it is only the
+   *  glyph. */
+  const laneOf = (row: Element): HTMLElement =>
+    row.querySelector(".diff-lane--line") as HTMLElement;
+  const takeOf = (row: Element): HTMLButtonElement =>
+    row.querySelector(".diff-line-take") as HTMLButtonElement;
+  const press = (el: HTMLElement, init: MouseEventInit = {}): void => {
+    el.dispatchEvent(
+      new MouseEvent("mousedown", { bubbles: true, button: 0, ...init })
+    );
+  };
+  /** The event a pointer crossing a row actually delivers. `buttons: 1` is the
+   *  left button still being held — the thing that separates a live drag from
+   *  a plain hover after a lost mouseup. */
+  const enter = (el: HTMLElement, buttons = 1): void => {
+    el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, buttons }));
+  };
+  const release = (): void => {
+    window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  };
+
+  it("routes a line\u2019s + and the whole visible hunk through typed IDs", async () => {
     const onToggleLine = vi.fn();
     const onApply = vi.fn();
     await act(async () => {
@@ -255,15 +276,27 @@ describe("DiffViewer hunk and line selection", () => {
       );
     });
 
-    // The hunk header's own box leads, then one per changed row.
-    const checkboxes = container.querySelectorAll<HTMLInputElement>(
-      'input[type="checkbox"]'
-    );
-    expect(checkboxes).toHaveLength(3);
-    expect(checkboxes[0]?.indeterminate).toBe(true);
-    expect(checkboxes[1]?.checked).toBe(true);
-    await act(async () => checkboxes[2]?.click());
-    expect(onToggleLine).toHaveBeenCalledWith([lines[1]?.id]);
+    // One chip at the top of the hunk, one + per changed row — and nothing
+    // else: the resting diff carries no column of controls.
+    const chip = container.querySelector(".diff-hunk-chip");
+    const takes = container.querySelectorAll(".diff-line-take");
+    expect(chip).not.toBeNull();
+    expect(takes).toHaveLength(2);
+    // Half the hunk is taken, so the chip and the rail both read "part".
+    expect(chip?.className).toContain("is-part");
+    expect(chip?.textContent).toBe("+");
+    expect(takes[0]?.className).toContain("is-on");
+    expect(takes[0]?.getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector(".diff-rail--part")).not.toBeNull();
+
+    const rows = container.querySelectorAll(".diff-row.is-tickable");
+    await act(async () => {
+      press(laneOf(rows[1]!));
+      release();
+    });
+    // A lone press carries its intent too — the run is one line long, but the
+    // op is still named rather than left to be re-derived.
+    expect(onToggleLine).toHaveBeenCalledWith([lines[1]?.id], "check");
 
     const hunkButton = [...container.querySelectorAll("button")].find(
       (button) => button.textContent === "Stage hunk"
@@ -272,7 +305,7 @@ describe("DiffViewer hunk and line selection", () => {
     expect(onApply).toHaveBeenCalledWith(lines.map((line) => line.id));
   });
 
-  it("selects a whole hunk from its header box with explicit intent", async () => {
+  it("selects a whole hunk from its chip with explicit intent", async () => {
     const onToggleLine = vi.fn();
     await act(async () => {
       root.render(
@@ -294,8 +327,11 @@ describe("DiffViewer hunk and line selection", () => {
       );
     });
 
-    const header = container.querySelector(".diff-select--hunk");
-    await act(async () => (header as HTMLElement).click());
+    const chip = container.querySelector(".diff-hunk-chip");
+    // Partial, so the chip still offers to complete rather than to clear.
+    expect(chip?.className).toContain("is-part");
+    expect(chip?.getAttribute("aria-pressed")).toBe("false");
+    await act(async () => (chip as HTMLElement).click());
     // A partially ticked hunk completes: every line, named intent.
     expect(onToggleLine).toHaveBeenCalledWith(
       [lines[0]?.id, lines[1]?.id],
@@ -327,77 +363,92 @@ describe("DiffViewer hunk and line selection", () => {
 
     const rows = container.querySelectorAll(".diff-row.is-tickable");
     expect(rows).toHaveLength(2);
-    // The gutter is part of the target; the code column deliberately is not,
-    // so a click there still starts a text selection. Aim at the FIRST gutter
-    // on purpose: on an added row that is the empty old-line cell, which is
-    // baseline-collapsed to no height, so the row — not the cell — is what
-    // actually receives the click.
-    const gutterOf = (row: Element): HTMLElement =>
-      row.querySelector(".diff-gutter") as HTMLElement;
-    await act(async () => gutterOf(rows[0]!).click());
-    expect(onToggleLine).toHaveBeenLastCalledWith([lines[0]?.id]);
     await act(async () => {
-      gutterOf(rows[1]!).dispatchEvent(
-        new MouseEvent("click", { bubbles: true, shiftKey: true })
-      );
+      press(laneOf(rows[0]!));
+      release();
     });
+    expect(onToggleLine).toHaveBeenLastCalledWith([lines[0]?.id], "uncheck");
+
+    // Shift extends from the anchor and deliberately does NOT begin a sweep:
+    // one button-down cannot mean both gestures.
+    await act(async () => press(laneOf(rows[1]!), { shiftKey: true }));
     expect(onToggleLine).toHaveBeenLastCalledWith(
       [lines[0]?.id, lines[1]?.id],
       "check"
     );
-
-    // A pre-existing selection elsewhere on the page must not disable ticking:
-    // the guard measures the gesture, it does not ask whether anything is
-    // selected. Simulated here by a click whose press and release coincide.
+    // Nothing is pending, so the release that ends the shift-click adds
+    // nothing of its own.
     onToggleLine.mockClear();
-    const g = gutterOf(rows[0]!);
-    g.dispatchEvent(
-      new MouseEvent("mousedown", { bubbles: true, clientX: 10, clientY: 20 })
-    );
-    await act(async () =>
-      g.dispatchEvent(
-        new MouseEvent("click", {
-          bubbles: true,
-          detail: 1,
-          clientX: 10,
-          clientY: 20
-        })
-      )
-    );
-    expect(onToggleLine).toHaveBeenLastCalledWith([lines[0]?.id]);
-
-    // A press and release far apart is a drag that happened to end over the
-    // gutter, and must not tick.
-    onToggleLine.mockClear();
-    g.dispatchEvent(
-      new MouseEvent("mousedown", { bubbles: true, clientX: 300, clientY: 20 })
-    );
-    await act(async () =>
-      g.dispatchEvent(
-        new MouseEvent("click", {
-          bubbles: true,
-          detail: 1,
-          clientX: 10,
-          clientY: 20
-        })
-      )
-    );
+    await act(async () => release());
     expect(onToggleLine).not.toHaveBeenCalled();
 
-    // The code column is not a toggle: clicking it must stay inert.
+    // The code column is not a control: pressing it must stay inert, so a
+    // click there still starts an ordinary text selection.
     onToggleLine.mockClear();
-    await act(async () =>
-      (rows[1]!.querySelector(".diff-text") as HTMLElement).click()
-    );
+    await act(async () => {
+      press(rows[1]!.querySelector(".diff-text") as HTMLElement);
+      release();
+    });
     expect(onToggleLine).not.toHaveBeenCalled();
-
-    // A click that lands on the row itself — the gap an empty, height-less
-    // gutter cell leaves behind — still ticks.
-    await act(async () => (rows[1] as HTMLElement).click());
-    expect(onToggleLine).toHaveBeenLastCalledWith([lines[1]?.id]);
   });
 
-  it("re-seats the shift anchor when a whole hunk is taken from its header", async () => {
+  it("commits a sweep as one run, with the intent fixed at the press", async () => {
+    const onToggleLine = vi.fn();
+    const render = async (selectedIds: Set<string>): Promise<void> => {
+      await act(async () => {
+        root.render(
+          <DiffViewer
+            patch={textPatch}
+            selection={{
+              staged: false,
+              selectedIds,
+              applying: false,
+              hunks: [
+                { id: "h:0:2:2", header: "@@ -2 +2 @@", lineSelection: true, lines }
+              ],
+              onToggleLine,
+              onApply: vi.fn()
+            }}
+          />
+        );
+      });
+    };
+    await render(new Set());
+
+    const rows = container.querySelectorAll(".diff-row.is-tickable");
+    await act(async () => press(laneOf(rows[0]!)));
+    await act(async () => enter(laneOf(rows[1]!)));
+    // Mid-sweep the run is previewed, not committed — nothing has been sent.
+    expect(onToggleLine).not.toHaveBeenCalled();
+    expect(container.querySelectorAll(".diff-row.is-sweeping")).toHaveLength(2);
+    // The lane answers the drag as it crosses, so the hunk reads as taken
+    // before the button comes up.
+    expect(container.querySelector(".diff-rail--full")).not.toBeNull();
+
+    await act(async () => release());
+    expect(onToggleLine).toHaveBeenCalledTimes(1);
+    expect(onToggleLine).toHaveBeenCalledWith(
+      [lines[0]?.id, lines[1]?.id],
+      "check"
+    );
+    expect(container.querySelector(".diff-row.is-sweeping")).toBeNull();
+
+    // Pressing a line that is ALREADY taken clears the run it crosses. The
+    // intent is read once, at the press: a sweep that re-decided per row
+    // would invert what it passed over and leave stripes behind.
+    onToggleLine.mockClear();
+    await render(new Set([lines[0]!.id]));
+    const taken = container.querySelectorAll(".diff-row.is-tickable");
+    await act(async () => press(laneOf(taken[0]!)));
+    await act(async () => enter(laneOf(taken[1]!)));
+    await act(async () => release());
+    expect(onToggleLine).toHaveBeenCalledWith(
+      [lines[0]?.id, lines[1]?.id],
+      "uncheck"
+    );
+  });
+
+  it("keeps tracking a sweep that drifts out of the line lane", async () => {
     const onToggleLine = vi.fn();
     await act(async () => {
       root.render(
@@ -417,23 +468,210 @@ describe("DiffViewer hunk and line selection", () => {
       );
     });
 
-    // Tick the first row, so the anchor sits there.
     const rows = container.querySelectorAll(".diff-row.is-tickable");
+    await act(async () => press(laneOf(rows[0]!)));
+    // A real downward drag does not stay inside a 24px column. Crossing the
+    // next row anywhere — here over its code — has to extend the run.
     await act(async () =>
-      (rows[0]!.querySelector(".diff-gutter") as HTMLElement).click()
+      enter(rows[1]!.querySelector(".diff-text") as HTMLElement)
     );
-    // Take the hunk from its header box; the anchor must move into the hunk.
+    expect(container.querySelectorAll(".diff-row.is-sweeping")).toHaveLength(2);
+    await act(async () => release());
+    expect(onToggleLine).toHaveBeenCalledWith(
+      [lines[0]?.id, lines[1]?.id],
+      "check"
+    );
+  });
+
+  it("drops a sweep whose mouseup went missing instead of tracking hover", async () => {
+    const onToggleLine = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffViewer
+          patch={textPatch}
+          selection={{
+            staged: false,
+            selectedIds: new Set(),
+            applying: false,
+            hunks: [
+              { id: "h:0:2:2", header: "@@ -2 +2 @@", lineSelection: true, lines }
+            ],
+            onToggleLine,
+            onApply: vi.fn()
+          }}
+        />
+      );
+    });
+
+    const rows = container.querySelectorAll(".diff-row.is-tickable");
+    await act(async () => press(laneOf(rows[0]!)));
+    // The release never arrived — a native menu ate it, or focus left
+    // mid-drag. The next movement reports no button held, and the sweep must
+    // end there rather than keep growing under a bare pointer.
+    await act(async () => enter(rows[1]! as HTMLElement, 0));
+    expect(container.querySelector(".diff-row.is-sweeping")).toBeNull();
+    await act(async () => enter(rows[1]! as HTMLElement, 0));
+    await act(async () => release());
+    expect(onToggleLine).not.toHaveBeenCalled();
+  });
+
+  it("presses from the gutter, but leaves code and blame alone", async () => {
+    const onToggleLine = vi.fn();
+    const onBlameFrom = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffViewer
+          patch={textPatch}
+          onBlameFrom={onBlameFrom}
+          selection={{
+            staged: false,
+            selectedIds: new Set(),
+            applying: false,
+            hunks: [
+              { id: "h:0:2:2", header: "@@ -2 +2 @@", lineSelection: true, lines }
+            ],
+            onToggleLine,
+            onApply: vi.fn()
+          }}
+        />
+      );
+    });
+
+    const rows = container.querySelectorAll(".diff-row.is-tickable");
+    // The line-number gutter was a target before the lanes existed and still
+    // is: the + is the affordance, not the whole of the hit area.
+    await act(async () => {
+      press(rows[0]!.querySelector(".diff-gutter") as HTMLElement);
+      release();
+    });
+    expect(onToggleLine).toHaveBeenCalledWith([lines[0]?.id], "check");
+
+    // The code column stays selectable text.
+    onToggleLine.mockClear();
+    await act(async () => {
+      press(rows[0]!.querySelector(".diff-text") as HTMLElement);
+      release();
+    });
+    expect(onToggleLine).not.toHaveBeenCalled();
+
+    // The blame gutter is its own button; a press there must not also start a
+    // sweep, or one click would do two things.
+    const blame = container.querySelector(".diff-gutter--blame");
+    expect(blame).not.toBeNull();
+    await act(async () => {
+      press(blame as HTMLElement);
+      release();
+    });
+    expect(onToggleLine).not.toHaveBeenCalled();
+  });
+
+  it("sweeps the same run whichever way the pointer travelled", async () => {
+    const onToggleLine = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffViewer
+          patch={textPatch}
+          selection={{
+            staged: false,
+            selectedIds: new Set(),
+            applying: false,
+            hunks: [
+              { id: "h:0:2:2", header: "@@ -2 +2 @@", lineSelection: true, lines }
+            ],
+            onToggleLine,
+            onApply: vi.fn()
+          }}
+        />
+      );
+    });
+
+    const rows = container.querySelectorAll(".diff-row.is-tickable");
+    await act(async () => press(laneOf(rows[1]!)));
+    await act(async () => enter(laneOf(rows[0]!)));
+    await act(async () => release());
+    // Painted order, not gesture order.
+    expect(onToggleLine).toHaveBeenCalledWith(
+      [lines[0]?.id, lines[1]?.id],
+      "check"
+    );
+  });
+
+  it("toggles once when the + is reached by keyboard", async () => {
+    const onToggleLine = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffViewer
+          patch={textPatch}
+          selection={{
+            staged: false,
+            selectedIds: new Set(),
+            applying: false,
+            hunks: [
+              { id: "h:0:2:2", header: "@@ -2 +2 @@", lineSelection: true, lines }
+            ],
+            onToggleLine,
+            onApply: vi.fn()
+          }}
+        />
+      );
+    });
+
+    const rows = container.querySelectorAll(".diff-row.is-tickable");
+    // Enter and Space arrive as a click reporting no press position. The
+    // pointer path is press/release, so only this one may act on a click —
+    // both firing would toggle the line straight back.
     await act(async () =>
-      (container.querySelector(".diff-select--hunk") as HTMLElement).click()
+      takeOf(rows[0]!).dispatchEvent(
+        new MouseEvent("click", { bubbles: true, detail: 0 })
+      )
+    );
+    expect(onToggleLine).toHaveBeenCalledTimes(1);
+    expect(onToggleLine).toHaveBeenCalledWith([lines[0]?.id]);
+
+    // The same button under a real pointer click has already been handled.
+    onToggleLine.mockClear();
+    await act(async () =>
+      takeOf(rows[0]!).dispatchEvent(
+        new MouseEvent("click", { bubbles: true, detail: 1 })
+      )
+    );
+    expect(onToggleLine).not.toHaveBeenCalled();
+  });
+
+  it("re-seats the shift anchor when a whole hunk is taken from its chip", async () => {
+    const onToggleLine = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffViewer
+          patch={textPatch}
+          selection={{
+            staged: false,
+            selectedIds: new Set(),
+            applying: false,
+            hunks: [
+              { id: "h:0:2:2", header: "@@ -2 +2 @@", lineSelection: true, lines }
+            ],
+            onToggleLine,
+            onApply: vi.fn()
+          }}
+        />
+      );
+    });
+
+    // Take the first row, so the anchor sits there.
+    const rows = container.querySelectorAll(".diff-row.is-tickable");
+    await act(async () => {
+      press(laneOf(rows[0]!));
+      release();
+    });
+    // Take the hunk from its chip; the anchor must move into the hunk.
+    await act(async () =>
+      (container.querySelector(".diff-hunk-chip") as HTMLElement).click()
     );
     // A shift-click on the last row now spans from that row, not from row 0;
     // the rendered selection is empty at the anchor, so the intent is uncheck.
     onToggleLine.mockClear();
-    await act(async () =>
-      (rows[1]!.querySelector(".diff-gutter") as HTMLElement).dispatchEvent(
-        new MouseEvent("click", { bubbles: true, shiftKey: true })
-      )
-    );
+    await act(async () => press(laneOf(rows[1]!), { shiftKey: true }));
     expect(onToggleLine).toHaveBeenLastCalledWith([lines[1]?.id], "uncheck");
   });
 
@@ -479,10 +717,12 @@ describe("DiffViewer hunk and line selection", () => {
     // ticked other.txt's line 2 as well. Read-only is the safe answer.
     expect(container.querySelectorAll(".diff-file")).toHaveLength(2);
     expect(container.querySelector(".diff-view--selectable")).toBeNull();
-    expect(container.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
+    // No lanes at all — neither hunk chips nor per-line controls.
+    expect(container.querySelectorAll(".diff-lane")).toHaveLength(0);
+    expect(container.querySelectorAll(".diff-hunk-chip")).toHaveLength(0);
   });
 
-  it("explains an EOF-sensitive line instead of dropping its box", async () => {
+  it("explains an EOF-sensitive line instead of dropping its mark", async () => {
     await act(async () => {
       root.render(
         <DiffViewer
@@ -506,17 +746,18 @@ describe("DiffViewer hunk and line selection", () => {
       );
     });
 
-    // The boxes stay, disabled and captioned: a row that silently loses its
-    // control while its neighbours keep theirs reads as a rendering fault.
-    const boxes = container.querySelectorAll<HTMLInputElement>(
-      'input[type="checkbox"]'
-    );
-    expect(boxes).toHaveLength(2);
-    expect([...boxes].every((box) => box.disabled)).toBe(true);
-    expect(boxes[0]?.title).toContain("no trailing newline");
-    // No header box either — there is nothing here to tick.
-    expect(container.querySelector(".diff-select--hunk")).toBeNull();
+    // A mark stays in the lane, captioned: a row that silently loses its
+    // affordance while its neighbours keep theirs reads as a rendering fault.
+    const marks = container.querySelectorAll(".diff-line-take--atomic");
+    expect(marks).toHaveLength(2);
+    expect(marks[0]?.getAttribute("title")).toContain("no trailing newline");
+    // Nothing here is a control: no + to press, and no chip either.
+    expect(container.querySelector("button.diff-line-take")).toBeNull();
+    expect(container.querySelector(".diff-hunk-chip")).toBeNull();
     expect(container.querySelector(".diff-row.is-tickable")).toBeNull();
+    // The rail still runs the hunk, resting, so the lane does not simply
+    // vanish for a file Git will only move whole.
+    expect(container.querySelector(".diff-rail--idle")).not.toBeNull();
     expect(container.textContent).toContain("Unstage hunk");
   });
 });

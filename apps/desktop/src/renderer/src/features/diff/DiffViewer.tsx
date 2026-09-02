@@ -4,8 +4,7 @@ import {
   useRef,
   useState,
   type MouseEvent,
-  type MouseEvent as ReactMouseEvent,
-  type RefObject
+  type MouseEvent as ReactMouseEvent
 } from "react";
 import {
   imageMediaType,
@@ -39,17 +38,6 @@ const STATUS_LABEL: Record<DiffFile["status"], string> = {
 const ATOMIC_LINE_TITLE =
   "This file has no trailing newline, so its last change can only move as a whole hunk.";
 
-/** The one column a click must NOT toggle on: everything left of the code is
- *  the tick target, and the code itself stays selectable text.
- *
- *  Naming the gutters positively does not work. A row's grid items are
- *  baseline-aligned, so a cell with no content has no height — and an added
- *  row's old-line cell, like a deleted row's new-line cell, is exactly that.
- *  Clicks across those 44px land on the row, not on the cell, so a rule
- *  written as "hit .diff-gutter" silently loses half its target on the very
- *  rows that carry the changes. Letting the row own everything but .diff-text
- *  has no such gaps. */
-const CODE_COLUMN = ".diff-text";
 
 export type DiffSelectionControls = {
   staged: boolean;
@@ -202,50 +190,56 @@ const coordinateOf = (line: DiffLine): string | null =>
         line.kind === "add" ? line.newNo : line.oldNo
       );
 
-/** A checkbox React cannot express in JSX alone: `indeterminate` is a
- *  property, not an attribute, so the partial state has to be written to the
- *  node. The box itself is inert to the pointer (see `.diff-select input` in
- *  app.css) — the row owns the click so the whole gutter is one target and a
- *  shift-click can be read for its modifier. Keyboard activation still fires
- *  a click on the input, which reaches that same handler. */
-function TickBox({
-  checked,
-  indeterminate,
-  disabled,
-  label,
-  title
-}: {
-  checked: boolean;
-  indeterminate: boolean;
-  disabled: boolean;
-  label: string;
-  title?: string;
-}) {
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (ref.current !== null) ref.current.indeterminate = indeterminate;
-  }, [indeterminate]);
-  return (
-    <input
-      ref={ref}
-      type="checkbox"
-      checked={checked}
-      disabled={disabled}
-      aria-label={label}
-      {...(title === undefined ? {} : { title })}
-      onChange={() => undefined}
-    />
-  );
-}
+/** A sweep in progress: where the press landed, the row the pointer is over
+ *  now, and what the gesture is doing.
+ *
+ *  Intent is fixed at press — pressing an unticked line takes the run,
+ *  pressing a ticked one clears it — rather than being re-decided per row.
+ *  A sweep that re-decided would invert whatever it crossed and leave a
+ *  striped selection behind, which is never what a drag across ten lines
+ *  means. */
+type Sweep = {
+  from: string;
+  to: string;
+  adding: boolean;
+  /** The painted line list this sweep was drawn against. `orderedIds` is
+   *  memoized on the parsed hunks, so a diff that refreshes mid-drag hands
+   *  back a different array — and a run resolved against THAT list is not the
+   *  run the preview showed. Identity is the whole check. */
+  order: readonly string[];
+};
 
-/** How far the pointer may travel between press and release and still count
- *  as a click rather than a drag. A drag that starts in the code column and
- *  releases over the gutter reports its click on the row, and reading that as
- *  a tick would throw the selection away and check a line nobody aimed at.
- *  Measuring the gesture is what separates the two — asking whether anything
- *  on the page is selected would also block every tick made while an
- *  unrelated selection happens to be sitting there. */
-const DRAG_SLOP_PX = 4;
+/** What a sweep would do if it ended now — the rows it covers and the single
+ *  intent it carries. One value, because the ids are meaningless without the
+ *  intent and a separate flag can only be read wrongly. */
+type SweepPreview = { ids: ReadonlySet<string>; adding: boolean };
+
+/** The columns a press must NOT start a gesture on. Everything else in the row
+ *  is the target — a 24px lane is a poor one, and the gutter cells around it
+ *  were already the target before the lanes existed.
+ *
+ *  Naming the target positively does not work. A row's grid items are
+ *  baseline-aligned, so a cell with no content has no height — an added row's
+ *  old-line cell, like a deleted row's new-line cell, is exactly that — and a
+ *  rule written as "hit .diff-lane" silently loses its target on the rows that
+ *  carry the changes. The code column stays selectable text; the blame gutter
+ *  is its own button, and a press that both opened blame and started a sweep
+ *  would do two things the user asked for once. */
+const NOT_A_PRESS = ".diff-text, .diff-gutter--blame";
+
+/** The inclusive slice of `order` between two IDs, in painted order however
+ *  the gesture ran — a sweep upward selects the same run as the same sweep
+ *  downward. */
+const runBetween = (
+  order: readonly string[],
+  from: string,
+  to: string
+): string[] => {
+  const a = order.indexOf(from);
+  const b = order.indexOf(to);
+  if (a === -1 || b === -1) return [];
+  return order.slice(Math.min(a, b), Math.max(a, b) + 1);
+};
 
 function DiffFileView({
   file,
@@ -283,8 +277,8 @@ function DiffFileView({
     return map;
   }, [selection?.hunks]);
 
-  // Every tickable ID in the order it is painted. A shift-click range is a
-  // slice of this list, so a run picked out by eye matches the one applied —
+  // Every tickable ID in the order it is painted. A sweep or a shift-click is
+  // a slice of this list, so a run picked out by eye matches the one applied —
   // including across a hunk boundary.
   const orderedIds = useMemo(() => {
     const ids: string[] = [];
@@ -299,29 +293,115 @@ function DiffFileView({
     return ids;
   }, [file.hunks, byCoordinate]);
 
-  // Lead of the last tick, so the next shift-click knows where to start.
+  // Lead of the last gesture, so the next shift-click knows where to start.
   const anchor = useRef<string | null>(null);
-  // Where the pointer went down, to tell a click from a drag on release.
-  const pressedAt = useRef<{ x: number; y: number } | null>(null);
-  const toggle = (id: string, shiftKey: boolean): void => {
-    if (selection === undefined) return;
+  // The sweep is held in a ref AND in state: the ref is what the gesture
+  // reads, so press → extend → release is correct however React schedules the
+  // renders between them (a click fast enough to beat a commit still lands);
+  // the state is only what paints the preview.
+  const sweepRef = useRef<Sweep | null>(null);
+  const [sweep, setSweep] = useState<Sweep | null>(null);
+  const setGesture = (next: Sweep | null): void => {
+    sweepRef.current = next;
+    setSweep(next);
+  };
+
+  // What the sweep would take if it ended now. Held here rather than pushed
+  // into the pane's selection on every row: an uncommitted sweep must be
+  // abandonable, and repainting one file beats repainting the pane — bar,
+  // counter and all — sixty times across a ten-line drag.
+  const preview = useMemo<SweepPreview | null>(
+    () =>
+      sweep === null
+        ? null
+        : {
+            ids: new Set(runBetween(orderedIds, sweep.from, sweep.to)),
+            adding: sweep.adding
+          },
+    [sweep, orderedIds]
+  );
+
+  // The list and the callback the release will need, mirrored after every
+  // commit. Neither changes mid-gesture — only a new patch moves them — so
+  // reading the last committed pair is reading the right one.
+  const latest = useRef({ orderedIds, selection });
+  useEffect(() => {
+    latest.current = { orderedIds, selection };
+  });
+
+  // The gesture ends wherever the button comes up, including outside the
+  // window — a sweep that ran off the bottom of a long diff still commits
+  // what it crossed rather than sticking in the pressed state forever.
+  // Registered once, for the life of the file view: an effect that installed
+  // it per sweep would not be listening until React flushed the press.
+  useEffect(() => {
+    const commit = (): void => {
+      const gesture = sweepRef.current;
+      const { orderedIds: order, selection: controls } = latest.current;
+      if (gesture === null || controls === undefined) return;
+      setGesture(null);
+      // The diff moved under the drag. Committing now would resolve the run
+      // against line positions the user never saw previewed, so drop it and
+      // let them draw it again on what is actually on screen.
+      if (gesture.order !== order) return;
+      const run = runBetween(order, gesture.from, gesture.to);
+      if (run.length === 0) return;
+      controls.onToggleLine(run, gesture.adding ? "check" : "uncheck");
+      anchor.current = gesture.to;
+    };
+    window.addEventListener("mouseup", commit);
+    return () => window.removeEventListener("mouseup", commit);
+    // Deliberately empty: `commit` reads everything it needs through refs, so
+    // it never goes stale and never needs re-registering.
+  }, []);
+
+  /** Press on a line's lane. Shift keeps its old meaning — extend from the
+   *  anchor, following the anchor's state — and deliberately does NOT begin a
+   *  sweep: the two gestures would fight over the same button-down. */
+  const press = (id: string, shiftKey: boolean): void => {
+    if (selection === undefined || selection.applying) return;
     const from = anchor.current;
-    const start = from === null ? -1 : orderedIds.indexOf(from);
-    const end = orderedIds.indexOf(id);
-    if (!shiftKey || start === -1 || end === -1 || from === null) {
-      anchor.current = id;
-      selection.onToggleLine([id]);
+    if (shiftKey && from !== null) {
+      const run = runBetween(orderedIds, from, id);
+      if (run.length > 0) {
+        selection.onToggleLine(
+          run,
+          selection.selectedIds.has(from) ? "check" : "uncheck"
+        );
+        return;
+      }
+    }
+    anchor.current = id;
+    setGesture({
+      from: id,
+      to: id,
+      adding: !selection.selectedIds.has(id),
+      order: orderedIds
+    });
+  };
+
+  /** Extend the run to this row. `held` is the event's button state: a mouseup
+   *  the window never saw — swallowed by a native menu, or by focus leaving
+   *  mid-drag — would otherwise leave the sweep live, and every later hover
+   *  would keep growing a run the user is no longer drawing. */
+  const extend = (id: string, held: boolean): void => {
+    const current = sweepRef.current;
+    if (current === null) return;
+    if (!held) {
+      setGesture(null);
       return;
     }
-    // The run follows the anchor's CURRENT state: extending from a ticked
-    // line ticks the span, extending from a just-unticked line clears it —
-    // the same rule every checkbox list follows. The anchor itself is in the
-    // run and keeps its state.
-    const run = orderedIds.slice(Math.min(start, end), Math.max(start, end) + 1);
-    selection.onToggleLine(
-      run,
-      selection.selectedIds.has(from) ? "check" : "uncheck"
-    );
+    if (current.to === id) return;
+    setGesture({ ...current, to: id });
+  };
+
+  /** Keyboard activation of a line's + button. The pointer path runs through
+   *  press/commit instead, so this fires only for Enter and Space, which
+   *  report no press position. */
+  const activate = (id: string): void => {
+    if (selection === undefined || selection.applying) return;
+    anchor.current = id;
+    selection.onToggleLine([id]);
   };
 
   return (
@@ -370,8 +450,10 @@ function DiffFileView({
             {...(onBlameFrom === undefined ? {} : { onBlameFrom })}
             selection={selection}
             byCoordinate={byCoordinate}
-            pressedAt={pressedAt}
-            onToggle={toggle}
+            preview={preview}
+            onPress={press}
+            onExtend={extend}
+            onActivate={activate}
             onAnchor={(id) => {
               anchor.current = id;
             }}
@@ -387,8 +469,10 @@ function DiffHunkView({
   filePath,
   selection,
   byCoordinate,
-  pressedAt,
-  onToggle,
+  preview,
+  onPress,
+  onExtend,
+  onActivate,
   onAnchor,
   onBlameFrom
 }: {
@@ -396,8 +480,10 @@ function DiffHunkView({
   filePath: string;
   selection: DiffSelectionControls | undefined;
   byCoordinate: Map<string, LineMeta>;
-  pressedAt: RefObject<{ x: number; y: number } | null>;
-  onToggle: (id: string, shiftKey: boolean) => void;
+  preview: SweepPreview | null;
+  onPress: (id: string, shiftKey: boolean) => void;
+  onExtend: (id: string, held: boolean) => void;
+  onActivate: (id: string) => void;
   onAnchor: (id: string) => void;
   onBlameFrom?: (path: string, line: number) => void;
 }) {
@@ -407,21 +493,35 @@ function DiffHunkView({
   };
 
   // Everything this hunk's button moves — including EOF-bound lines that
-  // carry no tick of their own, which is the reason the button has to exist.
+  // carry no control of their own, which is the reason the button has to
+  // exist.
   const hunkLines = hunk.lines.flatMap((line) => {
     const meta = metaFor(line);
     return meta === undefined ? [] : [meta];
   });
   const tickable = hunkLines.filter((line) => line.lineSelection);
-  const checked = tickable.filter((line) => selection?.selectedIds.has(line.id));
-  const allChecked = tickable.length > 0 && checked.length === tickable.length;
+  const isTicked = (id: string): boolean =>
+    selection?.selectedIds.has(id) === true;
+  // What the lane shows: the committed selection with an in-flight sweep laid
+  // over it, so the rail and the chip answer the drag as it crosses them
+  // rather than waiting for the button to come up.
+  const shown = (id: string): boolean =>
+    preview?.ids.has(id) === true ? preview.adding : isTicked(id);
+  const shownCount = tickable.filter((line) => shown(line.id)).length;
+  const shownAll = tickable.length > 0 && shownCount === tickable.length;
+  // The chip's own action reads committed state only. A sweep is always
+  // finished before a click can land, but a rail state that included a
+  // preview would make the button's meaning depend on a hover.
+  const committedAll =
+    tickable.length > 0 && tickable.every((line) => isTicked(line.id));
+  const railState = shownAll ? "full" : shownCount > 0 ? "part" : "idle";
   const verb = selection?.staged === true ? "Unstage" : "Stage";
 
   const toggleHunk = (): void => {
     if (selection === undefined) return;
     selection.onToggleLine(
       tickable.map((line) => line.id),
-      allChecked ? "uncheck" : "check"
+      committedAll ? "uncheck" : "check"
     );
     // Re-seat the anchor inside this hunk. Left where it was, the next
     // shift-click would sweep from whatever row was ticked last — possibly
@@ -430,22 +530,30 @@ function DiffHunkView({
     if (last !== undefined) onAnchor(last.id);
   };
 
+  const selectable = selection !== undefined;
   return (
     <div className="diff-hunk">
-      <div className="diff-hunk__header">
-        {selection !== undefined && tickable.length > 0 && (
-          <span
-            className={`diff-select diff-select--hunk${selection.applying ? "" : " is-tickable"}`}
-            {...(selection.applying ? {} : { onClick: toggleHunk })}
-          >
-            <TickBox
-              checked={allChecked}
-              indeterminate={checked.length > 0 && !allChecked}
-              disabled={selection.applying}
-              label={`Select every changed line in hunk ${hunk.header}`}
-              title="Select every changed line in this hunk"
-            />
-          </span>
+      <div
+        className={`diff-hunk__header${selectable ? " diff-hunk__header--lanes" : ""}`}
+      >
+        {selectable && (
+          <>
+            <span className="diff-lane diff-lane--hunk">
+              {tickable.length > 0 && (
+                <button
+                  className={`diff-hunk-chip${committedAll ? " is-on" : shownCount > 0 ? " is-part" : ""}`}
+                  disabled={selection.applying}
+                  onClick={toggleHunk}
+                  aria-pressed={committedAll}
+                  aria-label={`Select every changed line in hunk ${hunk.header}`}
+                  title="Select every changed line in this hunk"
+                >
+                  {committedAll ? "✓" : "+"}
+                </button>
+              )}
+            </span>
+            <span className="diff-lane diff-lane--line" />
+          </>
         )}
         <span className="diff-hunk__range">{hunk.header}</span>
         {selection !== undefined && hunkLines.length > 0 && (
@@ -467,72 +575,78 @@ function DiffHunkView({
             : line.kind === "del"
               ? line.oldNo
               : null;
-        const isSelected =
-          meta !== undefined && selection?.selectedIds.has(meta.id) === true;
+        const isSelected = meta !== undefined && isTicked(meta.id);
+        const inSweep = meta !== undefined && preview?.ids.has(meta.id) === true;
         // Drops while an apply is in flight, so the row stops advertising a
-        // click it would ignore.
+        // control it would ignore.
         const canTick =
           meta !== undefined &&
           meta.lineSelection &&
           selection !== undefined &&
           !selection.applying;
-        const onRowClick =
-          canTick && meta !== undefined
-            ? (event: MouseEvent<HTMLDivElement>): void => {
-                if ((event.target as Element).closest(CODE_COLUMN)) return;
-                // Only a gesture that actually travelled is a drag. Keyboard
-                // activation reports no press position and is a click.
-                const from = pressedAt.current;
-                pressedAt.current = null;
-                if (
-                  event.detail !== 0 &&
-                  from !== null &&
-                  (Math.abs(event.clientX - from.x) > DRAG_SLOP_PX ||
-                    Math.abs(event.clientY - from.y) > DRAG_SLOP_PX)
-                ) {
-                  return;
-                }
-                // The box is controlled; let React own its checked state.
-                event.preventDefault();
-                onToggle(meta.id, event.shiftKey);
-              }
-            : undefined;
+        const takeId = canTick && meta !== undefined ? meta.id : null;
         return (
           <div
             key={index}
-            className={`diff-row diff-row--${line.kind}${isSelected ? " is-selected" : ""}${canTick ? " is-tickable" : ""}`}
-            {...(onRowClick === undefined
+            className={`diff-row diff-row--${line.kind}${isSelected ? " is-selected" : ""}${inSweep ? " is-sweeping" : ""}${canTick ? " is-tickable" : ""}`}
+            {...(takeId === null
               ? {}
               : {
-                  onClick: onRowClick,
+                  // The ROW is the target, not the 16px glyph and not the
+                  // 24px lane holding it. A lane-only press is a fifth of the
+                  // target this gutter had before the lanes existed, and a
+                  // lane-only extend stops tracking the moment a downward
+                  // drag drifts out of a 24px column — which is most of them.
                   onMouseDown: (event: MouseEvent<HTMLDivElement>) => {
-                    pressedAt.current = {
-                      x: event.clientX,
-                      y: event.clientY
-                    };
-                  }
+                    if (event.button !== 0) return;
+                    if ((event.target as Element).closest(NOT_A_PRESS)) return;
+                    // Without this the press starts a text selection, and the
+                    // sweep drags a highlight across the code.
+                    event.preventDefault();
+                    onPress(takeId, event.shiftKey);
+                  },
+                  // mouseover, not mouseenter: enter/leave are synthesized by
+                  // React from delegated events, so a dispatched mouseenter
+                  // never reaches the handler and the gesture is untestable.
+                  // Bubbling is also what makes the whole row extend the run.
+                  onMouseOver: (event: MouseEvent<HTMLDivElement>) =>
+                    onExtend(takeId, event.buttons !== 0)
                 })}
           >
-            {selection !== undefined && (
-              <span className="diff-select">
-                {meta !== undefined &&
-                  (meta.lineSelection ? (
-                    <TickBox
-                      checked={isSelected}
-                      indeterminate={false}
-                      disabled={selection.applying}
-                      label={`Select ${meta.kind === "add" ? "added" : "deleted"} line ${lineNo ?? ""}`}
-                    />
-                  ) : (
-                    <TickBox
-                      checked={false}
-                      indeterminate={false}
-                      disabled
-                      label={ATOMIC_LINE_TITLE}
-                      title={ATOMIC_LINE_TITLE}
-                    />
-                  ))}
-              </span>
+            {selectable && (
+              <>
+                <span className="diff-lane diff-lane--hunk" aria-hidden="true">
+                  <span className={`diff-rail diff-rail--${railState}`} />
+                </span>
+                <span className="diff-lane diff-lane--line">
+                  {meta !== undefined &&
+                    (meta.lineSelection ? (
+                      <button
+                        className={`diff-line-take${isSelected ? " is-on" : inSweep ? " is-ghost" : ""}`}
+                        disabled={selection?.applying === true}
+                        aria-pressed={isSelected}
+                        aria-label={`Select ${meta.kind === "add" ? "added" : "deleted"} line ${lineNo ?? ""}`}
+                        // Enter and Space only: a mouse click has already
+                        // been handled by the press/release pair above, and
+                        // running both would toggle the line twice.
+                        onClick={(event) => {
+                          if (event.detail === 0) onActivate(meta.id);
+                        }}
+                      >
+                        {isSelected ? "−" : "+"}
+                      </button>
+                    ) : (
+                      <span
+                        className="diff-line-take diff-line-take--atomic"
+                        title={ATOMIC_LINE_TITLE}
+                        aria-label={ATOMIC_LINE_TITLE}
+                        role="img"
+                      >
+                        ·
+                      </span>
+                    ))}
+                </span>
+              </>
             )}
             <span className="diff-gutter">
               {line.kind === "add" ? "" : line.oldNo}

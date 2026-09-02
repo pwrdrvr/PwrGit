@@ -1,7 +1,7 @@
 # features/diff — AGENTS.md
 
-Mostly ordinary React. The image-diff half has three decisions that are not
-obvious from the code.
+Mostly ordinary React. The image-diff half and the staging gutter each carry a
+few decisions that are not obvious from the code.
 
 ## The stacking rule lives in two places on purpose
 
@@ -116,3 +116,52 @@ Two things force the shape of [image-clipboard.ts](image-clipboard.ts):
 `stripLayout` is pure and tested on its own: it matches panels on the
 **shortest** height and never scales up, so a 1x export beside its 2x twin
 stays sharp instead of interpolated.
+
+## The staging gutter is two lanes, and neither one is a checkbox
+
+`DiffViewer` puts two 16px/24px lanes ahead of the line numbers on a
+selectable patch: **lane 1 takes whole hunks** (a chip at the hunk header, and
+a `.diff-rail` spanning every row of that hunk — hairline / dim / solid for
+none / some / all), **lane 2 takes single lines** (a `+` that is `opacity: 0`
+until the row is hovered or the button is focused).
+
+The resting state carries no per-line control at all. That is the point: a
+column of checkboxes down a 400-line diff reads as a form to fill in rather
+than code to review, and the rail answers "how much of this hunk is going" from
+the edge of the pane without reading a single control.
+
+Four things about the gesture are not obvious from the code:
+
+- **The row is the pointer target, not the glyph and not the lane.** The
+  handlers live on `.diff-row`, and `NOT_A_PRESS` excludes the two columns
+  that own their own gesture: `.diff-text` stays selectable, and
+  `.diff-gutter--blame` is a button, so a press there would otherwise open
+  blame *and* start a sweep. The `+` is the affordance and the keyboard
+  control, nothing more. Binding the gesture to the 24px lane instead costs
+  five sixths of the target and, worse, stops a sweep tracking the moment a
+  downward drag drifts out of that column. Note this still does not meet WCAG
+  2.5.8's 24x24: a line-level control is bound to the row's line-height, and
+  reaching 24px would mean setting the diff's leading by its controls.
+- **The sweep is held in a ref, not only in state.** `press → extend → release`
+  must be correct however React schedules the renders between them — a click
+  fast enough to beat a commit would otherwise release into a `null` sweep and
+  do nothing. State still exists, but only to paint the preview.
+- **It listens for `mouseover`, not `mouseenter`.** React synthesizes
+  enter/leave from delegated `mouseover`/`mouseout` at the root, so a
+  dispatched `mouseenter` never reaches the handler and the gesture is
+  untestable. Bubbling is also what lets the whole row extend the run. Every
+  such event carries `buttons`, and a sweep that sees `buttons === 0` is one
+  whose mouseup went missing — a native menu, focus leaving mid-drag — so it
+  is dropped rather than left live to grow on plain hover.
+- **Intent is fixed at the press**, not re-decided per row: pressing an
+  unticked line takes the run, pressing a ticked one clears it. A sweep that
+  re-decided would invert whatever it crossed and leave stripes behind.
+
+Shift-click still means "extend from the anchor, following the anchor's state"
+and deliberately does **not** start a sweep — one button-down cannot mean both
+gestures. The window `mouseup` listener is registered once for the life of the
+file view, so a sweep that runs off the bottom of the pane still commits.
+
+A selected row has no spine of its own. It used to need one; now the filled
+control in lane 2 says it louder and the rail beside it says how much of the
+hunk went, so a third amber vertical only made the left edge look broken.

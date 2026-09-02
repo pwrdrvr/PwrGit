@@ -36,8 +36,10 @@ const HINT_SEEN_KEY = "pwrgit.diffHintSeen";
  *  only what is wired today; a help card advertising a dead key teaches
  *  distrust of the whole card. */
 const HELP_ROWS: { keys: string[]; label: string }[] = [
-  { keys: ["click"], label: "tick a line — anywhere left of the code" },
-  { keys: ["⇧", "click"], label: "extend the tick range" },
+  { keys: ["click"], label: "take one line — the + beside it" },
+  { keys: ["drag"], label: "sweep a run of lines" },
+  { keys: ["⇧", "click"], label: "extend from the last line taken" },
+  { keys: ["click"], label: "take a whole hunk — the chip at its top" },
   { keys: ["j", "k"], label: "next / previous hunk" },
   { keys: ["⏎"], label: "stage or unstage the focused hunk" },
   { keys: ["esc"], label: "close the diff" }
@@ -632,8 +634,8 @@ export function DiffPane({
                   </button>
                   {!hintSeen && (
                     <span className="diff-selection-bar__hint">
-                      Click a line’s gutter to pick it, shift-click for a run,
-                      or use <strong>{selectionVerb} hunk</strong>.
+                      Hover a line for its <strong>+</strong>, drag to sweep a
+                      run, or take the whole hunk from the chip at its top.
                     </span>
                   )}
                   <span className="diff-selection-bar__count" role="status">
