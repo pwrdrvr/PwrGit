@@ -48,10 +48,77 @@ async function render(file: DiffFile): Promise<void> {
 const images = (): HTMLImageElement[] =>
   Array.from(container.querySelectorAll("img"));
 
+const frames = (): HTMLButtonElement[] =>
+  Array.from(container.querySelectorAll("button.diff-image__frame"));
+
+const lightbox = (): HTMLElement | null =>
+  document.querySelector(".image-lightbox");
+
+/** Report a decode the way Chromium would, so the sides gain natural sizes. */
+async function decode(sizes: { w: number; h: number }[]): Promise<void> {
+  await act(async () => {
+    images().forEach((img, i) => {
+      const size = sizes[i];
+      if (size === undefined) return;
+      Object.defineProperty(img, "naturalWidth", {
+        value: size.w,
+        configurable: true
+      });
+      Object.defineProperty(img, "naturalHeight", {
+        value: size.h,
+        configurable: true
+      });
+      img.dispatchEvent(new Event("load"));
+    });
+  });
+}
+
+async function click(node: Element | null): Promise<void> {
+  await act(async () => {
+    node?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+}
+
+async function press(key: string): Promise<void> {
+  await act(async () => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+  });
+}
+
+/** Cancelable, as a real key event is, so a claim can be observed. */
+async function pressCancelable(key: string): Promise<KeyboardEvent> {
+  const event = new KeyboardEvent("keydown", {
+    key,
+    bubbles: true,
+    cancelable: true
+  });
+  await act(async () => {
+    window.dispatchEvent(event);
+  });
+  return event;
+}
+
+async function pointer(node: EventTarget | null, type: string): Promise<void> {
+  const event = new MouseEvent(type, { bubbles: true });
+  // jsdom has no PointerEvent constructor; the pan handler only reads this one
+  // field off it before handing it to pointer capture.
+  Object.defineProperty(event, "pointerId", { value: 1 });
+  await act(async () => {
+    node?.dispatchEvent(event);
+  });
+}
+
 beforeEach(() => {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
+  // Pointer capture is what keeps a pan alive once the cursor leaves the
+  // stage. Chromium has it and jsdom does not, so stub it here rather than
+  // teach the hook to work around a browser it never runs in.
+  Element.prototype.setPointerCapture ??= () => {};
+  Element.prototype.hasPointerCapture ??= () => false;
+  Element.prototype.releasePointerCapture ??= () => {};
+  Element.prototype.releasePointerCapture ??= () => {};
 });
 
 afterEach(async () => {
