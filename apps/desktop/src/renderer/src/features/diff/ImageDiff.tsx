@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
@@ -115,22 +116,35 @@ export function ImageDiff({
     return () => observer.disconnect();
   }, [host]);
 
+  // `sourceOf` concatenates the whole base64 payload — up to ~21 MB at the
+  // preview ceiling — so it is built ONCE per fetch rather than on each of the
+  // eight or so calls a render used to make. The stable identity matters twice
+  // over: usePixelDiff keeps these in an effect dependency array, where a
+  // fresh-but-equal string costs a full-length comparison every render.
+  const srcs = useMemo(
+    (): Record<SideKey, string | null> => ({
+      before: sourceOf(states.before),
+      after: sourceOf(states.after)
+    }),
+    [states]
+  );
+
   const extentOf = (side: SideKey): Extent | null => {
     const size = sizes[side];
-    return size !== null && size.src === sourceOf(states[side]) ? size : null;
+    return size !== null && size.src === srcs[side] ? size : null;
   };
   const stacked =
     sides.length === 2 &&
     shouldStack(rowWidth, [extentOf("before"), extentOf("after")]);
 
   const copySource = (side: SideKey) => {
-    const src = sourceOf(states[side]);
+    const src = srcs[side];
     return src === null ? null : { label: SIDE_LABEL[side], src };
   };
   const beforeExtent = extentOf("before");
   const afterExtent = extentOf("after");
-  const beforeSrc = sourceOf(states.before);
-  const afterSrc = sourceOf(states.after);
+  const beforeSrc = srcs.before;
+  const afterSrc = srcs.after;
   // Copying the diff from the row runs the same comparison the lightbox does;
   // there is no reason to make the reader open the viewer to reach it.
   const makeDiff =
@@ -167,6 +181,7 @@ export function ImageDiff({
           label={SIDE_LABEL[side]}
           path={side === "before" ? beforePath : file.path}
           state={states[side]}
+          src={srcs[side]}
           measured={extentOf(side)}
           note={note}
           onSize={(size) => setSizes((prev) => ({ ...prev, [side]: size }))}
@@ -197,6 +212,7 @@ function ImageSide({
   label,
   path,
   state,
+  src,
   measured,
   note,
   onSize,
@@ -205,12 +221,13 @@ function ImageSide({
   label: string;
   path: string;
   state: SideState;
+  /** Passed in rather than derived: see the `srcs` memo above. */
+  src: string | null;
   measured: Extent | null;
   note: string | null;
   onSize: (size: Measured) => void;
   onOpen?: () => void;
 }) {
-  const src = sourceOf(state);
   return (
     <figure className="diff-image__side">
       <figcaption className="diff-image__label">{label}</figcaption>

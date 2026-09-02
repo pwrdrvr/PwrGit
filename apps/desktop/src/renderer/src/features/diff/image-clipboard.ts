@@ -94,9 +94,23 @@ export type StripPanel = { label: string; src: string };
 export async function composeStrip(
   panels: readonly StripPanel[]
 ): Promise<Blob> {
-  const images = await Promise.all(panels.map((panel) => decode(panel.src)));
+  const decoded = await Promise.all(panels.map((panel) => decode(panel.src)));
+  // Drop the undrawable ones HERE, not inside stripLayout: it returns a box
+  // per usable panel, so pairing its boxes with the original array by index
+  // put every panel after a 0x0 one into its neighbour's slot.
+  const drawable = decoded
+    .map((image, i) => ({ image, panel: panels[i] }))
+    .filter(
+      (entry): entry is { image: HTMLImageElement; panel: StripPanel } =>
+        entry.panel !== undefined &&
+        entry.image.naturalWidth > 0 &&
+        entry.image.naturalHeight > 0
+    );
   const layout = stripLayout(
-    images.map((image) => ({ w: image.naturalWidth, h: image.naturalHeight }))
+    drawable.map(({ image }) => ({
+      w: image.naturalWidth,
+      h: image.naturalHeight
+    }))
   );
   const canvas = document.createElement("canvas");
   canvas.width = layout.width;
@@ -104,18 +118,21 @@ export async function composeStrip(
   const context = canvas.getContext("2d");
   if (context === null) throw new Error("no 2d context");
 
-  context.fillStyle = token("--bg-panel", "#0a0a0a");
+  // Fallbacks are CSS system colors, not literals: they follow the OS light or
+  // dark setting, where a hardcoded hex would bake this theme into a strip
+  // copied from the other one. lint-renderer-colors.mjs is CSS-only and says
+  // so — colors in .ts are the manual pass it delegates.
+  context.fillStyle = token("--bg-panel", "Canvas");
   context.fillRect(0, 0, layout.width, layout.height);
-  context.fillStyle = token("--text-secondary", "#b8b0a5");
+  context.fillStyle = token("--text-secondary", "CanvasText");
   context.font = `600 15px ${token("--font-sans", "sans-serif")}`;
   context.textBaseline = "alphabetic";
 
   layout.boxes.forEach((box, i) => {
-    const image = images[i];
-    const panel = panels[i];
-    if (image === undefined || panel === undefined) return;
-    context.fillText(panel.label, box.x, STRIP_PAD + STRIP_LABEL_BAND - 8);
-    context.drawImage(image, box.x, box.y, box.w, box.h);
+    const entry = drawable[i];
+    if (entry === undefined) return;
+    context.fillText(entry.panel.label, box.x, STRIP_PAD + STRIP_LABEL_BAND - 8);
+    context.drawImage(entry.image, box.x, box.y, box.w, box.h);
   });
   return toBlob(canvas);
 }

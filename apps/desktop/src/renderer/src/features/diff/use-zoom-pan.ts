@@ -160,11 +160,12 @@ export function useZoomPan(content: Extent | null): {
       event.preventDefault();
       const rect = node.getBoundingClientRect();
       if (event.ctrlKey || event.metaKey) {
-        zoomAbout(
-          1 - event.deltaY / 240,
-          event.clientX - rect.left,
-          event.clientY - rect.top
-        );
+        // A fast pinch delivers one event with deltaY well over 240, which
+        // drove `1 - deltaY/240` to zero or negative — the clamp downstream
+        // then slammed the picture to 2% in a single frame. Bounding the
+        // FACTOR keeps a hard gesture fast without making it nonsense.
+        const factor = Math.min(4, Math.max(0.25, 1 - event.deltaY / 240));
+        zoomAbout(factor, event.clientX - rect.left, event.clientY - rect.top);
         return;
       }
       const current = viewRef.current;
@@ -198,10 +199,16 @@ export function useZoomPan(content: Extent | null): {
       };
       const onUp = () => {
         setPanning(false);
-        node.releasePointerCapture(event.pointerId);
+        // Listeners come off FIRST. `pointercancel` releases the capture
+        // implicitly, so releasing it again throws — and a throw here used to
+        // strand `pointermove` on the stage, which then panned the picture
+        // from plain cursor movement with no button held.
         node.removeEventListener("pointermove", onMove);
         node.removeEventListener("pointerup", onUp);
         node.removeEventListener("pointercancel", onUp);
+        if (node.hasPointerCapture(event.pointerId)) {
+          node.releasePointerCapture(event.pointerId);
+        }
       };
       node.addEventListener("pointermove", onMove);
       node.addEventListener("pointerup", onUp);

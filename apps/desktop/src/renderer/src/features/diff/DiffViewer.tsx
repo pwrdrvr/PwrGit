@@ -107,6 +107,14 @@ export function DiffViewer({
     at: number;
     seed: SideSeed;
   } | null>(null);
+  // Memoized, and above the early return so the hook order holds. Both are
+  // pure functions of the already-memoized parse, and a fresh `files` array
+  // each render would defeat ImageLightbox's own useMemo — which invalidates
+  // its `step`, which re-registers the window keydown listener every render.
+  const walk = useMemo(() => {
+    const imageFiles = images === undefined ? [] : imageFilesOf(parsed.files);
+    return { imageFiles, sequence: buildSequence(imageFiles) };
+  }, [images, parsed]);
   if (parsed.files.length === 0) {
     return <div className="diff-empty">{emptyLabel ?? "No changes."}</div>;
   }
@@ -119,8 +127,7 @@ export function DiffViewer({
   // every image in the diff — before, after, diff, then on to the next file.
   // A row only knows its own picture, so it hands the request up along with
   // the bytes it already holds and this owns the walk.
-  const imageFiles = images === undefined ? [] : imageFilesOf(parsed.files);
-  const sequence = buildSequence(imageFiles);
+  const { imageFiles, sequence } = walk;
   const openImage = (file: DiffFile, item: SideKey, states: SideStates) => {
     const fileIndex = imageFiles.indexOf(file);
     if (fileIndex === -1) return;

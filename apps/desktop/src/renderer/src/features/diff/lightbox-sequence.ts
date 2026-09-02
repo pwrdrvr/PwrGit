@@ -76,5 +76,7 @@ export function stepStop(
   at: number,
   by: number
 ): number {
-  return Math.min(sequence.length - 1, Math.max(0, at + by));
+  // Lower bound last: with an empty sequence the upper bound is -1, and
+  // returning that would hand a caller a position that is not one.
+  return Math.max(0, Math.min(sequence.length - 1, at + by));
 }

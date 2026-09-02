@@ -116,6 +116,8 @@ beforeEach(() => {
   // stage. Chromium has it and jsdom does not, so stub it here rather than
   // teach the hook to work around a browser it never runs in.
   Element.prototype.setPointerCapture ??= () => {};
+  Element.prototype.hasPointerCapture ??= () => false;
+  Element.prototype.releasePointerCapture ??= () => {};
   Element.prototype.releasePointerCapture ??= () => {};
 });
 

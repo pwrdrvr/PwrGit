@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { DiffPlan } from "./pixel-diff";
 import { computePixelDiff } from "./pixel-diff-client";
 
@@ -32,12 +32,13 @@ export function usePixelDiff({
   // be released by hand or every toggle leaks a multi-megabyte PNG.
   const objectUrl = useRef<string | null>(null);
 
-  useEffect(
-    () => () => {
-      if (objectUrl.current !== null) URL.revokeObjectURL(objectUrl.current);
-    },
-    []
-  );
+  const release = useCallback(() => {
+    if (objectUrl.current === null) return;
+    URL.revokeObjectURL(objectUrl.current);
+    objectUrl.current = null;
+  }, []);
+
+  useEffect(() => () => release(), [release]);
 
   const width = plan?.size.w ?? 0;
   const height = plan?.size.h ?? 0;
@@ -45,6 +46,10 @@ export function usePixelDiff({
 
   useEffect(() => {
     if (!enabled || before === null || after === null || fit === undefined) {
+      // Going idle drops the last PNG from the UI, so its blob URL has to go
+      // too — walking a diff otherwise pins every diff it computed for the
+      // whole session, since only unmount used to revoke.
+      release();
       setState({ kind: "idle" });
       return;
     }
@@ -53,7 +58,7 @@ export function usePixelDiff({
     computePixelDiff({ before, after, width, height, fit }).then(
       (result) => {
         if (!active) return;
-        if (objectUrl.current !== null) URL.revokeObjectURL(objectUrl.current);
+        release();
         objectUrl.current = URL.createObjectURL(result.png);
         setState({
           kind: "ready",
@@ -70,7 +75,7 @@ export function usePixelDiff({
     return () => {
       active = false;
     };
-  }, [enabled, before, after, width, height, fit]);
+  }, [enabled, before, after, width, height, fit, release]);
 
   return state;
 }

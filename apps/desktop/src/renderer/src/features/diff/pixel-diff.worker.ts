@@ -54,14 +54,29 @@ ctx.onmessage = (event: MessageEvent<DiffRequest>) => {
       if (width * height > MAX_PIXELS) {
         throw new Error("image pair is too large to compare");
       }
-      const [beforeBitmap, afterBitmap] = await Promise.all([
+      // Settled, not all: one decode rejecting must not orphan the other's
+      // bitmap. A retina bitmap is tens of megabytes of GPU-backed surface,
+      // and it is only released by close().
+      const decoded = await Promise.allSettled([
         decode(request.before),
         decode(request.after)
       ]);
-      const before = rasterize(beforeBitmap, width, height, fit);
-      const after = rasterize(afterBitmap, width, height, fit);
-      beforeBitmap.close();
-      afterBitmap.close();
+      const bitmaps = decoded.flatMap((outcome) =>
+        outcome.status === "fulfilled" ? [outcome.value] : []
+      );
+      let before: ImageData;
+      let after: ImageData;
+      try {
+        const failure = decoded.find((outcome) => outcome.status === "rejected");
+        if (failure !== undefined) throw failure.reason;
+        const [beforeBitmap, afterBitmap] = bitmaps as [ImageBitmap, ImageBitmap];
+        before = rasterize(beforeBitmap, width, height, fit);
+        after = rasterize(afterBitmap, width, height, fit);
+      } finally {
+        // Rasterizing can throw too — an OffscreenCanvas this size is exactly
+        // what fails first under memory pressure.
+        for (const bitmap of bitmaps) bitmap.close();
+      }
 
       const output = new ImageData(width, height);
       const changed = pixelmatch(

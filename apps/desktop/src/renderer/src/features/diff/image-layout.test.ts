@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { buildSequence, stepStop } from "./lightbox-sequence";
 import {
   MIN_SIDE_HEIGHT,
   MIN_SIDE_WIDTH,
@@ -77,5 +78,16 @@ describe("referenceExtent", () => {
   it("falls back to whichever side has been measured", () => {
     expect(referenceExtent([null, { w: 64, h: 64 }])).toEqual({ w: 64, h: 64 });
     expect(referenceExtent([null, null])).toBeNull();
+  });
+});
+
+describe("stepStop", () => {
+  const sequence = buildSequence([]);
+
+  it("never returns a position that is not one", () => {
+    // The clamp used to run upper-bound-first, so an empty walk produced -1 —
+    // a value every caller then feeds straight back in as a position.
+    expect(stepStop(sequence, 0, 1)).toBe(0);
+    expect(stepStop(sequence, 0, -1)).toBe(0);
   });
 });

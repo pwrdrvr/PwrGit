@@ -46,6 +46,9 @@ function ensureWorker(): Worker {
       waiting.reject(new Error("the comparison crashed"));
     }
     pending.clear();
+    // Dropping the reference is not shutting it down: the thread and whatever
+    // ImageData it was holding survive until the browser gets around to it.
+    created.terminate();
     worker = null;
   });
   worker = created;

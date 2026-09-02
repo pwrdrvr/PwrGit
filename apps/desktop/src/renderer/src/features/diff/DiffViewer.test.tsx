@@ -150,6 +150,8 @@ beforeEach(() => {
   // Pointer capture keeps a pan alive once the cursor leaves the stage.
   // Chromium has it and jsdom does not.
   Element.prototype.setPointerCapture ??= () => {};
+  Element.prototype.hasPointerCapture ??= () => false;
+  Element.prototype.releasePointerCapture ??= () => {};
   Element.prototype.releasePointerCapture ??= () => {};
 });
 
@@ -706,6 +708,19 @@ describe("DiffViewer image copy menu", () => {
 
     // Nothing to compare against, so no diff and no strips.
     expect(menuLabels()).toEqual(["Copy after"]);
+  });
+
+  it("gives Escape to the open menu, not to the viewer behind it", async () => {
+    await openLightbox(modifiedBinaryPatch("art/logo.png"));
+    await rightClick(document.querySelector(".image-lightbox__stage"));
+    expect(menuLabels().length).toBeGreaterThan(0);
+
+    // The lightbox registered its keydown first, so without the guard it
+    // answers Escape before the menu does and takes the whole viewer — and
+    // with it the zoom, the pan, and the place in the walk.
+    const event = await press("Escape");
+    expect(lightbox()).not.toBeNull();
+    expect(event.defaultPrevented).toBe(false);
   });
 
   it("offers the same menu from inside the lightbox", async () => {
