@@ -1268,6 +1268,14 @@ export interface Commands {
     req: { worktreeId: string; path: string; rev: ImageRevision };
     res: ImagePreview;
   };
+  /** Put a PNG on the system clipboard. `pngBase64` is raw base64 with no
+   *  `data:` prefix. The renderer composes the picture — a single revision, or
+   *  a labelled strip of several — because only it has the decoded bitmaps;
+   *  the main process just owns the clipboard. */
+  "clipboard:writeImage": {
+    req: { pngBase64: string };
+    res: null;
+  };
   /** Rename-aware, bounded commit history for one selected file. */
   "file:history": {
     req: {

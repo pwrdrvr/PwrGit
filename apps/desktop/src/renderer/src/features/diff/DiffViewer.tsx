@@ -15,6 +15,14 @@ import {
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
 import { DiffStat } from "./DiffStat";
 import { ImageDiff, type ImageDiffRevisions } from "./ImageDiff";
+import { ImageLightbox } from "./ImageLightbox";
+import {
+  buildSequence,
+  imageFilesOf,
+  indexOfStop,
+  type SideKey
+} from "./lightbox-sequence";
+import type { SideSeed, SideStates } from "./use-image-revisions";
 import { type DiffFile, parseUnifiedDiff } from "./parse-diff";
 
 const STATUS_LABEL: Record<DiffFile["status"], string> = {
@@ -95,6 +103,10 @@ export function DiffViewer({
     path: string;
     trigger: HTMLButtonElement;
   } | null>(null);
+  const [lightbox, setLightbox] = useState<{
+    at: number;
+    seed: SideSeed;
+  } | null>(null);
   if (parsed.files.length === 0) {
     return <div className="diff-empty">{emptyLabel ?? "No changes."}</div>;
   }
@@ -103,6 +115,20 @@ export function DiffViewer({
   // only ever returns one, but nothing in the prop's type says so — and handing
   // the same map to a second file would tick a row in the wrong one.
   const scoped = parsed.files.length === 1 ? selection : undefined;
+  // The lightbox lives HERE rather than in each row because its arrows walk
+  // every image in the diff — before, after, diff, then on to the next file.
+  // A row only knows its own picture, so it hands the request up along with
+  // the bytes it already holds and this owns the walk.
+  const imageFiles = images === undefined ? [] : imageFilesOf(parsed.files);
+  const sequence = buildSequence(imageFiles);
+  const openImage = (file: DiffFile, item: SideKey, states: SideStates) => {
+    const fileIndex = imageFiles.indexOf(file);
+    if (fileIndex === -1) return;
+    setLightbox({
+      at: indexOfStop(sequence, { fileIndex, item }),
+      seed: { path: file.path, states }
+    });
+  };
   return (
     <div
       className={`diff-view${scoped === undefined ? "" : " diff-view--selectable"}`}
@@ -113,6 +139,7 @@ export function DiffViewer({
           file={file}
           images={images}
           selection={scoped}
+          onOpenImage={(item, states) => openImage(file, item, states)}
           {...(onBlameFrom === undefined ? {} : { onBlameFrom })}
           {...(fileMenuItems === undefined
             ? {}
@@ -137,6 +164,16 @@ export function DiffViewer({
           triggerRef={{ current: menu.trigger }}
           onClose={() => setMenu(null)}
           items={fileMenuItems(menu.path)}
+        />
+      )}
+      {lightbox !== null && images !== undefined && (
+        <ImageLightbox
+          files={imageFiles}
+          revisions={images}
+          at={lightbox.at}
+          seed={lightbox.seed}
+          onMove={(at) => setLightbox((prev) => (prev === null ? prev : { ...prev, at }))}
+          onClose={() => setLightbox(null)}
         />
       )}
     </div>
@@ -208,13 +245,15 @@ function DiffFileView({
   images,
   selection,
   onMenu,
-  onBlameFrom
+  onBlameFrom,
+  onOpenImage
 }: {
   file: DiffFile;
   images: ImageDiffRevisions | undefined;
   selection: DiffSelectionControls | undefined;
   onMenu?: (event: ReactMouseEvent<HTMLButtonElement>) => void;
   onBlameFrom?: (path: string, line: number) => void;
+  onOpenImage?: (item: SideKey, states: SideStates) => void;
 }) {
   const name =
     file.status === "renamed" && file.oldPath !== undefined
@@ -307,7 +346,11 @@ function DiffFileView({
 
       {file.binary ? (
         images !== undefined && imageMediaType(file.path) !== null ? (
-          <ImageDiff file={file} revisions={images} />
+          <ImageDiff
+            file={file}
+            revisions={images}
+            {...(onOpenImage === undefined ? {} : { onOpen: onOpenImage })}
+          />
         ) : (
           <div className="diff-binary">Binary file — no preview.</div>
         )

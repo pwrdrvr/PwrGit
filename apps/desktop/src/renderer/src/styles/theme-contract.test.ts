@@ -73,6 +73,10 @@ const INHERITS_FROM_DARK = new Set([
   // Theme-neutral by design.
   "--shadow-base", // drop shadows stay dark in both themes
   "--status-closed", // product choice: closed-without-merge is black in both
+  // Baked into the diff PNG by pixel-diff.worker.ts, so a flipped legend
+  // swatch would stop matching the image it explains.
+  "--diff-changed",
+  "--diff-aa",
   "--lane-1", // follows --accent
   "--focus-ring", // follows --accent
   // Alias tokens: resolve through a base the light block overrides.

@@ -28,10 +28,129 @@ const binaryPatch = (path: string): string =>
     ""
   ].join("\n");
 
+/** A binary image that exists on both sides, so it has a before AND an after. */
+const modifiedBinaryPatch = (path: string): string =>
+  [
+    `diff --git a/${path} b/${path}`,
+    "index 1111111..2222222 100644",
+    `Binary files a/${path} and b/${path} differ`,
+    ""
+  ].join("\n");
+
+/** A text file, so the walk has something it must refuse to stop on. */
+const textPatch = (path: string): string =>
+  [
+    `diff --git a/${path} b/${path}`,
+    "index 3333333..4444444 100644",
+    `--- a/${path}`,
+    `+++ b/${path}`,
+    "@@ -1,1 +1,1 @@",
+    "-old",
+    "+new",
+    ""
+  ].join("\n");
+
+const anyImage = () =>
+  ok({ kind: "image", mediaType: "image/png", base64: "iVBOR", bytes: 2048 });
+
+const frames = (): HTMLButtonElement[] =>
+  Array.from(container.querySelectorAll("button.diff-image__frame"));
+
+const lightbox = (): HTMLElement | null =>
+  document.querySelector(".image-lightbox");
+
+const lightboxText = (): string => lightbox()?.textContent ?? "";
+
+/**
+ * Report a decode the way Chromium would, so the sides gain natural sizes.
+ *
+ * Scans the whole document rather than `container`: the lightbox portals to
+ * <body>, and it mounts both revisions — the hidden one included — so it can
+ * plan a comparison without making the reader visit each item first.
+ */
+async function decode(sizes: {
+  before: { w: number; h: number };
+  after: { w: number; h: number };
+}): Promise<void> {
+  await act(async () => {
+    document.querySelectorAll("img").forEach((img) => {
+      const alt = img.getAttribute("alt") ?? "";
+      const size = alt.endsWith(", before")
+        ? sizes.before
+        : alt.endsWith(", after")
+          ? sizes.after
+          : null;
+      if (size === null) return;
+      Object.defineProperty(img, "naturalWidth", {
+        value: size.w,
+        configurable: true
+      });
+      Object.defineProperty(img, "naturalHeight", {
+        value: size.h,
+        configurable: true
+      });
+      img.dispatchEvent(new Event("load"));
+    });
+  });
+}
+
+async function decodeAll(size: { w: number; h: number }): Promise<void> {
+  await decode({ before: size, after: size });
+}
+
+async function click(node: Element | null): Promise<void> {
+  await act(async () => {
+    node?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+}
+
+async function press(key: string): Promise<KeyboardEvent> {
+  const event = new KeyboardEvent("keydown", {
+    key,
+    bubbles: true,
+    cancelable: true
+  });
+  await act(async () => {
+    window.dispatchEvent(event);
+  });
+  return event;
+}
+
+async function pointer(node: EventTarget | null, type: string): Promise<void> {
+  const event = new MouseEvent(type, { bubbles: true });
+  // jsdom has no PointerEvent constructor; the pan handler only reads this one
+  // field off it before handing it to pointer capture.
+  Object.defineProperty(event, "pointerId", { value: 1 });
+  await act(async () => {
+    node?.dispatchEvent(event);
+  });
+}
+
+/** Render a patch, let its images decode, and open the first frame. */
+async function openLightbox(patch: string): Promise<void> {
+  dispatchMock.mockImplementation(async (name: string) =>
+    name === "diff:image" ? anyImage() : ok(null)
+  );
+  await act(async () => {
+    root.render(<DiffViewer patch={patch} images={REVISIONS} />);
+  });
+  await decodeAll({ w: 64, h: 64 });
+  // A real click focuses the button it lands on; a synthetic one does not,
+  // and where focus sits decides whether the pane behind keeps its Escape.
+  frames()[0]?.focus();
+  await click(frames()[0] ?? null);
+  // The lightbox mounts its own copies of both revisions.
+  await decodeAll({ w: 64, h: 64 });
+}
+
 beforeEach(() => {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
+  // Pointer capture keeps a pan alive once the cursor leaves the stage.
+  // Chromium has it and jsdom does not.
+  Element.prototype.setPointerCapture ??= () => {};
+  Element.prototype.releasePointerCapture ??= () => {};
 });
 
 afterEach(async () => {
@@ -397,5 +516,202 @@ describe("DiffViewer hunk and line selection", () => {
     expect(container.querySelector(".diff-select--hunk")).toBeNull();
     expect(container.querySelector(".diff-row.is-tickable")).toBeNull();
     expect(container.textContent).toContain("Unstage hunk");
+  });
+});
+
+describe("DiffViewer image lightbox", () => {
+  it("offers before, after and a pixel diff of a modified image", async () => {
+    await openLightbox(modifiedBinaryPatch("art/logo.png"));
+
+    expect(
+      Array.from(document.querySelectorAll(".image-lightbox__item")).map(
+        (tab) => tab.textContent
+      )
+    ).toEqual(["Before", "After", "Diff"]);
+    expect(lightboxText()).toContain("1 / 3 · Before");
+  });
+
+  it("contributes one stop for a file with only one side", async () => {
+    await openLightbox(binaryPatch("art/added.png"));
+
+    expect(lightbox()).not.toBeNull();
+    expect(document.querySelectorAll(".image-lightbox__item")).toHaveLength(0);
+    expect(document.querySelectorAll(".image-lightbox__nav")).toHaveLength(0);
+  });
+
+  it("walks out of one file's diff and into the next file's before", async () => {
+    await openLightbox(
+      modifiedBinaryPatch("art/one.png") + modifiedBinaryPatch("art/two.png")
+    );
+
+    expect(lightboxText()).toContain("1 / 6 · Before");
+    expect(lightboxText()).toContain("file 1/2");
+    await press("ArrowRight");
+    await press("ArrowRight");
+    expect(lightboxText()).toContain("3 / 6 · Diff");
+    // The boundary is not a special case for the reader: one more press.
+    await press("ArrowRight");
+    expect(lightboxText()).toContain("4 / 6 · Before");
+    expect(lightboxText()).toContain("file 2/2");
+    expect(document.querySelector(".image-lightbox__path")?.textContent).toBe(
+      "art/two.png"
+    );
+  });
+
+  it("stops at both ends rather than wrapping", async () => {
+    await openLightbox(
+      modifiedBinaryPatch("art/one.png") + modifiedBinaryPatch("art/two.png")
+    );
+
+    for (let i = 0; i < 8; i += 1) await press("ArrowRight");
+    expect(lightboxText()).toContain("6 / 6 · Diff");
+    // Reaching the end and having the arrow do nothing is how you learn you
+    // are at the end; a walk that loops silently starts you over instead.
+    await press("ArrowRight");
+    expect(lightboxText()).toContain("6 / 6 · Diff");
+
+    for (let i = 0; i < 12; i += 1) await press("ArrowLeft");
+    expect(lightboxText()).toContain("1 / 6 · Before");
+    await press("ArrowLeft");
+    expect(lightboxText()).toContain("1 / 6 · Before");
+  });
+
+  it("skips files that are not images", async () => {
+    await openLightbox(
+      textPatch("src/app.ts") +
+        modifiedBinaryPatch("art/one.png") +
+        textPatch("src/other.ts") +
+        modifiedBinaryPatch("art/two.png")
+    );
+
+    // Six stops: two image files with three items each. The text files and
+    // their hunks are simply not in the walk.
+    expect(lightboxText()).toContain("1 / 6 · Before");
+    for (let i = 0; i < 3; i += 1) await press("ArrowRight");
+    expect(document.querySelector(".image-lightbox__path")?.textContent).toBe(
+      "art/two.png"
+    );
+  });
+
+  it("takes focus, so the pane behind it keeps its own Escape", async () => {
+    await openLightbox(modifiedBinaryPatch("art/logo.png"));
+    expect(document.activeElement).toBe(
+      document.querySelector(".image-lightbox__frame")
+    );
+  });
+
+  it("claims Escape rather than letting it through to the pane", async () => {
+    await openLightbox(modifiedBinaryPatch("art/logo.png"));
+    const event = await press("Escape");
+    expect(event.defaultPrevented).toBe(true);
+    expect(lightbox()).toBeNull();
+    expect(document.activeElement).toBe(frames()[0]);
+  });
+
+  it("closes on a click that both starts and ends on the scrim", async () => {
+    await openLightbox(modifiedBinaryPatch("art/logo.png"));
+    const scrim = lightbox();
+    await pointer(scrim, "pointerdown");
+    await click(scrim);
+    expect(lightbox()).toBeNull();
+  });
+
+  it("survives a pan that starts on the image and ends past the frame", async () => {
+    await openLightbox(modifiedBinaryPatch("art/logo.png"));
+    await pointer(document.querySelector(".image-lightbox__stage"), "pointerdown");
+    await click(lightbox());
+    expect(lightbox()).not.toBeNull();
+  });
+
+  it("says so on the diff when the two revisions are different sizes", async () => {
+    dispatchMock.mockImplementation(async (name: string) =>
+      name === "diff:image" ? anyImage() : ok(null)
+    );
+    await act(async () => {
+      root.render(
+        <DiffViewer
+          patch={modifiedBinaryPatch("art/logo.png")}
+          images={REVISIONS}
+        />
+      );
+    });
+    // Two revisions of the same shape at different resolutions.
+    const sizes = {
+      before: { w: 3104, h: 2024 },
+      after: { w: 1552, h: 1012 }
+    };
+    await decode(sizes);
+    frames()[0]?.focus();
+    await click(frames()[0] ?? null);
+    await decode(sizes);
+    await press("ArrowRight");
+    await press("ArrowRight");
+
+    expect(lightboxText()).toContain("Sizes differ");
+    expect(lightboxText()).toContain("3104×2024 against 1552×1012");
+    const toggle = document.querySelector<HTMLInputElement>(
+      ".image-lightbox__toggle input"
+    );
+    expect(toggle?.checked).toBe(true);
+  });
+});
+
+describe("DiffViewer image copy menu", () => {
+  const menuLabels = (): string[] =>
+    Array.from(document.querySelectorAll(".pop-menu button")).map(
+      (item) => item.textContent ?? ""
+    );
+
+  async function rightClick(node: Element | null): Promise<void> {
+    await act(async () => {
+      node?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    });
+  }
+
+  it("offers each revision and the composed strips from the row", async () => {
+    dispatchMock.mockImplementation(async (name: string) =>
+      name === "diff:image" ? anyImage() : ok(null)
+    );
+    await act(async () => {
+      root.render(
+        <DiffViewer
+          patch={modifiedBinaryPatch("art/logo.png")}
+          images={REVISIONS}
+        />
+      );
+    });
+    await decodeAll({ w: 64, h: 64 });
+    await rightClick(container.querySelector(".diff-image"));
+
+    expect(menuLabels()).toEqual([
+      "Copy before",
+      "Copy after",
+      "Copy diff",
+      "Copy before + after",
+      "Copy before + after + diff"
+    ]);
+  });
+
+  it("offers only what an added file has", async () => {
+    dispatchMock.mockImplementation(async (name: string) =>
+      name === "diff:image" ? anyImage() : ok(null)
+    );
+    await act(async () => {
+      root.render(
+        <DiffViewer patch={binaryPatch("art/added.png")} images={REVISIONS} />
+      );
+    });
+    await decodeAll({ w: 64, h: 64 });
+    await rightClick(container.querySelector(".diff-image"));
+
+    // Nothing to compare against, so no diff and no strips.
+    expect(menuLabels()).toEqual(["Copy after"]);
+  });
+
+  it("offers the same menu from inside the lightbox", async () => {
+    await openLightbox(modifiedBinaryPatch("art/logo.png"));
+    await rightClick(document.querySelector(".image-lightbox__stage"));
+
+    expect(menuLabels()).toContain("Copy before + after + diff");
   });
 });

@@ -1,25 +1,29 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
 import {
-  imageMediaType,
-  type ImagePreview,
-  type ImageRevision
-} from "@pwrgit/shared";
-import { dispatch } from "../../lib/pwrgit";
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type RefObject
+} from "react";
+import { ContextMenu } from "../shell/ContextMenu";
+import { buildImageCopyMenu, useCopyNote } from "./image-copy-menu";
+import { ROW_PADDING, shouldStack, type Extent } from "./image-layout";
+import { sidesFor, type SideKey } from "./lightbox-sequence";
+import { planDiff } from "./pixel-diff";
+import { computePixelDiff } from "./pixel-diff-client";
 import type { DiffFile } from "./parse-diff";
+import {
+  sourceOf,
+  useImageRevisions,
+  type ImageDiffRevisions,
+  type SideState,
+  type SideStates
+} from "./use-image-revisions";
 
-/** The two revisions a diff compares, so an image row can fetch both sides. */
-export type ImageDiffRevisions = {
-  worktreeId: string;
-  before: ImageRevision;
-  after: ImageRevision;
-};
-
-type SideKey = "before" | "after";
-
-type SideState = ImagePreview | { kind: "loading" } | { kind: "failed" };
+export type { ImageDiffRevisions } from "./use-image-revisions";
 
 /** Decoded dimensions, tagged with the source they were measured from. */
-type Measured = { src: string; w: number; h: number };
+type Measured = Extent & { src: string };
 
 const SIDE_LABEL: Record<SideKey, string> = {
   before: "before",
@@ -30,26 +34,6 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-/** Stable dependency key — the revisions object is rebuilt every render. */
-function revisionKey(rev: ImageRevision): string {
-  return rev.kind === "commit" || rev.kind === "commitParent"
-    ? `${rev.kind}:${rev.hash}`
-    : rev.kind;
-}
-
-/**
- * Which sides are worth fetching. An added file has no "before"; neither does
- * a rename out of a non-image extension (`logo.bin` → `logo.png`), where the
- * old blob is not something an <img> can show.
- */
-function sidesFor(status: DiffFile["status"], beforePath: string): SideKey[] {
-  if (status === "deleted") return ["before"];
-  if (status === "added" || imageMediaType(beforePath) === null) {
-    return ["after"];
-  }
-  return ["before", "after"];
 }
 
 /**
@@ -87,66 +71,124 @@ function useNearViewport(): [RefObject<HTMLDivElement | null>, boolean] {
  * Preview of a binary image file in a diff. Git has no line-level answer for
  * these, so both revisions are fetched as bytes and handed to Chromium, which
  * already decodes every format the repository is likely to hold.
+ *
+ * The lightbox is NOT owned here. It walks across every image file in the
+ * diff, and a row only knows its own, so `onOpen` hands the request up to
+ * DiffViewer along with the bytes this row already holds — which is what keeps
+ * the picture on screen instead of blanking while IPC repeats itself.
  */
 export function ImageDiff({
   file,
-  revisions
+  revisions,
+  onOpen
 }: {
   file: DiffFile;
   revisions: ImageDiffRevisions;
+  onOpen?: (item: SideKey, states: SideStates) => void;
 }) {
   // Renames move the bytes: the old revision only knows the old path.
   const beforePath = file.oldPath ?? file.path;
   const sides = sidesFor(file.status, beforePath);
   const [host, near] = useNearViewport();
-  const [state, setState] = useState<Record<SideKey, SideState>>({
-    before: { kind: "loading" },
-    after: { kind: "loading" }
+  const states = useImageRevisions({ file, revisions, enabled: near });
+  // Measured dimensions carry the source they were measured from. Bytes that
+  // never decode fire no `load`, so an unqualified size would keep reporting
+  // whatever the side showed previously.
+  const [sizes, setSizes] = useState<Record<SideKey, Measured | null>>({
+    before: null,
+    after: null
   });
+  const [rowWidth, setRowWidth] = useState(0);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [note, say] = useCopyNote();
 
+  // The container query in app.css settles the axis at first paint from width
+  // alone; this refines it once the aspect ratios are known, because a banner
+  // and a phone screenshot want different answers at the same pane width.
   useEffect(() => {
-    let active = true;
-    setState({ before: { kind: "loading" }, after: { kind: "loading" } });
-    if (!near) return;
-    for (const side of sides) {
-      const path = side === "before" ? beforePath : file.path;
-      void dispatch("diff:image", {
-        worktreeId: revisions.worktreeId,
-        path,
-        rev: side === "before" ? revisions.before : revisions.after
-      }).then((result) => {
-        if (!active) return;
-        setState((prev) => ({
-          ...prev,
-          [side]: result.ok ? result.value : { kind: "failed" }
-        }));
-      });
-    }
-    return () => {
-      active = false;
-    };
-    // Paths and revisions fully determine the fetch; `sides` derives from them.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    near,
-    revisions.worktreeId,
-    revisionKey(revisions.before),
-    revisionKey(revisions.after),
-    beforePath,
-    file.path,
-    file.status
-  ]);
+    const node = host.current;
+    if (node === null || typeof ResizeObserver === "undefined") return;
+    const measure = () => setRowWidth(node.clientWidth - ROW_PADDING * 2);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [host]);
+
+  const extentOf = (side: SideKey): Extent | null => {
+    const size = sizes[side];
+    return size !== null && size.src === sourceOf(states[side]) ? size : null;
+  };
+  const stacked =
+    sides.length === 2 &&
+    shouldStack(rowWidth, [extentOf("before"), extentOf("after")]);
+
+  const copySource = (side: SideKey) => {
+    const src = sourceOf(states[side]);
+    return src === null ? null : { label: SIDE_LABEL[side], src };
+  };
+  const beforeExtent = extentOf("before");
+  const afterExtent = extentOf("after");
+  const beforeSrc = sourceOf(states.before);
+  const afterSrc = sourceOf(states.after);
+  // Copying the diff from the row runs the same comparison the lightbox does;
+  // there is no reason to make the reader open the viewer to reach it.
+  const makeDiff =
+    beforeExtent !== null &&
+    afterExtent !== null &&
+    beforeSrc !== null &&
+    afterSrc !== null
+      ? async (): Promise<Blob> => {
+          const plan = planDiff(beforeExtent, afterExtent);
+          const result = await computePixelDiff({
+            before: beforeSrc,
+            after: afterSrc,
+            width: plan.size.w,
+            height: plan.size.h,
+            fit: plan.fit
+          });
+          return result.png;
+        }
+      : null;
 
   return (
-    <div className="diff-image" ref={host}>
+    <div
+      className={`diff-image${stacked ? " diff-image--stacked" : ""}`}
+      ref={host}
+      onContextMenu={(event: ReactMouseEvent<HTMLDivElement>) => {
+        if (beforeSrc === null && afterSrc === null) return;
+        event.preventDefault();
+        setMenu({ x: event.clientX, y: event.clientY });
+      }}
+    >
       {sides.map((side) => (
         <ImageSide
           key={side}
           label={SIDE_LABEL[side]}
           path={side === "before" ? beforePath : file.path}
-          state={state[side]}
+          state={states[side]}
+          measured={extentOf(side)}
+          note={note}
+          onSize={(size) => setSizes((prev) => ({ ...prev, [side]: size }))}
+          {...(onOpen === undefined
+            ? {}
+            : { onOpen: () => onOpen(side, states) })}
         />
       ))}
+      {menu !== null && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          label={`Copy ${file.path}`}
+          items={buildImageCopyMenu({
+            before: copySource("before"),
+            after: copySource("after"),
+            diff: makeDiff,
+            onResult: say
+          })}
+          onClose={() => setMenu(null)}
+        />
+      )}
     </div>
   );
 }
@@ -154,55 +196,81 @@ export function ImageDiff({
 function ImageSide({
   label,
   path,
-  state
+  state,
+  measured,
+  note,
+  onSize,
+  onOpen
 }: {
   label: string;
   path: string;
   state: SideState;
+  measured: Extent | null;
+  note: string | null;
+  onSize: (size: Measured) => void;
+  onOpen?: () => void;
 }) {
-  const src =
-    state.kind === "image"
-      ? `data:${state.mediaType};base64,${state.base64}`
-      : null;
-  // Measured dimensions carry the source they were measured from. Bytes that
-  // never decode fire no `load`, so an unqualified size would keep reporting
-  // whatever the side showed previously.
-  const [size, setSize] = useState<Measured | null>(null);
-  const measured = size !== null && size.src === src ? size : null;
+  const src = sourceOf(state);
   return (
     <figure className="diff-image__side">
       <figcaption className="diff-image__label">{label}</figcaption>
-      <div className="diff-image__frame">
-        <ImageBody
-          src={src}
-          path={path}
-          label={label}
-          state={state}
-          onSize={setSize}
-        />
-      </div>
+      {state.kind === "image" && onOpen !== undefined ? (
+        <button
+          type="button"
+          className="diff-image__frame"
+          onClick={onOpen}
+          title="Open (zoom, pan, compare) · right-click to copy"
+        >
+          <img
+            className="diff-image__img"
+            src={src ?? ""}
+            alt={`${path}, ${label}`}
+            onLoad={(e) =>
+              onSize({
+                src: e.currentTarget.getAttribute("src") ?? "",
+                w: e.currentTarget.naturalWidth,
+                h: e.currentTarget.naturalHeight
+              })
+            }
+          />
+          <span className="diff-image__open" aria-hidden="true">
+            Open
+          </span>
+        </button>
+      ) : (
+        <div className="diff-image__frame diff-image__frame--flat">
+          {state.kind === "image" ? (
+            <img
+              className="diff-image__img"
+              src={src ?? ""}
+              alt={`${path}, ${label}`}
+              onLoad={(e) =>
+                onSize({
+                  src: e.currentTarget.getAttribute("src") ?? "",
+                  w: e.currentTarget.naturalWidth,
+                  h: e.currentTarget.naturalHeight
+                })
+              }
+            />
+          ) : (
+            <ImageNote state={state} />
+          )}
+        </div>
+      )}
       <div className="diff-image__meta">
-        {state.kind === "image"
-          ? `${measured === null ? "" : `${measured.w}×${measured.h} · `}${formatBytes(state.bytes)}`
-          : ""}
+        {note !== null ? (
+          <span className="diff-image__copied">{note}</span>
+        ) : state.kind === "image" ? (
+          `${measured === null ? "" : `${measured.w}×${measured.h} · `}${formatBytes(state.bytes)}`
+        ) : (
+          ""
+        )}
       </div>
     </figure>
   );
 }
 
-function ImageBody({
-  src,
-  path,
-  label,
-  state,
-  onSize
-}: {
-  src: string | null;
-  path: string;
-  label: string;
-  state: SideState;
-  onSize: (size: Measured) => void;
-}) {
+function ImageNote({ state }: { state: SideState }) {
   switch (state.kind) {
     case "loading":
       return <span className="diff-image__note">Loading…</span>;
@@ -222,20 +290,7 @@ function ImageBody({
       );
     case "failed":
       return <span className="diff-image__note">Could not read the image</span>;
-    case "image":
-      return (
-        <img
-          className="diff-image__img"
-          src={src ?? ""}
-          alt={`${path}, ${label}`}
-          onLoad={(e) =>
-            onSize({
-              src: e.currentTarget.getAttribute("src") ?? "",
-              w: e.currentTarget.naturalWidth,
-              h: e.currentTarget.naturalHeight
-            })
-          }
-        />
-      );
+    default:
+      return null;
   }
 }

@@ -8167,12 +8167,33 @@ body.is-col-resizing {
    Two sides side by side when both exist; one alone for an add or a delete. */
 .diff-image {
   display: flex;
-  flex-wrap: wrap;
   gap: 12px;
   padding: 12px;
 }
+/* The axis. Side by side is worth keeping only while both sides stay readable
+   — below that the pair is two thumbnails, and one big picture beats two small
+   ones. The arithmetic: the pane spends 40px on .diff-pane__body's padding, 2px
+   on .diff-file's borders and 24px here, then the two sides split what is left
+   either side of a 12px gap. So a 320px side (image-layout.ts's floor) needs
+   320 * 2 + 12 + 66 = 718px of pane.
+
+   This settles the first paint from width alone, with no JS and no flash of the
+   wrong axis. ImageDiff then refines it once the images decode, because width
+   cannot see shape: an ultrawide banner has to stack in a pane where a phone
+   screenshot is perfectly happy beside its neighbour. */
+@container (max-width: 718px) {
+  .diff-image {
+    flex-direction: column;
+  }
+}
+.diff-image--stacked {
+  flex-direction: column;
+}
 .diff-image__side {
-  flex: 1 1 240px;
+  /* `1 1 0`, not the old `1 1 240px`: with a basis the sides wrapped by
+     themselves at ~500px, which is well past the point where either was worth
+     looking at, and it fought the container query for control of the axis. */
+  flex: 1 1 0;
   min-width: 0;
   margin: 0;
   display: flex;
@@ -8189,13 +8210,18 @@ body.is-col-resizing {
   /* Stretch to the taller side so both captions and meta lines line up,
      whatever the two revisions' pixel dimensions are. */
   flex: 1;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 100%;
   min-height: 96px;
   padding: 10px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
+  /* A <button>, not a <div>: it opens the lightbox, and a picture you can only
+     enlarge with a mouse is a picture half the users cannot enlarge. */
+  cursor: zoom-in;
   /* Chequerboard so a transparent PNG reads as transparent, not as the
      panel's own background. */
   background-color: var(--bg-input);
@@ -8205,12 +8231,53 @@ body.is-col-resizing {
   );
   background-size: 16px 16px;
 }
+.diff-image__frame:hover {
+  border-color: var(--accent-border);
+}
+.diff-image__frame:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+/* The states with nothing to open: loading, missing, LFS pointer, too large. */
+.diff-image__frame--flat,
+.diff-image__frame--flat:hover {
+  cursor: default;
+  border-color: var(--border-subtle);
+}
 .diff-image__img {
   max-width: 100%;
-  /* Tall assets stay inside the row instead of pushing the other side away. */
-  max-height: 420px;
+  /* Was a flat 420px, which left most of a tall pane empty whatever the window
+     size. Viewport-relative so the picture grows with the window, and stepped
+     by how much vertical room the row actually has: two stacked sides share the
+     scroll, one side alone owns it. */
+  max-height: min(58vh, 640px);
   object-fit: contain;
   image-orientation: from-image;
+}
+.diff-image--stacked .diff-image__img {
+  max-height: min(46vh, 560px);
+}
+.diff-image__side:only-of-type .diff-image__img {
+  max-height: min(72vh, 900px);
+}
+/* Says the frame is a door. Held at zero opacity rather than hidden so it
+   costs no layout, and revealed on hover or keyboard focus like the rail's
+   row actions. */
+.diff-image__open {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-app) 82%, transparent);
+  color: var(--text-secondary);
+  font: 600 9.5px/1 var(--font-sans);
+  opacity: 0;
+}
+.diff-image__frame:hover .diff-image__open,
+.diff-image__frame:focus-visible .diff-image__open {
+  opacity: 1;
 }
 .diff-image__note {
   padding: 8px;
@@ -8222,6 +8289,324 @@ body.is-col-resizing {
   min-height: 12px;
   font: 500 10.5px/1 var(--font-mono);
   color: var(--text-subtle);
+}
+
+/* ---- Image lightbox ----
+   Before, after and a pixel diff of the two, under ONE zoom and pan. The
+   shared viewport is the point: two pictures side by side answer "did anything
+   change", and only flipping between them on the same pixels at the same
+   magnification answers "what". So the arrows change the item and nothing
+   else — Fit and 100% are the only things that move the view. */
+.image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--bg-app) 92%, transparent);
+  /* Portaled to <body>, but assert no-drag explicitly so the controls can
+     never be swallowed by an OS window-drag region they float over. */
+  -webkit-app-region: no-drag;
+}
+/* Focused on open so this is a real modal: a screen reader lands in it, and
+   DiffPane's Escape — which is scoped to focus being inside the pane — stops
+   firing behind it. A region, not a control, so no ring. */
+.image-lightbox__frame:focus {
+  outline: none;
+}
+.image-lightbox__frame {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  max-width: 1600px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-overlay);
+}
+.image-lightbox__top {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.image-lightbox__items {
+  flex: 0 0 auto;
+  display: flex;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.image-lightbox__item {
+  padding: 4px 11px;
+  border: 0;
+  border-right: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-muted);
+  font: 650 10px/1.2 var(--font-sans);
+  cursor: pointer;
+}
+.image-lightbox__item:last-child {
+  border-right: 0;
+}
+.image-lightbox__item:hover {
+  background: var(--bg-panel-hover);
+  color: var(--text-primary);
+}
+.image-lightbox__item.is-on {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+.image-lightbox__item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.image-lightbox__path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 11.5px/1.3 var(--font-mono);
+  color: var(--text-secondary);
+}
+.image-lightbox__close {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--accent-border);
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-on);
+  cursor: pointer;
+}
+.image-lightbox__close:hover {
+  background: var(--accent-bright);
+}
+.image-lightbox__close:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+/* Says the two revisions are not the same size before the diff colours can be
+   misread as "everything moved". */
+.image-lightbox__note {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--status-warning) 40%, transparent);
+  border-radius: var(--radius-md);
+  background: var(--warn-soft);
+  color: var(--text-secondary);
+  font: 500 10.5px/1.4 var(--font-sans);
+}
+.image-lightbox__note b {
+  color: var(--status-warning);
+  font-weight: 600;
+}
+.image-lightbox__toggle {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font: 600 10px/1 var(--font-sans);
+  cursor: pointer;
+}
+.image-lightbox__stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: grab;
+  /* Same chequerboard as the inline frame, so transparency reads the same in
+     both places. */
+  background-color: var(--bg-input);
+  background-image: repeating-conic-gradient(
+    color-mix(in srgb, var(--text-subtle) 14%, transparent) 0% 25%,
+    transparent 0% 50%
+  );
+  background-size: 16px 16px;
+  /* The wheel handler owns pan and pinch; leaving the browser its own gestures
+     scrolls the diff pane underneath instead. */
+  touch-action: none;
+}
+.image-lightbox__stage.is-panning {
+  cursor: grabbing;
+}
+/* The reference box every revision is drawn into — the larger of the two, so a
+   2x asset and its downscale share one coordinate space. `transform-origin` at
+   the corner keeps the zoom-about-the-pointer arithmetic in use-zoom-pan.ts
+   honest: it assumes the box's top-left IS (x, y). */
+.image-lightbox__canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+.image-lightbox__img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  user-select: none;
+}
+.image-lightbox__img.is-fill {
+  width: 100%;
+  height: 100%;
+}
+/* Every revision stays mounted so all of them are decoded and their sizes
+   known; only one is on screen. `display: none` still loads the image. */
+.image-lightbox__img.is-hidden {
+  display: none;
+}
+.image-lightbox__busy {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  padding: 6px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  background: var(--bg-panel-elevated);
+  color: var(--text-secondary);
+  font: 600 11px/1 var(--font-sans);
+  transform: translate(-50%, -50%);
+}
+.image-lightbox__nav {
+  position: absolute;
+  top: 50%;
+  z-index: 1;
+  width: 32px;
+  height: 32px;
+  margin-top: -16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--bg-panel-elevated);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-popover);
+  cursor: pointer;
+}
+/* Inside the stage, not at the frame's edge: a near-miss should land on the
+   picture, not a dozen pixels from the scrim that dismisses everything. */
+.image-lightbox__nav--prev {
+  left: 12px;
+}
+.image-lightbox__nav--next {
+  right: 12px;
+}
+.image-lightbox__nav:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+.image-lightbox__nav:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.image-lightbox__nav:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+.image-lightbox__foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 21px;
+}
+.image-lightbox__pos,
+.image-lightbox__meta,
+.image-lightbox__pct {
+  font: 500 10.5px/1 var(--font-mono);
+  color: var(--text-subtle);
+}
+.image-lightbox__pos b {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.image-lightbox__meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* What the two colours in the diff mean. pixel-diff.worker.ts bakes these RGB
+   values into the PNG, so the swatches read the same tokens rather than
+   theme-flipping away from the picture they explain. */
+.image-lightbox__legend {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font: 500 10px/1 var(--font-sans);
+  color: var(--text-subtle);
+}
+.image-lightbox__swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.image-lightbox__swatch.is-changed {
+  background: var(--diff-changed);
+}
+.image-lightbox__swatch.is-aa {
+  background: var(--diff-aa);
+}
+.image-lightbox__zoom {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.image-lightbox__zoom button {
+  min-width: 24px;
+  height: 21px;
+  padding: 0 7px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel-elevated);
+  color: var(--text-secondary);
+  font: 650 10px/1 var(--font-sans);
+  cursor: pointer;
+}
+.image-lightbox__zoom button:hover {
+  border-color: var(--accent-border);
+  background: var(--bg-panel-hover);
+  color: var(--text-primary);
+}
+.image-lightbox__zoom button.is-on {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+.image-lightbox__zoom button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.image-lightbox__pct {
+  min-width: 46px;
+  text-align: right;
+  color: var(--text-secondary);
 }
 
 .diff-file {

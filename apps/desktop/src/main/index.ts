@@ -28,6 +28,7 @@ import {
   registerAppUpdateHandlers
 } from "./auto-updater";
 import { CommandBus } from "./command-bus";
+import { registerClipboardHandlers } from "./clipboard-handlers";
 import { registerDialogHandlers } from "./dialog-handlers";
 import { execGit } from "./git/dugite";
 import { openExternalUrlFromMenu } from "./external-links";
@@ -531,6 +532,7 @@ if (!gotSingleInstanceLock) {
     const fileInsightHandlers = registerFileInsightHandlers(bus, db);
     registerRebaseHandlers(bus, db, refresher, worktreeOperations);
     registerDialogHandlers(bus);
+    registerClipboardHandlers(bus);
     registerShellHandlers(bus);
     const githubHandlers = registerGitHubHandlers(
       bus,
