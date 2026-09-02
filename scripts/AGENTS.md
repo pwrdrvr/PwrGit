@@ -27,6 +27,13 @@ file, green CI, copyleft shipped, nobody told. The only safety was that a human
 might spot a new heading in the diff, which is worth nothing once regeneration
 is automated on a Dependabot branch.
 
+Regeneration **is** automated on a Dependabot branch now:
+[.github/workflows/dependabot-licenses.yml](../.github/workflows/dependabot-licenses.yml)
+runs the gate and then pushes the regenerated notice, and pushes nothing if the
+gate fails. Anything that weakens the gate now weakens a bot's commit, not a
+human's — and a dugite bump is deliberately outside it, because
+`EMBEDDED_GIT_NOTICE_SOURCES` below has to be re-synced by hand.
+
 ## Always-allowed licenses
 
 `ALLOWED_LICENSE_IDS`: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD,

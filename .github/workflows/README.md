@@ -7,6 +7,7 @@
 | `ci.yml` | push to `main`, PRs | Typecheck, build, unit tests, Linux + Windows desktop E2E. Unit-test jobs run `rebuild:electron-native` first — a no-op after a fresh install, which repairs a restored `node_modules` cache whose better-sqlite3 build predates the two-ABI layout. |
 | `preview-build.yml` | `build-preview` PR label | Unsigned macOS universal DMG + Windows NSIS installer, uploaded as workflow artifacts. |
 | `release.yml` | `v*` tag push, manual dispatch with a tag, or `ci:windows-signing` PR label | Tests and stages via `apps/desktop/scripts/release.mjs`. Tagged runs gate GitHub Pre-release creation on Linux build, signed/notarized macOS, and Azure-signed Windows. Labeled same-repo PRs run the real Windows prepare/sign/Authenticode path and upload workflow artifacts only. |
+| `dependabot-licenses.yml` | Dependabot PRs touching a manifest or the lockfile, manual dispatch with a PR number | Runs the license allowlist gate, then regenerates and pushes `THIRD_PARTY_LICENSES` so the PR's `Typecheck` check can pass. Needs a token to be provisioned before the push re-triggers CI — see below. |
 
 ## PR labels
 
@@ -19,6 +20,44 @@ Keep label names namespaced when they start, skip, or narrow CI work.
 
 If you add another label-influenced workflow path, document it here in the same
 change as the workflow update.
+
+## Dependabot license regeneration (setup required)
+
+`pnpm licenses:check` hashes the dependency tree, so **any** dependency change
+makes the committed `THIRD_PARTY_LICENSES` stale — and Dependabot cannot run
+`pnpm licenses:generate` itself. Every Dependabot PR therefore lands with
+`Typecheck` and `Windows (typecheck + build + test)` red on that one line, and
+`Typecheck` is a required check, so the PR cannot merge until someone pushes the
+regenerated notice by hand. `dependabot-licenses.yml` pushes that commit.
+
+**It runs the allowlist gate first and pushes nothing if that fails.** That
+ordering is the whole reason unattended regeneration is safe: the generator only
+transcribes, so without the gate a dependency that flipped to GPL would be
+written into the notice by a bot and go green. Read the workflow's header before
+editing it — the `pull_request_target` trigger, the two-job split that keeps
+`contents: write` behind the guard, the manifest-only file guard, and
+`pnpm install --ignore-scripts` are four controls that all carry weight.
+
+**Setup, not yet done.** A push made with the default `GITHUB_TOKEN` does not
+trigger new workflow runs, so until a token exists the workflow lands the commit
+and the PR keeps showing its stale red checks — it warns in the job summary when
+this happens. This repo currently has **no repository secrets or variables at
+all** (`RELEASES_PAT` is named by `release.yml` but only ever as
+`secrets.RELEASES_PAT || github.token`, so it has never been set). To finish the
+setup, provision:
+
+- repository **variable** `LICENSES_BOT_APP_CLIENT_ID`
+- repository **secret** `LICENSES_BOT_APP_PRIVATE_KEY`
+
+for a GitHub App installed on this repo with `contents: write` and nothing else.
+Prefer that narrow App over a broadly-scoped PAT: the job installs
+PR-controlled dependency versions, so a smaller token is a smaller blast radius.
+`RELEASES_PAT` stays in the fallback chain if it is ever created.
+
+**Dugite bumps are the deliberate exception.** They also need
+`EMBEDDED_GIT_NOTICE_SOURCES` in `scripts/generate-third-party-licenses.mjs`
+re-synced by hand, and that edit puts a `scripts/` file on the branch, which the
+file guard rejects. A human finishes those — see [scripts/AGENTS.md](../../scripts/AGENTS.md).
 
 ## Release setup (secrets & variables)
 
