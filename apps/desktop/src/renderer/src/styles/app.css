@@ -8814,11 +8814,16 @@ body.is-col-resizing {
 }
 /* Lane 2 — the line lane. The lane, not the 16px glyph inside it, is the
    pointer target: a control the size of its own icon cannot be hit twice in a
-   row (WCAG 2.5.8), and the sweep needs somewhere forgiving to travel. */
+   row, and the sweep needs somewhere forgiving to travel. The hit area is
+   wider still — the row owns the gesture everywhere but the code and the
+   blame gutter — so the cursor has to say so across the whole run, or the
+   affordance would advertise a fifth of what is actually clickable. */
 .diff-lane--line {
   cursor: default;
 }
-.diff-row.is-tickable .diff-lane--line {
+.diff-row.is-tickable .diff-lane,
+.diff-row.is-tickable .diff-gutter:not(.diff-gutter--blame),
+.diff-row.is-tickable .diff-sym {
   cursor: pointer;
 }
 .diff-row.is-tickable:hover .diff-lane--line {
@@ -8843,7 +8848,11 @@ body.is-col-resizing {
   opacity: 0;
   transition: opacity 120ms ease, background 120ms ease;
 }
-.diff-row:hover .diff-line-take,
+/* Scoped to is-tickable: while an apply is in flight the row drops that class
+   and the gesture with it, so hovering must stop offering a + that would be
+   ignored. Focus still reveals it — a keyboard user has to see where they
+   are — but the button is disabled there too. */
+.diff-row.is-tickable:hover .diff-line-take,
 .diff-line-take:focus-visible,
 .diff-line-take.is-ghost {
   opacity: 1;

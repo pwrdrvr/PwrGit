@@ -132,10 +132,16 @@ the edge of the pane without reading a single control.
 
 Four things about the gesture are not obvious from the code:
 
-- **The lane is the pointer target, not the glyph inside it.** A 16px control
-  is a 16px target, which fails WCAG 2.5.8 and is miserable to hit twice in a
-  row. `onMouseDown` lives on `.diff-lane--line`; the button inside is the
-  affordance and the keyboard control.
+- **The row is the pointer target, not the glyph and not the lane.** The
+  handlers live on `.diff-row`, and `NOT_A_PRESS` excludes the two columns
+  that own their own gesture: `.diff-text` stays selectable, and
+  `.diff-gutter--blame` is a button, so a press there would otherwise open
+  blame *and* start a sweep. The `+` is the affordance and the keyboard
+  control, nothing more. Binding the gesture to the 24px lane instead costs
+  five sixths of the target and, worse, stops a sweep tracking the moment a
+  downward drag drifts out of that column. Note this still does not meet WCAG
+  2.5.8's 24x24: a line-level control is bound to the row's line-height, and
+  reaching 24px would mean setting the diff's leading by its controls.
 - **The sweep is held in a ref, not only in state.** `press → extend → release`
   must be correct however React schedules the renders between them — a click
   fast enough to beat a commit would otherwise release into a `null` sweep and
@@ -143,8 +149,10 @@ Four things about the gesture are not obvious from the code:
 - **It listens for `mouseover`, not `mouseenter`.** React synthesizes
   enter/leave from delegated `mouseover`/`mouseout` at the root, so a
   dispatched `mouseenter` never reaches the handler and the gesture is
-  untestable. The lane's only child is its own button, so the repeat that
-  bubbling brings names the same line.
+  untestable. Bubbling is also what lets the whole row extend the run. Every
+  such event carries `buttons`, and a sweep that sees `buttons === 0` is one
+  whose mouseup went missing — a native menu, focus leaving mid-drag — so it
+  is dropped rather than left live to grow on plain hover.
 - **Intent is fixed at the press**, not re-decided per row: pressing an
   unticked line takes the run, pressing a ticked one clears it. A sweep that
   re-decided would invert whatever it crossed and leave stripes behind.

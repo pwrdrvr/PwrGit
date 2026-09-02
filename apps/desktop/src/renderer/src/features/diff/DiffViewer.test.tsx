@@ -240,9 +240,11 @@ describe("DiffViewer hunk and line selection", () => {
       new MouseEvent("mousedown", { bubbles: true, button: 0, ...init })
     );
   };
-  /** The event a pointer crossing into a lane actually delivers. */
-  const enter = (el: HTMLElement): void => {
-    el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+  /** The event a pointer crossing a row actually delivers. `buttons: 1` is the
+   *  left button still being held — the thing that separates a live drag from
+   *  a plain hover after a lost mouseup. */
+  const enter = (el: HTMLElement, buttons = 1): void => {
+    el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, buttons }));
   };
   const release = (): void => {
     window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
@@ -444,6 +446,123 @@ describe("DiffViewer hunk and line selection", () => {
       [lines[0]?.id, lines[1]?.id],
       "uncheck"
     );
+  });
+
+  it("keeps tracking a sweep that drifts out of the line lane", async () => {
+    const onToggleLine = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffViewer
+          patch={textPatch}
+          selection={{
+            staged: false,
+            selectedIds: new Set(),
+            applying: false,
+            hunks: [
+              { id: "h:0:2:2", header: "@@ -2 +2 @@", lineSelection: true, lines }
+            ],
+            onToggleLine,
+            onApply: vi.fn()
+          }}
+        />
+      );
+    });
+
+    const rows = container.querySelectorAll(".diff-row.is-tickable");
+    await act(async () => press(laneOf(rows[0]!)));
+    // A real downward drag does not stay inside a 24px column. Crossing the
+    // next row anywhere — here over its code — has to extend the run.
+    await act(async () =>
+      enter(rows[1]!.querySelector(".diff-text") as HTMLElement)
+    );
+    expect(container.querySelectorAll(".diff-row.is-sweeping")).toHaveLength(2);
+    await act(async () => release());
+    expect(onToggleLine).toHaveBeenCalledWith(
+      [lines[0]?.id, lines[1]?.id],
+      "check"
+    );
+  });
+
+  it("drops a sweep whose mouseup went missing instead of tracking hover", async () => {
+    const onToggleLine = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffViewer
+          patch={textPatch}
+          selection={{
+            staged: false,
+            selectedIds: new Set(),
+            applying: false,
+            hunks: [
+              { id: "h:0:2:2", header: "@@ -2 +2 @@", lineSelection: true, lines }
+            ],
+            onToggleLine,
+            onApply: vi.fn()
+          }}
+        />
+      );
+    });
+
+    const rows = container.querySelectorAll(".diff-row.is-tickable");
+    await act(async () => press(laneOf(rows[0]!)));
+    // The release never arrived — a native menu ate it, or focus left
+    // mid-drag. The next movement reports no button held, and the sweep must
+    // end there rather than keep growing under a bare pointer.
+    await act(async () => enter(rows[1]! as HTMLElement, 0));
+    expect(container.querySelector(".diff-row.is-sweeping")).toBeNull();
+    await act(async () => enter(rows[1]! as HTMLElement, 0));
+    await act(async () => release());
+    expect(onToggleLine).not.toHaveBeenCalled();
+  });
+
+  it("presses from the gutter, but leaves code and blame alone", async () => {
+    const onToggleLine = vi.fn();
+    const onBlameFrom = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffViewer
+          patch={textPatch}
+          onBlameFrom={onBlameFrom}
+          selection={{
+            staged: false,
+            selectedIds: new Set(),
+            applying: false,
+            hunks: [
+              { id: "h:0:2:2", header: "@@ -2 +2 @@", lineSelection: true, lines }
+            ],
+            onToggleLine,
+            onApply: vi.fn()
+          }}
+        />
+      );
+    });
+
+    const rows = container.querySelectorAll(".diff-row.is-tickable");
+    // The line-number gutter was a target before the lanes existed and still
+    // is: the + is the affordance, not the whole of the hit area.
+    await act(async () => {
+      press(rows[0]!.querySelector(".diff-gutter") as HTMLElement);
+      release();
+    });
+    expect(onToggleLine).toHaveBeenCalledWith([lines[0]?.id], "check");
+
+    // The code column stays selectable text.
+    onToggleLine.mockClear();
+    await act(async () => {
+      press(rows[0]!.querySelector(".diff-text") as HTMLElement);
+      release();
+    });
+    expect(onToggleLine).not.toHaveBeenCalled();
+
+    // The blame gutter is its own button; a press there must not also start a
+    // sweep, or one click would do two things.
+    const blame = container.querySelector(".diff-gutter--blame");
+    expect(blame).not.toBeNull();
+    await act(async () => {
+      press(blame as HTMLElement);
+      release();
+    });
+    expect(onToggleLine).not.toHaveBeenCalled();
   });
 
   it("sweeps the same run whichever way the pointer travelled", async () => {

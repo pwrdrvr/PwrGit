@@ -198,7 +198,34 @@ const coordinateOf = (line: DiffLine): string | null =>
  *  A sweep that re-decided would invert whatever it crossed and leave a
  *  striped selection behind, which is never what a drag across ten lines
  *  means. */
-type Sweep = { from: string; to: string; adding: boolean };
+type Sweep = {
+  from: string;
+  to: string;
+  adding: boolean;
+  /** The painted line list this sweep was drawn against. `orderedIds` is
+   *  memoized on the parsed hunks, so a diff that refreshes mid-drag hands
+   *  back a different array — and a run resolved against THAT list is not the
+   *  run the preview showed. Identity is the whole check. */
+  order: readonly string[];
+};
+
+/** What a sweep would do if it ended now — the rows it covers and the single
+ *  intent it carries. One value, because the ids are meaningless without the
+ *  intent and a separate flag can only be read wrongly. */
+type SweepPreview = { ids: ReadonlySet<string>; adding: boolean };
+
+/** The columns a press must NOT start a gesture on. Everything else in the row
+ *  is the target — a 24px lane is a poor one, and the gutter cells around it
+ *  were already the target before the lanes existed.
+ *
+ *  Naming the target positively does not work. A row's grid items are
+ *  baseline-aligned, so a cell with no content has no height — an added row's
+ *  old-line cell, like a deleted row's new-line cell, is exactly that — and a
+ *  rule written as "hit .diff-lane" silently loses its target on the rows that
+ *  carry the changes. The code column stays selectable text; the blame gutter
+ *  is its own button, and a press that both opened blame and started a sweep
+ *  would do two things the user asked for once. */
+const NOT_A_PRESS = ".diff-text, .diff-gutter--blame";
 
 /** The inclusive slice of `order` between two IDs, in painted order however
  *  the gesture ran — a sweep upward selects the same run as the same sweep
@@ -283,11 +310,14 @@ function DiffFileView({
   // into the pane's selection on every row: an uncommitted sweep must be
   // abandonable, and repainting one file beats repainting the pane — bar,
   // counter and all — sixty times across a ten-line drag.
-  const preview = useMemo(
+  const preview = useMemo<SweepPreview | null>(
     () =>
       sweep === null
         ? null
-        : new Set(runBetween(orderedIds, sweep.from, sweep.to)),
+        : {
+            ids: new Set(runBetween(orderedIds, sweep.from, sweep.to)),
+            adding: sweep.adding
+          },
     [sweep, orderedIds]
   );
 
@@ -310,6 +340,10 @@ function DiffFileView({
       const { orderedIds: order, selection: controls } = latest.current;
       if (gesture === null || controls === undefined) return;
       setGesture(null);
+      // The diff moved under the drag. Committing now would resolve the run
+      // against line positions the user never saw previewed, so drop it and
+      // let them draw it again on what is actually on screen.
+      if (gesture.order !== order) return;
       const run = runBetween(order, gesture.from, gesture.to);
       if (run.length === 0) return;
       controls.onToggleLine(run, gesture.adding ? "check" : "uncheck");
@@ -317,8 +351,8 @@ function DiffFileView({
     };
     window.addEventListener("mouseup", commit);
     return () => window.removeEventListener("mouseup", commit);
-    // setGesture closes over nothing that changes; the refs carry the rest.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Deliberately empty: `commit` reads everything it needs through refs, so
+    // it never goes stale and never needs re-registering.
   }, []);
 
   /** Press on a line's lane. Shift keeps its old meaning — extend from the
@@ -338,12 +372,26 @@ function DiffFileView({
       }
     }
     anchor.current = id;
-    setGesture({ from: id, to: id, adding: !selection.selectedIds.has(id) });
+    setGesture({
+      from: id,
+      to: id,
+      adding: !selection.selectedIds.has(id),
+      order: orderedIds
+    });
   };
 
-  const extend = (id: string): void => {
+  /** Extend the run to this row. `held` is the event's button state: a mouseup
+   *  the window never saw — swallowed by a native menu, or by focus leaving
+   *  mid-drag — would otherwise leave the sweep live, and every later hover
+   *  would keep growing a run the user is no longer drawing. */
+  const extend = (id: string, held: boolean): void => {
     const current = sweepRef.current;
-    if (current === null || current.to === id) return;
+    if (current === null) return;
+    if (!held) {
+      setGesture(null);
+      return;
+    }
+    if (current.to === id) return;
     setGesture({ ...current, to: id });
   };
 
@@ -403,7 +451,6 @@ function DiffFileView({
             selection={selection}
             byCoordinate={byCoordinate}
             preview={preview}
-            sweepAdding={sweep?.adding ?? false}
             onPress={press}
             onExtend={extend}
             onActivate={activate}
@@ -423,7 +470,6 @@ function DiffHunkView({
   selection,
   byCoordinate,
   preview,
-  sweepAdding,
   onPress,
   onExtend,
   onActivate,
@@ -434,10 +480,9 @@ function DiffHunkView({
   filePath: string;
   selection: DiffSelectionControls | undefined;
   byCoordinate: Map<string, LineMeta>;
-  preview: ReadonlySet<string> | null;
-  sweepAdding: boolean;
+  preview: SweepPreview | null;
   onPress: (id: string, shiftKey: boolean) => void;
-  onExtend: (id: string) => void;
+  onExtend: (id: string, held: boolean) => void;
   onActivate: (id: string) => void;
   onAnchor: (id: string) => void;
   onBlameFrom?: (path: string, line: number) => void;
@@ -461,7 +506,7 @@ function DiffHunkView({
   // over it, so the rail and the chip answer the drag as it crosses them
   // rather than waiting for the button to come up.
   const shown = (id: string): boolean =>
-    preview?.has(id) === true ? sweepAdding : isTicked(id);
+    preview?.ids.has(id) === true ? preview.adding : isTicked(id);
   const shownCount = tickable.filter((line) => shown(line.id)).length;
   const shownAll = tickable.length > 0 && shownCount === tickable.length;
   // The chip's own action reads committed state only. A sweep is always
@@ -531,7 +576,7 @@ function DiffHunkView({
               ? line.oldNo
               : null;
         const isSelected = meta !== undefined && isTicked(meta.id);
-        const inSweep = meta !== undefined && preview?.has(meta.id) === true;
+        const inSweep = meta !== undefined && preview?.ids.has(meta.id) === true;
         // Drops while an apply is in flight, so the row stops advertising a
         // control it would ignore.
         const canTick =
@@ -544,36 +589,36 @@ function DiffHunkView({
           <div
             key={index}
             className={`diff-row diff-row--${line.kind}${isSelected ? " is-selected" : ""}${inSweep ? " is-sweeping" : ""}${canTick ? " is-tickable" : ""}`}
+            {...(takeId === null
+              ? {}
+              : {
+                  // The ROW is the target, not the 16px glyph and not the
+                  // 24px lane holding it. A lane-only press is a fifth of the
+                  // target this gutter had before the lanes existed, and a
+                  // lane-only extend stops tracking the moment a downward
+                  // drag drifts out of a 24px column — which is most of them.
+                  onMouseDown: (event: MouseEvent<HTMLDivElement>) => {
+                    if (event.button !== 0) return;
+                    if ((event.target as Element).closest(NOT_A_PRESS)) return;
+                    // Without this the press starts a text selection, and the
+                    // sweep drags a highlight across the code.
+                    event.preventDefault();
+                    onPress(takeId, event.shiftKey);
+                  },
+                  // mouseover, not mouseenter: enter/leave are synthesized by
+                  // React from delegated events, so a dispatched mouseenter
+                  // never reaches the handler and the gesture is untestable.
+                  // Bubbling is also what makes the whole row extend the run.
+                  onMouseOver: (event: MouseEvent<HTMLDivElement>) =>
+                    onExtend(takeId, event.buttons !== 0)
+                })}
           >
             {selectable && (
               <>
                 <span className="diff-lane diff-lane--hunk" aria-hidden="true">
                   <span className={`diff-rail diff-rail--${railState}`} />
                 </span>
-                <span
-                  className="diff-lane diff-lane--line"
-                  {...(takeId === null
-                    ? {}
-                    : {
-                        // The lane is the target, not the 16px glyph inside
-                        // it: a control the size of its own icon is a control
-                        // nobody can hit twice in a row (WCAG 2.5.8).
-                        onMouseDown: (event: MouseEvent<HTMLSpanElement>) => {
-                          if (event.button !== 0) return;
-                          // Without this the press starts a text selection,
-                          // and the sweep drags a highlight across the code.
-                          event.preventDefault();
-                          onPress(takeId, event.shiftKey);
-                        },
-                        // mouseover, not mouseenter: enter/leave are
-                        // synthesized by React from delegated events, and a
-                        // bubbling event is both what the pointer actually
-                        // delivers and what a test can dispatch. The lane's
-                        // only child is its own button, so the repeat that
-                        // bubbling brings names the same line.
-                        onMouseOver: () => onExtend(takeId)
-                      })}
-                >
+                <span className="diff-lane diff-lane--line">
                   {meta !== undefined &&
                     (meta.lineSelection ? (
                       <button
