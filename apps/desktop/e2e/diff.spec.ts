@@ -143,10 +143,11 @@ test("hunk and line actions move only the selected changes through Git's index",
   const addedFirst = window.locator(".diff-row--add", {
     hasText: "FIRST edit"
   });
-  // Everything left of the code is the target, not the 13px box inside it.
-  // The +/− column always carries a glyph, so it is a stable thing to aim at;
-  // an added row's old-line gutter is empty and collapses to no height.
-  await addedFirst.locator(".diff-sym").click();
+  // The line lane is the target, not the 16px + inside it: the button is only
+  // the glyph, and it is transparent until the row is hovered. Playwright's
+  // click hovers first, so the control is painted by the time the press
+  // lands — but the press is what starts the gesture either way.
+  await addedFirst.locator(".diff-lane--line").click();
   await expect(window.locator(".diff-selection-bar__count")).toHaveText(
     "1 selected"
   );

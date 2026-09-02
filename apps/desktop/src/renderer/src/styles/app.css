@@ -7590,7 +7590,8 @@ body.is-col-resizing {
 .diff-selection-bar__file:focus-visible,
 .diff-selection-bar__help:focus-visible,
 .diff-hunk__action:focus-visible,
-.diff-select input:focus-visible {
+.diff-hunk-chip:focus-visible,
+.diff-line-take:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
@@ -8709,6 +8710,15 @@ body.is-col-resizing {
   color: var(--text-subtle);
   background: var(--bg-hover-strong);
 }
+/* The header joins the row grid for its first two columns, so the hunk chip
+   sits exactly above the rail it commands and the lanes read as two
+   continuous columns from the top of the hunk to the bottom. */
+.diff-hunk__header--lanes {
+  display: grid;
+  grid-template-columns: 16px 24px minmax(0, 1fr) auto;
+  gap: 6px;
+  padding-left: 0;
+}
 .diff-hunk__range {
   min-width: 0;
   overflow: hidden;
@@ -8728,56 +8738,165 @@ body.is-col-resizing {
   align-items: baseline;
   font: 500 11.5px/1.55 var(--font-mono);
 }
+/* Two lanes ahead of the line numbers: whole hunks on the left, single lines
+   on the right. */
 .diff-view--selectable .diff-row {
-  grid-template-columns: 24px 44px 44px 14px minmax(0, 1fr);
+  grid-template-columns: 16px 24px 44px 44px 14px minmax(0, 1fr);
 }
-.diff-select {
+/* Both lanes stretch past the baseline the rest of the row aligns to, which
+   is what lets the rail run edge to edge and gives the line control a target
+   taller than its glyph. */
+.diff-lane {
+  position: relative;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+}
+/* Lane 1 — the hunk rail. A 3px bar spanning every row of its hunk, so how
+   much of a hunk is taken is legible from the edge of the pane without
+   reading a single control: hairline = none, dim = some, solid = all. */
+.diff-rail {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 6px;
+  width: 3px;
+  border-radius: 2px;
+  transition: background 120ms ease;
+}
+.diff-rail--idle {
+  background: var(--border-subtle);
+}
+.diff-rail--part {
+  background: var(--accent-border);
+}
+.diff-rail--full {
+  background: var(--accent);
+}
+/* The chip at the top of the hunk: the whole-hunk control, sized and placed
+   as the head of its own rail rather than as another box in a row of boxes. */
+.diff-hunk-chip {
+  width: 16px;
+  height: 16px;
+  padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  align-self: stretch;
-  user-select: none;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent);
+  font: 650 11px/1 var(--font-mono);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
 }
-/* The box is a 13px glyph; the target is the whole gutter run. Making the
-   input inert to the pointer puts every click on the row handler, which is
-   what reads the shift modifier for range selection and what keeps a 13px
-   control from being a 13px target (WCAG 2.5.8). Keyboard activation is
-   untouched — the input still focuses, and Space still fires a click that
-   reaches the same handler. */
-.diff-select input {
-  width: 13px;
-  height: 13px;
-  margin: 0;
-  accent-color: var(--accent);
-  pointer-events: none;
+.diff-hunk-chip.is-part {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
 }
-.diff-select--hunk {
-  flex: 0 0 auto;
-  align-self: center;
-  padding: 2px;
+.diff-hunk-chip.is-on {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-on);
 }
-.diff-select--hunk.is-tickable {
+.diff-hunk-chip:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+.diff-hunk-chip.is-on:hover:not(:disabled) {
+  background: var(--accent-bright);
+}
+.diff-hunk-chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* Lane 2 — the line lane. The lane, not the 16px glyph inside it, is the
+   pointer target: a control the size of its own icon cannot be hit twice in a
+   row (WCAG 2.5.8), and the sweep needs somewhere forgiving to travel. */
+.diff-lane--line {
+  cursor: default;
+}
+.diff-row.is-tickable .diff-lane--line {
   cursor: pointer;
 }
-/* Only rows that can actually take a tick advertise one. */
-.diff-row.is-tickable .diff-select,
-.diff-row.is-tickable .diff-gutter,
-.diff-row.is-tickable .diff-sym {
-  cursor: pointer;
-}
-.diff-row.is-tickable:hover .diff-select {
+.diff-row.is-tickable:hover .diff-lane--line {
   background: var(--bg-hover-strong);
 }
-.diff-row.is-tickable:hover .diff-select input:not(:checked) {
-  outline: 1px solid var(--accent-border);
-  outline-offset: 1px;
+/* Nothing per line until the pointer or the keyboard asks for it. This is the
+   whole point of the two lanes: a resting diff is code, not a column of
+   controls. */
+.diff-line-take {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  background: var(--bg-panel);
+  color: var(--accent);
+  font: 650 11px/1 var(--font-mono);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease;
 }
-/* A ticked row has to survive a glance down a long hunk, so it gets a spine
-   in the selection column rather than a heavier fill that would fight the
-   add/delete tint already carrying the row's meaning. */
-.diff-row.is-selected {
-  box-shadow: inset 2px 0 0 var(--accent);
+.diff-row:hover .diff-line-take,
+.diff-line-take:focus-visible,
+.diff-line-take.is-ghost {
+  opacity: 1;
 }
+/* A taken line keeps its control on screen — the filled dot IS the tick, and
+   a selection that vanished when the pointer left would be unreadable. */
+.diff-line-take.is-on {
+  opacity: 1;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-on);
+}
+.diff-line-take:disabled {
+  cursor: default;
+}
+/* An EOF-bound line can only move with its hunk. It gets a mark rather than a
+   dead control: a row that simply loses its affordance while its neighbours
+   keep theirs reads as a rendering fault. */
+.diff-line-take--atomic {
+  border-style: dashed;
+  border-color: var(--border-subtle);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: help;
+}
+.diff-row:hover .diff-line-take--atomic {
+  opacity: 0.7;
+}
+/* The run a sweep would take if the button came up now. Tinted rather than
+   spined so it never impersonates the committed selection underneath it. */
+.diff-row.is-sweeping {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.diff-row.is-sweeping.diff-row--add {
+  background: color-mix(
+    in srgb,
+    var(--accent) 8%,
+    color-mix(in srgb, var(--status-ok) 10%, transparent)
+  );
+}
+.diff-row.is-sweeping.diff-row--del {
+  background: color-mix(
+    in srgb,
+    var(--accent) 8%,
+    color-mix(in srgb, var(--danger-base) 11%, transparent)
+  );
+}
+/* A taken row carries no spine of its own. It used to: with checkboxes there
+   was nothing else in the gutter to read down a long hunk. Now the filled
+   control in the line lane says the same thing louder, and the rail beside it
+   says how much of the hunk went — so a spine as well put two amber verticals
+   six pixels apart and made the left edge look like a bug. The text lift is
+   what is left, and it is enough. */
 .diff-row.is-selected .diff-text,
 .diff-row.is-selected .diff-sym {
   color: var(--text-primary);

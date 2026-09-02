@@ -72,15 +72,35 @@ describe("DiffPane refreshing an open working-tree diff", () => {
   let handlers: Map<string, (payload: { worktreeId: string }) => void>;
   let current: PartialFileDiff;
 
-  const tick = (): HTMLInputElement => {
-    const box = container.querySelector<HTMLInputElement>(
-      '.diff-row.is-tickable input[type="checkbox"]'
-    );
-    if (box === null) throw new Error("no tickable row rendered");
-    return box;
+  /** Every line control the pane is currently offering, in painted order. */
+  const takes = (): HTMLButtonElement[] => [
+    ...container.querySelectorAll<HTMLButtonElement>(
+      ".diff-row.is-tickable button.diff-line-take"
+    )
+  ];
+  const take = (): HTMLButtonElement => {
+    const button = takes()[0];
+    if (button === undefined) throw new Error("no tickable row rendered");
+    return button;
   };
-  const gutterOf = (box: HTMLInputElement): HTMLElement =>
-    box.closest(".diff-row")!.querySelector(".diff-gutter") as HTMLElement;
+  const isOn = (button: HTMLButtonElement): boolean =>
+    button.getAttribute("aria-pressed") === "true";
+  /** The lane the control sits in — the target the pointer actually presses. */
+  const laneOf = (button: HTMLButtonElement): HTMLElement =>
+    button.closest(".diff-lane") as HTMLElement;
+  /** One press-and-release over a line's lane: the whole gesture, as a
+   *  browser delivers it. */
+  const clickLine = async (
+    button: HTMLButtonElement,
+    init: MouseEventInit = {}
+  ): Promise<void> => {
+    await act(async () => {
+      laneOf(button).dispatchEvent(
+        new MouseEvent("mousedown", { bubbles: true, button: 0, ...init })
+      );
+      window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    });
+  };
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -124,15 +144,15 @@ describe("DiffPane refreshing an open working-tree diff", () => {
   };
 
   it("keeps the ticks and the rendered body when the file's diff is unchanged", async () => {
-    await act(async () => gutterOf(tick()).click());
-    expect(tick().checked).toBe(true);
+    await clickLine(take());
+    expect(isOn(take())).toBe(true);
 
     // The watcher behind this event fingerprints the whole worktree, so it
     // fires for edits to files this pane is not showing. Nothing about this
     // file moved, so nothing the reader chose may move either.
     await announce();
 
-    expect(tick().checked).toBe(true);
+    expect(isOn(take())).toBe(true);
     expect(container.querySelector(".diff-selection-bar__count")?.textContent)
       .toBe("1 selected");
     // No teardown: the body never falls back to the loading placeholder, which
@@ -146,46 +166,37 @@ describe("DiffPane refreshing an open working-tree diff", () => {
     // the set. The old contract encoded intent in array order and this exact
     // sequence — tick a line, shift-click to extend — cleared the range
     // instead of ticking it. Every prior test stopped at one component.
-    const boxes = (): HTMLInputElement[] => [
-      ...container.querySelectorAll<HTMLInputElement>(
-        '.diff-row.is-tickable input[type="checkbox"]'
-      )
-    ];
-    expect(boxes()).toHaveLength(2);
+    expect(takes()).toHaveLength(2);
 
-    await act(async () => gutterOf(boxes()[0]!).click());
-    expect(boxes()[0]?.checked).toBe(true);
+    await clickLine(takes()[0]!);
+    expect(isOn(takes()[0]!)).toBe(true);
 
-    await act(async () =>
-      gutterOf(boxes()[1]!).dispatchEvent(
-        new MouseEvent("click", { bubbles: true, shiftKey: true })
-      )
-    );
-    expect(boxes().map((box) => box.checked)).toEqual([true, true]);
+    await clickLine(takes()[1]!, { shiftKey: true });
+    expect(takes().map(isOn)).toEqual([true, true]);
     expect(container.querySelector(".diff-selection-bar__count")?.textContent)
       .toBe("2 selected");
   });
 
   it("drops the ticks and says why once the file's diff really moves", async () => {
-    await act(async () => gutterOf(tick()).click());
-    expect(tick().checked).toBe(true);
+    await clickLine(take());
+    expect(isOn(take())).toBe(true);
 
     // Positional line IDs describe a different edit against a new snapshot,
     // so carrying the ticks over would stage a line the reader never picked.
     current = snapshot("fingerprint-2");
     await announce();
 
-    expect(tick().checked).toBe(false);
+    expect(isOn(take())).toBe(false);
     expect(container.querySelector(".diff-stale-notice")?.textContent).toContain(
       "This file changed"
     );
     // Ticking again clears the notice rather than leaving it to linger.
-    await act(async () => gutterOf(tick()).click());
+    await clickLine(take());
     expect(container.querySelector(".diff-stale-notice")).toBeNull();
   });
 
   it("applies against the fingerprint the ticks were chosen on", async () => {
-    await act(async () => gutterOf(tick()).click());
+    await clickLine(take());
     const apply = container.querySelector<HTMLButtonElement>(
       ".diff-selection-bar__apply"
     );
@@ -219,7 +230,7 @@ describe("DiffPane refreshing an open working-tree diff", () => {
     expect(container.querySelector(".diff-selection-bar__help")).not.toBeNull();
 
     // The first landed selection is proof the gesture is learned.
-    await act(async () => gutterOf(tick()).click());
+    await clickLine(take());
     await act(async () =>
       container
         .querySelector<HTMLButtonElement>(".diff-selection-bar__apply")
