@@ -41,6 +41,11 @@ function createSystemGit(
 
 const systemGit = createSystemGit();
 
+// A clean preflight creates, fetches, rewrites, and removes a disposable clone.
+// Hosted Windows runners need extra headroom while the full suite runs in parallel.
+const CLEAN_PREFLIGHT_TEST_TIMEOUT =
+  process.platform === "win32" ? 30_000 : 15_000;
+
 function git(dir: string, args: string[]): void {
   execFileSync("git", args, { cwd: dir, stdio: "ignore" });
 }
@@ -346,7 +351,7 @@ describe("dryRunRebase (disposable clone)", () => {
       }
       expect(sourceSnapshot(repo)).toEqual(before);
       expect(readdirSync(tempParent)).toEqual([]);
-    }, 15_000);
+    }, CLEAN_PREFLIGHT_TEST_TIMEOUT);
   }
 
   it("reports a conflicting reorder and still leaves no source or temp changes", async () => {

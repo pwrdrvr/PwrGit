@@ -1280,6 +1280,55 @@ export type RebaseCheckResult =
     }
   | { status: "snag"; code: string; message: string };
 
+/** A locally discovered agent backend and whether PwrGit can safely use it. */
+export type AgentProviderAvailability = {
+  id: string;
+  kind: "codex" | "acp";
+  displayName: string;
+  status: "ready" | "unavailable" | "unsupported" | "error";
+  detail: string;
+  version?: string;
+};
+
+/** Discovery never rejects merely because no agent is installed. */
+export type AgentAvailability = {
+  profileId: ProfileId;
+  status: "ready" | "unavailable";
+  selectedProviderId: string | null;
+  message: string;
+  providers: AgentProviderAvailability[];
+};
+
+export type AgentProposalConfidence = "low" | "medium" | "high";
+export type AgentProposalVerdict = "proceed" | "caution";
+
+/**
+ * Structured, display-only review of PwrGit's canonical rebase plan. The
+ * canonical plan is returned rather than agent-authored executable text, so
+ * this value can never be passed to Git or used as an apply approval.
+ */
+export type AgentRebaseProposal = {
+  requestId: string;
+  providerId: string;
+  providerName: string;
+  operation: RebaseOperation;
+  plan: RebasePlan;
+  title: string;
+  summary: string;
+  rationale: string[];
+  risks: string[];
+  confidence: AgentProposalConfidence;
+  verdict: AgentProposalVerdict;
+  generatedAt: string;
+};
+
+export type AgentRequestPhase =
+  | "running"
+  | "completed"
+  | "cancelled"
+  | "timed_out"
+  | "failed";
+
 export type Lens = "Focused" | "Pinned" | "Behind" | "Stale" | "All";
 export type WorktreeSort = "recent" | "pinned" | "az" | "active" | "custom";
 

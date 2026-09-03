@@ -33,6 +33,11 @@ import {
   updateRemote
 } from "./git-service";
 
+// These fixtures perform two clones, multiple commits/pushes, and range-diff.
+// The hosted Windows runner needs more headroom under the full parallel suite.
+const RANGE_DIFF_TEST_TIMEOUT =
+  process.platform === "win32" ? 30_000 : 15_000;
+
 const systemGit: GitExec = (args, cwd) =>
   new Promise<Result<GitOutput>>((resolve) => {
     const proc = spawn("git", args, { cwd });
@@ -1010,7 +1015,7 @@ describe("remote ops (bare-remote fixture)", () => {
       upstream: { subject: "feat: shared patch", additions: 1, deletions: 0 }
     });
     expect(equivalent?.local?.hash).not.toBe(equivalent?.upstream?.hash);
-  }, 15_000);
+  }, RANGE_DIFF_TEST_TIMEOUT);
 
   it("keeps a local merge commit that range-diff omits", async () => {
     const { local, remote } = makeDivergedFixture();
@@ -1046,7 +1051,7 @@ describe("remote ops (bare-remote fixture)", () => {
       upstream: null,
       relation: "local-only"
     });
-  }, 15_000);
+  }, RANGE_DIFF_TEST_TIMEOUT);
 
   it("keeps an upstream merge commit that range-diff omits", async () => {
     const { local, remote } = makeDivergedFixture();
@@ -1082,7 +1087,7 @@ describe("remote ops (bare-remote fixture)", () => {
       upstream: divergence.value.upstreamCommits[0],
       relation: "upstream-only"
     });
-  }, 15_000);
+  }, RANGE_DIFF_TEST_TIMEOUT);
 
   it("resets only a clean branch to the exact inspected upstream", async () => {
     const { local, remote } = makeDivergedFixture();

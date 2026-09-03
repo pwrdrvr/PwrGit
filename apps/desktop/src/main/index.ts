@@ -20,8 +20,11 @@ import {
 } from "@pwrgit/shared";
 import { registerAppIdentityHandlers } from "./app-identity";
 import { registerAppDocumentHandlers } from "./app-document-handlers";
+import { registerAgentHandlers } from "./ai/agent-handlers";
+import { LocalAgentSession } from "./ai/agent-session";
 import { wireAppMenuBridge } from "./app-menu-bridge";
 import { openAppDocumentWindow } from "./app-document-window";
+import { drainBeforeQuit } from "./bounded-shutdown";
 import {
   initAutoUpdater,
   reconcileDownloadedUpdateEligibility,
@@ -74,7 +77,6 @@ import { GitHubCommitAuthorIdentityService } from "./github/commit-author-identi
 import { registerGitHubHandlers } from "./github/github-handlers";
 import { PrService } from "./github/pr-service";
 import { emitEvent, emitEventToWindow, registerIpc } from "./ipc";
-import { delay } from "./util/timing";
 import {
   initLogFile,
   logMain,
@@ -531,6 +533,15 @@ if (!gotSingleInstanceLock) {
     registerSubmoduleHandlers(bus, db);
     const fileInsightHandlers = registerFileInsightHandlers(bus, db);
     registerRebaseHandlers(bus, db, refresher, worktreeOperations);
+    const agentHandlers = registerAgentHandlers(bus, db, {
+      session: new LocalAgentSession({
+        // Built-app E2E can pin the honest unavailable state regardless of the
+        // developer machine's Codex install. Packaged builds ignore this seam.
+        discoveryDisabled:
+          !app.isPackaged &&
+          process.env["PWRGIT_E2E_AGENT_UNAVAILABLE"] === "1"
+      })
+    });
     registerDialogHandlers(bus);
     registerClipboardHandlers(bus);
     registerShellHandlers(bus);
@@ -561,6 +572,7 @@ if (!gotSingleInstanceLock) {
         githubHandlers.releaseWebContents(webContentsId);
         bulkSyncHandlers.releaseWebContents(webContentsId);
         fileInsightHandlers.releaseWebContents(webContentsId);
+        agentHandlers.releaseWebContents(webContentsId);
       }
     });
     registerAppUpdateHandlers(bus);
@@ -607,18 +619,21 @@ if (!gotSingleInstanceLock) {
       appearance.dispose();
     });
 
-    // Drain diagnostics before quitting so final monitor-stopped events and
-    // manifest writes land on disk. Bounded and fail-safe: the drain races a
-    // timeout, and if the resumed quit is swallowed (automation teardown,
-    // re-entrant quit), app.exit() guarantees the process still dies.
-    let diagnosticsQuitState: "pending" | "draining" | "done" = "pending";
+    // Drain diagnostics and agent subprocesses before quitting. Bounded and
+    // fail-safe: cleanup races a timeout, and if the resumed quit is swallowed
+    // (automation teardown, re-entrant quit), app.exit() still guarantees the
+    // process dies.
+    let quitDrainState: "pending" | "draining" | "done" = "pending";
     app.on("will-quit", (event) => {
-      if (diagnosticsQuitState === "done") return;
+      if (quitDrainState === "done") return;
       event.preventDefault();
-      if (diagnosticsQuitState === "draining") return; // drain will re-quit
-      diagnosticsQuitState = "draining";
-      void Promise.race([diagnostics.shutdown(), delay(1_500)]).finally(() => {
-        diagnosticsQuitState = "done";
+      if (quitDrainState === "draining") return; // drain will re-quit
+      quitDrainState = "draining";
+      void drainBeforeQuit(
+        [() => diagnostics.shutdown(), () => agentHandlers.dispose()],
+        1_500
+      ).finally(() => {
+        quitDrainState = "done";
         app.quit();
         setTimeout(() => app.exit(0), 500);
       });
