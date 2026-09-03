@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.11.0 - 2026-09-03
+
+- Changes - Refined partial staging with separate hunk and line controls, drag-to-select runs, and clearer indicators of how much of each hunk is staged.
+- Image Diff - Added full-size before/after/diff viewing, pixel-level comparisons, shared zoom and pan, and copy actions for image revisions.
+- Reset to Remote - Made destructive resets safer by prioritizing the branch's upstream, showing exactly which commits would be left behind, and offering an explicit fresh-fetch action.
+- Sync - Added a persistent activity panel and clearer queued, in-progress, and completed states for bulk repository synchronization.
+- macOS - Normalized Dock icon padding so PwrGit has a consistent native size across supported macOS releases.
+- Desktop - Updated the packaged Electron runtime to 41.10.7 and aligned the release builder with that runtime.
+- Packaging - Enforced the seven-day dependency maturity policy in CI and at the start of release packaging, catching immature dependencies before an expensive release build begins.
+
 ## v0.10.0 - 2026-08-31
 
 - File History and Blame - Added rename-aware file history, per-revision file viewing, and line-level blame from the Command Palette, changed-file menus, and diffs.
