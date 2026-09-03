@@ -59,6 +59,8 @@ import { RepoIndexer } from "./git/repo-indexer";
 import { registerSearchStatusHandlers } from "./git/search-status-handlers";
 import { registerSubmoduleHandlers } from "./git/submodule-handlers";
 import { registerTagHandlers } from "./git/tag-handlers";
+import { registerStashHandlers } from "./git/stash-handlers";
+import { createStashAnnouncer, StashWatch } from "./git/stash-watch";
 import {
   createWorktreeRefresher,
   registerWorktreeHandlers
@@ -530,6 +532,7 @@ if (!gotSingleInstanceLock) {
     registerOperationHandlers(bus, db, refresher, worktreeOperations);
     registerSubmoduleHandlers(bus, db);
     const fileInsightHandlers = registerFileInsightHandlers(bus, db);
+    registerStashHandlers(bus, db, refresher, worktreeOperations);
     registerRebaseHandlers(bus, db, refresher, worktreeOperations);
     registerDialogHandlers(bus);
     registerClipboardHandlers(bus);
@@ -589,10 +592,34 @@ if (!gotSingleInstanceLock) {
       onError: (cause) =>
         logMain("error", "changes", "change-set watch failed:", cause)
     });
+    // refs/stash and its reflog live in the repository's common Git dir. A
+    // terminal can add/drop a stash from another linked worktree without
+    // changing this checkout's status, so status watching alone cannot keep
+    // the repository stack fresh.
+    const announceStashMoves = createStashAnnouncer({
+      watch: new StashWatch(execGit),
+      repoOf: (worktreeId) =>
+        (
+          db
+            .prepare(
+              `SELECT w.repo_id AS repoId, w.path AS path
+               FROM worktrees w WHERE w.id = ?`
+            )
+            .get(worktreeId) as
+            | { repoId: string; path: string }
+            | undefined
+        ) ?? null,
+      run: (repoId, operation) =>
+        worktreeOperations.runRepository(repoId, operation),
+      announce: (repoId) => emitEvent("stash:changed", { repoId }),
+      onError: (cause) =>
+        logMain("error", "stash", "stash watch failed:", cause)
+    });
     const refreshActive = (): void => {
       if (activeWorktreeId === null) return;
       void refresher.refreshWorktree(activeWorktreeId);
       announceChangeSetMoves(activeWorktreeId);
+      announceStashMoves(activeWorktreeId);
     };
     app.on("browser-window-focus", () => {
       refreshActive();

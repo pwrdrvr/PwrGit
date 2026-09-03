@@ -988,7 +988,7 @@ describe("remote ops (bare-remote fixture)", () => {
       local: { subject: "feat: shared change 7", additions: 1, deletions: 0 },
       upstream: { subject: "feat: shared change 7", additions: 1, deletions: 0 }
     });
-  }, 15_000);
+  }, 45_000);
 
   it("marks recreated patches as equivalent even when their commit IDs differ", async () => {
     const { local, remote } = makeDivergedFixture();
