@@ -143,10 +143,11 @@ jobs:
           node-version: 24.x
 
       # One aggregate step on purpose: `pnpm lint` chains the checks
-      # cheapest-first (colors, licenses, boundaries, typecheck), so a new
-      # check is added to the chain in package.json and picked up here
-      # automatically instead of having to be remembered as another step.
-      - name: Lint (colors, licenses, boundaries, typecheck)
+      # cheapest-first (colors, package reservation, dependency maturity,
+      # licenses, boundaries, typecheck), so a new check is added to the chain
+      # in package.json and picked up here automatically instead of having to
+      # be remembered as another step.
+      - name: Lint (colors, package reservation, dependency maturity, licenses, boundaries, typecheck)
         run: pnpm lint
 
   build:

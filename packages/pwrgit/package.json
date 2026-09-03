@@ -1,25 +1,17 @@
 {
   "name": "pwrgit",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": false,
-  "description": "PwrGit placeholder package",
+  "description": "Reserved npm name for the PwrGit desktop app; contains no executable code",
   "author": "PwrDrvr LLC",
   "license": "MIT",
   "copyright": "Copyright © 2026 PwrDrvr LLC",
-  "homepage": "https://github.com/pwrdrvr/PwrGit#readme",
-  "bugs": {
-    "url": "https://github.com/pwrdrvr/PwrGit/issues"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/pwrdrvr/PwrGit.git",
-    "directory": "packages/pwrgit"
-  },
+  "homepage": "https://pwrgit.com",
   "keywords": [
     "pwrgit",
     "git",
-    "desktop",
-    "electron"
+    "desktop-application",
+    "name-reservation"
   ],
   "files": [
     "README.md",
@@ -27,8 +19,5 @@
   ],
   "publishConfig": {
     "access": "public"
-  },
-  "scripts": {
-    "pack:check": "npm pack --dry-run"
   }
 }
