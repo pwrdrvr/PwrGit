@@ -78,13 +78,22 @@ difference between the checked-in copy and the project, and it is load-bearing �
 Also skipped: `.thumbnail` (already covered by `design/**/.thumbnail` in
 `.gitignore`).
 
-The project has **no `chats/` folder** and no `uploads/`, so there is currently
-nothing of that kind to exclude. PwrAgnt gitignores both outright — see
-`docs/design/pwragent-v2/SOURCE.md` — because they can carry private context:
-internal product decisions, local paths, account names, identifying details in
-screenshots. This repo has no such rule, so **if a future export grows a
-`chats/` or an `uploads/`, read it before committing** rather than assuming the
-last review still holds. This repo is public.
+**`chats/` and `uploads/`** — design-session transcripts and pasted reference
+screenshots. No artboard references either, and both can carry private context:
+internal product decisions, local paths, account names, identifying details in a
+screenshot. This repo is public, so they are locked out in the top-level
+`.gitignore` rather than reviewed case by case on each re-export:
+
+```
+design/chats/
+design/uploads/
+```
+
+The project currently has neither, so nothing is being suppressed today — the
+rule is there so a future export cannot quietly reintroduce one. This matches
+PwrAgnt (`docs/design/pwragent-v2/SOURCE.md`). If you ever genuinely need a
+screenshot committed, put it under `design/assets/` where it is a deliberate,
+reviewable choice.
 
 ## How to re-export
 
@@ -94,7 +103,9 @@ last review still holds. This repo is public.
    the zip from the Projects tab at <https://claude.ai/design>).
 3. **Diff before replacing.** Do not `rm -rf` this directory: `PwrGit.dc.html`
    and `fork-flow/` are not produced by the export and would be lost.
-4. Skip `apps/desktop/**` and `.thumbnail`.
+4. Skip `apps/desktop/**`. `.thumbnail`, `chats/` and `uploads/` are already
+   gitignored, but delete them from your working copy anyway so `git status`
+   stays readable.
 5. Re-apply the `../` rewrite to `PwrGit Icon.dc.html` (see above), then confirm
    every `src` resolves to a real file under `apps/desktop/build/`.
 6. Verify each file's byte size against the project listing — a truncated or
