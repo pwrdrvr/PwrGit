@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { AppSettingsSnapshot } from "@pwrgit/shared";
+import type { AppSettingsPatch, AppSettingsSnapshot } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import { registerSettingsHandlers, settingsSnapshot } from "./settings-handlers";
 import { SettingsService } from "./settings-service";
@@ -30,7 +30,11 @@ describe("settings handlers", () => {
     expect(r.value.experimental.lineageAllBranches).toBe(false);
     expect(r.value.diagnostics.heapMonitorEnabled).toBe(false);
     expect(r.value.diagnostics.hotCpuProfilingTriggerMode).toBe("sustained");
-    expect(r.value.updates).toEqual({ train: "stable", channel: "latest" });
+    expect(r.value.updates).toEqual({
+      train: "stable",
+      channel: "latest",
+      selectionSource: "inferred"
+    });
     // No PWRGIT_* diagnostics vars in the test env → nothing env-forced.
     expect(r.value.diagnosticsEnv).toEqual({
       heapMonitorForcedOn: false,
@@ -190,7 +194,7 @@ describe("appearance axes", () => {
 });
 
 describe("update train and track", () => {
-  it("persists both keys when the user picks a train or track", async () => {
+  it("persists both keys and the pin when the user picks a slot", async () => {
     const bus = new CommandBus();
     const service = freshService();
     registerSettingsHandlers(bus, service, {
@@ -204,10 +208,65 @@ describe("update train and track", () => {
     });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value.updates).toEqual({ train: "stable", channel: "latest" });
+    expect(r.value.updates).toEqual({
+      train: "stable",
+      channel: "latest",
+      selectionSource: "user"
+    });
     expect(service.get().updates).toEqual({
       train: "stable",
-      channel: "latest"
+      channel: "latest",
+      selectionSource: "user"
+    });
+
+    // And the pin survives a fresh process on the same beta binary — without
+    // `selectionSource` this is exactly the read that would undo it, because
+    // stable/latest is also what "nobody chose" looks like on disk.
+    const reopened = new CommandBus();
+    registerSettingsHandlers(reopened, service, {
+      appVersion: "1.1.0-beta.2",
+      diagnosticsOutputRoot: "/diag",
+      onChanged: () => undefined
+    });
+    const after = await reopened.dispatch("settings:read", undefined);
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect(after.value.updates).toEqual({
+      train: "stable",
+      channel: "latest",
+      selectionSource: "user"
+    });
+  });
+
+  // A renderer cannot pin (or un-pin) a selection nobody clicked: the patch
+  // allowlist drops `selectionSource`, and the write path derives it from
+  // whether either axis was named.
+  it("ignores a selectionSource sent by a renderer", async () => {
+    const bus = new CommandBus();
+    const service = freshService();
+    registerSettingsHandlers(bus, service, {
+      appVersion: "1.1.0-alpha.7",
+      diagnosticsOutputRoot: "/diag",
+      onChanged: () => undefined
+    });
+
+    const r = await bus.dispatch("settings:update", {
+      patch: {
+        updates: { selectionSource: "user" }
+      } as AppSettingsPatch
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // Nothing was picked, so the alpha binary still decides.
+    expect(r.value.updates).toEqual({
+      train: "beta",
+      channel: "prerelease",
+      selectionSource: "inferred"
+    });
+    expect(service.get().updates).toEqual({
+      train: "beta",
+      channel: "prerelease",
+      selectionSource: "inferred"
     });
   });
 
@@ -222,10 +281,17 @@ describe("update train and track", () => {
     const r = await bus.dispatch("settings:read", undefined);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value.updates).toEqual({ train: "beta", channel: "latest" });
+    expect(r.value.updates).toEqual({
+      train: "beta",
+      channel: "latest",
+      selectionSource: "inferred"
+    });
   });
 
-  it("keeps a legacy channel-only prerelease config on Stable", async () => {
+  // The bug this replaced: an unpinned pair on disk read as a deliberate
+  // choice, so an alpha install was offered the last stable forever and never
+  // told about the newer alpha it came from.
+  it("re-infers an unpinned legacy config from the running binary", async () => {
     const service = freshService();
     service.update({ updates: { channel: "prerelease" } });
     const bus = new CommandBus();
@@ -238,9 +304,53 @@ describe("update train and track", () => {
     const r = await bus.dispatch("settings:read", undefined);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value.updates).toEqual({ train: "stable", channel: "prerelease" });
-    // The inferred train is not written back unless the user chooses it.
+    expect(r.value.updates).toEqual({
+      train: "beta",
+      channel: "latest",
+      selectionSource: "inferred"
+    });
+    // Reading never writes: the file keeps whatever it had until a click.
     expect(service.get().updates).toEqual({ channel: "prerelease" });
+  });
+
+  it("moves a legacy Stable Latest config onto the alpha feed it runs", async () => {
+    const service = freshService();
+    service.update({ updates: { train: "stable", channel: "latest" } });
+    const bus = new CommandBus();
+    registerSettingsHandlers(bus, service, {
+      appVersion: "1.1.0-alpha.7",
+      diagnosticsOutputRoot: "/diag",
+      onChanged: () => undefined
+    });
+
+    const r = await bus.dispatch("settings:read", undefined);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.updates).toEqual({
+      train: "beta",
+      channel: "prerelease",
+      selectionSource: "inferred"
+    });
+  });
+
+  it("treats a legacy non-default pair as an existing pin", async () => {
+    const service = freshService();
+    service.update({ updates: { train: "beta", channel: "latest" } });
+    const bus = new CommandBus();
+    registerSettingsHandlers(bus, service, {
+      appVersion: "1.0.3",
+      diagnosticsOutputRoot: "/diag",
+      onChanged: () => undefined
+    });
+
+    const r = await bus.dispatch("settings:read", undefined);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.updates).toEqual({
+      train: "beta",
+      channel: "latest",
+      selectionSource: "user"
+    });
   });
 
   it("writes the resolved pair even when the patch only names one axis", async () => {
@@ -257,10 +367,15 @@ describe("update train and track", () => {
     });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value.updates).toEqual({ train: "stable", channel: "latest" });
+    expect(r.value.updates).toEqual({
+      train: "stable",
+      channel: "latest",
+      selectionSource: "user"
+    });
     expect(service.get().updates).toEqual({
       train: "stable",
-      channel: "latest"
+      channel: "latest",
+      selectionSource: "user"
     });
   });
 
@@ -278,7 +393,8 @@ describe("update train and track", () => {
     if (!before.ok) return;
     expect(before.value.updates).toEqual({
       train: "beta",
-      channel: "prerelease"
+      channel: "prerelease",
+      selectionSource: "inferred"
     });
 
     const r = await bus.dispatch("settings:update", {
@@ -286,10 +402,15 @@ describe("update train and track", () => {
     });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value.updates).toEqual({ train: "beta", channel: "latest" });
+    expect(r.value.updates).toEqual({
+      train: "beta",
+      channel: "latest",
+      selectionSource: "user"
+    });
     expect(service.get().updates).toEqual({
       train: "beta",
-      channel: "latest"
+      channel: "latest",
+      selectionSource: "user"
     });
   });
 });

@@ -17,6 +17,7 @@ import {
   type DiagnosticsSettings,
   type ExperimentalSettings,
   type GeneralSettings,
+  type UpdatesSelection,
   type UpdatesSettings
 } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
@@ -135,6 +136,9 @@ function sanitizePatch(patch: AppSettingsPatch): {
     if (isUpdateTrain(upd.train)) {
       updates.train = upd.train;
     }
+    // `selectionSource` is deliberately absent from this allowlist. It is
+    // derived below from whether the patch named either axis, so a renderer
+    // can neither pin a selection nobody clicked nor un-pin one that was.
   }
 
   return { general, experimental, diagnostics, updates };
@@ -145,7 +149,8 @@ export function registerSettingsHandlers(
   settings: SettingsService,
   options: {
     diagnosticsOutputRoot: string;
-    /** Installed app version — used to seed train/track when both keys are absent. */
+    /** Installed app version — the whole rule for train/track until somebody
+     *  pins a slot. See `resolveUpdateSelection` in @pwrgit/shared. */
     appVersion?: string;
     /** Fired after a successful write with the fresh snapshot — index.ts
      *  broadcasts settings:changed and re-syncs diagnostics from it. */
@@ -164,19 +169,26 @@ export function registerSettingsHandlers(
       general: Partial<GeneralSettings>;
       experimental: Partial<ExperimentalSettings>;
       diagnostics: Partial<DiagnosticsSettings>;
-      updates?: UpdatesSettings;
+      updates?: UpdatesSelection;
     } = {
       general: { ...stored.general, ...sanitized.general },
       experimental: { ...stored.experimental, ...sanitized.experimental },
       diagnostics: { ...stored.diagnostics, ...sanitized.diagnostics }
     };
-    // Persist both keys whenever the user touches Updates, including
-    // stable/latest, so a Beta binary does not re-infer after they pick Stable.
+    // Persist both axes whenever the user touches Updates, including
+    // stable/latest, so a Beta binary does not re-infer after they pick
+    // Stable. Naming EITHER axis is what makes the pair a pin: deriving
+    // `selectionSource` here rather than accepting it means no call site can
+    // persist a slot the next hydration would silently re-infer away.
     if (req.patch.updates !== undefined) {
       const current = resolveUpdateSelection(stored.updates, appVersion);
+      const picked =
+        sanitized.updates.channel !== undefined ||
+        sanitized.updates.train !== undefined;
       next.updates = {
         channel: sanitized.updates.channel ?? current.channel,
-        train: sanitized.updates.train ?? current.train
+        train: sanitized.updates.train ?? current.train,
+        selectionSource: picked ? "user" : current.selectionSource
       };
     }
     settings.update(next);
