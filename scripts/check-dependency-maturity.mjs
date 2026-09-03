@@ -1,0 +1,428 @@
+#!/usr/bin/env node
+// Re-applies the `minimumReleaseAge` cooldown from `pnpm-workspace.yaml` to
+// every version already pinned in `pnpm-lock.yaml`.
+//
+// ── Why this exists ─────────────────────────────────────────────────────────
+//
+// pnpm only consults `minimumReleaseAge` while it *resolves*. Almost nothing
+// in this repo resolves: `pnpm install --frozen-lockfile` prints "Lockfile is
+// up to date, resolution step is skipped" and installs whatever the lockfile
+// says, so CI's install, typecheck, test, build and E2E jobs all pass over a
+// too-young dependency without a word. The one command that does resolve from
+// scratch is the release's `pnpm deploy --legacy` (apps/desktop/scripts/
+// release.mjs), which re-applies the gate to the lockfile's pinned versions.
+//
+// That is how zod 4.5.1 — merged by Dependabot one day after publication —
+// went green through every check and then failed v0.11.0 at the packaging
+// step, a week later, with nothing left to do but wait out the window. This
+// check moves the gate back to where the dependency lands: it runs in
+// `pnpm lint` (so the Dependabot PR itself fails) and again at the top of a
+// release, before any expensive work.
+//
+// ── Exclusion syntax ────────────────────────────────────────────────────────
+//
+// `minimumReleaseAgeExclude` entries are matched as:
+//
+//   name              every version of that package
+//   @scope/*          every package under that scope (trailing `*` wildcard)
+//   name@1.2.3        exactly that release
+//   name@1.2.3 || 1.2.4
+//                     exactly those releases
+//
+// pnpm itself also accepts semver ranges after the `@`. This audit rejects
+// them rather than guessing: an allowlist entry that silently covers more
+// releases than its author intended is the failure mode worth designing
+// against, and `pnpm deps:maturity` names the exact version to pin.
+
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { isCliEntrypoint } from "./lib/cli-entrypoint.mjs";
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const REGISTRY = "https://registry.npmjs.org";
+const CACHE_PATH = join(repoRoot, "node_modules", ".cache", "pwrgit", "dependency-publish-times.json");
+const FETCH_CONCURRENCY = 16;
+
+// `1.2.3`, `1.2.3-rc.1`, `1.2.3+build`. Anything else in a `packages:` key is
+// a link:/file:/tarball resolution, which has no registry publish time and no
+// cooldown to enforce.
+const REGISTRY_VERSION = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)*$/;
+
+/**
+ * Read `minimumReleaseAge` and `minimumReleaseAgeExclude` out of
+ * `pnpm-workspace.yaml`.
+ *
+ * Hand-parsed on purpose: no YAML library is a root dependency, and the two
+ * settings are a scalar and a flat list of strings. Comments and blank lines
+ * may be interleaved anywhere, including inside the list.
+ */
+export function parseMaturityPolicy(yaml) {
+  let minimumReleaseAgeMinutes;
+  const exclusions = [];
+  let inExclusions = false;
+
+  for (const raw of yaml.split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    if (line.trim() === "" || line.trimStart().startsWith("#")) continue;
+
+    if (inExclusions) {
+      const item = /^\s+-\s+(.*)$/.exec(line);
+      if (item) {
+        exclusions.push(unquote(item[1].replace(/\s+#.*$/, "").trim()));
+        continue;
+      }
+      inExclusions = false;
+    }
+
+    if (/^minimumReleaseAgeExclude:\s*(?:#.*)?$/.test(line)) {
+      inExclusions = true;
+      continue;
+    }
+
+    const age = /^minimumReleaseAge:\s*([0-9_]+)\s*(?:#.*)?$/.exec(line);
+    if (age) minimumReleaseAgeMinutes = Number(age[1].replaceAll("_", ""));
+  }
+
+  return { minimumReleaseAgeMinutes, exclusions };
+}
+
+/**
+ * Every registry package pinned by the lockfile, as `{ name, version }`.
+ *
+ * Only the top-level `packages:` block is read. `snapshots:` repeats the same
+ * releases with peer-dependency suffixes (`zod-to-json-schema@3.25.2(zod@4.5.1)`)
+ * and would double-count them.
+ */
+export function parseLockedPackages(yaml) {
+  const packages = [];
+  const seen = new Set();
+  let inPackages = false;
+
+  for (const raw of yaml.split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    if (/^packages:\s*$/.test(line)) {
+      inPackages = true;
+      continue;
+    }
+    if (!inPackages) continue;
+    // Any other column-0 key ends the block.
+    if (/^\S/.test(line)) break;
+
+    const entry = /^ {2}(\S.*?):\s*$/.exec(line);
+    if (!entry) continue;
+
+    const key = unquote(entry[1]);
+    const at = key.lastIndexOf("@");
+    if (at <= 0) continue;
+
+    const name = key.slice(0, at);
+    const version = key.slice(at + 1);
+    if (!REGISTRY_VERSION.test(version)) continue;
+
+    const id = `${name}@${version}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    packages.push({ name, version });
+  }
+
+  return packages;
+}
+
+/**
+ * Split `minimumReleaseAgeExclude` entries into matchers, rejecting the
+ * semver-range forms this audit will not evaluate.
+ */
+export function parseExclusions(exclusions) {
+  const matchers = [];
+  const unsupported = [];
+
+  for (const entry of exclusions) {
+    const at = entry.lastIndexOf("@");
+    const hasVersion = at > 0;
+    const name = hasVersion ? entry.slice(0, at) : entry;
+    const spec = hasVersion ? entry.slice(at + 1).trim() : undefined;
+
+    if (spec === undefined) {
+      matchers.push({ entry, name, versions: undefined });
+      continue;
+    }
+
+    const versions = spec.split("||").map((part) => part.trim());
+    if (versions.some((version) => !REGISTRY_VERSION.test(version))) {
+      unsupported.push(entry);
+      continue;
+    }
+    matchers.push({ entry, name, versions });
+  }
+
+  return { matchers, unsupported };
+}
+
+function nameMatches(pattern, name) {
+  if (pattern === name) return true;
+  return pattern.endsWith("*") && name.startsWith(pattern.slice(0, -1));
+}
+
+/** The matcher covering `name@version`, or undefined when none does. */
+export function findExclusion(name, version, matchers) {
+  return matchers.find(
+    (matcher) =>
+      nameMatches(matcher.name, name) &&
+      (matcher.versions === undefined || matcher.versions.includes(version)),
+  );
+}
+
+/**
+ * The audit itself, over publish times someone else fetched.
+ *
+ * `publishedAt` maps `name@version` to an ISO-8601 publish time.
+ */
+export function auditDependencyMaturity({
+  packages,
+  publishedAt,
+  matchers,
+  minimumReleaseAgeMinutes,
+  now,
+}) {
+  const windowMs = minimumReleaseAgeMinutes * 60_000;
+  const immature = [];
+  const unverifiable = [];
+  const excludedIds = new Set();
+  const maturedUnderPin = new Map();
+
+  for (const { name, version } of packages) {
+    const id = `${name}@${version}`;
+    const published = publishedAt.get(id);
+    if (published === undefined) {
+      // An excluded release is allowed through whatever its age, so a missing
+      // publish time for one is not a hole in the gate.
+      if (findExclusion(name, version, matchers) === undefined) unverifiable.push(id);
+      else excludedIds.add(id);
+      continue;
+    }
+
+    const ageMs = now - Date.parse(published);
+    const matured = ageMs >= windowMs;
+    const exclusion = findExclusion(name, version, matchers);
+
+    if (exclusion !== undefined) {
+      excludedIds.add(id);
+      // A pinned exemption that has served its purpose. Reported, never fatal:
+      // the release it unblocked is already out, and failing the build over
+      // housekeeping would just teach people to widen the entry instead.
+      if (matured && exclusion.versions !== undefined) {
+        maturedUnderPin.set(exclusion.entry, [...(maturedUnderPin.get(exclusion.entry) ?? []), id]);
+      }
+      continue;
+    }
+
+    if (!matured) {
+      immature.push({ name, version, published, ageMs, maturesAt: Date.parse(published) + windowMs });
+    }
+  }
+
+  // A pin nothing resolves any more is equally prunable. Bare names and scope
+  // wildcards are standing policy rather than a one-release waiver, so they are
+  // never reported.
+  const stale = [];
+  for (const matcher of matchers) {
+    const { entry, versions } = matcher;
+    if (versions === undefined) continue;
+    if (!packages.some(({ name, version }) => findExclusion(name, version, [matcher]) !== undefined)) {
+      stale.push({ entry, reason: "nothing in the lockfile resolves it" });
+      continue;
+    }
+    const matured = maturedUnderPin.get(entry);
+    if (matured !== undefined) {
+      stale.push({ entry, reason: `${matured.join(", ")} has matured past the window` });
+    }
+  }
+
+  return { immature, unverifiable, stale, excludedCount: excludedIds.size };
+}
+
+function unquote(value) {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+    (trimmed.startsWith('"') && trimmed.endsWith('"'))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function readCache() {
+  try {
+    return new Map(Object.entries(JSON.parse(readFileSync(CACHE_PATH, "utf8"))));
+  } catch {
+    return new Map();
+  }
+}
+
+// Publish times are immutable, so a hit never has to be revalidated and the
+// cache never has to expire. Only releases the lockfile has newly picked up
+// cost a request — which is exactly the set a PR needs judged.
+//
+// Narrowed to the lockfile's own releases before writing: a packument carries
+// the whole publish history (zod alone has over a thousand versions), and
+// keeping all of it would cost megabytes and never shed a version the repo has
+// moved off.
+function writeCache(publishedAt, keep) {
+  try {
+    const kept = {};
+    for (const id of keep) {
+      const published = publishedAt.get(id);
+      if (published !== undefined) kept[id] = published;
+    }
+    mkdirSync(dirname(CACHE_PATH), { recursive: true });
+    writeFileSync(CACHE_PATH, `${JSON.stringify(kept)}\n`);
+  } catch {
+    // A cache we cannot write is a slower check, not a failed one.
+  }
+}
+
+async function fetchPublishTimes(names, publishedAt) {
+  const queue = [...names];
+  const failures = [];
+
+  async function worker() {
+    for (let name = queue.pop(); name !== undefined; name = queue.pop()) {
+      try {
+        // The `time` map lives only in the full packument; the abbreviated
+        // (`application/vnd.npm.install-v1+json`) and single-version documents
+        // both omit it.
+        const response = await fetch(`${REGISTRY}/${name.replace("/", "%2F")}`, {
+          headers: { accept: "application/json" },
+        });
+        if (!response.ok) {
+          failures.push(`${name}: registry responded ${response.status}`);
+          continue;
+        }
+        const times = (await response.json()).time ?? {};
+        for (const [version, published] of Object.entries(times)) {
+          if (version === "created" || version === "modified") continue;
+          publishedAt.set(`${name}@${version}`, published);
+        }
+      } catch (error) {
+        failures.push(`${name}: ${error.message}`);
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: FETCH_CONCURRENCY }, worker));
+  return failures;
+}
+
+function fail(lines) {
+  console.error(["[check-dependency-maturity]", ...lines].join("\n"));
+  process.exit(1);
+}
+
+function days(ms) {
+  return (ms / 86_400_000).toFixed(1);
+}
+
+async function runCli() {
+  const workspacePath = join(repoRoot, "pnpm-workspace.yaml");
+  const { minimumReleaseAgeMinutes, exclusions } = parseMaturityPolicy(
+    readFileSync(workspacePath, "utf8"),
+  );
+
+  // The drift this repo actually had: an exclusion list sitting under no gate,
+  // so the only cooldown in force was whatever each developer's own pnpm
+  // config happened to set — enforced on one machine, absent from CI.
+  if (minimumReleaseAgeMinutes === undefined) {
+    fail([
+      "pnpm-workspace.yaml sets no `minimumReleaseAge`.",
+      exclusions.length > 0
+        ? `It does list ${exclusions.length} minimumReleaseAgeExclude entries, which exempt releases from a gate the repo never declares.`
+        : "Declare the cooldown here so every machine and CI job enforces the same policy.",
+      "Add: minimumReleaseAge: 10080   # 7 days",
+    ]);
+  }
+
+  const { matchers, unsupported } = parseExclusions(exclusions);
+  if (unsupported.length > 0) {
+    fail([
+      "minimumReleaseAgeExclude entries must pin exact versions, not ranges:",
+      ...unsupported.map((entry) => `  - ${entry}`),
+      "Write `name`, `@scope/*`, `name@1.2.3`, or `name@1.2.3 || 1.2.4`.",
+    ]);
+  }
+
+  const packages = parseLockedPackages(readFileSync(join(repoRoot, "pnpm-lock.yaml"), "utf8"));
+  if (packages.length === 0) {
+    fail(["pnpm-lock.yaml listed no registry packages — the lockfile format may have changed."]);
+  }
+
+  const lockedIds = packages.map(({ name, version }) => `${name}@${version}`);
+  const publishedAt = readCache();
+  const missing = new Set();
+  for (const { name, version } of packages) {
+    if (!publishedAt.has(`${name}@${version}`)) missing.add(name);
+  }
+
+  if (missing.size > 0) {
+    const failures = await fetchPublishTimes(missing, publishedAt);
+    if (failures.length > 0) {
+      fail([
+        `could not read publish times for ${failures.length} package(s) from ${REGISTRY}:`,
+        ...failures.slice(0, 10).map((failure) => `  ${failure}`),
+        "The cooldown cannot be verified offline for releases it has not seen before.",
+      ]);
+    }
+    writeCache(publishedAt, lockedIds);
+  }
+
+  const result = auditDependencyMaturity({
+    packages,
+    publishedAt,
+    matchers,
+    minimumReleaseAgeMinutes,
+    now: Date.now(),
+  });
+
+  if (result.unverifiable.length > 0) {
+    fail([
+      "the registry reports no publish time for:",
+      ...result.unverifiable.map((id) => `  ${id}`),
+    ]);
+  }
+
+  if (result.immature.length > 0) {
+    const window = days(minimumReleaseAgeMinutes * 60_000);
+    fail([
+      `${result.immature.length} dependency version(s) are younger than the ${window}-day minimumReleaseAge:`,
+      ...result.immature.map(
+        ({ name, version, published, ageMs, maturesAt }) =>
+          `  ${name}@${version} — published ${published} (${days(ageMs)} days ago), matures ${new Date(maturesAt).toISOString()}`,
+      ),
+      "",
+      "`pnpm install --frozen-lockfile` will not notice this, but the release's",
+      "`pnpm deploy` re-resolves and will refuse to package it.",
+      "",
+      "Either wait for the window to pass and re-run the lockfile update, or —",
+      "if the release has been reviewed and is worth taking early — pin it in",
+      "pnpm-workspace.yaml with a comment saying why:",
+      "",
+      "minimumReleaseAgeExclude:",
+      ...result.immature.map(({ name, version }) => `  - "${name}@${version}"`),
+    ]);
+  }
+
+  const summary =
+    `${packages.length} locked package versions checked against a ` +
+    `${days(minimumReleaseAgeMinutes * 60_000)}-day cooldown` +
+    (result.excludedCount > 0 ? `, ${result.excludedCount} excluded` : "");
+  console.log(`[check-dependency-maturity] ok — ${summary}.`);
+
+  for (const { entry, reason } of result.stale) {
+    console.log(`[check-dependency-maturity] note: minimumReleaseAgeExclude "${entry}" is prunable — ${reason}.`);
+  }
+}
+
+if (isCliEntrypoint(import.meta.url)) {
+  await runCli();
+}

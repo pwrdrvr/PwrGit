@@ -53,10 +53,19 @@ pnpm typecheck  # tsc across packages
 pnpm lint       # every check CI runs, cheapest-first (see below)
 ```
 
-`pnpm lint` chains `lint:colors` → `licenses:check` → `lint:boundaries` →
-`typecheck`, ordered so a fast failure doesn't wait on the slow one. CI's
-Typecheck job runs exactly this one command, so **add new repo-wide checks to
-the chain in the root `package.json`**, not as another CI step.
+`pnpm lint` chains `lint:colors` → `deps:maturity` → `licenses:check` →
+`lint:boundaries` → `typecheck`, ordered so a fast failure doesn't wait on the
+slow one. CI's Typecheck job runs exactly this one command, so **add new
+repo-wide checks to the chain in the root `package.json`**, not as another CI
+step.
+
+`deps:maturity` enforces the seven-day dependency cooldown
+(`minimumReleaseAge` in `pnpm-workspace.yaml`). pnpm only applies that setting
+while it *resolves*, and almost nothing here resolves — `--frozen-lockfile`
+skips it, while the release's `pnpm deploy` does not — so a too-young
+dependency otherwise passes every check and fails at packaging. See
+[scripts/AGENTS.md](scripts/AGENTS.md) before adding an exclusion; it is a
+supply-chain decision, not a way to make a build green.
 
 `licenses:check` chains three scripts that are easy to mistake for each other;
 [scripts/AGENTS.md](scripts/AGENTS.md) says which one judges a dependency's

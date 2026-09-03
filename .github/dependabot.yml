@@ -4,6 +4,18 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # Do not propose a release until it has cleared the same seven-day window
+    # `minimumReleaseAge` enforces in pnpm-workspace.yaml. Without this,
+    # Dependabot opens a PR the day a version lands, CI's frozen-lockfile
+    # install never re-checks the age, the bump merges — and then the release,
+    # whose `pnpm deploy` does re-resolve, refuses to package it days later.
+    # That is what happened to zod 4.5.1 and v0.11.0. Keeping the two windows
+    # equal is what makes the gate a non-event rather than a release blocker.
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 7
     groups:
       react-runtime:
         patterns:

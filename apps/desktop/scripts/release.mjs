@@ -252,7 +252,17 @@ function maybeDecodeAppleApiKey() {
 }
 
 if (!signStageOnly) {
-  // 1. Check license notices before doing expensive release work.
+  // 1. Cheap policy checks before doing expensive release work.
+  //
+  // The maturity check re-applies `minimumReleaseAge` to the lockfile the same
+  // way step 3's `pnpm deploy` will. It is redundant with `pnpm lint` on a
+  // healthy branch and takes about a second — but a release cut from a lockfile
+  // carrying a too-young dependency otherwise runs licenses, a full
+  // electron-vite build, and only then fails in the deploy, naming a constraint
+  // rather than what to do about it.
+  step("dependency maturity check");
+  runChecked("pnpm", ["deps:maturity"], { cwd: repoRoot });
+
   step("license notices check");
   runChecked("pnpm", ["licenses:check"], { cwd: repoRoot });
 
