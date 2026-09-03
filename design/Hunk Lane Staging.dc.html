@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --bg-app: #000000; --bg-panel: #0a0a0a; --bg-input: #080808;
+            --bg-elev: #101010; --bg-hover: #1f1a12;
+            --line: rgba(247, 243, 235, 0.1);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a;
+            --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42);
+            --atint: rgba(255, 138, 31, 0.08);
+            --ok: #5fa969; --okt: #9ce5b3; --bad: #b94232; --badt: #ffb0a1;
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          body { margin: 0; background: #050505; font-family: var(--sans); }
+          a { color: var(--accb); } a:hover { color: var(--acc); }
+          .dv-turn { padding: 40px 44px 32px; }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--sans); color: var(--t3); max-width: 640px; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--sans); color: var(--tsub); }
+          .dv-card { background: var(--bg-app); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+
+          /* ---- pane fragment, lifted from PwrGit app.css ---- */
+          .fhead { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--bg-input); }
+          .fstatus { flex: none; padding: 2px 6px; border-radius: 999px; font: 600 9px/1 var(--sans); letter-spacing: 0.06em; text-transform: uppercase; background: var(--bg-elev); color: var(--t3); }
+          .fpath { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 11.5px/1.3 var(--mono); color: var(--t1); }
+          .fstat { margin-left: auto; font: 500 10.5px/1 var(--mono); }
+          .fstat b { font-weight: 500; color: var(--okt); } .fstat s { text-decoration: none; color: var(--badt); }
+          .bar { display: flex; align-items: center; gap: 9px; min-height: 38px; padding: 7px 14px; border-bottom: 1px solid var(--line); background: var(--asoft); color: var(--t2); font: 500 10.5px/1.35 var(--sans); }
+          .btn-out { min-height: 24px; padding: 5px 9px; border: 1px solid var(--abord); border-radius: 5px; background: transparent; color: var(--accb); cursor: pointer; font: 650 10px/1 var(--sans); }
+          .btn-fill { min-height: 24px; padding: 5px 9px; border: 1px solid transparent; border-radius: 5px; background: var(--acc); color: var(--accon); cursor: pointer; font: 650 10px/1 var(--sans); }
+          .btn-fill.dim { opacity: 0.5; cursor: default; }
+          .bcount { margin-left: auto; color: var(--tsub); font-family: var(--mono); font-size: 10.5px; }
+
+          /* ---- two-lane grid ---- */
+          .hhead { display: grid; grid-template-columns: 16px 24px 1fr auto; gap: 6px; align-items: center; padding: 4px 10px 4px 0; font: 500 10.5px/1.4 var(--mono); color: var(--tsub); background: var(--bg-hover); }
+          .hbtn { min-height: 22px; padding: 3px 7px; border: 1px solid var(--abord); border-radius: 5px; background: var(--asoft); color: var(--accb); cursor: pointer; font: 650 10px/1 var(--sans); margin-right: 10px; }
+          .drow { display: grid; grid-template-columns: 16px 24px 40px 40px 14px 1fr; gap: 6px; align-items: baseline; padding: 1px 10px 1px 0; font: 500 11.5px/1.55 var(--mono); }
+          .drow.add { background: rgba(95, 169, 105, 0.1); }
+          .drow.del { background: rgba(185, 66, 50, 0.11); }
+          .drow.add .sym, .drow.add .code { color: var(--okt); }
+          .drow.del .sym, .drow.del .code { color: var(--badt); }
+          .drow.sel { box-shadow: inset 2px 0 0 var(--acc); }
+          .drow.sel .code, .drow.sel .sym { color: var(--t1); }
+          .drow.drag { background: var(--atint); box-shadow: inset 2px 0 0 var(--abord); }
+          .gut { text-align: right; color: var(--tsub); font-size: 10px; user-select: none; }
+          .sym { text-align: center; color: var(--tsub); user-select: none; }
+          .code { white-space: pre; color: var(--t2); }
+
+          /* lane 1 — the hunk rail */
+          .cell-h { position: relative; align-self: stretch; user-select: none; }
+          .rail { position: absolute; top: 0; bottom: 0; left: 6px; width: 3px; border-radius: 2px; background: transparent; }
+          .rail.idle { background: var(--line); }
+          .rail.part { background: var(--abord); }
+          .rail.full { background: var(--acc); }
+          .hchip { width: 16px; height: 16px; margin-left: 2px; padding: 0; border: 1px solid var(--abord); border-radius: 4px; background: transparent; color: var(--accb); cursor: pointer; font: 650 11px/1 var(--mono); }
+          .hchip.on { background: var(--acc); border-color: var(--acc); color: var(--accon); }
+          .hchip.part { background: var(--asoft); }
+
+          /* lane 2 — the line lane: + appears on row hover */
+          .cell-l { position: relative; align-self: stretch; display: flex; align-items: center; justify-content: center; cursor: pointer; user-select: none; }
+          .ladd { width: 16px; height: 16px; padding: 0; border: 1px solid var(--abord); border-radius: 999px; background: var(--bg-panel); color: var(--accb); cursor: pointer; font: 650 11px/1 var(--mono); opacity: 0; transition: opacity 120ms ease; }
+          .drow:hover .ladd { opacity: 1; }
+          .ladd.on { opacity: 1; background: var(--acc); border-color: var(--acc); color: var(--accon); }
+          .ladd.ghost { opacity: 1; }
+
+          /* annotation-only props (cursor, drag pill) — not UI */
+          .curs { position: absolute; width: 0; height: 0; border-left: 9px solid var(--t1); border-bottom: 4px solid transparent; border-top: 9px solid transparent; transform: rotate(-16deg); filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8)); pointer-events: none; }
+          .dragpill { position: absolute; padding: 3px 7px; border: 1px solid var(--abord); border-radius: 999px; background: var(--bg-elev); color: var(--accb); font: 600 10px/1 var(--mono); pointer-events: none; box-shadow: 0 12px 28px rgba(0, 0, 0, 0.32); }
+        </style>
+      </helmet>
+
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Two-lane staging gutter — checkboxes retired</span>
+        </div>
+        <p class="dv-sub">Left lane takes whole hunks: a chip at the top of each hunk, a rail spanning its rows. Second lane takes lines: a + surfaces on hover, press-and-sweep selects a run. Resting state carries no per-line controls at all.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a Resting">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Resting — one quiet chip per hunk, nothing per line</div>
+            <div class="dv-card" style="width: 560px;">
+              <div class="fhead"><span class="fstatus">modified</span><span class="fpath">src/renderer/src/styles/app.css</span><span class="fstat"><b>+29</b> <s>−12</s></span></div>
+              <div class="hhead"><span class="cell-h"><button class="hchip">+</button></span><span></span><span>@@ -204,8 +216,8 @@ .diff-row {</span><button class="hbtn">Stage hunk</button></div>
+              <div class="drow ctx"><span class="cell-h"><span class="rail idle"></span></span><span class="cell-l"></span><span class="gut">204</span><span class="gut">216</span><span class="sym"></span><span class="code">  align-items: baseline;</span></div>
+              <div class="drow del"><span class="cell-h"><span class="rail idle"></span></span><span class="cell-l"></span><span class="gut">205</span><span class="gut"></span><span class="sym">−</span><span class="code">  padding: var(--legacy-padding);</span></div>
+              <div class="drow add"><span class="cell-h"><span class="rail idle"></span></span><span class="cell-l"></span><span class="gut"></span><span class="gut">217</span><span class="sym">+</span><span class="code">  padding: var(--token-padding);</span></div>
+              <div class="drow del"><span class="cell-h"><span class="rail idle"></span></span><span class="cell-l"></span><span class="gut">206</span><span class="gut"></span><span class="sym">−</span><span class="code">  margin: var(--legacy-margin);</span></div>
+              <div class="drow add"><span class="cell-h"><span class="rail idle"></span></span><span class="cell-l"></span><span class="gut"></span><span class="gut">218</span><span class="sym">+</span><span class="code">  margin: var(--token-margin);</span></div>
+              <div class="drow ctx"><span class="cell-h"><span class="rail idle"></span></span><span class="cell-l"></span><span class="gut">207</span><span class="gut">219</span><span class="sym"></span><span class="code">}</span></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b Drag">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Drag — press a +, sweep the run</div>
+            <div class="dv-card" style="width: 560px; position: relative;">
+              <div class="fhead"><span class="fstatus">modified</span><span class="fpath">src/renderer/src/styles/app.css</span><span class="fstat"><b>+29</b> <s>−12</s></span></div>
+              <div class="hhead"><span class="cell-h"><button class="hchip part">+</button></span><span></span><span>@@ -204,8 +216,8 @@ .diff-row {</span><button class="hbtn">Stage hunk</button></div>
+              <div class="drow ctx"><span class="cell-h"><span class="rail part"></span></span><span class="cell-l"></span><span class="gut">204</span><span class="gut">216</span><span class="sym"></span><span class="code">  align-items: baseline;</span></div>
+              <div class="drow del drag"><span class="cell-h"><span class="rail part"></span></span><span class="cell-l"><button class="ladd on">+</button></span><span class="gut">205</span><span class="gut"></span><span class="sym">−</span><span class="code">  padding: var(--legacy-padding);</span></div>
+              <div class="drow add drag"><span class="cell-h"><span class="rail part"></span></span><span class="cell-l"></span><span class="gut"></span><span class="gut">217</span><span class="sym">+</span><span class="code">  padding: var(--token-padding);</span></div>
+              <div class="drow del drag"><span class="cell-h"><span class="rail part"></span></span><span class="cell-l"><button class="ladd ghost">+</button></span><span class="gut">206</span><span class="gut"></span><span class="sym">−</span><span class="code">  margin: var(--legacy-margin);</span></div>
+              <div class="drow add"><span class="cell-h"><span class="rail part"></span></span><span class="cell-l"></span><span class="gut"></span><span class="gut">218</span><span class="sym">+</span><span class="code">  margin: var(--token-margin);</span></div>
+              <div class="drow ctx"><span class="cell-h"><span class="rail part"></span></span><span class="cell-l"></span><span class="gut">207</span><span class="gut">219</span><span class="sym"></span><span class="code">}</span></div>
+              <span class="curs" style="left: 34px; top: 148px;"></span>
+              <span class="dragpill" style="left: 46px; top: 156px;">+3 lines</span>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1c" data-screen-label="1c Selected">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>Selected — the rail carries hunk state: solid = whole hunk, half-tone = partial</div>
+            <div class="dv-card" style="width: 560px;">
+              <div class="fhead"><span class="fstatus">modified</span><span class="fpath">src/renderer/src/styles/app.css</span><span class="fstat"><b>+29</b> <s>−12</s></span></div>
+              <div class="bar"><button class="btn-out">Stage file</button><button class="btn-fill">Stage 4 lines</button><span class="bcount">4 selected</span></div>
+              <div class="hhead"><span class="cell-h"><button class="hchip on">✓</button></span><span></span><span>@@ -204,4 +216,4 @@ .diff-row {</span><button class="hbtn">Unstage hunk</button></div>
+              <div class="drow del sel"><span class="cell-h"><span class="rail full"></span></span><span class="cell-l"><button class="ladd on">−</button></span><span class="gut">205</span><span class="gut"></span><span class="sym">−</span><span class="code">  padding: var(--legacy-padding);</span></div>
+              <div class="drow add sel"><span class="cell-h"><span class="rail full"></span></span><span class="cell-l"><button class="ladd on">−</button></span><span class="gut"></span><span class="gut">217</span><span class="sym">+</span><span class="code">  padding: var(--token-padding);</span></div>
+              <div class="drow add sel"><span class="cell-h"><span class="rail full"></span></span><span class="cell-l"><button class="ladd on">−</button></span><span class="gut"></span><span class="gut">218</span><span class="sym">+</span><span class="code">  margin: var(--token-margin);</span></div>
+              <div class="hhead"><span class="cell-h"><button class="hchip part">+</button></span><span></span><span>@@ -240,3 +252,3 @@ .diff-select {</span><button class="hbtn">Stage hunk</button></div>
+              <div class="drow del sel"><span class="cell-h"><span class="rail part"></span></span><span class="cell-l"><button class="ladd on">−</button></span><span class="gut">241</span><span class="gut"></span><span class="sym">−</span><span class="code">  width: 13px;</span></div>
+              <div class="drow add"><span class="cell-h"><span class="rail part"></span></span><span class="cell-l"></span><span class="gut"></span><span class="gut">253</span><span class="sym">+</span><span class="code">  width: 16px;</span></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1d" data-screen-label="1d Live prototype">
+            <div class="dv-olabel"><a class="dv-oid" href="#1d">1d</a>Live — hover a row, click a +, drag a run, take a hunk from its chip</div>
+            <div class="dv-card" style="width: 640px;">
+              <div class="fhead"><span class="fstatus">modified</span><span class="fpath">src/renderer/src/features/diff/DiffViewer.tsx</span><span class="fstat"><b>+9</b> <s>−4</s></span></div>
+              <div class="bar"><button class="btn-out">Stage file</button><button class="btn-fill {{barCls}}">{{barLabel}}</button><span class="bcount">{{countLabel}}</span></div>
+              <sc-for list="{{hunks}}" as="h" hint-placeholder-count="2">
+                <div>
+                  <div class="hhead"><span class="cell-h"><button class="hchip {{h.chipCls}}" onClick="{{h.take}}">{{h.chipGlyph}}</button></span><span></span><span>{{h.header}}</span><button class="hbtn" onClick="{{h.take}}">{{h.actionLabel}}</button></div>
+                  <sc-for list="{{h.rows}}" as="r" hint-placeholder-count="6">
+                    <div class="drow {{r.cls}}" onMouseEnter="{{r.enter}}">
+                      <span class="cell-h"><span class="rail {{h.railCls}}"></span></span>
+                      <span class="cell-l" onMouseDown="{{r.down}}"><sc-if value="{{r.tickable}}" hint-placeholder-val="{{ true }}"><button class="ladd {{r.addCls}}">{{r.glyph}}</button></sc-if></span>
+                      <span class="gut">{{r.oldNo}}</span>
+                      <span class="gut">{{r.newNo}}</span>
+                      <span class="sym">{{r.symGlyph}}</span>
+                      <span class="code">{{r.text}}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: "make the rail wider like <a class="dv-oid" href="#1c">1c</a> everywhere" · "put the hunk chip inline with the rail, not the header" · "show the unstage direction"</p>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = { sel: {}, from: null, to: null, adding: true, dragging: false };
+          this.hunksDef = [
+            { header: "@@ -18,4 +18,6 @@ export function DiffViewer({", rows: [
+              { k: "ctx", o: "18", n: "18", t: "  patch," },
+              { k: "del", o: "19", n: "", t: "}: { patch: string }) {", id: "a" },
+              { k: "add", o: "", n: "19", t: "  selection,", id: "b" },
+              { k: "add", o: "", n: "20", t: "}: {", id: "c" },
+              { k: "add", o: "", n: "21", t: "  patch: string;", id: "d" },
+              { k: "ctx", o: "20", n: "22", t: "  const parsed = useMemo(() => parse(patch), [patch]);" }
+            ] },
+            { header: "@@ -96,4 +100,5 @@ function DiffFileView({", rows: [
+              { k: "ctx", o: "96", n: "100", t: "      ) : (" },
+              { k: "del", o: "97", n: "", t: "        <DiffHunkView hunk={hunk} />", id: "e" },
+              { k: "add", o: "", n: "101", t: "        <DiffHunkView", id: "f" },
+              { k: "add", o: "", n: "102", t: "          hunk={hunk}", id: "g" },
+              { k: "add", o: "", n: "103", t: "          selection={selection}", id: "h" },
+              { k: "ctx", o: "98", n: "104", t: "      )}" }
+            ] }
+          ];
+          this.order = [];
+          for (const h of this.hunksDef) { for (const r of h.rows) { if (r.id) { this.order.push(r.id); } } }
+          this.endDrag = this.endDrag.bind(this);
+        }
+        componentDidMount() { window.addEventListener("mouseup", this.endDrag); }
+        componentWillUnmount() { window.removeEventListener("mouseup", this.endDrag); }
+        previewIds() {
+          const s = this.state;
+          if (!s.dragging || s.from === null) { return {}; }
+          const i = this.order.indexOf(s.from);
+          const j = this.order.indexOf(s.to === null ? s.from : s.to);
+          if (i < 0 || j < 0) { return {}; }
+          const out = {};
+          for (let x = Math.min(i, j); x <= Math.max(i, j); x += 1) { out[this.order[x]] = true; }
+          return out;
+        }
+        endDrag() {
+          const s = this.state;
+          if (!s.dragging) { return; }
+          const preview = this.previewIds();
+          const sel = Object.assign({}, s.sel);
+          for (const id of Object.keys(preview)) {
+            if (s.adding) { sel[id] = true; } else { delete sel[id]; }
+          }
+          this.setState({ sel: sel, from: null, to: null, dragging: false });
+        }
+        renderVals() {
+          const s = this.state;
+          const preview = this.previewIds();
+          const count = Object.keys(s.sel).length;
+          const hunks = this.hunksDef.map((h) => {
+            const ids = h.rows.filter((r) => r.id).map((r) => r.id);
+            const on = ids.filter((id) => s.sel[id]).length;
+            const all = on === ids.length && on > 0;
+            const railCls = all ? "full" : on > 0 ? "part" : "idle";
+            const take = () => {
+              const sel = Object.assign({}, this.state.sel);
+              for (const id of ids) { if (all) { delete sel[id]; } else { sel[id] = true; } }
+              this.setState({ sel: sel });
+            };
+            const rows = h.rows.map((r) => {
+              const tickable = Boolean(r.id);
+              const isSel = tickable && Boolean(s.sel[r.id]);
+              const inDrag = tickable && Boolean(preview[r.id]);
+              const cls = r.k + (isSel ? " sel" : "") + (inDrag ? " drag" : "");
+              return {
+                oldNo: r.o, newNo: r.n, text: r.t, tickable: tickable,
+                symGlyph: r.k === "add" ? "+" : r.k === "del" ? "−" : "",
+                cls: cls,
+                addCls: isSel ? "on" : inDrag ? "ghost" : "",
+                glyph: isSel ? "−" : "+",
+                down: tickable ? (e) => {
+                  e.preventDefault();
+                  this.setState({ from: r.id, to: r.id, adding: !this.state.sel[r.id], dragging: true });
+                } : undefined,
+                enter: tickable ? () => {
+                  if (this.state.dragging) { this.setState({ to: r.id }); }
+                } : undefined
+              };
+            });
+            return {
+              header: h.header, rows: rows, railCls: railCls, take: take,
+              chipGlyph: all ? "✓" : "+",
+              chipCls: all ? "on" : on > 0 ? "part" : "",
+              actionLabel: all ? "Clear hunk" : "Stage hunk"
+            };
+          });
+          return {
+            hunks: hunks,
+            barLabel: count === 0 ? "Stage selected" : "Stage " + count + " line" + (count === 1 ? "" : "s"),
+            barCls: count === 0 ? "dim" : "",
+            countLabel: count > 0 ? count + " selected" : ""
+          };
+        }
+      }
+    </script>
+  </body>
+</html>

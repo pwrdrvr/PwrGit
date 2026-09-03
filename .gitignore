@@ -62,6 +62,13 @@ design/**/.thumbnail
 # The .dc.html artboards and canvas.json beside them are the source; the
 # seeded page is regenerated from them.
 design/**/pwrgit-*.html
+# Design-session chat transcripts and pasted reference screenshots. Neither is
+# referenced by an artboard, and both can carry private context — internal
+# product decisions, local paths, account names, identifying details in a
+# screenshot. This repo is public, so they are excluded outright rather than
+# reviewed case by case on each re-export. Matches PwrAgnt; see design/SOURCE.md.
+design/chats/
+design/uploads/
 
 # Documentation screenshots produced by e2e/docs-screenshots.spec.ts.
 # Generated output: they are published from the docs repo, not committed here.
