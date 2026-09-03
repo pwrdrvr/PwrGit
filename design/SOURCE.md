@@ -37,7 +37,7 @@ and records where the retired wireframe disagreed with the code. Read it first.
 | `github.md` | Provenance note for the icon asset set (matched to PwrSnap's). |
 | `assets/logo-pwrgit.svg` | The lineage mark. |
 
-### Retired, but kept
+### History and leftovers
 
 `PwrGit.dc.html` is the **2026-08 wireframe**, superseded by
 `PwrGit App Baseline.dc.html`. It is deliberately still here because
@@ -47,10 +47,12 @@ path as the spec they were built against. Treat it as history: where it and the
 shipped app disagree, the app is right, and the coverage artboard lists every
 such disagreement. Do not use it as a target for new work.
 
-`uploads/pasted-1783285824699-0.png` is a screenshot of that same retired
-wireframe, unreferenced by any artboard. The design project dropped its
-`uploads/` folder in the 2026-09-02 pass; this one file is kept only so the
-re-export is not a silent deletion.
+`uploads/` is **gone** as of the 2026-09-03 re-export. It held a single pasted
+screenshot of that same retired wireframe, referenced by no artboard — so its
+only effect was to show the superseded UI sitting next to the artboard that
+replaces it. The design project dropped its own `uploads/` in the 2026-09-02
+pass on the same reasoning; the repo now matches. Nothing else referenced the
+file, and it carried no private content (see below).
 
 `fork-flow/` did not come from this project and is not reproduced by its export.
 Its four artboards load `./support.js`, which does not exist in that
@@ -76,11 +78,13 @@ difference between the checked-in copy and the project, and it is load-bearing �
 Also skipped: `.thumbnail` (already covered by `design/**/.thumbnail` in
 `.gitignore`).
 
-The project has **no `chats/` folder**, so unlike PwrAgnt there is no transcript
-to exclude. See PwrAgnt's
-`docs/design/pwragent-v2/SOURCE.md` for that policy; if a future export grows a
-`chats/` or a larger `uploads/`, review it for private context before committing
-— this repo is public.
+The project has **no `chats/` folder** and no `uploads/`, so there is currently
+nothing of that kind to exclude. PwrAgnt gitignores both outright — see
+`docs/design/pwragent-v2/SOURCE.md` — because they can carry private context:
+internal product decisions, local paths, account names, identifying details in
+screenshots. This repo has no such rule, so **if a future export grows a
+`chats/` or an `uploads/`, read it before committing** rather than assuming the
+last review still holds. This repo is public.
 
 ## How to re-export
 
@@ -88,8 +92,8 @@ to exclude. See PwrAgnt's
    is supposed to contain.
 2. Pull the project's files (`mcp__claude-design__list_files` / `read_file`, or
    the zip from the Projects tab at <https://claude.ai/design>).
-3. **Diff before replacing.** Do not `rm -rf` this directory: `PwrGit.dc.html`,
-   `uploads/` and `fork-flow/` are not produced by the export and would be lost.
+3. **Diff before replacing.** Do not `rm -rf` this directory: `PwrGit.dc.html`
+   and `fork-flow/` are not produced by the export and would be lost.
 4. Skip `apps/desktop/**` and `.thumbnail`.
 5. Re-apply the `../` rewrite to `PwrGit Icon.dc.html` (see above), then confirm
    every `src` resolves to a real file under `apps/desktop/build/`.
