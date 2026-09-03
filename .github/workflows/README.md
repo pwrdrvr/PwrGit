@@ -4,9 +4,23 @@
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `ci.yml` | push to `main`, PRs | Typecheck, build, unit tests, Linux + Windows desktop E2E. Unit-test jobs run `rebuild:electron-native` first — a no-op after a fresh install, which repairs a restored `node_modules` cache whose better-sqlite3 build predates the two-ABI layout. |
+| `ci.yml` | push to `main`, PRs | Typecheck, build, unit tests, Linux + Windows desktop E2E. Unit-test jobs run `rebuild:electron-native` first — a no-op after a fresh install, which repairs a restored `node_modules` cache whose better-sqlite3 build predates the two-ABI layout. Documentation-only PRs skip those jobs after Classify Changes (see below). |
 | `preview-build.yml` | `build-preview` PR label | Unsigned macOS universal DMG + Windows NSIS installer, uploaded as workflow artifacts. |
 | `release.yml` | `v*` tag push, manual dispatch with a tag, or `ci:windows-signing` PR label | Tests and stages via `apps/desktop/scripts/release.mjs`. Tagged runs gate GitHub Pre-release creation on Linux build, signed/notarized macOS, and Azure-signed Windows. Labeled same-repo PRs run the real Windows prepare/sign/Authenticode path and upload workflow artifacts only. |
+
+## Documentation-only PRs
+
+`ci.yml` classifies each pull request before the expensive jobs. If every
+changed path (and `previous_filename` on a rename) is under `docs/` or ends
+with `.md` (case-insensitive), Classify Changes sets `code_impacting=false`
+and these jobs skip: `install-deps`, `windows-install-deps`, `typecheck`,
+`build`, `test`, `desktop-e2e`, `desktop-e2e-result`, `windows`,
+`windows-e2e`. Push/main events, API errors, and incomplete file lists still
+run full CI.
+
+Do not add `paths` or `paths-ignore` to the `pull_request` trigger. Required
+status checks (`Typecheck`, `Desktop E2E`) must still exist on every PR;
+skipped jobs satisfy those checks, missing jobs leave them pending.
 
 ## PR labels
 
