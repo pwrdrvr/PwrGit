@@ -34,7 +34,7 @@
 // releases than its author intended is the failure mode worth designing
 // against, and `pnpm deps:maturity` names the exact version to pin.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isCliEntrypoint } from "./lib/cli-entrypoint.mjs";
@@ -43,6 +43,19 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REGISTRY = "https://registry.npmjs.org";
 const CACHE_PATH = join(repoRoot, "node_modules", ".cache", "pwrgit", "dependency-publish-times.json");
 const FETCH_CONCURRENCY = 16;
+// A cold run asks the registry about every distinct package name in the
+// lockfile — some 570 requests — and CI is always cold: the node_modules cache
+// is saved by the install-deps job, which never runs `pnpm lint`. Treating one
+// transient 5xx out of 570 as fatal would fail the lint chain on a large
+// fraction of runs, so each request retries with backoff, and none may hang
+// forever.
+const FETCH_ATTEMPTS = 3;
+const FETCH_TIMEOUT_MS = 30_000;
+const FETCH_RETRY_BASE_MS = 250;
+// Retries are for the odd blip in a large batch. Once this many packages have
+// exhausted theirs, the registry is not flaky, it is unreachable — stop paying
+// backoff for the remaining hundreds and report the outage promptly.
+const FAIL_FAST_AFTER = 10;
 
 // `1.2.3`, `1.2.3-rc.1`, `1.2.3+build`. Anything else in a `packages:` key is
 // a link:/file:/tarball resolution, which has no registry publish time and no
@@ -164,13 +177,17 @@ function nameMatches(pattern, name) {
   return pattern.endsWith("*") && name.startsWith(pattern.slice(0, -1));
 }
 
+/** Whether one matcher covers `name@version`. */
+export function matcherCovers(matcher, name, version) {
+  return (
+    nameMatches(matcher.name, name) &&
+    (matcher.versions === undefined || matcher.versions.includes(version))
+  );
+}
+
 /** The matcher covering `name@version`, or undefined when none does. */
 export function findExclusion(name, version, matchers) {
-  return matchers.find(
-    (matcher) =>
-      nameMatches(matcher.name, name) &&
-      (matcher.versions === undefined || matcher.versions.includes(version)),
-  );
+  return matchers.find((matcher) => matcherCovers(matcher, name, version));
 }
 
 /**
@@ -193,18 +210,19 @@ export function auditDependencyMaturity({
 
   for (const { name, version } of packages) {
     const id = `${name}@${version}`;
+    const exclusion = findExclusion(name, version, matchers);
     const published = publishedAt.get(id);
+
     if (published === undefined) {
       // An excluded release is allowed through whatever its age, so a missing
       // publish time for one is not a hole in the gate.
-      if (findExclusion(name, version, matchers) === undefined) unverifiable.push(id);
+      if (exclusion === undefined) unverifiable.push(id);
       else excludedIds.add(id);
       continue;
     }
 
     const ageMs = now - Date.parse(published);
     const matured = ageMs >= windowMs;
-    const exclusion = findExclusion(name, version, matchers);
 
     if (exclusion !== undefined) {
       excludedIds.add(id);
@@ -229,7 +247,7 @@ export function auditDependencyMaturity({
   for (const matcher of matchers) {
     const { entry, versions } = matcher;
     if (versions === undefined) continue;
-    if (!packages.some(({ name, version }) => findExclusion(name, version, [matcher]) !== undefined)) {
+    if (!packages.some(({ name, version }) => matcherCovers(matcher, name, version))) {
       stale.push({ entry, reason: "nothing in the lockfile resolves it" });
       continue;
     }
@@ -265,10 +283,9 @@ function readCache() {
 // cache never has to expire. Only releases the lockfile has newly picked up
 // cost a request — which is exactly the set a PR needs judged.
 //
-// Narrowed to the lockfile's own releases before writing: a packument carries
-// the whole publish history (zod alone has over a thousand versions), and
-// keeping all of it would cost megabytes and never shed a version the repo has
-// moved off.
+// `publishedAt` already holds only the ids the lockfile pins (fetchPublishTimes
+// discards the rest of each packument), so there is nothing left to narrow
+// here beyond dropping ids the current lockfile has moved off.
 function writeCache(publishedAt, keep) {
   try {
     const kept = {};
@@ -283,30 +300,64 @@ function writeCache(publishedAt, keep) {
   }
 }
 
-async function fetchPublishTimes(names, publishedAt) {
+const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+
+/**
+ * Fetch one packument, retrying the failures that are worth retrying.
+ *
+ * 5xx, 429 and transport errors are transient; 404 and the other 4xx are the
+ * registry's final answer and retrying them only makes the whole check slower.
+ */
+async function fetchPackument(name, attempts) {
+  let lastFailure;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      // The `time` map lives only in the full packument; the abbreviated
+      // (`application/vnd.npm.install-v1+json`) and single-version documents
+      // both omit it.
+      const response = await fetch(`${REGISTRY}/${name.replace("/", "%2F")}`, {
+        headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      if (response.ok) return { times: (await response.json()).time ?? {} };
+
+      lastFailure = `registry responded ${response.status}`;
+      if (response.status < 500 && response.status !== 429) break;
+    } catch (error) {
+      lastFailure = error.message;
+    }
+    if (attempt < attempts) await sleep(FETCH_RETRY_BASE_MS * 2 ** (attempt - 1));
+  }
+
+  return { failure: `${name}: ${lastFailure}` };
+}
+
+/**
+ * Resolve publish times for `names`, keeping only the ids in `wanted`.
+ *
+ * A packument carries the package's whole publish history — zod alone has over
+ * a thousand versions — and the audit reads exactly the releases the lockfile
+ * pins, so the rest is dropped on arrival rather than retained for the life of
+ * the process.
+ */
+async function fetchPublishTimes(names, wanted, publishedAt) {
   const queue = [...names];
   const failures = [];
 
   async function worker() {
     for (let name = queue.pop(); name !== undefined; name = queue.pop()) {
-      try {
-        // The `time` map lives only in the full packument; the abbreviated
-        // (`application/vnd.npm.install-v1+json`) and single-version documents
-        // both omit it.
-        const response = await fetch(`${REGISTRY}/${name.replace("/", "%2F")}`, {
-          headers: { accept: "application/json" },
-        });
-        if (!response.ok) {
-          failures.push(`${name}: registry responded ${response.status}`);
-          continue;
-        }
-        const times = (await response.json()).time ?? {};
-        for (const [version, published] of Object.entries(times)) {
-          if (version === "created" || version === "modified") continue;
-          publishedAt.set(`${name}@${version}`, published);
-        }
-      } catch (error) {
-        failures.push(`${name}: ${error.message}`);
+      const { times, failure } = await fetchPackument(
+        name,
+        failures.length < FAIL_FAST_AFTER ? FETCH_ATTEMPTS : 1,
+      );
+      if (failure !== undefined) {
+        failures.push(failure);
+        continue;
+      }
+      for (const [version, published] of Object.entries(times)) {
+        const id = `${name}@${version}`;
+        if (wanted.has(id)) publishedAt.set(id, published);
       }
     }
   }
@@ -322,6 +373,12 @@ function fail(lines) {
 
 function days(ms) {
   return (ms / 86_400_000).toFixed(1);
+}
+
+// A publish timestamp ahead of the local clock (skew, or a release seconds old)
+// would otherwise render as "-0.0 days ago" and read as a bug in the checker.
+function age(ms) {
+  return ms < 0 ? "just now, ahead of this machine's clock" : `${days(ms)} days ago`;
 }
 
 async function runCli() {
@@ -357,7 +414,7 @@ async function runCli() {
     fail(["pnpm-lock.yaml listed no registry packages — the lockfile format may have changed."]);
   }
 
-  const lockedIds = packages.map(({ name, version }) => `${name}@${version}`);
+  const lockedIds = new Set(packages.map(({ name, version }) => `${name}@${version}`));
   const publishedAt = readCache();
   const missing = new Set();
   for (const { name, version } of packages) {
@@ -365,15 +422,21 @@ async function runCli() {
   }
 
   if (missing.size > 0) {
-    const failures = await fetchPublishTimes(missing, publishedAt);
+    const failures = await fetchPublishTimes(missing, lockedIds, publishedAt);
+    // Written before the failure check: a cold run costs hundreds of packument
+    // fetches, and one package the registry would not serve is no reason to
+    // throw away the rest and pay for them again on the next attempt.
+    writeCache(publishedAt, lockedIds);
     if (failures.length > 0) {
       fail([
         `could not read publish times for ${failures.length} package(s) from ${REGISTRY}:`,
         ...failures.slice(0, 10).map((failure) => `  ${failure}`),
-        "The cooldown cannot be verified offline for releases it has not seen before.",
+        failures.length > FAIL_FAST_AFTER
+          ? `The registry looks unreachable, so only the first ${FAIL_FAST_AFTER} were retried.`
+          : `Each was retried up to ${FETCH_ATTEMPTS} times.`,
+        "The cooldown cannot be verified offline for releases this checkout has not seen before.",
       ]);
     }
-    writeCache(publishedAt, lockedIds);
   }
 
   const result = auditDependencyMaturity({
@@ -397,7 +460,7 @@ async function runCli() {
       `${result.immature.length} dependency version(s) are younger than the ${window}-day minimumReleaseAge:`,
       ...result.immature.map(
         ({ name, version, published, ageMs, maturesAt }) =>
-          `  ${name}@${version} — published ${published} (${days(ageMs)} days ago), matures ${new Date(maturesAt).toISOString()}`,
+          `  ${name}@${version} — published ${published} (${age(ageMs)}), matures ${new Date(maturesAt).toISOString()}`,
       ),
       "",
       "`pnpm install --frozen-lockfile` will not notice this, but the release's",

@@ -1,11 +1,17 @@
+import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   auditDependencyMaturity,
   findExclusion,
+  matcherCovers,
   parseExclusions,
   parseLockedPackages,
   parseMaturityPolicy,
 } from "./check-dependency-maturity.mjs";
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const WINDOW_MINUTES = 10_080;
 const NOW = Date.parse("2026-09-03T12:00:00.000Z");
@@ -68,6 +74,35 @@ describe("parseMaturityPolicy", () => {
     );
 
     expect(policy.minimumReleaseAgeMinutes).toBeUndefined();
+  });
+});
+
+// The parsers are hand-rolled against two files this repo owns and reformats
+// by hand. Fragments prove the grammar; these prove it still fits the real
+// thing, which is where a flow-style list or a quoted scalar would otherwise
+// degrade the check to "no policy" or "no exclusions" without failing a test.
+describe("against the repository's own files", () => {
+  it("finds the declared cooldown and every exclusion in pnpm-workspace.yaml", () => {
+    const policy = parseMaturityPolicy(
+      readFileSync(join(repoRoot, "pnpm-workspace.yaml"), "utf8"),
+    );
+
+    expect(policy.minimumReleaseAgeMinutes).toBe(10_080);
+    expect(policy.exclusions).toContain("@pwrdrvr/agent-core");
+    expect(policy.exclusions.every((entry) => entry.length > 0)).toBe(true);
+    expect(parseExclusions(policy.exclusions).unsupported).toEqual([]);
+  });
+
+  it("reads the lockfile's registry releases and nothing else", () => {
+    const packages = parseLockedPackages(readFileSync(join(repoRoot, "pnpm-lock.yaml"), "utf8"));
+
+    // A parser that silently stopped matching would return zero or a handful.
+    expect(packages.length).toBeGreaterThan(400);
+    expect(packages).toContainEqual({ name: "zod", version: "4.5.1" });
+    // link:/file: workspace entries carry no registry publish time.
+    expect(packages.every(({ version }) => /^\d+\.\d+\.\d+/.test(version))).toBe(true);
+    // `snapshots:` keys carry peer suffixes; none may leak through.
+    expect(packages.every(({ version }) => !version.includes("("))).toBe(true);
   });
 });
 
@@ -138,6 +173,16 @@ describe("parseExclusions", () => {
       ["4.5.1"],
       ["8.21.0", "8.21.1"],
     ]);
+  });
+});
+
+describe("matcherCovers", () => {
+  const [pin] = parseExclusions(["zod@4.5.1"]).matchers;
+
+  it("is the single predicate findExclusion is built from", () => {
+    expect(matcherCovers(pin, "zod", "4.5.1")).toBe(true);
+    expect(matcherCovers(pin, "zod", "4.5.4")).toBe(false);
+    expect(matcherCovers(pin, "zod-to-json-schema", "4.5.1")).toBe(false);
   });
 });
 

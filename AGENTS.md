@@ -60,12 +60,9 @@ repo-wide checks to the chain in the root `package.json`**, not as another CI
 step.
 
 `deps:maturity` enforces the seven-day dependency cooldown
-(`minimumReleaseAge` in `pnpm-workspace.yaml`). pnpm only applies that setting
-while it *resolves*, and almost nothing here resolves — `--frozen-lockfile`
-skips it, while the release's `pnpm deploy` does not — so a too-young
-dependency otherwise passes every check and fails at packaging. See
-[scripts/AGENTS.md](scripts/AGENTS.md) before adding an exclusion; it is a
-supply-chain decision, not a way to make a build green.
+(`minimumReleaseAge` in `pnpm-workspace.yaml`). Adding an exclusion to get past
+it is a supply-chain decision — [scripts/AGENTS.md](scripts/AGENTS.md) says why
+the check exists and what an exclusion costs.
 
 `licenses:check` chains three scripts that are easy to mistake for each other;
 [scripts/AGENTS.md](scripts/AGENTS.md) says which one judges a dependency's
