@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --bg-app: #000000; --bg-panel: #0a0a0a; --bg-input: #080808;
+            --bg-elev: #101010; --bg-hover: #14110d; --bg-row-active: #120800;
+            --line: rgba(247, 243, 235, 0.1); --line2: rgba(247, 243, 235, 0.14); --line3: rgba(247, 243, 235, 0.2);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a;
+            --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42);
+            --ok: #5fa969; --okt: #9ce5b3;
+            --bad: #b94232; --badsoft: rgba(185, 66, 50, 0.24); --badbord: rgba(185, 66, 50, 0.28); --badt: #ffb0a1; --badon: #2a0d08;
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #050505; }
+          body { margin: 0; background: #050505; font-family: var(--sans); }
+          a { color: var(--accb); text-decoration: none; } a:hover { color: var(--acc); }
+
+          /* ---- review chrome (matches "Hunk Lane Staging") ---- */
+          .dv-turn { padding: 40px 44px 32px; background: #050505; }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--sans); color: var(--t3); max-width: 720px; text-wrap: pretty; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--sans); color: var(--tsub); max-width: 660px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+
+          /* ---- modal shell, lifted from PwrGit app.css ---- */
+          .m { width: 656px; padding: 18px; background: var(--bg-elev); border: 1px solid var(--line3); border-radius: 12px; box-shadow: 0 18px 48px rgba(0,0,0,0.42); }
+          .m-title { margin: 0 0 12px; font: 700 13px/1.35 var(--sans); color: var(--t1); }
+          .m-p { margin: 0; font: 500 12px/1.5 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .m-note { margin: 12px 0 0; font: 500 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .m-note code { font: 600 10px/1.4 var(--mono); color: var(--t2); }
+          .m-acts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+          .b { height: 32px; padding: 0 14px; border-radius: 7px; border: 1px solid var(--line2); background: transparent; color: var(--t2); font: 600 12px/1 var(--sans); cursor: pointer; }
+          .b-go { border-color: transparent; background: var(--acc); color: var(--accon); font-weight: 700; }
+          .b-bad { border-color: transparent; background: var(--badt); color: var(--badon); font-weight: 700; }
+          .b-off { opacity: 0.45; cursor: not-allowed; }
+          .b-sm { height: 24px; padding: 0 9px; border-radius: 6px; font: 650 10px/1 var(--sans); }
+
+          /* ---- eyebrow + fields ---- */
+          .eyeb { display: block; margin: 15px 0 8px; font: 600 9.5px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); }
+          .fld { display: grid; grid-template-columns: 130px minmax(0, 1fr); align-items: center; gap: 10px; margin-top: 10px; }
+          .fld > .lbl { display: flex; align-items: center; gap: 5px; font: 600 10.5px/1.3 var(--sans); color: var(--t3); }
+          .inp { display: flex; align-items: center; width: 100%; height: 34px; padding: 0 9px; border: 1px solid var(--line2); border-radius: 7px; background: var(--bg-input); color: var(--t1); font: 500 11px/1 var(--mono); }
+          .inp.ph { color: var(--tsub); }
+          .inp.on { border-color: var(--abord); }
+          .caret { display: inline-block; width: 1px; height: 13px; margin-left: 1px; background: var(--acc); }
+
+          /* ---- listbox mocks ---- */
+          .lst { border: 1px solid var(--line2); border-radius: 7px; background: var(--bg-input); overflow: hidden; }
+          .lst.clipped { height: 40px; }
+          .lgrp { padding: 4px 8px 2px; font: 700 11px/1.4 var(--mono); color: var(--t1); }
+          .lrow { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; align-items: baseline; padding: 3px 8px; font: 500 11px/1.5 var(--mono); color: var(--t2); }
+          .lrow.sel { background: var(--acc); color: var(--accon); }
+          .lrow.sel .meta { color: var(--accon); opacity: 0.72; }
+          .lrow .meta { color: var(--tsub); font-size: 10px; white-space: nowrap; }
+          .lrow .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .sbar { position: absolute; top: 3px; right: 3px; bottom: 3px; width: 5px; border-radius: 999px; background: rgba(247,243,235,0.08); }
+          .sthumb { position: absolute; top: 0; width: 5px; height: 26%; border-radius: 999px; background: rgba(140,133,122,0.46); }
+          .status { display: flex; gap: 10px; align-items: center; justify-content: flex-end; margin-top: 6px; font: 500 10.5px/1.4 var(--sans); color: var(--t3); }
+
+          /* ---- radio target cards ---- */
+          .card { display: flex; align-items: flex-start; gap: 9px; padding: 10px; border: 1px solid var(--line2); border-radius: 9px; background: var(--bg-panel); cursor: pointer; }
+          .card + .card { margin-top: 8px; }
+          .card.on { border-color: var(--abord); background: var(--asoft); }
+          .rad { flex: none; width: 13px; height: 13px; margin-top: 2px; border-radius: 999px; border: 1px solid var(--line3); }
+          .rad.on { border: 4px solid var(--acc); }
+          .card-b { min-width: 0; flex: 1; }
+          .card-h { display: flex; align-items: baseline; gap: 8px; }
+          .card-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 650 12px/1.3 var(--mono); color: var(--t1); }
+          .card-s { display: block; font: 600 11.5px/1.3 var(--sans); color: var(--t1); }
+          .card-m { display: block; margin-top: 4px; font: 500 10.5px/1.45 var(--mono); color: var(--t3); }
+          .card-d { display: block; margin-top: 4px; font: 500 10.5px/1.45 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .tag { flex: none; margin-left: auto; padding: 2px 6px; border-radius: 999px; font: 700 8.5px/1.35 var(--sans); letter-spacing: 0.06em; text-transform: uppercase; background: var(--asoft); color: var(--accb); border: 1px solid var(--abord); }
+          .tag.q { background: rgba(247,243,235,0.06); color: var(--t3); border-color: var(--line); }
+
+          /* ---- ahead/behind + ledger ---- */
+          .ab { display: inline-flex; gap: 7px; font: 600 10.5px/1 var(--mono); }
+          .ab .up { color: var(--okt); } .ab .dn { color: var(--badt); }
+          .ledger { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+          .cell { padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-panel); }
+          .cell.hot { border-color: var(--badbord); background: var(--badsoft); }
+          .cell-k { font: 700 19px/1.1 var(--mono); color: var(--t1); }
+          .cell.hot .cell-k { color: var(--badt); }
+          .cell-l { margin-top: 4px; font: 500 10px/1.35 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .cell.hot .cell-l { color: var(--badt); opacity: 0.85; }
+
+          /* ---- review refs ---- */
+          .refs { display: grid; grid-template-columns: minmax(0,1fr) 22px minmax(0,1fr); align-items: center; gap: 10px; margin-top: 12px; }
+          .ref { padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-panel); min-width: 0; }
+          .ref dt { margin-bottom: 6px; font: 600 9.5px/1 var(--sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--t3); }
+          .ref dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 11px/1.35 var(--mono); color: var(--t1); }
+          .ref .sha { margin-top: 3px; font-size: 10px; color: var(--t3); }
+          .arr { text-align: center; font: 600 14px/1 var(--mono); color: var(--t3); }
+
+          /* ---- banners ---- */
+          .ban { display: flex; align-items: center; gap: 9px; margin-top: 12px; padding: 8px 10px; border: 1px solid var(--abord); border-radius: 8px; background: var(--asoft); font: 500 11px/1.45 var(--sans); color: var(--t2); }
+          .ban.hot { border-color: var(--badbord); background: var(--badsoft); color: var(--badt); }
+          .ban .grow { flex: 1; min-width: 0; text-wrap: pretty; }
+          .chk { display: flex; align-items: flex-start; gap: 9px; margin-top: 12px; padding: 10px; border: 1px solid var(--badbord); border-radius: 8px; background: var(--badsoft); font: 500 11px/1.45 var(--sans); color: var(--badt); cursor: pointer; }
+          .box { flex: none; width: 13px; height: 13px; margin-top: 1px; border-radius: 3px; border: 1px solid var(--badt); }
+
+          /* ---- dropped-commit list ---- */
+          .drops { margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-panel); overflow: hidden; }
+          .drops-h { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--line); font: 600 10px/1.3 var(--sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--t3); }
+          .drop { display: grid; grid-template-columns: 62px minmax(0,1fr) auto; gap: 10px; align-items: baseline; padding: 3px 10px; font: 500 11px/1.6 var(--mono); }
+          .drop .sha { color: var(--badt); }
+          .drop .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t2); }
+          .drop .age { color: var(--tsub); font-size: 10px; }
+          .drops-f { padding: 6px 10px; border-top: 1px solid var(--line); font: 500 10px/1.4 var(--sans); color: var(--t3); }
+
+          /* ---- findings legend ---- */
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); }
+          .pin.q { background: var(--t3); color: #050505; }
+          .rowpin { margin-left: auto; }
+          .find { width: 380px; display: flex; flex-direction: column; gap: 10px; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0,1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--sans); color: var(--t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .fitem code { font: 500 10px/1.4 var(--mono); color: var(--t2); }
+          .pair { display: flex; gap: 24px; align-items: flex-start; }
+
+          /* ---- sidebar row + menu mocks ---- */
+          .side { width: 320px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: #050505; }
+          .wt { display: flex; align-items: center; gap: 7px; padding: 4px 7px; border-radius: 6px; font: 500 12px/1.4 var(--mono); color: var(--t2); }
+          .wt.on { background: var(--bg-row-active); box-shadow: inset 2px 0 0 var(--acc); color: var(--t1); }
+          .wt .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .wt .ab { margin-left: auto; }
+          .wt .age { margin-left: auto; color: var(--tsub); font-size: 10px; }
+          .kb { flex: none; width: 18px; text-align: center; color: var(--t3); font: 700 12px/1 var(--sans); }
+          .menu { width: 232px; padding: 5px; border: 1px solid var(--line3); border-radius: 8px; background: var(--bg-elev); box-shadow: 0 18px 48px rgba(0,0,0,0.42); }
+          .mi { padding: 6px 9px; border-radius: 5px; font: 500 11.5px/1.35 var(--sans); color: var(--t2); }
+          .mi.new { background: var(--asoft); color: var(--accb); }
+          .mi.bad { color: var(--badt); }
+          .msep { height: 1px; margin: 4px 5px; background: var(--line); }
+
+          /* ---- entry-point table ---- */
+          .tbl { width: 656px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-panel); overflow: hidden; }
+          .tr { display: grid; grid-template-columns: minmax(0,1fr) 92px; gap: 12px; align-items: center; padding: 8px 11px; border-bottom: 1px solid var(--line); }
+          .tr.last { border-bottom: 0; }
+          .tr.head { background: var(--bg-hover); font: 600 9.5px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); }
+          .tr .where { font: 500 11.5px/1.4 var(--sans); color: var(--t1); }
+          .tr .where em { display: block; margin-top: 2px; font: 400 10px/1.4 var(--mono); font-style: normal; color: var(--t3); }
+          .tr .rt { justify-self: end; }
+          .st { padding: 2px 7px; border-radius: 999px; font: 700 8.5px/1.5 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; }
+          .st.has { background: rgba(95,169,105,0.14); color: var(--okt); border: 1px solid rgba(95,169,105,0.32); }
+          .st.add { background: var(--asoft); color: var(--accb); border: 1px solid var(--abord); }
+        </style>
+      </helmet>
+
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Findings — the dialog as it ships today</span>
+        </div>
+        <p class="dv-sub">Recreated from the reported screenshot: a worktree on fix/1.1-windows-media-copy, 9 ahead and 15 behind its own upstream, opening Reset to remote branch. Eight problems, six of them visible on this one screen.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a Current, annotated">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Current — the safest-looking default is the most destructive answer</div>
+            <div class="pair">
+              <div class="m">
+                <div class="m-title" style="display:flex;align-items:baseline;gap:8px;">Reset fix/1.1-windows-media-copy to a fetched remote branch<span class="pin rowpin">1</span></div>
+                <p class="m-p">Choose the fetched remote-tracking tip that this checked-out local branch should point to. PwrGit will inspect both tips again before showing the final confirmation.</p>
+
+                <div class="fld"><span class="lbl">Filter</span><div class="inp ph">Filter by name or commit subject</div></div>
+                <div class="fld" style="align-items:start;"><span class="lbl" style="padding-top:9px;">Remote branch<span class="pin">2</span><span class="pin">3</span></span>
+                  <div style="position:relative;">
+                    <div class="lst clipped">
+                      <div class="lgrp">Remote branches</div>
+                      <div class="lrow sel"><span class="nm">origin/main · eafa064247ab</span></div>
+                      <div class="lrow"><span class="nm">origin/fix/1.1-windows-media-copy · 9ec3f2a1b0c4</span></div>
+                    </div>
+                    <span class="sbar"><span class="sthumb"></span></span>
+                  </div>
+                </div>
+                <div class="status"><span class="pin q">4</span><span>Showing 39 of 39</span></div>
+
+                <span class="eyeb" style="display:flex;align-items:center;gap:8px;">Reset mode<span class="pin">5</span></span>
+                <div class="card on"><span class="rad on"></span><span class="card-b"><span class="card-s">Soft</span><span class="card-d">Move the branch and HEAD to the selected commit without changing the index or working tree. File contents and existing staged/unstaged work stay in place; Git reports their differences against the new HEAD.</span></span></div>
+                <div class="card"><span class="rad"></span><span class="card-b"><span class="card-s">Hard · destructive</span><span class="card-d">Move the branch and HEAD, reset the index, and overwrite tracked files. This discards tracked staged and unstaged changes. Untracked and ignored files are normally left alone, but Git may delete an untracked file or directory that obstructs a tracked path in the target commit. This does not run git clean.</span></span></div>
+
+                <p class="m-note">Both modes move the local branch pointer to <code>origin/main</code>. Any local commits that are not reachable from that target leave the branch. Git's reflog may retain them temporarily; do not rely on that as a backup.</p>
+                <div class="m-acts"><span class="pin" style="align-self:center;margin-right:auto;">6</span><button class="b">Cancel</button><button class="b b-go">Review soft reset</button></div>
+              </div>
+
+              <div class="find">
+                <div class="fitem"><span class="pin">1</span><div><h4>"Fetched" is a caveat with no controls</h4><p>The reset targets the last fetch, not the live remote. Nothing says when that was, and there is no way to refresh from here. A stale <code>origin</code> resets you to yesterday's tip, silently.</p></div></div>
+                <div class="fitem"><span class="pin">2</span><div><h4>Defaults to origin/main, not your upstream</h4><p>The picker seeds itself with the first row of a list sorted newest-commit-first across every remote. The branch's own upstream — <code>origin/fix/1.1-windows-media-copy</code>, the answer almost every time — is somewhere below the fold. One confirm resets a feature branch onto trunk.</p></div></div>
+                <div class="fitem"><span class="pin">3</span><div><h4>Eight-row listbox renders one row</h4><p><code>size={8}</code> is overridden in CSS: <code>.refs-field select { height: 34px }</code> lands after <code>.branch-picker__list select { height: auto }</code> at equal specificity, so the later rule wins. 39 branches paged through a one-row porthole. The push dialog shares the control and the bug.</p></div></div>
+                <div class="fitem"><span class="pin q">4</span><div><h4>The only clue that 39 exist</h4><p>10.5px muted text, bottom-right, underneath a control that shows one row. It reads as a footnote, not as "there is a list here".</p></div></div>
+                <div class="fitem"><span class="pin">5</span><div><h4>Both modes look equally safe</h4><p>Identical neutral cards. "Hard · destructive" carries the word but none of the colour, and its 62-word paragraph of Git semantics is longer than anything that tells you what happens to your work.</p></div></div>
+                <div class="fitem"><span class="pin">6</span><div><h4>Amber CTA regardless of mode</h4><p>The step-1 button stays the accent colour even when Hard is selected; danger styling appears only on the final button, one screen later.</p></div></div>
+                <div class="fitem"><span class="pin">7</span><div><h4>Never says what you lose</h4><p>The worktree already knows it is 9 ahead and has uncommitted files. Neither number appears on either screen — only prose about reachability and two 40-character SHAs on the confirm step.</p></div></div>
+                <div class="fitem"><span class="pin">8</span><div><h4>One way in</h4><p>The graph header's kebab, and nowhere else. The sidebar worktree row renders the same menu component without the item, and the diverged-pull dialog — where you most want this — does not offer it.</p></div></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Turn <a class="dv-oid" href="#t2">2</a> reworks the target step, <a class="dv-oid" href="#t3">3</a> the confirm step, <a class="dv-oid" href="#t4">4</a> the entry points.</p>
+      </section>
+
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">Choosing the target — rank it, don't search it</span>
+        </div>
+        <p class="dv-sub">There are only three real answers to "reset to what": this branch's upstream, the trunk, or something a human has to go find. The current dialog treats all 39 as equally likely and makes you filter your way to the obvious one. Three ways to fix that, cheapest first.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a Ranked target cards">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Ranked cards — the two known answers up front, the list behind the third</div>
+            <div class="m">
+              <div class="m-title">Reset fix/1.1-windows-media-copy to a fetched remote branch</div>
+              <p class="m-p">Pick the fetched tip this branch should point to. PwrGit re-reads both tips before the final confirmation.</p>
+              <span class="eyeb">Target</span>
+              <div class="card on"><span class="rad on"></span><span class="card-b"><span class="card-h"><span class="card-n">origin/fix/1.1-windows-media-copy</span><span class="tag">Upstream</span></span><span class="card-m">9ec3f2a1b0c4 · 3h ago · <span class="ab"><span class="up">↑9</span><span class="dn">↓15</span></span></span><span class="card-d">Drops the 9 local commits, takes the 15 on the remote.</span></span></div>
+              <div class="card"><span class="rad"></span><span class="card-b"><span class="card-h"><span class="card-n">origin/main</span><span class="tag q">Default branch</span></span><span class="card-m">eafa064247ab · 2h ago</span></span></div>
+              <div class="card"><span class="rad"></span><span class="card-b"><span class="card-h"><span class="card-s">Another fetched branch…</span><span class="tag q">39 available</span></span></span></div>
+              <div class="ban"><span class="grow">origin last fetched 2h 16m ago — this resets to that snapshot.</span><button class="b b-sm">Fetch now</button></div>
+              <div class="m-acts"><button class="b">Cancel</button><button class="b b-go">Continue</button></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Full-width ranked list">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Full-width list — the same native listbox, given its width, its eight rows and a ranking</div>
+            <div class="m">
+              <div class="m-title">Reset fix/1.1-windows-media-copy to a fetched remote branch</div>
+              <p class="m-p">Pick the fetched tip this branch should point to. PwrGit re-reads both tips before the final confirmation.</p>
+              <span class="eyeb">Target</span>
+              <div class="inp ph" style="margin-bottom:8px;">Filter by name or commit subject</div>
+              <div style="position:relative;">
+                <div class="lst">
+                  <div class="lgrp">Upstream of this branch</div>
+                  <div class="lrow sel"><span class="nm">origin/fix/1.1-windows-media-copy</span><span class="meta">9ec3f2a · 3h · ↑9 ↓15</span></div>
+                  <div class="lgrp">Default branch</div>
+                  <div class="lrow"><span class="nm">origin/main</span><span class="meta">eafa064 · 2h · ↑0 ↓24</span></div>
+                  <div class="lgrp">Same name on another remote</div>
+                  <div class="lrow"><span class="nm">upstream/fix/1.1-windows-media-copy</span><span class="meta">4b1d90c · 1d</span></div>
+                  <div class="lgrp">Recently fetched</div>
+                  <div class="lrow"><span class="nm">origin/agent/fix-windows-window-picker</span><span class="meta">1df621f · 1d</span></div>
+                  <div class="lrow"><span class="nm">origin/feat/star-map-manager-agent</span><span class="meta">56e64d1 · 1d</span></div>
+                  <div class="lrow"><span class="nm">origin/claude/license-allowlist-gate</span><span class="meta">b7a2f10 · 2d</span></div>
+                  <div class="lrow"><span class="nm">origin/fix/desktop-mcp-image-promotion</span><span class="meta">c0e4471 · 3d</span></div>
+                </div>
+                <span class="sbar"><span class="sthumb"></span></span>
+              </div>
+              <div class="status"><span>Showing 8 of 39</span><button class="b b-sm">Load more</button></div>
+              <div class="ban"><span class="grow">origin last fetched 2h 16m ago — this resets to that snapshot.</span><button class="b b-sm">Fetch now</button></div>
+              <div class="m-acts"><button class="b">Cancel</button><button class="b b-go">Continue</button></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c Combobox">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>Combobox — one field is both the filter and the selection, keyboard-first</div>
+            <div class="m">
+              <div class="m-title">Reset fix/1.1-windows-media-copy to a fetched remote branch</div>
+              <p class="m-p">Pick the fetched tip this branch should point to. PwrGit re-reads both tips before the final confirmation.</p>
+              <span class="eyeb">Target</span>
+              <div class="inp on">origin/fix<span class="caret"></span></div>
+              <div class="lst" style="margin-top:4px;">
+                <div class="lrow sel"><span class="nm">origin/fix/1.1-windows-media-copy</span><span class="meta">upstream · ↑9 ↓15</span></div>
+                <div class="lrow"><span class="nm">origin/fix/desktop-mcp-image-promotion</span><span class="meta">c0e4471 · 3d</span></div>
+                <div class="lrow"><span class="nm">upstream/fix/1.1-windows-media-copy</span><span class="meta">4b1d90c · 1d</span></div>
+              </div>
+              <div class="status" style="justify-content:space-between;"><span style="font-family:var(--mono);">3 of 39 match "origin/fix"</span><span>↑↓ move · ⏎ select · esc clear</span></div>
+              <div class="ban"><span class="grow">origin last fetched 2h 16m ago — this resets to that snapshot.</span><button class="b b-sm">Fetch now</button></div>
+              <div class="m-acts"><button class="b">Cancel</button><button class="b b-go">Continue</button></div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">All three seed the selection from the branch's upstream, then the trunk, then newest — never "whatever committed last". <a class="dv-oid" href="#2a">2a</a> is the smallest change and the biggest safety win; <a class="dv-oid" href="#2b">2b</a> keeps the native listbox and its screen-reader semantics; <a class="dv-oid" href="#2c">2c</a> reads best and costs hand-rolled ARIA.</p>
+      </section>
+
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3">3</a>
+          <span class="dv-tname">Confirming — count the loss, don't describe it</span>
+        </div>
+        <p class="dv-sub">Today the confirm step shows two SHAs and a paragraph about reachability. The app already knows the branch is 9 ahead and the worktree has 3 uncommitted files; those two numbers are the whole decision.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a Consequence ledger">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>Ledger — three numbers above the prose</div>
+            <div class="m">
+              <div class="m-title">Hard reset fix/1.1-windows-media-copy</div>
+              <p class="m-p">Review the exact refs and object IDs. The reset stops if either tip moves before you confirm.</p>
+              <div class="refs">
+                <div class="ref"><dt>Checked-out branch</dt><dd>fix/1.1-windows-media-copy</dd><dd class="sha">9a18912c4f01</dd></div>
+                <div class="arr">→</div>
+                <div class="ref"><dt>Fetched target</dt><dd>origin/fix/1.1-windows-media-copy</dd><dd class="sha">9ec3f2a1b0c4</dd></div>
+              </div>
+              <div class="ledger">
+                <div class="cell hot"><div class="cell-k">9</div><div class="cell-l">commits leave the branch</div></div>
+                <div class="cell"><div class="cell-k">15</div><div class="cell-l">commits arrive on it</div></div>
+                <div class="cell hot"><div class="cell-k">3</div><div class="cell-l">uncommitted files discarded</div></div>
+              </div>
+              <p class="m-note">Untracked and ignored files are left alone unless one obstructs a tracked path. This does not run <code>git clean</code>. The reflog may hold the 9 commits temporarily; do not rely on that as a backup.</p>
+              <div class="m-acts"><button class="b">Back</button><button class="b">Cancel</button><button class="b b-bad">Hard reset branch</button></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b Commits that leave">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Name them — the commits are the thing you cannot get back</div>
+            <div class="m">
+              <div class="m-title">Hard reset fix/1.1-windows-media-copy</div>
+              <p class="m-p">Review the exact refs and object IDs. The reset stops if either tip moves before you confirm.</p>
+              <div class="refs">
+                <div class="ref"><dt>Checked-out branch</dt><dd>fix/1.1-windows-media-copy</dd><dd class="sha">9a18912c4f01</dd></div>
+                <div class="arr">→</div>
+                <div class="ref"><dt>Fetched target</dt><dd>origin/fix/1.1-windows-media-copy</dd><dd class="sha">9ec3f2a1b0c4</dd></div>
+              </div>
+              <div class="drops">
+                <div class="drops-h"><span class="pin">9</span><span>commits leaving fix/1.1-windows-media-copy</span></div>
+                <div class="drop"><span class="sha">9a18912</span><span class="sub">refactor(desktop): isolate CF_HDROP ingest ownership</span><span class="age">1d</span></div>
+                <div class="drop"><span class="sha">1df621f</span><span class="sub">ci(desktop): validate Windows preview media</span><span class="age">1d</span></div>
+                <div class="drop"><span class="sha">56e64d1</span><span class="sub">fix(desktop): drop the stale clipboard fallback path</span><span class="age">2d</span></div>
+                <div class="drop"><span class="sha">b7a2f10</span><span class="sub">test(desktop): cover HDROP round-trip on Windows</span><span class="age">2d</span></div>
+                <div class="drop" style="opacity:0.5;"><span class="sha">c0e4471</span><span class="sub">chore(desktop): tidy media copy helpers</span><span class="age">3d</span></div>
+                <div class="drops-f">+4 more · none of the 9 are on any other branch</div>
+              </div>
+              <div class="m-acts"><button class="b">Back</button><button class="b">Cancel</button><button class="b b-bad">Hard reset branch</button></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3c" data-screen-label="3c Friction for hard">
+            <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>Friction proportional to loss — the checkbox appears only when commits would actually go</div>
+            <div class="m">
+              <div class="m-title">Hard reset fix/1.1-windows-media-copy</div>
+              <div class="refs" style="margin-top:0;">
+                <div class="ref"><dt>Checked-out branch</dt><dd>fix/1.1-windows-media-copy</dd><dd class="sha">9a18912c4f01</dd></div>
+                <div class="arr">→</div>
+                <div class="ref"><dt>Fetched target</dt><dd>origin/fix/1.1-windows-media-copy</dd><dd class="sha">9ec3f2a1b0c4</dd></div>
+              </div>
+              <div class="ban hot"><span class="grow">9 commits and 3 uncommitted files leave this branch. 15 commits arrive.</span></div>
+              <div class="chk"><span class="box"></span><span>I understand 9 commits will leave fix/1.1-windows-media-copy</span></div>
+              <div class="ban"><span class="grow">origin last fetched 2h 16m ago. Fetch first if you expect newer commits on the remote.</span><button class="b b-sm">Fetch now</button></div>
+              <div class="m-acts"><button class="b">Back</button><button class="b">Cancel</button><button class="b b-bad b-off">Hard reset branch</button></div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">A soft reset, and a hard reset onto an upstream you are strictly behind, lose nothing — those stay one click, the ledger reads 0 commits leave, and no checkbox appears.</p>
+      </section>
+
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t4">4</a>
+          <span class="dv-tname">Where reset lives</span>
+        </div>
+        <p class="dv-sub">One entry point today, on a kebab in the graph header. Everywhere a branch is named and its divergence is already on screen is a place someone will look for this.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="4a" data-screen-label="4a Sidebar kebab">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Sidebar worktree row — the same menu component, one item it is not given</div>
+            <div class="pair" style="gap:14px;align-items:flex-start;">
+              <div class="side">
+                <div class="wt"><span class="nm">detached@9a18912</span><span class="age">1w</span><span class="kb">⋯</span></div>
+                <div class="wt on"><span class="nm">fix/1.1-windows-media-copy</span><span class="ab"><span class="up">↑9</span><span class="dn">↓15</span></span><span class="kb" style="color:var(--acc);">⋯</span></div>
+                <div class="wt"><span class="nm">agent/fix-windows-window-picker</span><span class="age">2w</span><span class="kb">⋯</span></div>
+              </div>
+              <div class="menu">
+                <div class="mi">Copy branch name</div>
+                <div class="mi">Copy path</div>
+                <div class="mi">Reveal in Finder</div>
+                <div class="msep"></div>
+                <div class="mi new">Reset to remote branch…</div>
+                <div class="msep"></div>
+                <div class="mi bad">Remove worktree…</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="4b" data-screen-label="4b Entry points">
+            <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>Every place a branch and its divergence are already on screen</div>
+            <div class="tbl">
+              <div class="tr head"><span>Surface</span><span class="rt">Today</span></div>
+              <div class="tr"><span class="where">Graph header kebab<em>WorktreeHeader → WorktreeMenu</em></span><span class="rt"><span class="st has">Has it</span></span></div>
+              <div class="tr"><span class="where">Sidebar worktree row kebab<em>WorktreeRow → WorktreeMenu, prop not passed</em></span><span class="rt"><span class="st add">Add</span></span></div>
+              <div class="tr"><span class="where">Diverged-pull recovery dialog<em>PullDivergenceDialog — offers rebase or reset-to-upstream only</em></span><span class="rt"><span class="st add">Add</span></span></div>
+              <div class="tr"><span class="where">Branch-tip chip menu in the graph<em>BranchChipMenu — right-click a remote chip, reset to it</em></span><span class="rt"><span class="st add">Add</span></span></div>
+              <div class="tr last"><span class="where">Repository refs browser<em>RepoRefsModal — the branch table already lists upstream and ahead/behind</em></span><span class="rt"><span class="st add">Add</span></span></div>
+            </div>
+            <p class="m-note" style="width:656px;">The chip menu is the one that changes the shape of the task: right-clicking <code>origin/fix/1.1-windows-media-copy</code> in the graph already names the target, so it can open the dialog with that branch preselected and skip the picker entirely.</p>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: "build 2a with 3a" · "show 2a and 2b at the same width side by side" · "what does the soft-reset confirm look like when nothing is lost?"</p>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        renderVals() { return {}; }
+      }
+    </script>
+  </body>
+</html>

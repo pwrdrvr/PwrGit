@@ -1,0 +1,1106 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<meta name="design_doc_mode" content="canvas">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* Restated from apps/desktop/src/renderer/src/styles/tokens.css (dark).
+       Tangerine Terminal — absolute-black canvas, near-black structure,
+       warm-white text, sparse tangerine signal. */
+    --bg-app: #000000; --bg-side: #050505; --bg-panel: #0a0a0a; --bg-input: #080808;
+    --bg-elev: #101010; --bg-hover: #14110d; --bg-hover-strong: #1f1a12;
+    --row-active: #120800; --active-strong: #241000;
+    --line-faint: rgba(247,243,235,0.06); --line: rgba(247,243,235,0.1); --line-def: rgba(247,243,235,0.14);
+    --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a; --tsub: rgba(247,243,235,0.54);
+    --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+    --asoft: rgba(255,138,31,0.12); --atint: rgba(255,138,31,0.08); --abord: rgba(255,138,31,0.42);
+    --ok: #5fa969; --okt: #9ce5b3; --oksoft: rgba(74,148,92,0.18);
+    --warn: #d99a3d; --warnsoft: rgba(217,154,61,0.14);
+    --bad: #b94232; --badt: #ffb0a1; --badsoft: rgba(185,66,50,0.24);
+    --info: #9fc8ff; --susp: #6b6660; --purple: #8a6dc4;
+    --lane1: #ff8a1f; --lane2: #62c882; --lane3: #7aa2f7; --lane4: #e5b566;
+    --sans: "Geist","SF Pro Text","Inter",system-ui,sans-serif;
+    --mono: "Geist Mono","SF Mono","JetBrains Mono",Consolas,monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #050505; font-family: var(--sans); }
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-thumb { background: rgba(140,133,122,0.46); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  @keyframes pg-fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  button, input { font-family: inherit; }
+
+  .pg-doc { padding: 40px 44px 56px; color: var(--t1); display: flex; flex-direction: column; gap: 26px; }
+  .pg-eyebrow { font: 600 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--t3); }
+  .pg-h1 { font: 700 24px/1.2 var(--sans); letter-spacing: -.01em; margin: 8px 0 0; }
+  .pg-sub { margin: 8px 0 0; font: 400 12.5px/1.6 var(--sans); color: var(--t3); max-width: 720px; text-wrap: pretty; }
+  .pg-prov { margin-top: 12px; font: 500 10.5px/1.6 var(--mono); color: var(--tsub); }
+  .pg-legend { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+  .pg-chip { display: inline-flex; align-items: center; gap: 7px; height: 24px; padding: 0 10px; border-radius: 999px; font: 600 10.5px/1 var(--sans); border: 1px solid var(--line); color: var(--t2); }
+  .pg-chip--built { border-color: rgba(95,169,105,.42); color: var(--okt); background: var(--oksoft); }
+  .pg-chip--asp { border-color: rgba(138,109,196,.5); color: #c3aef0; background: rgba(138,109,196,.16); }
+  .pg-frame { width: 1360px; height: 860px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; box-shadow: 0 32px 80px rgba(0,0,0,.6); }
+  .pg-secthd { font: 600 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--t3); margin: 6px 0 2px; }
+  .pg-cards { display: flex; gap: 18px; flex-wrap: wrap; }
+  .pg-card { flex: 1 1 320px; min-width: 300px; max-width: 440px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); }
+  .pg-card--asp { border-color: rgba(138,109,196,.34); background: rgba(138,109,196,.06); }
+  .pg-card h4 { margin: 0 0 6px; font: 600 12.5px/1.3 var(--sans); color: var(--t1); }
+  .pg-card p { margin: 0; font: 400 11.5px/1.65 var(--sans); color: var(--t3); text-wrap: pretty; }
+  .pg-card code { font: 500 11px var(--mono); color: var(--accb); }
+</style>
+</helmet>
+
+<div class="pg-doc">
+
+  <div>
+    <div class="pg-eyebrow">PwrGit · as-built baseline</div>
+    <h1 class="pg-h1">Main window, as it ships today</h1>
+    <p class="pg-sub">The live main-window baseline: sidebar, lineage graph and right rail, drawn from the shipped renderer rather than from intent. Where the 2026-08 wireframe and the code disagreed, the code won. Interactive — switch profiles, filter with the lenses, expand repos, select commits, flip the rail between Changes and Rebase, press <b>⌘F</b>.</p>
+    <div class="pg-prov">Verified against <b>apps/desktop/src/renderer/src/**</b> and <b>styles/tokens.css</b> · main @ bc11343 · 2026-09-02</div>
+    <div class="pg-legend">
+      <span class="pg-chip pg-chip--built">Everything in the frame is as-built</span>
+      <span class="pg-chip pg-chip--asp">Aspirational items are called out below the frame</span>
+      <span class="pg-chip">Dark theme shown · a full light theme also ships</span>
+    </div>
+  </div>
+
+  <div class="pg-frame">
+  <div style="height:100%; display:flex; flex-direction:column; background:var(--bg-app);">
+
+    <!-- ============ TITLEBAR ============ -->
+    <!-- Repo > branch > path live UP HERE (features/chrome/TitleBar.tsx), not
+         in the worktree header, which the old wireframe got wrong. -->
+    <div style="height:38px; flex:0 0 auto; display:flex; align-items:center; gap:10px; padding:0 12px; background:var(--bg-side); border-bottom:1px solid var(--line); position:relative; z-index:30;">
+      <div style="display:flex; gap:8px; flex:0 0 auto;">
+        <span style="width:12px;height:12px;border-radius:999px;background:#ff5f56;"></span>
+        <span style="width:12px;height:12px;border-radius:999px;background:#ffbd2e;"></span>
+        <span style="width:12px;height:12px;border-radius:999px;background:#27c93f;"></span>
+      </div>
+      <div style="width:8px;"></div>
+      <p style="margin:0; font:700 12.5px/1 var(--sans); color:var(--t1); flex:0 0 auto;">Pwr<span style="color:var(--acc);">Git</span></p>
+      <div style="display:flex; align-items:center; gap:7px; min-width:0; margin-left:14px;">
+        <span style="font:600 12px/1 var(--sans); color:var(--t2); flex:0 0 auto;">{{hdrRepo}}</span>
+        <span style="color:var(--t3); flex:0 0 auto;">›</span>
+        <button onClick="{{onBranchMenu}}" title="Switch branch" style="display:inline-flex; align-items:center; gap:6px; height:22px; padding:0 9px; border-radius:999px; background:var(--asoft); border:1px solid var(--abord); color:var(--t1); font:500 11.5px/1 var(--mono); cursor:pointer; min-width:0;">
+          <span style="width:6px;height:6px;border-radius:999px;background:var(--acc); flex:0 0 auto;"></span>
+          <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{hdrBranch}}</span>
+          <span style="color:var(--t3); font-size:9px;">▾</span>
+        </button>
+        <span title="Click to copy" style="height:22px; display:inline-flex; align-items:center; padding:0 8px; border-radius:6px; border:1px solid var(--line); color:var(--tsub); font:500 10.5px/1 var(--mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer;">{{hdrPath}}</span>
+      </div>
+      <span style="flex:1;"></span>
+      <button onClick="{{onOpenSettings}}" title="Settings" style="width:26px;height:26px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--t3);cursor:pointer;font-size:12px;">⚙</button>
+    </div>
+
+    <!-- ============ 3-PANE BODY ============ -->
+    <div style="flex:1; min-height:0; display:grid; grid-template-columns:320px 4px minmax(0,1fr) 4px {{railWidth}}; position:relative;">
+
+      <!-- ---------- SIDEBAR ---------- -->
+      <aside style="background:var(--bg-side); display:flex; flex-direction:column; min-height:0;">
+
+        <!-- Profile chip. One window per profile: picking another profile
+             opens or focuses ITS window, it does not swap this one. -->
+        <div style="padding:11px 12px 9px; border-bottom:1px solid var(--line); position:relative;">
+          <button onClick="{{onToggleProfileMenu}}" style="{{profileChipStyle}}">
+            <span style="{{profileMonoStyle}}">{{profileMono}}</span>
+            <span style="flex:1; min-width:0; text-align:left; display:flex; flex-direction:column; gap:2px;">
+              <span style="font:700 13px/1 var(--sans); color:var(--t1);">{{profileName}}</span>
+              <span style="font:500 10.5px/1 var(--mono); color:var(--t3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{profileEmail}}</span>
+            </span>
+            <span style="color:var(--t3); font-size:9px;">▾</span>
+          </button>
+
+          <sc-if value="{{profileMenuOpen}}">
+            <div style="position:absolute; top:calc(100% - 2px); left:12px; right:12px; z-index:40; background:var(--bg-elev); border:1px solid var(--line-def); border-radius:10px; box-shadow:0 18px 48px rgba(0,0,0,0.5); padding:6px; animation:pg-fade 140ms cubic-bezier(0.22,1,0.36,1);">
+              <div style="padding:6px 8px 4px; font:600 10px/1 var(--sans); color:var(--t3); letter-spacing:0.08em; text-transform:uppercase;">Profiles</div>
+              <sc-for list="{{profileMenu}}" as="p" hint-placeholder-count="3">
+                <button onClick="{{p.onPick}}" style="{{p.style}}">
+                  <span style="{{p.monoStyle}}">{{p.mono}}</span>
+                  <span style="flex:1; min-width:0; text-align:left; display:flex; flex-direction:column; gap:1px;">
+                    <span style="font:600 12.5px/1.1 var(--sans); color:var(--t1);">{{p.name}}</span>
+                    <span style="font:500 10px/1 var(--mono); color:var(--t3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{p.email}}</span>
+                  </span>
+                  <sc-if value="{{p.open}}"><span style="font:600 9px/1 var(--mono); color:var(--okt); display:flex; align-items:center; gap:4px;"><span style="width:6px;height:6px;border-radius:999px;background:var(--ok);"></span>window open</span></sc-if>
+                </button>
+              </sc-for>
+              <div style="height:1px; background:var(--line); margin:6px 4px;"></div>
+              <div style="padding:4px 8px 6px; font:500 10.5px/1.4 var(--sans); color:var(--tsub);">Each profile gets its own window — picking one opens or focuses it.</div>
+            </div>
+          </sc-if>
+        </div>
+
+        <!-- Jump to repo. ⌘F is what the app advertises; ⌘K is a silent alias. -->
+        <div style="padding:10px 12px 8px;">
+          <button onClick="{{onOpenOverlay}}" style="width:100%; height:34px; display:flex; align-items:center; gap:8px; padding:0 10px; background:var(--bg-input); border:1px solid var(--line-def); border-radius:8px; color:var(--t3); cursor:pointer;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            <span style="flex:1; text-align:left; font:500 12.5px/1 var(--sans);">Jump to repo…</span>
+            <span title="⌘F or ⌘K" style="font:600 10px/1 var(--mono); color:var(--tsub); border:1px solid var(--line-def); border-radius:4px; padding:3px 5px;">⌘F</span>
+          </button>
+        </div>
+
+        <!-- Add folders is the prerequisite for Clone, so it sits beside it. -->
+        <div style="padding:0 12px 8px; display:flex; gap:6px;">
+          <button style="flex:1; height:28px; border-radius:7px; border:1px solid var(--line-def); background:transparent; color:var(--t2); font:600 11px/1 var(--sans); cursor:pointer;">+ Add folders</button>
+          <button style="flex:1; height:28px; border-radius:7px; border:1px solid var(--line-def); background:transparent; color:var(--t2); font:600 11px/1 var(--sans); cursor:pointer;">Clone</button>
+          <button style="flex:1; height:28px; border-radius:7px; border:1px solid var(--line-def); background:transparent; color:var(--t2); font:600 11px/1 var(--sans); cursor:pointer;">Fork</button>
+        </div>
+
+        <!-- Bulk sync across every repo in the profile. -->
+        <div style="padding:0 12px 9px; display:flex; gap:6px;" aria-label="Synchronize repositories">
+          <button onClick="{{onFetchAll}}" title="Fetch configured remotes once for every repository" style="flex:1; height:26px; border-radius:6px; border:1px solid var(--line); background:transparent; color:var(--t3); font:600 10.5px/1 var(--mono); cursor:pointer;">Fetch all</button>
+          <button onClick="{{onPullAll}}" title="Fast-forward only clean, safe tracked worktrees" style="flex:1; height:26px; border-radius:6px; border:1px solid var(--line); background:transparent; color:var(--t3); font:600 10.5px/1 var(--mono); cursor:pointer;">Pull safe</button>
+        </div>
+
+        <!-- Five lenses, icon-only: Focused · Pinned · Behind · Stale · All.
+             The labels came off so a sixth notch of --sidebar-title-size still
+             fits; the wording survives in the tooltip. -->
+        <div style="padding:0 12px 10px; display:flex; align-items:center; gap:6px;">
+          <div role="tablist" aria-label="Repo filter" style="flex:1; display:grid; grid-template-columns:repeat(5,1fr); gap:3px; padding:3px; border:1px solid var(--line); border-radius:9px; background:var(--bg-panel);">
+            <sc-for list="{{lenses}}" as="l" hint-placeholder-count="5">
+              <button onClick="{{l.onClick}}" title="{{l.title}}" aria-label="{{l.title}}" style="{{l.style}}">
+                <span style="font-size:12px; line-height:1;">{{l.icon}}</span>
+                <sc-if value="{{l.count}}"><span style="{{l.countStyle}}">{{l.count}}</span></sc-if>
+              </button>
+            </sc-for>
+          </div>
+          <button onClick="{{onToggleGroup}}" title="Sidebar display options — group by folder, text size, density" aria-label="Sidebar display options" style="{{gearStyle}}">☰</button>
+        </div>
+
+        <!-- Repo list, grouped by the folder root each repo was found under. -->
+        <div style="flex:1; min-height:0; overflow-y:auto; padding:0 8px 16px;" aria-label="Repositories">
+          <sc-for list="{{groups}}" as="g" hint-placeholder-count="2">
+            <div>
+              <sc-if value="{{g.showHead}}">
+                <div title="{{g.root}}" style="position:sticky; top:0; z-index:2; height:28px; display:flex; align-items:center; gap:7px; padding:0 6px; background:var(--bg-side);">
+                  <span style="font:600 9.5px/1 var(--sans); color:var(--tsub); letter-spacing:0.08em; text-transform:uppercase; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{g.label}}</span>
+                  <span style="font:500 9.5px/1 var(--mono); color:var(--tsub);">{{g.count}}</span>
+                  <span style="flex:1; height:1px; background:var(--line-faint);"></span>
+                </div>
+              </sc-if>
+
+              <sc-for list="{{g.repos}}" as="repo" hint-placeholder-count="4">
+                <div style="margin-bottom:2px;">
+                  <div onClick="{{repo.onToggleExpand}}" style="{{repo.rowStyle}}">
+                    <span style="{{repo.gripStyle}}"><svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor"><circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="2" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="2" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg></span>
+                    <span style="{{repo.chevStyle}}">▸</span>
+                    <span style="flex:1; min-width:0; text-align:left; font:600 13px/1.25 var(--sans); color:var(--t1); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{repo.name}}</span>
+                    <sc-if value="{{repo.prFlag}}"><span title="{{repo.prTitle}}" style="{{repo.prStyle}}"></span></sc-if>
+                    <sc-if value="{{repo.behindFlag}}"><span style="display:inline-flex; align-items:center; height:17px; padding:0 6px; border-radius:999px; background:var(--warnsoft); color:var(--warn); font:600 9.5px/1 var(--mono);">{{repo.behindText}}</span></sc-if>
+                    <span style="font:500 10px/1 var(--mono); color:var(--tsub);">{{repo.wtCountText}}</span>
+                    <span onClick="{{repo.onTogglePin}}" style="{{repo.pinStyle}}" title="Pin repo">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="{{repo.pinFill}}" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9Z"/></svg>
+                    </span>
+                  </div>
+
+                  <sc-if value="{{repo.expanded}}">
+                    <div style="padding:3px 0 6px 8px; margin:2px 0 4px 15px; border-left:1px solid var(--line-faint);">
+                      <sc-for list="{{repo.worktrees}}" as="wt" hint-placeholder-count="3">
+                        <div draggable="true" onClick="{{wt.onSelect}}" style="{{wt.rowStyle}}">
+                          <span style="{{wt.handleStyle}}"><svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor"><circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="2" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="2" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg></span>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="{{wt.branchColor}}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:0 0 auto;"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg>
+                          <span style="{{wt.labelStyle}}">{{wt.branch}}</span>
+                          <sc-if value="{{wt.dirty}}"><span style="display:inline-flex; align-items:center; height:16px; padding:0 5px; border-radius:999px; background:var(--warnsoft); color:var(--warn); font:600 9.5px/1 var(--mono); flex:0 0 auto;">{{wt.dirtyText}}</span></sc-if>
+                          <sc-if value="{{wt.ahead}}"><span style="font:600 10px/1 var(--mono); color:var(--okt); flex:0 0 auto;">{{wt.aheadText}}</span></sc-if>
+                          <sc-if value="{{wt.behind}}"><span style="font:600 10px/1 var(--mono); color:var(--warn); flex:0 0 auto;">{{wt.behindText}}</span></sc-if>
+                          <span onClick="{{wt.onTogglePin}}" style="{{wt.pinStyle}}" title="Pin worktree">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="{{wt.pinFill}}" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9Z"/></svg>
+                          </span>
+                        </div>
+                      </sc-for>
+                      <button onClick="{{repo.onNewWorktree}}" style="display:flex; align-items:center; gap:7px; width:100%; height:28px; padding:0 8px; margin-top:2px; background:transparent; border:1px dashed var(--line-def); border-radius:7px; color:var(--t3); font:500 11px/1 var(--sans); cursor:pointer;">
+                        <span style="font-size:13px;">+</span> New worktree
+                      </button>
+                    </div>
+                  </sc-if>
+                </div>
+              </sc-for>
+            </div>
+          </sc-for>
+        </div>
+      </aside>
+
+      <!-- draggable pane resizer (useColumnResize: 240–520) -->
+      <div title="Drag to resize" style="cursor:col-resize; background:var(--line-faint);"></div>
+
+      <!-- ---------- MAIN PANE ---------- -->
+      <main style="display:flex; flex-direction:column; min-width:0; min-height:0; background:var(--bg-app);">
+
+        <!-- Worktree header: live STATE + git actions only. Identity moved to
+             the titlebar, so this row is __state, not __id. -->
+        <div style="flex:0 0 auto; padding:11px 20px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px;">
+          <sc-if value="{{dirtyFlag}}"><span style="display:inline-flex; align-items:center; height:20px; padding:0 8px; border-radius:999px; background:var(--warnsoft); color:var(--warn); font:600 10.5px/1 var(--mono);">{{dirtyText}}</span></sc-if>
+          <span title="Git LFS is configured in this repository" style="display:inline-flex; align-items:center; gap:5px; height:20px; padding:0 8px; border-radius:999px; border:1px solid var(--line); color:var(--tsub); font:600 9.5px/1 var(--mono);">LFS</span>
+          <span style="flex:1;"></span>
+          <sc-if value="{{driftFlag}}"><span title="This branch's base has moved on origin/main" style="display:inline-flex; align-items:center; height:22px; padding:0 9px; border-radius:999px; border:1px solid var(--line); color:var(--tsub); font:600 10.5px/1 var(--mono);">{{driftText}}</span></sc-if>
+          <span style="{{syncChipStyle}}">{{syncChipText}}</span>
+
+          <div style="display:flex; gap:8px; flex:0 0 auto;">
+            <button onClick="{{onFetch}}" aria-label="Fetch" title="Fetch" style="{{fetchBtnStyle}}">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>{{fetchLabel}}
+            </button>
+            <button onClick="{{onPull}}" aria-label="Pull" title="Pull · fetch + fast-forward" style="{{pullBtnStyle}}">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>{{pullLabel}}
+            </button>
+            <button onClick="{{onPush}}" aria-label="Push" title="Push" style="{{pushBtnStyle}}">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V9"/><path d="m7 14 5-5 5 5"/><path d="M5 4h14"/></svg>{{pushLabel}}
+            </button>
+          </div>
+        </div>
+
+        <!-- Graph toolbar: branch chip strip, locate-HEAD, and the scope
+             toggle that reads Active / All branches (not "Only me"). -->
+        <div style="flex:0 0 auto; padding:11px 20px 9px; display:flex; align-items:center; gap:10px; min-width:0;">
+          <span style="font:600 11px/1 var(--sans); color:var(--acc); letter-spacing:0.06em; text-transform:uppercase; flex:0 0 auto;">Lineage</span>
+          <div style="flex:1; min-width:0; display:flex; gap:5px; overflow:hidden;">
+            <sc-for list="{{branchChips}}" as="b" hint-placeholder-count="3">
+              <button onClick="{{b.onClick}}" title="{{b.title}}" style="{{b.style}}">
+                <span style="{{b.dotStyle}}"></span>{{b.name}}
+              </button>
+            </sc-for>
+          </div>
+          <button onClick="{{onLocate}}" title="Scroll to this worktree's current commit (HEAD)" style="height:26px; padding:0 9px; border-radius:6px; border:1px solid var(--line); background:transparent; color:var(--t3); font:600 10.5px/1 var(--mono); cursor:pointer; flex:0 0 auto;">◎ HEAD</button>
+          <button onClick="{{onToggleScope}}" title="Lineage scope — Settings › Experimental can default this to All branches" style="{{scopeStyle}}">{{scopeText}}</button>
+        </div>
+
+        <!-- Multi-lane commit graph. Lane 1 is the default-branch spine and
+             rides the accent; lanes rotate through the 8-hue palette. Dashed
+             lineage exists only behind a remote-tracking ref. -->
+        <div style="flex:1; min-height:0; overflow-y:auto; padding:0 20px 16px;">
+          <div style="border:1px solid var(--line); border-radius:10px; background:var(--bg-panel); overflow:hidden;">
+            <sc-for list="{{commits}}" as="c" hint-placeholder-count="8">
+              <div onClick="{{c.onClick}}" style="{{c.rowStyle}}">
+                <div style="width:72px; flex:0 0 auto; align-self:stretch; position:relative;">
+                  <sc-for list="{{c.segs}}" as="g" hint-placeholder-count="2">
+                    <div style="{{g.style}}"></div>
+                  </sc-for>
+                  <div style="{{c.dotStyle}}"></div>
+                </div>
+                <span style="{{c.checkStyle}}">✓</span>
+                <div style="flex:1; min-width:0; padding:10px 0;">
+                  <div style="display:flex; align-items:center; gap:8px; min-width:0;">
+                    <sc-if value="{{c.tipFlag}}"><span style="{{c.tipStyle}}">{{c.tip}}</span></sc-if>
+                    <sc-if value="{{c.prFlag}}"><span title="{{c.prTitle}}" style="{{c.prStyle}}">{{c.prText}}</span></sc-if>
+                    <span style="{{c.msgStyle}}">{{c.msg}}</span>
+                    <span style="font:500 10.5px/1 var(--sans); color:var(--tsub); flex:0 0 auto;">{{c.time}}</span>
+                  </div>
+                  <div style="display:flex; align-items:center; gap:8px; margin-top:5px;">
+                    <span style="{{c.authorStyle}}">{{c.author}}</span>
+                    <span style="font:500 10px/1 var(--mono); color:var(--tsub);">{{c.hash}}</span>
+                    <sc-if value="{{c.isMergeFlag}}"><span style="display:inline-flex; align-items:center; height:16px; padding:0 6px; border-radius:999px; background:var(--bg-elev); color:var(--t3); font:600 9px/1 var(--mono);">merge</span></sc-if>
+                    <sc-if value="{{c.isRemoteFlag}}"><span title="Fetched, not merged into a local ref" style="display:inline-flex; align-items:center; height:16px; padding:0 6px; border-radius:999px; border:1px dashed var(--line-def); color:var(--tsub); font:600 9px/1 var(--mono);">fetched</span></sc-if>
+                  </div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+          <sc-if value="{{hiddenNoteVisible}}">
+            <div style="margin-top:10px; padding:10px 14px; border:1px dashed var(--line); border-radius:8px; display:flex; align-items:center; gap:10px; font:500 11.5px/1.4 var(--sans); color:var(--t3);">
+              {{hiddenNoteText}} <button onClick="{{onToggleScope}}" style="background:none;border:none;color:var(--accb);font:600 11.5px/1 var(--sans);cursor:pointer;padding:0;">Show all branches</button>
+            </div>
+          </sc-if>
+        </div>
+
+        <!-- Selection bar. "Open rebase tool →" — there is no agent here. -->
+        <sc-if value="{{actionBarVisible}}">
+          <div style="flex:0 0 auto; margin:0 20px 16px; padding:10px 14px; border:1px solid var(--abord); border-radius:10px; background:var(--active-strong); display:flex; align-items:center; gap:12px; box-shadow:0 12px 28px rgba(0,0,0,0.36); animation:pg-fade 160ms cubic-bezier(0.22,1,0.36,1);">
+            <span style="font:700 12px/1 var(--sans); color:var(--accb);">{{selCountText}}</span>
+            <span style="width:1px; height:16px; background:var(--line-def);"></span>
+            <button onClick="{{onSquash}}" style="height:28px; padding:0 11px; border-radius:6px; border:1px solid var(--line-def); background:var(--bg-elev); color:var(--t1); font:600 11.5px/1 var(--sans); cursor:pointer;">Squash</button>
+            <button onClick="{{onReorder}}" style="height:28px; padding:0 11px; border-radius:6px; border:1px solid var(--line-def); background:var(--bg-elev); color:var(--t1); font:600 11.5px/1 var(--sans); cursor:pointer;">Reorder</button>
+            <span style="flex:1;"></span>
+            <button onClick="{{onOpenRebaseTool}}" style="height:28px; padding:0 12px; border-radius:6px; border:none; background:var(--acc); color:var(--accon); font:700 11.5px/1 var(--sans); cursor:pointer;">Open rebase tool →</button>
+            <button onClick="{{onClearSel}}" aria-label="Clear" style="height:28px; width:28px; border-radius:6px; border:1px solid var(--line-def); background:transparent; color:var(--t3); font:600 13px/1 var(--sans); cursor:pointer;">×</button>
+          </div>
+        </sc-if>
+      </main>
+
+      <div title="Drag to resize" style="cursor:col-resize; background:var(--line-faint);"></div>
+
+      <!-- ---------- RIGHT RAIL ---------- -->
+      <aside style="{{railStyle}}">
+        <div style="flex:0 0 auto; display:flex; align-items:center; gap:2px; padding:9px 12px; border-bottom:1px solid var(--line);">
+          <sc-for list="{{railTabs}}" as="t" hint-placeholder-count="2">
+            <button onClick="{{t.onClick}}" style="{{t.style}}">{{t.label}}<sc-if value="{{t.badge}}"><span style="{{t.badgeStyle}}">{{t.badge}}</span></sc-if></button>
+          </sc-for>
+          <span style="flex:1;"></span>
+          <button onClick="{{onToggleRail}}" aria-label="Collapse panel" title="Collapse panel" style="width:26px;height:26px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--t3);cursor:pointer;">›</button>
+        </div>
+
+        <!-- Operation banner: advisory, appears mid rebase/merge/cherry-pick. -->
+        <sc-if value="{{operationVisible}}">
+          <div style="flex:0 0 auto; margin:10px 12px 0; padding:10px 12px; border:1px solid var(--abord); border-radius:9px; background:var(--row-active);">
+            <div style="font:700 11.5px/1.3 var(--sans); color:var(--accb);">Rebase in progress · step 2 of 4</div>
+            <div style="margin-top:4px; font:500 10.5px/1.5 var(--mono); color:var(--t3);">Stopped on a3f91c2 — resolve, then continue.</div>
+            <div style="display:flex; gap:7px; margin-top:9px;">
+              <button style="height:26px; padding:0 10px; border-radius:6px; border:none; background:var(--acc); color:var(--accon); font:700 11px/1 var(--sans); cursor:pointer;">Continue</button>
+              <button style="height:26px; padding:0 10px; border-radius:6px; border:1px solid var(--badsoft); background:transparent; color:var(--badt); font:600 11px/1 var(--sans); cursor:pointer;">Abort</button>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ===== CHANGES ===== -->
+        <sc-if value="{{showChanges}}">
+          <div style="flex:1; min-height:0; display:flex; flex-direction:column;">
+            <sc-if value="{{hasChanges}}">
+              <div style="flex:0 0 auto; display:flex; align-items:center; gap:8px; padding:9px 12px; border-bottom:1px solid var(--line-faint);" title="Uncommitted changes in the working tree">
+                <span style="width:7px;height:7px;border-radius:999px;background:var(--warn);"></span>
+                <span style="flex:1; font:600 11px/1 var(--sans); color:var(--t2);">{{wipText}}</span>
+                <button title="Discard every uncommitted change in this worktree" style="height:22px; padding:0 8px; border-radius:6px; border:1px solid var(--badsoft); background:transparent; color:var(--badt); font:600 10px/1 var(--sans); cursor:pointer;">Discard all</button>
+              </div>
+            </sc-if>
+
+            <div style="flex:1; min-height:0; overflow-y:auto; padding:10px 12px;">
+              <sc-if value="{{hasChanges}}">
+                <div>
+                  <div style="display:flex; align-items:center; gap:8px; margin:2px 0 7px;">
+                    <span style="font:600 10px/1 var(--sans); color:var(--t3); letter-spacing:0.08em; text-transform:uppercase;">Staged · {{stagedCount}}</span>
+                    <span style="flex:1;"></span>
+                    <button title="Unstage every staged file" style="height:20px; padding:0 7px; border-radius:5px; border:1px solid var(--line); background:transparent; color:var(--t3); font:600 9.5px/1 var(--mono); cursor:pointer;">Unstage all</button>
+                  </div>
+                  <sc-for list="{{stagedFiles}}" as="f" hint-placeholder-count="3">
+                    <div onClick="{{f.onOpen}}" title="{{f.title}}" style="{{f.rowStyle}}">
+                      <span style="{{f.statusStyle}}">{{f.status}}</span>
+                      <span style="flex:1; min-width:0; font:500 11px/1.3 var(--mono); color:var(--t2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; direction:rtl; text-align:left;">{{f.path}}</span>
+                      <sc-if value="{{f.split}}"><span title="Partly staged — this file also has unstaged changes" style="flex:0 0 auto; width:14px; height:14px; border-radius:4px; border:1px solid var(--abord); background:var(--asoft); color:var(--accb); font:700 8px/12px var(--mono); text-align:center;">◐</span></sc-if>
+                      <span style="display:flex; gap:4px; flex:0 0 auto;">
+                        <button title="Discard changes" style="width:20px;height:20px;border-radius:5px;border:1px solid var(--line-def);background:transparent;color:var(--badt);font:600 11px/1 var(--sans);cursor:pointer;">↺</button>
+                        <button onClick="{{f.onToggle}}" title="Unstage" style="width:20px;height:20px;border-radius:5px;border:1px solid var(--line-def);background:transparent;color:var(--t3);font:600 12px/1 var(--sans);cursor:pointer;">−</button>
+                      </span>
+                    </div>
+                  </sc-for>
+
+                  <div style="display:flex; align-items:center; gap:8px; margin:14px 0 7px;">
+                    <span style="font:600 10px/1 var(--sans); color:var(--t3); letter-spacing:0.08em; text-transform:uppercase;">Changes · {{unstagedCount}}</span>
+                    <span style="flex:1;"></span>
+                    <button title="Stage every changed and new file" style="height:20px; padding:0 7px; border-radius:5px; border:1px solid var(--line); background:transparent; color:var(--t3); font:600 9.5px/1 var(--mono); cursor:pointer;">Stage all</button>
+                  </div>
+
+                  <!-- Folder rows collapse a directory and act on all of it. -->
+                  <sc-for list="{{folders}}" as="d" hint-placeholder-count="2">
+                    <div>
+                      <div onClick="{{d.onToggle}}" style="display:flex; align-items:center; gap:7px; padding:6px 8px; border-radius:7px; margin-bottom:2px; cursor:pointer;">
+                        <span style="{{d.twistyStyle}}">▸</span>
+                        <span title="{{d.title}}" style="flex:1; min-width:0; font:500 11px/1.3 var(--mono); color:var(--t3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{d.dir}}</span>
+                        <span style="font:600 9.5px/1 var(--mono); color:var(--tsub);">{{d.count}}</span>
+                        <span style="display:flex; gap:4px;">
+                          <button title="{{d.discardTitle}}" style="width:20px;height:20px;border-radius:5px;border:1px solid var(--line-def);background:transparent;color:var(--badt);font:600 11px/1 var(--sans);cursor:pointer;">↺</button>
+                          <button title="{{d.stageTitle}}" style="width:20px;height:20px;border-radius:5px;border:1px solid var(--line-def);background:transparent;color:var(--t3);font:600 12px/1 var(--sans);cursor:pointer;">+</button>
+                        </span>
+                      </div>
+                      <sc-if value="{{d.open}}">
+                        <div style="padding-left:14px;">
+                          <sc-for list="{{d.files}}" as="f" hint-placeholder-count="2">
+                            <div onClick="{{f.onOpen}}" title="{{f.title}}" style="{{f.rowStyle}}">
+                              <span style="{{f.statusStyle}}">{{f.status}}</span>
+                              <span style="flex:1; min-width:0; font:500 11px/1.3 var(--mono); color:var(--t3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; direction:rtl; text-align:left;">{{f.path}}</span>
+                              <sc-if value="{{f.split}}"><span title="Partly staged — this file also has staged changes" style="flex:0 0 auto; width:14px; height:14px; border-radius:4px; border:1px solid var(--abord); background:var(--asoft); color:var(--accb); font:700 8px/12px var(--mono); text-align:center;">◐</span></sc-if>
+                              <span style="display:flex; gap:4px; flex:0 0 auto;">
+                                <button title="Discard changes" style="width:20px;height:20px;border-radius:5px;border:1px solid var(--line-def);background:transparent;color:var(--badt);font:600 11px/1 var(--sans);cursor:pointer;">↺</button>
+                                <button onClick="{{f.onToggle}}" title="Stage" style="width:20px;height:20px;border-radius:5px;border:1px solid var(--line-def);background:transparent;color:var(--t3);font:600 12px/1 var(--sans);cursor:pointer;">+</button>
+                              </span>
+                            </div>
+                          </sc-for>
+                        </div>
+                      </sc-if>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{noChanges}}">
+                <div style="padding:40px 16px; text-align:center;">
+                  <div style="width:40px;height:40px;margin:0 auto 12px;border-radius:999px;background:var(--oksoft);display:flex;align-items:center;justify-content:center;color:var(--ok);font-size:19px;">✓</div>
+                  <div style="font:600 13px/1.4 var(--sans); color:var(--t2);">Worktree is clean.</div>
+                  <div style="font:500 11px/1.5 var(--sans); color:var(--tsub); margin-top:4px;">Nothing to commit.</div>
+                </div>
+              </sc-if>
+            </div>
+
+            <sc-if value="{{hasChanges}}">
+              <div style="flex:0 0 auto; border-top:1px solid var(--line); padding:12px; background:var(--bg-side);">
+                <input value="{{commitMsg}}" onInput="{{onCommitMsg}}" placeholder="Summary" style="width:100%; height:32px; padding:0 10px; margin-bottom:8px; background:var(--bg-input); border:1px solid var(--line-def); border-radius:7px; color:var(--t1); font:500 12px/1 var(--sans); outline:none;">
+                <div style="display:flex; gap:8px;">
+                  <button onClick="{{onCommit}}" style="{{commitBtnStyle}}">{{commitLabel}}</button>
+                  <button style="height:32px; padding:0 12px; border-radius:7px; border:1px solid var(--line-def); background:var(--bg-elev); color:var(--t2); font:600 12px/1 var(--sans); cursor:pointer;">Amend</button>
+                </div>
+                <div style="margin-top:8px; font:500 10.5px/1.3 var(--mono); color:var(--tsub);">as {{profileEmail}}</div>
+              </div>
+            </sc-if>
+          </div>
+        </sc-if>
+
+        <!-- ===== REBASE ===== deterministic; no model in the loop. -->
+        <sc-if value="{{showRebase}}">
+          <div style="flex:1; min-height:0; overflow-y:auto; padding:14px;">
+            <div style="display:flex; align-items:center; gap:9px; margin-bottom:14px;">
+              <span style="width:26px;height:26px;border-radius:7px;background:var(--active-strong);border:1px solid var(--abord);display:flex;align-items:center;justify-content:center;color:var(--accb);font-size:13px;">↻</span>
+              <div style="flex:1;">
+                <div style="font:700 13px/1 var(--sans); color:var(--t1);">Rebase tool</div>
+                <div style="font:500 10.5px/1 var(--mono); color:var(--t3); margin-top:3px;">Isolated check · hooks and signing disabled</div>
+              </div>
+            </div>
+
+            <sc-if value="{{rebaseEmpty}}">
+              <div style="padding:20px 12px; border:1px dashed var(--line-def); border-radius:9px;">
+                <div style="font:500 12px/1.6 var(--sans); color:var(--t3);">Select commits in the graph, then choose <span style="color:var(--accb);">Squash</span> or <span style="color:var(--accb);">Reorder</span>. You can inspect the exact plan and check it safely before changing the worktree.</div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{rebaseActive}}">
+              <div>
+                <div style="font:600 10px/1 var(--sans); color:var(--t3); letter-spacing:0.08em; text-transform:uppercase; margin-bottom:8px;">{{rebaseActionLabel}} · {{rebaseSelCount}} commits</div>
+                <div style="border:1px solid var(--line); border-radius:9px; background:var(--bg-panel); overflow:hidden; margin-bottom:14px;">
+                  <sc-for list="{{rebaseCommits}}" as="rc" hint-placeholder-count="3">
+                    <div style="display:flex; align-items:center; gap:8px; padding:9px 11px; border-bottom:1px solid var(--line-faint);">
+                      <span style="width:6px;height:6px;border-radius:999px;background:var(--acc);flex:0 0 auto;"></span>
+                      <span style="flex:1; min-width:0; font:500 11.5px/1.3 var(--sans); color:var(--t1); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{rc.msg}}</span>
+                      <span style="font:500 9.5px/1 var(--mono); color:var(--tsub);">{{rc.hash}}</span>
+                    </div>
+                  </sc-for>
+                </div>
+
+                <div style="font:600 10px/1 var(--sans); color:var(--t3); letter-spacing:0.08em; text-transform:uppercase; margin-bottom:8px;">Plan</div>
+                <div style="border:1px solid var(--line); border-radius:9px; background:var(--bg-input); padding:12px 14px; margin-bottom:12px;">
+                  <sc-for list="{{rebasePlan}}" as="pl" hint-placeholder-count="3">
+                    <div style="display:flex; gap:8px; font:500 11.5px/1.7 var(--mono); color:var(--t2);"><span style="{{pl.opStyle}}">{{pl.op}}</span><span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{pl.text}}</span></div>
+                  </sc-for>
+                </div>
+
+                <sc-if value="{{checkVisible}}">
+                  <div role="status" style="{{checkStyle}}"><span style="{{checkTagStyle}}">{{checkTag}}</span>{{checkMsg}}</div>
+                </sc-if>
+
+                <div style="display:flex; flex-direction:column; gap:8px; margin-top:12px;">
+                  <button onClick="{{onRunCheck}}" style="{{checkBtnStyle}}">{{checkBtnLabel}}</button>
+                  <div style="display:flex; gap:8px;">
+                    <button onClick="{{onApplyRebase}}" style="{{applyBtnStyle}}">{{applyLabel}}</button>
+                    <button onClick="{{onClearSel}}" style="height:34px; padding:0 14px; border-radius:7px; border:1px solid var(--line-def); background:var(--bg-elev); color:var(--t2); font:600 12px/1 var(--sans); cursor:pointer;">Clear</button>
+                  </div>
+                </div>
+                <div style="margin-top:10px; font:500 10.5px/1.5 var(--sans); color:var(--tsub);">Hooks, signing, and rerere are disabled for both check and apply. Other repo-local Git settings can still affect Apply. Nothing is pushed.</div>
+              </div>
+            </sc-if>
+          </div>
+        </sc-if>
+      </aside>
+
+      <sc-if value="{{railCollapsed}}">
+        <button onClick="{{onToggleRail}}" style="position:absolute; top:12px; right:14px; z-index:20; height:30px; padding:0 12px; border-radius:7px; border:1px solid var(--line-def); background:var(--bg-elev); color:var(--t2); font:600 12px/1 var(--sans); cursor:pointer;">‹ Panel</button>
+      </sc-if>
+
+    </div>
+
+    <!-- ============ REPO SWITCHER (⌘F) ============ -->
+    <sc-if value="{{overlayOpen}}">
+      <div onClick="{{onCloseOverlay}}" style="position:absolute; inset:0; z-index:100; background:rgba(0,0,0,0.72); display:flex; align-items:flex-start; justify-content:center; padding-top:110px; animation:pg-fade 120ms ease;">
+        <div onClick="{{stop}}" style="width:620px; max-width:92%; background:var(--bg-elev); border:1px solid var(--line-def); border-radius:14px; box-shadow:0 32px 80px rgba(0,0,0,0.6); overflow:hidden;">
+          <div style="display:flex; align-items:center; gap:11px; padding:15px 18px; border-bottom:1px solid var(--line);">
+            <span style="color:var(--t3); font-size:15px;">⌕</span>
+            <input id="pg-repo-search" value="{{query}}" onInput="{{onQuery}}" placeholder="Search repos and branches across all profiles…" style="flex:1; background:transparent; border:none; outline:none; color:var(--t1); font:500 15px/1 var(--sans);">
+            <span style="font:600 10px/1 var(--mono); color:var(--tsub); border:1px solid var(--line-def); border-radius:4px; padding:3px 6px;">esc</span>
+          </div>
+          <div style="max-height:420px; overflow-y:auto; padding:8px;">
+            <sc-for list="{{results}}" as="r" hint-placeholder-count="6">
+              <button onClick="{{r.onPick}}" style="{{r.style}}">
+                <span style="flex:1; min-width:0; text-align:left; font:600 13px/1.2 var(--sans); color:var(--t1); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{r.name}}</span>
+                <span style="font:500 10px/1 var(--mono); color:var(--t3);">{{r.meta}}</span>
+                <span style="{{r.profStyle}}">{{r.profile}}</span>
+              </button>
+            </sc-for>
+            <sc-if value="{{noResults}}"><div style="padding:28px; text-align:center; font:500 12.5px/1 var(--sans); color:var(--tsub);">No repos match that search</div></sc-if>
+          </div>
+          <div style="display:flex; align-items:center; gap:16px; padding:10px 18px; border-top:1px solid var(--line); font:500 10.5px/1 var(--mono); color:var(--tsub);">
+            <span>↑↓ navigate</span><span>↵ open</span><span style="flex:1;"></span><span>{{resultCountText}}</span>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{toastVisible}}">
+      <div style="position:absolute; bottom:22px; left:50%; transform:translateX(-50%); z-index:120; padding:11px 16px; border-radius:9px; background:var(--bg-elev); border:1px solid var(--abord); box-shadow:0 18px 48px rgba(0,0,0,0.5); display:flex; align-items:center; gap:9px; animation:pg-fade 160ms cubic-bezier(0.22,1,0.36,1);">
+        <span style="width:7px;height:7px;border-radius:999px;background:var(--ok);"></span>
+        <span style="font:600 12px/1 var(--sans); color:var(--t1);">{{toastText}}</span>
+      </div>
+    </sc-if>
+
+  </div>
+  </div>
+
+  <!-- ================= aspirational ================= -->
+  <div>
+    <div class="pg-secthd">Aspirational — explored, not built</div>
+    <div class="pg-cards" style="margin-top:12px;">
+      <div class="pg-card pg-card--asp">
+        <h4>Agent-drafted rebase plans</h4>
+        <p>The 2026-08 wireframe drew an <b>Agent</b> rail tab — a “Rebase assistant · Codex · gpt-5.5 · ACP” that drafted a rebase plan for you to approve, reached by an <b>Ask agent →</b> button. No model is wired into PwrGit. What shipped instead is the deterministic <b>Rebase tool</b> in the frame above: <code>rebase:draft</code> builds the plan from the selection, <b>Check in isolated copy</b> replays it in a disposable clone and returns an approval token, and only a clean check enables <b>Apply</b>.</p>
+      </div>
+      <div class="pg-card pg-card--asp">
+        <h4>A quieter multi-lane lineage</h4>
+        <p>Lane reuse, dashed remote lineage and the Active/All scope toggle all ship. Still open: automatically dropping branches that have been merged or squash-landed so the graph stays quiet without being told, rather than leaning on the scope toggle and <code>Settings › Experimental › lineageAllBranches</code>.</p>
+      </div>
+      <div class="pg-card">
+        <h4>Not drawn here</h4>
+        <p>This artboard is the main window only. The diff pane, hunk/line staging gutter, image-diff lightbox, File Insights, Settings, Logs and the dialog family are inventoried in <b>PwrGit As-Built Coverage</b>, and two of them have their own artboards in this project.</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1448,"height":1340}}'>
+const PROFILES = [
+  { id: 'pwrdrvr', name: 'PwrDrvr', email: 'harold@pwrdrvr.com', mono: 'P' },
+  { id: 'acme', name: 'Acme Cloud', email: 'h.hunt@acmecloud.io', mono: 'A' },
+  { id: 'openclaw', name: 'Openclaw', email: 'harold@openclaw.dev', mono: 'O' }
+];
+
+function wt(branch, dirty, ahead, behind) { return { branch: branch, dirty: dirty, ahead: ahead, behind: behind }; }
+
+const REPOS = {
+  pwrdrvr: [
+    { id: 'pwrgit', name: 'PwrGit', root: '~/pwrdrvr', pr: 'open', wts: [ wt('feat/worktree-drag-sort', 6, 3, 0), wt('main', 0, 0, 0), wt('fix/graph-scope', 0, 0, 2) ] },
+    { id: 'pwragnt', name: 'PwrAgnt', root: '~/pwrdrvr', pr: 'merged', wts: [ wt('main', 0, 0, 0), wt('fix/telegram-topic-resume', 2, 1, 0) ] },
+    { id: 'pwrsnap', name: 'PwrSnap', root: '~/pwrdrvr', wts: [ wt('main', 0, 0, 3), wt('fix/editor-selection-loop', 1, 0, 0) ] },
+    { id: 'cdk-constructs', name: 'cdk-constructs', root: '~/oss', wts: [ wt('main', 0, 0, 0), wt('chore/bump-aws-cdk', 0, 2, 0) ] },
+    { id: 'microapps-router', name: 'microapps-router', root: '~/oss', wts: [ wt('main', 0, 0, 0) ] },
+    { id: 'codex-app-server', name: 'codex-app-server', root: '~/oss', wts: [ wt('main', 0, 0, 5) ] }
+  ],
+  acme: [
+    { id: 'billing-service', name: 'billing-service', root: '~/acme', wts: [ wt('main', 0, 0, 0), wt('fix/invoice-rounding', 3, 1, 0) ] },
+    { id: 'edge-gateway', name: 'edge-gateway', root: '~/acme', wts: [ wt('main', 0, 0, 2) ] },
+    { id: 'terraform-infra', name: 'terraform-infra', root: '~/acme', wts: [ wt('main', 0, 0, 0), wt('feat/vpc-peering', 0, 4, 0) ] }
+  ],
+  openclaw: [
+    { id: 'clawback', name: 'clawback', root: '~/side', wts: [ wt('main', 0, 0, 0), wt('feat/crab-cache', 4, 2, 0) ] },
+    { id: 'crab-cli', name: 'crab-cli', root: '~/side', wts: [ wt('main', 0, 0, 1) ] }
+  ]
+};
+
+const LANE_X = [12, 30, 48, 66];
+const LANE_C = ['#ff8a1f', '#62c882', '#7aa2f7', '#e5b566'];
+
+const GRAPH = [
+  { id: 'k9', lane: 1, up: false, down: true, through: [0], msg: 'feat: persist worktree drag order per repo', hash: 'a3f91c2', time: '2h ago', me: true, tip: 'feat/worktree-drag-sort', tipKind: 'head' },
+  { id: 'k8', lane: 1, up: true, down: true, through: [0], msg: 'feat: drag handles + dnd reorder for worktrees', hash: '7d0be14', time: '3h ago', me: true },
+  { id: 'k7', lane: 1, up: true, down: true, through: [0], msg: 'refactor: extract WorktreeList selector', hash: '12e8a9f', time: '5h ago', me: true },
+  { id: 'k6', lane: 1, up: true, down: true, through: [0], merge: 2, msg: "Merge branch 'main' into feat/worktree-drag-sort", hash: 'ff02aa1', time: 'yesterday', me: true, isMerge: true },
+  { id: 'k5', lane: 0, up: true, down: true, through: [1], dashed: true, msg: 'chore(deps-dev): bump @types/react-dom in the react-runtime group', hash: 'bc11343', time: '1d ago', me: false, author: 'dependabot', tip: 'origin/main', tipKind: 'remote', remote: true },
+  { id: 'k4', lane: 0, up: true, down: true, through: [1], msg: 'Give binary images a real diff: lightbox, pixel compare, and copy', hash: '5382de1', time: '2d ago', me: true, tip: 'main', tipKind: 'default', pr: '#189' },
+  { id: 'k3', lane: 2, up: false, down: true, through: [0, 1], msg: 'fix: sidebar scroll jank on expand', hash: '4b1c0de', time: '2d ago', me: true, tip: 'fix/graph-scope', tipKind: 'branch', pr: '#191' },
+  { id: 'k2', lane: 1, up: true, down: true, through: [0], merge: 2, msg: 'feat: worktree model + IPC surface', hash: 'e50f7a3', time: '4d ago', me: true },
+  { id: 'k1', lane: 0, up: true, down: false, through: [], msg: 'feat: initial worktree scaffolding', hash: '0091b2c', time: '5d ago', me: false, author: 'Dana Ng' }
+];
+
+const CHANGES = {
+  'pwrgit::feat/worktree-drag-sort': {
+    staged: [
+      { status: 'M', path: 'src/renderer/src/features/sidebar/WorktreeRow.tsx', split: true },
+      { status: 'M', path: 'src/renderer/src/features/sidebar/useListReorder.ts' },
+      { status: 'A', path: 'src/renderer/src/features/sidebar/worktree-order.ts' }
+    ],
+    folders: [
+      { dir: 'src/renderer/src/features/sidebar', files: [
+        { status: 'M', path: 'Sidebar.tsx', split: true },
+        { status: 'M', path: 'repo-view.ts' }
+      ] },
+      { dir: 'packages/shared/src', files: [
+        { status: 'M', path: 'worktree.ts' },
+        { status: '?', path: 'scratch-notes.md' }
+      ] }
+    ]
+  }
+};
+
+const LENSES = [
+  { key: 'Focused', icon: '◎', desc: 'Repos with work in flight' },
+  { key: 'Pinned', icon: '★', desc: 'Repos and worktrees you pinned' },
+  { key: 'Behind', icon: '↓', desc: 'Repos behind their remote' },
+  { key: 'Stale', icon: '◷', desc: 'Untouched for a while' },
+  { key: 'All', icon: '≡', desc: 'Every repo in this profile' }
+];
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      profileId: 'pwrdrvr',
+      profileMenuOpen: false,
+      openProfiles: ['pwrdrvr'],
+      lens: 'Focused',
+      groupByFolder: true,
+      expanded: { pwrgit: true },
+      sel: 'pwrgit::feat/worktree-drag-sort',
+      pinnedRepos: { pwrgit: true, pwragnt: true },
+      pinnedWts: { 'pwrgit::feat/worktree-drag-sort': true },
+      railTab: 'changes',
+      railCollapsed: false,
+      scope: 'active',
+      selCommits: {},
+      rebaseAction: null,
+      check: 'idle',
+      applied: false,
+      operation: false,
+      overlayOpen: false,
+      query: '',
+      sync: 'idle',
+      commitMsg: '',
+      folderOpen: { 'src/renderer/src/features/sidebar': true },
+      toast: null
+    };
+    this.onKey = this.onKey.bind(this);
+  }
+
+  componentDidMount() { window.addEventListener('keydown', this.onKey); }
+  componentWillUnmount() { window.removeEventListener('keydown', this.onKey); clearTimeout(this.tt); }
+
+  onKey(e) {
+    const k = (e.key || '').toLowerCase();
+    if ((e.metaKey || e.ctrlKey) && (k === 'f' || k === 'k')) { e.preventDefault(); this.openOverlay(); }
+    if (e.key === 'Escape') { this.setState({ overlayOpen: false, profileMenuOpen: false }); }
+  }
+
+  toast(text) {
+    clearTimeout(this.tt);
+    this.setState({ toast: text });
+    this.tt = setTimeout(() => { this.setState({ toast: null }); }, 2400);
+  }
+
+  openOverlay() {
+    this.setState({ overlayOpen: true, query: '' });
+    setTimeout(() => { const el = document.getElementById('pg-repo-search'); if (el) { el.focus(); } }, 40);
+  }
+
+  reposFor(pid) { return REPOS[pid] || []; }
+
+  lensFilter(list) {
+    const s = this.state;
+    if (s.lens === 'All') { return list; }
+    if (s.lens === 'Pinned') { return list.filter((r) => s.pinnedRepos[r.id]); }
+    if (s.lens === 'Behind') { return list.filter((r) => r.wts.some((w) => w.behind > 0)); }
+    if (s.lens === 'Stale') { return list.filter((r) => r.wts.every((w) => !w.dirty && !w.ahead)); }
+    return list.filter((r) => r.wts.some((w) => w.dirty || w.ahead) || s.pinnedRepos[r.id]);
+  }
+
+  lensCount(key) {
+    const s = this.state;
+    const list = this.reposFor(s.profileId);
+    if (key === 'All') { return list.length; }
+    if (key === 'Pinned') { return list.filter((r) => s.pinnedRepos[r.id]).length; }
+    if (key === 'Behind') { return list.filter((r) => r.wts.some((w) => w.behind > 0)).length; }
+    if (key === 'Stale') { return list.filter((r) => r.wts.every((w) => !w.dirty && !w.ahead)).length; }
+    return list.filter((r) => r.wts.some((w) => w.dirty || w.ahead) || s.pinnedRepos[r.id]).length;
+  }
+
+  switchProfile(pid) {
+    const repos = this.reposFor(pid);
+    const first = repos[0];
+    const sel = first ? first.id + '::' + first.wts[0].branch : null;
+    const open = this.state.openProfiles.indexOf(pid) >= 0 ? this.state.openProfiles : this.state.openProfiles.concat([pid]);
+    const expanded = {};
+    if (first) { expanded[first.id] = true; }
+    this.setState({ profileId: pid, profileMenuOpen: false, sel: sel, expanded: expanded, selCommits: {}, rebaseAction: null, openProfiles: open });
+    const p = PROFILES.filter((x) => x.id === pid)[0];
+    this.toast('Focused the ' + p.name + ' window');
+  }
+
+  renderVals() {
+    const s = this.state;
+    const self = this;
+    const prof = PROFILES.filter((p) => p.id === s.profileId)[0] || PROFILES[0];
+    const selRepoId = (s.sel || '').split('::')[0];
+    const selBranch = (s.sel || '').split('::')[1];
+    const selRepo = this.reposFor(s.profileId).filter((r) => r.id === selRepoId)[0] || null;
+    const selWt = selRepo ? selRepo.wts.filter((w) => w.branch === selBranch)[0] : null;
+
+    const monoBase = 'flex:0 0 auto; width:28px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center; font:700 12px/1 var(--mono); ';
+    const profileMenu = PROFILES.map((p) => ({
+      name: p.name, email: p.email, mono: p.mono,
+      open: s.openProfiles.indexOf(p.id) >= 0,
+      monoStyle: monoBase + (p.id === s.profileId ? 'background:var(--asoft); color:var(--accb); border:1px solid var(--abord);' : 'background:var(--bg-elev); color:var(--t3); border:1px solid var(--line);'),
+      style: 'width:100%; display:flex; align-items:center; gap:9px; padding:7px 8px; border-radius:8px; border:none; background:' + (p.id === s.profileId ? 'var(--row-active)' : 'transparent') + '; cursor:pointer;',
+      onPick: () => { self.switchProfile(p.id); }
+    }));
+
+    const lenses = LENSES.map((l) => {
+      const active = s.lens === l.key;
+      const count = this.lensCount(l.key);
+      return {
+        icon: l.icon, count: count || 0,
+        title: l.key + ' (' + count + ') — ' + l.desc,
+        onClick: () => { self.setState({ lens: l.key }); },
+        style: 'display:flex; align-items:center; justify-content:center; gap:4px; height:26px; border-radius:6px; border:1px solid ' + (active ? 'var(--abord)' : 'transparent') + '; background:' + (active ? 'var(--active-strong)' : 'transparent') + '; color:' + (active ? 'var(--accb)' : 'var(--t3)') + '; cursor:pointer;',
+        countStyle: 'font:600 9px/1 var(--mono); color:' + (active ? 'var(--accb)' : 'var(--tsub)') + ';'
+      };
+    });
+
+    const visibleRepos = this.lensFilter(this.reposFor(s.profileId));
+    const mkRepo = (r) => {
+      const expanded = Boolean(s.expanded[r.id]);
+      let behind = 0;
+      r.wts.forEach((w) => { behind += w.behind; });
+      const pinned = Boolean(s.pinnedRepos[r.id]);
+      const isSelRepo = r.id === selRepoId;
+      const prTone = r.pr === 'merged' ? 'var(--purple)' : r.pr === 'open' ? 'var(--susp)' : 'transparent';
+      return {
+        name: r.name, expanded: expanded,
+        wtCountText: r.wts.length + (r.wts.length === 1 ? ' wt' : ' wts'),
+        behindFlag: behind > 0, behindText: '↓' + behind,
+        prFlag: Boolean(r.pr), prTitle: r.pr === 'merged' ? 'Latest PR merged' : 'PR open',
+        prStyle: 'flex:0 0 auto; width:8px; height:8px; border-radius:999px; background:' + prTone + '; box-shadow:0 0 0 1px rgba(247,243,235,0.32);',
+        rowStyle: 'display:flex; align-items:center; gap:6px; height:26px; padding:0 8px; border-radius:7px; cursor:pointer; background:' + (isSelRepo ? 'var(--row-active)' : 'transparent') + ';',
+        gripStyle: 'flex:0 0 auto; width:12px; color:var(--tsub); display:flex; align-items:center; cursor:grab;',
+        chevStyle: 'flex:0 0 auto; width:10px; color:var(--t3); font-size:9px; display:inline-block; transform:rotate(' + (expanded ? 90 : 0) + 'deg);',
+        pinFill: pinned ? 'var(--acc)' : 'none',
+        pinStyle: 'flex:0 0 auto; display:flex; align-items:center; color:' + (pinned ? 'var(--acc)' : 'var(--tsub)') + '; cursor:pointer;',
+        onTogglePin: (e) => {
+          if (e && e.stopPropagation) { e.stopPropagation(); }
+          const next = Object.assign({}, self.state.pinnedRepos);
+          next[r.id] = !next[r.id];
+          self.setState({ pinnedRepos: next });
+        },
+        onToggleExpand: () => {
+          const next = Object.assign({}, self.state.expanded);
+          next[r.id] = !next[r.id];
+          self.setState({ expanded: next });
+        },
+        onNewWorktree: () => { self.toast('New worktree — ' + r.name); },
+        worktrees: r.wts.map((w) => {
+          const key = r.id + '::' + w.branch;
+          const active = key === s.sel;
+          const pin = Boolean(s.pinnedWts[key]);
+          return {
+            branch: w.branch,
+            dirty: w.dirty > 0, dirtyText: '●' + w.dirty,
+            ahead: w.ahead > 0, aheadText: '↑' + w.ahead,
+            behind: w.behind > 0, behindText: '↓' + w.behind,
+            branchColor: active ? '#ff8a1f' : '#8c857a',
+            labelStyle: 'flex:1; min-width:0; text-align:left; font:' + (active ? 600 : 500) + ' 12px/1.2 var(--mono); color:' + (active ? 'var(--t1)' : 'var(--t2)') + '; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;',
+            rowStyle: 'display:flex; align-items:center; gap:6px; height:26px; padding:0 7px 0 2px; border-radius:6px; margin-bottom:1px; cursor:pointer; background:' + (active ? 'var(--active-strong)' : 'transparent') + ';',
+            handleStyle: 'flex:0 0 auto; width:11px; color:var(--tsub); display:flex; align-items:center; cursor:grab;',
+            pinFill: pin ? 'var(--acc)' : 'none',
+            pinStyle: 'flex:0 0 auto; display:flex; align-items:center; color:' + (pin ? 'var(--acc)' : 'var(--tsub)') + '; cursor:pointer;',
+            onTogglePin: (e) => {
+              if (e && e.stopPropagation) { e.stopPropagation(); }
+              const next = Object.assign({}, self.state.pinnedWts);
+              next[key] = !next[key];
+              self.setState({ pinnedWts: next });
+            },
+            onSelect: () => { self.setState({ sel: key, selCommits: {}, rebaseAction: null, railTab: 'changes', check: 'idle', applied: false }); }
+          };
+        })
+      };
+    };
+
+    let groups;
+    if (s.groupByFolder) {
+      const roots = [];
+      visibleRepos.forEach((r) => { if (roots.indexOf(r.root) < 0) { roots.push(r.root); } });
+      groups = roots.map((root) => {
+        const rs = visibleRepos.filter((r) => r.root === root);
+        return { showHead: true, root: root, label: root, count: String(rs.length), repos: rs.map(mkRepo) };
+      });
+    } else {
+      groups = [{ showHead: false, root: '', label: '', count: '', repos: visibleRepos.map(mkRepo) }];
+    }
+
+    const hdrRepo = selRepo ? selRepo.name : '—';
+    const hdrBranch = selBranch || '—';
+    const hdrPath = selRepo ? '~/pwrdrvr/' + selRepo.name.toLowerCase() + (selBranch === 'main' ? '' : '-wt/' + String(selBranch || '').split('/').pop()) : '';
+    const dirty = selWt ? selWt.dirty : 0;
+    const ahead = selWt ? selWt.ahead : 0;
+    const behind = selWt ? selWt.behind : 0;
+
+    let chipText = 'in sync';
+    let chipBg = 'transparent';
+    let chipFg = 'var(--tsub)';
+    let chipBorder = 'var(--line)';
+    if (s.sync === 'fetching') { chipText = 'Fetching…'; chipFg = 'var(--accb)'; chipBorder = 'var(--abord)'; chipBg = 'var(--row-active)'; }
+    else if (behind > 0 && ahead > 0) { chipText = '↑' + ahead + ' ↓' + behind; chipFg = 'var(--warn)'; chipBorder = 'var(--line-def)'; }
+    else if (behind > 0) { chipText = '↓' + behind; chipFg = 'var(--warn)'; chipBorder = 'var(--line-def)'; chipBg = 'var(--warnsoft)'; }
+    else if (ahead > 0) { chipText = '↑' + ahead; chipFg = 'var(--okt)'; chipBorder = 'var(--line-def)'; chipBg = 'var(--oksoft)'; }
+
+    const btn = (accent) => 'display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 11px; border-radius:7px; border:1px solid ' + (accent ? 'var(--abord)' : 'var(--line-def)') + '; background:' + (accent ? 'var(--active-strong)' : 'transparent') + '; color:' + (accent ? 'var(--accb)' : 'var(--t2)') + '; font:600 11.5px/1 var(--sans); cursor:pointer;';
+
+    const scopeAll = s.scope === 'all';
+    const visible = scopeAll ? GRAPH : GRAPH.filter((c) => c.lane !== 2);
+    const hiddenCount = GRAPH.length - visible.length;
+
+    const commits = visible.map((c) => {
+      const selected = Boolean(s.selCommits[c.id]);
+      const x = LANE_X[c.lane];
+      const col = LANE_C[c.lane];
+      const dash = c.dashed ? 'dashed' : 'solid';
+      const segs = [];
+      (c.through || []).forEach((l) => {
+        const ld = (l === 0 && c.dashed) ? 'dashed' : 'solid';
+        segs.push({ style: 'position:absolute; left:' + (LANE_X[l] - 1) + 'px; top:0; bottom:0; width:0; border-left:2px ' + ld + ' ' + LANE_C[l] + ';' });
+      });
+      if (c.up) { segs.push({ style: 'position:absolute; left:' + (x - 1) + 'px; top:0; height:50%; width:0; border-left:2px ' + dash + ' ' + col + ';' }); }
+      if (c.down) { segs.push({ style: 'position:absolute; left:' + (x - 1) + 'px; top:50%; bottom:0; width:0; border-left:2px ' + dash + ' ' + col + ';' }); }
+      if (typeof c.merge === 'number') {
+        const mx = LANE_X[c.merge];
+        segs.push({ style: 'position:absolute; left:' + x + 'px; top:50%; width:' + (mx - x) + 'px; bottom:0; border-right:2px solid ' + LANE_C[c.merge] + '; border-top:2px solid ' + LANE_C[c.merge] + '; border-top-right-radius:10px;' });
+      }
+      const other = !c.me;
+      let tipTone;
+      if (c.tipKind === 'head') { tipTone = 'background:var(--asoft); border:1px solid var(--abord); color:var(--accb);'; }
+      else if (c.tipKind === 'default') { tipTone = 'background:transparent; border:1px solid ' + LANE_C[0] + '; color:' + LANE_C[0] + ';'; }
+      else if (c.tipKind === 'remote') { tipTone = 'background:transparent; border:1px dashed var(--line-def); color:var(--tsub);'; }
+      else { tipTone = 'background:transparent; border:1px solid ' + col + '; color:' + col + ';'; }
+      return {
+        msg: c.msg, hash: c.hash, time: c.time,
+        author: other ? (c.author || 'someone else') : 'you',
+        authorStyle: 'font:600 10px/1 var(--mono); color:' + (other ? 'var(--tsub)' : 'var(--t3)') + ';',
+        segs: segs,
+        dotStyle: 'position:absolute; left:' + (x - 5) + 'px; top:calc(50% - 5px); width:10px; height:10px; border-radius:999px; box-sizing:border-box; border:2.5px solid ' + col + '; background:' + (c.tip ? col : 'var(--bg-panel)') + ';',
+        tipFlag: Boolean(c.tip), tip: c.tip || '',
+        tipStyle: 'flex:0 0 auto; display:inline-flex; align-items:center; height:18px; padding:0 7px; border-radius:999px; font:600 9.5px/1 var(--mono); ' + tipTone,
+        prFlag: Boolean(c.pr), prText: c.pr || '', prTitle: 'Landed as pull request ' + (c.pr || ''),
+        prStyle: 'flex:0 0 auto; display:inline-flex; align-items:center; height:18px; padding:0 7px; border-radius:999px; border:1px solid var(--line); color:var(--purple); font:600 9.5px/1 var(--mono);',
+        isMergeFlag: Boolean(c.isMerge), isRemoteFlag: Boolean(c.remote),
+        checkStyle: 'flex:0 0 auto; align-self:center; width:18px; height:18px; border-radius:5px; display:flex; align-items:center; justify-content:center; font:700 10px/1 var(--sans); border:1.5px solid ' + (selected ? 'var(--acc)' : 'var(--line-def)') + '; background:' + (selected ? 'var(--acc)' : 'transparent') + '; color:' + (selected ? 'var(--accon)' : 'transparent') + ';',
+        msgStyle: 'flex:1; min-width:0; font:600 12.5px/1.3 var(--sans); color:' + (other ? 'var(--t3)' : 'var(--t1)') + '; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;',
+        rowStyle: 'display:flex; align-items:stretch; gap:9px; padding:0 12px 0 0; min-height:60px; cursor:pointer; border-bottom:1px solid var(--line-faint); background:' + (selected ? 'var(--row-active)' : 'transparent') + ';',
+        onClick: () => {
+          const sc = Object.assign({}, self.state.selCommits);
+          if (sc[c.id]) { delete sc[c.id]; } else { sc[c.id] = true; }
+          const n = Object.keys(sc).length;
+          self.setState({ selCommits: sc, rebaseAction: n ? self.state.rebaseAction : null, check: 'idle', applied: false });
+        }
+      };
+    });
+
+    const selIds = Object.keys(s.selCommits).filter((id) => visible.some((c) => c.id === id));
+    const selCount = selIds.length;
+
+    const chipDefs = [
+      { name: 'main', kind: 'default', lane: 0 },
+      { name: 'feat/worktree-drag-sort', kind: 'head', lane: 1 },
+      { name: 'fix/graph-scope', kind: 'branch', lane: 2 }
+    ];
+    const branchChips = chipDefs.map((b) => ({
+      name: b.name, title: b.name + ' — click to reveal its tip',
+      onClick: () => { self.toast('Revealed ' + b.name); },
+      style: 'display:inline-flex; align-items:center; gap:5px; height:24px; padding:0 9px; border-radius:999px; border:1px solid ' + (b.kind === 'head' ? 'var(--abord)' : 'var(--line)') + '; background:' + (b.kind === 'head' ? 'var(--active-strong)' : 'transparent') + '; color:' + (b.kind === 'head' ? 'var(--accb)' : 'var(--t3)') + '; font:600 10.5px/1 var(--mono); cursor:pointer; white-space:nowrap; flex:0 0 auto;',
+      dotStyle: 'width:6px; height:6px; border-radius:999px; flex:0 0 auto; background:' + LANE_C[b.lane] + ';'
+    }));
+
+    const changes = CHANGES[s.sel] || null;
+    const railWidth = s.railCollapsed ? '0px' : '344px';
+    const railStyle = 'background:var(--bg-side); display:' + (s.railCollapsed ? 'none' : 'flex') + '; flex-direction:column; min-height:0;';
+
+    const railTabDefs = [
+      { key: 'changes', label: 'Changes', badge: dirty || 0 },
+      { key: 'rebase', label: 'Rebase', badge: selCount || 0 }
+    ];
+    const railTabs = railTabDefs.map((t) => {
+      const active = s.railTab === t.key;
+      return {
+        label: t.label, badge: t.badge || 0,
+        onClick: () => { self.setState({ railTab: t.key }); },
+        style: 'display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 12px; border-radius:7px; border:1px solid ' + (active ? 'var(--abord)' : 'transparent') + '; background:' + (active ? 'var(--active-strong)' : 'transparent') + '; color:' + (active ? 'var(--accb)' : 'var(--t3)') + '; font:600 12px/1 var(--sans); cursor:pointer;',
+        badgeStyle: 'display:inline-flex; align-items:center; justify-content:center; min-width:16px; height:16px; padding:0 4px; border-radius:999px; background:var(--warnsoft); color:var(--warn); font:600 9px/1 var(--mono);'
+      };
+    });
+
+    const statusStyle = (st) => {
+      const map = { M: ['var(--warn)', 'var(--warnsoft)'], A: ['var(--okt)', 'var(--oksoft)'], D: ['var(--badt)', 'var(--badsoft)'] };
+      const c = map[st] || ['var(--t3)', 'var(--bg-elev)'];
+      return 'flex:0 0 auto; width:18px; height:18px; border-radius:5px; display:flex; align-items:center; justify-content:center; font:700 10px/1 var(--mono); color:' + c[0] + '; background:' + c[1] + ';';
+    };
+    const fileRowStyle = 'display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:7px; margin-bottom:2px; cursor:pointer; background:transparent;';
+    const mkFile = (f, staged) => ({
+      status: f.status, statusStyle: statusStyle(f.status), path: f.path, split: Boolean(f.split),
+      rowStyle: fileRowStyle,
+      title: f.split ? 'Partly staged — view these changes' : 'View changes',
+      onOpen: () => { self.toast('Opened diff · ' + f.path.split('/').pop()); },
+      onToggle: (e) => {
+        if (e && e.stopPropagation) { e.stopPropagation(); }
+        self.toast((staged ? 'Unstaged ' : 'Staged ') + f.path.split('/').pop());
+      }
+    });
+    const stagedFiles = changes ? changes.staged.map((f) => mkFile(f, true)) : [];
+    const folders = changes ? changes.folders.map((d) => ({
+      dir: d.dir, count: String(d.files.length), open: Boolean(s.folderOpen[d.dir]),
+      title: d.dir + '/ — ' + d.files.length + ' files',
+      discardTitle: 'Discard all ' + d.files.length + ' files in this folder',
+      stageTitle: 'Stage all ' + d.files.length + ' files in this folder',
+      twistyStyle: 'flex:0 0 auto; width:10px; color:var(--t3); font-size:9px; display:inline-block; transform:rotate(' + (s.folderOpen[d.dir] ? 90 : 0) + 'deg);',
+      onToggle: () => {
+        const next = Object.assign({}, self.state.folderOpen);
+        next[d.dir] = !next[d.dir];
+        self.setState({ folderOpen: next });
+      },
+      files: d.files.map((f) => mkFile(f, false))
+    })) : [];
+    let unstagedCount = 0;
+    folders.forEach((d) => { unstagedCount += d.files.length; });
+    const hasChanges = Boolean(changes);
+    const canCommit = s.commitMsg.trim().length > 0;
+
+    const rebaseActive = Boolean(s.rebaseAction) && selCount > 0;
+    const rebaseSel = visible.filter((c) => s.selCommits[c.id]);
+    const rebaseCommits = rebaseSel.map((c) => ({ msg: c.msg, hash: c.hash }));
+    const rebaseActionLabel = s.rebaseAction === 'reorder' ? 'Reorder' : 'Squash';
+    const okStyle = 'color:var(--okt); flex:0 0 auto; width:46px;';
+    const accStyle = 'color:var(--acc); flex:0 0 auto; width:46px;';
+    const dimStyle = 'color:var(--tsub); flex:0 0 auto; width:46px;';
+    let rebasePlan = [];
+    if (s.rebaseAction === 'squash' && rebaseSel.length) {
+      const oldest = rebaseSel[rebaseSel.length - 1];
+      rebasePlan = [{ op: 'pick', opStyle: okStyle, text: oldest.hash + '  ' + oldest.msg }];
+      rebaseSel.slice(0, -1).reverse().forEach((c) => {
+        rebasePlan.push({ op: 'squash', opStyle: accStyle, text: c.hash + '  ' + c.msg });
+      });
+      rebasePlan.push({ op: '#', opStyle: dimStyle, text: '→ ' + selCount + ' commits become 1' });
+    } else if (s.rebaseAction === 'reorder' && rebaseSel.length) {
+      rebasePlan = rebaseSel.slice().reverse().map((c) => ({ op: 'pick', opStyle: okStyle, text: c.hash + '  ' + c.msg }));
+      rebasePlan.push({ op: '#', opStyle: dimStyle, text: '→ oldest-first, no content change' });
+    }
+    const checkClean = s.check === 'clean';
+    const applyEnabled = checkClean && !s.applied;
+
+    const q = s.query.trim().toLowerCase();
+    const allRepos = [];
+    PROFILES.forEach((p) => {
+      (REPOS[p.id] || []).forEach((r) => { allRepos.push({ repo: r, profile: p }); });
+    });
+    let matched = q
+      ? allRepos.filter((x) => x.repo.name.toLowerCase().indexOf(q) >= 0 || x.repo.wts.some((w) => w.branch.toLowerCase().indexOf(q) >= 0))
+      : allRepos.filter((x) => x.profile.id === s.profileId);
+    matched = matched.slice(0, 40);
+    const profTint = { pwrdrvr: 'var(--accb)', acme: 'var(--info)', openclaw: 'var(--okt)' };
+    const results = matched.map((x, i) => ({
+      name: x.repo.name,
+      meta: x.repo.wts.length + (x.repo.wts.length === 1 ? ' wt' : ' wts'),
+      profile: x.profile.name,
+      profStyle: 'flex:0 0 auto; display:inline-flex; align-items:center; height:20px; padding:0 8px; border-radius:999px; background:var(--bg-panel); border:1px solid var(--line); color:' + (profTint[x.profile.id] || 'var(--t3)') + '; font:600 9.5px/1 var(--mono);',
+      style: 'width:100%; display:flex; align-items:center; gap:11px; padding:9px 11px; border-radius:8px; border:1px solid transparent; background:' + (i === 0 ? 'var(--active-strong)' : 'transparent') + '; cursor:pointer;',
+      onPick: () => {
+        const pid = x.profile.id;
+        const openIt = () => {
+          const exp = Object.assign({}, self.state.expanded);
+          exp[x.repo.id] = true;
+          self.setState({ overlayOpen: false, expanded: exp, sel: x.repo.id + '::' + x.repo.wts[0].branch, selCommits: {}, rebaseAction: null, railTab: 'changes' });
+        };
+        if (pid !== self.state.profileId) { self.switchProfile(pid); setTimeout(openIt, 0); } else { openIt(); }
+        self.toast('Opened ' + x.repo.name);
+      }
+    }));
+
+    return {
+      railWidth: railWidth,
+      hdrRepo: hdrRepo, hdrBranch: hdrBranch, hdrPath: hdrPath,
+      profileName: prof.name, profileEmail: prof.email, profileMono: prof.mono,
+      profileMonoStyle: monoBase + 'background:var(--asoft); color:var(--accb); border:1px solid var(--abord);',
+      profileChipStyle: 'width:100%; display:flex; align-items:center; gap:9px; padding:6px 8px; background:transparent; border:1px solid var(--line); border-radius:9px; cursor:pointer;',
+      profileMenuOpen: s.profileMenuOpen, profileMenu: profileMenu,
+      onToggleProfileMenu: () => { self.setState({ profileMenuOpen: !self.state.profileMenuOpen }); },
+      onOpenOverlay: () => { self.openOverlay(); },
+      onOpenSettings: () => { self.toast('Settings window'); },
+      onBranchMenu: () => { self.toast('Branch switcher'); },
+      onFetchAll: () => { self.toast('Fetching every repository…'); },
+      onPullAll: () => { self.toast('Fast-forwarded the safe worktrees'); },
+      lenses: lenses, groups: groups,
+      gearStyle: 'flex:0 0 auto; width:28px; height:32px; border-radius:7px; border:1px solid ' + (s.groupByFolder ? 'var(--abord)' : 'var(--line)') + '; background:' + (s.groupByFolder ? 'var(--active-strong)' : 'transparent') + '; color:' + (s.groupByFolder ? 'var(--accb)' : 'var(--t3)') + '; cursor:pointer; font-size:12px;',
+      onToggleGroup: () => { self.setState({ groupByFolder: !self.state.groupByFolder }); },
+
+      dirtyFlag: dirty > 0, dirtyText: '●' + dirty,
+      driftFlag: true, driftText: 'base ↓4',
+      syncChipText: chipText,
+      syncChipStyle: 'display:inline-flex; align-items:center; height:22px; padding:0 9px; border-radius:999px; border:1px solid ' + chipBorder + '; background:' + chipBg + '; color:' + chipFg + '; font:600 10.5px/1 var(--mono); flex:0 0 auto;',
+      fetchBtnStyle: btn(false), pushBtnStyle: btn(false), pullBtnStyle: btn(behind > 0),
+      fetchLabel: s.sync === 'fetching' ? 'Fetching…' : 'Fetch',
+      pullLabel: 'Pull', pushLabel: 'Push',
+      onFetch: () => {
+        self.setState({ sync: 'fetching' });
+        setTimeout(() => { self.setState({ sync: 'idle' }); self.toast('Fetched ' + hdrRepo); }, 900);
+      },
+      onPull: () => {
+        self.setState({ sync: 'fetching' });
+        setTimeout(() => {
+          if (selWt) { selWt.behind = 0; }
+          self.setState({ sync: 'idle' });
+          self.toast('Fast-forwarded · up to date');
+        }, 950);
+      },
+      onPush: () => { self.toast('Pushed ' + hdrBranch); },
+
+      branchChips: branchChips,
+      onLocate: () => { self.toast('Scrolled to HEAD'); },
+      scopeText: scopeAll ? 'All branches' : 'Active',
+      scopeStyle: 'height:26px; padding:0 10px; border-radius:6px; border:1px solid ' + (scopeAll ? 'var(--abord)' : 'var(--line)') + '; background:' + (scopeAll ? 'var(--active-strong)' : 'transparent') + '; color:' + (scopeAll ? 'var(--accb)' : 'var(--t3)') + '; font:600 10.5px/1 var(--mono); cursor:pointer; flex:0 0 auto;',
+      onToggleScope: () => { self.setState({ scope: self.state.scope === 'all' ? 'active' : 'all' }); },
+      commits: commits,
+      hiddenNoteVisible: !scopeAll && hiddenCount > 0,
+      hiddenNoteText: hiddenCount + ' commit' + (hiddenCount === 1 ? '' : 's') + ' on branches outside the active set are hidden.',
+
+      actionBarVisible: selCount > 0,
+      selCountText: selCount + ' commit' + (selCount === 1 ? '' : 's') + ' selected',
+      onSquash: () => { self.setState({ rebaseAction: 'squash', railTab: 'rebase', check: 'idle', applied: false }); },
+      onReorder: () => { self.setState({ rebaseAction: 'reorder', railTab: 'rebase', check: 'idle', applied: false }); },
+      onOpenRebaseTool: () => { self.setState({ rebaseAction: self.state.rebaseAction || 'squash', railTab: 'rebase' }); },
+      onClearSel: () => { self.setState({ selCommits: {}, rebaseAction: null, check: 'idle', applied: false }); },
+
+      railStyle: railStyle, railCollapsed: s.railCollapsed,
+      onToggleRail: () => { self.setState({ railCollapsed: !self.state.railCollapsed }); },
+      railTabs: railTabs, showChanges: s.railTab === 'changes', showRebase: s.railTab === 'rebase',
+      operationVisible: s.operation,
+      hasChanges: hasChanges, noChanges: !hasChanges,
+      wipText: dirty + ' uncommitted change' + (dirty === 1 ? '' : 's'),
+      stagedFiles: stagedFiles, folders: folders,
+      stagedCount: stagedFiles.length, unstagedCount: unstagedCount,
+      commitMsg: s.commitMsg,
+      onCommitMsg: (e) => { self.setState({ commitMsg: e.target.value }); },
+      commitBtnStyle: 'flex:1; height:32px; border-radius:7px; border:none; background:' + (canCommit ? 'var(--acc)' : 'var(--active-strong)') + '; color:' + (canCommit ? 'var(--accon)' : 'var(--tsub)') + '; font:700 12px/1 var(--sans); cursor:' + (canCommit ? 'pointer' : 'not-allowed') + ';',
+      commitLabel: 'Commit ' + stagedFiles.length + ' file' + (stagedFiles.length === 1 ? '' : 's'),
+      onCommit: () => {
+        if (!canCommit) { return; }
+        self.toast('Committed to ' + hdrBranch);
+        self.setState({ commitMsg: '' });
+      },
+
+      rebaseEmpty: !rebaseActive, rebaseActive: rebaseActive,
+      rebaseActionLabel: rebaseActionLabel, rebaseSelCount: selCount,
+      rebaseCommits: rebaseCommits, rebasePlan: rebasePlan,
+      checkVisible: s.check !== 'idle',
+      checkTag: s.check === 'checking' ? 'Checking' : 'Clean',
+      checkTagStyle: 'display:inline-flex; align-items:center; height:17px; padding:0 7px; margin-right:8px; border-radius:999px; font:700 9.5px/1 var(--mono); ' + (checkClean ? 'background:var(--oksoft); color:var(--okt);' : 'background:var(--asoft); color:var(--accb);'),
+      checkMsg: s.check === 'checking' ? 'Running the exact rebase in a disposable local repository…' : 'Replayed with no conflicts. Apply is unlocked.',
+      checkStyle: 'padding:9px 11px; border-radius:8px; border:1px solid ' + (checkClean ? 'rgba(95,169,105,0.42)' : 'var(--line-def)') + '; background:' + (checkClean ? 'var(--oksoft)' : 'var(--bg-panel)') + '; font:500 11px/1.5 var(--sans); color:var(--t2);',
+      checkBtnLabel: s.check === 'checking' ? 'Checking…' : 'Check in isolated copy',
+      checkBtnStyle: 'width:100%; height:32px; border-radius:7px; border:1px solid var(--line-def); background:var(--bg-elev); color:var(--t1); font:600 12px/1 var(--sans); cursor:pointer;',
+      onRunCheck: () => {
+        self.setState({ check: 'checking' });
+        setTimeout(() => { self.setState({ check: 'clean' }); }, 1100);
+      },
+      applyLabel: s.applied ? 'Applied ✓' : 'Apply rebase',
+      applyBtnStyle: 'flex:1; height:34px; border-radius:7px; border:none; background:' + (applyEnabled ? 'var(--acc)' : 'var(--active-strong)') + '; color:' + (applyEnabled ? 'var(--accon)' : 'var(--tsub)') + '; font:700 12px/1 var(--sans); cursor:' + (applyEnabled ? 'pointer' : 'not-allowed') + ';',
+      onApplyRebase: () => {
+        if (!applyEnabled) { return; }
+        self.setState({ applied: true });
+        self.toast(rebaseActionLabel + ' applied to ' + hdrBranch);
+      },
+
+      overlayOpen: s.overlayOpen, query: s.query,
+      onQuery: (e) => { self.setState({ query: e.target.value }); },
+      onCloseOverlay: () => { self.setState({ overlayOpen: false }); },
+      stop: (e) => { e.stopPropagation(); },
+      results: results, noResults: results.length === 0,
+      resultCountText: results.length + ' repos',
+
+      toastVisible: Boolean(s.toast), toastText: s.toast || ''
+    };
+  }
+}
+</script>
+</body>
+</html>
