@@ -28,6 +28,7 @@ import {
   registerAppUpdateHandlers
 } from "./auto-updater";
 import { CommandBus } from "./command-bus";
+import { registerClipboardHandlers } from "./clipboard-handlers";
 import { registerDialogHandlers } from "./dialog-handlers";
 import { execGit } from "./git/dugite";
 import { openExternalUrlFromMenu } from "./external-links";
@@ -36,6 +37,7 @@ import { registerBulkSyncHandlers } from "./git/bulk-sync-handlers";
 import { registerCloneHandlers } from "./git/clone-handlers";
 import { CloneService } from "./git/clone-service";
 import { registerForkHandlers } from "./git/fork-handlers";
+import { registerFileInsightHandlers } from "./git/file-insights-handlers";
 import { ForkService } from "./git/fork-service";
 import { ForgeRepoRegistry } from "./forge/repo-provider";
 import { createE2EForgeFixtureServices } from "./forge/e2e-forge-fixture";
@@ -181,7 +183,7 @@ bus.register("ping", () => ok("pong"));
 function installDevelopmentDockIcon(): void {
   if (process.platform !== "darwin" || app.isPackaged) return;
 
-  const iconPath = join(app.getAppPath(), "build", "icon.png");
+  const iconPath = join(app.getAppPath(), "build", "icon-macos.png");
   const icon = nativeImage.createFromPath(iconPath);
   if (icon.isEmpty()) {
     logMain("warn", "app", "failed to load development Dock icon", { iconPath });
@@ -527,8 +529,10 @@ if (!gotSingleInstanceLock) {
     registerChangesHandlers(bus, db, refresher, worktreeOperations);
     registerOperationHandlers(bus, db, refresher, worktreeOperations);
     registerSubmoduleHandlers(bus, db);
+    const fileInsightHandlers = registerFileInsightHandlers(bus, db);
     registerRebaseHandlers(bus, db, refresher, worktreeOperations);
     registerDialogHandlers(bus);
+    registerClipboardHandlers(bus);
     registerShellHandlers(bus);
     const githubHandlers = registerGitHubHandlers(
       bus,
@@ -556,6 +560,7 @@ if (!gotSingleInstanceLock) {
       onWebContentsDestroyed: (webContentsId) => {
         githubHandlers.releaseWebContents(webContentsId);
         bulkSyncHandlers.releaseWebContents(webContentsId);
+        fileInsightHandlers.releaseWebContents(webContentsId);
       }
     });
     registerAppUpdateHandlers(bus);

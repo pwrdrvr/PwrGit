@@ -1188,6 +1188,7 @@ export function LineageGraph({
           target={branchMenu}
           branchInfo={data?.branches ?? {}}
           viewingBranch={viewingBranch}
+          repoId={repoId}
           worktreeId={worktreeId}
           onSwitchBranch={(target) => void switchToBranch(target)}
           onRevealWorktree={onRevealWorktree}

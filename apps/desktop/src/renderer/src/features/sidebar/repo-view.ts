@@ -561,16 +561,6 @@ export function worktreeFolderLabel(
   return redundant ? null : folder;
 }
 
-/** Short relative age label for a last-activity timestamp. */
-export function relativeAge(iso: string, now: number = Date.now()): string {
-  const days = Math.floor((now - new Date(iso).getTime()) / 86_400_000);
-  if (days < 1) return "today";
-  if (days < 7) return `${days}d`;
-  if (days < 30) return `${Math.floor(days / 7)}w`;
-  if (days < 365) return `${Math.floor(days / 30)}mo`;
-  return `${Math.floor(days / 365)}y`;
-}
-
 /**
  * The only parts of an event the row-selection logic reads. Declared
  * structurally so a click and a keypress both satisfy it — the alternative was

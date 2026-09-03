@@ -35,6 +35,11 @@ import type {
   Commit,
   CommitFileChange,
   CommitStats,
+  FileBlamePage,
+  FileContents,
+  FileHistoryPage,
+  FileInsightContext,
+  FileSearchHit,
   GitHubCommitAuthorIdentityLookup,
   GraphLog,
   GitLfsReport,
@@ -57,10 +62,12 @@ import type {
   RemoteDivergence,
   BranchReveal,
   RemoteResetMode,
+  RemoteResetPreview,
   RemoteResetSnapshot,
   Repo,
   RepoId,
   RepoRefs,
+  ResetTargets,
   ResolvedCommit,
   TagPage,
   TagSummary,
@@ -1068,10 +1075,24 @@ export interface Commands {
     };
     res: null;
   };
-  /** Resolve a checked-out local branch and one fetched remote ref for review. */
+  /**
+   * Rank the reset targets worth naming before the user opens a 39-row list:
+   * the checked-out branch's own upstream first, then the remote's default
+   * branch. Also reports how stale the fetched view the reset acts on is.
+   */
+  "remote:resetTargets": {
+    req: { worktreeId: string };
+    res: ResetTargets;
+  };
+  /**
+   * Resolve a checked-out local branch and one fetched remote ref for review,
+   * with the commits that would leave the branch and Git's patch-aware
+   * alignment between the two ranges — a rebased upstream strands nothing
+   * even though every hash differs.
+   */
   "remote:inspectReset": {
     req: { worktreeId: string; remoteRef: string };
-    res: RemoteResetSnapshot;
+    res: RemoteResetPreview;
   };
   /** Reset only the still-current checkout/ref pair from the reviewed snapshot. */
   "remote:resetToRemote": {
@@ -1220,6 +1241,13 @@ export interface Commands {
     req: { worktreeId: string; hash: string };
     res: Commit | null;
   };
+  /** One commit's message. Separate from `commit:lookup` because the shared
+   *  log format feeds the 200-commit graph walk, and a body per row there is
+   *  payload nobody reads. */
+  "commit:message": {
+    req: { worktreeId: string; hash: string };
+    res: { subject: string; body: string } | null;
+  };
   /** The files a commit touched (rail's commit-scoped list). */
   "commit:files": {
     req: { worktreeId: string; hash: string };
@@ -1239,6 +1267,62 @@ export interface Commands {
   "diff:image": {
     req: { worktreeId: string; path: string; rev: ImageRevision };
     res: ImagePreview;
+  };
+  /** Put a PNG on the system clipboard. `pngBase64` is raw base64 with no
+   *  `data:` prefix. The renderer composes the picture — a single revision, or
+   *  a labelled strip of several — because only it has the decoded bitmaps;
+   *  the main process just owns the clipboard. */
+  "clipboard:writeImage": {
+    req: { pngBase64: string };
+    res: null;
+  };
+  /** Rename-aware, bounded commit history for one selected file. */
+  "file:history": {
+    req: {
+      operationId: string;
+      worktreeId: string;
+      path: string;
+      context: FileInsightContext;
+      cursor?: string;
+      limit?: number;
+    };
+    res: FileHistoryPage;
+  };
+  /** Bounded porcelain blame page for current or committed file contents.
+   *  `aimLine` asks for the page holding that 1-based line; the server owns
+   *  the page arithmetic and clamps past-EOF aims to the file's last page. */
+  "file:blame": {
+    req: {
+      operationId: string;
+      worktreeId: string;
+      path: string;
+      context: FileInsightContext;
+      cursor?: string;
+      aimLine?: number;
+      limit?: number;
+    };
+    res: FileBlamePage;
+  };
+  /** The file itself at a revision (or in the working tree), complete —
+   *  history shows what each commit changed; this shows what the file WAS. */
+  "file:contents": {
+    req: {
+      operationId: string;
+      worktreeId: string;
+      path: string;
+      context: FileInsightContext;
+    };
+    res: FileContents;
+  };
+  /** Stop a file-insight Git read (history, blame, contents, message)
+   *  owned by this renderer. */
+  "file:cancelInsight": { req: { operationId: string }; res: null };
+  /** Ranked tracked-file matches, so history and blame are reachable for a
+   *  file that has not changed recently — the app has no file browser, and a
+   *  file only ever entered through a diff it happened to appear in. */
+  "file:search": {
+    req: { worktreeId: string; query: string; limit?: number };
+    res: FileSearchHit[];
   };
 
   // App settings (Settings window)

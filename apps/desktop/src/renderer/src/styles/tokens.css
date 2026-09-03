@@ -138,6 +138,18 @@
   --pr-dot-ring: color-mix(in srgb, var(--text-primary) 32%, transparent);
   --brand-purple: #8a6dc4;
 
+  /* Image-diff deltas. These two do NOT flip with the theme, because they are
+     not chrome: pixel-diff.worker.ts bakes the same RGB into the diff PNG
+     itself, and a legend swatch that flipped would stop matching the picture
+     it explains. pixel-diff.test.ts pins the numbers against these declarations.
+
+     Deliberately not pixelmatch's default red: this repository's images are
+     screenshots of dark tangerine UI that already carry red error text, so a
+     red delta reads as part of the photograph rather than as an annotation.
+     Magenta appears nowhere in the theme or in what it photographs. */
+  --diff-changed: #ff2d9b;
+  --diff-aa: #ffe14d;
+
   /* Commit-graph lane palette. Lane 1 is the default-branch spine and rides
      the app accent; the rest rotate through legible, distinct hues. Consumed
      from GraphRow.tsx as var(--lane-N), so the palette themes with the app

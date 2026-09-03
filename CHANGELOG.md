@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.10.0 - 2026-08-31
+
+- File History and Blame - Added rename-aware file history, per-revision file viewing, and line-level blame from the Command Palette, changed-file menus, and diffs.
+- Changes - Added Git-native hunk and line staging and unstaging, with snapshot checks that safely refresh stale selections instead of applying them to changed content.
+- Updates - **Help → Check for Updates** now answers in a toast with a direct **Restart** action when an update is ready; development builds can preview the full flow safely.
+- Git LFS - Replaced the recurring banner with an at-a-glance repository header status and targeted repair guidance that does not shift the workspace.
+- Repositories - Protected scanned repositories, pins, and custom ordering when a configured scan location is temporarily unavailable or empty.
+- Packaging - Added a shipped-dependency license policy gate and embedded-Git source disclosure so an unexpected license change cannot silently pass packaging checks.
+
 ## v0.9.0 - 2026-08-30
 
 - Sync - Added profile-wide **Fetch all** and **Try pull all**, with per-repository progress, cancellation, and conservative fast-forwards that only update clean, tracked worktrees.

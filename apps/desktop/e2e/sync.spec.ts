@@ -128,7 +128,7 @@ test("a diverged pull aligns rewritten commits, scrolls both histories, and rese
   await expect(dialog).toContainText("Only on this branch 12 commits");
   await expect(dialog).toContainText("Only on origin/main 13 commits");
 
-  const comparison = dialog.locator(".pull-divergence__comparison-scroll");
+  const comparison = dialog.locator(".commit-align__scroll");
   await expect(comparison.locator('[role="row"]')).toHaveCount(15);
   await expect(
     comparison.getByLabel("Corresponding commit with changes")
@@ -148,11 +148,11 @@ test("a diverged pull aligns rewritten commits, scrolls both histories, and rese
   const alignedRow = comparison.locator('[role="row"]', {
     hasText: "feat: shared change 7"
   });
-  await expect(alignedRow.locator(".pull-divergence__commit-subject")).toHaveText([
+  await expect(alignedRow.locator(".commit-align__commit-subject")).toHaveText([
     "feat: shared change 7",
     "feat: shared change 7"
   ]);
-  await expect(alignedRow.locator(".pull-divergence__commit-stats")).toHaveText([
+  await expect(alignedRow.locator(".commit-align__commit-stats")).toHaveText([
     "+1−0",
     "+1−0"
   ]);

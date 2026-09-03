@@ -72,15 +72,35 @@ describe("DiffPane refreshing an open working-tree diff", () => {
   let handlers: Map<string, (payload: { worktreeId: string }) => void>;
   let current: PartialFileDiff;
 
-  const tick = (): HTMLInputElement => {
-    const box = container.querySelector<HTMLInputElement>(
-      '.diff-row.is-tickable input[type="checkbox"]'
-    );
-    if (box === null) throw new Error("no tickable row rendered");
-    return box;
+  /** Every line control the pane is currently offering, in painted order. */
+  const takes = (): HTMLButtonElement[] => [
+    ...container.querySelectorAll<HTMLButtonElement>(
+      ".diff-row.is-tickable button.diff-line-take"
+    )
+  ];
+  const take = (): HTMLButtonElement => {
+    const button = takes()[0];
+    if (button === undefined) throw new Error("no tickable row rendered");
+    return button;
   };
-  const gutterOf = (box: HTMLInputElement): HTMLElement =>
-    box.closest(".diff-row")!.querySelector(".diff-gutter") as HTMLElement;
+  const isOn = (button: HTMLButtonElement): boolean =>
+    button.getAttribute("aria-pressed") === "true";
+  /** The lane the control sits in — the target the pointer actually presses. */
+  const laneOf = (button: HTMLButtonElement): HTMLElement =>
+    button.closest(".diff-lane") as HTMLElement;
+  /** One press-and-release over a line's lane: the whole gesture, as a
+   *  browser delivers it. */
+  const clickLine = async (
+    button: HTMLButtonElement,
+    init: MouseEventInit = {}
+  ): Promise<void> => {
+    await act(async () => {
+      laneOf(button).dispatchEvent(
+        new MouseEvent("mousedown", { bubbles: true, button: 0, ...init })
+      );
+      window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    });
+  };
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -105,6 +125,7 @@ describe("DiffPane refreshing an open working-tree diff", () => {
           worktreeId="worktree-1"
           target={{ kind: "file", path: "file.txt", staged: false }}
           onOpenFile={vi.fn()}
+          onOpenFileInsight={() => undefined}
           onClose={vi.fn()}
         />
       );
@@ -123,15 +144,15 @@ describe("DiffPane refreshing an open working-tree diff", () => {
   };
 
   it("keeps the ticks and the rendered body when the file's diff is unchanged", async () => {
-    await act(async () => gutterOf(tick()).click());
-    expect(tick().checked).toBe(true);
+    await clickLine(take());
+    expect(isOn(take())).toBe(true);
 
     // The watcher behind this event fingerprints the whole worktree, so it
     // fires for edits to files this pane is not showing. Nothing about this
     // file moved, so nothing the reader chose may move either.
     await announce();
 
-    expect(tick().checked).toBe(true);
+    expect(isOn(take())).toBe(true);
     expect(container.querySelector(".diff-selection-bar__count")?.textContent)
       .toBe("1 selected");
     // No teardown: the body never falls back to the loading placeholder, which
@@ -145,46 +166,37 @@ describe("DiffPane refreshing an open working-tree diff", () => {
     // the set. The old contract encoded intent in array order and this exact
     // sequence — tick a line, shift-click to extend — cleared the range
     // instead of ticking it. Every prior test stopped at one component.
-    const boxes = (): HTMLInputElement[] => [
-      ...container.querySelectorAll<HTMLInputElement>(
-        '.diff-row.is-tickable input[type="checkbox"]'
-      )
-    ];
-    expect(boxes()).toHaveLength(2);
+    expect(takes()).toHaveLength(2);
 
-    await act(async () => gutterOf(boxes()[0]!).click());
-    expect(boxes()[0]?.checked).toBe(true);
+    await clickLine(takes()[0]!);
+    expect(isOn(takes()[0]!)).toBe(true);
 
-    await act(async () =>
-      gutterOf(boxes()[1]!).dispatchEvent(
-        new MouseEvent("click", { bubbles: true, shiftKey: true })
-      )
-    );
-    expect(boxes().map((box) => box.checked)).toEqual([true, true]);
+    await clickLine(takes()[1]!, { shiftKey: true });
+    expect(takes().map(isOn)).toEqual([true, true]);
     expect(container.querySelector(".diff-selection-bar__count")?.textContent)
       .toBe("2 selected");
   });
 
   it("drops the ticks and says why once the file's diff really moves", async () => {
-    await act(async () => gutterOf(tick()).click());
-    expect(tick().checked).toBe(true);
+    await clickLine(take());
+    expect(isOn(take())).toBe(true);
 
     // Positional line IDs describe a different edit against a new snapshot,
     // so carrying the ticks over would stage a line the reader never picked.
     current = snapshot("fingerprint-2");
     await announce();
 
-    expect(tick().checked).toBe(false);
+    expect(isOn(take())).toBe(false);
     expect(container.querySelector(".diff-stale-notice")?.textContent).toContain(
       "This file changed"
     );
     // Ticking again clears the notice rather than leaving it to linger.
-    await act(async () => gutterOf(tick()).click());
+    await clickLine(take());
     expect(container.querySelector(".diff-stale-notice")).toBeNull();
   });
 
   it("applies against the fingerprint the ticks were chosen on", async () => {
-    await act(async () => gutterOf(tick()).click());
+    await clickLine(take());
     const apply = container.querySelector<HTMLButtonElement>(
       ".diff-selection-bar__apply"
     );
@@ -218,7 +230,7 @@ describe("DiffPane refreshing an open working-tree diff", () => {
     expect(container.querySelector(".diff-selection-bar__help")).not.toBeNull();
 
     // The first landed selection is proof the gesture is learned.
-    await act(async () => gutterOf(tick()).click());
+    await clickLine(take());
     await act(async () =>
       container
         .querySelector<HTMLButtonElement>(".diff-selection-bar__apply")
@@ -239,6 +251,7 @@ describe("DiffPane refreshing an open working-tree diff", () => {
           worktreeId="worktree-1"
           target={{ kind: "file", path: "file.txt", staged: false }}
           onOpenFile={vi.fn()}
+          onOpenFileInsight={() => undefined}
           onClose={vi.fn()}
         />
       );
@@ -254,6 +267,7 @@ describe("DiffPane refreshing an open working-tree diff", () => {
           worktreeId="worktree-1"
           target={{ kind: "file", path: "file.txt", staged: false }}
           onOpenFile={vi.fn()}
+          onOpenFileInsight={() => undefined}
           onClose={onClose}
         />
       );
@@ -307,6 +321,7 @@ describe("DiffPane refreshing an open working-tree diff", () => {
           worktreeId="worktree-1"
           target={{ kind: "file", path: "file.txt", staged: false }}
           onOpenFile={onOpenFile}
+          onOpenFileInsight={() => undefined}
           onClose={vi.fn()}
         />
       );
@@ -328,4 +343,448 @@ describe("DiffPane refreshing an open working-tree diff", () => {
     await act(async () => across?.click());
     expect(onOpenFile).toHaveBeenCalledWith("file.txt", true);
   });
+});
+
+// ---- focus, header, and file-insight behaviour ----
+
+
+const TARGET = { kind: "file" as const, path: "docs/guide.txt", staged: false };
+const PATCH = [
+  "diff --git a/docs/guide.txt b/docs/guide.txt",
+  "--- a/docs/guide.txt",
+  "+++ b/docs/guide.txt",
+  "@@ -1 +1 @@",
+  "-old",
+  "+new"
+].join("\n");
+
+describe("DiffPane focus and header", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+const COMMIT = {
+  kind: "commitFile" as const,
+  hash: "7f856d4".padEnd(40, "0"),
+  path: "docs/guide.txt",
+  subject: "fix(desktop): harden agent request lifecycle"
+};
+
+const respond = (body: string) => (name: string) =>
+  name === "commit:message"
+    ? Promise.resolve(ok({ subject: COMMIT.subject, body }))
+    : Promise.resolve(ok(PATCH));
+
+  beforeEach(() => {
+  // Route by command: the staging pane fetches `diff:fileSelection` for file
+  // targets and crashes on a bare string where a PartialFileDiff belongs.
+  mocks.dispatch.mockImplementation(async (command: string) =>
+    command === "diff:fileSelection"
+      ? ok(snapshot("focus-suite"))
+      : command === "commit:message"
+        ? ok(null)
+        : ok(PATCH)
+  );
+  mocks.subscribe.mockImplementation(() => () => undefined);
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+});
+
+afterEach(async () => {
+  await act(async () => root.unmount());
+  container.remove();
+  vi.clearAllMocks();
+});
+
+const pressEscape = async (): Promise<void> => {
+  await act(async () => {
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true
+      })
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+};
+
+describe("DiffPane", () => {
+  it("takes focus on open so Escape is its own", async () => {
+    const onClose = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="wt-1"
+          target={TARGET}
+          onOpenFileInsight={() => undefined}
+          onOpenFile={vi.fn()}
+          onClose={onClose}
+        />
+      );
+    });
+
+    expect(document.activeElement).toBe(container.querySelector(".diff-pane"));
+    await pressEscape();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes focus back when file details close over it and leave", async () => {
+    const onClose = vi.fn();
+    const render = async (hidden: boolean): Promise<void> => {
+      await act(async () => {
+        root.render(
+          <DiffPane
+            worktreeId="wt-1"
+            target={TARGET}
+            hidden={hidden}
+            onOpenFileInsight={() => undefined}
+            onOpenFile={vi.fn()}
+          onClose={onClose}
+          />
+        );
+      });
+    };
+
+    await render(false);
+    // File details render OVER the pane and take focus, exactly as
+    // FileInsightsPane's own effect does, then unmount when they close.
+    await render(true);
+    const insights = document.createElement("section");
+    insights.tabIndex = -1;
+    document.body.append(insights);
+    insights.focus();
+    insights.remove();
+
+    await render(false);
+
+    // Neither the target nor the key changed, so nothing but `hidden` can tell
+    // the pane it is back on screen — and Escape is scoped to focus.
+    expect(document.activeElement).toBe(container.querySelector(".diff-pane"));
+    await pressEscape();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not steal focus while it is hidden", async () => {
+    const outside = document.createElement("input");
+    document.body.append(outside);
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="wt-1"
+          target={TARGET}
+          hidden
+          onOpenFileInsight={() => undefined}
+          onOpenFile={vi.fn()}
+          onClose={vi.fn()}
+        />
+      );
+    });
+    outside.focus();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(document.activeElement).toBe(outside);
+    outside.remove();
+  });
+
+  it("names the scope, never the file — the strip below does that", async () => {
+    mocks.dispatch.mockImplementation(respond(""));
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="wt-1"
+          target={COMMIT}
+          onOpenFileInsight={() => undefined}
+          onOpenFile={vi.fn()}
+          onClose={vi.fn()}
+        />
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const head = container.querySelector(".diff-pane__head");
+    // A one-file slice says "in", the whole commit says "commit" — collapsing
+    // them made a single strip read as "this commit touched one file".
+    expect(head?.textContent).toContain("in 7f856d4");
+    expect(head?.textContent).not.toContain("commit 7f856d4");
+    // The path belongs to the per-file strip; printing it here too put the
+    // same string on two lines, one above the other.
+    expect(head?.textContent).not.toContain("docs/guide.txt");
+    expect(container.querySelector(".diff-file__path")?.textContent).toBe(
+      "docs/guide.txt"
+    );
+  });
+
+  it("puts the subject on its own line and expands the body", async () => {
+    mocks.dispatch.mockImplementation(respond("Why this was needed.\n\n* one\n* two"));
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="wt-1"
+          target={COMMIT}
+          onOpenFileInsight={() => undefined}
+          onOpenFile={vi.fn()}
+          onClose={vi.fn()}
+        />
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const toggle = container.querySelector<HTMLButtonElement>(
+      ".diff-pane__message--toggle"
+    );
+    expect(toggle?.textContent).toContain(COMMIT.subject);
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector(".diff-pane__message-body")).toBeNull();
+
+    await act(async () => toggle?.click());
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+    const body = container.querySelector(".diff-pane__message-body");
+    expect(body?.textContent).toContain("* two");
+    expect(body?.id).toBe(toggle?.getAttribute("aria-controls"));
+  });
+
+  it("offers no control when the message is only a subject", async () => {
+    mocks.dispatch.mockImplementation(respond(""));
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="wt-1"
+          target={COMMIT}
+          onOpenFileInsight={() => undefined}
+          onOpenFile={vi.fn()}
+          onClose={vi.fn()}
+        />
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // A control that would do nothing is worse than no control.
+    expect(container.querySelector(".diff-pane__message--toggle")).toBeNull();
+    expect(container.querySelector(".diff-pane__message")?.textContent).toContain(
+      COMMIT.subject
+    );
+  });
+
+  it("shows no message row for a working-tree file", async () => {
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="wt-1"
+          target={TARGET}
+          onOpenFileInsight={() => undefined}
+          onOpenFile={vi.fn()}
+          onClose={vi.fn()}
+        />
+      );
+    });
+    expect(container.querySelector(".diff-pane__message")).toBeNull();
+    // The side tabs carry the side's NAME, so the scope says the comparison.
+    expect(container.querySelector(".diff-pane__scope")?.textContent).toBe(
+      "index → working tree"
+    );
+    expect(
+      mocks.dispatch.mock.calls.some(([name]) => name === "commit:message")
+    ).toBe(false);
+  });
+
+  it("reaches one file's history from a WHOLE-commit diff", async () => {
+    mocks.dispatch.mockImplementation(respond(""));
+    const onOpenFileInsight = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="wt-1"
+          target={{
+            kind: "commit",
+            hash: COMMIT.hash,
+            subject: COMMIT.subject
+          }}
+          onOpenFileInsight={onOpenFileInsight}
+          onOpenFile={vi.fn()}
+          onClose={vi.fn()}
+        />
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // No pane-level History/Blame here — a whole commit has no single file.
+    expect(container.querySelector(".diff-pane__tools")).toBeNull();
+
+    const trigger = container.querySelector<HTMLButtonElement>(".diff-file__menu");
+    expect(trigger?.getAttribute("aria-label")).toBe(
+      "Actions for docs/guide.txt"
+    );
+    await act(async () => trigger?.click());
+
+    const history = [...document.querySelectorAll(".pop-menu__item")].find(
+      (item) => item.textContent === "File history"
+    ) as HTMLButtonElement | undefined;
+    expect(history).toBeDefined();
+    await act(async () => history?.click());
+
+    // Blames at THIS commit, not at HEAD.
+    expect(onOpenFileInsight).toHaveBeenCalledWith(
+      "docs/guide.txt",
+      { kind: "commit", hash: COMMIT.hash },
+      "history"
+    );
+  });
+
+  it("opens blame at the line whose gutter number was clicked", async () => {
+    // A file target renders its selection snapshot, so the snapshot must
+    // carry THIS test's path and patch — the default fixture names file.txt
+    // and the gutter's blame callback reports the rendered file's path.
+    mocks.dispatch.mockImplementation(async (command: string) =>
+      command === "diff:fileSelection"
+        ? ok({
+            ...snapshot("gutter-suite"),
+            path: "docs/guide.txt",
+            patch: PATCH,
+            hunks: []
+          })
+        : command === "commit:message"
+          ? ok(null)
+          : ok(PATCH)
+    );
+    const onOpenFileInsight = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="wt-1"
+          target={TARGET}
+          onOpenFileInsight={onOpenFileInsight}
+          onOpenFile={vi.fn()}
+          onClose={vi.fn()}
+        />
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // PATCH's one added line is new-side line 1.
+    const gutter = container.querySelector<HTMLButtonElement>(
+      '[title="Blame from line 1"]'
+    );
+    expect(gutter).not.toBeNull();
+    await act(async () => gutter?.click());
+
+    expect(onOpenFileInsight).toHaveBeenCalledWith(
+      "docs/guide.txt",
+      { kind: "workingTree" },
+      "blame",
+      1
+    );
+  });
+
+  it("offers the file at this commit from the per-file menu", async () => {
+    mocks.dispatch.mockImplementation(respond(""));
+    const onOpenFileInsight = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="wt-1"
+          target={{ kind: "commit", hash: COMMIT.hash, subject: COMMIT.subject }}
+          onOpenFileInsight={onOpenFileInsight}
+          onOpenFile={vi.fn()}
+          onClose={vi.fn()}
+        />
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>(".diff-file__menu")?.click()
+    );
+    const view = [...document.querySelectorAll(".pop-menu__item")].find(
+      (item) => item.textContent === "View file at this commit"
+    ) as HTMLButtonElement | undefined;
+    expect(view).toBeDefined();
+    await act(async () => view?.click());
+
+    expect(onOpenFileInsight).toHaveBeenCalledWith(
+      "docs/guide.txt",
+      { kind: "commit", hash: COMMIT.hash },
+      "contents"
+    );
+  });
+
+  it("fetches one message per commit, not one per file", async () => {
+    mocks.dispatch.mockImplementation(respond("Some body."));
+    const render = async (path: string): Promise<void> => {
+      await act(async () => {
+        root.render(
+          <DiffPane
+            worktreeId="wt-1"
+            target={{ ...COMMIT, path }}
+            onOpenFileInsight={() => undefined}
+            onOpenFile={vi.fn()}
+          onClose={vi.fn()}
+          />
+        );
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    };
+
+    await render("docs/guide.txt");
+    await render("docs/other.txt");
+    await render("docs/third.txt");
+
+    // Browsing a commit's files flips the target per click; the message is
+    // per-commit and immutable, so one fetch serves them all.
+    expect(
+      mocks.dispatch.mock.calls.filter(([name]) => name === "commit:message")
+    ).toHaveLength(1);
+  });
+
+  it("offers no aimed gutter blame on a staged diff", async () => {
+    const onOpenFileInsight = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="wt-1"
+          target={{ kind: "file", path: "docs/guide.txt", staged: true }}
+          onOpenFileInsight={onOpenFileInsight}
+          onOpenFile={vi.fn()}
+          onClose={vi.fn()}
+        />
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // A staged diff numbers its new side in INDEX coordinates while blame
+    // reads the working tree — an aim would confidently mark the wrong line,
+    // so the gutter offers none. The header's un-aimed Blame remains.
+    expect(container.querySelector('[title^="Blame from line"]')).toBeNull();
+    expect(
+      [...container.querySelectorAll(".diff-pane__tools button")].map(
+        (button) => button.textContent
+      )
+    ).toContain("Blame");
+  });
+});
 });

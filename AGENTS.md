@@ -54,10 +54,15 @@ pnpm lint       # every check CI runs, cheapest-first (see below)
 ```
 
 `pnpm lint` chains `lint:colors` → `package:reservation:check` →
-`licenses:check` → `lint:boundaries` → `typecheck`, ordered so a fast failure
-doesn't wait on the slow one. CI's Typecheck job runs exactly this one command,
-so **add new repo-wide checks to the chain in the root `package.json`**, not as
-another CI step.
+`deps:maturity` → `licenses:check` → `lint:boundaries` → `typecheck`, ordered
+so a fast failure doesn't wait on the slow one. CI's Typecheck job runs exactly
+this one command, so **add new repo-wide checks to the chain in the root
+`package.json`**, not as another CI step.
+
+`deps:maturity` enforces the seven-day dependency cooldown
+(`minimumReleaseAge` in `pnpm-workspace.yaml`). Adding an exclusion to get past
+it is a supply-chain decision — [scripts/AGENTS.md](scripts/AGENTS.md) says why
+the check exists and what an exclusion costs.
 
 `licenses:check` chains three scripts that are easy to mistake for each other;
 [scripts/AGENTS.md](scripts/AGENTS.md) says which one judges a dependency's
@@ -119,6 +124,35 @@ verifies). Tag suffixes map onto Settings → Updates: no suffix is Stable
 Latest, `-prerelease` is Stable Prerelease, `-beta` is Beta Latest, `-alpha`
 is Beta Prerelease. CI, preview builds, and signing secrets are documented in
 `.github/workflows/README.md`.
+
+## Pull Requests
+
+- Prefer before/after screenshots on PRs that change visible UI.
+  - Use 100% contrived fixture data when possible.
+  - If a screenshot is not 100% contrived, show it to the operator and wait for approval before attaching. Redact anything that must not ship (secrets, tokens, customer data, private thread text, account identifiers).
+- GitHub CLI 2.99+ (`gh` v2.99.0) can attach images and videos with the repeatable `--attach` flag on `gh pr create`, `gh pr edit`, and `gh pr comment`.
+  - Reference the local path in the Markdown body so `gh` rewrites it to the uploaded URL in place. Unreferenced attachments are appended at the end.
+  - Example:
+
+    ```bash
+    gh pr create \
+      --title "fix(desktop): tighten sidebar padding" \
+      --body-file /tmp/pr-body.md \
+      --attach ./before.png \
+      --attach ./after.png
+    ```
+
+    With this body:
+
+    ```markdown
+    ## Before
+    ![sidebar before](./before.png)
+
+    ## After
+    ![sidebar after](./after.png)
+    ```
+
+  - Alt text can also follow the path after `#`, as in `--attach './after.png#sidebar after'`. Update `gh` to v2.99.0 or later before using `--attach`.
 
 ## Docs & conventions
 

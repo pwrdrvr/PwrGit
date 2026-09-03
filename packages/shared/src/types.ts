@@ -130,6 +130,64 @@ export type RemoteResetSnapshot = {
   remoteHead: string;
 };
 
+/** One ranked reset target the dialog names before the full branch list. */
+export type ResetTargetSuggestion = {
+  /** Fully qualified fetched ref, e.g. `refs/remotes/origin/main`. */
+  ref: string;
+  /** Display-qualified name, e.g. `origin/main`. */
+  label: string;
+  head: string;
+  lastCommitAt?: string;
+  subject?: string;
+  /** Commits on the checkout that this tip does not contain. */
+  ahead: number;
+  /** Commits on this tip that the checkout does not contain. */
+  behind: number;
+};
+
+/**
+ * What the reset dialog knows before the user picks anything.
+ *
+ * The ranking is computed in main because only Git knows which ref a branch
+ * tracks. The picker's own list is sorted by committer date, which on an
+ * active repository puts the trunk first no matter which branch is checked
+ * out — the wrong default for the one action that discards history.
+ */
+export type ResetTargets = {
+  branch: string;
+  head: string;
+  /** The checked-out branch's configured upstream, when it is fetched. */
+  upstream: ResetTargetSuggestion | null;
+  /** The remote's default branch. Null when it is already `upstream`. */
+  defaultBranch: ResetTargetSuggestion | null;
+  /** Fetched remote-tracking branches across every remote. */
+  branchCount: number;
+  /** ISO-8601 time this checkout last fetched; null if it never has. */
+  lastFetchedAt: string | null;
+};
+
+/**
+ * The reviewed reset, carrying the two facts prose cannot: which commits
+ * actually leave the branch, and which of those are the same work under a new
+ * object name. An upstream that was rebased and force-pushed strands nothing
+ * even though every commit on both sides has a different hash — a count alone
+ * would report that as total loss.
+ */
+export type RemoteResetPreview = {
+  snapshot: RemoteResetSnapshot;
+  /** Commits on the checkout that the target does not contain. */
+  leaving: DivergenceCommit[];
+  /** Commits on the target that the checkout does not contain. */
+  arriving: DivergenceCommit[];
+  /** Patch-aware correspondence between the two ranges, newest first. */
+  alignedCommits: DivergenceCommitAlignment[];
+  /**
+   * Tracked working-tree entries a hard reset overwrites. Untracked and
+   * ignored files are excluded because `reset --hard` leaves them in place.
+   */
+  dirty: number;
+};
+
 export type RemoteSummary = {
   name: string;
   fetchUrl: string;
@@ -852,6 +910,91 @@ export type Commit = {
   /** ISO-8601 commit time. */
   committedAt: string;
   isMerge: boolean;
+};
+
+/** The file contents a history/blame view is anchored to. Working-tree
+ *  history walks through HEAD while blame includes uncommitted lines. */
+export type FileInsightContext =
+  | { kind: "workingTree" }
+  | { kind: "commit"; hash: string };
+
+/** One rename-aware commit in a file's lineage. */
+export type FileHistoryEntry = Commit & {
+  /** Path as it existed immediately after this commit. */
+  path: string;
+  status: FileStatus;
+  /** Older path crossed by this rename/copy commit. */
+  previousPath?: string;
+};
+
+/** A bounded page from `git log --follow`. The cursor is opaque to renderers. */
+export type FileHistoryPage = {
+  entries: FileHistoryEntry[];
+  nextCursor: string | null;
+};
+
+/** Contiguous lines attributed to one commit by porcelain blame output. */
+export type FileBlameHunk = {
+  hash: string | null;
+  shortHash: string | null;
+  authorName: string;
+  authorEmail: string;
+  committedAt: string | null;
+  subject: string;
+  /** Path reported by Git for the source lines (may predate a rename). */
+  sourcePath: string;
+  originalStartLine: number;
+  startLine: number;
+  endLine: number;
+  lines: string[];
+  uncommitted: boolean;
+};
+
+export type FileBlameUnavailableReason =
+  | "binary"
+  | "too_large"
+  | "missing";
+
+/** One bounded line page. Deleted files may resolve to the parent revision;
+ *  `notice` makes that fallback explicit rather than silently changing scope.
+ *  The page says WHERE it landed (`startLine`) and how to reach the page above
+ *  (`previousCursor`), so the renderer never does page arithmetic of its own —
+ *  a request may aim at a line, and the server clamps to the file's end. */
+export type FileBlamePage = {
+  path: string;
+  effectiveContext: FileInsightContext;
+  /** 1-based number of the first line this page holds (after any clamp). */
+  startLine: number;
+  hunks: FileBlameHunk[];
+  /** Cursor for the page ABOVE this one, or null when this page starts at 1. */
+  previousCursor: string | null;
+  nextCursor: string | null;
+  bytes: number | null;
+  unavailableReason?: FileBlameUnavailableReason;
+  notice?: string;
+};
+
+/** One tracked file matched by the command palette's file search. */
+export type FileSearchHit = {
+  /** Repository-relative, forward-slashed, exactly as Git records it. */
+  path: string;
+  name: string;
+  /** Directory part, or "" for a file at the repository root. */
+  dir: string;
+};
+
+/** A file's contents at a revision (or the working tree), complete. Shares
+ *  blame's caps and unavailable states — same content resolution, same 1 MB
+ *  ceiling, same binary refusal — and that cap is why this is ONE answer, not
+ *  a paged read: the underlying git read is O(file) whatever the cursor, so
+ *  server-side paging multiplied I/O by the page count and saved nothing. */
+export type FileContents = {
+  path: string;
+  effectiveContext: FileInsightContext;
+  lines: string[];
+  bytes: number | null;
+  unavailableReason?: FileBlameUnavailableReason;
+  notice?: string;
 };
 
 /** GitHub account presentation fields proven for an exact Git commit author. */

@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --bg-app: #000000; --bg-panel: #0a0a0a; --bg-input: #080808;
+            --bg-elev: #101010; --bg-hover: #1f1a12;
+            --line: rgba(247, 243, 235, 0.1);
+            --line2: rgba(247, 243, 235, 0.2);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a;
+            --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42);
+            --atint: rgba(255, 138, 31, 0.08);
+            --ok: #5fa969; --okt: #9ce5b3; --bad: #b94232; --badt: #ffb0a1;
+            --warn: #d99a3d; --warnsoft: rgba(217, 154, 61, 0.14);
+            --hot: #ff2d9b; --aa: #ffe14d;
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          body { margin: 0; background: #050505; font-family: var(--sans); }
+          a { color: var(--accb); } a:hover { color: var(--acc); }
+          .dv-turn { padding: 40px 44px 32px; }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--sans); color: var(--t3); max-width: 700px; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { margin-right: 7px; font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: block; font: 400 11px/1.6 var(--sans); color: var(--tsub); max-width: 640px; text-wrap: pretty; }
+          .dv-olabel b { color: var(--t2); font-weight: 600; }
+          .dv-olabel code { font: 500 10.5px var(--mono); color: var(--accb); }
+          .dv-card { background: var(--bg-app); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+          .dv-next { margin: 26px 0 0; font: 12px/1.6 var(--sans); color: var(--t3); }
+
+          /* ---- pane fragment, lifted from PwrGit app.css ---- */
+          .fhead { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--bg-input); }
+          .fstatus { flex: none; padding: 2px 6px; border-radius: 999px; font: 600 9px/1 var(--sans); letter-spacing: 0.06em; text-transform: uppercase; background: var(--bg-elev); color: var(--t3); }
+          .fpath { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 11.5px/1.3 var(--mono); color: var(--t1); }
+          .fstat { margin-left: auto; font: 500 10.5px/1 var(--mono); color: var(--tsub); }
+
+          /* ---- the image row ---- */
+          .irow { display: flex; gap: 12px; padding: 12px; }
+          .irow-stack { flex-direction: column; }
+          .iside { flex: 1 1 0; min-width: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+          .ilabel { display: flex; align-items: baseline; gap: 6px; font: 600 9px/1 var(--sans); letter-spacing: 0.06em; text-transform: uppercase; color: var(--tsub); }
+          .iframe { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; padding: 10px; border: 1px solid var(--line); border-radius: 6px; cursor: zoom-in; background-color: var(--bg-input); background-image: repeating-conic-gradient(rgba(247, 243, 235, 0.075) 0% 25%, transparent 0% 50%); background-size: 16px 16px; }
+          .iframe:hover { border-color: var(--abord); }
+          .imeta { min-height: 12px; font: 500 10.5px/1 var(--mono); color: var(--tsub); }
+          .izoom { position: absolute; right: 7px; bottom: 7px; display: flex; align-items: center; gap: 4px; padding: 3px 7px; border: 1px solid var(--line2); border-radius: 999px; background: rgba(5, 5, 5, 0.82); color: var(--t2); font: 600 9.5px/1 var(--sans); opacity: 0; }
+          .iframe:hover .izoom { opacity: 1; }
+          .izoom.pin { opacity: 1; }
+
+          /* ---- schematic screenshot: a stand-in for the real asset ---- */
+          .shot { width: 100%; aspect-ratio: 16 / 10; background: #0d0d0f; border-radius: 2px; overflow: hidden; display: flex; flex-direction: column; }
+          .shot-bar { flex: none; height: 11%; display: flex; align-items: center; gap: 3px; padding: 0 6px; background: #17171a; }
+          .dot { width: 4px; height: 4px; border-radius: 50%; background: #3d3d44; }
+          .shot-body { flex: 1; display: flex; min-height: 0; }
+          .shot-rail { flex: 0 0 21%; padding: 6px 5px; display: flex; flex-direction: column; gap: 5px; background: #101013; }
+          .shot-main { flex: 1; padding: 7px 8px; display: flex; flex-direction: column; gap: 5px; }
+          .line { height: 5px; border-radius: 2px; background: #2c2c33; }
+          .line-q { background: #202026; }
+          .line-acc { background: #6b3d13; }
+          /* the diff render: pixelmatch fades the original, then paints the deltas.
+             .hot / .aa are re-stated INSIDE .shot-diff because the fade rule below
+             is a descendant selector and would otherwise out-specify them. */
+          .shot-diff .line { background: #242429; }
+          .shot-diff .line-acc { background: #2b2620; }
+          .shot-diff .shot-bar { background: #151518; }
+          .shot-diff .shot-rail { background: #0f0f11; }
+          .shot-diff .dot { background: #2c2c31; }
+          .shot-diff .hot { background: var(--hot); }
+          .shot-diff .aa { background: var(--aa); }
+          .hot { background: var(--hot); }
+          .aa { background: var(--aa); }
+
+          /* ---- lightbox ---- */
+          .lb { position: relative; height: 448px; padding: 42px 54px 40px; background: rgba(4, 4, 4, 0.97); display: flex; align-items: center; justify-content: center; }
+          .lb.noted { height: 404px; padding-top: 86px; }
+          .lb-top { position: absolute; top: 11px; left: 13px; right: 13px; display: flex; align-items: center; gap: 9px; }
+          .lb-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 10.5px/1.3 var(--mono); color: var(--t2); }
+          .seg-group { flex: none; display: flex; border: 1px solid var(--line2); border-radius: 6px; overflow: hidden; }
+          .seg { padding: 4px 11px; border: 0; border-right: 1px solid var(--line); background: transparent; color: var(--t3); font: 650 10px/1.2 var(--sans); cursor: pointer; }
+          .seg.on { background: var(--asoft); color: var(--accb); }
+          .lb-close { flex: none; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--abord); border-radius: 50%; background: var(--acc); color: var(--accon); font: 700 12px/1 var(--sans); cursor: pointer; }
+          .lb-nav { position: absolute; top: 50%; width: 32px; height: 32px; margin-top: -16px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--line2); border-radius: 50%; background: var(--bg-elev); color: var(--t1); font: 600 13px/1 var(--sans); cursor: pointer; }
+          .prev { left: 12px; }
+          .next { right: 12px; }
+          .dim { opacity: 0.3; cursor: default; }
+          .lb-stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background-color: var(--bg-input); background-image: repeating-conic-gradient(rgba(247, 243, 235, 0.075) 0% 25%, transparent 0% 50%); background-size: 16px 16px; cursor: grab; }
+          .lb-view { width: 88%; }
+          .lb-foot { position: absolute; bottom: 10px; left: 13px; right: 13px; display: flex; align-items: center; gap: 10px; font: 500 10px/1 var(--mono); color: var(--tsub); }
+          .lb-pos { flex: none; color: var(--t2); }
+          .lb-pos b { color: var(--t1); }
+          .chip { flex: none; display: flex; align-items: center; gap: 5px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg-elev); color: var(--t2); font: 600 9.5px/1.3 var(--sans); }
+          .hot-chip { border-color: rgba(255, 45, 155, 0.45); color: var(--hot); background: rgba(255, 45, 155, 0.1); }
+          .sw { flex: none; width: 8px; height: 8px; border-radius: 2px; }
+          .zoomgrp { flex: none; margin-left: auto; display: flex; align-items: center; gap: 4px; }
+          .zbtn { flex: none; min-width: 22px; height: 21px; padding: 0 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg-elev); color: var(--t2); font: 650 10px/1 var(--sans); cursor: pointer; }
+          .zbtn.on { border-color: var(--abord); background: var(--asoft); color: var(--accb); }
+          .zpct { flex: none; min-width: 46px; text-align: right; color: var(--t2); font: 500 10px/1 var(--mono); }
+          .lb-note { position: absolute; left: 13px; right: 13px; top: 45px; display: flex; align-items: center; gap: 9px; padding: 6px 10px; border: 1px solid rgba(217, 154, 61, 0.4); border-radius: 6px; background: var(--warnsoft); color: var(--t2); font: 500 10px/1.4 var(--sans); }
+          .lb-note b { color: var(--warn); font-weight: 600; }
+          .tog { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: none; color: var(--t2); font: 600 9.5px/1 var(--sans); }
+          .tog-track { width: 26px; height: 15px; padding: 2px; border-radius: 999px; background: var(--acc); display: flex; justify-content: flex-end; }
+          .tog-knob { width: 11px; height: 11px; border-radius: 50%; background: var(--accon); }
+
+          /* ---- rule card ---- */
+          .rule { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 13px; }
+          .rule-h { margin-bottom: 4px; font: 600 10px/1 var(--sans); letter-spacing: 0.06em; text-transform: uppercase; color: var(--tsub); }
+          .rule-p { margin: 0; font: 400 11px/1.55 var(--sans); color: var(--t2); }
+          .rule-p code { font: 500 10.5px var(--mono); color: var(--accb); }
+          .rule-p b { color: var(--t1); font-weight: 600; }
+          .mini-pair { display: flex; gap: 10px; }
+          .mini { flex: 1; display: flex; flex-direction: column; gap: 5px; }
+          .mini-box { height: 62px; border: 1px solid var(--line); border-radius: 5px; padding: 6px; display: flex; gap: 5px; background: var(--bg-input); }
+          .col { flex-direction: column; }
+          .mini-cell { flex: 1; border-radius: 2px; background: #22222a; }
+          .mini-cap { font: 500 9.5px/1.3 var(--mono); color: var(--tsub); }
+          .good { color: var(--okt); }
+          .bad { color: var(--badt); }
+        </style>
+      </helmet>
+
+      <section class="dv-turn" data-screen-label="Turn 2 - image diff">
+        <div class="dv-thd"><a class="dv-tid" href="#2">2</a><span class="dv-tname">Image diff — filling the pane, and a lightbox that can compare</span></div>
+        <p class="dv-sub">Two problems. Inline, the pair stays side by side down to about a 500px pane, where each picture is ~300px wide and neither is readable — and a fixed 420px cap leaves the rest of a tall pane empty. Expanded, there is nowhere to go: no zoom, no pan, no way to flip between revisions on the same pixels. The lightbox carries three items — Before, After, Diff — under one shared zoom and pan.</p>
+
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a Inline wide">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Inline, wide pane — side by side survives because each side still clears the legibility floor. The frame grows with the pane instead of stopping at 420px.</div>
+            <div class="dv-card" style="width: 880px;">
+              <div class="fhead"><span class="fstatus">modified</span><span class="fpath">assets/screenshots/desktop-queued-turns.png</span><span class="fstat">binary</span></div>
+              <div class="irow" style="height: 330px;">
+                <figure class="iside">
+                  <figcaption class="ilabel">before</figcaption>
+                  <div class="iframe">
+                    <div class="shot">
+                      <div class="shot-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+                      <div class="shot-body">
+                        <div class="shot-rail"><span class="line line-acc"></span><span class="line line-q"></span><span class="line line-q"></span><span class="line line-q"></span></div>
+                        <div class="shot-main"><span class="line" style="width: 74%"></span><span class="line line-q" style="width: 52%"></span><span class="line line-q" style="width: 61%"></span><span class="line line-q" style="width: 38%"></span></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="imeta">3104×2024 · 746.2 KB</div>
+                </figure>
+                <figure class="iside">
+                  <figcaption class="ilabel">after</figcaption>
+                  <div class="iframe">
+                    <div class="shot">
+                      <div class="shot-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+                      <div class="shot-body">
+                        <div class="shot-rail"><span class="line line-acc"></span><span class="line line-q"></span><span class="line line-q"></span><span class="line line-q"></span></div>
+                        <div class="shot-main"><span class="line" style="width: 74%"></span><span class="line line-q" style="width: 52%"></span><span class="line line-q" style="width: 84%"></span><span class="line line-q" style="width: 38%"></span></div>
+                      </div>
+                    </div>
+                    <span class="izoom pin">Open ⤢</span>
+                  </div>
+                  <div class="imeta">1552×1012 · 285.6 KB</div>
+                </figure>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Inline narrow">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Same pane at 520px — stacked. Each picture is full-width instead of a 240px thumbnail, and the pair still reads top-to-bottom as before → after.</div>
+            <div class="dv-card" style="width: 520px;">
+              <div class="fhead"><span class="fstatus">modified</span><span class="fpath">desktop-queued-turns.png</span><span class="fstat">binary</span></div>
+              <div class="irow irow-stack">
+                <figure class="iside">
+                  <figcaption class="ilabel">before</figcaption>
+                  <div class="iframe">
+                    <div class="shot">
+                      <div class="shot-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+                      <div class="shot-body">
+                        <div class="shot-rail"><span class="line line-acc"></span><span class="line line-q"></span><span class="line line-q"></span><span class="line line-q"></span></div>
+                        <div class="shot-main"><span class="line" style="width: 74%"></span><span class="line line-q" style="width: 52%"></span><span class="line line-q" style="width: 61%"></span><span class="line line-q" style="width: 38%"></span></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="imeta">3104×2024 · 746.2 KB</div>
+                </figure>
+                <figure class="iside">
+                  <figcaption class="ilabel">after</figcaption>
+                  <div class="iframe">
+                    <div class="shot">
+                      <div class="shot-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+                      <div class="shot-body">
+                        <div class="shot-rail"><span class="line line-acc"></span><span class="line line-q"></span><span class="line line-q"></span><span class="line line-q"></span></div>
+                        <div class="shot-main"><span class="line" style="width: 74%"></span><span class="line line-q" style="width: 52%"></span><span class="line line-q" style="width: 84%"></span><span class="line line-q" style="width: 38%"></span></div>
+                      </div>
+                    </div>
+                    <span class="izoom pin">Open ⤢</span>
+                  </div>
+                  <div class="imeta">1552×1012 · 285.6 KB</div>
+                </figure>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c The layout rule">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>What decides the axis</div>
+            <div class="dv-card" style="width: 400px;">
+              <div class="rule">
+                <div class="mini-pair">
+                  <div class="mini">
+                    <div class="mini-box"><span class="mini-cell"></span><span class="mini-cell"></span></div>
+                    <span class="mini-cap bad">side by side at 630px → 309px each</span>
+                  </div>
+                  <div class="mini">
+                    <div class="mini-box col"><span class="mini-cell"></span><span class="mini-cell"></span></div>
+                    <span class="mini-cap good">stacked → 630px each</span>
+                  </div>
+                </div>
+                <div>
+                  <div class="rule-h">The rule</div>
+                  <p class="rule-p">Stack when side-by-side would render each image under <code>320px</code> wide, <b>or</b> when the image's own aspect makes a side under <code>160px</code> tall. Above both floors keep them side by side — comparison beats size.</p>
+                </div>
+                <div>
+                  <div class="rule-h">How it's measured</div>
+                  <p class="rule-p">The width floor is a container query on <code>.pane--main</code> at <code>820px</code>, so it is right at first paint with no JS. The height floor needs the decoded aspect ratio, so <code>ImageDiff</code> adds <code>.diff-image--stacked</code> once both sides report a natural size. An ultrawide banner stacks in a pane where a phone screenshot would not.</p>
+                </div>
+                <div>
+                  <div class="rule-h">Filling the height</div>
+                  <p class="rule-p">The 420px cap becomes viewport-relative: <code>min(58vh, 640px)</code> side by side, <code>min(46vh, 560px)</code> stacked, <code>min(72vh, 900px)</code> when an add or a delete leaves only one side.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2d" data-screen-label="2d Lightbox Diff">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>Lightbox, third item — the pixel diff. Changed pixels in magenta over a faded original, anti-aliased edges in yellow. Magenta rather than pixelmatch's default red: these assets are screenshots of dark UI that already carry red error text.</div>
+            <div class="dv-card" style="width: 760px;">
+              <div class="lb">
+                <div class="lb-top">
+                  <div class="seg-group">
+                    <button class="seg">Before</button><button class="seg">After</button><button class="seg on">Diff</button>
+                  </div>
+                  <span class="lb-title">assets/screenshots/desktop-queued-turns.png</span>
+                  <button class="lb-close">✕</button>
+                </div>
+                <button class="lb-nav prev">‹</button>
+                <button class="lb-nav next dim">›</button>
+                <div class="lb-stage">
+                  <div class="lb-view">
+                    <div class="shot shot-diff">
+                      <div class="shot-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+                      <div class="shot-body">
+                        <div class="shot-rail"><span class="line line-acc"></span><span class="line"></span><span class="line"></span><span class="line"></span></div>
+                        <div class="shot-main"><span class="line" style="width: 74%"></span><span class="line aa" style="width: 52%; height: 2px"></span><span class="line hot" style="width: 84%"></span><span class="line" style="width: 38%"></span><span class="line hot" style="width: 22%"></span><span class="line" style="width: 55%"></span></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="lb-foot">
+                  <span class="lb-pos"><b>3</b> / 3</span>
+                  <span class="chip hot-chip"><span class="sw hot"></span>1.84% changed · 114,203 px</span>
+                  <span class="chip"><span class="sw aa"></span>anti-aliased</span>
+                  <span class="zoomgrp">
+                    <button class="zbtn">Fit</button><button class="zbtn on">100%</button><button class="zbtn">−</button><button class="zbtn">+</button><span class="zpct">100%</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2e" data-screen-label="2e Dimensions differ">
+            <div class="dv-olabel"><a class="dv-oid" href="#2e">2e</a>The case in the real repo: 3104×2024 against 1552×1012. pixelmatch refuses unequal sizes, so we say so and offer the answer instead of hiding the tab. Aspect ratios match here, so <b>Scale to match</b> starts on; when they don't it stays off and the diff runs on the union canvas with the overhang counted as changed.</div>
+            <div class="dv-card" style="width: 760px;">
+              <div class="lb noted">
+                <div class="lb-top">
+                  <div class="seg-group">
+                    <button class="seg">Before</button><button class="seg">After</button><button class="seg on">Diff</button>
+                  </div>
+                  <span class="lb-title">assets/screenshots/desktop-queued-turns.png</span>
+                  <button class="lb-close">✕</button>
+                </div>
+                <div class="lb-note">
+                  <span><b>Sizes differ</b> — 3104×2024 against 1552×1012. Diffed at the larger size.</span>
+                  <span class="tog">Scale to match<span class="tog-track"><span class="tog-knob"></span></span></span>
+                </div>
+                <button class="lb-nav prev">‹</button>
+                <button class="lb-nav next dim">›</button>
+                <div class="lb-stage">
+                  <div class="lb-view">
+                    <div class="shot shot-diff">
+                      <div class="shot-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+                      <div class="shot-body">
+                        <div class="shot-rail"><span class="line line-acc"></span><span class="line"></span><span class="line"></span><span class="line"></span></div>
+                        <div class="shot-main"><span class="line" style="width: 74%"></span><span class="line aa" style="width: 52%; height: 2px"></span><span class="line hot" style="width: 84%"></span><span class="line" style="width: 38%"></span><span class="line hot" style="width: 22%"></span><span class="line" style="width: 55%"></span></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="lb-foot">
+                  <span class="lb-pos"><b>3</b> / 3</span>
+                  <span class="chip hot-chip"><span class="sw hot"></span>2.06% changed · 129,440 px</span>
+                  <span class="zoomgrp">
+                    <button class="zbtn on">Fit</button><button class="zbtn">100%</button><button class="zbtn">−</button><button class="zbtn">+</button><span class="zpct">31%</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2f" data-screen-label="2f Live shared viewport">
+            <div class="dv-olabel"><a class="dv-oid" href="#2f">2f</a>Live — press ‹ › or the segments. Zoom with − +, then flip: the zoom carries across all three items. That shared viewport is the whole point; a lightbox that refits on every switch cannot compare anything.</div>
+            <div class="dv-card" style="width: 760px;">
+              <div class="lb">
+                <div class="lb-top">
+                  <div class="seg-group">
+                    <button class="{{segB}}" onClick="{{toB}}">Before</button><button class="{{segA}}" onClick="{{toA}}">After</button><button class="{{segD}}" onClick="{{toD}}">Diff</button>
+                  </div>
+                  <span class="lb-title">assets/screenshots/desktop-queued-turns.png</span>
+                  <button class="lb-close">✕</button>
+                </div>
+                <button class="{{prevCls}}" onClick="{{prev}}">‹</button>
+                <button class="{{nextCls}}" onClick="{{next}}">›</button>
+                <div class="lb-stage">
+                  <div class="lb-view" style="{{viewStyle}}">
+                    <sc-if value="{{isBefore}}" hint-placeholder-val="{{ true }}">
+                      <div class="shot">
+                        <div class="shot-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+                        <div class="shot-body">
+                          <div class="shot-rail"><span class="line line-acc"></span><span class="line line-q"></span><span class="line line-q"></span><span class="line line-q"></span></div>
+                          <div class="shot-main"><span class="line" style="width: 74%"></span><span class="line line-q" style="width: 52%"></span><span class="line line-q" style="width: 61%"></span><span class="line line-q" style="width: 38%"></span><span class="line line-q" style="width: 55%"></span></div>
+                        </div>
+                      </div>
+                    </sc-if>
+                    <sc-if value="{{isAfter}}" hint-placeholder-val="{{ false }}">
+                      <div class="shot">
+                        <div class="shot-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+                        <div class="shot-body">
+                          <div class="shot-rail"><span class="line line-acc"></span><span class="line line-q"></span><span class="line line-q"></span><span class="line line-q"></span></div>
+                          <div class="shot-main"><span class="line" style="width: 74%"></span><span class="line line-q" style="width: 52%"></span><span class="line line-q" style="width: 84%"></span><span class="line line-q" style="width: 38%"></span><span class="line line-q" style="width: 22%"></span></div>
+                        </div>
+                      </div>
+                    </sc-if>
+                    <sc-if value="{{isDiff}}" hint-placeholder-val="{{ false }}">
+                      <div class="shot shot-diff">
+                        <div class="shot-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+                        <div class="shot-body">
+                          <div class="shot-rail"><span class="line line-acc"></span><span class="line"></span><span class="line"></span><span class="line"></span></div>
+                          <div class="shot-main"><span class="line" style="width: 74%"></span><span class="line aa" style="width: 52%; height: 2px"></span><span class="line hot" style="width: 84%"></span><span class="line" style="width: 38%"></span><span class="line hot" style="width: 22%"></span></div>
+                        </div>
+                      </div>
+                    </sc-if>
+                  </div>
+                </div>
+                <div class="lb-foot">
+                  <span class="lb-pos"><b>{{posN}}</b> / 3 · {{modeName}}</span>
+                  <span class="chip">{{meta}}</span>
+                  <span class="zoomgrp">
+                    <button class="zbtn" onClick="{{fit}}">Fit</button><button class="zbtn" onClick="{{zoomOut}}">−</button><button class="zbtn" onClick="{{zoomIn}}">+</button><span class="zpct">{{pct}}</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: "add GitHub's swipe and onion-skin as two more items" · "put the mismatch % on the inline row too, not just the lightbox" · "let ← → walk the other image files in the commit instead"</p>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = { mode: 0, zoom: 1 };
+          this.names = ["Before", "After", "Diff"];
+          this.metas = [
+            "3104x2024 · 746.2 KB",
+            "1552x1012 · 285.6 KB",
+            "1.84% changed · 114,203 px"
+          ];
+        }
+        go(i) {
+          const next = Math.max(0, Math.min(2, i));
+          if (next !== this.state.mode) this.setState({ mode: next });
+        }
+        scale(f) {
+          this.setState({ zoom: Math.max(0.4, Math.min(4, this.state.zoom * f)) });
+        }
+        renderVals() {
+          const mode = this.state.mode;
+          const zoom = this.state.zoom;
+          const seg = (i) => (i === mode ? "seg on" : "seg");
+          return {
+            modeName: this.names[mode],
+            meta: this.metas[mode],
+            posN: String(mode + 1),
+            pct: Math.round(zoom * 100) + "%",
+            isBefore: mode === 0,
+            isAfter: mode === 1,
+            isDiff: mode === 2,
+            segB: seg(0),
+            segA: seg(1),
+            segD: seg(2),
+            prevCls: mode === 0 ? "lb-nav prev dim" : "lb-nav prev",
+            nextCls: mode === 2 ? "lb-nav next dim" : "lb-nav next",
+            viewStyle: { width: "88%", transform: "scale(" + zoom.toFixed(3) + ")" },
+            prev: () => this.go(mode - 1),
+            next: () => this.go(mode + 1),
+            toB: () => this.go(0),
+            toA: () => this.go(1),
+            toD: () => this.go(2),
+            fit: () => this.setState({ zoom: 1 }),
+            zoomIn: () => this.scale(1.35),
+            zoomOut: () => this.scale(1 / 1.35)
+          };
+        }
+      }
+    </script>
+  </body>
+</html>

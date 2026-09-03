@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { RemoteBranchSummary } from "@pwrgit/shared";
 import { announce } from "../../lib/announce";
+import { relativeAge } from "../../lib/relativeAge";
 import { useRemoteBranchSearch } from "../../lib/useRemoteBranchSearch";
 
 /**
@@ -50,7 +51,9 @@ export function BranchRefPicker({
   onChange,
   disabled = false,
   autoFocus = false,
-  rows = 8
+  rows = 8,
+  stacked = false,
+  autoSelectFirst = true
 }: {
   repoId: string;
   label: string;
@@ -67,6 +70,14 @@ export function BranchRefPicker({
   disabled?: boolean;
   autoFocus?: boolean;
   rows?: number;
+  /** Label above each control at full width, rather than in a 130px gutter. */
+  stacked?: boolean;
+  /**
+   * Seed the selection from the first row that arrives. Off for callers that
+   * already hold a choice — the first row is whatever committed most recently,
+   * and letting it win would silently repoint a decision the user made.
+   */
+  autoSelectFirst?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const search = useRemoteBranchSearch({
@@ -105,12 +116,12 @@ export function BranchRefPicker({
   const notify = useRef(onChange);
   notify.current = onChange;
   useEffect(() => {
-    if (selected !== null) return;
+    if (!autoSelectFirst || selected !== null) return;
     const first = shown[0];
     if (first === undefined) return;
     setSelected(first);
     notify.current(first);
-  }, [shown, selected]);
+  }, [autoSelectFirst, shown, selected]);
 
   const stranded =
     selected !== null && !shown.some((option) => option.ref === selected.ref)
@@ -140,7 +151,7 @@ export function BranchRefPicker({
   };
 
   return (
-    <div className="branch-picker">
+    <div className={`branch-picker${stacked ? " branch-picker--stacked" : ""}`}>
       <label className="refs-field">
         <span>Filter</span>
         <input
@@ -179,6 +190,9 @@ export function BranchRefPicker({
               {remoteMatches.map((option) => (
                 <option key={option.ref} value={option.ref}>
                   {option.label} · {shortHead(option.head)}
+                  {option.remoteBranch?.lastCommitAt === undefined
+                    ? ""
+                    : ` · ${relativeAge(option.remoteBranch.lastCommitAt)}`}
                 </option>
               ))}
             </optgroup>

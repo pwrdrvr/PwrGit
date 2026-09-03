@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<meta name="design_doc_mode" content="canvas">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-app: #000000; --bg-panel: #0a0a0a; --bg-elev: #101010;
+    --line-faint: rgba(247,243,235,0.06); --line: rgba(247,243,235,0.1); --line-def: rgba(247,243,235,0.14);
+    --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a; --tsub: rgba(247,243,235,0.54);
+    --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+    --asoft: rgba(255,138,31,0.12); --abord: rgba(255,138,31,0.42);
+    --ok: #5fa969; --okt: #9ce5b3; --oksoft: rgba(74,148,92,0.18);
+    --warn: #d99a3d; --warnsoft: rgba(217,154,61,0.14);
+    --badt: #ffb0a1; --badsoft: rgba(185,66,50,0.24);
+    --purple: #8a6dc4; --psoft: rgba(138,109,196,0.16);
+    --sans: "Geist","SF Pro Text","Inter",system-ui,sans-serif;
+    --mono: "Geist Mono","SF Mono","JetBrains Mono",Consolas,monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #050505; font-family: var(--sans); color: var(--t1); }
+
+  .doc { padding: 40px 44px 64px; width: 1240px; display: flex; flex-direction: column; gap: 34px; }
+  .eyebrow { font: 600 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--t3); }
+  h1 { font: 700 24px/1.2 var(--sans); letter-spacing: -.01em; margin: 8px 0 0; }
+  .sub { margin: 8px 0 0; font: 400 12.5px/1.6 var(--sans); color: var(--t3); max-width: 760px; text-wrap: pretty; }
+  .prov { margin-top: 12px; font: 500 10.5px/1.6 var(--mono); color: var(--tsub); }
+
+  h2 { font: 600 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--t3); margin: 0 0 4px; }
+  .h2sub { margin: 0 0 16px; font: 400 12px/1.6 var(--sans); color: var(--tsub); max-width: 760px; }
+
+  table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+  th { text-align: left; font: 600 9.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--tsub); padding: 10px 14px; background: var(--bg-panel); border-bottom: 1px solid var(--line); }
+  td { padding: 11px 14px; border-bottom: 1px solid var(--line-faint); font: 400 12px/1.6 var(--sans); color: var(--t2); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td.k { color: var(--t1); font-weight: 600; width: 210px; }
+  td b { color: var(--t1); font-weight: 600; }
+  code { font: 500 11px var(--mono); color: var(--accb); }
+  .was { color: var(--tsub); text-decoration: line-through; }
+
+  .pill { display: inline-flex; align-items: center; height: 19px; padding: 0 8px; border-radius: 999px; font: 600 9.5px/1 var(--mono); white-space: nowrap; }
+  .p-built { background: var(--oksoft); color: var(--okt); }
+  .p-here { background: var(--asoft); color: var(--accb); border: 1px solid var(--abord); }
+  .p-own { background: var(--psoft); color: #c3aef0; }
+  .p-none { background: transparent; color: var(--tsub); border: 1px dashed var(--line-def); }
+  .p-gone { background: var(--badsoft); color: var(--badt); }
+
+  .note { padding: 16px 18px; border: 1px solid var(--line); border-left: 3px solid var(--acc); border-radius: 0 9px 9px 0; background: var(--bg-panel); font: 400 12px/1.7 var(--sans); color: var(--t2); }
+  .note b { color: var(--t1); }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; font: 400 11px/1 var(--sans); color: var(--tsub); align-items: center; }
+</style>
+</helmet>
+
+<div class="doc">
+
+  <div>
+    <div class="eyebrow">PwrGit · as-built coverage</div>
+    <h1>What ships, and where it is drawn</h1>
+    <p class="sub">The companion to <b>PwrGit App Baseline</b>. Two things live here: every place the retired 2026-08 wireframe disagreed with the shipped app, and a surface-by-surface map of what the design project actually covers — so a gap reads as a gap rather than as a screen nobody built.</p>
+    <div class="prov">Verified against <b>apps/desktop/src/renderer/src/**</b> and <b>styles/tokens.css</b> · main @ bc11343 · 2026-09-02</div>
+  </div>
+
+  <div>
+    <h2>1 · Drift the wireframe carried</h2>
+    <p class="h2sub">Each row was checked against the component named in the last column. The code is the truth; the baseline artboard has been corrected to match.</p>
+    <table>
+      <tr>
+        <th>Surface</th><th>Wireframe claimed</th><th>What actually ships</th><th>Source of truth</th>
+      </tr>
+      <tr>
+        <td class="k">Palette</td>
+        <td><span class="was">#0a0908</span> canvas, <span class="was">#e8743a</span> accent, <span class="was">#f5efe3</span> text</td>
+        <td>Absolute-black <code>--bg-app #000000</code>, <code>--accent #ff8a1f</code>, <code>--text-primary #f7f3eb</code>. PwrGit dropped its own warm-dark variant to track the family Tangerine Terminal palette — and a <b>full light theme</b> ships that the wireframe never drew.</td>
+        <td><code>styles/tokens.css</code></td>
+      </tr>
+      <tr>
+        <td class="k">Window identity</td>
+        <td>Titlebar was traffic lights + a centred “PwrGit”; repo › branch › path sat in a header row below</td>
+        <td>Identity moved <b>up into the titlebar</b>: brand, repo, a clickable branch chip that opens the switcher, and a copyable path chip. Platform chrome is stamped as <code>data-platform</code> before first paint.</td>
+        <td><code>features/chrome/TitleBar.tsx</code></td>
+      </tr>
+      <tr>
+        <td class="k">Worktree header</td>
+        <td>Repo, branch, path, then Fetch / Pull / Push</td>
+        <td>State only — hence <code>__state</code>, not <code>__id</code>: dirty badge, <b>Git LFS chip</b>, base-drift chip, sync chip, then the three actions with busy spinners and a container-query ladder that collapses labels as the pane narrows.</td>
+        <td><code>features/graph/WorktreeHeader.tsx</code></td>
+      </tr>
+      <tr>
+        <td class="k">Sidebar lenses</td>
+        <td>Four labelled lenses, default “Recent”</td>
+        <td><b>Five, icon-only</b>: Focused · Pinned · Behind · Stale · All. Labels came off so the text-size axis still fits; the wording survives in each tooltip.</td>
+        <td><code>features/sidebar/LensFilter.tsx</code>, <code>repo-view.ts</code></td>
+      </tr>
+      <tr>
+        <td class="k">Jump to repo</td>
+        <td><span class="was">⌘K</span> on the button</td>
+        <td><b>⌘F</b> is advertised; ⌘K stays as a silent alias. The overlay searches branches as well as repos.</td>
+        <td><code>features/sidebar/Sidebar.tsx</code></td>
+      </tr>
+      <tr>
+        <td class="k">Rail tabs</td>
+        <td>Changes / <span class="was">Agent</span></td>
+        <td><b>Changes / Rebase</b>, plus a third <b>Commit</b> mode the Changes tab swaps into when you click a commit in the lineage. An <b>operation banner</b> with Abort / Continue appears mid rebase or merge.</td>
+        <td><code>features/rail/Rail.tsx</code></td>
+      </tr>
+      <tr>
+        <td class="k">Rebase</td>
+        <td>“Rebase assistant · Codex · gpt-5.5 · ACP” drafted the plan; <span class="was">Ask agent →</span> opened it</td>
+        <td>A <b>deterministic Rebase tool</b>. <code>rebase:draft</code> builds the plan, <b>Check in isolated copy</b> replays it in a disposable clone and returns an approval token, and only a clean check enables <b>Apply</b>. Hooks, signing and rerere are disabled for both. <b>No model is wired into PwrGit.</b> The selection bar reads <b>Open rebase tool →</b>.</td>
+        <td><code>features/rail/RebaseTab.tsx</code>, <code>features/graph/SelectionBar.tsx</code></td>
+      </tr>
+      <tr>
+        <td class="k">Graph scope</td>
+        <td>An “<span class="was">Only me</span>” author toggle</td>
+        <td>A branch-scope toggle reading <b>Active / All branches</b>, beside a branch-chip strip and a locate-HEAD button. <code>Settings › Experimental › lineageAllBranches</code> sets its default.</td>
+        <td><code>features/graph/LineageGraph.tsx</code></td>
+      </tr>
+      <tr>
+        <td class="k">Commit graph</td>
+        <td>One lane plus a single merge curve</td>
+        <td>A real <b>multi-lane layout</b>: an 8-hue lane palette, lane reuse, an honest default-branch spine, dashed lineage for history known only behind a remote-tracking ref, branch tips and PR-landing status.</td>
+        <td><code>features/graph/lane-layout.ts</code>, <code>GraphRow.tsx</code>, <code>pr-landings.ts</code></td>
+      </tr>
+      <tr>
+        <td class="k">Changes tab</td>
+        <td>Flat staged / unstaged lists with a ± toggle</td>
+        <td><b>Folder rows</b> with a twisty and folder-level stage / discard, per-file discard, a <b>partly-staged</b> marker, section-level Stage all / Unstage all, a WIP header with discard-everything, and a truncation notice on very large sets.</td>
+        <td><code>features/rail/ChangesTab.tsx</code></td>
+      </tr>
+      <tr>
+        <td class="k">Profiles</td>
+        <td>A menu that swapped the current window's profile</td>
+        <td><b>One window per profile</b> — picking another opens or focuses its window. The window-bound profile seeds selection synchronously so there is no empty first frame.</td>
+        <td><code>state/useProfiles.ts</code>, <code>lib/profileTitle.ts</code></td>
+      </tr>
+    </table>
+  </div>
+
+  <div>
+    <h2>2 · Surface coverage</h2>
+    <p class="h2sub">Every shipped renderer surface, and whether this design project draws it.</p>
+    <div class="legend">
+      <span class="pill p-here">in the baseline</span>
+      <span class="pill p-own">has its own artboard</span>
+      <span class="pill p-none">not drawn</span>
+      <span>— “not drawn” means no artboard covers it, not that it is unbuilt. Everything listed here ships.</span>
+    </div>
+    <table>
+      <tr><th>Shipped surface</th><th>Coverage</th><th>What it is</th></tr>
+
+      <tr><td class="k">Sidebar · repos &amp; worktrees</td><td><span class="pill p-here">in the baseline</span></td><td>Profile chip, ⌘F jump, add-folders / clone / fork, bulk fetch &amp; safe-pull, five lenses, folder grouping, drag reorder, pins.</td></tr>
+      <tr><td class="k">Lineage graph</td><td><span class="pill p-here">in the baseline</span></td><td>Multi-lane layout, branch chips, locate HEAD, Active/All scope, selection and the rebase entry point.</td></tr>
+      <tr><td class="k">Worktree header + titlebar</td><td><span class="pill p-here">in the baseline</span></td><td>Identity, LFS, drift and sync chips, Fetch / Pull / Push.</td></tr>
+      <tr><td class="k">Changes &amp; Rebase rail</td><td><span class="pill p-here">in the baseline</span></td><td>Staging, commit box, operation banner, the isolated-check rebase flow.</td></tr>
+
+      <tr><td class="k">Hunk / line staging gutter</td><td><span class="pill p-own">own artboard</span></td><td><b>Hunk Lane Staging</b> — the two-lane tick gutter for partial staging: per-line ticks, shift-drag ranges, hunk chips.</td></tr>
+      <tr><td class="k">Binary image diff</td><td><span class="pill p-own">own artboard</span></td><td><b>Image Diff Lightbox</b> — lightbox, pixel compare and copy. Its magenta/yellow deltas deliberately do not flip with the theme; the worker bakes the same RGB into the diff PNG.</td></tr>
+      <tr><td class="k">Reset to remote</td><td><span class="pill p-own">own artboard</span></td><td><b>Reset to Remote — UX Review</b> — the destructive-reset confirmation and its impact preview.</td></tr>
+      <tr><td class="k">App icon &amp; release assets</td><td><span class="pill p-own">own artboard</span></td><td><b>PwrGit Icon</b> — the lineage mark, size ladder, tray templates and DMG background, rendered from the real files under <code>apps/desktop/build/</code>.</td></tr>
+
+      <tr><td class="k">Diff pane</td><td><span class="pill p-none">not drawn</span></td><td>Side-of-index switch, message header, selection bar, stale-diff notice, gesture help, blame-from-line on the new-side gutter.</td></tr>
+      <tr><td class="k">File Insights</td><td><span class="pill p-none">not drawn</span></td><td>History / Blame / Contents tabs for one file.</td></tr>
+      <tr><td class="k">Settings window</td><td><span class="pill p-none">not drawn</span></td><td>Eight sections on the <code>#settings</code> route: General (theme, sidebar text size, density, developer mode), Updates, Profiles, Forges, <b>Agents</b>, Experimental, Memory / CPU, About.</td></tr>
+      <tr><td class="k">Settings › Agents</td><td><span class="pill p-none">not drawn</span></td><td>The only “agent” surface that ships, and it is the inverse of the wireframe's: MCP roles, capabilities, sessions and one-time tokens that let <b>external</b> agents drive PwrGit. Nothing drives PwrGit's own UI.</td></tr>
+      <tr><td class="k">Logs window</td><td><span class="pill p-none">not drawn</span></td><td><code>#logs</code> route.</td></tr>
+      <tr><td class="k">Licence / notices windows</td><td><span class="pill p-none">not drawn</span></td><td><code>#document-license</code> and <code>#document-third-party-notices</code>.</td></tr>
+      <tr><td class="k">Dialog family</td><td><span class="pill p-none">not drawn</span></td><td>Clone, Fork, New worktree, Repo refs, Bulk sync, Push refs, Create tag, Tag remote, Branch rename, Branch-from-commit, Pull divergence, SSH remote recovery, Profile.</td></tr>
+      <tr><td class="k">Submodules</td><td><span class="pill p-none">not drawn</span></td><td>Submodule panel in the rail.</td></tr>
+      <tr><td class="k">Update toast</td><td><span class="pill p-none">not drawn</span></td><td>In-app update prompt fed by the release channel chosen in Settings › Updates.</td></tr>
+      <tr><td class="k">Light theme</td><td><span class="pill p-none">not drawn</span></td><td>A complete second palette in <code>tokens.css</code>, including a re-tuned lane ramp and contrast-corrected warning and subtle tiers. No artboard shows it.</td></tr>
+    </table>
+  </div>
+
+  <div>
+    <h2>3 · Left behind in the retired project</h2>
+    <p class="h2sub">What was <b>not</b> carried over from “PwrGit Application Wireframe”, so the decision to delete it is an informed one.</p>
+    <table>
+      <tr><th>Item</th><th>Call</th><th>Why</th></tr>
+      <tr><td class="k"><code>uploads/</code></td><td><span class="pill p-gone">not imported</span></td><td>~3 MB of reference screenshots, unreferenced by any artboard. Four are PwrSnap captures kept while matching that app's release-asset system; two are pasted scratch images. Nothing renders them.</td></tr>
+      <tr><td class="k"><code>support.js</code></td><td><span class="pill p-gone">not imported</span></td><td>A 61 KB runtime one generation behind this project's 66 KB one — they differ in the component contract (<code>render()</code> there, <code>renderVals()</code> here). Copying it would have broken every artboard in this project.</td></tr>
+      <tr><td class="k"><code>PwrGit.dc.html</code></td><td><span class="pill p-built">imported, rewritten</span></td><td>Landed as <b>PwrGit App Baseline</b> and corrected against the code — see section 1.</td></tr>
+      <tr><td class="k"><code>PwrGit Icon.dc.html</code></td><td><span class="pill p-built">imported as-is</span></td><td>Already on the current palette and still accurate: it renders the very files the app ships.</td></tr>
+      <tr><td class="k"><code>apps/desktop/**</code>, <code>assets/</code>, <code>github.md</code></td><td><span class="pill p-built">imported as-is</span></td><td>The icon artboard's image dependencies, the logo mark, and the provenance note recording how the asset set was matched to PwrSnap's.</td></tr>
+    </table>
+    <div class="note" style="margin-top:18px;">
+      <b>A third project could not be reached.</b> “PwrGit Left Bar — Alignment Review” (<code>d2862c5a…85f0f</code>) is not in the account's project list and returns <i>project not found</i>, so its <code>Left Bar Alignment Review.dc.html</code> could not be read or judged. The sidebar alignment work it reviewed is visible in the shipped code — the repo-row inset, grip column and chevron offset are now three tokens in <code>tokens.css</code> that exist specifically so the three rules that must agree cannot drift — so the review appears to have been acted on and closed out.
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

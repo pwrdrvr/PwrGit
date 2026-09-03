@@ -54,6 +54,29 @@ card. A sweep satisfies neither, so the extra path costs no suppression.
 the trigger when the user had tabbed into the card. Anything that renders its
 own hover surface outside that hook owes the same.
 
+## `useAutoPaging` re-observes on `loading`, never on `error`
+
+`useAutoPaging` fills a tall viewport by rebuilding its IntersectionObserver
+every time `loading` clears — the "load more" control does not move enough to
+emit a fresh intersection of its own, so without that the fill stops after one
+page.
+
+The same edge is what makes the `error` argument load-bearing rather than
+cosmetic. A page that FAILS also clears `loading` without advancing the cursor,
+so re-observing fired the identical request again, immediately, forever: a
+probe reached 200+ dispatches in a few microtask flushes, each spawning a Git
+process. A failed page waits for the reader to press the button.
+
+Two rules for callers, then:
+
+- **Pass the real error state.** Passing `null` reintroduces the loop.
+- **The control stays rendered.** It is the keyboard affordance, the retry
+  after a failure, and the fallback where `IntersectionObserver` is undefined
+  (the hook no-ops there rather than paging).
+
+The hook also refuses to request any one cursor twice, so a caller that
+returns an unchanged `nextCursor` stalls instead of spinning.
+
 ## Remote branches are paged — never list them whole
 
 `repo:refs` returns every **local** branch, but only a six-row

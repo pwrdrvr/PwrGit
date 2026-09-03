@@ -32,6 +32,24 @@ fail on the Windows runner, so a green local run proves nothing about them:
   everywhere, and a bracket expression exercises glob-escaping just as well
   (see `gitignore.test.ts`). Keep `*` / `?` cases to pure string assertions.
 
+## Main decides how many Git processes exist, not the renderer
+
+`file-insights-handlers.ts` tracks live reads per renderer **and kind**
+(`<webContentsId>:history`), never per operation id. A pane shows one file one
+way, so a second read of a kind supersedes the first.
+
+That keying is the point. Operation ids are unique per request by construction,
+so keying on them capped nothing: a renderer that asked in a loop — a retry that
+never backed off, a bad effect dependency — had this process spawning a Git
+child per iteration for as long as it kept asking. It happened, and the guard
+that stopped it lived in a React hook.
+
+So the rule for anything here that spawns off an IPC message: **bound it on this
+side.** A renderer-side guard is worth having and is not sufficient, because the
+renderer does not own process lifetime and its bugs are exactly the case the
+bound exists for. Fan-out over a list already has `mapLimit` (`util/map-limit.ts`)
+for the same reason; a per-message spawn needs its own ceiling.
+
 ## Paths from git are always forward-slash
 
 `git status`, `ls-files` and `ls-tree` report `a/b/c` on every platform, so
@@ -107,6 +125,37 @@ Two related traps in the same area:
 - **`GIT_AUTHOR_*` / `GIT_COMMITTER_*` outrank `-c user.email`.** Tests that set
   those in the environment cannot prove identity handling; unset them for that
   assertion (see `execGitWithoutIdentityEnv`).
+## A scan that found nothing is not proof anything was deleted
+
+`rescanProfile` prunes the repos a scan did not see, and that delete cascades
+through every table keyed to `repos(id)` — pins, sort and custom order,
+identity, the branch and PR caches, the LFS notice. Re-discovering the same
+directory later re-inserts the row under the same hashed id and rebuilds none
+of it, so a prune driven by a bad scan is unrecoverable.
+
+Discovery skips unreadable directories rather than throwing, so an empty result
+is ambiguous. `scanRepoRoot` reports `rootReadable` to break the tie, and
+`canPruneFromScan` refuses a scan that is too weak to act on: one whose root
+could not be listed (an unmounted volume, a share not up yet at login), or one
+that resolved no repos at all while roots remain configured. Clearing every
+root is the one deliberate route to zero and still prunes.
+
+Two things follow that are easy to undo by accident:
+
+- **The scan clock and the prune answer different questions.** Pruning wants
+  evidence the repos are gone; `profile_scan_state` only records that a pass
+  got to *look*, and a readable-but-empty root did look. Stamping it after an
+  unreadable root arms the 24h throttle in `shouldRescanProfile` off a scan
+  that saw nothing — and there is no manual rescan channel, only
+  `profile:setRoots`, so the volume stays undiscovered for a day after it
+  mounts.
+- **Readability is only observed at the root.** A mount point *below* a
+  configured root that is unmounted still reads as an ordinary empty directory
+  (or throws where discovery ignores it), so repos under it are pruned as long
+  as some other repo resolved. Widening the check to every depth is not the
+  fix: macOS denies a non-FDA app `~/Documents` and friends, and one EACCES
+  would disable pruning for good.
+
 ## Partial staging works through Git, never through renderer patch text
 
 `partial-staging.ts` stages and unstages hunks and lines. Four invariants hold

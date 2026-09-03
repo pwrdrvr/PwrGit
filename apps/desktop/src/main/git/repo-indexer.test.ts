@@ -13,13 +13,17 @@ import { err, ok, type Result } from "@pwrgit/shared";
 import { openDatabase } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
 import type { GitExec, GitOutput } from "./dugite";
-import { findRepoDirs, findRepoDirsAsync, RepoIndexer } from "./repo-indexer";
+import { findRepoDirs, RepoIndexer, scanRepoRoot } from "./repo-indexer";
 
 // Drive the indexer with system git so the test is independent of dugite's
-// bundled binary.
+// bundled binary. Address the repo with `-C` and keep the process cwd out of
+// it, exactly as `gitProcessInvocation` does in production: several tests here
+// rename a scanned directory out from under a git run, and on Windows a
+// descendant git.exe still holding it as its native cwd fails that rename with
+// EPERM/EBUSY (see this directory's AGENTS.md).
 const systemGit: GitExec = (args, cwd) =>
   new Promise<Result<GitOutput>>((resolve) => {
-    const proc = spawn("git", args, { cwd });
+    const proc = spawn("git", ["-C", cwd, ...args], { cwd: tmpdir() });
     let stdout = "";
     let stderr = "";
     proc.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
@@ -93,15 +97,33 @@ describe("findRepoDirs", () => {
 
   it("discovers asynchronously with bounded event-loop yields", async () => {
     let yields = 0;
-    const dirs = await findRepoDirsAsync(root, undefined, {
+    const scan = await scanRepoRoot(root, undefined, {
       yieldEvery: 1,
       yieldToEventLoop: async () => {
         yields += 1;
       }
     });
 
-    expect(new Set(dirs)).toEqual(new Set(findRepoDirs(root)));
+    expect(new Set(scan.dirs)).toEqual(new Set(findRepoDirs(root)));
+    expect(scan.rootReadable).toBe(true);
     expect(yields).toBeGreaterThan(0);
+  });
+
+  it("tells an unreadable root apart from an empty one", async () => {
+    // Both scans come back with no dirs; only `rootReadable` says whether that
+    // means "nothing here" or "could not look". An unmounted volume takes the
+    // missing-path branch — the mount point is simply not there to list.
+    const emptyRoot = mkdtempSync(join(tmpdir(), "pwrgit-empty-root-"));
+    const missingRoot = join(emptyRoot, "never-created");
+
+    await expect(scanRepoRoot(emptyRoot)).resolves.toEqual({
+      dirs: [],
+      rootReadable: true
+    });
+    await expect(scanRepoRoot(missingRoot)).resolves.toEqual({
+      dirs: [],
+      rootReadable: false
+    });
   });
 });
 
@@ -644,6 +666,224 @@ describe("RepoIndexer", () => {
     if (profile === null) throw new Error("profile missing");
     await indexer.rescanProfile(profile);
     expect(indexer.searchAll("solo").some((h) => h.name === "solo")).toBe(true);
+  });
+
+  it("keeps scanned repos and their arrangement when a root is unreadable", async () => {
+    const parent = mkdtempSync(join(tmpdir(), "pwrgit-unmounted-"));
+    const isolatedRoot = join(parent, "volume");
+    const detachedRoot = join(parent, "volume-detached");
+    initRepo(join(isolatedRoot, "repo"));
+
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({
+      name: "Unmounted",
+      email: "unmounted@example.com",
+      roots: [isolatedRoot]
+    });
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
+
+    const indexed = (await isolatedIndexer.rescanProfile(profile))[0];
+    if (indexed === undefined) throw new Error("repo missing");
+    isolatedIndexer.setRepoPinned(indexed.id, true);
+    isolatedIndexer.setRepoOrder(profile.id, [indexed.id]);
+
+    // Stand in for an external volume, or a share not mounted yet at login:
+    // the root stops resolving, discovery's readdir throws, and the scan comes
+    // back with nothing. That is a scan that looked nowhere, not one that
+    // found the repos gone — pruning on it would take the row and everything
+    // cascading from it.
+    renameSync(isolatedRoot, detachedRoot);
+    try {
+      const whileDetached = await isolatedIndexer.rescanProfile(profile);
+      expect(whileDetached.map((r) => r.name)).toEqual(["repo"]);
+    } finally {
+      renameSync(detachedRoot, isolatedRoot);
+    }
+
+    // Remounted, and it is the same row throughout: the pin and the
+    // hand-placed order survived. Re-inserting under the same hashed id would
+    // have rebuilt neither.
+    const remounted = await isolatedIndexer.rescanProfile(profile);
+    expect(remounted.map((r) => r.name)).toEqual(["repo"]);
+    expect(isolatedIndexer.getRepo(indexed.id)?.pinned).toBe(true);
+    expect(isolatedIndexer.getRepo(indexed.id)?.order).toBe(0);
+  });
+
+  it("keeps scanned repos when a readable root resolves none at all", async () => {
+    const parent = mkdtempSync(join(tmpdir(), "pwrgit-empty-scan-"));
+    const isolatedRoot = join(parent, "root");
+    const repoPath = join(isolatedRoot, "repo");
+    const movedPath = join(parent, "repo-elsewhere");
+    initRepo(repoPath);
+
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({
+      name: "Empty",
+      email: "empty@example.com",
+      roots: [isolatedRoot]
+    });
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
+    expect(await isolatedIndexer.rescanProfile(profile)).toHaveLength(1);
+
+    // The root itself lists fine here — an empty mount point standing in for
+    // the share, or a git that failed for every candidate, reads exactly like
+    // this. Emptying a profile wholesale needs better evidence than a scan
+    // that resolved nothing.
+    renameSync(repoPath, movedPath);
+    try {
+      const emptied = await isolatedIndexer.rescanProfile(profile);
+      expect(emptied.map((r) => r.name)).toEqual(["repo"]);
+    } finally {
+      renameSync(movedPath, repoPath);
+    }
+  });
+
+  it("still prunes a repo that vanished from a readable root", async () => {
+    const parent = mkdtempSync(join(tmpdir(), "pwrgit-prune-"));
+    const isolatedRoot = join(parent, "root");
+    const goingPath = join(isolatedRoot, "going");
+    const movedPath = join(parent, "going-elsewhere");
+    initRepo(join(isolatedRoot, "staying"));
+    initRepo(goingPath);
+
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({
+      name: "Prune",
+      email: "prune@example.com",
+      roots: [isolatedRoot]
+    });
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
+    expect(
+      (await isolatedIndexer.rescanProfile(profile)).map((r) => r.name)
+    ).toEqual(["going", "staying"]);
+
+    // The scan still resolved a repo, so it saw the root's contents and can be
+    // believed about what is no longer there.
+    renameSync(goingPath, movedPath);
+    const pruned = await isolatedIndexer.rescanProfile(profile);
+    expect(pruned.map((r) => r.name)).toEqual(["staying"]);
+  });
+
+  it("suppresses the prune for every root while any one is unreadable", async () => {
+    const parent = mkdtempSync(join(tmpdir(), "pwrgit-two-roots-"));
+    const healthyRoot = join(parent, "healthy");
+    const detachableRoot = join(parent, "detachable");
+    const detachedRoot = join(parent, "detachable-gone");
+    const goingPath = join(healthyRoot, "going");
+    const movedPath = join(parent, "going-elsewhere");
+    initRepo(join(healthyRoot, "staying"));
+    initRepo(goingPath);
+    initRepo(join(detachableRoot, "onvolume"));
+
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({
+      name: "Two roots",
+      email: "tworoots@example.com",
+      roots: [healthyRoot, detachableRoot]
+    });
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
+    expect(
+      (await isolatedIndexer.rescanProfile(profile)).map((r) => r.name)
+    ).toEqual(["going", "onvolume", "staying"]);
+
+    // One root detaches while a repo is genuinely deleted from the OTHER,
+    // perfectly readable root. The flag is profile-wide deliberately: scoping
+    // the prune per root would mean matching git-normalised repo paths against
+    // configured root strings, and on Windows those come from different sources
+    // with different separators — a false negative there is the data loss this
+    // guard exists to prevent. So `going` lingers rather than risking that.
+    renameSync(detachableRoot, detachedRoot);
+    renameSync(goingPath, movedPath);
+    try {
+      expect(
+        (await isolatedIndexer.rescanProfile(profile)).map((r) => r.name)
+      ).toEqual(["going", "onvolume", "staying"]);
+    } finally {
+      renameSync(detachedRoot, detachableRoot);
+    }
+
+    // Every root readable again, so the scan is believed and the backlog
+    // clears: only the repo that really went away is dropped.
+    expect(
+      (await isolatedIndexer.rescanProfile(profile)).map((r) => r.name)
+    ).toEqual(["onvolume", "staying"]);
+  });
+
+  it("stamps the scan clock only when every root could be listed", async () => {
+    const parent = mkdtempSync(join(tmpdir(), "pwrgit-scan-clock-"));
+    const isolatedRoot = join(parent, "volume");
+    const detachedRoot = join(parent, "volume-detached");
+    const emptyRoot = mkdtempSync(join(tmpdir(), "pwrgit-scan-clock-empty-"));
+    initRepo(join(isolatedRoot, "repo"));
+
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({
+      name: "Clock",
+      email: "clock@example.com",
+      roots: [isolatedRoot]
+    });
+    let now = 1_000;
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit, {
+      profileRescanIntervalMs: 10_000,
+      now: () => now
+    });
+    await isolatedIndexer.rescanProfile(profile);
+    expect(isolatedIndexer.shouldRescanProfile(profile.id)).toBe(false);
+
+    // A scan that could not list its root never completed a pass, so it must
+    // not arm the throttle. Stamping it would leave a volume mounted a minute
+    // later undiscovered for a day — and there is no manual rescan channel to
+    // fall back on, only editing the roots list.
+    renameSync(isolatedRoot, detachedRoot);
+    try {
+      now += 20_000;
+      await isolatedIndexer.rescanProfile(profile);
+      expect(
+        isolatedDb
+          .prepare(
+            "SELECT scanned_at_ms FROM profile_scan_state WHERE profile_id = ?"
+          )
+          .get(profile.id)
+      ).toEqual({ scanned_at_ms: 1_000 });
+      expect(isolatedIndexer.shouldRescanProfile(profile.id)).toBe(true);
+    } finally {
+      renameSync(detachedRoot, isolatedRoot);
+    }
+
+    // A root that reads fine but holds no repos DID complete a pass. It refuses
+    // to prune on that, but it still stamps — otherwise a legitimately empty
+    // root would re-walk on every profile open.
+    const emptied = profiles.setRoots(profile.id, [emptyRoot]);
+    if (emptied === null) throw new Error("profile missing");
+    now += 20_000;
+    await isolatedIndexer.rescanProfile(emptied);
+    expect(isolatedIndexer.shouldRescanProfile(profile.id)).toBe(false);
+  });
+
+  it("prunes every scanned repo once the last root is removed", async () => {
+    const isolatedRoot = mkdtempSync(join(tmpdir(), "pwrgit-no-roots-"));
+    initRepo(join(isolatedRoot, "repo"));
+
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({
+      name: "No roots",
+      email: "noroots@example.com",
+      roots: [isolatedRoot]
+    });
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
+    expect(await isolatedIndexer.rescanProfile(profile)).toHaveLength(1);
+
+    // Clearing the roots is the one deliberate way to reach zero, and it must
+    // still prune — `setRoots` promises repos under a removed root go away.
+    const rootless = profiles.setRoots(profile.id, []);
+    if (rootless === null) throw new Error("profile missing");
+    expect(await isolatedIndexer.rescanProfile(rootless)).toHaveLength(0);
   });
 
   it("rejects a non-repo path", async () => {

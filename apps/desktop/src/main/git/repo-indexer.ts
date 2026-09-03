@@ -254,19 +254,23 @@ export class RepoIndexer {
     );
   }
 
-  /** Rescan a profile's roots; upsert discovered repos, prune vanished ones. */
+  /** Rescan a profile's roots; upsert discovered repos, prune vanished ones —
+   *  but only when the scan saw enough to be sure they are gone (see
+   *  `canPruneFromScan`). */
   async rescanProfile(
     profile: Profile,
     options: RepoRescanOptions = {}
   ): Promise<Repo[]> {
     const { signal } = options;
     const found = new Set<string>();
+    let everyRootReadable = true;
     for (const root of profile.roots) {
-      const dirs = await findRepoDirsAsync(root, MAX_SCAN_DEPTH, {
+      const scan = await scanRepoRoot(root, MAX_SCAN_DEPTH, {
         yieldEvery: this.discoveryYieldEvery,
         yieldToEventLoop: this.yieldToEventLoop
       });
-      for (const dir of dirs) found.add(dir);
+      if (!scan.rootReadable) everyRootReadable = false;
+      for (const dir of scan.dirs) found.add(dir);
     }
     signal?.throwIfAborted();
 
@@ -331,8 +335,16 @@ export class RepoIndexer {
     }
     signal?.throwIfAborted();
     this.db.transaction(() => {
-      this.pruneScannedRepos(profile.id, seenRepoIds);
-      this.markProfileScanned(profile.id);
+      if (canPruneFromScan(profile, everyRootReadable, seenRepoIds.length)) {
+        this.pruneScannedRepos(profile.id, seenRepoIds);
+      }
+      // The scan clock records that a discovery pass got to look, which is a
+      // weaker claim than the one pruning needs: a readable root that holds no
+      // repos did complete a pass. A root that could not be listed did not, and
+      // stamping it would arm the 24h throttle in `shouldRescanProfile` off a
+      // scan that saw nothing — leaving the volume undiscovered for a day after
+      // it mounts, with no manual rescan to reach for.
+      if (everyRootReadable) this.markProfileScanned(profile.id);
     })();
 
     return this.listRepos(profile.id);
@@ -1297,6 +1309,41 @@ export class RepoIndexer {
   }
 }
 
+/**
+ * Whether a finished scan is strong enough evidence to prune on.
+ *
+ * A prune deletes `repos` rows, and everything keyed to `repos(id)` cascades
+ * with them: the pin, the sort and custom order, the identity, the branch and
+ * PR caches, the LFS notice. Re-discovering the same directory later re-inserts
+ * a row under the same hashed id but rebuilds none of that, so a prune driven
+ * by an incomplete scan is unrecoverable — the user's arrangement is simply
+ * gone once the volume comes back.
+ *
+ * Two scans are too weak to prune on:
+ *
+ * - One where a root could not be listed at all (`rootReadable` false): an
+ *   unmounted external volume, a share not mounted yet at login. `readdir`
+ *   threw, discovery skipped the whole subtree, and the scan found nothing
+ *   because it looked nowhere.
+ * - One that resolved no repos at all while roots remain configured. Here the
+ *   roots read fine but their contents did not — an empty mountpoint standing
+ *   in for the share, or a `git` invocation that failed for every candidate.
+ *   Emptying a profile wholesale is a large enough claim to want evidence for,
+ *   and a scan with zero results supplies none.
+ *
+ * Clearing every root is the one deliberate way to reach zero, and it still
+ * prunes: with no roots left there is nowhere to look, so the repos really are
+ * out of scope (`ProfileService.setRoots` relies on this).
+ */
+function canPruneFromScan(
+  profile: Profile,
+  everyRootReadable: boolean,
+  resolvedRepoCount: number
+): boolean {
+  if (!everyRootReadable) return false;
+  return resolvedRepoCount > 0 || profile.roots.length === 0;
+}
+
 function worktreeShape(path: string, branch: string, isPrimary: boolean): Worktree {
   return {
     id: hashId(path),
@@ -1316,7 +1363,14 @@ function worktreeShape(path: string, branch: string, isPrimary: boolean): Worktr
   };
 }
 
-/** Depth-bounded scan for directories containing a `.git` entry. */
+/**
+ * Depth-bounded scan for directories containing a `.git` entry.
+ *
+ * Reference implementation for the depth and skip rules, and the oracle
+ * `scanRepoRoot`'s test compares against — not a production scanner. It cannot
+ * tell an unreadable root from an empty one, so anything whose result feeds
+ * `pruneScannedRepos` must use `scanRepoRoot` instead.
+ */
 export function findRepoDirs(
   root: string,
   maxDepth: number = MAX_SCAN_DEPTH
@@ -1348,24 +1402,42 @@ export function findRepoDirs(
   return results;
 }
 
+export type RootScan = {
+  /** Directories under the root that hold a `.git` entry. */
+  dirs: string[];
+  /**
+   * Whether the root itself could be listed. False means the scan looked
+   * nowhere — an unmounted external volume, a network share not mounted yet
+   * at login, a folder whose permission was revoked — which is a very
+   * different claim from "this root holds no repos".
+   */
+  rootReadable: boolean;
+};
+
 /**
- * Non-blocking counterpart used by startup rescans. Directory IO happens off
- * the main thread, and explicit bounded yields keep Electron IPC responsive
- * even when cached filesystem reads resolve in a tight loop.
+ * Non-blocking counterpart to `findRepoDirs`, used by startup rescans.
+ * Directory IO happens off the main thread, and explicit bounded yields keep
+ * Electron IPC responsive even when cached filesystem reads resolve in a tight
+ * loop.
+ *
+ * Unreadable directories are skipped rather than thrown, so an empty result is
+ * ambiguous on its own; `rootReadable` is what separates the two readings. See
+ * `canPruneFromScan` for why the caller must not confuse them.
  */
-export async function findRepoDirsAsync(
+export async function scanRepoRoot(
   root: string,
   maxDepth: number = MAX_SCAN_DEPTH,
   options: {
     yieldEvery?: number;
     yieldToEventLoop?: () => Promise<void>;
   } = {}
-): Promise<string[]> {
+): Promise<RootScan> {
   const results: string[] = [];
   const pending: { dir: string; depth: number }[] = [{ dir: root, depth: 0 }];
   const yieldEvery = Math.max(1, options.yieldEvery ?? DISCOVERY_YIELD_EVERY);
   const yieldToEventLoop = options.yieldToEventLoop ?? defaultYieldToEventLoop;
   let visited = 0;
+  let rootReadable = true;
 
   while (pending.length > 0) {
     const current = pending.pop();
@@ -1375,6 +1447,9 @@ export async function findRepoDirsAsync(
     try {
       entries = await readdir(current.dir, { withFileTypes: true });
     } catch {
+      // Only the root is queued at depth 0, so this identifies it without
+      // re-comparing paths the filesystem may normalise differently.
+      if (current.depth === 0) rootReadable = false;
       continue;
     }
 
@@ -1395,5 +1470,5 @@ export async function findRepoDirsAsync(
     if (visited % yieldEvery === 0) await yieldToEventLoop();
   }
 
-  return results;
+  return { dirs: results, rootReadable };
 }

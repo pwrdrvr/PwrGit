@@ -16,8 +16,78 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
+  # Keep the pull_request trigger path-unfiltered so the required check jobs
+  # exist on every PR. Documentation-only PRs skip those jobs below instead.
+  changes:
+    name: Classify Changes
+    runs-on: ubuntu-latest
+    outputs:
+      code_impacting: ${{ steps.classify.outputs.code_impacting }}
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - name: Classify changed files
+        id: classify
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fullCi = (reason) => {
+              core.setOutput("code_impacting", "true");
+              core.setOutput("docs_only", "false");
+              core.notice(`Running full CI: ${reason}`);
+            };
+
+            if (context.eventName !== "pull_request") {
+              fullCi(`${context.eventName} events are never docs-only`);
+              return;
+            }
+
+            let files;
+            try {
+              files = await github.paginate(github.rest.pulls.listFiles, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+                per_page: 100,
+              });
+            } catch (error) {
+              fullCi(`changed-file lookup failed (${error.message})`);
+              return;
+            }
+
+            const reportedCount = context.payload.pull_request.changed_files;
+            if (files.length === 0 || files.length !== reportedCount) {
+              fullCi(
+                `changed-file list was incomplete (received ${files.length} of ${reportedCount})`,
+              );
+              return;
+            }
+
+            const isDocumentationPath = (path) =>
+              path.startsWith("docs/") || path.toLowerCase().endsWith(".md");
+            const codeImpactingFile = files.find((file) => {
+              const paths = [file.filename, file.previous_filename].filter(Boolean);
+              return paths.some((path) => !isDocumentationPath(path));
+            });
+            const docsOnly = codeImpactingFile === undefined;
+
+            core.setOutput("code_impacting", String(!docsOnly));
+            core.setOutput("docs_only", String(docsOnly));
+            await core.summary
+              .addHeading("Changed-file classification")
+              .addTable([
+                [{data: "Classification", header: true}, {data: "Files", header: true}],
+                [docsOnly ? "Documentation only" : "Code impacting", String(files.length)],
+              ])
+              .addRaw(
+                docsOnly
+                  ? "Only `docs/**` and Markdown files changed; expensive CI jobs are skipped."
+                  : `Full CI runs because \`${codeImpactingFile.filename}\` is not documentation-only.`,
+              )
+              .write();
+
   # Cache-priming gate. `lookup-only` makes this ~1s on a hit; on a miss it
   # pays one cold install and saves the cache inline (not in a post step), so
   # the fan-out below restores instead of each job installing from scratch.
@@ -27,6 +97,8 @@ jobs:
   install-deps:
     name: Install Dependencies
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.code_impacting == 'true'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -40,6 +112,8 @@ jobs:
   windows-install-deps:
     name: Install Dependencies (Windows)
     runs-on: windows-latest
+    needs: changes
+    if: needs.changes.outputs.code_impacting == 'true'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -57,7 +131,8 @@ jobs:
     # `pnpm lint` chain (typecheck is its last and slowest link).
     name: Typecheck
     runs-on: ubuntu-latest
-    needs: install-deps
+    needs: [changes, install-deps]
+    if: needs.changes.outputs.code_impacting == 'true'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -68,17 +143,18 @@ jobs:
           node-version: 24.x
 
       # One aggregate step on purpose: `pnpm lint` chains the checks
-      # cheapest-first (colors, package reservation, licenses, boundaries,
-      # typecheck), so a new check is added to the chain in package.json and
-      # picked up here automatically instead of having to be remembered as
-      # another step.
-      - name: Lint (colors, package reservation, licenses, boundaries, typecheck)
+      # cheapest-first (colors, package reservation, dependency maturity,
+      # licenses, boundaries, typecheck), so a new check is added to the chain
+      # in package.json and picked up here automatically instead of having to
+      # be remembered as another step.
+      - name: Lint (colors, package reservation, dependency maturity, licenses, boundaries, typecheck)
         run: pnpm lint
 
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: install-deps
+    needs: [changes, install-deps]
+    if: needs.changes.outputs.code_impacting == 'true'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -94,7 +170,8 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    needs: install-deps
+    needs: [changes, install-deps]
+    if: needs.changes.outputs.code_impacting == 'true'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -117,7 +194,8 @@ jobs:
   desktop-e2e:
     name: Desktop E2E (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
-    needs: install-deps
+    needs: [changes, install-deps]
+    if: needs.changes.outputs.code_impacting == 'true'
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -158,8 +236,10 @@ jobs:
     # shard reaches this job and cannot turn the aggregate check into a skip.
     name: Desktop E2E
     runs-on: ubuntu-latest
-    needs: desktop-e2e
-    if: ${{ always() }}
+    needs: [changes, desktop-e2e]
+    if: >-
+      always() &&
+      needs.changes.outputs.code_impacting == 'true'
     timeout-minutes: 5
     steps:
       - name: Require both Linux Desktop E2E shards
@@ -174,7 +254,8 @@ jobs:
   windows:
     name: Windows (typecheck + build + test)
     runs-on: windows-latest
-    needs: windows-install-deps
+    needs: [changes, windows-install-deps]
+    if: needs.changes.outputs.code_impacting == 'true'
     timeout-minutes: 20
     steps:
       - name: Checkout repository
@@ -216,7 +297,8 @@ jobs:
   windows-e2e:
     name: Windows Desktop E2E (${{ matrix.shard }}/4)
     runs-on: windows-latest
-    needs: windows-install-deps
+    needs: [changes, windows-install-deps]
+    if: needs.changes.outputs.code_impacting == 'true'
     timeout-minutes: 30
     strategy:
       fail-fast: false

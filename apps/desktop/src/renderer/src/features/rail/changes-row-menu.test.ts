@@ -19,7 +19,9 @@ const actions = () => ({
   onToggle: vi.fn(),
   onDiscard: vi.fn(),
   onIgnore: vi.fn(),
-  onCopyPath: vi.fn()
+  onCopyPath: vi.fn(),
+  onHistory: vi.fn(),
+  onBlame: vi.fn()
 });
 
 const labels = (target: ChangesRowTarget): string[] =>
@@ -119,6 +121,8 @@ describe("changesRowMenuItems", () => {
   it("drops the ignore entry for a tracked file", () => {
     expect(labels({ kind: "file", file: file("src/app.ts", "M") })).toEqual([
       "Stage",
+      "File history",
+      "Blame",
       "Copy path",
       "Discard changes…"
     ]);
@@ -165,5 +169,32 @@ describe("targetPaths", () => {
         files: [file("dist/a.js", "?"), file("dist/b.js", "?")]
       })
     ).toEqual(["dist/a.js", "dist/b.js"]);
+  });
+});
+
+describe("file history and blame entries", () => {
+  it("offers both for a tracked file", () => {
+    expect(labels({ kind: "file", file: file("src/a.ts", "M") })).toEqual([
+      "Stage",
+      "File history",
+      "Blame",
+      "Copy path",
+      "Discard changes…"
+    ]);
+  });
+
+  it("omits them for an untracked file, which has no committed history", () => {
+    expect(labels({ kind: "file", file: file("src/new.ts", "?") })).not.toContain(
+      "File history"
+    );
+  });
+
+  it("omits them for a folder, since both are per-file views", () => {
+    const target: ChangesRowTarget = {
+      kind: "folder",
+      dir: "src",
+      files: [file("src/a.ts", "M"), file("src/b.ts", "M")]
+    };
+    expect(labels(target)).not.toContain("Blame");
   });
 });

@@ -1,16 +1,7 @@
 import { useEffect, useState } from "react";
 import type { CommitFileChange } from "@pwrgit/shared";
+import { fileStatusChipProps } from "../../lib/fileStatus";
 import { dispatch } from "../../lib/pwrgit";
-
-const STATUS_TONE: Record<string, string> = {
-  M: "warn",
-  A: "ok",
-  D: "danger",
-  R: "warn",
-  C: "warn",
-  U: "danger",
-  "?": "muted"
-};
 
 /**
  * Commit-scoped file list in the rail — the mirror of the Changes tab for a
@@ -24,11 +15,14 @@ export function CommitTab({
   subject,
   onOpenFile,
   onOpenFullDiff,
-  onClose
+  onClose,
+  view
 }: {
   worktreeId: string;
   hash: string;
   subject: string;
+  /** What the main pane is showing of THIS commit, so the list can say so. */
+  view: { kind: "full" } | { kind: "file"; path: string } | null;
   onOpenFile: (path: string) => void;
   onOpenFullDiff: () => void;
   onClose: () => void;
@@ -59,7 +53,12 @@ export function CommitTab({
         <span className="commit-tab__hash">{hash.slice(0, 7)}</span>
         <span style={{ flex: 1 }} />
         <button
-          className="commit-tab__full"
+          className={`commit-tab__full${
+            view?.kind === "full" ? " is-active" : ""
+          }`}
+          {...(view?.kind === "full"
+            ? { "aria-current": "true" as const }
+            : {})}
           onClick={onOpenFullDiff}
           title="Open the whole commit as one diff"
         >
@@ -80,15 +79,18 @@ export function CommitTab({
             {files.map((f, i) => (
               <div
                 key={`${i}-${f.path}`}
-                className="file-row is-clickable"
+                className={`file-row is-clickable${
+                  view?.kind === "file" && view.path === f.path
+                    ? " is-selected"
+                    : ""
+                }`}
+                {...(view?.kind === "file" && view.path === f.path
+                  ? { "aria-current": "true" as const }
+                  : {})}
                 onClick={() => onOpenFile(f.path)}
                 title="View this file's changes in the commit"
               >
-                <span
-                  className={`file-status file-status--${STATUS_TONE[f.status] ?? "muted"}`}
-                >
-                  {f.status}
-                </span>
+                <span {...fileStatusChipProps(f.status)}>{f.status}</span>
                 <span className="file-path" title={f.path}>
                   {f.path}
                 </span>
