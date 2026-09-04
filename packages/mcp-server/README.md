@@ -4,9 +4,32 @@
 find GitHub and GitLab checkouts, inspect safe repository/worktree metadata,
 and subscribe to normalized local/PR/MR/CI status.
 
-## Build and configure
+## Connect an agent
 
-From the PwrGit repository root:
+Open **PwrGit → Settings → Agents** and turn on **Local agent access**. Then,
+from the agent you want to connect:
+
+```bash
+pwrgit-mcp pair --client "Claude Code" --format claude
+```
+
+PwrGit shows an approval card naming the client and the role it will get.
+Approve it and the command prints a ready-to-run line:
+
+```bash
+claude mcp add-json pwrgit '{"command":"…","args":["…","serve"],"env":{…}}'
+```
+
+`--format mcp-json` (default) prints a config object to paste into any MCP
+client, and `--format env` prints the two environment variables. Nothing is
+granted until you approve it in the PwrGit window; an unanswered request
+expires, and a token is handed out exactly once.
+
+`pwrgit-mcp status` reports whether PwrGit is accepting connections, so a
+client can tell "PwrGit is not running" apart from "the operator declined".
+
+The installed app ships the server, so there is nothing to build. If you are
+working from a checkout instead:
 
 ```bash
 source ~/.nvm/nvm.sh
@@ -15,13 +38,14 @@ pnpm install
 pnpm --filter @pwrgit/mcp-server build
 ```
 
-Open **PwrGit → Settings → Agents**, create a named Session, and assign its
-role. PwrGit shows the 256-bit Session token once. Built-in roles cover
-repository discovery, local metadata, and live forge status; custom roles can
-choose individual permissions and restrict every path-taking operation to
-specific existing repository roots.
+## Configure by hand
 
-Configure a stdio MCP client with absolute paths:
+Settings → Agents can also mint a Session directly and copy a complete client
+config. Built-in roles cover repository discovery, local metadata, and live
+forge status; custom roles can choose individual permissions and restrict
+every path-taking operation to specific existing repository roots.
+
+The equivalent stdio configuration, with absolute paths:
 
 ```json
 {

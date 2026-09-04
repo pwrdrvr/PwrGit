@@ -50,6 +50,48 @@ them. Invalid JSON, missing canonical built-ins, role drift, unknown Sessions,
 and missing permissions all fail closed. Tool annotations remain descriptive
 MCP metadata; they are not used as authorization.
 
+## Loopback agent access and pairing
+
+Setting the server up by hand means minting a Session, copying a 256-bit
+token, and writing a config with absolute paths. That cost is why the server
+went untested for so long, so the app hosts an opt-in loopback surface that
+does the same thing with an approval click.
+
+`AGENT_ACCESS_PORT` is 51731 (PwrSnap owns 51729). The listener runs only
+while **Settings → Agents → Local agent access** is on; an always-listening
+local MCP endpoint is a standing grant on the operator's repositories, so it
+is never enabled implicitly, and turning it off answers every pending request
+with "no".
+
+| Route | Purpose |
+| --- | --- |
+| `GET /health` | Reachability, so a client distinguishes "not running" from "declined" |
+| `POST /pair/request` | Ask for access; returns a `pairingId` and poll interval |
+| `GET /pair/poll` | Poll until the operator answers |
+| `POST /mcp` | Streamable HTTP MCP behind `Authorization: Bearer <session token>` |
+
+Nothing is minted until the operator approves in the PwrGit window. An
+unanswered request expires after five minutes, and an approved token is
+returned by exactly one poll, so a leaked poll URL cannot be replayed into a
+second client. `POST /mcp` re-reads the policy file per call, so revoking a
+Session cuts off a live client without restarting anything.
+
+Both `Origin` and `Host` are validated. Any web page can issue requests to
+127.0.0.1, and a hostname that resolves to loopback defeats a `Host` check on
+its own, so a request carrying a non-loopback `Origin` is refused outright.
+A non-browser client sends no `Origin` and passes on the `Host` check. This is
+the Origin validation the MCP Streamable HTTP transport requires.
+
+The same handshake is available without the app UI through the CLI:
+
+```bash
+pwrgit-mcp pair --client "Claude Code" --format claude
+pwrgit-mcp status
+```
+
+A bare `pwrgit-mcp` still serves on stdio, so configurations written before
+the CLI grew subcommands keep working.
+
 ## Transport decision
 
 The MCP server uses stdio because it has the broadest local-client support and
