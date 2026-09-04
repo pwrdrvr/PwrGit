@@ -130,6 +130,9 @@ importers:
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
+      vite:
+        specifier: ^7.3.5
+        version: 7.3.6(@types/node@24.12.4)(jiti@2.7.0)
 
   packages/pwrgit: {}
 

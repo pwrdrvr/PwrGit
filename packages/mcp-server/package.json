@@ -12,6 +12,7 @@
   },
   "files": [
     "dist",
+    "dist-bundle",
     "README.md"
   ],
   "exports": {
@@ -22,7 +23,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "start": "node ./dist/bin.js",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build:bundle": "vite build --config vite.bundle.config.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
@@ -30,6 +32,7 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
-    "@types/ws": "^8.18.1"
+    "@types/ws": "^8.18.1",
+    "vite": "^7.3.5"
   }
 }

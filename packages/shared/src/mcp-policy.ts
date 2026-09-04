@@ -115,4 +115,12 @@ export type AgentAccessSnapshot = {
   /** Set when the listener could not bind, so the UI can say why rather than
    * showing an enabled toggle over a dead endpoint. */
   error?: string;
+  /** How a stdio MCP client should launch the server that ships inside this
+   * app. Absent when the single-file build is missing, so the UI can say to
+   * build it rather than hand out a config that fails at launch. */
+  clientLaunch?: {
+    command: string;
+    args: string[];
+    env: Record<string, string>;
+  };
 };

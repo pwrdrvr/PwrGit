@@ -110,6 +110,10 @@ import { McpPolicyStore } from "@pwrgit/mcp-server/access-policy";
 import { registerLocalAgentHandlers } from "./local-agents/local-agent-handlers";
 import { AgentAccessService } from "./agent-access/agent-access-service";
 import { registerAgentAccessHandlers } from "./agent-access/agent-access-handlers";
+import {
+  bundledCliLaunch,
+  resolveBundledCliPath
+} from "./agent-access/bundled-cli";
 
 const APP_NAME = "PwrGit";
 
@@ -596,9 +600,23 @@ if (!gotSingleInstanceLock) {
     });
     // The loopback listener stays off until the operator turns it on: it is a
     // standing grant on their repositories, not a default.
+    const mcpPolicyFile = join(app.getPath("userData"), "mcp-policy.json");
+    const bundledCli = resolveBundledCliPath({
+      resourcesPath: process.resourcesPath,
+      packaged: app.isPackaged,
+      appPath: app.getAppPath()
+    });
     const agentAccess = new AgentAccessService(mcpPolicy, {
-      policyFile: join(app.getPath("userData"), "mcp-policy.json"),
+      policyFile: mcpPolicyFile,
       appVersion,
+      clientLaunch:
+        bundledCli === undefined
+          ? undefined
+          : bundledCliLaunch({
+              execPath: process.execPath,
+              scriptPath: bundledCli,
+              policyFile: mcpPolicyFile
+            }),
       onChanged: () => {
         emitEvent("agentAccess:changed", agentAccess.status());
         emitEvent("localAgents:changed", mcpPolicy.snapshot());

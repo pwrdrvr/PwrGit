@@ -2,6 +2,7 @@ import type { McpPolicyStore } from "@pwrgit/mcp-server/access-policy";
 import { AgentAccessServer } from "./agent-access-server.js";
 import { PairingRegistry } from "./pairing-registry.js";
 import type { PendingPairing } from "@pwrgit/mcp-server/agent-access-protocol";
+import type { BundledCliLaunch } from "./bundled-cli.js";
 
 export type AgentAccessStatus = {
   enabled: boolean;
@@ -12,12 +13,16 @@ export type AgentAccessStatus = {
    * or something else already on the port. Surfaced instead of retrying
    * silently, because a client polling a dead endpoint has no other clue. */
   error?: string;
+  clientLaunch?: BundledCliLaunch;
 };
 
 export type AgentAccessServiceOptions = {
   policyFile: string;
   appVersion: string;
   onChanged: () => void;
+  /** How a stdio client launches the bundled server. Undefined when the
+   * single-file build is not present. */
+  clientLaunch?: BundledCliLaunch | undefined;
   port?: number;
   log?: (message: string, extra?: unknown) => void;
 };
@@ -53,7 +58,10 @@ export class AgentAccessService {
       listening: this.server.listening,
       mcpUrl: this.server.mcpUrl,
       pending: this.pairings.pending(),
-      ...(this.error === undefined ? {} : { error: this.error })
+      ...(this.error === undefined ? {} : { error: this.error }),
+      ...(this.options.clientLaunch === undefined
+        ? {}
+        : { clientLaunch: this.options.clientLaunch })
     };
   }
 

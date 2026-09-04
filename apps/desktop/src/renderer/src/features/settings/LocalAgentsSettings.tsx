@@ -12,11 +12,12 @@ import {
   type McpAgentPolicySnapshot,
   type McpAgentRole,
   type McpAgentRoleInput,
-  type McpAgentSessionCredential
+  type McpAgentSessionCredential,
+  type AgentAccessSnapshot
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { SettingsPanelHead, SettingsSection } from "./SettingsLayout";
-import { AgentAccessSection } from "./AgentAccessSection";
+import { AgentAccessSection, useAgentAccessSnapshot } from "./AgentAccessSection";
 
 type RoleDraft = {
   id: string | null;
@@ -39,6 +40,7 @@ export function LocalAgentsSettings() {
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const agentAccess = useAgentAccessSnapshot();
 
   const read = useCallback(async (): Promise<void> => {
     const result = await dispatch("localAgents:read", undefined);
@@ -326,16 +328,22 @@ export function LocalAgentsSettings() {
         {credential !== null ? (
           <div className="agent-credential" role="status">
             <div><b>Copy this now</b><span>The token cannot be recovered after this pane closes.</span></div>
-            <pre>{environmentSnippet(credential)}</pre>
+            <pre>{clientSnippet(credential, agentAccess?.clientLaunch)}</pre>
             <button
               className="settings-button"
               type="button"
               onClick={() => {
-                void navigator.clipboard?.writeText(environmentSnippet(credential));
+                void navigator.clipboard?.writeText(
+                  clientSnippet(credential, agentAccess?.clientLaunch)
+                );
                 setCopied(true);
               }}
             >
-              {copied ? "Copied" : "Copy environment"}
+              {copied
+                ? "Copied"
+                : agentAccess?.clientLaunch === undefined
+                  ? "Copy environment"
+                  : "Copy MCP config"}
             </button>
           </div>
         ) : null}
@@ -456,6 +464,34 @@ function draftInput(draft: RoleDraft): McpAgentRoleInput {
       ? null
       : [...new Set(draft.repositoryRoots.split(/\r?\n/u).map((root) => root.trim()).filter(Boolean))]
   };
+}
+
+/** Prefers a complete, paste-ready client config over two environment
+ * variables: the variables still left the operator to work out the command,
+ * the script path, and the JSON shape by hand, which is most of the setup
+ * cost this pane exists to remove. Falls back to the variables when the app
+ * ships no single-file server to point at. */
+function clientSnippet(
+  credential: McpAgentSessionCredential,
+  launch: AgentAccessSnapshot["clientLaunch"]
+): string {
+  if (launch === undefined) return environmentSnippet(credential);
+  return JSON.stringify(
+    {
+      mcpServers: {
+        pwrgit: {
+          command: launch.command,
+          args: launch.args,
+          env: {
+            ...launch.env,
+            PWRGIT_MCP_SESSION_TOKEN: credential.token
+          }
+        }
+      }
+    },
+    null,
+    2
+  );
 }
 
 function environmentSnippet(credential: McpAgentSessionCredential): string {

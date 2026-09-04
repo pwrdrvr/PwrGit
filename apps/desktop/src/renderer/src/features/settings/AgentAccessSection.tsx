@@ -8,6 +8,24 @@ import { SettingsSwitch } from "./SettingsSwitch";
  * default role offered is the narrowest one that is still useful. */
 const DEFAULT_PAIRING_ROLE = "builtin.local-reader";
 
+/** Shared so the credential pane can build a paste-ready config from the same
+ * snapshot this section renders, without a second read of the same state. */
+export function useAgentAccessSnapshot(): AgentAccessSnapshot | null {
+  const [snapshot, setSnapshot] = useState<AgentAccessSnapshot | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void dispatch("agentAccess:read", undefined).then((result) => {
+      if (!cancelled && result.ok) setSnapshot(result.value);
+    });
+    const stop = subscribe("agentAccess:changed", (next) => setSnapshot(next));
+    return () => {
+      cancelled = true;
+      stop();
+    };
+  }, []);
+  return snapshot;
+}
+
 export function AgentAccessSection(props: { roles: McpAgentRole[] }) {
   const [snapshot, setSnapshot] = useState<AgentAccessSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
