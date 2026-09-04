@@ -144,16 +144,29 @@ test("menu opens the Settings window; panes render and settings persist", async 
     "Active"
   );
 
-  // Updates: picking a train persists both keys so a later Beta binary
-  // cannot re-infer after the operator chose Stable.
+  // Updates: all four published slots are on screen, and picking one persists
+  // both axes plus the pin, so a later Beta binary cannot re-infer past it.
+  // Tiles are addressed by the aria-label prefix — the version half settles
+  // from "Loading…" to whatever the slot resolved to.
   await settings.locator(".settings-nav__button", { hasText: "Updates" }).click();
-  await expect(
-    settings.getByRole("radio", { name: "Stable" })
-  ).toHaveAttribute("aria-checked", "true");
-  await settings.getByRole("radio", { name: "Beta" }).click();
-  await expect(
-    settings.getByRole("radio", { name: "Beta" })
-  ).toHaveAttribute("aria-checked", "true");
+  const slot = (train: string, channel: string) =>
+    settings.locator(`.settings-slot[aria-label^="${train} ${channel} "]`);
+  await expect(settings.locator(".settings-slot")).toHaveCount(4);
+  await expect(slot("Stable", "Latest")).toHaveAttribute(
+    "aria-checked",
+    "true"
+  );
+  // An unpackaged build fetches nothing, so every slot is empty — and each
+  // one says why on itself instead of leaving a blank tile.
+  await expect(slot("Beta", "Prerelease")).toContainText(
+    "Release versions are not fetched in development builds."
+  );
+  await slot("Beta", "Latest").click();
+  await expect(slot("Beta", "Latest")).toHaveAttribute("aria-checked", "true");
+  await expect(slot("Stable", "Latest")).toHaveAttribute(
+    "aria-checked",
+    "false"
+  );
 
   // Mounting the pane must not check GitHub for release versions: this build
   // is unpackaged and could not install what it found anyway.
@@ -211,7 +224,11 @@ test("menu opens the Settings window; panes render and settings persist", async 
     readFileSync(join(userData, "settings.json"), "utf8")
   ) as Record<string, unknown>;
   expect(stored["general"]).toEqual({ theme: "light", developerMode: true });
-  expect(stored["updates"]).toEqual({ train: "beta", channel: "latest" });
+  expect(stored["updates"]).toEqual({
+    train: "beta",
+    channel: "latest",
+    selectionSource: "user"
+  });
   expect(stored["experimental"]).toEqual({ lineageAllBranches: true });
   expect(stored["diagnostics"]).toEqual({ hotCpuProfilingEnabled: true });
 

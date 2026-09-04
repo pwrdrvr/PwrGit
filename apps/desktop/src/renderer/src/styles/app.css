@@ -9286,6 +9286,113 @@ body.is-col-resizing {
   color: var(--text-muted);
 }
 
+/* Release slot matrix (Settings → Updates)
+   All four published slots at once: two trains (rows) x two tracks
+   (columns). Every tile carries its own resolved version, so an empty
+   Beta Latest can never read as "the Beta train has nothing" while Beta
+   Prerelease sits right beside it with a build. */
+.settings-slots {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px;
+  align-items: stretch;
+  width: 100%;
+}
+.settings-slots__col-header,
+.settings-slots__row-header {
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+}
+.settings-slots__col-header {
+  padding-left: 2px;
+  font: 600 10px/1 var(--font-sans);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.settings-slots__row-header {
+  font: 600 12px/1 var(--font-sans);
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+}
+.settings-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
+  appearance: none;
+  padding: 9px 11px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+.settings-slot:hover:not(:disabled) {
+  border-color: var(--accent-border);
+}
+/* The matrix is a roving-tabindex radiogroup, so arrow keys move focus
+   between tiles WITHOUT selecting. Without a focus ring distinct from
+   `.is-selected` there is no way to see which slot Space would commit. */
+.settings-slot:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.settings-slot.is-selected {
+  background: var(--bg-row-active);
+  border-color: var(--accent-border);
+}
+.settings-slot:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.settings-slot__version {
+  font: 600 12px/1.2 var(--font-mono);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.settings-slot.is-selected .settings-slot__version {
+  color: var(--accent-bright);
+}
+.settings-slot__version.is-empty {
+  font: 500 12px/1.2 var(--font-sans);
+  color: var(--text-muted);
+}
+.settings-slot__sub {
+  font: 400 11px/1.35 var(--font-sans);
+  color: var(--text-subtle);
+}
+.settings-slot__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.settings-slot__chip {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel-elevated);
+  color: var(--text-muted);
+  font: 600 9px/1 var(--font-sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.settings-slot__chip.is-selected {
+  border-color: transparent;
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+.settings-slot__chip.is-installed {
+  border-color: transparent;
+  background: var(--success-soft);
+  color: var(--success-text);
+}
+
 .settings-update-channel {
   display: flex;
   flex-wrap: wrap;

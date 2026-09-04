@@ -312,9 +312,42 @@ export function isUpdateTrain(value: unknown): value is UpdateTrain {
   );
 }
 
+/** The two selectable axes. This is the pair a renderer may patch, and the
+ *  pair {@link inferUpdateSelection} derives from a version string. */
 export type UpdatesSettings = {
   channel: UpdateChannel;
   train: UpdateTrain;
+};
+
+/** Where the persisted train/track pair came from.
+ *
+ *  `"inferred"` means nobody has picked a slot yet, so the pair is derived
+ *  from the RUNNING BINARY's version on every hydration — install an alpha
+ *  and you follow the alpha feed, install a stable build and you follow
+ *  Stable Latest. `"user"` means somebody clicked a slot in Settings, and
+ *  the pair is pinned until they click another one.
+ *
+ *  Without this flag the two states are indistinguishable on disk: a stored
+ *  `stable`/`latest` is equally "the default nobody touched" and "the choice
+ *  somebody made". PwrGit persists both axes on every click, so the moment a
+ *  user so much as reopens the pane and taps the segment they are already on,
+ *  their install is frozen on that feed — a later hand-installed alpha is then
+ *  offered the last stable forever and never told about the newer alpha it
+ *  came from. An `-alpha` / `-beta` tag is evidence of the Beta train, and it
+ *  should keep winning until somebody says otherwise. */
+export type UpdateSelectionSource = "inferred" | "user";
+
+export function isUpdateSelectionSource(
+  value: unknown
+): value is UpdateSelectionSource {
+  return value === "inferred" || value === "user";
+}
+
+/** The stored selection: the pair, plus who chose it. Main-owned —
+ *  `selectionSource` is derived in the write path, never accepted from a
+ *  renderer, which is why {@link AppSettingsPatch} carries only the pair. */
+export type UpdatesSelection = UpdatesSettings & {
+  selectionSource: UpdateSelectionSource;
 };
 
 /** Runtime/build identity assembled in main; the renderer has no Node access. */
@@ -355,10 +388,17 @@ function parseUpdateVersion(
 }
 
 /**
- * Map a desktop app version onto the Settings update train/track.
- * Used only when both `updates.train` and `updates.channel` are unset so a
- * GitHub or website download of Beta/Prerelease follows that feed. A
- * pre-train config that only set `channel` stays on Stable.
+ * Map an INSTALLED app version onto the Settings update train/track, so a
+ * GitHub or website download follows the feed it came from. This is the whole
+ * rule for a selection whose {@link UpdateSelectionSource} is still
+ * `"inferred"`: an `-alpha` binary is evidence of Beta/Prerelease, a `-beta`
+ * binary is evidence of Beta/Latest, an `-rc` / `-prerelease` binary is
+ * evidence of Stable/Prerelease, and a plain release means Stable/Latest.
+ * Once somebody picks a slot in Settings the source flips to `"user"` and
+ * this function is no longer consulted.
+ *
+ * `v1.0.0-beta.N` is the one exception: those tags were the STABLE prerelease
+ * line before the trains split, so they stay on Stable.
  */
 export function inferUpdateSelection(version: string): UpdatesSettings {
   const parsed = parseUpdateVersion(version);
@@ -391,17 +431,78 @@ export function inferUpdateSelection(version: string): UpdatesSettings {
   return { channel: "prerelease", train: UPDATE_TRAIN_DEFAULT };
 }
 
-/** Resolve stored keys, inferring from the app version only when both are absent. */
+/** The pair every pre-`selectionSource` settings file landed on when nobody
+ *  had chosen: the pair the old write path filled in on any click, including
+ *  a click on the segment already selected. This is a HISTORICAL FACT about
+ *  files already on disk, so it is frozen here rather than read from
+ *  `UPDATE_*_DEFAULT` — moving the shipped default later must not
+ *  retroactively reclassify those files as deliberate pins and freeze that
+ *  population on Stable Latest forever. */
+const LEGACY_UNCHOSEN_UPDATE_PAIR: UpdatesSettings = {
+  channel: "latest",
+  train: "stable"
+};
+
+/** Classify a settings file written before `updates.selectionSource` existed.
+ *  A complete pair that is NOT the historical unchosen pair could only have
+ *  come from a deliberate click, so it reads as `"user"`. Everything else —
+ *  no pair, a half pair, or that pair — is indistinguishable from "never
+ *  chose", so it reads as `"inferred"` and gets re-derived from the running
+ *  binary.
+ *
+ *  The one behavior change this can produce: an operator who deliberately
+ *  pinned Stable/Latest while running an alpha is moved back onto
+ *  Beta/Prerelease once. That is the same state as the bug it fixes — an
+ *  alpha build being offered the last stable and never told about the newer
+ *  alpha — and there is no signal on disk that separates the two. Their next
+ *  click writes `"user"` and pins for good. */
+function legacyUpdateSelectionSource(
+  channel: UpdateChannel | undefined,
+  train: UpdateTrain | undefined
+): UpdateSelectionSource {
+  if (channel === undefined || train === undefined) return "inferred";
+  if (
+    channel === LEGACY_UNCHOSEN_UPDATE_PAIR.channel &&
+    train === LEGACY_UNCHOSEN_UPDATE_PAIR.train
+  ) {
+    return "inferred";
+  }
+  return "user";
+}
+
+/**
+ * Resolve the stored selection against the running binary.
+ *
+ * While the source reads `"inferred"` the pair is RE-DERIVED on every
+ * hydration from the version of the binary doing the reading, so installing
+ * an alpha over a stable build (or the reverse) moves the feed with it
+ * instead of stranding the install on a slot it can never advance from.
+ * A `"user"` pin is honoured as stored.
+ */
 export function resolveUpdateSelection(
-  stored: Partial<UpdatesSettings> | undefined,
+  stored: Partial<UpdatesSelection> | undefined,
   appVersion: string
-): UpdatesSettings {
-  if (stored?.channel === undefined && stored?.train === undefined) {
-    return inferUpdateSelection(appVersion);
+): UpdatesSelection {
+  const channel = isUpdateChannel(stored?.channel) ? stored.channel : undefined;
+  const train = isUpdateTrain(stored?.train) ? stored.train : undefined;
+  const source = isUpdateSelectionSource(stored?.selectionSource)
+    ? stored.selectionSource
+    : legacyUpdateSelectionSource(channel, train);
+  // A pin is honoured even when one axis did not survive the round trip (a
+  // truncated write, a hand edit that misspelled a value). Re-inferring the
+  // whole pair there would silently discard the axis that IS valid and
+  // un-pin the selection — on an alpha binary that quietly moves a
+  // deliberate Stable pin onto the alpha feed. Fall back per axis instead.
+  if (source === "user") {
+    return {
+      channel: channel ?? UPDATE_CHANNEL_DEFAULT,
+      train: train ?? UPDATE_TRAIN_DEFAULT,
+      selectionSource: "user"
+    };
   }
   return {
-    channel: stored.channel ?? UPDATE_CHANNEL_DEFAULT,
-    train: stored.train ?? UPDATE_TRAIN_DEFAULT
+    ...inferUpdateSelection(appVersion),
+    selectionSource: "inferred"
   };
 }
 
@@ -502,7 +603,7 @@ export type AppSettingsSnapshot = {
   general: GeneralSettings;
   experimental: ExperimentalSettings;
   diagnostics: DiagnosticsSettings;
-  updates: UpdatesSettings;
+  updates: UpdatesSelection;
   diagnosticsEnv: DiagnosticsEnvOverrides;
   /** Directory diagnostics sessions (profiles, snapshots) are written to. */
   diagnosticsOutputRoot: string;
@@ -512,6 +613,9 @@ export type AppSettingsPatch = {
   general?: Partial<GeneralSettings>;
   experimental?: Partial<ExperimentalSettings>;
   diagnostics?: Partial<DiagnosticsSettings>;
+  /** Only the two selectable axes. `selectionSource` is main-owned derived
+   *  state — the write path sets it to `"user"` whenever a patch names
+   *  either axis, so a renderer can neither forget to send it nor forge it. */
   updates?: Partial<UpdatesSettings>;
 };
 
