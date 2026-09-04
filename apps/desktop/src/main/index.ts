@@ -108,6 +108,8 @@ import { openSettingsWindow } from "./settings-window";
 import { createNativeThemeController } from "./native-theme";
 import { McpPolicyStore } from "@pwrgit/mcp-server/access-policy";
 import { registerLocalAgentHandlers } from "./local-agents/local-agent-handlers";
+import { AgentAccessService } from "./agent-access/agent-access-service";
+import { registerAgentAccessHandlers } from "./agent-access/agent-access-handlers";
 
 const APP_NAME = "PwrGit";
 
@@ -592,6 +594,19 @@ if (!gotSingleInstanceLock) {
     registerLocalAgentHandlers(bus, mcpPolicy, () => {
       emitEvent("localAgents:changed", mcpPolicy.snapshot());
     });
+    // The loopback listener stays off until the operator turns it on: it is a
+    // standing grant on their repositories, not a default.
+    const agentAccess = new AgentAccessService(mcpPolicy, {
+      policyFile: join(app.getPath("userData"), "mcp-policy.json"),
+      appVersion,
+      onChanged: () => {
+        emitEvent("agentAccess:changed", agentAccess.status());
+        emitEvent("localAgents:changed", mcpPolicy.snapshot());
+      },
+      log: (message, extra) => logMain("info", "agent-access", message, extra)
+    });
+    app.on("will-quit", () => void agentAccess.dispose());
+    registerAgentAccessHandlers(bus, agentAccess);
     diagnostics.sync(); // start any settings-enabled monitors at boot
 
     registerIpc(bus, {

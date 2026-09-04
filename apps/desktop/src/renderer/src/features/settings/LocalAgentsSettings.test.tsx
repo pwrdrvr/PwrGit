@@ -60,6 +60,23 @@ const snapshot: McpAgentPolicySnapshot = {
   ]
 };
 
+/** The pane embeds AgentAccessSection, which reads its own state on mount.
+ * Every dispatch mock in this file needs to answer that call; anything else is
+ * still an unexpected command. */
+function agentAccessFallback(name: string): Promise<unknown> {
+  if (name === "agentAccess:read") {
+    return Promise.resolve(
+      ok({
+        enabled: false,
+        listening: false,
+        mcpUrl: "http://127.0.0.1:51731/mcp",
+        pending: []
+      })
+    );
+  }
+  throw new Error(`unexpected command ${name}`);
+}
+
 let container: HTMLDivElement;
 let root: Root;
 const unsubscribe = vi.fn();
@@ -69,7 +86,7 @@ beforeEach(() => {
   mocks.subscribe.mockReturnValue(unsubscribe);
   mocks.dispatch.mockImplementation((name: string) => {
     if (name === "localAgents:read") return Promise.resolve(ok(snapshot));
-    throw new Error(`unexpected command ${name}`);
+    return agentAccessFallback(name);
   });
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -121,7 +138,7 @@ describe("LocalAgentsSettings", () => {
     mocks.dispatch.mockImplementation((name: string) => {
       if (name === "localAgents:read") return Promise.resolve(ok(snapshot));
       if (name === "localAgents:createSession") return Promise.resolve(ok(credential));
-      throw new Error(`unexpected command ${name}`);
+      return agentAccessFallback(name);
     });
     await render();
     const input = container.querySelector<HTMLInputElement>("input[placeholder='PwrAgent on this Mac']");
@@ -155,7 +172,7 @@ describe("LocalAgentsSettings", () => {
       if (name === "localAgents:revoke") {
         return Promise.resolve(ok({ ...snapshot.sessions[0]!, revokedAt: "now" }));
       }
-      throw new Error(`unexpected command ${name}`);
+      return agentAccessFallback(name);
     });
     await render();
     const button = Array.from(container.querySelectorAll("button")).find(

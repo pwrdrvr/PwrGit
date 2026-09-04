@@ -95,3 +95,24 @@ export type McpAgentRoleInput = {
 };
 
 export type McpAgentRolePatch = Partial<McpAgentRoleInput>;
+
+/** A pairing request waiting on the operator's answer in the PwrGit window. */
+export type McpPendingPairing = {
+  pairingId: string;
+  clientName: string;
+  requestedRoleId?: string;
+  createdAt: string;
+  expiresAt: string;
+};
+
+/** State of the loopback listener that lets a local agent reach PwrGit's MCP
+ * tools without the operator hand-copying a Session token. */
+export type AgentAccessSnapshot = {
+  enabled: boolean;
+  listening: boolean;
+  mcpUrl: string;
+  pending: McpPendingPairing[];
+  /** Set when the listener could not bind, so the UI can say why rather than
+   * showing an enabled toggle over a dead endpoint. */
+  error?: string;
+};

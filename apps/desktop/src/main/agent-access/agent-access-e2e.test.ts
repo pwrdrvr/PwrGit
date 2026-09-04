@@ -71,7 +71,9 @@ describe("agent access end to end", () => {
       requestInit: { headers: { authorization: `Bearer ${approved.token}` } }
     });
     try {
-      await client.connect(transport);
+      await client.connect(
+        transport as unknown as Parameters<typeof client.connect>[0]
+      );
       const tools = await client.listTools();
       expect(tools.tools.map((tool) => tool.name)).toContain("pwrgit_repository_info");
 

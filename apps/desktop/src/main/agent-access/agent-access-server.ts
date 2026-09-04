@@ -55,7 +55,7 @@ type Session = {
  *   without restarting anything.
  */
 export class AgentAccessServer {
-  private http?: HttpServer;
+  private http: HttpServer | undefined;
   private readonly sessions = new Map<string, Session>();
   /** The requested port; 0 asks the OS to choose. */
   private readonly requestedPort: number;
@@ -249,7 +249,10 @@ export class AgentAccessServer {
       void server.close().catch(() => undefined);
       this.log("session closed", { sessionId: id });
     };
-    await server.mcp.connect(transport);
+    // The SDK's transport classes declare optional members without an
+    // explicit `| undefined`, which this project's exactOptionalPropertyTypes
+    // rejects structurally. The runtime shape is correct.
+    await server.mcp.connect(transport as unknown as Parameters<typeof server.mcp.connect>[0]);
     await transport.handleRequest(request, response, body);
   }
 

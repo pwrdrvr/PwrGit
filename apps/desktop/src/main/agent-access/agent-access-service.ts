@@ -31,7 +31,7 @@ export class AgentAccessService {
   private readonly server: AgentAccessServer;
   readonly pairings: PairingRegistry;
   private enabled = false;
-  private error?: string;
+  private error: string | undefined;
 
   constructor(
     policy: McpPolicyStore,

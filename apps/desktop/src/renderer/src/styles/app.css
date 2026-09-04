@@ -9557,6 +9557,70 @@ body.is-col-resizing {
 .settings-stack--agents {
   max-width: 1120px;
 }
+.agent-access-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0 4px;
+}
+.agent-access-toggle__copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.agent-access-toggle__copy b {
+  font: 600 12.5px/1.4 var(--font-sans);
+  color: var(--text-primary);
+}
+.agent-access-toggle__copy span {
+  font: 400 11.5px/1.5 var(--font-sans);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.agent-access-pending {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+}
+.agent-access-request {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+}
+.agent-access-request__copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.agent-access-request__copy b {
+  font: 600 12.5px/1.4 var(--font-sans);
+  color: var(--text-primary);
+}
+.agent-access-request__copy span {
+  font: 400 11.5px/1.5 var(--font-sans);
+  color: var(--text-muted);
+}
+.agent-access-request__role {
+  display: grid;
+  gap: 3px;
+}
+.agent-access-request__role span {
+  font: 500 10.5px/1.3 var(--font-sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.agent-access-request__actions {
+  display: flex;
+  gap: 8px;
+}
+
 .agent-auth-graph {
   display: grid;
   grid-template-columns: minmax(190px, 0.9fr) minmax(210px, 1fr) minmax(300px, 1.35fr);

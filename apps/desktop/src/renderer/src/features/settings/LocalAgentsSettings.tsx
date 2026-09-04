@@ -16,6 +16,7 @@ import {
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { SettingsPanelHead, SettingsSection } from "./SettingsLayout";
+import { AgentAccessSection } from "./AgentAccessSection";
 
 type RoleDraft = {
   id: string | null;
@@ -168,6 +169,8 @@ export function LocalAgentsSettings() {
         title="Local agents"
         help="Every MCP process must present a named Session token. Sessions bind to one role; roles grant explicit capabilities and can restrict access to selected repository roots. Revocation is checked again on every tool, resource, and live-status poll."
       />
+
+      <AgentAccessSection roles={snapshot?.roles ?? []} />
 
       <SettingsSection
         title="Authorization graph"

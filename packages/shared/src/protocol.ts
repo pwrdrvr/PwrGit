@@ -81,6 +81,7 @@ import type {
 } from "./types";
 import type { ImagePreview, ImageRevision } from "./image";
 import type {
+  AgentAccessSnapshot,
   McpAgentPolicySnapshot,
   McpAgentRole,
   McpAgentRoleInput,
@@ -1450,6 +1451,15 @@ export interface Commands {
     res: McpAgentRole;
   };
   "localAgents:roleDelete": { req: { id: string }; res: null };
+  /** Loopback agent-access listener state plus any pairing awaiting consent. */
+  "agentAccess:read": { req: void; res: AgentAccessSnapshot };
+  "agentAccess:setEnabled": { req: { enabled: boolean }; res: AgentAccessSnapshot };
+  /** Mints the Session. Only reachable from the consent sheet. */
+  "agentAccess:approvePairing": {
+    req: { pairingId: string; roleId: string; sessionName?: string };
+    res: AgentAccessSnapshot;
+  };
+  "agentAccess:denyPairing": { req: { pairingId: string }; res: AgentAccessSnapshot };
   /** Current preference plus native-resolved palette; closes bootstrap races. */
   "appearance:read": { req: void; res: AppAppearance };
 
@@ -1558,6 +1568,7 @@ export interface Events {
   "settings:changed": AppSettingsSnapshot;
   /** Sessions, roles, or repository boundaries changed in Settings. */
   "localAgents:changed": McpAgentPolicySnapshot;
+  "agentAccess:changed": AgentAccessSnapshot;
   /** Resolved color theme changed, including a live OS change in System mode. */
   "appearance:changed": AppAppearance;
   /** Auto-update status changed — Settings and the update toast subscribe. */
