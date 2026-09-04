@@ -42,13 +42,21 @@ export type PwrGitMcpServer = {
   close: () => Promise<void>;
 };
 
+/** MCP says a tool returning `structuredContent` SHOULD also serialize it into
+ * a text block, because a host that only renders `content` otherwise shows the
+ * agent a sentence with no data in it. Returning the summary alone made every
+ * tool here look like it answered while telling the caller nothing.
+ * https://modelcontextprotocol.io/specification/2025-11-25/server/tools */
 function success(value: unknown, message: string): CallToolResult {
   const structuredContent =
     value !== null && typeof value === "object"
       ? (value as Record<string, unknown>)
       : { value };
   return {
-    content: [{ type: "text", text: message }],
+    content: [
+      { type: "text", text: message },
+      { type: "text", text: JSON.stringify(structuredContent) }
+    ],
     structuredContent
   };
 }
@@ -179,7 +187,7 @@ export async function createPwrGitMcpServer(
       });
       return success(
         result,
-        `PwrGit inspected ${result.roots.length} bounded repository root${result.roots.length === 1 ? "" : "s"}. See structuredContent for paths and scan limits.`
+        `PwrGit inspected ${result.roots.length} bounded repository root${result.roots.length === 1 ? "" : "s"}.`
       );
     }
   );
@@ -237,7 +245,7 @@ export async function createPwrGitMcpServer(
       });
       return success(
         result,
-        `PwrGit found ${result.matches.length} matching checkout${result.matches.length === 1 ? "" : "s"}. See structuredContent for credential-free identities and local paths.`
+        `PwrGit found ${result.matches.length} matching checkout${result.matches.length === 1 ? "" : "s"}.`
       );
     }
   );
@@ -249,7 +257,21 @@ export async function createPwrGitMcpServer(
       description:
         "Read canonical provider identity, credential-free remotes, fork/upstream evidence, worktrees, branches, and safe aggregate status. Does not return filenames, commit messages, author data, or remote credentials.",
       inputSchema: {
-        path: z.string().trim().min(1).max(4_096)
+        path: z
+          .string()
+          .trim()
+          .min(1)
+          .max(4_096)
+          .describe("Absolute path to a repository or one of its worktrees."),
+        maxWorktrees: z
+          .number()
+          .int()
+          .min(1)
+          .max(64)
+          .optional()
+          .describe(
+            "Worktree rows to return (default 10, hard maximum 64). Rows are ordered by attention — primary, conflicted, mid-operation, prunable, dirty — and worktreeSummary always aggregates every inspected worktree."
+          )
       },
       annotations: readOnlyAnnotations
     },
@@ -258,10 +280,17 @@ export async function createPwrGitMcpServer(
         capabilities: ["repository.metadata.read"],
         repositoryPaths: [input.path]
       });
-      const result = await readRepositoryInfo(input.path, options.runner);
+      const result = await readRepositoryInfo(
+        input.path,
+        options.runner,
+        input.maxWorktrees === undefined ? {} : { maxWorktrees: input.maxWorktrees }
+      );
+      const truncated = result.worktreesTruncated
+        ? ` Returned the ${result.worktreesReturned} most relevant; raise maxWorktrees for more.`
+        : "";
       return success(
         result,
-        `PwrGit inspected ${result.worktreeCount} worktree${result.worktreeCount === 1 ? "" : "s"} for ${result.canonicalRemote?.path ?? result.repositoryPath}. See structuredContent for safe status counts.`
+        `PwrGit inspected ${result.worktreeCount} worktree${result.worktreeCount === 1 ? "" : "s"} for ${result.canonicalRemote?.path ?? result.repositoryPath}.${truncated}`
       );
     }
   );
@@ -304,7 +333,8 @@ export async function createPwrGitMcpServer(
             description:
               "Subscribe with resources/subscribe, then re-read after notifications/resources/updated.",
             mimeType: "application/json"
-          }
+          },
+          { type: "text", text: JSON.stringify(document) }
         ],
         structuredContent: document as unknown as Record<string, unknown>
       };
@@ -326,7 +356,7 @@ export async function createPwrGitMcpServer(
       });
       return success(
         eventServer.capabilities(authorization),
-        `PwrGit live status uses standard MCP subscriptions first. The same contract is readable at ${CAPABILITY_RESOURCE_URI}; an optional WebSocket fallback is included in structuredContent.`
+        `PwrGit live status uses standard MCP subscriptions first. The same contract is readable at ${CAPABILITY_RESOURCE_URI}.`
       );
     }
   );

@@ -64,11 +64,15 @@ The stdio protocol owns stdout. Diagnostics go only to stderr.
 - `pwrgit_find_checkout` — locate a checkout by GitHub/GitLab identity.
 - `pwrgit_repository_info` — canonical remote/provider, credential-free
   remotes, fork/upstream evidence, default/current branches, worktrees, and
-  safe aggregate status.
+  safe aggregate status. Returns the ten most relevant worktrees by default
+  plus a `worktreeSummary` over all of them; raise `maxWorktrees` for more.
 - `pwrgit_watch_repository` — create a versioned subscribable MCP status
   resource.
 - `pwrgit_live_status_capabilities` — discover the standard subscription path
   and optional WebSocket fallback contract.
 
-See [the protocol and security documentation](../../docs/mcp-server.md) for
-resource schemas, event states, limits, and provider requirements.
+Arguments are `repository` for `pwrgit_find_checkout` and `path` for
+`pwrgit_repository_info` / `pwrgit_watch_repository`. See
+[the protocol and security documentation](../../docs/mcp-server.md) for the
+full parameter table, resource schemas, event states, limits, and provider
+requirements.

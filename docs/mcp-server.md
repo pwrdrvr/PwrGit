@@ -78,6 +78,24 @@ under-scoped client cannot obtain the fallback capability URL.
 
 ## Repository discovery and metadata
 
+Every tool parameter, so a client does not have to guess a name:
+
+| Tool | Required | Optional |
+| --- | --- | --- |
+| `pwrgit_repository_roots` | — | `roots` (string[]), `includeConventional` (boolean, default true), `maxDepth` (0-5, default 4) |
+| `pwrgit_find_checkout` | `repository` (string) | `provider` (`github`\|`gitlab`), `roots` (string[]), `maxDepth` (0-5), `maxResults` (1-20) |
+| `pwrgit_repository_info` | `path` (string) | `maxWorktrees` (1-64, default 10) |
+| `pwrgit_watch_repository` | `path` (string) | `intervalMs` (5000-300000, default 15000) |
+| `pwrgit_live_status_capabilities` | — | — |
+
+The repository argument is named `repository`, not `identity`, and the path
+arguments are named `path`, not `repositoryPath`.
+
+Every tool returns its full result in `structuredContent` **and** as a
+serialized JSON text block, so a host that renders only `content` still shows
+the caller the data.
+
+
 `pwrgit_repository_roots` inspects, in priority order:
 
 - roots explicitly supplied by the caller;
@@ -86,8 +104,9 @@ under-scoped client cannot obtain the fallback capability URL.
   filesystem root;
 - existing conventional folders under the home directory.
 
-Each scan has a maximum depth of five, a per-root directory budget, a 20,000
-directory total budget, 32 roots, and explicit skip folders (`node_modules`,
+Each scan uses a depth of four by default and five at most, a per-root
+directory budget, a 20,000 directory total budget, 32 roots, and explicit skip
+folders (`node_modules`,
 `.git`, build output, caches, `Library`, and similar). Directory symlinks are
 not followed. Checkout matching inspects at most 500 discovered repositories.
 Results say when a budget truncated the scan.
@@ -119,8 +138,14 @@ it uses the configured, workspace, and conventional candidates above.
 - an explicit fork relationship only when a distinct `upstream` remote proves
   it, otherwise `isFork: null`;
 - resolved default and current branches;
-- up to 64 worktrees with paths, heads, branches, detached/locked/prunable
-  flags, and safe status summaries;
+- `worktrees`: the ten most relevant worktrees by default, ordered primary,
+  conflicted, mid-operation, prunable, dirty, diverged, locked, quiet. Raise
+  `maxWorktrees` up to 64 for more. A repository with dozens of worktrees
+  otherwise costs an agent more tokens to read than the answer is worth;
+- `worktreeSummary`: clean/dirty/conflicted/detached/locked/prunable/operation
+  and ahead/behind counts across every inspected worktree, so a bounded list
+  still says whether anything needs attention;
+- `worktreeCount`, `worktreesReturned`, and `worktreesTruncated`;
 - staged, unstaged, untracked, conflicted, ahead, and behind counts;
 - an in-progress merge, rebase, cherry-pick, or revert indicator.
 
