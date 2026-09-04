@@ -230,10 +230,47 @@ describe("UpdatesSettings — release matrix", () => {
     ] as const) {
       expect(slot(train, channel).textContent).toContain("Unavailable");
       expect(slot(train, channel).textContent).not.toContain("Loading");
+      // A read that never answered is not an empty feed. Claiming "nothing
+      // published here yet" would be the same false claim, one layer down,
+      // that the matrix replaced on the Beta button.
+      expect(slot(train, channel).textContent).toContain(
+        "Could not read the release feed."
+      );
+      expect(slot(train, channel).textContent).not.toContain(
+        "Nothing published here yet."
+      );
     }
     expect(container.textContent).toContain(
       "Could not read published releases: bridge closed"
     );
+  });
+
+  // The matrix is a roving-tabindex radiogroup, so the focused tile is the
+  // only thing anchoring keyboard navigation. Disabling the tiles for the
+  // length of the settings round trip drops that focus to <body> and never
+  // gives it back.
+  it("keeps the tiles focusable while a selection is saving", async () => {
+    await act(async () => {
+      root.render(
+        <UpdatesSettings
+          saving={true}
+          snapshot={snapshotWith()}
+          onSelectionChange={onSelectionChange}
+        />
+      );
+    });
+
+    const tile = slot("Stable", "Latest");
+    expect(tile.disabled).toBe(false);
+    tile.focus();
+    expect(document.activeElement).toBe(tile);
+
+    await act(async () => {
+      tile.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })
+      );
+    });
+    expect(document.activeElement).toBe(slot("Beta", "Latest"));
   });
 
   it("moves focus across the matrix without changing the selection", async () => {

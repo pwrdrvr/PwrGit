@@ -75,6 +75,10 @@ function sameVersion(a: string | undefined, b: string | undefined): boolean {
   return a.trim().replace(/^v/i, "") === b.trim().replace(/^v/i, "");
 }
 
+function readReleases() {
+  return dispatch("app:readUpdateReleases", undefined);
+}
+
 function updateResultText(result: AppUpdateCheckResult): string {
   if (result.status === "skipped") return result.reason;
   if (result.status === "error") {
@@ -97,9 +101,11 @@ function SlotTile(props: {
   /** The release read is still in flight. Distinct from a slot that answered
    *  and has nothing — "Loading" and "Unavailable" are not the same claim. */
   loading: boolean;
+  /** The read ANSWERED with a failure, so this slot has no data because
+   *  nobody could ask — a third claim, and not the same as an empty feed. */
+  unread: boolean;
   selected: boolean;
   installed: boolean;
-  disabled: boolean;
   /** Roving tabindex: exactly one tile is in the tab order, per the
    *  radiogroup contract. `SLOT_ORDER` is what the arrows walk. */
   tabbable: boolean;
@@ -110,21 +116,25 @@ function SlotTile(props: {
   const version = props.release?.version;
   const label = `${TRAIN_LABEL[props.train]} ${CHANNEL_LABEL[props.channel]}`;
   const headline = version ?? (props.loading ? "Loading…" : "Unavailable");
+  // An empty slot explains itself rather than leaving the reader to guess.
+  // The three ways to be empty are three different claims and must not
+  // collapse into one: the read is still running, the read failed, or the
+  // feed answered and this slot genuinely holds nothing.
   const sub =
     version !== undefined
       ? SLOT_SUB[`${props.train}:${props.channel}`]
       : props.loading
         ? "Reading published releases."
-        : // An empty slot explains itself rather than leaving the reader to
-          // guess whether the feed broke or simply has nothing yet.
-          (props.release?.unavailableReason ?? "Nothing published here yet.");
+        : (props.release?.unavailableReason ??
+          (props.unread
+            ? "Could not read the release feed."
+            : "Nothing published here yet."));
   return (
     <button
       ref={props.registerRef}
       aria-checked={props.selected}
       aria-label={`${label} — ${headline}`}
       className={`settings-slot${props.selected ? " is-selected" : ""}`}
-      disabled={props.disabled}
       role="radio"
       tabIndex={props.tabbable ? 0 : -1}
       type="button"
@@ -187,49 +197,62 @@ export function UpdatesSettings(props: {
   const channel = props.snapshot.updates.channel;
   const pinned = props.snapshot.updates.selectionSource === "user";
 
+  // Reads race: the slow mount read and a Check the user asked for meanwhile
+  // both land here. Only the most recently STARTED read may paint, or a stale
+  // failure repaints an error over versions that are already on screen.
+  const readSeq = useRef(0);
+  const applyReleaseRead = useCallback(
+    (seq: number, result: Awaited<ReturnType<typeof readReleases>>): void => {
+      if (seq !== readSeq.current) return;
+      setReleasesSettled(true);
+      if (result.ok) {
+        setReleaseVersions(result.value);
+        setReleasesError(undefined);
+      } else {
+        setReleasesError(result.error.message);
+      }
+    },
+    []
+  );
+
   useEffect(() => {
+    const seq = ++readSeq.current;
     let canceled = false;
     void (async () => {
       const [versions, identity] = await Promise.all([
-        dispatch("app:readUpdateReleases", undefined),
+        readReleases(),
         dispatch("app:readIdentity", undefined)
       ]);
       if (canceled) return;
-      setReleasesSettled(true);
-      if (versions.ok) {
-        setReleaseVersions(versions.value);
-        setReleasesError(undefined);
-      } else {
-        setReleasesError(versions.error.message);
-      }
+      applyReleaseRead(seq, versions);
       if (identity.ok) setAppVersion(identity.value.version);
     })();
     return () => {
       canceled = true;
     };
-  }, []);
+  }, [applyReleaseRead]);
 
   const handleCheckForUpdate = async (): Promise<void> => {
     setUpdateChecking(true);
     setUpdateResult(undefined);
-    const result = await dispatch("app:checkForUpdate", undefined);
-    if (result.ok) {
+    // `finally`, not a trailing call: a dispatch that REJECTS rather than
+    // returning an error Result would otherwise leave the button disabled
+    // reading "Checking…" for the rest of the window's life.
+    try {
+      const result = await dispatch("app:checkForUpdate", undefined);
+      if (!result.ok) {
+        setUpdateResult({ status: "error", message: result.error.message });
+        return;
+      }
       setUpdateResult(result.value);
       setUpdateStatus(result.value);
       // The check revalidated the main-process release cache, so this read is
       // served from memory and clears any stale Unavailable slot labels.
-      const versions = await dispatch("app:readUpdateReleases", undefined);
-      setReleasesSettled(true);
-      if (versions.ok) {
-        setReleaseVersions(versions.value);
-        setReleasesError(undefined);
-      } else {
-        setReleasesError(versions.error.message);
-      }
-    } else {
-      setUpdateResult({ status: "error", message: result.error.message });
+      const seq = ++readSeq.current;
+      applyReleaseRead(seq, await readReleases());
+    } finally {
+      setUpdateChecking(false);
     }
-    setUpdateChecking(false);
   };
 
   // Roving tabindex + arrow keys, the radiogroup contract. Focus moves and
@@ -315,7 +338,7 @@ export function UpdatesSettings(props: {
                     {CHANNEL_LABEL[headerChannel]}
                   </div>
                 ))}
-                {UPDATE_TRAINS.map((rowTrain) => (
+                {UPDATE_TRAINS.map((rowTrain, rowIndex) => (
                   <Fragment key={rowTrain}>
                     <div
                       className="settings-slots__row-header"
@@ -323,11 +346,11 @@ export function UpdatesSettings(props: {
                     >
                       {TRAIN_LABEL[rowTrain]}
                     </div>
-                    {UPDATE_CHANNELS.map((slotChannel) => {
-                      const index = SLOT_ORDER.findIndex(
-                        (slot) =>
-                          slot.train === rowTrain && slot.channel === slotChannel
-                      );
+                    {UPDATE_CHANNELS.map((slotChannel, columnIndex) => {
+                      // Row-major, exactly how SLOT_ORDER is built — so the
+                      // arrow-key walk and the render can never disagree
+                      // about which tile an index names.
+                      const index = rowIndex * COLUMNS + columnIndex;
                       const release = releaseVersions?.[rowTrain]?.[slotChannel];
                       return (
                         <SlotTile
@@ -336,9 +359,9 @@ export function UpdatesSettings(props: {
                           channel={slotChannel}
                           release={release}
                           loading={!releasesSettled}
+                          unread={releasesError !== undefined}
                           selected={index === selectedIndex}
                           installed={sameVersion(release?.version, appVersion)}
-                          disabled={props.saving}
                           tabbable={index === selectedIndex}
                           onSelect={() => {
                             props.onSelectionChange({

@@ -180,15 +180,19 @@ export function registerSettingsHandlers(
     // Stable. Naming EITHER axis is what makes the pair a pin: deriving
     // `selectionSource` here rather than accepting it means no call site can
     // persist a slot the next hydration would silently re-infer away.
-    if (req.patch.updates !== undefined) {
+    // An `updates` key carrying no valid axis is not a choice, so it writes
+    // nothing: persisting the currently-inferred pair would put a train/track
+    // on disk that nobody picked, which is the exact ambiguity
+    // `selectionSource` exists to remove.
+    if (
+      sanitized.updates.channel !== undefined ||
+      sanitized.updates.train !== undefined
+    ) {
       const current = resolveUpdateSelection(stored.updates, appVersion);
-      const picked =
-        sanitized.updates.channel !== undefined ||
-        sanitized.updates.train !== undefined;
       next.updates = {
         channel: sanitized.updates.channel ?? current.channel,
         train: sanitized.updates.train ?? current.train,
-        selectionSource: picked ? "user" : current.selectionSource
+        selectionSource: "user"
       };
     }
     settings.update(next);

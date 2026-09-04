@@ -263,11 +263,9 @@ describe("update train and track", () => {
       channel: "prerelease",
       selectionSource: "inferred"
     });
-    expect(service.get().updates).toEqual({
-      train: "beta",
-      channel: "prerelease",
-      selectionSource: "inferred"
-    });
+    // And nothing reached disk: persisting the inferred pair would leave a
+    // train/track in the file that nobody chose.
+    expect(service.get().updates).toBeUndefined();
   });
 
   it("infers Beta Latest from a newer-than-1.0.0 beta app version", async () => {
