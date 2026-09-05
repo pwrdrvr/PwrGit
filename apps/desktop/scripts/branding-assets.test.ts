@@ -1,32 +1,48 @@
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import sharp from "sharp";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 /**
  * The shipped macOS app icon, as a test.
  *
- * `build/icon.icns` is a binary that no reviewer reads in a diff, and it is
- * the *only* icon macOS ever sees — electron-builder copies it into the
- * bundle verbatim. A container that decodes wrong therefore ships silently
- * and shows up as a broken icon in Finder and the Dock.
+ * macOS reads the icon from two places, one per era:
  *
- * That already happened once: the checked-in icns stored its 16px and 32px
- * artwork in `icp4`/`icp5` elements. Those are the ambiguous 10.7-era slots —
- * an ICNS writer may legally put PNG in them, but Apple's own CoreServices
- * decoder reads them as raw pixel data, so both small sizes came back as
- * colour noise (`iconutil -c iconset` on that file reproduces it). Every
- * larger size was fine, which is exactly why it went unnoticed.
+ *   - `Contents/Resources/Assets.car` + `CFBundleIconName` — macOS 26. Compiled
+ *     by `actool` from `build/icon.icon`, the Icon Composer package that
+ *     `generate-app-icon.swift` writes.
+ *   - `Contents/Resources/icon.icns` + `CFBundleIconFile` — macOS 15 and
+ *     earlier. Also actool output, derived from the same package.
  *
- * Regenerate with `pnpm --filter @pwrgit/desktop generate:app-icon`, which
- * renders `build/icon.iconset/` from `generate-app-icon.swift` and packs it
- * with `iconutil`. These tests assert the result of that pipeline, so a
- * hand-rolled or third-party icns writer fails here rather than in Finder.
+ * Nothing in this repo hand-builds a `.icns` any more. Two shipped bugs are
+ * the reason, and both are asserted against below:
+ *
+ *   - #125: a hand-assembled icns stored its 16px and 32px artwork in
+ *     `icp4`/`icp5`, the ambiguous 10.7-era slots that CoreServices decodes
+ *     as raw pixels — both small sizes rendered as colour noise. actool's
+ *     icns is checked for those slots here so a regression in Apple's
+ *     writer is caught rather than shipped.
+ *   - #187 padded the hand-built icns to Apple's 824-in-1024 template, which
+ *     is right for macOS 15 — and macOS 26.6.2, handed ONLY that legacy
+ *     icns, composited the padded tile onto a light plate in the Dock and
+ *     Finder. With the `.icon` present macOS 26 never opens the icns, so the
+ *     padding stays where it belongs.
+ *
+ * Regenerate with `pnpm --filter @pwrgit/desktop generate:app-icon`. The
+ * package structure and the flat PNG masters are pinned everywhere; the
+ * actool compile runs on a Mac with Xcode 26+ (electron-builder's own
+ * requirement) and skips elsewhere.
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
 const buildDir = resolve(here, "../build");
+const iconPackage = join(buildDir, "icon.icon");
+const glyphPng = join(iconPackage, "Assets", "glyph.png");
+const flatMaster = join(buildDir, "icon.png");
+const developmentDockIcon = join(buildDir, "icon-macos.png");
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -34,11 +50,11 @@ const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0
 const ELEMENT_HEADER = 8;
 
 /**
- * The elements `iconutil` emits for a complete iconset, each with the pixel
- * size it carries and the payload encoding its type implies. `ic04`/`ic05`
- * hold Apple's run-length-coded `ARGB` blobs; everything else holds PNG.
+ * Pixel size and payload encoding each ICNS element type implies. `ic04`/
+ * `ic05` hold Apple's run-length-coded `ARGB` blobs; everything else holds
+ * PNG. actool emits a subset of these (16, 16@2x, 128, 256@2x today).
  */
-const EXPECTED_ELEMENTS = {
+const ELEMENT_TYPES: Record<string, { pixels: number; payload: "ARGB" | "PNG" }> = {
   ic04: { pixels: 16, payload: "ARGB" },
   ic05: { pixels: 32, payload: "ARGB" },
   ic11: { pixels: 32, payload: "PNG" },
@@ -49,12 +65,12 @@ const EXPECTED_ELEMENTS = {
   ic14: { pixels: 512, payload: "PNG" },
   ic09: { pixels: 512, payload: "PNG" },
   ic10: { pixels: 1024, payload: "PNG" }
-} as const;
+};
 
 /** The slots CoreServices misreads. Never ship artwork in one. */
 const FORBIDDEN_ELEMENTS = ["icp4", "icp5", "icp6"] as const;
 
-/** Non-image trailer `iconutil` appends; carries a binary plist, not artwork. */
+/** Non-image trailers; carry a binary plist or a table of contents, not artwork. */
 const METADATA_ELEMENTS = ["info", "TOC "] as const;
 
 interface Element {
@@ -66,9 +82,8 @@ interface Element {
  *  the whole file, then `<4-char type><4-byte length incl. header><payload>`.
  *
  *  Every read is bounds-checked first: a truncated file is the likeliest way
- *  this goes wrong (an interrupted `iconutil`, a partial checkout), and
- *  `readUInt32BE` past the end throws `ERR_OUT_OF_RANGE`, which says nothing
- *  about the icns. Throw a sentence naming the problem instead. */
+ *  this goes wrong, and `readUInt32BE` past the end throws `ERR_OUT_OF_RANGE`,
+ *  which says nothing about the icns. Throw a sentence naming the problem. */
 function readIcns(bytes: Buffer): Element[] {
   if (bytes.byteLength < ELEMENT_HEADER) {
     throw new Error(`truncated icns: ${bytes.byteLength} bytes, need at least ${ELEMENT_HEADER}`);
@@ -86,9 +101,6 @@ function readIcns(bytes: Buffer): Element[] {
     }
     const type = bytes.subarray(offset, offset + 4).toString("latin1");
     const length = bytes.readUInt32BE(offset + 4);
-    // A length that under- or overruns would desynchronise every element after
-    // it, so fail here rather than reporting nonsense types further down. That
-    // also makes the walk terminate: length is always at least the header.
     if (length < ELEMENT_HEADER || offset + length > bytes.byteLength) {
       throw new Error(
         `element ${type} declares ${length} bytes at offset ${offset}, ` +
@@ -112,13 +124,12 @@ function pngPixels(payload: Buffer): number {
 }
 
 /**
- * Square edge length of an `ARGB` element.
- *
- * There is no header to read — the size is implied by how much data the
- * payload decompresses to. Apple packs the four channels back to back with a
- * PackBits variant: a control byte with the high bit set repeats the next byte
- * `(c & 0x7f) + 3` times, otherwise the next `c + 1` bytes are literal. Four
- * channels of N x N pixels means 4 * N^2 bytes out.
+ * Square edge length of an `ARGB` element. There is no header to read — the
+ * size is implied by how much data the payload decompresses to. Apple packs
+ * the four channels back to back with a PackBits variant: a control byte with
+ * the high bit set repeats the next byte `(c & 0x7f) + 3` times, otherwise
+ * the next `c + 1` bytes are literal. Four channels of N x N pixels means
+ * 4 * N^2 bytes out.
  */
 function argbPixels(payload: Buffer): number {
   expect(payload.subarray(0, 4).toString("latin1")).toBe("ARGB");
@@ -145,90 +156,246 @@ function argbPixels(payload: Buffer): number {
   return pixels;
 }
 
-// Parsed lazily and memoised: reading in a `describe` body turns a missing or
-// malformed asset into a collection error, which registers no tests at all
-// rather than failing the ones written to report it.
-let parsed: Element[] | undefined;
-const icnsElements = (): Element[] =>
-  (parsed ??= readIcns(readFileSync(resolve(buildDir, "icon.icns"))));
+interface AlphaImage {
+  data: Buffer;
+  width: number;
+  height: number;
+  channels: number;
+}
 
-describe("build/icon.icns", () => {
-  it("carries no element type that CoreServices decodes as raw pixels", () => {
-    const byType = new Set(icnsElements().map((element) => element.type));
-    expect(
-      FORBIDDEN_ELEMENTS.filter((type) => byType.has(type)),
-      "icp4/icp5/icp6 render as colour noise at 16px and 32px — repack the " +
-        "iconset with `pnpm --filter @pwrgit/desktop generate:app-icon`"
-    ).toEqual([]);
+/** Decodes a PNG (path or bytes) to raw RGBA. */
+async function loadAlpha(input: string | Buffer): Promise<AlphaImage> {
+  const { data, info } = await sharp(input).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  return { data, width: info.width, height: info.height, channels: info.channels };
+}
+
+function alphaAt(image: AlphaImage, x: number, y: number): number {
+  return image.data[(y * image.width + x) * image.channels + 3];
+}
+
+/** Bounding box of pixels with alpha >= 128, or null when fully transparent. */
+function opaqueBounds(image: AlphaImage): { x: number; y: number; width: number; height: number } | null {
+  let left = image.width;
+  let top = image.height;
+  let right = -1;
+  let bottom = -1;
+  for (let y = 0; y < image.height; y += 1) {
+    for (let x = 0; x < image.width; x += 1) {
+      if (alphaAt(image, x, y) < 128) continue;
+      left = Math.min(left, x);
+      top = Math.min(top, y);
+      right = Math.max(right, x);
+      bottom = Math.max(bottom, y);
+    }
+  }
+  if (right < 0) return null;
+  return { x: left, y: top, width: right - left + 1, height: bottom - top + 1 };
+}
+
+interface IconManifest {
+  fill: { "linear-gradient": string[] };
+  groups: Array<{ layers: Array<{ "image-name": string }> }>;
+  "supported-platforms": { squares: string };
+}
+
+describe("build/icon.icon (Icon Composer package)", () => {
+  const manifest = JSON.parse(readFileSync(join(iconPackage, "icon.json"), "utf8")) as IconManifest;
+
+  it("paints the tile with a two-stop sRGB gradient from the generator's palette", () => {
+    const stops = manifest.fill["linear-gradient"];
+    expect(stops).toHaveLength(2);
+    for (const stop of stops) {
+      expect(stop).toMatch(/^srgb:\d\.\d{5},\d\.\d{5},\d\.\d{5},1\.00000$/);
+    }
+    expect(manifest["supported-platforms"].squares).toBe("shared");
   });
 
-  it("carries every element iconutil emits for a full iconset", () => {
-    const byType = new Set(icnsElements().map((element) => element.type));
-    expect(Object.keys(EXPECTED_ELEMENTS).filter((type) => !byType.has(type))).toEqual([]);
-  });
-
-  it("holds artwork of the encoding and size each element type implies", () => {
-    const byType = new Map(icnsElements().map((element) => [element.type, element]));
-    for (const [type, { pixels, payload }] of Object.entries(EXPECTED_ELEMENTS)) {
-      const element = byType.get(type);
-      if (!element) continue; // reported by the coverage test above
-      const measure = payload === "PNG" ? pngPixels : argbPixels;
-      expect(measure(element.payload), `${type} artwork size`).toBe(pixels);
+  it("references only layer images that exist in Assets/", () => {
+    const imageNames = manifest.groups.flatMap((group) => group.layers.map((layer) => layer["image-name"]));
+    expect(imageNames.length).toBeGreaterThan(0);
+    for (const name of imageNames) {
+      expect(existsSync(join(iconPackage, "Assets", name)), `missing Assets/${name}`).toBe(true);
     }
   });
 
-  it("contains nothing beyond the expected artwork and metadata", () => {
-    const known = new Set<string>([...Object.keys(EXPECTED_ELEMENTS), ...METADATA_ELEMENTS]);
-    expect(icnsElements().map((element) => element.type).filter((type) => !known.has(type)))
-      .toEqual([]);
+  it("ships the mark alone, on a transparent 1024px canvas, inside the safe area", async () => {
+    const glyph = await loadAlpha(glyphPng);
+    expect({ width: glyph.width, height: glyph.height }).toEqual({ width: 1024, height: 1024 });
+
+    // No baked tile: every corner and edge midpoint is fully transparent.
+    for (const [x, y] of [
+      [0, 0],
+      [1023, 0],
+      [0, 1023],
+      [1023, 1023],
+      [512, 0],
+      [512, 1023],
+      [0, 512],
+      [1023, 512]
+    ] as const) {
+      expect(alphaAt(glyph, x, y), `alpha at ${x},${y}`).toBe(0);
+    }
+
+    // The mark stays inside Apple's 824-in-1024 safe area so nothing is
+    // clipped by the icon shape on any platform.
+    const bounds = opaqueBounds(glyph);
+    expect(bounds).not.toBeNull();
+    expect(bounds!.x).toBeGreaterThanOrEqual(100);
+    expect(bounds!.y).toBeGreaterThanOrEqual(100);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(924);
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(924);
   });
 });
 
-describe("build/icon.iconset", () => {
-  // `iconutil` derives every element from these, so a mis-sized source PNG
-  // becomes a mis-sized element. Names encode the point size and scale.
-  const sources = [
-    ["icon_16x16.png", 16],
-    ["icon_16x16@2x.png", 32],
-    ["icon_32x32.png", 32],
-    ["icon_32x32@2x.png", 64],
-    ["icon_128x128.png", 128],
-    ["icon_128x128@2x.png", 256],
-    ["icon_256x256.png", 256],
-    ["icon_256x256@2x.png", 512],
-    ["icon_512x512.png", 512],
-    ["icon_512x512@2x.png", 1024]
-  ] as const;
-
-  it.each(sources)("%s is %ipx square", (name, pixels) => {
-    expect(pngPixels(readFileSync(resolve(buildDir, "icon.iconset", name)))).toBe(pixels);
+describe("flat PNG masters", () => {
+  it("keeps the development Dock icon's tile inside Apple's legacy safe area", async () => {
+    // app.dock.setIcon() in src/main/index.ts paints this literally.
+    expect(opaqueBounds(await loadAlpha(developmentDockIcon))).toEqual({
+      x: 100,
+      y: 100,
+      width: 824,
+      height: 824
+    });
   });
 
-  it("keeps the macOS tile inside Apple's legacy safe area", async () => {
-    const { data, info } = await sharp(resolve(buildDir, "icon.iconset", "icon_512x512@2x.png"))
-      .ensureAlpha()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    let left = info.width;
-    let top = info.height;
-    let right = -1;
-    let bottom = -1;
-    for (let y = 0; y < info.height; y += 1) {
-      for (let x = 0; x < info.width; x += 1) {
-        const alpha = data[(y * info.width + x) * info.channels + 3];
-        if (alpha < 128) continue;
-        left = Math.min(left, x);
-        top = Math.min(top, y);
-        right = Math.max(right, x);
-        bottom = Math.max(bottom, y);
-      }
-    }
+  it("keeps the Windows / Linux master full-bleed", async () => {
+    // electron-builder derives the .ico from this; neither platform wants a margin.
+    expect(opaqueBounds(await loadAlpha(flatMaster))).toEqual({
+      x: 0,
+      y: 0,
+      width: 1024,
+      height: 1024
+    });
+  });
+});
 
-    expect({
-      x: left,
-      y: top,
-      width: right - left + 1,
-      height: bottom - top + 1
-    }).toEqual({ x: 100, y: 100, width: 824, height: 824 });
+/**
+ * Major version of the selected Xcode's actool, or 0 when unavailable.
+ * electron-builder refuses to compile a .icon with anything below 26.
+ */
+function actoolMajorVersion(): number {
+  if (process.platform !== "darwin") return 0;
+  try {
+    const plist = execFileSync("xcrun", ["actool", "--version"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+    const json = execFileSync("plutil", ["-convert", "json", "-o", "-", "-"], {
+      input: plist,
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "ignore"]
+    });
+    const short = (JSON.parse(json) as Record<string, Record<string, string>>)["com.apple.actool.version"][
+      "short-bundle-version"
+    ];
+    return Number.parseInt(String(short).split(".")[0], 10) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+const actoolMajor = actoolMajorVersion();
+
+describe.skipIf(actoolMajor < 26)("actool compile (macOS with Xcode 26+)", () => {
+  const tempDir = mkdtempSync(join(tmpdir(), "pwrgit-icon-compile-"));
+  // electron-builder copies the package to `Icon.icon` before compiling:
+  // actool resolves `--app-icon Icon` by the package's basename and, fed the
+  // repo's `icon.icon` directly, exits 0 while silently emitting no icns. It
+  // also does not create its --compile directory. Mirror both so a package
+  // that passes here is exactly what packages at release time.
+  const stagedPackage = join(tempDir, "Icon.icon");
+  const outputDir = join(tempDir, "out");
+  const partialPlist = join(outputDir, "assetcatalog_generated_info.plist");
+  const generatedIcns = join(outputDir, "Icon.icns");
+  cpSync(iconPackage, stagedPackage, { recursive: true });
+  mkdirSync(outputDir, { recursive: true });
+
+  afterAll(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it(
+    "compiles to Assets.car plus a legacy icns, declaring both Info.plist keys",
+    () => {
+      // The exact invocation app-builder-lib/out/util/macosIconComposer.js
+      // uses. The "Accent color 'AccentColor' is not present" notice is expected.
+      execFileSync(
+        "actool",
+        [
+          stagedPackage,
+          "--compile",
+          outputDir,
+          "--output-format",
+          "human-readable-text",
+          "--notices",
+          "--warnings",
+          "--output-partial-info-plist",
+          partialPlist,
+          "--app-icon",
+          "Icon",
+          "--include-all-app-icons",
+          "--accent-color",
+          "AccentColor",
+          "--enable-on-demand-resources",
+          "NO",
+          "--development-region",
+          "en",
+          "--target-device",
+          "mac",
+          "--minimum-deployment-target",
+          "26.0",
+          "--platform",
+          "macosx"
+        ],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
+      );
+
+      expect(existsSync(join(outputDir, "Assets.car"))).toBe(true);
+      expect(existsSync(generatedIcns)).toBe(true);
+
+      // CFBundleIconName is what macOS 26 reads, CFBundleIconFile is what
+      // macOS 15 falls back to. electron-builder writes the same pair.
+      const plistJson = execFileSync("plutil", ["-convert", "json", "-o", "-", partialPlist], {
+        encoding: "utf8"
+      });
+      expect(JSON.parse(plistJson)).toMatchObject({
+        CFBundleIconName: "Icon",
+        CFBundleIconFile: "Icon"
+      });
+    },
+    120_000
+  );
+
+  it("writes a legacy icns CoreServices can decode at every size", () => {
+    const elements = readIcns(readFileSync(generatedIcns));
+    const byType = new Set(elements.map((element) => element.type));
+    expect(
+      FORBIDDEN_ELEMENTS.filter((type) => byType.has(type)),
+      "icp4/icp5/icp6 render as colour noise at 16px and 32px (#125)"
+    ).toEqual([]);
+
+    const artwork = elements.filter((element) => !(METADATA_ELEMENTS as readonly string[]).includes(element.type));
+    expect(artwork.length, "actool icns carries no artwork").toBeGreaterThan(0);
+    for (const element of artwork) {
+      const spec = ELEMENT_TYPES[element.type];
+      expect(spec, `unexpected icns element ${element.type}`).toBeDefined();
+      const measure = spec.payload === "PNG" ? pngPixels : argbPixels;
+      expect(measure(element.payload), `${element.type} artwork size`).toBe(spec.pixels);
+    }
+  });
+
+  it("pads the legacy icns the way macOS 15 expects", async () => {
+    // actool, not this repo, decides the legacy inset now. Pin that it still
+    // lands on Apple's 824-in-1024 template (~80.5% fill) — the reason the
+    // hand-built, padded icns could be deleted at all.
+    const largest = readIcns(readFileSync(generatedIcns))
+      .filter((element) => ELEMENT_TYPES[element.type]?.payload === "PNG")
+      .reduce((best, element) => (ELEMENT_TYPES[element.type].pixels > ELEMENT_TYPES[best.type].pixels ? element : best));
+    const image = await loadAlpha(largest.payload);
+    const bounds = opaqueBounds(image);
+    expect(bounds).not.toBeNull();
+    const fill = bounds!.width / image.width;
+    expect(fill).toBeGreaterThan(0.78);
+    expect(fill).toBeLessThan(0.83);
   });
 });
