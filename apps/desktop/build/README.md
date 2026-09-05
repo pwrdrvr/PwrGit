@@ -14,9 +14,12 @@ lane is everyone else's.
 - Design-system SVG: `assets/logo-pwrgit.svg` (128 viewBox, `currentColor`)
 - App-icon accent: `#e8743a` (sibling app-icon orange)
 - Tray / DMG accent: `#ff8a1f` (design-system tangerine)
-- Tile: 180/1024 corner radius on Windows/Linux; the macOS variants use
-  Apple's legacy 824/1024 tile with a 100px margin and 185px corner radius.
-  Both use the vertical gradient `rgb(30,26,20)` → `rgb(10,9,8)`.
+- Tile: 180/1024 corner radius on Windows/Linux (`icon.png`); the development
+  Dock icon (`icon-macos.png`) uses Apple's legacy 824/1024 tile with a 100px
+  margin and 185px corner radius. Both use the vertical gradient
+  `rgb(30,26,20)` → `rgb(10,9,8)`. The shipped macOS icon bakes no tile at
+  all: `icon.icon/` carries the mark alone and that gradient as the package
+  `fill`, and macOS draws its own shape around it.
 
 ## Files
 
@@ -24,8 +27,9 @@ lane is everyone else's.
 apps/desktop/build/
   icon.png                       1024×1024   Windows/Linux source
   icon-macos.png                 1024×1024   macOS safe-area development Dock icon
-  icon.icns                                  macOS app / Dock
-  icon.iconset/                              10 PNGs, iconutil-compatible names
+  icon.icon/                                 Icon Composer package — the macOS input
+    icon.json                                fill gradient + one glyph layer
+    Assets/glyph.png             1024×1024   the mark alone, transparent
   dmg-background.png             660×400
   tray-icon-template.png         16×16       macOS menubar (alpha-only)
   tray-icon-template@2x.png      32×32
@@ -36,12 +40,14 @@ apps/desktop/build/
   fonts/Geist-Bold.ttf                       used by the DMG generator
 ```
 
-`icon.icns` here was assembled directly (PNG entries: icp4 icp5 ic11 ic12
-ic07 ic13 ic08 ic14 ic09 ic10). On a Mac, prefer regenerating it:
+There is no `.icns` or `.iconset` in the repo any more. electron-builder
+compiles `icon.icon/` with Xcode 26's `actool` at package time into
+`Contents/Resources/Assets.car` (what macOS 26 draws) and derives the legacy
+`icon.icns` (macOS 15 and earlier) from it — see AGENTS.md "macOS app icon"
+for why a hand-built `.icns` is not an option. Regenerate on a Mac:
 
 ```
-swift scripts/generate-app-icon.swift build/icon.iconset
-iconutil -c icns build/icon.iconset -o build/icon.icns
+swift scripts/generate-app-icon.swift build
 node scripts/generate-tray-icon.mjs
 swift scripts/generate-dmg-background.swift build/dmg-background.png
 ```
@@ -57,7 +63,7 @@ against — don't move it without regenerating the PNG.
 
 ```yaml
 mac:
-  icon: build/icon.icns
+  icon: build/icon.icon   # Icon Composer package; actool derives the .icns
 
 win:
   icon: build/icon.png
