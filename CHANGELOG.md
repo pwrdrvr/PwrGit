@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.12.0-alpha.0 - 2026-09-06
+
+- Updates - Installed alpha and beta builds now stay on the Beta release feed until you explicitly choose another one, and Settings shows each Stable/Beta, Latest/Pre-release slot directly with the installed build marked.
+- macOS - Replaced the legacy-only app icon with an Icon Composer package, fixing the light-plate rendering introduced by macOS 26.6.2 while retaining the appropriate padded icon for macOS 15 and earlier.
+- Packaging - Release and preview builds now select Xcode 26 for Icon Composer compilation and verify the generated catalog and legacy icon before packaging.
+
 ## v0.11.0 - 2026-09-03
 
 - Changes - Refined partial staging with separate hunk and line controls, drag-to-select runs, and clearer indicators of how much of each hunk is staged.
