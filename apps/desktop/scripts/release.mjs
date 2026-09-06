@@ -361,18 +361,9 @@ function maybeDecodeCscLink() {
 function maybePrepareCodesignKeychain() {
   if (process.platform !== "darwin") return false;
   if (!process.env.CSC_LINK) return false;
-  if (!process.env.CSC_KEY_PASSWORD) {
-    throw new Error("CSC_LINK is set but CSC_KEY_PASSWORD is missing");
-  }
   const certificatePath = cscLinkFilePath();
   if (certificatePath === null) {
     return false;
-  }
-
-  const existingIdentity = findDeveloperIdIdentity(null);
-  if (existingIdentity !== null) {
-    process.env.CSC_NAME ??= stripDeveloperIdApplicationPrefix(existingIdentity);
-    return true;
   }
 
   const keychainPath = join(
@@ -385,6 +376,15 @@ function maybePrepareCodesignKeychain() {
   );
 
   runQuiet("security", ["create-keychain", "-p", keychainPassword, keychainPath]);
+  // Setup can throw after importing private keys or changing the search list.
+  // Register exit cleanup as soon as the keychain exists, before either step.
+  codesignKeychainCleanup = () => restoreCodesignKeychains(originalKeychains, keychainPath);
+  process.once("exit", () => {
+    if (codesignKeychainCleanup !== null) {
+      codesignKeychainCleanup();
+      codesignKeychainCleanup = null;
+    }
+  });
   runQuiet("security", ["set-keychain-settings", "-lut", "21600", keychainPath]);
   runQuiet("security", ["unlock-keychain", "-p", keychainPassword, keychainPath]);
   runQuiet("security", [
@@ -393,7 +393,7 @@ function maybePrepareCodesignKeychain() {
     "-k",
     keychainPath,
     "-P",
-    process.env.CSC_KEY_PASSWORD,
+    process.env.CSC_KEY_PASSWORD ?? "",
     "-T",
     "/usr/bin/codesign",
     "-T",
@@ -421,7 +421,6 @@ function maybePrepareCodesignKeychain() {
 
   const identity = findDeveloperIdIdentity(keychainPath);
   if (identity === null) {
-    restoreCodesignKeychains(originalKeychains, keychainPath);
     throw new Error(
       `imported ${pathToFileURL(certificatePath).href} into ${keychainPath}, ` +
         "but no Developer ID Application identity was found",
@@ -433,13 +432,6 @@ function maybePrepareCodesignKeychain() {
   // Keep ours first in the user search list, set CSC_NAME, and remove the
   // import credentials before electron-builder can create another keychain.
   process.env.CSC_NAME ??= stripDeveloperIdApplicationPrefix(identity);
-  codesignKeychainCleanup = () => restoreCodesignKeychains(originalKeychains, keychainPath);
-  process.once("exit", () => {
-    if (codesignKeychainCleanup !== null) {
-      codesignKeychainCleanup();
-      codesignKeychainCleanup = null;
-    }
-  });
   console.log(`  imported CSC_LINK into temporary keychain for ${identity}`);
   return true;
 }
