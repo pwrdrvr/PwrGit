@@ -62,18 +62,22 @@ something the 2026-09-03 export changed.
 ## Deliberately NOT copied in
 
 **`apps/desktop/**`.** The Claude Design project carries a working copy of
-`apps/desktop/build/**` (icons, `icon.iconset/`, tray PNGs, `dmg-background.png`,
+`apps/desktop/build/**` (icons, an `icon.iconset/`, tray PNGs, `dmg-background.png`,
 `fonts/Geist-Bold.ttf`) and `apps/desktop/scripts/*` — roughly 1 MB — because the
 icon set was authored there. Those files already live in this repo at their real
-paths, and the design project's copies have since drifted (its `icon.icns` is
-345 KB against the repo's 129 KB). Copying them into `design/` would shadow the
-canonical files with stale duplicates.
+paths, and the design project's copies have since drifted (it still carries an
+`icon.icns` and `icon.iconset/`; the repo ships `icon.icon/` and lets
+electron-builder derive the legacy sizes — see `apps/desktop/AGENTS.md`).
+Copying them into `design/` would shadow the canonical files with stale
+duplicates.
 
 Instead, **`PwrGit Icon.dc.html` is edited on import**: each of its ten image
 `src`s is rewritten from `apps/desktop/build/…` to `../apps/desktop/build/…` so
-the artboard renders the files the app actually ships. This is the only content
-difference between the checked-in copy and the project, and it is load-bearing —
-**re-apply it on every re-export** or all ten images break.
+the artboard renders the files the app actually ships, and the five size-ladder
+images point at `icon-macos.png` (scaled by their `width`) because the repo no
+longer carries an `icon.iconset/`. These are the only content differences
+between the checked-in copy and the project, and they are load-bearing —
+**re-apply them on every re-export** or the images break.
 
 Also skipped: `.thumbnail` (already covered by `design/**/.thumbnail` in
 `.gitignore`).

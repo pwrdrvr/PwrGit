@@ -136,7 +136,12 @@ electronFuses:
 
 mac:
   category: public.app-category.developer-tools
-  icon: build/icon.icns
+  # Icon Composer package, NOT a hand-built .icns: electron-builder compiles
+  # it with Xcode 26's actool (Assets.car + CFBundleIconName for macOS 26) and
+  # derives the legacy icon.icns + CFBundleIconFile (macOS 15 and earlier).
+  # Needs actool 26 selected (release.yml and preview-build.yml do it). Why:
+  # apps/desktop/AGENTS.md "macOS app icon".
+  icon: build/icon.icon
   hardenedRuntime: true
   gatekeeperAssess: false
   # mac.notarize: true reads APPLE_API_KEY/APPLE_API_KEY_ID/APPLE_API_ISSUER
