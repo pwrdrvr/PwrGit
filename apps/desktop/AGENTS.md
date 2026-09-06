@@ -91,13 +91,15 @@ plate in the Dock, Finder, and the DMG window. With the `.icon` present the
   `icon-macos.png` (padded — the development Dock icon that
   [src/main/index.ts](src/main/index.ts) paints literally). Do not add a
   `.icns` / `.iconset` back, and do not point `mac.icon` at one.
-- **Every job that packages the mac app needs an actool 26 or newer.**
-  electron-builder hard-fails below that, and GitHub's `macos-15` image
-  defaults to Xcode 16.4. The repo's `.github/actions/select-xcode-for-actool`
-  finds the newest stable Xcode with actool 26+ and returns its Developer
-  directory; `release.yml` (both macOS jobs) and `preview-build.yml` set
-  `DEVELOPER_DIR` from it on exactly the steps that run actool — the unit
-  tests, so the compile test in
+- **Every job that packages the mac app needs a macOS 26 host and actool 26 or
+  newer.** Xcode 26's `AssetCatalogAgent` loads host CoreMedia and MediaToolbox
+  frameworks: selecting Xcode 26.3 on GitHub's `macos-15` runner crashes during
+  Icon Composer compilation because those symbols are absent. The packaging
+  lanes use `macos-26`, and the repo's `.github/actions/select-xcode-for-actool`
+  checks that host prerequisite before finding the newest stable Xcode with
+  actool 26+ and returning its Developer directory. `release.yml` (both macOS
+  jobs) and `preview-build.yml` set `DEVELOPER_DIR` from it on exactly the
+  steps that run actool — the unit tests, so the compile test in
   [scripts/branding-assets.test.ts](scripts/branding-assets.test.ts) runs
   instead of skips (that step also sets `PWRGIT_REQUIRE_ACTOOL=1`, so on the
   release lane the suite fails rather than skips when the probe finds no
