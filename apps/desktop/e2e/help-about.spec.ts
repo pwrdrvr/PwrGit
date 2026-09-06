@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, test, type ElectronApplication, type Page } from "@playwright/test";
-import { PWRGIT_LINKS } from "@pwrgit/shared";
+import { inferUpdateSelection, PWRGIT_LINKS } from "@pwrgit/shared";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 
 const DESKTOP_VERSION = (
@@ -8,6 +8,10 @@ const DESKTOP_VERSION = (
     readFileSync(new URL("../package.json", import.meta.url), "utf8")
   ) as { version: string }
 ).version;
+const DESKTOP_RELEASE = inferUpdateSelection(DESKTOP_VERSION);
+const DESKTOP_RELEASE_NAME = `${
+  DESKTOP_RELEASE.train === "stable" ? "Stable" : "Beta"
+} · ${DESKTOP_RELEASE.channel === "latest" ? "Latest" : "Prerelease"}`;
 
 let handle: AppHandle | null = null;
 
@@ -114,7 +118,7 @@ test("Help and About expose identity, canonical support links, and recovery", as
   expect(runtime.runtimeVersion).not.toBe(DESKTOP_VERSION);
   expect(DESKTOP_VERSION).not.toBe(runtime.electronVersion);
   await expect(about).toContainText(`v${DESKTOP_VERSION}`);
-  await expect(about).toContainText("Stable · Latest");
+  await expect(about).toContainText(DESKTOP_RELEASE_NAME);
   await expect(about).toContainText("Development build");
   await expect(about).toContainText(`${runtime.platformVersion} (${runtime.arch})`);
   await expect(about).toContainText(`Electron ${runtime.electronVersion}`);
