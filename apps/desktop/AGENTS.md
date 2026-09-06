@@ -67,6 +67,67 @@ three together. Note that electron-builder's npm `latest` tag lags the 26.x
 line (it currently points at 26.15.3 while `v26` is 26.15.7), so `npm view
 electron-builder version` is not the version to pin — read the sibling repos.
 
+## macOS app icon — ship the Icon Composer `.icon`; actool derives the `.icns`
+
+`mac.icon` in [electron-builder.yml](electron-builder.yml) points at
+`build/icon.icon`, an Icon Composer package written by
+[scripts/generate-app-icon.swift](scripts/generate-app-icon.swift), and nothing
+in this repo hand-builds a `.icns`. electron-builder (26.15+, pinned) compiles
+the package with Xcode 26's `actool` into `Contents/Resources/Assets.car` +
+`CFBundleIconName` (what macOS 26 draws) and derives the legacy
+`Contents/Resources/icon.icns` + `CFBundleIconFile` (macOS 15 and earlier) from
+the same source. Each OS reads the format designed for it.
+
+Why this is an invariant: macOS 26 auto-normalizes a legacy `.icns` it is
+handed *instead of* a `.icon`, and how it does so changed between 26.6.1 and
+26.6.2. #187 padded the hand-built `.icns` to Apple's 824-in-1024 template —
+the right shape for macOS 15 — and 26.6.2 composited that tile onto a light
+plate in the Dock, Finder, and the DMG window. With the `.icon` present the
+`.icns` is never opened on macOS 26. Ghostty (MIT) ships exactly this pair.
+
+- **Regenerate with `pnpm --filter @pwrgit/desktop generate:app-icon`.** It
+  writes the package (`icon.json` + a glyph-only `Assets/glyph.png`; the tile
+  is the package `fill`), `icon.png` (full-bleed Windows/Linux master) and
+  `icon-macos.png` (padded — the development Dock icon that
+  [src/main/index.ts](src/main/index.ts) paints literally). Do not add a
+  `.icns` / `.iconset` back, and do not point `mac.icon` at one.
+- **Every job that packages the mac app needs a macOS 26 host and actool 26 or
+  newer.** Xcode 26's `AssetCatalogAgent` loads host CoreMedia and MediaToolbox
+  frameworks: selecting Xcode 26.3 on GitHub's `macos-15` runner crashes during
+  Icon Composer compilation because those symbols are absent. The packaging
+  lanes use `macos-26`, and the repo's `.github/actions/select-xcode-for-actool`
+  checks that host prerequisite before finding the newest stable Xcode with
+  actool 26+ and returning its Developer directory. `release.yml` (both macOS
+  jobs) and `preview-build.yml` set `DEVELOPER_DIR` from it on exactly the
+  steps that run actool — the unit tests, so the compile test in
+  [scripts/branding-assets.test.ts](scripts/branding-assets.test.ts) runs
+  instead of skips (that step also sets `PWRGIT_REQUIRE_ACTOOL=1`, so on the
+  release lane the suite fails rather than skips when the probe finds no
+  actool 26) — and electron-builder, so the icon compile does not move
+  `build:native` onto a different toolchain. The sign job has no checkout, so
+  the action rides inside the archived signing input. Locally, select an
+  Xcode 26 (`xcode-select`, or `DEVELOPER_DIR`) before `package:dryrun`.
+- **The compile test calls electron-builder's own helper**
+  (`app-builder-lib/out/util/macosIconComposer.generateAssetCatalogForIcon`),
+  not a copied actool command line, so the two cannot drift. If you compile
+  by hand: `actool` resolves `--app-icon Icon` by the package's basename, so
+  copy the package to `Icon.icon` first (fed `icon.icon` it exits 0 and
+  silently writes no `.icns`), create the `--compile` directory, and check
+  the output for the `.icns`.
+- **actool's derived `.icns` carries 16, 32, 128 and 256px reps only** — the
+  same four Ghostty ships. macOS 15 upsamples the 256px rep for Finder's
+  largest icon sizes and Quick Look, where the deleted hand-built icns had 512
+  and 1024. Accepted for now; an `afterPack` hook could splice larger reps
+  rendered from `icon-macos.png` if it ever matters.
+- **PNG bytes drift ±2/255 across macOS versions.** Regenerate when the
+  artwork changes, not to "refresh".
+- **Verify by asking macOS, on the newest macOS you ship to.** Render
+  `NSWorkspace.shared.icon(forFile:)` and measure it; the recipe, the
+  measurements, and the Ghostty comparison are in PwrSnap's
+  `docs/solutions/2026-09-05-macos-26-legacy-icon-light-plate.md`
+  (pwrdrvr/PwrSnap#563). A clean result on an older point release or on the
+  GitHub runner proves nothing for this class.
+
 ## e2e needs a build first
 
 `pnpm test:e2e` (Playwright) launches the BUILT app at `out/main/index.js` —

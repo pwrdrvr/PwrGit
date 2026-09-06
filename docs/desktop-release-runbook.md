@@ -62,8 +62,9 @@ stable tags may be promoted.
 
 ## CI flow
 
-1. The macOS prepare job checks metadata, typechecks, tests, checks license
-   notices, builds, and creates a deploy stage.
+1. The macOS prepare job checks metadata, typechecks, selects an Xcode with
+   actool 26 for the icon compile (`.github/actions/select-xcode-for-actool`),
+   tests, checks license notices, builds, and creates a deploy stage.
 2. `apple-signing` signs, notarizes, and packages the universal app, then
    stages the DMG, updater ZIP, blockmap, and `latest-mac.yml`.
 3. Linux validates that the desktop source builds. It produces no package.
@@ -111,9 +112,26 @@ Use local packaging only for a smoke test or when CI is unavailable:
 pnpm --filter @pwrgit/desktop package:dryrun
 ```
 
+Packaging the mac app needs an Xcode 26 or newer selected (`xcode-select -p`,
+or export `DEVELOPER_DIR`): electron-builder compiles `build/icon.icon` with
+`actool` and refuses older versions — see `apps/desktop/AGENTS.md` "macOS app
+icon".
+
 That command makes a locally ad-hoc-signed macOS package, not a Developer
 ID-signed release, and does not publish it. Release publication remains a
 guarded CI operation.
+
+For non-dry-run macOS signing, `release.mjs` decodes a base64 `CSC_LINK` when
+needed and imports the supplied Developer ID certificate into a temporary keychain
+even when other signing identities are already installed. An empty or unset
+`CSC_KEY_PASSWORD` is supported for passwordless certificates. The temporary
+keychain uses its own generated password. It makes that keychain first in the user search
+list, sets `CSC_NAME`, and removes `CSC_LINK` and `CSC_KEY_PASSWORD` before
+starting electron-builder. This avoids electron-builder 26.15.x applying the
+`.p12` password to its generated keychain on macOS 26. The script restores the
+previous keychain list and deletes the temporary keychain when packaging exits,
+including when certificate import or subsequent keychain setup fails.
+`package:dryrun` does not import a certificate or alter keychains.
 
 ## npm name reservation
 

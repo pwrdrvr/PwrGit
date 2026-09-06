@@ -27,7 +27,9 @@ jobs:
   prepare:
     name: Test and prepare macOS signing input
     if: ${{ github.event_name != 'pull_request' }}
-    runs-on: macos-15 # Apple Silicon GH-hosted runner; matches signing identity
+    # Xcode 26's AssetCatalogAgent links against macOS 26 frameworks. Selecting
+    # Xcode 26 on macos-15 reaches actool but crashes while compiling .icon.
+    runs-on: macos-26 # Apple Silicon GH-hosted runner; matches signing identity
     timeout-minutes: 45
     permissions:
       contents: read
@@ -62,7 +64,21 @@ jobs:
       - name: Ensure better-sqlite3 native builds are current
         run: pnpm --filter @pwrgit/desktop run rebuild:electron-native
 
+      # electron-builder compiles build/icon.icon with actool 26. The macos-26
+      # host supplies the matching AssetCatalogAgent runtime; this action
+      # verifies the selected Xcode still has actool 26+. Only the steps that
+      # run actool set DEVELOPER_DIR, so build:native keeps the image toolchain
+      # and SDK. See AGENTS.md "macOS app icon".
+      - name: Select an Xcode with actool 26
+        id: xcode
+        uses: ./.github/actions/select-xcode-for-actool
+
       - name: Test (unit)
+        env:
+          # Lets the actool compile test in apps/desktop/scripts/branding-assets.test.ts run instead of skip,
+          # and REQUIRE_ACTOOL makes that suite fail rather than skip if the selection is ever wrong.
+          DEVELOPER_DIR: ${{ steps.xcode.outputs.developer-dir }}
+          PWRGIT_REQUIRE_ACTOOL: "1"
         run: pnpm test
 
       - name: Prepare release stage
@@ -83,6 +99,7 @@ jobs:
             apps/desktop/electron-builder.yml \
             apps/desktop/resources \
             apps/desktop/release-stage \
+            .github/actions/select-xcode-for-actool \
             apps/desktop/scripts/release.mjs \
             apps/desktop/scripts/beforepack-dugite-arch.mjs \
             apps/desktop/scripts/stage-better-sqlite3-arch.mjs \
@@ -106,7 +123,9 @@ jobs:
 
   sign:
     name: Sign, notarize, package macOS
-    runs-on: macos-15
+    # Keep packaging on the same macOS 26 host used to validate the Icon
+    # Composer package in prepare; Xcode 26's AssetCatalogAgent needs it.
+    runs-on: macos-26
     needs: prepare
     timeout-minutes: 60
     environment: apple-signing
@@ -136,8 +155,17 @@ jobs:
       - name: Expand signing input
         run: tar -xzf .release-input/desktop-release-signing-input.tgz
 
+      # No checkout in this job: the action arrives inside the signing input
+      # tarball the prepare job archived (see its tar list).
+      - name: Select an Xcode with actool 26
+        id: xcode
+        uses: ./.github/actions/select-xcode-for-actool
+
       - name: Sign, notarize, package macOS
         env:
+          # electron-builder compiles build/icon.icon with this Xcode's actool.
+          DEVELOPER_DIR: ${{ steps.xcode.outputs.developer-dir }}
+
           # These come from the apple-signing GitHub Environment.
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}

@@ -4,7 +4,7 @@ import type {
   DiagnosticsSettings,
   ExperimentalSettings,
   GeneralSettings,
-  UpdatesSettings
+  UpdatesSelection
 } from "@pwrgit/shared";
 
 /** App-level (not per-profile) settings. Grows as later units need it.
@@ -18,8 +18,10 @@ export type AppSettings = {
   general?: Partial<GeneralSettings>;
   experimental?: Partial<ExperimentalSettings>;
   diagnostics?: Partial<DiagnosticsSettings>;
-  /** Both keys are written together once the user picks a train or track. */
-  updates?: Partial<UpdatesSettings>;
+  /** Both axes are written together once the user picks a train or track,
+   *  alongside the main-owned `selectionSource` that says the pair is a
+   *  choice rather than something derived from the installed binary. */
+  updates?: Partial<UpdatesSelection>;
 };
 
 const DEFAULTS: AppSettings = {};

@@ -178,8 +178,9 @@ const bus = new CommandBus();
 bus.register("ping", () => ok("pong"));
 
 // Development launches do not pass through electron-builder, so macOS would
-// otherwise show the generic Electron tile in the Dock. Packaged builds use
-// build/icon.icns through electron-builder instead.
+// otherwise show the generic Electron tile in the Dock. Packaged builds get
+// theirs from build/icon.icon, which electron-builder compiles with actool
+// (apps/desktop/AGENTS.md "macOS app icon").
 function installDevelopmentDockIcon(): void {
   if (process.platform !== "darwin" || app.isPackaged) return;
 
@@ -241,13 +242,19 @@ if (!gotSingleInstanceLock) {
 
     const db = openDatabase(join(app.getPath("userData"), "pwrgit.db"));
     const diagnosticsOutputRoot = join(app.getPath("userData"), "diagnostics");
+    // Read once and thread it through every snapshot: `settingsSnapshot`
+    // defaults this to "" and an empty version re-infers to Stable/Latest, so
+    // a call site that forgets it silently broadcasts the wrong release feed
+    // to every window rather than failing.
+    const appVersion = app.getVersion();
     const mcpPolicy = new McpPolicyStore(
       join(app.getPath("userData"), "mcp-policy.json")
     );
     const diagnostics = new DiagnosticsManager({
       outputRoot: diagnosticsOutputRoot,
       getDiagnostics: () =>
-        settingsSnapshot(settings, diagnosticsOutputRoot).diagnostics,
+        settingsSnapshot(settings, diagnosticsOutputRoot, appVersion)
+          .diagnostics,
       onHotCpuHeapSnapshotLimitReached: () => {
         // Mirror PwrAgnt: a session that hits its heap-snapshot cap turns the
         // capture flag off so the next arm doesn't silently refill the disk.
@@ -259,7 +266,7 @@ if (!gotSingleInstanceLock) {
         });
         emitEvent(
           "settings:changed",
-          settingsSnapshot(settings, diagnosticsOutputRoot)
+          settingsSnapshot(settings, diagnosticsOutputRoot, appVersion)
         );
         diagnostics.sync();
       }
@@ -267,7 +274,8 @@ if (!gotSingleInstanceLock) {
     // Startup CPU profiling must begin before the first window exists to
     // cover window creation; enabled via Settings toggle or PWRGIT_* env.
     const startupCpu = await startStartupCpuProfiling({
-      enabled: settingsSnapshot(settings, diagnosticsOutputRoot).diagnostics
+      enabled: settingsSnapshot(settings, diagnosticsOutputRoot, appVersion)
+        .diagnostics
         .startupCpuProfilingEnabled,
       outputRoot: diagnosticsOutputRoot
     });
@@ -441,8 +449,11 @@ if (!gotSingleInstanceLock) {
         onOpenExternalLink: (label, url) => {
           void openExternalUrlFromMenu(label, url);
         },
-        developerMode: settingsSnapshot(settings, diagnosticsOutputRoot).general
-          .developerMode
+        developerMode: settingsSnapshot(
+          settings,
+          diagnosticsOutputRoot,
+          appVersion
+        ).general.developerMode
       });
     };
 
@@ -543,7 +554,7 @@ if (!gotSingleInstanceLock) {
     registerSearchStatusHandlers(bus, db);
     registerSettingsHandlers(bus, settings, {
       diagnosticsOutputRoot,
-      appVersion: app.getVersion(),
+      appVersion,
       onChanged: (snapshot) => {
         appearance.setTheme(snapshot.general.theme);
         emitEvent("settings:changed", snapshot);
@@ -569,7 +580,7 @@ if (!gotSingleInstanceLock) {
     });
     initAutoUpdater({
       resolveSelection: () =>
-        resolveUpdateSelection(settings.get().updates, app.getVersion())
+        resolveUpdateSelection(settings.get().updates, appVersion)
     });
 
     // The refresher only speaks up when the *coarse* state moved, which a

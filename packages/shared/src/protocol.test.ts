@@ -5,7 +5,9 @@ import {
   resolveUpdateSelection,
   type CommandName,
   type Req,
-  type Res
+  type Res,
+  type UpdateChannel,
+  type UpdateSelectionSource
 } from "./protocol";
 
 describe("Result", () => {
@@ -105,35 +107,104 @@ describe("inferUpdateSelection", () => {
 });
 
 describe("resolveUpdateSelection", () => {
-  it("infers from the app version only when both keys are absent", () => {
+  it("infers from the app version while nothing is pinned", () => {
     expect(resolveUpdateSelection(undefined, "1.1.0-beta.2")).toEqual({
       train: "beta",
-      channel: "latest"
+      channel: "latest",
+      selectionSource: "inferred"
     });
     expect(resolveUpdateSelection({}, "1.1.0-alpha.7")).toEqual({
       train: "beta",
-      channel: "prerelease"
+      channel: "prerelease",
+      selectionSource: "inferred"
     });
   });
 
-  it("keeps a legacy channel-only prerelease config on the Stable train", () => {
+  // The bug this replaced: a stored pair with no `selectionSource` read as a
+  // deliberate pin, so an alpha install was offered the last stable forever
+  // and never told about the newer alpha it came from. A half pair proves
+  // nothing about intent, so the binary decides.
+  it("re-infers a half-written legacy config from the running binary", () => {
     expect(
       resolveUpdateSelection({ channel: "prerelease" }, "1.1.0-beta.2")
     ).toEqual({
-      train: "stable",
-      channel: "prerelease"
+      train: "beta",
+      channel: "latest",
+      selectionSource: "inferred"
     });
   });
 
-  it("honors an explicit Stable Latest choice on a Beta binary", () => {
+  // Stable/Latest is what the old write path stamped on ANY click, including
+  // a click on the segment already selected — it cannot be told apart from
+  // "never chose", so the installed binary wins until somebody pins.
+  it("re-infers a legacy Stable Latest pair onto the alpha feed it runs", () => {
     expect(
       resolveUpdateSelection(
         { train: "stable", channel: "latest" },
+        "1.1.0-alpha.7"
+      )
+    ).toEqual({
+      train: "beta",
+      channel: "prerelease",
+      selectionSource: "inferred"
+    });
+  });
+
+  // Any non-default legacy pair could only have come from a real click.
+  it("treats a legacy non-default pair as an existing pin", () => {
+    expect(
+      resolveUpdateSelection({ train: "beta", channel: "latest" }, "1.0.3")
+    ).toEqual({
+      train: "beta",
+      channel: "latest",
+      selectionSource: "user"
+    });
+  });
+
+  it("honors an explicit Stable Latest pin on a Beta binary", () => {
+    expect(
+      resolveUpdateSelection(
+        { train: "stable", channel: "latest", selectionSource: "user" },
         "1.1.0-beta.2"
       )
     ).toEqual({
       train: "stable",
-      channel: "latest"
+      channel: "latest",
+      selectionSource: "user"
+    });
+  });
+
+  // A pin whose file lost one axis (a truncated write, a hand edit with a
+  // typo) keeps the axis that survived AND stays pinned — re-inferring the
+  // pair would quietly move a deliberate Stable pin onto the alpha feed.
+  it("keeps a pin whose stored pair lost one axis", () => {
+    expect(
+      resolveUpdateSelection(
+        { train: "stable", channel: "lates" as UpdateChannel, selectionSource: "user" },
+        "1.1.0-alpha.7"
+      )
+    ).toEqual({
+      train: "stable",
+      channel: "latest",
+      selectionSource: "user"
+    });
+  });
+
+  it("ignores a selectionSource that is not one of the two states", () => {
+    expect(
+      resolveUpdateSelection(
+        {
+          train: "beta",
+          channel: "latest",
+          selectionSource: "pinned" as UpdateSelectionSource
+        },
+        "1.0.3"
+      )
+    ).toEqual({
+      train: "beta",
+      channel: "latest",
+      // Falls through to the legacy classification: a non-default pair.
+      selectionSource: "user"
     });
   });
 });

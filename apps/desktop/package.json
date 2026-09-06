@@ -1,7 +1,7 @@
 {
   "name": "@pwrgit/desktop",
   "productName": "PwrGit",
-  "version": "0.10.0",
+  "version": "0.12.0",
   "private": true,
   "description": "Cross-platform desktop git client",
   "author": "PwrDrvr LLC",
@@ -12,7 +12,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "generate:app-icon": "swift ./scripts/generate-app-icon.swift ./build/icon.iconset && iconutil -c icns build/icon.iconset -o build/icon.icns",
+    "generate:app-icon": "swift ./scripts/generate-app-icon.swift ./build",
     "generate:dmg-background": "swift ./scripts/generate-dmg-background.swift ./build/dmg-background.png",
     "generate:tray-icon": "node ./scripts/generate-tray-icon.mjs",
     "generate:branding-assets": "pnpm run generate:app-icon && pnpm run generate:tray-icon && pnpm run generate:dmg-background",

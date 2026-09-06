@@ -125,6 +125,14 @@ Latest, `-prerelease` is Stable Prerelease, `-beta` is Beta Latest, `-alpha`
 is Beta Prerelease. CI, preview builds, and signing secrets are documented in
 `.github/workflows/README.md`.
 
+### macOS app icon
+
+`mac.icon` is `build/icon.icon`, an Icon Composer package that electron-builder
+compiles with Xcode 26's `actool`; nothing in this repo hand-builds a `.icns`,
+and every job or machine that packages the mac app needs an actool 26 or newer
+selected. Why, how to regenerate, and how to verify: `apps/desktop/AGENTS.md`
+"macOS app icon".
+
 ## Pull Requests
 
 - Prefer before/after screenshots on PRs that change visible UI.
