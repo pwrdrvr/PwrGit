@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.12.0-alpha.0 - 2026-09-06
+## v0.12.0 - 2026-09-06
 
 - Updates - Installed alpha and beta builds now stay on the Beta release feed until you explicitly choose another one, and Settings shows each Stable/Beta, Latest/Pre-release slot directly with the installed build marked.
 - macOS - Replaced the legacy-only app icon with an Icon Composer package, fixing the light-plate rendering introduced by macOS 26.6.2 while retaining the appropriate padded icon for macOS 15 and earlier.
