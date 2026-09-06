@@ -120,3 +120,15 @@ icon".
 That command makes a locally ad-hoc-signed macOS package, not a Developer
 ID-signed release, and does not publish it. Release publication remains a
 guarded CI operation.
+
+For non-dry-run macOS signing, `release.mjs` decodes a base64 `CSC_LINK` when
+needed and imports the supplied Developer ID certificate into a temporary keychain
+even when other signing identities are already installed. An empty or unset
+`CSC_KEY_PASSWORD` is supported for passwordless certificates. The temporary
+keychain uses its own generated password. It makes that keychain first in the user search
+list, sets `CSC_NAME`, and removes `CSC_LINK` and `CSC_KEY_PASSWORD` before
+starting electron-builder. This avoids electron-builder 26.15.x applying the
+`.p12` password to its generated keychain on macOS 26. The script restores the
+previous keychain list and deletes the temporary keychain when packaging exits,
+including when certificate import or subsequent keychain setup fails.
+`package:dryrun` does not import a certificate or alter keychains.
