@@ -5,8 +5,18 @@
 | Workflow | Trigger | What it does |
 |---|---|---|
 | `ci.yml` | push to `main`, PRs | Typecheck, build, unit tests, Linux + Windows desktop E2E. Unit-test jobs run `rebuild:electron-native` first — a no-op after a fresh install, which repairs a restored `node_modules` cache whose better-sqlite3 build predates the two-ABI layout. Documentation-only PRs skip those jobs after Classify Changes (see below). |
-| `preview-build.yml` | `build-preview` PR label | Unsigned macOS universal DMG + Windows NSIS installer, uploaded as workflow artifacts. |
-| `release.yml` | `v*` tag push, manual dispatch with a tag, or `ci:windows-signing` PR label | Tests and stages via `apps/desktop/scripts/release.mjs`. Tagged runs gate GitHub Pre-release creation on Linux build, signed/notarized macOS, and Azure-signed Windows. Labeled same-repo PRs run the real Windows prepare/sign/Authenticode path and upload workflow artifacts only. |
+| `preview-build.yml` | `build-preview` PR label | Unsigned macOS universal DMG (macOS 26/Xcode 26) + Windows NSIS installer, uploaded as workflow artifacts. |
+| `release.yml` | `v*` tag push, manual dispatch with a tag, or `ci:windows-signing` PR label | Tests and stages via `apps/desktop/scripts/release.mjs`. Tagged runs gate GitHub Pre-release creation on Linux build, signed/notarized macOS (macOS 26/Xcode 26), and Azure-signed Windows. Labeled same-repo PRs run the real Windows prepare/sign/Authenticode path and upload workflow artifacts only. |
+
+## macOS Icon Composer runner
+
+The macOS release and preview packaging jobs use `macos-26`. Although the
+`macos-15` image contains Xcode 26, its host frameworks are too old for
+Xcode 26's `AssetCatalogAgent`; Icon Composer compilation fails after Xcode
+selection with missing CoreMedia/MediaToolbox symbols. The shared
+`select-xcode-for-actool` action requires both a macOS 26 host and actool 26+
+so release validation remains mandatory and fails early if a workflow is moved
+to an incompatible runner.
 
 ## Documentation-only PRs
 
