@@ -178,8 +178,9 @@ const bus = new CommandBus();
 bus.register("ping", () => ok("pong"));
 
 // Development launches do not pass through electron-builder, so macOS would
-// otherwise show the generic Electron tile in the Dock. Packaged builds use
-// build/icon.icns through electron-builder instead.
+// otherwise show the generic Electron tile in the Dock. Packaged builds get
+// theirs from build/icon.icon, which electron-builder compiles with actool
+// (apps/desktop/AGENTS.md "macOS app icon").
 function installDevelopmentDockIcon(): void {
   if (process.platform !== "darwin" || app.isPackaged) return;
 

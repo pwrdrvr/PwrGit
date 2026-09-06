@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import sharp from "sharp";
-import { afterAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 /**
  * The shipped macOS app icon, as a test.
@@ -34,7 +34,9 @@ import { afterAll, describe, expect, it } from "vitest";
  * Regenerate with `pnpm --filter @pwrgit/desktop generate:app-icon`. The
  * package structure and the flat PNG masters are pinned everywhere; the
  * actool compile runs on a Mac with Xcode 26+ (electron-builder's own
- * requirement) and skips elsewhere.
+ * requirement) and skips elsewhere. It goes through electron-builder's own
+ * helper rather than a copied actool command line, so it cannot drift from
+ * what packages at release time. See apps/desktop/AGENTS.md "macOS app icon".
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -52,7 +54,7 @@ const ELEMENT_HEADER = 8;
 /**
  * Pixel size and payload encoding each ICNS element type implies. `ic04`/
  * `ic05` hold Apple's run-length-coded `ARGB` blobs; everything else holds
- * PNG. actool emits a subset of these (16, 16@2x, 128, 256@2x today).
+ * PNG. actool emits a subset of these (16, 16@2x, 128, 128@2x today).
  */
 const ELEMENT_TYPES: Record<string, { pixels: number; payload: "ARGB" | "PNG" }> = {
   ic04: { pixels: 16, payload: "ARGB" },
@@ -198,20 +200,41 @@ interface IconManifest {
   "supported-platforms": { squares: string };
 }
 
-describe("build/icon.icon (Icon Composer package)", () => {
-  const manifest = JSON.parse(readFileSync(join(iconPackage, "icon.json"), "utf8")) as IconManifest;
+/**
+ * Read inside each test, not at describe scope: a missing or malformed
+ * icon.json should fail the tests written to report it, not turn the whole
+ * file into a collection error that registers no tests at all.
+ */
+function readManifest(): IconManifest {
+  return JSON.parse(readFileSync(join(iconPackage, "icon.json"), "utf8")) as IconManifest;
+}
 
-  it("paints the tile with a two-stop sRGB gradient from the generator's palette", () => {
-    const stops = manifest.fill["linear-gradient"];
-    expect(stops).toHaveLength(2);
-    for (const stop of stops) {
-      expect(stop).toMatch(/^srgb:\d\.\d{5},\d\.\d{5},\d\.\d{5},1\.00000$/);
-    }
+/**
+ * The tile gradient, top then bottom, as `Color.bgTop` / `Color.bgBottom` in
+ * generate-app-icon.swift. macOS 26 paints the package fill as the tile, so
+ * the stops are pinned to the palette, not just to the `srgb:` shape.
+ */
+const TILE_GRADIENT_RGB: number[][] = [
+  [30, 26, 20],
+  [10, 9, 8]
+];
+
+/** `srgb:r,g,b,1.00000` → 8-bit `[r, g, b]`, or null when malformed. */
+function parseSrgbStop(stop: string): number[] | null {
+  const match = /^srgb:(\d\.\d{5}),(\d\.\d{5}),(\d\.\d{5}),1\.00000$/.exec(stop);
+  if (match === null) return null;
+  return match.slice(1, 4).map((channel) => Math.round(Number(channel) * 255));
+}
+
+describe("build/icon.icon (Icon Composer package)", () => {
+  it("paints the tile with the generator's two-stop sRGB gradient", () => {
+    const manifest = readManifest();
+    expect(manifest.fill["linear-gradient"].map(parseSrgbStop)).toEqual(TILE_GRADIENT_RGB);
     expect(manifest["supported-platforms"].squares).toBe("shared");
   });
 
   it("references only layer images that exist in Assets/", () => {
-    const imageNames = manifest.groups.flatMap((group) => group.layers.map((layer) => layer["image-name"]));
+    const imageNames = readManifest().groups.flatMap((group) => group.layers.map((layer) => layer["image-name"]));
     expect(imageNames.length).toBeGreaterThan(0);
     for (const name of imageNames) {
       expect(existsSync(join(iconPackage, "Assets", name)), `missing Assets/${name}`).toBe(true);
@@ -270,104 +293,77 @@ describe("flat PNG masters", () => {
 });
 
 /**
- * Major version of the selected Xcode's actool, or 0 when unavailable.
- * electron-builder refuses to compile a .icon with anything below 26.
+ * Major version of the selected Xcode's actool (0 when unavailable) and why,
+ * so a lane that requires it can report the probe failure instead of a bare
+ * 0. electron-builder refuses to compile a .icon with anything below 26.
  */
-function actoolMajorVersion(): number {
-  if (process.platform !== "darwin") return 0;
+function probeActool(): { major: number; reason: string } {
+  if (process.platform !== "darwin") return { major: 0, reason: `no actool on ${process.platform}` };
   try {
     const plist = execFileSync("xcrun", ["actool", "--version"], {
       encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"]
+      stdio: ["ignore", "pipe", "pipe"]
     });
     const json = execFileSync("plutil", ["-convert", "json", "-o", "-", "-"], {
       input: plist,
       encoding: "utf8",
-      stdio: ["pipe", "pipe", "ignore"]
+      stdio: ["pipe", "pipe", "pipe"]
     });
-    const short = (JSON.parse(json) as Record<string, Record<string, string>>)["com.apple.actool.version"][
-      "short-bundle-version"
-    ];
-    return Number.parseInt(String(short).split(".")[0], 10) || 0;
-  } catch {
-    return 0;
+    const short = String(
+      (JSON.parse(json) as Record<string, Record<string, string>>)["com.apple.actool.version"]["short-bundle-version"]
+    );
+    return { major: Number.parseInt(short.split(".")[0], 10) || 0, reason: `actool ${short}` };
+  } catch (error) {
+    return { major: 0, reason: error instanceof Error ? error.message : String(error) };
   }
 }
 
-const actoolMajor = actoolMajorVersion();
+type IconComposer = {
+  generateAssetCatalogForIcon(iconPath: string): Promise<{ assetCatalog: Buffer; icnsFile: Buffer }>;
+};
 
-describe.skipIf(actoolMajor < 26)("actool compile (macOS with Xcode 26+)", () => {
-  const tempDir = mkdtempSync(join(tmpdir(), "pwrgit-icon-compile-"));
-  // electron-builder copies the package to `Icon.icon` before compiling:
-  // actool resolves `--app-icon Icon` by the package's basename and, fed the
-  // repo's `icon.icon` directly, exits 0 while silently emitting no icns. It
-  // also does not create its --compile directory. Mirror both so a package
-  // that passes here is exactly what packages at release time.
-  const stagedPackage = join(tempDir, "Icon.icon");
-  const outputDir = join(tempDir, "out");
-  const partialPlist = join(outputDir, "assetcatalog_generated_info.plist");
-  const generatedIcns = join(outputDir, "Icon.icns");
-  cpSync(iconPackage, stagedPackage, { recursive: true });
-  mkdirSync(outputDir, { recursive: true });
+/**
+ * electron-builder's own compile step, reached through its dependency graph
+ * so this test cannot drift from what packages at release time. app-builder-lib
+ * copies the package to `Icon.icon` (actool resolves `--app-icon Icon` by the
+ * basename and silently writes no icns otherwise), creates the --compile
+ * directory, runs its actool invocation, refuses actool < 26, and returns
+ * Assets.car plus the derived legacy icns. The Info.plist keys are set by its
+ * macPackager at package time (CFBundleIconName = Icon, CFBundleIconFile =
+ * icon.icns), not by actool's partial plist, so they are not asserted here.
+ */
+function loadIconComposer(): IconComposer {
+  const fromHere = createRequire(import.meta.url);
+  const fromElectronBuilder = createRequire(fromHere.resolve("electron-builder"));
+  return fromElectronBuilder("app-builder-lib/out/util/macosIconComposer") as IconComposer;
+}
 
-  afterAll(() => {
-    rmSync(tempDir, { recursive: true, force: true });
-  });
+const actool = probeActool();
+const requireActool = process.env.PWRGIT_REQUIRE_ACTOOL === "1";
 
-  it(
-    "compiles to Assets.car plus a legacy icns, declaring both Info.plist keys",
-    () => {
-      // The exact invocation app-builder-lib/out/util/macosIconComposer.js
-      // uses. The "Accent color 'AccentColor' is not present" notice is expected.
-      execFileSync(
-        "actool",
-        [
-          stagedPackage,
-          "--compile",
-          outputDir,
-          "--output-format",
-          "human-readable-text",
-          "--notices",
-          "--warnings",
-          "--output-partial-info-plist",
-          partialPlist,
-          "--app-icon",
-          "Icon",
-          "--include-all-app-icons",
-          "--accent-color",
-          "AccentColor",
-          "--enable-on-demand-resources",
-          "NO",
-          "--development-region",
-          "en",
-          "--target-device",
-          "mac",
-          "--minimum-deployment-target",
-          "26.0",
-          "--platform",
-          "macosx"
-        ],
-        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
-      );
+// The skip below is a convenience for Linux, Windows, and Macs without Xcode
+// 26 — not for the release lane, which exists to compile the package.
+// release.yml sets PWRGIT_REQUIRE_ACTOOL=1 on its unit-test step so a probe
+// failure or a wrong Xcode selection fails here, with the reason, instead of
+// surfacing as the first actool error inside the sign job.
+it.runIf(requireActool)("finds actool 26+ when PWRGIT_REQUIRE_ACTOOL=1", () => {
+  expect(actool.major, actool.reason).toBeGreaterThanOrEqual(26);
+});
 
-      expect(existsSync(join(outputDir, "Assets.car"))).toBe(true);
-      expect(existsSync(generatedIcns)).toBe(true);
+describe.skipIf(actool.major < 26)("actool compile (macOS with Xcode 26+)", () => {
+  let icns: Buffer;
 
-      // CFBundleIconName is what macOS 26 reads, CFBundleIconFile is what
-      // macOS 15 falls back to. electron-builder writes the same pair.
-      const plistJson = execFileSync("plutil", ["-convert", "json", "-o", "-", partialPlist], {
-        encoding: "utf8"
-      });
-      expect(JSON.parse(plistJson)).toMatchObject({
-        CFBundleIconName: "Icon",
-        CFBundleIconFile: "Icon"
-      });
-    },
-    120_000
-  );
+  // In beforeAll, not the describe body: vitest runs a skipped suite's body at
+  // collection but never its hooks, so work there would run on every platform
+  // that skips.
+  beforeAll(async () => {
+    const compiled = await loadIconComposer().generateAssetCatalogForIcon(iconPackage);
+    expect(compiled.assetCatalog.byteLength, "actool wrote no Assets.car").toBeGreaterThan(0);
+    icns = compiled.icnsFile;
+  }, 120_000);
 
   it("writes a legacy icns CoreServices can decode at every size", () => {
-    const elements = readIcns(readFileSync(generatedIcns));
+    const elements = readIcns(icns);
     const byType = new Set(elements.map((element) => element.type));
     expect(
       FORBIDDEN_ELEMENTS.filter((type) => byType.has(type)),
@@ -387,10 +383,13 @@ describe.skipIf(actoolMajor < 26)("actool compile (macOS with Xcode 26+)", () =>
   it("pads the legacy icns the way macOS 15 expects", async () => {
     // actool, not this repo, decides the legacy inset now. Pin that it still
     // lands on Apple's 824-in-1024 template (~80.5% fill) — the reason the
-    // hand-built, padded icns could be deleted at all.
-    const largest = readIcns(readFileSync(generatedIcns))
-      .filter((element) => ELEMENT_TYPES[element.type]?.payload === "PNG")
-      .reduce((best, element) => (ELEMENT_TYPES[element.type].pixels > ELEMENT_TYPES[best.type].pixels ? element : best));
+    // hand-built, padded icns could be deleted at all. actool writes four
+    // reps (16, 16@2x, 128, 128@2x); 256px is its ceiling — see AGENTS.md.
+    const pngElements = readIcns(icns).filter((element) => ELEMENT_TYPES[element.type]?.payload === "PNG");
+    expect(pngElements.length, "actool icns carries no PNG rep").toBeGreaterThan(0);
+    const largest = pngElements.reduce((best, element) =>
+      ELEMENT_TYPES[element.type].pixels > ELEMENT_TYPES[best.type].pixels ? element : best
+    );
     const image = await loadAlpha(largest.payload);
     const bounds = opaqueBounds(image);
     expect(bounds).not.toBeNull();

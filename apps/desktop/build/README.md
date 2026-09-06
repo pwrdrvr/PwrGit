@@ -43,7 +43,7 @@ apps/desktop/build/
 There is no `.icns` or `.iconset` in the repo any more. electron-builder
 compiles `icon.icon/` with Xcode 26's `actool` at package time into
 `Contents/Resources/Assets.car` (what macOS 26 draws) and derives the legacy
-`icon.icns` (macOS 15 and earlier) from it — see AGENTS.md "macOS app icon"
+`icon.icns` (macOS 15 and earlier) from it — see apps/desktop/AGENTS.md "macOS app icon"
 for why a hand-built `.icns` is not an option. Regenerate on a Mac:
 
 ```

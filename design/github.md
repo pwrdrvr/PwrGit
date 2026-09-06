@@ -18,7 +18,7 @@ date: 2026-08-02T02:29:44Z
 ## Screen map
 | Output | Built from |
 |---|---|
-| apps/desktop/build/icon.png, icon.icns, icon.iconset/* | PwrSnap apps/desktop/scripts/generate-app-icon.swift |
+| apps/desktop/build/icon.png, icon-macos.png, icon.icon/ | PwrSnap apps/desktop/scripts/generate-app-icon.swift |
 | apps/desktop/build/tray-icon*.png | PwrSnap apps/desktop/scripts/generate-tray-icon.mjs |
 | apps/desktop/build/dmg-background.png | PwrSnap apps/desktop/scripts/generate-dmg-background.swift |
 | apps/desktop/build/README.md (wiring) | PwrSnap apps/desktop/electron-builder.yml |

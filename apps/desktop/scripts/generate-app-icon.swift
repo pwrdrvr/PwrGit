@@ -24,7 +24,7 @@ import Foundation
 // deliberately no hand-built .icns / .iconset any more: a macOS 26 build
 // that only finds a legacy .icns guesses at how to normalize it, and 26.6.2
 // guessed a light plate behind our padded tile (#187 added the padding).
-// See AGENTS.md "macOS app icon".
+// See apps/desktop/AGENTS.md "macOS app icon".
 
 let buildDir = URL(fileURLWithPath: CommandLine.arguments.dropFirst().first ?? "build")
 
@@ -45,22 +45,36 @@ struct Color {
   static let dimAlpha: CGFloat = 0.55
 }
 
-/// Renders the icon at `size` px.
+/// The three rasters this script writes, all on a 1024px canvas.
+enum Variant {
+  /// Tile + mark edge to edge: `icon.png`, the Windows / Linux master.
+  case fullBleed
+  /// Tile + mark on Apple's legacy 824-in-1024 tile: `icon-macos.png`.
+  case legacyCanvas
+  /// The mark alone on transparency: the Icon Composer layer.
+  case glyphOnly
+}
+
+let canvasSize = 1024
+
+/// Renders one variant.
 ///
-/// - `macOSCanvas`: inset the tile to Apple's legacy 824-in-1024 safe area
+/// - `.legacyCanvas`: inset the tile to Apple's legacy 824-in-1024 safe area
 ///   (a 100px transparent margin). Pre-26 macOS draws a .icns canvas
 ///   literally, so a full-bleed tile reads ~24% larger than Terminal next to
 ///   it. Used for the development Dock PNG only — the shipped legacy .icns
 ///   is derived by actool from the .icon package, which pads it itself.
-/// - `glyphOnly`: skip the tile and paint just the mark on a transparent
+/// - `.glyphOnly`: skip the tile and paint just the mark on a transparent
 ///   canvas. This is the Icon Composer layer; the tile comes from the
 ///   package's `fill`, which is what lets macOS 26 apply its own shape,
 ///   glass edge, and Dark / Clear / Tinted variants.
-func renderIcon(size: Int, macOSCanvas: Bool = false, glyphOnly: Bool = false) -> NSBitmapImageRep {
+func renderIcon(_ variant: Variant) -> NSBitmapImageRep {
+  let macOSCanvas = variant == .legacyCanvas
+  let glyphOnly = variant == .glyphOnly
   guard let bitmap = NSBitmapImageRep(
     bitmapDataPlanes: nil,
-    pixelsWide: size,
-    pixelsHigh: size,
+    pixelsWide: canvasSize,
+    pixelsHigh: canvasSize,
     bitsPerSample: 8,
     samplesPerPixel: 4,
     hasAlpha: true,
@@ -69,15 +83,13 @@ func renderIcon(size: Int, macOSCanvas: Bool = false, glyphOnly: Bool = false) -
     bytesPerRow: 0,
     bitsPerPixel: 0
   ) else { fatalError("Unable to create bitmap") }
-  bitmap.size = NSSize(width: CGFloat(size), height: CGFloat(size))
+  bitmap.size = NSSize(width: canvasSize, height: canvasSize)
 
   NSGraphicsContext.saveGraphicsState()
   NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
 
-  let s = CGFloat(size)
-  let canvasScale = s / 1024.0
-  let tileInset = macOSCanvas ? 100 * canvasScale : 0
-  let tileSize = macOSCanvas ? 824 * canvasScale : s
+  let tileInset: CGFloat = macOSCanvas ? 100 : 0
+  let tileSize: CGFloat = macOSCanvas ? 824 : 1024
   let scale = tileSize / 1024.0
   func k(_ v: CGFloat) -> CGFloat { v * scale }
   func coord(_ v: CGFloat) -> CGFloat { tileInset + k(v) }
@@ -87,7 +99,7 @@ func renderIcon(size: Int, macOSCanvas: Bool = false, glyphOnly: Bool = false) -
     // device-RGB (encoded) space so the ramp is linear in the output pixels.
     // The bitmap context is y-up, so image row 0 (top, lighter) maps to the
     // highest AppKit y.
-    let cornerRadius = macOSCanvas ? 185 * canvasScale : k(180)
+    let cornerRadius = macOSCanvas ? 185 : k(180)
     let bg = NSBezierPath(roundedRect: NSRect(
                             x: tileInset,
                             y: tileInset,
@@ -188,7 +200,7 @@ let assetsDir = iconPackage.appendingPathComponent("Assets")
 try FileManager.default.createDirectory(at: assetsDir, withIntermediateDirectories: true)
 
 try writePNG(
-  renderIcon(size: 1024, glyphOnly: true),
+  renderIcon(.glyphOnly),
   to: assetsDir.appendingPathComponent("glyph.png"),
   label: "icon.icon/Assets/glyph.png"
 )
@@ -239,7 +251,7 @@ print("  icon.icon/icon.json")
 
 // --- build/icon.png — unpadded master (Windows / Linux source) --------------
 try writePNG(
-  renderIcon(size: 1024),
+  renderIcon(.fullBleed),
   to: buildDir.appendingPathComponent("icon.png"),
   label: "icon.png"
 )
@@ -250,7 +262,7 @@ try writePNG(
 // of the packaged-app icon handling, so it carries the legacy safe-area
 // inset itself (see src/main/index.ts).
 try writePNG(
-  renderIcon(size: 1024, macOSCanvas: true),
+  renderIcon(.legacyCanvas),
   to: buildDir.appendingPathComponent("icon-macos.png"),
   label: "icon-macos.png"
 )
