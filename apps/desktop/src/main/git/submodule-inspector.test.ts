@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { err, ok } from "@pwrgit/shared";
 import {
   execGitRecords,
+  gitProcessInvocation,
   type GitExec,
   type GitOutput,
   type GitRecordExec
@@ -38,8 +39,9 @@ const GIT_ENV: NodeJS.ProcessEnv = {
 
 const systemGit: GitExec = (args, cwd, options) =>
   new Promise((resolveResult) => {
-    const proc = spawn("git", args, {
-      cwd,
+    const invocation = gitProcessInvocation(args, cwd);
+    const proc = spawn("git", invocation.args, {
+      cwd: invocation.processCwd,
       env: { ...GIT_ENV, ...options?.env }
     });
     let stdout = "";
@@ -69,8 +71,9 @@ const systemGitRecords: GitRecordExec = (args, cwd, options) =>
   });
 
 function git(cwd: string, args: string[]): string {
-  return execFileSync("git", args, {
-    cwd,
+  const invocation = gitProcessInvocation(args, cwd);
+  return execFileSync("git", invocation.args, {
+    cwd: invocation.processCwd,
     env: GIT_ENV,
     encoding: "utf8"
   }).trim();
@@ -218,6 +221,8 @@ describe("inspectSubmodules (system git)", () => {
     expect(git(parent, ["rev-parse", "HEAD:modules/api"])).toBe(pinned);
   });
 
+  // Recursive submodule setup spawns many Git processes before inspection;
+  // Windows CI can exceed the default 20s even while making progress.
   it("isolates multiple and nested checkouts plus missing, uninitialized, deinitialized, and changed-URL failures", async () => {
     const leaf = join(root, "leaf");
     const outer = join(root, "outer");
@@ -307,7 +312,7 @@ describe("inspectSubmodules (system git)", () => {
       checkoutState: "checked_out",
       relation: "at_pin"
     });
-  });
+  }, 60_000);
 
   it("finds retained submodule data in a linked worktree's Git directory", async () => {
     const child = join(root, "linked-child");
