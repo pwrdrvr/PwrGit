@@ -169,23 +169,40 @@ describe("worktree:removeMany × state probes", () => {
 });
 
 describe("worktree:removeMany × pruned worktree", () => {
+  /** Add a worktree on a new branch and index it; returns the sidebar row. */
+  async function addIndexedWorktree(
+    branch: string
+  ): Promise<{ id: string; path: string }> {
+    const path = join(root, `wt-${branch}`);
+    await worktreeAdd(systemGit, repoPath, path, branch, { newBranch: true });
+    await indexer.refreshRepoWorktrees(repoId);
+    const wt = indexer
+      .listRepos(profileId)[0]
+      ?.worktrees.find((w) => w.branch === branch);
+    if (wt === undefined) throw new Error("worktree not indexed");
+    return { id: wt.id, path };
+  }
+  const rowExists = (id: string): boolean =>
+    indexer.listRepos(profileId)[0]?.worktrees.some((w) => w.id === id) ??
+    false;
+  // Windows can hold a fresh checkout open (antivirus, our own probes) for a
+  // moment; retry like the production path does.
+  const rmRetrying = (path: string): void =>
+    rmSync(path, {
+      recursive: true,
+      force: true,
+      maxRetries: 15,
+      retryDelay: 300
+    });
+
   // Another tool (Codex, a shell `rm -rf` plus `git worktree prune`) can
   // delete a checkout and unregister it before PwrGit re-indexes. The row
   // lingers in the sidebar with nothing behind it: fetch fails ("cannot change
   // to …"), and remove used to fail too ("is not a working tree"), leaving no
   // way to get rid of it. Removal must succeed and drop the row.
   it("removes a worktree whose directory is gone and metadata already pruned", async () => {
-    const wtPath = join(root, "wt-pruned");
-    await worktreeAdd(systemGit, repoPath, wtPath, "pruned", {
-      newBranch: true
-    });
-    await indexer.refreshRepoWorktrees(repoId);
-    const wt = indexer
-      .listRepos(profileId)[0]
-      ?.worktrees.find((w) => w.branch === "pruned");
-    if (wt === undefined) throw new Error("worktree not indexed");
-
-    rmSync(wtPath, { recursive: true, force: true });
+    const wt = await addIndexedWorktree("pruned");
+    rmRetrying(wt.path);
     git(repoPath, ["worktree", "prune"]);
 
     const res = await bus.dispatch("worktree:removeMany", {
@@ -197,11 +214,7 @@ describe("worktree:removeMany × pruned worktree", () => {
       expect(res.value.removed).toEqual([wt.id]);
       expect(res.value.failed).toEqual([]);
     }
-    expect(
-      indexer
-        .listRepos(profileId)[0]
-        ?.worktrees.some((w) => w.id === wt.id)
-    ).toBe(false);
+    expect(rowExists(wt.id)).toBe(false);
     expect(vi.mocked(emitEvent)).toHaveBeenCalledWith("worktree:removed", {
       worktreeId: wt.id
     });
@@ -209,21 +222,15 @@ describe("worktree:removeMany × pruned worktree", () => {
 
   // Same staleness, but the directory is still there and git disowns it. The
   // row is a fossil either way, so it must go — but the directory stays and
-  // the failure names it, since nothing proves it is safe to delete.
+  // the failure names it, since nothing proves it is safe to delete. It is
+  // reported as a failure only: `worktree:removed` would tick the renderer's
+  // removal progress for something that was not removed.
   it("drops the row but keeps a directory git no longer recognises", async () => {
-    const wtPath = join(root, "wt-orphan");
-    await worktreeAdd(systemGit, repoPath, wtPath, "orphan", {
-      newBranch: true
-    });
-    await indexer.refreshRepoWorktrees(repoId);
-    const wt = indexer
-      .listRepos(profileId)[0]
-      ?.worktrees.find((w) => w.branch === "orphan");
-    if (wt === undefined) throw new Error("worktree not indexed");
-
+    const wt = await addIndexedWorktree("orphan");
     // Unregister without deleting: drop the .git link, prune the metadata.
-    rmSync(join(wtPath, ".git"), { force: true });
+    rmRetrying(join(wt.path, ".git"));
     git(repoPath, ["worktree", "prune"]);
+    vi.mocked(emitEvent).mockClear();
 
     const res = await bus.dispatch("worktree:removeMany", {
       worktreeIds: [wt.id]
@@ -235,12 +242,14 @@ describe("worktree:removeMany × pruned worktree", () => {
       expect(res.value.failed).toHaveLength(1);
       expect(res.value.failed[0]?.message).toMatch(/no longer registered/i);
     }
-    expect(existsSync(wtPath)).toBe(true);
-    expect(
-      indexer
-        .listRepos(profileId)[0]
-        ?.worktrees.some((w) => w.id === wt.id)
-    ).toBe(false);
+    expect(existsSync(wt.path)).toBe(true);
+    expect(rowExists(wt.id)).toBe(false);
+    expect(vi.mocked(emitEvent)).not.toHaveBeenCalledWith("worktree:removed", {
+      worktreeId: wt.id
+    });
+    expect(vi.mocked(emitEvent)).toHaveBeenCalledWith("repo:changed", {
+      profileId
+    });
   });
 });
 

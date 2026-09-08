@@ -563,6 +563,13 @@ export class RepoIndexer {
     run();
   }
 
+  /** Drop one worktree row without re-listing the repo: for a path git no
+   *  longer recognises, a refresh would only confirm the row is a fossil (and
+   *  pay a full branch re-index to do it). */
+  forgetWorktree(worktreeId: string): void {
+    this.db.prepare("DELETE FROM worktrees WHERE id = ?").run(worktreeId);
+  }
+
   /** Re-list an existing repo's worktrees (after create/remove), preserving
    *  its source, pins, and custom order (syncWorktrees only touches identity). */
   async refreshRepoWorktrees(

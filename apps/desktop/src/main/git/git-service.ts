@@ -1084,30 +1084,29 @@ export async function worktreeRemove(
     if (raw.value.exitCode === 0) return ok(undefined);
     const message = raw.value.stderr.trim();
     const unregistered = /is not a working tree/i.test(message);
-    // Git can disown a worktree PwrGit still lists: another tool deleted the
-    // checkout and ran `git worktree prune` (or git pruned it on its own)
-    // before we re-indexed. Removing the row is the only way out of the
-    // sidebar, so "not a working tree" with nothing left on disk is a finished
-    // removal. Prune once more so stale metadata can't resurrect the entry on
-    // the next listing.
-    if (attempt === 1 && unregistered && !existsSync(worktreePath)) {
-      await git(["worktree", "prune"], repoPath);
-      return ok(undefined);
-    }
-    // A directory git no longer recognises may belong to something else now
-    // (a fresh clone at the same path, a pruned-then-restored checkout), so
-    // never delete it on a first refusal — report it and leave it in place.
+    // Git says this only for a path it no longer lists at all, so its metadata
+    // is already gone: another tool deleted the checkout and pruned it (or git
+    // pruned on its own) before PwrGit re-indexed. Do NOT `worktree prune`
+    // here — that is repo-wide and also unregisters every worktree whose
+    // directory is merely unreachable right now (an unmounted volume).
     if (attempt === 1 && unregistered) {
-      return err({
-        kind: "repo",
-        code: "not_a_worktree",
-        message: `${worktreePath} is no longer registered as a worktree of this repository. Its directory was left in place; delete it yourself if it is no longer needed.`
-      });
+      // A directory git disowns may belong to something else now (a fresh
+      // clone at the same path, a pruned-then-restored checkout), so never
+      // delete it on a first refusal — report it and leave it in place.
+      if (existsSync(worktreePath)) {
+        return err({
+          kind: "repo",
+          code: "not_a_worktree",
+          message: `${worktreePath} is no longer registered as a worktree of this repository. Its directory was left in place; delete it yourself if it is no longer needed.`
+        });
+      }
+      // Nothing on disk and nothing in git: the removal already happened.
+      return ok(undefined);
     }
     // A retry can find the worktree already unregistered: the failed attempt
     // pruned git's metadata before the file deletion hit the lock. Finish the
     // delete ourselves (rmSync retries EPERM/EBUSY on Windows).
-    if (unregistered) {
+    if (attempt > 1 && unregistered) {
       try {
         rmSync(worktreePath, {
           recursive: true,
