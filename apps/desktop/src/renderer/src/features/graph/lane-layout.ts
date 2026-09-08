@@ -42,6 +42,8 @@ export type LaneRefs = {
   remoteBranches?: string[] | undefined;
   /** The branch checked out in the viewing worktree — pinned to lane 1. */
   headBranch?: string | undefined;
+  /** Actual tracking ref of the focused branch, when it has unapplied work. */
+  headUpstream?: string | undefined;
   /** Branches drawn besides the default spine (most recent first). */
   shownBranches: string[];
 };
@@ -120,9 +122,37 @@ function computeOwners(
   }
   spineStart ??= localTip;
 
+  // A fast-forward upstream extends the focused branch's reserved train.
+  // Require the local tip on its first-parent chain: reachability through a
+  // merge's side parent is not a linear continuation. Unknown/window-truncated
+  // ancestry and rewritten or divergent histories keep separate ownership.
+  const headTip =
+    refs.headBranch === undefined ? undefined : tipOf.get(refs.headBranch);
+  let headStart = headTip;
+  const upstreamTip =
+    refs.headUpstream === undefined ? undefined : tipOf.get(refs.headUpstream);
+  if (headTip !== undefined && upstreamTip !== undefined) {
+    let cur: string | undefined = upstreamTip;
+    const seen = new Set<string>();
+    while (cur !== undefined && !seen.has(cur)) {
+      if (cur === headTip) {
+        headStart = upstreamTip;
+        break;
+      }
+      if (cur !== upstreamTip && drawnTips.has(cur)) break;
+      seen.add(cur);
+      cur = byHash.get(cur)?.parents[0];
+    }
+  }
+
   const owners = new Map<string, string>();
   for (const b of drawn) {
-    const start = b === refs.defaultBranch ? spineStart : tipOf.get(b);
+    const start =
+      b === refs.defaultBranch
+        ? spineStart
+        : b === refs.headBranch
+          ? headStart
+          : tipOf.get(b);
     let cur = start;
     while (cur !== undefined) {
       const commit = byHash.get(cur);
@@ -132,7 +162,12 @@ function computeOwners(
       // conflict-free lane across it later, but ownership remains distinct so
       // genuine forks still choose the correct continuing path. (The default
       // branch may claim through a plain trunk-history tip.)
-      if (b !== refs.defaultBranch && cur !== start && drawnTips.has(cur)) break;
+      if (
+        b !== refs.defaultBranch &&
+        cur !== start &&
+        cur !== tipOf.get(b) &&
+        drawnTips.has(cur)
+      ) break;
       owners.set(cur, b);
       cur = commit.parents[0];
     }

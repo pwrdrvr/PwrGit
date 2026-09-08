@@ -500,6 +500,7 @@ export function LineageGraph({
         defaultBranch: data.defaultBranch,
         defaultRefTips: data.defaultRefTips,
         localRefTips: Object.keys(data.tips),
+        headUpstream: data.headUpstream,
         remoteBranches: drawnRefs.filter((name) => remoteNames.has(name)),
         // This worktree's checked-out branch — pinned to lane 1.
         headBranch: Object.entries(data.branches).find(

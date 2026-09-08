@@ -423,6 +423,7 @@ export function registerGraphHandlers(
       commits: out.commits,
       tips: out.tips,
       remoteTips: out.remoteTips,
+      ...(headUpstream === undefined ? {} : { headUpstream }),
       branches: out.branches,
       head,
       headOnlyCommits,

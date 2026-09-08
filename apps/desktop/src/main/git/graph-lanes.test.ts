@@ -218,6 +218,7 @@ describe("graph:lanes — unapplied upstream work on non-default branches", () =
       // ...and its ref has to be drawn, or the row renders with no chip and
       // without the dashed "fetched but not applied" lineage.
       expect(graph.upstreamRefs).toContain("origin/releases/1.0");
+      expect(graph.headUpstream).toBe("origin/releases/1.0");
     }
   );
 
@@ -287,6 +288,7 @@ describe("graph:lanes — unapplied upstream work on non-default branches", () =
     expect(graph.shownBranches).not.toContain("releases/1.0");
     expect(subjects(graph)).toContain("rel: upstream fix nobody has locally");
     expect(graph.upstreamRefs).toContain("origin/releases/1.0");
+    expect(graph.headUpstream).toBe("origin/releases/1.0");
   });
 
   it("never re-adds the trunk's own ref via a branch that tracks it", async () => {
@@ -335,6 +337,7 @@ describe("graph:lanes — unapplied upstream work on non-default branches", () =
     // "N of M active branches" reads shownBranches.length. An upstream ref is
     // not an active branch, so folding it in there would inflate the count.
     expect(graph.upstreamRefs).toContain("origin/releases/1.0");
+    expect(graph.headUpstream).toBe("origin/releases/1.0");
     expect(graph.shownBranches).toEqual(["releases/1.0"]);
   });
 
