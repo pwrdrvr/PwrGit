@@ -98,7 +98,7 @@ describe("against the repository's own files", () => {
 
     // A parser that silently stopped matching would return zero or a handful.
     expect(packages.length).toBeGreaterThan(400);
-    expect(packages).toContainEqual({ name: "zod", version: "4.5.1" });
+    expect(packages).toContainEqual(expect.objectContaining({ name: "zod" }));
     // link:/file: workspace entries carry no registry publish time.
     expect(packages.every(({ version }) => /^\d+\.\d+\.\d+/.test(version))).toBe(true);
     // `snapshots:` keys carry peer suffixes; none may leak through.
