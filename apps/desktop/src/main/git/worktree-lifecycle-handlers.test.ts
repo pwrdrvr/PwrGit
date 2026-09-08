@@ -1,5 +1,11 @@
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -159,6 +165,82 @@ describe("worktree:removeMany × state probes", () => {
       expect(c.end).toBeGreaterThan(0);
       expect(c.end).toBeLessThan(remove?.start ?? 0);
     }
+  });
+});
+
+describe("worktree:removeMany × pruned worktree", () => {
+  // Another tool (Codex, a shell `rm -rf` plus `git worktree prune`) can
+  // delete a checkout and unregister it before PwrGit re-indexes. The row
+  // lingers in the sidebar with nothing behind it: fetch fails ("cannot change
+  // to …"), and remove used to fail too ("is not a working tree"), leaving no
+  // way to get rid of it. Removal must succeed and drop the row.
+  it("removes a worktree whose directory is gone and metadata already pruned", async () => {
+    const wtPath = join(root, "wt-pruned");
+    await worktreeAdd(systemGit, repoPath, wtPath, "pruned", {
+      newBranch: true
+    });
+    await indexer.refreshRepoWorktrees(repoId);
+    const wt = indexer
+      .listRepos(profileId)[0]
+      ?.worktrees.find((w) => w.branch === "pruned");
+    if (wt === undefined) throw new Error("worktree not indexed");
+
+    rmSync(wtPath, { recursive: true, force: true });
+    git(repoPath, ["worktree", "prune"]);
+
+    const res = await bus.dispatch("worktree:removeMany", {
+      worktreeIds: [wt.id]
+    });
+
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.value.removed).toEqual([wt.id]);
+      expect(res.value.failed).toEqual([]);
+    }
+    expect(
+      indexer
+        .listRepos(profileId)[0]
+        ?.worktrees.some((w) => w.id === wt.id)
+    ).toBe(false);
+    expect(vi.mocked(emitEvent)).toHaveBeenCalledWith("worktree:removed", {
+      worktreeId: wt.id
+    });
+  });
+
+  // Same staleness, but the directory is still there and git disowns it. The
+  // row is a fossil either way, so it must go — but the directory stays and
+  // the failure names it, since nothing proves it is safe to delete.
+  it("drops the row but keeps a directory git no longer recognises", async () => {
+    const wtPath = join(root, "wt-orphan");
+    await worktreeAdd(systemGit, repoPath, wtPath, "orphan", {
+      newBranch: true
+    });
+    await indexer.refreshRepoWorktrees(repoId);
+    const wt = indexer
+      .listRepos(profileId)[0]
+      ?.worktrees.find((w) => w.branch === "orphan");
+    if (wt === undefined) throw new Error("worktree not indexed");
+
+    // Unregister without deleting: drop the .git link, prune the metadata.
+    rmSync(join(wtPath, ".git"), { force: true });
+    git(repoPath, ["worktree", "prune"]);
+
+    const res = await bus.dispatch("worktree:removeMany", {
+      worktreeIds: [wt.id]
+    });
+
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.value.removed).toEqual([]);
+      expect(res.value.failed).toHaveLength(1);
+      expect(res.value.failed[0]?.message).toMatch(/no longer registered/i);
+    }
+    expect(existsSync(wtPath)).toBe(true);
+    expect(
+      indexer
+        .listRepos(profileId)[0]
+        ?.worktrees.some((w) => w.id === wt.id)
+    ).toBe(false);
   });
 });
 
