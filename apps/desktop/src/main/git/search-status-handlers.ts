@@ -29,6 +29,10 @@ export function registerSearchStatusHandlers(bus: CommandBus, db: DB): void {
     if (worktreeId === null) {
       return err({ kind: "repo", code: "not_found", message: "no worktree" });
     }
+    // Before the cache: a re-index flags a gone checkout without touching
+    // its snapshot, and that snapshot is the pre-deletion count.
+    const gone = missingWorktreeError(db, worktreeId);
+    if (gone !== null) return err(gone);
 
     const cached = db
       .prepare(
@@ -58,8 +62,6 @@ export function registerSearchStatusHandlers(bus: CommandBus, db: DB): void {
     if (wt === undefined) {
       return err({ kind: "repo", code: "not_found", message: "no worktree" });
     }
-    const gone = missingWorktreeError(db, worktreeId);
-    if (gone !== null) return err(gone);
     const raw = await execGit(["log", "-1", "--format=%cI"], wt.path);
     const lastActivityAt =
       raw.ok && raw.value.exitCode === 0 && raw.value.stdout.trim() !== ""

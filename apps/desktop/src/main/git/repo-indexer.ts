@@ -959,11 +959,12 @@ export class RepoIndexer {
         )
         .all(r.id) as WorktreeRow[]
     ).map((w): Worktree => {
-      // A gone checkout has nothing dirty, ahead or behind — the cached counts
-      // are what was true before it went, and reading them as live is exactly
-      // the stale green badge this flag exists to retire. Zero them here, in
-      // the one place every consumer reads (sidebar, lenses, bulk sync), and
-      // keep the cached row so a remounted volume picks up where it left off.
+      // A gone checkout has nothing dirty, ahead, behind or merged — the
+      // cached counts are what was true before it went, and reading them as
+      // live is exactly the stale green badge this flag exists to retire.
+      // Zero them here, in the one place every sidebar consumer reads (rows,
+      // lenses, bulk sync), the same way `rowToState` zeroes the header's
+      // snapshot, and keep the cached row so a remounted volume resumes.
       const missing = w.missing === 1;
       const wt: Worktree = {
         id: w.id,
@@ -973,10 +974,10 @@ export class RepoIndexer {
         dirty: missing ? 0 : (w.dirty ?? 0),
         ahead: missing ? 0 : (w.ahead ?? 0),
         behind: missing ? 0 : (w.behind ?? 0),
-        behindDefault: w.behind_default ?? 0,
+        behindDefault: missing ? 0 : (w.behind_default ?? 0),
         defaultBranch: w.default_branch ?? "",
-        mergedIntoDefault: w.merged_into_default === 1,
-        divergedFromDefault: w.diverged_from_default === 1,
+        mergedIntoDefault: !missing && w.merged_into_default === 1,
+        divergedFromDefault: !missing && w.diverged_from_default === 1,
         isDefaultBranch: w.is_default_branch === 1,
         pinned: w.pinned === 1,
         isPrimary: w.is_primary === 1
@@ -1397,12 +1398,18 @@ function worktreeShape(w: WorktreeInfo, isPrimary: boolean): Worktree {
     pinned: false,
     isPrimary
   };
-  // Git's `prunable` line is the primary signal, but git never reports a
-  // LOCKED worktree prunable — that is what locking is for — so a locked
+  // Git's `prunable` line is git's own `.git`-link test, so for an unlocked
+  // linked worktree it already answers what `checkoutExists` would — and git
+  // paid for that stat in a child process. Git never reports a LOCKED
+  // worktree prunable, though (that is what locking is for), so a locked
   // checkout on an unmounted drive would flip between the probe (gone) and
-  // the re-index (fine) forever. Ask the filesystem the same question the
-  // probe asks so the two sources agree.
-  if (w.prunable || !checkoutExists(w.path)) shape.missing = true;
+  // the re-index (fine) forever: ask the filesystem for those, and only
+  // those — a synchronous stat here runs on the main thread for every
+  // worktree of every repo in a rescan, and the locked-because-removable rows
+  // are the few that can hang it. The primary was just listed successfully.
+  if (w.prunable || (w.locked && !isPrimary && !checkoutExists(w.path))) {
+    shape.missing = true;
+  }
   if (w.locked) shape.locked = true;
   return shape;
 }

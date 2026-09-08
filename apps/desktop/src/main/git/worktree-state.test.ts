@@ -11,9 +11,14 @@ import { RepoIndexer } from "./repo-indexer";
 import { parseStatus, WorktreeStateService } from "./worktree-state";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
+// Address the repo with `-C` and keep the process cwd out of it, as
+// `gitProcessInvocation` does in production: a test here deletes a worktree
+// the probe just ran git in, and on Windows a descendant git.exe still
+// holding that directory as its native cwd fails the delete with EPERM/EBUSY
+// (see this directory's AGENTS.md).
 const systemGit: GitExec = (args, cwd) =>
   new Promise<Result<GitOutput>>((resolve) => {
-    const proc = spawn("git", args, { cwd });
+    const proc = spawn("git", ["-C", cwd, ...args], { cwd: tmpdir() });
     let stdout = "";
     let stderr = "";
     proc.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
@@ -243,6 +248,46 @@ describe("WorktreeStateService (system git)", () => {
     expect(back?.missing).toBeUndefined();
     expect(back).toMatchObject({ dirty: 0, branch: "feature" });
     expect(isolated.getCached(row.id)?.missing).toBeUndefined();
+  });
+
+  // A linked worktree nested inside the primary's tree (`<repo>/.worktrees/x`
+  // is a common layout) that loses its `.git` link is still a directory git
+  // can run in: `git status` walks up, finds the PRIMARY, and succeeds with
+  // that checkout's branch and dirt. Trusting the exit code cleared the flag
+  // the re-index had just set and relabelled the row with the parent's branch.
+  it("does not mistake the parent repo for a nested worktree whose link is gone", async () => {
+    const isolatedRoot = mkdtempSync(join(tmpdir(), "pwrgit-state-nested-"));
+    const repo = join(isolatedRoot, "repo");
+    const nested = join(repo, ".worktrees", "feature");
+    mkdirSync(repo, { recursive: true });
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.email", "t@t.com"]);
+    git(repo, ["config", "user.name", "Tester"]);
+    writeFileSync(join(repo, "README.md"), "# repo\n");
+    git(repo, ["add", "."]);
+    git(repo, ["commit", "-m", "init"]);
+    git(repo, ["worktree", "add", nested, "-b", "feature"]);
+
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({ name: "N", email: "n@t.com" });
+    const indexer = new RepoIndexer(isolatedDb, systemGit);
+    const added = await indexer.indexRepoAt(profile.id, repo);
+    if (!added.ok) throw new Error("indexRepoAt failed");
+    const row = added.value.worktrees.find((w) => w.branch === "feature");
+    if (row === undefined) throw new Error("nested worktree not indexed");
+    const isolated = new WorktreeStateService(isolatedDb, systemGit);
+    expect((await isolated.compute(row.id))?.missing).toBeUndefined();
+
+    rmSync(join(nested, ".git"));
+    await indexer.refreshRepoWorktrees(added.value.id);
+    const probed = await isolated.compute(row.id);
+    expect(probed).toMatchObject({ missing: true, branch: "feature", dirty: 0 });
+    expect(
+      isolatedDb
+        .prepare("SELECT branch, missing FROM worktrees WHERE id = ?")
+        .get(row.id)
+    ).toEqual({ branch: "feature", missing: 1 });
   });
 
   it("returns null for an unknown worktree id", async () => {

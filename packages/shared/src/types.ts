@@ -1059,7 +1059,7 @@ export type WorktreeState = {
   /** ISO-8601 time the snapshot was computed. */
   updatedAt: string;
   /** The checkout's directory is gone (see `Worktree.missing`); the counts
-   *  above are the last ones seen before it went, or zero. */
+   *  above read as zero while it is set. */
   missing?: boolean;
 };
 

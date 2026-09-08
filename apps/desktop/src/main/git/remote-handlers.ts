@@ -2,7 +2,8 @@ import {
   err,
   ok,
   type PullProgressPhase,
-  type PwrGitError
+  type PwrGitError,
+  type Result
 } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
@@ -29,7 +30,7 @@ import {
 } from "./git-service";
 import type { WorktreeRefresher } from "./worktree-handlers";
 import type { RepoIndexer } from "./repo-indexer";
-import { missingWorktreeError } from "./worktree-liveness";
+import { liveWorktreePath, worktreeMissingError } from "./worktree-liveness";
 import {
   formatPullDuration,
   PULL_RECOVERY_OPERATION_TIMEOUT_MS,
@@ -139,19 +140,25 @@ export function registerRemoteHandlers(
   operations: WorktreeOperationQueue,
   indexer?: Pick<RepoIndexer, "refreshRepoRemoteBranches">
 ): void {
+  // Not-found and a gone checkout both refuse in the lookup itself, so no
+  // handler below can reach git without the check.
   const worktreeOf = (
     worktreeId: string
-  ): { path: string; repoId: string } | null =>
-    (
-      db
-        .prepare("SELECT path, repo_id AS repoId FROM worktrees WHERE id = ?")
-        .get(worktreeId) as
-        | { path: string; repoId: string }
-        | undefined
-    ) ?? null;
+  ): Result<{ path: string; repoId: string }> => {
+    const row = db
+      .prepare(
+        "SELECT path, repo_id AS repoId, missing FROM worktrees WHERE id = ?"
+      )
+      .get(worktreeId) as
+      | { path: string; repoId: string; missing?: number }
+      | undefined;
+    if (row === undefined) return err(notFound);
+    if (row.missing === 1) return err(worktreeMissingError(row.path));
+    return ok({ path: row.path, repoId: row.repoId });
+  };
 
-  const pathOf = (worktreeId: string): string | null =>
-    worktreeOf(worktreeId)?.path ?? null;
+  const pathOf = (worktreeId: string): Result<string> =>
+    liveWorktreePath(db, worktreeId);
 
   const repoOf = (repoId: string): { path: string } | null => {
     const row = db
@@ -186,10 +193,9 @@ export function registerRemoteHandlers(
   // Ordinary sync successes log at info; Pull adds live phase/failure details
   // below because a long-running command cannot wait for command-bus logging.
   bus.register("remote:fetch", async (req) => {
-    const worktree = worktreeOf(req.worktreeId);
-    if (worktree === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = worktreeOf(req.worktreeId);
+    if (!live.ok) return live;
+    const worktree = live.value;
     const startedAt = Date.now();
     const result = await operations.runRepository(worktree.repoId, async () => {
       const fetched = await fetchRemote(execGit, worktree.path);
@@ -260,18 +266,16 @@ export function registerRemoteHandlers(
   });
 
   bus.register("remote:inspectSshRecovery", async (req) => {
-    const worktree = worktreeOf(req.worktreeId);
-    if (worktree === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = worktreeOf(req.worktreeId);
+    if (!live.ok) return live;
+    const worktree = live.value;
     return inspectSshRemoteRecovery(execGit, worktree.path);
   });
 
   bus.register("remote:testSshRecovery", async (req) => {
-    const worktree = worktreeOf(req.worktreeId);
-    if (worktree === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = worktreeOf(req.worktreeId);
+    if (!live.ok) return live;
+    const worktree = live.value;
     const startedAt = Date.now();
     logMain(
       "info",
@@ -291,10 +295,9 @@ export function registerRemoteHandlers(
   });
 
   bus.register("remote:applySshRecovery", async (req) => {
-    const worktree = worktreeOf(req.worktreeId);
-    if (worktree === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = worktreeOf(req.worktreeId);
+    if (!live.ok) return live;
+    const worktree = live.value;
     const result = await operations.run(req.worktreeId, () =>
       applySshRemoteRecovery(execGit, worktree.path, req.recovery)
     );
@@ -362,10 +365,9 @@ export function registerRemoteHandlers(
   });
 
   bus.register("remote:pull", async (req) => {
-    const worktree = worktreeOf(req.worktreeId);
-    if (worktree === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = worktreeOf(req.worktreeId);
+    if (!live.ok) return live;
+    const worktree = live.value;
     const path = worktree.path;
     const startedAt = Date.now();
     let currentPhase: PullWatchdogPhase = "starting";
@@ -533,10 +535,9 @@ export function registerRemoteHandlers(
   });
 
   bus.register("remote:push", async (req) => {
-    const worktree = worktreeOf(req.worktreeId);
-    if (worktree === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = worktreeOf(req.worktreeId);
+    if (!live.ok) return live;
+    const worktree = live.value;
     const startedAt = Date.now();
     const result = await operations.runRepository(worktree.repoId, async () => {
       const pushed = await pushRemote(execGit, worktree.path);
@@ -550,18 +551,16 @@ export function registerRemoteHandlers(
   });
 
   bus.register("remote:inspectDivergence", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const path = live.value;
     return inspectRemoteDivergence(execGit, path);
   });
 
   bus.register("remote:resetToUpstream", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const path = live.value;
     const startedAt = Date.now();
     const result = await operations.run(req.worktreeId, () =>
       resetToUpstream(execGit, path, req)
@@ -573,26 +572,23 @@ export function registerRemoteHandlers(
   });
 
   bus.register("remote:resetTargets", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const path = live.value;
     return resolveResetTargets(execGit, path);
   });
 
   bus.register("remote:inspectReset", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const path = live.value;
     return inspectRemoteReset(execGit, path, req.remoteRef);
   });
 
   bus.register("remote:resetToRemote", async (req) => {
-    const worktree = worktreeOf(req.worktreeId);
-    if (worktree === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = worktreeOf(req.worktreeId);
+    if (!live.ok) return live;
+    const worktree = live.value;
     const startedAt = Date.now();
     const result = await operations.run(req.worktreeId, () =>
       resetToRemote(execGit, worktree.path, req, req.mode)
@@ -612,10 +608,9 @@ export function registerRemoteHandlers(
   });
 
   bus.register("remote:rebaseOntoUpstream", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const path = live.value;
     const startedAt = Date.now();
     const result = await operations.run(req.worktreeId, () =>
       rebaseOntoUpstream(execGit, path, req)

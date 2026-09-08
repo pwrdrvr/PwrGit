@@ -1,4 +1,4 @@
-import { err, ok } from "@pwrgit/shared";
+import { err, ok, type Result } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
@@ -22,7 +22,7 @@ import { appendToGitignore, toGitignorePattern } from "./gitignore";
 import { readImagePreview } from "./image-preview";
 import { applyPartialSelection, partialFileDiff } from "./partial-staging";
 import type { WorktreeRefresher } from "./worktree-handlers";
-import { missingWorktreeError } from "./worktree-liveness";
+import { liveWorktreePath, worktreeMissingError } from "./worktree-liveness";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 const notFound = {
@@ -49,26 +49,22 @@ export function registerChangesHandlers(
     void refresher.refreshWorktree(worktreeId);
   };
 
-  const pathOf = (worktreeId: string): string | null =>
-    (
-      db.prepare("SELECT path FROM worktrees WHERE id = ?").get(worktreeId) as
-        | { path: string }
-        | undefined
-    )?.path ?? null;
+  // Not-found and a gone checkout both refuse here, in the one lookup every
+  // handler goes through, so no handler can reach git without the check.
+  const pathOf = (worktreeId: string): Result<string> =>
+    liveWorktreePath(db, worktreeId);
 
   bus.register("changes:list", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const path = live.value;
     return operations.run(req.worktreeId, () => readChanges(execGit, path));
   });
 
   bus.register("changes:stage", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const path = live.value;
     const result = await operations.run(req.worktreeId, () =>
       stagePaths(execGit, path, req.paths)
     );
@@ -83,10 +79,9 @@ export function registerChangesHandlers(
   });
 
   bus.register("changes:unstage", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const path = live.value;
     const result = await operations.run(req.worktreeId, () =>
       unstagePaths(execGit, path, req.paths)
     );
@@ -96,10 +91,9 @@ export function registerChangesHandlers(
   });
 
   bus.register("changes:applySelection", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const path = live.value;
     const result = await operations.run(req.worktreeId, () =>
       applyPartialSelection(
         execGit,
@@ -120,10 +114,9 @@ export function registerChangesHandlers(
   });
 
   bus.register("changes:discard", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const path = live.value;
     const result = await operations.run(req.worktreeId, () =>
       discardPaths(execGit, path, req.paths)
     );
@@ -135,10 +128,9 @@ export function registerChangesHandlers(
   });
 
   bus.register("changes:ignore", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const path = live.value;
     if (req.entries.length === 0) {
       return err({
         kind: "validation",
@@ -169,10 +161,9 @@ export function registerChangesHandlers(
   });
 
   bus.register("changes:discardAll", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const path = live.value;
     const result = await operations.run(req.worktreeId, () =>
       discardAllChanges(execGit, path)
     );
@@ -193,18 +184,18 @@ export function registerChangesHandlers(
     // to repo config.
     const row = db
       .prepare(
-        `SELECT w.path AS path, p.email AS email, p.author_name AS author_name
+        `SELECT w.path AS path, w.missing AS missing, p.email AS email,
+                p.author_name AS author_name
          FROM worktrees w
          JOIN repos r ON r.id = w.repo_id
          JOIN profiles p ON p.id = r.profile_id
          WHERE w.id = ?`
       )
       .get(req.worktreeId) as
-      | { path: string; email: string; author_name: string | null }
+      | { path: string; missing?: number; email: string; author_name: string | null }
       | undefined;
     if (row === undefined) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    if (row.missing === 1) return err(worktreeMissingError(row.path));
 
     const identity: CommitIdentity =
       row.author_name !== null
@@ -228,60 +219,53 @@ export function registerChangesHandlers(
   });
 
   bus.register("diff:fileSelection", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const path = live.value;
     return operations.run(req.worktreeId, () =>
       partialFileDiff(execGit, execGitBinary, path, req.path, req.staged)
     );
   });
 
   bus.register("diff:commit", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const path = live.value;
     return commitDiff(execGit, path, req.hash);
   });
 
   bus.register("commit:lookup", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const path = live.value;
     return readCommit(execGit, path, req.hash);
   });
 
   bus.register("commit:files", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const path = live.value;
     return commitFiles(execGit, path, req.hash);
   });
 
   bus.register("commit:stats", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const path = live.value;
     return commitStats(execGit, path, req.hash);
   });
 
   bus.register("diff:commitFile", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const path = live.value;
     return commitFileDiff(execGit, path, req.hash, req.path);
   });
 
   bus.register("diff:image", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
-    const gone = missingWorktreeError(db, req.worktreeId);
-    if (gone !== null) return err(gone);
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const path = live.value;
     return readImagePreview(execGit, execGitBinary, path, req.path, req.rev);
   });
 }

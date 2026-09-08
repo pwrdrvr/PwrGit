@@ -287,6 +287,9 @@ export const STALE_AGE_DAYS = 14;
 
 export function isPrunableWorktree(w: Worktree, now: number = Date.now()): boolean {
   if (w.isDefaultBranch || w.isPrimary) return false;
+  // Nothing to prune: the checkout is already gone. The row says so itself,
+  // and "stale" beside "directory missing" would be two answers to one row.
+  if (w.missing === true) return false;
   if (w.dirty > 0) return false;
   // A merged PR is definitive — the work is in the base branch, so it's safe to
   // prune at any age. This catches squash/rebase merges that the git-ancestry

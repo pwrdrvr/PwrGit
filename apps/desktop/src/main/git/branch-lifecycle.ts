@@ -139,18 +139,25 @@ async function guardWorktrees(
   const listed = await listWorktrees(git, cwd);
   if (!listed.ok) return listed;
   for (const worktree of listed.value) {
-    const directory = await gitDirectory(git, worktree);
-    if (!directory.ok) return directory;
-    const operation = operationMarkers.find(([marker]) =>
-      existsSync(join(directory.value, marker))
-    );
-    if (operation !== undefined) {
-      return err(
-        lifecycleError(
-          "operation_in_progress",
-          `A ${operation[1]} is in progress in ${worktree.path}. Finish or abort it before changing branch refs.`
-        )
+    // A prunable entry has no checkout to be mid-operation in, and running
+    // git inside its missing directory fails — which used to refuse every
+    // rename and delete in the repo until the row was removed. Git itself
+    // still refuses to delete a branch such an entry holds, so the
+    // checked-out test below keeps applying to it.
+    if (!worktree.prunable) {
+      const directory = await gitDirectory(git, worktree);
+      if (!directory.ok) return directory;
+      const operation = operationMarkers.find(([marker]) =>
+        existsSync(join(directory.value, marker))
       );
+      if (operation !== undefined) {
+        return err(
+          lifecycleError(
+            "operation_in_progress",
+            `A ${operation[1]} is in progress in ${worktree.path}. Finish or abort it before changing branch refs.`
+          )
+        );
+      }
     }
     if (
       !worktree.detached &&

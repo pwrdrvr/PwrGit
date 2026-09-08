@@ -128,6 +128,26 @@ describe("guardedSwitchBranch", () => {
     expect(confirmDialog).toHaveBeenCalledOnce();
   });
 
+  // "Carry changes over" is the wrong question for a directory that does not
+  // exist; the answer was a confirm followed by the switch's own refusal.
+  it("refuses a gone checkout without offering to carry changes over", async () => {
+    dispatch.mockResolvedValueOnce({
+      ok: false,
+      error: {
+        kind: "repo",
+        code: "worktree_missing",
+        message: "This worktree's folder no longer exists: /wt/gone."
+      }
+    });
+    await expect(guardedSwitchBranch(args)).resolves.toEqual({
+      kind: "failed",
+      code: "worktree_missing",
+      message: "This worktree's folder no longer exists: /wt/gone."
+    });
+    expect(confirmDialog).not.toHaveBeenCalled();
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+
   it("skips the state read entirely when the caller already confirmed", async () => {
     dispatch.mockResolvedValueOnce({ ok: true, value: null });
     await expect(

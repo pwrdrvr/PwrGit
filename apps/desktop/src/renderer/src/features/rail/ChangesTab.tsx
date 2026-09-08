@@ -369,7 +369,10 @@ export function ChangesTab({
     let active = true;
     const load = (): void => {
       void dispatch("changes:list", { worktreeId: wtId }).then((r) => {
-        if (active && r.ok) setChanges(r.value);
+        if (!active) return;
+        // A refusal (the checkout is gone) must not leave the previous
+        // selection's files on screen under this worktree's name.
+        setChanges(r.ok ? r.value : null);
       });
     };
     load();
