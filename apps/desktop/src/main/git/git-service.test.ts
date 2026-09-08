@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ok, type Commit } from "@pwrgit/shared";
 import {
   parseBranchRefs,
@@ -12,9 +12,13 @@ import {
   readChanges,
   readCheckoutDirtyCount,
   readCommit,
-  topoMergeCommits
+  topoMergeCommits,
+  worktreeRemove
 } from "./git-service";
 import type { GitExec } from "./dugite";
+import { mkdtempSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 describe("parseNameStatus", () => {
   it("parses modified/added/deleted and takes the NEW path for renames", () => {
@@ -258,6 +262,67 @@ describe("parseWorktreeList", () => {
     );
     expect(out[0]).toMatchObject({ bare: true, branch: "(bare)" });
     expect(out[1]).toMatchObject({ detached: true, branch: "detached@0123456" });
+  });
+});
+
+describe("worktreeRemove", () => {
+  let root: string;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "pwrgit-wtremove-"));
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const notAWorkingTree = (path: string) =>
+    ok({
+      stdout: "",
+      stderr: `fatal: '${path}' is not a working tree\n`,
+      exitCode: 128
+    });
+  /** A git that refuses `worktree remove` and records every command. */
+  const disowningGit =
+    (path: string, calls: string[][]): GitExec =>
+    async (args) => {
+      calls.push(args);
+      return args[0] === "worktree" && args[1] === "remove"
+        ? notAWorkingTree(path)
+        : ok({ stdout: "", stderr: "", exitCode: 0 });
+    };
+
+  // The sidebar still lists a worktree whose directory is gone and whose
+  // metadata git has already pruned (a `git worktree prune` from another tool,
+  // or a cleanup that deleted the checkout). Removing it is the only way to
+  // drop the row, so "is not a working tree" must count as done when nothing
+  // is left on disk — not fail on the very first attempt.
+  it("treats an unregistered worktree with no directory as already removed", async () => {
+    const gone = join(root, "gone");
+    const calls: string[][] = [];
+
+    const res = await worktreeRemove(disowningGit(gone, calls), root, gone);
+
+    expect(res.ok).toBe(true);
+    // Git only says "not a working tree" for a path it no longer lists, so
+    // there is no metadata to prune — and `worktree prune` is repo-wide: it
+    // would also unregister worktrees on a volume that is merely unmounted.
+    expect(calls).toEqual([["worktree", "remove", gone]]);
+  });
+
+  // A directory git no longer recognises may hold work from somewhere else
+  // (a re-clone into the same path, a pruned-then-restored checkout). Never
+  // delete it on the caller's behalf; say what happened instead.
+  it("keeps an unregistered directory and reports it as not a worktree", async () => {
+    const orphan = join(root, "orphan");
+    mkdirSync(orphan);
+
+    const res = await worktreeRemove(disowningGit(orphan, []), root, orphan);
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.code).toBe("not_a_worktree");
+      expect(res.error.message).toMatch(/no longer registered/i);
+    }
+    expect(existsSync(orphan)).toBe(true);
   });
 });
 
