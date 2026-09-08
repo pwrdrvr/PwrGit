@@ -1240,6 +1240,8 @@ export type LaneGraph = {
    *  This is per-worktree (unlike the cached lane graph) and lets consumers
    *  distinguish a branch's own commits from shared/base history. */
   headOnlyCommits: string[];
+  /** Actual tracking ref of the focused branch when it has unapplied work. */
+  headUpstream?: string;
   defaultBranch: string;
   /** The concrete ref used as the default-branch comparison point, usually
    *  `origin/main` when a remote default is configured. */
