@@ -135,6 +135,35 @@ describe("safe local branch lifecycle", () => {
     ).toContain(linkedPath.replaceAll("\\", "/"));
   });
 
+  // A worktree deleted behind git's back (an agent cleaning up) stays listed
+  // as prunable. Inspecting it for an in-progress operation spawned git in a
+  // directory that no longer exists, and that failure refused every rename
+  // and delete in the repo — of branches the dead worktree never held.
+  it("ignores a prunable worktree except for the branch it still holds", async () => {
+    const { root, path } = repo("prunable");
+    git(path, "branch", "unrelated");
+    const gone = join(root, "gone");
+    git(path, "worktree", "add", gone, "-b", "held");
+    rmSync(gone, { recursive: true, force: true, maxRetries: 15, retryDelay: 300 });
+
+    const renamed = await renameLocalBranch(
+      systemGit,
+      path,
+      { branch: "unrelated", expectedHead: head(path, "unrelated") },
+      "renamed"
+    );
+    expect(renamed).toEqual(ok(undefined));
+    expect(hasRef(path, "refs/heads/renamed")).toBe(true);
+
+    const held = await deleteLocalBranch(
+      systemGit,
+      path,
+      { branch: "held", expectedHead: head(path, "held") },
+      true
+    );
+    expect(!held.ok && held.error.code).toBe("branch_checked_out");
+  });
+
   it("rejects a rename target held by an unborn worktree", async () => {
     const { root, path } = repo("unborn-target");
     git(path, "branch", "source");

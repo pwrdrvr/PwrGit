@@ -539,6 +539,10 @@ describe("staleness (isPrunableWorktree + Stale lens)", () => {
     expect(isPrunableWorktree(diverged)).toBe(true);
   });
 
+  it("excludes a worktree whose directory is gone", () => {
+    expect(isPrunableWorktree({ ...prunable, missing: true })).toBe(false);
+  });
+
   it("excludes dirty, unmerged, default, recent, or primary worktrees", () => {
     expect(isPrunableWorktree({ ...prunable, dirty: 2 })).toBe(false);
     expect(isPrunableWorktree({ ...prunable, mergedIntoDefault: false })).toBe(

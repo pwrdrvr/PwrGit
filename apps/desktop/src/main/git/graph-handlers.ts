@@ -9,6 +9,7 @@ import type { CommandBus } from "../command-bus";
 import { prSummaryFromRow, prSummarySelect } from "../forge/pr-row";
 import type { DB } from "../persistence/db";
 import { execGit } from "./dugite";
+import { missingWorktreeError } from "./worktree-liveness";
 import {
   branchTips,
   isUnbornHead,
@@ -72,6 +73,8 @@ export function registerGraphHandlers(
         message: "worktree not found"
       });
     }
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
 
     const def = await state.resolveDefaultBranch(wt.repo_id, wt.path);
     const unborn = await isUnbornHead(execGit, wt.path);
@@ -109,6 +112,8 @@ export function registerGraphHandlers(
     if (wt === undefined) {
       return err({ kind: "repo", code: "not_found", message: "worktree not found" });
     }
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
 
     const unborn = await isUnbornHead(execGit, wt.path);
     if (!unborn.ok) return unborn;

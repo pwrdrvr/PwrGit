@@ -2,6 +2,7 @@ import type { WorktreeState } from "@pwrgit/shared";
 import type { DB } from "../persistence/db";
 import { mapLimit } from "../util/map-limit";
 import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
+import { checkoutExists } from "./worktree-liveness";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 export type ParsedStatus = {
@@ -49,9 +50,12 @@ type WorktreeRow = {
   path: string;
   repo_id: string;
   repo_path: string;
+  missing: number;
 };
 type StateRow = {
   worktree_id: string;
+  /** Joined from `worktrees.missing`, the one home of that flag. */
+  missing: number;
   branch: string;
   head: string;
   has_upstream: number;
@@ -74,22 +78,29 @@ type CachedDefaultBranch = {
 };
 
 function rowToState(r: StateRow): WorktreeState {
+  // A gone checkout has nothing dirty, ahead, behind or merged: the stored
+  // counts are what was true before it went, and reading them as live is the
+  // stale badge the flag exists to retire. Zero them at read time — the row
+  // itself is kept, so a remounted volume resumes from a real snapshot — in
+  // the same way `RepoIndexer` zeroes the sidebar's `Worktree` projection.
+  const missing = r.missing === 1;
   const s: WorktreeState = {
     worktreeId: r.worktree_id,
     branch: r.branch,
     head: r.head,
     hasUpstream: r.has_upstream === 1,
-    ahead: r.ahead,
-    behind: r.behind,
-    dirty: r.dirty,
-    behindDefault: r.behind_default,
+    ahead: missing ? 0 : r.ahead,
+    behind: missing ? 0 : r.behind,
+    dirty: missing ? 0 : r.dirty,
+    behindDefault: missing ? 0 : r.behind_default,
     defaultBranch: r.default_branch,
-    mergedIntoDefault: r.merged_into_default === 1,
-    divergedFromDefault: r.diverged_from_default === 1,
+    mergedIntoDefault: !missing && r.merged_into_default === 1,
+    divergedFromDefault: !missing && r.diverged_from_default === 1,
     isDefaultBranch: r.is_default_branch === 1,
     updatedAt: r.updated_at
   };
   if (r.last_activity_at !== null) s.lastActivityAt = r.last_activity_at;
+  if (missing) s.missing = true;
   return s;
 }
 
@@ -122,7 +133,11 @@ export class WorktreeStateService {
 
   getCached(worktreeId: string): WorktreeState | null {
     const row = this.db
-      .prepare("SELECT * FROM worktree_state WHERE worktree_id = ?")
+      .prepare(
+        `SELECT s.*, w.missing AS missing
+         FROM worktree_state s JOIN worktrees w ON w.id = s.worktree_id
+         WHERE s.worktree_id = ?`
+      )
       .get(worktreeId) as StateRow | undefined;
     return row === undefined ? null : rowToState(row);
   }
@@ -130,12 +145,48 @@ export class WorktreeStateService {
   private worktreeRow(worktreeId: string): WorktreeRow | null {
     const row = this.db
       .prepare(
-        `SELECT w.id, w.branch, w.path, w.repo_id, r.path AS repo_path
+        `SELECT w.id, w.branch, w.path, w.repo_id, w.missing,
+                r.path AS repo_path
          FROM worktrees w JOIN repos r ON r.id = w.repo_id
          WHERE w.id = ?`
       )
       .get(worktreeId) as WorktreeRow | undefined;
     return row ?? null;
+  }
+
+  /**
+   * The probe found no checkout behind the row. Flag it; `rowToState` reads
+   * the counts as zero while the flag is set, and the stored snapshot is kept
+   * so a remounted volume resumes from it. Not pruned: a volume that is
+   * merely unmounted reads the same way, and the next successful probe
+   * clears the flag. A row that never had a snapshot gets a blank one — the
+   * refresher announces a flip by comparing snapshots, and null-to-null is
+   * not a change it can see.
+   */
+  private markMissing(wt: WorktreeRow): WorktreeState | null {
+    this.db.transaction(() => {
+      this.db
+        .prepare("UPDATE worktrees SET missing = 1 WHERE id = ?")
+        .run(wt.id);
+      if (this.getCached(wt.id) === null) {
+        this.upsert({
+          worktreeId: wt.id,
+          branch: wt.branch,
+          head: "",
+          hasUpstream: false,
+          ahead: 0,
+          behind: 0,
+          dirty: 0,
+          behindDefault: 0,
+          defaultBranch: "",
+          mergedIntoDefault: false,
+          divergedFromDefault: false,
+          isDefaultBranch: false,
+          updatedAt: new Date().toISOString()
+        });
+      }
+    })();
+    return this.getCached(wt.id);
   }
 
   /**
@@ -294,6 +345,14 @@ export class WorktreeStateService {
     const wt = this.worktreeRow(worktreeId);
     if (wt === null) return null;
 
+    // Ask the filesystem before asking git. A missing checkout needs no
+    // process spawned into it — and the exit code alone cannot be trusted
+    // either way: `git status` from a directory whose own `.git` link is gone
+    // resolves some PARENT repository (a linked worktree nested in the
+    // primary's tree, reduced to a plain folder) and succeeds, reporting
+    // that repo's branch and dirt as this row's.
+    if (!checkoutExists(wt.path)) return this.markMissing(wt);
+
     const statusRaw = await this.git(
       [
         "status",
@@ -307,9 +366,18 @@ export class WorktreeStateService {
       wt.path,
       NO_OPTIONAL_LOCKS
     );
-    if (!statusRaw.ok) return this.getCached(worktreeId);
-    const status = requireExit0(statusRaw.value, ["status"]);
+    // The checkout was there a moment ago, so a failed status is transient
+    // (an index lock, a repo mid-write, a deletion racing this probe — the
+    // next probe settles it): keep the cached snapshot.
+    const status = statusRaw.ok
+      ? requireExit0(statusRaw.value, ["status"])
+      : statusRaw;
     if (!status.ok) return this.getCached(worktreeId);
+    if (wt.missing === 1) {
+      this.db
+        .prepare("UPDATE worktrees SET missing = 0 WHERE id = ?")
+        .run(worktreeId);
+    }
     const parsed = parseStatus(status.value.stdout);
 
     let lastActivityAt: string | undefined;

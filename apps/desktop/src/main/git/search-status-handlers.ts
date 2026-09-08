@@ -2,6 +2,7 @@ import { err, ok, type SearchHitStatus } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import type { DB } from "../persistence/db";
 import { execGit } from "./dugite";
+import { missingWorktreeError } from "./worktree-liveness";
 
 /**
  * Per-hit status for ⌘F results. Deliberately ONE unit of work per call —
@@ -28,6 +29,10 @@ export function registerSearchStatusHandlers(bus: CommandBus, db: DB): void {
     if (worktreeId === null) {
       return err({ kind: "repo", code: "not_found", message: "no worktree" });
     }
+    // Before the cache: a re-index flags a gone checkout without touching
+    // its snapshot, and that snapshot is the pre-deletion count.
+    const gone = missingWorktreeError(db, worktreeId);
+    if (gone !== null) return err(gone);
 
     const cached = db
       .prepare(

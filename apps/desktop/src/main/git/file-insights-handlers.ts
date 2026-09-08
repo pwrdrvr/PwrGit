@@ -1,7 +1,8 @@
-import { err, ok } from "@pwrgit/shared";
+import { err, ok, type Result } from "@pwrgit/shared";
 import type { CommandBus, CommandContext } from "../command-bus";
 import type { DB } from "../persistence/db";
 import { execGit } from "./dugite";
+import { liveWorktreePath } from "./worktree-liveness";
 import {
   readFileBlame,
   readFileContents,
@@ -84,12 +85,8 @@ export function registerFileInsightHandlers(
   const ownedBy = (operation: ActiveOperation, ctx: CommandContext): boolean =>
     operation.owner === ownerId(ctx);
 
-  const pathOf = (worktreeId: string): string | null =>
-    (
-      db.prepare("SELECT path FROM worktrees WHERE id = ?").get(worktreeId) as
-        | { path: string }
-        | undefined
-    )?.path ?? null;
+  const pathOf = (worktreeId: string): Result<string> =>
+    liveWorktreePath(db, worktreeId);
 
   const begin = (
     kind: FileInsightKind,
@@ -119,14 +116,9 @@ export function registerFileInsightHandlers(
   };
 
   bus.register("file:history", async (req, ctx) => {
-    const cwd = pathOf(req.worktreeId);
-    if (cwd === null) {
-      return err({
-        kind: "repo",
-        code: "not_found",
-        message: "worktree not found"
-      });
-    }
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const cwd = live.value;
     const started = begin("history", req.operationId, ctx);
     if (started === null) {
       return err({
@@ -150,14 +142,9 @@ export function registerFileInsightHandlers(
   });
 
   bus.register("file:blame", async (req, ctx) => {
-    const cwd = pathOf(req.worktreeId);
-    if (cwd === null) {
-      return err({
-        kind: "repo",
-        code: "not_found",
-        message: "worktree not found"
-      });
-    }
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const cwd = live.value;
     const started = begin("blame", req.operationId, ctx);
     if (started === null) {
       return err({
@@ -181,14 +168,9 @@ export function registerFileInsightHandlers(
   });
 
   bus.register("file:contents", async (req, ctx) => {
-    const cwd = pathOf(req.worktreeId);
-    if (cwd === null) {
-      return err({
-        kind: "repo",
-        code: "not_found",
-        message: "worktree not found"
-      });
-    }
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const cwd = live.value;
     const started = begin("contents", req.operationId, ctx);
     if (started === null) {
       return err({
@@ -216,14 +198,9 @@ export function registerFileInsightHandlers(
   // demands for anything that spawns off an IPC message. One live message
   // read per renderer; a newer commit's fetch cancels the older.
   bus.register("commit:message", async (req, ctx) => {
-    const cwd = pathOf(req.worktreeId);
-    if (cwd === null) {
-      return err({
-        kind: "repo",
-        code: "not_found",
-        message: "worktree not found"
-      });
-    }
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const cwd = live.value;
     const started = begin("message", "commit-message", ctx);
     if (started === null) return ok(null);
     const { key, operation } = started;
@@ -241,14 +218,9 @@ export function registerFileInsightHandlers(
   });
 
   bus.register("file:search", async (req, ctx) => {
-    const cwd = pathOf(req.worktreeId);
-    if (cwd === null) {
-      return err({
-        kind: "repo",
-        code: "not_found",
-        message: "worktree not found"
-      });
-    }
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const cwd = live.value;
     if (req.query.trim() === "") return ok([]);
     // Bounded and cancellable like the other two reads: a window that closes
     // mid-read should not leave `ls-files` running for results nobody will see.

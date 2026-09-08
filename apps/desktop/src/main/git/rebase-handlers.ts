@@ -8,6 +8,7 @@ import {
 import type { CommandBus } from "../command-bus";
 import type { DB } from "../persistence/db";
 import { execGit, type GitExec } from "./dugite";
+import { missingWorktreeError } from "./worktree-liveness";
 import type { CommitIdentity } from "./git-service";
 import {
   applyRebase,
@@ -101,6 +102,8 @@ export function registerRebaseHandlers(
         message: "Worktree not found."
       });
     }
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     const plan = planRebase(req.commits, req.op);
     if (!plan.valid) return ok(plan);
     const valid = await validateSelection(
@@ -124,6 +127,8 @@ export function registerRebaseHandlers(
         message: "Worktree not found."
       });
     }
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
 
     const plan = planRebase(req.commits, req.op);
     if (!plan.valid) {
@@ -180,6 +185,8 @@ export function registerRebaseHandlers(
         message: "Worktree not found."
       });
     }
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     if (approval === undefined) {
       return err({
         kind: "rebase",

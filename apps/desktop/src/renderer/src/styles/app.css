@@ -1847,6 +1847,21 @@ textarea,
   letter-spacing: 0.03em;
   text-transform: uppercase;
 }
+/* The checkout is gone. Filled, unlike "in default": it is rare, it is a
+   problem, and the row's status badges are absent precisely because of it —
+   so it has to carry the row's whole story on its own. */
+.wt-tag--missing {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+.wt-row.is-missing .wt-row__branch {
+  color: var(--text-muted);
+}
+.wt-tag--locked {
+  background: transparent;
+  color: var(--text-subtle);
+  padding: 0 2px;
+}
 .wt-row__branch-icon--local {
   color: var(--accent);
 }

@@ -238,6 +238,32 @@ describe("WorktreeHeader default-branch drift", () => {
     expect(drift()).toBeNull();
   });
 
+  it("says the directory is missing ahead of any sync reading", async () => {
+    const syncChip = (): HTMLElement | null =>
+      container.querySelector(".sync-chip:not(.sync-chip--drift)");
+    await render({ ...feature, behind: 24, missing: true });
+    expect(syncChip()?.textContent).toBe("directory missing");
+    expect(syncChip()?.classList.contains("sync-chip--warn")).toBe(true);
+    // The live snapshot carries the flag too, once the probe has run.
+    await render(feature, {
+      worktreeId: feature.id,
+      branch: "releases/1.0",
+      head: "abc1234",
+      hasUpstream: true,
+      ahead: 0,
+      behind: 3,
+      dirty: 0,
+      behindDefault: 0,
+      defaultBranch: "main",
+      mergedIntoDefault: false,
+      divergedFromDefault: false,
+      isDefaultBranch: false,
+      updatedAt: "2026-08-12T00:00:00.000Z",
+      missing: true
+    });
+    expect(syncChip()?.textContent).toBe("directory missing");
+  });
+
   it("says nothing on the default branch, or once the work is in it", async () => {
     await render(worktree);
     expect(drift()).toBeNull();

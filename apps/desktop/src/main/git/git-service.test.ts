@@ -263,6 +263,42 @@ describe("parseWorktreeList", () => {
     expect(out[0]).toMatchObject({ bare: true, branch: "(bare)" });
     expect(out[1]).toMatchObject({ detached: true, branch: "detached@0123456" });
   });
+
+  // Git keeps listing a worktree whose directory was deleted behind its back
+  // (Codex cleaning up ~/.codex/worktrees, a shell rm -rf) — it just appends a
+  // `prunable <reason>` line. Dropping that line re-indexed the dead checkout
+  // as healthy on every rescan, so the sidebar row outlived the directory.
+  it("reads the prunable and locked lines, with or without a reason", () => {
+    const out = parseWorktreeList(
+      [
+        "worktree /repo/main",
+        "HEAD abc123",
+        "branch refs/heads/main",
+        "",
+        "worktree /repo/wt/gone",
+        "HEAD def456",
+        "branch refs/heads/feat/gone",
+        "prunable gitdir file points to non-existent location",
+        "",
+        "worktree /repo/wt/usb",
+        "HEAD 789abc",
+        "branch refs/heads/feat/usb",
+        "locked",
+        "",
+        "worktree /repo/wt/reasoned",
+        "HEAD 789abc",
+        "branch refs/heads/feat/reasoned",
+        "locked on removable media",
+        ""
+      ].join("\n")
+    );
+    expect(out.map((w) => [w.prunable, w.locked])).toEqual([
+      [false, false],
+      [true, false],
+      [false, true],
+      [false, true]
+    ]);
+  });
 });
 
 describe("worktreeRemove", () => {

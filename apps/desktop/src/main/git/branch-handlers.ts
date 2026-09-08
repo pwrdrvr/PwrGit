@@ -6,6 +6,7 @@ import type { DB } from "../persistence/db";
 import type { SettingsService } from "../settings/settings-service";
 import { deleteLocalBranch, renameLocalBranch } from "./branch-lifecycle";
 import { execGit } from "./dugite";
+import { worktreeMissingError } from "./worktree-liveness";
 import {
   checkoutNewBranchAt,
   createBranchAt,
@@ -35,6 +36,7 @@ const partialBranchMutationCodes = new Set([
 
 type Row = {
   path: string;
+  missing?: number;
   repo_id: string;
   repo_name: string;
   repo_path: string;
@@ -54,15 +56,22 @@ export function registerBranchHandlers(
   operations: WorktreeOperationQueue,
   settings: SettingsService
 ): void {
-  const rowOf = (worktreeId: string): Row | undefined =>
-    db
+  // Not-found and a gone checkout both refuse in the lookup itself, so no
+  // handler below can reach git without the check.
+  const rowOf = (worktreeId: string): Result<Row> => {
+    const row = db
       .prepare(
-        `SELECT w.path AS path, w.repo_id AS repo_id, r.name AS repo_name,
-                r.path AS repo_path, r.profile_id AS profile_id
+        `SELECT w.path AS path, w.missing AS missing, w.repo_id AS repo_id,
+                r.name AS repo_name, r.path AS repo_path,
+                r.profile_id AS profile_id
          FROM worktrees w JOIN repos r ON r.id = w.repo_id
          WHERE w.id = ?`
       )
       .get(worktreeId) as Row | undefined;
+    if (row === undefined) return err(notFound);
+    if (row.missing === 1) return err(worktreeMissingError(row.path));
+    return ok(row);
+  };
 
   const repoOf = (repoId: string): RepoRow | undefined =>
     db
@@ -87,8 +96,9 @@ export function registerBranchHandlers(
   };
 
   bus.register("worktree:readDirty", async (req) => {
-    const row = rowOf(req.worktreeId);
-    if (row === undefined) return err(notFound);
+    const live = rowOf(req.worktreeId);
+    if (!live.ok) return live;
+    const row = live.value;
     return operations.run(req.worktreeId, async () => {
       const dirty = await readCheckoutDirtyCount(execGit, row.path);
       if (!dirty.ok) return dirty;
@@ -97,14 +107,16 @@ export function registerBranchHandlers(
   });
 
   bus.register("branch:list", async (req) => {
-    const row = rowOf(req.worktreeId);
-    if (row === undefined) return err(notFound);
+    const live = rowOf(req.worktreeId);
+    if (!live.ok) return live;
+    const row = live.value;
     return listBranches(execGit, row.path);
   });
 
   bus.register("branch:localNames", async (req) => {
-    const row = rowOf(req.worktreeId);
-    if (row === undefined) return err(notFound);
+    const live = rowOf(req.worktreeId);
+    if (!live.ok) return live;
+    const row = live.value;
     return listLocalBranchNames(execGit, row.path);
   });
 
@@ -143,8 +155,9 @@ export function registerBranchHandlers(
   });
 
   bus.register("branch:create", async (req) => {
-    const row = rowOf(req.worktreeId);
-    if (row === undefined) return err(notFound);
+    const live = rowOf(req.worktreeId);
+    if (!live.ok) return live;
+    const row = live.value;
 
     if (req.checkout === "here") {
       // The renderer disables this choice for a dirty worktree, but its view of
@@ -241,8 +254,9 @@ export function registerBranchHandlers(
   });
 
   bus.register("branch:switch", async (req) => {
-    const row = rowOf(req.worktreeId);
-    if (row === undefined) return err(notFound);
+    const live = rowOf(req.worktreeId);
+    if (!live.ok) return live;
+    const row = live.value;
     const result = await operations.run(req.worktreeId, () =>
       switchBranch(execGit, row.path, req.branch)
     );

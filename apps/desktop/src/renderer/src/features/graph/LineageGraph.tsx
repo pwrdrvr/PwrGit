@@ -356,7 +356,10 @@ export function LineageGraph({
           const message = r.error.message.split("\n")[0];
           setLoadError(message);
           setLoading(false);
+          // Keyed: every `graph:changed` for the repo reloads, and a
+          // worktree whose folder is gone fails each time the same way.
           showErrorToast({
+            key: `history:${worktreeId}`,
             title: "History unavailable",
             message,
             detail: r.error.message

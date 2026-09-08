@@ -39,7 +39,9 @@ function profileRepos(db: DB, profileId: string): BulkSyncRepoInput[] | null {
       `SELECT w.id, w.repo_id AS repoId, w.branch, w.path
        FROM worktrees w
        JOIN repos r ON r.id = w.repo_id
-       WHERE r.profile_id = ?
+       -- A checkout that is gone has nothing to pull; the repo-level fetch
+       -- still runs from the primary.
+       WHERE r.profile_id = ? AND w.missing = 0
        ORDER BY w.repo_id, w.is_primary DESC, w.branch COLLATE NOCASE, w.id`
     )
     .all(profileId) as WorktreeRow[];

@@ -66,6 +66,13 @@ export type Worktree = {
   isPrimary: boolean;
   /** Most-recent GitHub PR for this branch, if any (populated when fetched). */
   pr?: PrSummary;
+  /** The checkout is gone — its directory (or its `.git` link) no longer
+   *  exists — but git still registers it and the row is kept so the user can
+   *  see what happened and remove it. Counts are zeroed while set; every
+   *  per-worktree git action refuses with `worktree_missing`. */
+  missing?: boolean;
+  /** `git worktree lock`ed (removable media); removal needs `--force`. */
+  locked?: boolean;
 };
 
 /** A branch a worktree can switch to (a local head or a remote-tracking ref). */
@@ -1051,6 +1058,9 @@ export type WorktreeState = {
   lastActivityAt?: string;
   /** ISO-8601 time the snapshot was computed. */
   updatedAt: string;
+  /** The checkout's directory is gone (see `Worktree.missing`); the counts
+   *  above read as zero while it is set. */
+  missing?: boolean;
 };
 
 /** Profile-wide repository synchronization without destructive recovery. */
