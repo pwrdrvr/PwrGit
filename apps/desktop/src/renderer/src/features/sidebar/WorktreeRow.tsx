@@ -75,6 +75,11 @@ export function WorktreeRow({
   platform?: string;
 }) {
   const prunable = isPrunableWorktree(worktree, now);
+  // The checkout is gone (deleted outside PwrGit, or on a volume that is not
+  // mounted). Nothing is dirty, ahead or behind in a directory that does not
+  // exist, so the count badges stay off whatever the row carries; the tag
+  // says why, and the row keeps Remove.
+  const missing = worktree.missing === true;
   // The primary checkout sits in the repo's own directory, which the folder row
   // directly above already names — repeating it on every repo's first row would
   // be noise, so only linked worktrees carry the folder.
@@ -104,7 +109,9 @@ export function WorktreeRow({
     <div
       className={`wt-row${selected ? " is-selected" : ""}${
         multiSelected ? " is-multiselected" : ""
-      }${prunable ? " is-stale" : ""}${dragging ? " is-dragging" : ""}${
+      }${prunable ? " is-stale" : ""}${missing ? " is-missing" : ""}${
+        dragging ? " is-dragging" : ""
+      }${
         dropPosition === null ? "" : ` is-drop-${dropPosition}`
       }`}
       data-wt-id={worktree.id}
@@ -198,6 +205,26 @@ export function WorktreeRow({
           primary
         </span>
       )}
+      {missing && (
+        <span
+          className="wt-tag wt-tag--missing"
+          title={
+            `${worktree.path} no longer exists, but git still registers the ` +
+            "worktree. Remove it to drop this row, or put the folder back " +
+            "(remount the volume) and refresh the repo."
+          }
+        >
+          directory missing
+        </span>
+      )}
+      {worktree.locked === true && (
+        <span
+          className="wt-tag wt-tag--locked"
+          title="Locked with `git worktree lock` (usually on removable media); removing it needs --force"
+        >
+          locked
+        </span>
+      )}
       {/* ●3 / ↑2 / ↓1 are the row's whole status story, and as bare glyphs they
           reached a screen reader as "3", "2", "1" run together with the branch
           name — the meaning lived only in a symbol and a colour (SC 1.1.1,
@@ -209,7 +236,7 @@ export function WorktreeRow({
           element and its text should stay exactly what is painted. The
           sr-only span is `position: absolute`, so it is not a flex item and
           costs the row no width, no gap and no height. */}
-      {worktree.dirty > 0 && (
+      {!missing && worktree.dirty > 0 && (
         <>
           <span className="badge badge--warn" aria-hidden="true">
             ●{worktree.dirty}
@@ -220,7 +247,7 @@ export function WorktreeRow({
           </span>
         </>
       )}
-      {worktree.ahead > 0 && (
+      {!missing && worktree.ahead > 0 && (
         <>
           <span className="badge-text badge-text--ok" aria-hidden="true">
             ↑{worktree.ahead}
@@ -230,7 +257,7 @@ export function WorktreeRow({
           </span>
         </>
       )}
-      {worktree.behind > 0 && (
+      {!missing && worktree.behind > 0 && (
         <>
           <span className="badge-text badge-text--warn" aria-hidden="true">
             ↓{worktree.behind}
@@ -242,7 +269,7 @@ export function WorktreeRow({
       )}
       {worktree.pr !== undefined && !worktree.isDefaultBranch ? (
         <PrChip pr={worktree.pr} />
-      ) : (
+      ) : missing ? null : (
         <>
           {!worktree.isDefaultBranch && worktree.mergedIntoDefault && (
             <span
@@ -333,7 +360,9 @@ export function WorktreeRow({
         worktree={worktree}
         className="wt-row__menu"
         platform={platform}
-        onResetToRemote={() => openResetToRemote({ worktree })}
+        {...(missing
+          ? {}
+          : { onResetToRemote: () => openResetToRemote({ worktree }) })}
         {...(worktree.isPrimary ? {} : { onRemove })}
       />
     </div>

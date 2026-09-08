@@ -1,6 +1,7 @@
 import { err } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import type { DB } from "../persistence/db";
+import { missingWorktreeError } from "./worktree-liveness";
 import {
   execGit,
   execGitRecords,
@@ -26,6 +27,8 @@ export function registerSubmoduleHandlers(
       .prepare("SELECT path FROM worktrees WHERE id = ?")
       .get(req.worktreeId) as { path: string } | undefined;
     if (row === undefined) return err(notFound);
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     // Every Git command in the inspector is read-only and disables optional
     // locks. Do not hold the mutation queue during a potentially deep audit:
     // staging must remain responsive, and a concurrent index move can at worst

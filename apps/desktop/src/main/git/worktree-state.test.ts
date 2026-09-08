@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -192,6 +192,57 @@ describe("WorktreeStateService (system git)", () => {
     );
     expect((await isolated.compute(indexedWorktree.id))?.dirty).toBe(1);
     expect(isolated.getCached(indexedWorktree.id)?.dirty).toBe(1);
+  });
+
+  // The 15s poll and the window-focus probe are the first to learn that a
+  // checkout was deleted behind PwrGit's back, and they used to throw that
+  // evidence away: a failed `git status` returned the cached snapshot, so the
+  // row kept its green badges for as long as the directory stayed gone.
+  it("flags a worktree whose directory is gone instead of returning stale state", async () => {
+    const isolatedRoot = mkdtempSync(join(tmpdir(), "pwrgit-state-missing-"));
+    const repo = join(isolatedRoot, "repo");
+    const linked = join(isolatedRoot, "linked");
+    mkdirSync(repo, { recursive: true });
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.email", "t@t.com"]);
+    git(repo, ["config", "user.name", "Tester"]);
+    writeFileSync(join(repo, "README.md"), "# repo\n");
+    git(repo, ["add", "."]);
+    git(repo, ["commit", "-m", "init"]);
+    git(repo, ["worktree", "add", linked, "-b", "feature"]);
+    writeFileSync(join(linked, "wip.txt"), "dirty\n");
+
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({ name: "M", email: "m@t.com" });
+    const indexer = new RepoIndexer(isolatedDb, systemGit);
+    const added = await indexer.indexRepoAt(profile.id, repo);
+    if (!added.ok) throw new Error("indexRepoAt failed");
+    const row = added.value.worktrees.find((w) => w.branch === "feature");
+    if (row === undefined) throw new Error("linked worktree not indexed");
+    const isolated = new WorktreeStateService(isolatedDb, systemGit);
+
+    const healthy = await isolated.compute(row.id);
+    expect(healthy).toMatchObject({ dirty: 1 });
+    expect(healthy?.missing).toBeUndefined();
+
+    rmSync(linked, { recursive: true, force: true });
+    const gone = await isolated.compute(row.id);
+    // Not the cached snapshot: the checkout is gone, so nothing is dirty.
+    expect(gone).toMatchObject({ missing: true, dirty: 0, ahead: 0, behind: 0 });
+    expect(isolated.getCached(row.id)).toMatchObject({ missing: true });
+    expect(
+      indexer.getRepo(added.value.id)?.worktrees.find((w) => w.id === row.id)
+    ).toMatchObject({ missing: true, dirty: 0 });
+
+    // Back on disk (a remounted volume reads the same way): the next probe
+    // clears the flag by itself, no re-index required.
+    git(repo, ["worktree", "prune"]);
+    git(repo, ["worktree", "add", linked, "feature"]);
+    const back = await isolated.compute(row.id);
+    expect(back?.missing).toBeUndefined();
+    expect(back).toMatchObject({ dirty: 0, branch: "feature" });
+    expect(isolated.getCached(row.id)?.missing).toBeUndefined();
   });
 
   it("returns null for an unknown worktree id", async () => {

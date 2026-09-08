@@ -6,6 +6,7 @@ import type { DB } from "../persistence/db";
 import type { GitExec } from "./dugite";
 import { inspectGitLfs } from "./git-lfs";
 import { recordLfsOutcome } from "./git-lfs-notice";
+import { missingWorktreeError } from "./worktree-liveness";
 import type { WorktreeStateService } from "./worktree-state";
 
 function stateChanged(a: WorktreeState, b: WorktreeState): boolean {
@@ -22,7 +23,8 @@ function stateChanged(a: WorktreeState, b: WorktreeState): boolean {
     a.mergedIntoDefault !== b.mergedIntoDefault ||
     a.divergedFromDefault !== b.divergedFromDefault ||
     a.isDefaultBranch !== b.isDefaultBranch ||
-    a.lastActivityAt !== b.lastActivityAt
+    a.lastActivityAt !== b.lastActivityAt ||
+    a.missing !== b.missing
   );
 }
 
@@ -146,6 +148,8 @@ export function registerWorktreeHandlers(
         message: "repo or worktree not found"
       });
     }
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     const inspected = await inspectGitLfs(git, row.path);
     if (!inspected.ok) return inspected;
     // Best-effort bookkeeping: the repo row can be pruned while the probe's

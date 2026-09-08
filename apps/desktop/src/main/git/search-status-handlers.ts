@@ -2,6 +2,7 @@ import { err, ok, type SearchHitStatus } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import type { DB } from "../persistence/db";
 import { execGit } from "./dugite";
+import { missingWorktreeError } from "./worktree-liveness";
 
 /**
  * Per-hit status for ⌘F results. Deliberately ONE unit of work per call —
@@ -57,6 +58,8 @@ export function registerSearchStatusHandlers(bus: CommandBus, db: DB): void {
     if (wt === undefined) {
       return err({ kind: "repo", code: "not_found", message: "no worktree" });
     }
+    const gone = missingWorktreeError(db, worktreeId);
+    if (gone !== null) return err(gone);
     const raw = await execGit(["log", "-1", "--format=%cI"], wt.path);
     const lastActivityAt =
       raw.ok && raw.value.exitCode === 0 && raw.value.stdout.trim() !== ""

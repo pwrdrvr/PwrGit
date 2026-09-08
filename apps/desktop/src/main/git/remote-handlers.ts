@@ -29,6 +29,7 @@ import {
 } from "./git-service";
 import type { WorktreeRefresher } from "./worktree-handlers";
 import type { RepoIndexer } from "./repo-indexer";
+import { missingWorktreeError } from "./worktree-liveness";
 import {
   formatPullDuration,
   PULL_RECOVERY_OPERATION_TIMEOUT_MS,
@@ -187,6 +188,8 @@ export function registerRemoteHandlers(
   bus.register("remote:fetch", async (req) => {
     const worktree = worktreeOf(req.worktreeId);
     if (worktree === null) return err(notFound);
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     const startedAt = Date.now();
     const result = await operations.runRepository(worktree.repoId, async () => {
       const fetched = await fetchRemote(execGit, worktree.path);
@@ -259,12 +262,16 @@ export function registerRemoteHandlers(
   bus.register("remote:inspectSshRecovery", async (req) => {
     const worktree = worktreeOf(req.worktreeId);
     if (worktree === null) return err(notFound);
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     return inspectSshRemoteRecovery(execGit, worktree.path);
   });
 
   bus.register("remote:testSshRecovery", async (req) => {
     const worktree = worktreeOf(req.worktreeId);
     if (worktree === null) return err(notFound);
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     const startedAt = Date.now();
     logMain(
       "info",
@@ -286,6 +293,8 @@ export function registerRemoteHandlers(
   bus.register("remote:applySshRecovery", async (req) => {
     const worktree = worktreeOf(req.worktreeId);
     if (worktree === null) return err(notFound);
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     const result = await operations.run(req.worktreeId, () =>
       applySshRemoteRecovery(execGit, worktree.path, req.recovery)
     );
@@ -355,6 +364,8 @@ export function registerRemoteHandlers(
   bus.register("remote:pull", async (req) => {
     const worktree = worktreeOf(req.worktreeId);
     if (worktree === null) return err(notFound);
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     const path = worktree.path;
     const startedAt = Date.now();
     let currentPhase: PullWatchdogPhase = "starting";
@@ -524,6 +535,8 @@ export function registerRemoteHandlers(
   bus.register("remote:push", async (req) => {
     const worktree = worktreeOf(req.worktreeId);
     if (worktree === null) return err(notFound);
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     const startedAt = Date.now();
     const result = await operations.runRepository(worktree.repoId, async () => {
       const pushed = await pushRemote(execGit, worktree.path);
@@ -539,12 +552,16 @@ export function registerRemoteHandlers(
   bus.register("remote:inspectDivergence", async (req) => {
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     return inspectRemoteDivergence(execGit, path);
   });
 
   bus.register("remote:resetToUpstream", async (req) => {
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     const startedAt = Date.now();
     const result = await operations.run(req.worktreeId, () =>
       resetToUpstream(execGit, path, req)
@@ -558,18 +575,24 @@ export function registerRemoteHandlers(
   bus.register("remote:resetTargets", async (req) => {
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     return resolveResetTargets(execGit, path);
   });
 
   bus.register("remote:inspectReset", async (req) => {
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     return inspectRemoteReset(execGit, path, req.remoteRef);
   });
 
   bus.register("remote:resetToRemote", async (req) => {
     const worktree = worktreeOf(req.worktreeId);
     if (worktree === null) return err(notFound);
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     const startedAt = Date.now();
     const result = await operations.run(req.worktreeId, () =>
       resetToRemote(execGit, worktree.path, req, req.mode)
@@ -591,6 +614,8 @@ export function registerRemoteHandlers(
   bus.register("remote:rebaseOntoUpstream", async (req) => {
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     const startedAt = Date.now();
     const result = await operations.run(req.worktreeId, () =>
       rebaseOntoUpstream(execGit, path, req)

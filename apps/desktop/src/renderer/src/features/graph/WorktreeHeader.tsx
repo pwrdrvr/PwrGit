@@ -19,7 +19,13 @@ import { SshRemoteRecoveryDialog } from "./SshRemoteRecoveryDialog";
 
 type Chip = { text: string; tone: "muted" | "ok" | "warn" };
 
-function baseChip(state: WorktreeState | null): Chip {
+function baseChip(state: WorktreeState | null, worktree: Worktree): Chip {
+  // A gone checkout outranks every sync reading: nothing below is true of a
+  // directory that does not exist. Read it from this worktree's own row when
+  // the live snapshot still belongs to the previous selection.
+  const missing =
+    state?.worktreeId === worktree.id ? state.missing : worktree.missing;
+  if (missing === true) return { text: "directory missing", tone: "warn" };
   if (state === null) return { text: "…", tone: "muted" };
   if (state.behind > 0) {
     const ahead = state.ahead > 0 ? ` · ↑${state.ahead}` : "";
@@ -289,7 +295,7 @@ export function WorktreeHeader({
   const chip =
     busy === "pull"
       ? { text: pullLabel, tone: "muted" as const }
-      : (flash ?? baseChip(state));
+      : (flash ?? baseChip(state, worktree));
   const dirty = state?.dirty ?? worktree.dirty;
   const behind = state?.behind ?? worktree.behind;
   const drift = defaultBranchDrift(state, worktree);

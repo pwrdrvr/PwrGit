@@ -4,6 +4,7 @@ import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import { execGit, type GitExec } from "./dugite";
+import { missingWorktreeError } from "./worktree-liveness";
 import {
   abortOperation,
   continueOperation,
@@ -46,6 +47,8 @@ export function registerOperationHandlers(
   bus.register("operation:state", async (req) => {
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     return operations.run(req.worktreeId, () => readOperationState(git, path));
   });
 
@@ -55,6 +58,8 @@ export function registerOperationHandlers(
   bus.register("operation:markerScan", async (req) => {
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     return ok(await scanConflictMarkers(path, req.paths));
   });
 
@@ -73,6 +78,8 @@ export function registerOperationHandlers(
       | { path: string; email: string; author_name: string | null }
       | undefined;
     if (row === undefined) return err(notFound);
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     const identity =
       row.author_name === null
         ? { email: row.email }
@@ -96,6 +103,8 @@ export function registerOperationHandlers(
   bus.register("operation:abort", async (req) => {
     const path = pathOf(req.worktreeId);
     if (path === null) return err(notFound);
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     const result = await operations.run(req.worktreeId, () =>
       abortOperation(git, path, req.operation)
     );

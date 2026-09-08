@@ -47,6 +47,48 @@ const render = (
     />
   );
 
+describe("WorktreeRow — a checkout that is gone", () => {
+  // The directory was deleted outside PwrGit (an agent cleaning up its
+  // worktrees). The row used to keep its last green badges and every action
+  // on it failed with git's raw error; now it says what happened and offers
+  // the one thing that helps, which is removing it.
+  it("says the directory is missing and drops the stale counts", () => {
+    const markup = render(
+      worktree({
+        missing: true,
+        dirty: 3,
+        ahead: 2,
+        behind: 1,
+        mergedIntoDefault: true,
+        lastActivityAt: "2026-08-01T00:00:00.000Z"
+      })
+    );
+    expect(markup).toContain("wt-row is-missing");
+    expect(markup).toContain(
+      '<span class="wt-tag wt-tag--missing"'
+    );
+    expect(markup).toContain(">directory missing</span>");
+    // The full path is named where the user will look for the tag's meaning.
+    expect(markup).toContain("/wt/PwrGit/graph-x");
+    for (const badge of ["●3", "↑2", "↓1", "in default"]) {
+      expect(markup).not.toContain(badge);
+    }
+    // Reset needs the checkout; Remove is exactly what a gone row needs.
+    expect(markup).toContain("Worktree actions");
+  });
+
+  it("says nothing on a checkout that is still there", () => {
+    expect(render(worktree({}))).not.toContain("directory missing");
+    expect(render(worktree({}))).not.toContain("is-missing");
+  });
+
+  it("names a locked worktree", () => {
+    const markup = render(worktree({ locked: true }));
+    expect(markup).toContain('<span class="wt-tag wt-tag--locked"');
+    expect(markup).toContain(">locked</span>");
+  });
+});
+
 describe("WorktreeRow — the folder a worktree lives in", () => {
   // A worktree whose branch was renamed or recreated after it was created keeps
   // its original directory name. The row titled itself with the branch alone,

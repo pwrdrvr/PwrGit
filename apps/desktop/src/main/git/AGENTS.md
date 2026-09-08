@@ -156,6 +156,30 @@ Two things follow that are easy to undo by accident:
   fix: macOS denies a non-FDA app `~/Documents` and friends, and one EACCES
   would disable pruning for good.
 
+## A worktree whose directory is gone stays a row, flagged `missing`
+
+Agents delete their checkouts without `git worktree remove` (Codex cleans up
+`~/.codex/worktrees/…`), and git keeps listing the entry with a `prunable`
+line. `worktrees.missing` (0027) records that so the sidebar can say
+"directory missing" and every per-worktree handler can refuse with one typed
+`worktree_missing` error (`worktree-liveness.ts`) instead of git's raw
+"cannot change to '<path>'". Three things to keep straight:
+
+- **Two sources set it, and they must agree.** The indexer reads git's
+  `prunable` line; the state probe reacts to a failed `git status`. Both ask
+  the filesystem the same question — `checkoutExists`, the `.git` link inside
+  the worktree, which is git's own prunability test — because git never
+  reports a *locked* worktree prunable, and a locked checkout on an unmounted
+  drive would otherwise flip between the two forever.
+- **Never prune.** An unmounted volume reads exactly like a deleted directory,
+  and `git worktree prune` is repo-wide; a remounted checkout must clear the
+  flag by itself (the next successful probe or re-index does). Remove stays
+  available on a missing row — git removes a prunable entry cleanly — and
+  removal is deliberately not guarded.
+- **The guard reads only the flag.** `missingWorktreeError` never stats the
+  path: handler tests stub the DB with paths that do not exist, and a live
+  check would turn every one of them into a "missing" worktree.
+
 ## Partial staging works through Git, never through renderer patch text
 
 `partial-staging.ts` stages and unstages hunks and lines. Four invariants hold

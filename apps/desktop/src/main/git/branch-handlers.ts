@@ -6,6 +6,7 @@ import type { DB } from "../persistence/db";
 import type { SettingsService } from "../settings/settings-service";
 import { deleteLocalBranch, renameLocalBranch } from "./branch-lifecycle";
 import { execGit } from "./dugite";
+import { missingWorktreeError } from "./worktree-liveness";
 import {
   checkoutNewBranchAt,
   createBranchAt,
@@ -89,6 +90,8 @@ export function registerBranchHandlers(
   bus.register("worktree:readDirty", async (req) => {
     const row = rowOf(req.worktreeId);
     if (row === undefined) return err(notFound);
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     return operations.run(req.worktreeId, async () => {
       const dirty = await readCheckoutDirtyCount(execGit, row.path);
       if (!dirty.ok) return dirty;
@@ -99,12 +102,16 @@ export function registerBranchHandlers(
   bus.register("branch:list", async (req) => {
     const row = rowOf(req.worktreeId);
     if (row === undefined) return err(notFound);
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     return listBranches(execGit, row.path);
   });
 
   bus.register("branch:localNames", async (req) => {
     const row = rowOf(req.worktreeId);
     if (row === undefined) return err(notFound);
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     return listLocalBranchNames(execGit, row.path);
   });
 
@@ -145,6 +152,8 @@ export function registerBranchHandlers(
   bus.register("branch:create", async (req) => {
     const row = rowOf(req.worktreeId);
     if (row === undefined) return err(notFound);
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
 
     if (req.checkout === "here") {
       // The renderer disables this choice for a dirty worktree, but its view of
@@ -243,6 +252,8 @@ export function registerBranchHandlers(
   bus.register("branch:switch", async (req) => {
     const row = rowOf(req.worktreeId);
     if (row === undefined) return err(notFound);
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     const result = await operations.run(req.worktreeId, () =>
       switchBranch(execGit, row.path, req.branch)
     );

@@ -1029,6 +1029,65 @@ describe("RepoIndexer", () => {
     // The canonical repo keeps its own rows — the fossil's cleanup is scoped.
     expect(isolatedIndexer.getRepo(canonical.id)?.worktrees).toHaveLength(2);
   });
+
+  // Codex cleans up ~/.codex/worktrees/... without `git worktree remove`, so
+  // git keeps listing the checkout — with a `prunable` line the parser used to
+  // drop. Every rescan then re-upserted the dead row as healthy, and each
+  // action on it failed with git's raw "cannot change to '<path>'".
+  it("keeps a worktree whose directory was deleted, flagged missing", async () => {
+    const isolatedRoot = mkdtempSync(join(tmpdir(), "pwrgit-missing-"));
+    const repoPath = join(isolatedRoot, "repo");
+    const gonePath = join(isolatedRoot, "gone");
+    const lockedPath = join(isolatedRoot, "locked");
+    initRepo(repoPath);
+    git(repoPath, ["worktree", "add", gonePath, "-b", "feat/gone"]);
+    git(repoPath, ["worktree", "add", lockedPath, "-b", "feat/locked"]);
+    git(repoPath, ["worktree", "lock", "--reason", "on a thumb drive", lockedPath]);
+
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({
+      name: "Missing",
+      email: "missing@example.com",
+      roots: [isolatedRoot]
+    });
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
+    const indexed = (await isolatedIndexer.rescanProfile(profile)).find(
+      (repo) => repo.name === "repo"
+    );
+    if (indexed === undefined) throw new Error("repo missing");
+    const before = indexed.worktrees.find((w) => w.branch === "feat/gone");
+    expect(before?.missing).toBeUndefined();
+    expect(
+      indexed.worktrees.find((w) => w.branch === "feat/locked")?.locked
+    ).toBe(true);
+
+    rmSync(gonePath, { recursive: true, force: true });
+    const refreshed = await isolatedIndexer.refreshRepoWorktrees(indexed.id);
+    expect(refreshed.ok).toBe(true);
+    if (!refreshed.ok || refreshed.value.outcome !== "reconciled") return;
+    // The row survives — it is what the user removes from the sidebar — and
+    // the flip is reported as an update so the caller repaints.
+    expect(refreshed.value).toMatchObject({ removed: 0, updated: 1 });
+    const gone = refreshed.value.repo.worktrees.find(
+      (w) => w.branch === "feat/gone"
+    );
+    expect(gone).toMatchObject({ id: before?.id, missing: true });
+    expect(
+      refreshed.value.repo.worktrees.find((w) => w.isPrimary)?.missing
+    ).toBeUndefined();
+
+    // Restoring the directory (a volume remounting reads the same way to git)
+    // clears the flag on the next reconcile, with no prune in between.
+    git(repoPath, ["worktree", "prune"]);
+    git(repoPath, ["worktree", "add", gonePath, "feat/gone"]);
+    const restored = await isolatedIndexer.refreshRepoWorktrees(indexed.id);
+    if (!restored.ok || restored.value.outcome !== "reconciled") return;
+    expect(
+      restored.value.repo.worktrees.find((w) => w.branch === "feat/gone")
+        ?.missing
+    ).toBeUndefined();
+  });
 });
 
 describe("searchAll (FTS5)", () => {

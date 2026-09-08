@@ -2,6 +2,7 @@ import type { WorktreeState } from "@pwrgit/shared";
 import type { DB } from "../persistence/db";
 import { mapLimit } from "../util/map-limit";
 import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
+import { checkoutExists } from "./worktree-liveness";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 export type ParsedStatus = {
@@ -49,9 +50,12 @@ type WorktreeRow = {
   path: string;
   repo_id: string;
   repo_path: string;
+  missing: number;
 };
 type StateRow = {
   worktree_id: string;
+  /** Joined from `worktrees.missing`, the one home of that flag. */
+  missing: number;
   branch: string;
   head: string;
   has_upstream: number;
@@ -90,6 +94,7 @@ function rowToState(r: StateRow): WorktreeState {
     updatedAt: r.updated_at
   };
   if (r.last_activity_at !== null) s.lastActivityAt = r.last_activity_at;
+  if (r.missing === 1) s.missing = true;
   return s;
 }
 
@@ -122,7 +127,11 @@ export class WorktreeStateService {
 
   getCached(worktreeId: string): WorktreeState | null {
     const row = this.db
-      .prepare("SELECT * FROM worktree_state WHERE worktree_id = ?")
+      .prepare(
+        `SELECT s.*, w.missing AS missing
+         FROM worktree_state s JOIN worktrees w ON w.id = s.worktree_id
+         WHERE s.worktree_id = ?`
+      )
       .get(worktreeId) as StateRow | undefined;
     return row === undefined ? null : rowToState(row);
   }
@@ -130,12 +139,50 @@ export class WorktreeStateService {
   private worktreeRow(worktreeId: string): WorktreeRow | null {
     const row = this.db
       .prepare(
-        `SELECT w.id, w.branch, w.path, w.repo_id, r.path AS repo_path
+        `SELECT w.id, w.branch, w.path, w.repo_id, w.missing,
+                r.path AS repo_path
          FROM worktrees w JOIN repos r ON r.id = w.repo_id
          WHERE w.id = ?`
       )
       .get(worktreeId) as WorktreeRow | undefined;
     return row ?? null;
+  }
+
+  /**
+   * The probe found no checkout behind the row. Flag it and replace the
+   * cached counts with zeros: nothing is dirty, ahead or behind in a
+   * directory that does not exist, and the old numbers are exactly the stale
+   * badges the flag exists to retire. Branch, head and activity are kept —
+   * they name what was there. Not pruned: a volume that is merely unmounted
+   * reads the same way, and the next successful probe clears the flag.
+   */
+  private markMissing(wt: WorktreeRow): WorktreeState | null {
+    const cached = this.getCached(wt.id);
+    const state: WorktreeState = {
+      worktreeId: wt.id,
+      branch: cached?.branch ?? wt.branch,
+      head: cached?.head ?? "",
+      hasUpstream: cached?.hasUpstream ?? false,
+      ahead: 0,
+      behind: 0,
+      dirty: 0,
+      behindDefault: 0,
+      defaultBranch: cached?.defaultBranch ?? "",
+      mergedIntoDefault: false,
+      divergedFromDefault: false,
+      isDefaultBranch: cached?.isDefaultBranch ?? false,
+      updatedAt: new Date().toISOString()
+    };
+    if (cached?.lastActivityAt !== undefined) {
+      state.lastActivityAt = cached.lastActivityAt;
+    }
+    this.db.transaction(() => {
+      this.db
+        .prepare("UPDATE worktrees SET missing = 1 WHERE id = ?")
+        .run(wt.id);
+      this.upsert(state);
+    })();
+    return this.getCached(wt.id);
   }
 
   /**
@@ -307,9 +354,23 @@ export class WorktreeStateService {
       wt.path,
       NO_OPTIONAL_LOCKS
     );
-    if (!statusRaw.ok) return this.getCached(worktreeId);
-    const status = requireExit0(statusRaw.value, ["status"]);
-    if (!status.ok) return this.getCached(worktreeId);
+    // A failed status is either transient (an index lock, a repo mid-write)
+    // or the checkout is gone. The cached snapshot is right for the first
+    // and exactly wrong for the second — so ask the filesystem which it is
+    // rather than discarding the evidence.
+    const status = statusRaw.ok
+      ? requireExit0(statusRaw.value, ["status"])
+      : statusRaw;
+    if (!status.ok) {
+      return checkoutExists(wt.path)
+        ? this.getCached(worktreeId)
+        : this.markMissing(wt);
+    }
+    if (wt.missing === 1) {
+      this.db
+        .prepare("UPDATE worktrees SET missing = 0 WHERE id = ?")
+        .run(worktreeId);
+    }
     const parsed = parseStatus(status.value.stdout);
 
     let lastActivityAt: string | undefined;

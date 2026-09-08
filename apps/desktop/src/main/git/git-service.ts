@@ -918,7 +918,17 @@ export type WorktreeInfo = {
   head: string;
   detached: boolean;
   bare: boolean;
+  /** Git still lists it, but its directory (or its `.git` link) is gone —
+   *  the entry `git worktree prune` would drop. Never pruned here: an
+   *  unmounted volume reads the same way and comes back. */
+  prunable: boolean;
+  /** `git worktree lock`ed, typically because it lives on removable media. */
+  locked: boolean;
 };
+
+/** `locked` and `prunable` print bare or followed by a reason. */
+const flagLine = (line: string, flag: string): boolean =>
+  line === flag || line.startsWith(`${flag} `);
 
 /**
  * Parse `git worktree list --porcelain` output. Blocks are separated by blank
@@ -937,6 +947,8 @@ export function parseWorktreeList(stdout: string): WorktreeInfo[] {
     let branch = "";
     let detached = false;
     let bare = false;
+    let prunable = false;
+    let locked = false;
 
     for (const line of block.split("\n")) {
       if (line.startsWith("worktree ")) path = line.slice(9).trim();
@@ -945,6 +957,8 @@ export function parseWorktreeList(stdout: string): WorktreeInfo[] {
         branch = line.slice(7).trim().replace(/^refs\/heads\//, "");
       else if (line === "detached") detached = true;
       else if (line === "bare") bare = true;
+      else if (flagLine(line, "prunable")) prunable = true;
+      else if (flagLine(line, "locked")) locked = true;
     }
 
     if (path === "") continue;
@@ -955,7 +969,7 @@ export function parseWorktreeList(stdout: string): WorktreeInfo[] {
           ? "(bare)"
           : "(unknown)";
     }
-    out.push({ path, branch, head, detached, bare });
+    out.push({ path, branch, head, detached, bare, prunable, locked });
   }
   return out;
 }

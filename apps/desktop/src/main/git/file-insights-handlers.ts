@@ -2,6 +2,7 @@ import { err, ok } from "@pwrgit/shared";
 import type { CommandBus, CommandContext } from "../command-bus";
 import type { DB } from "../persistence/db";
 import { execGit } from "./dugite";
+import { missingWorktreeError } from "./worktree-liveness";
 import {
   readFileBlame,
   readFileContents,
@@ -127,6 +128,8 @@ export function registerFileInsightHandlers(
         message: "worktree not found"
       });
     }
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     const started = begin("history", req.operationId, ctx);
     if (started === null) {
       return err({
@@ -158,6 +161,8 @@ export function registerFileInsightHandlers(
         message: "worktree not found"
       });
     }
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     const started = begin("blame", req.operationId, ctx);
     if (started === null) {
       return err({
@@ -189,6 +194,8 @@ export function registerFileInsightHandlers(
         message: "worktree not found"
       });
     }
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     const started = begin("contents", req.operationId, ctx);
     if (started === null) {
       return err({
@@ -224,6 +231,8 @@ export function registerFileInsightHandlers(
         message: "worktree not found"
       });
     }
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     const started = begin("message", "commit-message", ctx);
     if (started === null) return ok(null);
     const { key, operation } = started;
@@ -249,6 +258,8 @@ export function registerFileInsightHandlers(
         message: "worktree not found"
       });
     }
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
     if (req.query.trim() === "") return ok([]);
     // Bounded and cancellable like the other two reads: a window that closes
     // mid-read should not leave `ls-files` running for results nobody will see.

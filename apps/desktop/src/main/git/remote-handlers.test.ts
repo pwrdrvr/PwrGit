@@ -94,6 +94,38 @@ describe("remote handlers", () => {
 
   afterEach(() => vi.useRealTimers());
 
+  // A row the index has flagged missing used to reach git anyway, and every
+  // action then failed on its own with "fatal: cannot change to '<path>'".
+  it("refuses to fetch a worktree whose directory is gone, without running git", async () => {
+    const db = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({
+          path: "/repos/project/wt/gone",
+          repoId: "repo-1",
+          missing: 1
+        }))
+      }))
+    } as unknown as DB;
+    const refresher = {
+      refreshWorktree: vi.fn(async () => undefined),
+      refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
+
+    const result = await bus.dispatch("remote:fetch", { worktreeId: "wt-gone" });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatchObject({
+      kind: "repo",
+      code: "worktree_missing"
+    });
+    expect(result.error.message).toContain("/repos/project/wt/gone");
+    expect(fetchRemote).not.toHaveBeenCalled();
+    expect(refresher.refreshWorktree).not.toHaveBeenCalled();
+  });
+
   it("logs pull start and every phase immediately with path and elapsed time", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
