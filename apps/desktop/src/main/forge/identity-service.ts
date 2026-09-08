@@ -15,6 +15,7 @@ import type { ForgeRepoRegistry } from "./repo-provider";
  *  when stale by an hour — the cost of asking is a network round trip per
  *  repository, so this is deliberately long. */
 const IDENTITY_TTL_MS = 6 * 60 * 60_000;
+const AUTH_RETRY_MS = 5 * 60_000;
 const REMOTE_CONCURRENCY = 8;
 const FORGE_CONCURRENCY = 4;
 /** Ceiling on one refresh pass, so a pathologically large profile cannot spend
@@ -53,6 +54,9 @@ export async function readOrigin(
 }
 
 export class IdentityService {
+  private readonly refreshing = new Set<string>();
+  private readonly authRetryAfter = new Map<string, number>();
+
   constructor(
     private readonly db: DB,
     private readonly git: GitExec,
@@ -133,7 +137,9 @@ export class IdentityService {
   ): Promise<IdentityChange[]> {
     const stored = this.read(repos.map((repo) => repo.id));
     const due = repos.filter((repo) => {
+      if (this.refreshing.has(repo.id)) return false;
       if (options.force === true) return true;
+      if (Date.now() < (this.authRetryAfter.get(repo.id) ?? 0)) return false;
       const existing = stored.get(repo.id);
       if (existing?.fetchedAt === undefined) return true;
       const age = Date.now() - Date.parse(`${existing.fetchedAt}Z`);
@@ -149,75 +155,85 @@ export class IdentityService {
         `identity refresh covering ${batch.length} of ${due.length} repositories this pass`
       );
     }
-    const origins: OriginRef[] = [];
-    await mapLimit(batch, REMOTE_CONCURRENCY, async (repo) => {
-      const origin = await readOrigin(this.git, repo);
-      // `other` hosts have no provider to ask, and recording an unknown row
-      // for them would suppress the retry if a provider is added later.
-      if (origin !== null && origin.host !== "other") origins.push(origin);
-    });
+    // Reserve before the first await: profile loads and fetches can overlap.
+    for (const repo of batch) this.refreshing.add(repo.id);
+    try {
+      const origins: OriginRef[] = [];
+      await mapLimit(batch, REMOTE_CONCURRENCY, async (repo) => {
+        const origin = await readOrigin(this.git, repo);
+        // `other` hosts have no provider to ask, and recording an unknown row
+        // for them would suppress the retry if a provider is added later.
+        if (origin !== null && origin.host !== "other") origins.push(origin);
+      });
 
-    const changes: IdentityChange[] = [];
-    await mapLimit(origins, FORGE_CONCURRENCY, async (origin) => {
-      const provider = this.forges.get(origin.host);
-      if (provider === null) return;
-      let identity: RepoIdentity;
-      try {
-        const repository = await provider.viewRepo(origin.nameWithOwner);
-        identity = {
-          host: repository.host,
-          hostname: repository.hostname,
-          owner: repository.owner,
-          name: repository.name,
-          nameWithOwner: repository.nameWithOwner,
-          visibility: repository.visibility,
-          ...(repository.parent === undefined
-            ? {}
-            : { parent: repository.parent }),
-          ...(repository.root === undefined ? {} : { root: repository.root })
-        };
-      } catch (cause) {
-        // A forge that will not answer is recorded as `unknown` rather than
-        // left absent: absent means "not looked up", and re-asking a private
-        // repo we have no access to on every pass is pure noise.
-        if (!provider.isAuthError(cause)) {
-          logMain(
-            "debug",
-            "forge",
-            `identity lookup failed for ${origin.nameWithOwner}:`,
-            provider.errorMessage(cause)
-          );
+      const changes: IdentityChange[] = [];
+      await mapLimit(origins, FORGE_CONCURRENCY, async (origin) => {
+        const provider = this.forges.get(origin.host);
+        if (provider === null) return;
+        let identity: RepoIdentity;
+        try {
+          const repository = await provider.viewRepo(origin.nameWithOwner);
           identity = {
-            host: origin.host,
-            hostname: origin.hostname,
-            owner: origin.nameWithOwner.slice(
-              0,
-              origin.nameWithOwner.lastIndexOf("/")
-            ),
-            name: origin.nameWithOwner.slice(
-              origin.nameWithOwner.lastIndexOf("/") + 1
-            ),
-            nameWithOwner: origin.nameWithOwner,
-            visibility: "unknown"
+            host: repository.host,
+            hostname: repository.hostname,
+            owner: repository.owner,
+            name: repository.name,
+            nameWithOwner: repository.nameWithOwner,
+            visibility: repository.visibility,
+            ...(repository.parent === undefined
+              ? {}
+              : { parent: repository.parent }),
+            ...(repository.root === undefined ? {} : { root: repository.root })
           };
-        } else {
-          // Not signed in is a transient, fixable state — leave the row alone
-          // so signing in produces a fresh read rather than a cached "unknown".
-          return;
+        } catch (cause) {
+          // A forge that will not answer is recorded as `unknown` rather than
+          // left absent: absent means "not looked up", and re-asking a private
+          // repo we have no access to on every pass is pure noise.
+          if (!provider.isAuthError(cause)) {
+            logMain(
+              "debug",
+              "forge",
+              `identity lookup failed for ${origin.nameWithOwner}:`,
+              provider.errorMessage(cause)
+            );
+            identity = {
+              host: origin.host,
+              hostname: origin.hostname,
+              owner: origin.nameWithOwner.slice(
+                0,
+                origin.nameWithOwner.lastIndexOf("/")
+              ),
+              name: origin.nameWithOwner.slice(
+                origin.nameWithOwner.lastIndexOf("/") + 1
+              ),
+              nameWithOwner: origin.nameWithOwner,
+              visibility: "unknown"
+            };
+          } else {
+            // Not signed in is a transient, fixable state — leave the row alone
+            // so signing in can recover. Back off briefly in memory so fetches
+            // do not repeatedly spawn a signed-out CLI. Explicit refresh bypasses it.
+            this.authRetryAfter.set(origin.repoId, Date.now() + AUTH_RETRY_MS);
+            return;
+          }
         }
-      }
-      const previous = stored.get(origin.repoId);
-      this.write(origin.repoId, identity);
-      if (!sameIdentity(previous, identity)) {
-        changes.push({ repoId: origin.repoId, identity });
-      }
-    });
-    return changes;
+        this.authRetryAfter.delete(origin.repoId);
+        const previous = stored.get(origin.repoId);
+        this.write(origin.repoId, identity);
+        if (!sameIdentity(previous, identity)) {
+          changes.push({ repoId: origin.repoId, identity });
+        }
+      });
+      return changes;
+    } finally {
+      for (const repo of batch) this.refreshing.delete(repo.id);
+    }
   }
 
   /** Drop stored identities for repositories that no longer exist. The FK
    *  cascade covers deletes through `repos`; this covers a direct call. */
   forget(repoId: string): void {
+    this.authRetryAfter.delete(repoId);
     this.db.prepare("DELETE FROM repo_identity WHERE repo_id = ?").run(repoId);
   }
 

@@ -32,6 +32,7 @@ function temporaryRoot(): string {
   return path;
 }
 afterEach(() => {
+  vi.restoreAllMocks();
   while (created.length > 0) rmSync(created.pop()!, { recursive: true, force: true });
 });
 
@@ -106,6 +107,47 @@ describe("IdentityService", () => {
     });
   });
 
+  it.each(["unknown", "private", "internal"])(
+    "refreshes stale %s visibility without querying again on every fetch",
+    async (visibility) => {
+      const gh = vi.fn(okGh({ full_name: "huntharo/react", visibility }));
+      const { db, identities, indexer, profileId } = await fixture(gh);
+      const repos = indexer.listRepos(profileId);
+      await identities.refresh(repos);
+      gh.mockImplementation(
+        okGh({ full_name: "huntharo/react", visibility: "public" })
+      );
+      gh.mockClear();
+      expect(await identities.refresh(repos)).toEqual([]);
+      expect(gh).not.toHaveBeenCalled();
+
+      db.prepare(
+        "UPDATE repo_identity SET fetched_at = datetime('now', '-7 hours')"
+      ).run();
+      const changes = await identities.refresh(repos);
+      expect(changes[0]?.identity.visibility).toBe("public");
+      expect(indexer.listRepos(profileId)[0]?.identity?.visibility).toBe("public");
+      gh.mockClear();
+      expect(await identities.refresh(repos)).toEqual([]);
+      expect(gh).not.toHaveBeenCalled();
+    }
+  );
+
+  it("coalesces overlapping refreshes for the same repository", async () => {
+    const gh = vi.fn(okGh({ full_name: "huntharo/react", visibility: "public" }));
+    const { identities, indexer, profileId } = await fixture(gh);
+    const repos = indexer.listRepos(profileId);
+    const changes = await Promise.all([
+      identities.refresh(repos),
+      identities.refresh(repos),
+      identities.refresh(repos)
+    ]);
+    expect(
+      gh.mock.calls.filter(([args]) => args[1]?.startsWith("repos/"))
+    ).toHaveLength(1);
+    expect(changes.flat()).toHaveLength(1);
+  });
+
   it("hydrates the stored identity onto repo:list", async () => {
     const { identities, indexer, profileId } = await fixture(
       okGh({ full_name: "huntharo/react", visibility: "public" })
@@ -159,6 +201,22 @@ describe("IdentityService", () => {
     // mean signing in produced no refresh.
     expect(changes).toEqual([]);
     expect(indexer.listRepos(profileId)[0]?.identity).toBeUndefined();
+  });
+
+  it("backs off signed-out lookups without persisting unknown, then recovers", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.now());
+    const gh = vi.fn<(args: string[]) => Promise<string>>(async () => { throw new Error("gh auth login"); });
+    const { identities, indexer, profileId } = await fixture(gh);
+    const repos = indexer.listRepos(profileId);
+    await identities.refresh(repos);
+    gh.mockClear();
+    expect(await identities.refresh(repos)).toEqual([]);
+    expect(gh).not.toHaveBeenCalled();
+    expect(indexer.listRepos(profileId)[0]?.identity).toBeUndefined();
+
+    now.mockReturnValue(Date.now() + 5 * 60_000);
+    gh.mockImplementation(okGh({ full_name: "huntharo/react", visibility: "public" }));
+    expect((await identities.refresh(repos))[0]?.identity.visibility).toBe("public");
   });
 
   it("ignores a repo whose origin is on no known forge", async () => {
