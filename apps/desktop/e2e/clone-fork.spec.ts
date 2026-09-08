@@ -241,12 +241,15 @@ for (const host of ["github", "gitlab"] as const) {
     await expect(
       repoBlock(window, name).locator(`[title^="Fork of ${sourceSlug}"]`)
     ).toBeVisible();
-    await expect(
-      repoBlock(window, name).getByTitle(
-        `private on ${host === "github" ? "github.com" : "gitlab.com"}`,
-        { exact: true }
-      )
-    ).toBeVisible();
+    const visibility = repoBlock(window, name).getByRole("button", {
+      name: "Refresh repository visibility",
+      exact: true
+    });
+    await expect(visibility).toBeVisible();
+    await expect(visibility).toHaveAttribute(
+      "title",
+      host === "github" ? /^private on github\.com\./ : /^private on gitlab\.com\./
+    );
     expect(await recordedPhases(window)).toEqual(
       expect.arrayContaining([
         "starting",
