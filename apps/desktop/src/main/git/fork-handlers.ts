@@ -65,7 +65,10 @@ export function registerForkHandlers(
     return ok(null);
   });
   bus.register("repo:refreshIdentities", async (req) => {
-    const changed = await identities.refresh(indexer.listRepos(req.profileId), {
+    const repos = indexer.listRepos(req.profileId).filter(
+      (repo) => req.repoId === undefined || repo.id === req.repoId
+    );
+    const changed = await identities.refresh(repos, {
       ...(req.force === undefined ? {} : { force: req.force })
     });
     if (changed.length > 0) {

@@ -15,7 +15,8 @@ import type { ForgeRepoRegistry } from "./repo-provider";
  *  when stale by an hour — the cost of asking is a network round trip per
  *  repository, so this is deliberately long. */
 const IDENTITY_TTL_MS = 6 * 60 * 60_000;
-const AUTH_RETRY_MS = 5 * 60_000;
+/** Unknown responses and signed-out attempts should recover promptly. */
+const IDENTITY_RETRY_MS = 5 * 60_000;
 const REMOTE_CONCURRENCY = 8;
 const FORGE_CONCURRENCY = 4;
 /** Ceiling on one refresh pass, so a pathologically large profile cannot spend
@@ -53,7 +54,32 @@ export async function readOrigin(
   };
 }
 
+/** One FIFO semaphore per service, shared by every refresh invocation. */
+class IdentitySlots {
+  private active = 0;
+  private readonly waiting: Array<() => void> = [];
+
+  constructor(private readonly limit: number) {}
+
+  async run<T>(work: () => Promise<T>): Promise<T> {
+    if (this.active >= this.limit) {
+      await new Promise<void>((resolve) => this.waiting.push(resolve));
+    } else {
+      this.active += 1;
+    }
+    try {
+      return await work();
+    } finally {
+      const next = this.waiting.shift();
+      if (next === undefined) this.active -= 1;
+      else next();
+    }
+  }
+}
+
 export class IdentityService {
+  private readonly remoteSlots = new IdentitySlots(REMOTE_CONCURRENCY);
+  private readonly forgeSlots = new IdentitySlots(FORGE_CONCURRENCY);
   private readonly refreshing = new Set<string>();
   private readonly authRetryAfter = new Map<string, number>();
 
@@ -143,7 +169,10 @@ export class IdentityService {
       const existing = stored.get(repo.id);
       if (existing?.fetchedAt === undefined) return true;
       const age = Date.now() - Date.parse(`${existing.fetchedAt}Z`);
-      return !Number.isFinite(age) || age > IDENTITY_TTL_MS;
+      const ttl = existing.visibility === "unknown"
+        ? IDENTITY_RETRY_MS
+        : IDENTITY_TTL_MS;
+      return !Number.isFinite(age) || age > ttl;
     });
     if (due.length === 0) return [];
 
@@ -160,7 +189,7 @@ export class IdentityService {
     try {
       const origins: OriginRef[] = [];
       await mapLimit(batch, REMOTE_CONCURRENCY, async (repo) => {
-        const origin = await readOrigin(this.git, repo);
+        const origin = await this.remoteSlots.run(() => readOrigin(this.git, repo));
         // `other` hosts have no provider to ask, and recording an unknown row
         // for them would suppress the retry if a provider is added later.
         if (origin !== null && origin.host !== "other") origins.push(origin);
@@ -172,7 +201,9 @@ export class IdentityService {
         if (provider === null) return;
         let identity: RepoIdentity;
         try {
-          const repository = await provider.viewRepo(origin.nameWithOwner);
+          const repository = await this.forgeSlots.run(() =>
+            provider.viewRepo(origin.nameWithOwner)
+          );
           identity = {
             host: repository.host,
             hostname: repository.hostname,
@@ -213,7 +244,7 @@ export class IdentityService {
             // Not signed in is a transient, fixable state — leave the row alone
             // so signing in can recover. Back off briefly in memory so fetches
             // do not repeatedly spawn a signed-out CLI. Explicit refresh bypasses it.
-            this.authRetryAfter.set(origin.repoId, Date.now() + AUTH_RETRY_MS);
+            this.authRetryAfter.set(origin.repoId, Date.now() + IDENTITY_RETRY_MS);
             return;
           }
         }

@@ -448,8 +448,8 @@ export function RepoRow({
         ? "1 linked worktree"
         : `${wtCount} linked worktrees`,
     behind > 0 ? `primary branch ${behind} behind upstream` : null,
-    // The identity glyphs are aria-hidden and carry only titles, which are not
-    // reliably announced — this is how they reach a screen reader at all.
+    // Include the identity facts in the row description, independently of
+    // the visibility button that refreshes them.
     repo.identity === undefined ? null : identityDescription(repo.identity),
     arrangeable && pinSource === "worktree"
       ? "in Pinned because one of its worktrees is pinned"
@@ -535,7 +535,11 @@ export function RepoRow({
             distinct from a read that came back `unknown`, which draws the
             dashed glyph. */}
         {repo.identity !== undefined && (
-          <RepoIdentityGlyphs identity={repo.identity} />
+          <RepoIdentityGlyphs
+            identity={repo.identity}
+            repoId={repo.id}
+            profileId={repo.profileId}
+          />
         )}
         {wtCount > 0 && (
           <span className="repo-row__wtcount">

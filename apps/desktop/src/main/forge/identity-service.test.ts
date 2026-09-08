@@ -148,6 +148,62 @@ describe("IdentityService", () => {
     expect(changes.flat()).toHaveLength(1);
   });
 
+  it("bounds aggregate forge requests across batch and detached refreshes", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let active = 0;
+    let peak = 0;
+    let calls = 0;
+    const gh = async () => {
+      active += 1;
+      calls += 1;
+      peak = Math.max(peak, active);
+      const call = calls;
+      try {
+        await gate;
+        if (call === 1) throw new Error("network unavailable");
+        return JSON.stringify({ full_name: "huntharo/react", visibility: "public" });
+      } finally {
+        active -= 1;
+      }
+    };
+    const { db, indexer, profileId } = await fixture(gh);
+    const base = indexer.listRepos(profileId)[0]!;
+    const repos = Array.from({ length: 12 }, (_, i) => ({ ...base, id: `queued-${i}` }));
+    for (const repo of repos) {
+      db.prepare("INSERT INTO repos (id, profile_id, name, path) VALUES (?, ?, ?, ?)")
+        .run(repo.id, profileId, repo.name, `${repo.path}-${repo.id}`);
+    }
+    const registry = new ForgeRepoRegistry();
+    registry.register(new GitHubRepoProvider(gh));
+    const service = new IdentityService(db, async () => ok({
+      exitCode: 0, stdout: "git@github.com:huntharo/react.git", stderr: ""
+    }), registry);
+    const pending = Promise.all([
+      service.refresh(repos.slice(0, 6)),
+      ...repos.slice(6).map((repo) => service.refresh([repo]))
+    ]);
+    try {
+      await vi.waitFor(() => expect(calls).toBeGreaterThanOrEqual(4));
+      expect(peak).toBe(4);
+    } finally {
+      release();
+      await pending;
+    }
+    expect(calls).toBe(12);
+    expect(peak).toBe(4);
+  });
+
+  it("retries an unknown identity after five minutes instead of six hours", async () => {
+    const { db, identities, indexer, profileId } = await fixture(
+      okGh({ full_name: "huntharo/react", visibility: "public" })
+    );
+    const repos = indexer.listRepos(profileId);
+    await identities.refresh(repos);
+    db.prepare("UPDATE repo_identity SET visibility = 'unknown', fetched_at = datetime('now', '-6 minutes')").run();
+    expect((await identities.refresh(repos))[0]?.identity.visibility).toBe("public");
+  });
+
   it("hydrates the stored identity onto repo:list", async () => {
     const { identities, indexer, profileId } = await fixture(
       okGh({ full_name: "huntharo/react", visibility: "public" })

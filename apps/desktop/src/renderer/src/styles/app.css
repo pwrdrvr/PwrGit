@@ -2396,6 +2396,18 @@ textarea,
   align-items: center;
   color: var(--text-subtle);
 }
+.repo-mark--refresh {
+  background: transparent;
+  border: 0;
+  padding: 3px;
+  margin: -3px;
+  cursor: pointer;
+}
+.repo-mark--refresh:disabled {
+  cursor: progress;
+  opacity: 0.5;
+}
+
 .repo-mark--fork {
   color: var(--text-muted);
 }

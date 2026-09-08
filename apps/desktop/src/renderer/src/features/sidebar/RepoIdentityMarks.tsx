@@ -1,3 +1,6 @@
+import { useRef, useState } from "react";
+import { dispatch } from "../../lib/pwrgit";
+import { showErrorToast, showInfoToast } from "../../lib/toast";
 import type {
   CloneRepository,
   ForgeHost,
@@ -167,7 +170,49 @@ function VisibilityIcon({
  * nowhere to go at this width, so it lives in the title — the row already
  * relies on titles for the same reason its name does (SC 1.4.4).
  */
-export function RepoIdentityGlyphs({ identity }: { identity: RepoIdentity }) {
+export function RepoIdentityGlyphs({
+  identity,
+  repoId,
+  profileId
+}: {
+  identity: RepoIdentity;
+  repoId: string;
+  profileId: string;
+}) {
+  const pending = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const refresh = async (): Promise<void> => {
+    if (pending.current) return;
+    pending.current = true;
+    setBusy(true);
+    setFeedback(null);
+    try {
+      const result = await dispatch("repo:refreshIdentities", {
+        profileId,
+        repoId,
+        force: true
+      });
+      const unresolved =
+        result.ok && result.value.changed === 0 && identity.visibility === "unknown";
+      const message = !result.ok ? result.error.message : unresolved
+        ? "Visibility is still unknown. Check Settings → Forges or Logs."
+        : "Repository visibility refreshed.";
+      setFeedback(message);
+      if (!result.ok || unresolved) {
+        showErrorToast({ title: "Repository visibility", message });
+      } else {
+        showInfoToast({ title: "Repository visibility", message });
+      }
+    } catch {
+      const message = "Could not refresh visibility. Check Settings → Forges or Logs.";
+      setFeedback(message);
+      showErrorToast({ title: "Repository visibility", message });
+    } finally {
+      pending.current = false;
+      setBusy(false);
+    }
+  };
   return (
     <>
       {identity.parent !== undefined && (
@@ -182,12 +227,27 @@ export function RepoIdentityGlyphs({ identity }: { identity: RepoIdentity }) {
           <GitForkIcon size={12} />
         </span>
       )}
-      <span
-        className={`repo-mark repo-mark--${identity.visibility}`}
-        title={visibilityTitle(identity.visibility, identity.hostname)}
+      <button
+        type="button"
+        className={`repo-mark repo-mark--refresh repo-mark--${identity.visibility}`}
+        title={busy
+          ? "Refreshing repository visibility…"
+          : `${visibilityTitle(identity.visibility, identity.hostname)}. ${feedback ?? "Click to refresh visibility."}`
+        }
+        aria-label="Refresh repository visibility"
+        aria-busy={busy}
+        disabled={busy}
+        onClick={(event) => {
+          event.stopPropagation();
+          void refresh();
+        }}
+        onKeyDown={(event) => event.stopPropagation()}
       >
         <VisibilityIcon visibility={identity.visibility} size={12} />
-      </span>
+      </button>
+      {feedback !== null && (
+        <span className="a11y-sr-only" role="status">{feedback}</span>
+      )}
     </>
   );
 }
@@ -235,7 +295,7 @@ export function RepoIdentityChips({
 }
 
 /** A screen-reader sentence for one repository's identity. The glyphs above
- *  are `aria-hidden` and carry only titles, which are not reliably announced. */
+ *  are also described here independently of the visibility refresh button. */
 export function identityDescription(identity: RepoIdentity): string {
   const parts = [
     identity.visibility === "unknown"

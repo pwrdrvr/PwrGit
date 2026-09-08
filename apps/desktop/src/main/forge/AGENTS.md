@@ -161,8 +161,11 @@ provider or reach a real forge.
   understate where code can go. A signed-out CLI writes **no** row (signing in
   should produce a fresh read); a 404 writes `unknown` (re-asking every pass is
   noise). Successful fetches/pulls request a background refresh under the same
-  six-hour TTL as profile loads. Overlapping lookups are coalesced; signed-out
-  attempts back off five minutes in memory without writing a row.
+  TTL as profile loads: six hours for known visibility, five minutes for
+  unknown. Service-wide slots bound all overlapping calls (eight Git reads,
+  four forge requests); lookups for the same repo are coalesced. Signed-out
+  attempts back off five minutes in memory without writing a row. Clicking
+  the sidebar visibility mark forces a refresh of just that repository.
 - **A dialog opens on local state; a forge is asked only on debounced input.**
   This is the rule the clone dialog broke. `repo:cloneCatalog` used to list
   every known owner's repositories as it opened — `gh repo list <owner>
