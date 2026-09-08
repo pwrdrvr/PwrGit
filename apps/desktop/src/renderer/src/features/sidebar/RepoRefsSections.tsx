@@ -8,6 +8,7 @@ import {
 } from "react";
 import type { LocalBranchSummary, Repo, RepoRefs, Worktree } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
+import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { CopyTarget } from "../shell/CopyTarget";
 import { guardedSwitchBranch } from "../shell/branchSwitch";
@@ -522,8 +523,9 @@ export function RepoRefsSections({
             </span>
           </button>
           <button
-            className={`ref-fetch-all${fetching === "*" ? " is-fetching" : ""}`}
+            className="ref-fetch-all"
             aria-label={`Fetch all remotes for ${repo.name}`}
+            aria-busy={fetching === "*"}
             title="Fetch all remotes and prune deleted branches"
             /* `disabled` stays for the static case (there is nothing to fetch),
                but NOT for the in-flight one: Chromium blurs an element the
@@ -539,7 +541,7 @@ export function RepoRefsSections({
               void fetchRemote();
             }}
           >
-            ↻
+            <RefreshGlyph />
           </button>
         </div>
         {openSections.has("remotes") && (
@@ -574,10 +576,9 @@ export function RepoRefsSections({
                       </small>
                     </button>
                     <button
-                      className={`ref-mini-action${
-                        fetching === remote.name ? " is-fetching" : ""
-                      }`}
+                      className="ref-mini-action"
                       aria-label={`Fetch ${remote.name}`}
+                      aria-busy={fetching === remote.name}
                       /* Busy, not unavailable — see .ref-fetch-all above. */
                       aria-disabled={fetching !== null}
                       onClick={(event) => {
@@ -586,7 +587,7 @@ export function RepoRefsSections({
                         void fetchRemote(remote.name);
                       }}
                     >
-                      ↻
+                      <RefreshGlyph />
                     </button>
                   </div>
                   {open && (

@@ -62,7 +62,7 @@ test("Fetch all reports one broken remote without stopping other repositories", 
   handle = await launchApp();
   const { window } = handle;
   await addRootAndExpand(window, handle, sandbox, "partial");
-  await window.getByRole("button", { name: "↻ Fetch all" }).click();
+  await window.getByRole("button", { name: "↻ Fetch all repos" }).click();
 
   const dialog = window.getByRole("dialog", {
     name: "Fetch all repositories"

@@ -1275,14 +1275,6 @@ textarea,
 .wt-refresh[aria-disabled="true"] {
   cursor: default;
 }
-.wt-refresh.is-refreshing svg {
-  animation: wt-refresh-spin 800ms linear infinite;
-}
-@keyframes wt-refresh-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 
 /* Repository refs live beside worktrees but stay collapsed until requested. */
 .ref-section {
@@ -1519,10 +1511,6 @@ textarea,
 .ref-fetch-all {
   margin-right: 5px;
   border-color: var(--border-subtle);
-}
-.ref-mini-action.is-fetching,
-.ref-fetch-all.is-fetching {
-  animation: wt-refresh-spin 800ms linear infinite;
 }
 .ref-view-all {
   width: 100%;
@@ -4500,9 +4488,20 @@ textarea,
   gap: 6px;
   flex: 0 0 auto;
 }
-.wt-btn:disabled {
+/* Busy is spelled aria-disabled, not `disabled`: Chromium blurs an element the
+   moment it becomes disabled, so pressing Fetch from the keyboard threw focus
+   back to <body> for the length of the fetch (SC 2.4.3). Same fix, and the
+   same reasoning, as .wt-refresh and .ref-fetch-all — the click handlers are
+   what make these inert. `disabled` stays for genuinely unavailable actions. */
+.wt-btn:disabled,
+.wt-btn[aria-disabled="true"] {
   opacity: 0.6;
   cursor: wait;
+}
+/* An aria-disabled button is still busy-tinted; opacity would wash the tint
+   out, so the in-flight one opts back to full strength. */
+.wt-btn[aria-busy="true"] {
+  opacity: 1;
 }
 /* Pull is one of four peer actions, so at rest it looks like its neighbours.
    The accent belongs to `.is-behind` — the state where pulling actually has
@@ -5552,6 +5551,9 @@ button.ref-chip:focus-visible {
   flex: 1;
 }
 .submodule-panel__refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   min-height: 22px;
   padding: 0 7px;
   border: 1px solid transparent;
@@ -5568,9 +5570,13 @@ button.ref-chip:focus-visible {
   background: var(--accent-soft);
   color: var(--accent-bright);
 }
-.submodule-panel__refresh:disabled {
+.submodule-panel__refresh:disabled,
+.submodule-panel__refresh[aria-disabled="true"] {
   cursor: default;
   opacity: 0.62;
+}
+.submodule-panel__refresh[aria-busy="true"] {
+  opacity: 1;
 }
 .submodule-row {
   margin-left: calc(var(--submodule-depth, 0) * 10px);
@@ -9934,8 +9940,52 @@ button.agent-auth-node {
   margin: 16px 0 0;
 }
 
-/* ---- Sync-button busy spinner (visible even in icon-only narrow mode) ---- */
+/* ---- Refresh and fetch affordances: one busy language ----
 
+   Every control that re-reads state says "working" the same way, whatever its
+   size or panel: the button takes an accent tint, and its circular-arrow glyph
+   rotates in place. Before this there were three languages on one screen — the
+   graph toolbar swapped its glyph for a ring, the Worktrees heading spun its
+   glyph grey, and the Remotes heading rotated its entire bordered box.
+
+   The hook is `[aria-busy="true"]`, not a class, for two reasons.
+
+   The tint has to survive `prefers-reduced-motion`, where the blanket rule at
+   the top of this file kills every animation. Motion used to be the ONLY busy
+   signal, so a reduced-motion user got none at all: the ring froze as a broken
+   circle and the glyphs simply sat there, indistinguishable from resting. The
+   tint is a paint, so it holds in both modes — and it makes a 13px signal
+   legible for everyone, not only for the people who asked for less motion.
+
+   Keying the paint off the ARIA state also means a control cannot look busy
+   without announcing it. The two that used to animate off `.is-fetching`
+   announced nothing to a screen reader.
+
+   Only ever animate the `svg`, never the button. `.ref-fetch-all` used to hold
+   a bare `↻` text node, so its rule had no child to select and the animation
+   landed on the button element itself — see lib/RefreshGlyph.tsx. */
+
+.wt-btn[aria-busy="true"],
+.wt-refresh[aria-busy="true"],
+.ref-mini-action[aria-busy="true"],
+.ref-fetch-all[aria-busy="true"],
+.submodule-panel__refresh[aria-busy="true"] {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+.wt-btn[aria-busy="true"] svg,
+.wt-refresh[aria-busy="true"] svg,
+.ref-mini-action[aria-busy="true"] svg,
+.ref-fetch-all[aria-busy="true"] svg,
+.submodule-panel__refresh[aria-busy="true"] svg {
+  animation: pg-spin 800ms linear infinite;
+}
+
+/* Pull and Push keep the ring: an arrow that means "down" is not a rotation,
+   and spinning one reads as broken rather than busy. So the rule is the glyph,
+   not the control — a circular arrow turns, anything else swaps to this. It
+   stays visible in the icon-only narrow header, where the label is gone. */
 .wt-btn__spinner {
   width: 13px;
   height: 13px;
