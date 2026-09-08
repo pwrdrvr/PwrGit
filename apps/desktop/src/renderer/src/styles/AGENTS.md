@@ -42,6 +42,38 @@ Form controls (`input`, `textarea`, `[contenteditable]`) opt back in near the
 top of the file and must stay that way — a field you can't select inside is
 broken, not merely unpolished.
 
+## Busy state is `[aria-busy]`, and the arrow spins
+
+Every control that re-reads state — `git fetch` over the network or a local
+re-read — says "working" one way: an accent tint on the button, plus its
+circular-arrow glyph rotating in place. Three treatments used to be visible on
+one screen; see `design/Refresh Affordances - Normalization.dc.html`.
+
+Three rules fall out of that, and a new refresh control needs all three:
+
+- **Draw the glyph with `lib/RefreshGlyph.tsx`**, never a `↻` text character.
+  `--font-mono` contains no U+21BB, so that character resolves through an OS
+  fallback and changes shape per platform. A text node also gives an animation
+  nothing to target: the rule had to spin the *button*, and a bordered 24px box
+  cartwheeled.
+- **Paint busy from `[aria-busy="true"]`, not a class.** The blanket
+  `prefers-reduced-motion` rule at the top of `app.css` kills every animation,
+  so a motion-only busy state leaves reduced-motion users with no signal at
+  all. A tint survives it. Keying paint to the ARIA state also means a control
+  cannot look busy without announcing it.
+- **Don't add your selector to the spin rule.** It keys off `.refresh-glyph`,
+  which the shared component stamps, so it already covers you. Only the tint
+  list enumerates buttons, because their shapes differ.
+
+A glyph that is not a circular arrow — Pull's ↓, Push's ↑ — swaps to
+`.wt-btn__spinner` instead. Spinning an arrow that means "down" reads as
+broken. The rule is the glyph, not the control.
+
+In-flight is `aria-disabled`, never `disabled`: Chromium blurs an element the
+moment it becomes disabled, so activating one from the keyboard throws focus to
+`<body>` for the length of the operation (SC 2.4.3). Guard the click handler
+instead. `disabled` still belongs on a genuinely unavailable action.
+
 ## No raw color literals outside `tokens.css`
 
 `tokens.css` holds the theme blocks — `:root` (dark) and

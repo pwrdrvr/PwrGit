@@ -1495,8 +1495,11 @@ textarea,
   border: 1px solid transparent;
   border-radius: 5px;
   background: transparent;
-  color: var(--text-subtle);
-  font: 600 11px/1 var(--font-mono);
+  /* --text-muted, matching .wt-refresh: these two draw the same glyph in
+     headings 8px apart, so they must resolve to the same token. --text-subtle
+     was here to tint a `↻` text node and is alpha, not opaque, so it drifted
+     with whatever surface sat behind it. */
+  color: var(--text-muted);
   cursor: pointer;
 }
 /* "Busy" is aria-disabled rather than `disabled` on these, so that a fetch
@@ -4492,16 +4495,18 @@ textarea,
    moment it becomes disabled, so pressing Fetch from the keyboard threw focus
    back to <body> for the length of the fetch (SC 2.4.3). Same fix, and the
    same reasoning, as .wt-refresh and .ref-fetch-all — the click handlers are
-   what make these inert. `disabled` stays for genuinely unavailable actions. */
+   what make these inert. `disabled` stays for genuinely unavailable actions.
+
+   The busy button is excluded from the dim rather than re-set to opacity 1
+   afterwards: it carries the accent tint, and dimming would wash that out.
+   Saying so in the selector keeps it independent of source order. */
 .wt-btn:disabled,
-.wt-btn[aria-disabled="true"] {
+.wt-btn[aria-disabled="true"]:not([aria-busy="true"]) {
   opacity: 0.6;
   cursor: wait;
 }
-/* An aria-disabled button is still busy-tinted; opacity would wash the tint
-   out, so the in-flight one opts back to full strength. */
 .wt-btn[aria-busy="true"] {
-  opacity: 1;
+  cursor: wait;
 }
 /* Pull is one of four peer actions, so at rest it looks like its neighbours.
    The accent belongs to `.is-behind` — the state where pulling actually has
@@ -5570,13 +5575,14 @@ button.ref-chip:focus-visible {
   background: var(--accent-soft);
   color: var(--accent-bright);
 }
+/* Busy is excluded from the dim — see .wt-btn above. */
 .submodule-panel__refresh:disabled,
-.submodule-panel__refresh[aria-disabled="true"] {
+.submodule-panel__refresh[aria-disabled="true"]:not([aria-busy="true"]) {
   cursor: default;
   opacity: 0.62;
 }
 .submodule-panel__refresh[aria-busy="true"] {
-  opacity: 1;
+  cursor: default;
 }
 .submodule-row {
   margin-left: calc(var(--submodule-depth, 0) * 10px);
@@ -9974,11 +9980,18 @@ button.agent-auth-node {
   background: var(--accent-soft);
   color: var(--accent-bright);
 }
-.wt-btn[aria-busy="true"] svg,
-.wt-refresh[aria-busy="true"] svg,
-.ref-mini-action[aria-busy="true"] svg,
-.ref-fetch-all[aria-busy="true"] svg,
-.submodule-panel__refresh[aria-busy="true"] svg {
+/* Keyed off the shared glyph, not off a list of callers. Enumerating the five
+   buttons here meant a sixth refresh control would tint but never rotate, with
+   nothing to catch the half-applied rule; lib/RefreshGlyph.tsx stamps this
+   class, so every present and future caller spins by construction.
+
+   `flex: 0 0 auto` follows .wt-btn__spinner, the element the glyph replaced in
+   the Fetch button: these live in inline-flex buttons, and an SVG flex item
+   otherwise shrinks to an ellipse when the row is squeezed. */
+.refresh-glyph {
+  flex: 0 0 auto;
+}
+[aria-busy="true"] > .refresh-glyph {
   animation: pg-spin 800ms linear infinite;
 }
 

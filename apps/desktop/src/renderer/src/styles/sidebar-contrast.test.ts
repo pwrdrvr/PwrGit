@@ -309,9 +309,14 @@ describe.each(THEMES)("sidebar contrast — %s theme", (themeName, theme) => {
     });
 
     it("drag grips and glyph-only controls read", () => {
-      // .repo-row__handle, .wt-row__handle, .pin, .ref-mini-action.
+      // --text-subtle: .repo-row__handle, .wt-row__handle, .pin.
+      // --text-muted: .wt-refresh, .ref-fetch-all, .ref-mini-action — the
+      // three that draw <RefreshGlyph />. They share a token deliberately,
+      // since the Worktrees and Remotes headings sit 8px apart and draw the
+      // same glyph; see styles/AGENTS.md.
       for (const bg of ROW_SURFACES) {
         expect(round(ratio(theme, "--text-subtle", bg))).toBeGreaterThanOrEqual(3);
+        expect(round(ratio(theme, "--text-muted", bg))).toBeGreaterThanOrEqual(3);
       }
     });
 

@@ -366,7 +366,9 @@ export function WorktreeHeader({
             aria-disabled={busy !== null}
             aria-label="Fetch"
             aria-busy={busy === "fetch"}
-            title="Fetch"
+            /* The label span is display:none in the narrow header, so this is
+               the only text left — it has to track busy, as Pull's does. */
+            title={busy === "fetch" ? "Fetching…" : "Fetch"}
           >
             <RefreshGlyph />
             <span className="wt-btn__label">
@@ -408,7 +410,7 @@ export function WorktreeHeader({
             aria-disabled={busy !== null}
             aria-label="Push"
             aria-busy={busy === "push"}
-            title="Push"
+            title={busy === "push" ? "Pushing…" : "Push"}
           >
             {busy === "push" ? (
               <span className="wt-btn__spinner" />

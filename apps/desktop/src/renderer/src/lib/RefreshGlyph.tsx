@@ -18,18 +18,27 @@ import type { ReactElement } from "react";
  * and all — while its remote fetched. An element inside the button is what
  * makes the busy rule in app.css able to rotate the glyph alone.
  *
- * Busy state is painted from `[aria-busy="true"]` rather than a class; see
- * "Refresh and fetch affordances" in app.css for why.
+ * The `refresh-glyph` class is what the busy animation selects, so every
+ * caller — present and future — spins by construction rather than by being
+ * remembered in a selector list. Busy state is painted from
+ * `[aria-busy="true"]` rather than a class; see "Refresh and fetch
+ * affordances" in app.css for why.
  */
 export function RefreshGlyph({ size = 13 }: { size?: number }): ReactElement {
   return (
     <svg
+      className="refresh-glyph"
       width={size}
       height={size}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.8"
+      /* The 24-unit viewBox scales to `size`, so a fixed stroke thins as the
+         glyph shrinks — at 11px, 1.8 renders ~0.83 device px against ~0.98 at
+         13, and the small instance reads as a lighter-weight icon than its
+         neighbours. Scaling the stroke by the same factor holds the apparent
+         weight constant, which is the whole point of one shared glyph. */
+      strokeWidth={(1.8 * 13) / size}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
