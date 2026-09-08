@@ -73,7 +73,16 @@ test("shows the parent pin, live checkout, dirtiness, tag, branch hint, and URL 
 
   // Refresh is deliberately read-only; the same parent pin and dirty child
   // remain visible after the second full main/preload/renderer round trip.
-  await panel.getByRole("button", { name: "Refresh submodules" }).click();
+  //
+  // Wait for aria-busy to clear first. The button says aria-disabled rather
+  // than `disabled` (Chromium blurs on disable — SC 2.4.3), and Playwright's
+  // actionability check only knows about the `disabled` property, so it will
+  // not wait out a scan on its own. A click that lands mid-scan is dropped by
+  // the component's guard, and the assertions below re-check content that was
+  // already on screen, so they would pass without a round trip ever happening.
+  const refresh = panel.getByRole("button", { name: "Refresh submodules" });
+  await expect(refresh).toHaveAttribute("aria-busy", "false");
+  await refresh.click();
   await expect(row).toContainText(pinned.slice(0, 8));
   await expect(row).toContainText("Dirty");
 });

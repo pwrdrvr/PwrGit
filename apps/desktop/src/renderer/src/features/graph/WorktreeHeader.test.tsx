@@ -75,6 +75,63 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
+describe("WorktreeHeader sync buttons stay focusable while busy", () => {
+  // The sibling of a11y-sidebar.spec.ts's guard on .wt-refresh. Chromium blurs
+  // an element the moment it becomes disabled, so `disabled={busy !== null}`
+  // here threw a keyboard user back to <body> for the length of the operation
+  // (SC 2.4.3). Asserting the PROPERTY is the durable half: the operation can
+  // settle before any focus check runs, but a reintroduced `disabled` fails
+  // this outright.
+  it("says aria-disabled, never disabled, while an operation runs", async () => {
+    let settle!: () => void;
+    bridge.dispatch.mockReturnValueOnce(
+      new Promise((resolve) => {
+        settle = () => resolve(ok(undefined));
+      })
+    );
+
+    const fetchButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Fetch"]'
+    );
+    expect(fetchButton).not.toBeNull();
+
+    await act(async () => fetchButton?.click());
+
+    expect(fetchButton?.getAttribute("aria-busy")).toBe("true");
+    expect(fetchButton?.getAttribute("aria-disabled")).toBe("true");
+    expect(
+      fetchButton?.disabled,
+      "the sync buttons must never use the disabled property"
+    ).toBe(false);
+
+    // Its peers are unavailable for the duration, and they say so the same way.
+    for (const label of ["Pull", "Push"]) {
+      const peer = container.querySelector<HTMLButtonElement>(
+        `button[aria-label="${label}"]`
+      );
+      expect(peer?.getAttribute("aria-disabled")).toBe("true");
+      expect(peer?.disabled).toBe(false);
+    }
+
+    // Still inert: aria-disabled removes nothing from the a11y tree and does
+    // not block the click, so the handler's own guard has to. Asserted by
+    // command rather than call count — GitLfsChip shares this bridge mock.
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Push"]')
+        ?.click();
+    });
+    expect(bridge.dispatch).not.toHaveBeenCalledWith(
+      "remote:push",
+      expect.anything()
+    );
+
+    await act(async () => {
+      settle();
+    });
+  });
+});
+
 describe("WorktreeHeader pull progress", () => {
   it("replaces the indefinite pull label with each worktree-scoped phase", async () => {
     const pull = container.querySelector<HTMLButtonElement>(

@@ -161,6 +161,39 @@ describe("SubmodulePanel", () => {
     ).toBe(true);
   });
 
+  it("says aria-disabled, never disabled, while a scan runs", async () => {
+    // Same guard as WorktreeHeader's and a11y-sidebar.spec.ts's: `disabled`
+    // here blurred the button mid-scan and dropped a keyboard user on <body>
+    // (SC 2.4.3). The click guard is what keeps it inert.
+    let resolveScan!: (value: { ok: true; value: SubmoduleSnapshot }) => void;
+    dispatchMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveScan = resolve;
+      })
+    );
+
+    await act(async () => {
+      root.render(<SubmodulePanel worktreeId="worktree-1" />);
+    });
+
+    const refresh = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Refresh submodules"]'
+    );
+    expect(refresh?.getAttribute("aria-busy")).toBe("true");
+    expect(refresh?.getAttribute("aria-disabled")).toBe("true");
+    expect(
+      refresh?.disabled,
+      "the refresh button must never use the disabled property"
+    ).toBe(false);
+
+    await act(async () => refresh?.click());
+    expect(dispatchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveScan(ok(SNAPSHOT));
+    });
+  });
+
   it("coalesces events during a scan into one trailing refresh", async () => {
     let resolveFirst!: (value: {
       ok: true;

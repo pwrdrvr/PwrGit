@@ -12,6 +12,7 @@ import type {
   SubmoduleStatus
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { RefreshGlyph } from "../../lib/RefreshGlyph";
 
 const shortSha = (sha: string | undefined): string => sha?.slice(0, 8) ?? "—";
 
@@ -288,11 +289,20 @@ export function SubmodulePanel({
         <span className="submodule-panel__spacer" />
         <button
           className="submodule-panel__refresh"
-          onClick={load}
-          disabled={loading}
+          /* Busy is aria-disabled, not `disabled`: Chromium blurs an element
+             the moment it becomes disabled, so refreshing from the keyboard
+             threw focus back to <body> (SC 2.4.3). The guard below is what
+             makes it inert. Same fix as .wt-refresh and .ref-fetch-all. */
+          aria-disabled={loading}
+          aria-busy={loading}
+          onClick={() => {
+            if (loading) return;
+            load();
+          }}
           aria-label="Refresh submodules"
         >
-          {loading ? "Checking…" : "Refresh"}
+          <RefreshGlyph size={11} />
+          {loading ? "Refreshing…" : "Refresh"}
         </button>
       </div>
 

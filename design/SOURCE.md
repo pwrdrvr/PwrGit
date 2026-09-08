@@ -8,7 +8,11 @@ failure mode that matters here — if you change the design, re-export.
 ## Source
 
 - Project: **PwrGit** — <https://claude.ai/design/p/88030015-bdd6-424d-8202-005feb3cee12>
-- Exported: **2026-09-03**
+- Exported: **2026-09-03**, plus `Refresh Affordances - Normalization.dc.html`
+  pulled on **2026-09-08**. That was a single-file add, not a re-export, so two
+  pre-existing gaps are still open: the project's `Settings Updates.dc.html` has
+  no copy here at all, and `PwrGit As-Built Coverage.dc.html` has drifted
+  (16,629 bytes here against 17,153 in the project). Both predate that add.
 - Reflects the project's "as built" reconciliation pass of **2026-09-02**, which
   checked the design against `apps/desktop/src/renderer/src/**` and
   `styles/tokens.css` at `main @ bc11343`.
@@ -32,6 +36,7 @@ and records where the retired wireframe disagreed with the code. Read it first.
 | `Hunk Lane Staging.dc.html` | Two-lane hunk/line staging gutter. |
 | `Image Diff Lightbox.dc.html` | Binary image diff — inline layout rule, lightbox, pixel compare. |
 | `Reset to Remote - UX Review.dc.html` | Reset-to-remote findings and redesign. |
+| `Refresh Affordances - Normalization.dc.html` | The six refresh/fetch controls, why they diverged, and the one busy language that replaced them. |
 | `PwrGit Icon.dc.html` | App icon, size ladder, tray templates, DMG background. |
 | `support.js` | Generated `dc-runtime` bundle every `.dc.html` loads. |
 | `github.md` | Provenance note for the icon asset set (matched to PwrSnap's). |

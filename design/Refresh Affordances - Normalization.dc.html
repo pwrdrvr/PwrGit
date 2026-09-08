@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --bg-app: #000000; --bg-panel: #0a0a0a; --bg-input: #080808;
+            --bg-elev: #101010; --bg-hover: #14110d; --bg-row-active: #120800;
+            --line: rgba(247, 243, 235, 0.1); --line2: rgba(247, 243, 235, 0.14); --line3: rgba(247, 243, 235, 0.2);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a;
+            --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42);
+            --ok: #5fa969; --okt: #9ce5b3;
+            --bad: #b94232; --badsoft: rgba(185, 66, 50, 0.24); --badbord: rgba(185, 66, 50, 0.28); --badt: #ffb0a1;
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #050505; }
+          body { margin: 0; background: #050505; font-family: var(--sans); }
+          a { color: var(--accb); text-decoration: none; } a:hover { color: var(--acc); }
+
+          /* ---- review chrome (matches "Reset to Remote - UX Review") ---- */
+          .dv-turn { padding: 40px 44px 32px; background: #050505; }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--sans); color: var(--t3); max-width: 760px; text-wrap: pretty; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--sans); color: var(--tsub); max-width: 700px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+
+          /* ---- specimen stage ---- */
+          .stage { display: flex; flex-direction: column; gap: 11px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); }
+          .stage-h { display: flex; align-items: baseline; gap: 8px; font: 600 9.5px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); }
+          .stage-h em { font: 500 9.5px/1 var(--mono); font-style: normal; color: var(--tsub); text-transform: none; letter-spacing: 0; }
+          .spec { display: grid; grid-template-columns: 92px auto; align-items: center; gap: 14px; }
+          .spec-l { font: 500 10px/1.35 var(--mono); color: var(--tsub); text-align: right; }
+          .cell-b { display: flex; align-items: center; gap: 10px; min-height: 34px; }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+
+          /* ---- shipped affordances, reproduced at true size ---- */
+          @keyframes spin { to { transform: rotate(360deg); } }
+
+          /* .wt-btn — graph header toolbar */
+          .wtbtn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line2); background: var(--bg-elev); color: var(--t1); font: 600 12px/1 var(--sans); }
+          .wtbtn.ico { width: 32px; padding: 0; }
+          .wtbtn.hot { border-color: var(--abord); background: var(--bg-row-active); color: var(--accb); font-weight: 700; }
+          .ring { width: 13px; height: 13px; flex: none; border-radius: 50%; border: 2px solid var(--asoft); border-top-color: var(--acc); animation: spin 700ms linear infinite; }
+
+          /* .wt-refresh — WORKTREES heading */
+          .wtref { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--t3); }
+          .wtref.busy svg { animation: spin 800ms linear infinite; }
+
+          /* .ref-fetch-all / .ref-mini-action — REMOTES heading + remote rows.
+             font stack is PwrGit's --font-mono verbatim, so the glyph resolves
+             here exactly as it does in the shipped app. */
+          .reffa { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--tsub); font: 600 11px/1 var(--mono); }
+          .reffa.bare { border-color: transparent; }
+          .reffa.busy { animation: spin 800ms linear infinite; }
+          .reffa.big { width: 44px; height: 44px; font-size: 22px; }
+
+          /* .bulk-sync-action — sidebar top (sans stack: the glyph DOES resolve) */
+          .bulk { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 30px; padding: 0 7px; min-width: 118px; border: 1px solid var(--line); border-radius: 7px; background: transparent; color: var(--t3); font: 600 10.5px/1 var(--sans); }
+
+          /* .submodule-panel__refresh — right rail */
+          .subref { display: inline-flex; align-items: center; gap: 5px; min-height: 22px; padding: 0 7px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--t3); font: 600 9px/1 var(--sans); }
+
+          /* ---- the proposal ---- */
+          .px { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--t3); }
+          .px.sq24 { width: 24px; height: 24px; }
+          .px.tall { height: 32px; padding: 0 12px; border-color: var(--line2); border-radius: 8px; background: var(--bg-elev); color: var(--t1); font: 600 12px/1 var(--sans); }
+          .px.tall.ico { width: 32px; padding: 0; }
+          .px.sm { min-height: 22px; padding: 0 7px; font: 600 9px/1 var(--sans); }
+          .px.busy { border-color: var(--abord); background: var(--asoft); color: var(--accb); }
+          .px.busy svg { animation: spin 800ms linear infinite; }
+          .px.nomo svg { animation: none; }
+
+          /* ---- pins + findings ---- */
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); }
+          .pin.q { background: var(--t3); color: #050505; }
+          .pin.ok { background: var(--ok); color: #050505; }
+          .find { width: 392px; display: flex; flex-direction: column; gap: 10px; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--sans); color: var(--t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .fitem code { font: 500 10px/1.4 var(--mono); color: var(--t2); }
+          .pair { display: flex; gap: 24px; align-items: flex-start; }
+
+          /* ---- matrix table ---- */
+          .tbl { border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); overflow: hidden; }
+          .tr { display: grid; grid-template-columns: 210px 120px 145px 130px minmax(0, 1fr); gap: 12px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); font: 500 10.5px/1.4 var(--sans); color: var(--t2); }
+          .tr.wide { grid-template-columns: 250px 128px minmax(0, 1fr); }
+          .tr.last { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--t3); background: rgba(247, 243, 235, 0.03); }
+          .tr .where { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+          .tr .where em { font: 500 9.5px/1.35 var(--mono); font-style: normal; color: var(--tsub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .st { display: inline-flex; padding: 2px 6px; border-radius: 999px; font: 700 8.5px/1.35 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; }
+          .st.keep { background: rgba(95, 169, 105, 0.16); color: var(--okt); }
+          .st.chg { background: var(--asoft); color: var(--accb); border: 1px solid var(--abord); }
+          .st.bug { background: var(--badsoft); color: var(--badt); }
+          .st.q { background: rgba(247, 243, 235, 0.06); color: var(--t3); }
+
+          /* ---- sidebar context strips ---- */
+          .side { width: 328px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: #050505; }
+          .shead { display: flex; align-items: center; gap: 7px; height: 31px; padding: 0 4px; }
+          .slabel { font: 600 9px/1 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--tsub); }
+          .scount { font: 600 9px/1 var(--mono); color: var(--tsub); }
+          .chev { flex: none; width: 0; height: 0; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 4px solid var(--t3); }
+          .grow { flex: 1; }
+        </style>
+      </helmet>
+
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Findings — six affordances, three busy languages, one bug</span>
+        </div>
+        <p class="dv-sub">The reported screenshot shows three refresh controls on one screen, each animating differently. A sweep of <code>apps/desktop/src/renderer/src</code> finds three more. Every specimen below is reproduced at shipped size from the real CSS, in PwrGit's own font stacks, and is really animating — the third one is not a stylistic choice, it is a defect.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a The three on screen">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>The three in the screenshot — resting, then busy</div>
+            <div class="pair">
+              <div class="stage" style="width:420px;">
+                <div class="stage-h"><span class="pin">1</span>Graph header <em>WorktreeHeader · .wt-btn</em></div>
+                <div class="spec">
+                  <span class="spec-l">rest</span>
+                  <span class="cell-b">
+                    <span class="wtbtn ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"></path><path d="M21 3v5h-5"></path></svg></span>
+                    <span class="wtbtn hot ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"></path><path d="m7 10 5 5 5-5"></path><path d="M5 20h14"></path></svg></span>
+                    <span class="note">Fetch · Pull</span>
+                  </span>
+                </div>
+                <div class="spec">
+                  <span class="spec-l">busy</span>
+                  <span class="cell-b">
+                    <span class="wtbtn ico"><span class="ring"></span></span>
+                    <span class="note">glyph is <strong style="color:var(--t2);">replaced</strong> by a 13px accent ring, 700ms</span>
+                  </span>
+                </div>
+              </div>
+
+              <div class="stage" style="width:420px;">
+                <div class="stage-h"><span class="pin">2</span>Worktrees heading <em>RepoRow · .wt-refresh</em></div>
+                <div class="spec">
+                  <span class="spec-l">rest</span>
+                  <span class="cell-b">
+                    <span class="wtref"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></span>
+                    <span class="note">a <strong style="color:var(--t2);">different</strong> circular-arrow glyph — two arcs, not one</span>
+                  </span>
+                </div>
+                <div class="spec">
+                  <span class="spec-l">busy</span>
+                  <span class="cell-b">
+                    <span class="wtref busy"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></span>
+                    <span class="note">glyph spins in place, 800ms — and stays grey</span>
+                  </span>
+                </div>
+              </div>
+
+              <div class="stage" style="width:420px;">
+                <div class="stage-h"><span class="pin">3</span>Remotes heading <em>RepoRefsSections · .ref-fetch-all</em></div>
+                <div class="spec">
+                  <span class="spec-l">rest</span>
+                  <span class="cell-b">
+                    <span class="reffa">&#8635;</span>
+                    <span class="note">not an icon — the text character <code>U+21BB</code></span>
+                  </span>
+                </div>
+                <div class="spec">
+                  <span class="spec-l">busy</span>
+                  <span class="cell-b">
+                    <span class="reffa busy">&#8635;</span>
+                    <span class="note"><strong style="color:var(--badt);">the whole button rotates</strong> — border, radius and all</span>
+                  </span>
+                </div>
+                <div class="spec">
+                  <span class="spec-l">at 22px</span>
+                  <span class="cell-b">
+                    <span class="reffa big">&#8635;</span>
+                    <span class="note">blown up — this is what Geist Mono actually draws for <code>U+21BB</code>. See <span class="pin">11</span>.</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b Why the box spins">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>The defect, and the three the screenshot missed</div>
+            <div class="pair">
+              <div class="find">
+                <div class="fitem"><span class="pin">3</span><div><h4>The box spins because there is nothing else to spin</h4><p><code>.wt-refresh.is-refreshing <strong>svg</strong></code> targets the child glyph. Its sibling rule <code>.ref-fetch-all.is-fetching</code> has no <code>svg</code> — the button's only child is the text node <code>&#8635;</code> — so the animation lands on the button element itself. One missing selector segment, and a bordered 24px box cartwheels.</p></div></div>
+                <div class="fitem"><span class="pin">11</span><div><h4>Geist Mono has no <code>U+21BB</code>, so that glyph is a fallback</h4><p>Measured in this document, in PwrGit's exact <code>--font-mono</code> stack: <code>&#8635;</code> and a guaranteed-missing codepoint advance to the identical width, so nothing in the stack resolves it and the browser substitutes. The two mono buttons (<code>.ref-fetch-all</code>, <code>.ref-mini-action</code>) therefore draw whatever the OS supplies — different shape, weight and baseline per platform. <code>.bulk-sync-action</code> escapes it only because it is <code>--font-sans</code>, where the glyph does resolve. That is why the remotes control never quite matched anything near it.</p></div></div>
+                <div class="fitem"><span class="pin">4</span><div><h4>Busy is orange in one place and grey in the other two</h4><p>The ring is drawn from <code>--accent</code>. Both spinning glyphs inherit <code>--text-muted</code> / <code>--text-subtle</code> and never change colour, so "working" has no consistent hue.</p></div></div>
+                <div class="fitem"><span class="pin">5</span><div><h4>Reduced motion removes the busy state entirely</h4><p><code>app.css:97</code> kills every animation under <code>prefers-reduced-motion: reduce</code>. All three specimens then look <em>identical to resting</em> — the ring freezes as a broken circle, the glyphs just sit there. There is no non-motion fallback, so sighted reduced-motion users get no feedback at all that a fetch is running.</p></div></div>
+                <div class="fitem"><span class="pin">6</span><div><h4><code>aria-busy</code> is on two of the six</h4><p>Only <code>.wt-btn</code> and <code>.wt-refresh</code> set it. The remotes buttons and the submodule refresh announce nothing, so a screen reader has neither the motion nor the state.</p></div></div>
+                <div class="fitem"><span class="pin">7</span><div><h4>"Fetch all" names two different scopes</h4><p>The sidebar's <code>&#8635; Fetch all</code> fetches <em>every repo in the profile</em>. The remotes heading's <code>&#8635;</code> fetches <em>every remote in one repo</em>. Same word, same glyph, two blast radii; only the second one says which in its <code>aria-label</code>.</p></div></div>
+                <div class="fitem"><span class="pin q">8</span><div><h4>Two of the six still blur focus mid-op</h4><p><code>.wt-btn</code> and the submodule refresh go <code>disabled</code> the instant they are pressed, so Chromium blurs them and a keyboard user is thrown to <code>&lt;body&gt;</code> (SC 2.4.3). This exact bug was already fixed on <code>.wt-refresh</code> and <code>.ref-fetch-all</code> with <code>aria-disabled</code> — the fix just never reached the other two.</p></div></div>
+                <div class="fitem"><span class="pin q">12</span><div><h4>None of the six has a keyboard shortcut</h4><p>Fetch is the most-repeated action in the app and is reachable only by pointer or by tabbing to it. Out of scope here; noted so it is not lost.</p></div></div>
+              </div>
+
+              <div style="display:flex;flex-direction:column;gap:14px;">
+                <div class="stage" style="width:392px;">
+                  <div class="stage-h"><span class="pin">7</span>Sidebar top <em>Sidebar · .bulk-sync-action</em></div>
+                  <div class="cell-b">
+                    <span class="bulk">&#8635; Fetch all</span>
+                    <span class="bulk">&#8595; Try pull all</span>
+                  </div>
+                  <p class="note">Text glyph again, inline with the label. No busy state of its own — it opens <code>BulkSyncDialog</code>, which owns the progress. That delegation is fine; the glyph and the name are not.</p>
+                </div>
+
+                <div class="stage" style="width:392px;">
+                  <div class="stage-h"><span class="pin">9</span>Submodules rail <em>SubmodulePanel · .submodule-panel__refresh</em></div>
+                  <div class="cell-b">
+                    <span class="subref">Refresh</span>
+                    <span class="note">rest</span>
+                    <span class="subref" style="opacity:.62;">Checking&#8230;</span>
+                    <span class="note">busy</span>
+                  </div>
+                  <p class="note">A fourth vocabulary: no glyph at all, and the busy state is a <em>word swap</em> to "Checking…" — a verb used nowhere else in the app.</p>
+                </div>
+
+                <div class="stage" style="width:392px;">
+                  <div class="stage-h"><span class="pin q">10</span>Rebase tab <em>RebaseTab · .rebase-head__icon</em></div>
+                  <div class="cell-b">
+                    <span class="reffa bare" style="color:var(--t3);">&#8635;</span>
+                    <span class="note">The same <code>&#8635;</code> character, decorative, labelling <strong style="color:var(--t2);">rebase</strong>. The one glyph the app uses for "fetch" also means "replay commits".</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Turn <a class="dv-oid" href="#t2">2</a> picks one busy language, <a class="dv-oid" href="#t3">3</a> settles the glyph and the two verbs, <a class="dv-oid" href="#t4">4</a> maps it onto the six surfaces.</p>
+      </section>
+
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">One busy language</span>
+        </div>
+        <p class="dv-sub">Three treatments exist because nobody chose one. Two candidates below, then the part neither of them covers: what "busy" looks like when motion is off.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a Spin the arrow">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Spin the arrow, tint the button &#183; <span style="color:var(--accb);">recommended</span></div>
+            <div class="stage" style="width:460px;">
+              <div class="stage-h">Busy = accent tint + the glyph rotating in place</div>
+              <div class="spec">
+                <span class="spec-l">graph header</span>
+                <span class="cell-b">
+                  <span class="px tall ico busy"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></span>
+                  <span class="px tall busy"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg>Fetching&#8230;</span>
+                </span>
+              </div>
+              <div class="spec">
+                <span class="spec-l">headings</span>
+                <span class="cell-b">
+                  <span class="px sq24 busy"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></span>
+                  <span class="px sm busy"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg>Refresh</span>
+                </span>
+              </div>
+              <p class="note">The glyph <em>is</em> a rotation, so rotating it is the literal reading — and unlike the ring it keeps the button's identity while it works: you can still see <em>which</em> control is busy. The tint is what does the heavy lifting; the spin is decoration on top of it.</p>
+              <p class="note">Pull&#8595; and Push&#8593; keep the ring: their glyphs are not rotational, and spinning an arrow that means "down" is nonsense. That is the whole rule — <strong style="color:var(--t2);">the circular arrow spins; every other glyph swaps to the ring</strong>.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Ring everywhere">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Ring everywhere — one spinner, no exceptions</div>
+            <div class="stage" style="width:392px;">
+              <div class="stage-h">Busy = the glyph is replaced by the accent ring</div>
+              <div class="spec">
+                <span class="spec-l">graph header</span>
+                <span class="cell-b"><span class="wtbtn ico"><span class="ring"></span></span><span class="wtbtn"><span class="ring"></span>Fetching&#8230;</span></span>
+              </div>
+              <div class="spec">
+                <span class="spec-l">headings</span>
+                <span class="cell-b"><span class="wtref"><span class="ring"></span></span><span class="subref"><span class="ring" style="width:11px;height:11px;"></span>Refresh</span></span>
+              </div>
+              <p class="note">Fewer rules — every busy control looks the same regardless of glyph, and <code>.wt-btn</code> needs no change at all. The cost: at 24px the ring nearly fills the button, the control loses its identity the moment it starts working, and a row of three busy headings becomes three anonymous circles.</p>
+              <p class="note" style="color:var(--tsub);">Cheaper to ship, worse to read. Listed so the choice is on the record.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c Reduced motion">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>The same three, with motion off — today vs. the proposal</div>
+            <div class="stage" style="width:460px;">
+              <div class="stage-h"><span class="pin">5</span>prefers-reduced-motion: reduce</div>
+              <div class="spec">
+                <span class="spec-l">today, busy</span>
+                <span class="cell-b">
+                  <span class="wtbtn ico"><span class="ring" style="animation:none;"></span></span>
+                  <span class="wtref"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></span>
+                  <span class="reffa">&#8635;</span>
+                  <span class="note" style="color:var(--badt);">indistinguishable from resting</span>
+                </span>
+              </div>
+              <div class="spec">
+                <span class="spec-l">2a, busy</span>
+                <span class="cell-b">
+                  <span class="px tall ico busy nomo"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></span>
+                  <span class="px sq24 busy nomo"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></span>
+                  <span class="px sm busy nomo"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></span>
+                  <span class="note" style="color:var(--okt);">state survives without motion</span>
+                </span>
+              </div>
+              <p class="note">This is the finding that outranks the cosmetic one. Because the tint is carried by <code>[aria-busy="true"]</code> rather than by the animation, it holds in both modes — and it makes a 13px busy signal legible for everyone, not only for users who asked for less motion.</p>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Turn <a class="dv-oid" href="#t3">3</a>: one glyph or two?</p>
+      </section>
+
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3">3</a>
+          <span class="dv-tname">The glyph, and the two verbs hiding behind it</span>
+        </div>
+        <p class="dv-sub">Four of the six talk to a network (<code>git fetch</code>); two only re-read what is already on disk. That distinction is real and worth keeping legible — but the current encoding of it, a one-arc glyph versus a two-arc glyph at 13px, is not legible to anyone.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a One glyph">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>One glyph, verb carried by name and placement &#183; <span style="color:var(--accb);">recommended</span></div>
+            <div class="stage" style="width:460px;">
+              <div class="stage-h">The two-arc arrow, everywhere, at 13px / 11px</div>
+              <div class="cell-b" style="gap:18px;">
+                <span class="px tall ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></span>
+                <span class="px sq24"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></span>
+                <span class="px sm"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg>Refresh</span>
+              </div>
+              <p class="note">The text <code>&#8635;</code> goes away entirely. Finding <span class="pin">11</span> is the clinching argument: the app's mono stack does not contain the codepoint, so today that button's shape is decided by the operating system. An inline SVG takes a stroke weight, matches its neighbours at 13px, renders identically on every platform — and gives the animation something to target, which is what fixes the box-spin.</p>
+              <p class="note">Local-vs-network stays legible the way it already is in the code: by <strong style="color:var(--t2);">placement and accessible name</strong>. <code>RepoRow.tsx:667</code> already argues this — the button sits under the Worktrees heading "where it can only read as re-list these". Placement was doing the work; the two-arc/one-arc split was never carrying it.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b Two glyphs">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Two glyphs — keep a visual split between network and local</div>
+            <div class="stage" style="width:392px;">
+              <div class="stage-h">At the size these actually ship</div>
+              <div class="spec">
+                <span class="spec-l">network</span>
+                <span class="cell-b"><span class="px sq24"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"></path><path d="M21 3v5h-5"></path></svg></span><span class="note">one arc &#183; <code>fetch</code></span></span>
+              </div>
+              <div class="spec">
+                <span class="spec-l">local</span>
+                <span class="cell-b"><span class="px sq24"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></span><span class="note">two arcs &#183; <code>re-read</code></span></span>
+              </div>
+              <p class="note">This is what ships today, minus the text glyph. Side by side and called out, the difference is findable. In the app they are never side by side — they are 400px apart in different panels, one per panel, at 13px. Nobody decodes that.</p>
+              <p class="note" style="color:var(--tsub);">Keep it only if we also give the local one a genuinely different shape. Two arcs vs. one is a distinction that exists in the source, not on the screen.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3c" data-screen-label="3c Naming">
+            <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>Names — the two "Fetch all"s, and the busy verb</div>
+            <div class="stage" style="width:844px;">
+              <div class="tbl">
+                <div class="tr wide head"><span>Control</span><span>Today</span><span>Proposed accessible name</span></div>
+                <div class="tr wide"><span class="where">Sidebar bulk fetch<em>Sidebar &#183; .bulk-sync-action</em></span><span><code>&#8635; Fetch all</code></span><span>Fetch all repos &#8212; <span style="color:var(--tsub);">visible label states the scope</span></span></div>
+                <div class="tr wide"><span class="where">Remotes heading<em>RepoRefsSections &#183; .ref-fetch-all</em></span><span><code>&#8635;</code></span><span>Fetch all remotes for <em style="color:var(--tsub);">{repo}</em> &#8212; <span style="color:var(--tsub);">already correct, keep</span></span></div>
+                <div class="tr wide"><span class="where">Worktrees heading<em>RepoRow &#183; .wt-refresh</em></span><span>Refresh worktrees</span><span>Refresh worktrees for <em style="color:var(--tsub);">{repo}</em> &#8212; <span style="color:var(--tsub);">already correct, keep</span></span></div>
+                <div class="tr wide last"><span class="where">Submodules rail<em>SubmodulePanel &#183; .submodule-panel__refresh</em></span><span>Refresh / "Checking&#8230;"</span><span>Refresh submodules; busy label <strong style="color:var(--accb);">Refreshing&#8230;</strong></span></div>
+              </div>
+              <p class="note">One busy verb across the app: <strong style="color:var(--t2);">Fetching&#8230;</strong> for anything that touches a remote, <strong style="color:var(--t2);">Refreshing&#8230;</strong> for anything that re-reads locally. "Checking…" retires.</p>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Turn <a class="dv-oid" href="#t4">4</a>: what actually changes, per surface.</p>
+      </section>
+
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t4">4</a>
+          <span class="dv-tname">The change map</span>
+        </div>
+        <p class="dv-sub">2a + 3a applied to all six surfaces. Three CSS rules and one shared icon carry most of it; no component moves, no affordance is removed.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="4a" data-screen-label="4a Per-surface">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Six surfaces &#215; four properties</div>
+            <div class="tbl" style="width:844px;">
+              <div class="tr head"><span>Surface</span><span>Glyph</span><span>Busy motion</span><span>Busy state</span><span>a11y</span></div>
+              <div class="tr"><span class="where">Graph header Fetch<em>WorktreeHeader &#183; .wt-btn</em></span><span><span class="st chg">Unify</span></span><span><span class="st chg">Ring &#8594; spin</span></span><span><span class="st chg">Add tint</span></span><span><span class="st bug">aria-disabled</span></span></div>
+              <div class="tr"><span class="where">Graph header Pull / Push<em>WorktreeHeader &#183; .wt-btn</em></span><span><span class="st keep">Keep &#8595;&#8593;</span></span><span><span class="st keep">Keep ring</span></span><span><span class="st chg">Add tint</span></span><span><span class="st bug">aria-disabled</span></span></div>
+              <div class="tr"><span class="where">Worktrees heading<em>RepoRow &#183; .wt-refresh</em></span><span><span class="st keep">Keep</span></span><span><span class="st keep">Keep spin</span></span><span><span class="st chg">Add tint</span></span><span><span class="st keep">Already ok</span></span></div>
+              <div class="tr"><span class="where">Remotes heading<em>RepoRefsSections &#183; .ref-fetch-all</em></span><span><span class="st bug">&#8635; &#8594; svg</span></span><span><span class="st bug">Box &#8594; glyph</span></span><span><span class="st chg">Add tint</span></span><span><span class="st chg">+aria-busy</span></span></div>
+              <div class="tr"><span class="where">Per-remote row<em>RepoRefsSections &#183; .ref-mini-action</em></span><span><span class="st bug">&#8635; &#8594; svg</span></span><span><span class="st bug">Box &#8594; glyph</span></span><span><span class="st chg">Add tint</span></span><span><span class="st chg">+aria-busy</span></span></div>
+              <div class="tr"><span class="where">Submodules rail<em>SubmodulePanel &#183; .submodule-panel__refresh</em></span><span><span class="st chg">Add svg</span></span><span><span class="st chg">Add spin</span></span><span><span class="st chg">Add tint</span></span><span><span class="st bug">aria-disabled</span></span></div>
+              <div class="tr last"><span class="where">Sidebar bulk fetch<em>Sidebar &#183; .bulk-sync-action</em></span><span><span class="st chg">&#8635; &#8594; svg</span></span><span><span class="st q">n/a &#8212; modal</span></span><span><span class="st q">n/a</span></span><span><span class="st chg">Rename</span></span></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="4b" data-screen-label="4b In situ">
+            <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>In situ — the two sidebar headings, before and after</div>
+            <div class="pair">
+              <div style="display:flex;flex-direction:column;gap:9px;">
+                <span class="dv-olabel" style="color:var(--badt);">Today &#8212; two glyphs, two motions</span>
+                <div class="side">
+                  <div class="shead"><span class="chev"></span><span class="slabel">Worktrees</span><span class="scount">54</span><span class="grow"></span><span class="wtref busy"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></span></div>
+                  <div class="shead"><span class="chev"></span><span class="slabel">Remotes</span><span class="scount">1</span><span class="grow"></span><span class="reffa busy">&#8635;</span></div>
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:9px;">
+                <span class="dv-olabel" style="color:var(--okt);">Proposed &#8212; one glyph, one motion, one tint</span>
+                <div class="side">
+                  <div class="shead"><span class="chev"></span><span class="slabel">Worktrees</span><span class="scount">54</span><span class="grow"></span><span class="px sq24 busy"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></span></div>
+                  <div class="shead"><span class="chev"></span><span class="slabel">Remotes</span><span class="scount">1</span><span class="grow"></span><span class="px sq24 busy"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></span></div>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="max-width:700px;">Both headings are 31px tall and 8px apart. Today one spins a grey glyph and the other cartwheels a bordered box; after, they are the same control doing the same thing at two scopes.</p>
+          </div>
+
+          <div class="dv-opt" id="4c" data-screen-label="4c Open questions">
+            <div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>Judgement calls worth a second opinion before they ship</div>
+            <div class="find" style="width:520px;">
+              <div class="fitem"><span class="pin q">A</span><div><h4>Dropping the network/local glyph split</h4><p>3a retires a distinction the code deliberately encodes. The argument for retiring it is that 13px one-arc vs two-arc never conveyed it and placement always did. If we would rather keep a visual split, it needs a genuinely different shape, not a second arc &#8212; that is a bigger change than this pass.</p></div></div>
+              <div class="fitem"><span class="pin q">B</span><div><h4>Changing the graph header Fetch from ring to spin</h4><p>It is the most-used button of the six and the only one whose busy state is currently <em>good</em>. Swapping it is for consistency, not because it is broken. Leaving it on the ring is defensible &#8212; it just means the toolbar and the headings keep speaking differently.</p></div></div>
+              <div class="fitem"><span class="pin q">C</span><div><h4>The RebaseTab <code>&#8635;</code></h4><p>Decorative, not a button, and outside the refresh family &#8212; but it is the same character meaning something else, and it inherits the same missing-codepoint problem. Changing it is scope creep for this PR; flagging it so it is a choice rather than an oversight.</p></div></div>
+              <div class="fitem"><span class="pin ok">D</span><div><h4>Not controversial: the box-spin, the tint, and <code>aria-busy</code></h4><p>The cartwheel is a defect, the reduced-motion gap is a real accessibility hole, the mono <code>&#8635;</code> is an unrendered codepoint, and the missing <code>aria-busy</code> / <code>aria-disabled</code> are repeats of fixes this codebase has already made twice. Those ship regardless of A&#8211;C.</p></div></div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: "show 2a on the graph header at full width" &#183; "what does a failed fetch look like in this vocabulary?" &#183; "add a keyboard shortcut row &#8212; none of the six has one"</p>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        renderVals() { return {}; }
+      }
+    </script>
+  </body>
+</html>
