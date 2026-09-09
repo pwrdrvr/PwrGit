@@ -106,9 +106,27 @@ describe("WorktreeRow — the folder a worktree lives in", () => {
     );
     // Both names, so either one identifies the row.
     expect(markup).toContain("dmg-file-art-update-4fd193");
-    // The full path is one hover away; the row only has room for the leaf.
+    // Hovering the folder line names the branch in full — that name is the
+    // row's first casualty of a narrow sidebar — over a path elided in the
+    // middle so the tooltip fits on screen.
     expect(markup).toContain(
-      "Worktree folder — /Users/me/claude-worktrees/PwrSnap/recursing-euler-9edf74"
+      "dmg-file-art-update-4fd193\nWorktree folder — /Users/…/PwrSnap/recursing-euler-9edf74"
+    );
+  });
+
+  // The branch is what a long name truncates to "fix/desktop-price-a…", and
+  // the folder line under it is where the pointer lands when someone goes
+  // looking for the rest of it.
+  it("names the whole branch on the folder line's tooltip", () => {
+    const markup = render(
+      worktree({
+        branch: "fix/desktop-price-and-token-columns-for-agent-runs",
+        path: "/Users/me/claude-worktrees/PwrAgnt/elated-cartwright-f52b78"
+      })
+    );
+
+    expect(markup).toContain(
+      'title="fix/desktop-price-and-token-columns-for-agent-runs\nWorktree folder — /Users/…/PwrAgnt/elated-cartwright-f52b78"'
     );
   });
 

@@ -6,7 +6,11 @@ import {
   type MouseEvent as ReactMouseEvent
 } from "react";
 import type { Worktree } from "@pwrgit/shared";
-import { currentPlatform, shortcutLabel } from "../../lib/platform";
+import {
+  currentPlatform,
+  elidePathMiddle,
+  shortcutLabel
+} from "../../lib/platform";
 import { relativeAge } from "../../lib/relativeAge";
 import { openResetToRemote } from "../graph/reset-to-remote";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
@@ -318,9 +322,20 @@ export function WorktreeRow({
       {folder !== null && (
         <>
           <span className="a11y-sr-only">in folder</span>
+          {/* The branch again, in full. The name above is the row's only
+              shrinkable element, so at 320px it is usually the truncated one —
+              and this second line is what the pointer is over when someone
+              wants to know which checkout they are looking at. The path is
+              middle-elided: a native tooltip is one unwrapped line, so the
+              whole thing reached across the pane beside the sidebar to say
+              two things the row above already showed. "Copy path" in the ⋯
+              menu still yields it exactly, and the switcher's tooltip keeps
+              it whole, where a path match is why the row is on screen. */}
           <span
             className="wt-row__folder"
-            title={`Worktree folder — ${worktree.path}`}
+            title={`${worktree.branch}\nWorktree folder — ${elidePathMiddle(
+              worktree.path
+            )}`}
           >
             <svg
               width="10"
