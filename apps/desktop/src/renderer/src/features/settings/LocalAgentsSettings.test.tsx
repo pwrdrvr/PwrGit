@@ -118,52 +118,11 @@ describe("LocalAgentsSettings", () => {
     expect(container.textContent).toContain("Read forge status");
   });
 
-  it("creates a named Session and shows its token exactly once", async () => {
-    const credential = {
-      session: {
-        id: "session_new",
-        name: "Codex",
-        roleId: "builtin.discovery",
-        createdAt: "2026-08-23T00:00:00.000Z",
-        updatedAt: "2026-08-23T00:00:00.000Z",
-        revokedAt: null
-      },
-      token: "pgmcp_secret-once",
-      environment: {
-        policyFileVariable: "PWRGIT_MCP_POLICY_FILE" as const,
-        policyFile: snapshot.policyFile,
-        sessionTokenVariable: "PWRGIT_MCP_SESSION_TOKEN" as const
-      }
-    };
-    mocks.dispatch.mockImplementation((name: string) => {
-      if (name === "localAgents:read") return Promise.resolve(ok(snapshot));
-      if (name === "localAgents:createSession") return Promise.resolve(ok(credential));
-      return agentAccessFallback(name);
-    });
+  it("offers OAuth connection commands instead of manual token creation", async () => {
     await render();
-    const input = container.querySelector<HTMLInputElement>("input[placeholder='PwrAgent on this Mac']");
-    const button = Array.from(container.querySelectorAll("button")).find(
-      (candidate) => candidate.textContent === "Create Session"
-    );
-    await act(async () => {
-      if (input !== null) {
-        const setter = Object.getOwnPropertyDescriptor(
-          HTMLInputElement.prototype,
-          "value"
-        )?.set;
-        setter?.call(input, "Codex");
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-      }
-      button?.click();
-    });
-
-    expect(mocks.dispatch).toHaveBeenCalledWith("localAgents:createSession", {
-      name: "Codex",
-      roleId: "builtin.discovery"
-    });
-    expect(container.textContent).toContain("Copy this now");
-    expect(container.textContent).toContain("PWRGIT_MCP_SESSION_TOKEN");
-    expect(container.textContent).toContain("pgmcp_secret-once");
+    expect(container.textContent).toContain("Connect an agent");
+    expect(container.textContent).not.toContain("Create Session");
+    expect(mocks.dispatch).not.toHaveBeenCalledWith("localAgents:createSession", expect.anything());
   });
 
   it("revokes a Session through the typed command bus", async () => {

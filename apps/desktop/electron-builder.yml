@@ -84,14 +84,6 @@ files:
   - "!**/node_modules/dugite/git/**"
 
 extraResources:
-  # Single-file build of the stdio MCP server, so an operator can point any
-  # MCP client at the installed app with no Node install, clone, or build.
-  # Run through Electron with ELECTRON_RUN_AS_NODE=1; see
-  # src/main/agent-access/bundled-cli.ts for the resolved path.
-  # Copied into the stage root by scripts/release.mjs, like LICENSE: every
-  # `from` here resolves against the release stage, not the repository.
-  - from: pwrgit-mcp.mjs
-    to: pwrgit-mcp.mjs
   - from: LICENSE
     to: LICENSE
   - from: THIRD_PARTY_LICENSES

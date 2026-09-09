@@ -26,7 +26,7 @@ export function registerIpc(
           lifecycle.onWebContentsDestroyed?.(webContentsId);
         });
       }
-      return bus.dispatch(name, req as Req<CommandName>, { webContentsId });
+      return bus.dispatch(name, req as Req<CommandName>, { webContentsId, isMainFrame: event.senderFrame === event.sender.mainFrame });
     }
   );
 }

@@ -1,93 +1,36 @@
-import type { McpPolicyStore } from "@pwrgit/mcp-server/access-policy";
-import { AgentAccessServer } from "./agent-access-server.js";
-import { PairingRegistry } from "./pairing-registry.js";
-import type { PendingPairing } from "@pwrgit/mcp-server/agent-access-protocol";
-import type { BundledCliLaunch } from "./bundled-cli.js";
+import type { AgentAccessSnapshot } from "@pwrgit/shared";
+import { AgentAccessServer, type AgentAccessServerOptions } from "./agent-access-server";
 
-export type AgentAccessStatus = {
-  enabled: boolean;
-  listening: boolean;
-  mcpUrl: string;
-  pending: PendingPairing[];
-  /** Set when the listener could not bind — usually another PwrGit instance,
-   * or something else already on the port. Surfaced instead of retrying
-   * silently, because a client polling a dead endpoint has no other clue. */
-  error?: string;
-  clientLaunch?: BundledCliLaunch;
-};
-
-export type AgentAccessServiceOptions = {
-  policyFile: string;
-  appVersion: string;
-  onChanged: () => void;
-  /** How a stdio client launches the bundled server. Undefined when the
-   * single-file build is not present. */
-  clientLaunch?: BundledCliLaunch | undefined;
-  port?: number;
-  log?: (message: string, extra?: unknown) => void;
-};
-
-/** Owns the loopback listener's lifecycle and the pairing consent state.
- *
- * The listener is off until the operator turns it on: an always-listening
- * local MCP endpoint is a standing grant on their repositories, and that is
- * their decision to make, not a default. */
+export type AgentAccessStatus = AgentAccessSnapshot;
 export class AgentAccessService {
   private readonly server: AgentAccessServer;
-  readonly pairings: PairingRegistry;
   private enabled = false;
   private error: string | undefined;
-
-  constructor(
-    policy: McpPolicyStore,
-    private readonly options: AgentAccessServiceOptions
-  ) {
-    this.pairings = new PairingRegistry(policy, options.onChanged);
-    this.server = new AgentAccessServer({
-      policyFile: options.policyFile,
-      appVersion: options.appVersion,
-      pairings: this.pairings,
-      ...(options.port === undefined ? {} : { port: options.port }),
-      ...(options.log === undefined ? {} : { log: options.log })
+  private tail: Promise<unknown> = Promise.resolve();
+  constructor(private readonly options: AgentAccessServerOptions & { saveEnabled: (enabled: boolean) => void }) {
+    this.server = new AgentAccessServer(options);
+  }
+  status(): AgentAccessSnapshot {
+    return { enabled: this.enabled, listening: this.server.listening, mcpUrl: this.server.mcpUrl,
+      ...(this.error ? { error: this.error } : {}) };
+  }
+  setEnabled(enabled: boolean): Promise<AgentAccessSnapshot> {
+    const operation = this.tail.then(async () => {
+      this.error = undefined;
+      if (enabled) {
+        try { await this.server.start(); }
+        catch (cause) { this.error = cause instanceof Error ? cause.message : String(cause); }
+      } else await this.server.stop();
+      this.enabled = enabled;
+      this.options.saveEnabled(enabled);
+      this.options.onChanged();
+      return this.status();
     });
+    this.tail = operation.catch(() => undefined);
+    return operation;
   }
-
-  status(): AgentAccessStatus {
-    return {
-      enabled: this.enabled,
-      listening: this.server.listening,
-      mcpUrl: this.server.mcpUrl,
-      pending: this.pairings.pending(),
-      ...(this.error === undefined ? {} : { error: this.error }),
-      ...(this.options.clientLaunch === undefined
-        ? {}
-        : { clientLaunch: this.options.clientLaunch })
-    };
-  }
-
-  async setEnabled(enabled: boolean): Promise<AgentAccessStatus> {
-    if (enabled === this.enabled) return this.status();
-    this.enabled = enabled;
-    this.error = undefined;
-    if (enabled) {
-      try {
-        await this.server.start();
-      } catch (cause) {
-        this.enabled = false;
-        this.error = cause instanceof Error ? cause.message : String(cause);
-      }
-    } else {
-      // Pending requests are consent decisions the operator never made.
-      // Turning access off answers them all with "no".
-      this.pairings.clear();
-      await this.server.stop();
-    }
-    this.options.onChanged();
-    return this.status();
-  }
-
-  async dispose(): Promise<void> {
-    this.enabled = false;
+  async dispose() {
+    await this.tail;
     await this.server.stop();
   }
 }

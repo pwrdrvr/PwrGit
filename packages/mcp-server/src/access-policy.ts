@@ -87,6 +87,7 @@ type McpAgentSessionRecord = {
   createdAt: string;
   updatedAt: string;
   revokedAt: string | null;
+  oauth?: { clientId: string; scopes: McpAgentCapability[] };
 };
 
 export type McpAgentSession = Omit<McpAgentSessionRecord, "tokenHash">;
@@ -303,7 +304,8 @@ function publicSession(session: McpAgentSessionRecord): McpAgentSession {
     roleId: session.roleId,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
-    revokedAt: session.revokedAt
+    revokedAt: session.revokedAt,
+    ...(session.oauth ? { oauth: { clientId: session.oauth.clientId, scopes: [...session.oauth.scopes] } } : {})
   };
 }
 
@@ -393,6 +395,11 @@ function parseSession(value: unknown): McpAgentSessionRecord {
   ) {
     throw new McpAccessError("invalid_policy", "policy contains an invalid session");
   }
+  if (session.oauth !== undefined && (
+    session.oauth === null || typeof session.oauth !== "object" ||
+    typeof session.oauth.clientId !== "string" || !ID_PATTERN.test(session.oauth.clientId) ||
+    !Array.isArray(session.oauth.scopes) || !session.oauth.scopes.every(isCapability)
+  )) throw new McpAccessError("invalid_policy", "invalid OAuth session binding");
   return session as McpAgentSessionRecord;
 }
 
@@ -471,7 +478,7 @@ export class McpPolicyStore {
     };
   }
 
-  createSession(nameInput: string, roleId: string): {
+  createSession(nameInput: string, roleId: string, oauth?: McpAgentSessionRecord["oauth"]): {
     session: McpAgentSession;
     token: string;
     environment: {
@@ -500,7 +507,8 @@ export class McpPolicyStore {
       tokenHash: tokenHashHex(token),
       createdAt: timestamp,
       updatedAt: timestamp,
-      revokedAt: null
+      revokedAt: null,
+      ...(oauth === undefined ? {} : { oauth: { clientId: oauth.clientId, scopes: [...oauth.scopes] } })
     };
     policy.sessions.push(record);
     this.write(policy);
@@ -594,8 +602,11 @@ export class McpPolicyStore {
     if (session.revokedAt !== null) throw new McpAccessError("revoked_session", "MCP session has been revoked");
     const role = policy.roles.find((candidate) => candidate.id === session.roleId);
     if (role === undefined) throw new McpAccessError("invalid_role", "MCP session has no valid role");
+    const permissions = role.permissions.filter((capability) =>
+      session.oauth === undefined || session.oauth.scopes.includes(capability)
+    );
     const missing = (requirement.capabilities ?? []).filter(
-      (capability) => !role.permissions.includes(capability)
+      (capability) => !permissions.includes(capability)
     );
     if (missing.length > 0) {
       throw new McpAccessError(
@@ -621,7 +632,7 @@ export class McpPolicyStore {
       sessionName: session.name,
       roleId: role.id,
       roleName: role.name,
-      capabilities: [...role.permissions],
+      capabilities: [...permissions],
       repositoryRoots: role.repositoryRoots === null ? null : [...role.repositoryRoots]
     };
   }

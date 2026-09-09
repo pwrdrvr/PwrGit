@@ -28,6 +28,7 @@ import {
 export const CAPABILITY_RESOURCE_URI = "pwrgit://live-status/capabilities/v1";
 
 export type PwrGitMcpServerOptions = {
+  supportsSubscriptions?: boolean;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   runner?: CommandRunner;
@@ -96,14 +97,17 @@ export async function createPwrGitMcpServer(
     {
       instructions:
         "PwrGit provides bounded, read-only discovery of local GitHub and GitLab checkouts. " +
-        "Remote credentials and changed-file paths are never returned. For live status, call pwrgit_watch_repository, read its versioned resource, subscribe with resources/subscribe, and re-read it after notifications/resources/updated. " +
-        "Use the advertised WebSocket only when the host cannot surface standard MCP resource subscriptions."
+        "Remote credentials and changed-file paths are never returned. For live status, call pwrgit_watch_repository and read its versioned resource. " +
+        (options.supportsSubscriptions === false
+          ? "This HTTP transport is stateless: read status resources on demand and use the advertised WebSocket for live updates. Resource subscriptions are unavailable."
+          : "Subscribe with resources/subscribe, then re-read after notifications/resources/updated. Use the WebSocket only when the host cannot surface standard MCP subscriptions.")
     }
   );
   const statusResources = new StatusResourceRegistry(
     mcp,
     liveStatusLoader,
-    authorizer
+    authorizer,
+    options.supportsSubscriptions ?? true
   );
 
   mcp.registerResource(
@@ -124,7 +128,7 @@ export async function createPwrGitMcpServer(
           {
             uri: uri.toString(),
             mimeType: "application/json",
-            text: JSON.stringify(eventServer.capabilities(authorization))
+            text: JSON.stringify(eventServer.capabilities(authorization, options.supportsSubscriptions ?? true))
           }
         ]
       };
@@ -298,9 +302,10 @@ export async function createPwrGitMcpServer(
   mcp.registerTool(
     "pwrgit_watch_repository",
     {
-      title: "Create a subscribable live status resource",
+      title: "Create a live status resource",
       description:
-        "Create and initially read a versioned MCP resource for normalized local, PR/MR, CI, merge-conflict, review, and PR/MR state. Subscribe to resourceUri with resources/subscribe and re-read after notifications/resources/updated.",
+        "Create and initially read a versioned MCP resource for normalized local, PR/MR, CI, merge-conflict, review, and PR/MR state. " +
+        (options.supportsSubscriptions === false ? "Read resourceUri on demand; use the advertised WebSocket for live updates." : "Subscribe to resourceUri with resources/subscribe and re-read after notifications/resources/updated."),
       inputSchema: {
         path: z.string().trim().min(1).max(4_096),
         intervalMs: z
@@ -323,15 +328,18 @@ export async function createPwrGitMcpServer(
         content: [
           {
             type: "text",
-            text:
-              "PwrGit live status resource is ready. Read the attached resource, subscribe to its URI, and re-read it after notifications/resources/updated."
+            text: options.supportsSubscriptions === false
+              ? "PwrGit live status resource is ready. Read the attached resource on demand; discover the WebSocket with pwrgit_live_status_capabilities for live updates."
+              : "PwrGit live status resource is ready. Read the attached resource, subscribe to its URI, and re-read it after notifications/resources/updated."
           },
           {
             type: "resource_link",
             uri: document.resourceUri,
             name: "PwrGit live repository status v1",
             description:
-              "Subscribe with resources/subscribe, then re-read after notifications/resources/updated.",
+              options.supportsSubscriptions === false
+                ? "Read this resource on demand for current status."
+                : "Subscribe with resources/subscribe, then re-read after notifications/resources/updated.",
             mimeType: "application/json"
           },
           { type: "text", text: JSON.stringify(document) }
@@ -355,8 +363,8 @@ export async function createPwrGitMcpServer(
         capabilities: ["forge.status.read", "status.subscribe"]
       });
       return success(
-        eventServer.capabilities(authorization),
-        `PwrGit live status uses standard MCP subscriptions first. The same contract is readable at ${CAPABILITY_RESOURCE_URI}.`
+        eventServer.capabilities(authorization, options.supportsSubscriptions ?? true),
+        `PwrGit live status capabilities are readable at ${CAPABILITY_RESOURCE_URI}.`
       );
     }
   );

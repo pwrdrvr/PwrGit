@@ -43,6 +43,7 @@
     "better-sqlite3": "^13.0.3",
     "dugite": "^3.2.3",
     "electron-updater": "6.8.9",
+    "express": "5.2.1",
     "pixelmatch": "^7.2.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
@@ -52,6 +53,7 @@
     "@electron/rebuild": "^4.2.0",
     "@playwright/test": "^1.62.1",
     "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "5.0.6",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react": "^5.2.0",

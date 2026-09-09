@@ -1,202 +1,43 @@
 // @vitest-environment jsdom
-
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ok, type AgentAccessSnapshot, type McpAgentRole } from "@pwrgit/shared";
-
-const mocks = vi.hoisted(() => ({
-  dispatch: vi.fn(),
-  subscribe: vi.fn()
-}));
-
-vi.mock("../../lib/pwrgit", () => ({
-  dispatch: mocks.dispatch,
-  subscribe: mocks.subscribe
-}));
-
-import { AgentAccessSection } from "./AgentAccessSection";
-
-const roles: McpAgentRole[] = [
-  {
-    id: "builtin.local-reader",
-    name: "Local Repository Reader",
-    description: "",
-    builtIn: true,
-    permissions: ["repository.roots.read"],
-    repositoryRoots: null
-  },
-  {
-    id: "builtin.live-status",
-    name: "Live Forge Status",
-    description: "",
-    builtIn: true,
-    permissions: ["repository.roots.read"],
-    repositoryRoots: null
-  }
-];
-
-function snapshot(patch: Partial<AgentAccessSnapshot> = {}): AgentAccessSnapshot {
-  return {
-    enabled: false,
-    listening: false,
-    mcpUrl: "http://127.0.0.1:51731/mcp",
-    pending: [],
-    ...patch
-  };
-}
-
-function pendingSnapshot(clientName: string, pairingId: string): AgentAccessSnapshot {
-  return snapshot({
-    enabled: true,
-    listening: true,
-    pending: [
-      {
-        pairingId,
-        clientName,
-        requestedRoleId: "builtin.live-status",
-        createdAt: "2026-09-03T00:00:00.000Z",
-        expiresAt: "2026-09-03T00:05:00.000Z"
-      }
-    ]
-  });
-}
-
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { ok } from "@pwrgit/shared";
+const mocks = vi.hoisted(() => ({ dispatch: vi.fn(), subscribe: vi.fn() }));
+vi.mock("../../lib/pwrgit", () => mocks);
+import { AgentAccessSection, CONNECT_RECIPES } from "./AgentAccessSection";
 let container: HTMLDivElement;
 let root: Root;
-const unsubscribe = vi.fn();
-
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.subscribe.mockReturnValue(unsubscribe);
+  mocks.subscribe.mockReturnValue(() => undefined);
+  mocks.dispatch.mockResolvedValue(ok({ enabled: false, listening: false, mcpUrl: "http://127.0.0.1:51731/mcp" }));
   container = document.createElement("div");
-  document.body.appendChild(container);
+  document.body.append(container);
   root = createRoot(container);
 });
-
-afterEach(() => {
-  act(() => root.unmount());
-  container.remove();
+afterEach(() => { act(() => root.unmount()); container.remove(); });
+const render = () => act(async () => { root.render(<AgentAccessSection />); });
+it("shows the opt-in toggle and hides commands until listening", async () => {
+  await render();
+  expect(container.querySelector("[role=switch]")?.getAttribute("aria-checked")).toBe("false");
+  expect(container.textContent).not.toContain("codex mcp add");
+  await act(async () => { (container.querySelector("[role=switch]") as HTMLElement).click(); });
+  expect(mocks.dispatch).toHaveBeenCalledWith("agentAccess:setEnabled", { enabled: true });
 });
-
-async function render(): Promise<void> {
-  await act(async () => {
-    root.render(<AgentAccessSection roles={roles} />);
-  });
-}
-
-function buttonNamed(label: string): HTMLButtonElement | undefined {
-  return [...container.querySelectorAll("button")].find(
-    (button) => button.textContent?.trim() === label
-  );
-}
-
-describe("AgentAccessSection", () => {
-  it("starts off, because an open endpoint is a standing grant", async () => {
-    mocks.dispatch.mockResolvedValue(ok(snapshot()));
-    await render();
-
-    const toggle = container.querySelector("[role='switch']");
-    expect(toggle?.getAttribute("aria-checked")).toBe("false");
-    expect(container.textContent).toContain(
-      "The app accepts no HTTP connections while this is off. Existing stdio Sessions remain active until revoked."
-    );
-    // Nothing about pending requests renders while the listener is off.
-    expect(container.querySelector(".agent-access-pending")).toBeNull();
-  });
-
-  it("enables the listener through the command bus", async () => {
-    mocks.dispatch.mockImplementation((name: string) =>
-      name === "agentAccess:setEnabled"
-        ? Promise.resolve(ok(snapshot({ enabled: true, listening: true })))
-        : Promise.resolve(ok(snapshot()))
-    );
-    await render();
-
-    await act(async () => {
-      (container.querySelector("[role='switch']") as HTMLElement).click();
-    });
-
-    expect(mocks.dispatch).toHaveBeenCalledWith("agentAccess:setEnabled", {
-      enabled: true
-    });
-    expect(container.textContent).toContain("reachable at");
-  });
-
-  it("approves a pending request with the selected role", async () => {
-    mocks.dispatch.mockImplementation((name: string) =>
-      name === "agentAccess:approvePairing"
-        ? Promise.resolve(ok(snapshot({ enabled: true, listening: true })))
-        : Promise.resolve(ok(pendingSnapshot("Claude Code", "pair_1")))
-    );
-    await render();
-
-    expect(container.textContent).toContain("Claude Code");
-
-    const select = container.querySelector("select") as HTMLSelectElement;
-    await act(async () => {
-      select.value = "builtin.live-status";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    await act(async () => {
-      buttonNamed("Approve")?.click();
-    });
-
-    expect(mocks.dispatch).toHaveBeenCalledWith("agentAccess:approvePairing", {
-      pairingId: "pair_1",
-      roleId: "builtin.live-status"
-    });
-  });
-
-  it("denies a request without minting a session", async () => {
-    mocks.dispatch.mockImplementation((name: string) =>
-      name === "agentAccess:denyPairing"
-        ? Promise.resolve(ok(snapshot({ enabled: true, listening: true })))
-        : Promise.resolve(ok(pendingSnapshot("Unknown agent", "pair_2")))
-    );
-    await render();
-
-    await act(async () => {
-      buttonNamed("Deny")?.click();
-    });
-
-    expect(mocks.dispatch).toHaveBeenCalledWith("agentAccess:denyPairing", {
-      pairingId: "pair_2"
-    });
-    expect(mocks.dispatch).not.toHaveBeenCalledWith(
-      "agentAccess:approvePairing",
-      expect.anything()
-    );
-  });
-
-  it("explains a listener that could not bind instead of showing it as on", async () => {
-    mocks.dispatch.mockResolvedValue(
-      ok(snapshot({ enabled: false, error: "listen EADDRINUSE" }))
-    );
-    await render();
-
-    expect(container.textContent).toContain("could not start: listen EADDRINUSE");
-    expect(container.querySelector("[role='switch']")?.getAttribute("aria-checked")).toBe(
-      "false"
-    );
-  });
-
-  it("shows and grants the default role even when the client requests a broader role", async () => {
-    mocks.dispatch.mockImplementation((name: string) =>
-      name === "agentAccess:approvePairing"
-        ? Promise.resolve(ok(snapshot({ enabled: true, listening: true })))
-        : Promise.resolve(ok(pendingSnapshot("Some agent", "pair_3")))
-    );
-    await render();
-    expect((container.querySelector("select") as HTMLSelectElement).value).toBe("builtin.local-reader");
-
-    await act(async () => {
-      buttonNamed("Approve")?.click();
-    });
-
-    expect(mocks.dispatch).toHaveBeenCalledWith("agentAccess:approvePairing", {
-      pairingId: "pair_3",
-      roleId: "builtin.local-reader"
-    });
-  });
+it("prints the same OAuth recipes as PwrSnap with PwrGit's name and port", async () => {
+  mocks.dispatch.mockResolvedValue(ok({ enabled: true, listening: true, mcpUrl: "http://127.0.0.1:51731/mcp" }));
+  await render();
+  expect(CONNECT_RECIPES).toEqual([
+    { name: "Claude Code", command: "claude mcp add --scope user --transport http pwrgit http://127.0.0.1:51731/mcp\nclaude mcp login pwrgit" },
+    { name: "Codex CLI", command: "codex mcp add pwrgit --url http://127.0.0.1:51731/mcp --oauth-client-registration dcr" }
+  ]);
+  for (const recipe of CONNECT_RECIPES) expect(container.textContent).toContain(recipe.command);
+  expect(container.textContent).not.toContain("pair");
+});
+it("shows bind failures without offering unusable commands", async () => {
+  mocks.dispatch.mockResolvedValue(ok({ enabled: true, listening: false, error: "Port is in use" }));
+  await render();
+  expect(container.querySelector("[role=alert]")?.textContent).toBe("Port is in use");
+  expect(container.textContent).not.toContain("codex mcp add");
 });

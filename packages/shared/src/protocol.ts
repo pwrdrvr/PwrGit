@@ -82,12 +82,13 @@ import type {
 import type { ImagePreview, ImageRevision } from "./image";
 import type {
   AgentAccessSnapshot,
+  AgentConsentPrompt,
+  AgentConsentDecision,
   McpAgentPolicySnapshot,
   McpAgentRole,
   McpAgentRoleInput,
   McpAgentRolePatch,
-  McpAgentSession,
-  McpAgentSessionCredential
+  McpAgentSession
 } from "./mcp-policy";
 
 export type ProfileList = {
@@ -1436,10 +1437,6 @@ export interface Commands {
   "settings:update": { req: { patch: AppSettingsPatch }; res: AppSettingsSnapshot };
   /** Fail-closed standalone MCP authorization policy and effective scopes. */
   "localAgents:read": { req: void; res: McpAgentPolicySnapshot };
-  "localAgents:createSession": {
-    req: { name: string; roleId: string };
-    res: McpAgentSessionCredential;
-  };
   "localAgents:revoke": { req: { id: string }; res: McpAgentSession };
   "localAgents:assignRole": {
     req: { sessionId: string; roleId: string };
@@ -1451,15 +1448,12 @@ export interface Commands {
     res: McpAgentRole;
   };
   "localAgents:roleDelete": { req: { id: string }; res: null };
-  /** Loopback agent-access listener state plus any pairing awaiting consent. */
+  /** Loopback OAuth MCP listener state. */
   "agentAccess:read": { req: void; res: AgentAccessSnapshot };
   "agentAccess:setEnabled": { req: { enabled: boolean }; res: AgentAccessSnapshot };
-  /** Mints the Session. Only reachable from the consent sheet. */
-  "agentAccess:approvePairing": {
-    req: { pairingId: string; roleId: string; sessionName?: string };
-    res: AgentAccessSnapshot;
-  };
-  "agentAccess:denyPairing": { req: { pairingId: string }; res: AgentAccessSnapshot };
+  /** Native approval is bound to the requesting window. */
+  "agentAccess:consentRead": { req: void; res: AgentConsentPrompt };
+  "agentAccess:consentDecide": { req: AgentConsentDecision; res: null };
   /** Current preference plus native-resolved palette; closes bootstrap races. */
   "appearance:read": { req: void; res: AppAppearance };
 

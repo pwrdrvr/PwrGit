@@ -14,36 +14,18 @@ function setup() {
   registerLocalAgentHandlers(bus, policy, () => {
     changes += 1;
   });
-  return { bus, dir, changes: () => changes };
+  return { bus, dir, policy, changes: () => changes };
 }
 
 describe("local-agent handlers", () => {
-  it("creates a one-time credential and publishes only renderer-safe policy metadata", async () => {
-    const { bus, changes } = setup();
-    const before = await bus.dispatch("localAgents:read", undefined);
-    expect(before.ok && before.value.sessions).toHaveLength(0);
-
-    const created = await bus.dispatch("localAgents:createSession", {
-      name: "Codex",
-      roleId: "builtin.discovery"
-    });
-    expect(created.ok).toBe(true);
-    if (!created.ok) return;
-    expect(created.value.token).toMatch(/^pgmcp_/u);
-    expect(created.value.environment.sessionTokenVariable).toBe(
-      "PWRGIT_MCP_SESSION_TOKEN"
-    );
-
-    const after = await bus.dispatch("localAgents:read", undefined);
-    expect(after.ok).toBe(true);
-    if (!after.ok) return;
-    expect(after.value.sessions[0]).not.toHaveProperty("tokenHash");
-    expect(JSON.stringify(after.value)).not.toContain(created.value.token);
-    expect(changes()).toBe(1);
+  it("rejects manual Session minting", async () => {
+    const { bus } = setup();
+    expect(await bus.dispatch("localAgents:createSession" as never, { name: "Client", roleId: "builtin.discovery" } as never))
+      .toMatchObject({ ok: false, error: { code: "no_handler" } });
   });
 
   it("creates scoped roles, reassigns Sessions, and revokes them", async () => {
-    const { bus, dir, changes } = setup();
+    const { bus, dir, policy, changes } = setup();
     const root = join(dir, "repos");
     mkdirSync(root);
     await bus.dispatch("localAgents:read", undefined);
@@ -55,10 +37,7 @@ describe("local-agent handlers", () => {
     });
     expect(role.ok).toBe(true);
     if (!role.ok) return;
-    const session = await bus.dispatch("localAgents:createSession", {
-      name: "Reader",
-      roleId: "builtin.discovery"
-    });
+    const session = { ok: true, value: policy.createSession("Reader", "builtin.discovery") };
     expect(session.ok).toBe(true);
     if (!session.ok) return;
 
@@ -71,11 +50,11 @@ describe("local-agent handlers", () => {
       id: session.value.session.id
     });
     expect(revoked.ok && revoked.value.revokedAt).not.toBeNull();
-    expect(changes()).toBe(4);
+    expect(changes()).toBe(3);
   });
 
   it("rejects deletion while assigned to an active Session and permits it after revocation", async () => {
-    const { bus, dir } = setup();
+    const { bus, dir, policy } = setup();
     const root = join(dir, "repos");
     mkdirSync(root);
     await bus.dispatch("localAgents:read", undefined);
@@ -86,11 +65,8 @@ describe("local-agent handlers", () => {
       repositoryRoots: [root]
     });
     if (!role.ok) throw new Error(role.error.message);
-    const session = await bus.dispatch("localAgents:createSession", {
-      name: "Client",
-      roleId: role.value.id
-    });
-    if (!session.ok) throw new Error(session.error.message);
+    const session = { ok: true, value: policy.createSession("Client", role.value.id) };
+
 
     const result = await bus.dispatch("localAgents:roleDelete", {
       id: role.value.id

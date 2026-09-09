@@ -61,6 +61,7 @@ export type McpAgentSession = {
   createdAt: string;
   updatedAt: string;
   revokedAt: string | null;
+  oauth?: { clientId: string; scopes: McpAgentCapability[] };
 };
 
 export type McpAgentPolicySnapshot = {
@@ -96,31 +97,23 @@ export type McpAgentRoleInput = {
 
 export type McpAgentRolePatch = Partial<McpAgentRoleInput>;
 
-/** A pairing request waiting on the operator's answer in the PwrGit window. */
-export type McpPendingPairing = {
-  pairingId: string;
-  clientName: string;
-  requestedRoleId?: string;
-  createdAt: string;
-  expiresAt: string;
-};
-
-/** State of the loopback listener that lets a local agent reach PwrGit's MCP
- * tools without the operator hand-copying a Session token. */
 export type AgentAccessSnapshot = {
   enabled: boolean;
   listening: boolean;
   mcpUrl: string;
-  pending: McpPendingPairing[];
-  /** Set when the listener could not bind, so the UI can say why rather than
-   * showing an enabled toggle over a dead endpoint. */
   error?: string;
-  /** How a stdio MCP client should launch the server that ships inside this
-   * app. Absent when the single-file build is missing, so the UI can say to
-   * build it rather than hand out a config that fails at launch. */
-  clientLaunch?: {
-    command: string;
-    args: string[];
-    env: Record<string, string>;
-  };
+};
+
+export type AgentConsentPrompt = {
+  requestId: string;
+  clientName: string;
+  sessionName: string;
+  roles: McpAgentRole[];
+};
+
+export type AgentConsentDecision = {
+  requestId: string;
+  decision: "allow" | "deny";
+  sessionName: string;
+  roleId: string;
 };

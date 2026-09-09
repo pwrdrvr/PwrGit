@@ -19,12 +19,12 @@ Every standalone MCP process must receive a named Session token through
 credential on every request. Stdio is a one-client process transport, so the
 Session environment is its client principal; HTTP OAuth would add a second
 identity ceremony without improving isolation for that transport. The token is
-256 random bits, is shown once, and is stored only as a SHA-256 hash in a
+256 random bits, is returned to the OAuth client at token exchange, and is stored only as a SHA-256 hash in a
 user-private policy file. `PWRGIT_MCP_POLICY_FILE` overrides the standard
 PwrGit app-data path when needed.
 
 Settings → Agents visualizes **Session → role → effective permissions and
-repository boundary**. It can create and revoke Sessions, assign roles, and
+repository boundary**. It can revoke Sessions, assign roles, and
 create, edit, or delete custom roles. Built-in roles are immutable and checked
 against their canonical definitions on every policy read.
 
@@ -52,53 +52,68 @@ them. Invalid JSON, missing canonical built-ins, role drift, unknown Sessions,
 and missing permissions all fail closed. Tool annotations remain descriptive
 MCP metadata; they are not used as authorization.
 
-## Loopback agent access and pairing
+## Connect an agent
 
-The app hosts an opt-in loopback surface for requesting a Session and
-approving its role in Settings. This is a custom pairing protocol, not
-PwrSnap’s OAuth flow; clients need the pairing CLI or protocol support.
+Enable **Settings → Agents → Enable local-agent access**. PwrGit serves
+MCP at `http://127.0.0.1:51731/mcp` while enabled and running. The preference
+persists across app restarts; it defaults to off.
 
-`AGENT_ACCESS_PORT` is 51731 (PwrSnap owns 51729). The listener runs only
-while **Settings → Agents → Local agent access** is on; an always-listening
-local MCP endpoint is a standing grant on the operator's repositories, so it
-is never enabled implicitly, and turning it off answers every pending request
-with "no". The toggle resets to off when the app restarts. Existing stdio
-Sessions remain usable until revoked in Settings.
-
-| Route | Purpose |
-| --- | --- |
-| `GET /health` | Reachability, so a client distinguishes "not running" from "declined" |
-| `POST /pair/request` | Ask for access; returns a `pairingId` and poll interval |
-| `GET /pair/poll` | Poll until the operator answers |
-| `POST /mcp` | Streamable HTTP MCP behind `Authorization: Bearer <session token>` |
-
-Nothing is minted until the operator approves in the PwrGit window. An
-unanswered request expires after five minutes, and an approved token is
-returned by exactly one poll, so a leaked poll URL cannot be replayed into a
-second client. `POST /mcp` re-reads the policy file per call, so revoking a
-Session cuts off a live client without restarting anything.
-
-Both `Origin` and `Host` are validated. Any web page can issue requests to
-127.0.0.1, and a hostname that resolves to loopback defeats a `Host` check on
-its own, so a request carrying a non-loopback `Origin` is refused outright.
-A non-browser client sends no `Origin` and passes on the `Host` check. This is
-the Origin validation the MCP Streamable HTTP transport requires.
-
-Start the handshake from the CLI, then approve the request in the app:
+**Claude Code**
 
 ```bash
-pwrgit-mcp pair --client "Claude Code" --format claude
-pwrgit-mcp status
+claude mcp add --scope user --transport http pwrgit http://127.0.0.1:51731/mcp
+claude mcp login pwrgit
 ```
 
-A bare `pwrgit-mcp` still serves on stdio, so configurations written before
-the CLI grew subcommands keep working.
+**Codex CLI**
+
+```bash
+codex mcp add pwrgit --url http://127.0.0.1:51731/mcp --oauth-client-registration dcr
+```
+
+The client opens PwrGit’s native approval window. Choose a Session Name and
+role, then Approve or Deny. Only that window’s main frame can submit the
+decision. The browser page has no form or script and cannot approve access.
+Settings lists the resulting Session and supports role changes and revocation.
+
+This uses the same connection shape as PwrSnap: public OAuth clients, dynamic
+registration, authorization-code flow with PKCE S256 and a resource indicator,
+native approval, and non-expiring revocable access tokens. Product name,
+port, tools, and role permissions are PwrGit-specific.
+
+| Route | Behavior |
+| --- | --- |
+| `/.well-known/oauth-authorization-server` | Authorization server metadata |
+| `/.well-known/oauth-protected-resource/mcp` | MCP resource metadata |
+| `POST /register` | Dynamic registration; registration alone grants nothing |
+| `GET /authorize` | Validate the request and open native approval |
+| `GET /authorize/status` | Browser waiting page or PKCE-bound redirect |
+| `POST /token` | Exchange a single-use authorization code |
+| `POST /revoke` | Revoke the calling client’s token |
+| `POST /mcp` | Stateless Streamable HTTP, authenticated on every request |
+
+An unauthenticated MCP POST returns `401` with a `WWW-Authenticate` challenge
+pointing to resource metadata. Every other MCP method returns `405` and
+`Allow: POST`; HTTP does not create transport sessions or standalone SSE
+streams. Authorization codes and pending approvals expire after five minutes.
+Disabling the listener cancels pending approvals and invalidates unused codes.
+
+Client registrations survive app restarts in the private
+`mcp-oauth-clients.json`; Session tokens are stored only as hashes in
+`mcp-policy.json`. Tokens are bound to their OAuth client and consented scopes.
+Later role edits cannot enlarge an OAuth Session beyond those scopes.
+HTTP accepts only OAuth-issued Sessions. There are no custom pairing endpoints
+or manual credential-creation controls.
+
+Existing standalone stdio clients remain compatible with their saved Session
+tokens. Revoking those Sessions disables them too; turning off the HTTP listener
+does not stop an independently launched stdio process.
 
 ## Transport decision
 
 The standalone MCP server uses stdio; the optional desktop listener uses
 Streamable HTTP. MCP defines
-standard resource subscriptions, so normalized live status uses those first:
+standard resource subscriptions on stdio, so those clients use:
 
 1. Call `pwrgit_watch_repository` with an absolute worktree path.
 2. Read the returned `pwrgit://status/v1/{watchId}` resource.
@@ -106,8 +121,11 @@ standard resource subscriptions, so normalized live status uses those first:
 4. When PwrGit sends `notifications/resources/updated`, re-read the URI.
 5. Send `resources/unsubscribe` when the status is no longer needed.
 
-The server advertises `resources: { subscribe: true, listChanged: true }`
-during MCP initialization. This is the interoperable path defined by the
+The stdio server advertises `resources: { subscribe: true, listChanged: true }`.
+Stateless HTTP advertises no resource subscriptions: read status resources on
+demand, or use the WebSocket for live updates. Watch resources and WebSocket
+capabilities remain isolated per authorized Session across HTTP requests and
+are cleared when the listener stops. This is the interoperable path defined by the
 [MCP resource specification](https://modelcontextprotocol.io/specification/2025-11-25/server/resources).
 
 Some hosts negotiate subscriptions but do not surface resource updates as a

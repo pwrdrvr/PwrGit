@@ -1,3 +1,4 @@
+import { AgentConsentWindow } from "./features/settings/AgentConsentWindow";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
@@ -27,7 +28,9 @@ const hash = window.location.hash;
 
 createRoot(container).render(
   <StrictMode>
-    {hash === "#settings" ? (
+    {hash === "#agent-consent" ? (
+      <AgentConsentWindow />
+    ) : hash === "#settings" ? (
       <SettingsWindow />
     ) : hash === "#logs" ? (
       <LogsWindow />

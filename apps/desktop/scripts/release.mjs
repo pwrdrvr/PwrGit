@@ -452,16 +452,6 @@ if (!signStageOnly) {
   runChecked("pnpm", ["licenses:check"], { cwd: repoRoot });
 
   // 2. Build (electron-vite -> apps/desktop/out/).
-  //
-  // The single-file MCP server is built first and separately: electron-builder
-  // copies it from packages/mcp-server/dist-bundle/ through extraResources, and
-  // the desktop build does not produce it. Skipping this step fails packaging
-  // on a missing resource rather than silently shipping without the server.
-  step("mcp-server bundle");
-  runChecked("pnpm", ["--filter", "@pwrgit/mcp-server", "build:bundle"], {
-    cwd: repoRoot,
-  });
-
   step("electron-vite build");
   runChecked("pnpm", ["--filter", "@pwrgit/desktop", "build"], { cwd: repoRoot });
 
@@ -508,12 +498,6 @@ if (!signStageOnly) {
   for (const file of ["LICENSE", "THIRD_PARTY_LICENSES", "CHANGELOG.md"]) {
     copyFileSync(join(repoRoot, file), join(stageDir, file));
   }
-  // The single-file MCP server ships through extraResources, whose paths
-  // resolve against the stage rather than the repository.
-  copyFileSync(
-    join(repoRoot, "packages", "mcp-server", "dist-bundle", "pwrgit-mcp.mjs"),
-    join(stageDir, "pwrgit-mcp.mjs"),
-  );
 
   if (prepareOnly) {
     step("prepared release-stage");
