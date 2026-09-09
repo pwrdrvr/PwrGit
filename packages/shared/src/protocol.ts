@@ -26,6 +26,7 @@ import type {
   ForkPreflight,
   ForkProgress,
   RepoIdentity,
+  RepoIdentityRefreshOutcome,
   PushRefPlan,
   PushRefResult,
   ChangeSet,
@@ -784,7 +785,7 @@ export interface Commands {
    *  Answers the changed rows; the rest of the tree is left alone. */
   "repo:refreshIdentities": {
     req: { profileId: ProfileId; repoId?: RepoId; force?: boolean };
-    res: { changed: number };
+    res: { changed: number; outcomes: RepoIdentityRefreshOutcome[] };
   };
   "repo:search": { req: { query: string }; res: RepoSearchHit[] };
   /** Lazy per-hit status for ⌘F results (cached worktree_state when present;

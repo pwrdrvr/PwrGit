@@ -193,11 +193,16 @@ export function RepoIdentityGlyphs({
         repoId,
         force: true
       });
-      const unresolved =
-        result.ok && result.value.changed === 0 && identity.visibility === "unknown";
-      const message = !result.ok ? result.error.message : unresolved
-        ? "Visibility is still unknown. Check Settings → Forges or Logs."
-        : "Repository visibility refreshed.";
+      const outcome = result.ok
+        ? result.value.outcomes.find((entry) => entry.repoId === repoId)
+        : undefined;
+      const unresolved = outcome?.status !== "resolved";
+      const message = !result.ok ? result.error.message
+        : outcome?.status === "signed_out"
+          ? "Sign in to the forge in Settings → Forges, then refresh visibility again."
+          : unresolved
+            ? "Visibility is still unknown. Check Settings → Forges or Logs."
+            : "Repository visibility refreshed.";
       setFeedback(message);
       if (!result.ok || unresolved) {
         showErrorToast({ title: "Repository visibility", message });

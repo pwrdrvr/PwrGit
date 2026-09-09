@@ -148,6 +148,32 @@ describe("IdentityService", () => {
     expect(changes.flat()).toHaveLength(1);
   });
 
+  it.each(["resolved", "unknown", "signed_out"] as const)("waits for an ongoing lookup and shares its %s outcome", async (status) => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const gh = vi.fn(async () => {
+      await gate;
+      if (status === "signed_out") throw new Error("gh auth login");
+      return JSON.stringify({ full_name: "huntharo/react", visibility: status === "resolved" ? "public" : "unknown" });
+    });
+    const { identities, indexer, profileId } = await fixture(gh);
+    const repos = indexer.listRepos(profileId);
+    const background = identities.refresh(repos);
+    await vi.waitFor(() => expect(gh).toHaveBeenCalledTimes(1));
+    let finished = false;
+    const explicit = identities.refreshWithOutcomes(repos, { force: true }).then((result) => { finished = true; return result; });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(finished).toBe(false);
+    } finally {
+      release();
+      await Promise.all([background, explicit]);
+    }
+    expect(gh).toHaveBeenCalledTimes(1);
+    expect((await explicit).outcomes[0]?.status).toBe(status);
+    expect((await explicit).changes).toEqual([]);
+  });
+
   it("bounds aggregate forge requests across batch and detached refreshes", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -203,6 +229,27 @@ describe("IdentityService", () => {
     db.prepare("UPDATE repo_identity SET visibility = 'unknown', fetched_at = datetime('now', '-6 minutes')").run();
     expect((await identities.refresh(repos))[0]?.identity.visibility).toBe("public");
   });
+
+  it.each(["resolved", "unknown", "signed_out", "network"] as const)(
+    "reports %s independently of changes to a previously known identity",
+    async (status) => {
+      const gh = vi.fn(okGh({ full_name: "huntharo/react", visibility: "private" }));
+      const { identities, indexer, profileId } = await fixture(gh);
+      const repos = indexer.listRepos(profileId);
+      await identities.refresh(repos);
+      gh.mockImplementation(async () => {
+        if (status === "signed_out") throw new Error("gh auth login");
+        if (status === "network") throw new Error("network unavailable");
+        return JSON.stringify({ full_name: "huntharo/react", visibility: status === "resolved" ? "private" : "unknown" });
+      });
+      const result = await identities.refreshWithOutcomes(repos, { force: true });
+      expect(result.outcomes[0]?.status).toBe(status === "network" ? "unknown" : status);
+      expect(result.outcomes[0]?.identity?.visibility).toBe(
+        status === "signed_out" || status === "resolved" ? "private" : "unknown"
+      );
+      expect(result.changes).toHaveLength(status === "signed_out" || status === "resolved" ? 0 : 1);
+    }
+  );
 
   it("hydrates the stored identity onto repo:list", async () => {
     const { identities, indexer, profileId } = await fixture(

@@ -68,7 +68,7 @@ export function registerForkHandlers(
     const repos = indexer.listRepos(req.profileId).filter(
       (repo) => req.repoId === undefined || repo.id === req.repoId
     );
-    const changed = await identities.refresh(repos, {
+    const { changes: changed, outcomes } = await identities.refreshWithOutcomes(repos, {
       ...(req.force === undefined ? {} : { force: req.force })
     });
     if (changed.length > 0) {
@@ -77,6 +77,6 @@ export function registerForkHandlers(
         identities: changed
       });
     }
-    return { ok: true as const, value: { changed: changed.length } };
+    return { ok: true as const, value: { changed: changed.length, outcomes } };
   });
 }

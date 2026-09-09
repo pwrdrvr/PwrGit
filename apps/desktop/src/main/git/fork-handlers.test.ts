@@ -15,17 +15,18 @@ describe("fork handlers", () => {
   it("forces only the requested repository within its profile and publishes the delta", async () => {
     const repo = { id: "repo-1" };
     const changed = [{ repoId: "repo-1", identity: { visibility: "public" } }];
-    const refresh = vi.fn(async () => changed);
+    const outcomes = [{ repoId: "repo-1", status: "resolved" }];
+    const refreshWithOutcomes = vi.fn(async () => ({ changes: changed, outcomes }));
     const listRepos = vi.fn(() => [repo, { id: "repo-2" }]);
     const bus = new CommandBus();
     registerForkHandlers(bus, {} as ForkService,
-      { refresh } as unknown as IdentityService,
+      { refreshWithOutcomes } as unknown as IdentityService,
       { listRepos } as unknown as RepoIndexer);
     expect(await bus.dispatch("repo:refreshIdentities", {
       profileId: "profile-1", repoId: "repo-1", force: true
-    })).toEqual(ok({ changed: 1 }));
+    })).toEqual(ok({ changed: 1, outcomes }));
     expect(listRepos).toHaveBeenCalledWith("profile-1");
-    expect(refresh).toHaveBeenCalledExactlyOnceWith([repo], { force: true });
+    expect(refreshWithOutcomes).toHaveBeenCalledExactlyOnceWith([repo], { force: true });
     expect(emitEvent).toHaveBeenCalledWith("repo:identityChanged", {
       profileId: "profile-1", identities: changed
     });

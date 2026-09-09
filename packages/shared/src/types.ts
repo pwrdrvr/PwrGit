@@ -603,6 +603,14 @@ export type RepoIdentity = {
   fetchedAt?: string;
 };
 
+/** Result of an attempted identity lookup, independent of whether stored facts changed.
+ *  A signed-out/unavailable result may carry an older cached identity. */
+export type RepoIdentityRefreshOutcome = {
+  repoId: RepoId;
+  status: "resolved" | "unknown" | "signed_out" | "unavailable";
+  identity?: RepoIdentity;
+};
+
 /** Ways the clone dialog can hand a repository to the local machine. `cli`
  *  defers to the forge's own CLI (and its credential helper) — it was
  *  `gh_cli` when GitHub was the only forge, and is host-labelled now. */
