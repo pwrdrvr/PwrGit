@@ -97,7 +97,9 @@ describe("elidePathMiddle", () => {
 
   it("keeps every trailing segment that still fits", () => {
     expect(
-      elidePathMiddle("/Users/huntharo/dev/checkouts/2026/experiments/PwrGit/graph-x")
+      elidePathMiddle(
+        "/Users/huntharo/dev/checkouts/2026/experiments/PwrGit/graph-x"
+      )
     ).toBe("/Users/…/2026/experiments/PwrGit/graph-x");
   });
 
@@ -123,6 +125,14 @@ describe("elidePathMiddle", () => {
     // Only "me" sits between the root and the leaf, so the "…" replacing it
     // saves one character and costs a name.
     const path = `/Users/me/${"long-worktree-name-".repeat(3)}x`;
+    expect(elidePathMiddle(path)).toBe(path);
+  });
+
+  // Runs of separators collapse when the segments are read, so width alone
+  // can push a path over the budget while every segment it has still fits —
+  // and an "…" there would claim a name had been hidden when none was.
+  it("never shows an ellipsis that stands in for nothing", () => {
+    const path = `/Users/me${"/".repeat(40)}graph-x`;
     expect(elidePathMiddle(path)).toBe(path);
   });
 

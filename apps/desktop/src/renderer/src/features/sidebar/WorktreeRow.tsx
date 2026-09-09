@@ -326,8 +326,11 @@ export function WorktreeRow({
               shrinkable element, so at 320px it is usually the truncated one —
               and this second line is what the pointer is over when someone
               wants to know which checkout they are looking at. The path is
-              middle-elided to keep the tooltip inside the window; "Copy path"
-              in the ⋯ menu still yields it exactly. */}
+              middle-elided: a native tooltip is one unwrapped line, so the
+              whole thing reached across the pane beside the sidebar to say
+              two things the row above already showed. "Copy path" in the ⋯
+              menu still yields it exactly, and the switcher's tooltip keeps
+              it whole, where a path match is why the row is on screen. */}
           <span
             className="wt-row__folder"
             title={`${worktree.branch}\nWorktree folder — ${elidePathMiddle(

@@ -57,10 +57,16 @@ export function revealPathLabel(platform: string = currentPlatform()): string {
   return "Show in folder";
 }
 
-/** A path's final non-empty segment, accepting POSIX, drive-letter, mixed, and
- *  UNC input regardless of the machine rendering it. */
+/** A path's non-empty segments, accepting POSIX, drive-letter, mixed, and UNC
+ *  input regardless of the machine rendering it. Runs of separators collapse,
+ *  so callers that rebuild a path from these do not reproduce them. */
+function pathSegments(path: string): string[] {
+  return path.split(/[\\/]+/).filter(Boolean);
+}
+
+/** A path's final non-empty segment. */
 export function pathLeaf(path: string): string {
-  return path.split(/[\\/]+/).filter(Boolean).pop() ?? path;
+  return pathSegments(path).pop() ?? path;
 }
 
 /** Compact path label using the target platform's separator. Normalizing the
@@ -70,7 +76,7 @@ export function pathTail(
   segmentCount = 2,
   platform: string = currentPlatform()
 ): string {
-  const parts = path.split(/[\\/]+/).filter(Boolean);
+  const parts = pathSegments(path);
   if (segmentCount <= 0) return "";
   const separator = platform === "win32" ? "\\" : "/";
   return parts.slice(-segmentCount).join(separator);
@@ -91,39 +97,48 @@ export function joinDisplayPath(
   return `${parent.replace(/\/+$/, "")}/${child}`;
 }
 
-/** Widest a path may be before `elidePathMiddle` starts dropping segments.
- *  Native tooltips do not wrap, so a long one runs past the window it
- *  explains. */
-export const PATH_TOOLTIP_MAX_CHARS = 48;
+/** Widest a path may be before `elidePathMiddle` starts dropping segments. A
+ *  native tooltip is one line that does not wrap until it is very wide, so a
+ *  full worktree path spills out of the 320px sidebar and across the pane
+ *  beside it. */
+const PATH_TOOLTIP_MAX_CHARS = 48;
 
 /** How much width an elision has to buy before it is worth a hidden name. */
 const MIN_ELISION_SAVING_CHARS = 8;
 
 /**
- * Drop whole segments from the middle of a path so a tooltip stays one
- * readable line, keeping the root and as many trailing segments as fit.
+ * Drop whole segments from the middle of a path so a tooltip stays a readable
+ * width, keeping the root and as many trailing segments as fit.
  *
- * What identifies a checkout is its own folder and the repo folder above it;
- * the home directory in the middle is the same on every row and is what makes
- * the string long. Segments only — chopping inside a name yields something
- * that reads as a real path and is not one — so a path with nothing droppable
- * comes back whole, as does one where the ellipsis would not buy any width.
+ * On the paths this is for — `<worktree root>/<repo>/<folder>` — that leaves
+ * the two names that identify a checkout and drops the home directory, which
+ * is the same on every row and is what made the string long. A deeper path
+ * keeps its deepest segments instead; nothing here decides that one segment
+ * matters more than another.
  *
- * For display only: the exact path stays one "Copy path" away in the row's
- * ⋯ menu.
+ * Whole segments only, and only when the "…" earns its place: it must stand
+ * for at least one real segment and buy real width, so a path with no
+ * droppable middle — or one that only just overflows — comes back untouched
+ * rather than trading a name for a character.
+ *
+ * For display only: it collapses runs of separators and drops a trailing one,
+ * and the exact path stays one "Copy path" away in the row's ⋯ menu.
  */
 export function elidePathMiddle(
   path: string,
   maxChars: number = PATH_TOOLTIP_MAX_CHARS
 ): string {
   if (path.length <= maxChars) return path;
-  // Kept verbatim so a UNC path stays a UNC path ("\\\\server\\share").
-  const prefix = /^[\\/]*/.exec(path)?.[0] ?? "";
-  const segments = path.slice(prefix.length).split(/[\\/]+/).filter(Boolean);
+  const segments = pathSegments(path);
   // Fewer than three and there is no middle: the root and the leaf are it.
   if (segments.length < 3) return path;
-  // The path's own separator, not the platform's — mixing the two in one
-  // string invents a shape neither OS writes.
+  // Kept verbatim so a UNC path stays a UNC path ("\\\\server\\share"). The
+  // fallbacks are what satisfy `exec`'s nullable return: both patterns match
+  // every string that reaches here. A drive letter has no prefix but still
+  // has separators, so the two are read independently — the path's own
+  // separator, never the platform's, since mixing them in one string invents
+  // a shape neither OS writes.
+  const prefix = /^[\\/]*/.exec(path)?.[0] ?? "";
   const separator = /[\\/]/.exec(path)?.[0] ?? "/";
   const head = `${prefix}${segments[0]}`;
   const assemble = (tail: string[]): string =>
@@ -134,6 +149,11 @@ export function elidePathMiddle(
     if (assemble(wider).length > maxChars) break;
     tail = wider;
   }
+  // The "…" has to be standing in for something. Runs of separators collapse
+  // in `pathSegments`, so a path can be over budget on width the segments do
+  // not account for and reach here with every one of them still in hand — an
+  // ellipsis there would claim a name had been hidden when none was.
+  if (tail.length + 1 >= segments.length) return path;
   const elided = assemble(tail);
   // A "…" standing in for one short segment is no narrower than the segment
   // was: it would hide a real folder name and buy nothing. A path that only
