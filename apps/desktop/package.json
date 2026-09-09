@@ -46,7 +46,8 @@
     "express": "5.2.1",
     "pixelmatch": "^7.2.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@electron/asar": "^4.3.0",
