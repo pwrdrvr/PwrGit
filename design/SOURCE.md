@@ -8,11 +8,7 @@ failure mode that matters here — if you change the design, re-export.
 ## Source
 
 - Project: **PwrGit** — <https://claude.ai/design/p/88030015-bdd6-424d-8202-005feb3cee12>
-- Exported: **2026-09-03**, plus `Refresh Affordances - Normalization.dc.html`
-  pulled on **2026-09-08**. That was a single-file add, not a re-export, so two
-  pre-existing gaps are still open: the project's `Settings Updates.dc.html` has
-  no copy here at all, and `PwrGit As-Built Coverage.dc.html` has drifted
-  (16,629 bytes here against 17,153 in the project). Both predate that add.
+- Exported: **2026-09-08**.
 - Reflects the project's "as built" reconciliation pass of **2026-09-02**, which
   checked the design against `apps/desktop/src/renderer/src/**` and
   `styles/tokens.css` at `main @ bc11343`.
@@ -37,6 +33,7 @@ and records where the retired wireframe disagreed with the code. Read it first.
 | `Image Diff Lightbox.dc.html` | Binary image diff — inline layout rule, lightbox, pixel compare. |
 | `Reset to Remote - UX Review.dc.html` | Reset-to-remote findings and redesign. |
 | `Refresh Affordances - Normalization.dc.html` | The six refresh/fetch controls, why they diverged, and the one busy language that replaced them. |
+| `Settings Updates.dc.html` | Settings › Updates — the four-slot release matrix, and the two-control layout it replaced. |
 | `PwrGit Icon.dc.html` | App icon, size ladder, tray templates, DMG background. |
 | `support.js` | Generated `dc-runtime` bundle every `.dc.html` loads. |
 | `github.md` | Provenance note for the icon asset set (matched to PwrSnap's). |
@@ -80,9 +77,17 @@ Instead, **`PwrGit Icon.dc.html` is edited on import**: each of its ten image
 `src`s is rewritten from `apps/desktop/build/…` to `../apps/desktop/build/…` so
 the artboard renders the files the app actually ships, and the five size-ladder
 images point at `icon-macos.png` (scaled by their `width`) because the repo no
-longer carries an `icon.iconset/`. These are the only content differences
-between the checked-in copy and the project, and they are load-bearing —
-**re-apply them on every re-export** or the images break.
+longer carries an `icon.iconset/`.
+
+**`github.md` is edited on import too**, for the same reason: its screen-map row
+reads `icon.png, icon-macos.png, icon.icon/` where the project still says
+`icon.icns, icon.iconset/*`. Copying the project's row back would re-assert an
+`.icns` the repo has not shipped since
+[#196](https://github.com/pwrdrvr/PwrGit/pull/196).
+
+Those two files are the only content differences between the checked-in copies
+and the project, and both are load-bearing — **re-apply them on every
+re-export** or the images break and the provenance note goes stale.
 
 Also skipped: `.thumbnail` (already covered by `design/**/.thumbnail` in
 `.gitignore`).
@@ -115,10 +120,14 @@ reviewable choice.
 4. Skip `apps/desktop/**`. `.thumbnail`, `chats/` and `uploads/` are already
    gitignored, but delete them from your working copy anyway so `git status`
    stays readable.
-5. Re-apply the `../` rewrite to `PwrGit Icon.dc.html` (see above), then confirm
-   every `src` resolves to a real file under `apps/desktop/build/`.
+5. Re-apply both on-import edits (see above): the `../` rewrite and size-ladder
+   repoint in `PwrGit Icon.dc.html`, and the screen-map row in `github.md`. Then
+   confirm every `src` resolves to a real file under `apps/desktop/build/`.
 6. Verify each file's byte size against the project listing — a truncated or
-   mistranscribed artboard is easy to miss and renders blank.
+   mistranscribed artboard is easy to miss and renders blank. Exactly two files
+   are *expected* to differ, both from step 5: `PwrGit Icon.dc.html` (5,945 here
+   against 5,990 there) and `github.md` (1,211 against 1,210). Do not "correct"
+   those two toward the project.
 7. Update the "Exported" date above.
 
 `support.js` is generated (`dc-runtime`) and is shared byte-for-byte across Pwr
