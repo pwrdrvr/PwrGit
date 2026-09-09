@@ -9556,6 +9556,7 @@ body.is-col-resizing {
 /* Settings > Agents — Session → role → effective permission graph. */
 .settings-stack--agents {
   max-width: 1120px;
+  container: agent-settings / inline-size;
 }
 .agent-access-toggle {
   display: flex;
@@ -9939,9 +9940,11 @@ button.agent-auth-node {
   gap: 8px;
 }
 
-@media (max-width: 820px) {
+/* The graph needs 720px plus the section's padding and borders. Measure the
+   settings pane, since the navigation rail and zoom reduce its usable width. */
+@container agent-settings (max-width: 760px) {
   .agent-auth-graph {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .agent-session-create,
   .agent-credential {
