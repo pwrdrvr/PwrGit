@@ -1,3 +1,4 @@
+import { runCommand } from "@pwrgit/mcp-server";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,7 +14,7 @@ it("persists enablement and starts/stops the listener", async () => {
   const policyFile = join(dir, "policy.json");
   new McpPolicyStore(policyFile).initialize();
   const service = new AgentAccessService({
-    policyFile, clientsFile: join(dir, "clients.json"), port: 0,
+    runner: runCommand, policyFile, clientsFile: join(dir, "clients.json"), port: 0,
     saveEnabled: enabled => { settings.update({ localAgentAccessEnabled: enabled }); },
     onChanged: () => undefined,
     requestConsent: async () => ({ decision: "deny", sessionName: "", roleId: "" })

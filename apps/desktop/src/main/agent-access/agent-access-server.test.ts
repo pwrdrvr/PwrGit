@@ -1,5 +1,7 @@
+import { runCommand } from "@pwrgit/mcp-server";
 import { auth, type OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { OAuthClientInformationMixed, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
+import { connect } from "node:net";
 import { request as httpRequest } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -20,7 +22,7 @@ async function setup(decision: ConsentDecision = { decision: "allow", sessionNam
   const policyFile = join(dir, "policy.json");
   const policy = new McpPolicyStore(policyFile);
   policy.initialize();
-  const options = { policyFile, clientsFile: join(dir, "clients.json"), port: 0,
+  const options = { runner: runCommand, policyFile, clientsFile: join(dir, "clients.json"), port: 0,
     requestConsent: requestConsent ?? (async () => decision), onChanged: () => undefined };
   const server = new AgentAccessServer(options);
   await server.start();
@@ -75,6 +77,48 @@ async function setup(decision: ConsentDecision = { decision: "allow", sessionNam
 }
 
 describe("PwrSnap-compatible OAuth MCP surface", () => {
+  it("reclaims revoked clients and their WebSocket listeners before admitting replacements", async () => {
+    const { server, policy } = await setup();
+    const sessions = Array.from({ length: 18 }, (_, index) => policy.createSession(
+      `Client ${index}`, "builtin.live-status", { clientId: "fixture-client", scopes: [...MCP_AGENT_CAPABILITIES] }
+    ));
+    const post = (index: number, method = "initialize") => fetch(server.mcpUrl, {
+      method: "POST", headers: { authorization: "Bearer " + sessions[index]!.token,
+        "content-type": "application/json", accept: "application/json, text/event-stream", connection: "close" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: method === "initialize"
+        ? { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "fixture", version: "1" } }
+        : { name: "pwrgit_live_status_capabilities", arguments: {} } })
+    });
+    for (let index = 0; index < 16; index++) {
+      const response = await post(index);
+      expect(response.status).toBe(200);
+      await response.json();
+    }
+    const capabilities = await (await post(0, "tools/call")).json() as {
+      result: { structuredContent: { websocket: { url: string } } }
+    };
+    const port = Number(new URL(capabilities.result.structuredContent.websocket.url).port);
+    const listening = () => new Promise<boolean>(resolve => {
+      const socket = connect({ host: "127.0.0.1", port });
+      socket.once("connect", () => { socket.destroy(); resolve(true); });
+      socket.once("error", () => { socket.destroy(); resolve(false); });
+    });
+    expect(await listening()).toBe(true);
+    const denied = await post(16);
+    expect(denied.status).toBe(429);
+    expect(await denied.json()).toEqual({ error: "too_many_clients" });
+    for (const { session } of sessions.slice(0, 16)) policy.revokeSession(session.id);
+    // Simultaneous admissions also wait for the retired servers to close.
+    for (const response of await Promise.all([post(16), post(17)])) {
+      expect(response.status).toBe(200);
+      await response.json();
+    }
+    expect(await listening()).toBe(false);
+    const revoked = await post(0);
+    expect(revoked.status).toBe(401);
+    await revoked.json();
+  });
+
   it("advertises DCR, PKCE S256, public clients and no refresh grant", async () => {
     const { base } = await setup();
     const metadata = await (await fetch(base + "/.well-known/oauth-authorization-server")).json();

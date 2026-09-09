@@ -110,6 +110,7 @@ import { McpPolicyStore } from "@pwrgit/mcp-server/access-policy";
 import { registerLocalAgentHandlers } from "./local-agents/local-agent-handlers";
 import { ConsentBroker } from "./agent-access/consent-broker";
 import { createConsentWindow } from "./agent-access/consent-window";
+import { createDesktopMcpRunner } from "./agent-access/desktop-mcp-runner";
 import { AgentAccessService } from "./agent-access/agent-access-service";
 import { registerAgentAccessHandlers } from "./agent-access/agent-access-handlers";
 
@@ -602,6 +603,7 @@ if (!gotSingleInstanceLock) {
     const consent = new ConsentBroker(mcpPolicy, () => createConsentWindow(appearance.appearance()));
     consent.register(bus);
     const agentAccess = new AgentAccessService({
+      runner: createDesktopMcpRunner(execGit),
       policyFile: mcpPolicyFile,
       clientsFile: join(app.getPath("userData"), "mcp-oauth-clients.json"),
       requestConsent: consent.request,

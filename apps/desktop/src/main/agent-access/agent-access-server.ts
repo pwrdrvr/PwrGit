@@ -7,11 +7,12 @@ import { revocationHandler } from "@modelcontextprotocol/sdk/server/auth/handler
 import { mcpAuthMetadataRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { McpPolicyStore, PolicyFileAuthorizer, MCP_AGENT_CAPABILITIES } from "@pwrgit/mcp-server/access-policy";
-import { createPwrGitMcpServer, type PwrGitMcpServer } from "@pwrgit/mcp-server";
+import { createPwrGitMcpServer, type PwrGitMcpServer, type CommandRunner } from "@pwrgit/mcp-server";
 import { AGENT_ACCESS_PORT } from "@pwrgit/mcp-server/agent-access-protocol";
 import { AgentOAuth, type RequestConsent } from "./agent-oauth";
 
 export type AgentAccessServerOptions = {
+  runner: CommandRunner;
   policyFile: string;
   clientsFile: string;
   requestConsent: RequestConsent;
@@ -28,6 +29,7 @@ export class AgentAccessServer {
   private http: HttpServer | undefined;
   private oauth: AgentOAuth | undefined;
   private boundPort: number;
+  private reclamation: Promise<void> = Promise.resolve();
   private readonly principals = new Map<string, Principal>();
   constructor(private readonly options: AgentAccessServerOptions) {
     this.boundPort = options.port ?? AGENT_ACCESS_PORT;
@@ -128,12 +130,14 @@ export class AgentAccessServer {
       res.setHeader("WWW-Authenticate", `Bearer resource_metadata="${new URL(this.mcpUrl).origin}/.well-known/oauth-protected-resource/mcp"`);
       res.status(401).json({ error: "unauthorized" }); return;
     }
+    if (!this.principals.has(principalId)) await this.reclaimRevokedPrincipals();
     let principal = this.principals.get(principalId);
     if (!principal) {
       if (this.principals.size >= 16) { res.status(429).json({ error: "too_many_clients" }); return; }
       principal = {
         server: createPwrGitMcpServer({
           authorizer: new PolicyFileAuthorizer(this.options.policyFile, token!),
+          runner: this.options.runner,
           supportsSubscriptions: false
         }),
         tail: Promise.resolve(), pending: 0
@@ -157,6 +161,27 @@ export class AgentAccessServer {
     await operation;
   }
 
+  private reclaimRevokedPrincipals(): Promise<void> {
+    // Serialize admission cleanup so concurrent clients cannot reuse a slot
+    // before its old server and WebSocket listener have finished closing.
+    const operation = this.reclamation.then(async () => {
+      const active = new Set(new McpPolicyStore(this.options.policyFile).snapshot().sessions
+        .filter(session => session.revokedAt === null).map(session => session.id));
+      const retired: Principal[] = [];
+      for (const [id, principal] of this.principals) {
+        if (active.has(id)) continue;
+        this.principals.delete(id);
+        retired.push(principal);
+      }
+      await Promise.allSettled(retired.map(async principal => {
+        await principal.tail;
+        await (await principal.server).close();
+      }));
+    });
+    this.reclamation = operation.catch(() => undefined);
+    return operation;
+  }
+
   async stop(): Promise<void> {
     this.oauth?.close();
     this.oauth = undefined;
@@ -164,6 +189,7 @@ export class AgentAccessServer {
     this.http = undefined;
     // Terminate active HTTP connections before draining queued MCP calls.
     http?.closeAllConnections();
+    await this.reclamation;
     await Promise.all([...this.principals.values()].map(async p => {
       await p.tail;
       await (await p.server).close();
