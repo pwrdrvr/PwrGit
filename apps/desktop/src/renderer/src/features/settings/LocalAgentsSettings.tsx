@@ -70,13 +70,12 @@ export function LocalAgentsSettings() {
   );
   const selectedRole = useMemo(() => {
     const roleId = selectedSession?.roleId ?? selectedRoleId;
-    const role = snapshot?.roles.find((role) => role.id === roleId) ?? null;
-    if (role && selectedSession?.oauth) return {
-      ...role, permissions: role.permissions.filter(p => selectedSession.oauth!.scopes.includes(p))
-    };
-    return role;
+    return snapshot?.roles.find((role) => role.id === roleId) ?? null;
   }, [selectedRoleId, selectedSession, snapshot]);
 
+  const effectivePermissions = selectedRole?.permissions.filter(permission =>
+    !selectedSession?.oauth || selectedSession.oauth.scopes.includes(permission)
+  ) ?? [];
 
   const assignRole = async (sessionId: string, roleId: string): Promise<void> => {
     setSaving(true);
@@ -233,7 +232,7 @@ export function LocalAgentsSettings() {
               </div>
               {MCP_AGENT_CAPABILITIES.map((capability) => {
                 const detail = MCP_AGENT_CAPABILITY_DETAILS[capability];
-                const allowed = selectedRole?.permissions.includes(capability) === true;
+                const allowed = effectivePermissions.includes(capability);
                 return (
                   <div
                     key={capability}

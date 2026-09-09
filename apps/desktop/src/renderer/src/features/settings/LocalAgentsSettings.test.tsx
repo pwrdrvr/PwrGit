@@ -118,6 +118,40 @@ describe("LocalAgentsSettings", () => {
     expect(container.textContent).toContain("Read forge status");
   });
 
+  it.each([
+    ["Edit selected role", "localAgents:roleUpdate"],
+    ["Duplicate selected role", "localAgents:roleCreate"]
+  ])("%s preserves full role permissions for a narrowly consented Session", async (buttonText, command) => {
+    const scopedSnapshot: McpAgentPolicySnapshot = {
+      ...snapshot,
+      sessions: [{ ...snapshot.sessions[0]!, oauth: { clientId: "fixture", scopes: ["repository.roots.read"] } }]
+    };
+    mocks.dispatch.mockImplementation((name: string) => {
+      if (name === "localAgents:read") return Promise.resolve(ok(scopedSnapshot));
+      if (name === command) return Promise.resolve(ok(snapshot.roles[1]!));
+      return agentAccessFallback(name);
+    });
+    await render();
+    expect(container.querySelectorAll(".agent-auth-permission.is-allowed")).toHaveLength(1);
+    const button = (text: string) => Array.from(container.querySelectorAll("button"))
+      .find(candidate => candidate.textContent === text)!;
+    await act(async () => button(buttonText).click());
+    const editor = container.querySelector(".agent-role-editor")!;
+    expect(editor.querySelectorAll('input[type="checkbox"]:checked')).toHaveLength(MCP_AGENT_CAPABILITIES.length);
+    const description = Array.from(editor.querySelectorAll("label"))
+      .find(label => label.textContent === "Description")!.querySelector("input")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(description, "Updated description");
+      description.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => button("Save role").click());
+    const expected = expect.objectContaining({
+      description: "Updated description", permissions: [...MCP_AGENT_CAPABILITIES]
+    });
+    expect(mocks.dispatch).toHaveBeenCalledWith(command, command === "localAgents:roleUpdate"
+      ? { id: "role_scoped", patch: expected } : expected);
+  });
+
   it("offers OAuth connection commands instead of manual token creation", async () => {
     await render();
     expect(container.textContent).toContain("Connect an agent");

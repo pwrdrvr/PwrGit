@@ -1,8 +1,10 @@
 import { tmpdir } from "node:os";
 import { ok } from "@pwrgit/shared";
-import { expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { execGit, type GitExec } from "../git/dugite";
 import { createDesktopMcpRunner } from "./desktop-mcp-runner";
+
+afterEach(() => vi.unstubAllEnvs());
 
 it("runs bundled Git with no Git on PATH", async () => {
   const fallback = vi.fn().mockRejectedValue(new Error("PATH runner must not execute Git"));
@@ -16,6 +18,7 @@ it("runs bundled Git with no Git on PATH", async () => {
 });
 
 it("preserves Git results and delegates forge commands", async () => {
+  vi.stubEnv("PATH", "/usr/bin:/bin");
   const output = { exitCode: 1, stdout: "", stderr: "missing ref" };
   const git = vi.fn<GitExec>().mockResolvedValue(ok(output));
   const fallback = vi.fn().mockResolvedValue(output);
@@ -26,7 +29,10 @@ it("preserves Git results and delegates forge commands", async () => {
   }));
   for (const command of ["gh", "glab"]) {
     await runner(command, ["version"], { cwd: tmpdir(), timeoutMs: 42 });
-    expect(fallback).toHaveBeenCalledWith(command, ["version"], { cwd: tmpdir(), timeoutMs: 42 });
+    expect(fallback).toHaveBeenCalledWith(command, ["version"], {
+      cwd: tmpdir(), timeoutMs: 42,
+      env: { PATH: "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" }
+    });
   }
   expect(git).toHaveBeenCalledTimes(1);
 });

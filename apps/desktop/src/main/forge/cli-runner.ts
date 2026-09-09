@@ -89,10 +89,14 @@ export type CliClient = {
   run(args: string[], options?: CliRunOptions): Promise<string>;
 };
 
+export function cliSearchPath(): string {
+  return [process.env.PATH ?? "", ...EXTRA_PATH].filter(Boolean).join(":");
+}
+
 export function createCliClient(spec: CliSpec): CliClient {
   const environment = (): NodeJS.ProcessEnv => ({
     ...process.env,
-    PATH: [process.env.PATH ?? "", ...EXTRA_PATH].filter(Boolean).join(":"),
+    PATH: cliSearchPath(),
     ...spec.nonInteractiveEnv
   });
 
