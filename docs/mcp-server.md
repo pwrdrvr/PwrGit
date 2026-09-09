@@ -1,20 +1,22 @@
 # PwrGit MCP server and live-status protocol
 
-The PwrGit MCP server is a standalone, read-only stdio process under
-`packages/mcp-server`. It follows the Pwr family conventions established by
+PwrGit provides a read-only MCP server under `packages/mcp-server`, available
+as a standalone stdio process or through the desktop app’s opt-in HTTP listener. It follows the Pwr family conventions established by
 PwrSnap: the official TypeScript SDK, explicit capabilities, structured tool
 results, read-only tool annotations, typed resources, stderr-only diagnostics,
 bounded inputs, fail-closed RBAC, named revocable Sessions, and contract-level
 integration tests.
 
-The Electron app does not need to remain running. Settings → Agents owns the
+The Electron app does not need to remain running for stdio clients; HTTP
+clients require the app and its local-agent listener to remain running. Settings → Agents owns the
 authorization graph and writes the cross-platform `mcp-policy.json` consumed
 by standalone processes.
 
 ## Authorization policy v1
 
-Every MCP process must receive a named Session token through
-`PWRGIT_MCP_SESSION_TOKEN`. Stdio is a one-client process transport, so the
+Every standalone MCP process must receive a named Session token through
+`PWRGIT_MCP_SESSION_TOKEN`. HTTP clients send their Session token as a Bearer
+credential on every request. Stdio is a one-client process transport, so the
 Session environment is its client principal; HTTP OAuth would add a second
 identity ceremony without improving isolation for that transport. The token is
 256 random bits, is shown once, and is stored only as a SHA-256 hash in a
@@ -52,16 +54,16 @@ MCP metadata; they are not used as authorization.
 
 ## Loopback agent access and pairing
 
-Setting the server up by hand means minting a Session, copying a 256-bit
-token, and writing a config with absolute paths. That cost is why the server
-went untested for so long, so the app hosts an opt-in loopback surface that
-does the same thing with an approval click.
+The app hosts an opt-in loopback surface for requesting a Session and
+approving its role in Settings. This is a custom pairing protocol, not
+PwrSnap’s OAuth flow; clients need the pairing CLI or protocol support.
 
 `AGENT_ACCESS_PORT` is 51731 (PwrSnap owns 51729). The listener runs only
 while **Settings → Agents → Local agent access** is on; an always-listening
 local MCP endpoint is a standing grant on the operator's repositories, so it
 is never enabled implicitly, and turning it off answers every pending request
-with "no".
+with "no". The toggle resets to off when the app restarts. Existing stdio
+Sessions remain usable until revoked in Settings.
 
 | Route | Purpose |
 | --- | --- |
@@ -82,7 +84,7 @@ its own, so a request carrying a non-loopback `Origin` is refused outright.
 A non-browser client sends no `Origin` and passes on the `Host` check. This is
 the Origin validation the MCP Streamable HTTP transport requires.
 
-The same handshake is available without the app UI through the CLI:
+Start the handshake from the CLI, then approve the request in the app:
 
 ```bash
 pwrgit-mcp pair --client "Claude Code" --format claude
@@ -94,8 +96,8 @@ the CLI grew subcommands keep working.
 
 ## Transport decision
 
-The MCP server uses stdio because it has the broadest local-client support and
-does not create a separately discoverable HTTP control plane. MCP defines
+The standalone MCP server uses stdio; the optional desktop listener uses
+Streamable HTTP. MCP defines
 standard resource subscriptions, so normalized live status uses those first:
 
 1. Call `pwrgit_watch_repository` with an absolute worktree path.

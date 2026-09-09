@@ -104,7 +104,7 @@ export function AgentAccessSection(props: { roles: McpAgentRole[] }) {
           <span>
             {listening
               ? `PwrGit is reachable at ${snapshot?.mcpUrl ?? ""} for approved agents only.`
-              : "PwrGit accepts no agent connections while this is off."}
+              : "The app accepts no HTTP connections while this is off. Existing stdio Sessions remain active until revoked."}
           </span>
         </div>
         <SettingsSwitch
@@ -148,7 +148,6 @@ export function AgentAccessSection(props: { roles: McpAgentRole[] }) {
                     disabled={busy}
                     value={
                       roleByPairing[request.pairingId]
-                      ?? request.requestedRoleId
                       ?? DEFAULT_PAIRING_ROLE
                     }
                     onChange={(event) =>

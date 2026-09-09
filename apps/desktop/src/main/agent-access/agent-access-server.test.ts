@@ -81,6 +81,11 @@ describe("loopback origin gate", () => {
     expect(isLoopbackRequest(fakeRequest({ host: "pwrgit.example" }))).toBe(false);
   });
 
+  it("rejects opaque browser origins and missing hosts", () => {
+    expect(isLoopbackRequest(fakeRequest({ host: "127.0.0.1", origin: "null" }))).toBe(false);
+    expect(isLoopbackRequest(fakeRequest({}))).toBe(false);
+  });
+
   it("rejects an unparseable origin rather than defaulting to allow", () => {
     expect(
       isLoopbackRequest(fakeRequest({ host: "127.0.0.1", origin: "not a url" }))
@@ -133,7 +138,7 @@ describe("agent access server", () => {
   });
 
   it("hands out a token only after the operator approves", async () => {
-    const { base, pairings } = await startServer();
+    const { base, pairings, store } = await startServer();
     const ticket = (await (
       await fetch(`${base}/pair/request`, {
         method: "POST",
@@ -182,7 +187,7 @@ describe("agent access server", () => {
   });
 
   it("serves MCP tools to an approved token", async () => {
-    const { base, pairings } = await startServer();
+    const { base, pairings, store } = await startServer();
     const ticket = (await (
       await fetch(`${base}/pair/request`, {
         method: "POST",
@@ -217,5 +222,31 @@ describe("agent access server", () => {
     expect(response.headers.get("mcp-session-id")).toBeTruthy();
     const text = await response.text();
     expect(text).toContain("PwrGit");
+    const sessionId = response.headers.get("mcp-session-id")!;
+    const other = store.createSession("Other client", "builtin.local-reader");
+    const post = (token: string) => fetch(`${base}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        authorization: `Bearer ${token}`,
+        "mcp-session-id": sessionId
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" })
+    });
+    const invalid = await post("pgmcp_invalid");
+    expect(invalid.status).toBe(401);
+    await invalid.text();
+    const wrongPrincipal = await post(other.token);
+    expect(wrongPrincipal.status).toBe(403);
+    await wrongPrincipal.text();
+    const valid = await post(approved.token);
+    expect(valid.status).toBe(200);
+    await valid.text();
+    const principal = store.snapshot().sessions.find((session) => session.name === "Probe")!;
+    store.revokeSession(principal.id);
+    const revoked = await post(approved.token);
+    expect(revoked.status).toBe(401);
+    await revoked.text();
   });
 });

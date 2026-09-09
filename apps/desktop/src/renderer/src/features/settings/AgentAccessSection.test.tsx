@@ -54,6 +54,7 @@ function pendingSnapshot(clientName: string, pairingId: string): AgentAccessSnap
       {
         pairingId,
         clientName,
+        requestedRoleId: "builtin.live-status",
         createdAt: "2026-09-03T00:00:00.000Z",
         expiresAt: "2026-09-03T00:05:00.000Z"
       }
@@ -98,7 +99,7 @@ describe("AgentAccessSection", () => {
     const toggle = container.querySelector("[role='switch']");
     expect(toggle?.getAttribute("aria-checked")).toBe("false");
     expect(container.textContent).toContain(
-      "PwrGit accepts no agent connections while this is off."
+      "The app accepts no HTTP connections while this is off. Existing stdio Sessions remain active until revoked."
     );
     // Nothing about pending requests renders while the listener is off.
     expect(container.querySelector(".agent-access-pending")).toBeNull();
@@ -180,13 +181,14 @@ describe("AgentAccessSection", () => {
     );
   });
 
-  it("defaults an approval to the narrowest useful role", async () => {
+  it("shows and grants the default role even when the client requests a broader role", async () => {
     mocks.dispatch.mockImplementation((name: string) =>
       name === "agentAccess:approvePairing"
         ? Promise.resolve(ok(snapshot({ enabled: true, listening: true })))
         : Promise.resolve(ok(pendingSnapshot("Some agent", "pair_3")))
     );
     await render();
+    expect((container.querySelector("select") as HTMLSelectElement).value).toBe("builtin.local-reader");
 
     await act(async () => {
       buttonNamed("Approve")?.click();

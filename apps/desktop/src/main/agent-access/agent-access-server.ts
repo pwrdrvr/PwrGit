@@ -37,6 +37,7 @@ export type AgentAccessServerOptions = {
 };
 
 type Session = {
+  principalId: string;
   transport: StreamableHTTPServerTransport;
   server: PwrGitMcpServer;
 };
@@ -200,9 +201,28 @@ export class AgentAccessServer {
       return;
     }
 
+    // Authorize before building anything, so a bad token cannot cost us a
+    // server instance and a WebSocket port.
+    const authorizer = new PolicyFileAuthorizer(this.options.policyFile, token);
+    let principalId: string;
+    try {
+      principalId = (await authorizer.authorize()).sessionId;
+    } catch (cause) {
+      response.setHeader("WWW-Authenticate", "Bearer");
+      this.json(response, 401, {
+        error: "unauthorized",
+        message: cause instanceof Error ? cause.message : String(cause)
+      });
+      return;
+    }
+
     const sessionId = header(request, "mcp-session-id");
     const existing = sessionId === undefined ? undefined : this.sessions.get(sessionId);
     if (existing !== undefined) {
+      if (existing.principalId !== principalId) {
+        this.json(response, 403, { error: "session_principal_mismatch" });
+        return;
+      }
       await existing.transport.handleRequest(request, response);
       return;
     }
@@ -221,25 +241,11 @@ export class AgentAccessServer {
       return;
     }
 
-    // Authorize before building anything, so a bad token cannot cost us a
-    // server instance and a WebSocket port.
-    const authorizer = new PolicyFileAuthorizer(this.options.policyFile, token);
-    try {
-      await authorizer.authorize();
-    } catch (cause) {
-      response.setHeader("WWW-Authenticate", "Bearer");
-      this.json(response, 401, {
-        error: "unauthorized",
-        message: cause instanceof Error ? cause.message : String(cause)
-      });
-      return;
-    }
-
     const server = await createPwrGitMcpServer({ authorizer });
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (id: string) => {
-        this.sessions.set(id, { transport, server });
+        this.sessions.set(id, { transport, server, principalId });
         this.log("session opened", { sessionId: id });
       }
     });
@@ -253,7 +259,11 @@ export class AgentAccessServer {
     // explicit `| undefined`, which this project's exactOptionalPropertyTypes
     // rejects structurally. The runtime shape is correct.
     await server.mcp.connect(transport as unknown as Parameters<typeof server.mcp.connect>[0]);
-    await transport.handleRequest(request, response, body);
+    try {
+      await transport.handleRequest(request, response, body);
+    } finally {
+      if (transport.sessionId === undefined) await server.close();
+    }
   }
 
   private async readJson(
@@ -321,9 +331,10 @@ function bearerToken(request: IncomingMessage): string | undefined {
  * Origin and passes on the Host check. */
 export function isLoopbackRequest(request: IncomingMessage): boolean {
   const host = headerValue(request.headers.host);
-  if (host !== undefined && !isLoopbackHost(host)) return false;
+  if (host === undefined || !isLoopbackHost(host)) return false;
   const origin = headerValue(request.headers.origin);
-  if (origin === undefined || origin === "null") return true;
+  if (origin === undefined) return true;
+  if (origin === "null") return false;
   try {
     return isLoopbackHostname(new URL(origin).hostname);
   } catch {
