@@ -19,6 +19,7 @@
     "licenses:check": "node ./scripts/check-package-license-policy.mjs && node ./scripts/check-third-party-license-allowlist.mjs && node ./scripts/generate-third-party-licenses.mjs --check",
     "licenses:generate": "node ./scripts/generate-third-party-licenses.mjs",
     "typecheck": "pnpm -r --if-present typecheck",
+    "pretest": "pnpm --filter @pwrgit/mcp-server build",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "pnpm --filter @pwrgit/desktop test:e2e",

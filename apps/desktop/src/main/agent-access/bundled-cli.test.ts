@@ -1,3 +1,4 @@
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   bundledCliLaunch,
@@ -6,34 +7,37 @@ import {
 } from "./bundled-cli";
 
 describe("resolveBundledCliPath", () => {
+  const resourcesPath = resolve("fixture", "PwrGit", "resources");
+  const repoRoot = resolve("fixture", "repo");
+  const appPath = join(repoRoot, "apps", "desktop");
   it("prefers the packaged resources copy", () => {
     const path = resolveBundledCliPath({
-      resourcesPath: "/Applications/PwrGit.app/Contents/Resources",
+      resourcesPath,
       packaged: true,
       exists: () => true
     });
     expect(path).toBe(
-      "/Applications/PwrGit.app/Contents/Resources/pwrgit-mcp.mjs"
+      join(resourcesPath, "pwrgit-mcp.mjs")
     );
   });
 
   it("falls back to the workspace build during development", () => {
     const path = resolveBundledCliPath({
-      resourcesPath: "/tmp/resources",
+      resourcesPath,
       packaged: false,
-      appPath: "/repo/apps/desktop",
+      appPath,
       exists: (candidate) => candidate.includes("dist-bundle")
     });
-    expect(path).toBe("/repo/packages/mcp-server/dist-bundle/pwrgit-mcp.mjs");
+    expect(path).toBe(join(repoRoot, "packages", "mcp-server", "dist-bundle", "pwrgit-mcp.mjs"));
   });
 
   it("never falls back to the workspace path in a packaged build", () => {
     // A packaged app has no repository beside it; guessing one would hand out
     // a config whose script does not exist.
     const path = resolveBundledCliPath({
-      resourcesPath: "/Applications/PwrGit.app/Contents/Resources",
+      resourcesPath,
       packaged: true,
-      appPath: "/Applications/PwrGit.app/Contents/Resources/app.asar",
+      appPath: join(resourcesPath, "app.asar"),
       exists: (candidate) => candidate.includes("dist-bundle")
     });
     expect(path).toBeUndefined();
@@ -42,9 +46,9 @@ describe("resolveBundledCliPath", () => {
   it("returns undefined rather than a guess when nothing is built", () => {
     expect(
       resolveBundledCliPath({
-        resourcesPath: "/tmp/resources",
+        resourcesPath,
         packaged: false,
-        appPath: "/repo/apps/desktop",
+        appPath,
         exists: () => false
       })
     ).toBeUndefined();
