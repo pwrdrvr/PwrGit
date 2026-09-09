@@ -63,3 +63,36 @@ describe("PrChip hover card", () => {
     expect(openCard(pr())?.getAttribute("aria-label")).toBe("Pull request");
   });
 });
+
+
+describe("PR check presentation", () => {
+  it.each([
+    [{ checkState: "passing", isDraft: true }, "passing", "draft · checks passing"],
+    [{ checkState: "pending" }, "pending", "checks pending"],
+    [{ checkState: "failing", checksStillRunning: true }, "failing", "checks failing · checks still running"],
+    [{ checkState: "passing", mergeState: "conflicting" }, "conflicting", "merge conflict · checks passing"],
+    [{ state: "merged", isDraft: true, checkState: "failing", mergeState: "conflicting" }, "merged", "merged"],
+    [{ state: "closed", checkState: "passing" }, "closed", "closed without merge"],
+    [{}, "unknown", "status unknown"]
+  ] as const)("keeps the chip and card aligned for %j", (overrides, dot, label) => {
+    const card = openCard(pr(overrides));
+    const chip = container.querySelector(".pr-chip")!;
+    expect(chip.classList.contains(`pr-chip--${dot}`)).toBe(true);
+    expect(chip.getAttribute("aria-label")).toContain(label);
+    expect(card?.textContent).toContain(label);
+    expect(card?.querySelector(`.pr-status-card__dot--${dot}`)).not.toBeNull();
+    expect(chip.classList.contains("pr-chip--checks-running")).toBe(
+      "checksStillRunning" in overrides && overrides.checksStillRunning === true
+    );
+    expect(chip.querySelector(".pr-chip__draft-bar") !== null).toBe(
+      "isDraft" in overrides && overrides.isDraft === true && !("state" in overrides)
+    );
+  });
+
+  it("updates an already-open card when checks finish", () => {
+    openCard(pr({ checkState: "pending" }));
+    act(() => root.render(<PrChip pr={pr({ checkState: "passing" })} />));
+    expect(document.body.querySelector("[role='dialog']")?.textContent).toContain("checks passing");
+    expect(container.querySelector(".pr-chip--passing")).not.toBeNull();
+  });
+});

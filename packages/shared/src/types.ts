@@ -487,6 +487,9 @@ export type PrSummary = {
   title: string;
   state: PrLifecycle;
   isDraft: boolean;
+  checkState?: "passing" | "failing" | "pending" | "unknown";
+  checksStillRunning?: boolean;
+  mergeState?: "mergeable" | "conflicting" | "unknown";
   /** Which forge issued this number; decides PR vs MR wording. */
   forge?: ForgeKind;
   /** Forge host — a number is only unique within one instance. */

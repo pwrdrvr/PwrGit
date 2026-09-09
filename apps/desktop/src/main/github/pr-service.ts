@@ -23,6 +23,9 @@ type CachedPr = {
   title: string | null;
   state: string | null;
   is_draft: number;
+  check_state: string | null;
+  checks_still_running: number | null;
+  merge_state: string | null;
   forge: string | null;
   host: string | null;
   repo_path: string | null;
@@ -703,6 +706,9 @@ function cachedFromSummary(pr: PrSummary | null): CachedPr {
     title: pr?.title ?? null,
     state: pr?.state ?? null,
     is_draft: pr?.isDraft === true ? 1 : 0,
+    check_state: pr?.checkState ?? null,
+    checks_still_running: pr?.checksStillRunning === undefined ? null : Number(pr.checksStillRunning),
+    merge_state: pr?.mergeState ?? null,
     forge: pr?.forge ?? null,
     host: pr?.host ?? null,
     repo_path: pr?.repoPath ?? null,

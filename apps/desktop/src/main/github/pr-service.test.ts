@@ -139,6 +139,25 @@ describe("PrService", () => {
     ).toEqual({ state: "open", is_draft: 0 });
   });
 
+  it("persists and broadcasts CI-only changes to branch and commit caches", async () => {
+    const hash = "a".repeat(40);
+    const pending = pr({ checkState: "pending", checksStillRunning: true, mergeState: "mergeable" });
+    response = new Map([["feature/pr-state", pending]]);
+    commitResponse = new Map([[hash, pending]]);
+    await service.refreshRepo("repo", { branches: ["feature/pr-state"], trigger: "user" });
+    await service.refreshCommits("repo", [hash]);
+    statusResponse = new Map([[42, pr({ checkState: "failing", checksStillRunning: false, mergeState: "conflicting" })]]);
+    const changed = await service.refreshPrNumbers("repo", [42]);
+    for (const summary of [changed.branches.get("feature/pr-state"), changed.commits.get(hash)]) {
+      expect(summary).toMatchObject({ checkState: "failing", checksStillRunning: false, mergeState: "conflicting" });
+    }
+    for (const table of ["branch_pr", "commit_pr"]) {
+      expect(db.prepare(`SELECT check_state, checks_still_running, merge_state FROM ${table}`).get()).toMatchObject({
+        check_state: "failing", checks_still_running: 0, merge_state: "conflicting"
+      });
+    }
+  });
+
   it("limits hover refreshes to one branch and ten-second user cooldown", async () => {
     await service.refreshRepo("repo", {
       branches: ["feature/pr-state"],

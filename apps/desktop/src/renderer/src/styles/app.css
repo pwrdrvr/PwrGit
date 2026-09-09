@@ -7029,9 +7029,7 @@ body.is-col-resizing {
   border-radius: 50%;
   background: var(--text-muted);
 }
-.pr-chip--open .pr-chip__dot {
-  /* PwrGit has lifecycle data but not a check rollup. Gray is intentionally
-     neutral; blue would suggest a state the app cannot currently explain. */
+.pr-chip--unknown .pr-chip__dot {
   background: var(--status-suspended);
 }
 .pr-chip--merged .pr-chip__dot {
@@ -7129,7 +7127,6 @@ body.is-col-resizing {
   margin-top: 8px;
   color: var(--text-secondary);
   font: 500 10.5px/1 var(--font-sans);
-  text-transform: capitalize;
 }
 .pr-status-card__dot {
   width: 7px;
@@ -7138,18 +7135,29 @@ body.is-col-resizing {
   border-radius: 50%;
   background: var(--text-muted);
 }
-/* Mirrors .pr-chip__dot exactly — a card that disagreed with the chip it is
-   anchored to would just look broken. */
-.pr-status-card__dot--open,
-.pr-status-card__dot--draft {
-  background: var(--status-suspended);
-}
-.pr-status-card__dot--merged {
-  background: var(--brand-purple);
-}
+/* Chip and hover card share their status colors. */
+.pr-chip--passing .pr-chip__dot,
+.pr-status-card__dot--passing { background: var(--status-ok); }
+.pr-chip--failing .pr-chip__dot,
+.pr-chip--conflicting .pr-chip__dot,
+.pr-status-card__dot--failing,
+.pr-status-card__dot--conflicting { background: var(--status-error); }
+.pr-chip--pending .pr-chip__dot,
+.pr-status-card__dot--pending { background: var(--status-warning); }
+.pr-status-card__dot--unknown { background: var(--status-suspended); }
+.pr-status-card__dot--merged { background: var(--brand-purple); }
 .pr-status-card__dot--closed {
   background: var(--status-closed);
   box-shadow: 0 0 0 1px var(--pr-dot-ring);
+}
+.pr-chip--checks-running .pr-chip__dot {
+  animation: pr-checks-running 1.6s ease-in-out infinite;
+}
+@keyframes pr-checks-running {
+  50% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pr-chip--checks-running .pr-chip__dot { animation: none; }
 }
 .pr-status-card__section {
   margin-top: 10px;
