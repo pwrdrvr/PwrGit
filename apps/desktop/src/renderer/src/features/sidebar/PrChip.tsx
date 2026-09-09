@@ -8,6 +8,7 @@ import {
 } from "../../lib/hoverIntent";
 import { dispatch } from "../../lib/pwrgit";
 import { useViewportTooltip } from "../../lib/useViewportTooltip";
+import { prPresentation } from "./pr-status";
 import { PrStatusCard } from "./PrStatusCard";
 
 /** A compact PR-status chip: colored dot + #number. Click opens the PR in
@@ -44,7 +45,8 @@ export function PrChip({
   const hoverIntent = sharedIntent ?? ownIntent;
   // GitHub's terminal lifecycle wins over a stale draft bit. This also mirrors
   // PwrAgnt: the bar is an affordance for open drafts only.
-  const isDraft = pr.state === "open" && pr.isDraft;
+  const status = prPresentation(pr);
+  const isDraft = status.draft;
   const label =
     pr.state === "merged"
       ? `merged #${pr.number}`
@@ -74,12 +76,12 @@ export function PrChip({
   return (
     <>
       <span
-        className={`pr-chip pr-chip--${pr.state}${isDraft ? " pr-chip--draft" : ""}`}
+        className={`pr-chip pr-chip--${status.dot}${isDraft ? " pr-chip--draft" : ""}${status.running ? " pr-chip--checks-running" : ""}`}
         role="button"
         tabIndex={0}
         aria-label={`${
           pr.forge === "gitlab" ? "Merge request" : "Pull request"
-        } #${pr.number} (${pr.state}) — Enter opens in browser`}
+        } #${pr.number} (${status.label}) — Enter opens in browser`}
         onMouseEnter={(e) => chip.onMouseEnter(e.currentTarget)}
         onMouseLeave={chip.onMouseLeave}
         onFocus={(e) => chip.onFocus(e.currentTarget)}

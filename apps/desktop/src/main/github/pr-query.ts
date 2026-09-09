@@ -5,8 +5,17 @@ import type { PrLifecycle, PrSummary } from "@pwrgit/shared";
  * all of it is optional downstream, because a PR that reached a terminal state
  * before this shipped stops being refreshed and will never gain them.
  */
-const PR_NODE_FIELDS = `number title url state isDraft headRefName baseRefName
-      additions deletions changedFiles commits(first: 0) { totalCount }
+const PR_NODE_FIELDS = `number title url state isDraft mergeable headRefName baseRefName
+      additions deletions changedFiles commits(last: 1) {
+        totalCount
+        nodes { commit { statusCheckRollup {
+          state
+          contexts(first: 0) {
+            checkRunCountsByState { state count }
+            statusContextCountsByState { state count }
+          }
+        } } }
+      }
       createdAt mergedAt closedAt`;
 const PR_FIELDS = `nodes { ${PR_NODE_FIELDS} }`;
 
@@ -16,12 +25,16 @@ type PrNode = {
   url: string;
   state: string;
   isDraft: boolean;
+  mergeable?: string | null;
   headRefName?: string | null;
   baseRefName?: string | null;
   additions?: number | null;
   deletions?: number | null;
   changedFiles?: number | null;
-  commits?: { totalCount?: number | null } | null;
+  commits?: {
+    totalCount?: number | null;
+    nodes?: { commit?: { statusCheckRollup?: CheckRollup | null } }[];
+  } | null;
   createdAt?: string | null;
   mergedAt?: string | null;
   closedAt?: string | null;
@@ -88,6 +101,11 @@ function toSummary(node: PrNode): PrSummary {
     title: node.title ?? "",
     state,
     isDraft: Boolean(node.isDraft),
+    ...checkSummary(node.commits?.nodes?.[0]?.commit?.statusCheckRollup),
+    ...(node.mergeable === undefined ? {} : {
+      mergeState: node.mergeable === "CONFLICTING" ? "conflicting" as const
+        : node.mergeable === "MERGEABLE" ? "mergeable" as const : "unknown" as const
+    }),
     ...optionalText("headRefName", node.headRefName),
     ...optionalText("baseRefName", node.baseRefName),
     ...optionalCount("additions", node.additions),
@@ -192,7 +210,7 @@ export function buildPrNumberQuery(
   numbers.forEach((number, i) => {
     variables[`n${i}`] = number;
     decls.push(`$n${i}: Int!`);
-    aliases.push(`n${i}: pullRequest(number: $n${i}) { number title url state isDraft }`);
+    aliases.push(`n${i}: pullRequest(number: $n${i}) { ${PR_NODE_FIELDS} }`);
   });
   const query = `query (${decls.join(", ")}) {
   repository(owner: $owner, name: $name) {
@@ -213,4 +231,32 @@ export function parsePrNumberResponse(
     const node = repo[`n${i}`];
     return [number, node == null ? null : toSummary(node)] as const;
   }));
+}
+
+
+type CheckRollup = {
+  state?: string;
+  contexts?: {
+    checkRunCountsByState?: { state: string; count: number }[] | null;
+    statusContextCountsByState?: { state: string; count: number }[] | null;
+  };
+};
+
+/** Aggregate counts cover every check without paging hundreds of jobs per PR.
+ * Failure wins over pending, while the independent running flag keeps the pulse. */
+function checkSummary(rollup: CheckRollup | null | undefined): Partial<PrSummary> {
+  if (rollup === undefined) return {};
+  const counts = [
+    ...(rollup?.contexts?.checkRunCountsByState ?? []),
+    ...(rollup?.contexts?.statusContextCountsByState ?? [])
+  ].filter(({ count }) => count > 0);
+  const failing = new Set(["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "STALE"]);
+  const running = new Set(["PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED"]);
+  const checksStillRunning = counts.some(({ state }) => running.has(state)) || running.has(rollup?.state ?? "");
+  const hasFailure = counts.some(({ state }) => failing.has(state)) || failing.has(rollup?.state ?? "");
+  return {
+    checkState: hasFailure ? "failing" : checksStillRunning ? "pending"
+      : rollup?.state === "SUCCESS" ? "passing" : "unknown",
+    checksStillRunning
+  };
 }

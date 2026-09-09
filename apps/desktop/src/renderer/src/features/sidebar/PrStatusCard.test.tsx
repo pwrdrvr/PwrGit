@@ -57,9 +57,9 @@ describe("PrStatusCard", () => {
     const html = render();
     expect(html).not.toContain("Changes");
     expect(html).not.toContain("Timeline");
-    // No dashes, no "unknown", no empty headers.
+    // No placeholder detail sections; unknown CI is stated explicitly.
     expect(html).not.toContain("—");
-    expect(html).not.toContain("unknown");
+    expect(html).toContain("status unknown");
   });
 
   it("never renders a missing count as zero", () => {

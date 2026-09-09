@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildPrQuery,
+  parsePrResponse,
   buildCommitPrQuery,
   buildPrNumberQuery,
   parseCommitPrResponse,
@@ -110,5 +112,40 @@ describe("PR-number status query", () => {
       }],
       [30, null]
     ]));
+  });
+});
+
+
+describe("check rollups", () => {
+  it.each([
+    ["SUCCESS", [], [], "passing", false],
+    ["PENDING", [{ state: "FAILURE", count: 1 }, { state: "IN_PROGRESS", count: 150 }], [], "failing", true],
+    ["FAILURE", [{ state: "FAILURE", count: 1 }], [{ state: "PENDING", count: 1 }], "failing", true],
+    ["FAILURE", [{ state: "TIMED_OUT", count: 1 }], [], "failing", false],
+    ["PENDING", [{ state: "QUEUED", count: 1 }, { state: "FAILURE", count: 0 }], [], "pending", true],
+    ["ERROR", [], [], "failing", false]
+  ])("normalizes %s and counts across every read path", (state, runs, contexts, checkState, checksStillRunning) => {
+    const node = {
+      number: 29, title: "Fixture", url: "https://example.test/29", state: "OPEN", isDraft: true,
+      mergeable: "CONFLICTING",
+      commits: { totalCount: 3, nodes: [{ commit: { statusCheckRollup: {
+        state, contexts: { checkRunCountsByState: runs, statusContextCountsByState: contexts }
+      } } }] }
+    };
+    for (const summary of [
+      parsePrResponse(["feature"], { repository: { a0: { nodes: [node] } } }).get("feature"),
+      parseCommitPrResponse(["sha"], { repository: { c0: { associatedPullRequests: { nodes: [node] } } } }).get("sha"),
+      parsePrNumberResponse([29], { repository: { n0: node } }).get(29)
+    ]) expect(summary).toMatchObject({ checkState, checksStillRunning, mergeState: "conflicting", commitCount: 3 });
+    for (const { query } of [buildPrQuery("o", "r", ["b"]), buildCommitPrQuery("o", "r", ["s"]), buildPrNumberQuery("o", "r", [29])]) {
+      expect(query).toContain("checkRunCountsByState");
+      expect(query).toContain("mergeable");
+      expect(query).toContain("commits(last: 1)");
+    }
+  });
+  it("does not call a missing rollup passing", () => {
+    expect(parsePrNumberResponse([1], { repository: { n0: {
+      number: 1, state: "OPEN", commits: { nodes: [{ commit: { statusCheckRollup: null } }] }
+    } } }).get(1)).toMatchObject({ checkState: "unknown", checksStillRunning: false });
   });
 });

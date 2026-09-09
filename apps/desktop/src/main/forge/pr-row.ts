@@ -18,6 +18,9 @@ export const PR_CORE_COLUMNS = [
 
 /** The hover-card detail. Split out because the writer needs it on its own. */
 export const PR_DETAIL_COLUMNS = [
+  "check_state",
+  "checks_still_running",
+  "merge_state",
   "forge",
   "host",
   "repo_path",
@@ -65,6 +68,9 @@ export function prSummaryFromRow(
     state:
       state === "merged" ? "merged" : state === "closed" ? "closed" : "open",
     isDraft: row[`${prefix}is_draft`] === 1,
+    ...optional("checkState", enumValue(row[`${prefix}check_state`], ["passing", "failing", "pending", "unknown"] as const)),
+    ...optional("mergeState", enumValue(row[`${prefix}merge_state`], ["mergeable", "conflicting", "unknown"] as const)),
+    ...optional("checksStillRunning", row[`${prefix}checks_still_running`] == null ? undefined : row[`${prefix}checks_still_running`] === 1),
     ...optional("forge", forgeKind(row[`${prefix}forge`])),
     ...optional("host", text(row[`${prefix}host`])),
     ...optional("repoPath", text(row[`${prefix}repo_path`])),
@@ -95,4 +101,8 @@ function count(value: unknown): number | undefined {
 /** Guard the stored string rather than casting: a stale row may hold anything. */
 function forgeKind(value: unknown): ForgeKind | undefined {
   return value === "github" || value === "gitlab" ? value : undefined;
+}
+
+function enumValue<T extends string>(value: unknown, values: readonly T[]): T | undefined {
+  return values.includes(value as T) ? value as T : undefined;
 }
