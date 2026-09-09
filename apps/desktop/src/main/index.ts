@@ -528,13 +528,40 @@ if (!gotSingleInstanceLock) {
       settings
     );
     registerTagHandlers(bus, db);
-    registerRemoteHandlers(bus, db, refresher, worktreeOperations, indexer);
+    const refreshIdentity = (repoId: string): void => {
+      // Fetch carries no forge visibility. Ask separately in the background;
+      // IdentityService skips fresh rows and concurrent lookups of this repo.
+      const repo = indexer.getRepo(repoId);
+      if (repo === null) return;
+      void identityService
+        .refresh([repo])
+        .then((changed) => {
+          if (changed.length > 0) {
+            emitEvent("repo:identityChanged", {
+              profileId: repo.profileId,
+              identities: changed
+            });
+          }
+        })
+        .catch((cause: unknown) => {
+          logMain("debug", "forge", "post-fetch identity refresh failed:", cause);
+        });
+    };
+    registerRemoteHandlers(
+      bus,
+      db,
+      refresher,
+      worktreeOperations,
+      indexer,
+      refreshIdentity
+    );
     const bulkSyncHandlers = registerBulkSyncHandlers(
       bus,
       db,
       refresher,
       worktreeOperations,
-      indexer
+      indexer,
+      refreshIdentity
     );
     registerGraphHandlers(bus, db, stateService);
     registerChangesHandlers(bus, db, refresher, worktreeOperations);

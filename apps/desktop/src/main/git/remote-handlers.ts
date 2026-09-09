@@ -138,7 +138,8 @@ export function registerRemoteHandlers(
   db: DB,
   refresher: WorktreeRefresher,
   operations: WorktreeOperationQueue,
-  indexer?: Pick<RepoIndexer, "refreshRepoRemoteBranches">
+  indexer?: Pick<RepoIndexer, "refreshRepoRemoteBranches">,
+  refreshIdentity?: (repoId: string) => void
 ): void {
   // Not-found and a gone checkout both refuse in the lookup itself, so no
   // handler below can reach git without the check.
@@ -208,6 +209,7 @@ export function registerRemoteHandlers(
       "remote",
       `fetched ${worktree.path} (${seconds(startedAt)})`
     );
+    refreshIdentity?.(worktree.repoId);
     refresher.refreshWorktree(req.worktreeId);
     return ok(null);
   });
@@ -229,6 +231,7 @@ export function registerRemoteHandlers(
       "remote",
       `fetched ${req.remote ?? "all remotes"} for ${repo.path} (${seconds(startedAt)})`
     );
+    refreshIdentity?.(req.repoId);
     refresher.refreshRepoWorktrees(req.repoId);
     return ok(null);
   });
@@ -465,6 +468,7 @@ export function registerRemoteHandlers(
             // repository lock, but it must not be counted as a stalled pull.
             watchdog.finish();
             recoveryWatchdog?.finish();
+            refreshIdentity?.(worktree.repoId);
             await refreshRemoteBranches(worktree.repoId, "pull");
           }
           return pulled;

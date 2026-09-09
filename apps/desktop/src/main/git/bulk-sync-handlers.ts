@@ -65,7 +65,8 @@ export function registerBulkSyncHandlers(
   db: DB,
   refresher: WorktreeRefresher,
   operations: WorktreeOperationQueue,
-  indexer?: Pick<RepoIndexer, "refreshRepoRemoteBranches">
+  indexer?: Pick<RepoIndexer, "refreshRepoRemoteBranches">,
+  refreshIdentity?: (repoId: string) => void
 ): BulkSyncHandlers {
   const active = new Map<
     string,
@@ -147,6 +148,7 @@ export function registerBulkSyncHandlers(
           const updated = result.worktrees.some(
             (worktree) => worktree.outcome === "updated"
           );
+          if (fetched) refreshIdentity?.(repo.id);
           if (fetched && indexer !== undefined) {
             try {
               const indexed = await operations.runRepository(repo.id, () =>

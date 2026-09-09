@@ -10,6 +10,7 @@ import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import {
+  fetchAllRemotes,
   fetchNamedRemote,
   fetchRemote,
   inspectRemoteReset,
@@ -40,6 +41,7 @@ vi.mock("./git-service", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./git-service")>();
   return {
     ...actual,
+    fetchAllRemotes: vi.fn(),
     fetchNamedRemote: vi.fn(),
     fetchRemote: vi.fn(),
     inspectRemoteReset: vi.fn(),
@@ -61,6 +63,7 @@ vi.mock("./ssh-remote-recovery", () => ({
 describe("remote handlers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(fetchAllRemotes).mockResolvedValue(ok(undefined));
     vi.mocked(fetchNamedRemote).mockResolvedValue(ok(undefined));
     vi.mocked(fetchRemote).mockResolvedValue(ok(undefined));
     vi.mocked(inspectRemoteReset).mockResolvedValue(
@@ -94,8 +97,54 @@ describe("remote handlers", () => {
 
   afterEach(() => vi.useRealTimers());
 
-  // A row the index has flagged missing used to reach git anyway, and every
-  // action then failed on its own with "fatal: cannot change to '<path>'".
+  it.each(["worktree", "repo", "all-remotes", "pull"] as const)(
+    "refreshes identity after a successful %s fetch, but not a failed fetch",
+    async (scope) => {
+      const db = {
+        prepare: vi.fn(() => ({
+          get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" }))
+        }))
+      } as unknown as DB;
+      const refresher = {
+        refreshWorktree: vi.fn(async () => undefined),
+        refreshRepoWorktrees: vi.fn()
+      } satisfies WorktreeRefresher;
+      const refreshIdentity = vi.fn();
+      const bus = new CommandBus();
+      registerRemoteHandlers(
+        bus,
+        db,
+        refresher,
+        new WorktreeOperationQueue(),
+        undefined,
+        refreshIdentity
+      );
+      const fetch = () => {
+        if (scope === "worktree") {
+          return bus.dispatch("remote:fetch", { worktreeId: "wt-1" });
+        }
+        if (scope === "pull") {
+          return bus.dispatch("remote:pull", { worktreeId: "wt-1" });
+        }
+        return bus.dispatch("remote:fetchRepo", {
+          repoId: "repo-1",
+          ...(scope === "repo" ? { remote: "origin" } : {})
+        });
+      };
+
+      expect((await fetch()).ok).toBe(true);
+      expect(refreshIdentity).toHaveBeenCalledExactlyOnceWith("repo-1");
+      refreshIdentity.mockClear();
+      const offline = err({ kind: "git" as const, code: "failed", message: "offline" });
+      vi.mocked(fetchRemote).mockResolvedValue(offline);
+      vi.mocked(fetchAllRemotes).mockResolvedValue(offline);
+      vi.mocked(fetchNamedRemote).mockResolvedValue(offline);
+      vi.mocked(pullFastForward).mockResolvedValue(offline);
+      expect((await fetch()).ok).toBe(false);
+      expect(refreshIdentity).not.toHaveBeenCalled();
+    }
+  );
+
   it("refuses to fetch a worktree whose directory is gone, without running git", async () => {
     const db = {
       prepare: vi.fn(() => ({
