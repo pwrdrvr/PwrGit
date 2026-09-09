@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  elidePathMiddle,
   hasPrimaryModifier,
   joinDisplayPath,
   pathLeaf,
@@ -76,5 +77,58 @@ describe("cross-platform path labels", () => {
     expect(
       pathTail("\\\\fileserver\\engineering\\clients\\PwrGit", 2, "win32")
     ).toBe("clients\\PwrGit");
+  });
+});
+
+describe("elidePathMiddle", () => {
+  it("leaves a path a tooltip can already hold", () => {
+    expect(elidePathMiddle("/Users/me/pwrdrvr/PwrGit")).toBe(
+      "/Users/me/pwrdrvr/PwrGit"
+    );
+  });
+
+  it("drops the middle of a worktree path, keeping repo and folder", () => {
+    expect(
+      elidePathMiddle(
+        "/Users/huntharo/claude-worktrees/PwrAgnt/elated-cartwright-f52b78"
+      )
+    ).toBe("/Users/…/PwrAgnt/elated-cartwright-f52b78");
+  });
+
+  it("keeps every trailing segment that still fits", () => {
+    expect(
+      elidePathMiddle("/Users/huntharo/dev/checkouts/2026/experiments/PwrGit/graph-x")
+    ).toBe("/Users/…/2026/experiments/PwrGit/graph-x");
+  });
+
+  it("writes the path's own separator, and keeps a UNC prefix", () => {
+    expect(
+      elidePathMiddle(
+        "C:\\Users\\someone\\source\\worktrees\\PwrGit\\dmg-file-art-update-4fd193"
+      )
+    ).toBe("C:\\…\\worktrees\\PwrGit\\dmg-file-art-update-4fd193");
+    expect(
+      elidePathMiddle(
+        "\\\\fileserver\\engineering\\clients\\acme\\PwrGit\\graph-x"
+      )
+    ).toBe("\\\\fileserver\\…\\clients\\acme\\PwrGit\\graph-x");
+  });
+
+  it("keeps a path with no droppable middle whole, however long", () => {
+    const twoSegments = `/${"a".repeat(60)}/graph-x`;
+    expect(elidePathMiddle(twoSegments)).toBe(twoSegments);
+  });
+
+  it("keeps the real path when an ellipsis would not buy any width", () => {
+    // Only "me" sits between the root and the leaf, so the "…" replacing it
+    // saves one character and costs a name.
+    const path = `/Users/me/${"long-worktree-name-".repeat(3)}x`;
+    expect(elidePathMiddle(path)).toBe(path);
+  });
+
+  it("still elides when even the leaf overflows the budget", () => {
+    expect(
+      elidePathMiddle(`/Users/me/claude-worktrees/PwrGit/${"x".repeat(60)}`)
+    ).toBe(`/Users/…/${"x".repeat(60)}`);
   });
 });

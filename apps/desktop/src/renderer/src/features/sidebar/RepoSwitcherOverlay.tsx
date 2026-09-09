@@ -6,7 +6,11 @@ import type {
   SearchHitStatus
 } from "@pwrgit/shared";
 import { createAsyncFill } from "../../lib/asyncFill";
-import { currentPlatform, shortcutLabel } from "../../lib/platform";
+import {
+  currentPlatform,
+  elidePathMiddle,
+  shortcutLabel
+} from "../../lib/platform";
 import { dispatch } from "../../lib/pwrgit";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import { shortWhen } from "../graph/graph-view";
@@ -575,7 +579,13 @@ export function RepoSwitcherOverlay({
                     <span className="a11y-sr-only">in folder</span>
                     <span
                       className="overlay-result__folder"
-                      title={`Worktree folder — ${r.path}`}
+                      /* The hit's name too: it is the half of the row that
+                         truncates first, and this is the element the pointer
+                         is over. The path is middle-elided so the tooltip
+                         stays inside the overlay. */
+                      title={`${r.name}\nWorktree folder — ${elidePathMiddle(
+                        r.path
+                      )}`}
                     >
                       <svg
                         width="11"
