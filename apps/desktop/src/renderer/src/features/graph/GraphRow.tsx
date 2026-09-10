@@ -60,6 +60,7 @@ export type GraphRowVM = {
   commit: Commit;
   row: LaneRow;
   refs: string[];
+  tag?: { name: string; kind: "annotated" | "lightweight" } | undefined;
   /** Remote-tracking refs to chip here — full ("origin/main") when the remote
    *  sits away from its local branch, collapsed ("origin") when synced. */
   remoteRefs: string[];
@@ -398,6 +399,11 @@ export function GraphRow({
             // used to open this row's commit card instead, which made the same
             // chip mean two different things depending on where it sat.
             <PrChip pr={pullRequest} hoverIntent={hoverIntent} />
+          )}
+          {vm.tag !== undefined && (
+            <span className="commit-tag commit-tag--release" title={`${vm.tag.name}${vm.tag.kind === "annotated" ? " (annotated tag)" : ""}`}>
+              # {vm.tag.name}
+            </span>
           )}
           {isHead && <span className="commit-tag commit-tag--head">HEAD</span>}
           {/* Chips are capped — a commit tipped by dozens of stale branches

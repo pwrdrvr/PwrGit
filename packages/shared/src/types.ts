@@ -1239,6 +1239,8 @@ export type LaneBranchInfo = {
 export type LaneGraph = {
   /** Topological order (newest first); each carries its parent hashes. */
   commits: Commit[];
+  /** One prominent local tag per displayed commit. */
+  tags?: Record<string, { name: string; kind: "annotated" | "lightweight" }>;
   /** commit hash → local branch names tipped there (for ref labels). */
   tips: Record<string, string[]>;
   /** commit hash → remote-tracking refs tipped there (e.g. "origin/main"). */

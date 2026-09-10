@@ -1,3 +1,4 @@
+import { LocateGlyph } from "../../lib/LocateGlyph";
 import {
   useCallback,
   useEffect,
@@ -6,7 +7,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent
 } from "react";
-import type { LocalBranchSummary, Repo, RepoRefs, Worktree } from "@pwrgit/shared";
+import type { TagSummary, LocalBranchSummary, Repo, RepoRefs, Worktree } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
@@ -52,6 +53,7 @@ export function RepoRefsSections({
   repo,
   now,
   focusedWorktree,
+  onLocateTag,
   onRevealWorktree,
   onCreateWorktree
 }: {
@@ -61,6 +63,7 @@ export function RepoRefsSections({
    *  otherwise is what keeps the current-branch marker unique across the
    *  window while "occupied" stays per-repo. */
   focusedWorktree: Worktree | null;
+  onLocateTag?: ((repoId: string, tag: TagSummary) => void) | undefined;
   onRevealWorktree: (worktreeId: string) => void;
   onCreateWorktree: (
     branch: string,
@@ -463,6 +466,22 @@ export function RepoRefsSections({
                 >
                   <span className="refs-copyable-name__text">{tag.name}</span>
                 </CopyTarget>
+                <button
+                  className="ref-mini-action"
+                  aria-label={`Locate tag ${tag.name} in lineage`}
+                  title={
+                    tag.targetType === "commit"
+                      ? "Locate tag in lineage"
+                      : "This tag does not point to a commit"
+                  }
+                  disabled={tag.targetType !== "commit" || onLocateTag === undefined}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onLocateTag?.(repo.id, tag);
+                  }}
+                >
+                  <LocateGlyph />
+                </button>
                 <small
                   title={
                     tag.kind === "annotated"
@@ -695,6 +714,7 @@ export function RepoRefsSections({
 
       {browser !== null && refs !== null && (
         <RepoRefsModal
+          onLocateTag={onLocateTag}
           repo={repo}
           refs={refs}
           now={now}

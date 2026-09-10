@@ -6,7 +6,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent
 } from "react";
-import type { Lens, Profile, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
+import type { TagSummary, Lens, Profile, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
 import { announce, mountLiveRegion, movedMessage } from "../../lib/announce";
 import type { ReadState } from "../../state/readState";
 import { copyText } from "../../lib/copyText";
@@ -142,6 +142,7 @@ export function Sidebar({
   repoLoadState,
   onRetryRepos,
   selectedWorktreeId,
+  onLocateTag,
   onSelectWorktree,
   onSetRepoPin,
   onSetWorktreePin,
@@ -171,6 +172,7 @@ export function Sidebar({
   repoLoadState: ReadState;
   onRetryRepos: () => void;
   selectedWorktreeId: string | null;
+  onLocateTag?: ((repoId: string, tag: TagSummary) => void) | undefined;
   onSelectWorktree: (repo: Repo, worktree: Worktree) => void;
   onSetRepoPin: (repoId: string, pinned: boolean) => void;
   onSetWorktreePin: (worktreeId: string, pinned: boolean) => void;
@@ -685,6 +687,7 @@ export function Sidebar({
         : null;
     return (
       <RepoRow
+        onLocateTag={onLocateTag}
         key={repo.id}
         posinset={index + 1}
         setsize={list.length}

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
-import { addRootAndExpand, branchRow } from "./fixtures/steps";
+import { addRootAndExpand, branchRow, expandRepoGroup } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -212,4 +212,44 @@ test("tags a commit straight from the lineage graph", async () => {
   // Tagging never moves a checkout — HEAD is exactly where it was, not merely
   // somewhere other than the tagged commit.
   expect(box.git(repo.path, "rev-parse", "HEAD")).toBe(headBefore);
+});
+
+test("locates old tags across repositories and keeps one prominent chip", async ({}, testInfo) => {
+  test.setTimeout(90_000);
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepo("release-history");
+  const target = box.git(repo.path, "rev-parse", "HEAD");
+  box.git(repo.path, "tag", "v2.9.0", target);
+  box.git(repo.path, "tag", "v2.10.0", target);
+  box.git(repo.path, "tag", "-a", "milestone", "-m", "Release milestone", target);
+  box.git(repo.path, "tag", "build/123", target);
+  box.git(repo.path, "tag", "source-tree", "HEAD^{tree}");
+  for (let i = 0; i < 155; i += 1) box.git(repo.path, "commit", "--allow-empty", "-m", `Development ${i + 1}`);
+  box.makeRepo("other-project");
+  handle = await launchApp({ worktreeRoot: box.worktreeRoot, theme: "dark" });
+  const { window } = handle;
+  await addRootAndExpand(window, handle, box, "other-project");
+  await branchRow(window, "main").click();
+  await expect(window.locator(".graph-row").first()).toBeVisible();
+  const group = await expandRepoGroup(window, "release-history");
+  const block = window.locator(".repo-block", { has: group });
+  const toggle = block.getByRole("button", { name: /^Tags 5/ });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(block.getByRole("button", { name: "Locate tag source-tree in lineage" })).toBeDisabled();
+  await block.getByRole("button", { name: "Locate tag v2.10.0 in lineage", exact: true }).click();
+  const row = window.locator(`.graph-row[data-hash="${target}"]`);
+  await expect(row).toBeInViewport();
+  await expect(row.locator(".commit-tag--release")).toHaveCount(1);
+  await expect(row.locator(".commit-tag--release")).toHaveText("# v2.10.0");
+  expect(box.git(repo.path, "symbolic-ref", "--short", "HEAD")).toBe("main");
+  await window.screenshot({ path: testInfo.outputPath("tag-locator.png") });
+  await block.getByRole("button", { name: "View all 5 tags…" }).click();
+  const browser = window.getByRole("dialog", { name: "release-history branches, tags, and remotes" });
+  await browser.getByRole("button", { name: "Locate tag build/123 in lineage", exact: true }).click();
+  await expect(browser).toHaveCount(0);
+  await expect(row).toBeInViewport();
+  await expect(row.locator(".commit-tag--release")).toHaveText("# build/123");
+  await expect(row.locator(".commit-tag--release")).toHaveCount(1);
 });

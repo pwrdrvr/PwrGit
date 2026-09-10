@@ -1,3 +1,4 @@
+import { LocateGlyph } from "../../lib/LocateGlyph";
 import { useEffect, useMemo, useState } from "react";
 import type {
   LocalBranchSummary,
@@ -163,6 +164,7 @@ export function RepoRefsModal({
   now,
   initialTab,
   onRefresh,
+  onLocateTag,
   onRevealWorktree,
   onCreateWorktree,
   onClose
@@ -172,6 +174,7 @@ export function RepoRefsModal({
   now: number;
   initialTab: "branches" | "tags" | "remotes";
   onRefresh: () => void | Promise<void>;
+  onLocateTag?: ((repoId: string, tag: TagSummary) => void) | undefined;
   onRevealWorktree: (worktreeId: string) => void;
   onCreateWorktree: (
     branch: string,
@@ -711,6 +714,22 @@ export function RepoRefsModal({
                     )}
                   </div>
                   <div className="refs-tag-actions">
+                    <button
+                      className="refs-row-action"
+                      aria-label={`Locate tag ${tag.name} in lineage`}
+                      disabled={tag.targetType !== "commit" || onLocateTag === undefined}
+                      title={
+                        tag.targetType === "commit"
+                          ? "Locate tag in lineage"
+                          : "This tag does not point to a commit"
+                      }
+                      onClick={() => {
+                        onLocateTag?.(repo.id, tag);
+                        onClose();
+                      }}
+                    >
+                      <LocateGlyph /> Locate
+                    </button>
                     <button
                       className="refs-row-action"
                       disabled={refs.remotes.length === 0}

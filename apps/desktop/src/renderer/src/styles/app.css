@@ -10731,3 +10731,13 @@ button.agent-auth-node {
   background: var(--accent);
   color: var(--accent-on);
 }
+
+.commit-tag--release {
+  color: var(--accent);
+  background: var(--accent-soft);
+  flex-shrink: 0;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
