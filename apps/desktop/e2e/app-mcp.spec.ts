@@ -32,6 +32,9 @@ test("HTTP MCP answers recent repos from the app and opens and refreshes real wo
       return response.structuredContent as { repositories: Array<{ id: string; name: string; path: string; lastViewedAt: string | null; worktrees: Array<{ id: string; path: string }> }> };
     };
     await expect.poll(async () => (await list()).repositories[0]?.name).toBe("zeta");
+    const ordered = await client.callTool({ name: "pwrgit_app_recent_repositories", arguments: {} });
+    expect(ordered.structuredContent).toMatchObject({ ordering: { by: "lastViewedAt", direction: "descending", unknownVisits: "excluded" },
+      repositories: expect.arrayContaining([expect.objectContaining({ name: "zeta", lastViewedAt: expect.any(String) })]) });
     const recent = await list();
     // Git uses forward slashes on Windows; compare native-normalized paths.
     expect(normalize(recent.repositories[0]!.path)).toBe(normalize(zeta.path));
@@ -43,6 +46,7 @@ test("HTTP MCP answers recent repos from the app and opens and refreshes real wo
     expect((await client.callTool({ name: "pwrgit_app_refresh", arguments: { repoId: other.id } })).isError).not.toBe(true);
     await expect.poll(async () => (await list()).repositories.find(repo => repo.id === other.id)?.worktrees.map(w => normalize(w.path))).toContain(normalize(external));
     const roots = await client.callTool({ name: "pwrgit_repository_roots", arguments: {} });
+    expect(roots.structuredContent).toMatchObject({ appTools: { recentRepositories: "pwrgit_app_recent_repositories" } });
     const discovered = roots.structuredContent as { roots: Array<{ path: string }> };
     expect(discovered.roots.map(root => normalize(root.path))).toContain(normalize(sandbox.reposDir));
     expect(JSON.stringify(roots.structuredContent)).not.toContain("current_workspace");

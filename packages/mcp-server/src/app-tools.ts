@@ -59,20 +59,32 @@ export function registerAppTools(mcp: McpServer, backend: AppBackend, authorizer
     return result({ protocol: "pwrgit.app/v1", activeProfileId: state.activeProfileId,
       profiles: state.profiles.map(profile => ({ ...profile, repositoryCount: state.repositories.filter(repo => repo.profileId === profile.id).length })) });
   });
-  mcp.registerTool("pwrgit_app_repositories", {
-    description: "Find repositories and worktrees known to PwrGit, their local paths, saved per-profile selection, pinned state and cached dirty/ahead/behind counts. For recently used repos use sort=recently_viewed, which ranks actual selections in PwrGit, not commit dates. lastViewedAt=null means no recorded visit; lastCommitAt is a separate Git activity signal. History from older versions imports when the profile window opens. Defaults to all authorized profiles. Requires repository.metadata.read.",
-    inputSchema: { profileId: z.string().optional(), query: z.string().max(200).optional(),
-      sort: z.enum(["recently_viewed", "name"]).default("recently_viewed"), limit: z.number().int().min(1).max(100).default(20) }, annotations: readOnly
-  }, async input => {
+  const queryRepositories = async (input: { profileId?: string | undefined; query?: string | undefined; sort: "recently_viewed" | "name"; limit: number }, recentOnly = false) => {
     const state = await catalog();
     const query = input.query?.toLowerCase() ?? "";
-    const repos = state.repositories.filter(repo => (!input.profileId || repo.profileId === input.profileId)
+    const matching = state.repositories.filter(repo => (!input.profileId || repo.profileId === input.profileId)
       && `${repo.name} ${repo.path} ${repo.worktrees.map(w => `${w.path} ${w.branch}`).join(" ")}`.toLowerCase().includes(query))
       .map(repo => ({ ...repo, lastViewedAt: repo.worktrees.map(w => w.lastViewedAt).filter((date): date is string => date !== null).sort().at(-1) ?? null }));
+    const withHistory = matching.filter(repo => repo.lastViewedAt !== null).length;
+    const repos = recentOnly ? matching.filter(repo => repo.lastViewedAt !== null) : matching;
     repos.sort((a, b) => (input.sort === "recently_viewed" ? (b.lastViewedAt ?? "").localeCompare(a.lastViewedAt ?? "") : 0) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
     return result({ protocol: "pwrgit.app/v1", activeProfileId: state.activeProfileId, source: "PwrGit application index", total: repos.length,
+      ordering: { by: input.sort === "recently_viewed" ? "lastViewedAt" : "name", direction: input.sort === "recently_viewed" ? "descending" : "ascending", ties: "name then id", unknownVisits: recentOnly ? "excluded" : "last" },
+      history: { meaning: "Time a worktree was selected in PwrGit, not its last commit or filesystem modification time.",
+        repositoriesWithVisits: withHistory, repositoriesWithoutVisits: matching.length - withHistory,
+        coverage: matching.length === 0 ? "no_repositories" : withHistory === 0 ? "none" : withHistory === matching.length ? "complete" : "partial",
+        importNote: "Older sidebar history imports when its profile window selects a worktree. Unrecorded usage cannot be ranked." },
       truncated: repos.length > input.limit, repositories: repos.slice(0, input.limit) });
-  });
+  };
+  mcp.registerTool("pwrgit_app_repositories", {
+    description: "Find repositories and worktrees known to PwrGit, their local paths, saved per-profile selection, pinned state and cached dirty/ahead/behind counts. Defaults to lastViewedAt descending across all authorized profiles; unvisited repositories sort last. For strictly recently used repositories call pwrgit_app_recent_repositories. lastCommitAt is a separate Git activity signal. Requires repository.metadata.read.",
+    inputSchema: { profileId: z.string().optional(), query: z.string().max(200).optional(),
+      sort: z.enum(["recently_viewed", "name"]).default("recently_viewed"), limit: z.number().int().min(1).max(100).default(20) }, annotations: readOnly
+  }, input => queryRepositories(input));
+  mcp.registerTool("pwrgit_app_recent_repositories", {
+    description: "Answer which repositories the user most recently used in PwrGit and where they are. Returns only repositories with recorded PwrGit visits, newest first, with explicit lastViewedAt timestamps, local paths and history coverage. Defaults to all authorized profiles. Empty results mean no recorded visits, not that no repositories exist. Use pwrgit_app_repositories for the full catalog. Requires repository.metadata.read.",
+    inputSchema: { profileId: z.string().optional(), limit: z.number().int().min(1).max(100).default(20) }, annotations: readOnly
+  }, input => queryRepositories({ ...input, sort: "recently_viewed" }, true));
   for (const action of ["open", "refresh"] as const) {
     mcp.registerTool(`pwrgit_app_${action}`, {
       description: action === "open"

@@ -103,7 +103,7 @@ export async function createPwrGitMcpServer(
     { name: "PwrGit", version: "0.1.0" },
     {
       instructions:
-        "Use pwrgit_app_repositories for repositories known to the running PwrGit app, recent usage, selection and cached status. Use pwrgit_app_profiles for profile roots. These app tools are available only in the desktop HTTP server. Filesystem discovery is a fallback, not app history. " +
+        "Use pwrgit_app_recent_repositories for recently used repositories and timestamps. Use pwrgit_app_repositories for the full app catalog, selection and cached status. Use pwrgit_app_profiles for profile roots. These app tools are available only in the desktop HTTP server. Filesystem discovery is a fallback, not app history. " +
         "PwrGit also provides bounded, read-only discovery of local GitHub and GitLab checkouts. " +
         "Remote credentials and changed-file paths are never returned. For live status, call pwrgit_watch_repository and read its versioned resource. " +
         (options.supportsSubscriptions === false
@@ -148,7 +148,7 @@ export async function createPwrGitMcpServer(
     {
       title: "Discover repository roots",
       description:
-        "Find bounded folders where this user keeps Git repositories. In the desktop uses PwrGit profile roots and indexed repos; standalone uses PWRGIT_MCP_ROOTS, caller-provided roots, a safe current-workspace parent, and existing conventional folders; never selects a home directory or filesystem root automatically.",
+        "Directory discovery only: this tool does not rank recent usage. Use pwrgit_app_recent_repositories for recently used repositories in the desktop app. Find bounded folders where this user keeps Git repositories. In the desktop uses PwrGit profile roots and indexed repos; standalone uses PWRGIT_MCP_ROOTS, caller-provided roots, a safe current-workspace parent, and existing conventional folders; never selects a home directory or filesystem root automatically.",
       inputSchema: {
         roots: z
           .array(z.string().trim().min(1).max(4_096))
@@ -198,7 +198,11 @@ export async function createPwrGitMcpServer(
         ...(options.runner === undefined ? {} : { runner: options.runner })
       });
       return success(
-        result,
+        options.appBackend ? { ...result, appTools: {
+          recentRepositories: "pwrgit_app_recent_repositories",
+          allRepositories: "pwrgit_app_repositories",
+          note: "These are discovery roots, not recently used repositories. Call the recent-repositories tool for lastViewedAt timestamps and usage ordering."
+        } } : result,
         `PwrGit inspected ${result.roots.length} bounded repository root${result.roots.length === 1 ? "" : "s"}.`
       );
     }

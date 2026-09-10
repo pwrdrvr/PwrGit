@@ -22,11 +22,17 @@ see PwrGit's profiles or navigation history and do not advertise these tools.
 | --- | --- |
 | `pwrgit_app_profiles` | Profile names, configured roots, active profile and authorized repository counts; no account email or credentials |
 | `pwrgit_app_repositories` | Search indexed repositories by name, path or branch, across profiles or within `profileId`; return worktrees, paths, pins, saved selection and cached status |
+| `pwrgit_app_recent_repositories` | Only repositories with recorded visits, newest first; explicit ordering and history coverage |
 | `pwrgit_app_open` | Open/focus the repository's profile window and optionally reveal a particular worktree |
 | `pwrgit_app_refresh` | Reconcile externally added/removed worktrees and refresh cached state using the same app services as the UI |
 
 For “where are my most recently used repositories?”, call
-`pwrgit_app_repositories` with `{"sort":"recently_viewed","limit":10}`.
+`pwrgit_app_recent_repositories` with `{"limit":10}`. Results explicitly declare
+`ordering.by=lastViewedAt`, descending direction, and exclude unvisited repos.
+The `history` object reports authorized matching repositories with and without
+visit records, so partial history cannot be mistaken for complete usage history.
+Discovery-root responses link to this tool rather than implying that root order
+is recent-use order.
 `lastViewedAt` records actual selection in PwrGit, aggregated from worktrees;
 `lastCommitAt` is a separate Git timestamp. Missing history stays `null` and
 sorts last. The response includes `total` and `truncated`; the limit is 1–100.
