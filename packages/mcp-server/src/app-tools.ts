@@ -64,11 +64,17 @@ export function registerAppTools(mcp: McpServer, backend: AppBackend, authorizer
     const query = input.query?.toLowerCase() ?? "";
     const matching = state.repositories.filter(repo => (!input.profileId || repo.profileId === input.profileId)
       && `${repo.name} ${repo.path} ${repo.worktrees.map(w => `${w.path} ${w.branch}`).join(" ")}`.toLowerCase().includes(query))
-      .map(repo => ({ ...repo, lastViewedAt: repo.worktrees.map(w => w.lastViewedAt).filter((date): date is string => date !== null).sort().at(-1) ?? null }));
+      .map(repo => ({ ...repo, profileName: state.profiles.find(profile => profile.id === repo.profileId)?.name ?? null, lastViewedAt: repo.worktrees.map(w => w.lastViewedAt).filter((date): date is string => date !== null).sort().at(-1) ?? null }));
     const withHistory = matching.filter(repo => repo.lastViewedAt !== null).length;
     const repos = recentOnly ? matching.filter(repo => repo.lastViewedAt !== null) : matching;
     repos.sort((a, b) => (input.sort === "recently_viewed" ? (b.lastViewedAt ?? "").localeCompare(a.lastViewedAt ?? "") : 0) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
     return result({ protocol: "pwrgit.app/v1", activeProfileId: state.activeProfileId, source: "PwrGit application index", total: repos.length,
+      profileCoverage: state.profiles.filter(profile => !input.profileId || profile.id === input.profileId).map(profile => ({
+        profileId: profile.id, profileName: profile.name,
+        matchingRepositories: matching.filter(repo => repo.profileId === profile.id).length,
+        repositoriesWithVisits: matching.filter(repo => repo.profileId === profile.id && repo.lastViewedAt !== null).length,
+        returnedRepositories: repos.slice(0, input.limit).filter(repo => repo.profileId === profile.id).length
+      })),
       ordering: { by: input.sort === "recently_viewed" ? "lastViewedAt" : "name", direction: input.sort === "recently_viewed" ? "descending" : "ascending", ties: "name then id", unknownVisits: recentOnly ? "excluded" : "last" },
       history: { meaning: "Time a worktree was selected in PwrGit, not its last commit or filesystem modification time.",
         repositoriesWithVisits: withHistory, repositoriesWithoutVisits: matching.length - withHistory,

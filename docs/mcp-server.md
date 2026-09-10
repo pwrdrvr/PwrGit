@@ -29,6 +29,10 @@ see PwrGit's profiles or navigation history and do not advertise these tools.
 For “where are my most recently used repositories?”, call
 `pwrgit_app_recent_repositories` with `{"limit":10}`. Results explicitly declare
 `ordering.by=lastViewedAt`, descending direction, and exclude unvisited repos.
+Results include `profileName` beside each repository and `profileCoverage` with
+per-profile matching, visited, and returned counts. Ordering is global before the
+limit is applied; the active profile receives no preference. A single-profile
+page can still be correct if its visits are newest or other profiles lack history.
 The `history` object reports authorized matching repositories with and without
 visit records, so partial history cannot be mistaken for complete usage history.
 Discovery-root responses link to this tool rather than implying that root order

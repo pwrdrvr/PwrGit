@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { expect, it, vi } from "vitest";
-import { McpPolicyStore, PolicyFileAuthorizer, MCP_AGENT_CAPABILITIES } from "./access-policy.js";
+import { FixedMcpAuthorizer, fullAccessAuthorization, McpPolicyStore, PolicyFileAuthorizer, MCP_AGENT_CAPABILITIES } from "./access-policy.js";
 import { createPwrGitMcpServer } from "./server.js";
 import type { AppBackend } from "./app-tools.js";
 
@@ -57,4 +57,33 @@ it("uses app history, filters scope, dispatches app actions and enforces OAuth g
     policy.revokeSession(session.session.id);
     expect((await client.callTool({ name: "pwrgit_app_repositories", arguments: {} })).isError).toBe(true);
   } finally { await client.close(); await server.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+it("globally ranks mixed-profile visits before limiting and honors an explicit profile filter", async () => {
+  const repo = (id: string, profileId: string, day: number) => ({ id, profileId, name: id, path: `/fixture/${id}`, pinned: false,
+    worktrees: [{ id: `${id}-wt`, path: `/fixture/${id}`, branch: "main", selected: false,
+      lastViewedAt: `2026-09-0${day}T00:00:00.000Z`, lastCommitAt: null, dirty: 0, ahead: 0, behind: 0 }] });
+  const backend: AppBackend = { catalog: () => ({ activeProfileId: "first",
+    profiles: [{ id: "first", name: "First", roots: [] }, { id: "second", name: "Second", roots: [] }],
+    repositories: [repo("first-old", "first", 1), repo("first-new", "first", 3), repo("second-old", "second", 2), repo("second-new", "second", 4)]
+  }), open: vi.fn(), refresh: vi.fn() };
+  const server = await createPwrGitMcpServer({ appBackend: backend, authorizer: new FixedMcpAuthorizer(fullAccessAuthorization()) });
+  const client = new Client({ name: "mixed-profiles", version: "1" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  try {
+    await server.mcp.connect(serverTransport); await client.connect(clientTransport);
+    for (const tool of ["pwrgit_app_repositories", "pwrgit_app_recent_repositories"]) {
+      const all = await client.callTool({ name: tool, arguments: {} });
+      const data = all.structuredContent as { repositories: Array<{ id: string }> };
+      expect(data.repositories.map(repo => repo.id)).toEqual(["second-new", "first-new", "second-old", "first-old"]);
+      const limited = await client.callTool({ name: tool, arguments: { limit: 2 } });
+      expect(limited.structuredContent).toMatchObject({ total: 4, truncated: true, profileCoverage: [
+        { profileId: "first", matchingRepositories: 2, repositoriesWithVisits: 2, returnedRepositories: 1 },
+        { profileId: "second", matchingRepositories: 2, repositoriesWithVisits: 2, returnedRepositories: 1 }
+      ], repositories: [{ id: "second-new", profileName: "Second" }, { id: "first-new", profileName: "First" }] });
+      const filtered = await client.callTool({ name: tool, arguments: { profileId: "second" } });
+      expect(filtered.structuredContent).toMatchObject({ total: 2, truncated: false, profileCoverage: [{ profileId: "second", returnedRepositories: 2 }],
+        repositories: [{ id: "second-new" }, { id: "second-old" }] });
+    }
+  } finally { await client.close(); await server.close(); }
 });
