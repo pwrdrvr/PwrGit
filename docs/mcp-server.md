@@ -1,9 +1,10 @@
 # PwrGit MCP server and live-status protocol
 
-PwrGit provides a read-only MCP server under `packages/mcp-server`, available
+PwrGit exposes app state and explicit workspace navigation through MCP, plus
+read-only Git discovery and live status. The server lives under `packages/mcp-server`, available
 as a standalone stdio process or through the desktop app’s opt-in HTTP listener. It follows the Pwr family conventions established by
 PwrSnap: the official TypeScript SDK, explicit capabilities, structured tool
-results, read-only tool annotations, typed resources, stderr-only diagnostics,
+results, accurate tool annotations, typed resources, stderr-only diagnostics,
 bounded inputs, fail-closed RBAC, named revocable Sessions, and contract-level
 integration tests.
 
@@ -11,6 +12,44 @@ The Electron app does not need to remain running for stdio clients; HTTP
 clients require the app and its local-agent listener to remain running. Settings → Agents owns the
 authorization graph and writes the cross-platform `mcp-policy.json` consumed
 by standalone processes.
+
+## Running-app tools (`pwrgit.app/v1`)
+
+Use the desktop HTTP connection for app state. Standalone stdio tools cannot
+see PwrGit's profiles or navigation history and do not advertise these tools.
+
+| Tool | Purpose |
+| --- | --- |
+| `pwrgit_app_profiles` | Profile names, configured roots, active profile and authorized repository counts; no account email or credentials |
+| `pwrgit_app_repositories` | Search indexed repositories by name, path or branch, across profiles or within `profileId`; return worktrees, paths, pins, saved selection and cached status |
+| `pwrgit_app_open` | Open/focus the repository's profile window and optionally reveal a particular worktree |
+| `pwrgit_app_refresh` | Reconcile externally added/removed worktrees and refresh cached state using the same app services as the UI |
+
+For “where are my most recently used repositories?”, call
+`pwrgit_app_repositories` with `{"sort":"recently_viewed","limit":10}`.
+`lastViewedAt` records actual selection in PwrGit, aggregated from worktrees;
+`lastCommitAt` is a separate Git timestamp. Missing history stays `null` and
+sorts last. The response includes `total` and `truncated`; the limit is 1–100.
+The index can be stale until refreshed; cached dirty/ahead/behind counts are
+not a fresh Git or network request.
+
+Navigation history is persisted in PwrGit's SQLite state, per profile. Existing
+sidebar localStorage history imports when a profile window selects a worktree.
+A saved selection describes that profile's last selected worktree; it does not
+prove the window is currently open. Opening a window through MCP updates history
+through the same renderer selection path as a click.
+
+Choose **Local Repository Reader** or **Live Forge Status** for the app read and
+refresh tools. **PwrGit Workspace Control** additionally grants `app.navigate`.
+Existing Sessions do not gain navigation implicitly: OAuth scopes and role
+permissions must both grant it. Reauthorize if the original OAuth scope excluded
+`app.navigate`. Repository boundaries filter catalog entries and worktrees and
+are rechecked before an action. No arbitrary command dispatch, commit, push,
+file editing or destructive Git operation is exposed by these app tools.
+
+Desktop root discovery now uses profile roots and indexed repositories rather
+than the Electron process's working directory. Standalone discovery retains its
+bounded configured/conventional-folder behavior.
 
 ## Authorization policy v1
 
@@ -34,8 +73,9 @@ The versioned capabilities are:
 | --- | --- |
 | `repository.roots.read` | Bounded root discovery |
 | `repository.checkout.locate` | Checkout lookup by forge identity |
-| `repository.metadata.read` | Remotes, branches, worktrees, and safe local status |
+| `repository.metadata.read` | App profiles, indexed repositories, navigation history, worktrees, safe local status, and index refresh |
 | `forge.status.read` | PR/MR, CI, conflict, and review reads through `gh`/`glab` |
+| `app.navigate` | Open/focus authorized repositories and worktrees in PwrGit |
 | `status.subscribe` | MCP resource subscriptions and WebSocket fallback subscriptions |
 
 A role's `repositoryRoots: null` allows the server's bounded discovery rules.

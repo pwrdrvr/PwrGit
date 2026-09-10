@@ -1,3 +1,4 @@
+import { registerAppTools, type AppBackend } from "./app-tools.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   ErrorCode,
@@ -28,6 +29,7 @@ import {
 export const CAPABILITY_RESOURCE_URI = "pwrgit://live-status/capabilities/v1";
 
 export type PwrGitMcpServerOptions = {
+  appBackend?: AppBackend;
   supportsSubscriptions?: boolean;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
@@ -81,6 +83,11 @@ export async function createPwrGitMcpServer(
 ): Promise<PwrGitMcpServer> {
   const cwd = options.cwd ?? process.cwd();
   const env = options.env ?? process.env;
+  const appRoots = async (): Promise<string[] | undefined> => {
+    if (!options.appBackend) return undefined;
+    const catalog = await options.appBackend.catalog();
+    return [...new Set([...catalog.profiles.flatMap(profile => profile.roots), ...catalog.repositories.map(repo => repo.path)])].slice(0, 32);
+  };
   const authorizer = options.authorizer ?? PolicyFileAuthorizer.fromEnvironment(env);
   const initialAuthorization = await requireAccess(authorizer);
   const liveStatusLoader =
@@ -96,7 +103,8 @@ export async function createPwrGitMcpServer(
     { name: "PwrGit", version: "0.1.0" },
     {
       instructions:
-        "PwrGit provides bounded, read-only discovery of local GitHub and GitLab checkouts. " +
+        "Use pwrgit_app_repositories for repositories known to the running PwrGit app, recent usage, selection and cached status. Use pwrgit_app_profiles for profile roots. These app tools are available only in the desktop HTTP server. Filesystem discovery is a fallback, not app history. " +
+        "PwrGit also provides bounded, read-only discovery of local GitHub and GitLab checkouts. " +
         "Remote credentials and changed-file paths are never returned. For live status, call pwrgit_watch_repository and read its versioned resource. " +
         (options.supportsSubscriptions === false
           ? "This HTTP transport is stateless: read status resources on demand and use the advertised WebSocket for live updates. Resource subscriptions are unavailable."
@@ -140,7 +148,7 @@ export async function createPwrGitMcpServer(
     {
       title: "Discover repository roots",
       description:
-        "Find bounded folders where this user appears to keep Git repositories. Uses PWRGIT_MCP_ROOTS, caller-provided roots, a safe current-workspace parent, and existing conventional folders; never selects a home directory or filesystem root automatically.",
+        "Find bounded folders where this user keeps Git repositories. In the desktop uses PwrGit profile roots and indexed repos; standalone uses PWRGIT_MCP_ROOTS, caller-provided roots, a safe current-workspace parent, and existing conventional folders; never selects a home directory or filesystem root automatically.",
       inputSchema: {
         roots: z
           .array(z.string().trim().min(1).max(4_096))
@@ -175,15 +183,15 @@ export async function createPwrGitMcpServer(
       const requestedRoots =
         input.roots ??
         (authorization.repositoryRoots === null
-          ? undefined
+          ? await appRoots()
           : [...authorization.repositoryRoots]);
       const result = await discoverRepositoryRoots({
         ...(requestedRoots === undefined ? {} : { requested: requestedRoots }),
-        includeConventional: restricted
+        includeConventional: restricted || options.appBackend
           ? false
           : (input.includeConventional ?? true),
-        includeConfigured: !restricted,
-        includeCurrentWorkspace: !restricted,
+        includeConfigured: !restricted && !options.appBackend,
+        includeCurrentWorkspace: !restricted && !options.appBackend,
         ...(input.maxDepth === undefined ? {} : { maxDepth: input.maxDepth }),
         cwd,
         env,
@@ -235,7 +243,7 @@ export async function createPwrGitMcpServer(
       const roots =
         input.roots ??
         (authorization.repositoryRoots === null
-          ? undefined
+          ? await appRoots()
           : [...authorization.repositoryRoots]);
       const result = await findRepositoryCheckouts({
         repository: input.repository,
@@ -368,6 +376,8 @@ export async function createPwrGitMcpServer(
       );
     }
   );
+
+  if (options.appBackend) registerAppTools(mcp, options.appBackend, authorizer);
 
   let closed = false;
   return {

@@ -1,3 +1,4 @@
+import { dispatch } from "../../lib/pwrgit";
 import {
   useCallback,
   useEffect,
@@ -239,10 +240,12 @@ export function Sidebar({
       ? focusVisitStore.visits
       : readFocusVisits(focusVisitsKey);
 
+  const recordedSelection = useRef<string | null>(null);
+
   // Selection is the clearest "I work here" signal. Keep it per profile and
   // bounded; repo pins and Git activity remain durable in SQLite as before.
   useEffect(() => {
-    if (selectedWorktreeId === null) return;
+    if (selectedWorktreeId === null) { recordedSelection.current = null; return; }
     if (
       !repos.some((repo) =>
         repo.worktrees.some((worktree) => worktree.id === selectedWorktreeId)
@@ -250,6 +253,12 @@ export function Sidebar({
     ) {
       return;
     }
+    const selectionKey = `${focusVisitsKey}:${selectedWorktreeId}`;
+    if (recordedSelection.current === selectionKey) return;
+    recordedSelection.current = selectionKey;
+    if (activeProfile) void dispatch("navigation:record", {
+      profileId: activeProfile.id, selectedWorktreeId, visits: readFocusVisits(focusVisitsKey)
+    });
     setFocusVisitStore((current) => {
       const base =
         current.key === focusVisitsKey

@@ -1,6 +1,8 @@
 # @pwrgit/mcp-server
 
-Read-only repository discovery, metadata and live status for PwrGit.
+PwrGit app profiles, indexed repositories, recent navigation, open/refresh actions,
+and read-only Git metadata and live status. App-backed tools require the desktop
+HTTP server; standalone stdio remains filesystem-based.
 
 The desktop app exposes OAuth-protected MCP at
 `http://127.0.0.1:51731/mcp`. Enable local-agent access in Settings → Agents,

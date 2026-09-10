@@ -623,6 +623,7 @@ export type AppSettingsPatch = {
 };
 
 export interface Commands {
+  "navigation:record": { req: { profileId: string; selectedWorktreeId: string | null; visits?: Record<string, number> }; res: null };
   /** Liveness probe — proves the command-bus round-trip end to end. */
   ping: { req: void; res: string };
 

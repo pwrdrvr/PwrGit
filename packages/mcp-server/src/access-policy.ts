@@ -33,7 +33,8 @@ export const MCP_AGENT_CAPABILITIES = [
   "repository.checkout.locate",
   "repository.metadata.read",
   "forge.status.read",
-  "status.subscribe"
+  "status.subscribe",
+  "app.navigate"
 ] as const;
 
 export type McpAgentCapability = (typeof MCP_AGENT_CAPABILITIES)[number];
@@ -55,12 +56,17 @@ export const MCP_AGENT_CAPABILITY_DETAILS: Record<
   },
   "repository.metadata.read": {
     label: "Read repository metadata",
-    detail: "Read remotes, branches, worktrees, and aggregate working-tree status.",
+    detail: "Read app repositories, recent selections, branches, worktrees, and aggregate status.",
     danger: "sensitive"
   },
   "forge.status.read": {
     label: "Read forge status",
     detail: "Use the signed-in GitHub or GitLab CLI to read PR, MR, CI, and review status.",
+    danger: "sensitive"
+  },
+  "app.navigate": {
+    label: "Navigate PwrGit",
+    detail: "Open or focus authorized repositories and worktrees in PwrGit windows.",
     danger: "sensitive"
   },
   "status.subscribe": {
@@ -185,8 +191,13 @@ export const BUILT_IN_MCP_ROLES = [
     name: "Live Forge Status",
     description: "Read local metadata plus PR, MR, CI, review, and live status updates.",
     builtIn: true,
-    permissions: [...MCP_AGENT_CAPABILITIES],
+    permissions: MCP_AGENT_CAPABILITIES.filter(capability => capability !== "app.navigate"),
     repositoryRoots: null
+  },
+  {
+    id: "builtin.app-operator", name: "PwrGit Workspace Control",
+    description: "Read app repositories and status, and open authorized repositories in PwrGit. Does not grant Git mutations.",
+    builtIn: true, permissions: [...MCP_AGENT_CAPABILITIES], repositoryRoots: null
   }
 ] as const satisfies readonly McpAgentRole[];
 
@@ -428,6 +439,9 @@ function parsePolicy(value: unknown): McpPolicyFile {
   }
   for (const canonical of BUILT_IN_MCP_ROLES) {
     if (!roles.some((role) => role.id === canonical.id)) {
+      // Older v1 policies predate app navigation. Add its opt-in role without
+      // changing any existing role, Session assignment or OAuth scope.
+      if (canonical.id === "builtin.app-operator") { roles.push(cloneRole(canonical)); continue; }
       throw new McpAccessError("invalid_policy", `MCP policy is missing ${canonical.id}`);
     }
   }

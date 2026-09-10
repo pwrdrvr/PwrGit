@@ -7,11 +7,12 @@ import { revocationHandler } from "@modelcontextprotocol/sdk/server/auth/handler
 import { mcpAuthMetadataRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { McpPolicyStore, PolicyFileAuthorizer, MCP_AGENT_CAPABILITIES } from "@pwrgit/mcp-server/access-policy";
-import { createPwrGitMcpServer, type PwrGitMcpServer, type CommandRunner } from "@pwrgit/mcp-server";
+import { createPwrGitMcpServer, type PwrGitMcpServer, type CommandRunner, type AppBackend } from "@pwrgit/mcp-server";
 import { AGENT_ACCESS_PORT } from "@pwrgit/mcp-server/agent-access-protocol";
 import { AgentOAuth, type RequestConsent } from "./agent-oauth";
 
 export type AgentAccessServerOptions = {
+  appBackend?: AppBackend;
   runner: CommandRunner;
   policyFile: string;
   clientsFile: string;
@@ -138,6 +139,7 @@ export class AgentAccessServer {
         server: createPwrGitMcpServer({
           authorizer: new PolicyFileAuthorizer(this.options.policyFile, token!),
           runner: this.options.runner,
+          ...(this.options.appBackend ? { appBackend: this.options.appBackend } : {}),
           supportsSubscriptions: false
         }),
         tail: Promise.resolve(), pending: 0

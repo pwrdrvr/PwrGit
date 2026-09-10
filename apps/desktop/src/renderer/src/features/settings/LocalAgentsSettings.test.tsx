@@ -112,7 +112,7 @@ describe("LocalAgentsSettings", () => {
     expect(container.textContent).toContain("Authorization graph");
     expect(container.textContent).toContain("PwrAgent");
     expect(container.textContent).toContain("Acme Status");
-    expect(container.textContent).toContain("5 permissions");
+    expect(container.textContent).toContain(`${MCP_AGENT_CAPABILITIES.length} permissions`);
     expect(container.textContent).toContain("1 approved root");
     expect(container.textContent).toContain("/Users/test/src/acme");
     expect(container.textContent).toContain("Read forge status");

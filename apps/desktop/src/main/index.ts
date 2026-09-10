@@ -111,6 +111,7 @@ import { registerLocalAgentHandlers } from "./local-agents/local-agent-handlers"
 import { ConsentBroker } from "./agent-access/consent-broker";
 import { createConsentWindow } from "./agent-access/consent-window";
 import { createDesktopMcpRunner } from "./agent-access/desktop-mcp-runner";
+import { createAppBackend } from "./agent-access/app-backend";
 import { AgentAccessService } from "./agent-access/agent-access-service";
 import { registerAgentAccessHandlers } from "./agent-access/agent-access-handlers";
 
@@ -603,6 +604,8 @@ if (!gotSingleInstanceLock) {
     const consent = new ConsentBroker(mcpPolicy, () => createConsentWindow(appearance.appearance()));
     consent.register(bus);
     const agentAccess = new AgentAccessService({
+      ...(!app.isPackaged && process.env["PWRGIT_E2E_AGENT_ACCESS_PORT"] === "0" ? { port: 0 } : {}),
+      appBackend: createAppBackend(db, profiles, indexer, bus),
       runner: createDesktopMcpRunner(execGit),
       policyFile: mcpPolicyFile,
       clientsFile: join(app.getPath("userData"), "mcp-oauth-clients.json"),

@@ -27,7 +27,7 @@ export function AgentConsentWindow() {
   };
   return <main className="agent-consent-window">
     <h1>Approve agent access</h1>
-    <p><strong>{prompt?.clientName ?? "Loading agent…"}</strong> wants to read your repositories through PwrGit.</p>
+    <p><strong>{prompt?.clientName ?? "Loading agent…"}</strong> wants to connect to PwrGit. Review the permissions below.</p>
     {error ? <p role="alert" className="settings-field__error">{error}</p> : null}
     {prompt ? <SettingsSection title="Session permissions" eyebrow="Your approval">
       <label className="settings-field"><span>Session Name</span>
