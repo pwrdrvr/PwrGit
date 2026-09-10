@@ -1,4 +1,4 @@
-import { dirname, join } from "node:path";
+import { dirname, join, normalize } from "node:path";
 import { expect, test } from "@playwright/test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -33,16 +33,18 @@ test("HTTP MCP answers recent repos from the app and opens and refreshes real wo
     };
     await expect.poll(async () => (await list()).repositories[0]?.name).toBe("zeta");
     const recent = await list();
-    expect(recent.repositories[0]!.path).toBe(zeta.path);
+    // Git uses forward slashes on Windows; compare native-normalized paths.
+    expect(normalize(recent.repositories[0]!.path)).toBe(normalize(zeta.path));
     expect(recent.repositories[0]!.lastViewedAt).not.toBeNull();
     const other = recent.repositories.find(repo => repo.name === "alpha")!;
     expect((await client.callTool({ name: "pwrgit_app_open", arguments: { repoId: other.id, worktreeId: other.worktrees[0]!.id } })).isError).not.toBe(true);
     await expect.poll(async () => (await list()).repositories[0]?.name).toBe("alpha");
     const external = alpha.addWorktree("external");
     expect((await client.callTool({ name: "pwrgit_app_refresh", arguments: { repoId: other.id } })).isError).not.toBe(true);
-    await expect.poll(async () => (await list()).repositories.find(repo => repo.id === other.id)?.worktrees.map(w => w.path)).toContain(external);
+    await expect.poll(async () => (await list()).repositories.find(repo => repo.id === other.id)?.worktrees.map(w => normalize(w.path))).toContain(normalize(external));
     const roots = await client.callTool({ name: "pwrgit_repository_roots", arguments: {} });
-    expect(JSON.stringify(roots.structuredContent)).toContain(sandbox.reposDir);
+    const discovered = roots.structuredContent as { roots: Array<{ path: string }> };
+    expect(discovered.roots.map(root => normalize(root.path))).toContain(normalize(sandbox.reposDir));
     expect(JSON.stringify(roots.structuredContent)).not.toContain("current_workspace");
   } finally { await client.close(); await handle.cleanup(); sandbox.cleanup(); }
 });
