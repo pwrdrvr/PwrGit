@@ -464,6 +464,12 @@ async function inspectChild(
   );
   const expectedCommit = indexStage0?.commit ?? candidate.pinnedCommit;
   const issues: SubmoduleIssue[] = [];
+  const configurationRemedy =
+    config === null
+      ? "Restore a matching .gitmodules entry with a reviewed URL before initializing, or remove the gitlink if it was added accidentally."
+      : config.url === undefined || config.url === ""
+        ? "Add a reviewed URL to this submodule's .gitmodules entry before initializing."
+        : undefined;
 
   if (config === null) {
     issues.push(
@@ -471,7 +477,7 @@ async function inspectChild(
         "gitmodules_entry_missing",
         "error",
         "The parent records a gitlink here, but .gitmodules has no matching path.",
-        "Restore the matching .gitmodules entry before another clone needs this submodule."
+        configurationRemedy
       )
     );
   } else if (config.url === undefined || config.url === "") {
@@ -480,7 +486,7 @@ async function inspectChild(
         "url_missing",
         "error",
         ".gitmodules does not declare a URL for this submodule.",
-        "Add submodule.<name>.url before trying to initialize it."
+        configurationRemedy
       )
     );
   }
@@ -548,7 +554,8 @@ async function inspectChild(
         "checkout_missing",
         "error",
         "The submodule checkout path is missing.",
-        "Initialize this path from the parent repository after reviewing its URL."
+        configurationRemedy ??
+          "Initialize this path from the parent repository after reviewing its URL."
       )
     );
   } else {
@@ -578,13 +585,15 @@ async function inspectChild(
                 "checkout_deinitialized",
                 "warning",
                 "This submodule was deinitialized; its Git data is still retained locally.",
-                "Reinitialize it from the parent after reviewing the configured URL."
+                configurationRemedy ??
+          "Reinitialize it from the parent after reviewing the configured URL."
               )
             : issue(
                 "checkout_uninitialized",
                 "warning",
                 "This submodule has not been initialized.",
-                "Initialize it from the parent after reviewing the configured URL."
+                configurationRemedy ??
+          "Initialize it from the parent after reviewing the configured URL."
               )
         );
       } else {
@@ -594,7 +603,9 @@ async function inspectChild(
             "checkout_not_repository",
             "error",
             "The path exists but is not this submodule's Git checkout.",
-            "Preserve or move the existing files, then initialize the submodule."
+            configurationRemedy === undefined
+              ? "Preserve or move the existing files, then initialize the submodule."
+              : `Preserve or move the existing files. ${configurationRemedy}`
           )
         );
       }
