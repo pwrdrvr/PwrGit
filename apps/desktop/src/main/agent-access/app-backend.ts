@@ -41,6 +41,7 @@ export function createAppBackend(db: DB, profiles: ProfileService, indexer: Repo
             id: repo.id, profileId: profile.id, name: repo.name, path: repo.path, pinned: repo.pinned,
             worktrees: repo.worktrees.map(worktree => ({
               id: worktree.id, path: worktree.path, branch: worktree.branch,
+              pinned: worktree.pinned, isPrimary: worktree.isPrimary, missing: worktree.missing ?? false,
               selected: navigation.selectedWorktreeId === worktree.id,
               lastViewedAt: navigation.visits[worktree.id] === undefined ? null : new Date(navigation.visits[worktree.id]!).toISOString(),
               lastCommitAt: worktree.lastActivityAt ?? null,

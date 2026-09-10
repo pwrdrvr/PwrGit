@@ -16,9 +16,17 @@ it("uses app history, filters scope, dispatches app actions and enforces OAuth g
   const role = policy.createRole({ name: "App control", description: "", permissions: [...MCP_AGENT_CAPABILITIES], repositoryRoots: [inside] });
   const session = policy.createSession("test", role.id);
   const repo = (id: string, path: string, lastViewedAt: string | null) => ({ id, profileId: "profile", name: id, path, pinned: false,
-    worktrees: [{ id: id + "-wt", path, branch: "main", selected: false, lastViewedAt, lastCommitAt: "2026-09-09T00:00:00.000Z", dirty: 0, ahead: 0, behind: 0 }] });
+    worktrees: [{ id: id + "-wt", path, branch: "main", selected: false, pinned: false, isPrimary: true, missing: false, lastViewedAt, lastCommitAt: "2026-09-09T00:00:00.000Z", dirty: 0, ahead: 0, behind: 0 }] });
+  const recentRepo = repo("recent", inside, "2026-09-08T00:00:00.000Z");
+  const baseWorktree = recentRepo.worktrees[0]!;
+  recentRepo.worktrees.push(
+    { ...baseWorktree, id: "linked-one", branch: "topic", pinned: true, isPrimary: false },
+    { ...baseWorktree, id: "linked-two", branch: "topic", pinned: true, isPrimary: false, missing: true },
+    { ...baseWorktree, id: "detached", branch: "detached@abc1234", pinned: true, isPrimary: false },
+    { ...baseWorktree, id: "out-of-scope", path: outside, branch: "private", pinned: true, isPrimary: false }
+  );
   const backend: AppBackend = { catalog: () => ({ activeProfileId: "profile", profiles: [{ id: "profile", name: "Personal", roots: [inside, outside] }],
-    repositories: [repo("older", inside, "2026-09-01T00:00:00.000Z"), repo("recent", inside, "2026-09-08T00:00:00.000Z"), repo("hidden", outside, "2026-09-09T00:00:00.000Z"), repo("never", inside, null)] }), open: vi.fn(), refresh: vi.fn() };
+    repositories: [repo("older", inside, "2026-09-01T00:00:00.000Z"), recentRepo, repo("hidden", outside, "2026-09-09T00:00:00.000Z"), repo("never", inside, null)] }), open: vi.fn(), refresh: vi.fn() };
   const server = await createPwrGitMcpServer({ appBackend: backend, authorizer: new PolicyFileAuthorizer(policy.filePath, session.token) });
   const client = new Client({ name: "app-test", version: "1" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -29,6 +37,11 @@ it("uses app history, filters scope, dispatches app actions and enforces OAuth g
     const data = listed.structuredContent as { repositories: Array<{ id: string }>; total: number };
     expect(data.repositories.map(repo => repo.id)).toEqual(["recent", "older", "never"]);
     expect(JSON.stringify(listed)).not.toContain(outside);
+    expect(listed.structuredContent).toMatchObject({ repositories: expect.arrayContaining([
+      expect.objectContaining({ id: "recent", pinned: false, worktreeCount: 4, linkedWorktreeCount: 3,
+        pinnedWorktreeCount: 3, pinnedWorktreeBranchCount: 1 }),
+      expect.objectContaining({ id: "older", worktreeCount: 1, linkedWorktreeCount: 0, pinnedWorktreeCount: 0, pinnedWorktreeBranchCount: 0 })
+    ]) });
     expect(listed.structuredContent).toMatchObject({ ordering: { by: "lastViewedAt", direction: "descending", unknownVisits: "last" },
       history: { repositoriesWithVisits: 2, repositoriesWithoutVisits: 1, coverage: "partial" } });
     const recent = await client.callTool({ name: "pwrgit_app_recent_repositories", arguments: { limit: 1 } });
@@ -61,7 +74,7 @@ it("uses app history, filters scope, dispatches app actions and enforces OAuth g
 
 it("globally ranks mixed-profile visits before limiting and honors an explicit profile filter", async () => {
   const repo = (id: string, profileId: string, day: number) => ({ id, profileId, name: id, path: `/fixture/${id}`, pinned: false,
-    worktrees: [{ id: `${id}-wt`, path: `/fixture/${id}`, branch: "main", selected: false,
+    worktrees: [{ id: `${id}-wt`, path: `/fixture/${id}`, branch: "main", selected: false, pinned: false, isPrimary: true, missing: false,
       lastViewedAt: `2026-09-0${day}T00:00:00.000Z`, lastCommitAt: null, dirty: 0, ahead: 0, behind: 0 }] });
   const backend: AppBackend = { catalog: () => ({ activeProfileId: "first",
     profiles: [{ id: "first", name: "First", roots: [] }, { id: "second", name: "Second", roots: [] }],

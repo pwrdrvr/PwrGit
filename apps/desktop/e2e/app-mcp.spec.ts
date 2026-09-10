@@ -42,9 +42,16 @@ test("HTTP MCP answers recent repos from the app and opens and refreshes real wo
     const other = recent.repositories.find(repo => repo.name === "alpha")!;
     expect((await client.callTool({ name: "pwrgit_app_open", arguments: { repoId: other.id, worktreeId: other.worktrees[0]!.id } })).isError).not.toBe(true);
     await expect.poll(async () => (await list()).repositories[0]?.name).toBe("alpha");
+    const pin = await handle.window.evaluate(async worktreeId => window.pwrgit.dispatch("worktree:setPin", { worktreeId, pinned: true }), other.worktrees[0]!.id) as { ok: boolean };
+    expect(pin.ok).toBe(true);
     const external = alpha.addWorktree("external");
     expect((await client.callTool({ name: "pwrgit_app_refresh", arguments: { repoId: other.id } })).isError).not.toBe(true);
     await expect.poll(async () => (await list()).repositories.find(repo => repo.id === other.id)?.worktrees.map(w => normalize(w.path))).toContain(normalize(external));
+    const withCounts = await client.callTool({ name: "pwrgit_app_repositories", arguments: {} });
+    expect(withCounts.structuredContent).toMatchObject({ repositories: expect.arrayContaining([
+      expect.objectContaining({ id: other.id, worktreeCount: 2, linkedWorktreeCount: 1, pinnedWorktreeCount: 1, pinnedWorktreeBranchCount: 1,
+        worktrees: expect.arrayContaining([expect.objectContaining({ id: other.worktrees[0]!.id, pinned: true, isPrimary: true })]) })
+    ]) });
     const roots = await client.callTool({ name: "pwrgit_repository_roots", arguments: {} });
     expect(roots.structuredContent).toMatchObject({ appTools: { recentRepositories: "pwrgit_app_recent_repositories" } });
     const discovered = roots.structuredContent as { roots: Array<{ path: string }> };

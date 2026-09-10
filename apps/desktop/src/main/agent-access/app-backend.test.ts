@@ -14,6 +14,7 @@ it("persists imported visits and live selections and delegates actions through a
     const profileId = profiles.getActiveId()!;
     db.prepare("INSERT INTO repos(id, profile_id, name, path) VALUES (?, ?, ?, ?)").run("repo", profileId, "Widget", "/fixture/widget");
     db.prepare("INSERT INTO worktrees(id, repo_id, branch, path, is_primary) VALUES (?, ?, ?, ?, 1)").run("wt", "repo", "main", "/fixture/widget");
+    db.prepare("UPDATE worktrees SET pinned = 1 WHERE id = ?").run("wt");
     const indexer = new RepoIndexer(db, vi.fn());
     const bus = new CommandBus();
     const open = vi.fn(() => ok(null));
@@ -22,6 +23,7 @@ it("persists imported visits and live selections and delegates actions through a
     expect((await backend.catalog()).repositories[0]!.worktrees[0]!.lastViewedAt).toBeNull();
     expect((await bus.dispatch("navigation:record", { profileId, selectedWorktreeId: null, visits: { wt: 1000, unknown: 2000 } })).ok).toBe(true);
     const imported = (await backend.catalog()).repositories[0]!;
+    expect(imported.worktrees[0]).toMatchObject({ pinned: true, isPrimary: true, missing: false });
     expect(imported.worktrees[0]!.lastViewedAt).toBe("1970-01-01T00:00:01.000Z");
     expect(JSON.stringify(await backend.catalog())).not.toContain("private@example.com");
     expect((await bus.dispatch("navigation:record", { profileId, selectedWorktreeId: "wt" })).ok).toBe(true);

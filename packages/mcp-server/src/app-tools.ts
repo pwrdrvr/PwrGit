@@ -4,6 +4,7 @@ import { McpAccessError, type McpAuthorizer } from "./access-policy.js";
 
 export type AppWorktree = {
   id: string; path: string; branch: string; selected: boolean; lastViewedAt: string | null;
+  pinned: boolean; isPrimary: boolean; missing: boolean;
   lastCommitAt: string | null; dirty: number; ahead: number; behind: number;
 };
 export type AppRepository = {
@@ -64,7 +65,13 @@ export function registerAppTools(mcp: McpServer, backend: AppBackend, authorizer
     const query = input.query?.toLowerCase() ?? "";
     const matching = state.repositories.filter(repo => (!input.profileId || repo.profileId === input.profileId)
       && `${repo.name} ${repo.path} ${repo.worktrees.map(w => `${w.path} ${w.branch}`).join(" ")}`.toLowerCase().includes(query))
-      .map(repo => ({ ...repo, profileName: state.profiles.find(profile => profile.id === repo.profileId)?.name ?? null, lastViewedAt: repo.worktrees.map(w => w.lastViewedAt).filter((date): date is string => date !== null).sort().at(-1) ?? null }));
+      .map(repo => ({ ...repo,
+        worktreeCount: repo.worktrees.length,
+        linkedWorktreeCount: repo.worktrees.filter(worktree => !worktree.isPrimary).length,
+        pinnedWorktreeCount: repo.worktrees.filter(worktree => worktree.pinned).length,
+        pinnedWorktreeBranchCount: new Set(repo.worktrees.filter(worktree => worktree.pinned && worktree.branch !== ""
+          && !worktree.branch.startsWith("detached@") && worktree.branch !== "(bare)" && worktree.branch !== "(unknown)").map(worktree => worktree.branch)).size,
+        profileName: state.profiles.find(profile => profile.id === repo.profileId)?.name ?? null, lastViewedAt: repo.worktrees.map(w => w.lastViewedAt).filter((date): date is string => date !== null).sort().at(-1) ?? null }));
     const withHistory = matching.filter(repo => repo.lastViewedAt !== null).length;
     const repos = recentOnly ? matching.filter(repo => repo.lastViewedAt !== null) : matching;
     repos.sort((a, b) => (input.sort === "recently_viewed" ? (b.lastViewedAt ?? "").localeCompare(a.lastViewedAt ?? "") : 0) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
@@ -83,7 +90,7 @@ export function registerAppTools(mcp: McpServer, backend: AppBackend, authorizer
       truncated: repos.length > input.limit, repositories: repos.slice(0, input.limit) });
   };
   mcp.registerTool("pwrgit_app_repositories", {
-    description: "Find repositories and worktrees known to PwrGit, their local paths, saved per-profile selection, pinned state and cached dirty/ahead/behind counts. Defaults to lastViewedAt descending across all authorized profiles; unvisited repositories sort last. For strictly recently used repositories call pwrgit_app_recent_repositories. lastCommitAt is a separate Git activity signal. Requires repository.metadata.read.",
+    description: "Find repositories and worktrees known to PwrGit, their local paths, saved per-profile selection, pinned state, worktreeCount (including the primary), linkedWorktreeCount, pinnedWorktreeCount, distinct pinnedWorktreeBranchCount, and cached dirty/ahead/behind counts. Counts cover only authorized indexed worktrees, including registered missing checkouts. Branch pins are derived from pinned worktrees, not independent branch favorites. Defaults to lastViewedAt descending across all authorized profiles; unvisited repositories sort last. For strictly recently used repositories call pwrgit_app_recent_repositories. lastCommitAt is a separate Git activity signal. Requires repository.metadata.read.",
     inputSchema: { profileId: z.string().optional(), query: z.string().max(200).optional(),
       sort: z.enum(["recently_viewed", "name"]).default("recently_viewed"), limit: z.number().int().min(1).max(100).default(20) }, annotations: readOnly
   }, input => queryRepositories(input));

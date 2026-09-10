@@ -40,6 +40,15 @@ is recent-use order.
 `lastViewedAt` records actual selection in PwrGit, aggregated from worktrees;
 `lastCommitAt` is a separate Git timestamp. Missing history stays `null` and
 sorts last. The response includes `total` and `truncated`; the limit is 1–100.
+Each repository also includes `worktreeCount` (primary plus linked),
+`linkedWorktreeCount`, `pinnedWorktreeCount`, and `pinnedWorktreeBranchCount`
+(distinct branch names among pinned worktrees, excluding detached, bare, and
+unknown branch labels). The app has no separate
+branch-favorite flag; repository `pinned` remains independent of worktree pins.
+Each worktree exposes `pinned`, `isPrimary`, and `missing`. Counts include
+registered missing checkouts, match the authorized returned worktree list, and
+never include worktrees hidden by the Session's repository boundary.
+
 The index can be stale until refreshed; cached dirty/ahead/behind counts are
 not a fresh Git or network request.
 
