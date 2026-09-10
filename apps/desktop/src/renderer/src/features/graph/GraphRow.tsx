@@ -2,6 +2,7 @@ import type { MouseEvent } from "react";
 import type { Commit, LaneBranchInfo, PrSummary } from "@pwrgit/shared";
 import { hoverIntentHandlers, type HoverIntent } from "../../lib/hoverIntent";
 import { PrChip } from "../sidebar/PrChip";
+import { TagGlyph } from "../../lib/TagGlyph";
 import type { LaneRow } from "./lane-layout";
 import type { PrLandingSeg } from "./pr-landings";
 import type { BranchChipTarget } from "./BranchChipMenu";
@@ -401,8 +402,17 @@ export function GraphRow({
             <PrChip pr={pullRequest} hoverIntent={hoverIntent} />
           )}
           {vm.tag !== undefined && (
-            <span className="commit-tag commit-tag--release" title={`${vm.tag.name}${vm.tag.kind === "annotated" ? " (annotated tag)" : ""}`}>
-              # {vm.tag.name}
+            <span
+              className="commit-tag commit-tag--tag"
+              title={`${vm.tag.kind === "annotated" ? "Annotated tag" : "Tag"} ${vm.tag.name}`}
+            >
+              <TagGlyph />
+              {/* The mark is decorative, so without this the chip announces as
+                  a bare version string among the branch names beside it. */}
+              <span className="a11y-sr-only">
+                {vm.tag.kind === "annotated" ? "Annotated tag " : "Tag "}
+              </span>
+              <span className="commit-tag__name">{vm.tag.name}</span>
             </span>
           )}
           {isHead && <span className="commit-tag commit-tag--head">HEAD</span>}

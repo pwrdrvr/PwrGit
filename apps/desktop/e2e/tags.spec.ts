@@ -239,12 +239,16 @@ test("locates old tags across repositories and keeps one prominent chip", async 
   const toggle = block.getByRole("button", { name: /^Tags 5/ });
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
-  await expect(block.getByRole("button", { name: "Locate tag source-tree in lineage" })).toBeDisabled();
+  await expect(
+    block.getByRole("button", {
+      name: "Locate tag source-tree in lineage — unavailable, this tag points at a tree, not a commit"
+    })
+  ).toBeDisabled();
   await block.getByRole("button", { name: "Locate tag v2.10.0 in lineage", exact: true }).click();
   const row = window.locator(`.graph-row[data-hash="${target}"]`);
   await expect(row).toBeInViewport();
-  await expect(row.locator(".commit-tag--release")).toHaveCount(1);
-  await expect(row.locator(".commit-tag--release")).toHaveText("# v2.10.0");
+  await expect(row.locator(".commit-tag--tag")).toHaveCount(1);
+  await expect(row.locator(".commit-tag--tag .commit-tag__name")).toHaveText("v2.10.0");
   expect(box.git(repo.path, "symbolic-ref", "--short", "HEAD")).toBe("main");
   await window.screenshot({ path: testInfo.outputPath("tag-locator.png") });
   await block.getByRole("button", { name: "View all 5 tags…" }).click();
@@ -252,8 +256,8 @@ test("locates old tags across repositories and keeps one prominent chip", async 
   await browser.getByRole("button", { name: "Locate tag build/123 in lineage", exact: true }).click();
   await expect(browser).toHaveCount(0);
   await expect(row).toBeInViewport();
-  await expect(row.locator(".commit-tag--release")).toHaveText("# build/123");
-  await expect(row.locator(".commit-tag--release")).toHaveCount(1);
+  await expect(row.locator(".commit-tag--tag .commit-tag__name")).toHaveText("build/123");
+  await expect(row.locator(".commit-tag--tag")).toHaveCount(1);
 
   // A later history refresh must not replay the tag navigation over a newer
   // manual selection, and HEAD should regain its normal automatic locator.

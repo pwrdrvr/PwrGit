@@ -466,22 +466,6 @@ export function RepoRefsSections({
                 >
                   <span className="refs-copyable-name__text">{tag.name}</span>
                 </CopyTarget>
-                <button
-                  className="ref-mini-action"
-                  aria-label={`Locate tag ${tag.name} in lineage`}
-                  title={
-                    tag.targetType === "commit"
-                      ? "Locate tag in lineage"
-                      : "This tag does not point to a commit"
-                  }
-                  disabled={tag.targetType !== "commit" || onLocateTag === undefined}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onLocateTag?.(repo.id, tag);
-                  }}
-                >
-                  <LocateGlyph />
-                </button>
                 <small
                   title={
                     tag.kind === "annotated"
@@ -491,6 +475,37 @@ export function RepoRefsSections({
                 >
                   {tag.targetId.slice(0, 7)}
                 </small>
+                {/* Last in the row, like the branch and remote-branch rows'
+                    mini actions: the three lists stack in one panel, so an
+                    action parked mid-row breaks the column they share.
+                    Rendered only when the handler exists — a button that can
+                    never do anything is worse than no button, because its
+                    disabled state has no cause the reader can see. */}
+                {onLocateTag !== undefined && (
+                  <button
+                    className="ref-mini-action"
+                    /* A disabled control still announces its name, so the name
+                       has to carry the reason — `title` is hover-only, and AT
+                       reads the label over it. */
+                    aria-label={
+                      tag.targetType === "commit"
+                        ? `Locate tag ${tag.name} in lineage`
+                        : `Locate tag ${tag.name} in lineage — unavailable, this tag points at a ${tag.targetType}, not a commit`
+                    }
+                    title={
+                      tag.targetType === "commit"
+                        ? "Locate tag in lineage"
+                        : `This tag points at a ${tag.targetType}, not a commit`
+                    }
+                    disabled={tag.targetType !== "commit"}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onLocateTag(repo.id, tag);
+                    }}
+                  >
+                    <LocateGlyph />
+                  </button>
+                )}
               </div>
             ))}
             {error !== null && <div className="ref-section__error">{error}</div>}

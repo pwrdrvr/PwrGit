@@ -714,22 +714,34 @@ export function RepoRefsModal({
                     )}
                   </div>
                   <div className="refs-tag-actions">
-                    <button
-                      className="refs-row-action"
-                      aria-label={`Locate tag ${tag.name} in lineage`}
-                      disabled={tag.targetType !== "commit" || onLocateTag === undefined}
-                      title={
-                        tag.targetType === "commit"
-                          ? "Locate tag in lineage"
-                          : "This tag does not point to a commit"
-                      }
-                      onClick={() => {
-                        onLocateTag?.(repo.id, tag);
-                        onClose();
-                      }}
-                    >
-                      <LocateGlyph /> Locate
-                    </button>
+                    {/* Only when there is somewhere to locate into. The
+                        disabled spelling below is reserved for the one reason
+                        a reader can act on — the tag does not name a commit. */}
+                    {onLocateTag !== undefined && (
+                      <button
+                        className="refs-row-action refs-row-action--icon"
+                        /* The reason rides on the name: `title` is hover-only,
+                           and assistive tech reads the label instead of it. */
+                        aria-label={
+                          tag.targetType === "commit"
+                            ? `Locate tag ${tag.name} in lineage`
+                            : `Locate tag ${tag.name} in lineage — unavailable, this tag points at a ${tag.targetType}, not a commit`
+                        }
+                        disabled={tag.targetType !== "commit"}
+                        title={
+                          tag.targetType === "commit"
+                            ? "Locate tag in lineage"
+                            : `This tag points at a ${tag.targetType}, not a commit`
+                        }
+                        onClick={() => {
+                          onLocateTag(repo.id, tag);
+                          onClose();
+                        }}
+                      >
+                        <LocateGlyph />
+                        Locate
+                      </button>
+                    )}
                     <button
                       className="refs-row-action"
                       disabled={refs.remotes.length === 0}

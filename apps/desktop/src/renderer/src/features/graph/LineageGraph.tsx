@@ -9,6 +9,7 @@ import type {
   LaneGraph,
   PrSummary
 } from "@pwrgit/shared";
+import { announce } from "../../lib/announce";
 import { useHoverIntent } from "../../lib/hoverIntent";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
@@ -891,6 +892,13 @@ export function LineageGraph({
       const commit = vmByHash.get(revealCommit.hash)?.commit;
       if (revealCommit.tagName !== undefined && commit !== undefined) {
         onOpenCommit(commit.hash, commit.subject);
+        // Locating scrolls the graph and swaps the rail without moving focus
+        // — and when the request came from the refs browser, the dialog the
+        // reader was in has just closed underneath them. Everything that says
+        // it worked is visual, so say it (SC 4.1.3).
+        announce(
+          `Tag ${revealCommit.tagName} located at commit ${commit.shortHash}, ${commit.subject}.`
+        );
       }
     });
     return () => cancelAnimationFrame(raf);
