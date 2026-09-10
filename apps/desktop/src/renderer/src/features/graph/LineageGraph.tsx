@@ -338,7 +338,17 @@ export function LineageGraph({
     };
   }, []);
 
-  const revealHash = revealCommit?.tagName === undefined ? undefined : revealCommit.hash;
+  // A reveal is a one-shot navigation request, but its history target must
+  // survive consumption and ordinary command-palette navigation.
+  const revealHash = revealCommit?.hash;
+  const completedReveal = useRef<{ worktreeId: string; requestId: number } | null>(null);
+  const revealPending = revealCommit !== null && (
+    completedReveal.current?.worktreeId !== worktreeId ||
+    completedReveal.current.requestId !== revealCommit.requestId
+  );
+  useEffect(() => {
+    completedReveal.current = null;
+  }, [worktreeId]);
 
   // Active membership needs PR state for every local branch, including refs
   // that are not checked out in a worktree. The service coalesces this with the
@@ -874,8 +884,9 @@ export function LineageGraph({
   };
 
   useEffect(() => {
-    if (revealCommit === null || !vmByHash.has(revealCommit.hash)) return;
+    if (!revealPending || revealCommit === null || !vmByHash.has(revealCommit.hash)) return;
     const raf = requestAnimationFrame(() => {
+      completedReveal.current = { worktreeId, requestId: revealCommit.requestId };
       locateHash(revealCommit.hash);
       const commit = vmByHash.get(revealCommit.hash)?.commit;
       if (revealCommit.tagName !== undefined && commit !== undefined) {
@@ -885,13 +896,14 @@ export function LineageGraph({
     return () => cancelAnimationFrame(raf);
     // locateHash intentionally tracks the rendered graph through graphCommitKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graphCommitKey, revealCommit]);
+  }, [graphCommitKey, revealCommit, worktreeId, revealPending]);
 
   // Selecting a worktree takes you to its HEAD: center it and flash it. Also
   // re-centers when HEAD itself moves (commit, pull, switch branch).
   useEffect(() => {
-    // Explicit tag navigation wins when switching repositories also moves HEAD.
-    if (head === "" || revealHash !== undefined) return;
+    // Capture pending state from this render: the reveal RAF may consume the
+    // request before this RAF runs. Once consumed, future HEAD moves center normally.
+    if (head === "" || revealPending) return;
     const raf = requestAnimationFrame(() => locateHash(head));
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps

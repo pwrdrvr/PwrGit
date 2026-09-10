@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
-import { addRootAndExpand, branchRow, expandRepoGroup } from "./fixtures/steps";
+import { addRootAndExpand, branchRow, expandRepoGroup, primaryShortcut } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -219,6 +219,8 @@ test("locates old tags across repositories and keeps one prominent chip", async 
   sandbox = createGitSandbox();
   const box = sandbox;
   const repo = box.makeRepo("release-history");
+  const ancestor = box.git(repo.path, "rev-parse", "HEAD");
+  box.git(repo.path, "commit", "--allow-empty", "-m", "Release milestone commit");
   const target = box.git(repo.path, "rev-parse", "HEAD");
   box.git(repo.path, "tag", "v2.9.0", target);
   box.git(repo.path, "tag", "v2.10.0", target);
@@ -252,4 +254,37 @@ test("locates old tags across repositories and keeps one prominent chip", async 
   await expect(row).toBeInViewport();
   await expect(row.locator(".commit-tag--release")).toHaveText("# build/123");
   await expect(row.locator(".commit-tag--release")).toHaveCount(1);
+
+  // A later history refresh must not replay the tag navigation over a newer
+  // manual selection, and HEAD should regain its normal automatic locator.
+  const other = window.locator(".graph-row").filter({ has: window.locator(".commit-msg", { hasText: /^Development 155$/ }) });
+  await other.click();
+  await expect(other).toHaveClass(/is-focused/);
+  box.git(repo.path, "commit", "--allow-empty", "-m", "After tag navigation");
+  const newHead = box.git(repo.path, "rev-parse", "HEAD");
+  await window.getByRole("button", { name: "Refresh worktrees for release-history" }).click();
+  await expect(window.locator(`.graph-row[data-hash="${newHead}"]`)).toBeInViewport();
+  await expect(other).toHaveClass(/is-focused/);
+  await expect(row).not.toHaveClass(/is-focused/);
+
+  // Ordinary search requests drop the tag label, but must keep their target
+  // in the graph even when it only exists in the supplemental history window.
+  for (const hash of [target, ancestor]) {
+    await window.keyboard.press(primaryShortcut("k"));
+    await window.locator(".overlay-search input").fill(hash);
+    const result = window.locator(".overlay-result").filter({ hasText: hash.slice(0, 7) });
+    await expect(result).toHaveCount(1);
+    await result.click();
+    await expect(window.locator(".overlay-search")).toHaveCount(0);
+    const revealed = window.locator(`.graph-row[data-hash="${hash}"]`);
+    await expect(revealed).toBeInViewport();
+    await window.locator(".only-me").click();
+    box.git(repo.path, "commit", "--allow-empty", "-m", `Refresh after searching ${hash}`);
+    const refreshedHead = box.git(repo.path, "rev-parse", "HEAD");
+    await window.getByRole("button", { name: "Refresh worktrees for release-history" }).click();
+    // Seeing the new HEAD proves the asynchronous history reload completed.
+    await expect(window.locator(`.graph-row[data-hash="${refreshedHead}"]`)).toBeInViewport();
+    await expect(revealed).toHaveClass(/is-focused/);
+  }
+
 });
