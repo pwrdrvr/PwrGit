@@ -1,4 +1,4 @@
-name: Release Desktop (macOS universal + Windows; Linux-gated)
+name: Release Desktop (macOS universal + arm64 + Windows; Linux-gated)
 
 on:
   push:
@@ -101,6 +101,7 @@ jobs:
             apps/desktop/release-stage \
             .github/actions/select-xcode-for-actool \
             apps/desktop/scripts/release.mjs \
+            apps/desktop/scripts/mac-release-artifacts.mjs \
             apps/desktop/scripts/beforepack-dugite-arch.mjs \
             apps/desktop/scripts/stage-better-sqlite3-arch.mjs \
             apps/desktop/scripts/verify-asar-contents.mjs \
@@ -127,7 +128,7 @@ jobs:
     # Composer package in prepare; Xcode 26's AssetCatalogAgent needs it.
     runs-on: macos-26
     needs: prepare
-    timeout-minutes: 60
+    timeout-minutes: 90
     environment: apple-signing
     permissions:
       contents: read
@@ -174,15 +175,6 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_TEAM_ID: T44CNHC4UH
         run: node apps/desktop/scripts/release.mjs --sign-stage-only --no-publish
-
-      - name: Prepare stable-name DMG alias
-        # PwrGit.dmg is the canonical latest-release download name. The final
-        # publication job uploads it only after every platform gate succeeds.
-        run: |
-          set -euo pipefail
-          cd apps/desktop/release-stage/dist
-          versioned=$(ls PwrGit-*-universal.dmg | head -n 1)
-          cp "$versioned" PwrGit.dmg
 
       # Required input to the publication job. No GitHub Release exists until
       # all platform gates succeed.

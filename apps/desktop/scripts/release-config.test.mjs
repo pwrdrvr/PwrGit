@@ -93,6 +93,19 @@ describe("macOS signing keychain behavior", () => {
 });
 
 describe("desktop release configuration", () => {
+  test("packages both Mac architectures serially and assembles metadata before publication", () => {
+    const config = read("apps/desktop/electron-builder.yml");
+    const script = read("apps/desktop/scripts/release.mjs");
+    expect(config.match(/arch: \[universal, arm64\]/g)).toHaveLength(2);
+    expect(config).toContain("concurrency:\n  jobs: 1");
+    expect(script).toContain('builderArgs.push("--mac")');
+    expect(script).not.toContain('builderArgs.push("--mac", "--universal")');
+    expect(script).toContain("writeMacReleaseArtifacts(dist,");
+    for (const file of [".github/workflows/release.yml", "scripts/release/archive-windows-signing-input.ps1"]) {
+      expect(read(file)).toContain("apps/desktop/scripts/mac-release-artifacts.mjs");
+    }
+  });
+
   test("macOS signing preloads a generated-password keychain", () => {
     const script = read("apps/desktop/scripts/release.mjs");
 

@@ -2,9 +2,11 @@
 
 Exploration dated 2026-09-11, based on PwrGit commit
 `9b013a5c69fe3c513113b5c39c70cfea9b284f06` (v0.13.0 preparation).
-No packaging configuration, production feeds, tags, releases, or website
-repositories were changed. This document proposes implementation; its new
-download URLs are not live promises.
+This records the initial exploration. PR #218 now implements the dual macOS
+builds, combined update metadata, aliases, and eligibility checks described
+below. Website/README rollout and signed migration smoke tests remain follow-up
+work; the new download URLs become live only after release publication.
+No production feeds, tags, releases, or website repositories were changed.
 
 ## Recommendation
 

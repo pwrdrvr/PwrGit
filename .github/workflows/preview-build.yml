@@ -1,4 +1,4 @@
-name: Preview Build (macOS DMG + Windows installer)
+name: Preview Build (macOS universal + arm64 DMGs + Windows installer)
 
 on:
   pull_request:
@@ -22,7 +22,7 @@ jobs:
     # Xcode 26's AssetCatalogAgent loads macOS 26 frameworks when compiling
     # build/icon.icon, so macos-15 cannot safely host this packaging lane.
     runs-on: macos-26
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - name: Checkout PR branch
         uses: actions/checkout@v5
@@ -68,7 +68,11 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: PwrGit-${{ steps.version.outputs.version }}-preview
-          path: apps/desktop/release-stage/dist/*.dmg
+          path: |
+            apps/desktop/release-stage/dist/*.dmg
+            apps/desktop/release-stage/dist/*.zip
+            apps/desktop/release-stage/dist/*.blockmap
+            apps/desktop/release-stage/dist/latest-mac.yml
           retention-days: 14
 
   preview-windows:
