@@ -264,6 +264,63 @@ describe("WorktreeHeader pull progress", () => {
     );
   });
 
+  it("answers a hover that landed before the operation was reported", async () => {
+    const pull = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Pull"]'
+    );
+    await act(async () => pull?.click());
+
+    // The whole of the race, in order. Clicking Pull turns the button busy
+    // from this component's own state and swaps its glyph for the spinner,
+    // which fires mouseenter under the pointer the click left resting there —
+    // all of it BEFORE main reports the operation. That enter used to be the
+    // only one the button would ever see, and it was dropped for having
+    // nothing to report; the pointer was already inside, so no further enter
+    // was coming and the card never opened however long the user waited.
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-busy="true"]')
+        ?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+    expect(document.querySelector(".remote-activity-popover")).toBeNull();
+
+    // Old enough to be past the age gate the moment it is reported, which is
+    // the case the card exists for.
+    await emitActivities([
+      { startedAt: Date.now() - 30_000, phase: "fetch", silent: true }
+    ]);
+    expect(
+      document.querySelector(".remote-activity-popover")?.textContent,
+      "a hover is a place the pointer is, not a moment an event fired"
+    ).toContain("Pull · project · main");
+  });
+
+  it("does not open a later operation's card beside a pointer that left", async () => {
+    const pull = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Pull"]'
+    );
+    await act(async () => pull?.click());
+    const busy = container.querySelector<HTMLButtonElement>(
+      'button[aria-busy="true"]'
+    );
+    await act(async () => {
+      busy?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+
+    // The pointer leaves while there is still nothing to report. React's own
+    // mouseleave prop is not enough to catch this in general — it rides on a
+    // control that stops being a trigger the moment its operation ends — so
+    // the popover listens on the element itself.
+    await act(async () => {
+      busy?.dispatchEvent(new MouseEvent("mouseleave"));
+    });
+
+    await emitActivities([
+      { startedAt: Date.now() - 30_000, phase: "fetch", silent: true }
+    ]);
+    expect(document.querySelector(".remote-activity-popover")).toBeNull();
+  });
+
   it("keeps the card off a pull short enough that nobody asked", async () => {
     const pull = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Pull"]'

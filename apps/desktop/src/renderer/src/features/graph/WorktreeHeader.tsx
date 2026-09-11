@@ -319,10 +319,18 @@ export function WorktreeHeader({
   // handlers ride on whichever button this operation belongs to — and on the
   // progress chip beside them, which is the wider target and the thing a user
   // is already looking at when they wonder what it is doing.
+  //
+  // They go on from the first busy render, not from the record's arrival,
+  // because clicking Pull leaves the pointer inside the button: the only
+  // `mouseenter` that button will ever see fires when its glyph swaps for the
+  // spinner, one or more renders before main reports the operation. A trigger
+  // that is not listening yet at that moment loses the hover for good. The
+  // popover holds a hover with nothing to report and opens when the record
+  // lands (see useRemoteActivityPopover).
   const carriesCard = (kind: Exclude<Busy, null>): boolean =>
     activity !== null && activity.kind === kind;
   const statusTrigger = (kind: Exclude<Busy, null>): StatusTriggerProps =>
-    !carriesCard(kind)
+    running !== kind
       ? {}
       : {
           onMouseEnter: (event) => status.open(event.currentTarget),
@@ -386,7 +394,7 @@ export function WorktreeHeader({
           // Pointer only: the chip is not focusable, and making a live status
           // a tab stop would buy the keyboard nothing the working button below
           // does not already offer.
-          {...(activity === null
+          {...(running === null
             ? {}
             : {
                 onMouseEnter: (event: { currentTarget: HTMLElement }) =>

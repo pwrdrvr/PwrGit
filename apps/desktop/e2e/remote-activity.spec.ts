@@ -81,6 +81,11 @@ test("a pull that gets no answer says so, shows Git's command, and cancels", asy
     timeout: 20_000
   });
 
+  // The pointer has rested here since `pull.click()` — which is exactly how a
+  // user arrives at this card, and why `hover()` cannot be what summons it:
+  // with the pointer already inside the button, Playwright dispatches a bare
+  // `mousemove` and no boundary event at all. The card has to come from the
+  // operation's record reaching a trigger the pointer is already on.
   await busy.hover();
   const card = window.locator(".remote-activity-popover");
   await expect(card).toBeVisible({ timeout: 10_000 });
@@ -88,6 +93,14 @@ test("a pull that gets no answer says so, shows Git's command, and cancels", asy
   // The two facts that turn "it's spinning" into something actionable.
   await expect(card).toContainText("git fetch --prune --progress");
   await expect(card).toContainText("Git has produced no output yet.");
+
+  // The other way in, which the click leaves no room to observe above: leave
+  // the button and come back. An operation this old is past the age gate, so
+  // the hover is answered on the spot rather than after another wait.
+  await window.mouse.move(20, 300);
+  await expect(card).toBeHidden({ timeout: 10_000 });
+  await busy.hover();
+  await expect(card).toBeVisible({ timeout: 10_000 });
 
   // And a way out that is not force-quitting the app.
   await card.getByRole("button", { name: "Cancel" }).click();

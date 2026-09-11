@@ -54,3 +54,44 @@ spinner fires `mouseenter` under that stationary pointer — so without the gate
 every ordinary one-second pull threw a card over the graph and took it away
 again. Measuring from `startedAt` means a hover onto something that has already
 been running opens instantly, which is the case the card is for.
+
+## A hover is a place, not a moment
+
+That same stationary-pointer `mouseenter` is the ONLY enter the button will
+ever see, and it fires while the button is busy from the renderer's own
+`busy` state — one or more renders before main reports the operation and
+`activity` stops being `null`. Which side of the record the enter lands on is a
+race nobody can see or influence, and losing it used to be permanent: the
+pointer is already inside the button, so no further enter is coming and the
+card never opened no matter how long the user waited. The one way out was to
+move the pointer off the button and back on — for the operation the card exists
+for, a wedged fetch, that is the worst possible time to ask.
+
+So the trigger handlers go on from the **first busy render**, not from the
+record's arrival (`running === kind` in `WorktreeHeader`, not `carriesCard`),
+the popover **remembers the trigger** a hover landed on even with nothing to
+report, and it re-arms when the record arrives. An enter that lands anywhere in
+the busy period is now kept until there is something to answer it with.
+
+What this does NOT do is invent a hover that never happened, and Fetch is where
+that shows: its glyph does not swap (the arrow spins in place), so a click
+leaves the pointer on a button that dispatches no boundary event at all, and
+the `focusin` the click does fire lands on mousedown — before `running` is set
+and before any handler is listening. Resting on a wedged *fetch* still shows
+nothing until the pointer leaves the button and returns. Closing that means
+asking the DOM where the pointer is (`:hover`) rather than waiting to be told,
+which jsdom cannot answer — so it needs an e2e, not a unit test.
+
+Two things keep that from becoming a card nobody asked for. The re-arm is keyed
+on the operation's **id**, not on the record — one arrives every half-second,
+and re-arming per update would restart the age gate's timer forever. And the
+popover watches the trigger leave *for itself*, with listeners on the element
+rather than the `close()` prop: that prop rides on a control which stops being
+a trigger the moment its operation ends, so a pointer that wanders off after
+that is never recorded as having left — and the stale trigger would open some
+LATER operation's card beside a pointer that is nowhere near it.
+(`useViewportTooltip` releases an Escape-dismissed trigger the same way.)
+
+`e2e/remote-activity.spec.ts` covers this. Playwright's `hover()` cannot stand
+in for the fix: after `pull.click()` the pointer is already inside the button,
+so the hover dispatches a bare `mousemove` and no boundary event at all.
