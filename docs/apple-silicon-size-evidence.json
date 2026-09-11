@@ -1,0 +1,160 @@
+{
+  "universal_logical_bytes": 619358759,
+  "thinned_logical_bytes": 356575783,
+  "mach_o_count": 29,
+  "binaries": [
+    {
+      "path": "PwrGit.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework",
+      "universal": 378875856,
+      "arm64": 179171280
+    },
+    {
+      "path": "PwrGit.app/Contents/Resources/git/libexec/git-core/git-lfs",
+      "universal": 25963504,
+      "arm64": 12512240
+    },
+    {
+      "path": "PwrGit.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libGLESv2.dylib",
+      "universal": 14738928,
+      "arm64": 6874608
+    },
+    {
+      "path": "PwrGit.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libvk_swiftshader.dylib",
+      "universal": 21426704,
+      "arm64": 16708112
+    },
+    {
+      "path": "PwrGit.app/Contents/Resources/git/bin/git",
+      "universal": 7211056,
+      "arm64": 3426352
+    },
+    {
+      "path": "PwrGit.app/Contents/Resources/git/libexec/git-core/git",
+      "universal": 7211056,
+      "arm64": 3426352
+    },
+    {
+      "path": "PwrGit.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libffmpeg.dylib",
+      "universal": 4770864,
+      "arm64": 2231344
+    },
+    {
+      "path": "PwrGit.app/Contents/Resources/git/libexec/git-core/git-http-push",
+      "universal": 4172112,
+      "arm64": 2009424
+    },
+    {
+      "path": "PwrGit.app/Contents/Resources/git/libexec/git-core/git-imap-send",
+      "universal": 4171760,
+      "arm64": 2009072
+    },
+    {
+      "path": "PwrGit.app/Contents/Resources/git/libexec/git-core/git-remote-http",
+      "universal": 4188176,
+      "arm64": 2025488
+    },
+    {
+      "path": "PwrGit.app/Contents/Resources/git/libexec/git-core/git-http-fetch",
+      "universal": 4155248,
+      "arm64": 2008944
+    },
+    {
+      "path": "PwrGit.app/Contents/Resources/git/bin/scalar",
+      "universal": 4103440,
+      "arm64": 1973520
+    },
+    {
+      "path": "PwrGit.app/Contents/Resources/git/libexec/git-core/scalar",
+      "universal": 4103440,
+      "arm64": 1973520
+    },
+    {
+      "path": "PwrGit.app/Contents/Resources/git/libexec/git-core/git-daemon",
+      "universal": 4036656,
+      "arm64": 1939504
+    },
+    {
+      "path": "PwrGit.app/Contents/Resources/git/libexec/git-core/git-http-backend",
+      "universal": 4036128,
+      "arm64": 1938976
+    },
+    {
+      "path": "PwrGit.app/Contents/Resources/git/libexec/git-core/git-sh-i18n--envsubst",
+      "universal": 4003200,
+      "arm64": 1922432
+    },
+    {
+      "path": "PwrGit.app/Contents/Resources/git/libexec/git-core/git-shell",
+      "universal": 4003184,
+      "arm64": 1922416
+    },
+    {
+      "path": "PwrGit.app/Contents/Resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+      "universal": 4056784,
+      "arm64": 2008784
+    },
+    {
+      "path": "PwrGit.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Helpers/chrome_crashpad_handler",
+      "universal": 3100560,
+      "arm64": 1511312
+    },
+    {
+      "path": "PwrGit.app/Contents/Frameworks/ReactiveObjC.framework/Versions/A/ReactiveObjC",
+      "universal": 796976,
+      "arm64": 387376
+    },
+    {
+      "path": "PwrGit.app/Contents/Frameworks/PwrGit Helper (GPU).app/Contents/MacOS/PwrGit Helper (GPU)",
+      "universal": 485264,
+      "arm64": 223120
+    },
+    {
+      "path": "PwrGit.app/Contents/Frameworks/PwrGit Helper.app/Contents/MacOS/PwrGit Helper",
+      "universal": 485248,
+      "arm64": 223104
+    },
+    {
+      "path": "PwrGit.app/Contents/Frameworks/PwrGit Helper (Plugin).app/Contents/MacOS/PwrGit Helper (Plugin)",
+      "universal": 485264,
+      "arm64": 223120
+    },
+    {
+      "path": "PwrGit.app/Contents/Frameworks/PwrGit Helper (Renderer).app/Contents/MacOS/PwrGit Helper (Renderer)",
+      "universal": 485264,
+      "arm64": 223120
+    },
+    {
+      "path": "PwrGit.app/Contents/Frameworks/Squirrel.framework/Versions/A/Squirrel",
+      "universal": 327232,
+      "arm64": 163392
+    },
+    {
+      "path": "PwrGit.app/Contents/Frameworks/Squirrel.framework/Versions/A/Resources/ShipIt",
+      "universal": 292528,
+      "arm64": 145072
+    },
+    {
+      "path": "PwrGit.app/Contents/Frameworks/Mantle.framework/Versions/A/Mantle",
+      "universal": 222272,
+      "arm64": 107584
+    },
+    {
+      "path": "PwrGit.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libEGL.dylib",
+      "universal": 208512,
+      "arm64": 110208
+    },
+    {
+      "path": "PwrGit.app/Contents/MacOS/PwrGit",
+      "universal": 119008,
+      "arm64": 53472
+    }
+  ],
+  "release": "v0.11.0",
+  "measured_at": "2026-09-11",
+  "universal_zip_sha256": "c2029bddce7eaf708321b9a96d49ff09f449c8c84ec11234a24e42ba6a7e2ef6",
+  "published_zip_bytes": 248444968,
+  "published_dmg_bytes": 257354691,
+  "repacked_universal_zip_bytes": 257503379,
+  "repacked_thinned_zip_bytes": 142143535,
+  "method": "Thin fat Mach-O files to arm64 in a disposable copy; sum regular files without symlinks; recompress both with ditto -c -k --sequesterRsrc --keepParent. Not a signed arm64 build."
+}
