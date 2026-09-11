@@ -15,9 +15,19 @@ const TABBABLE =
  * reads the cascade instead, which jsdom does model. Using `offsetParent` here
  * would make the trap match nothing under test while working in the app: the
  * exact split where a bug hides.
+ *
+ * `visibilityProperty` is not optional. `checkVisibility()` defaults to
+ * ignoring `visibility`, so in the app a `visibility: hidden` button answers
+ * TRUE (measured) and would sit in the trap's cycle — while the jsdom fallback,
+ * which reads the cascade, correctly excludes it. That is the same split again,
+ * this time hidden behind a test that only ever exercised `display: none`.
+ * `opacity` is deliberately left out: a control faded to 0 mid-transition is
+ * still a real control.
  */
 function visible(el: HTMLElement): boolean {
-  if (typeof el.checkVisibility === "function") return el.checkVisibility();
+  if (typeof el.checkVisibility === "function") {
+    return el.checkVisibility({ visibilityProperty: true });
+  }
   for (let node: HTMLElement | null = el; node !== null; node = node.parentElement) {
     const style = getComputedStyle(node);
     if (style.display === "none" || style.visibility === "hidden") return false;

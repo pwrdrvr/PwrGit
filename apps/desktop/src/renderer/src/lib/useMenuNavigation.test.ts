@@ -172,6 +172,39 @@ describe("useMenuNavigation", () => {
     outside.remove();
   });
 
+  it("keeps a tab stop when the item holding it disappears", async () => {
+    // .branch-pop builds its list from graph data that can land after the menu
+    // opens. When the node holding tabIndex 0 unmounts, nothing is left in the
+    // tab order and focus drops to <body> — where useDismissable reads the next
+    // Escape as "nowhere in particular".
+    render({ open: true });
+    const menu = container.querySelector('[role="menu"]')!;
+    const first = menu.querySelector<HTMLElement>('[role="menuitem"]')!;
+    expect(first.tabIndex).toBe(0);
+
+    first.remove();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const remaining = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    expect(remaining.filter((el) => el.tabIndex === 0)).toHaveLength(1);
+    expect(focusedLabel()).toBe("Beta");
+  });
+
+  it("does not snatch focus back when the user is still on an item", async () => {
+    render({ open: true });
+    const menu = container.querySelector('[role="menu"]')!;
+    press("End");
+    expect(focusedLabel()).toBe("Gamma");
+
+    // A refresh drops an item the user is NOT standing on.
+    menu.querySelector<HTMLElement>('[role="menuitem"]')!.remove();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(focusedLabel()).toBe("Gamma");
+    const remaining = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    expect(remaining.filter((el) => el.tabIndex === 0)).toHaveLength(1);
+  });
+
   it("skips disabled items when walking", () => {
     render({ open: true });
     const [, beta] = [...container.querySelectorAll<HTMLElement>('[role="menuitem"]')];

@@ -137,11 +137,15 @@ test("a dialog that was unclosable by keyboard now closes", async () => {
   await expect(modal).toHaveCount(0);
 });
 
-test("one Escape closes a menu without taking the dialog behind it", async () => {
-  // The nesting case the hook resolves by focus: a menu opened inside a dialog
-  // must not close both. Open the profile modal, then its repo-folder picker's
-  // surrounding menu is not available here — so use the dialog plus the
-  // profile menu that launched it, which is the same layering.
+test("a menu that launches a dialog hands the key over cleanly", async () => {
+  // Not the nested case — the menu closes as it opens the dialog, so only one
+  // overlay is ever registered here. What this pins is the handover: the menu's
+  // layer is unregistered rather than left behind, so the dialog (not a stale
+  // menu entry) answers the next Escape, and exactly one overlay closes.
+  //
+  // Stacked overlays are covered where they can actually be constructed:
+  // useDismissable.test.ts builds a real nested pair, and DiffViewer.test.tsx
+  // covers a ContextMenu open over the diff pane and over the lightbox.
   handle = await launchApp();
   const { window } = handle;
 
@@ -150,11 +154,11 @@ test("one Escape closes a menu without taking the dialog behind it", async () =>
     .locator(".profile-menu__action", { hasText: "New profile" })
     .click();
   await expect(window.locator(".modal--profile")).toBeVisible();
+  await expect(window.locator(".profile-menu")).toHaveCount(0);
 
-  // The menu closed when it launched the dialog, so the dialog is alone and
-  // owns the key; a second press would be needed for anything else.
   await window.keyboard.press("Escape");
   await expect(window.locator(".modal--profile")).toHaveCount(0);
-  // The sidebar behind it is still there — Escape did not cascade.
+  // One press closed one thing: the sidebar behind it is untouched.
   await expect(window.getByTestId("sidebar")).toBeVisible();
+  await expect(window.locator(".profile-chip")).toBeVisible();
 });

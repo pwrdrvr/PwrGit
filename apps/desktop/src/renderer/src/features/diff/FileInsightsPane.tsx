@@ -4,8 +4,7 @@ import {
   useId,
   useMemo,
   useRef,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent
+  useState
 } from "react";
 import type {
   FileBlameHunk,

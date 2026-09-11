@@ -35,8 +35,6 @@ export function CreateTagDialog({
   /** In-flight resolutions outlive a dismissal; they must not write state. */
   const mounted = useRef(true);
   /** Latest close, so the one-shot key listener never calls a stale closure. */
-  const closeRef = useRef(onClose);
-  closeRef.current = onClose;
 
   useEffect(() => {
     mounted.current = true;
