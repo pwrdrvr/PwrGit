@@ -170,7 +170,15 @@ export function App() {
   }, [selection?.worktreeId]);
 
   useEffect(() => {
-    if (pendingTag === null || selection?.worktreeId !== pendingTag.worktreeId) return;
+    if (pendingTag === null) return;
+    // The request is for one worktree and one moment. If the selection lands
+    // somewhere else — the user kept navigating while this was in flight —
+    // abandon it rather than leaving it armed to fire the next time they
+    // happen back, which would hijack a navigation they did not ask for.
+    if (selection?.worktreeId !== pendingTag.worktreeId) {
+      setPendingTag(null);
+      return;
+    }
     setFileInsightTarget(null);
     setDiffTarget(null);
     setCommitFocus({ hash: pendingTag.tag.targetId, subject: pendingTag.tag.name });
