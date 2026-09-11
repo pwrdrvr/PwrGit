@@ -72,18 +72,25 @@ let fileBroken = false;
  * Start mirroring log lines to `path`. Called once from index.ts after
  * app-ready. A file already over the size cap is rotated to `<path>.old`
  * first so the log can't grow without bound. `legacyPath`, when given, is a
- * previous location this log lived at: it is moved into place once, so the
- * history from before the move isn't stranded where nobody looks for it.
+ * previous location this log lived at: it and its rotated `.old` sibling are
+ * moved into place once, so the history from before the move isn't stranded
+ * where nobody looks for it.
  */
 export function initLogFile(path: string, legacyPath?: string): void {
   logFilePath = path;
   fileChain = fileChain.then(async () => {
     if (legacyPath !== undefined && legacyPath !== path) {
-      try {
-        await stat(path);
-      } catch {
-        // Nothing at the new path yet — adopt the old file if there is one.
+      // Only a missing file means "nothing here yet": adopting on any other
+      // stat error (a permissions change, a stale mount) would rename the old
+      // log over a live one and lose this session's history.
+      const absent = await stat(path).then(
+        () => false,
+        (cause: NodeJS.ErrnoException) => cause.code === "ENOENT"
+      );
+      if (absent) {
+        // Take the rotated sibling too, so nothing is left in the old location.
         await rename(legacyPath, path).catch(() => undefined);
+        await rename(`${legacyPath}.old`, `${path}.old`).catch(() => undefined);
       }
     }
     try {

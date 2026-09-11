@@ -20,7 +20,10 @@ afterEach(() => {
 async function readLogFileOnce(marker: string): Promise<string> {
   const path = getLogFilePath();
   if (path === null) throw new Error("no log file configured");
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  // Generous on purpose: this waits on four filesystem ops, and the Windows CI
+  // runners are where those are dearest. A genuinely stuck chain still fails,
+  // on vitest's own timeout.
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
     const text = await readFile(path, "utf8").catch(() => "");
     if (text.includes(marker)) return text;
     await new Promise((resolve) => setTimeout(resolve, 5));
@@ -91,6 +94,7 @@ describe("initLogFile", () => {
     await mkdir(join(dir, "logs"));
     const path = join(dir, "logs", "main.log");
     await writeFile(legacyPath, "[old] earlier run\n");
+    await writeFile(`${legacyPath}.old`, "[old] rotated run\n");
 
     initLogFile(path, legacyPath);
     logMain("info", "app", "PwrGit 9.9.9 starting pid=311");
@@ -98,6 +102,9 @@ describe("initLogFile", () => {
     const moved = await readLogFileOnce("starting pid=311");
     expect(moved).toContain("[old] earlier run");
     await expect(readFile(legacyPath, "utf8")).rejects.toThrow();
+    // The rotated sibling travels too, so nothing is left behind in userData.
+    expect(await readFile(`${path}.old`, "utf8")).toContain("[old] rotated run");
+    await expect(readFile(`${legacyPath}.old`, "utf8")).rejects.toThrow();
   });
 
   it("leaves an existing log at the new location alone", async () => {

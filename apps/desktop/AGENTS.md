@@ -141,3 +141,7 @@ Electron dies with "Unable to find Electron app at .../out/main/index.js".
   handlers return `Result`, never throw across the boundary.
 - Migrations are `.sql` files copied beside the bundle by `electron.vite.config.ts`.
 - git runs through the injected `GitExec` (dugite in prod; system git in tests).
+- The app log is `app.getPath("logs")/main.log` — `~/Library/Logs/PwrGit` on
+  macOS, `<userData>/logs` elsewhere — buffered in `src/main/logs.ts` and shown
+  by Help › Logs. `src/main/process-ids.ts` puts the main, GPU, renderer and
+  utility pids in that log so a pasted log names its own processes.

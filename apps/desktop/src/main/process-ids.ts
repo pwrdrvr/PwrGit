@@ -10,31 +10,37 @@ import { logMain } from "./logs";
 /** Helpers arrive asynchronously; collapse a burst of triggers into one sample. */
 const SETTLE_MS = 500;
 
-/** The three an operator actually asks about lead the line; the rest sort after. */
-const LEADING_LABELS = ["main", "gpu", "renderer"];
+// Chromium's process types, mapped to the words used to describe them, in the
+// order an operator asks about them — every other type sorts alphabetically
+// after these. A type named here is labeled by type alone: `name` for a Tab is
+// the page title, which would rewrite the line on every navigation without
+// naming a new pid. A Map, not an object, so an unexpected type can't resolve
+// an inherited key ("constructor", "toString") to something that isn't a label.
+const TYPE_LABELS = new Map<string, string>([
+  ["Browser", "main"],
+  ["GPU", "gpu"],
+  ["Tab", "renderer"]
+]);
 
-// Chromium's process types, mapped to the words used to describe them. A type
-// named here is labeled by type alone: `name` for a Tab is the page title,
-// which would rewrite the line on every navigation without naming a new pid.
-const TYPE_LABELS: Record<string, string> = {
-  Browser: "main",
-  GPU: "gpu",
-  Tab: "renderer"
-};
+const LEADING_LABELS = [...TYPE_LABELS.values()];
 
 export type ProcessIdSample = Pick<
   ProcessMetric,
   "pid" | "type" | "name" | "serviceName"
 >;
 
-function labelFor(metric: ProcessIdSample): string {
-  const known = TYPE_LABELS[metric.type];
+function labelFor(metric: Omit<ProcessIdSample, "pid">): string {
+  const known = TYPE_LABELS.get(metric.type);
   if (known !== undefined) return known;
 
-  // Utility processes are only distinguishable by service ("Network Service",
-  // "Audio Service"), and those names are stable for a process's lifetime.
+  // Utility processes are only distinguishable by service, and `serviceName` is
+  // the one Electron documents as non-localized — `name` is "Network Service"
+  // in English and something else entirely on a French machine, which would
+  // make one operator's log unsearchable with another's label. The leading
+  // namespace carries nothing here: network.mojom.NetworkService → NetworkService.
   const base = metric.type.toLowerCase().replace(/\s+/g, "-");
-  const detail = (metric.name ?? metric.serviceName ?? "").replace(/\s+/g, "");
+  const service = metric.serviceName ?? metric.name ?? "";
+  const detail = (service.split(".").pop() ?? "").replace(/\s+/g, "");
   return detail === "" ? base : `${base}:${detail}`;
 }
 
@@ -62,12 +68,11 @@ export function formatProcessIds(metrics: readonly ProcessIdSample[]): string {
     .join(" ");
 }
 
+/** Named with labelFor's spelling, so a crash and the table that follows grep alike. */
 function goneLine(
-  kind: string,
-  details: { reason: string; exitCode: number; name?: string | undefined }
+  gone: Omit<ProcessIdSample, "pid"> & { reason: string; exitCode: number }
 ): string {
-  const named = details.name === undefined ? "" : ` (${details.name})`;
-  return `${kind} process gone${named} reason=${details.reason} exitCode=${details.exitCode}`;
+  return `${labelFor(gone)} process gone reason=${gone.reason} exitCode=${gone.exitCode}`;
 }
 
 /**
@@ -100,7 +105,10 @@ export function watchProcessIds(): void {
   sampleSoon();
 
   app.on("web-contents-created", (_event, contents) => {
+    // A renderer that fails to load still holds a process (it paints Chromium's
+    // error page), so the failure path has to sample too or its pid never lands.
     contents.once("did-finish-load", sampleSoon);
+    contents.once("did-fail-load", sampleSoon);
     contents.once("destroyed", sampleSoon);
   });
 
@@ -108,7 +116,7 @@ export function watchProcessIds(): void {
     logMain(
       details.reason === "clean-exit" ? "info" : "warn",
       "process",
-      goneLine(details.type, details)
+      goneLine(details)
     );
     sampleSoon();
   });
@@ -117,7 +125,7 @@ export function watchProcessIds(): void {
     logMain(
       details.reason === "clean-exit" ? "info" : "warn",
       "process",
-      goneLine("renderer", details)
+      goneLine({ type: "Tab", ...details })
     );
     sampleSoon();
   });

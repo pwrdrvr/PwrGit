@@ -210,6 +210,22 @@ function installDevelopmentDockIcon(): void {
 }
 
 /**
+ * Where the app log file goes. getPath("logs") creates the directory and throws
+ * if it cannot — a startup this early has no window and no log to explain
+ * itself, so an unwritable log directory falls back to the pre-0.14 location
+ * rather than taking the app down with it.
+ */
+function appLogFilePath(fallback: string): string {
+  try {
+    return join(app.getPath("logs"), "main.log");
+  } catch (cause) {
+    // Buffered now, written to `fallback` as soon as initLogFile runs.
+    logMain("warn", "app", "log directory unavailable; using", fallback, cause);
+    return fallback;
+  }
+}
+
+/**
  * Single-instance: PwrGit is a single-instance app — one window per profile
  * inside it. A second launch focuses an existing window instead of spawning
  * another process.
@@ -232,10 +248,8 @@ if (!gotSingleInstanceLock) {
     // The file sits in the OS log directory (~/Library/Logs/PwrGit on macOS,
     // <userData>/logs elsewhere) beside the other Pwr apps, rather than in
     // userData where nobody goes looking for a log.
-    initLogFile(
-      join(app.getPath("logs"), "main.log"),
-      join(app.getPath("userData"), "pwrgit-main.log")
-    );
+    const legacyLogPath = join(app.getPath("userData"), "pwrgit-main.log");
+    initLogFile(appLogFilePath(legacyLogPath), legacyLogPath);
     subscribeLogEntries((entry) => emitEvent("logs:entry", entry));
     // Process ids ride on the log itself: the main one here, the helpers as
     // watchProcessIds sees them appear, so a copied log identifies its own

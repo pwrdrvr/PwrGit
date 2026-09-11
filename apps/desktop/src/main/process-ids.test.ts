@@ -66,12 +66,30 @@ describe("formatProcessIds", () => {
   it("leads with main, GPU and renderer, then names utilities by service", () => {
     expect(
       formatProcessIds([
-        { pid: 317, type: "Utility", name: "Network Service" },
+        {
+          pid: 317,
+          type: "Utility",
+          // `name` is localized; the label has to come from serviceName so two
+          // operators' logs spell the same helper the same way.
+          name: "Service réseau",
+          serviceName: "network.mojom.NetworkService"
+        },
         { pid: 330, type: "Tab", name: "PwrGit" },
         { pid: 311, type: "Browser" },
         { pid: 315, type: "GPU" }
       ])
     ).toBe("main=311 gpu=315 renderer=330 utility:NetworkService=317");
+  });
+
+  it("labels a helper with no service name by type alone, sorted after the leaders", () => {
+    expect(
+      formatProcessIds([
+        { pid: 351, type: "Utility", serviceName: "audio.mojom.AudioService" },
+        { pid: 361, type: "Sandbox helper" },
+        { pid: 311, type: "Browser" },
+        { pid: 371, type: "Zygote" }
+      ])
+    ).toBe("main=311 sandbox-helper=361 utility:AudioService=351 zygote=371");
   });
 
   it("groups same-type processes into one ascending list", () => {
@@ -126,6 +144,19 @@ describe("watchProcessIds", () => {
     expect(loggedLines()).toEqual(["main=311", "main=311 renderer=330"]);
   });
 
+  it("samples a renderer whose load failed — the process is still there", async () => {
+    metrics({ pid: 311, type: "Browser" });
+    watchProcessIds();
+    await vi.advanceTimersByTimeAsync(500);
+
+    const contents = createWebContents();
+    metrics({ pid: 311, type: "Browser" }, { pid: 330, type: "Tab" });
+    contents.get("did-fail-load")?.();
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(loggedLines()).toEqual(["main=311", "main=311 renderer=330"]);
+  });
+
   it("collapses a burst of triggers into a single sample", async () => {
     metrics({ pid: 311, type: "Browser" });
     watchProcessIds();
@@ -146,9 +177,11 @@ describe("watchProcessIds", () => {
     fire("render-process-gone", {}, {}, { reason: "clean-exit", exitCode: 0 });
     await vi.advanceTimersByTimeAsync(500);
 
+    // Each gone line is spelled the way the table spells that process, so one
+    // grep finds the crash and the table that replaced it.
     expect(logMainMock.mock.calls.map((call) => call.slice(0, 3))).toEqual([
       ["info", "process", "main=311 gpu=315"],
-      ["warn", "process", "GPU process gone reason=crashed exitCode=139"],
+      ["warn", "process", "gpu process gone reason=crashed exitCode=139"],
       ["info", "process", "renderer process gone reason=clean-exit exitCode=0"],
       ["info", "process", "main=311"]
     ]);
