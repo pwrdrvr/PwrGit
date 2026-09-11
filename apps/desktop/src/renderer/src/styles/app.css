@@ -478,6 +478,15 @@ textarea,
   left: 0;
   right: 0;
   z-index: 40;
+  /* The row count is unbounded user data — one row per profile — and the menu
+     hangs from the top of the sidebar, so without a cap a long list runs off
+     the bottom of the window and takes "New profile…" with it. At the app's
+     minimum 600px window (src/main/window.ts) only six profiles fit. 140px is
+     the menu's own top offset (98px: titlebar + section padding + chip + gap)
+     plus breathing room, so the cap tracks the window instead of scrolling
+     early on a tall one. Same treatment as .branch-pop. */
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
   background: var(--bg-menu);
   border: 1px solid var(--border-default);
   border-radius: 10px;
