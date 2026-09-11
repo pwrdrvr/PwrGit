@@ -12,9 +12,20 @@ body,
   margin: 0;
 }
 
-html {
-  /* Commit reveals must scroll their pane, never the window chrome. Hidden
-     overflow still permits scrollIntoView() to move the document viewport. */
+/* Reveals (scrollIntoView, focus()) must scroll their own pane, never the
+   window chrome. `clip` on BOTH boxes, and never `hidden`: a hidden box is
+   still a scroll container that refuses the *user* but obeys the *script*, so
+   anything that pokes past the app's 100vh — a popover placed near the bottom
+   edge, a pane that briefly can't shrink — hands the chrome somewhere to
+   scroll to. It then rides up under the traffic lights and leaves a band of
+   bare <body> along the bottom, and nothing scrolls it back.
+
+   `html` alone is not enough, which is what #214 missed: an explicit overflow
+   on the root stops `body`'s value propagating to the viewport, so the same
+   `overflow: hidden` that used to be inert became body's own scroll box. A
+   clipped box is not a scroll container at all — there is no offset to set. */
+html,
+body {
   overflow: clip;
 }
 
@@ -22,7 +33,6 @@ body {
   background: var(--bg-app);
   color: var(--text-primary);
   font-family: var(--font-sans);
-  overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -43,10 +53,24 @@ textarea,
 /* Text for assistive technology only. Clip rather than `display: none` or
    `visibility: hidden`, both of which remove the node from the accessibility
    tree along with the pixels. Used where a glyph carries meaning that has no
-   text equivalent — the sidebar's ●/↑/↓ count badges — and for the live region
-   that announces keyboard reorders. */
+   text equivalent — the sidebar's ●/↑/↓ count badges, a commit's tag chips,
+   the Git LFS chip — and for the live region that announces keyboard reorders.
+
+   `top`/`left` are load-bearing, not tidying. Left to `auto`, an absolutely
+   positioned box sits at its STATIC position while its containing block is
+   the nearest positioned ancestor — and inside our scrollers that ancestor is
+   the pane, not the scroller. So the span escapes the scroller's clip and
+   lands at its place in the un-scrolled list: a tag chip 9,000px down a
+   commit list put a 1px box 9,000px below the window, and the document grew
+   to match. Nothing showed, because nothing paints — but the next
+   `scrollIntoView` had all of that to scroll through, and took the window
+   chrome with it. Pinned to the containing block's origin, the box is always
+   inside the window (or inside a scroller that clips it), and no list's
+   length can move the shell. */
 .a11y-sr-only {
   position: absolute;
+  top: 0;
+  left: 0;
   width: 1px;
   height: 1px;
   margin: -1px;
@@ -469,10 +493,23 @@ textarea,
 }
 .profile-menu {
   position: absolute;
-  top: calc(100% - 2px);
-  left: 12px;
-  right: 12px;
+  /* Detached below the chip and edge-aligned to it. The old `100% - 2px`
+     tucked the menu under the chip's bottom border, and the 12px insets
+     re-applied .sidebar__profile's padding on top of the wrapper that already
+     sits inside it, leaving the menu narrower than the control that opens it. */
+  top: calc(100% + var(--popover-gap));
+  left: 0;
+  right: 0;
   z-index: 40;
+  /* The row count is unbounded user data — one row per profile — and the menu
+     hangs from the top of the sidebar, so without a cap a long list runs off
+     the bottom of the window and takes "New profile…" with it. At the app's
+     minimum 600px window (src/main/window.ts) only six profiles fit. 140px is
+     the menu's own top offset (98px: titlebar + section padding + chip + gap)
+     plus breathing room, so the cap tracks the window instead of scrolling
+     early on a tall one. Same treatment as .branch-pop. */
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
   background: var(--bg-menu);
   border: 1px solid var(--border-default);
   border-radius: 10px;
@@ -4857,7 +4894,7 @@ textarea,
 }
 .branch-pop {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + var(--popover-gap));
   right: 0;
   z-index: 41;
   width: 300px;

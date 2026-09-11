@@ -353,6 +353,47 @@ test("focused rows and chips carry a real focus indicator", async () => {
   }
 });
 
+test("the profile chip announces its menu, and Escape hands focus back", async () => {
+  handle = await launchApp();
+  const { window } = handle;
+
+  // The chip used to be a bare <button>: no aria-haspopup, no aria-expanded,
+  // and a popup with no menu role. Every other popup menu in the app
+  // (WorktreeMenu, the sidebar options menu, .branch-pop) already carries
+  // them, so a screen reader described this one control as a plain button
+  // that did nothing visible when pressed.
+  const chip = window.locator(".profile-chip");
+  await expect(chip).toHaveAttribute("aria-haspopup", "menu");
+  await expect(chip).toHaveAttribute("aria-expanded", "false");
+
+  await chip.click();
+  await expect(chip).toHaveAttribute("aria-expanded", "true");
+
+  const menu = window.locator(".profile-menu");
+  await expect(menu).toHaveRole("menu");
+  await expect(menu).toHaveAccessibleName("Profiles");
+
+  // The active profile is shown with a green dot. `menuitemradio` +
+  // aria-checked is how that reaches a screen reader.
+  const active = window.locator(".profile-menu__item.is-active");
+  await expect(active).toHaveRole("menuitemradio");
+  await expect(active).toHaveAttribute("aria-checked", "true");
+  await expect(
+    window.locator(".profile-menu__action", { hasText: "New profile" })
+  ).toHaveRole("menuitem");
+
+  // The monogram tile repeats the first letter of the name beside it, so the
+  // chip's name must not be announced as "P Personal".
+  await expect(chip).toHaveAccessibleName(/^Personal/);
+
+  // Escape closes and returns focus to the chip. The menu unmounts, so
+  // without that the keyboard user lands on <body> (SC 2.4.3).
+  await window.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(chip).toHaveAttribute("aria-expanded", "false");
+  await expect(chip).toBeFocused();
+});
+
 test("refreshing a worktree list does not throw focus away", async () => {
   sandbox = createGitSandbox();
   sandbox.makeRepo("alpha", { worktrees: ["feature/one"] });
