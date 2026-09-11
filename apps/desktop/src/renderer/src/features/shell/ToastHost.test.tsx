@@ -9,7 +9,8 @@ const dispatchMock = vi.hoisted(() => vi.fn());
 const subscribeMock = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/pwrgit", () => ({
   dispatch: dispatchMock,
-  subscribe: subscribeMock
+  subscribe: subscribeMock,
+  windowProfileId: () => "profile-1"
 }));
 
 import { ToastHost } from "./ToastHost";
@@ -31,7 +32,11 @@ function eyebrows(): string[] {
 }
 
 beforeEach(async () => {
-  dispatchMock.mockResolvedValue(ok({ status: "idle" }));
+  // Command-aware: the host now also mounts the live-activity cards, whose
+  // store asks for a snapshot on mount and expects a list back.
+  dispatchMock.mockImplementation((name: string) =>
+    Promise.resolve(ok(name === "remote:activities" ? [] : { status: "idle" }))
+  );
   subscribeMock.mockReturnValue(() => undefined);
   let current: Toast[] = [];
   const unsubscribe = subscribeToasts((next) => {

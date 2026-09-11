@@ -29,6 +29,7 @@ import type {
   RepoIdentityRefreshOutcome,
   PushRefPlan,
   PushRefResult,
+  RemoteActivity,
   ChangeSet,
   GitOperationKind,
   OperationContinueOutcome,
@@ -50,7 +51,6 @@ import type {
   Profile,
   ProfileId,
   ProfileThemeOverride,
-  PullProgressPhase,
   PartialFileDiff,
   RebaseCommitRef,
   RebaseCheckResult,
@@ -1093,6 +1093,29 @@ export interface Commands {
   };
 
   // Remotes (U9 / U13)
+  /**
+   * Every live remote operation in this process, for a window that opened (or
+   * reloaded) while one was already running. `remote:activity` carries every
+   * later move, but it only fires when something *changes* — a fetch that has
+   * been silent for four minutes emits nothing, so a new window would show an
+   * empty toolbar over a running Git process without this snapshot.
+   */
+  "remote:activities": { req: void; res: RemoteActivity[] };
+  /**
+   * The complete retained Git output for one live operation — what the status
+   * popover's Copy action hands over. The live event carries only a short tail
+   * so a per-chunk broadcast stays small. Null once the operation is gone.
+   */
+  "remote:activityLog": {
+    req: { operationId: string };
+    res: { lines: string[] } | null;
+  };
+  /** Ask a live remote operation to stop. Git is signalled; Pull then rolls
+   *  its checkout back exactly as it does for a watchdog timeout. */
+  "remote:cancelActivity": {
+    req: { operationId: string };
+    res: { canceled: boolean };
+  };
   "remote:fetch": { req: { worktreeId: string }; res: null };
   /** Fetch one named remote, or every non-skipped remote when omitted. */
   "remote:fetchRepo": {
@@ -1522,11 +1545,15 @@ export interface Events {
    * signal or it silently shows a stale set.
    */
   "changes:changed": { worktreeId: string };
-  /** Coarse live pull progress for one worktree. */
-  "worktree:pullProgress": {
-    worktreeId: string;
-    phase: PullProgressPhase;
-  };
+  /**
+   * Every live remote operation, whenever the set or any member moves.
+   *
+   * The whole set travels on each emit rather than a per-operation delta: it
+   * is a handful of small records, and a renderer that misses one delta would
+   * otherwise keep a finished operation on screen forever. Broadcast to every
+   * window; each filters to its own profile.
+   */
+  "remote:activity": { activities: RemoteActivity[] };
   /** Per-repository progress for profile-wide fetch / conservative pull. */
   "remote:bulkSyncProgress": BulkSyncProgress;
   /** A worktree finished being removed (streamed during a batch remove). */

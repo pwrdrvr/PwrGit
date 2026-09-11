@@ -182,6 +182,8 @@ textarea,
 .clone-destination-choice,
 .refs-tag-resolved__sha,
 .refs-tag-resolved__subject,
+.remote-activity__output,
+.remote-activity__command,
 .selectable {
   -webkit-user-select: text;
   user-select: text;
@@ -10267,6 +10269,182 @@ button.agent-auth-node {
   margin: 8px 0 0;
   font: 500 11.5px/1.35 var(--font-sans);
   color: var(--danger-text);
+}
+
+
+/* Live status for a running fetch / pull / push. One card, two placements:
+   the toolbar's hover popover and the toast that keeps an operation from
+   another repository reachable. Both want the same information, so the only
+   difference is density (`--compact` drops the Git output block). */
+.remote-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  width: 320px;
+  max-width: 100%;
+}
+
+.remote-activity--compact {
+  gap: 6px;
+  width: 300px;
+}
+
+.remote-activity__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.remote-activity__title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font: 600 11.5px/1.3 var(--font-sans);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Tabular figures: a counter that reflows its own width every second reads as
+   a glitch rather than as a clock. */
+.remote-activity__elapsed {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font: 500 11px/1.3 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.remote-activity__status {
+  margin: 0;
+  font: 500 12px/1.35 var(--font-sans);
+  overflow-wrap: anywhere;
+}
+
+.remote-activity__status--muted {
+  color: var(--text-secondary);
+}
+
+/* The whole point of the card: a transfer that is moving and one that has
+   been silent for four minutes must not look alike. */
+.remote-activity__status--warn {
+  color: var(--status-warning);
+}
+
+.remote-activity__meter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.remote-activity__bar {
+  overflow: hidden;
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-muted) 25%, transparent);
+}
+
+.remote-activity__bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width 120ms linear;
+}
+
+.remote-activity__meter-label {
+  color: var(--text-muted);
+  font: 500 10.5px/1.3 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.remote-activity__command {
+  margin: 0;
+  color: var(--text-muted);
+  font: 500 10.5px/1.35 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.remote-activity__output {
+  margin: 0;
+  max-height: 108px;
+  overflow: auto;
+  padding: 6px 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-app);
+  color: var(--text-secondary);
+  font: 400 10.5px/1.45 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.remote-activity__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.remote-activity__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font: 600 11px/1 var(--font-sans);
+  cursor: pointer;
+}
+
+.remote-activity__button:hover,
+.remote-activity__button:focus-visible {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+  outline: none;
+}
+
+/* Stop is the action someone comes to this card for after five silent
+   minutes; it should not need hunting for among three identical buttons. */
+.remote-activity__button--stop {
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+
+.remote-activity__button--stop:hover,
+.remote-activity__button--stop:focus-visible {
+  border-color: var(--danger-border);
+  background: color-mix(in srgb, var(--danger-text) 14%, transparent);
+  color: var(--danger-text);
+}
+
+.remote-activity__button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* The popover shell. `.viewport-tooltip` is pointer-events: none because it
+   is a label; this card is a dialog you move into, so it sets its own. */
+.remote-activity-popover {
+  position: fixed;
+  z-index: 140;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 11px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-menu);
+  box-shadow: var(--shadow-popover);
+  color: var(--text-primary);
+  pointer-events: auto;
+  text-align: left;
+}
+
+.app-toast--activity {
+  display: block;
+  padding: 11px 12px;
 }
 
 .app-toast__timer {

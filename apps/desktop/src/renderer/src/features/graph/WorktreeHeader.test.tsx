@@ -6,23 +6,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   err,
   ok,
-  type PullProgressPhase,
+  type RemoteActivity,
   type SshRemoteRecovery,
   type Worktree,
   type WorktreeState
 } from "@pwrgit/shared";
 
+// The activity store subscribes once per module instance, so the captured
+// handlers deliberately outlive a single test's mock reset.
 const bridge = vi.hoisted(() => ({
   dispatch: vi.fn(),
   subscribe: vi.fn(),
-  onProgress: undefined as
-    | ((event: { worktreeId: string; phase: PullProgressPhase }) => void)
-    | undefined
+  handlers: new Map<string, (payload: unknown) => void>()
 }));
 
 vi.mock("../../lib/pwrgit", () => ({
   dispatch: bridge.dispatch,
-  subscribe: bridge.subscribe
+  subscribe: bridge.subscribe,
+  windowProfileId: () => "profile-1"
 }));
 vi.mock("../../lib/toast", () => ({
   showErrorToast: vi.fn(),
@@ -51,13 +52,46 @@ const worktree: Worktree = {
   isPrimary: true
 };
 
+/** A live pull against this checkout, at its first phase. */
+const idle: RemoteActivity = {
+  id: "op-1",
+  kind: "pull",
+  phase: "fetch",
+  profileId: "profile-1",
+  repoId: "repo-1",
+  repoName: "project",
+  worktreeId: "worktree-1",
+  branch: "main",
+  startedAt: 0,
+  phaseSince: 0,
+  lastOutputAt: 0,
+  silent: false,
+  progress: null,
+  command: null,
+  tail: [],
+  canceling: false
+};
+
 let container: HTMLDivElement;
 let root: Root;
 
+/** Publish the live remote operations this window can see. */
+async function emitActivities(activities: Partial<RemoteActivity>[]) {
+  await act(async () => {
+    bridge.handlers.get("remote:activity")?.({
+      activities: activities.map((activity) => ({ ...idle, ...activity }))
+    });
+  });
+}
+
 beforeEach(async () => {
-  bridge.dispatch.mockReturnValue(new Promise(() => undefined));
-  bridge.subscribe.mockImplementation((_channel, handler) => {
-    bridge.onProgress = handler;
+  bridge.dispatch.mockImplementation((name: string) =>
+    name === "remote:activities"
+      ? Promise.resolve(ok([]))
+      : new Promise(() => undefined)
+  );
+  bridge.subscribe.mockImplementation((channel, handler) => {
+    bridge.handlers.set(channel, handler);
     return () => undefined;
   });
   container = document.createElement("div");
@@ -69,9 +103,9 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  await emitActivities([]);
   await act(async () => root.unmount());
   container.remove();
-  bridge.onProgress = undefined;
   vi.clearAllMocks();
 });
 
@@ -141,7 +175,14 @@ describe("WorktreeHeader pull progress", () => {
 
     await act(async () => pull?.click());
     expect(pull?.getAttribute("aria-busy")).toBe("true");
-    expect(container.textContent).toContain("Fetching updates…");
+    // Before main reports anything the label is honestly indefinite; the
+    // queued phase is the first thing it can truthfully say.
+    expect(container.textContent).toContain("Pulling…");
+
+    await emitActivities([{ phase: "queued" }]);
+    expect(container.textContent).toContain(
+      "Waiting for another Git operation…"
+    );
     expect(
       container
         .querySelector('[role="status"]')
@@ -149,25 +190,78 @@ describe("WorktreeHeader pull progress", () => {
     ).toBe(true);
 
     for (const [phase, label] of [
+      ["fetch", "Fetching updates…"],
       ["prepare", "Preparing local changes…"],
       ["fast_forward", "Fast-forwarding and checking out files…"],
       ["reapply", "Reapplying local changes…"],
       ["refresh", "Finishing refresh…"]
     ] as const) {
-      await act(async () => {
-        bridge.onProgress?.({ worktreeId: worktree.id, phase });
-      });
+      await emitActivities([{ phase }]);
       expect(container.textContent).toContain(label);
       expect(pull?.getAttribute("aria-label")).toBe(label);
     }
 
-    await act(async () => {
-      bridge.onProgress?.({
-        worktreeId: "another-worktree",
-        phase: "fetch"
-      });
-    });
+    // Another checkout's operation is another checkout's business: this
+    // toolbar must never narrate it.
+    await emitActivities([
+      { phase: "refresh" },
+      { id: "op-2", worktreeId: "another-worktree", phase: "fetch" }
+    ]);
     expect(container.textContent).toContain("Finishing refresh…");
+    expect(container.textContent).not.toContain("Fetching updates…");
+  });
+
+  it("opens the status card from the working button, and cancels from it", async () => {
+    const pull = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Pull"]'
+    );
+    await act(async () => pull?.click());
+    await emitActivities([
+      {
+        phase: "fetch",
+        silent: true,
+        command: "git fetch --prune --progress",
+        tail: ["remote: Enumerating objects: 12"]
+      }
+    ]);
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-busy="true"]')
+        ?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+    const card = document.querySelector(".remote-activity-popover");
+    expect(card).not.toBeNull();
+    // Git's own words, and the command that produced them — the two facts a
+    // spinner cannot carry.
+    expect(card?.textContent).toContain("git fetch --prune --progress");
+    expect(card?.textContent).toContain("remote: Enumerating objects: 12");
+
+    const cancel = [
+      ...(card?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+    ].find((button) => button.textContent === "Cancel");
+    await act(async () => cancel?.click());
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:cancelActivity", {
+      operationId: "op-1"
+    });
+  });
+
+  it("keeps the card off a pull short enough that nobody asked", async () => {
+    const pull = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Pull"]'
+    );
+    await act(async () => pull?.click());
+    // Clicking Pull leaves the pointer on the button, and swapping in the
+    // spinner fires mouseenter under it. A card for every one-second pull is
+    // the "front and centre" this deliberately is not.
+    await emitActivities([{ startedAt: Date.now(), phase: "fetch" }]);
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-busy="true"]')
+        ?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+
+    expect(document.querySelector(".remote-activity-popover")).toBeNull();
   });
 
   it("offers user-approved SSH recovery after a Git LFS HTTPS authentication failure", async () => {

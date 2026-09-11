@@ -60,6 +60,35 @@ vi.mock("./ssh-remote-recovery", () => ({
   testSshRemoteRecovery: vi.fn()
 }));
 
+/** Distinct phases one worktree's activity passed through, in order. */
+function phasesFrom(
+  emit: ReturnType<typeof vi.mocked<typeof emitEvent>>,
+  worktreeId: string
+): string[] {
+  const seen: string[] = [];
+  for (const [channel, payload] of emit.mock.calls) {
+    if (channel !== "remote:activity") continue;
+    const activity = (
+      payload as { activities: { worktreeId: string | null; phase: string }[] }
+    ).activities.find((entry) => entry.worktreeId === worktreeId);
+    if (activity === undefined) continue;
+    if (seen.at(-1) !== activity.phase) seen.push(activity.phase);
+  }
+  return seen;
+}
+
+/** The live activity records as of the most recent broadcast. */
+function liveActivities(
+  emit: ReturnType<typeof vi.mocked<typeof emitEvent>>
+): { id: string; kind: string; phase: string; worktreeId: string | null }[] {
+  for (let i = emit.mock.calls.length - 1; i >= 0; i -= 1) {
+    const [channel, payload] = emit.mock.calls[i]!;
+    if (channel !== "remote:activity") continue;
+    return (payload as { activities: never[] }).activities;
+  }
+  return [];
+}
+
 describe("remote handlers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -224,6 +253,92 @@ describe("remote handlers", () => {
       ])
     );
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("stops a running pull when its live activity is canceled", async () => {
+    const db = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" }))
+      }))
+    } as unknown as DB;
+    const refresher = {
+      refreshWorktree: vi.fn(async () => undefined),
+      refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    vi.mocked(pullFastForward).mockImplementationOnce(
+      async (_git, _path, onProgress, control) => {
+        onProgress?.("fetch");
+        await new Promise<void>((resolve) => {
+          control?.signal?.addEventListener("abort", () => resolve());
+        });
+        return err(control?.signal?.reason as PwrGitError);
+      }
+    );
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
+
+    const pull = bus.dispatch("remote:pull", { worktreeId: "worktree-1" });
+    await vi.waitFor(() =>
+      expect(liveActivities(vi.mocked(emitEvent))[0]?.phase).toBe("fetch")
+    );
+    const operationId = liveActivities(vi.mocked(emitEvent))[0]!.id;
+
+    await expect(
+      bus.dispatch("remote:cancelActivity", { operationId })
+    ).resolves.toEqual(ok({ canceled: true }));
+
+    // The user chose this, so it reads as an outcome rather than a fault —
+    // and it names where the pull was when it stopped.
+    await expect(pull).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "canceled",
+        message: "Pull canceled during fetching after 0s."
+      }
+    });
+    // Retired once Git is gone, so no stale card outlives the operation.
+    expect(liveActivities(vi.mocked(emitEvent))).toEqual([]);
+    await expect(
+      bus.dispatch("remote:cancelActivity", { operationId })
+    ).resolves.toEqual(ok({ canceled: false }));
+  });
+
+  it("reports the wait behind another repository operation as queued", async () => {
+    const db = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" }))
+      }))
+    } as unknown as DB;
+    const refresher = {
+      refreshWorktree: vi.fn(async () => undefined),
+      refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    let releaseFetch!: () => void;
+    vi.mocked(fetchRemote).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseFetch = () => resolve(ok(undefined));
+        })
+    );
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
+
+    const fetch = bus.dispatch("remote:fetch", { worktreeId: "worktree-1" });
+    const pull = bus.dispatch("remote:pull", { worktreeId: "worktree-1" });
+
+    // Time spent behind another operation's lock is not Git being slow, and a
+    // spinner that cannot say so is the whole reason this record exists.
+    await vi.waitFor(() => {
+      const live = liveActivities(vi.mocked(emitEvent));
+      expect(live.map((entry) => [entry.kind, entry.phase])).toEqual([
+        ["fetch", "fetch"],
+        ["pull", "queued"]
+      ]);
+    });
+
+    releaseFetch();
+    await expect(fetch).resolves.toMatchObject({ ok: true });
+    await expect(pull).resolves.toMatchObject({ ok: true });
   });
 
   it("logs stalled warnings and returns a typed phase timeout without timer leaks", async () => {
@@ -492,26 +607,16 @@ describe("remote handlers", () => {
     const pull = bus.dispatch("remote:pull", { worktreeId: "worktree-1" });
     await vi.waitFor(() => expect(refreshWorktree).toHaveBeenCalledOnce());
 
-    expect(emitEvent).toHaveBeenNthCalledWith(1, "worktree:pullProgress", {
-      worktreeId: "worktree-1",
-      phase: "fetch"
-    });
-    expect(emitEvent).toHaveBeenNthCalledWith(2, "worktree:pullProgress", {
-      worktreeId: "worktree-1",
-      phase: "prepare"
-    });
-    expect(emitEvent).toHaveBeenNthCalledWith(3, "worktree:pullProgress", {
-      worktreeId: "worktree-1",
-      phase: "fast_forward"
-    });
-    expect(emitEvent).toHaveBeenNthCalledWith(4, "worktree:pullProgress", {
-      worktreeId: "worktree-1",
-      phase: "reapply"
-    });
-    expect(emitEvent).toHaveBeenNthCalledWith(5, "worktree:pullProgress", {
-      worktreeId: "worktree-1",
-      phase: "refresh"
-    });
+    // Phases reach the renderer as live activity, not as a separate channel:
+    // the queued wait, the phase, and the Git output are one record.
+    expect(phasesFrom(vi.mocked(emitEvent), "worktree-1")).toEqual([
+      "queued",
+      "fetch",
+      "prepare",
+      "fast_forward",
+      "reapply",
+      "refresh"
+    ]);
 
     let settled = false;
     void pull.then(() => {
