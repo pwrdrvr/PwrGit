@@ -3,6 +3,7 @@ import type { LocalBranchSummary } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { branchNameProblem } from "../graph/branch-from-commit";
+import { useModal } from "../../lib/useModal";
 
 export function BranchRenameDialog({
   repoId,
@@ -37,16 +38,6 @@ export function BranchRenameDialog({
         ? `A local branch named ${trimmed} already exists.`
         : problem.message;
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
-
   const submit = async (): Promise<void> => {
     if (busy || problem !== null || unchanged) return;
     setBusy(true);
@@ -80,9 +71,14 @@ export function BranchRenameDialog({
     onClose();
   };
 
+  const modalRef = useModal<HTMLDivElement>({ onClose });
+
   return (
     <div className="overlay-backdrop" onClick={onClose}>
       <div
+        ref={modalRef}
+        aria-modal="true"
+        tabIndex={-1}
         className="modal branch-rename"
         role="dialog"
         aria-label={`Rename branch ${branch.name}`}

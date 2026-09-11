@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Repo } from "@pwrgit/shared";
+import { useModal } from "../../lib/useModal";
 
 export function NewWorktreeModal({
   repo,
@@ -35,9 +36,15 @@ export function NewWorktreeModal({
     else setError(message);
   };
 
+  const modalRef = useModal<HTMLDivElement>({ onClose });
+
   return (
     <div className="overlay-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        tabIndex={-1}
+        className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal__title">New worktree · {repo.name}</div>
         <input
           className="modal__input"
@@ -46,8 +53,8 @@ export function NewWorktreeModal({
           onChange={(e) => setBranch(e.target.value)}
           placeholder="branch name"
           onKeyDown={(e) => {
+            // Escape is the dialog's, via useModal.
             if (e.key === "Enter") void submit();
-            else if (e.key === "Escape") onClose();
           }}
         />
         <label className="modal__check">
