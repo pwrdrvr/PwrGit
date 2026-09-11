@@ -38,14 +38,23 @@ async function startSilentRemote(): Promise<number> {
 }
 
 test.afterEach(async () => {
-  if (handle !== null) {
-    await handle.cleanup();
-    handle = null;
-  }
+  // Drop the connections BEFORE closing the app. This spec is the only thing
+  // in the suite that deliberately leaves a Git process blocked on a socket,
+  // and Git for Windows runs git behind a launcher: terminating the process
+  // PwrGit spawned can leave that grandchild alive, still blocked on this
+  // read and still holding the stdio pipes it inherited — which `app.close()`
+  // then waits on until Playwright's test timeout. Closing the socket first
+  // makes the read fail, so Git exits on its own and there is nothing left to
+  // wait for. Closing the app first passes on macOS and Linux and timed out
+  // every run on the Windows E2E job.
   for (const socket of held) socket.destroy();
   held = [];
   silentRemote?.close();
   silentRemote = null;
+  if (handle !== null) {
+    await handle.cleanup();
+    handle = null;
+  }
   sandbox?.cleanup();
   sandbox = null;
 });

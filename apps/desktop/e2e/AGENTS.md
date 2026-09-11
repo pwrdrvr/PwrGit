@@ -34,6 +34,14 @@ the Electron build.
 
 ## Gotchas
 
+- **Tear down anything a Git process is blocked on BEFORE `handle.cleanup()`.**
+  `remote-activity.spec.ts` wedges a fetch against a `git://` socket it owns.
+  Git for Windows runs git behind a launcher, so terminating the process
+  PwrGit spawned can leave that grandchild alive, still blocked on the read
+  and still holding the stdio pipes it inherited — and `app.close()` waits on
+  those until Playwright's 60s test timeout. macOS and Linux pass either way,
+  so this only ever shows up on the Windows job.
+
 - Specs run as **ESM** — use `import.meta.url` + `fileURLToPath`, not
   `__dirname`.
 - Confirms/alerts are **in-app** dialogs (not native), so drive them by clicking
