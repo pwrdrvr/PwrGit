@@ -107,6 +107,20 @@ had one Escape dismiss both. Each now returns early on `defaultPrevented`.
 A third keydown handler on `window` owes the same on both counts: claim the key
 when you spend it, and leave it alone when someone else already has.
 
+Deferring alone is not enough, because it settles ties by **listener order**,
+and `useDismissable`'s listener is removed and re-added each time the overlay
+stack empties and refills — so the same gesture would close the menu sometimes
+and hide the card other times. Its listener is therefore on the **capture**
+phase, which runs ahead of every bubble listener however late it was added. A
+menu or dialog is something the user opened on purpose and a hover card is not,
+so the deliberate surface wins. The card is not cheated out of its own case:
+when focus is inside one, `escapeOwner` finds no registered surface holding it
+and claims nothing, so the card's handler gets an unspent key.
+
+`DiffPane` solves the same ordering problem the other way, by deferring its
+`defaultPrevented` check a tick. Either is fine; what is not fine is a
+synchronous check from a bubble listener, which is a coin flip.
+
 ### `useFocusTrap` captures the opener during render
 
 Not in an effect. React applies `autoFocus` while committing, which is *before*

@@ -115,22 +115,65 @@ describe("useDismissable", () => {
     expect(onDismiss).toHaveBeenCalledOnce();
   });
 
-  it("defers to an Escape another surface already claimed", () => {
-    // useViewportTooltip's hover cards (the remote-activity popover, the SHA
-    // chips) claim Escape with preventDefault while they are showing. Two
-    // surfaces answering one keystroke means a hover card and an open menu both
-    // vanish on a single press — features/diff/AGENTS.md writes the rule down:
-    // defer to a claimed Escape.
+  it("defers to a surface that claimed the key ahead of it", () => {
+    // Anything running earlier in the capture phase owns the keystroke.
     const claimer = (e: KeyboardEvent): void => e.preventDefault();
-    window.addEventListener("keydown", claimer);
+    window.addEventListener("keydown", claimer, true);
     const onDismiss = vi.fn();
-    render({ open: true, onDismiss });
-    byText("Inside").focus();
-
-    escape();
-
-    window.removeEventListener("keydown", claimer);
+    try {
+      render({ open: true, onDismiss });
+      byText("Inside").focus();
+      escape();
+    } finally {
+      window.removeEventListener("keydown", claimer, true);
+    }
     expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it("beats a hover card's handler when the overlay is the one with focus", () => {
+    // useViewportTooltip's cards claim Escape from a bubble listener, and both
+    // sides defer to defaultPrevented — so two bubble listeners would settle it
+    // by registration order, which moves as the overlay stack empties and
+    // refills. Capture makes the deliberate surface win every time.
+    const card = vi.fn((e: KeyboardEvent) => {
+      if (!e.defaultPrevented) e.preventDefault();
+    });
+    window.addEventListener("keydown", card);
+    const onDismiss = vi.fn();
+    try {
+      render({ open: true, onDismiss });
+      byText("Inside").focus();
+      escape();
+    } finally {
+      window.removeEventListener("keydown", card);
+    }
+    expect(onDismiss).toHaveBeenCalledOnce();
+    // The card still saw the key — and saw it already spent, so it stands down.
+    expect(card).toHaveBeenCalledOnce();
+    expect(card.mock.calls[0]![0].defaultPrevented).toBe(true);
+  });
+
+  it("leaves the key to a hover card that holds focus itself", () => {
+    // Focus inside an unregistered surface: the overlay claims nothing, so the
+    // card's own handler gets an unspent key and can dismiss itself.
+    let sawUnspent = false;
+    const card = (e: KeyboardEvent): void => {
+      sawUnspent = !e.defaultPrevented;
+    };
+    window.addEventListener("keydown", card);
+    const onDismiss = vi.fn();
+    const cardSurface = document.createElement("button");
+    document.body.appendChild(cardSurface);
+    try {
+      render({ open: true, onDismiss });
+      cardSurface.focus();
+      escape();
+    } finally {
+      window.removeEventListener("keydown", card);
+      cardSurface.remove();
+    }
+    expect(onDismiss).not.toHaveBeenCalled();
+    expect(sawUnspent).toBe(true);
   });
 
   it("does not steal focus from somewhere else on the page", () => {

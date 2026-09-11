@@ -102,9 +102,27 @@ function onGlobalKeyDown(e: KeyboardEvent): void {
   owner.onDismiss.current();
 }
 
+/**
+ * Capture phase, deliberately.
+ *
+ * `useViewportTooltip`'s hover cards also claim Escape, from a bubble-phase
+ * `window` listener, and both sides defer to `defaultPrevented`. Two bubble
+ * listeners would settle it by registration order — and this one is removed
+ * and re-added every time the overlay stack empties and refills, so its place
+ * in that list moves during a session. The same gesture would close the menu
+ * sometimes and hide the card other times.
+ *
+ * Capture runs before every bubble listener regardless of when it was added, so
+ * a click-opened overlay wins deterministically. That is the right way round:
+ * a menu or dialog is something the user opened on purpose, while a hover card
+ * appeared because their pointer came to rest. And it does not steal the case
+ * that belongs to the card — when focus is inside one, `escapeOwner` finds no
+ * registered surface holding it and claims nothing, leaving the card's own
+ * handler to run.
+ */
 function register(layer: Layer): void {
   if (openOverlays.length === 0) {
-    window.addEventListener("keydown", onGlobalKeyDown);
+    window.addEventListener("keydown", onGlobalKeyDown, true);
   }
   openOverlays.push(layer);
 }
@@ -113,7 +131,7 @@ function unregister(layer: Layer): void {
   const at = openOverlays.indexOf(layer);
   if (at !== -1) openOverlays.splice(at, 1);
   if (openOverlays.length === 0) {
-    window.removeEventListener("keydown", onGlobalKeyDown);
+    window.removeEventListener("keydown", onGlobalKeyDown, true);
   }
 }
 
