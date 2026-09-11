@@ -24,6 +24,10 @@ asar: true
 asarUnpack:
   - "**/*.node"
 compression: normal
+# beforePack changes the staged native dependencies for each architecture.
+# Never package architectures concurrently against this shared deploy stage.
+concurrency:
+  jobs: 1
 
 # Files included in the app bundle. Run via apps/desktop/scripts/release.mjs
 # which first runs `pnpm deploy` to materialize a flat node_modules tree, since
@@ -164,11 +168,15 @@ mac:
     LSApplicationCategoryType: public.app-category.developer-tools
   target:
     - target: dmg
-      arch: [universal]
+      arch: [universal, arm64]
     - target: zip
-      arch: [universal]
+      arch: [universal, arm64]
+
+  # Always include the architecture, even when it matches the build host.
+  artifactName: "${productName}-${version}-${arch}-mac.${ext}"
 
 dmg:
+  artifactName: "${productName}-${version}-${arch}.${ext}"
   background: build/dmg-background.png
   window:
     width: 660

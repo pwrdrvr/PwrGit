@@ -24,8 +24,8 @@
  *       --require-signing:
  *                       fail unless the complete Azure signing configuration is
  *                       present. Release CI always passes this flag.
- *       (default)     : build + package signed/notarized + publish to the
- *                       channel configured in electron-builder.yml
+ *       (default)     : rejected on macOS; publish through release.yml so
+ *                       verified artifacts and metadata ship together
  *   - In CI, the App Store Connect API key may arrive as a base64-encoded
  *     env var (`APPLE_API_KEY_BASE64`) instead of a file path. This script
  *     decodes it to a temp file and re-exports `APPLE_API_KEY` for
@@ -61,6 +61,7 @@ import {
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { MAC_ARCHITECTURES, writeMacReleaseArtifacts } from "./mac-release-artifacts.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -95,6 +96,9 @@ if (winPublish && noPublish) {
 }
 
 const publish = !dryrun && !noPublish && !prepareOnly && (!win || winPublish);
+if (publish && !win) {
+  throw new Error("Publish macOS through release.yml so both architectures and their verified metadata ship together. Use --no-publish for local packaging.");
+}
 let codesignKeychainCleanup = null;
 
 function step(label) {
@@ -541,7 +545,7 @@ if (win) {
     );
   }
 } else {
-  step(`electron-builder --mac --universal (${publish ? "publish" : "no publish"}, ${dryrun ? "ad-hoc signed" : "signed"})`);
+  step(`electron-builder --mac (universal + arm64, ${dryrun ? "ad-hoc signed" : "signed"})`);
   maybeDecodeAppleApiKey();
   if (!dryrun) {
     maybeDecodeCscLink();
@@ -551,7 +555,7 @@ if (win) {
       console.log("  using preloaded Developer ID keychain for electron-builder signing");
     }
   }
-  builderArgs.push("--mac", "--universal");
+  builderArgs.push("--mac");
   if (dryrun) {
     // Use ad-hoc signing (identity=-) instead of no signing (identity=null).
     // electron-builder modifies the Electron binary to set fuses, which
@@ -570,6 +574,8 @@ if (win) {
   builderArgs.push(publish ? "--publish" : "--publish=never", publish ? "always" : "");
 }
 const cleanedArgs = builderArgs.filter((arg) => arg !== "");
+// A signing-stage retry must not upload artifacts left by a previous build.
+if (!win) rmSync(join(stageDir, "dist"), { recursive: true, force: true });
 runChecked("node", [electronBuilderCli(), ...cleanedArgs], { cwd: stageDir });
 
 // 6. Post-build checks — fail loudly if forbidden files leaked into the asar
@@ -602,37 +608,48 @@ if (win) {
   process.exit(0);
 }
 
-const builtApp = join(dist, "mac-universal", "PwrGit.app");
+for (const arch of MAC_ARCHITECTURES) {
+  const builtApp = join(dist, `mac-${arch}`, "PwrGit.app");
 
-step("verify universal binary slices");
-const universalMachO = [
-  join(builtApp, "Contents", "MacOS", "PwrGit"),
-  join(
-    builtApp,
-    "Contents",
-    "Resources",
-    "app.asar.unpacked",
-    "node_modules",
-    "better-sqlite3",
-    "build",
-    "Release",
-    "better_sqlite3.node",
-  ),
-  // dugite's embedded git must be universal or Intel Macs get an arm64 git
-  // (or vice versa). Produced by the beforePack per-arch download + the
-  // @electron/universal lipo merge, shipped via extraResources (see
-  // electron-builder.yml).
-  join(builtApp, "Contents", "Resources", "git", "bin", "git"),
-];
-for (const binary of universalMachO) {
-  runChecked("lipo", [binary, "-verify_arch", "x86_64", "arm64"]);
+  step(`verify ${arch} binary slices`);
+  const requiredMachO = [
+    join(builtApp, "Contents", "MacOS", "PwrGit"),
+    join(builtApp, "Contents", "Frameworks", "Electron Framework.framework", "Versions", "A", "Electron Framework"),
+    join(
+      builtApp,
+      "Contents",
+      "Resources",
+      "app.asar.unpacked",
+      "node_modules",
+      "better-sqlite3",
+      "build",
+      "Release",
+      "better_sqlite3.node",
+    ),
+    // dugite's embedded git must be universal or Intel Macs get an arm64 git
+    // (or vice versa). Produced by the beforePack per-arch download + the
+    // @electron/universal lipo merge, shipped via extraResources (see
+    // electron-builder.yml).
+    join(builtApp, "Contents", "Resources", "git", "bin", "git"),
+    join(builtApp, "Contents", "Resources", "git", "libexec", "git-core", "git-lfs"),
+  ];
+  for (const binary of requiredMachO) {
+    const actual = runQuiet("lipo", [binary, "-archs"]).trim().split(/\s+/).sort();
+    const expected = arch === "universal" ? ["arm64", "x86_64"] : ["arm64"];
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      throw new Error(`Wrong slices in ${binary}: ${actual.join(", ")}; expected ${expected.join(", ")}`);
+    }
+  }
+
+  step("verify packaged asar contents");
+  runChecked("node", [join(desktopRoot, "scripts", "verify-asar-contents.mjs"), builtApp]);
+
+  step("verify embedded Git runtime notices");
+  runChecked("node", [join(desktopRoot, "scripts", "verify-embedded-git-notices.mjs"), builtApp]);
 }
 
-step("verify packaged asar contents");
-runChecked("node", [join(desktopRoot, "scripts", "verify-asar-contents.mjs"), builtApp]);
-
-step("verify embedded Git runtime notices");
-runChecked("node", [join(desktopRoot, "scripts", "verify-embedded-git-notices.mjs"), builtApp]);
+step("write architecture-aware macOS update metadata and stable download aliases");
+writeMacReleaseArtifacts(dist, JSON.parse(readFileSync(join(stageDir, "package.json"), "utf8")).version);
 
 step("done");
 console.log(`  artifacts: ${dist}`);

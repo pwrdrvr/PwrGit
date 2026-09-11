@@ -5,7 +5,7 @@
 | Workflow | Trigger | What it does |
 |---|---|---|
 | `ci.yml` | push to `main`, PRs | Typecheck, build, unit tests, Linux + Windows desktop E2E. Unit-test jobs run `rebuild:electron-native` first — a no-op after a fresh install, which repairs a restored `node_modules` cache whose better-sqlite3 build predates the two-ABI layout. Documentation-only PRs skip those jobs after Classify Changes (see below). |
-| `preview-build.yml` | `build-preview` PR label | Unsigned macOS universal DMG (macOS 26/Xcode 26) + Windows NSIS installer, uploaded as workflow artifacts. |
+| `preview-build.yml` | `build-preview` PR label | Unsigned macOS universal + arm64 DMGs and updater ZIPs (macOS 26/Xcode 26) + Windows NSIS installer, uploaded as workflow artifacts. |
 | `release.yml` | `v*` tag push, manual dispatch with a tag, or `ci:windows-signing` PR label | Tests and stages via `apps/desktop/scripts/release.mjs`. Tagged runs gate GitHub Pre-release creation on Linux build, signed/notarized macOS (macOS 26/Xcode 26), and Azure-signed Windows. Labeled same-repo PRs run the real Windows prepare/sign/Authenticode path and upload workflow artifacts only. |
 
 ## macOS Icon Composer runner
@@ -90,3 +90,17 @@ Use `-prerelease.N` for Stable RCs. Use `-alpha.N` / `-beta.N` on `main`.
 Every `main` tag with a prerelease suffix must stay a GitHub Pre-release so it
 cannot steal `/releases/latest` from the Stable train. The updater pins
 electron-updater to the selected tag via the generic GitHub download feed.
+
+## macOS architectures
+
+Release and preview packaging build universal and arm64 apps sequentially from
+one deploy stage. `PwrGit.dmg` remains universal; `PwrGit-arm64.dmg` is the
+Apple Silicon alias. Both versioned DMGs, ZIPs and ZIP blockmaps ship together.
+`release.mjs` validates both apps before writing `latest-mac.yml` with both
+ZIP descriptors and a universal legacy fallback. The pinned updater chooses
+arm64 on Apple Silicon (including Rosetta) and universal on Intel.
+
+Use the guarded release workflow to publish macOS. Direct macOS publication
+through `pnpm release` is rejected so electron-builder cannot publish an
+unvalidated intermediate manifest. `package` and `package:dryrun` still build
+both architectures locally without publication.

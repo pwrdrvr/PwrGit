@@ -269,7 +269,8 @@ Verify the macOS release contains:
 
 - `PwrGit-<version>-universal.dmg`;
 - the stable-name `PwrGit.dmg` alias;
-- the universal updater ZIP and `.blockmap`; and
+- both universal and arm64 updater ZIPs and their `.blockmap` files;
+- `PwrGit-<version>-arm64.dmg` and its `PwrGit-arm64.dmg` alias; and
 - `latest-mac.yml`.
 
 Verify the Windows release contains one of these intentional shapes:
@@ -318,5 +319,6 @@ pnpm --filter @pwrgit/desktop package:dryrun
 pnpm --filter @pwrgit/desktop package
 ```
 
-Run `pnpm --filter @pwrgit/desktop release` only after the publish provider is
-configured and the user has explicitly authorized publishing.
+Publish macOS through `release.yml` only. The direct desktop `release` command
+rejects macOS publication because the combined architecture metadata must be
+verified before any assets are uploaded.

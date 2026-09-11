@@ -663,8 +663,11 @@ function hasMacUpdateAssets(release: GitHubRelease): boolean {
     release,
     (name) => name === MAC_UPDATE_CHANNEL_FILE
   );
+  // Universal remains mandatory: legacy clients and Intel Macs need a safe
+  // fallback even when this release also offers a smaller Apple Silicon ZIP.
+  const version = release.tag_name?.replace(/^v/i, "");
   const hasZip = hasUploadedReleaseAsset(release, (name) =>
-    name.endsWith(".zip")
+    name === `PwrGit-${version}-universal-mac.zip`
   );
   return hasChannelFile && hasZip;
 }

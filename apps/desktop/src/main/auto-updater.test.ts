@@ -989,6 +989,18 @@ describe("selectAppUpdateReleases", () => {
     });
     const { selectAppUpdateReleases } = await import("./auto-updater");
     const releases = [
+      githubRelease("v1.0.0-beta.39", {
+        assets: [
+          { name: "latest-mac.yml", state: "uploaded" },
+          { name: "PwrGit-1.0.0-beta.39-arm64-mac.zip", state: "uploaded" }
+        ]
+      }),
+      githubRelease("v1.0.0-beta.38", {
+        assets: [
+          { name: "latest-mac.yml", state: "uploaded" },
+          { name: "PwrGit-1.0.0-beta.37-universal-mac.zip", state: "uploaded" }
+        ]
+      }),
       githubRelease("v1.0.0-beta.37", { assets: [] }),
       githubRelease("v1.0.0-beta.36", {
         assets: [{ name: "latest-mac.yml", state: "uploaded" }]

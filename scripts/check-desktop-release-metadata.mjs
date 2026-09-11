@@ -150,6 +150,10 @@ const electronBuilder = readFileSync(electronBuilderPath, "utf8");
 if (!/^\s*releaseType:\s*prerelease\s*$/m.test(electronBuilder)) {
   fail("apps/desktop/electron-builder.yml publish.releaseType must be prerelease");
 }
+if ((electronBuilder.match(/arch: \[universal, arm64\]/g) ?? []).length !== 2) {
+  fail("macOS DMG and ZIP targets must both include universal and arm64");
+}
+assertContains(electronBuilder, "apps/desktop/electron-builder.yml", "concurrency:\n  jobs: 1");
 
 const releaseWorkflow = readFileSync(releaseWorkflowPath, "utf8").replace(
   /\r\n?/g,
@@ -157,6 +161,8 @@ const releaseWorkflow = readFileSync(releaseWorkflowPath, "utf8").replace(
 );
 const workflowsReadme = readFileSync(workflowsReadmePath, "utf8");
 const releaseScript = readFileSync(releaseScriptPath, "utf8");
+assertContains(releaseScript, "apps/desktop/scripts/release.mjs", "writeMacReleaseArtifacts(dist,");
+assertContains(releaseWorkflow, ".github/workflows/release.yml", "apps/desktop/scripts/mac-release-artifacts.mjs");
 const verifyAsarContents = readFileSync(verifyAsarContentsPath, "utf8");
 const verifyEmbeddedGitNotices = readFileSync(
   verifyEmbeddedGitNoticesPath,
@@ -303,6 +309,7 @@ for (const expected of [
   "apps/desktop/release-stage/node_modules/.pnpm/node_modules",
   "apps/desktop/release-stage",
   "apps/desktop/scripts/release.mjs",
+  "apps/desktop/scripts/mac-release-artifacts.mjs",
   "scripts/release/install-trusted-signing.ps1",
   "tar.exe -czf",
 ]) {
