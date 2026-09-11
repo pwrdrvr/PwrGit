@@ -23,6 +23,7 @@ import { useRelativeClock } from "../../lib/useRelativeClock";
 import { localWhen, shortWhen } from "../graph/graph-view";
 import { DiffViewer } from "./DiffViewer";
 import type { ImageDiffRevisions } from "./ImageDiff";
+import { tablistKeyHandler } from "../../lib/tablistKeys";
 
 export type FileInsightTab = "history" | "blame" | "contents";
 
@@ -1105,24 +1106,10 @@ export function FileInsightsPane({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [goBack]);
 
-  const onTabKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
-    const index = TAB_ORDER.indexOf(tab);
-    const last = TAB_ORDER.length - 1;
-    const target =
-      event.key === "ArrowRight"
-        ? TAB_ORDER[index === last ? 0 : index + 1]
-        : event.key === "ArrowLeft"
-          ? TAB_ORDER[index === 0 ? last : index - 1]
-          : event.key === "Home"
-            ? TAB_ORDER[0]
-            : event.key === "End"
-              ? TAB_ORDER[last]
-              : undefined;
-    if (target === undefined) return;
-    event.preventDefault();
+  const onTabKeyDown = tablistKeyHandler(TAB_ORDER, tab, (target) => {
     selectTab(target);
     tabRefs.current[target]?.focus();
-  };
+  });
 
   const showCommit = (hash: string, subject: string): boolean => {
     const revealed = onShowCommit(hash, subject);

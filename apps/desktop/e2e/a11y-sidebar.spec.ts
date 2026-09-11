@@ -394,6 +394,39 @@ test("the profile chip announces its menu, and Escape hands focus back", async (
   await expect(chip).toBeFocused();
 });
 
+test("the lens switch is one tab stop, with the arrows moving inside it", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepo("alpha");
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, sandbox, "alpha");
+
+  // role="tablist" promises exactly this. Before, every chip was its own tab
+  // stop and the arrows did nothing, so crossing the strip took six presses.
+  const chips = window.locator(".lens-filter [role='tab']");
+  const count = await chips.count();
+  expect(count).toBeGreaterThan(1);
+  expect(
+    await chips.evaluateAll((els) =>
+      els.filter((el) => (el as HTMLElement).tabIndex === 0).length
+    )
+  ).toBe(1);
+
+  await lensChip(window, "All").focus();
+  const selected = () =>
+    window.locator(".lens-filter [role='tab'][aria-selected='true']");
+  const before = await selected().getAttribute("aria-label");
+
+  await window.keyboard.press("ArrowRight");
+  await expect(selected()).not.toHaveAttribute("aria-label", before ?? "");
+  // Selection and focus travel together in a tablist, which is what makes the
+  // strip announce each lens as you arrow along it.
+  await expect(selected()).toBeFocused();
+
+  await window.keyboard.press("Home");
+  await expect(selected()).toBeFocused();
+});
+
 test("refreshing a worktree list does not throw focus away", async () => {
   sandbox = createGitSandbox();
   sandbox.makeRepo("alpha", { worktrees: ["feature/one"] });
