@@ -1,11 +1,7 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
-import {
-  addRootAndExpand,
-  branchRow,
-  expandRepoGroup
-} from "./fixtures/steps";
+import { addRootAndExpand, branchRow, repoGroup } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -18,6 +14,38 @@ test.afterEach(async () => {
   sandbox?.cleanup();
   sandbox = null;
 });
+
+/**
+ * Panes whose descendants poke out of them, plus which panes were actually
+ * measured. `scrollHeight` on a box that is not a scroll container still
+ * reports the scrollable overflow its descendants produced, which is exactly
+ * what an escaped `.a11y-sr-only` span inflated.
+ *
+ * A pane that is not on screen (the rail, when it is collapsed) is skipped
+ * rather than reported: a missing box is not an overflowing one. `measured`
+ * is returned so a caller can still fail on a selector that has rotted away.
+ */
+async function paneOverflow(
+  page: Page
+): Promise<{ overflowing: string[]; measured: string[] }> {
+  return page.evaluate(() => {
+    const overflowing: string[] = [];
+    const measured: string[] = [];
+    for (const sel of [
+      ".pane--sidebar",
+      ".pane--main",
+      ".pane--rail",
+      ".app-body"
+    ]) {
+      const el = document.querySelector(sel);
+      if (el === null) continue;
+      measured.push(sel);
+      const over = el.scrollHeight - el.clientHeight;
+      if (over > 0) overflowing.push(`${sel}: +${over}px`);
+    }
+    return { overflowing, measured };
+  });
+}
 
 /**
  * The shell is chrome, not a document: nothing may scroll it.
@@ -40,8 +68,14 @@ test.afterEach(async () => {
 test("nothing can scroll the window chrome, whatever overflows a pane", async () => {
   sandbox = createGitSandbox();
   const repo = sandbox.makeRepo("aaa-park");
+  // Dirty, so every third row wears a ●N badge — and a badge carries an
+  // `.a11y-sr-only` span. The sidebar's spans are contained today (`.wt-row`
+  // is positioned, so they never reach the pane); stocking the list with them
+  // is what keeps the pane check below honest as these rows change.
   for (let i = 0; i < 20; i += 1) {
-    repo.addWorktree(`wt/pad-${String(i).padStart(2, "0")}`);
+    repo.addWorktree(`wt/pad-${String(i).padStart(2, "0")}`, {
+      dirty: i % 3 === 0
+    });
   }
 
   handle = await launchApp();
@@ -60,36 +94,55 @@ test("nothing can scroll the window chrome, whatever overflows a pane", async ()
       "position:absolute;left:0;top:0;width:4px;height:calc(100% + 200px);pointer-events:none";
     appBody.appendChild(spike);
 
-    const tops: Record<string, number> = { spiked: titleTop() };
-    document.documentElement.scrollTop = 400;
-    tops["htmlScrollTop"] = titleTop();
-    document.body.scrollTop = 400;
-    tops["bodyScrollTop"] = titleTop();
-    // `globalThis`, not `window`: inside evaluate() the spec's own `window`
-    // (the Playwright Page) shadows the browser global.
-    globalThis.scrollTo(0, 400);
-    tops["windowScrollTo"] = titleTop();
-    // A reveal: the sidebar uses "nearest", the graph's locate uses "center",
-    // and "center" is the one that scrolls every scrollable ancestor whether
-    // the target is visible or not.
     const rows = document.querySelectorAll(".wt-row");
-    rows[rows.length - 1]?.scrollIntoView({ block: "center" });
-    tops["scrollIntoView"] = titleTop();
     // Chromium scrolls a newly focused element into view too, and the last
     // row's controls are the ones below the fold.
     const controls = document.querySelectorAll<HTMLElement>(".wt-row button");
-    controls[controls.length - 1]?.focus();
-    tops["focus"] = titleTop();
+    // Each attempt starts from an un-scrolled chrome and is measured on its
+    // own: leaving the previous one's offset in place would report the same
+    // displacement for every mechanism after the first, and the failure would
+    // name whichever ran first rather than the one that actually scrolled.
+    const moved: Record<string, number> = {};
+    const attempt = (name: string, act: () => void): void => {
+      act();
+      moved[name] = Math.max(
+        Math.abs(titleTop()),
+        // Read the offset while the overflow still exists: it is what the
+        // titlebar's displacement is made of.
+        Math.abs(document.body.scrollTop)
+      );
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    };
 
-    // Read the offset while the overflow still exists: removing the spike
-    // clamps it, which would make a scrolled chrome look innocent.
-    const bodyScrollTop = document.body.scrollTop;
+    attempt("spikeAlone", () => {});
+    attempt("htmlScrollTop", () => {
+      document.documentElement.scrollTop = 400;
+    });
+    attempt("bodyScrollTop", () => {
+      document.body.scrollTop = 400;
+    });
+    // `globalThis`, not `window`: inside evaluate() the spec's own `window`
+    // (the Playwright Page) shadows the browser global.
+    attempt("windowScrollTo", () => globalThis.scrollTo(0, 400));
+    // A reveal: the sidebar uses "nearest", the graph's locate uses "center",
+    // and "center" is the one that scrolls every scrollable ancestor whether
+    // the target is visible or not.
+    attempt("scrollIntoView", () =>
+      rows[rows.length - 1]?.scrollIntoView({ block: "center" })
+    );
+    attempt("focus", () => controls[controls.length - 1]?.focus());
+
     spike.remove();
     return {
-      tops,
-      bodyScrollTop,
-      // Guard against a vacuous pass: both reveals need something to act on.
-      reached: { rows: rows.length, controls: controls.length },
+      moved,
+      // Guard against a vacuous pass: both reveals need something to act on,
+      // and the hidden spans need to be on screen to be worth checking.
+      reached: {
+        rows: rows.length,
+        controls: controls.length,
+        hidden: document.querySelectorAll(".sidebar__list .a11y-sr-only").length
+      },
       // The inner scrollers must still scroll — clipping the chrome is only
       // correct if the panes keep their own overflow.
       sidebarScrolls: (() => {
@@ -100,13 +153,20 @@ test("nothing can scroll the window chrome, whatever overflows a pane", async ()
     };
   });
 
-  for (const [attempt, top] of Object.entries(result.tops)) {
-    expect(top, `${attempt} moved the titlebar`).toBe(0);
+  for (const [attempt, offset] of Object.entries(result.moved)) {
+    expect(offset, `${attempt} scrolled the chrome`).toBe(0);
   }
-  expect(result.bodyScrollTop).toBe(0);
   expect(result.sidebarScrolls).toBe("yes");
   expect(result.reached.rows).toBeGreaterThan(1);
   expect(result.reached.controls).toBeGreaterThan(0);
+  expect(result.reached.hidden).toBeGreaterThan(0);
+
+  // Nothing may hang out of a pane either. With the chrome clipped an escaped
+  // box no longer shows itself — no symptom, no bug report — so a long,
+  // hidden-span-heavy sidebar gets the same check the graph gets below.
+  const panes = await paneOverflow(window);
+  expect(panes.overflowing, "boxes hanging out of a pane").toEqual([]);
+  expect(panes.measured).toContain(".pane--sidebar");
 });
 
 /**
@@ -122,15 +182,14 @@ test("nothing can scroll the window chrome, whatever overflows a pane", async ()
  * window chrome went with it.
  */
 test("locating a tag deep in history leaves nothing hanging out of a pane", async () => {
-  test.setTimeout(90_000);
   sandbox = createGitSandbox();
   const box = sandbox;
   const repo = box.makeRepo("release-history");
   const target = box.git(repo.path, "rev-parse", "HEAD");
   box.git(repo.path, "tag", "v1.0", target);
-  // Bury the tagged commit: its row is ~150 rows down the graph, which is
-  // exactly how far below the window the hidden span used to sit.
-  for (let i = 0; i < 150; i += 1) {
+  // Bury the tagged commit: ~60 rows puts it thousands of pixels below the
+  // fold, which is all the escaped span needed to inflate the document.
+  for (let i = 0; i < 60; i += 1) {
     box.git(repo.path, "commit", "--allow-empty", "-m", `Development ${i + 1}`);
   }
 
@@ -142,10 +201,17 @@ test("locating a tag deep in history leaves nothing hanging out of a pane", asyn
     timeout: 20_000
   });
 
-  const group = await expandRepoGroup(window, "release-history");
-  const block = window.locator(".repo-block", { has: group });
-  const tags = block.getByRole("button", { name: /^Tags 1/ });
+  // Already expanded by addRootAndExpand above — this only needs the locator.
+  const block = window.locator(".repo-block", {
+    has: repoGroup(window, "release-history")
+  });
+  // Exact, not a prefix: /^Tags 1/ would also take "Tags 12" if the fixture
+  // ever grows tags. And read the state back — e2e/AGENTS.md: sidebar
+  // disclosure clicks get dropped, and without this the failure surfaces much
+  // later as a missing Locate button.
+  const tags = block.getByRole("button", { name: "Tags 1", exact: true });
   await tags.click();
+  await expect(tags).toHaveAttribute("aria-expanded", "true");
   await block
     .getByRole("button", { name: "Locate tag v1.0 in lineage", exact: true })
     .click();
@@ -155,23 +221,14 @@ test("locating a tag deep in history leaves nothing hanging out of a pane", asyn
   // `behavior: smooth` — let the scroll it asked for finish before reading.
   await window.waitForTimeout(700);
 
+  const panes = await paneOverflow(window);
+  expect(panes.overflowing, "boxes hanging out of a pane").toEqual([]);
+  expect(panes.measured).toContain(".pane--main");
+
   const after = await window.evaluate(() => ({
     titleTop: document.querySelector(".titlebar")!.getBoundingClientRect().top,
-    bodyScrollTop: document.body.scrollTop,
-    // Nothing may hang out of a pane: `scrollHeight` on a box that is not a
-    // scroll container still reports the scrollable overflow its descendants
-    // produced, which is precisely what the escaped span inflated.
-    escaped: [".pane--sidebar", ".pane--main", ".pane--rail", ".app-body"]
-      .map((sel) => {
-        const el = document.querySelector(sel);
-        if (el === null) return `${sel}: missing`;
-        const over = el.scrollHeight - el.clientHeight;
-        return over > 0 ? `${sel}: +${over}px` : "";
-      })
-      .filter((entry) => entry !== "")
+    bodyScrollTop: document.body.scrollTop
   }));
-
-  expect(after.escaped, "boxes hanging out of a pane").toEqual([]);
   expect(after.titleTop, "the titlebar rode up out of the window").toBe(0);
   expect(after.bodyScrollTop).toBe(0);
 });
