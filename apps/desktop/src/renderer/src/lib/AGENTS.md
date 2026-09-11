@@ -54,6 +54,59 @@ card. A sweep satisfies neither, so the extra path costs no suppression.
 the trigger when the user had tabbed into the card. Anything that renders its
 own hover surface outside that hook owes the same.
 
+## Click-opened overlays go through `useDismissable` / `useModal`
+
+The same rule, for the surfaces a click opens. Do not hand-roll a keydown
+effect: four menus and fourteen dialogs each grew their own, and the result was
+that `.branch-pop` and the sidebar options menu could not be closed from the
+keyboard at all, and five dialogs had no Escape of any kind.
+
+- **A menu**: `useDismissable` + `useMenuNavigation`. The second is not
+  optional if the surface says `role="menu"` — the role promises arrows,
+  Home/End and typeahead, and a screen-reader user told "menu" reaches for
+  them.
+- **A dialog**: `useModal`, which is the two above plus `useFocusTrap`. Give
+  the element `role="dialog"`, `aria-modal="true"` and `tabIndex={-1}`.
+- **A tablist**: `tablistKeys`, plus a roving tab stop
+  (`tabIndex={selected ? 0 : -1}`).
+
+### Escape belongs to exactly one overlay, and focus decides which
+
+`useDismissable` resolves the owner **once per keypress**, from a single
+module-level listener, by which registered surface holds focus (deepest wins,
+trigger included). Three simpler rules are wrong, and each looks right:
+
+- *Listener order.* Everything listens on `window`, so `stopPropagation` has
+  nothing to stop and `stopImmediatePropagation` only reaches listeners added
+  later — backwards for a menu opened inside an existing dialog.
+- *Open order.* React runs child effects before parent effects, so a nested
+  pair mounting in one commit registers innermost-first.
+- *One listener per hook instance.* They all fire for the same key, and
+  dismissing the owner moves focus, so the next listener computes a different
+  owner and dismisses that too — one Escape closing a menu and the dialog
+  behind it.
+
+Focus parked in something **unregistered** means nobody claims the key. Not
+every floating surface uses the hook (the ⌘F repo switcher does not), and
+claiming it there closes the dialog underneath while the user is dismissing the
+thing on top of it. Only "nowhere in particular" (`<body>`, null, detached)
+falls through to the newest overlay.
+
+### Claiming Escape means calling `preventDefault`
+
+`DiffPane` and `FileInsightsPane` close only `if (!event.defaultPrevented)`
+(`features/diff/AGENTS.md` writes this out). An overlay that dismisses without
+claiming takes the pane behind it down too — which is what ContextMenu did.
+`useDismissable` claims for every caller, so this is handled as long as you use
+it.
+
+### `useFocusTrap` captures the opener during render
+
+Not in an effect. React applies `autoFocus` while committing, which is *before*
+passive effects, so a dialog with an autoFocused field — most of them — had
+already moved focus inside itself by the time an effect could look. The hook
+then recorded that field as the opener and restored nothing on close.
+
 ## `useAutoPaging` re-observes on `loading`, never on `error`
 
 `useAutoPaging` fills a tall viewport by rebuilding its IntersectionObserver
