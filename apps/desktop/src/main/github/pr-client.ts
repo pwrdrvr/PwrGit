@@ -1,6 +1,7 @@
 import { graphql, GraphqlResponseError } from "@octokit/graphql";
 import type { PrSummary } from "@pwrgit/shared";
 import { clampRetryDelayMs, delay } from "../util/timing";
+import { forgeOrigin, type ForgeRepo } from "../forge/types";
 import { runGh } from "./gh-cli";
 import {
   buildCommitPrQuery,
@@ -35,8 +36,11 @@ export function clearGitHubTokenCache(): void {
  * instance is a coin toss the caller cannot see. Always ask for the host we are
  * about to query.
  *
- * `GITHUB_TOKEN` stays host-independent deliberately: it is an explicit escape
- * hatch, and an operator who exports one has said which forge they mean.
+ * `GITHUB_TOKEN` applies to **github.com only**. It is a github.com PAT in
+ * every convention that sets it, and sending it to a self-managed Enterprise
+ * host would hand that server a credential for a forge it has nothing to do
+ * with. `gh` draws the same line (`GH_ENTERPRISE_TOKEN` is a separate
+ * variable), so an Enterprise host falls through to `gh auth token` instead.
  */
 export async function getGitHubToken(
   host: string = GITHUB_DOT_COM
@@ -46,7 +50,8 @@ export async function getGitHubToken(
   if (cached !== undefined && Date.now() - cached.at < TOKEN_TTL_MS) {
     return cached.token;
   }
-  const env = process.env.GITHUB_TOKEN?.trim();
+  const env =
+    key === GITHUB_DOT_COM ? process.env.GITHUB_TOKEN?.trim() : undefined;
   if (env) {
     tokenCache.set(key, { token: env, at: Date.now() });
     return env;
@@ -64,17 +69,24 @@ export async function getGitHubToken(
 }
 
 /**
- * The GraphQL base URL for a GitHub host.
+ * The GraphQL base URL for a GitHub repo's host.
  *
  * `@octokit/graphql` appends `/graphql` to whatever `baseUrl` it is given, so
  * Enterprise Server wants `https://HOST/api` and github.com wants the SaaS
  * endpoint it already defaults to. Returning undefined for github.com keeps
  * that default rather than restating it, so this cannot drift from Octokit.
+ *
+ * Built from `forgeOrigin` — the same helper the GitLab client uses — so a
+ * remote that named a non-default web port keeps it. Dropping the port would
+ * send the Enterprise token at whatever answers on 443 instead.
  */
-export function githubGraphqlBaseUrl(host: string): string | undefined {
-  const key = host.trim().toLowerCase();
-  if (key === GITHUB_DOT_COM || key === "") return undefined;
-  return `https://${key}/api`;
+export function githubGraphqlBaseUrl(
+  repo: Pick<ForgeRepo, "host" | "port">
+): string | undefined {
+  const key = repo.host.trim().toLowerCase();
+  if (key === "") return undefined;
+  if (key === GITHUB_DOT_COM && repo.port === undefined) return undefined;
+  return `${forgeOrigin({ ...repo, host: key })}/api`;
 }
 
 export type GhStatus = { installed: boolean; loggedIn: boolean };
@@ -116,11 +128,11 @@ function retryDelayMs(error: unknown, attempt: number): number | null {
 
 async function runQuery(
   token: string,
-  host: string,
+  repo: Pick<ForgeRepo, "host" | "port">,
   query: string,
   variables: Record<string, string | number>
 ): Promise<unknown> {
-  const base = githubGraphqlBaseUrl(host);
+  const base = githubGraphqlBaseUrl(repo);
   const client = graphql.defaults({
     headers: { authorization: `token ${token}` },
     // Absent for github.com so Octokit's own default endpoint stands.
@@ -147,16 +159,16 @@ async function runQuery(
 /** Fetch the most-recent PR for each branch in one repo (batched + backed off). */
 export async function fetchPrsForRepo(
   token: string,
-  host: string,
+  repo: Pick<ForgeRepo, "host" | "port">,
   owner: string,
-  repo: string,
+  name: string,
   branches: string[]
 ): Promise<Map<string, PrSummary | null>> {
   const result = new Map<string, PrSummary | null>();
   for (let i = 0; i < branches.length; i += BATCH) {
     const chunk = branches.slice(i, i + BATCH);
-    const { query, variables } = buildPrQuery(owner, repo, chunk);
-    const data = await runQuery(token, host, query, variables);
+    const { query, variables } = buildPrQuery(owner, name, chunk);
+    const data = await runQuery(token, repo, query, variables);
     for (const [branch, pr] of parsePrResponse(chunk, data)) {
       result.set(branch, pr);
     }
@@ -167,16 +179,16 @@ export async function fetchPrsForRepo(
 /** Fetch the best PR associated with each exact commit in batched GraphQL calls. */
 export async function fetchPrsForCommits(
   token: string,
-  host: string,
+  repo: Pick<ForgeRepo, "host" | "port">,
   owner: string,
-  repo: string,
+  name: string,
   commitHashes: string[]
 ): Promise<Map<string, PrSummary | null>> {
   const result = new Map<string, PrSummary | null>();
   for (let i = 0; i < commitHashes.length; i += BATCH) {
     const chunk = commitHashes.slice(i, i + BATCH);
-    const { query, variables } = buildCommitPrQuery(owner, repo, chunk);
-    const data = await runQuery(token, host, query, variables);
+    const { query, variables } = buildCommitPrQuery(owner, name, chunk);
+    const data = await runQuery(token, repo, query, variables);
     for (const [hash, pr] of parseCommitPrResponse(chunk, data)) {
       result.set(hash, pr);
     }
@@ -187,16 +199,16 @@ export async function fetchPrsForCommits(
 /** Refresh already-discovered PRs once per unique number. */
 export async function fetchPrsByNumbers(
   token: string,
-  host: string,
+  repo: Pick<ForgeRepo, "host" | "port">,
   owner: string,
-  repo: string,
+  name: string,
   numbers: number[]
 ): Promise<Map<number, PrSummary | null>> {
   const result = new Map<number, PrSummary | null>();
   for (let i = 0; i < numbers.length; i += BATCH) {
     const chunk = numbers.slice(i, i + BATCH);
-    const { query, variables } = buildPrNumberQuery(owner, repo, chunk);
-    const data = await runQuery(token, host, query, variables);
+    const { query, variables } = buildPrNumberQuery(owner, name, chunk);
+    const data = await runQuery(token, repo, query, variables);
     for (const [number, pr] of parsePrNumberResponse(chunk, data)) {
       result.set(number, pr);
     }

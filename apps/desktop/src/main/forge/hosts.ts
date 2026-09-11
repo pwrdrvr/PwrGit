@@ -1,4 +1,5 @@
 import {
+  canonicalForgeHostname,
   type ForgeHostConfig,
   type ForgeKind,
   type ForgeSettings,
@@ -46,9 +47,10 @@ export type ForgeHostEntry = ResolvedForgeHost & {
   scopes?: string[];
 };
 
+/** Shared with the settings write path, so a stored key always matches a
+ *  lookup. An unusable hostname collapses to "" and matches nothing. */
 function canonical(host: string): string {
-  const trimmed = host.trim().toLowerCase();
-  return trimmed.startsWith("www.") ? trimmed.slice(4) : trimmed;
+  return canonicalForgeHostname(host) ?? "";
 }
 
 /** Parse a comma-separated host allowlist. Returns null when unset, which is
@@ -94,9 +96,23 @@ export class ForgeHosts {
     this.env = deps.env ?? process.env;
   }
 
+  /** Memoized on the array identity: `discovered()` returns the caller's
+   *  cached list, so the map is rebuilt only when that list is replaced —
+   *  `kindFor` sits on the per-refresh remote-resolution path and must not
+   *  rescan for every question asked about a host. */
+  private discoveredIndex:
+    | { source: readonly DiscoveredForgeHost[]; byHost: Map<string, DiscoveredForgeHost> }
+    | null = null;
+
   private discoveredFor(host: string): DiscoveredForgeHost | undefined {
-    const key = canonical(host);
-    return this.discovered().find((entry) => entry.host === key);
+    const source = this.discovered();
+    if (this.discoveredIndex?.source !== source) {
+      this.discoveredIndex = {
+        source,
+        byHost: new Map(source.map((entry) => [entry.host, entry]))
+      };
+    }
+    return this.discoveredIndex.byHost.get(canonical(host));
   }
 
   private isSignedIn(host: string): boolean {
@@ -229,14 +245,19 @@ export class ForgeHosts {
    */
   overrides(): ForgeHostOverrides {
     const map: Record<string, ForgeKind> = {};
+    // Applied weakest-first, so the LAST writer wins and the result matches
+    // `kindFor`'s env > config > discovered order exactly. Building this map
+    // in the opposite order is how the resolver and the settings pane end up
+    // routing the same host to two different providers.
+    for (const found of this.discovered()) map[found.host] = found.kind;
+    for (const [host, config] of Object.entries(this.readSettings().hosts)) {
+      const key = canonical(host);
+      if (key !== "" && config.kind !== undefined) map[key] = config.kind;
+    }
     const github = envHosts(this.env, GITHUB_HOSTS_ENV);
     if (github !== null) for (const host of github) map[host] = "github";
     const gitlab = envHosts(this.env, GITLAB_HOSTS_ENV);
     if (gitlab !== null) for (const host of gitlab) map[host] = "gitlab";
-    for (const found of this.discovered()) map[found.host] = found.kind;
-    for (const [host, config] of Object.entries(this.readSettings().hosts)) {
-      if (config.kind !== undefined) map[canonical(host)] = config.kind;
-    }
     return map;
   }
 }

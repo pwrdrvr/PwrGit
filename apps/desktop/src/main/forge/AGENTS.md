@@ -18,10 +18,31 @@ speaks `PrSummary` and never learns which forge answered.
   it forever. `withNullsForMissing()` does this. The one deliberate exception is
   a *failed* commit lookup, which is omitted so a network blip is not cached as
   "no MR".
-- **Host detection can't be certain** (`resolve.ts`). The two SaaS hostnames and
-  a `gitlab.*` prefix are all we can know; anything else needs an explicit
-  override, and until then resolution returns null and the feature no-ops —
-  the same best-effort behavior as before this module existed.
+- **Forge hosts are enumerated, not guessed** (`cli-hosts.ts`, `hosts.ts`).
+  `gh auth status --json hosts` and `glab auth status --all` report what each
+  CLI is signed in to, and enumeration carries the product with it — `gh` only
+  knows GitHub hosts, `glab` only GitLab ones. The user may also add a host by
+  hand, naming the instance and its product together. **A git remote is never a
+  source**: it is an ssh target, so a NAS or a box on a home network would
+  otherwise earn a settings row and a "which forge is this?" question.
+  `ForgeHosts.kindFor` returns null for anything unknown, and null is silent —
+  no row, no prompt, no feature — exactly the best-effort no-op this module has
+  always had for an unrecognized remote.
+  - `glab auth status` writes its report to **stderr**. Reading it through
+    `runGlab`'s resolved stdout returns an empty string and enumerates nothing,
+    silently, on a machine that is signed in — use the runner's `onStderr` hook,
+    and keep a non-zero exit's output (glab exits non-zero when ANY configured
+    instance fails, and the hosts it did reach are still in there).
+  - `gh` supports several accounts per host; take the **active** one, since that
+    is the credential `gh api --hostname` would use.
+  - **`resolve.ts`'s `classifyForgeHost` still applies a `gitlab.*` prefix
+    rule.** That predates enumeration and `ForgeHosts` deliberately does not
+    honour it. Until the two are reconciled, a `gitlab.*` host resolves for PR
+    status while `ForgeHosts` reports it unknown — do not add a third spelling
+    of this question.
+  - **Canonicalize with `canonicalForgeHostname` (shared), everywhere.** The
+    settings write path and host resolution must agree byte-for-byte, or a
+    setting persists under a key no lookup matches and silently does nothing.
 - **`cli-runner.ts` is the audited `gh`/`glab` process spawner** — no inherited
   TTY, no prompt, bounded output, and credentials never reaching a diagnostic.
   It is `gh-cli.ts`'s former body with the brand-specific parts lifted into a

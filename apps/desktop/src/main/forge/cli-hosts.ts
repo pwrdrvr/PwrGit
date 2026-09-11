@@ -98,8 +98,11 @@ export function parseGlabHosts(text: string): DiscoveredForgeHost[] {
   const out: DiscoveredForgeHost[] = [];
   let current: string | null = null;
   for (const raw of text.split("\n")) {
-    // Strip ANSI colour; glab writes it even when not a TTY in some versions.
-    const line = raw.replace(/\[[0-9;]*m/g, "").replace(/\r$/, "");
+    // Strip ANSI colour. Written as \u001b rather than a literal ESC byte:
+    // an invisible control character in source is unreadable in a diff and
+    // easy to drop in a copy-paste, which would silently break every
+    // coloured line.
+    const line = raw.replace(/\u001b\[[0-9;]*m/g, "").replace(/\r$/, "");
     const hostMatch = GLAB_HOST_LINE.exec(line);
     if (hostMatch?.[1] !== undefined) {
       current = canonical(hostMatch[1]);

@@ -43,6 +43,24 @@ export type ForgeHostMap = Readonly<Record<string, "github" | "gitlab">>;
  * renderer's dialogs and the main process can never disagree about which
  * provider owns a remote.
  */
+/**
+ * The one spelling of a hostname every layer must agree on.
+ *
+ * Config keys are written by the settings pane and read by host resolution; if
+ * the two canonicalize differently, a setting persists under a key no lookup
+ * ever matches and silently does nothing. Returns null for anything that is
+ * not a bare hostname — a port, a path, or a space means the caller has a URL
+ * or a typo, not a host.
+ */
+export function canonicalForgeHostname(value: string): string | null {
+  const host = value.trim().toLowerCase().replace(/^www\./, "");
+  if (host === "") return null;
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(host)) {
+    return null;
+  }
+  return host;
+}
+
 export function classifyForgeHost(
   hostname: string,
   overrides: ForgeHostMap = {}

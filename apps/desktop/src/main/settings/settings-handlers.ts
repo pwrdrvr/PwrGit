@@ -10,6 +10,7 @@ import {
   isSidebarTextSize,
   isUpdateChannel,
   isUpdateTrain,
+  canonicalForgeHostname,
   ok,
   resolveUpdateSelection,
   type AppSettingsPatch,
@@ -167,10 +168,12 @@ function sanitizeForgeHosts(
   if (patch === undefined) return undefined;
   const out: Record<string, ForgeHostConfig | null> = {};
   for (const [rawHost, value] of Object.entries(patch)) {
-    const host = rawHost.trim().toLowerCase();
-    // A hostname with a slash or a space is not a hostname; refuse rather than
-    // storing a key no resolver will ever match.
-    if (host === "" || /[^a-z0-9.:-]/.test(host)) continue;
+    // The SAME canonicalization host resolution uses. Lower-casing alone is
+    // not enough: `www.` is stripped on read, and a port or a path is not a
+    // hostname at all — either would persist under a key no lookup can match,
+    // leaving a setting that appears saved and silently does nothing.
+    const host = canonicalForgeHostname(rawHost);
+    if (host === null) continue;
     if (value === null) {
       out[host] = null;
       continue;

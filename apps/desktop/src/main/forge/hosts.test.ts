@@ -182,6 +182,26 @@ describe("ForgeHosts.overrides", () => {
     expect(hosts.isEnabled("git.contoso.dev").enabled).toBe(false);
   });
 
+  it("resolves the same way kindFor does when env and config disagree", () => {
+    // The map handed to resolveForgeRepo and the answer the pane paints must
+    // agree, or one host routes to two different providers.
+    const hosts = make({
+      hosts: { "h.example": { kind: "gitlab" } },
+      env: { PWRGIT_GITHUB_HOSTS: "h.example" }
+    });
+    expect(hosts.kindFor("h.example").kind).toBe("github");
+    expect(hosts.overrides()["h.example"]).toBe("github");
+  });
+
+  it("lets config override a discovered host in both places", () => {
+    const hosts = make({
+      hosts: { "h.example": { kind: "github" } },
+      discovered: [GL("h.example")]
+    });
+    expect(hosts.kindFor("h.example").kind).toBe("github");
+    expect(hosts.overrides()["h.example"]).toBe("github");
+  });
+
   it("includes env-named hosts", () => {
     const hosts = make({
       env: { PWRGIT_GITHUB_HOSTS: "ghe.acme.com, Other.Example " }
@@ -262,5 +282,22 @@ describe("ForgeHosts.list", () => {
     expect(make({ hosts: { "nas.local": { enabled: false } } }).list()).toEqual(
       []
     );
+  });
+});
+
+describe("ForgeHosts canonicalization", () => {
+  it("matches a stored key however the caller spells the host", () => {
+    const hosts = make({ hosts: { "git.example": { kind: "gitlab" } } });
+    for (const spelling of ["git.example", "GIT.EXAMPLE", "www.git.example", " Git.Example "]) {
+      expect(hosts.kindFor(spelling).kind).toBe("gitlab");
+    }
+  });
+
+  it("matches nothing for a key that is not a bare hostname", () => {
+    // The write path refuses these, so nothing should ever be stored under
+    // one — but a hand-edited settings file must not resolve either.
+    const hosts = make({ hosts: { "ghe.example:8443": { kind: "github" } } });
+    expect(hosts.kindFor("ghe.example").kind).toBeNull();
+    expect(hosts.list()).toEqual([]);
   });
 });

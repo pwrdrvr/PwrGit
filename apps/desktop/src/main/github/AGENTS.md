@@ -14,8 +14,18 @@ claims `origin`'s host, the CLI isn't logged in, or the network fails.
   `gh api repos/{nwo}` for one repository — REST is the only GitHub response
   carrying `source`, the fork-network root, alongside `parent`. `fork()` reads
   the result back, which makes "created" and "already exists" one path.
-- **Auth**: `getGitHubToken()` prefers `GITHUB_TOKEN`, else `gh auth token`
-  (reuses the user's gh login — no separate flow). Cached ~5 min.
+- **Auth**: `getGitHubToken(host)` takes the host it is about to query and
+  runs `gh auth token --hostname <host>` (reuses the user's gh login — no
+  separate flow). Cached ~5 min, **keyed by host**: a single-slot cache hands
+  one host's token to another for the rest of the TTL.
+  `GITHUB_TOKEN` applies to **github.com only** — it is a github.com PAT by
+  every convention that sets it, and sending it to a self-managed Enterprise
+  host would hand that server a credential for an unrelated forge. `gh` draws
+  the same line with a separate `GH_ENTERPRISE_TOKEN`.
+- **Enterprise endpoints**: `githubGraphqlBaseUrl(repo)` builds the GraphQL
+  base from `forgeOrigin` — the same helper the GitLab client uses — so a
+  remote that named a non-default web port keeps it. github.com returns
+  undefined so Octokit's own default stands rather than being restated.
 - **`gh-cli.ts` is a thin binding** over the shared, audited spawner in
   `../forge/cli-runner.ts`; it holds GitHub's vocabulary (binary, token shapes,
   sensitive env names) and nothing else. Its test still covers the runner.

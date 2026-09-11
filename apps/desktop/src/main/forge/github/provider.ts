@@ -24,7 +24,7 @@ export const githubProvider: ForgeProvider = {
     const parts = githubOwnerAndName(repo);
     if (parts === null) return emptyFor(branches);
     return stampForge(
-      await fetchPrsForRepo(token, repo.host, parts.owner, parts.name, branches),
+      await fetchPrsForRepo(token, repo, parts.owner, parts.name, branches),
       repo
     );
   },
@@ -35,7 +35,7 @@ export const githubProvider: ForgeProvider = {
     return stampForge(
       await fetchPrsForCommits(
         token,
-        repo.host,
+        repo,
         parts.owner,
         parts.name,
         commitHashes
@@ -48,7 +48,7 @@ export const githubProvider: ForgeProvider = {
     const parts = githubOwnerAndName(repo);
     if (parts === null) return new Map<number, PrSummary | null>();
     return stampForge(
-      await fetchPrsByNumbers(token, repo.host, parts.owner, parts.name, numbers),
+      await fetchPrsByNumbers(token, repo, parts.owner, parts.name, numbers),
       repo
     );
   }

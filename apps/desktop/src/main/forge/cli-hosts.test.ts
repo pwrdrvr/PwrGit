@@ -117,7 +117,11 @@ gitlab.broken.example
   });
 
   it("tolerates ANSI colour and CRLF", () => {
-    const text = "[0;32mgitlab.com[0m\r\n  [0;32m✓[0m Logged in to gitlab.com as octo-dev (keyring)\r\n";
+    // \u001b, not a literal ESC: the escape has to be visible here or the
+    // test silently stops exercising ANSI at all.
+    const text =
+      "\u001b[0;32mgitlab.com\u001b[0m\r\n" +
+      "  \u001b[0;32m✓\u001b[0m Logged in to gitlab.com as octo-dev (keyring)\r\n";
     expect(parseGlabHosts(text)).toEqual([
       { kind: "gitlab", host: "gitlab.com", account: "octo-dev" }
     ]);
