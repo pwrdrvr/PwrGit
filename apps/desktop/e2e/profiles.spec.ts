@@ -150,9 +150,15 @@ test("creating a profile opens its own window with repos from all roots", async 
   // Picking the profile again anywhere focuses the existing window — never a
   // third one. (Drive it from the original window's menu.)
   await window.locator(".profile-chip").click();
-  await window
-    .locator(".profile-menu__item", { hasText: "Acme" })
-    .click();
+  const acmeRow = window.locator(".profile-menu__item", { hasText: "Acme" });
+  // The only place two profiles coexist, so the only place the unchecked half
+  // of `aria-checked={isActive}` can be asserted: with one profile seeded,
+  // "exactly one row is checked" is true however the expression is written.
+  await expect(acmeRow).toHaveAttribute("aria-checked", "false");
+  await expect(
+    window.locator(".profile-menu__item", { hasText: "Personal" })
+  ).toHaveAttribute("aria-checked", "true");
+  await acmeRow.click();
   await window.waitForTimeout(600);
   expect(handle.app.windows().length).toBe(2);
 });

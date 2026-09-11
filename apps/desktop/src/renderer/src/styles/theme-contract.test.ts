@@ -92,7 +92,8 @@ const INHERITS_FROM_DARK = new Set([
   "--radius-sm",
   "--radius-md",
   "--radius-lg",
-  "--radius-xl"
+  "--radius-xl",
+  "--popover-gap" // popover-to-trigger spacing; not a color
 ]);
 
 describe("theme contract", () => {

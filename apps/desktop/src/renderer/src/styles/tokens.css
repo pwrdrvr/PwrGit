@@ -170,6 +170,13 @@
   --radius-lg: 10px;
   --radius-xl: 14px;
 
+  /* Gap between a popover and the control it hangs from. One value so the
+     next trigger-anchored menu inherits the spacing instead of copying a
+     number out of whichever rule its author happened to read — which is how
+     .profile-menu drifted from .branch-pop and ended up overlapping its own
+     chip. */
+  --popover-gap: 6px;
+
   /* Shadows. Drop shadows stay dark in both themes (standard drop-shadow
      pattern), so --shadow-base does not flip; the light block only lowers the
      alphas, because dark-theme weights read as a hard slab against white. */
