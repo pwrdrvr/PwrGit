@@ -87,10 +87,10 @@ export type LiveEventCapabilities = {
     repositoryRoots: readonly string[] | null;
   };
   mcp: {
-    transport: "stdio";
-    primary: "subscribable_status_resource";
+    transport: "stdio" | "streamable_http";
+    primary: "subscribable_status_resource" | "websocket";
     resourceSubscriptions: {
-      supported: true;
+      supported: boolean;
       resourceTemplate: "pwrgit://status/v1/{watchId}";
       updateNotification: "notifications/resources/updated";
       behavior: string;
@@ -265,7 +265,8 @@ export class LiveEventServer {
   }
 
   capabilities(
-    authorization: McpAuthorization = this.initialAuthorization
+    authorization: McpAuthorization = this.initialAuthorization,
+    supportsSubscriptions = true
   ): LiveEventCapabilities {
     if (this.port === null) throw new Error("live event server is not started");
     return {
@@ -285,14 +286,15 @@ export class LiveEventServer {
             : [...authorization.repositoryRoots]
       },
       mcp: {
-        transport: "stdio",
-        primary: "subscribable_status_resource",
+        transport: supportsSubscriptions ? "stdio" : "streamable_http",
+        primary: supportsSubscriptions ? "subscribable_status_resource" : "websocket",
         resourceSubscriptions: {
-          supported: true,
+          supported: supportsSubscriptions,
           resourceTemplate: "pwrgit://status/v1/{watchId}",
           updateNotification: "notifications/resources/updated",
-          behavior:
-            "Call pwrgit_watch_repository, read the returned URI, subscribe with resources/subscribe, and re-read after each notifications/resources/updated notification. The WebSocket is an optional fallback for hosts that do not expose MCP resource subscriptions."
+          behavior: !supportsSubscriptions
+            ? "Read status resources on demand or use the WebSocket for live updates. Stateless HTTP does not support resource subscriptions."
+            : "Call pwrgit_watch_repository, read the returned URI, subscribe with resources/subscribe, and re-read after each notifications/resources/updated notification. The WebSocket is an optional fallback for hosts that do not expose MCP resource subscriptions."
         }
       },
       websocket: {

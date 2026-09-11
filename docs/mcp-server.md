@@ -1,28 +1,88 @@
 # PwrGit MCP server and live-status protocol
 
-The PwrGit MCP server is a standalone, read-only stdio process under
-`packages/mcp-server`. It follows the Pwr family conventions established by
+PwrGit exposes app state and explicit workspace navigation through MCP, plus
+read-only Git discovery and live status. The server lives under `packages/mcp-server`, available
+as a standalone stdio process or through the desktop app’s opt-in HTTP listener. It follows the Pwr family conventions established by
 PwrSnap: the official TypeScript SDK, explicit capabilities, structured tool
-results, read-only tool annotations, typed resources, stderr-only diagnostics,
+results, accurate tool annotations, typed resources, stderr-only diagnostics,
 bounded inputs, fail-closed RBAC, named revocable Sessions, and contract-level
 integration tests.
 
-The Electron app does not need to remain running. Settings → Agents owns the
+The Electron app does not need to remain running for stdio clients; HTTP
+clients require the app and its local-agent listener to remain running. Settings → Agents owns the
 authorization graph and writes the cross-platform `mcp-policy.json` consumed
 by standalone processes.
 
+## Running-app tools (`pwrgit.app/v1`)
+
+Use the desktop HTTP connection for app state. Standalone stdio tools cannot
+see PwrGit's profiles or navigation history and do not advertise these tools.
+
+| Tool | Purpose |
+| --- | --- |
+| `pwrgit_app_profiles` | Profile names, configured roots, active profile and authorized repository counts; no account email or credentials |
+| `pwrgit_app_repositories` | Search indexed repositories by name, path or branch, across profiles or within `profileId`; return worktrees, paths, pins, saved selection and cached status |
+| `pwrgit_app_recent_repositories` | Only repositories with recorded visits, newest first; explicit ordering and history coverage |
+| `pwrgit_app_open` | Open/focus the repository's profile window and optionally reveal a particular worktree |
+| `pwrgit_app_refresh` | Reconcile externally added/removed worktrees and refresh cached state using the same app services as the UI |
+
+For “where are my most recently used repositories?”, call
+`pwrgit_app_recent_repositories` with `{"limit":10}`. Results explicitly declare
+`ordering.by=lastViewedAt`, descending direction, and exclude unvisited repos.
+Results include `profileName` beside each repository and `profileCoverage` with
+per-profile matching, visited, and returned counts. Ordering is global before the
+limit is applied; the active profile receives no preference. A single-profile
+page can still be correct if its visits are newest or other profiles lack history.
+The `history` object reports authorized matching repositories with and without
+visit records, so partial history cannot be mistaken for complete usage history.
+Discovery-root responses link to this tool rather than implying that root order
+is recent-use order.
+`lastViewedAt` records actual selection in PwrGit, aggregated from worktrees;
+`lastCommitAt` is a separate Git timestamp. Missing history stays `null` and
+sorts last. The response includes `total` and `truncated`; the limit is 1–100.
+Each repository also includes `worktreeCount` (primary plus linked),
+`linkedWorktreeCount`, `pinnedWorktreeCount`, and `pinnedWorktreeBranchCount`
+(distinct branch names among pinned worktrees, excluding detached, bare, and
+unknown branch labels). The app has no separate
+branch-favorite flag; repository `pinned` remains independent of worktree pins.
+Each worktree exposes `pinned`, `isPrimary`, and `missing`. Counts include
+registered missing checkouts, match the authorized returned worktree list, and
+never include worktrees hidden by the Session's repository boundary.
+
+The index can be stale until refreshed; cached dirty/ahead/behind counts are
+not a fresh Git or network request.
+
+Navigation history is persisted in PwrGit's SQLite state, per profile. Existing
+sidebar localStorage history imports when a profile window selects a worktree.
+A saved selection describes that profile's last selected worktree; it does not
+prove the window is currently open. Opening a window through MCP updates history
+through the same renderer selection path as a click.
+
+Choose **Local Repository Reader** or **Live Forge Status** for the app read and
+refresh tools. **PwrGit Workspace Control** additionally grants `app.navigate`.
+Existing Sessions do not gain navigation implicitly: OAuth scopes and role
+permissions must both grant it. Reauthorize if the original OAuth scope excluded
+`app.navigate`. Repository boundaries filter catalog entries and worktrees and
+are rechecked before an action. No arbitrary command dispatch, commit, push,
+file editing or destructive Git operation is exposed by these app tools.
+
+Desktop root discovery now uses profile roots and indexed repositories rather
+than the Electron process's working directory. Standalone discovery retains its
+bounded configured/conventional-folder behavior.
+
 ## Authorization policy v1
 
-Every MCP process must receive a named Session token through
-`PWRGIT_MCP_SESSION_TOKEN`. Stdio is a one-client process transport, so the
+Every standalone MCP process must receive a named Session token through
+`PWRGIT_MCP_SESSION_TOKEN`. HTTP clients send their Session token as a Bearer
+credential on every request. Stdio is a one-client process transport, so the
 Session environment is its client principal; HTTP OAuth would add a second
 identity ceremony without improving isolation for that transport. The token is
-256 random bits, is shown once, and is stored only as a SHA-256 hash in a
+256 random bits, is returned to the OAuth client at token exchange, and is stored only as a SHA-256 hash in a
 user-private policy file. `PWRGIT_MCP_POLICY_FILE` overrides the standard
 PwrGit app-data path when needed.
 
 Settings → Agents visualizes **Session → role → effective permissions and
-repository boundary**. It can create and revoke Sessions, assign roles, and
+repository boundary**. It can revoke Sessions, assign roles, and
 create, edit, or delete custom roles. Built-in roles are immutable and checked
 against their canonical definitions on every policy read.
 
@@ -32,8 +92,9 @@ The versioned capabilities are:
 | --- | --- |
 | `repository.roots.read` | Bounded root discovery |
 | `repository.checkout.locate` | Checkout lookup by forge identity |
-| `repository.metadata.read` | Remotes, branches, worktrees, and safe local status |
+| `repository.metadata.read` | App profiles, indexed repositories, navigation history, worktrees, safe local status, and index refresh |
 | `forge.status.read` | PR/MR, CI, conflict, and review reads through `gh`/`glab` |
+| `app.navigate` | Open/focus authorized repositories and worktrees in PwrGit |
 | `status.subscribe` | MCP resource subscriptions and WebSocket fallback subscriptions |
 
 A role's `repositoryRoots: null` allows the server's bounded discovery rules.
@@ -50,11 +111,68 @@ them. Invalid JSON, missing canonical built-ins, role drift, unknown Sessions,
 and missing permissions all fail closed. Tool annotations remain descriptive
 MCP metadata; they are not used as authorization.
 
+## Connect an agent
+
+Enable **Settings → Agents → Enable local-agent access**. PwrGit serves
+MCP at `http://127.0.0.1:51731/mcp` while enabled and running. The preference
+persists across app restarts; it defaults to off.
+
+**Claude Code**
+
+```bash
+claude mcp add --scope user --transport http pwrgit http://127.0.0.1:51731/mcp
+claude mcp login pwrgit
+```
+
+**Codex CLI**
+
+```bash
+codex mcp add pwrgit --url http://127.0.0.1:51731/mcp --oauth-client-registration dcr
+```
+
+The client opens PwrGit’s native approval window. Choose a Session Name and
+role, then Approve or Deny. Only that window’s main frame can submit the
+decision. The browser page has no form or script and cannot approve access.
+Settings lists the resulting Session and supports role changes and revocation.
+
+This uses the same connection shape as PwrSnap: public OAuth clients, dynamic
+registration, authorization-code flow with PKCE S256 and a resource indicator,
+native approval, and non-expiring revocable access tokens. Product name,
+port, tools, and role permissions are PwrGit-specific.
+
+| Route | Behavior |
+| --- | --- |
+| `/.well-known/oauth-authorization-server` | Authorization server metadata |
+| `/.well-known/oauth-protected-resource/mcp` | MCP resource metadata |
+| `POST /register` | Dynamic registration; registration alone grants nothing |
+| `GET /authorize` | Validate the request and open native approval |
+| `GET /authorize/status` | Browser waiting page or PKCE-bound redirect |
+| `POST /token` | Exchange a single-use authorization code |
+| `POST /revoke` | Revoke the calling client’s token |
+| `POST /mcp` | Stateless Streamable HTTP, authenticated on every request |
+
+An unauthenticated MCP POST returns `401` with a `WWW-Authenticate` challenge
+pointing to resource metadata. Every other MCP method returns `405` and
+`Allow: POST`; HTTP does not create transport sessions or standalone SSE
+streams. Authorization codes and pending approvals expire after five minutes.
+Disabling the listener cancels pending approvals and invalidates unused codes.
+
+Client registrations survive app restarts in the private
+`mcp-oauth-clients.json`; Session tokens are stored only as hashes in
+`mcp-policy.json`. Tokens are bound to their OAuth client and consented scopes.
+Later role edits cannot enlarge an OAuth Session beyond those scopes.
+HTTP accepts only OAuth-issued Sessions. There are no custom pairing endpoints
+or manual credential-creation controls.
+
+Existing standalone stdio clients remain compatible with their saved Session
+tokens. Revoking those Sessions disables them too; turning off the HTTP listener
+does not stop an independently launched stdio process.
+
 ## Transport decision
 
-The MCP server uses stdio because it has the broadest local-client support and
-does not create a separately discoverable HTTP control plane. MCP defines
-standard resource subscriptions, so normalized live status uses those first:
+The standalone MCP server uses stdio; the optional desktop listener uses
+Streamable HTTP. MCP defines
+standard resource subscriptions on stdio, so those clients use:
 
 1. Call `pwrgit_watch_repository` with an absolute worktree path.
 2. Read the returned `pwrgit://status/v1/{watchId}` resource.
@@ -62,8 +180,11 @@ standard resource subscriptions, so normalized live status uses those first:
 4. When PwrGit sends `notifications/resources/updated`, re-read the URI.
 5. Send `resources/unsubscribe` when the status is no longer needed.
 
-The server advertises `resources: { subscribe: true, listChanged: true }`
-during MCP initialization. This is the interoperable path defined by the
+The stdio server advertises `resources: { subscribe: true, listChanged: true }`.
+Stateless HTTP advertises no resource subscriptions: read status resources on
+demand, or use the WebSocket for live updates. Watch resources and WebSocket
+capabilities remain isolated per authorized Session across HTTP requests and
+are cleared when the listener stops. This is the interoperable path defined by the
 [MCP resource specification](https://modelcontextprotocol.io/specification/2025-11-25/server/resources).
 
 Some hosts negotiate subscriptions but do not surface resource updates as a
@@ -78,6 +199,24 @@ under-scoped client cannot obtain the fallback capability URL.
 
 ## Repository discovery and metadata
 
+Every tool parameter, so a client does not have to guess a name:
+
+| Tool | Required | Optional |
+| --- | --- | --- |
+| `pwrgit_repository_roots` | — | `roots` (string[]), `includeConventional` (boolean, default true), `maxDepth` (0-5, default 4) |
+| `pwrgit_find_checkout` | `repository` (string) | `provider` (`github`\|`gitlab`), `roots` (string[]), `maxDepth` (0-5), `maxResults` (1-20) |
+| `pwrgit_repository_info` | `path` (string) | `maxWorktrees` (1-64, default 10) |
+| `pwrgit_watch_repository` | `path` (string) | `intervalMs` (5000-300000, default 15000) |
+| `pwrgit_live_status_capabilities` | — | — |
+
+The repository argument is named `repository`, not `identity`, and the path
+arguments are named `path`, not `repositoryPath`.
+
+Every tool returns its full result in `structuredContent` **and** as a
+serialized JSON text block, so a host that renders only `content` still shows
+the caller the data.
+
+
 `pwrgit_repository_roots` inspects, in priority order:
 
 - roots explicitly supplied by the caller;
@@ -86,8 +225,9 @@ under-scoped client cannot obtain the fallback capability URL.
   filesystem root;
 - existing conventional folders under the home directory.
 
-Each scan has a maximum depth of five, a per-root directory budget, a 20,000
-directory total budget, 32 roots, and explicit skip folders (`node_modules`,
+Each scan uses a depth of four by default and five at most, a per-root
+directory budget, a 20,000 directory total budget, 32 roots, and explicit skip
+folders (`node_modules`,
 `.git`, build output, caches, `Library`, and similar). Directory symlinks are
 not followed. Checkout matching inspects at most 500 discovered repositories.
 Results say when a budget truncated the scan.
@@ -119,8 +259,14 @@ it uses the configured, workspace, and conventional candidates above.
 - an explicit fork relationship only when a distinct `upstream` remote proves
   it, otherwise `isFork: null`;
 - resolved default and current branches;
-- up to 64 worktrees with paths, heads, branches, detached/locked/prunable
-  flags, and safe status summaries;
+- `worktrees`: the ten most relevant worktrees by default, ordered primary,
+  conflicted, mid-operation, prunable, dirty, diverged, locked, quiet. Raise
+  `maxWorktrees` up to 64 for more. A repository with dozens of worktrees
+  otherwise costs an agent more tokens to read than the answer is worth;
+- `worktreeSummary`: clean/dirty/conflicted/detached/locked/prunable/operation
+  and ahead/behind counts across every inspected worktree, so a bounded list
+  still says whether anything needs attention;
+- `worktreeCount`, `worktreesReturned`, and `worktreesTruncated`;
 - staged, unstaged, untracked, conflicted, ahead, and behind counts;
 - an in-progress merge, rebase, cherry-pick, or revert indicator.
 

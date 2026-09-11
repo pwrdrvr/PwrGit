@@ -51,8 +51,28 @@ export type RepositoryInfo = {
   };
   worktreeCount: number;
   worktreesTruncated: boolean;
+  worktreesReturned: number;
+  worktreeSummary: WorktreeAggregate;
   worktrees: WorktreeSummary[];
   status: SafeStatusSummary;
+};
+
+/** Aggregate counts over every inspected worktree, so a caller that asked for
+ * a small `maxWorktrees` still learns whether anything needs attention. A
+ * repository with dozens of worktrees otherwise costs more tokens to read
+ * than the answer is worth. */
+export type WorktreeAggregate = {
+  /** Worktrees whose status was inspected to build this aggregate. */
+  inspected: number;
+  clean: number;
+  dirty: number;
+  conflicted: number;
+  detached: number;
+  locked: number;
+  prunable: number;
+  withOperation: number;
+  ahead: number;
+  behind: number;
 };
 
 export type CiState =

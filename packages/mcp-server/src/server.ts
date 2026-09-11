@@ -1,3 +1,4 @@
+import { registerAppTools, type AppBackend } from "./app-tools.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   ErrorCode,
@@ -28,6 +29,8 @@ import {
 export const CAPABILITY_RESOURCE_URI = "pwrgit://live-status/capabilities/v1";
 
 export type PwrGitMcpServerOptions = {
+  appBackend?: AppBackend;
+  supportsSubscriptions?: boolean;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   runner?: CommandRunner;
@@ -42,13 +45,21 @@ export type PwrGitMcpServer = {
   close: () => Promise<void>;
 };
 
+/** MCP says a tool returning `structuredContent` SHOULD also serialize it into
+ * a text block, because a host that only renders `content` otherwise shows the
+ * agent a sentence with no data in it. Returning the summary alone made every
+ * tool here look like it answered while telling the caller nothing.
+ * https://modelcontextprotocol.io/specification/2025-11-25/server/tools */
 function success(value: unknown, message: string): CallToolResult {
   const structuredContent =
     value !== null && typeof value === "object"
       ? (value as Record<string, unknown>)
       : { value };
   return {
-    content: [{ type: "text", text: message }],
+    content: [
+      { type: "text", text: message },
+      { type: "text", text: JSON.stringify(structuredContent) }
+    ],
     structuredContent
   };
 }
@@ -72,6 +83,11 @@ export async function createPwrGitMcpServer(
 ): Promise<PwrGitMcpServer> {
   const cwd = options.cwd ?? process.cwd();
   const env = options.env ?? process.env;
+  const appRoots = async (): Promise<string[] | undefined> => {
+    if (!options.appBackend) return undefined;
+    const catalog = await options.appBackend.catalog();
+    return [...new Set([...catalog.profiles.flatMap(profile => profile.roots), ...catalog.repositories.map(repo => repo.path)])].slice(0, 32);
+  };
   const authorizer = options.authorizer ?? PolicyFileAuthorizer.fromEnvironment(env);
   const initialAuthorization = await requireAccess(authorizer);
   const liveStatusLoader =
@@ -87,15 +103,19 @@ export async function createPwrGitMcpServer(
     { name: "PwrGit", version: "0.1.0" },
     {
       instructions:
-        "PwrGit provides bounded, read-only discovery of local GitHub and GitLab checkouts. " +
-        "Remote credentials and changed-file paths are never returned. For live status, call pwrgit_watch_repository, read its versioned resource, subscribe with resources/subscribe, and re-read it after notifications/resources/updated. " +
-        "Use the advertised WebSocket only when the host cannot surface standard MCP resource subscriptions."
+        "Use pwrgit_app_recent_repositories for recently used repositories and timestamps. Use pwrgit_app_repositories for the full app catalog, selection and cached status. Use pwrgit_app_profiles for profile roots. These app tools are available only in the desktop HTTP server. Filesystem discovery is a fallback, not app history. " +
+        "PwrGit also provides bounded, read-only discovery of local GitHub and GitLab checkouts. " +
+        "Remote credentials and changed-file paths are never returned. For live status, call pwrgit_watch_repository and read its versioned resource. " +
+        (options.supportsSubscriptions === false
+          ? "This HTTP transport is stateless: read status resources on demand and use the advertised WebSocket for live updates. Resource subscriptions are unavailable."
+          : "Subscribe with resources/subscribe, then re-read after notifications/resources/updated. Use the WebSocket only when the host cannot surface standard MCP subscriptions.")
     }
   );
   const statusResources = new StatusResourceRegistry(
     mcp,
     liveStatusLoader,
-    authorizer
+    authorizer,
+    options.supportsSubscriptions ?? true
   );
 
   mcp.registerResource(
@@ -116,7 +136,7 @@ export async function createPwrGitMcpServer(
           {
             uri: uri.toString(),
             mimeType: "application/json",
-            text: JSON.stringify(eventServer.capabilities(authorization))
+            text: JSON.stringify(eventServer.capabilities(authorization, options.supportsSubscriptions ?? true))
           }
         ]
       };
@@ -128,7 +148,7 @@ export async function createPwrGitMcpServer(
     {
       title: "Discover repository roots",
       description:
-        "Find bounded folders where this user appears to keep Git repositories. Uses PWRGIT_MCP_ROOTS, caller-provided roots, a safe current-workspace parent, and existing conventional folders; never selects a home directory or filesystem root automatically.",
+        "Directory discovery only: this tool does not rank recent usage. Use pwrgit_app_recent_repositories for recently used repositories in the desktop app. Find bounded folders where this user keeps Git repositories. In the desktop uses PwrGit profile roots and indexed repos; standalone uses PWRGIT_MCP_ROOTS, caller-provided roots, a safe current-workspace parent, and existing conventional folders; never selects a home directory or filesystem root automatically.",
       inputSchema: {
         roots: z
           .array(z.string().trim().min(1).max(4_096))
@@ -163,23 +183,27 @@ export async function createPwrGitMcpServer(
       const requestedRoots =
         input.roots ??
         (authorization.repositoryRoots === null
-          ? undefined
+          ? await appRoots()
           : [...authorization.repositoryRoots]);
       const result = await discoverRepositoryRoots({
         ...(requestedRoots === undefined ? {} : { requested: requestedRoots }),
-        includeConventional: restricted
+        includeConventional: restricted || options.appBackend
           ? false
           : (input.includeConventional ?? true),
-        includeConfigured: !restricted,
-        includeCurrentWorkspace: !restricted,
+        includeConfigured: !restricted && !options.appBackend,
+        includeCurrentWorkspace: !restricted && !options.appBackend,
         ...(input.maxDepth === undefined ? {} : { maxDepth: input.maxDepth }),
         cwd,
         env,
         ...(options.runner === undefined ? {} : { runner: options.runner })
       });
       return success(
-        result,
-        `PwrGit inspected ${result.roots.length} bounded repository root${result.roots.length === 1 ? "" : "s"}. See structuredContent for paths and scan limits.`
+        options.appBackend ? { ...result, appTools: {
+          recentRepositories: "pwrgit_app_recent_repositories",
+          allRepositories: "pwrgit_app_repositories",
+          note: "These are discovery roots, not recently used repositories. Call the recent-repositories tool for lastViewedAt timestamps and usage ordering."
+        } } : result,
+        `PwrGit inspected ${result.roots.length} bounded repository root${result.roots.length === 1 ? "" : "s"}.`
       );
     }
   );
@@ -223,7 +247,7 @@ export async function createPwrGitMcpServer(
       const roots =
         input.roots ??
         (authorization.repositoryRoots === null
-          ? undefined
+          ? await appRoots()
           : [...authorization.repositoryRoots]);
       const result = await findRepositoryCheckouts({
         repository: input.repository,
@@ -237,7 +261,7 @@ export async function createPwrGitMcpServer(
       });
       return success(
         result,
-        `PwrGit found ${result.matches.length} matching checkout${result.matches.length === 1 ? "" : "s"}. See structuredContent for credential-free identities and local paths.`
+        `PwrGit found ${result.matches.length} matching checkout${result.matches.length === 1 ? "" : "s"}.`
       );
     }
   );
@@ -249,7 +273,21 @@ export async function createPwrGitMcpServer(
       description:
         "Read canonical provider identity, credential-free remotes, fork/upstream evidence, worktrees, branches, and safe aggregate status. Does not return filenames, commit messages, author data, or remote credentials.",
       inputSchema: {
-        path: z.string().trim().min(1).max(4_096)
+        path: z
+          .string()
+          .trim()
+          .min(1)
+          .max(4_096)
+          .describe("Absolute path to a repository or one of its worktrees."),
+        maxWorktrees: z
+          .number()
+          .int()
+          .min(1)
+          .max(64)
+          .optional()
+          .describe(
+            "Worktree rows to return (default 10, hard maximum 64). Rows are ordered by attention — primary, conflicted, mid-operation, prunable, dirty — and worktreeSummary always aggregates every inspected worktree."
+          )
       },
       annotations: readOnlyAnnotations
     },
@@ -258,10 +296,17 @@ export async function createPwrGitMcpServer(
         capabilities: ["repository.metadata.read"],
         repositoryPaths: [input.path]
       });
-      const result = await readRepositoryInfo(input.path, options.runner);
+      const result = await readRepositoryInfo(
+        input.path,
+        options.runner,
+        input.maxWorktrees === undefined ? {} : { maxWorktrees: input.maxWorktrees }
+      );
+      const truncated = result.worktreesTruncated
+        ? ` Returned the ${result.worktreesReturned} most relevant; raise maxWorktrees for more.`
+        : "";
       return success(
         result,
-        `PwrGit inspected ${result.worktreeCount} worktree${result.worktreeCount === 1 ? "" : "s"} for ${result.canonicalRemote?.path ?? result.repositoryPath}. See structuredContent for safe status counts.`
+        `PwrGit inspected ${result.worktreeCount} worktree${result.worktreeCount === 1 ? "" : "s"} for ${result.canonicalRemote?.path ?? result.repositoryPath}.${truncated}`
       );
     }
   );
@@ -269,9 +314,10 @@ export async function createPwrGitMcpServer(
   mcp.registerTool(
     "pwrgit_watch_repository",
     {
-      title: "Create a subscribable live status resource",
+      title: "Create a live status resource",
       description:
-        "Create and initially read a versioned MCP resource for normalized local, PR/MR, CI, merge-conflict, review, and PR/MR state. Subscribe to resourceUri with resources/subscribe and re-read after notifications/resources/updated.",
+        "Create and initially read a versioned MCP resource for normalized local, PR/MR, CI, merge-conflict, review, and PR/MR state. " +
+        (options.supportsSubscriptions === false ? "Read resourceUri on demand; use the advertised WebSocket for live updates." : "Subscribe to resourceUri with resources/subscribe and re-read after notifications/resources/updated."),
       inputSchema: {
         path: z.string().trim().min(1).max(4_096),
         intervalMs: z
@@ -294,17 +340,21 @@ export async function createPwrGitMcpServer(
         content: [
           {
             type: "text",
-            text:
-              "PwrGit live status resource is ready. Read the attached resource, subscribe to its URI, and re-read it after notifications/resources/updated."
+            text: options.supportsSubscriptions === false
+              ? "PwrGit live status resource is ready. Read the attached resource on demand; discover the WebSocket with pwrgit_live_status_capabilities for live updates."
+              : "PwrGit live status resource is ready. Read the attached resource, subscribe to its URI, and re-read it after notifications/resources/updated."
           },
           {
             type: "resource_link",
             uri: document.resourceUri,
             name: "PwrGit live repository status v1",
             description:
-              "Subscribe with resources/subscribe, then re-read after notifications/resources/updated.",
+              options.supportsSubscriptions === false
+                ? "Read this resource on demand for current status."
+                : "Subscribe with resources/subscribe, then re-read after notifications/resources/updated.",
             mimeType: "application/json"
-          }
+          },
+          { type: "text", text: JSON.stringify(document) }
         ],
         structuredContent: document as unknown as Record<string, unknown>
       };
@@ -325,11 +375,13 @@ export async function createPwrGitMcpServer(
         capabilities: ["forge.status.read", "status.subscribe"]
       });
       return success(
-        eventServer.capabilities(authorization),
-        `PwrGit live status uses standard MCP subscriptions first. The same contract is readable at ${CAPABILITY_RESOURCE_URI}; an optional WebSocket fallback is included in structuredContent.`
+        eventServer.capabilities(authorization, options.supportsSubscriptions ?? true),
+        `PwrGit live status capabilities are readable at ${CAPABILITY_RESOURCE_URI}.`
       );
     }
   );
+
+  if (options.appBackend) registerAppTools(mcp, options.appBackend, authorizer);
 
   let closed = false;
   return {

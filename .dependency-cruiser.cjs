@@ -240,6 +240,16 @@ module.exports = {
     },
   ],
   options: {
+    /**
+     * Generated single-file build of the MCP server. It is output, not source:
+     * it inlines every dependency, including ws's optional native accelerators
+     * (`bufferutil`, `utf-8-validate`), which are deliberately absent at
+     * runtime. Cruising it reports those as unresolvable while saying nothing
+     * about our architecture. Every rule still applies to every source file.
+     */
+    exclude: {
+      path: "packages/mcp-server/dist-bundle/",
+    },
     doNotFollow: {
       path: "node_modules",
       dependencyTypes: [

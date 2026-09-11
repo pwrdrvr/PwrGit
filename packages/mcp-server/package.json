@@ -16,7 +16,8 @@
   ],
   "exports": {
     ".": "./src/index.ts",
-    "./access-policy": "./src/access-policy.ts"
+    "./access-policy": "./src/access-policy.ts",
+    "./agent-access-protocol": "./src/agent-access-protocol.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

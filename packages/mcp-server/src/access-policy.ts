@@ -33,7 +33,8 @@ export const MCP_AGENT_CAPABILITIES = [
   "repository.checkout.locate",
   "repository.metadata.read",
   "forge.status.read",
-  "status.subscribe"
+  "status.subscribe",
+  "app.navigate"
 ] as const;
 
 export type McpAgentCapability = (typeof MCP_AGENT_CAPABILITIES)[number];
@@ -55,12 +56,17 @@ export const MCP_AGENT_CAPABILITY_DETAILS: Record<
   },
   "repository.metadata.read": {
     label: "Read repository metadata",
-    detail: "Read remotes, branches, worktrees, and aggregate working-tree status.",
+    detail: "Read app repositories, recent selections, branches, worktrees, and aggregate status.",
     danger: "sensitive"
   },
   "forge.status.read": {
     label: "Read forge status",
     detail: "Use the signed-in GitHub or GitLab CLI to read PR, MR, CI, and review status.",
+    danger: "sensitive"
+  },
+  "app.navigate": {
+    label: "Navigate PwrGit",
+    detail: "Open or focus authorized repositories and worktrees in PwrGit windows.",
     danger: "sensitive"
   },
   "status.subscribe": {
@@ -87,6 +93,7 @@ type McpAgentSessionRecord = {
   createdAt: string;
   updatedAt: string;
   revokedAt: string | null;
+  oauth?: { clientId: string; scopes: McpAgentCapability[] };
 };
 
 export type McpAgentSession = Omit<McpAgentSessionRecord, "tokenHash">;
@@ -184,8 +191,13 @@ export const BUILT_IN_MCP_ROLES = [
     name: "Live Forge Status",
     description: "Read local metadata plus PR, MR, CI, review, and live status updates.",
     builtIn: true,
-    permissions: [...MCP_AGENT_CAPABILITIES],
+    permissions: MCP_AGENT_CAPABILITIES.filter(capability => capability !== "app.navigate"),
     repositoryRoots: null
+  },
+  {
+    id: "builtin.app-operator", name: "PwrGit Workspace Control",
+    description: "Read app repositories and status, and open authorized repositories in PwrGit. Does not grant Git mutations.",
+    builtIn: true, permissions: [...MCP_AGENT_CAPABILITIES], repositoryRoots: null
   }
 ] as const satisfies readonly McpAgentRole[];
 
@@ -303,7 +315,8 @@ function publicSession(session: McpAgentSessionRecord): McpAgentSession {
     roleId: session.roleId,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
-    revokedAt: session.revokedAt
+    revokedAt: session.revokedAt,
+    ...(session.oauth ? { oauth: { clientId: session.oauth.clientId, scopes: [...session.oauth.scopes] } } : {})
   };
 }
 
@@ -393,6 +406,11 @@ function parseSession(value: unknown): McpAgentSessionRecord {
   ) {
     throw new McpAccessError("invalid_policy", "policy contains an invalid session");
   }
+  if (session.oauth !== undefined && (
+    session.oauth === null || typeof session.oauth !== "object" ||
+    typeof session.oauth.clientId !== "string" || !ID_PATTERN.test(session.oauth.clientId) ||
+    !Array.isArray(session.oauth.scopes) || !session.oauth.scopes.every(isCapability)
+  )) throw new McpAccessError("invalid_policy", "invalid OAuth session binding");
   return session as McpAgentSessionRecord;
 }
 
@@ -421,6 +439,9 @@ function parsePolicy(value: unknown): McpPolicyFile {
   }
   for (const canonical of BUILT_IN_MCP_ROLES) {
     if (!roles.some((role) => role.id === canonical.id)) {
+      // Older v1 policies predate app navigation. Add its opt-in role without
+      // changing any existing role, Session assignment or OAuth scope.
+      if (canonical.id === "builtin.app-operator") { roles.push(cloneRole(canonical)); continue; }
       throw new McpAccessError("invalid_policy", `MCP policy is missing ${canonical.id}`);
     }
   }
@@ -471,7 +492,7 @@ export class McpPolicyStore {
     };
   }
 
-  createSession(nameInput: string, roleId: string): {
+  createSession(nameInput: string, roleId: string, oauth?: McpAgentSessionRecord["oauth"]): {
     session: McpAgentSession;
     token: string;
     environment: {
@@ -500,7 +521,8 @@ export class McpPolicyStore {
       tokenHash: tokenHashHex(token),
       createdAt: timestamp,
       updatedAt: timestamp,
-      revokedAt: null
+      revokedAt: null,
+      ...(oauth === undefined ? {} : { oauth: { clientId: oauth.clientId, scopes: [...oauth.scopes] } })
     };
     policy.sessions.push(record);
     this.write(policy);
@@ -594,8 +616,11 @@ export class McpPolicyStore {
     if (session.revokedAt !== null) throw new McpAccessError("revoked_session", "MCP session has been revoked");
     const role = policy.roles.find((candidate) => candidate.id === session.roleId);
     if (role === undefined) throw new McpAccessError("invalid_role", "MCP session has no valid role");
+    const permissions = role.permissions.filter((capability) =>
+      session.oauth === undefined || session.oauth.scopes.includes(capability)
+    );
     const missing = (requirement.capabilities ?? []).filter(
-      (capability) => !role.permissions.includes(capability)
+      (capability) => !permissions.includes(capability)
     );
     if (missing.length > 0) {
       throw new McpAccessError(
@@ -621,7 +646,7 @@ export class McpPolicyStore {
       sessionName: session.name,
       roleId: role.id,
       roleName: role.name,
-      capabilities: [...role.permissions],
+      capabilities: [...permissions],
       repositoryRoots: role.repositoryRoots === null ? null : [...role.repositoryRoots]
     };
   }

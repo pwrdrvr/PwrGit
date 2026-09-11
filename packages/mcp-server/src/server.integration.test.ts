@@ -244,6 +244,15 @@ describe("PwrGit MCP integration", () => {
       expect(result.structuredContent).toMatchObject({
         roots: [{ path: realpathSync.native(root), source: "requested" }]
       });
+      // A host that renders only `content` must still receive the data. Without
+      // the serialized block the agent sees a summary sentence and nothing else.
+      const textBlocks = (result.content as Array<{ type: string; text?: string }>)
+        .filter((block) => block.type === "text")
+        .map((block) => block.text ?? "");
+      expect(textBlocks.length).toBeGreaterThanOrEqual(2);
+      expect(JSON.parse(textBlocks[textBlocks.length - 1] ?? "null")).toEqual(
+        result.structuredContent
+      );
       const denied = await client.callTool({
         name: "pwrgit_repository_info",
         arguments: { path: root }

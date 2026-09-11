@@ -3,7 +3,8 @@ export const MCP_AGENT_CAPABILITIES = [
   "repository.checkout.locate",
   "repository.metadata.read",
   "forge.status.read",
-  "status.subscribe"
+  "status.subscribe",
+  "app.navigate"
 ] as const;
 
 export type McpAgentCapability = (typeof MCP_AGENT_CAPABILITIES)[number];
@@ -29,12 +30,17 @@ export const MCP_AGENT_CAPABILITY_DETAILS: Record<
   },
   "repository.metadata.read": {
     label: "Read repository metadata",
-    detail: "Read remotes, branches, worktrees, and aggregate working-tree status.",
+    detail: "Read app repositories, recent selections, branches, worktrees, and aggregate status.",
     danger: "sensitive"
   },
   "forge.status.read": {
     label: "Read forge status",
     detail: "Use the signed-in GitHub or GitLab CLI to read PR, MR, CI, and review status.",
+    danger: "sensitive"
+  },
+  "app.navigate": {
+    label: "Navigate PwrGit",
+    detail: "Open or focus authorized repositories and worktrees in PwrGit windows.",
     danger: "sensitive"
   },
   "status.subscribe": {
@@ -61,6 +67,7 @@ export type McpAgentSession = {
   createdAt: string;
   updatedAt: string;
   revokedAt: string | null;
+  oauth?: { clientId: string; scopes: McpAgentCapability[] };
 };
 
 export type McpAgentPolicySnapshot = {
@@ -95,3 +102,24 @@ export type McpAgentRoleInput = {
 };
 
 export type McpAgentRolePatch = Partial<McpAgentRoleInput>;
+
+export type AgentAccessSnapshot = {
+  enabled: boolean;
+  listening: boolean;
+  mcpUrl: string;
+  error?: string;
+};
+
+export type AgentConsentPrompt = {
+  requestId: string;
+  clientName: string;
+  sessionName: string;
+  roles: McpAgentRole[];
+};
+
+export type AgentConsentDecision = {
+  requestId: string;
+  decision: "allow" | "deny";
+  sessionName: string;
+  roleId: string;
+};

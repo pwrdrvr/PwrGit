@@ -127,4 +127,63 @@ describe("safe repository metadata", () => {
     expect(info.currentBranch).toBe("topic");
     expect(info.defaultBranch).toBeNull();
   });
+  it("bounds returned worktrees while aggregating every inspected one", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-mcp-bounded-"));
+    cleanup.push(root);
+    const primary = join(root, "primary");
+    execFileSync("git", ["init", "-b", "main", primary], { stdio: "ignore" });
+    git(primary, ["config", "user.name", "PwrGit Test"]);
+    git(primary, ["config", "user.email", "pwrgit@example.test"]);
+    writeFileSync(join(primary, "tracked.txt"), "one\n");
+    git(primary, ["add", "tracked.txt"]);
+    git(primary, ["commit", "-m", "initial"]);
+    for (let index = 0; index < 5; index += 1) {
+      git(primary, [
+        "worktree",
+        "add",
+        "-b",
+        `topic/${index}`,
+        join(root, `linked-${index}`)
+      ]);
+    }
+    // One linked worktree is dirty; the ranking must surface it even though
+    // three clean worktrees precede it in git's own listing order.
+    writeFileSync(join(root, "linked-4", "scratch.txt"), "dirty\n");
+
+    const info = await readRepositoryInfo(primary, undefined, { maxWorktrees: 2 });
+
+    expect(info.worktreeCount).toBe(6);
+    expect(info.worktreesReturned).toBe(2);
+    expect(info.worktreesTruncated).toBe(true);
+    expect(info.worktrees).toHaveLength(2);
+    expect(info.worktreeSummary).toMatchObject({
+      inspected: 6,
+      clean: 5,
+      dirty: 1,
+      conflicted: 0,
+      withOperation: 0
+    });
+    // Primary leads, then the one worktree that needs attention.
+    expect(info.worktrees[0]?.primary).toBe(true);
+    expect(info.worktrees[1]?.path).toBe(await realpath(join(root, "linked-4")));
+    expect(info.worktrees[1]?.status?.clean).toBe(false);
+  });
+
+  it("reports no truncation when every worktree fits", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-mcp-untruncated-"));
+    cleanup.push(root);
+    execFileSync("git", ["init", "-b", "main", root], { stdio: "ignore" });
+    git(root, ["config", "user.name", "PwrGit Test"]);
+    git(root, ["config", "user.email", "pwrgit@example.test"]);
+    writeFileSync(join(root, "tracked.txt"), "one\n");
+    git(root, ["add", "tracked.txt"]);
+    git(root, ["commit", "-m", "initial"]);
+
+    const info = await readRepositoryInfo(root);
+
+    expect(info.worktreeCount).toBe(1);
+    expect(info.worktreesReturned).toBe(1);
+    expect(info.worktreesTruncated).toBe(false);
+    expect(info.worktreeSummary.inspected).toBe(1);
+  });
 });

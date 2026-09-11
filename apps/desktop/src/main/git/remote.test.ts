@@ -488,7 +488,7 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(gitOut(local, ["diff", "--cached"])).toBe(originalStagedDiff);
     expect(gitOut(local, ["diff"])).toBe(originalUnstagedDiff);
     expect(gitOut(local, ["stash", "list"])).toBe("");
-  }, 15_000);
+  });
 
   it("removes partial untracked checkout artifacts before restoring a clean checkout", async () => {
     const { local, remote } = makeDivergedFixture();

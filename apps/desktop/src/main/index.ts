@@ -108,6 +108,12 @@ import { openSettingsWindow } from "./settings-window";
 import { createNativeThemeController } from "./native-theme";
 import { McpPolicyStore } from "@pwrgit/mcp-server/access-policy";
 import { registerLocalAgentHandlers } from "./local-agents/local-agent-handlers";
+import { ConsentBroker } from "./agent-access/consent-broker";
+import { createConsentWindow } from "./agent-access/consent-window";
+import { createDesktopMcpRunner } from "./agent-access/desktop-mcp-runner";
+import { createAppBackend } from "./agent-access/app-backend";
+import { AgentAccessService } from "./agent-access/agent-access-service";
+import { registerAgentAccessHandlers } from "./agent-access/agent-access-handlers";
 
 const APP_NAME = "PwrGit";
 
@@ -592,6 +598,28 @@ if (!gotSingleInstanceLock) {
     registerLocalAgentHandlers(bus, mcpPolicy, () => {
       emitEvent("localAgents:changed", mcpPolicy.snapshot());
     });
+    // The loopback listener stays off until the operator turns it on: it is a
+    // standing grant on their repositories, not a default.
+    const mcpPolicyFile = join(app.getPath("userData"), "mcp-policy.json");
+    const consent = new ConsentBroker(mcpPolicy, () => createConsentWindow(appearance.appearance()));
+    consent.register(bus);
+    const agentAccess = new AgentAccessService({
+      ...(!app.isPackaged && process.env["PWRGIT_E2E_AGENT_ACCESS_PORT"] === "0" ? { port: 0 } : {}),
+      appBackend: createAppBackend(db, profiles, indexer, bus),
+      runner: createDesktopMcpRunner(execGit),
+      policyFile: mcpPolicyFile,
+      clientsFile: join(app.getPath("userData"), "mcp-oauth-clients.json"),
+      requestConsent: consent.request,
+      saveEnabled: (enabled) => settings.update({ localAgentAccessEnabled: enabled }),
+      onChanged: () => {
+        emitEvent("agentAccess:changed", agentAccess.status());
+        emitEvent("localAgents:changed", mcpPolicy.snapshot());
+      },
+      log: (message, extra) => logMain("info", "agent-access", message, extra)
+    });
+    app.on("will-quit", () => void agentAccess.dispose());
+    registerAgentAccessHandlers(bus, agentAccess);
+    if (settings.get().localAgentAccessEnabled === true) await agentAccess.setEnabled(true);
     diagnostics.sync(); // start any settings-enabled monitors at boot
 
     registerIpc(bus, {

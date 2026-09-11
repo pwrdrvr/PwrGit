@@ -44,6 +44,7 @@ function cleanEnv(extra: Record<string, string>): Record<string, string> {
  */
 export async function launchApp(
   opts: {
+    agentAccess?: boolean;
     worktreeRoot?: string;
     gitConfig?: string;
     forgeFixturePath?: string;
@@ -85,6 +86,7 @@ export async function launchApp(
   const app = await electron.launch({
     args: [MAIN],
     env: cleanEnv({
+      ...(opts.agentAccess ? { PWRGIT_E2E_AGENT_ACCESS_PORT: "0" } : {}),
       PWRGIT_USER_DATA_DIR: userData,
       PWRGIT_GITCONFIG: gitconfig,
       // The app's Git commands must be as deterministic as fixture setup:

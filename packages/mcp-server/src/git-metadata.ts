@@ -6,10 +6,14 @@ import type {
   RemoteSummary,
   RepositoryInfo,
   SafeStatusSummary,
+  WorktreeAggregate,
   WorktreeSummary
 } from "./types.js";
 
 const MAX_WORKTREES = 64;
+/** Most repositories have one worktree. A caller that wants the long tail
+ * asks for it; a caller that does not should not pay for 50+ rows. */
+const DEFAULT_RETURNED_WORKTREES = 10;
 
 export async function readConfiguredRemotes(
   cwd: string,
@@ -245,9 +249,66 @@ async function mapLimit<T, R>(
   return output;
 }
 
+/** A worktree that needs attention sorts ahead of a quiet one, so a truncated
+ * list still carries the interesting rows. The primary worktree always leads:
+ * it is the one a caller asked about. */
+function attentionRank(worktree: {
+  primary: boolean;
+  locked: boolean;
+  prunable: boolean;
+  status: SafeStatusSummary | null;
+}): number {
+  if (worktree.primary) return 0;
+  const status = worktree.status;
+  if (status !== null && status.conflictedFiles > 0) return 1;
+  if (status !== null && status.operation !== null) return 2;
+  if (worktree.prunable) return 3;
+  if (status !== null && !status.clean) return 4;
+  if (status !== null && (status.ahead > 0 || status.behind > 0)) return 5;
+  if (worktree.locked) return 6;
+  return 7;
+}
+
+function aggregateWorktrees(
+  worktrees: readonly {
+    detached: boolean;
+    locked: boolean;
+    prunable: boolean;
+    status: SafeStatusSummary | null;
+  }[]
+): WorktreeAggregate {
+  const aggregate: WorktreeAggregate = {
+    inspected: worktrees.length,
+    clean: 0,
+    dirty: 0,
+    conflicted: 0,
+    detached: 0,
+    locked: 0,
+    prunable: 0,
+    withOperation: 0,
+    ahead: 0,
+    behind: 0
+  };
+  for (const worktree of worktrees) {
+    if (worktree.detached) aggregate.detached += 1;
+    if (worktree.locked) aggregate.locked += 1;
+    if (worktree.prunable) aggregate.prunable += 1;
+    const status = worktree.status;
+    if (status === null) continue;
+    if (status.clean) aggregate.clean += 1;
+    else aggregate.dirty += 1;
+    if (status.conflictedFiles > 0) aggregate.conflicted += 1;
+    if (status.operation !== null) aggregate.withOperation += 1;
+    if (status.ahead > 0) aggregate.ahead += 1;
+    if (status.behind > 0) aggregate.behind += 1;
+  }
+  return aggregate;
+}
+
 export async function readRepositoryInfo(
   requestedPath: string,
-  runner?: CommandRunner
+  runner?: CommandRunner,
+  options: { maxWorktrees?: number } = {}
 ): Promise<RepositoryInfo> {
   const requested = await realpath(requestedPath);
   const topLevelResult = await git(requested, ["rev-parse", "--show-toplevel"], runner);
@@ -272,11 +333,29 @@ export async function readRepositoryInfo(
   );
   const repositoryPath = canonicalWorktrees[0]?.path ?? (await realpath(topLevel));
   const visibleWorktrees = canonicalWorktrees.slice(0, MAX_WORKTREES);
-  const worktrees = await mapLimit(visibleWorktrees, 4, async (worktree, index) => ({
+  // Status is read for every inspected worktree so the aggregate is accurate
+  // and the attention ranking below can see which rows matter. Only the
+  // returned slice is bounded — the payload is what costs the caller, not
+  // the reads.
+  const inspectedWorktrees = await mapLimit(visibleWorktrees, 4, async (worktree, index) => ({
     ...worktree,
     primary: index === 0,
     status: worktree.bare ? null : await readSafeStatus(worktree.path, runner)
   }));
+  const worktreeSummary = aggregateWorktrees(inspectedWorktrees);
+  const maxWorktrees = Math.min(
+    Math.max(options.maxWorktrees ?? DEFAULT_RETURNED_WORKTREES, 1),
+    MAX_WORKTREES
+  );
+  const worktrees = [...inspectedWorktrees]
+    .map((worktree, index) => ({ worktree, index }))
+    .sort(
+      (left, right) =>
+        attentionRank(left.worktree) - attentionRank(right.worktree)
+        || left.index - right.index
+    )
+    .slice(0, maxWorktrees)
+    .map((entry) => entry.worktree);
   const canonicalRemote = remotes.find((remote) => remote.role === "canonical") ?? null;
   const explicitUpstream = remotes.find((remote) => remote.role === "upstream") ?? null;
   const differentUpstream =
@@ -311,7 +390,9 @@ export async function readRepositoryInfo(
       evidence: differentUpstream === null ? "not_determinable" : "upstream_remote"
     },
     worktreeCount: parsedWorktrees.length,
-    worktreesTruncated: parsedWorktrees.length > MAX_WORKTREES,
+    worktreesTruncated: worktrees.length < parsedWorktrees.length,
+    worktreesReturned: worktrees.length,
+    worktreeSummary,
     worktrees,
     status
   };
