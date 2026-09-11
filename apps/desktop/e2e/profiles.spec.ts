@@ -244,6 +244,30 @@ test("profile menu closes on outside click and Escape", async () => {
   await expect(window.locator(".profile-menu")).toHaveCount(0);
 });
 
+test("profile menu hangs below its chip, flush with the chip's edges", async () => {
+  handle = await launchApp();
+  const { window } = handle;
+
+  await window.locator(".profile-chip").click();
+  await expect(window.locator(".profile-menu")).toBeVisible();
+
+  const chip = await window.locator(".profile-chip").boundingBox();
+  const menu = await window.locator(".profile-menu").boundingBox();
+  if (chip === null || menu === null) throw new Error("chip/menu not laid out");
+
+  // The menu used to open 2px OVER the chip, so its square top corners cut
+  // through the chip's rounded ones. It must clear the chip entirely — and by
+  // enough for the chip's focus ring (outline-offset 2px + 1px) to survive,
+  // since the menu paints above the chip.
+  expect(menu.y).toBeGreaterThanOrEqual(chip.y + chip.height + 3);
+
+  // ...and line up with the control that opens it. `left/right: 12px` used to
+  // re-apply .sidebar__profile's padding on top of the wrapper already inside
+  // it, leaving the menu 24px narrower than the chip.
+  expect(Math.abs(menu.x - chip.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(menu.width - chip.width)).toBeLessThanOrEqual(1);
+});
+
 test("deleting an active profile closes its window but keeps its repositories", async () => {
   boxA = createGitSandbox();
   const repo = boxA.makeRepo("acme-delete-safe");
