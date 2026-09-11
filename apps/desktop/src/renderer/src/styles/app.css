@@ -12,6 +12,12 @@ body,
   margin: 0;
 }
 
+html {
+  /* Commit reveals must scroll their pane, never the window chrome. Hidden
+     overflow still permits scrollIntoView() to move the document viewport. */
+  overflow: clip;
+}
+
 body {
   background: var(--bg-app);
   color: var(--text-primary);
