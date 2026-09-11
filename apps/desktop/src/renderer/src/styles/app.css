@@ -469,9 +469,14 @@ textarea,
 }
 .profile-menu {
   position: absolute;
-  top: calc(100% - 2px);
-  left: 12px;
-  right: 12px;
+  /* Detached below the chip, edge-aligned to it — same 6px gap as .branch-pop.
+     The old `100% - 2px` tucked the menu under the chip's bottom border, and
+     the 12px insets re-applied .sidebar__profile's padding on top of the
+     wrapper that already sits inside it, leaving the menu narrower than the
+     control that opens it. */
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
   z-index: 40;
   background: var(--bg-menu);
   border: 1px solid var(--border-default);
