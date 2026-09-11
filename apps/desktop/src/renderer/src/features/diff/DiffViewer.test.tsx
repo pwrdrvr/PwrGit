@@ -961,7 +961,32 @@ describe("DiffViewer image copy menu", () => {
     // with it the zoom, the pan, and the place in the walk.
     const event = await press("Escape");
     expect(lightbox()).not.toBeNull();
-    expect(event.defaultPrevented).toBe(false);
+    // The menu claims the key, per the contract in this directory's AGENTS.md
+    // ("defers a tick and bails if something called preventDefault"). It used
+    // to close without claiming, which the lightbox survived only because of
+    // its own `menu !== null` guard — see the next case for what that left
+    // unprotected.
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("an open menu shields the diff pane behind it, not just the lightbox", async () => {
+    // DiffPane closes on Escape unless something called preventDefault
+    // (DiffPane.tsx). ContextMenu did not, so dismissing a right-click menu
+    // anywhere in the pane threw the file viewer away with it — the lightbox
+    // was patched against this locally; nothing else was.
+    dispatchMock.mockImplementation(async (name: string) =>
+      name === "diff:image" ? anyImage() : ok(null)
+    );
+    await act(async () => {
+      root.render(<DiffViewer patch={modifiedBinaryPatch("art/logo.png")} images={REVISIONS} />);
+    });
+    await decodeAll({ w: 64, h: 64 });
+    // The inline image diff, with no lightbox open above it.
+    await rightClick(document.querySelector(".diff-image"));
+    expect(menuLabels().length).toBeGreaterThan(0);
+
+    const event = await press("Escape");
+    expect(event.defaultPrevented).toBe(true);
   });
 
   it("offers the same menu from inside the lightbox", async () => {

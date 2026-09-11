@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 
 /** Anything `role="menu"` is allowed to own as a focusable child. */
 const ITEM_SELECTOR =
@@ -38,6 +38,11 @@ export function useMenuNavigation({
   /** Called for Tab, which per APG closes the menu and lets focus move on. */
   onClose: () => void;
 }): void {
+  // Callers routinely pass an inline arrow. Holding it in a ref keeps the
+  // keydown subscription from being torn down and rebuilt every render.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   // Roving tabindex + initial focus. Runs on every open so a menu whose items
   // changed while closed still starts from a valid one.
   useEffect(() => {
@@ -94,7 +99,7 @@ export function useMenuNavigation({
           return;
         case "Tab":
           // APG: Tab closes the menu and moves on. Escape is `useDismissable`.
-          onClose();
+          onCloseRef.current();
           return;
         default:
           break;
@@ -121,5 +126,5 @@ export function useMenuNavigation({
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, menuRef, onClose]);
+  }, [open, menuRef]);
 }

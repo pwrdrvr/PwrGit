@@ -6,6 +6,8 @@ import {
   type RefObject
 } from "react";
 import { createPortal } from "react-dom";
+import { useDismissable } from "../../lib/useDismissable";
+import { useMenuNavigation } from "../../lib/useMenuNavigation";
 
 export type MenuItem =
   | {
@@ -40,10 +42,24 @@ export function ContextMenu({
   triggerRef?: RefObject<HTMLElement | null>;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // A right-click menu has no trigger element to return focus to; the empty
+  // ref makes that the no-op case rather than a special one.
+  const noTrigger = useRef<HTMLElement | null>(null);
   const [pos, setPos] = useState<{ left: number; top: number }>({
     left: x,
     top: y
   });
+
+  // Mounted only while open, so `open` is constant here. Escape + focus
+  // restore, and the arrow/typeahead contract its role="menu" already promised
+  // — this one component is the keyboard behaviour for seven call sites.
+  useDismissable({
+    open: true,
+    onDismiss: onClose,
+    triggerRef: triggerRef ?? noTrigger,
+    surfaceRef: ref
+  });
+  useMenuNavigation({ open: true, menuRef: ref, onClose });
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -54,7 +70,8 @@ export function ContextMenu({
     if (left + r.width > window.innerWidth - 8) left = window.innerWidth - r.width - 8;
     if (top + r.height > window.innerHeight - 8) top = window.innerHeight - r.height - 8;
     setPos({ left: Math.max(8, left), top: Math.max(8, top) });
-    el.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+    // Initial focus belongs to useMenuNavigation, which also seeds the roving
+    // tabindex; focusing here too would fight it on every reposition.
   }, [x, y, items.length]);
 
   useEffect(() => {
@@ -68,18 +85,13 @@ export function ContextMenu({
         onClose();
       }
     };
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") onClose();
-    };
     window.addEventListener("mousedown", onDown, true);
     window.addEventListener("contextmenu", onDown, true);
-    window.addEventListener("keydown", onKey);
     window.addEventListener("scroll", onClose, true);
     window.addEventListener("resize", onClose);
     return () => {
       window.removeEventListener("mousedown", onDown, true);
       window.removeEventListener("contextmenu", onDown, true);
-      window.removeEventListener("keydown", onKey);
       window.removeEventListener("scroll", onClose, true);
       window.removeEventListener("resize", onClose);
     };
