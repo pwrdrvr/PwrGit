@@ -1,10 +1,10 @@
 import {
-  classifyForgeHost,
   type ForgeHostConfig,
   type ForgeKind,
   type ForgeSettings,
   type ForgeValueSource
 } from "@pwrgit/shared";
+import type { DiscoveredForgeHost } from "./cli-hosts";
 import type { ForgeHostOverrides } from "./resolve";
 
 /** Env escape hatches, mirroring the `GITHUB_TOKEN`/`GITLAB_TOKEN` pattern
@@ -17,8 +17,8 @@ const GITLAB_HOSTS_ENV = "PWRGIT_GITLAB_HOSTS";
 export type ResolvedForgeHost = {
   /** Canonical lowercase hostname, as `parseRemoteUrl` produces it. */
   host: string;
-  /** Null when nothing can say which product runs here — the state that needs
-   *  a human, and the only one the settings pane asks about. */
+  /** Null means "not a forge host PwrGit knows", which is the ordinary answer
+   *  for any ssh remote. It is NOT a question for the user — see `kindFor`. */
   kind: ForgeKind | null;
   kindSource: ForgeValueSource;
   enabled: boolean;
@@ -29,10 +29,21 @@ export type ForgeHostsDeps = {
   /** Reads the persisted per-host config. A function rather than a value so a
    *  settings write is picked up without re-constructing the service. */
   readSettings: () => ForgeSettings;
-  /** Whether that forge's CLI holds a credential for this exact host. Drives
-   *  the derived `enabled` default, so "on" means "we can actually read it". */
-  isSignedIn: (kind: ForgeKind, host: string) => boolean;
+  /** Hosts the CLIs report being signed in to. The primary source of the host
+   *  list, and what makes the derived `enabled` default mean "we can actually
+   *  read this". Injected already-resolved — enumeration spawns two processes
+   *  and is cached by the caller, not re-run per lookup. */
+  discovered: () => readonly DiscoveredForgeHost[];
   env?: NodeJS.ProcessEnv;
+};
+
+/** A forge host, however PwrGit came to know about it. */
+export type ForgeHostEntry = ResolvedForgeHost & {
+  /** `cli` — the CLI is signed in here. `config` — the user added it by hand
+   *  and no CLI reports it, which is the state that needs a sign-in prompt. */
+  origin: "cli" | "config";
+  account?: string;
+  scopes?: string[];
 };
 
 function canonical(host: string): string {
@@ -74,13 +85,22 @@ function envHosts(
  */
 export class ForgeHosts {
   private readonly readSettings: () => ForgeSettings;
-  private readonly isSignedIn: (kind: ForgeKind, host: string) => boolean;
+  private readonly discovered: () => readonly DiscoveredForgeHost[];
   private readonly env: NodeJS.ProcessEnv;
 
   constructor(deps: ForgeHostsDeps) {
     this.readSettings = deps.readSettings;
-    this.isSignedIn = deps.isSignedIn;
+    this.discovered = deps.discovered;
     this.env = deps.env ?? process.env;
+  }
+
+  private discoveredFor(host: string): DiscoveredForgeHost | undefined {
+    const key = canonical(host);
+    return this.discovered().find((entry) => entry.host === key);
+  }
+
+  private isSignedIn(host: string): boolean {
+    return this.discoveredFor(host) !== undefined;
   }
 
   private configFor(host: string): ForgeHostConfig | undefined {
@@ -90,10 +110,17 @@ export class ForgeHosts {
   /**
    * Which product runs at this host.
    *
-   * An env allowlist wins, then an explicit config choice, then the hostname
-   * heuristic (`github.com`, `gitlab.com`, `gitlab.*`). Null is a real answer
-   * and must not collapse to a guess: sending a private repository's metadata
-   * at the wrong forge's API is worse than reporting no status at all.
+   * Env allowlist, then an explicit config entry (a host the user added), then
+   * what a CLI reported, then the two SaaS hostnames — so a fresh install with
+   * `gh` signed in works before anyone opens Settings.
+   *
+   * Null means "not a forge host we know about", and that is the ordinary
+   * answer for most remotes: a git remote is an ssh target, and a box on a home
+   * network or a bare repo on a NAS is not a forge. Null is silent — no row, no
+   * prompt, no feature — never a question put to the user. The hostname is
+   * deliberately NOT used to guess beyond github.com/gitlab.com: `gitlab.*` was
+   * dropped because a name is not evidence, and a wrong guess sends a private
+   * repository's metadata at the wrong API.
    */
   kindFor(host: string): { kind: ForgeKind | null; source: ForgeValueSource } {
     const key = canonical(host);
@@ -105,11 +132,13 @@ export class ForgeHosts {
     const configured = this.configFor(key)?.kind;
     if (configured !== undefined) return { kind: configured, source: "config" };
 
-    const classified = classifyForgeHost(key);
-    return {
-      kind: classified === "other" ? null : classified,
-      source: "auto"
-    };
+    const found = this.discoveredFor(key);
+    if (found !== undefined) return { kind: found.kind, source: "auto" };
+
+    // The two SaaS hosts only. Everything else must be signed in to or added.
+    if (key === "github.com") return { kind: "github", source: "auto" };
+    if (key === "gitlab.com") return { kind: "gitlab", source: "auto" };
+    return { kind: null, source: "auto" };
   }
 
   /**
@@ -124,10 +153,9 @@ export class ForgeHosts {
   isEnabled(host: string): { enabled: boolean; source: ForgeValueSource } {
     const key = canonical(host);
     const { kind } = this.kindFor(key);
-    // An unclassified host has no transport to enable. Reporting it "off"
-    // would be the wrong word — nobody turned it off — but every caller of
-    // this asks in order to decide whether to spawn something, and the answer
-    // there is no. The settings pane reads `kind === null` for the distinction.
+    // Not a forge we know: there is no transport to enable. Callers ask this
+    // to decide whether to spawn something, and the answer is no. It is not
+    // "off" in any sense the user would recognise, and no row is shown for it.
     if (kind === null) return { enabled: false, source: "auto" };
 
     const env =
@@ -142,7 +170,7 @@ export class ForgeHosts {
     if (configured !== undefined) {
       return { enabled: configured, source: "config" };
     }
-    return { enabled: this.isSignedIn(kind, key), source: "auto" };
+    return { enabled: this.isSignedIn(key), source: "auto" };
   }
 
   /** Everything resolved, for one host. */
@@ -157,6 +185,36 @@ export class ForgeHosts {
       enabled: enabled.enabled,
       enabledSource: enabled.source
     };
+  }
+
+  /**
+   * Every forge host PwrGit knows about, for the settings pane.
+   *
+   * Two sources, deliberately: what the CLIs are signed in to, and what the
+   * user added by hand. Git remotes are NOT a source — see `kindFor`. A
+   * config-only entry is a host somebody added that no CLI reports, which is
+   * exactly the row that should offer a sign-in command.
+   */
+  list(): ForgeHostEntry[] {
+    const entries = new Map<string, ForgeHostEntry>();
+    for (const found of this.discovered()) {
+      entries.set(found.host, {
+        ...this.resolve(found.host),
+        origin: "cli",
+        ...(found.account === undefined ? {} : { account: found.account }),
+        ...(found.scopes === undefined ? {} : { scopes: found.scopes })
+      });
+    }
+    for (const host of Object.keys(this.readSettings().hosts)) {
+      const key = canonical(host);
+      if (entries.has(key)) continue;
+      const resolved = this.resolve(key);
+      // A config entry that only flipped a switch on a host no CLI reports
+      // names no forge, so there is nothing to show a row for.
+      if (resolved.kind === null) continue;
+      entries.set(key, { ...resolved, origin: "config" });
+    }
+    return [...entries.values()].sort((a, b) => a.host.localeCompare(b.host));
   }
 
   /**
@@ -175,6 +233,7 @@ export class ForgeHosts {
     if (github !== null) for (const host of github) map[host] = "github";
     const gitlab = envHosts(this.env, GITLAB_HOSTS_ENV);
     if (gitlab !== null) for (const host of gitlab) map[host] = "gitlab";
+    for (const found of this.discovered()) map[found.host] = found.kind;
     for (const [host, config] of Object.entries(this.readSettings().hosts)) {
       if (config.kind !== undefined) map[canonical(host)] = config.kind;
     }

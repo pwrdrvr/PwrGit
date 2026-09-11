@@ -1,41 +1,68 @@
 import { describe, expect, it } from "vitest";
-import type { ForgeKind, ForgeSettings } from "@pwrgit/shared";
+import type { ForgeSettings } from "@pwrgit/shared";
+import type { DiscoveredForgeHost } from "./cli-hosts";
 import { ForgeHosts } from "./hosts";
 
 function make(opts: {
   hosts?: ForgeSettings["hosts"];
-  signedIn?: Array<`${ForgeKind}:${string}`>;
+  discovered?: DiscoveredForgeHost[];
   env?: NodeJS.ProcessEnv;
 }): ForgeHosts {
-  const signedIn = new Set(opts.signedIn ?? []);
   return new ForgeHosts({
     readSettings: () => ({ hosts: opts.hosts ?? {} }),
-    isSignedIn: (kind, host) => signedIn.has(`${kind}:${host}`),
+    discovered: () => opts.discovered ?? [],
     env: opts.env ?? {}
   });
 }
 
+const GH = (host: string, account = "octo-dev"): DiscoveredForgeHost => ({
+  kind: "github",
+  host,
+  account
+});
+const GL = (host: string, account = "o.dev"): DiscoveredForgeHost => ({
+  kind: "gitlab",
+  host,
+  account
+});
+
 describe("ForgeHosts.kindFor", () => {
-  it("classifies the two SaaS hosts and the gitlab.* convention", () => {
+  it("knows the two SaaS hosts with no configuration at all", () => {
     const hosts = make({});
     expect(hosts.kindFor("github.com")).toEqual({
       kind: "github",
       source: "auto"
     });
     expect(hosts.kindFor("gitlab.com").kind).toBe("gitlab");
-    expect(hosts.kindFor("gitlab.internal.example").kind).toBe("gitlab");
   });
 
-  it("returns null for a host nothing can identify", () => {
-    // The whole point of the settings row: guessing here would send a private
-    // repo's metadata at the wrong forge's API.
-    expect(make({}).kindFor("git.contoso.dev")).toEqual({
-      kind: null,
+  it("takes the kind from whichever CLI reported the host", () => {
+    // Enumeration carries the product with it: `gh` only knows GitHub hosts.
+    // Nothing is inferred from the name.
+    const hosts = make({ discovered: [GH("github.acme-inc.com")] });
+    expect(hosts.kindFor("github.acme-inc.com")).toEqual({
+      kind: "github",
       source: "auto"
     });
   });
 
-  it("lets an explicit choice name a host the heuristic cannot", () => {
+  it("does NOT guess from a gitlab.* hostname", () => {
+    // A name is not evidence. This host is only a forge once glab is signed in
+    // to it or the user adds it.
+    expect(make({}).kindFor("gitlab.internal.example").kind).toBeNull();
+  });
+
+  it("stays silent about an ordinary ssh remote", () => {
+    // The objection that reshaped this: a remote is an ssh target. A NAS or a
+    // box on a home network is not a forge and must never become a row.
+    for (const host of ["nas.local", "192.168.1.50", "build-box"]) {
+      expect(make({}).kindFor(host).kind).toBeNull();
+      expect(make({}).isEnabled(host).enabled).toBe(false);
+    }
+    expect(make({}).list()).toEqual([]);
+  });
+
+  it("lets the user name a host no CLI reports", () => {
     const hosts = make({ hosts: { "git.contoso.dev": { kind: "gitlab" } } });
     expect(hosts.kindFor("git.contoso.dev")).toEqual({
       kind: "gitlab",
@@ -43,10 +70,11 @@ describe("ForgeHosts.kindFor", () => {
     });
   });
 
-  it("lets an explicit choice override the heuristic outright", () => {
-    // `gitlab.acme.com` running GitHub Enterprise is perverse but legal, and
-    // the operator is better informed than the prefix rule.
-    const hosts = make({ hosts: { "gitlab.acme.com": { kind: "github" } } });
+  it("lets config override what a CLI reported", () => {
+    const hosts = make({
+      hosts: { "gitlab.acme.com": { kind: "github" } },
+      discovered: [GL("gitlab.acme.com")]
+    });
     expect(hosts.kindFor("gitlab.acme.com").kind).toBe("github");
   });
 
@@ -69,7 +97,7 @@ describe("ForgeHosts.kindFor", () => {
 
 describe("ForgeHosts.isEnabled", () => {
   it("derives on from being signed in to that host", () => {
-    const hosts = make({ signedIn: ["github:github.com"] });
+    const hosts = make({ discovered: [GH("github.com")] });
     expect(hosts.isEnabled("github.com")).toEqual({
       enabled: true,
       source: "auto"
@@ -78,7 +106,7 @@ describe("ForgeHosts.isEnabled", () => {
 
   it("derives off when that CLI holds no account for the host", () => {
     // The GitHub-only machine: nothing is broken, so nothing should be probed.
-    const hosts = make({ signedIn: ["github:github.com"] });
+    const hosts = make({ discovered: [GH("github.com")] });
     expect(hosts.isEnabled("gitlab.com")).toEqual({
       enabled: false,
       source: "auto"
@@ -86,14 +114,14 @@ describe("ForgeHosts.isEnabled", () => {
   });
 
   it("derives per host, not per forge", () => {
-    const hosts = make({ signedIn: ["github:github.com"] });
+    const hosts = make({ discovered: [GH("github.com")] });
     expect(hosts.isEnabled("github.acme-inc.com").enabled).toBe(false);
   });
 
   it("keeps an explicit off after a later sign-in", () => {
     const hosts = make({
       hosts: { "gitlab.com": { enabled: false } },
-      signedIn: ["gitlab:gitlab.com"]
+      discovered: [GL("gitlab.com")]
     });
     expect(hosts.isEnabled("gitlab.com")).toEqual({
       enabled: false,
@@ -112,7 +140,7 @@ describe("ForgeHosts.isEnabled", () => {
   it("treats a set env allowlist as exhaustive, overriding config", () => {
     const hosts = make({
       hosts: { "gitlab.com": { enabled: true } },
-      signedIn: ["gitlab:gitlab.com"],
+      discovered: [GL("gitlab.com")],
       env: { PWRGIT_GITLAB_HOSTS: "gitlab.internal.example" }
     });
     expect(hosts.isEnabled("gitlab.com")).toEqual({
@@ -122,22 +150,26 @@ describe("ForgeHosts.isEnabled", () => {
     expect(hosts.isEnabled("gitlab.internal.example").enabled).toBe(true);
   });
 
-  it("reports an unclassified host as not enabled", () => {
-    // There is no transport to turn on until somebody says which forge it is.
-    const hosts = make({ hosts: { "git.contoso.dev": { enabled: true } } });
-    expect(hosts.isEnabled("git.contoso.dev").enabled).toBe(false);
+  it("reports an unknown host as not enabled", () => {
+    // A switch flipped on a host that names no forge enables no transport.
+    const hosts = make({ hosts: { "nas.local": { enabled: true } } });
+    expect(hosts.isEnabled("nas.local").enabled).toBe(false);
   });
 });
 
 describe("ForgeHosts.overrides", () => {
-  it("carries only explicit decisions, not the heuristic's answers", () => {
+  it("carries discovered hosts and explicit decisions, nothing else", () => {
     const hosts = make({
       hosts: {
         "git.contoso.dev": { kind: "gitlab" },
         "gitlab.com": { enabled: false }
-      }
+      },
+      discovered: [GH("github.acme-inc.com")]
     });
-    expect(hosts.overrides()).toEqual({ "git.contoso.dev": "gitlab" });
+    expect(hosts.overrides()).toEqual({
+      "github.acme-inc.com": "github",
+      "git.contoso.dev": "gitlab"
+    });
   });
 
   it("still names a host whose kind is known but which is disabled", () => {
@@ -166,10 +198,69 @@ describe("ForgeHosts.overrides", () => {
     let hosts: ForgeSettings["hosts"] = {};
     const service = new ForgeHosts({
       readSettings: () => ({ hosts }),
-      isSignedIn: () => false
+      discovered: () => []
     });
     expect(service.kindFor("git.contoso.dev").kind).toBeNull();
     hosts = { "git.contoso.dev": { kind: "github" } };
     expect(service.kindFor("git.contoso.dev").kind).toBe("github");
+  });
+});
+
+describe("ForgeHosts.list", () => {
+  it("lists what the CLIs are signed in to, with their accounts", () => {
+    const hosts = make({
+      discovered: [GH("github.com", "octo-dev"), GL("gitlab.com", "o.dev")]
+    });
+    expect(hosts.list()).toEqual([
+      {
+        host: "github.com",
+        kind: "github",
+        kindSource: "auto",
+        enabled: true,
+        enabledSource: "auto",
+        origin: "cli",
+        account: "octo-dev"
+      },
+      {
+        host: "gitlab.com",
+        kind: "gitlab",
+        kindSource: "auto",
+        enabled: true,
+        enabledSource: "auto",
+        origin: "cli",
+        account: "o.dev"
+      }
+    ]);
+  });
+
+  it("includes a user-added host no CLI reports, marked as such", () => {
+    // This is the row that should offer a sign-in command: somebody said the
+    // host is a GitLab, and glab holds no account for it.
+    const hosts = make({
+      hosts: { "git.contoso.dev": { kind: "gitlab" } }
+    });
+    const [entry] = hosts.list();
+    expect(entry?.origin).toBe("config");
+    expect(entry?.kind).toBe("gitlab");
+    expect(entry?.enabled).toBe(false);
+  });
+
+  it("does not duplicate a host that is both added and signed in", () => {
+    const hosts = make({
+      hosts: { "github.acme-inc.com": { kind: "github" } },
+      discovered: [GH("github.acme-inc.com")]
+    });
+    expect(hosts.list().map((entry) => entry.host)).toEqual([
+      "github.acme-inc.com"
+    ]);
+    expect(hosts.list()[0]?.origin).toBe("cli");
+  });
+
+  it("shows no row for a config entry that only flipped a switch", () => {
+    // `{enabled:false}` on an unknown host names no forge, so there is nothing
+    // to render — and nothing to ask the user about.
+    expect(make({ hosts: { "nas.local": { enabled: false } } }).list()).toEqual(
+      []
+    );
   });
 });
