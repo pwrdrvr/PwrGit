@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RemoteActivity } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import {
@@ -29,6 +29,15 @@ export function RemoteActivityCard({
   compact?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<number | undefined>(undefined);
+  useEffect(
+    () => () => {
+      if (copiedTimer.current !== undefined) {
+        window.clearTimeout(copiedTimer.current);
+      }
+    },
+    []
+  );
   const status = remoteActivityStatus(activity, now);
   const meter = remoteActivityMeter(activity);
   const elapsed = formatElapsed(now - activity.startedAt);
@@ -42,7 +51,7 @@ export function RemoteActivityCard({
       remoteActivityReport(activity, lines, now)
     );
     setCopied(true);
-    window.setTimeout(() => setCopied(false), 1600);
+    copiedTimer.current = window.setTimeout(() => setCopied(false), 1600);
   };
 
   return (
@@ -94,15 +103,22 @@ export function RemoteActivityCard({
       )}
 
       <div className="remote-activity__actions">
+        {/* aria-disabled, never `disabled` (styles/AGENTS.md): Chromium blurs
+            an element the moment it becomes disabled, and this card is an
+            interactive tooltip whose blur handler schedules its own dismissal
+            — so `disabled` would take the status off screen at the instant
+            the user asked to stop, and drop keyboard focus to <body>
+            (SC 2.4.3). The handler guards instead. */}
         <button
           className="remote-activity__button remote-activity__button--stop"
           type="button"
           onClick={() => {
+            if (activity.canceling) return;
             void dispatch("remote:cancelActivity", {
               operationId: activity.id
             });
           }}
-          disabled={activity.canceling}
+          aria-disabled={activity.canceling}
         >
           {activity.canceling ? "Stopping…" : "Cancel"}
         </button>

@@ -48,6 +48,12 @@ export function useRemoteActivityPopover(
   });
   const { show, update, hide, scheduleHide, visible } = tooltip;
   const pending = useRef<number | undefined>(undefined);
+  // The deferred open below fires from a timer, and the only handler that
+  // cancels it is `close()` — which stops existing the moment the operation
+  // ends and the trigger drops its listeners. Read the live record through a
+  // ref so the timer can tell "still running" from "finished while I waited".
+  const latest = useRef<RemoteActivity | null>(activity);
+  latest.current = activity;
   // One tick per second, and only while the card is on screen — the readouts
   // it exists for ("no response for 2m 41s") are counted in seconds.
   const now = useSecondsClock(visible);
@@ -74,18 +80,18 @@ export function useRemoteActivityPopover(
     open: (target) => {
       if (activity === null) return;
       cancelPending();
-      const card = (): ReactNode => (
-        <RemoteActivityCard activity={activity} now={Date.now()} />
-      );
       const wait =
         REMOTE_ACTIVITY_POPOVER_AFTER_MS - (Date.now() - activity.startedAt);
       if (wait <= 0) {
-        show(target, card());
+        show(target, <RemoteActivityCard activity={activity} now={Date.now()} />);
         return;
       }
+      const id = activity.id;
       pending.current = window.setTimeout(() => {
         pending.current = undefined;
-        show(target, card());
+        const live = latest.current;
+        if (live === null || live.id !== id) return;
+        show(target, <RemoteActivityCard activity={live} now={Date.now()} />);
       }, wait);
     },
     close: () => {

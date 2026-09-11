@@ -10420,9 +10420,17 @@ button.agent-auth-node {
   color: var(--danger-text);
 }
 
-.remote-activity__button:disabled {
+/* After the hover rules, and keyed off the ARIA state rather than `disabled`
+   (see styles/AGENTS.md): a button that is already working must not still
+   light up under the pointer. */
+.remote-activity__button[aria-disabled="true"],
+.remote-activity__button[aria-disabled="true"]:hover,
+.remote-activity__button[aria-disabled="true"]:focus-visible {
   cursor: default;
   opacity: 0.6;
+  border-color: var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
 }
 
 /* The popover shell. `.viewport-tooltip` is pointer-events: none because it

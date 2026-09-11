@@ -244,6 +244,24 @@ describe("WorktreeHeader pull progress", () => {
     expect(bridge.dispatch).toHaveBeenCalledWith("remote:cancelActivity", {
       operationId: "op-1"
     });
+
+    // While Git is being stopped the button says so with aria-disabled, never
+    // `disabled`: Chromium blurs a disabled element, and this card dismisses
+    // itself on blur — the status would vanish at the moment it is wanted.
+    bridge.dispatch.mockClear();
+    await emitActivities([{ phase: "fetch", canceling: true }]);
+    const stopping = [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        ".remote-activity-popover button"
+      )
+    ].find((button) => button.textContent === "Stopping…");
+    expect(stopping?.getAttribute("aria-disabled")).toBe("true");
+    expect(stopping?.disabled).toBe(false);
+    await act(async () => stopping?.click());
+    expect(bridge.dispatch).not.toHaveBeenCalledWith(
+      "remote:cancelActivity",
+      expect.anything()
+    );
   });
 
   it("keeps the card off a pull short enough that nobody asked", async () => {
@@ -262,6 +280,25 @@ describe("WorktreeHeader pull progress", () => {
     });
 
     expect(document.querySelector(".remote-activity-popover")).toBeNull();
+  });
+
+  it("keeps a tooltip on a working button until the card can take over", async () => {
+    const pull = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Pull"]'
+    );
+    await act(async () => pull?.click());
+    // Before main registers the operation there is no card to summon, and in
+    // the narrow header the label span is display:none — so the title is the
+    // only text a spinning button has.
+    expect(pull?.getAttribute("title")).toBe("Pulling…");
+
+    await emitActivities([{ phase: "fetch" }]);
+    // Now the card carries it, and a native tooltip would cover the card.
+    expect(
+      container
+        .querySelector('button[aria-busy="true"]')
+        ?.hasAttribute("title")
+    ).toBe(false);
   });
 
   it("offers user-approved SSH recovery after a Git LFS HTTPS authentication failure", async () => {

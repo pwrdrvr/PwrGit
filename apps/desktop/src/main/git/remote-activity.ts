@@ -16,6 +16,29 @@ export const REMOTE_ACTIVITY_LOG_LINES = 300;
 export const REMOTE_ACTIVITY_EMIT_INTERVAL_MS = 400;
 /** A meter would otherwise write hundreds of near-identical lines to Logs. */
 export const REMOTE_ACTIVITY_METER_LOG_INTERVAL_MS = 5_000;
+/**
+ * Characters of a Git command line kept for display.
+ *
+ * Pull's rollback passes a `runBatched` pathspec list that reaches ~32KB. The
+ * useful part of "which command is running" is its head — the subcommand and
+ * its flags — so keep that and count what was dropped, rather than
+ * broadcasting a kilobyte of mid-path text to every window.
+ */
+export const REMOTE_ACTIVITY_COMMAND_CHARS = 160;
+
+/** `git fetch --prune --progress`, or `git checkout -- … (+812 more)`. */
+export function gitCommandLabel(args: string[]): string {
+  const kept: string[] = [];
+  let length = 3;
+  for (const arg of args) {
+    if (length + arg.length + 1 > REMOTE_ACTIVITY_COMMAND_CHARS) break;
+    kept.push(arg);
+    length += arg.length + 1;
+  }
+  const dropped = args.length - kept.length;
+  const head = `git ${kept.join(" ")}`.trimEnd();
+  return dropped === 0 ? head : `${head} … (+${dropped} more)`;
+}
 
 /**
  * `Receiving objects:  43% (860/2000), 12.4 MiB | 3.1 MiB/s`
@@ -75,7 +98,8 @@ export type RemoteActivityHandle = {
   setCommand: (args: string[] | null) => void;
   /** The most recent Git line, so a stall warning can name what it last saw. */
   lastLine: () => string | null;
-  snapshot: () => RemoteActivity;
+  /** The Git command line now running, for the same warnings. */
+  command: () => string | null;
   finish: () => void;
 };
 
@@ -88,6 +112,8 @@ type LiveActivity = {
   /** Meter label whose line currently sits at the end of the buffers. */
   meterLabel: string | null;
   lastMeterLogAt: number;
+  /** Retired. A killed Git child can still flush after the handler returns. */
+  done: boolean;
 };
 
 export type RemoteActivityLogger = (
@@ -156,6 +182,7 @@ export class RemoteActivityRegistry {
       log: [],
       pending: "",
       meterLabel: null,
+      done: false,
       // Never logged, rather than "logged at epoch zero" — a fake or freshly
       // set clock at 0 would otherwise swallow the first sample.
       lastMeterLogAt: Number.NEGATIVE_INFINITY
@@ -167,7 +194,10 @@ export class RemoteActivityRegistry {
       id,
       signal: entry.controller.signal,
       onStderr: (chunk) => this.ingest(entry, chunk),
-      onActivity: () => this.noteOutput(entry),
+      onActivity: () => {
+        if (entry.done) return;
+        this.noteOutput(entry);
+      },
       setPhase: (phase) => {
         if (entry.record.phase === phase) return;
         entry.record.phase = phase;
@@ -179,7 +209,7 @@ export class RemoteActivityRegistry {
       },
       setCommand: (args) => {
         const command =
-          args === null ? null : sanitizeGitLogDetail(`git ${args.join(" ")}`);
+          args === null ? null : sanitizeGitLogDetail(gitCommandLabel(args));
         if (entry.record.command === command) return;
         entry.record.command = command;
         // Silence is a property of the command now running, not of the whole
@@ -194,9 +224,16 @@ export class RemoteActivityRegistry {
         this.publish(false);
       },
       lastLine: () => entry.log.at(-1) ?? null,
-      snapshot: () => ({ ...entry.record, tail: [...entry.record.tail] }),
+      command: () => entry.record.command,
       finish: () => {
-        if (!this.live.delete(id)) return;
+        if (entry.done) return;
+        // Git's last line often has no trailing newline — a `fatal:` as the
+        // process dies, or a stream cut mid-line. Without this flush the most
+        // diagnostic line of the whole operation is the one line that never
+        // reaches the Logs window.
+        this.flush(entry);
+        entry.done = true;
+        this.live.delete(id);
         this.publish(true);
       }
     };
@@ -236,9 +273,10 @@ export class RemoteActivityRegistry {
     return true;
   }
 
-  dispose(): void {
-    if (this.emitTimer !== undefined) clearTimeout(this.emitTimer);
-    this.emitTimer = undefined;
+  private flush(entry: LiveActivity): void {
+    const line = sanitizeGitLogDetail(entry.pending.replace(ANSI, ""));
+    entry.pending = "";
+    if (line !== "") this.append(entry, line);
   }
 
   private noteOutput(entry: LiveActivity): void {
@@ -248,6 +286,7 @@ export class RemoteActivityRegistry {
   }
 
   private ingest(entry: LiveActivity, chunk: string): void {
+    if (entry.done) return;
     this.noteOutput(entry);
     // Git separates meter repaints with CR and messages with LF; both are line
     // boundaries here, and whatever trails the last one is an unfinished line.

@@ -319,8 +319,10 @@ export function WorktreeHeader({
   // handlers ride on whichever button this operation belongs to — and on the
   // progress chip beside them, which is the wider target and the thing a user
   // is already looking at when they wonder what it is doing.
+  const carriesCard = (kind: Exclude<Busy, null>): boolean =>
+    activity !== null && activity.kind === kind;
   const statusTrigger = (kind: Exclude<Busy, null>): StatusTriggerProps =>
-    activity === null || activity.kind !== kind
+    !carriesCard(kind)
       ? {}
       : {
           onMouseEnter: (event) => status.open(event.currentTarget),
@@ -328,6 +330,22 @@ export function WorktreeHeader({
           onFocus: (event) => status.open(event.currentTarget),
           onBlur: status.close
         };
+  /**
+   * A native tooltip everywhere the status card is NOT coming — the two must
+   * never both appear, but a button with neither is worse than either.
+   *
+   * `.wt-btn__label` is `display:none` in the narrow header, so this is the
+   * only text left there; dropping it for the whole of a sub-second fetch, or
+   * for the gap before main registers the operation, left a spinning button
+   * that explained nothing.
+   */
+  const busyTitle = (
+    kind: Exclude<Busy, null>,
+    idle: string
+  ): { title?: string } =>
+    carriesCard(kind)
+      ? {}
+      : { title: running === kind ? busyLabel(kind) : idle };
   const dirty = state?.dirty ?? worktree.dirty;
   const behind = state?.behind ?? worktree.behind;
   const drift = defaultBranchDrift(state, worktree);
@@ -350,7 +368,8 @@ export function WorktreeHeader({
         />
         <span style={{ flex: 1 }} />
         {/* Left of the sync chip, which stays adjacent to the buttons it maps
-            onto. Hidden mid-pull so the progress label keeps the width it
+            onto. Hidden while ANY remote operation runs (not just a pull, as
+            it once was) so the progress label keeps the width it
             ellipsizes into; on width it outlives the sync chip (see the
             container queries — ↓behind has the Pull accent, drift has nothing
             else). */}
@@ -407,11 +426,10 @@ export function WorktreeHeader({
             aria-disabled={running !== null}
             aria-label={running === "fetch" ? busyLabel("fetch") : "Fetch"}
             aria-busy={running === "fetch"}
-            /* The label span is display:none in the narrow header, so this is
-               the only text left — it has to track busy, as Pull's does. A
-               working button also carries the status card, so no `title`: a
-               native tooltip would cover the card it summons. */
-            {...(running === "fetch" ? {} : { title: "Fetch" })}
+            /* Title comes from busyTitle: a button that carries the status
+               card gets none, because a native tooltip would cover the card
+               it summons. */
+            {...busyTitle("fetch", "Fetch")}
             {...statusTrigger("fetch")}
           >
             <RefreshGlyph />
@@ -429,9 +447,7 @@ export function WorktreeHeader({
             aria-disabled={running !== null}
             aria-label={running === "pull" ? busyLabel("pull") : "Pull"}
             aria-busy={running === "pull"}
-            {...(running === "pull"
-              ? {}
-              : { title: "Pull · fetch + fast-forward" })}
+            {...busyTitle("pull", "Pull · fetch + fast-forward")}
             {...statusTrigger("pull")}
           >
             {running === "pull" ? (
@@ -457,7 +473,7 @@ export function WorktreeHeader({
             aria-disabled={running !== null}
             aria-label={running === "push" ? busyLabel("push") : "Push"}
             aria-busy={running === "push"}
-            {...(running === "push" ? {} : { title: "Push" })}
+            {...busyTitle("push", "Push")}
             {...statusTrigger("push")}
           >
             {running === "push" ? (

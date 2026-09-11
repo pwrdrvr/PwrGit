@@ -315,9 +315,16 @@ export function registerRemoteHandlers(
         branch: worktree.branch
       },
       "fetch",
-      async (git) => {
+      async (git, activity) => {
         const fetched = await fetchRemote(git, worktree.path, true);
-        if (fetched.ok) await refreshRemoteBranches(worktree.repoId, "fetch");
+        if (fetched.ok) {
+          // Off the network phase before the branch index is rebuilt. Silence
+          // is only evidence while `--progress` obliges Git to speak; leaving
+          // the phase at `fetch` makes a long re-index report the successful
+          // transfer as a stalled one.
+          activity.setPhase("refresh");
+          await refreshRemoteBranches(worktree.repoId, "fetch");
+        }
         return fetched;
       }
     );
@@ -344,11 +351,14 @@ export function registerRemoteHandlers(
         repoName: repo.name
       },
       "fetch",
-      async (git) => {
+      async (git, activity) => {
         const fetched = await (req.remote === undefined
           ? fetchAllRemotes(git, repo.path, true)
           : fetchNamedRemote(git, repo.path, req.remote, true));
-        if (fetched.ok) await refreshRemoteBranches(req.repoId, "fetch");
+        if (fetched.ok) {
+          activity.setPhase("refresh");
+          await refreshRemoteBranches(req.repoId, "fetch");
+        }
         return fetched;
       }
     );
@@ -518,7 +528,7 @@ export function registerRemoteHandlers(
       // which command produced none. Name the command and the last line Git did
       // write — on a wedged transfer those two ARE the diagnosis.
       const stallContext = (): string => {
-        const command = activity.snapshot().command;
+        const command = activity.command();
         const last = activity.lastLine();
         return [
           command === null ? null : `running ${command}`,
@@ -711,9 +721,12 @@ export function registerRemoteHandlers(
         branch: worktree.branch
       },
       "push",
-      async (git) => {
+      async (git, activity) => {
         const pushed = await pushRemote(git, worktree.path, true);
-        if (pushed.ok) await refreshRemoteBranches(worktree.repoId, "push");
+        if (pushed.ok) {
+          activity.setPhase("refresh");
+          await refreshRemoteBranches(worktree.repoId, "push");
+        }
         return pushed;
       }
     );

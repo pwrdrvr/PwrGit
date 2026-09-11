@@ -255,6 +255,40 @@ describe("remote handlers", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("leaves the network phase before rebuilding the branch index", async () => {
+    const db = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" }))
+      }))
+    } as unknown as DB;
+    const refresher = {
+      refreshWorktree: vi.fn(async () => undefined),
+      refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    let releaseIndex!: () => void;
+    const indexer = {
+      refreshRepoRemoteBranches: vi.fn(
+        () =>
+          new Promise((resolve) => {
+            releaseIndex = () => resolve(ok(true));
+          })
+      )
+    } as unknown as RepoIndexer;
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue(), indexer);
+
+    const fetch = bus.dispatch("remote:fetch", { worktreeId: "worktree-1" });
+    // Git is done; the index rebuild is not. Reporting that as `fetch` makes
+    // the card cry "no Git output for 30s" about a transfer that succeeded —
+    // silence is only evidence while --progress obliges Git to speak.
+    await vi.waitFor(() =>
+      expect(liveActivities(vi.mocked(emitEvent))[0]?.phase).toBe("refresh")
+    );
+
+    releaseIndex();
+    await expect(fetch).resolves.toMatchObject({ ok: true });
+  });
+
   it("stops a running pull when its live activity is canceled", async () => {
     const db = {
       prepare: vi.fn(() => ({

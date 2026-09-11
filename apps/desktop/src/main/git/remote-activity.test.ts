@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RemoteActivity } from "@pwrgit/shared";
 import {
+  gitCommandLabel,
   parseTransferProgress,
   RemoteActivityRegistry,
+  REMOTE_ACTIVITY_COMMAND_CHARS,
   REMOTE_ACTIVITY_LOG_LINES,
   REMOTE_ACTIVITY_TAIL_LINES
 } from "./remote-activity";
@@ -213,6 +215,23 @@ describe("RemoteActivityRegistry", () => {
     );
   });
 
+  it("keeps a command line short enough to read", () => {
+    // Pull's rollback passes a runBatched pathspec list that reaches ~32KB.
+    // The head names the command; the tail is unreadable mid-path text nobody
+    // wants broadcast to every window.
+    const label = gitCommandLabel([
+      "checkout",
+      "--",
+      ...Array.from({ length: 400 }, (_, i) => `src/very/long/path/file-${i}.ts`)
+    ]);
+    expect(label.length).toBeLessThan(REMOTE_ACTIVITY_COMMAND_CHARS + 24);
+    expect(label).toMatch(/^git checkout -- /);
+    expect(label).toMatch(/… \(\+\d+ more\)$/);
+    expect(gitCommandLabel(["fetch", "--prune", "--progress"])).toBe(
+      "git fetch --prune --progress"
+    );
+  });
+
   it("names the Git command now running", () => {
     vi.useFakeTimers();
     const { registry: activities, latest } = registry();
@@ -223,9 +242,43 @@ describe("RemoteActivityRegistry", () => {
     // Five silent minutes are far easier to act on when the status says which
     // command produced no output.
     expect(latest().command).toBe("git fetch --prune --progress");
+    expect(handle.command()).toBe("git fetch --prune --progress");
     handle.setCommand(null);
     vi.advanceTimersByTime(20);
     expect(latest().command).toBeNull();
+  });
+
+  it("flushes Git's last line when it arrived without a newline", () => {
+    vi.useFakeTimers();
+    const { registry: activities, log } = registry();
+    const handle = activities.begin(input);
+    // Git's final message is routinely the most useful one and routinely
+    // unterminated — a `fatal:` as the process dies, or a stream cut mid-line.
+    handle.onStderr("fatal: could not read from remote repository");
+    vi.advanceTimersByTime(20);
+    expect(log).not.toHaveBeenCalledWith("info", expect.stringContaining("fatal"));
+
+    handle.finish();
+    expect(log).toHaveBeenCalledWith(
+      "info",
+      "PwrAgnt: fatal: could not read from remote repository"
+    );
+  });
+
+  it("ignores output that arrives after the operation is retired", () => {
+    vi.useFakeTimers();
+    const { registry: activities, emit } = registry();
+    const handle = activities.begin(input);
+    handle.finish();
+    const emitted = emit.mock.calls.length;
+
+    // A killed Git child can still flush after the handler has returned.
+    handle.onStderr("remote: too late\n");
+    handle.onActivity();
+    vi.advanceTimersByTime(20);
+
+    expect(emit).toHaveBeenCalledTimes(emitted);
+    expect(activities.logFor(handle.id)).toBeNull();
   });
 
   it("cancels with a typed reason and keeps the record until Git exits", () => {
