@@ -71,11 +71,21 @@ let fileBroken = false;
 /**
  * Start mirroring log lines to `path`. Called once from index.ts after
  * app-ready. A file already over the size cap is rotated to `<path>.old`
- * first so the log can't grow without bound.
+ * first so the log can't grow without bound. `legacyPath`, when given, is a
+ * previous location this log lived at: it is moved into place once, so the
+ * history from before the move isn't stranded where nobody looks for it.
  */
-export function initLogFile(path: string): void {
+export function initLogFile(path: string, legacyPath?: string): void {
   logFilePath = path;
   fileChain = fileChain.then(async () => {
+    if (legacyPath !== undefined && legacyPath !== path) {
+      try {
+        await stat(path);
+      } catch {
+        // Nothing at the new path yet — adopt the old file if there is one.
+        await rename(legacyPath, path).catch(() => undefined);
+      }
+    }
     try {
       const info = await stat(path);
       if (info.size > MAX_LOG_FILE_BYTES) await rename(path, `${path}.old`);

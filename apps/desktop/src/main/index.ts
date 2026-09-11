@@ -1,3 +1,4 @@
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   app,
@@ -82,6 +83,7 @@ import {
   subscribeLogEntries
 } from "./logs";
 import { openLogsWindow } from "./logs-window";
+import { watchProcessIds } from "./process-ids";
 import { ensureMacKeychainAccess } from "./mac-keychain-access";
 import { openDatabase } from "./persistence/db";
 import { readGitIdentityDefaults } from "./profiles/git-identity";
@@ -157,6 +159,13 @@ if (app.isPackaged && !process.env["LOCAL_GIT_DIRECTORY"]) {
 const dataDirOverride = process.env["PWRGIT_USER_DATA_DIR"];
 if (dataDirOverride !== undefined && dataDirOverride !== "") {
   app.setPath("userData", dataDirOverride);
+  // The app log lives in the OS log directory, which on macOS is keyed by app
+  // name (~/Library/Logs/PwrGit) rather than by userData — an isolated run
+  // would otherwise append to the real instance's log. Electron only creates
+  // the *default* logs directory, so an override has to exist first.
+  const logsDirOverride = join(dataDirOverride, "logs");
+  mkdirSync(logsDirOverride, { recursive: true });
+  app.setAppLogsPath(logsDirOverride);
 }
 
 // Settings and native appearance are established before app readiness so the
@@ -220,9 +229,19 @@ if (!gotSingleInstanceLock) {
   app.whenReady().then(async () => {
     wireAppMenuBridge();
     // App log: ring buffer + file, streamed to the Logs window (Help › Logs).
-    initLogFile(join(app.getPath("userData"), "pwrgit-main.log"));
+    // The file sits in the OS log directory (~/Library/Logs/PwrGit on macOS,
+    // <userData>/logs elsewhere) beside the other Pwr apps, rather than in
+    // userData where nobody goes looking for a log.
+    initLogFile(
+      join(app.getPath("logs"), "main.log"),
+      join(app.getPath("userData"), "pwrgit-main.log")
+    );
     subscribeLogEntries((entry) => emitEvent("logs:entry", entry));
-    logMain("info", "app", `PwrGit ${app.getVersion()} starting`);
+    // Process ids ride on the log itself: the main one here, the helpers as
+    // watchProcessIds sees them appear, so a copied log identifies its own
+    // processes without a trip to Activity Monitor or Task Manager.
+    logMain("info", "app", `PwrGit ${app.getVersion()} starting pid=${process.pid}`);
+    watchProcessIds();
     installDevelopmentDockIcon();
     bus.register("logs:read", () => ok(readLogSnapshot()));
     bus.register("logs:openWindow", () => {
