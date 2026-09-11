@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --bg-app: #000000; --bg-panel: #0a0a0a; --bg-input: #080808;
+            --bg-elev: #101010; --bg-hover: #14110d; --bg-row-active: #120800;
+            --line: rgba(247, 243, 235, 0.1); --line2: rgba(247, 243, 235, 0.14); --line3: rgba(247, 243, 235, 0.2);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a;
+            --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42);
+            --ok: #5fa969; --okt: #9ce5b3;
+            --bad: #b94232; --badsoft: rgba(185, 66, 50, 0.24); --badbord: rgba(185, 66, 50, 0.28); --badt: #ffb0a1;
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #050505; }
+          body { margin: 0; background: #050505; font-family: var(--sans); }
+          a { color: var(--accb); text-decoration: none; } a:hover { color: var(--acc); }
+
+                    /* ---- chip specimens, true size from the shipped CSS ---- */
+          .meta { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 10px; background: #000; border-radius: 6px; }
+          .meta.rowsel { background: rgba(255,138,31,.12); }
+          .meta.rowfoc { background: rgba(247,243,235,.07); }
+          .chip { display: inline-flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 999px; background: var(--bg-elev); color: var(--t3); font: 600 9px/1 var(--mono); }
+          .chip.head { background: var(--acc); color: var(--accon); }
+          .chip.old { color: var(--accb); background: var(--asoft); flex-shrink: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .chip.newtag { flex: 0 1 auto; gap: 4px; min-width: 0; max-width: 180px; padding: 0 7px; border: 1px solid var(--abord); background: var(--bg-elev); color: var(--t1); }
+          .chip.newtag svg { color: var(--acc); }
+          .chip.newtag .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .prchip { display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 0 7px; flex: none; border-radius: 999px; border: 1px solid var(--line); background: var(--bg-panel); color: var(--t2); font: 600 9.5px/1 var(--mono); }
+          .prdot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--t3); }
+          .refchip { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 17px; max-width: 180px; padding: 0 8px; border-radius: 999px; background: var(--bg-elev); border: 1px solid var(--line); color: var(--t2); font: 600 9.5px/1 var(--mono); }
+          .refchip .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+          /* ---- sidebar ref rows ---- */
+          .rrow { display: flex; align-items: center; gap: 6px; min-width: 0; height: 29px; padding: 0 4px 0 7px; border-radius: 6px; color: var(--t2); }
+          .rrow .hash { flex: none; color: var(--acc); font: 700 12px/1 var(--mono); }
+          .rrow .bico { flex: none; color: var(--tsub); font: 600 12px/1 var(--mono); }
+          .rrow .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t1); font: 500 11px/1 var(--mono); }
+          .rrow small { flex: none; max-width: 82px; font: 600 8.5px/1 var(--mono); color: var(--t3); }
+          .mini { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 24px; height: 24px; margin: -2px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--t3); }
+          .mini.off { opacity: .5; }
+          .colrule { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--bad); opacity: .55; }
+
+          /* ---- contrast matrix ---- */
+          .ctbl { border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); overflow: hidden; width: 560px; }
+          .ctr { display: grid; grid-template-columns: minmax(0,1fr) 78px 78px 66px; gap: 10px; align-items: center; padding: 7px 12px; border-bottom: 1px solid var(--line); font: 500 10.5px/1.4 var(--sans); color: var(--t2); }
+          .ctr.last { border-bottom: 0; }
+          .ctr.head { font: 600 9.5px/1.3 var(--sans); letter-spacing: .04em; text-transform: uppercase; color: var(--t3); background: rgba(247,243,235,.03); }
+          .ctr b { font: 600 10.5px/1.4 var(--mono); }
+          .fail { color: var(--badt); }
+          .pass { color: var(--okt); }
+          .shot { display: block; border: 1px solid var(--line); border-radius: 8px; max-width: 100%; }
+
+          /* ---- review chrome (matches "Refresh Affordances - Normalization") ---- */
+          .dv-turn { padding: 40px 44px 32px; background: #050505; }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--sans); color: var(--t3); max-width: 760px; text-wrap: pretty; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--sans); color: var(--tsub); max-width: 700px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+
+          /* ---- specimen stage ---- */
+          .stage { display: flex; flex-direction: column; gap: 11px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); }
+          .stage-h { display: flex; align-items: baseline; gap: 8px; font: 600 9.5px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); }
+          .stage-h em { font: 500 9.5px/1 var(--mono); font-style: normal; color: var(--tsub); text-transform: none; letter-spacing: 0; }
+          .spec { display: grid; grid-template-columns: 92px auto; align-items: center; gap: 14px; }
+          .spec-l { font: 500 10px/1.35 var(--mono); color: var(--tsub); text-align: right; }
+          .cell-b { display: flex; align-items: center; gap: 10px; min-height: 34px; }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+
+          /* ---- pins + findings ---- */
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); }
+          .pin.q { background: var(--t3); color: #050505; }
+          .pin.ok { background: var(--ok); color: #050505; }
+          .find { width: 392px; display: flex; flex-direction: column; gap: 10px; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--sans); color: var(--t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .fitem code { font: 500 10px/1.4 var(--mono); color: var(--t2); }
+          .pair { display: flex; gap: 24px; align-items: flex-start; }
+
+          /* ---- matrix table ---- */
+          .tbl { border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); overflow: hidden; }
+          .tr { display: grid; grid-template-columns: 210px 120px 145px 130px minmax(0, 1fr); gap: 12px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); font: 500 10.5px/1.4 var(--sans); color: var(--t2); }
+          .tr.wide { grid-template-columns: 250px 128px minmax(0, 1fr); }
+          .tr.last { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--t3); background: rgba(247, 243, 235, 0.03); }
+          .tr .where { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+          .tr .where em { font: 500 9.5px/1.35 var(--mono); font-style: normal; color: var(--tsub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .st { display: inline-flex; padding: 2px 6px; border-radius: 999px; font: 700 8.5px/1.35 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; }
+          .st.keep { background: rgba(95, 169, 105, 0.16); color: var(--okt); }
+          .st.chg { background: var(--asoft); color: var(--accb); border: 1px solid var(--abord); }
+          .st.bug { background: var(--badsoft); color: var(--badt); }
+          .st.q { background: rgba(247, 243, 235, 0.06); color: var(--t3); }
+
+          .side { width: 328px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: #050505; }
+          .shead { display: flex; align-items: center; gap: 7px; height: 31px; padding: 0 4px; }
+          .slabel { font: 600 9px/1 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--tsub); }
+          .scount { font: 600 9px/1 var(--mono); color: var(--tsub); }
+          .chev { flex: none; width: 0; height: 0; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 4px solid var(--t3); }
+          .grow { flex: 1; }
+        </style>
+      </helmet>
+
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Findings &#8212; one chip, four rules it was breaking</span>
+        </div>
+        <p class="dv-sub"><a href="https://github.com/pwrdrvr/PwrGit/pull/211">PR&nbsp;#211</a> adds a crosshair locator beside every tag and puts one prominent tag chip on the tagged commit. The locator is the right affordance and the one-chip cap is the right call. The chip it lands you on was the problem: it was drawn as a new thing rather than as the thing it already is &#8212; a ref chip, sitting on a line that already has three of them. Every specimen below is reproduced at shipped size from the real CSS, in PwrGit's own font stacks.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a The meta line">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>One commit's meta line &#8212; before, then after</div>
+            <div class="stage" style="width:470px">
+              <div class="stage-h"><span class="pin">1</span>Before <em>.commit-tag--release</em></div>
+              <div class="meta">
+                <span class="prchip"><span class="prdot"></span>#412</span>
+                <span class="chip old"># release&#8209;2026.09.02&#8209;nightly</span>
+                <span class="chip head">HEAD</span>
+                <span class="refchip"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;opacity:.85"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg><span class="nm">feat/tag&#8209;locate</span></span>
+              </div>
+              <p class="note">Two <code>#</code> tokens in the same mono face, 8px apart, meaning different things &#8212; <code>#412</code> is a pull request, <code>#&nbsp;release&#8209;&#8230;</code> is a tag. The tag name is also cut mid&#8209;glyph with no ellipsis, and the chip is the one item on the line that will not give up width.</p>
+              <div class="stage-h" style="margin-top:4px"><span class="pin ok">2</span>After <em>.commit-tag--tag</em></div>
+              <div class="meta">
+                <span class="prchip"><span class="prdot"></span>#412</span>
+                <span class="chip newtag"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/></svg><span class="nm">release&#8209;2026.09.02&#8209;nightly</span></span>
+                <span class="chip head">HEAD</span>
+                <span class="refchip"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;opacity:.85"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg><span class="nm">feat/tag&#8209;locate</span></span>
+              </div>
+              <p class="note">Mark plus name, opaque, bordered &#8212; the construction <code>.ref-chip</code> beside it already uses. One <code>#</code> left on the line, and it means what it has always meant. The accent moves onto the mark, so the chip still outranks a branch chip without tinting the surface its name has to stay legible against.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b Contrast by row state">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>The tint made contrast a function of row state</div>
+            <div class="stage" style="width:592px">
+              <div class="stage-h"><span class="pin">3</span>Measured <em>9px text &#183; SC 1.4.3 needs 4.5:1</em></div>
+              <div class="ctbl">
+                <div class="ctr head"><span>Row underneath the chip</span><span>Before, dark</span><span>Before, light</span><span>After</span></div>
+                <div class="ctr"><span>plain</span><b class="pass">10.43</b><b class="pass">5.23</b><b class="pass">17.2 / 18.0</b></div>
+                <div class="ctr"><span>hover &#183; <code>--accent-tint</code></span><b class="pass">9.25</b><b class="pass">4.72</b><b class="pass">17.2 / 18.0</b></div>
+                <div class="ctr"><span><code>.graph-row--head</code></span><b class="pass">9.57</b><b class="pass">4.84</b><b class="pass">17.2 / 18.0</b></div>
+                <div class="ctr"><span><code>.is-focused</code> &#8212; where a located tag lands</span><b class="pass">8.94</b><b class="pass">4.58</b><b class="pass">17.2 / 18.0</b></div>
+                <div class="ctr"><span><code>.is-selected</code> &#8212; and a located tag is selected</span><b class="pass">8.61</b><b class="fail">4.47</b><b class="pass">17.2 / 18.0</b></div>
+                <div class="ctr last"><span><code>.is-focused</code> + hover</span><b class="pass">8.24</b><b class="fail">4.32</b><b class="pass">17.2 / 18.0</b></div>
+              </div>
+              <p class="note"><code>--accent-soft</code> is a 12% tint, so a chip painted with it composites over whatever the row is already painting &#8212; and this row paints four tints of its own. Light theme therefore failed on a selected row and on a focused&#8209;and&#8209;hovered one, and cleared the floor by less than a rounding error everywhere else. Locating a tag both selects and focuses its row, so the failing states were the ones the feature exists to produce. Dark theme was never at risk; a design that is only checked in dark would have shipped this.</p>
+              <p class="note">An opaque <code>--bg-panel-elevated</code> takes the row back out of the sum. <code>--text-primary</code> on it is <b class="pass">17.19:1</b> dark and <b class="pass">17.99:1</b> light in every state, and <code>--accent</code> on it clears SC&nbsp;1.4.11's 3:1 for the mark (<b class="pass">8.07</b> / <b class="pass">5.19</b>).</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1c" data-screen-label="1c The action column">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>The sidebar's right-hand action column</div>
+            <div class="pair">
+              <div class="stage" style="width:352px">
+                <div class="stage-h"><span class="pin">4</span>Before <em>action parked mid&#8209;row</em></div>
+                <div class="side" style="position:relative">
+                  <div class="rrow"><span class="bico">&#8969;</span><span class="nm">feat/lineage&#8209;scope</span><small style="color:var(--okt)">&#8593;2</small><span class="mini">+</span></div>
+                  <div class="rrow"><span class="hash">#</span><span class="nm">v2.10.0</span><span class="mini"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="flex:none"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></span><small>1358e14</small></div>
+                  <div class="rrow"><span class="hash">#</span><span class="nm">source&#8209;tree</span><span class="mini off"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="flex:none"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></span><small>20cfb13</small></div>
+                  <div class="colrule" style="right:11px"></div>
+                </div>
+                <p class="note">Branch rows put their mini action last; the new tag rows put it between the name and the target hash. The two lists stack in one panel, so the column they share bends at the section boundary.</p>
+              </div>
+              <div class="stage" style="width:352px">
+                <div class="stage-h"><span class="pin ok">5</span>After <em>action last, as everywhere else</em></div>
+                <div class="side" style="position:relative">
+                  <div class="rrow"><span class="bico">&#8969;</span><span class="nm">feat/lineage&#8209;scope</span><small style="color:var(--okt)">&#8593;2</small><span class="mini">+</span></div>
+                  <div class="rrow"><span class="hash">#</span><span class="nm">v2.10.0</span><small>1358e14</small><span class="mini"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="flex:none"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></span></div>
+                  <div class="rrow"><span class="hash">#</span><span class="nm">source&#8209;tree</span><small>20cfb13</small><span class="mini off"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="flex:none"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></span></div>
+                  <div class="colrule" style="right:11px;background:var(--ok)"></div>
+                </div>
+                <p class="note">One column down the whole panel. The dimmed row is a tag pointing at a tree rather than a commit &#8212; it keeps its place in the column instead of vanishing, so the column stays a column.</p>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: "show the chip on a light&#8209;theme selected row" &#183; "what happens when a commit carries four tags?"</p>
+      </section>
+
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">In the shipped app</span>
+        </div>
+        <p class="dv-sub">Both captures come from the same Playwright scenario on contrived fixture repositories &#8212; five tags on one commit, 155 commits of history after it, and a second repository to navigate away from. The tag is located from the sidebar in each.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="2a" data-screen-label="2a Before"><div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Before</div><img class="shot" src="./assets/tag-locate-before.png" width="680" alt="PwrGit before: tag chip reads hash v2.10.0 on an accent tint; sidebar locate buttons sit between the tag name and its hash"></div>
+          <div class="dv-opt" id="2b" data-screen-label="2b After"><div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>After</div><img class="shot" src="./assets/tag-locate-after.png" width="680" alt="PwrGit after: tag chip is an opaque bordered pill with a tag mark and the name v2.10.0; sidebar locate buttons align in the right-hand action column"></div>
+        </div>
+      </section>
+
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3">3</a>
+          <span class="dv-tname">What the locator says out loud</span>
+        </div>
+        <p class="dv-sub">Locating is a context change with no focus move, and from the refs browser it also tears down the dialog the reader was standing in. Everything that confirmed it worked was visual.</p>
+        <div class="dv-opts">
+          <div class="find">
+            <div class="fitem"><span class="pin ok">A</span><div><h4>The jump announces</h4><p>The reveal now speaks through <code>lib/announce.ts</code>: &#8220;Tag v2.10.0 located at commit fb92f40, Release milestone commit.&#8221; One polite live region, the same one the sidebar reorder uses (SC&nbsp;4.1.3).</p></div></div>
+            <div class="fitem"><span class="pin ok">B</span><div><h4>A disabled locator says why</h4><p><code>title</code> is hover&#8209;only and assistive tech reads the label over it, so &#8220;Locate tag source&#8209;tree in lineage&#8221; on a permanently dimmed button was a promise the control would not keep. The name now carries the reason: <em>&#8230; unavailable, this tag points at a tree, not a commit</em>.</p></div></div>
+            <div class="fitem"><span class="pin ok">C</span><div><h4>No handler, no button</h4><p>Both surfaces took an optional <code>onLocateTag</code> and rendered a dead, disabled button without it. A control that can never act is worse than no control &#8212; its disabled state has no cause the reader can see.</p></div></div>
+            <div class="fitem"><span class="pin q">D</span><div><h4>Still open: the tags that get no chip at all</h4><p><code>readGraphTags</code> keeps one tag per commit and only when it scores above zero, so a commit carrying <code>nightly</code> or <code>build/123</code> and nothing else draws no chip &#8212; the graph reads as if it were untagged &#8212; and a commit carrying four release tags shows one with no sign of the others. The branch chips on the same line solve exactly this with a <code>+N</code> pill whose tooltip lists everything. Left for the author: it is a product call about how loud tags should be, not a rule the chip was breaking.</p></div></div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: "draw the +N overflow pill for tags" &#183; "should an ordinary build tag chip at all?"</p>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        renderVals() { return {}; }
+      }
+    </script>
+  </body>
+</html>

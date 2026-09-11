@@ -64,7 +64,7 @@
     <div class="eyebrow">PwrGit · as-built coverage</div>
     <h1>What ships, and where it is drawn</h1>
     <p class="sub">The companion to <b>PwrGit App Baseline</b>. Two things live here: every place the retired 2026-08 wireframe disagreed with the shipped app, and a surface-by-surface map of what the design project actually covers — so a gap reads as a gap rather than as a screen nobody built.</p>
-    <div class="prov">Verified against <b>apps/desktop/src/renderer/src/**</b> and <b>styles/tokens.css</b> · main @ bc11343 · 2026-09-02</div>
+    <div class="prov">Verified against <b>apps/desktop/src/renderer/src/**</b> and <b>styles/tokens.css</b> · main @ bc11343 · 2026-09-02 · coverage table amended 2026-09-03 for <b>Settings Updates</b> and 2026-09-10 for <b>Tag Chips and Locate</b></div>
   </div>
 
   <div>
@@ -163,11 +163,13 @@
       <tr><td class="k">Hunk / line staging gutter</td><td><span class="pill p-own">own artboard</span></td><td><b>Hunk Lane Staging</b> — the two-lane tick gutter for partial staging: per-line ticks, shift-drag ranges, hunk chips.</td></tr>
       <tr><td class="k">Binary image diff</td><td><span class="pill p-own">own artboard</span></td><td><b>Image Diff Lightbox</b> — lightbox, pixel compare and copy. Its magenta/yellow deltas deliberately do not flip with the theme; the worker bakes the same RGB into the diff PNG.</td></tr>
       <tr><td class="k">Reset to remote</td><td><span class="pill p-own">own artboard</span></td><td><b>Reset to Remote — UX Review</b> — the destructive-reset confirmation and its impact preview.</td></tr>
+      <tr><td class="k">Lineage tag chip &amp; tag locator</td><td><span class="pill p-own">own artboard</span></td><td><b>Tag Chips and Locate — UX Review</b> — the one prominent tag chip on a commit's meta line, why it is built as <code>.ref-chip</code> is built rather than as an accent tint, and the locate affordance in the sidebar and the refs browser. From <b>PwrGit#211</b>.</td></tr>
+      <tr><td class="k">Settings › Updates</td><td><span class="pill p-own">own artboard</span></td><td><b>Settings Updates</b> — the four-slot release matrix (two trains × two tracks), the states an empty or still-unpinned slot has to report, and the two-control layout it replaced in <b>PwrGit#195</b>. The one Settings section that is drawn.</td></tr>
       <tr><td class="k">App icon &amp; release assets</td><td><span class="pill p-own">own artboard</span></td><td><b>PwrGit Icon</b> — the lineage mark, size ladder, tray templates and DMG background, rendered from the real files under <code>apps/desktop/build/</code>.</td></tr>
 
       <tr><td class="k">Diff pane</td><td><span class="pill p-none">not drawn</span></td><td>Side-of-index switch, message header, selection bar, stale-diff notice, gesture help, blame-from-line on the new-side gutter.</td></tr>
       <tr><td class="k">File Insights</td><td><span class="pill p-none">not drawn</span></td><td>History / Blame / Contents tabs for one file.</td></tr>
-      <tr><td class="k">Settings window</td><td><span class="pill p-none">not drawn</span></td><td>Eight sections on the <code>#settings</code> route: General (theme, sidebar text size, density, developer mode), Updates, Profiles, Forges, <b>Agents</b>, Experimental, Memory / CPU, About.</td></tr>
+      <tr><td class="k">Settings window</td><td><span class="pill p-none">not drawn</span></td><td>Eight sections on the <code>#settings</code> route: General (theme, sidebar text size, density, developer mode), Updates (<b>drawn</b> — see the row above), Profiles, Forges, <b>Agents</b>, Experimental, Memory / CPU, About. The window chrome and the other seven panes have no artboard.</td></tr>
       <tr><td class="k">Settings › Agents</td><td><span class="pill p-none">not drawn</span></td><td>The only “agent” surface that ships, and it is the inverse of the wireframe's: MCP roles, capabilities, sessions and one-time tokens that let <b>external</b> agents drive PwrGit. Nothing drives PwrGit's own UI.</td></tr>
       <tr><td class="k">Logs window</td><td><span class="pill p-none">not drawn</span></td><td><code>#logs</code> route.</td></tr>
       <tr><td class="k">Licence / notices windows</td><td><span class="pill p-none">not drawn</span></td><td><code>#document-license</code> and <code>#document-third-party-notices</code>.</td></tr>

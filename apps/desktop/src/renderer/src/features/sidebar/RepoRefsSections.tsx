@@ -1,3 +1,4 @@
+import { LocateGlyph } from "../../lib/LocateGlyph";
 import {
   useCallback,
   useEffect,
@@ -6,7 +7,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent
 } from "react";
-import type { LocalBranchSummary, Repo, RepoRefs, Worktree } from "@pwrgit/shared";
+import type { TagSummary, LocalBranchSummary, Repo, RepoRefs, Worktree } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
@@ -52,6 +53,7 @@ export function RepoRefsSections({
   repo,
   now,
   focusedWorktree,
+  onLocateTag,
   onRevealWorktree,
   onCreateWorktree
 }: {
@@ -61,6 +63,7 @@ export function RepoRefsSections({
    *  otherwise is what keeps the current-branch marker unique across the
    *  window while "occupied" stays per-repo. */
   focusedWorktree: Worktree | null;
+  onLocateTag?: ((repoId: string, tag: TagSummary) => void) | undefined;
   onRevealWorktree: (worktreeId: string) => void;
   onCreateWorktree: (
     branch: string,
@@ -472,6 +475,37 @@ export function RepoRefsSections({
                 >
                   {tag.targetId.slice(0, 7)}
                 </small>
+                {/* Last in the row, like the branch and remote-branch rows'
+                    mini actions: the three lists stack in one panel, so an
+                    action parked mid-row breaks the column they share.
+                    Rendered only when the handler exists — a button that can
+                    never do anything is worse than no button, because its
+                    disabled state has no cause the reader can see. */}
+                {onLocateTag !== undefined && (
+                  <button
+                    className="ref-mini-action"
+                    /* A disabled control still announces its name, so the name
+                       has to carry the reason — `title` is hover-only, and AT
+                       reads the label over it. */
+                    aria-label={
+                      tag.targetType === "commit"
+                        ? `Locate tag ${tag.name} in lineage`
+                        : `Locate tag ${tag.name} in lineage — unavailable, this tag points at a ${tag.targetType}, not a commit`
+                    }
+                    title={
+                      tag.targetType === "commit"
+                        ? "Locate tag in lineage"
+                        : `This tag points at a ${tag.targetType}, not a commit`
+                    }
+                    disabled={tag.targetType !== "commit"}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onLocateTag(repo.id, tag);
+                    }}
+                  >
+                    <LocateGlyph />
+                  </button>
+                )}
               </div>
             ))}
             {error !== null && <div className="ref-section__error">{error}</div>}
@@ -695,6 +729,7 @@ export function RepoRefsSections({
 
       {browser !== null && refs !== null && (
         <RepoRefsModal
+          onLocateTag={onLocateTag}
           repo={repo}
           refs={refs}
           now={now}

@@ -6,7 +6,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent
 } from "react";
-import type { Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
+import type { TagSummary, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
 import { announce, movedMessage } from "../../lib/announce";
 import {
   currentPlatform,
@@ -94,6 +94,7 @@ export function RepoRow({
   onCycleSort,
   onReorder,
   onNewWorktree,
+  onLocateTag,
   onRevealWorktree,
   onCreateWorktreeFromRef,
   arrangeable,
@@ -143,6 +144,7 @@ export function RepoRow({
   onCycleSort: () => void;
   onReorder: (orderedIds: string[]) => void;
   onNewWorktree: () => void;
+  onLocateTag?: ((repoId: string, tag: TagSummary) => void) | undefined;
   onRevealWorktree: (worktreeId: string) => void;
   onCreateWorktreeFromRef: (
     branch: string,
@@ -750,6 +752,7 @@ export function RepoRow({
           )}
 
           <RepoRefsSections
+            onLocateTag={onLocateTag}
             repo={repo}
             now={now}
             // Only when the working target lives in THIS repo. That is what

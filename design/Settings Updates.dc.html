@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --bg-app: #000000; --bg-panel: #0a0a0a; --bg-input: #080808;
+            --bg-elev: #101010; --bg-row-active: #1a1206;
+            --line-faint: rgba(247, 243, 235, 0.06);
+            --line: rgba(247, 243, 235, 0.1);
+            --line-def: rgba(247, 243, 235, 0.14);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a;
+            --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42);
+            --ok: #5fa969; --okt: #9ce5b3; --oksoft: rgba(74, 148, 92, 0.18);
+            --warn: #d99a3d; --warnsoft: rgba(217, 154, 61, 0.14);
+            --bad: #b94232; --badt: #ffb0a1; --badsoft: rgba(185, 66, 50, 0.24);
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          * { box-sizing: border-box; }
+          body { margin: 0; background: #050505; font-family: var(--sans); color: var(--t1); }
+          a { color: var(--accb); } a:hover { color: var(--acc); }
+
+          .dv-turn { padding: 40px 44px 32px; }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.6 var(--sans); color: var(--t3); max-width: 700px; text-wrap: pretty; }
+          .dv-sub code, .dv-note code, .dv-olabel code { font: 500 10.5px var(--mono); color: var(--accb); }
+          .dv-sub b, .dv-note b { color: var(--t2); font-weight: 600; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          /* Flex row, so the prose after the id chip is ONE span — an inline
+             <b>/<code> left bare here becomes its own flex item and breaks the
+             sentence into columns. */
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.4 var(--sans); color: var(--tsub); max-width: 620px; }
+          .dv-card { background: var(--bg-app); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+          .dv-note { margin: 24px 0 0; padding: 14px 16px; border: 1px solid var(--line); border-left: 3px solid var(--acc); border-radius: 0 8px 8px 0; background: var(--bg-panel); font: 400 11.5px/1.7 var(--sans); color: var(--t2); max-width: 900px; }
+          .dv-prov { margin-top: 10px; font: 500 10px/1.6 var(--mono); color: var(--tsub); }
+
+          /* ---- Settings chrome, lifted from PwrGit app.css ---- */
+          .pane { padding: 22px 24px; display: flex; flex-direction: column; gap: 18px; }
+          .head-eyebrow { font: 600 9.5px/1 var(--sans); letter-spacing: 0.14em; text-transform: uppercase; color: var(--acc); }
+          .head-title { margin: 6px 0 0; font: 700 19px/1.2 var(--sans); letter-spacing: -0.01em; color: var(--t1); }
+          .head-help { margin: 6px 0 0; font: 400 11.5px/1.6 var(--sans); color: var(--t3); max-width: 52ch; }
+
+          .card { border: 1px solid var(--line); border-radius: 10px; background: var(--bg-panel); overflow: hidden; }
+          .card-hd { display: flex; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line-faint); }
+          .card-hd-main { min-width: 0; flex: 1; }
+          .card-eyebrow { margin: 0; font: 600 9.5px/1 var(--sans); letter-spacing: 0.14em; text-transform: uppercase; color: var(--t3); }
+          .card-title { margin: 6px 0 0; font: 600 13.5px/1.2 var(--sans); color: var(--t1); }
+          .card-desc { margin: 6px 0 0; font: 400 11.5px/1.6 var(--sans); color: var(--t3); max-width: 54ch; }
+          .chip { flex: none; align-self: flex-start; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg-elev); color: var(--t3); font: 600 10px/1 var(--sans); letter-spacing: 0.03em; }
+          .chip.ok { color: var(--okt); background: var(--oksoft); border-color: transparent; }
+          .chip.warn { color: var(--warn); background: var(--warnsoft); border-color: transparent; }
+
+          .field { display: flex; gap: 20px; padding: 15px 16px; border-bottom: 1px solid var(--line-faint); }
+          .field:last-child { border-bottom: none; }
+          .field-l { width: 190px; flex: none; display: flex; flex-direction: column; gap: 4px; }
+          .field-l > span:first-child { font: 600 12px/1.3 var(--sans); color: var(--t1); }
+          .field-sub { font: 400 11px/1.45 var(--sans); color: var(--t3); }
+          .field-c { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+          .field-help { font: 400 10.5px/1.45 var(--sans); color: var(--tsub); max-width: 46ch; }
+
+          /* ---- the release slot matrix ---- */
+          .slots { display: grid; grid-template-columns: 76px minmax(0, 1fr) minmax(0, 1fr); gap: 6px; width: 100%; align-items: stretch; }
+          .slots-col { display: flex; align-items: center; padding-left: 2px; font: 600 9.5px/1 var(--sans); letter-spacing: 0.14em; text-transform: uppercase; color: var(--t3); }
+          .slots-row { display: flex; align-items: center; font: 600 11.5px/1 var(--sans); letter-spacing: 0.03em; color: var(--t2); }
+          .slot { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; min-width: 0; padding: 9px 11px; background: var(--bg-input); border: 1px solid var(--line); border-radius: 8px; color: var(--t2); text-align: left; cursor: pointer; }
+          .slot.sel { background: var(--bg-row-active); border-color: var(--abord); }
+          .slot.focus { outline: 2px solid var(--acc); outline-offset: 1px; }
+          .slot-ver { font: 600 11.5px/1.2 var(--mono); color: var(--t1); overflow-wrap: anywhere; }
+          .slot.sel .slot-ver { color: var(--accb); }
+          .slot-ver.empty { font: 500 11.5px/1.2 var(--sans); color: var(--t3); }
+          .slot-sub { font: 400 10.5px/1.35 var(--sans); color: var(--tsub); }
+          .slot-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+          .sc { display: inline-flex; align-items: center; height: 16px; padding: 0 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-elev); color: var(--t3); font: 600 8.5px/1 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; }
+          .sc.sel { border-color: transparent; background: var(--asoft); color: var(--accb); }
+          .sc.inst { border-color: transparent; background: var(--oksoft); color: var(--okt); }
+
+          .btn { padding: 7px 12px; border: 1px solid var(--line-def); border-radius: 7px; background: var(--bg-elev); color: var(--t1); font: 550 11.5px/1 var(--sans); cursor: pointer; }
+          .btn.primary { border-color: transparent; background: var(--acc); color: var(--accon); }
+          .row-actions { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; }
+
+          /* ---- the retired two-control layout (turn 2 only) ---- */
+          .seg { display: inline-flex; flex-wrap: wrap; gap: 1px; background: var(--bg-input); border: 1px solid var(--line); border-radius: 7px; padding: 2px; }
+          .seg button { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; border: 0; background: transparent; color: var(--t2); font: 550 11.5px/1 var(--sans); padding: 6px 11px; border-radius: 5px; cursor: pointer; }
+          .seg button.on { background: var(--bg-row-active); color: var(--accb); }
+          .seg .meta { font: 400 9.5px/1.2 var(--sans); color: var(--tsub); }
+          /* Call-outs live in a gutter beside the card with a leader rule back to
+             what they name — laid over the control, they hid the evidence. */
+          .dv-annot { position: relative; width: 980px; }
+          .lead { position: absolute; height: 1px; background: var(--bad); opacity: 0.5; }
+          .flag { position: absolute; display: flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 7px; background: var(--badsoft); border: 1px solid var(--bad); color: var(--badt); font: 600 10px/1.3 var(--sans); white-space: nowrap; }
+          .flag::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--badt); flex: none; }
+        </style>
+      </helmet>
+
+      <div class="dv-turn">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Settings &rsaquo; Updates &mdash; the four-slot release matrix</span>
+        </div>
+        <p class="dv-sub">
+          As built. Two trains (rows) &times; two tracks (columns), all four published slots on screen at once.
+          Every tile states <b>its own</b> resolved version whether or not it is the selected one, an empty tile
+          says <b>why</b> it is empty, and a tile click writes both axes in one <code>settings:update</code> patch.
+          The matrix is a roving-tabindex radiogroup: arrow keys move focus without changing the feed, which
+          commits on Space/Enter or a click.
+        </p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a Inferred">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a><span>Resting, selection still <code>inferred</code> &mdash; the running binary is the alpha in the bottom-right tile, so that is the feed being followed, and the hint says the choice is not pinned yet.</span></div>
+            <div class="dv-card" style="width: 660px;">
+              <div class="pane">
+                <header>
+                  <div class="head-eyebrow">Updates</div>
+                  <h1 class="head-title">Updates</h1>
+                  <p class="head-help">Choose the release train and track. Website downloads follow the suffix of the installed binary until you pick a slot here.</p>
+                </header>
+                <section class="card">
+                  <div class="card-hd">
+                    <div class="card-hd-main">
+                      <p class="card-eyebrow">Updates</p>
+                      <h2 class="card-title">Release channel</h2>
+                      <p class="card-desc">Stable is the smoke-checked train. Beta follows main and stays selectable even when its versions are still Unavailable.</p>
+                    </div>
+                    <span class="chip ok">Stable &middot; Latest</span>
+                  </div>
+                  <div class="field">
+                    <div class="field-l">
+                      <span>Follow this build</span>
+                      <span class="field-sub">Two trains, two tracks. Latest is smoke-checked within its train; Prerelease is newer and may not install.</span>
+                    </div>
+                    <div class="field-c">
+                      <div class="slots">
+                        <div></div>
+                        <div class="slots-col">Latest</div>
+                        <div class="slots-col">Prerelease</div>
+                        <div class="slots-row">Stable</div>
+                        <div class="slot sel">
+                          <span class="slot-ver">v9.9.0</span>
+                          <span class="slot-sub">Smoke-checked. The default for everyone.</span>
+                          <span class="slot-chips"><span class="sc sel">Selected</span></span>
+                        </div>
+                        <div class="slot">
+                          <span class="slot-ver">v9.9.1-rc.1</span>
+                          <span class="slot-sub">Release candidates for the stable line.</span>
+                        </div>
+                        <div class="slots-row">Beta</div>
+                        <div class="slot">
+                          <span class="slot-ver empty">Unavailable</span>
+                          <span class="slot-sub">No beta release found.</span>
+                        </div>
+                        <div class="slot">
+                          <span class="slot-ver">v9.10.0-alpha.3</span>
+                          <span class="slot-sub">Newest alpha off main. May not install.</span>
+                          <span class="slot-chips"><span class="sc inst">Installed</span></span>
+                        </div>
+                      </div>
+                      <span class="field-help">Following the build you installed. Pick a slot to pin it.</span>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <div class="field-l">
+                      <span>Check now</span>
+                      <span class="field-sub">PwrGit also checks on its own. This asks immediately.</span>
+                    </div>
+                    <div class="field-c">
+                      <div class="row-actions"><button class="btn">Check for Update</button></div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b Pinned">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a><span>Pinned to Beta Prerelease, an update downloaded &mdash; Selected and Installed can sit on the same tile, and the &ldquo;we guessed&rdquo; hint is gone the moment somebody picks.</span></div>
+            <div class="dv-card" style="width: 660px;">
+              <div class="pane">
+                <section class="card">
+                  <div class="card-hd">
+                    <div class="card-hd-main">
+                      <p class="card-eyebrow">Updates</p>
+                      <h2 class="card-title">Release channel</h2>
+                      <p class="card-desc">Stable is the smoke-checked train. Beta follows main and stays selectable even when its versions are still Unavailable.</p>
+                    </div>
+                    <span class="chip warn">Beta &middot; Prerelease</span>
+                  </div>
+                  <div class="field">
+                    <div class="field-l">
+                      <span>Follow this build</span>
+                      <span class="field-sub">Two trains, two tracks. Latest is smoke-checked within its train; Prerelease is newer and may not install.</span>
+                    </div>
+                    <div class="field-c">
+                      <div class="slots">
+                        <div></div>
+                        <div class="slots-col">Latest</div>
+                        <div class="slots-col">Prerelease</div>
+                        <div class="slots-row">Stable</div>
+                        <div class="slot">
+                          <span class="slot-ver">v9.9.0</span>
+                          <span class="slot-sub">Smoke-checked. The default for everyone.</span>
+                        </div>
+                        <div class="slot focus">
+                          <span class="slot-ver">v9.9.1-rc.1</span>
+                          <span class="slot-sub">Release candidates for the stable line.</span>
+                        </div>
+                        <div class="slots-row">Beta</div>
+                        <div class="slot">
+                          <span class="slot-ver empty">Unavailable</span>
+                          <span class="slot-sub">No beta release found.</span>
+                        </div>
+                        <div class="slot sel">
+                          <span class="slot-ver">v9.10.0-alpha.4</span>
+                          <span class="slot-sub">Newest alpha off main. May not install.</span>
+                          <span class="slot-chips"><span class="sc sel">Selected</span></span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <div class="field-l">
+                      <span>Check now</span>
+                      <span class="field-sub">PwrGit also checks on its own. This asks immediately.</span>
+                    </div>
+                    <div class="field-c">
+                      <div class="row-actions">
+                        <button class="btn primary">Restart to Update (9.10.0-alpha.4)</button>
+                        <button class="btn">Check for Update</button>
+                      </div>
+                      <span class="field-help">Update ready: v9.10.0-alpha.4. Restart to install.</span>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1c" data-screen-label="1c Nothing to show">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a><span>No feed &mdash; a development build never spends a GitHub request, so all four answer empty. &ldquo;Loading&rdquo; and &ldquo;Unavailable&rdquo; are different claims: a read that <b>fails</b> still settles, and the tiles must stop claiming one is in flight.</span></div>
+            <div class="dv-card" style="width: 660px;">
+              <div class="pane">
+                <section class="card">
+                  <div class="card-hd">
+                    <div class="card-hd-main">
+                      <p class="card-eyebrow">Updates</p>
+                      <h2 class="card-title">Release channel</h2>
+                      <p class="card-desc">Stable is the smoke-checked train. Beta follows main and stays selectable even when its versions are still Unavailable.</p>
+                    </div>
+                    <span class="chip ok">Stable &middot; Latest</span>
+                  </div>
+                  <div class="field">
+                    <div class="field-l">
+                      <span>Follow this build</span>
+                      <span class="field-sub">Two trains, two tracks. Latest is smoke-checked within its train; Prerelease is newer and may not install.</span>
+                    </div>
+                    <div class="field-c">
+                      <div class="slots">
+                        <div></div>
+                        <div class="slots-col">Latest</div>
+                        <div class="slots-col">Prerelease</div>
+                        <div class="slots-row">Stable</div>
+                        <div class="slot sel">
+                          <span class="slot-ver empty">Unavailable</span>
+                          <span class="slot-sub">Release versions are not fetched in development builds.</span>
+                          <span class="slot-chips"><span class="sc sel">Selected</span></span>
+                        </div>
+                        <div class="slot">
+                          <span class="slot-ver empty">Unavailable</span>
+                          <span class="slot-sub">Release versions are not fetched in development builds.</span>
+                        </div>
+                        <div class="slots-row">Beta</div>
+                        <div class="slot">
+                          <span class="slot-ver empty">Unavailable</span>
+                          <span class="slot-sub">Release versions are not fetched in development builds.</span>
+                        </div>
+                        <div class="slot">
+                          <span class="slot-ver empty">Unavailable</span>
+                          <span class="slot-sub">Release versions are not fetched in development builds.</span>
+                        </div>
+                      </div>
+                      <span class="field-help">Following the build you installed. Pick a slot to pin it.</span>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <div class="dv-note">
+          <b>The pin is a third field, not a shape.</b> <code>updates.selectionSource</code> is main-owned:
+          while it reads <code>"inferred"</code>, train/track are re-derived from the running binary on every
+          hydration, so a hand-installed alpha follows the alpha feed. The write path derives
+          <code>"user"</code> from any patch naming either axis, and the patch allowlist drops the field &mdash;
+          a renderer can neither pin a selection nobody clicked nor un-pin one that was. Without it,
+          <code>stable</code>/<code>latest</code> on disk is equally &ldquo;the default nobody touched&rdquo; and
+          &ldquo;the choice somebody made&rdquo;.
+        </div>
+      </div>
+
+      <div class="dv-turn">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">What it replaced</span>
+        </div>
+        <p class="dv-sub">
+          Two stacked segmented controls, retired in <a href="https://github.com/pwrdrvr/PwrGit/pull/195">PwrGit#195</a>.
+          Kept here because the failure is a <b>layout</b> failure, not a copy one: with only two buttons per
+          axis, a control can only ever label itself with one of the two slots on its row.
+        </p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="2a" data-screen-label="2a Retired">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a><span>The mislabel &mdash; same fixture data as 1a.</span></div>
+            <div class="dv-annot">
+              <div class="dv-card" style="width: 660px;">
+                <div class="pane">
+                  <section class="card">
+                    <div class="card-hd">
+                      <div class="card-hd-main">
+                        <p class="card-eyebrow">Updates</p>
+                        <h2 class="card-title">Release train</h2>
+                        <p class="card-desc">Stable is the smoke-checked train. Beta follows main and stays selectable even when its versions are still Unavailable.</p>
+                      </div>
+                      <span class="chip ok">Stable</span>
+                    </div>
+                    <div class="field">
+                      <div class="field-l">
+                        <span>Release channel</span>
+                        <span class="field-sub">Stable is the 1.0 feed. Beta is the next main-train build.</span>
+                      </div>
+                      <div class="field-c">
+                        <div class="seg">
+                          <button class="on">Stable<span class="meta">v9.9.0</span></button>
+                          <button>Beta<span class="meta">Unavailable</span></button>
+                        </div>
+                        <span class="field-help">Stable latest: v9.9.0. Stable prerelease: v9.9.1-rc.1. Beta latest: Unavailable. Beta prerelease: v9.10.0-alpha.3</span>
+                      </div>
+                    </div>
+                    <div class="field">
+                      <div class="field-l">
+                        <span>Update track</span>
+                        <span class="field-sub">Latest is smoke-checked. Prerelease is newer and may not install.</span>
+                      </div>
+                      <div class="field-c">
+                        <div class="row-actions">
+                          <div class="seg">
+                            <button class="on">Latest<span class="meta">v9.9.0</span></button>
+                            <button>Prerelease<span class="meta">v9.9.1-rc.1</span></button>
+                          </div>
+                          <button class="btn">Check for Update</button>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </div>
+              <span class="lead" style="left: 388px; top: 163px; width: 286px;"></span>
+              <span class="flag" style="left: 674px; top: 151px;">Reads &ldquo;Unavailable&rdquo; &mdash; the alpha is one click away</span>
+              <span class="lead" style="left: 574px; top: 206px; width: 100px;"></span>
+              <span class="flag" style="left: 674px; top: 194px;">&hellip; and the help line right here names it</span>
+            </div>
+          </div>
+        </div>
+        <div class="dv-note">
+          <b>Two bugs feeding each other.</b> The train control labelled each button with that train&rsquo;s
+          <code>latest</code> release only, so Beta read <b>Unavailable</b> whenever <code>beta.latest</code>
+          was empty &mdash; while <code>beta.prerelease</code> held a shipped alpha, and the help line beneath
+          it said so in prose. Meanwhile the write path persisted both axes on every click, including a click
+          on the segment already selected, so the first visit to this pane froze the install on Stable Latest.
+          A later hand-installed alpha was then offered the last stable forever, and this screen was the one
+          place that could have said otherwise.
+        </div>
+        <div class="dv-prov">Verified against apps/desktop/src/renderer/src/features/settings/UpdatesSettings.tsx, styles/app.css and packages/shared/src/protocol.ts &middot; PwrGit#195 &middot; 2026-09-03. Versions are contrived fixture data; no PwrGit tag is near 9.x.</div>
+      </div>
+    </x-dc>
+  </body>
+</html>

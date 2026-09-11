@@ -1,3 +1,4 @@
+import { LocateGlyph } from "../../lib/LocateGlyph";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type {
@@ -8,6 +9,7 @@ import type {
   LaneGraph,
   PrSummary
 } from "@pwrgit/shared";
+import { announce } from "../../lib/announce";
 import { useHoverIntent } from "../../lib/hoverIntent";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
@@ -243,8 +245,8 @@ export function LineageGraph({
   selectedCommits: Set<string>;
   /** Commit whose files are open in the rail — highlighted even off-branch. */
   focusedCommit: string | null;
-  /** A command-palette request to center and flash a loaded commit. */
-  revealCommit: { hash: string; requestId: number } | null;
+  /** An explicit request to center and flash a commit. */
+  revealCommit: { hash: string; requestId: number; tagName?: string; tagKind?: "annotated" | "lightweight" } | null;
   onToggleCommit: (hash: string) => void;
   /** Publishes the currently loaded timeline for command-palette search. */
   onCommitsChange: (commits: Commit[]) => void;
@@ -337,6 +339,18 @@ export function LineageGraph({
     };
   }, []);
 
+  // A reveal is a one-shot navigation request, but its history target must
+  // survive consumption and ordinary command-palette navigation.
+  const revealHash = revealCommit?.hash;
+  const completedReveal = useRef<{ worktreeId: string; requestId: number } | null>(null);
+  const revealPending = revealCommit !== null && (
+    completedReveal.current?.worktreeId !== worktreeId ||
+    completedReveal.current.requestId !== revealCommit.requestId
+  );
+  useEffect(() => {
+    completedReveal.current = null;
+  }, [worktreeId]);
+
   // Active membership needs PR state for every local branch, including refs
   // that are not checked out in a worktree. The service coalesces this with the
   // sidebar's repo refresh when both surfaces open together.
@@ -350,7 +364,7 @@ export function LineageGraph({
     const load = (force: boolean): void => {
       const sequence = ++loadSequence;
       setLoadError(null);
-      void dispatch("graph:lanes", { worktreeId, scope, force }).then((r) => {
+      void dispatch("graph:lanes", { worktreeId, scope, force, ...(revealHash === undefined ? {} : { revealHash }) }).then((r) => {
         if (!active || sequence !== loadSequence) return;
         if (!r.ok) {
           const message = r.error.message.split("\n")[0];
@@ -431,7 +445,7 @@ export function LineageGraph({
       active = false;
       off();
     };
-  }, [branchPrGeneration, onCommitsChange, repoId, worktreeId, scope]);
+  }, [branchPrGeneration, onCommitsChange, repoId, worktreeId, scope, revealHash]);
 
   // The sidebar and graph keep separate view models. Apply the same targeted
   // PR delta to the graph cache so a hover/focused refresh updates both
@@ -567,6 +581,9 @@ export function LineageGraph({
         commit,
         row: layout.rows[i] ?? { lane: 0, top: [], bottom: [] },
         refs,
+        tag: revealCommit?.hash === commit.hash && revealCommit.tagName !== undefined
+          ? { name: revealCommit.tagName, kind: revealCommit.tagKind ?? "lightweight" }
+          : data?.tags?.[commit.hash],
         remoteRefs,
         isHead: commit.hash === head,
         isHeadOnly: headOnlyCommits.has(commit.hash),
@@ -575,7 +592,7 @@ export function LineageGraph({
         ...(pullRequest == null ? {} : { pullRequest })
       };
     });
-  }, [commitPullRequests, data, layout, email, head]);
+  }, [commitPullRequests, data, layout, email, head, revealCommit]);
 
   const graphCommitKey = useMemo(
     () => (data?.commits ?? []).map((commit) => commit.hash).join("\n"),
@@ -868,17 +885,33 @@ export function LineageGraph({
   };
 
   useEffect(() => {
-    if (revealCommit === null || !vmByHash.has(revealCommit.hash)) return;
-    const raf = requestAnimationFrame(() => locateHash(revealCommit.hash));
+    if (!revealPending || revealCommit === null || !vmByHash.has(revealCommit.hash)) return;
+    const raf = requestAnimationFrame(() => {
+      completedReveal.current = { worktreeId, requestId: revealCommit.requestId };
+      locateHash(revealCommit.hash);
+      const commit = vmByHash.get(revealCommit.hash)?.commit;
+      if (revealCommit.tagName !== undefined && commit !== undefined) {
+        onOpenCommit(commit.hash, commit.subject);
+        // Locating scrolls the graph and swaps the rail without moving focus
+        // — and when the request came from the refs browser, the dialog the
+        // reader was in has just closed underneath them. Everything that says
+        // it worked is visual, so say it (SC 4.1.3).
+        announce(
+          `Tag ${revealCommit.tagName} located at commit ${commit.shortHash}, ${commit.subject}.`
+        );
+      }
+    });
     return () => cancelAnimationFrame(raf);
     // locateHash intentionally tracks the rendered graph through graphCommitKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graphCommitKey, revealCommit]);
+  }, [graphCommitKey, revealCommit, worktreeId, revealPending]);
 
   // Selecting a worktree takes you to its HEAD: center it and flash it. Also
   // re-centers when HEAD itself moves (commit, pull, switch branch).
   useEffect(() => {
-    if (head === "") return;
+    // Capture pending state from this render: the reveal RAF may consume the
+    // request before this RAF runs. Once consumed, future HEAD moves center normally.
+    if (head === "" || revealPending) return;
     const raf = requestAnimationFrame(() => locateHash(head));
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1076,10 +1109,7 @@ export function LineageGraph({
             onClick={() => locateHash(head)}
             title="Scroll to this worktree's current commit (HEAD)"
           >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <circle cx="12" cy="12" r="7" />
-              <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
-            </svg>
+            <LocateGlyph />
             You are here
           </button>
         )}

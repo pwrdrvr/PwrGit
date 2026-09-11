@@ -1230,6 +1230,8 @@ export interface Commands {
    *  is cached per repo; `force` recomputes it (else only HEAD is re-resolved). */
   "graph:lanes": {
     req: {
+      /** Explicit navigation target; adds a bounded history window if absent. */
+      revealHash?: string;
       worktreeId: string;
       scope: "active" | "all";
       limit?: number;
