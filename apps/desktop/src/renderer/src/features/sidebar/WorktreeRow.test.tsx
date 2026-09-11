@@ -47,6 +47,48 @@ const render = (
     />
   );
 
+describe("WorktreeRow — a checkout that is gone", () => {
+  // The directory was deleted outside PwrGit (an agent cleaning up its
+  // worktrees). The row used to keep its last green badges and every action
+  // on it failed with git's raw error; now it says what happened and offers
+  // the one thing that helps, which is removing it.
+  it("says the directory is missing and drops the stale counts", () => {
+    const markup = render(
+      worktree({
+        missing: true,
+        dirty: 3,
+        ahead: 2,
+        behind: 1,
+        mergedIntoDefault: true,
+        lastActivityAt: "2026-08-01T00:00:00.000Z"
+      })
+    );
+    expect(markup).toContain("wt-row is-missing");
+    expect(markup).toContain(
+      '<span class="wt-tag wt-tag--missing"'
+    );
+    expect(markup).toContain(">directory missing</span>");
+    // The full path is named where the user will look for the tag's meaning.
+    expect(markup).toContain("/wt/PwrGit/graph-x");
+    for (const badge of ["●3", "↑2", "↓1", "in default"]) {
+      expect(markup).not.toContain(badge);
+    }
+    // Reset needs the checkout; Remove is exactly what a gone row needs.
+    expect(markup).toContain("Worktree actions");
+  });
+
+  it("says nothing on a checkout that is still there", () => {
+    expect(render(worktree({}))).not.toContain("directory missing");
+    expect(render(worktree({}))).not.toContain("is-missing");
+  });
+
+  it("names a locked worktree", () => {
+    const markup = render(worktree({ locked: true }));
+    expect(markup).toContain('<span class="wt-tag wt-tag--locked"');
+    expect(markup).toContain(">locked</span>");
+  });
+});
+
 describe("WorktreeRow — the folder a worktree lives in", () => {
   // A worktree whose branch was renamed or recreated after it was created keeps
   // its original directory name. The row titled itself with the branch alone,
@@ -64,9 +106,27 @@ describe("WorktreeRow — the folder a worktree lives in", () => {
     );
     // Both names, so either one identifies the row.
     expect(markup).toContain("dmg-file-art-update-4fd193");
-    // The full path is one hover away; the row only has room for the leaf.
+    // Hovering the folder line names the branch in full — that name is the
+    // row's first casualty of a narrow sidebar — over a path elided in the
+    // middle so the tooltip fits on screen.
     expect(markup).toContain(
-      "Worktree folder — /Users/me/claude-worktrees/PwrSnap/recursing-euler-9edf74"
+      "dmg-file-art-update-4fd193\nWorktree folder — /Users/…/PwrSnap/recursing-euler-9edf74"
+    );
+  });
+
+  // The branch is what a long name truncates to "fix/desktop-price-a…", and
+  // the folder line under it is where the pointer lands when someone goes
+  // looking for the rest of it.
+  it("names the whole branch on the folder line's tooltip", () => {
+    const markup = render(
+      worktree({
+        branch: "fix/desktop-price-and-token-columns-for-agent-runs",
+        path: "/Users/me/claude-worktrees/PwrAgnt/elated-cartwright-f52b78"
+      })
+    );
+
+    expect(markup).toContain(
+      'title="fix/desktop-price-and-token-columns-for-agent-runs\nWorktree folder — /Users/…/PwrAgnt/elated-cartwright-f52b78"'
     );
   });
 

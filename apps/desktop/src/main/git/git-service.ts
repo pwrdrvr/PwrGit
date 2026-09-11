@@ -1,4 +1,4 @@
-import { rmSync, statSync } from "node:fs";
+import { existsSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   type BranchRef,
@@ -918,7 +918,17 @@ export type WorktreeInfo = {
   head: string;
   detached: boolean;
   bare: boolean;
+  /** Git still lists it, but its directory (or its `.git` link) is gone —
+   *  the entry `git worktree prune` would drop. Never pruned here: an
+   *  unmounted volume reads the same way and comes back. */
+  prunable: boolean;
+  /** `git worktree lock`ed, typically because it lives on removable media. */
+  locked: boolean;
 };
+
+/** `locked` and `prunable` print bare or followed by a reason. */
+const flagLine = (line: string, flag: string): boolean =>
+  line === flag || line.startsWith(`${flag} `);
 
 /**
  * Parse `git worktree list --porcelain` output. Blocks are separated by blank
@@ -937,6 +947,8 @@ export function parseWorktreeList(stdout: string): WorktreeInfo[] {
     let branch = "";
     let detached = false;
     let bare = false;
+    let prunable = false;
+    let locked = false;
 
     for (const line of block.split("\n")) {
       if (line.startsWith("worktree ")) path = line.slice(9).trim();
@@ -945,6 +957,8 @@ export function parseWorktreeList(stdout: string): WorktreeInfo[] {
         branch = line.slice(7).trim().replace(/^refs\/heads\//, "");
       else if (line === "detached") detached = true;
       else if (line === "bare") bare = true;
+      else if (flagLine(line, "prunable")) prunable = true;
+      else if (flagLine(line, "locked")) locked = true;
     }
 
     if (path === "") continue;
@@ -955,7 +969,7 @@ export function parseWorktreeList(stdout: string): WorktreeInfo[] {
           ? "(bare)"
           : "(unknown)";
     }
-    out.push({ path, branch, head, detached, bare });
+    out.push({ path, branch, head, detached, bare, prunable, locked });
   }
   return out;
 }
@@ -1083,10 +1097,30 @@ export async function worktreeRemove(
     if (!raw.ok) return raw;
     if (raw.value.exitCode === 0) return ok(undefined);
     const message = raw.value.stderr.trim();
+    const unregistered = /is not a working tree/i.test(message);
+    // Git says this only for a path it no longer lists at all, so its metadata
+    // is already gone: another tool deleted the checkout and pruned it (or git
+    // pruned on its own) before PwrGit re-indexed. Do NOT `worktree prune`
+    // here — that is repo-wide and also unregisters every worktree whose
+    // directory is merely unreachable right now (an unmounted volume).
+    if (attempt === 1 && unregistered) {
+      // A directory git disowns may belong to something else now (a fresh
+      // clone at the same path, a pruned-then-restored checkout), so never
+      // delete it on a first refusal — report it and leave it in place.
+      if (existsSync(worktreePath)) {
+        return err({
+          kind: "repo",
+          code: "not_a_worktree",
+          message: `${worktreePath} is no longer registered as a worktree of this repository. Its directory was left in place; delete it yourself if it is no longer needed.`
+        });
+      }
+      // Nothing on disk and nothing in git: the removal already happened.
+      return ok(undefined);
+    }
     // A retry can find the worktree already unregistered: the failed attempt
     // pruned git's metadata before the file deletion hit the lock. Finish the
     // delete ourselves (rmSync retries EPERM/EBUSY on Windows).
-    if (attempt > 1 && /is not a working tree/i.test(message)) {
+    if (attempt > 1 && unregistered) {
       try {
         rmSync(worktreePath, {
           recursive: true,

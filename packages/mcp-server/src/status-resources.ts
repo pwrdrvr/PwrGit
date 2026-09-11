@@ -57,7 +57,8 @@ export class StatusResourceRegistry {
   constructor(
     private readonly mcp: McpServer,
     private readonly loader: LiveStatusLoader,
-    private readonly authorizer: McpAuthorizer
+    private readonly authorizer: McpAuthorizer,
+    supportsSubscriptions = true
   ) {
     mcp.registerResource(
       "pwrgit-live-status",
@@ -65,7 +66,8 @@ export class StatusResourceRegistry {
       {
         title: "PwrGit live repository status v1",
         description:
-          "Versioned normalized local Git, PR/MR, CI, merge-conflict, and review status. Obtain a concrete URI from pwrgit_watch_repository, subscribe to it, and re-read it after notifications/resources/updated.",
+          "Versioned normalized local Git, PR/MR, CI, merge-conflict, and review status. Obtain a concrete URI from pwrgit_watch_repository. " +
+          (supportsSubscriptions ? "Subscribe and re-read after notifications/resources/updated." : "Read on demand for current status."),
         mimeType: "application/json"
       },
       async (uri) => {
@@ -87,8 +89,9 @@ export class StatusResourceRegistry {
       }
     );
     mcp.server.registerCapabilities({
-      resources: { listChanged: true, subscribe: true }
+      resources: { listChanged: supportsSubscriptions, subscribe: supportsSubscriptions }
     });
+    if (!supportsSubscriptions) return;
     mcp.server.setRequestHandler(SubscribeRequestSchema, async (request) => {
       const watch = this.requireWatch(request.params.uri);
       await this.authorizer.authorize({

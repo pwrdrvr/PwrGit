@@ -60,6 +60,23 @@ const snapshot: McpAgentPolicySnapshot = {
   ]
 };
 
+/** The pane embeds AgentAccessSection, which reads its own state on mount.
+ * Every dispatch mock in this file needs to answer that call; anything else is
+ * still an unexpected command. */
+function agentAccessFallback(name: string): Promise<unknown> {
+  if (name === "agentAccess:read") {
+    return Promise.resolve(
+      ok({
+        enabled: false,
+        listening: false,
+        mcpUrl: "http://127.0.0.1:51731/mcp",
+        pending: []
+      })
+    );
+  }
+  throw new Error(`unexpected command ${name}`);
+}
+
 let container: HTMLDivElement;
 let root: Root;
 const unsubscribe = vi.fn();
@@ -69,7 +86,7 @@ beforeEach(() => {
   mocks.subscribe.mockReturnValue(unsubscribe);
   mocks.dispatch.mockImplementation((name: string) => {
     if (name === "localAgents:read") return Promise.resolve(ok(snapshot));
-    throw new Error(`unexpected command ${name}`);
+    return agentAccessFallback(name);
   });
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -95,58 +112,51 @@ describe("LocalAgentsSettings", () => {
     expect(container.textContent).toContain("Authorization graph");
     expect(container.textContent).toContain("PwrAgent");
     expect(container.textContent).toContain("Acme Status");
-    expect(container.textContent).toContain("5 permissions");
+    expect(container.textContent).toContain(`${MCP_AGENT_CAPABILITIES.length} permissions`);
     expect(container.textContent).toContain("1 approved root");
     expect(container.textContent).toContain("/Users/test/src/acme");
     expect(container.textContent).toContain("Read forge status");
   });
 
-  it("creates a named Session and shows its token exactly once", async () => {
-    const credential = {
-      session: {
-        id: "session_new",
-        name: "Codex",
-        roleId: "builtin.discovery",
-        createdAt: "2026-08-23T00:00:00.000Z",
-        updatedAt: "2026-08-23T00:00:00.000Z",
-        revokedAt: null
-      },
-      token: "pgmcp_secret-once",
-      environment: {
-        policyFileVariable: "PWRGIT_MCP_POLICY_FILE" as const,
-        policyFile: snapshot.policyFile,
-        sessionTokenVariable: "PWRGIT_MCP_SESSION_TOKEN" as const
-      }
+  it.each([
+    ["Edit selected role", "localAgents:roleUpdate"],
+    ["Duplicate selected role", "localAgents:roleCreate"]
+  ])("%s preserves full role permissions for a narrowly consented Session", async (buttonText, command) => {
+    const scopedSnapshot: McpAgentPolicySnapshot = {
+      ...snapshot,
+      sessions: [{ ...snapshot.sessions[0]!, oauth: { clientId: "fixture", scopes: ["repository.roots.read"] } }]
     };
     mocks.dispatch.mockImplementation((name: string) => {
-      if (name === "localAgents:read") return Promise.resolve(ok(snapshot));
-      if (name === "localAgents:createSession") return Promise.resolve(ok(credential));
-      throw new Error(`unexpected command ${name}`);
+      if (name === "localAgents:read") return Promise.resolve(ok(scopedSnapshot));
+      if (name === command) return Promise.resolve(ok(snapshot.roles[1]!));
+      return agentAccessFallback(name);
     });
     await render();
-    const input = container.querySelector<HTMLInputElement>("input[placeholder='PwrAgent on this Mac']");
-    const button = Array.from(container.querySelectorAll("button")).find(
-      (candidate) => candidate.textContent === "Create Session"
-    );
+    expect(container.querySelectorAll(".agent-auth-permission.is-allowed")).toHaveLength(1);
+    const button = (text: string) => Array.from(container.querySelectorAll("button"))
+      .find(candidate => candidate.textContent === text)!;
+    await act(async () => button(buttonText).click());
+    const editor = container.querySelector(".agent-role-editor")!;
+    expect(editor.querySelectorAll('input[type="checkbox"]:checked')).toHaveLength(MCP_AGENT_CAPABILITIES.length);
+    const description = Array.from(editor.querySelectorAll("label"))
+      .find(label => label.textContent === "Description")!.querySelector("input")!;
     await act(async () => {
-      if (input !== null) {
-        const setter = Object.getOwnPropertyDescriptor(
-          HTMLInputElement.prototype,
-          "value"
-        )?.set;
-        setter?.call(input, "Codex");
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-      }
-      button?.click();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(description, "Updated description");
+      description.dispatchEvent(new Event("input", { bubbles: true }));
     });
+    await act(async () => button("Save role").click());
+    const expected = expect.objectContaining({
+      description: "Updated description", permissions: [...MCP_AGENT_CAPABILITIES]
+    });
+    expect(mocks.dispatch).toHaveBeenCalledWith(command, command === "localAgents:roleUpdate"
+      ? { id: "role_scoped", patch: expected } : expected);
+  });
 
-    expect(mocks.dispatch).toHaveBeenCalledWith("localAgents:createSession", {
-      name: "Codex",
-      roleId: "builtin.discovery"
-    });
-    expect(container.textContent).toContain("Copy this now");
-    expect(container.textContent).toContain("PWRGIT_MCP_SESSION_TOKEN");
-    expect(container.textContent).toContain("pgmcp_secret-once");
+  it("offers OAuth connection commands instead of manual token creation", async () => {
+    await render();
+    expect(container.textContent).toContain("Connect an agent");
+    expect(container.textContent).not.toContain("Create Session");
+    expect(mocks.dispatch).not.toHaveBeenCalledWith("localAgents:createSession", expect.anything());
   });
 
   it("revokes a Session through the typed command bus", async () => {
@@ -155,7 +165,7 @@ describe("LocalAgentsSettings", () => {
       if (name === "localAgents:revoke") {
         return Promise.resolve(ok({ ...snapshot.sessions[0]!, revokedAt: "now" }));
       }
-      throw new Error(`unexpected command ${name}`);
+      return agentAccessFallback(name);
     });
     await render();
     const button = Array.from(container.querySelectorAll("button")).find(

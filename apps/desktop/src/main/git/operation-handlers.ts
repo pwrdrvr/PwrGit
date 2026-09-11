@@ -1,9 +1,10 @@
-import { err, ok } from "@pwrgit/shared";
+import { err, ok, type Result } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import { execGit, type GitExec } from "./dugite";
+import { liveWorktreePath, worktreeMissingError } from "./worktree-liveness";
 import {
   abortOperation,
   continueOperation,
@@ -31,12 +32,8 @@ export function registerOperationHandlers(
   operations: WorktreeOperationQueue,
   git: GitExec = execGit
 ): void {
-  const pathOf = (worktreeId: string): string | null =>
-    (
-      db.prepare("SELECT path FROM worktrees WHERE id = ?").get(worktreeId) as
-        | { path: string }
-        | undefined
-    )?.path ?? null;
+  const pathOf = (worktreeId: string): Result<string> =>
+    liveWorktreePath(db, worktreeId);
 
   const notifyChanged = (worktreeId: string): void => {
     emitEvent("changes:changed", { worktreeId });
@@ -44,8 +41,9 @@ export function registerOperationHandlers(
   };
 
   bus.register("operation:state", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const path = live.value;
     return operations.run(req.worktreeId, () => readOperationState(git, path));
   });
 
@@ -53,8 +51,9 @@ export function registerOperationHandlers(
   // touches the index, so queueing it behind a long fetch would only stall the
   // confirmation dialog the user is waiting on.
   bus.register("operation:markerScan", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const path = live.value;
     return ok(await scanConflictMarkers(path, req.paths));
   });
 
@@ -63,16 +62,18 @@ export function registerOperationHandlers(
     // repo-local user.email (matches the commit path in changes-handlers).
     const row = db
       .prepare(
-        `SELECT w.path AS path, p.email AS email, p.author_name AS author_name
+        `SELECT w.path AS path, w.missing AS missing, p.email AS email,
+                p.author_name AS author_name
          FROM worktrees w
          JOIN repos r ON r.id = w.repo_id
          JOIN profiles p ON p.id = r.profile_id
          WHERE w.id = ?`
       )
       .get(req.worktreeId) as
-      | { path: string; email: string; author_name: string | null }
+      | { path: string; missing?: number; email: string; author_name: string | null }
       | undefined;
     if (row === undefined) return err(notFound);
+    if (row.missing === 1) return err(worktreeMissingError(row.path));
     const identity =
       row.author_name === null
         ? { email: row.email }
@@ -94,8 +95,9 @@ export function registerOperationHandlers(
   });
 
   bus.register("operation:abort", async (req) => {
-    const path = pathOf(req.worktreeId);
-    if (path === null) return err(notFound);
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    const path = live.value;
     const result = await operations.run(req.worktreeId, () =>
       abortOperation(git, path, req.operation)
     );

@@ -6,13 +6,14 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent
 } from "react";
-import type { Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
+import type { TagSummary, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
 import { announce, movedMessage } from "../../lib/announce";
 import {
   currentPlatform,
   hasPrimaryModifier,
   shortcutLabel
 } from "../../lib/platform";
+import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { useViewportTooltip } from "../../lib/useViewportTooltip";
 import type { FocusVisits } from "./focus-visits";
 import {
@@ -93,6 +94,7 @@ export function RepoRow({
   onCycleSort,
   onReorder,
   onNewWorktree,
+  onLocateTag,
   onRevealWorktree,
   onCreateWorktreeFromRef,
   arrangeable,
@@ -142,6 +144,7 @@ export function RepoRow({
   onCycleSort: () => void;
   onReorder: (orderedIds: string[]) => void;
   onNewWorktree: () => void;
+  onLocateTag?: ((repoId: string, tag: TagSummary) => void) | undefined;
   onRevealWorktree: (worktreeId: string) => void;
   onCreateWorktreeFromRef: (
     branch: string,
@@ -448,8 +451,8 @@ export function RepoRow({
         ? "1 linked worktree"
         : `${wtCount} linked worktrees`,
     behind > 0 ? `primary branch ${behind} behind upstream` : null,
-    // The identity glyphs are aria-hidden and carry only titles, which are not
-    // reliably announced — this is how they reach a screen reader at all.
+    // Include the identity facts in the row description, independently of
+    // the visibility button that refreshes them.
     repo.identity === undefined ? null : identityDescription(repo.identity),
     arrangeable && pinSource === "worktree"
       ? "in Pinned because one of its worktrees is pinned"
@@ -535,7 +538,11 @@ export function RepoRow({
             distinct from a read that came back `unknown`, which draws the
             dashed glyph. */}
         {repo.identity !== undefined && (
-          <RepoIdentityGlyphs identity={repo.identity} />
+          <RepoIdentityGlyphs
+            identity={repo.identity}
+            repoId={repo.id}
+            profileId={repo.profileId}
+          />
         )}
         {wtCount > 0 && (
           <span className="repo-row__wtcount">
@@ -663,12 +670,17 @@ export function RepoRow({
               <span className="ref-section__count">{remaining.length}</span>
             </button>
             <span style={{ flex: 1 }} />
-            {/* Scoped to this list on purpose: the same circular-arrows glyph
-                means Fetch in the repo toolbar, so keep this one under the
-                Worktrees heading where it can only read as "re-list these". */}
+            {/* Deliberately the SAME glyph as Fetch in the repo toolbar. The
+                two used to differ by an arc — one arrowhead there, two here —
+                to mark "network" against "re-read local". At 13px, 400px
+                apart, one per panel, nobody decoded that; what actually
+                separates them is this button living under the Worktrees
+                heading, where it can only read as "re-list these", and saying
+                so in its accessible name. Placement was carrying the
+                distinction on its own, so the glyphs converged. */}
             <button
               type="button"
-              className={`wt-refresh${refreshing ? " is-refreshing" : ""}`}
+              className="wt-refresh"
               aria-label={`Refresh worktrees for ${repo.name}`}
               aria-busy={refreshing}
               /* `disabled` (not `aria-disabled`) used to be set here the
@@ -700,22 +712,7 @@ export function RepoRow({
                 onRefreshWorktrees();
               }}
             >
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
-                <path d="M21 3v5h-5" />
-                <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
-                <path d="M8 16H3v5" />
-              </svg>
+              <RefreshGlyph />
             </button>
             {refreshTooltip.tooltipNode}
             {/* The visible text is the current VALUE ("Recent"), which on its
@@ -755,6 +752,7 @@ export function RepoRow({
           )}
 
           <RepoRefsSections
+            onLocateTag={onLocateTag}
             repo={repo}
             now={now}
             // Only when the working target lives in THIS repo. That is what

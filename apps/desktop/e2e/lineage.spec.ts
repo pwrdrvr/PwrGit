@@ -719,3 +719,63 @@ test("a focused branch behind its upstream draws the commits it is missing", asy
     window.locator(".graph-row", { hasText: "prepare release" })
   ).toBeVisible();
 });
+
+test(
+  "a focused branch two commits behind keeps one straight dashed train",
+  async ({}, testInfo) => {
+    sandbox = createGitSandbox();
+    const s = sandbox;
+    const repo = s.makeRepo("linear-upstream");
+    const branch = "fix/desktop-federation-audit-followthrough";
+    const wt = repo.addWorktree(branch);
+    s.commit(wt, "local.txt", "preserve local pin placement");
+    const localTip = s.git(wt, "rev-parse", "HEAD");
+    s.commit(wt, "remote-one.txt", "wait for native focus");
+    s.commit(wt, "remote-two.txt", "start visual documents after synchronization");
+    s.git(repo.path, "remote", "add", "origin", repo.path);
+    s.git(
+      repo.path,
+      "update-ref",
+      `refs/remotes/origin/${branch}`,
+      s.git(wt, "rev-parse", "HEAD")
+    );
+    s.git(wt, "reset", "--hard", localTip);
+    s.git(wt, "branch", "--set-upstream-to", `origin/${branch}`);
+
+    handle = await launchApp({ theme: "light" });
+    const { window } = handle;
+    await addRootAndExpand(window, handle, s, "linear-upstream");
+    await branchRow(window, branch).click();
+    const rows = [
+      "start visual documents after synchronization",
+      "wait for native focus",
+      "preserve local pin placement"
+    ].map((subject) => window.locator(".graph-row", { hasText: subject }));
+    for (const row of rows) await expect(row).toBeVisible();
+    await window.screenshot({
+      path: testInfo.outputPath("linear-upstream.png"),
+      animations: "disabled"
+    });
+    const dots = await Promise.all(
+      rows.map((row) =>
+        row.locator(".graph-lanes > circle").last().getAttribute("cx")
+      )
+    );
+    expect(dots[0]).toBe(dots[2]);
+    expect(dots[1]).toBe(dots[2]);
+    for (const row of rows.slice(0, 2)) {
+      await expect(
+        row.locator('.graph-lanes line[stroke-dasharray="4 4"]')
+      ).not.toHaveCount(0);
+      await expect(
+        row.locator(".graph-lanes path[stroke-dasharray]")
+      ).toHaveCount(0);
+    }
+    await expect(
+      rows[2].locator('.graph-lanes line[stroke-dasharray="4 4"]')
+    ).toHaveCount(1);
+    await expect(
+      rows[2].locator(".graph-lanes line:not([stroke-dasharray])")
+    ).not.toHaveCount(0);
+  }
+);

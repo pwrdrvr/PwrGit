@@ -1,3 +1,4 @@
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   app,
@@ -82,6 +83,7 @@ import {
   subscribeLogEntries
 } from "./logs";
 import { openLogsWindow } from "./logs-window";
+import { watchProcessIds } from "./process-ids";
 import { ensureMacKeychainAccess } from "./mac-keychain-access";
 import { openDatabase } from "./persistence/db";
 import { readGitIdentityDefaults } from "./profiles/git-identity";
@@ -108,6 +110,12 @@ import { openSettingsWindow } from "./settings-window";
 import { createNativeThemeController } from "./native-theme";
 import { McpPolicyStore } from "@pwrgit/mcp-server/access-policy";
 import { registerLocalAgentHandlers } from "./local-agents/local-agent-handlers";
+import { ConsentBroker } from "./agent-access/consent-broker";
+import { createConsentWindow } from "./agent-access/consent-window";
+import { createDesktopMcpRunner } from "./agent-access/desktop-mcp-runner";
+import { createAppBackend } from "./agent-access/app-backend";
+import { AgentAccessService } from "./agent-access/agent-access-service";
+import { registerAgentAccessHandlers } from "./agent-access/agent-access-handlers";
 
 const APP_NAME = "PwrGit";
 
@@ -151,6 +159,13 @@ if (app.isPackaged && !process.env["LOCAL_GIT_DIRECTORY"]) {
 const dataDirOverride = process.env["PWRGIT_USER_DATA_DIR"];
 if (dataDirOverride !== undefined && dataDirOverride !== "") {
   app.setPath("userData", dataDirOverride);
+  // The app log lives in the OS log directory, which on macOS is keyed by app
+  // name (~/Library/Logs/PwrGit) rather than by userData — an isolated run
+  // would otherwise append to the real instance's log. Electron only creates
+  // the *default* logs directory, so an override has to exist first.
+  const logsDirOverride = join(dataDirOverride, "logs");
+  mkdirSync(logsDirOverride, { recursive: true });
+  app.setAppLogsPath(logsDirOverride);
 }
 
 // Settings and native appearance are established before app readiness so the
@@ -195,6 +210,22 @@ function installDevelopmentDockIcon(): void {
 }
 
 /**
+ * Where the app log file goes. getPath("logs") creates the directory and throws
+ * if it cannot — a startup this early has no window and no log to explain
+ * itself, so an unwritable log directory falls back to the pre-0.14 location
+ * rather than taking the app down with it.
+ */
+function appLogFilePath(fallback: string): string {
+  try {
+    return join(app.getPath("logs"), "main.log");
+  } catch (cause) {
+    // Buffered now, written to `fallback` as soon as initLogFile runs.
+    logMain("warn", "app", "log directory unavailable; using", fallback, cause);
+    return fallback;
+  }
+}
+
+/**
  * Single-instance: PwrGit is a single-instance app — one window per profile
  * inside it. A second launch focuses an existing window instead of spawning
  * another process.
@@ -214,9 +245,17 @@ if (!gotSingleInstanceLock) {
   app.whenReady().then(async () => {
     wireAppMenuBridge();
     // App log: ring buffer + file, streamed to the Logs window (Help › Logs).
-    initLogFile(join(app.getPath("userData"), "pwrgit-main.log"));
+    // The file sits in the OS log directory (~/Library/Logs/PwrGit on macOS,
+    // <userData>/logs elsewhere) beside the other Pwr apps, rather than in
+    // userData where nobody goes looking for a log.
+    const legacyLogPath = join(app.getPath("userData"), "pwrgit-main.log");
+    initLogFile(appLogFilePath(legacyLogPath), legacyLogPath);
     subscribeLogEntries((entry) => emitEvent("logs:entry", entry));
-    logMain("info", "app", `PwrGit ${app.getVersion()} starting`);
+    // Process ids ride on the log itself: the main one here, the helpers as
+    // watchProcessIds sees them appear, so a copied log identifies its own
+    // processes without a trip to Activity Monitor or Task Manager.
+    logMain("info", "app", `PwrGit ${app.getVersion()} starting pid=${process.pid}`);
+    watchProcessIds();
     installDevelopmentDockIcon();
     bus.register("logs:read", () => ok(readLogSnapshot()));
     bus.register("logs:openWindow", () => {
@@ -528,13 +567,40 @@ if (!gotSingleInstanceLock) {
       settings
     );
     registerTagHandlers(bus, db);
-    registerRemoteHandlers(bus, db, refresher, worktreeOperations, indexer);
+    const refreshIdentity = (repoId: string): void => {
+      // Fetch carries no forge visibility. Ask separately in the background;
+      // IdentityService skips fresh rows and concurrent lookups of this repo.
+      const repo = indexer.getRepo(repoId);
+      if (repo === null) return;
+      void identityService
+        .refresh([repo])
+        .then((changed) => {
+          if (changed.length > 0) {
+            emitEvent("repo:identityChanged", {
+              profileId: repo.profileId,
+              identities: changed
+            });
+          }
+        })
+        .catch((cause: unknown) => {
+          logMain("debug", "forge", "post-fetch identity refresh failed:", cause);
+        });
+    };
+    registerRemoteHandlers(
+      bus,
+      db,
+      refresher,
+      worktreeOperations,
+      indexer,
+      refreshIdentity
+    );
     const bulkSyncHandlers = registerBulkSyncHandlers(
       bus,
       db,
       refresher,
       worktreeOperations,
-      indexer
+      indexer,
+      refreshIdentity
     );
     registerGraphHandlers(bus, db, stateService);
     registerChangesHandlers(bus, db, refresher, worktreeOperations);
@@ -565,6 +631,28 @@ if (!gotSingleInstanceLock) {
     registerLocalAgentHandlers(bus, mcpPolicy, () => {
       emitEvent("localAgents:changed", mcpPolicy.snapshot());
     });
+    // The loopback listener stays off until the operator turns it on: it is a
+    // standing grant on their repositories, not a default.
+    const mcpPolicyFile = join(app.getPath("userData"), "mcp-policy.json");
+    const consent = new ConsentBroker(mcpPolicy, () => createConsentWindow(appearance.appearance()));
+    consent.register(bus);
+    const agentAccess = new AgentAccessService({
+      ...(!app.isPackaged && process.env["PWRGIT_E2E_AGENT_ACCESS_PORT"] === "0" ? { port: 0 } : {}),
+      appBackend: createAppBackend(db, profiles, indexer, bus),
+      runner: createDesktopMcpRunner(execGit),
+      policyFile: mcpPolicyFile,
+      clientsFile: join(app.getPath("userData"), "mcp-oauth-clients.json"),
+      requestConsent: consent.request,
+      saveEnabled: (enabled) => settings.update({ localAgentAccessEnabled: enabled }),
+      onChanged: () => {
+        emitEvent("agentAccess:changed", agentAccess.status());
+        emitEvent("localAgents:changed", mcpPolicy.snapshot());
+      },
+      log: (message, extra) => logMain("info", "agent-access", message, extra)
+    });
+    app.on("will-quit", () => void agentAccess.dispose());
+    registerAgentAccessHandlers(bus, agentAccess);
+    if (settings.get().localAgentAccessEnabled === true) await agentAccess.setEnabled(true);
     diagnostics.sync(); // start any settings-enabled monitors at boot
 
     registerIpc(bus, {

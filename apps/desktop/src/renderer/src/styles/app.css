@@ -12,11 +12,27 @@ body,
   margin: 0;
 }
 
+/* Reveals (scrollIntoView, focus()) must scroll their own pane, never the
+   window chrome. `clip` on BOTH boxes, and never `hidden`: a hidden box is
+   still a scroll container that refuses the *user* but obeys the *script*, so
+   anything that pokes past the app's 100vh — a popover placed near the bottom
+   edge, a pane that briefly can't shrink — hands the chrome somewhere to
+   scroll to. It then rides up under the traffic lights and leaves a band of
+   bare <body> along the bottom, and nothing scrolls it back.
+
+   `html` alone is not enough, which is what #214 missed: an explicit overflow
+   on the root stops `body`'s value propagating to the viewport, so the same
+   `overflow: hidden` that used to be inert became body's own scroll box. A
+   clipped box is not a scroll container at all — there is no offset to set. */
+html,
+body {
+  overflow: clip;
+}
+
 body {
   background: var(--bg-app);
   color: var(--text-primary);
   font-family: var(--font-sans);
-  overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -37,10 +53,24 @@ textarea,
 /* Text for assistive technology only. Clip rather than `display: none` or
    `visibility: hidden`, both of which remove the node from the accessibility
    tree along with the pixels. Used where a glyph carries meaning that has no
-   text equivalent — the sidebar's ●/↑/↓ count badges — and for the live region
-   that announces keyboard reorders. */
+   text equivalent — the sidebar's ●/↑/↓ count badges, a commit's tag chips,
+   the Git LFS chip — and for the live region that announces keyboard reorders.
+
+   `top`/`left` are load-bearing, not tidying. Left to `auto`, an absolutely
+   positioned box sits at its STATIC position while its containing block is
+   the nearest positioned ancestor — and inside our scrollers that ancestor is
+   the pane, not the scroller. So the span escapes the scroller's clip and
+   lands at its place in the un-scrolled list: a tag chip 9,000px down a
+   commit list put a 1px box 9,000px below the window, and the document grew
+   to match. Nothing showed, because nothing paints — but the next
+   `scrollIntoView` had all of that to scroll through, and took the window
+   chrome with it. Pinned to the containing block's origin, the box is always
+   inside the window (or inside a scroller that clips it), and no list's
+   length can move the shell. */
 .a11y-sr-only {
   position: absolute;
+  top: 0;
+  left: 0;
   width: 1px;
   height: 1px;
   margin: -1px;
@@ -463,10 +493,23 @@ textarea,
 }
 .profile-menu {
   position: absolute;
-  top: calc(100% - 2px);
-  left: 12px;
-  right: 12px;
+  /* Detached below the chip and edge-aligned to it. The old `100% - 2px`
+     tucked the menu under the chip's bottom border, and the 12px insets
+     re-applied .sidebar__profile's padding on top of the wrapper that already
+     sits inside it, leaving the menu narrower than the control that opens it. */
+  top: calc(100% + var(--popover-gap));
+  left: 0;
+  right: 0;
   z-index: 40;
+  /* The row count is unbounded user data — one row per profile — and the menu
+     hangs from the top of the sidebar, so without a cap a long list runs off
+     the bottom of the window and takes "New profile…" with it. At the app's
+     minimum 600px window (src/main/window.ts) only six profiles fit. 140px is
+     the menu's own top offset (98px: titlebar + section padding + chip + gap)
+     plus breathing room, so the cap tracks the window instead of scrolling
+     early on a tall one. Same treatment as .branch-pop. */
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
   background: var(--bg-menu);
   border: 1px solid var(--border-default);
   border-radius: 10px;
@@ -1275,14 +1318,6 @@ textarea,
 .wt-refresh[aria-disabled="true"] {
   cursor: default;
 }
-.wt-refresh.is-refreshing svg {
-  animation: wt-refresh-spin 800ms linear infinite;
-}
-@keyframes wt-refresh-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 
 /* Repository refs live beside worktrees but stay collapsed until requested. */
 .ref-section {
@@ -1503,8 +1538,11 @@ textarea,
   border: 1px solid transparent;
   border-radius: 5px;
   background: transparent;
-  color: var(--text-subtle);
-  font: 600 11px/1 var(--font-mono);
+  /* --text-muted, matching .wt-refresh: these two draw the same glyph in
+     headings 8px apart, so they must resolve to the same token. --text-subtle
+     was here to tint a `↻` text node and is alpha, not opaque, so it drifted
+     with whatever surface sat behind it. */
+  color: var(--text-muted);
   cursor: pointer;
 }
 /* "Busy" is aria-disabled rather than `disabled` on these, so that a fetch
@@ -1519,10 +1557,6 @@ textarea,
 .ref-fetch-all {
   margin-right: 5px;
   border-color: var(--border-subtle);
-}
-.ref-mini-action.is-fetching,
-.ref-fetch-all.is-fetching {
-  animation: wt-refresh-spin 800ms linear infinite;
 }
 .ref-view-all {
   width: 100%;
@@ -1846,6 +1880,21 @@ textarea,
   color: var(--accent-bright);
   letter-spacing: 0.03em;
   text-transform: uppercase;
+}
+/* The checkout is gone. Filled, unlike "in default": it is rare, it is a
+   problem, and the row's status badges are absent precisely because of it —
+   so it has to carry the row's whole story on its own. */
+.wt-tag--missing {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+.wt-row.is-missing .wt-row__branch {
+  color: var(--text-muted);
+}
+.wt-tag--locked {
+  background: transparent;
+  color: var(--text-subtle);
+  padding: 0 2px;
 }
 .wt-row__branch-icon--local {
   color: var(--accent);
@@ -2381,6 +2430,18 @@ textarea,
   align-items: center;
   color: var(--text-subtle);
 }
+.repo-mark--refresh {
+  background: transparent;
+  border: 0;
+  padding: 3px;
+  margin: -3px;
+  cursor: pointer;
+}
+.repo-mark--refresh:disabled {
+  cursor: progress;
+  opacity: 0.5;
+}
+
 .repo-mark--fork {
   color: var(--text-muted);
 }
@@ -3567,6 +3628,17 @@ textarea,
 .refs-row-action.is-danger {
   color: var(--danger-text);
 }
+/* A button is `display: block` with centred contents, so a glyph and a label
+   inside one baseline-align against a raw text space. Every other glyph+label
+   control here is flex with a real gap (`.graph-locate` 6px, `.jump-btn` 8px);
+   this modifier is that, so an icon action does not arrive with its own
+   spacing. */
+.refs-row-action--icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
 /* `disabled` for the statically unavailable case, `aria-disabled` for busy —
    see the Delete-local button in RepoRefsModal. Both must look unavailable. */
 .refs-row-action:disabled,
@@ -4485,8 +4557,21 @@ textarea,
   gap: 6px;
   flex: 0 0 auto;
 }
-.wt-btn:disabled {
+/* Busy is spelled aria-disabled, not `disabled`: Chromium blurs an element the
+   moment it becomes disabled, so pressing Fetch from the keyboard threw focus
+   back to <body> for the length of the fetch (SC 2.4.3). Same fix, and the
+   same reasoning, as .wt-refresh and .ref-fetch-all — the click handlers are
+   what make these inert. `disabled` stays for genuinely unavailable actions.
+
+   The busy button is excluded from the dim rather than re-set to opacity 1
+   afterwards: it carries the accent tint, and dimming would wash that out.
+   Saying so in the selector keeps it independent of source order. */
+.wt-btn:disabled,
+.wt-btn[aria-disabled="true"]:not([aria-busy="true"]) {
   opacity: 0.6;
+  cursor: wait;
+}
+.wt-btn[aria-busy="true"] {
   cursor: wait;
 }
 /* Pull is one of four peer actions, so at rest it looks like its neighbours.
@@ -4809,7 +4894,7 @@ textarea,
 }
 .branch-pop {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + var(--popover-gap));
   right: 0;
   z-index: 41;
   width: 300px;
@@ -5537,6 +5622,9 @@ button.ref-chip:focus-visible {
   flex: 1;
 }
 .submodule-panel__refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   min-height: 22px;
   padding: 0 7px;
   border: 1px solid transparent;
@@ -5553,9 +5641,14 @@ button.ref-chip:focus-visible {
   background: var(--accent-soft);
   color: var(--accent-bright);
 }
-.submodule-panel__refresh:disabled {
+/* Busy is excluded from the dim — see .wt-btn above. */
+.submodule-panel__refresh:disabled,
+.submodule-panel__refresh[aria-disabled="true"]:not([aria-busy="true"]) {
   cursor: default;
   opacity: 0.62;
+}
+.submodule-panel__refresh[aria-busy="true"] {
+  cursor: default;
 }
 .submodule-row {
   margin-left: calc(var(--submodule-depth, 0) * 10px);
@@ -7014,9 +7107,7 @@ body.is-col-resizing {
   border-radius: 50%;
   background: var(--text-muted);
 }
-.pr-chip--open .pr-chip__dot {
-  /* PwrGit has lifecycle data but not a check rollup. Gray is intentionally
-     neutral; blue would suggest a state the app cannot currently explain. */
+.pr-chip--unknown .pr-chip__dot {
   background: var(--status-suspended);
 }
 .pr-chip--merged .pr-chip__dot {
@@ -7114,7 +7205,6 @@ body.is-col-resizing {
   margin-top: 8px;
   color: var(--text-secondary);
   font: 500 10.5px/1 var(--font-sans);
-  text-transform: capitalize;
 }
 .pr-status-card__dot {
   width: 7px;
@@ -7123,18 +7213,29 @@ body.is-col-resizing {
   border-radius: 50%;
   background: var(--text-muted);
 }
-/* Mirrors .pr-chip__dot exactly — a card that disagreed with the chip it is
-   anchored to would just look broken. */
-.pr-status-card__dot--open,
-.pr-status-card__dot--draft {
-  background: var(--status-suspended);
-}
-.pr-status-card__dot--merged {
-  background: var(--brand-purple);
-}
+/* Chip and hover card share their status colors. */
+.pr-chip--passing .pr-chip__dot,
+.pr-status-card__dot--passing { background: var(--status-ok); }
+.pr-chip--failing .pr-chip__dot,
+.pr-chip--conflicting .pr-chip__dot,
+.pr-status-card__dot--failing,
+.pr-status-card__dot--conflicting { background: var(--status-error); }
+.pr-chip--pending .pr-chip__dot,
+.pr-status-card__dot--pending { background: var(--status-warning); }
+.pr-status-card__dot--unknown { background: var(--status-suspended); }
+.pr-status-card__dot--merged { background: var(--brand-purple); }
 .pr-status-card__dot--closed {
   background: var(--status-closed);
   box-shadow: 0 0 0 1px var(--pr-dot-ring);
+}
+.pr-chip--checks-running .pr-chip__dot {
+  animation: pr-checks-running 1.6s ease-in-out infinite;
+}
+@keyframes pr-checks-running {
+  50% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pr-chip--checks-running .pr-chip__dot { animation: none; }
 }
 .pr-status-card__section {
   margin-top: 10px;
@@ -9509,7 +9610,72 @@ body.is-col-resizing {
 /* Settings > Agents — Session → role → effective permission graph. */
 .settings-stack--agents {
   max-width: 1120px;
+  container: agent-settings / inline-size;
 }
+.agent-access-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0 4px;
+}
+.agent-access-toggle__copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.agent-access-toggle__copy b {
+  font: 600 12.5px/1.4 var(--font-sans);
+  color: var(--text-primary);
+}
+.agent-access-toggle__copy span {
+  font: 400 11.5px/1.5 var(--font-sans);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.agent-access-pending {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+}
+.agent-access-request {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+}
+.agent-access-request__copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.agent-access-request__copy b {
+  font: 600 12.5px/1.4 var(--font-sans);
+  color: var(--text-primary);
+}
+.agent-access-request__copy span {
+  font: 400 11.5px/1.5 var(--font-sans);
+  color: var(--text-muted);
+}
+.agent-access-request__role {
+  display: grid;
+  gap: 3px;
+}
+.agent-access-request__role span {
+  font: 500 10.5px/1.3 var(--font-sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.agent-access-request__actions {
+  display: flex;
+  gap: 8px;
+}
+
 .agent-auth-graph {
   display: grid;
   grid-template-columns: minmax(190px, 0.9fr) minmax(210px, 1fr) minmax(300px, 1.35fr);
@@ -9828,9 +9994,11 @@ button.agent-auth-node {
   gap: 8px;
 }
 
-@media (max-width: 820px) {
+/* The graph needs 720px plus the section's padding and borders. Measure the
+   settings pane, since the navigation rail and zoom reduce its usable width. */
+@container agent-settings (max-width: 760px) {
   .agent-auth-graph {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .agent-session-create,
   .agent-credential {
@@ -9919,8 +10087,59 @@ button.agent-auth-node {
   margin: 16px 0 0;
 }
 
-/* ---- Sync-button busy spinner (visible even in icon-only narrow mode) ---- */
+/* ---- Refresh and fetch affordances: one busy language ----
 
+   Every control that re-reads state says "working" the same way, whatever its
+   size or panel: the button takes an accent tint, and its circular-arrow glyph
+   rotates in place. Before this there were three languages on one screen — the
+   graph toolbar swapped its glyph for a ring, the Worktrees heading spun its
+   glyph grey, and the Remotes heading rotated its entire bordered box.
+
+   The hook is `[aria-busy="true"]`, not a class, for two reasons.
+
+   The tint has to survive `prefers-reduced-motion`, where the blanket rule at
+   the top of this file kills every animation. Motion used to be the ONLY busy
+   signal, so a reduced-motion user got none at all: the ring froze as a broken
+   circle and the glyphs simply sat there, indistinguishable from resting. The
+   tint is a paint, so it holds in both modes — and it makes a 13px signal
+   legible for everyone, not only for the people who asked for less motion.
+
+   Keying the paint off the ARIA state also means a control cannot look busy
+   without announcing it. The two that used to animate off `.is-fetching`
+   announced nothing to a screen reader.
+
+   Only ever animate the `svg`, never the button. `.ref-fetch-all` used to hold
+   a bare `↻` text node, so its rule had no child to select and the animation
+   landed on the button element itself — see lib/RefreshGlyph.tsx. */
+
+.wt-btn[aria-busy="true"],
+.wt-refresh[aria-busy="true"],
+.ref-mini-action[aria-busy="true"],
+.ref-fetch-all[aria-busy="true"],
+.submodule-panel__refresh[aria-busy="true"] {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+/* Keyed off the shared glyph, not off a list of callers. Enumerating the five
+   buttons here meant a sixth refresh control would tint but never rotate, with
+   nothing to catch the half-applied rule; lib/RefreshGlyph.tsx stamps this
+   class, so every present and future caller spins by construction.
+
+   `flex: 0 0 auto` follows .wt-btn__spinner, the element the glyph replaced in
+   the Fetch button: these live in inline-flex buttons, and an SVG flex item
+   otherwise shrinks to an ellipse when the row is squeezed. */
+.refresh-glyph {
+  flex: 0 0 auto;
+}
+[aria-busy="true"] > .refresh-glyph {
+  animation: pg-spin 800ms linear infinite;
+}
+
+/* Pull and Push keep the ring: an arrow that means "down" is not a rotation,
+   and spinning one reads as broken rather than busy. So the rule is the glyph,
+   not the control — a circular arrow turns, anything else swaps to this. It
+   stays visible in the icon-only narrow header, where the label is gone. */
 .wt-btn__spinner {
   width: 13px;
   height: 13px;
@@ -10632,4 +10851,70 @@ button.agent-auth-node {
   border: 1px solid var(--accent-border);
   background: var(--accent);
   color: var(--accent-on);
+}
+
+.agent-consent-window { padding: 28px; overflow: auto; height: 100vh; box-sizing: border-box; }
+
+.agent-consent-window { font: 14px/1.5 var(--font-sans); }
+.agent-consent-window h1 { font-size: 24px; margin-top: 0; }
+.agent-consent-window .settings-field { display: grid; gap: 6px; margin-bottom: 12px; }
+.agent-consent-window input, .agent-consent-window select {
+  box-sizing: border-box; width: 100%; min-width: 0; padding: 9px 10px;
+  border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+  background: var(--bg-panel); color: var(--text-primary); font: inherit;
+}
+.agent-consent-window ul { padding-left: 22px; }
+
+.agent-connect-recipe { display: grid; gap: 12px; margin-bottom: 20px; }
+.agent-connect-recipe pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 var(--font-mono); }
+.agent-connect-recipe button { justify-self: start; }
+
+/* Tag chip — the one prominent local tag at a commit, sitting on the same meta
+   line as the branch chips and the PR chip. Built as `.ref-chip` is built,
+   because it is the same kind of object: mark + name, opaque, bordered,
+   truncating on the name span. Three rules it has to keep.
+
+   The background is OPAQUE. `--accent-soft` is a 12% tint, so a chip painted
+   with it composites over whatever the row is already painting — and this row
+   paints four tints of its own (hover, --head, is-selected, is-focused). That
+   made the chip's contrast a function of row state: in light theme
+   `--accent-bright` on this 9px text measured 5.23:1 on a plain row but 4.47:1
+   on a selected one and 4.32:1 focused-and-hovered, both under SC 1.4.3's 4.5,
+   with 4.58 and 4.72 in the states between. Locating a tag selects and focuses
+   its row, so the failing states were the ones the feature exists to produce.
+   An opaque surface takes the row out of the sum: `--text-primary` on
+   `--bg-panel-elevated` is 17.19:1 dark and 17.99:1 light in every state, and
+   `--accent` on it clears SC 1.4.11's 3:1 for the mark (8.07 / 5.19).
+
+   Truncation lives on the name span — see `.ref-chip__name`, which says why:
+   `text-overflow: ellipsis` does nothing on a flex container, so a cap set on
+   the chip clips the name mid-glyph with no ellipsis and reads as a rendering
+   fault rather than as truncation.
+
+   And it yields. `.commit-meta`'s rule is that the chips give way rather than
+   wrap the row, and the way a name-carrying chip does that here is `flex: 0 1
+   auto` + `min-width: 0` on the element that sits directly in the row — the
+   role `.ref-chips` plays for the branch chips. `flex-shrink: 0` made this the
+   one thing on the line that refuses, at its full 180px. */
+.commit-tag--tag {
+  flex: 0 1 auto;
+  gap: 4px;
+  min-width: 0;
+  max-width: 180px;
+  padding: 0 7px;
+  border: 1px solid var(--accent-border);
+  background: var(--bg-panel-elevated);
+  color: var(--text-primary);
+}
+/* Accent on the mark alone — one step of emphasis over the branch chip beside
+   it, without tinting the surface the name has to stay legible against. */
+.commit-tag--tag .tag-glyph {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+.commit-tag__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

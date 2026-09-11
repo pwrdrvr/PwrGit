@@ -11,11 +11,11 @@ import {
   type McpAgentCapability,
   type McpAgentPolicySnapshot,
   type McpAgentRole,
-  type McpAgentRoleInput,
-  type McpAgentSessionCredential
+  type McpAgentRoleInput
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { SettingsPanelHead, SettingsSection } from "./SettingsLayout";
+import { AgentAccessSection } from "./AgentAccessSection";
 
 type RoleDraft = {
   id: string | null;
@@ -30,13 +30,9 @@ export function LocalAgentsSettings() {
   const [snapshot, setSnapshot] = useState<McpAgentPolicySnapshot | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
-  const [sessionName, setSessionName] = useState("");
-  const [newSessionRoleId, setNewSessionRoleId] = useState("builtin.discovery");
-  const [credential, setCredential] = useState<McpAgentSessionCredential | null>(null);
   const [roleDraft, setRoleDraft] = useState<RoleDraft | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const read = useCallback(async (): Promise<void> => {
@@ -56,11 +52,6 @@ export function LocalAgentsSettings() {
       current !== null && result.value.roles.some((role) => role.id === current)
         ? current
         : (result.value.roles[0]?.id ?? null)
-    );
-    setNewSessionRoleId((current) =>
-      result.value.roles.some((role) => role.id === current)
-        ? current
-        : (result.value.roles[0]?.id ?? "")
     );
     setError(null);
   }, []);
@@ -82,29 +73,9 @@ export function LocalAgentsSettings() {
     return snapshot?.roles.find((role) => role.id === roleId) ?? null;
   }, [selectedRoleId, selectedSession, snapshot]);
 
-  const createSession = async (): Promise<void> => {
-    const name = sessionName.trim();
-    if (name === "") {
-      setError("Session name is required.");
-      return;
-    }
-    setSaving(true);
-    const result = await dispatch("localAgents:createSession", {
-      name,
-      roleId: newSessionRoleId
-    });
-    setSaving(false);
-    if (!result.ok) {
-      setError(result.error.message);
-      return;
-    }
-    setCredential(result.value);
-    setSessionName("");
-    setSelectedSessionId(result.value.session.id);
-    setSelectedRoleId(result.value.session.roleId);
-    setCopied(false);
-    await read();
-  };
+  const effectivePermissions = selectedRole?.permissions.filter(permission =>
+    !selectedSession?.oauth || selectedSession.oauth.scopes.includes(permission)
+  ) ?? [];
 
   const assignRole = async (sessionId: string, roleId: string): Promise<void> => {
     setSaving(true);
@@ -166,8 +137,10 @@ export function LocalAgentsSettings() {
       <SettingsPanelHead
         eyebrow="Access control"
         title="Local agents"
-        help="Every MCP process must present a named Session token. Sessions bind to one role; roles grant explicit capabilities and can restrict access to selected repository roots. Revocation is checked again on every tool, resource, and live-status poll."
+        help="Authorize agents in PwrGit’s approval window, then manage their Sessions and roles here. Roles define permissions and repository access. Revocation applies to every tool and resource request."
       />
+
+      <AgentAccessSection />
 
       <SettingsSection
         title="Authorization graph"
@@ -259,7 +232,7 @@ export function LocalAgentsSettings() {
               </div>
               {MCP_AGENT_CAPABILITIES.map((capability) => {
                 const detail = MCP_AGENT_CAPABILITY_DETAILS[capability];
-                const allowed = selectedRole?.permissions.includes(capability) === true;
+                const allowed = effectivePermissions.includes(capability);
                 return (
                   <div
                     key={capability}
@@ -283,60 +256,6 @@ export function LocalAgentsSettings() {
             </GraphColumn>
           </div>
         )}
-      </SettingsSection>
-
-      <SettingsSection
-        title="Create Session"
-        eyebrow="Client authorization"
-        description="The token is shown once. Put it in that client's MCP environment; PwrGit stores only its SHA-256 hash."
-      >
-        <div className="agent-session-create">
-          <label>
-            Session name
-            <input
-              className="agent-auth-input"
-              maxLength={200}
-              placeholder="PwrAgent on this Mac"
-              value={sessionName}
-              onChange={(event) => setSessionName(event.target.value)}
-            />
-          </label>
-          <label>
-            Initial role
-            <select
-              className="agent-auth-input"
-              value={newSessionRoleId}
-              onChange={(event) => setNewSessionRoleId(event.target.value)}
-            >
-              {snapshot?.roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}
-            </select>
-          </label>
-          <button
-            className="settings-button settings-button--primary"
-            disabled={saving || snapshot === null}
-            type="button"
-            onClick={() => void createSession()}
-          >
-            Create Session
-          </button>
-        </div>
-        {credential !== null ? (
-          <div className="agent-credential" role="status">
-            <div><b>Copy this now</b><span>The token cannot be recovered after this pane closes.</span></div>
-            <pre>{environmentSnippet(credential)}</pre>
-            <button
-              className="settings-button"
-              type="button"
-              onClick={() => {
-                void navigator.clipboard?.writeText(environmentSnippet(credential));
-                setCopied(true);
-              }}
-            >
-              {copied ? "Copied" : "Copy environment"}
-            </button>
-          </div>
-        ) : null}
-        {snapshot !== null ? <p className="agent-policy-path selectable">Policy: {snapshot.policyFile}</p> : null}
       </SettingsSection>
 
       {roleDraft !== null ? (
@@ -455,7 +374,8 @@ function draftInput(draft: RoleDraft): McpAgentRoleInput {
   };
 }
 
-function environmentSnippet(credential: McpAgentSessionCredential): string {
-  const quote = (value: string): string => `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
-  return `${credential.environment.policyFileVariable}=${quote(credential.environment.policyFile)}\n${credential.environment.sessionTokenVariable}=${quote(credential.token)}`;
-}
+/** Prefers a complete, paste-ready client config over two environment
+ * variables: the variables still left the operator to work out the command,
+ * the script path, and the JSON shape by hand, which is most of the setup
+ * cost this pane exists to remove. Falls back to the variables when the app
+ * ships no single-file server to point at. */

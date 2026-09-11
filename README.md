@@ -108,19 +108,13 @@ expectations live in **[CONTRIBUTING.md](CONTRIBUTING.md)** and
 
 ### Connect a local agent over MCP
 
-The workspace also ships a read-only stdio MCP server for bounded checkout
-discovery, credential-free GitHub/GitLab identity, worktree metadata, safe
-status summaries, and subscribable PR/MR/CI status:
+Open **Settings → Agents**, enable local-agent access, then use the connection
+commands shown there. PwrGit exposes OAuth-protected MCP at
+`http://127.0.0.1:51731/mcp`; approve the client’s Session Name and role in
+PwrGit’s native window. The app must remain running for HTTP clients.
 
-```bash
-pnpm --filter @pwrgit/mcp-server build
-node packages/mcp-server/dist/bin.js
-```
-
-MCP clients normally spawn that command themselves. Configuration, tools,
-security bounds, the standard `resources/subscribe` flow, and the optional
-WebSocket fallback are documented in the
-[PwrGit MCP server guide](docs/mcp-server.md).
+Tools, repository boundaries, revocation, and standalone stdio compatibility are
+documented in the [PwrGit MCP server guide](docs/mcp-server.md).
 
 ## How it's built
 

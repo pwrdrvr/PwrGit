@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
@@ -235,4 +235,40 @@ test("menu opens the Settings window; panes render and settings persist", async 
   // Singleton: reopening from the menu focuses the same window.
   await openSettingsFromMenu(app);
   expect(app.windows().length).toBe(2);
+});
+
+test("Agents columns fit the settings pane at narrow widths and increased zoom", async ({}, testInfo) => {
+  handle = await launchApp();
+  const { app } = handle;
+  const nextWindow = app.waitForEvent("window");
+  await openSettingsFromMenu(app);
+  const settings = await nextWindow;
+  await settings.waitForSelector(".settings-screen");
+  await settings.getByRole("button", { name: "Agents", exact: true }).click();
+  await expect(settings.locator(".agent-auth-column")).toHaveCount(3);
+  for (const [width, zoom] of [[1040, 1], [1144, 1.3], [1440, 1], [1440, 1.3]]) {
+    await app.evaluate(({ BrowserWindow }, size) => {
+      const win = BrowserWindow.getAllWindows().find(candidate => candidate.webContents.getURL().includes("#settings"))!;
+      win.setSize(size.width, 950);
+      win.webContents.setZoomFactor(size.zoom);
+    }, { width: width!, zoom: zoom! });
+    await expect.poll(async () => Math.abs(await settings.evaluate(() => innerWidth) - width! / zoom!)).toBeLessThan(3);
+    await expect.poll(() => settings.evaluate(() => {
+      const pane = document.querySelector<HTMLElement>(".settings-content")!;
+      const graph = document.querySelector<HTMLElement>(".agent-auth-graph")!;
+      const columns = Array.from(graph.children).map(column => column.getBoundingClientRect());
+      const available = document.querySelector(".settings-stack--agents")!.getBoundingClientRect().width;
+      const stacked = columns[1]!.top > columns[0]!.top;
+      return pane.scrollWidth <= pane.clientWidth + 1 && graph.scrollWidth <= graph.clientWidth + 1
+        && stacked === (available <= 760);
+    })).toBe(true);
+    if (width === 1144) {
+      await settings.locator(".agent-auth-graph").evaluate(element => element.scrollIntoView({ block: "start" }));
+      const screenshot = await app.evaluate(async ({ BrowserWindow }) => {
+        const win = BrowserWindow.getAllWindows().find(candidate => candidate.webContents.getURL().includes("#settings"))!;
+        return (await win.capturePage()).toPNG().toString("base64");
+      });
+      writeFileSync(testInfo.outputPath("agents-stacked.png"), Buffer.from(screenshot, "base64"));
+    }
+  }
 });

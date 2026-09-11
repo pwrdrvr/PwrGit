@@ -11,6 +11,7 @@ import type {
  *  Experimental/diagnostics are stored sparsely — only keys the user changed;
  *  reads are defaulted at the settings:read handler. */
 export type AppSettings = {
+  localAgentAccessEnabled?: boolean;
   /** Root under which PwrGit-managed worktrees are created (U14). */
   worktreeRoot?: string;
   /** The macOS Safe Storage prompt has been explained before it can appear. */

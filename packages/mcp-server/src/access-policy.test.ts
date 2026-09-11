@@ -44,7 +44,8 @@ describe("MCP access policy", () => {
     expect(snapshot.roles.map((role) => role.id)).toEqual([
       "builtin.discovery",
       "builtin.local-reader",
-      "builtin.live-status"
+      "builtin.live-status",
+      "builtin.app-operator"
     ]);
     expect(created.token).toMatch(/^pgmcp_[A-Za-z0-9_-]{43}$/);
     expect(contents).not.toContain(created.token);
@@ -52,6 +53,20 @@ describe("MCP access policy", () => {
     if (process.platform !== "win32") {
       expect(statSync(policyFile).mode & 0o777).toBe(0o600);
     }
+  });
+
+  it("upgrades older policies without granting navigation to existing Sessions", () => {
+    const { policyFile, store } = fixture();
+    store.initialize();
+    const existing = store.createSession("Existing reader", "builtin.live-status");
+    const oldPolicy = JSON.parse(readFileSync(policyFile, "utf8"));
+    oldPolicy.roles = oldPolicy.roles.filter((role: { id: string }) => role.id !== "builtin.app-operator");
+    writeFileSync(policyFile, JSON.stringify(oldPolicy));
+    expect(store.snapshot().roles.some(role => role.id === "builtin.app-operator")).toBe(true);
+    expect(() => store.authorize(existing.token, { capabilities: ["repository.metadata.read"] })).not.toThrow();
+    expect(() => store.authorize(existing.token, { capabilities: ["app.navigate"] })).toThrow("does not grant");
+    const scoped = store.createSession("Narrow OAuth", "builtin.app-operator", { clientId: "fixture", scopes: ["repository.metadata.read"] });
+    expect(() => store.authorize(scoped.token, { capabilities: ["app.navigate"] })).toThrow("does not grant");
   });
 
   it("enforces capabilities, repository roots, symlink resolution, and immediate revocation", async () => {

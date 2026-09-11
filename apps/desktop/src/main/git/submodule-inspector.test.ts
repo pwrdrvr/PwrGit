@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { err, ok } from "@pwrgit/shared";
 import {
   execGitRecords,
+  gitProcessInvocation,
   type GitExec,
   type GitOutput,
   type GitRecordExec
@@ -38,8 +39,9 @@ const GIT_ENV: NodeJS.ProcessEnv = {
 
 const systemGit: GitExec = (args, cwd, options) =>
   new Promise((resolveResult) => {
-    const proc = spawn("git", args, {
-      cwd,
+    const invocation = gitProcessInvocation(args, cwd);
+    const proc = spawn("git", invocation.args, {
+      cwd: invocation.processCwd,
       env: { ...GIT_ENV, ...options?.env }
     });
     let stdout = "";
@@ -69,8 +71,9 @@ const systemGitRecords: GitRecordExec = (args, cwd, options) =>
   });
 
 function git(cwd: string, args: string[]): string {
-  return execFileSync("git", args, {
-    cwd,
+  const invocation = gitProcessInvocation(args, cwd);
+  return execFileSync("git", invocation.args, {
+    cwd: invocation.processCwd,
     env: GIT_ENV,
     encoding: "utf8"
   }).trim();
@@ -168,6 +171,83 @@ describe("inspectSubmodules (system git)", () => {
 
   afterEach(() => rmSync(root, { recursive: true, force: true }));
 
+  it.each([
+    { declaration: "absent", emptyDirectory: true },
+    { declaration: "absent", emptyDirectory: false },
+    { declaration: "no URL", emptyDirectory: true },
+    { declaration: "no URL", emptyDirectory: false },
+    { declaration: "valid", emptyDirectory: true },
+    { declaration: "valid", emptyDirectory: false }
+  ])(
+    "requires configuration repair before initialization ($declaration, empty directory: $emptyDirectory)",
+    async ({ declaration, emptyDirectory }) => {
+      const parent = join(root, "parent");
+      const pinned = "a".repeat(40);
+      initRepo(parent);
+      commitFile(parent, "README.md", "parent\n", "parent baseline");
+      if (declaration !== "absent") {
+        writeFileSync(
+          join(parent, ".gitmodules"),
+          '[submodule "vendor"]\n\tpath = vendor\n' +
+            (declaration === "valid" ? "\turl = ../vendor.git\n" : "")
+        );
+        git(parent, ["add", ".gitmodules"]);
+      }
+      git(parent, [
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        `160000,${pinned},vendor`
+      ]);
+      git(parent, ["commit", "-m", "record vendor gitlink"]);
+      if (emptyDirectory) mkdirSync(join(parent, "vendor"));
+
+      // A gitlink alone does not tell Git where to obtain the child repository.
+      const native = await systemGit(["submodule", "status"], parent);
+      expect(native.ok).toBe(true);
+      if (native.ok) {
+        expect(native.value.exitCode === 0).toBe(declaration !== "absent");
+        if (declaration === "absent") {
+          expect(native.value.stderr).toContain("no submodule mapping found");
+        }
+      }
+      const snapshot = expectSnapshot(
+        await inspectSubmodules(systemGit, systemGitRecords, parent)
+      );
+      expect(snapshot.submodules).toHaveLength(1);
+      const row = snapshot.submodules[0]!;
+      expect(row).toMatchObject({
+        pinnedCommit: pinned,
+        checkoutState: emptyDirectory ? "uninitialized" : "missing",
+        relation: "unknown",
+        dirty: null
+      });
+      expect(row.checkedOutCommit).toBeUndefined();
+      const checkoutIssue = row.issues.find(
+        (problem) =>
+          problem.code ===
+          (emptyDirectory ? "checkout_uninitialized" : "checkout_missing")
+      );
+      if (declaration === "valid") {
+        expect(row.issues).toHaveLength(1);
+        expect(checkoutIssue?.remedy).toContain("Initialize");
+        expect(checkoutIssue?.remedy).not.toContain("before initializing");
+      } else {
+        expect(checkoutIssue?.remedy).toContain(".gitmodules");
+        expect(checkoutIssue?.remedy).toContain("before initializing");
+        if (declaration === "absent") {
+          expect(
+            row.issues.find(
+              (problem) => problem.code === "gitmodules_entry_missing"
+            )?.remedy
+          ).toContain("remove the gitlink if it was added accidentally");
+        } else {
+          expect(row.issues.map((problem) => problem.code)).toContain("url_missing");
+        }
+      }
+    }
+  );
+
   it("uses the parent gitlink as the pin while surfacing tag, branch hint, detached checkout, dirtiness, and divergence", async () => {
     const child = join(root, "child");
     const parent = join(root, "parent");
@@ -218,6 +298,8 @@ describe("inspectSubmodules (system git)", () => {
     expect(git(parent, ["rev-parse", "HEAD:modules/api"])).toBe(pinned);
   });
 
+  // Recursive submodule setup spawns many Git processes before inspection;
+  // Windows CI can exceed the default 20s even while making progress.
   it("isolates multiple and nested checkouts plus missing, uninitialized, deinitialized, and changed-URL failures", async () => {
     const leaf = join(root, "leaf");
     const outer = join(root, "outer");
@@ -307,7 +389,7 @@ describe("inspectSubmodules (system git)", () => {
       checkoutState: "checked_out",
       relation: "at_pin"
     });
-  });
+  }, 60_000);
 
   it("finds retained submodule data in a linked worktree's Git directory", async () => {
     const child = join(root, "linked-child");

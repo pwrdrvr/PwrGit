@@ -24,12 +24,6 @@ export function registerLocalAgentHandlers(
 ): void {
   bus.register("localAgents:read", () => policyResult(() => policy.initialize()));
 
-  bus.register("localAgents:createSession", (request) => {
-    const result = policyResult(() => policy.createSession(request.name, request.roleId));
-    if (result.ok) onChanged();
-    return result;
-  });
-
   bus.register("localAgents:revoke", (request) => {
     const result = policyResult(() => policy.revokeSession(request.id));
     if (result.ok) onChanged();

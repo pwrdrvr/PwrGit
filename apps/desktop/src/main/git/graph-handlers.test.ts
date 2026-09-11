@@ -442,3 +442,24 @@ describe("graph:lanes caching", () => {
     expect(fromCache.head).not.toBe(feature.head);
   });
 });
+
+describe("graph tag navigation", () => {
+  it("reveals a hidden commit without adding it to the shared cache", async () => {
+    const hidden = execFileSync("git", ["rev-parse", "shipped"], { cwd: repoPath }).toString().trim();
+    insertPr("shipped", { number: 99, state: "merged", url: "https://example.com/pull/99", title: "Shipped" });
+    git(repoPath, ["tag", "-a", "milestone", "-m", "Milestone", hidden]);
+    git(repoPath, ["tag", "v2.9.0", hidden]);
+    git(repoPath, ["tag", "v2.10.0", hidden]);
+    try {
+      const baseline = await lanes("main");
+      expect(baseline.commits.some((c) => c.hash === hidden)).toBe(false);
+      const revealed = await bus.dispatch("graph:lanes", { worktreeId: worktreeIds.get("main")!, scope: "active", revealHash: hidden });
+      if (!revealed.ok) throw new Error(revealed.error.message);
+      expect(revealed.value.commits.some((c) => c.hash === hidden)).toBe(true);
+      expect(revealed.value.tags?.[hidden]?.name).toBe("v2.10.0");
+      expect((await lanes("main", { force: false })).commits.some((c) => c.hash === hidden)).toBe(false);
+    } finally {
+      git(repoPath, ["tag", "-d", "milestone", "v2.9.0", "v2.10.0"]);
+    }
+  });
+});

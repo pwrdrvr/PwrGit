@@ -160,7 +160,16 @@ provider or reach a real forge.
   render differently, and neither collapses into `public` — that would
   understate where code can go. A signed-out CLI writes **no** row (signing in
   should produce a fresh read); a 404 writes `unknown` (re-asking every pass is
-  noise).
+  noise). Successful fetches/pulls request a background refresh under the same
+  TTL as profile loads: six hours for known visibility, five minutes for
+  unknown. Service-wide slots bound all overlapping calls (eight Git reads,
+  four forge requests); lookups for the same repo are coalesced. Signed-out
+  attempts back off five minutes in memory without writing a row. Clicking
+  the sidebar visibility mark forces a refresh of just that repository and
+  waits for an existing lookup when one is already running. IPC returns the
+  lookup outcome separately from deltas: signed-out attempts may retain a
+  known identity, and a change to unknown is still unresolved. Only a resolved
+  outcome warrants successful visibility feedback.
 - **A dialog opens on local state; a forge is asked only on debounced input.**
   This is the rule the clone dialog broke. `repo:cloneCatalog` used to list
   every known owner's repositories as it opened — `gh repo list <owner>

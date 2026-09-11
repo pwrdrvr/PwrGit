@@ -41,6 +41,9 @@ export default defineConfig(({ command }) => {
       // ESM resolver can't follow extensionless `./protocol`-style imports
       // inside source-form packages. Mirrors PwrSnap / PwrAgnt.
       plugins: [
+        // Keep ws as a desktop runtime dependency so it stays external here.
+        // Bundling its optional native accelerators can emit a top-level
+        // missing-bufferutil error even though ws works without them in Node.
         externalizeDepsPlugin({
           exclude: ["@pwrgit/shared", "@pwrgit/mcp-server"]
         }),

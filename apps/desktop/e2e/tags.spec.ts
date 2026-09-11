@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
-import { addRootAndExpand, branchRow } from "./fixtures/steps";
+import { addRootAndExpand, branchRow, expandRepoGroup, primaryShortcut } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -209,7 +209,91 @@ test("tags a commit straight from the lineage graph", async () => {
   await expect(create).toHaveCount(0);
 
   expect(box.git(repo.path, "rev-parse", "refs/tags/v0.9.0")).toBe(target);
+  // The chip appears without waiting out the lane cache. `tag:create` used to
+  // emit only `repo:changed`, which the graph does not subscribe to, so the tag
+  // the user had just made stayed invisible here for LANE_TTL_MS (30s). The
+  // default expect timeout is far under that, which is the point.
+  await expect(row.locator(".commit-tag--tag .commit-tag__name")).toHaveText("v0.9.0");
   // Tagging never moves a checkout — HEAD is exactly where it was, not merely
   // somewhere other than the tagged commit.
   expect(box.git(repo.path, "rev-parse", "HEAD")).toBe(headBefore);
+});
+
+test("locates old tags across repositories and keeps one prominent chip", async ({}, testInfo) => {
+  test.setTimeout(90_000);
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepo("release-history");
+  const ancestor = box.git(repo.path, "rev-parse", "HEAD");
+  box.git(repo.path, "commit", "--allow-empty", "-m", "Release milestone commit");
+  const target = box.git(repo.path, "rev-parse", "HEAD");
+  box.git(repo.path, "tag", "v2.9.0", target);
+  box.git(repo.path, "tag", "v2.10.0", target);
+  box.git(repo.path, "tag", "-a", "milestone", "-m", "Release milestone", target);
+  box.git(repo.path, "tag", "build/123", target);
+  box.git(repo.path, "tag", "source-tree", "HEAD^{tree}");
+  for (let i = 0; i < 155; i += 1) box.git(repo.path, "commit", "--allow-empty", "-m", `Development ${i + 1}`);
+  box.makeRepo("other-project");
+  handle = await launchApp({ worktreeRoot: box.worktreeRoot, theme: "dark" });
+  const { window } = handle;
+  await addRootAndExpand(window, handle, box, "other-project");
+  await branchRow(window, "main").click();
+  await expect(window.locator(".graph-row").first()).toBeVisible();
+  const group = await expandRepoGroup(window, "release-history");
+  const block = window.locator(".repo-block", { has: group });
+  const toggle = block.getByRole("button", { name: /^Tags 5/ });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(
+    block.getByRole("button", {
+      name: "Locate tag source-tree in lineage — unavailable, this tag points at a tree, not a commit"
+    })
+  ).toBeDisabled();
+  await block.getByRole("button", { name: "Locate tag v2.10.0 in lineage", exact: true }).click();
+  const row = window.locator(`.graph-row[data-hash="${target}"]`);
+  await expect(row).toBeInViewport();
+  await expect(row.locator(".commit-tag--tag")).toHaveCount(1);
+  await expect(row.locator(".commit-tag--tag .commit-tag__name")).toHaveText("v2.10.0");
+  expect(box.git(repo.path, "symbolic-ref", "--short", "HEAD")).toBe("main");
+  await window.screenshot({ path: testInfo.outputPath("tag-locator.png") });
+  await block.getByRole("button", { name: "View all 5 tags…" }).click();
+  const browser = window.getByRole("dialog", { name: "release-history branches, tags, and remotes" });
+  await browser.getByRole("button", { name: "Locate tag build/123 in lineage", exact: true }).click();
+  await expect(browser).toHaveCount(0);
+  await expect(row).toBeInViewport();
+  await expect(row.locator(".commit-tag--tag .commit-tag__name")).toHaveText("build/123");
+  await expect(row.locator(".commit-tag--tag")).toHaveCount(1);
+
+  // A later history refresh must not replay the tag navigation over a newer
+  // manual selection, and HEAD should regain its normal automatic locator.
+  const other = window.locator(".graph-row").filter({ has: window.locator(".commit-msg", { hasText: /^Development 155$/ }) });
+  await other.click();
+  await expect(other).toHaveClass(/is-focused/);
+  box.git(repo.path, "commit", "--allow-empty", "-m", "After tag navigation");
+  const newHead = box.git(repo.path, "rev-parse", "HEAD");
+  await window.getByRole("button", { name: "Refresh worktrees for release-history" }).click();
+  await expect(window.locator(`.graph-row[data-hash="${newHead}"]`)).toBeInViewport();
+  await expect(other).toHaveClass(/is-focused/);
+  await expect(row).not.toHaveClass(/is-focused/);
+
+  // Ordinary search requests drop the tag label, but must keep their target
+  // in the graph even when it only exists in the supplemental history window.
+  for (const hash of [target, ancestor]) {
+    await window.keyboard.press(primaryShortcut("k"));
+    await window.locator(".overlay-search input").fill(hash);
+    const result = window.locator(".overlay-result").filter({ hasText: hash.slice(0, 7) });
+    await expect(result).toHaveCount(1);
+    await result.click();
+    await expect(window.locator(".overlay-search")).toHaveCount(0);
+    const revealed = window.locator(`.graph-row[data-hash="${hash}"]`);
+    await expect(revealed).toBeInViewport();
+    await window.locator(".only-me").click();
+    box.git(repo.path, "commit", "--allow-empty", "-m", `Refresh after searching ${hash}`);
+    const refreshedHead = box.git(repo.path, "rev-parse", "HEAD");
+    await window.getByRole("button", { name: "Refresh worktrees for release-history" }).click();
+    // Seeing the new HEAD proves the asynchronous history reload completed.
+    await expect(window.locator(`.graph-row[data-hash="${refreshedHead}"]`)).toBeInViewport();
+    await expect(revealed).toHaveClass(/is-focused/);
+  }
+
 });

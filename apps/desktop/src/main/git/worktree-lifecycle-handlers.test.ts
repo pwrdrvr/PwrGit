@@ -1,5 +1,11 @@
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -159,6 +165,118 @@ describe("worktree:removeMany × state probes", () => {
       expect(c.end).toBeGreaterThan(0);
       expect(c.end).toBeLessThan(remove?.start ?? 0);
     }
+  });
+});
+
+describe("worktree:removeMany × pruned worktree", () => {
+  /** Add a worktree on a new branch and index it; returns the sidebar row. */
+  async function addIndexedWorktree(
+    branch: string
+  ): Promise<{ id: string; path: string }> {
+    const path = join(root, `wt-${branch}`);
+    await worktreeAdd(systemGit, repoPath, path, branch, { newBranch: true });
+    await indexer.refreshRepoWorktrees(repoId);
+    const wt = indexer
+      .listRepos(profileId)[0]
+      ?.worktrees.find((w) => w.branch === branch);
+    if (wt === undefined) throw new Error("worktree not indexed");
+    return { id: wt.id, path };
+  }
+  const rowExists = (id: string): boolean =>
+    indexer.listRepos(profileId)[0]?.worktrees.some((w) => w.id === id) ??
+    false;
+  // Windows can hold a fresh checkout open (antivirus, our own probes) for a
+  // moment; retry like the production path does.
+  const rmRetrying = (path: string): void =>
+    rmSync(path, {
+      recursive: true,
+      force: true,
+      maxRetries: 15,
+      retryDelay: 300
+    });
+
+  // Another tool (Codex, a shell `rm -rf` plus `git worktree prune`) can
+  // delete a checkout and unregister it before PwrGit re-indexes. The row
+  // lingers in the sidebar with nothing behind it: fetch fails ("cannot change
+  // to …"), and remove used to fail too ("is not a working tree"), leaving no
+  // way to get rid of it. Removal must succeed and drop the row.
+  it("removes a worktree whose directory is gone and metadata already pruned", async () => {
+    const wt = await addIndexedWorktree("pruned");
+    rmRetrying(wt.path);
+    git(repoPath, ["worktree", "prune"]);
+
+    const res = await bus.dispatch("worktree:removeMany", {
+      worktreeIds: [wt.id]
+    });
+
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.value.removed).toEqual([wt.id]);
+      expect(res.value.failed).toEqual([]);
+    }
+    expect(rowExists(wt.id)).toBe(false);
+    expect(vi.mocked(emitEvent)).toHaveBeenCalledWith("worktree:removed", {
+      worktreeId: wt.id
+    });
+  });
+
+  // Same staleness, but the directory is still there and git disowns it. The
+  // row is a fossil either way, so it must go — but the directory stays and
+  // the failure names it, since nothing proves it is safe to delete. It is
+  // reported as a failure only: `worktree:removed` would tick the renderer's
+  // removal progress for something that was not removed.
+  it("drops the row but keeps a directory git no longer recognises", async () => {
+    const wt = await addIndexedWorktree("orphan");
+    // Unregister without deleting: drop the .git link, prune the metadata.
+    rmRetrying(join(wt.path, ".git"));
+    git(repoPath, ["worktree", "prune"]);
+    vi.mocked(emitEvent).mockClear();
+
+    const res = await bus.dispatch("worktree:removeMany", {
+      worktreeIds: [wt.id]
+    });
+
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.value.removed).toEqual([]);
+      expect(res.value.failed).toHaveLength(1);
+      expect(res.value.failed[0]?.message).toMatch(/no longer registered/i);
+    }
+    expect(existsSync(wt.path)).toBe(true);
+    expect(rowExists(wt.id)).toBe(false);
+    expect(vi.mocked(emitEvent)).not.toHaveBeenCalledWith("worktree:removed", {
+      worktreeId: wt.id
+    });
+    expect(vi.mocked(emitEvent)).toHaveBeenCalledWith("repo:changed", {
+      profileId
+    });
+  });
+
+  // The deleted-but-NOT-pruned case: git still lists the entry (`prunable`),
+  // the index flags the row missing, and every other action refuses. The one
+  // action it must keep is the way out — git removes a prunable entry without
+  // complaint, and the probe lock it takes must not spawn git in the deleted
+  // directory either.
+  it("removes a worktree the index has flagged missing", async () => {
+    const wt = await addIndexedWorktree("gone");
+    rmRetrying(wt.path);
+    await indexer.refreshRepoWorktrees(repoId);
+    expect(
+      indexer.listRepos(profileId)[0]?.worktrees.find((w) => w.id === wt.id)
+    ).toMatchObject({ missing: true });
+
+    const res = await bus.dispatch("worktree:removeMany", {
+      worktreeIds: [wt.id]
+    });
+
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.value).toEqual({ removed: [wt.id], dirty: [], failed: [] });
+    }
+    expect(rowExists(wt.id)).toBe(false);
+    expect(vi.mocked(emitEvent)).toHaveBeenCalledWith("worktree:removed", {
+      worktreeId: wt.id
+    });
   });
 });
 

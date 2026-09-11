@@ -62,7 +62,8 @@ describe("repo worktree refresh events", () => {
       "default-branch identity",
       { isDefaultBranch: false },
       { isDefaultBranch: true }
-    ]
+    ],
+    ["a deleted checkout", {}, { missing: true }]
   ] satisfies [string, Partial<WorktreeState>, Partial<WorktreeState>][])(
     "treats %s as a rendered state change",
     async (_label, beforeOverrides, afterOverrides) => {

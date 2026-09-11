@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.13.0 - 2026-09-10
+
+- Agents - Added opt-in local-agent access with OAuth and a native approval window, so approved coding agents can discover your PwrGit profiles, repositories, worktrees, recent activity, and safely request navigation or refreshes without receiving generic Git-write access.
+- Lineage - Added direct tag-to-commit navigation, prominent tag chips, and clearer focused-branch upstream lanes; fixed repository reveals so they keep window chrome in place.
+- Worktrees - Made missing or externally pruned worktrees recoverable: PwrGit flags unavailable directories, avoids actions that would fail, and lets you remove stale sidebar entries safely.
+- Repositories - Refresh repository visibility after fetches, pulls, and profile-wide syncs, with a direct retry control when a forge lookup fails.
+- Submodules - Explain when a submodule needs its `.gitmodules` configuration repaired before it can be initialized.
+- Security - Updated dependencies to resolve known security advisories.
+
 ## v0.12.0 - 2026-09-06
 
 - Updates - Installed alpha and beta builds now stay on the Beta release feed until you explicitly choose another one, and Settings shows each Stable/Beta, Latest/Pre-release slot directly with the installed build marked.

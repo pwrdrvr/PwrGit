@@ -39,7 +39,9 @@ function profileRepos(db: DB, profileId: string): BulkSyncRepoInput[] | null {
       `SELECT w.id, w.repo_id AS repoId, w.branch, w.path
        FROM worktrees w
        JOIN repos r ON r.id = w.repo_id
-       WHERE r.profile_id = ?
+       -- A checkout that is gone has nothing to pull; the repo-level fetch
+       -- still runs from the primary.
+       WHERE r.profile_id = ? AND w.missing = 0
        ORDER BY w.repo_id, w.is_primary DESC, w.branch COLLATE NOCASE, w.id`
     )
     .all(profileId) as WorktreeRow[];
@@ -63,7 +65,8 @@ export function registerBulkSyncHandlers(
   db: DB,
   refresher: WorktreeRefresher,
   operations: WorktreeOperationQueue,
-  indexer?: Pick<RepoIndexer, "refreshRepoRemoteBranches">
+  indexer?: Pick<RepoIndexer, "refreshRepoRemoteBranches">,
+  refreshIdentity?: (repoId: string) => void
 ): BulkSyncHandlers {
   const active = new Map<
     string,
@@ -145,6 +148,7 @@ export function registerBulkSyncHandlers(
           const updated = result.worktrees.some(
             (worktree) => worktree.outcome === "updated"
           );
+          if (fetched) refreshIdentity?.(repo.id);
           if (fetched && indexer !== undefined) {
             try {
               const indexed = await operations.runRepository(repo.id, () =>

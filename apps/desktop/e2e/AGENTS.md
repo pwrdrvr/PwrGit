@@ -19,7 +19,10 @@ the Electron build.
 
 - **Data**: `PWRGIT_USER_DATA_DIR` (honored early in `src/main/index.ts`) points
   the db / settings / profiles at a fresh temp dir per launch, so every run
-  starts from the seeded default profile — see `fixtures/electron-app.ts`.
+  starts from the seeded default profile — see `fixtures/electron-app.ts`. It
+  also redirects the app log to `<dir>/logs/main.log`: macOS keys the default
+  log directory off the app *name*, so without that a run would append to the
+  installed app's own log.
 - **Folder picker**: `dialog.showOpenDialog` is stubbed in the main process
   (`setPickDirectory`) so "Add repo folder…" is driven from the UI, not a native
   dialog.

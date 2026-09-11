@@ -66,6 +66,13 @@ export type Worktree = {
   isPrimary: boolean;
   /** Most-recent GitHub PR for this branch, if any (populated when fetched). */
   pr?: PrSummary;
+  /** The checkout is gone — its directory (or its `.git` link) no longer
+   *  exists — but git still registers it and the row is kept so the user can
+   *  see what happened and remove it. Counts are zeroed while set; every
+   *  per-worktree git action refuses with `worktree_missing`. */
+  missing?: boolean;
+  /** `git worktree lock`ed (removable media); removal needs `--force`. */
+  locked?: boolean;
 };
 
 /** A branch a worktree can switch to (a local head or a remote-tracking ref). */
@@ -480,6 +487,9 @@ export type PrSummary = {
   title: string;
   state: PrLifecycle;
   isDraft: boolean;
+  checkState?: "passing" | "failing" | "pending" | "unknown";
+  checksStillRunning?: boolean;
+  mergeState?: "mergeable" | "conflicting" | "unknown";
   /** Which forge issued this number; decides PR vs MR wording. */
   forge?: ForgeKind;
   /** Forge host — a number is only unique within one instance. */
@@ -594,6 +604,14 @@ export type RepoIdentity = {
   root?: ForgeRepoRef;
   /** ISO timestamp of the last successful read from the forge. */
   fetchedAt?: string;
+};
+
+/** Result of an attempted identity lookup, independent of whether stored facts changed.
+ *  A signed-out/unavailable result may carry an older cached identity. */
+export type RepoIdentityRefreshOutcome = {
+  repoId: RepoId;
+  status: "resolved" | "unknown" | "signed_out" | "unavailable";
+  identity?: RepoIdentity;
 };
 
 /** Ways the clone dialog can hand a repository to the local machine. `cli`
@@ -1051,6 +1069,9 @@ export type WorktreeState = {
   lastActivityAt?: string;
   /** ISO-8601 time the snapshot was computed. */
   updatedAt: string;
+  /** The checkout's directory is gone (see `Worktree.missing`); the counts
+   *  above read as zero while it is set. */
+  missing?: boolean;
 };
 
 /** Profile-wide repository synchronization without destructive recovery. */
@@ -1218,6 +1239,8 @@ export type LaneBranchInfo = {
 export type LaneGraph = {
   /** Topological order (newest first); each carries its parent hashes. */
   commits: Commit[];
+  /** One prominent local tag per displayed commit. */
+  tags?: Record<string, { name: string; kind: "annotated" | "lightweight" }>;
   /** commit hash → local branch names tipped there (for ref labels). */
   tips: Record<string, string[]>;
   /** commit hash → remote-tracking refs tipped there (e.g. "origin/main"). */
@@ -1230,6 +1253,8 @@ export type LaneGraph = {
    *  This is per-worktree (unlike the cached lane graph) and lets consumers
    *  distinguish a branch's own commits from shared/base history. */
   headOnlyCommits: string[];
+  /** Actual tracking ref of the focused branch when it has unapplied work. */
+  headUpstream?: string;
   defaultBranch: string;
   /** The concrete ref used as the default-branch comparison point, usually
    *  `origin/main` when a remote default is configured. */

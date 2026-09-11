@@ -141,3 +141,20 @@ Electron dies with "Unable to find Electron app at .../out/main/index.js".
   handlers return `Result`, never throw across the boundary.
 - Migrations are `.sql` files copied beside the bundle by `electron.vite.config.ts`.
 - git runs through the injected `GitExec` (dugite in prod; system git in tests).
+- The app log is `app.getPath("logs")/main.log` — `~/Library/Logs/PwrGit` on
+  macOS, `<userData>/logs` elsewhere — buffered in `src/main/logs.ts` and shown
+  by Help › Logs. `src/main/process-ids.ts` puts the main, GPU, renderer and
+  utility pids in that log so a pasted log names its own processes.
+
+## macOS release architectures
+
+DMG and ZIP targets build universal and arm64. Keep `concurrency.jobs: 1`:
+`beforePack` mutates the shared stage's Git and SQLite files per architecture.
+`release.mjs` verifies both app trees, then `mac-release-artifacts.mjs` writes
+one `latest-mac.yml` and stable DMG aliases. Universal must remain the legacy
+`path`/`sha512` fallback and the `PwrGit.dmg` alias. Keep `arm64` in arm64 asset
+names; electron-updater uses that substring to select architecture.
+
+The metadata helper is imported by the common orchestrator, so include it in
+both macOS and Windows signing-input archives. Direct macOS publication is
+blocked; use the release workflow, which uploads only after validation.

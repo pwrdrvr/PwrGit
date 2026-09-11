@@ -1,3 +1,4 @@
+import { dispatch } from "../../lib/pwrgit";
 import {
   useCallback,
   useEffect,
@@ -6,7 +7,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent
 } from "react";
-import type { Lens, Profile, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
+import type { TagSummary, Lens, Profile, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
 import { announce, mountLiveRegion, movedMessage } from "../../lib/announce";
 import type { ReadState } from "../../state/readState";
 import { copyText } from "../../lib/copyText";
@@ -142,6 +143,7 @@ export function Sidebar({
   repoLoadState,
   onRetryRepos,
   selectedWorktreeId,
+  onLocateTag,
   onSelectWorktree,
   onSetRepoPin,
   onSetWorktreePin,
@@ -171,6 +173,7 @@ export function Sidebar({
   repoLoadState: ReadState;
   onRetryRepos: () => void;
   selectedWorktreeId: string | null;
+  onLocateTag?: ((repoId: string, tag: TagSummary) => void) | undefined;
   onSelectWorktree: (repo: Repo, worktree: Worktree) => void;
   onSetRepoPin: (repoId: string, pinned: boolean) => void;
   onSetWorktreePin: (worktreeId: string, pinned: boolean) => void;
@@ -239,10 +242,12 @@ export function Sidebar({
       ? focusVisitStore.visits
       : readFocusVisits(focusVisitsKey);
 
+  const recordedSelection = useRef<string | null>(null);
+
   // Selection is the clearest "I work here" signal. Keep it per profile and
   // bounded; repo pins and Git activity remain durable in SQLite as before.
   useEffect(() => {
-    if (selectedWorktreeId === null) return;
+    if (selectedWorktreeId === null) { recordedSelection.current = null; return; }
     if (
       !repos.some((repo) =>
         repo.worktrees.some((worktree) => worktree.id === selectedWorktreeId)
@@ -250,6 +255,12 @@ export function Sidebar({
     ) {
       return;
     }
+    const selectionKey = `${focusVisitsKey}:${selectedWorktreeId}`;
+    if (recordedSelection.current === selectionKey) return;
+    recordedSelection.current = selectionKey;
+    if (activeProfile) void dispatch("navigation:record", {
+      profileId: activeProfile.id, selectedWorktreeId, visits: readFocusVisits(focusVisitsKey)
+    });
     setFocusVisitStore((current) => {
       const base =
         current.key === focusVisitsKey
@@ -685,6 +696,7 @@ export function Sidebar({
         : null;
     return (
       <RepoRow
+        onLocateTag={onLocateTag}
         key={repo.id}
         posinset={index + 1}
         setsize={list.length}
@@ -865,13 +877,26 @@ export function Sidebar({
             </button>
           </div>
           <div className="bulk-sync-actions" aria-label="Synchronize repositories">
+            {/* "Fetch all repos", not "Fetch all": the Remotes heading in
+                every RepoRow carries a button of the same name that fetches
+                all remotes of ONE repo. Same words, two blast radii — so the
+                wider one states its scope.
+
+                These two keep their `↻` / `↓` text glyphs while the rest of
+                the app moved to <RefreshGlyph />, and the exception is
+                deliberate. Both reasons for retiring the character are absent
+                here: they are --font-sans, which does resolve U+21BB (the mono
+                stack does not), and neither has a busy state to animate — they
+                open BulkSyncDialog, which owns the progress. Swapping only
+                this one would also split a matched pair, since there is no
+                fetch-shaped counterpart for "Try pull all". */}
             <button
               className="bulk-sync-action"
               disabled={activeProfile === null || repos.length === 0}
               title="Fetch configured remotes once for every repository"
               onClick={() => setBulkSyncMode("fetch")}
             >
-              ↻ Fetch all
+              ↻ Fetch all repos
             </button>
             <button
               className="bulk-sync-action"

@@ -274,6 +274,62 @@ describe("layoutLanes with refs (branch-aware lanes)", () => {
     expect(rows[2].top).toEqual([{ from: 1, to: 0 }]);
   });
 
+  it.each(["origin/h", "upstream/different-name"])(
+    "keeps a two-commit fast-forward upstream %s on the focused lane",
+    (upstream) => {
+      const { rows } = layoutLanes(
+        [c("R2", "R1"), c("R1", "H"), c("H", "B"), c("M", "B"), c("B")],
+        {
+          tips: { R2: [upstream], H: ["h"], M: ["main"] },
+          defaultBranch: "main",
+          headBranch: "h",
+          headUpstream: upstream,
+          localRefTips: ["H", "M"],
+          remoteBranches: [upstream],
+          shownBranches: ["h", upstream]
+        }
+      );
+      expect(rows.slice(0, 3).map((row) => row.lane)).toEqual([1, 1, 1]);
+      expect(rows[0].bottom).toEqual([{ from: 1, to: 1, dashed: 1 }]);
+      expect(rows[1].top).toEqual([{ from: 1, to: 1, dashed: 1 }]);
+      expect(rows[2].top).toEqual([{ from: 1, to: 1, dashed: 1 }]);
+      expect(rows[2].bottom).toEqual([{ from: 1, to: 1 }]);
+    }
+  );
+
+  it("keeps an upstream that merges HEAD as a side parent on a separate train", () => {
+    const { rows } = layoutLanes(
+      [c("R", "S", "H"), c("S", "B"), c("H", "B"), c("M", "B"), c("B")],
+      {
+        tips: { R: ["origin/h"], H: ["h"], M: ["main"] },
+        defaultBranch: "main",
+        headBranch: "h",
+        headUpstream: "origin/h",
+        localRefTips: ["H", "M"],
+        remoteBranches: ["origin/h"],
+        shownBranches: ["h", "origin/h"]
+      }
+    );
+    expect(rows[0].lane).toBe(2);
+    expect(rows[2].lane).toBe(1);
+  });
+
+  it("preserves the focused tip when another drawn branch interrupts the upstream chain", () => {
+    const { rows } = layoutLanes(
+      [c("R", "C"), c("C", "H"), c("H", "M"), c("M")],
+      {
+        tips: { R: ["origin/h"], C: ["child"], H: ["h"], M: ["main"] },
+        defaultBranch: "main",
+        headBranch: "h",
+        headUpstream: "origin/h",
+        localRefTips: ["C", "H", "M"],
+        remoteBranches: ["origin/h"],
+        shownBranches: ["h", "child", "origin/h"]
+      }
+    );
+    expect(rows.map((row) => row.lane)).toEqual([2, 2, 1, 0]);
+  });
+
   it("ends a remote-ahead dash at the local main tip", () => {
     // origin/main (R2..R1) is ahead of local main (L). One lane-0 line — the
     // remote stretch stays dashed through L's incoming edge, then known-local
@@ -574,6 +630,7 @@ describe("layoutLanes with refs (branch-aware lanes)", () => {
         localRefTips: ["M", "P"],
         remoteBranches: ["origin/releases/1.0"],
         headBranch: "releases/1.0",
+        headUpstream: "origin/releases/1.0",
         shownBranches: ["releases/1.0", "origin/releases/1.0"]
       }
     );
@@ -618,6 +675,7 @@ describe("layoutLanes with refs (branch-aware lanes)", () => {
         localRefTips: ["M", "L2"],
         remoteBranches: ["origin/releases/1.0"],
         headBranch: "releases/1.0",
+        headUpstream: "origin/releases/1.0",
         shownBranches: ["releases/1.0", "origin/releases/1.0"]
       }
     );

@@ -25,8 +25,14 @@ import { mapLimit } from "../util/map-limit";
 import type { GitExec } from "./dugite";
 import { buildFtsQuery } from "./fts-query";
 import { pathLeafLikePatterns, rankSearchHits } from "./search-rank";
-import { listBranches, listRemoteNames, listWorktrees } from "./git-service";
+import {
+  listBranches,
+  listRemoteNames,
+  listWorktrees,
+  type WorktreeInfo
+} from "./git-service";
 import { claimWorktreeOwnership } from "./repo-ownership";
+import { checkoutExists } from "./worktree-liveness";
 
 const MAX_SCAN_DEPTH = 5;
 const GIT_CONCURRENCY = 12;
@@ -115,6 +121,8 @@ type WorktreeRow = {
   path: string;
   is_primary: number;
   pinned: number;
+  missing: number;
+  locked: number;
   dirty: number | null;
   ahead: number | null;
   behind: number | null;
@@ -297,7 +305,7 @@ export class RepoIndexer {
         path: primary.path,
         worktrees: listed.value
           .filter((w) => !w.bare)
-          .map((w, i) => worktreeShape(w.path, w.branch, i === 0)),
+          .map((w, i) => worktreeShape(w, i === 0)),
         indexedBranches: listedBranches.ok ? listedBranches.value : null
       });
     });
@@ -370,7 +378,7 @@ export class RepoIndexer {
     }
     const worktrees = listed.value
       .filter((w) => !w.bare)
-      .map((w, i) => worktreeShape(w.path, w.branch, i === 0));
+      .map((w, i) => worktreeShape(w, i === 0));
 
     const repoId = hashId(primary.path);
     const run = this.db.transaction(() => {
@@ -563,6 +571,13 @@ export class RepoIndexer {
     run();
   }
 
+  /** Drop one worktree row without re-listing the repo: for a path git no
+   *  longer recognises, a refresh would only confirm the row is a fossil (and
+   *  pay a full branch re-index to do it). */
+  forgetWorktree(worktreeId: string): void {
+    this.db.prepare("DELETE FROM worktrees WHERE id = ?").run(worktreeId);
+  }
+
   /** Re-list an existing repo's worktrees (after create/remove), preserving
    *  its source, pins, and custom order (syncWorktrees only touches identity). */
   async refreshRepoWorktrees(
@@ -602,7 +617,7 @@ export class RepoIndexer {
     }
     const worktrees = listed.value
       .filter((w) => !w.bare)
-      .map((w, i) => worktreeShape(w.path, w.branch, i === 0));
+      .map((w, i) => worktreeShape(w, i === 0));
     this.db.transaction(() => this.syncWorktrees(repoId, worktrees))();
     if (listedBranches.ok) {
       await this.syncBranchIndexChunked(
@@ -631,7 +646,9 @@ export class RepoIndexer {
         old !== undefined &&
         (old.branch !== w.branch ||
           old.path !== w.path ||
-          old.isPrimary !== w.isPrimary)
+          old.isPrimary !== w.isPrimary ||
+          old.missing !== w.missing ||
+          old.locked !== w.locked)
       );
     }).length;
 
@@ -923,7 +940,7 @@ export class RepoIndexer {
       this.db
         .prepare(
           `SELECT w.id, w.repo_id, w.branch, w.path, w.is_primary, w.pinned,
-                  w.custom_order AS custom_order,
+                  w.missing, w.locked, w.custom_order AS custom_order,
                   s.dirty AS dirty, s.ahead AS ahead, s.behind AS behind,
                   s.has_upstream AS has_upstream,
                   s.behind_default AS behind_default,
@@ -942,23 +959,32 @@ export class RepoIndexer {
         )
         .all(r.id) as WorktreeRow[]
     ).map((w): Worktree => {
+      // A gone checkout has nothing dirty, ahead, behind or merged — the
+      // cached counts are what was true before it went, and reading them as
+      // live is exactly the stale green badge this flag exists to retire.
+      // Zero them here, in the one place every sidebar consumer reads (rows,
+      // lenses, bulk sync), the same way `rowToState` zeroes the header's
+      // snapshot, and keep the cached row so a remounted volume resumes.
+      const missing = w.missing === 1;
       const wt: Worktree = {
         id: w.id,
         repoId: w.repo_id,
         branch: w.branch,
         path: w.path,
-        dirty: w.dirty ?? 0,
-        ahead: w.ahead ?? 0,
-        behind: w.behind ?? 0,
-        behindDefault: w.behind_default ?? 0,
+        dirty: missing ? 0 : (w.dirty ?? 0),
+        ahead: missing ? 0 : (w.ahead ?? 0),
+        behind: missing ? 0 : (w.behind ?? 0),
+        behindDefault: missing ? 0 : (w.behind_default ?? 0),
         defaultBranch: w.default_branch ?? "",
-        mergedIntoDefault: w.merged_into_default === 1,
-        divergedFromDefault: w.diverged_from_default === 1,
+        mergedIntoDefault: !missing && w.merged_into_default === 1,
+        divergedFromDefault: !missing && w.diverged_from_default === 1,
         isDefaultBranch: w.is_default_branch === 1,
         pinned: w.pinned === 1,
         isPrimary: w.is_primary === 1
       };
-      const tracking = trackingFromWorktreeState(w);
+      if (missing) wt.missing = true;
+      if (w.locked === 1) wt.locked = true;
+      const tracking = missing ? undefined : trackingFromWorktreeState(w);
       if (tracking !== undefined) wt.tracking = tracking;
       if (w.last_activity_at !== null) wt.lastActivityAt = w.last_activity_at;
       if (w.custom_order !== null) wt.order = w.custom_order;
@@ -1041,18 +1067,29 @@ export class RepoIndexer {
     // it. Without this, a row minted under an older/wrong repo (e.g. a linked
     // worktree once indexed as its own repo) stays stranded there forever.
     const stmt = this.db.prepare(
-      `INSERT INTO worktrees (id, repo_id, branch, path, is_primary, last_seen_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now'))
+      `INSERT INTO worktrees (id, repo_id, branch, path, is_primary, missing,
+                              locked, last_seen_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
        ON CONFLICT(id) DO UPDATE SET
          repo_id = excluded.repo_id,
          branch = excluded.branch,
          is_primary = excluded.is_primary,
+         missing = excluded.missing,
+         locked = excluded.locked,
          last_seen_at = datetime('now')`
     );
     for (const w of worktrees) {
       const id = hashId(w.path);
       seen.push(id);
-      stmt.run(id, repoId, w.branch, w.path, w.isPrimary ? 1 : 0);
+      stmt.run(
+        id,
+        repoId,
+        w.branch,
+        w.path,
+        w.isPrimary ? 1 : 0,
+        w.missing === true ? 1 : 0,
+        w.locked === true ? 1 : 0
+      );
     }
     if (seen.length === 0) {
       this.db.prepare("DELETE FROM worktrees WHERE repo_id = ?").run(repoId);
@@ -1344,12 +1381,12 @@ function canPruneFromScan(
   return resolvedRepoCount > 0 || profile.roots.length === 0;
 }
 
-function worktreeShape(path: string, branch: string, isPrimary: boolean): Worktree {
-  return {
-    id: hashId(path),
+function worktreeShape(w: WorktreeInfo, isPrimary: boolean): Worktree {
+  const shape: Worktree = {
+    id: hashId(w.path),
     repoId: "",
-    branch,
-    path,
+    branch: w.branch,
+    path: w.path,
     dirty: 0,
     ahead: 0,
     behind: 0,
@@ -1361,6 +1398,20 @@ function worktreeShape(path: string, branch: string, isPrimary: boolean): Worktr
     pinned: false,
     isPrimary
   };
+  // Git's `prunable` line is git's own `.git`-link test, so for an unlocked
+  // linked worktree it already answers what `checkoutExists` would — and git
+  // paid for that stat in a child process. Git never reports a LOCKED
+  // worktree prunable, though (that is what locking is for), so a locked
+  // checkout on an unmounted drive would flip between the probe (gone) and
+  // the re-index (fine) forever: ask the filesystem for those, and only
+  // those — a synchronous stat here runs on the main thread for every
+  // worktree of every repo in a rescan, and the locked-because-removable rows
+  // are the few that can hang it. The primary was just listed successfully.
+  if (w.prunable || (w.locked && !isPrimary && !checkoutExists(w.path))) {
+    shape.missing = true;
+  }
+  if (w.locked) shape.locked = true;
+  return shape;
 }
 
 /**

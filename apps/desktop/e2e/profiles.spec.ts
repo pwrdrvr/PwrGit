@@ -150,9 +150,15 @@ test("creating a profile opens its own window with repos from all roots", async 
   // Picking the profile again anywhere focuses the existing window — never a
   // third one. (Drive it from the original window's menu.)
   await window.locator(".profile-chip").click();
-  await window
-    .locator(".profile-menu__item", { hasText: "Acme" })
-    .click();
+  const acmeRow = window.locator(".profile-menu__item", { hasText: "Acme" });
+  // The only place two profiles coexist, so the only place the unchecked half
+  // of `aria-checked={isActive}` can be asserted: with one profile seeded,
+  // "exactly one row is checked" is true however the expression is written.
+  await expect(acmeRow).toHaveAttribute("aria-checked", "false");
+  await expect(
+    window.locator(".profile-menu__item", { hasText: "Personal" })
+  ).toHaveAttribute("aria-checked", "true");
+  await acmeRow.click();
   await window.waitForTimeout(600);
   expect(handle.app.windows().length).toBe(2);
 });
@@ -242,6 +248,30 @@ test("profile menu closes on outside click and Escape", async () => {
   await expect(window.locator(".profile-menu")).toBeVisible();
   await window.keyboard.press("Escape");
   await expect(window.locator(".profile-menu")).toHaveCount(0);
+});
+
+test("profile menu hangs below its chip, flush with the chip's edges", async () => {
+  handle = await launchApp();
+  const { window } = handle;
+
+  await window.locator(".profile-chip").click();
+  await expect(window.locator(".profile-menu")).toBeVisible();
+
+  const chip = await window.locator(".profile-chip").boundingBox();
+  const menu = await window.locator(".profile-menu").boundingBox();
+  if (chip === null || menu === null) throw new Error("chip/menu not laid out");
+
+  // The menu used to open 2px OVER the chip, so its square top corners cut
+  // through the chip's rounded ones. It must clear the chip entirely — and by
+  // enough for the chip's focus ring (outline-offset 2px + 1px) to survive,
+  // since the menu paints above the chip.
+  expect(menu.y).toBeGreaterThanOrEqual(chip.y + chip.height + 3);
+
+  // ...and line up with the control that opens it. `left/right: 12px` used to
+  // re-apply .sidebar__profile's padding on top of the wrapper already inside
+  // it, leaving the menu 24px narrower than the chip.
+  expect(Math.abs(menu.x - chip.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(menu.width - chip.width)).toBeLessThanOrEqual(1);
 });
 
 test("deleting an active profile closes its window but keeps its repositories", async () => {

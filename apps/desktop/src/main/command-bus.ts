@@ -12,6 +12,7 @@ export type CommandContext = {
   signal?: AbortSignal;
   /** Electron sender identity; absent for local/test transports. */
   webContentsId?: number;
+  isMainFrame?: boolean;
 };
 
 export type CommandHandler<C extends CommandName> = (

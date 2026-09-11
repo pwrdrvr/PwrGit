@@ -12,7 +12,7 @@ export type CommandResult = {
 export type CommandRunner = (
   command: string,
   args: readonly string[],
-  options: { cwd: string; timeoutMs?: number }
+  options: { cwd: string; timeoutMs?: number; env?: NodeJS.ProcessEnv }
 ) => Promise<CommandResult>;
 
 /** Spawn without a shell, a TTY, inherited credentials in arguments, or an
@@ -28,6 +28,7 @@ export const runCommand: CommandRunner = async (command, args, options) =>
         encoding: "utf8",
         env: {
           ...process.env,
+          ...options.env,
           GCM_INTERACTIVE: "never",
           GH_PROMPT_DISABLED: "1",
           GIT_OPTIONAL_LOCKS: "0",

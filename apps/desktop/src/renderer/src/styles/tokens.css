@@ -107,7 +107,7 @@
 
   /* Semantic — danger / success / info. This is a subset of PwrAgnt's
      contract: --accent-strong, --accent-shadow, --info-soft, --info-border,
-     --success-border and --status-error are omitted because no PwrGit surface
+     --success-border are omitted because no PwrGit surface
      paints with them, and a token nobody reads drifts silently
      (theme-contract.test.ts enforces that). Re-add from PwrAgnt's
      docs/UI-THEME.md when a surface needs one. */
@@ -124,6 +124,7 @@
 
   /* Status indicators */
   --status-ok: #5fa969;
+  --status-error: #c45a3a;
   --status-warning: #d99a3d;
   --status-suspended: #6b6660;
   /* PwrGit-only: the warning wash behind log lines and callouts. */
@@ -168,6 +169,13 @@
   --radius-md: 7px;
   --radius-lg: 10px;
   --radius-xl: 14px;
+
+  /* Gap between a popover and the control it hangs from. One value so the
+     next trigger-anchored menu inherits the spacing instead of copying a
+     number out of whichever rule its author happened to read — which is how
+     .profile-menu drifted from .branch-pop and ended up overlapping its own
+     chip. */
+  --popover-gap: 6px;
 
   /* Shadows. Drop shadows stay dark in both themes (standard drop-shadow
      pattern), so --shadow-base does not flip; the light block only lowers the
@@ -240,6 +248,7 @@
 
   /* Status indicators — darker for visibility on light. */
   --status-ok: #2e7d3c;
+  --status-error: #a8472a;
   /* #a86b00 was 4.01:1 as text on --bg-sidebar and only 3.40:1 inside a
      --warn-soft badge (the wash is derived from this token, so the badge is
      always the tighter of the two) — both under SC 1.4.3's 4.5:1. #805200

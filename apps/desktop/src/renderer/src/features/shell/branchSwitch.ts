@@ -23,7 +23,10 @@ export type DirtyState =
   | { kind: "clean" }
   | { kind: "dirty"; files: number }
   /** No snapshot could be read. Treated exactly like dirty — see below. */
-  | { kind: "unknown" };
+  | { kind: "unknown" }
+  /** The checkout is gone: there is nothing to switch, and nothing to carry
+   *  over, so the switch is refused outright rather than confirmed. */
+  | { kind: "missing"; message: string };
 
 /**
  * Read checkout safety directly from Git rather than trusting a cached coarse
@@ -34,7 +37,11 @@ export async function readDirtyState(
   worktreeId: WorktreeId
 ): Promise<DirtyState> {
   const result = await dispatch("worktree:readDirty", { worktreeId });
-  if (!result.ok) return { kind: "unknown" };
+  if (!result.ok) {
+    return result.error.code === "worktree_missing"
+      ? { kind: "missing", message: result.error.message }
+      : { kind: "unknown" };
+  }
   return result.value.dirty > 0
     ? { kind: "dirty", files: result.value.dirty }
     : { kind: "clean" };
@@ -93,6 +100,9 @@ export async function guardedSwitchBranch({
 }): Promise<SwitchOutcome> {
   if (!skipDirtyConfirm) {
     const dirty = await readDirtyState(worktreeId);
+    if (dirty.kind === "missing") {
+      return { kind: "failed", code: "worktree_missing", message: dirty.message };
+    }
     if (dirty.kind !== "clean") {
       const proceed = await confirmDialog({
         title: `Switch ${worktreeLabel} to ${branch}?`,

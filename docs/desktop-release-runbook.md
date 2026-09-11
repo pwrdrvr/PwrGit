@@ -65,8 +65,8 @@ stable tags may be promoted.
 1. The macOS prepare job checks metadata, typechecks, selects an Xcode with
    actool 26 for the icon compile (`.github/actions/select-xcode-for-actool`),
    tests, checks license notices, builds, and creates a deploy stage.
-2. `apple-signing` signs, notarizes, and packages the universal app, then
-   stages the DMG, updater ZIP, blockmap, and `latest-mac.yml`.
+2. `apple-signing` signs, notarizes, and packages the universal and arm64 apps, then
+   stages both DMGs, updater ZIPs, blockmaps, and one `latest-mac.yml`.
 3. Linux validates that the desktop source builds. It produces no package.
 4. Windows prepares a self-contained x64 stage without credentials.
 5. `windows-signing` uses Azure Artifact Signing during NSIS packaging and
@@ -85,7 +85,10 @@ The release workflow must finish successfully, including the publication job.
 Then confirm that the release body is non-empty and that the assets include:
 
 - `PwrGit-<version>-universal.dmg` and the stable `PwrGit.dmg` alias;
-- `PwrGit-<version>-universal-mac.zip`, its blockmap, and `latest-mac.yml`;
+- `PwrGit-<version>-arm64.dmg` and the stable `PwrGit-arm64.dmg` alias;
+- `PwrGit-<version>-universal-mac.zip` and `PwrGit-<version>-arm64-mac.zip`,
+  their blockmaps, and `latest-mac.yml` listing both ZIPs with universal in the
+  legacy top-level `path`/`sha512`;
 - `PwrGit-<version>-windows-x64-setup.exe`, its blockmap, `latest.yml`, and
   `PwrGit-windows-SHA256SUMS`; and
 - no Linux installer or package.
@@ -132,6 +135,25 @@ starting electron-builder. This avoids electron-builder 26.15.x applying the
 previous keychain list and deletes the temporary keychain when packaging exits,
 including when certificate import or subsequent keychain setup fails.
 `package:dryrun` does not import a certificate or alter keychains.
+
+## Architecture upgrade verification
+
+Both apps retain the same bundle identity, signing identity and user-data
+location. An existing universal app updates to arm64 on Apple Silicon,
+including when running under Rosetta; Intel continues to receive universal.
+A same-version installation needs a manual DMG replacement to change its
+architecture. Choosing the universal DMG on Apple Silicon does not pin future
+updates to universal. A later universal-only release remains a valid fallback.
+
+Before promotion, smoke-test a signed older-to-newer update on Intel, native
+Apple Silicon and Rosetta. Verify launch, SQLite, embedded Git and retained
+settings. Test both full downloads and fallback when a previous arm64 blockmap
+is absent. Local dry-run builds validate packaging and architecture selection,
+but do not prove Developer ID signing, notarization or Squirrel replacement.
+
+Publish macOS only through `release.yml`; the direct macOS release command
+fails before building. The workflow waits until both apps and the combined
+metadata have been verified before its existing all-platform publication gate.
 
 ## npm name reservation
 

@@ -111,6 +111,15 @@ export function registerWorktreeLifecycleHandlers(
           dirty.push(id);
         } else {
           failed.push({ id, message: res.error.message });
+          // Git disowned this path but its directory survives: the row is a
+          // fossil, so drop it and let `repo:changed` reload the tree. Not a
+          // `worktree:removed` — nothing was removed, and that event ticks the
+          // removal progress. The failure still reaches the user so they know
+          // the directory was kept.
+          if (res.error.code === "not_a_worktree") {
+            indexer.forgetWorktree(id);
+            affectedProfiles.add(wt.profile_id);
+          }
         }
       }
 

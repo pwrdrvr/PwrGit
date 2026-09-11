@@ -156,6 +156,38 @@ Two things follow that are easy to undo by accident:
   fix: macOS denies a non-FDA app `~/Documents` and friends, and one EACCES
   would disable pruning for good.
 
+## A worktree whose directory is gone stays a row, flagged `missing`
+
+Agents delete their checkouts without `git worktree remove` (Codex cleans up
+`~/.codex/worktrees/…`), and git keeps listing the entry with a `prunable`
+line. `worktrees.missing` (0027) records that so the sidebar can say
+"directory missing" and every per-worktree handler can refuse with one typed
+`worktree_missing` error (`worktree-liveness.ts`) instead of git's raw
+"cannot change to '<path>'". Three things to keep straight:
+
+- **Two sources set it, and they must agree.** The indexer reads git's
+  `prunable` line; the state probe stats the checkout before it spawns git.
+  Both are the same question — `checkoutExists`, the `.git` link inside the
+  worktree, which is git's own prunability test — and the indexer only stats
+  a *locked* worktree itself, because git never reports one prunable (a
+  locked checkout on an unmounted drive would otherwise flip between the two
+  forever) and a synchronous stat per worktree per rescan is main-thread
+  time. The probe must not trust `git status`'s exit code instead: run from a
+  nested worktree whose link is gone, git resolves the *parent* repo and
+  succeeds with that checkout's branch and dirt.
+- **Never prune.** An unmounted volume reads exactly like a deleted directory,
+  and `git worktree prune` is repo-wide; a remounted checkout must clear the
+  flag by itself (the next successful probe or re-index does). Remove stays
+  available on a missing row — git removes a prunable entry cleanly — and
+  removal is deliberately not guarded.
+- **The guard reads only the flag, in the lookup.** Handlers that resolve a
+  worktree through a per-file closure (`pathOf`, `rowOf`, `worktreeOf`) get
+  the refusal from that closure, so a new handler cannot reach git without
+  it; the one-off lookups check `missing` inline or call
+  `missingWorktreeError`. None of them stat the path: handler tests stub the
+  DB with paths that do not exist, and a live check would turn every one of
+  them into a "missing" worktree.
+
 ## Partial staging works through Git, never through renderer patch text
 
 `partial-staging.ts` stages and unstages hunks and lines. Four invariants hold

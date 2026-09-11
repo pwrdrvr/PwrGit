@@ -573,9 +573,16 @@ export function RepoSwitcherOverlay({
                 return (
                   <>
                     <span className="a11y-sr-only">in folder</span>
+                    {/* The hit's name too: it is the half of the row that
+                        truncates first, and this is the element the pointer is
+                        over. The path stays WHOLE here, unlike the sidebar's:
+                        a worktree can come back because the query matched a
+                        directory deep inside its path, and this tooltip is the
+                        only place that shows it — eliding the middle would
+                        hide the very segment that explains the row. */}
                     <span
                       className="overlay-result__folder"
-                      title={`Worktree folder — ${r.path}`}
+                      title={`${r.name}\nWorktree folder — ${r.path}`}
                     >
                       <svg
                         width="11"

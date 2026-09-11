@@ -10,6 +10,7 @@ import type {
   WorktreeState
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { showErrorToast } from "../../lib/toast";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
 import { GitLfsChip } from "./GitLfsChip";
@@ -19,7 +20,13 @@ import { SshRemoteRecoveryDialog } from "./SshRemoteRecoveryDialog";
 
 type Chip = { text: string; tone: "muted" | "ok" | "warn" };
 
-function baseChip(state: WorktreeState | null): Chip {
+function baseChip(state: WorktreeState | null, worktree: Worktree): Chip {
+  // A gone checkout outranks every sync reading: nothing below is true of a
+  // directory that does not exist. Read it from this worktree's own row when
+  // the live snapshot still belongs to the previous selection.
+  const missing =
+    state?.worktreeId === worktree.id ? state.missing : worktree.missing;
+  if (missing === true) return { text: "directory missing", tone: "warn" };
   if (state === null) return { text: "…", tone: "muted" };
   if (state.behind > 0) {
     const ahead = state.ahead > 0 ? ` · ↑${state.ahead}` : "";
@@ -289,7 +296,7 @@ export function WorktreeHeader({
   const chip =
     busy === "pull"
       ? { text: pullLabel, tone: "muted" as const }
-      : (flash ?? baseChip(state));
+      : (flash ?? baseChip(state, worktree));
   const dirty = state?.dirty ?? worktree.dirty;
   const behind = state?.behind ?? worktree.behind;
   const drift = defaultBranchDrift(state, worktree);
@@ -331,26 +338,39 @@ export function WorktreeHeader({
         </span>
 
         <div className="wt-actions">
-          {/* While an op runs its button swaps the icon for a spinner — the
-              labels and sync chip collapse away in narrow headers, so the
-              icon itself must carry the busy state. aria-label keeps the
-              accessible name when the label span is display:none. */}
+          {/* The labels and sync chip collapse away in narrow headers, so the
+              icon itself has to carry the busy state. aria-label keeps the
+              accessible name when the label span is display:none.
+
+              Two busy treatments, one rule: a circular arrow spins in place,
+              and any other glyph swaps to the ring. Fetch's arrow IS a
+              rotation, so rotating it is the literal reading and the button
+              keeps its identity while it works; Pull's ↓ and Push's ↑ are not,
+              and spinning them would read as broken. The accent tint that says
+              "busy" is shared by all three and lives in app.css, keyed off
+              aria-busy so it survives prefers-reduced-motion.
+
+              `disabled` used to be set here while any of the three ran.
+              Chromium blurs an element the moment it becomes disabled, so
+              pressing Fetch from the keyboard threw focus to <body> for the
+              length of the fetch (SC 2.4.3) — the same bug already fixed on
+              .wt-refresh and .ref-fetch-all. aria-disabled says the same thing
+              and keeps the button focusable; the guards below make them
+              inert. */}
           <button
             className="wt-btn"
-            onClick={onFetch}
-            disabled={busy !== null}
+            onClick={() => {
+              if (busy !== null) return;
+              onFetch();
+            }}
+            aria-disabled={busy !== null}
             aria-label="Fetch"
             aria-busy={busy === "fetch"}
-            title="Fetch"
+            /* The label span is display:none in the narrow header, so this is
+               the only text left — it has to track busy, as Pull's does. */
+            title={busy === "fetch" ? "Fetching…" : "Fetch"}
           >
-            {busy === "fetch" ? (
-              <span className="wt-btn__spinner" />
-            ) : (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
-                <path d="M21 3v5h-5" />
-              </svg>
-            )}
+            <RefreshGlyph />
             <span className="wt-btn__label">
               {busy === "fetch" ? "Fetching…" : "Fetch"}
             </span>
@@ -358,8 +378,11 @@ export function WorktreeHeader({
 
           <button
             className={`wt-btn wt-btn--pull${behind > 0 ? " is-behind" : ""}`}
-            onClick={onPull}
-            disabled={busy !== null}
+            onClick={() => {
+              if (busy !== null) return;
+              onPull();
+            }}
+            aria-disabled={busy !== null}
             aria-label={busy === "pull" ? pullLabel : "Pull"}
             aria-busy={busy === "pull"}
             title={busy === "pull" ? pullLabel : "Pull · fetch + fast-forward"}
@@ -380,11 +403,14 @@ export function WorktreeHeader({
 
           <button
             className="wt-btn"
-            onClick={onPush}
-            disabled={busy !== null}
+            onClick={() => {
+              if (busy !== null) return;
+              onPush();
+            }}
+            aria-disabled={busy !== null}
             aria-label="Push"
             aria-busy={busy === "push"}
-            title="Push"
+            title={busy === "push" ? "Pushing…" : "Push"}
           >
             {busy === "push" ? (
               <span className="wt-btn__spinner" />

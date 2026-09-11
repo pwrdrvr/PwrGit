@@ -1,4 +1,5 @@
 import type { PrSummary } from "@pwrgit/shared";
+import { prPresentation } from "./pr-status";
 import { DiffStat } from "../diff/DiffStat";
 import { longWhen } from "../graph/graph-view";
 
@@ -12,7 +13,7 @@ import { longWhen } from "../graph/graph-view";
  * defensive. The detail fields are optional on `PrSummary` because a row cached
  * before they existed will never gain them — a change request that reached a
  * terminal state stops being refreshed, so its row is frozen. The card has to
- * look finished with any subset present: no dashes, no "unknown", no empty
+ * look finished with any subset present: no dashes, no empty
  * headers. A missing count is never rendered as zero; "not known" and "changes
  * nothing" are different claims and we only have evidence for the second.
  */
@@ -27,7 +28,7 @@ export function PrStatusCard({
   const title = pr.title.trim();
   const changes = readChanges(pr);
   const timeline = readTimeline(pr, now);
-  const isDraft = pr.state === "open" && pr.isDraft;
+  const status = prPresentation(pr);
 
   return (
     <>
@@ -57,10 +58,10 @@ export function PrStatusCard({
         <span
           aria-hidden="true"
           className={`pr-status-card__dot pr-status-card__dot--${
-            isDraft ? "draft" : pr.state
+            status.dot
           }`}
         />
-        <span>{isDraft ? `${pr.state} · draft` : pr.state}</span>
+        <span>{status.label}</span>
       </div>
       {changes !== undefined ? (
         <div className="pr-status-card__section">

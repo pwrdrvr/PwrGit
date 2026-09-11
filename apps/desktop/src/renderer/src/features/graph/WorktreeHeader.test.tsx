@@ -75,6 +75,63 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
+describe("WorktreeHeader sync buttons stay focusable while busy", () => {
+  // The sibling of a11y-sidebar.spec.ts's guard on .wt-refresh. Chromium blurs
+  // an element the moment it becomes disabled, so `disabled={busy !== null}`
+  // here threw a keyboard user back to <body> for the length of the operation
+  // (SC 2.4.3). Asserting the PROPERTY is the durable half: the operation can
+  // settle before any focus check runs, but a reintroduced `disabled` fails
+  // this outright.
+  it("says aria-disabled, never disabled, while an operation runs", async () => {
+    let settle!: () => void;
+    bridge.dispatch.mockReturnValueOnce(
+      new Promise((resolve) => {
+        settle = () => resolve(ok(undefined));
+      })
+    );
+
+    const fetchButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Fetch"]'
+    );
+    expect(fetchButton).not.toBeNull();
+
+    await act(async () => fetchButton?.click());
+
+    expect(fetchButton?.getAttribute("aria-busy")).toBe("true");
+    expect(fetchButton?.getAttribute("aria-disabled")).toBe("true");
+    expect(
+      fetchButton?.disabled,
+      "the sync buttons must never use the disabled property"
+    ).toBe(false);
+
+    // Its peers are unavailable for the duration, and they say so the same way.
+    for (const label of ["Pull", "Push"]) {
+      const peer = container.querySelector<HTMLButtonElement>(
+        `button[aria-label="${label}"]`
+      );
+      expect(peer?.getAttribute("aria-disabled")).toBe("true");
+      expect(peer?.disabled).toBe(false);
+    }
+
+    // Still inert: aria-disabled removes nothing from the a11y tree and does
+    // not block the click, so the handler's own guard has to. Asserted by
+    // command rather than call count — GitLfsChip shares this bridge mock.
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Push"]')
+        ?.click();
+    });
+    expect(bridge.dispatch).not.toHaveBeenCalledWith(
+      "remote:push",
+      expect.anything()
+    );
+
+    await act(async () => {
+      settle();
+    });
+  });
+});
+
 describe("WorktreeHeader pull progress", () => {
   it("replaces the indefinite pull label with each worktree-scoped phase", async () => {
     const pull = container.querySelector<HTMLButtonElement>(
@@ -236,6 +293,32 @@ describe("WorktreeHeader default-branch drift", () => {
       updatedAt: "2026-08-12T00:00:00.000Z"
     });
     expect(drift()).toBeNull();
+  });
+
+  it("says the directory is missing ahead of any sync reading", async () => {
+    const syncChip = (): HTMLElement | null =>
+      container.querySelector(".sync-chip:not(.sync-chip--drift)");
+    await render({ ...feature, behind: 24, missing: true });
+    expect(syncChip()?.textContent).toBe("directory missing");
+    expect(syncChip()?.classList.contains("sync-chip--warn")).toBe(true);
+    // The live snapshot carries the flag too, once the probe has run.
+    await render(feature, {
+      worktreeId: feature.id,
+      branch: "releases/1.0",
+      head: "abc1234",
+      hasUpstream: true,
+      ahead: 0,
+      behind: 3,
+      dirty: 0,
+      behindDefault: 0,
+      defaultBranch: "main",
+      mergedIntoDefault: false,
+      divergedFromDefault: false,
+      isDefaultBranch: false,
+      updatedAt: "2026-08-12T00:00:00.000Z",
+      missing: true
+    });
+    expect(syncChip()?.textContent).toBe("directory missing");
   });
 
   it("says nothing on the default branch, or once the work is in it", async () => {

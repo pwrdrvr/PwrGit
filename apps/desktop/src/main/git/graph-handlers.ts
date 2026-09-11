@@ -1,5 +1,6 @@
 import {
   type Commit,
+  type LaneGraph,
   err,
   type LaneBranchInfo,
   ok,
@@ -9,6 +10,7 @@ import type { CommandBus } from "../command-bus";
 import { prSummaryFromRow, prSummarySelect } from "../forge/pr-row";
 import type { DB } from "../persistence/db";
 import { execGit } from "./dugite";
+import { missingWorktreeError } from "./worktree-liveness";
 import {
   branchTips,
   isUnbornHead,
@@ -21,11 +23,13 @@ import {
   topoMergeCommits,
   unappliedUpstreams
 } from "./git-service";
+import { readGraphTags } from "./graph-tags";
 import type { WorktreeStateService } from "./worktree-state";
 
 /** The repo-level part of the lane graph (same for every worktree of a repo);
  *  only the HEAD dot varies per worktree, so this is cached and reused. */
 type CachedLanes = {
+  tags: NonNullable<LaneGraph["tags"]>;
   commits: Commit[];
   tips: Record<string, string[]>;
   /** commit hash → remote-tracking refs tipped there (e.g. "origin/main"). */
@@ -72,6 +76,8 @@ export function registerGraphHandlers(
         message: "worktree not found"
       });
     }
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
 
     const def = await state.resolveDefaultBranch(wt.repo_id, wt.path);
     const unborn = await isUnbornHead(execGit, wt.path);
@@ -94,6 +100,11 @@ export function registerGraphHandlers(
   });
 
   bus.register("graph:lanes", async (req) => {
+    // SHA-1 and SHA-256 object IDs, and nothing between: a range would admit
+    // lengths git cannot resolve, which then have to fail somewhere worse.
+    if (req.revealHash !== undefined && !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(req.revealHash)) {
+      return err({ kind: "git", code: "invalid_commit", message: "Invalid commit object ID" });
+    }
     const wt = db
       .prepare(
         `SELECT w.path AS path, w.repo_id AS repo_id, w.branch AS branch,
@@ -109,6 +120,8 @@ export function registerGraphHandlers(
     if (wt === undefined) {
       return err({ kind: "repo", code: "not_found", message: "worktree not found" });
     }
+    const gone = missingWorktreeError(db, req.worktreeId);
+    if (gone !== null) return err(gone);
 
     const unborn = await isUnbornHead(execGit, wt.path);
     if (!unborn.ok) return unborn;
@@ -293,7 +306,12 @@ export function registerGraphHandlers(
         entry.pr = pr;
       }
 
+      // Tags are decoration on a commit row. A refs/tags directory this
+      // process cannot read is a reason to draw no chips, not a reason to
+      // refuse the graph — which is what returning the error here would do.
+      const tags = await readGraphTags(execGit, wt.path);
       cached = {
+        tags: tags.ok ? tags.value : {},
         commits: topoMergeCommits([trunk.value, uniques.value]),
         tips: tips.value.local,
         remoteTips: tips.value.remote,
@@ -414,10 +432,29 @@ export function registerGraphHandlers(
       }
     }
 
+    // Navigation is per request: never contaminate the shared repo cache.
+    let commits = out.commits;
+    if (req.revealHash !== undefined && !commits.some((c) => c.hash === req.revealHash)) {
+      // The reveal is an enhancement to this request, so a hash this repo
+      // cannot resolve costs the caller the jump, not the graph. A stale
+      // target racing a cross-repo switch is the ordinary way that happens.
+      const window = await readLogRefs(execGit, wt.path, [req.revealHash], 40);
+      if (window.ok) commits = topoMergeCommits([commits, window.value]);
+    }
+    // Built from the commits being drawn, not from every tag in the repo: the
+    // map has at most one entry per row, and a repo with 20k tagged commits
+    // should not pay for 20k of them on a graph that shows 150.
+    const tags: NonNullable<LaneGraph["tags"]> = {};
+    for (const commit of commits) {
+      const tag = out.tags[commit.hash];
+      if (tag !== undefined) tags[commit.hash] = tag;
+    }
     return ok({
-      commits: out.commits,
+      commits,
+      tags,
       tips: out.tips,
       remoteTips: out.remoteTips,
+      ...(headUpstream === undefined ? {} : { headUpstream }),
       branches: out.branches,
       head,
       headOnlyCommits,

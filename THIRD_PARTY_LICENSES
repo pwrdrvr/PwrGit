@@ -43,8 +43,8 @@ BSD-2-Clause
 
 BSD-3-Clause
 ~~~~~~~~~~~~
-- fast-uri@3.1.5 | https://github.com/fastify/fast-uri
-- qs@6.15.3 | https://github.com/ljharb/qs
+- fast-uri@3.1.6 | https://github.com/fastify/fast-uri
+- qs@6.16.0 | https://github.com/ljharb/qs
 
 GPL-2.0-only
 ~~~~~~~~~~~~
@@ -129,7 +129,7 @@ MIT
 - gopd@1.2.0 | https://github.com/ljharb/gopd
 - has-symbols@1.1.0 | https://github.com/inspect-js/has-symbols
 - hasown@2.0.4 | https://github.com/inspect-js/hasOwn
-- hono@4.13.2 | https://github.com/honojs/hono
+- hono@4.13.5 | https://github.com/honojs/hono
 - http-errors@2.0.1 | jshttp/http-errors
 - iconv-lite@0.7.3 | https://github.com/pillarjs/iconv-lite
 - indent-string@4.0.0 | sindresorhus/indent-string
@@ -137,7 +137,7 @@ MIT
 - ipaddr.js@1.9.1 | https://github.com/whitequark/ipaddr.js
 - is-promise@4.0.0 | https://github.com/then/is-promise
 - jose@6.2.9 | panva/jose
-- js-yaml@4.3.1 | nodeca/js-yaml
+- js-yaml@4.3.2 | nodeca/js-yaml
 - json-schema-traverse@1.0.0 | https://github.com/epoberezkin/json-schema-traverse
 - jsonfile@6.2.1 | https://github.com/jprichardson/node-jsonfile
 - lazy-val@1.0.5 | develar/lazy-val
@@ -188,7 +188,7 @@ MIT
 - unpipe@1.0.0 | stream-utils/unpipe
 - vary@1.1.2 | jshttp/vary
 - ws@8.21.3 | https://github.com/websockets/ws
-- zod@4.5.1 | https://github.com/colinhacks/zod
+- zod@4.5.4 | https://github.com/colinhacks/zod
 
 OFL-1.1
 ~~~~~~~
@@ -2062,13 +2062,13 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
-fast-uri@3.1.5 (BSD-3-Clause)
+fast-uri@3.1.6 (BSD-3-Clause)
 -----------------------------
 
 Applies to:
-- fast-uri@3.1.5 (BSD-3-Clause)
+- fast-uri@3.1.6 (BSD-3-Clause)
 
-Representative file: fast-uri@3.1.5/LICENSE
+Representative file: fast-uri@3.1.6/LICENSE
 
 Copyright (c) 2011-2021, Gary Court until https://github.com/garycourt/uri-js/commit/a1acf730b4bba3f1097c9f52e7d9d3aba8cdcaae
 Copyright (c) 2021-present The Fastify team <https://github.com/fastify/fastify#team>
@@ -2896,13 +2896,13 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-hono@4.13.2 (MIT)
+hono@4.13.5 (MIT)
 -----------------
 
 Applies to:
-- hono@4.13.2 (MIT)
+- hono@4.13.5 (MIT)
 
-Representative file: hono@4.13.2/LICENSE
+Representative file: hono@4.13.5/LICENSE
 
 MIT License
 
@@ -3152,13 +3152,13 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-js-yaml@4.3.1 (MIT)
+js-yaml@4.3.2 (MIT)
 -------------------
 
 Applies to:
-- js-yaml@4.3.1 (MIT)
+- js-yaml@4.3.2 (MIT)
 
-Representative file: js-yaml@4.3.1/LICENSE
+Representative file: js-yaml@4.3.2/LICENSE
 
 (The MIT License)
 
@@ -3817,13 +3817,13 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-qs@6.15.3 (BSD-3-Clause)
+qs@6.16.0 (BSD-3-Clause)
 ------------------------
 
 Applies to:
-- qs@6.15.3 (BSD-3-Clause)
+- qs@6.16.0 (BSD-3-Clause)
 
-Representative file: qs@6.15.3/LICENSE.md
+Representative file: qs@6.16.0/LICENSE.md
 
 BSD 3-Clause License
 
@@ -4499,13 +4499,13 @@ COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-zod@4.5.1 (MIT)
+zod@4.5.4 (MIT)
 ---------------
 
 Applies to:
-- zod@4.5.1 (MIT)
+- zod@4.5.4 (MIT)
 
-Representative file: zod@4.5.1/LICENSE
+Representative file: zod@4.5.4/LICENSE
 
 MIT License
 

@@ -26,6 +26,7 @@ import type {
   ForkPreflight,
   ForkProgress,
   RepoIdentity,
+  RepoIdentityRefreshOutcome,
   PushRefPlan,
   PushRefResult,
   ChangeSet,
@@ -80,12 +81,14 @@ import type {
 } from "./types";
 import type { ImagePreview, ImageRevision } from "./image";
 import type {
+  AgentAccessSnapshot,
+  AgentConsentPrompt,
+  AgentConsentDecision,
   McpAgentPolicySnapshot,
   McpAgentRole,
   McpAgentRoleInput,
   McpAgentRolePatch,
-  McpAgentSession,
-  McpAgentSessionCredential
+  McpAgentSession
 } from "./mcp-policy";
 
 export type ProfileList = {
@@ -620,6 +623,7 @@ export type AppSettingsPatch = {
 };
 
 export interface Commands {
+  "navigation:record": { req: { profileId: string; selectedWorktreeId: string | null; visits?: Record<string, number> }; res: null };
   /** Liveness probe — proves the command-bus round-trip end to end. */
   ping: { req: void; res: string };
 
@@ -783,8 +787,8 @@ export interface Commands {
   /** Re-read forge identity (visibility, fork lineage) for a profile's repos.
    *  Answers the changed rows; the rest of the tree is left alone. */
   "repo:refreshIdentities": {
-    req: { profileId: ProfileId; force?: boolean };
-    res: { changed: number };
+    req: { profileId: ProfileId; repoId?: RepoId; force?: boolean };
+    res: { changed: number; outcomes: RepoIdentityRefreshOutcome[] };
   };
   "repo:search": { req: { query: string }; res: RepoSearchHit[] };
   /** Lazy per-hit status for ⌘F results (cached worktree_state when present;
@@ -1226,6 +1230,8 @@ export interface Commands {
    *  is cached per repo; `force` recomputes it (else only HEAD is re-resolved). */
   "graph:lanes": {
     req: {
+      /** Explicit navigation target; adds a bounded history window if absent. */
+      revealHash?: string;
       worktreeId: string;
       scope: "active" | "all";
       limit?: number;
@@ -1434,10 +1440,6 @@ export interface Commands {
   "settings:update": { req: { patch: AppSettingsPatch }; res: AppSettingsSnapshot };
   /** Fail-closed standalone MCP authorization policy and effective scopes. */
   "localAgents:read": { req: void; res: McpAgentPolicySnapshot };
-  "localAgents:createSession": {
-    req: { name: string; roleId: string };
-    res: McpAgentSessionCredential;
-  };
   "localAgents:revoke": { req: { id: string }; res: McpAgentSession };
   "localAgents:assignRole": {
     req: { sessionId: string; roleId: string };
@@ -1449,6 +1451,12 @@ export interface Commands {
     res: McpAgentRole;
   };
   "localAgents:roleDelete": { req: { id: string }; res: null };
+  /** Loopback OAuth MCP listener state. */
+  "agentAccess:read": { req: void; res: AgentAccessSnapshot };
+  "agentAccess:setEnabled": { req: { enabled: boolean }; res: AgentAccessSnapshot };
+  /** Native approval is bound to the requesting window. */
+  "agentAccess:consentRead": { req: void; res: AgentConsentPrompt };
+  "agentAccess:consentDecide": { req: AgentConsentDecision; res: null };
   /** Current preference plus native-resolved palette; closes bootstrap races. */
   "appearance:read": { req: void; res: AppAppearance };
 
@@ -1557,6 +1565,7 @@ export interface Events {
   "settings:changed": AppSettingsSnapshot;
   /** Sessions, roles, or repository boundaries changed in Settings. */
   "localAgents:changed": McpAgentPolicySnapshot;
+  "agentAccess:changed": AgentAccessSnapshot;
   /** Resolved color theme changed, including a live OS change in System mode. */
   "appearance:changed": AppAppearance;
   /** Auto-update status changed — Settings and the update toast subscribe. */
