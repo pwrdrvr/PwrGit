@@ -41,23 +41,35 @@ export function clearGitHubTokenCache(): void {
  * host would hand that server a credential for a forge it has nothing to do
  * with. `gh` draws the same line (`GH_ENTERPRISE_TOKEN` is a separate
  * variable), so an Enterprise host falls through to `gh auth token` instead.
+ *
+ * Omitting `host` means "whatever host `gh` considers default", NOT github.com.
+ * That distinction is load-bearing: `GH_HOST` sets gh's default, and defaulting
+ * to github.com here would pass `--hostname github.com` and override it — so an
+ * operator who points `GH_HOST` at their Enterprise instance would watch
+ * Settings → Forges flip from Connected to Signed out. Callers that know which
+ * host they are about to query pass it; the status probe deliberately does not.
  */
 export async function getGitHubToken(
-  host: string = GITHUB_DOT_COM
+  host?: string
 ): Promise<string | null> {
-  const key = host.trim().toLowerCase();
+  const key = host?.trim().toLowerCase() ?? "";
   const cached = tokenCache.get(key);
   if (cached !== undefined && Date.now() - cached.at < TOKEN_TTL_MS) {
     return cached.token;
   }
+  // "" is gh's own default host, which GITHUB_TOKEN has always applied to.
   const env =
-    key === GITHUB_DOT_COM ? process.env.GITHUB_TOKEN?.trim() : undefined;
+    key === "" || key === GITHUB_DOT_COM
+      ? process.env.GITHUB_TOKEN?.trim()
+      : undefined;
   if (env) {
     tokenCache.set(key, { token: env, at: Date.now() });
     return env;
   }
   try {
-    const token = await gh(["auth", "token", "--hostname", key]);
+    const token = await gh(
+      key === "" ? ["auth", "token"] : ["auth", "token", "--hostname", key]
+    );
     if (token) {
       tokenCache.set(key, { token, at: Date.now() });
       return token;

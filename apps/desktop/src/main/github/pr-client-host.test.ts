@@ -56,6 +56,28 @@ describe("getGitHubToken", () => {
     expect(token).toBe("token-for-github.acme-inc.com");
   });
 
+  it("leaves gh's default host alone when no host is named", async () => {
+    // The status probe calls this with no argument. Passing
+    // `--hostname github.com` there would override GH_HOST and flip an
+    // Enterprise operator's Settings → Forges row to "Signed out".
+    const { runGh } = await import("./gh-cli");
+    const { getGitHubToken } = await import("./pr-client");
+    await getGitHubToken();
+    expect(vi.mocked(runGh).mock.calls[0]?.[0]).toEqual(["auth", "token"]);
+  });
+
+  it("names the host when the caller knows it", async () => {
+    const { runGh } = await import("./gh-cli");
+    const { getGitHubToken } = await import("./pr-client");
+    await getGitHubToken("ghe.acme.com");
+    expect(vi.mocked(runGh).mock.calls[0]?.[0]).toEqual([
+      "auth",
+      "token",
+      "--hostname",
+      "ghe.acme.com"
+    ]);
+  });
+
   it("caches per host rather than in one slot", async () => {
     const { getGitHubToken } = await import("./pr-client");
     expect(await getGitHubToken("github.com")).toBe("token-for-github.com");
