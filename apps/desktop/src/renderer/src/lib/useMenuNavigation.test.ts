@@ -59,7 +59,7 @@ function labels(): string[] {
 function press(key: string, init: KeyboardEventInit = {}): void {
   act(() => {
     window.dispatchEvent(
-      new KeyboardEvent("keydown", { key, bubbles: true, ...init })
+      new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init })
     );
   });
 }

@@ -39,7 +39,7 @@ function render(props: { open: boolean; onDismiss?: () => void }): void {
 function escape(): void {
   act(() => {
     window.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
     );
   });
 }
@@ -113,6 +113,24 @@ describe("useDismissable", () => {
     escape();
 
     expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
+  it("defers to an Escape another surface already claimed", () => {
+    // useViewportTooltip's hover cards (the remote-activity popover, the SHA
+    // chips) claim Escape with preventDefault while they are showing. Two
+    // surfaces answering one keystroke means a hover card and an open menu both
+    // vanish on a single press — features/diff/AGENTS.md writes the rule down:
+    // defer to a claimed Escape.
+    const claimer = (e: KeyboardEvent): void => e.preventDefault();
+    window.addEventListener("keydown", claimer);
+    const onDismiss = vi.fn();
+    render({ open: true, onDismiss });
+    byText("Inside").focus();
+
+    escape();
+
+    window.removeEventListener("keydown", claimer);
+    expect(onDismiss).not.toHaveBeenCalled();
   });
 
   it("does not steal focus from somewhere else on the page", () => {

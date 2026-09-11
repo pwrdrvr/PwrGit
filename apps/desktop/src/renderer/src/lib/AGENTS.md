@@ -92,13 +92,20 @@ claiming it there closes the dialog underneath while the user is dismissing the
 thing on top of it. Only "nowhere in particular" (`<body>`, null, detached)
 falls through to the newest overlay.
 
-### Claiming Escape means calling `preventDefault`
+### Claiming Escape means calling `preventDefault` — and checking it first
 
 `DiffPane` and `FileInsightsPane` close only `if (!event.defaultPrevented)`
 (`features/diff/AGENTS.md` writes this out). An overlay that dismisses without
 claiming takes the pane behind it down too — which is what ContextMenu did.
 `useDismissable` claims for every caller, so this is handled as long as you use
 it.
+
+The rule runs **both ways**, and that half was missing. `useDismissable` and
+`useViewportTooltip` own separate stacks — click-opened overlays and hover
+cards — and both listen on `window`, so a hover card showing over an open menu
+had one Escape dismiss both. Each now returns early on `defaultPrevented`.
+A third keydown handler on `window` owes the same on both counts: claim the key
+when you spend it, and leave it alone when someone else already has.
 
 ### `useFocusTrap` captures the opener during render
 

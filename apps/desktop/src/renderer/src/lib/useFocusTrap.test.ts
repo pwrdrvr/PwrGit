@@ -39,7 +39,7 @@ function render(props: { open: boolean; hideMiddle?: boolean }): void {
 function tab(shiftKey = false): void {
   act(() => {
     window.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Tab", shiftKey, bubbles: true })
+      new KeyboardEvent("keydown", { key: "Tab", shiftKey, bubbles: true, cancelable: true })
     );
   });
 }

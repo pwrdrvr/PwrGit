@@ -89,6 +89,12 @@ function escapeOwner(): Layer | undefined {
  */
 function onGlobalKeyDown(e: KeyboardEvent): void {
   if (e.key !== "Escape") return;
+  // Someone already spent this keystroke. `useViewportTooltip`'s hover cards —
+  // the remote-activity popover, the SHA chips — claim Escape while they are
+  // showing, and both listen on `window`, so without this a card open over a
+  // menu meant one press dismissed both. features/diff/AGENTS.md states the
+  // rule for the pane underneath; it applies just as much between overlays.
+  if (e.defaultPrevented) return;
   const owner = escapeOwner();
   if (owner === undefined) return;
   e.preventDefault();
