@@ -3585,6 +3585,17 @@ textarea,
 .refs-row-action.is-danger {
   color: var(--danger-text);
 }
+/* A button is `display: block` with centred contents, so a glyph and a label
+   inside one baseline-align against a raw text space. Every other glyph+label
+   control here is flex with a real gap (`.graph-locate` 6px, `.jump-btn` 8px);
+   this modifier is that, so an icon action does not arrive with its own
+   spacing. */
+.refs-row-action--icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
 /* `disabled` for the statically unavailable case, `aria-disabled` for busy —
    see the Delete-local button in RepoRefsModal. Both must look unavailable. */
 .refs-row-action:disabled,
@@ -10730,4 +10741,54 @@ button.agent-auth-node {
   border: 1px solid var(--accent-border);
   background: var(--accent);
   color: var(--accent-on);
+}
+
+/* Tag chip — the one prominent local tag at a commit, sitting on the same meta
+   line as the branch chips and the PR chip. Built as `.ref-chip` is built,
+   because it is the same kind of object: mark + name, opaque, bordered,
+   truncating on the name span. Three rules it has to keep.
+
+   The background is OPAQUE. `--accent-soft` is a 12% tint, so a chip painted
+   with it composites over whatever the row is already painting — and this row
+   paints four tints of its own (hover, --head, is-selected, is-focused). That
+   made the chip's contrast a function of row state: in light theme
+   `--accent-bright` on this 9px text measured 5.23:1 on a plain row but 4.47:1
+   on a selected one and 4.32:1 focused-and-hovered, both under SC 1.4.3's 4.5,
+   with 4.58 and 4.72 in the states between. Locating a tag selects and focuses
+   its row, so the failing states were the ones the feature exists to produce.
+   An opaque surface takes the row out of the sum: `--text-primary` on
+   `--bg-panel-elevated` is 17.19:1 dark and 17.99:1 light in every state, and
+   `--accent` on it clears SC 1.4.11's 3:1 for the mark (8.07 / 5.19).
+
+   Truncation lives on the name span — see `.ref-chip__name`, which says why:
+   `text-overflow: ellipsis` does nothing on a flex container, so a cap set on
+   the chip clips the name mid-glyph with no ellipsis and reads as a rendering
+   fault rather than as truncation.
+
+   And it yields. `.commit-meta`'s rule is that the chips give way rather than
+   wrap the row, and the way a name-carrying chip does that here is `flex: 0 1
+   auto` + `min-width: 0` on the element that sits directly in the row — the
+   role `.ref-chips` plays for the branch chips. `flex-shrink: 0` made this the
+   one thing on the line that refuses, at its full 180px. */
+.commit-tag--tag {
+  flex: 0 1 auto;
+  gap: 4px;
+  min-width: 0;
+  max-width: 180px;
+  padding: 0 7px;
+  border: 1px solid var(--accent-border);
+  background: var(--bg-panel-elevated);
+  color: var(--text-primary);
+}
+/* Accent on the mark alone — one step of emphasis over the branch chip beside
+   it, without tinting the surface the name has to stay legible against. */
+.commit-tag--tag .tag-glyph {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+.commit-tag__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

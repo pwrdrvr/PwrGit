@@ -6,8 +6,10 @@ import type {
   Profile,
   Repo,
   RepoSearchHit,
+  TagSummary,
   Worktree
 } from "@pwrgit/shared";
+import { showErrorToast } from "./lib/toast";
 import { DiffPane, type DiffTarget } from "./features/diff/DiffPane";
 import {
   FileInsightsPane,
@@ -147,6 +149,13 @@ export function App() {
   const [commitReveal, setCommitReveal] = useState<{
     hash: string;
     requestId: number;
+    tagName?: string;
+    tagKind?: "annotated" | "lightweight";
+  } | null>(null);
+
+  const [pendingTag, setPendingTag] = useState<{
+    worktreeId: string;
+    tag: TagSummary;
   } | null>(null);
 
   // Clear commit selection + any open diff when the worktree changes.
@@ -159,6 +168,21 @@ export function App() {
     setSearchableCommits([]);
     setCommitReveal(null);
   }, [selection?.worktreeId]);
+
+  useEffect(() => {
+    if (pendingTag === null || selection?.worktreeId !== pendingTag.worktreeId) return;
+    setFileInsightTarget(null);
+    setDiffTarget(null);
+    setCommitFocus({ hash: pendingTag.tag.targetId, subject: pendingTag.tag.name });
+    setRailCollapsed(false);
+    setCommitReveal((current) => ({
+      hash: pendingTag.tag.targetId,
+      tagName: pendingTag.tag.name,
+      tagKind: pendingTag.tag.kind,
+      requestId: (current?.requestId ?? 0) + 1
+    }));
+    setPendingTag(null);
+  }, [pendingTag, selection?.worktreeId]);
 
   const toggleCommit = useCallback((hash: string) => {
     setSelectedCommits((prev) => {
@@ -555,6 +579,22 @@ export function App() {
 
       <div className="app-body" style={{ gridTemplateColumns }}>
         <Sidebar
+          onLocateTag={(repoId, tag) => {
+            const repo = repos.find((r) => r.id === repoId);
+            const worktree =
+              repo?.worktrees.find((w) => w.id === selection?.worktreeId && !w.missing) ??
+              repo?.worktrees.find((w) => w.isPrimary && !w.missing) ??
+              repo?.worktrees.find((w) => !w.missing);
+            if (worktree === undefined) {
+              showErrorToast({
+                title: "Cannot locate tag",
+                message: "No available worktree for this repository."
+              });
+              return;
+            }
+            setSelection({ repoId, worktreeId: worktree.id });
+            setPendingTag({ worktreeId: worktree.id, tag });
+          }}
           profiles={profiles}
           activeProfile={activeProfile}
           profileLoadState={profileLoadState}

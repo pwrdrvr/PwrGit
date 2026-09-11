@@ -8,7 +8,7 @@ failure mode that matters here — if you change the design, re-export.
 ## Source
 
 - Project: **PwrGit** — <https://claude.ai/design/p/88030015-bdd6-424d-8202-005feb3cee12>
-- Exported: **2026-09-08**.
+- Exported: **2026-09-10**.
 - Reflects the project's "as built" reconciliation pass of **2026-09-02**, which
   checked the design against `apps/desktop/src/renderer/src/**` and
   `styles/tokens.css` at `main @ bc11343`.
@@ -34,10 +34,12 @@ and records where the retired wireframe disagreed with the code. Read it first.
 | `Reset to Remote - UX Review.dc.html` | Reset-to-remote findings and redesign. |
 | `Refresh Affordances - Normalization.dc.html` | The six refresh/fetch controls, why they diverged, and the one busy language that replaced them. |
 | `Settings Updates.dc.html` | Settings › Updates — the four-slot release matrix, and the two-control layout it replaced. |
+| `Tag Chips and Locate - UX Review.dc.html` | The lineage tag chip and the tag locator — chip vocabulary, the light-theme contrast the accent tint could not hold, and the sidebar action column. |
 | `PwrGit Icon.dc.html` | App icon, size ladder, tray templates, DMG background. |
 | `support.js` | Generated `dc-runtime` bundle every `.dc.html` loads. |
 | `github.md` | Provenance note for the icon asset set (matched to PwrSnap's). |
 | `assets/logo-pwrgit.svg` | The lineage mark. |
+| `assets/tag-locate-{before,after}.png` | Shipped-app captures for the tag chip artboard, from the Playwright tag scenario on contrived fixture repos. |
 
 ### History and leftovers
 
@@ -60,6 +62,22 @@ file, and it carried no private content (see below).
 Its four artboards load `./support.js`, which does not exist in that
 subdirectory, so they will not run as checked in — a pre-existing condition, not
 something the 2026-09-03 export changed.
+
+## Authored here first
+
+`Tag Chips and Locate - UX Review.dc.html` and its two `assets/tag-locate-*.png`
+captures were written in this repo during the review of
+[#211](https://github.com/pwrdrvr/PwrGit/pull/211) and pushed **up** to the
+Claude Design project, which is the opposite of the usual direction. That is
+fine — the project is the source of truth for what the design *is*, and it now
+carries this artboard — but it means a re-export must not treat the file as
+foreign and drop it. It is a normal member of the bundle from here on.
+
+Its two screenshots are 100% contrived: fixture repositories built by
+`apps/desktop/e2e/fixtures/git-sandbox.ts`, a seeded default profile, and a
+`PWRGIT_USER_DATA_DIR` temp dir. Nothing in them came from a real account or a
+real repository, which is why they may live under `design/assets/` in a public
+repo — the rule the "chats/ and uploads/" section below states.
 
 ## Deliberately NOT copied in
 

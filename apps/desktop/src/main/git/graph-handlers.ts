@@ -1,5 +1,6 @@
 import {
   type Commit,
+  type LaneGraph,
   err,
   type LaneBranchInfo,
   ok,
@@ -22,11 +23,13 @@ import {
   topoMergeCommits,
   unappliedUpstreams
 } from "./git-service";
+import { readGraphTags } from "./graph-tags";
 import type { WorktreeStateService } from "./worktree-state";
 
 /** The repo-level part of the lane graph (same for every worktree of a repo);
  *  only the HEAD dot varies per worktree, so this is cached and reused. */
 type CachedLanes = {
+  tags: NonNullable<LaneGraph["tags"]>;
   commits: Commit[];
   tips: Record<string, string[]>;
   /** commit hash → remote-tracking refs tipped there (e.g. "origin/main"). */
@@ -97,6 +100,9 @@ export function registerGraphHandlers(
   });
 
   bus.register("graph:lanes", async (req) => {
+    if (req.revealHash !== undefined && !/^[0-9a-f]{40,64}$/.test(req.revealHash)) {
+      return err({ kind: "git", code: "invalid_commit", message: "Invalid commit object ID" });
+    }
     const wt = db
       .prepare(
         `SELECT w.path AS path, w.repo_id AS repo_id, w.branch AS branch,
@@ -298,7 +304,10 @@ export function registerGraphHandlers(
         entry.pr = pr;
       }
 
+      const tags = await readGraphTags(execGit, wt.path);
+      if (!tags.ok) return tags;
       cached = {
+        tags: tags.value,
         commits: topoMergeCommits([trunk.value, uniques.value]),
         tips: tips.value.local,
         remoteTips: tips.value.remote,
@@ -419,8 +428,17 @@ export function registerGraphHandlers(
       }
     }
 
+    // Navigation is per request: never contaminate the shared repo cache.
+    let commits = out.commits;
+    if (req.revealHash !== undefined && !commits.some((c) => c.hash === req.revealHash)) {
+      const window = await readLogRefs(execGit, wt.path, [req.revealHash], 40);
+      if (!window.ok) return window;
+      commits = topoMergeCommits([commits, window.value]);
+    }
+    const visible = new Set(commits.map((commit) => commit.hash));
     return ok({
-      commits: out.commits,
+      commits,
+      tags: Object.fromEntries(Object.entries(out.tags).filter(([hash]) => visible.has(hash))),
       tips: out.tips,
       remoteTips: out.remoteTips,
       ...(headUpstream === undefined ? {} : { headUpstream }),
