@@ -1203,17 +1203,29 @@ export async function fetchRemote(
 export async function fetchNamedRemote(
   git: GitExec,
   cwd: string,
-  remote: string
+  remote: string,
+  forceProgress = false
 ): Promise<Result<void>> {
-  return fetchWithRefRaceRetry(git, cwd, ["fetch", "--prune", remote]);
+  return fetchWithRefRaceRetry(git, cwd, [
+    "fetch",
+    "--prune",
+    ...(forceProgress ? ["--progress"] : []),
+    remote
+  ]);
 }
 
 /** Fetch every configured remote except those opted out with skipFetchAll. */
 export async function fetchAllRemotes(
   git: GitExec,
-  cwd: string
+  cwd: string,
+  forceProgress = false
 ): Promise<Result<void>> {
-  return fetchWithRefRaceRetry(git, cwd, ["fetch", "--all", "--prune"]);
+  return fetchWithRefRaceRetry(git, cwd, [
+    "fetch",
+    "--all",
+    "--prune",
+    ...(forceProgress ? ["--progress"] : [])
+  ]);
 }
 
 async function checkedRemoteMutation(
@@ -1324,9 +1336,21 @@ export type PullOutcome = {
   reappliedWithConflicts: boolean;
 };
 
-export type PullExecutionControl = {
+/**
+ * Per-operation hooks a network command threads through: how it is stopped,
+ * how liveness is observed, and where its raw stderr goes.
+ *
+ * `onStderr` is what makes a long operation legible — Git's own progress and
+ * `remote:` messages are the only ground truth about where it is stuck, and
+ * they exist nowhere else once the process exits.
+ */
+export type GitControl = {
   signal?: AbortSignal;
   onActivity?: () => void;
+  onStderr?: (chunk: string) => void;
+};
+
+export type PullExecutionControl = GitControl & {
   startRecovery?: () => PullRecoveryControl;
 };
 
@@ -1334,18 +1358,24 @@ export type PullRecoveryControl = PullExecutionControl & {
   finish?: (succeeded: boolean) => void;
 };
 
-function controlledGit(git: GitExec, control: PullExecutionControl): GitExec {
+/** Wrap a `GitExec` so every command it runs carries one operation's control. */
+export function controlledGit(git: GitExec, control: GitControl): GitExec {
   return (args, path, options) =>
     git(args, path, {
       ...options,
       ...(control.signal !== undefined ? { signal: control.signal } : {}),
-      // A pull is force-stopped only after the generous watchdog limits. The
-      // direct Git process receives SIGKILL; LFS/filter children normally exit
-      // when Git and their inherited pipes close.
+      // A pull is force-stopped only after the generous watchdog limits, or
+      // when the user cancels. The direct Git process receives SIGKILL;
+      // LFS/filter children normally exit when Git and their inherited pipes
+      // close.
       ...(control.signal !== undefined ? { killSignal: "SIGKILL" } : {}),
       onActivity: () => {
         options?.onActivity?.();
         control.onActivity?.();
+      },
+      onStderr: (chunk) => {
+        options?.onStderr?.(chunk);
+        control.onStderr?.(chunk);
       }
     });
 }
@@ -4079,9 +4109,13 @@ export async function pushPlannedRefs(
 /** Push the current branch to its upstream. */
 export async function pushRemote(
   git: GitExec,
-  cwd: string
+  cwd: string,
+  forceProgress = false
 ): Promise<Result<void>> {
-  const raw = await git(["push"], cwd);
+  const raw = await git(
+    ["push", ...(forceProgress ? ["--progress"] : [])],
+    cwd
+  );
   if (!raw.ok) return raw;
   if (raw.value.exitCode !== 0) {
     const message = raw.value.stderr.trim();

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AppUpdateToast } from "../update/AppUpdateToast";
+import { RemoteActivityToast } from "../remote/RemoteActivityToast";
 import { dispatch } from "../../lib/pwrgit";
 import { dismissToast, subscribeToasts, type Toast } from "../../lib/toast";
 
@@ -13,7 +14,13 @@ const AUTO_DISMISS_MS = 9_000;
  *  transient notice, so anchoring it to the corner keeps it from being shoved
  *  around as errors come and go. The container is rendered even when empty —
  *  a childless flex column at a fixed corner has no size and paints nothing. */
-export function ToastHost() {
+export function ToastHost({
+  selectedWorktreeId = null
+}: {
+  /** The checkout on screen — its own toolbar reports its operations, so the
+   *  activity cards below skip it. */
+  selectedWorktreeId?: string | null;
+}) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   useEffect(() => subscribeToasts(setToasts), []);
@@ -34,6 +41,10 @@ export function ToastHost() {
         .map((toast) => (
           <ToastCard key={toast.key ?? toast.id} toast={toast} />
         ))}
+      {/* Live operations sit below the transient notices and above the update
+          card, for the reason the sort above gives: they outlive the come-and-go
+          and must not be shoved around by it. */}
+      <RemoteActivityToast selectedWorktreeId={selectedWorktreeId} />
       <AppUpdateToast />
     </div>
   );

@@ -429,6 +429,80 @@ export type PullProgressPhase =
   | "reapply"
   | "refresh";
 
+/**
+ * One line of Git's transfer meter — `Receiving objects:  43% (860/2000)`.
+ *
+ * The label is carried as text rather than a union because every network
+ * command prints its own set (`Writing objects` on push, `Receiving objects`
+ * on fetch) and Git adds more between versions. A meter PwrGit cannot name is
+ * still a meter worth drawing, and the UI only ever prints the label.
+ */
+export type GitTransferProgress = {
+  label: string;
+  percent: number;
+  completed: number;
+  total: number;
+  /** Git's human-readable transferred byte count, such as `12.4 MiB`. */
+  bytes?: string;
+  /** Git's human-readable transfer rate, such as `3.1 MiB/s`. */
+  rate?: string;
+};
+
+/** The long-running remote operations PwrGit reports live status for. */
+export type RemoteActivityKind = "fetch" | "pull" | "push";
+
+/**
+ * Where a remote operation has got to. `queued` is the wait for another
+ * operation's repository lock — time that is not a Git stall and must not be
+ * reported as one. The pull phases are `PullProgressPhase`; `push` and
+ * `recovery` have no sub-steps worth naming.
+ */
+export type RemoteActivityPhase =
+  | PullProgressPhase
+  | "queued"
+  | "push"
+  | "recovery";
+
+/**
+ * One live remote operation, as the UI needs to describe, follow, and stop it.
+ *
+ * Everything here is a *fact observed in main*, not a guess: `silent` says Git
+ * has written nothing at all, and `lastOutputAt` dates the last byte it did
+ * write. Those two are what distinguish "a big transfer is underway" from
+ * "this has been wedged for five minutes", which a spinner cannot express.
+ */
+export type RemoteActivity = {
+  id: string;
+  kind: RemoteActivityKind;
+  phase: RemoteActivityPhase;
+  profileId: ProfileId;
+  repoId: string;
+  repoName: string;
+  /** Absent on a repo-wide fetch, which no single checkout owns. */
+  worktreeId: string | null;
+  branch: string | null;
+  /** Epoch ms. The renderer derives elapsed from its own clock. */
+  startedAt: number;
+  /** Epoch ms the current phase began. */
+  phaseSince: number;
+  /**
+   * Epoch ms of the last byte the running Git command wrote, or of when that
+   * command started if it has written none. Scoped to the command rather than
+   * the operation: a pull's `rev-parse` writing one line says nothing about
+   * whether the fetch after it is alive.
+   */
+  lastOutputAt: number;
+  /** The Git command now running has produced no output at all. */
+  silent: boolean;
+  progress: GitTransferProgress | null;
+  /** The sanitized Git command line running right now. */
+  command: string | null;
+  /** Most recent sanitized Git output lines, oldest first. */
+  tail: string[];
+  /** A cancel was requested and Git has been signalled. */
+  canceling: boolean;
+};
+
 /** Hosting products PwrGit can read change-request status from. */
 export type ForgeKind = "github" | "gitlab";
 
