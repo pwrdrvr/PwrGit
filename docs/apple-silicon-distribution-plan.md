@@ -26,6 +26,25 @@ Estimated benefit from a released bundle: **42.4% less installed logical file
 data and 44.8% smaller ZIPs under identical recompression**. These are measured
 estimates, not final signed arm64 package sizes. Do not market “half the size.”
 
+## Implemented build verification
+
+The dual-architecture `package:dryrun` completed successfully on 2026-09-11
+for v0.13.0. These are actual separately packaged apps, not thinned estimates:
+
+| Output | Universal bytes | arm64 bytes | Reduction |
+|---|---:|---:|---:|
+| DMG | 257,024,664 | 141,686,021 | 44.87% |
+| Auto-update ZIP | 248,647,570 | 136,880,775 | 44.95% |
+| App logical regular-file bytes, excluding symlinks | 619,731,817 | 356,244,114 | 42.52% |
+
+Both apps passed architecture, ASAR-content and embedded Git notice checks.
+The combined manifest references both versioned ZIPs and keeps universal as
+its legacy fallback. Lint/typechecks passed; 197 test files passed with 2,027
+tests passing and one skipped. Builds were ad-hoc signed; Developer ID signing,
+notarization and signed upgrade smoke tests remain release validation work.
+
+The remaining sections preserve the original exploration and rollout plan.
+
 ## Current pipeline and constraints
 
 - `apps/desktop/electron-builder.yml`: Electron 41.10.7; DMG and ZIP target

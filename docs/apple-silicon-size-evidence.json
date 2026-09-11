@@ -156,5 +156,16 @@
   "published_dmg_bytes": 257354691,
   "repacked_universal_zip_bytes": 257503379,
   "repacked_thinned_zip_bytes": 142143535,
-  "method": "Thin fat Mach-O files to arm64 in a disposable copy; sum regular files without symlinks; recompress both with ditto -c -k --sequesterRsrc --keepParent. Not a signed arm64 build."
+  "method": "Thin fat Mach-O files to arm64 in a disposable copy; sum regular files without symlinks; recompress both with ditto -c -k --sequesterRsrc --keepParent. Not a signed arm64 build.",
+  "built_artifacts": {
+    "version": "0.13.0",
+    "measured_at": "2026-09-11",
+    "signing": "ad-hoc; notarization disabled for package:dryrun",
+    "universal_dmg_bytes": 257024664,
+    "arm64_dmg_bytes": 141686021,
+    "universal_zip_bytes": 248647570,
+    "arm64_zip_bytes": 136880775,
+    "universal_app_logical_bytes": 619731817,
+    "arm64_app_logical_bytes": 356244114
+  }
 }
