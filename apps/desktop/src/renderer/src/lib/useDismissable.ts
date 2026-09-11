@@ -45,9 +45,20 @@ function escapeOwner(): Layer | undefined {
     let bestDepth = -1;
     for (const layer of openOverlays) {
       const surface = layer.surfaceRef?.current;
-      if (surface === undefined || surface === null) continue;
-      if (!surface.contains(active)) continue;
-      const d = depth(surface);
+      const trigger = layer.triggerRef.current;
+      // The trigger belongs to its overlay as much as the surface does. A menu
+      // whose items are all disabled never takes focus off the button that
+      // opened it, and that must still count as "the user is in this menu" —
+      // otherwise the only surface that can be Escaped is one that managed to
+      // move focus into itself.
+      const holder =
+        surface?.contains(active) === true
+          ? surface
+          : trigger?.contains(active) === true
+            ? trigger
+            : null;
+      if (holder === null) continue;
+      const d = depth(holder);
       // >= so a later-opened sibling at equal depth still wins.
       if (d >= bestDepth) {
         best = layer;

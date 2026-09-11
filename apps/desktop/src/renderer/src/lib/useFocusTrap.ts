@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 
 /**
  * Everything tabbable, in DOM order. `tabindex="-1"` is excluded on purpose —
@@ -60,12 +60,28 @@ export function useFocusTrap({
   /** Where focus lands on open. Defaults to the first tabbable element. */
   initialFocusRef?: RefObject<HTMLElement | null>;
 }): void {
-  // Remember the opener before focus moves, and put it back on close. Reading
-  // it inside the same effect that moves focus is what makes this reliable:
-  // by the time a cleanup runs, activeElement is already inside the dialog.
+  // The opener is captured during RENDER, not in the effect below.
+  //
+  // React applies `autoFocus` while committing, which is before passive effects
+  // run — so a dialog with an autoFocused field (most of them) had already
+  // moved focus inside itself by the time an effect could look. The hook then
+  // recorded that field as the opener and, on close, found it disconnected and
+  // restored nothing: focus fell to <body> and the keyboard user was back at
+  // the top of the document. Render runs before commit, so this sees the real
+  // opener.
+  // The `typeof document` guard keeps this render-safe without a DOM:
+  // PullDivergenceDialog's tests render the component through
+  // `renderToStaticMarkup`, where reading `document` at render time throws.
+  const openerRef = useRef<HTMLElement | null>(null);
+  const wasOpen = useRef(false);
+  if (open && !wasOpen.current && typeof document !== "undefined") {
+    openerRef.current = document.activeElement as HTMLElement | null;
+  }
+  wasOpen.current = open;
+
   useEffect(() => {
     if (!open) return;
-    const opener = document.activeElement as HTMLElement | null;
+    const opener = openerRef.current;
     const target = initialFocusRef?.current ?? tabbable(containerRef.current)[0];
     // A dialog with nothing tabbable still needs to receive focus, or the first
     // Tab escapes it; the container carries tabindex="-1" for that case.
