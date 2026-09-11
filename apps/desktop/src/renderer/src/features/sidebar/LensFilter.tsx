@@ -1,6 +1,7 @@
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import type { Lens } from "@pwrgit/shared";
 import { formatLensCount, LENSES } from "./repo-view";
+import { tablistKeyHandler } from "../../lib/tablistKeys";
 
 /**
  * Icon-only lens switch, following PwrAgnt's #1425.
@@ -76,8 +77,21 @@ export function LensFilter({
   controlsId: string;
 }) {
   const activeCount = counts[lens];
+  // role="tablist" promises one Tab stop with the arrows moving inside it.
+  // Every chip used to be its own stop and the arrows did nothing, so reaching
+  // the repo list from the sidebar search meant tabbing past all six.
+  const chipRefs = useRef<Partial<Record<Lens, HTMLButtonElement>>>({});
+  const onKeyDown = tablistKeyHandler(LENSES, lens, (next) => {
+    onChange(next);
+    chipRefs.current[next]?.focus();
+  });
   return (
-    <div className="lens-filter" role="tablist" aria-label="Repo filter">
+    <div
+      className="lens-filter"
+      role="tablist"
+      aria-label="Repo filter"
+      onKeyDown={onKeyDown}
+    >
       {LENSES.map((l) => {
         const count = counts[l];
         const label = count > 0 ? `${l} (${count})` : l;
@@ -86,6 +100,12 @@ export function LensFilter({
             key={l}
             type="button"
             role="tab"
+            ref={(element) => {
+              if (element === null) delete chipRefs.current[l];
+              else chipRefs.current[l] = element;
+            }}
+            // Roving tab stop: the strip is one stop, arrows move within it.
+            tabIndex={l === lens ? 0 : -1}
             aria-selected={l === lens}
             aria-controls={controlsId}
             aria-label={label}

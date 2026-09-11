@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { Profile } from "@pwrgit/shared";
+import { useDismissable } from "../../lib/useDismissable";
+import { useMenuNavigation } from "../../lib/useMenuNavigation";
 
 function monogram(p: Profile): string {
   return p.mono !== "" ? p.mono : p.name.slice(0, 1).toUpperCase();
@@ -20,23 +22,15 @@ export function ProfileChip({
 }) {
   const [open, setOpen] = useState(false);
   const chipRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
 
-  // Escape closes; clicks elsewhere land on the backdrop below. Escape also
-  // puts focus back on the chip: the menu unmounts, so without this the
-  // keyboard user is dropped on <body> and has to tab in from the top of the
-  // sidebar again (SC 2.4.3). Activating an item is deliberately not handled
-  // the same way — each action hands off to a modal or to another profile's
-  // window, and those place focus themselves.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== "Escape") return;
-      setOpen(false);
-      chipRef.current?.focus();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
+  // Escape dismisses and hands focus back to the chip; arrows, Home/End and
+  // typeahead walk the items. Activating an item is deliberately left alone —
+  // each action hands off to a modal or to another profile's window, and those
+  // place focus themselves.
+  useDismissable({ open, onDismiss: close, triggerRef: chipRef, surfaceRef: menuRef });
+  useMenuNavigation({ open, menuRef, onClose: close });
 
   if (activeProfile === null) return null;
 
@@ -74,7 +68,7 @@ export function ProfileChip({
         />
       )}
       {open && (
-        <div className="profile-menu" role="menu" aria-label="Profiles">
+        <div ref={menuRef} className="profile-menu" role="menu" aria-label="Profiles">
           <div className="profile-menu__label" aria-hidden="true">
             Profiles
           </div>

@@ -4,6 +4,7 @@ import { ProfileModal } from "../sidebar/ProfileModal";
 import { ReadError } from "../shell/ReadError";
 import { useProfiles } from "../../state/useProfiles";
 import { SettingsPanelHead, SettingsSection } from "./SettingsLayout";
+import { useModal } from "../../lib/useModal";
 
 /**
  * Profiles pane (PwrAgnt's ProfilesSettings pattern, on PwrGit's profile
@@ -194,6 +195,12 @@ function DeleteProfileDialog(props: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const titleId = `delete-profile-${props.profile.id}-title`;
+  // Escape is refused mid-delete, matching the backdrop.
+  const modalRef = useModal<HTMLDivElement>({
+    onClose: () => {
+      if (!busy) props.onClose();
+    }
+  });
   const matches = confirmation === props.profile.name;
 
   const remove = async (): Promise<void> => {
@@ -217,13 +224,13 @@ function DeleteProfileDialog(props: {
       }}
     >
       <div
+        ref={modalRef}
+        aria-modal="true"
+        tabIndex={-1}
         className="modal modal--delete-profile"
         role="alertdialog"
         aria-labelledby={titleId}
         onClick={(event) => event.stopPropagation()}
-        onKeyDown={(event) => {
-          if (event.key === "Escape" && !busy) props.onClose();
-        }}
       >
         <div className="modal__title" id={titleId}>
           Delete “{props.profile.name}”?

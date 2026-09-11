@@ -10,6 +10,7 @@ import {
   writeStoredCheckoutTarget
 } from "./branch-from-commit";
 import { longWhen } from "./graph-view";
+import { useModal } from "../../lib/useModal";
 
 function firstLine(message: string): string {
   return message.split("\n")[0] ?? message;
@@ -54,7 +55,6 @@ export function BranchFromCommitDialog({
   const [error, setError] = useState<string | null>(null);
   const active = useRef(true);
   const selected = useRef(false);
-  const dialogRef = useRef<HTMLDivElement>(null);
   /** Latest dismiss, so the one-shot key listener never calls a stale closure. */
   const dismissRef = useRef<() => void>(() => undefined);
   /** Whether the checkout target on screen is the user's pick or the fallback. */
@@ -140,29 +140,6 @@ export function BranchFromCommitDialog({
   // "here" stays checked until the dirty check answers, so hold the submit too
   // rather than sending a checkout the main process would only reject.
   const blocked = problem !== null || (target === "here" && !canCheckoutHere);
-
-  /**
-   * Escape closes the dialog unless something else owns the keystroke. ⌘F opens
-   * the repo switcher over this dialog, and the Escape that dismisses it must
-   * not take the dialog with it — but scoping the handler to the dialog's own
-   * subtree is too narrow: once that switcher closes, focus falls back to
-   * <body> and Escape would stop working entirely. Focus inside the dialog, or
-   * nowhere in particular, is ours; focus inside another overlay is not.
-   */
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape") return;
-      const focused = document.activeElement;
-      const ownsFocus =
-        focused === null ||
-        focused === document.body ||
-        dialogRef.current?.contains(focused) === true;
-      if (!ownsFocus) return;
-      dismissRef.current();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
 
   // Dismissing mid-create is allowed (checking out a big repo takes seconds),
   // so say the work continues — the outcome arrives as a toast either way.
@@ -257,6 +234,14 @@ export function BranchFromCommitDialog({
     </label>
   );
 
+  // ⌘F can open the repo switcher over this dialog. useDismissable gives
+  // Escape to whichever overlay holds focus, which is what the hand-rolled
+  // "owns focus" check here was approximating — including its <body> case,
+  // since the switcher closing drops focus there.
+  const modalRef = useModal<HTMLDivElement>({
+    onClose: () => dismissRef.current()
+  });
+
   return (
     <div className="overlay-backdrop" onClick={dismiss}>
       <div
@@ -264,7 +249,8 @@ export function BranchFromCommitDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="branch-from-title"
-        ref={dialogRef}
+        ref={modalRef}
+        tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="modal__title" id="branch-from-title">

@@ -10,6 +10,8 @@ import type {
   PrSummary
 } from "@pwrgit/shared";
 import { announce } from "../../lib/announce";
+import { useDismissable } from "../../lib/useDismissable";
+import { useMenuNavigation } from "../../lib/useMenuNavigation";
 import { useHoverIntent } from "../../lib/hoverIntent";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
@@ -263,6 +265,9 @@ export function LineageGraph({
   const [branchPrGeneration, setBranchPrGeneration] = useState(0);
   const [flash, setFlash] = useState<string | null>(null);
   const [branchesOpen, setBranchesOpen] = useState(false);
+  const branchesBtnRef = useRef<HTMLButtonElement>(null);
+  const branchesPopRef = useRef<HTMLDivElement>(null);
+  const closeBranches = useCallback(() => setBranchesOpen(false), []);
   const [hoveredCommit, setHoveredCommit] = useState<string | null>(null);
   const [commitMenu, setCommitMenu] = useState<CommitMenuState | null>(null);
   const [branchMenu, setBranchMenu] = useState<BranchChipTarget | null>(null);
@@ -1021,6 +1026,20 @@ export function LineageGraph({
           matched === 1 ? "" : "es"
         } in flight`;
 
+  // The branch navigator could not be closed from the keyboard at all before
+  // this — backdrop click was its only dismissal (WCAG 2.1 SC 2.1.1).
+  useDismissable({
+    open: branchesOpen,
+    onDismiss: closeBranches,
+    triggerRef: branchesBtnRef,
+    surfaceRef: branchesPopRef
+  });
+  useMenuNavigation({
+    open: branchesOpen,
+    menuRef: branchesPopRef,
+    onClose: closeBranches
+  });
+
   return (
     <>
       <div className="graph-toolbar">
@@ -1028,6 +1047,7 @@ export function LineageGraph({
         <span style={{ flex: 1 }} />
         <span className="graph-branches-wrap">
           <button
+            ref={branchesBtnRef}
             className="graph-branches"
             aria-haspopup="menu"
             aria-expanded={branchesOpen}
@@ -1045,7 +1065,7 @@ export function LineageGraph({
                 className="branch-pop__backdrop"
                 onClick={() => setBranchesOpen(false)}
               />
-              <div className="branch-pop" role="menu">
+              <div ref={branchesPopRef} className="branch-pop" role="menu">
                 {[
                   ...(data?.shownBranches ?? []),
                   ...(data?.upstreamRefs ?? [])

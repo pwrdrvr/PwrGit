@@ -15,6 +15,7 @@ import {
   type BranchPickerOption
 } from "../shell/BranchRefPicker";
 import { CommitAlignment, commitCountLabel } from "./CommitAlignment";
+import { useModal } from "../../lib/useModal";
 import {
   fetchAgeLabel,
   isStaleFetch,
@@ -201,16 +202,6 @@ export function ResetToRemoteDialog({
     void loadTargets();
   }, [loadTargets]);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape" || busy !== null) return;
-      if (preview !== null) setPreview(null);
-      else onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [busy, onClose, preview]);
-
   const changeMode = (next: RemoteResetMode): void => {
     setMode(next);
     setPreview(null);
@@ -327,12 +318,25 @@ export function ResetToRemoteDialog({
     selected.ref !== upstreamRef &&
     selected.ref !== defaultRef;
 
+  // Escape unwinds one step at a time: it leaves the review screen first and
+  // only closes the dialog from the top, and is refused entirely while a reset
+  // is running. Preserved from the hand-rolled handler this replaced.
+  const modalRef = useModal<HTMLDivElement>({
+    onClose: () => {
+      if (busy !== null) return;
+      if (preview !== null) setPreview(null);
+      else onClose();
+    }
+  });
+
   return (
     <div
       className="overlay-backdrop reset-remote-backdrop"
       onClick={() => canClose && onClose()}
     >
       <div
+        ref={modalRef}
+        tabIndex={-1}
         className={`modal reset-remote${preview === null ? "" : " is-reviewing"}`}
         role="dialog"
         aria-modal="true"

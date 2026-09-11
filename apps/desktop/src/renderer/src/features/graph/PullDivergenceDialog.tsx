@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { RemoteDivergence } from "@pwrgit/shared";
+import { useModal } from "../../lib/useModal";
 import {
   CommitAlignment,
   commitCountLabel as countLabel,
@@ -39,21 +40,21 @@ export function PullDivergenceDialog({
     closeRef.current?.focus();
   }, [confirmingReset]);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape" || busy !== null) return;
-      if (confirmingReset) setConfirmingReset(false);
-      else onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [busy, confirmingReset, onClose]);
-
   const canRecover = divergence.workingTreeClean && busy === null;
   const localCount = divergence.localCommits.length;
   const pairedCount = rewrittenCommitCount(divergence.alignedCommits);
   const localUnpairedCount = strandedCommitCount(divergence.alignedCommits);
   const upstreamUnpairedCount = otherOnlyCommitCount(divergence.alignedCommits);
+
+  // Escape steps back out of the reset confirmation before it closes the
+  // dialog, and is refused while an operation runs.
+  const modalRef = useModal<HTMLDivElement>({
+    onClose: () => {
+      if (busy !== null) return;
+      if (confirmingReset) setConfirmingReset(false);
+      else onClose();
+    }
+  });
 
   return (
     <div
@@ -61,6 +62,8 @@ export function PullDivergenceDialog({
       onClick={() => busy === null && onClose()}
     >
       <div
+        ref={modalRef}
+        tabIndex={-1}
         className="modal pull-divergence"
         role="dialog"
         aria-modal="true"

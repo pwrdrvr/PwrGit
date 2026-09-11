@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { SshRemoteRecovery } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
+import { useModal } from "../../lib/useModal";
 
 type Busy = "test" | "apply" | null;
 
@@ -34,14 +35,6 @@ export function SshRemoteRecoveryDialog({
   }, []);
 
   useEffect(() => primaryRef.current?.focus(), [tested]);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape" && busy === null) onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [busy, onClose]);
 
   const test = async (): Promise<void> => {
     setBusy("test");
@@ -92,12 +85,22 @@ export function SshRemoteRecoveryDialog({
     onChanged();
   };
 
+  // Escape is refused while a test or repair is in flight — the same rule the
+  // hand-rolled handler applied before this moved to the shared hook.
+  const modalRef = useModal<HTMLDivElement>({
+    onClose: () => {
+      if (busy === null) onClose();
+    }
+  });
+
   return (
     <div
       className="overlay-backdrop ssh-recovery-backdrop"
       onClick={() => busy === null && onClose()}
     >
       <div
+        ref={modalRef}
+        tabIndex={-1}
         className="modal ssh-recovery"
         role="dialog"
         aria-modal="true"

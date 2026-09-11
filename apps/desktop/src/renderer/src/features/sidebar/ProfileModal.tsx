@@ -6,6 +6,7 @@ import type {
   UpdateProfileRequest
 } from "@pwrgit/shared";
 import { SettingsSegmented } from "../settings/SettingsLayout";
+import { useModal } from "../../lib/useModal";
 
 type ProfileThemeChoice = "inherit" | ProfileThemeOverride;
 
@@ -112,9 +113,15 @@ export function ProfileModal({
     onClose();
   };
 
+  const modalRef = useModal<HTMLDivElement>({ onClose });
+
   return (
     <div className="overlay-backdrop" onClick={onClose}>
-      <div className="modal modal--profile" onClick={(e) => e.stopPropagation()}>
+      <div ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        tabIndex={-1}
+        className="modal modal--profile" onClick={(e) => e.stopPropagation()}>
         <div className="modal__title">
           {mode === "create"
             ? "New profile"

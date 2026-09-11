@@ -10,6 +10,7 @@ import type {
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { CopyTarget } from "../shell/CopyTarget";
+import { useModal } from "../../lib/useModal";
 
 const shortObject = (value: string | undefined): string =>
   value === undefined ? "absent" : value.slice(0, 12);
@@ -98,9 +99,14 @@ export function TagRemoteDialog({
   };
 
   const actionable = plan !== null && plan.status !== "equal";
+  const modalRef = useModal<HTMLDivElement>({ onClose });
+
   return (
     <div className="overlay-backdrop refs-push-backdrop" onClick={onClose}>
       <div
+        ref={modalRef}
+        aria-modal="true"
+        tabIndex={-1}
         className="modal refs-tag-dialog"
         role="dialog"
         aria-label={`Manage remote tag ${tag.name}`}

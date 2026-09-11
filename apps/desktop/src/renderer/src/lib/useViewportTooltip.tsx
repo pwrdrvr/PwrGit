@@ -257,6 +257,11 @@ export function useViewportTooltip(
     // not want it needs a way out that is not "move the mouse and wait".
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
+      // Defer if something already claimed it — the same rule this handler
+      // relies on surfaces underneath obeying. A click-opened overlay
+      // (useDismissable) can be up at the same time as a hover card, and one
+      // keystroke must not dismiss both.
+      if (event.defaultPrevented) return;
       // This listener only exists while a card is showing, so the Escape is
       // spent on the card. Say so: surfaces underneath (the diff pane) defer
       // to a claimed Escape rather than closing on the same keystroke.

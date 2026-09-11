@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ResolvedCommit, TagSummary } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
+import { useModal } from "../../lib/useModal";
 
 /** Long enough that resolution doesn't fire on every keystroke of a pasted id. */
 const RESOLVE_DEBOUNCE_MS = 250;
@@ -34,38 +35,12 @@ export function CreateTagDialog({
   /** In-flight resolutions outlive a dismissal; they must not write state. */
   const mounted = useRef(true);
   /** Latest close, so the one-shot key listener never calls a stale closure. */
-  const closeRef = useRef(onClose);
-  closeRef.current = onClose;
-  const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
     };
-  }, []);
-
-  /**
-   * Escape dismisses. This used to be RepoRefsModal's job — it kept a stack of
-   * which nested dialog Escape closes — but the commit context menu now opens
-   * this dialog with no RepoRefsModal above it, so the dialog owns it, as
-   * BranchFromCommitDialog does. Focus inside the dialog, or nowhere in
-   * particular, is ours; focus inside another overlay is not.
-   */
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      const focused = document.activeElement;
-      const ownsFocus =
-        focused === null ||
-        focused === document.body ||
-        dialogRef.current?.contains(focused) === true;
-      if (!ownsFocus) return;
-      event.preventDefault();
-      closeRef.current();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
   const target = targetCommit.trim();
@@ -142,13 +117,17 @@ export function CreateTagDialog({
     onClose();
   };
 
+  const modalRef = useModal<HTMLDivElement>({ onClose });
+
   return (
     <div className="overlay-backdrop refs-push-backdrop" onClick={onClose}>
       <div
+        ref={modalRef}
+        aria-modal="true"
+        tabIndex={-1}
         className="modal refs-tag-dialog"
         role="dialog"
         aria-label={`Create tag in ${repoName}`}
-        ref={dialogRef}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="modal__title">Create tag · {repoName}</div>
