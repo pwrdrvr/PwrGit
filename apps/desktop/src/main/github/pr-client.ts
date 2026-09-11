@@ -14,29 +14,67 @@ async function gh(args: string[]): Promise<string> {
   return runGh(args);
 }
 
-let tokenCache: { token: string; at: number } | null = null;
 const TOKEN_TTL_MS = 5 * 60_000;
+/** Keyed by host, mirroring `getGitLabToken`: an Enterprise Server instance and
+ *  github.com are different credentials, and a single-slot cache would hand one
+ *  host's token to the other for the rest of the TTL. */
+const tokenCache = new Map<string, { token: string; at: number }>();
 
-/** GITHUB_TOKEN if set, else `gh auth token` (reusing the user's gh login). */
-export async function getGitHubToken(): Promise<string | null> {
-  if (tokenCache !== null && Date.now() - tokenCache.at < TOKEN_TTL_MS) {
-    return tokenCache.token;
+export const GITHUB_DOT_COM = "github.com";
+
+/** Only reset by tests; the cache is otherwise per-host and time-bounded. */
+export function clearGitHubTokenCache(): void {
+  tokenCache.clear();
+}
+
+/**
+ * `GITHUB_TOKEN` if set, else the token `gh` already holds for this host.
+ *
+ * `gh auth token` without `--hostname` answers for whatever host `gh` considers
+ * default, which on a machine signed in to both github.com and an Enterprise
+ * instance is a coin toss the caller cannot see. Always ask for the host we are
+ * about to query.
+ *
+ * `GITHUB_TOKEN` stays host-independent deliberately: it is an explicit escape
+ * hatch, and an operator who exports one has said which forge they mean.
+ */
+export async function getGitHubToken(
+  host: string = GITHUB_DOT_COM
+): Promise<string | null> {
+  const key = host.trim().toLowerCase();
+  const cached = tokenCache.get(key);
+  if (cached !== undefined && Date.now() - cached.at < TOKEN_TTL_MS) {
+    return cached.token;
   }
   const env = process.env.GITHUB_TOKEN?.trim();
   if (env) {
-    tokenCache = { token: env, at: Date.now() };
+    tokenCache.set(key, { token: env, at: Date.now() });
     return env;
   }
   try {
-    const token = await gh(["auth", "token"]);
+    const token = await gh(["auth", "token", "--hostname", key]);
     if (token) {
-      tokenCache = { token, at: Date.now() };
+      tokenCache.set(key, { token, at: Date.now() });
       return token;
     }
   } catch {
-    // gh missing or not logged in
+    // gh missing, or holds no account for this host.
   }
   return null;
+}
+
+/**
+ * The GraphQL base URL for a GitHub host.
+ *
+ * `@octokit/graphql` appends `/graphql` to whatever `baseUrl` it is given, so
+ * Enterprise Server wants `https://HOST/api` and github.com wants the SaaS
+ * endpoint it already defaults to. Returning undefined for github.com keeps
+ * that default rather than restating it, so this cannot drift from Octokit.
+ */
+export function githubGraphqlBaseUrl(host: string): string | undefined {
+  const key = host.trim().toLowerCase();
+  if (key === GITHUB_DOT_COM || key === "") return undefined;
+  return `https://${key}/api`;
 }
 
 export type GhStatus = { installed: boolean; loggedIn: boolean };
@@ -78,11 +116,15 @@ function retryDelayMs(error: unknown, attempt: number): number | null {
 
 async function runQuery(
   token: string,
+  host: string,
   query: string,
   variables: Record<string, string | number>
 ): Promise<unknown> {
+  const base = githubGraphqlBaseUrl(host);
   const client = graphql.defaults({
-    headers: { authorization: `token ${token}` }
+    headers: { authorization: `token ${token}` },
+    // Absent for github.com so Octokit's own default endpoint stands.
+    ...(base === undefined ? {} : { baseUrl: base })
   });
   let attempt = 0;
   for (;;) {
@@ -105,6 +147,7 @@ async function runQuery(
 /** Fetch the most-recent PR for each branch in one repo (batched + backed off). */
 export async function fetchPrsForRepo(
   token: string,
+  host: string,
   owner: string,
   repo: string,
   branches: string[]
@@ -113,7 +156,7 @@ export async function fetchPrsForRepo(
   for (let i = 0; i < branches.length; i += BATCH) {
     const chunk = branches.slice(i, i + BATCH);
     const { query, variables } = buildPrQuery(owner, repo, chunk);
-    const data = await runQuery(token, query, variables);
+    const data = await runQuery(token, host, query, variables);
     for (const [branch, pr] of parsePrResponse(chunk, data)) {
       result.set(branch, pr);
     }
@@ -124,6 +167,7 @@ export async function fetchPrsForRepo(
 /** Fetch the best PR associated with each exact commit in batched GraphQL calls. */
 export async function fetchPrsForCommits(
   token: string,
+  host: string,
   owner: string,
   repo: string,
   commitHashes: string[]
@@ -132,7 +176,7 @@ export async function fetchPrsForCommits(
   for (let i = 0; i < commitHashes.length; i += BATCH) {
     const chunk = commitHashes.slice(i, i + BATCH);
     const { query, variables } = buildCommitPrQuery(owner, repo, chunk);
-    const data = await runQuery(token, query, variables);
+    const data = await runQuery(token, host, query, variables);
     for (const [hash, pr] of parseCommitPrResponse(chunk, data)) {
       result.set(hash, pr);
     }
@@ -143,6 +187,7 @@ export async function fetchPrsForCommits(
 /** Refresh already-discovered PRs once per unique number. */
 export async function fetchPrsByNumbers(
   token: string,
+  host: string,
   owner: string,
   repo: string,
   numbers: number[]
@@ -151,7 +196,7 @@ export async function fetchPrsByNumbers(
   for (let i = 0; i < numbers.length; i += BATCH) {
     const chunk = numbers.slice(i, i + BATCH);
     const { query, variables } = buildPrNumberQuery(owner, repo, chunk);
-    const data = await runQuery(token, query, variables);
+    const data = await runQuery(token, host, query, variables);
     for (const [number, pr] of parsePrNumberResponse(chunk, data)) {
       result.set(number, pr);
     }

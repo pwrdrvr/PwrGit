@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --bg-app: #000000; --bg-panel: #0a0a0a; --bg-input: #080808;
+            --bg-elev: #101010; --bg-row-active: #1a1206;
+            --line-faint: rgba(247, 243, 235, 0.06);
+            --line: rgba(247, 243, 235, 0.1);
+            --line-def: rgba(247, 243, 235, 0.14);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a;
+            --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42);
+            --ok: #5fa969; --okt: #9ce5b3; --oksoft: rgba(74, 148, 92, 0.18);
+            --warn: #d99a3d; --warnsoft: rgba(217, 154, 61, 0.14);
+            --bad: #b94232; --badt: #ffb0a1; --badsoft: rgba(185, 66, 50, 0.24);
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          * { box-sizing: border-box; }
+          body { margin: 0; background: #050505; font-family: var(--sans); color: var(--t1); }
+          a { color: var(--accb); } a:hover { color: var(--acc); }
+
+          .dv-turn { padding: 40px 44px 32px; }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.6 var(--sans); color: var(--t3); max-width: 760px; text-wrap: pretty; }
+          .dv-sub code, .dv-note code, .dv-olabel code, .dv-flag code { font: 500 10.5px var(--mono); color: var(--accb); }
+          .dv-sub b, .dv-note b { color: var(--t2); font-weight: 600; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.4 var(--sans); color: var(--tsub); max-width: 680px; }
+          .dv-card { background: var(--bg-app); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+          .dv-note { margin: 24px 0 0; padding: 14px 16px; border: 1px solid var(--line); border-left: 3px solid var(--acc); border-radius: 0 8px 8px 0; background: var(--bg-panel); font: 400 11.5px/1.7 var(--sans); color: var(--t2); max-width: 940px; }
+          .dv-prov { margin-top: 10px; font: 500 10px/1.6 var(--mono); color: var(--tsub); }
+
+          /* Critique gutter: a column of call-outs beside the card. No leader
+             lines — each flag names the row it is about, which survives a
+             re-flow that hand-placed pixel offsets would not. */
+          .dv-annot { display: flex; align-items: flex-start; gap: 16px; }
+          .dv-gutter { display: flex; flex-direction: column; gap: 8px; width: 260px; padding-top: 4px; }
+          .dv-flag { padding: 8px 10px; border-radius: 7px; background: var(--badsoft); border: 1px solid var(--bad); color: var(--badt); font: 500 10px/1.5 var(--sans); }
+          .dv-flag b { display: block; font: 600 10px/1.4 var(--mono); color: #ffd7cd; margin-bottom: 3px; }
+
+          /* ---- Settings chrome, lifted from PwrGit app.css ---- */
+          .pane { padding: 22px 24px; display: flex; flex-direction: column; gap: 18px; }
+          .head-eyebrow { font: 600 9.5px/1 var(--sans); letter-spacing: 0.14em; text-transform: uppercase; color: var(--acc); }
+          .head-title { margin: 6px 0 0; font: 700 19px/1.2 var(--sans); letter-spacing: -0.01em; color: var(--t1); }
+          .head-help { margin: 6px 0 0; font: 400 11.5px/1.6 var(--sans); color: var(--t3); max-width: 56ch; }
+
+          .card { border: 1px solid var(--line); border-radius: 10px; background: var(--bg-panel); overflow: hidden; }
+          .card-hd { display: flex; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line-faint); }
+          .card-hd-main { min-width: 0; flex: 1; }
+          .card-eyebrow { margin: 0; font: 600 9.5px/1 var(--sans); letter-spacing: 0.14em; text-transform: uppercase; color: var(--t3); }
+          .card-title { margin: 6px 0 0; font: 600 13.5px/1.2 var(--sans); color: var(--t1); }
+          .card-desc { margin: 6px 0 0; font: 400 11.5px/1.6 var(--sans); color: var(--t3); max-width: 58ch; }
+          .chip { flex: none; align-self: flex-start; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg-elev); color: var(--t3); font: 600 10px/1 var(--sans); letter-spacing: 0.03em; }
+          .chip.ok { color: var(--okt); background: var(--oksoft); border-color: transparent; }
+          .chip.warn { color: var(--warn); background: var(--warnsoft); border-color: transparent; }
+          .chip.bad { color: var(--badt); background: var(--badsoft); border-color: transparent; }
+
+          .field { display: flex; gap: 20px; padding: 15px 16px; border-bottom: 1px solid var(--line-faint); }
+          .field:last-child { border-bottom: none; }
+          .field-l { width: 190px; flex: none; display: flex; flex-direction: column; gap: 4px; }
+          .field-l > span:first-child { font: 600 12px/1.3 var(--sans); color: var(--t1); }
+          .field-sub { font: 400 11px/1.45 var(--sans); color: var(--t3); }
+          .field-c { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+          .field-help { font: 400 10.5px/1.45 var(--sans); color: var(--tsub); max-width: 46ch; }
+
+          /* ---- the host list ---- */
+          .hosts { display: flex; flex-direction: column; }
+          .host { display: flex; flex-direction: column; gap: 7px; padding: 13px 16px; border-bottom: 1px solid var(--line-faint); }
+          .host:last-child { border-bottom: none; }
+          .host.off { background: rgba(0, 0, 0, 0.35); }
+          .host.off .host-name, .host.off .host-ev { opacity: 0.55; }
+          .host-main { display: flex; align-items: center; gap: 9px; }
+          .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--t3); }
+          .dot.ok { background: var(--ok); }
+          .dot.warn { background: var(--warn); }
+          .dot.bad { background: var(--bad); }
+          .dot.off { background: rgba(247, 243, 235, 0.22); }
+          .host-name { font: 600 12.5px/1.2 var(--mono); color: var(--t1); }
+          .kind { padding: 3px 7px; border-radius: 5px; border: 1px solid var(--line); background: var(--bg-elev); color: var(--t2); font: 600 9.5px/1 var(--sans); letter-spacing: 0.06em; text-transform: uppercase; }
+          .kind.unk { border-color: var(--warn); color: var(--warn); background: var(--warnsoft); }
+          .host-sp { flex: 1; }
+          .host-ev { padding-left: 16px; font: 400 10.5px/1.5 var(--sans); color: var(--tsub); max-width: 62ch; }
+          .host-ev b { color: var(--t2); font-weight: 600; }
+          .host-act { padding-left: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+
+          /* switch, mirroring SettingsSwitch */
+          .sw { display: inline-flex; align-items: center; gap: 7px; flex: none; }
+          .sw-track { width: 30px; height: 17px; border-radius: 999px; background: var(--bg-input); border: 1px solid var(--line-def); position: relative; }
+          .sw-thumb { position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--t3); }
+          .sw.on .sw-track { background: var(--asoft); border-color: var(--abord); }
+          .sw.on .sw-thumb { left: auto; right: 2px; background: var(--accb); }
+          .sw-word { font: 600 10px/1 var(--sans); color: var(--t3); width: 20px; }
+          .sw.on .sw-word { color: var(--accb); }
+
+          .cmd { display: inline-flex; align-items: center; gap: 8px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg-input); }
+          .cmd code { font: 500 10.5px/1.3 var(--mono); color: var(--t1); }
+          .btn { padding: 6px 11px; border: 1px solid var(--line-def); border-radius: 7px; background: var(--bg-elev); color: var(--t1); font: 550 10.5px/1 var(--sans); cursor: pointer; }
+          .btn.tiny { padding: 4px 8px; font-size: 9.5px; }
+          .btn.primary { border-color: transparent; background: var(--acc); color: var(--accon); }
+          .btn.pick { border-color: var(--abord); color: var(--accb); background: var(--asoft); }
+          .src { padding: 3px 6px; border-radius: 5px; background: rgba(247, 243, 235, 0.06); color: var(--tsub); font: 600 9px/1 var(--mono); letter-spacing: 0.06em; }
+          .row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+        </style>
+      </helmet>
+
+      <!-- ================= TURN 1 ================= -->
+      <div class="dv-turn">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Settings &rsaquo; Forges &mdash; as built</span>
+        </div>
+        <p class="dv-sub">
+          Two rows, one per <b>forge</b>, each standing for exactly one host. That models a machine with a
+          github.com account and a gitlab.com account, and nothing else. The fixture below is the case it
+          cannot describe: a working estate of <b>four</b> hosts, three of them invisible to this pane.
+        </p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="1a" data-screen-label="1a As built">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a><span>Today&rsquo;s pane against a mixed estate. It is not wrong about what it shows &mdash; it is silent about everything else.</span></div>
+            <div class="dv-annot">
+              <div class="dv-card" style="width: 640px;">
+                <div class="pane">
+                  <header>
+                    <div class="head-eyebrow">Integrations</div>
+                    <h1 class="head-title">Forges</h1>
+                    <p class="head-help">PwrGit reads pull and merge request status through the CLI you already sign in with. It never asks for a password or stores a token of its own.</p>
+                  </header>
+                  <section class="card">
+                    <div class="card-hd">
+                      <div class="card-hd-main">
+                        <p class="card-eyebrow">Integrations</p>
+                        <h2 class="card-title">Forges</h2>
+                        <p class="card-desc">PwrGit reads pull and merge request status through the CLI you already sign in with.</p>
+                      </div>
+                      <span class="chip ok">1 connected</span>
+                    </div>
+                    <div class="field">
+                      <div class="field-l">
+                        <span>GitHub</span>
+                        <span class="field-sub">Pull requests on github.com.</span>
+                      </div>
+                      <div class="field-c">
+                        <span class="chip ok">Connected</span>
+                        <span class="field-help">Branch status in bulk &middot; Commit links in bulk &middot; Diff size and timeline &middot; Fork just the default branch &middot; Commit author avatars</span>
+                      </div>
+                    </div>
+                    <div class="field">
+                      <div class="field-l">
+                        <span>GitLab</span>
+                        <span class="field-sub">Merge requests on gitlab.com and self-managed instances.</span>
+                      </div>
+                      <div class="field-c">
+                        <span class="chip warn">Signed out</span>
+                        <span class="field-help">Run `glab auth login` in a terminal, then this updates on its own.</span>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </div>
+              <div class="dv-gutter">
+                <div class="dv-flag">
+                  <b>GitLab row</b>
+                  Reads &ldquo;Signed out&rdquo; because the probe is hardcoded to <code>getGitLabToken("gitlab.com")</code>. This operator is signed in to <code>gitlab.internal.example</code> &mdash; and MR status there works.
+                </div>
+                <div class="dv-flag">
+                  <b>Missing entirely</b>
+                  <code>git.contoso.dev</code> has 6 indexed repos. <code>classifyHost</code> returns null for it, so there is no status, no avatars, no clone lineage &mdash; and no row that says so.
+                </div>
+                <div class="dv-flag">
+                  <b>Missing entirely</b>
+                  <code>github.acme-inc.com</code> (Enterprise Server) is unreachable twice over: <code>gh auth token</code> takes no host, and the Octokit client has no <code>baseUrl</code>.
+                </div>
+                <div class="dv-flag">
+                  <b>GitLab help line</b>
+                  The remediation is prose. It is selectable, but there is nothing to click, and it names no host &mdash; which is the one thing the operator needs to type.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="dv-note">
+          <b>The override map is already plumbed, and nothing has ever fed it.</b> <code>ForgeHostOverrides</code>
+          threads through <code>forge/resolve.ts</code>, <code>forge/providers.ts</code> and shared
+          <code>classifyForgeHost</code>; every call site passes <code>{}</code>, and shared
+          <code>parseForgeRemote</code> does not forward one at all. So the skeleton for host 3 exists and
+          has no value in it. That is why this is a settings gap rather than a new subsystem.
+        </div>
+      </div>
+
+      <!-- ================= TURN 2 ================= -->
+      <div class="dv-turn">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">Proposed &mdash; hosts, discovered from the repos you already have</span>
+        </div>
+        <p class="dv-sub">
+          The unit is the <b>host</b>, not the forge. Rows are derived from the <code>origin</code> of every
+          indexed repository, so the list needs no typing and cannot drift from reality: a host appears
+          because your code is there. Each row states its own evidence &mdash; how many repositories put it on
+          this list, which account answered, and where that credential came from. Both CLIs are already
+          multi-host (<code>gh auth token --hostname</code>, <code>glab config get token --host</code>), so
+          every row is one CLI call, not a login PwrGit owns.
+        </p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a Mixed estate">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a><span>The same machine as 1a, resting. Four hosts, four different stories, and the two that need a human say exactly what to do.</span></div>
+            <div class="dv-card" style="width: 700px;">
+              <div class="pane">
+                <header>
+                  <div class="head-eyebrow">Integrations</div>
+                  <h1 class="head-title">Forges</h1>
+                  <p class="head-help">PwrGit reads pull and merge request status through the CLI you already sign in with. It never asks for a password or stores a token of its own.</p>
+                </header>
+                <section class="card">
+                  <div class="card-hd">
+                    <div class="card-hd-main">
+                      <p class="card-eyebrow">Integrations</p>
+                      <h2 class="card-title">Hosts</h2>
+                      <p class="card-desc">Found in the remotes of the repositories you have open. PwrGit only ever talks to a host on this list.</p>
+                    </div>
+                    <span class="chip warn">2 of 4 connected</span>
+                  </div>
+                  <div class="hosts">
+                    <div class="host">
+                      <div class="host-main">
+                        <span class="dot ok"></span>
+                        <span class="host-name">github.com</span>
+                        <span class="kind">GitHub</span>
+                        <span class="host-sp"></span>
+                        <span class="chip ok">Connected</span>
+                        <span class="sw on"><span class="sw-track"><span class="sw-thumb"></span></span><span class="sw-word">On</span></span>
+                      </div>
+                      <div class="host-ev">12 repositories &middot; <b>octo-dev</b> via <b>gh</b> &middot; scopes: repo, read:org</div>
+                    </div>
+
+                    <div class="host">
+                      <div class="host-main">
+                        <span class="dot ok"></span>
+                        <span class="host-name">gitlab.internal.example</span>
+                        <span class="kind">GitLab</span>
+                        <span class="host-sp"></span>
+                        <span class="chip ok">Connected</span>
+                        <span class="sw on"><span class="sw-track"><span class="sw-thumb"></span></span><span class="sw-word">On</span></span>
+                      </div>
+                      <div class="host-ev">4 repositories &middot; <b>o.dev</b> via <b>glab</b> &middot; self-managed</div>
+                    </div>
+
+                    <div class="host">
+                      <div class="host-main">
+                        <span class="dot bad"></span>
+                        <span class="host-name">github.acme-inc.com</span>
+                        <span class="kind">GitHub</span>
+                        <span class="host-sp"></span>
+                        <span class="chip bad">Sign in</span>
+                        <span class="sw on"><span class="sw-track"><span class="sw-thumb"></span></span><span class="sw-word">On</span></span>
+                      </div>
+                      <div class="host-ev">3 repositories &middot; Enterprise Server &middot; <b>gh</b> holds no account for this host.</div>
+                      <div class="host-act">
+                        <span class="cmd"><code>gh auth login --hostname github.acme-inc.com</code><button class="btn tiny">Copy</button></span>
+                      </div>
+                    </div>
+
+                    <div class="host">
+                      <div class="host-main">
+                        <span class="dot warn"></span>
+                        <span class="host-name">git.contoso.dev</span>
+                        <span class="kind unk">Which forge?</span>
+                        <span class="host-sp"></span>
+                        <span class="chip warn">Needs a choice</span>
+                      </div>
+                      <div class="host-ev">6 repositories &middot; The hostname does not say which product runs here, and guessing would send your code&rsquo;s metadata to the wrong API.</div>
+                      <div class="host-act">
+                        <button class="btn pick">GitHub</button>
+                        <button class="btn pick">GitLab</button>
+                        <button class="btn">Neither &mdash; ignore this host</button>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Resolved + off">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a><span>After the choice in 2a, and with one host deliberately turned off. <b>Off</b> is a resting state somebody chose &mdash; it never borrows the tone that means broken.</span></div>
+            <div class="dv-card" style="width: 700px;">
+              <div class="pane">
+                <section class="card">
+                  <div class="card-hd">
+                    <div class="card-hd-main">
+                      <p class="card-eyebrow">Integrations</p>
+                      <h2 class="card-title">Hosts</h2>
+                      <p class="card-desc">Found in the remotes of the repositories you have open. PwrGit only ever talks to a host on this list.</p>
+                    </div>
+                    <span class="chip ok">3 connected</span>
+                  </div>
+                  <div class="hosts">
+                    <div class="host">
+                      <div class="host-main">
+                        <span class="dot ok"></span>
+                        <span class="host-name">github.com</span>
+                        <span class="kind">GitHub</span>
+                        <span class="host-sp"></span>
+                        <span class="chip ok">Connected</span>
+                        <span class="sw on"><span class="sw-track"><span class="sw-thumb"></span></span><span class="sw-word">On</span></span>
+                      </div>
+                      <div class="host-ev">12 repositories &middot; <b>octo-dev</b> via <b>gh</b> &middot; scopes: repo, read:org</div>
+                    </div>
+
+                    <div class="host">
+                      <div class="host-main">
+                        <span class="dot ok"></span>
+                        <span class="host-name">git.contoso.dev</span>
+                        <span class="kind">GitLab</span>
+                        <span class="host-sp"></span>
+                        <span class="chip ok">Connected</span>
+                        <span class="sw on"><span class="sw-track"><span class="sw-thumb"></span></span><span class="sw-word">On</span></span>
+                      </div>
+                      <div class="host-ev">6 repositories &middot; <b>o.dev</b> via <b>glab</b> &middot; set to GitLab by you <span class="src">config</span></div>
+                    </div>
+
+                    <div class="host off">
+                      <div class="host-main">
+                        <span class="dot off"></span>
+                        <span class="host-name">gitlab.com</span>
+                        <span class="kind">GitLab</span>
+                        <span class="host-sp"></span>
+                        <span class="chip">Off</span>
+                        <span class="sw"><span class="sw-track"><span class="sw-thumb"></span></span><span class="sw-word">Off</span></span>
+                      </div>
+                      <div class="host-ev">1 repository &middot; PwrGit runs no <b>glab</b> command and mints no token for this host, including on the background refresh.</div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c One host, derived">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a><span>The common machine: one host, one account, nothing to decide. The <code>auto</code> badge says the switch is a <b>derived</b> default, not a choice on record &mdash; so no upgrade silently turns anything off.</span></div>
+            <div class="dv-card" style="width: 700px;">
+              <div class="pane">
+                <section class="card">
+                  <div class="card-hd">
+                    <div class="card-hd-main">
+                      <p class="card-eyebrow">Integrations</p>
+                      <h2 class="card-title">Hosts</h2>
+                      <p class="card-desc">Found in the remotes of the repositories you have open. PwrGit only ever talks to a host on this list.</p>
+                    </div>
+                    <span class="chip ok">1 connected</span>
+                  </div>
+                  <div class="hosts">
+                    <div class="host">
+                      <div class="host-main">
+                        <span class="dot ok"></span>
+                        <span class="host-name">github.com</span>
+                        <span class="kind">GitHub</span>
+                        <span class="host-sp"></span>
+                        <span class="chip ok">Connected</span>
+                        <span class="sw on"><span class="sw-track"><span class="sw-thumb"></span></span><span class="sw-word">On</span></span>
+                        <span class="src">auto</span>
+                      </div>
+                      <div class="host-ev">31 repositories &middot; <b>octo-dev</b> via <b>gh</b> &middot; On because <b>gh</b> is signed in here.</div>
+                    </div>
+                  </div>
+                </section>
+                <div class="field" style="border: 1px solid var(--line); border-radius: 10px; background: var(--bg-panel);">
+                  <div class="field-l">
+                    <span>Other hosts</span>
+                    <span class="field-sub">Add a host before you clone from it.</span>
+                  </div>
+                  <div class="field-c">
+                    <div class="row-actions"><button class="btn">Add a host&hellip;</button></div>
+                    <span class="field-help">GitLab is not listed because no repository here points at one. Nothing was probed for it, and no <code>glab</code> process ran.</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <div class="dv-note">
+          <b>Why the list is derived rather than typed.</b> A hand-maintained host list is a second source of
+          truth that starts wrong and rots: it can name a host you no longer use, and it is silent about the
+          one you cloned this morning. Deriving it from <code>origin</code> means the pane cannot omit a host
+          that matters, and the evidence line (<i>&ldquo;6 repositories&rdquo;</i>) is the answer to the only
+          question a surprising row raises. <b>Add a host&hellip;</b> exists for the one case derivation cannot
+          cover &mdash; signing in before the first clone.
+          <br /><br />
+          <b>Off has to be enforced below the UI.</b> The switch gates four places, not one:
+          <code>resolveForge</code> (status), <code>resolveForgeRepo</code> in commit-author identity
+          (avatars), <code>ForgeRepoRegistry</code> (clone and fork), and the status probe itself. An
+          &ldquo;off&rdquo; that still spawns a CLI is a setting that lies. <code>ForgeRepoRegistry</code> is
+          keyed by forge <i>kind</i> today and has to be rekeyed by hostname for any of this to work &mdash;
+          that is the one structural change under this screen.
+        </div>
+      </div>
+
+      <!-- ================= TURN 3 ================= -->
+      <div class="dv-turn">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3">3</a>
+          <span class="dv-tname">Later &mdash; signing in without a CLI</span>
+        </div>
+        <p class="dv-sub">
+          Not this change. Shown because the row above has to leave room for it: some operators will want
+          PwrGit signed in <b>without</b> configuring <code>gh</code> or <code>glab</code> at all, the way
+          VS Code does. The row already carries a <b>credential source</b> &mdash; today it always reads
+          <code>gh</code> or <code>glab</code>. Adding a second source fills that slot instead of
+          re-opening the layout.
+        </p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="3a" data-screen-label="3a Direct sign-in">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a><span>Three credential sources on one screen, all reading the same row shape: a CLI, a PwrGit sign-in, and a host offering one because no CLI is installed.</span></div>
+            <div class="dv-card" style="width: 700px;">
+              <div class="pane">
+                <section class="card">
+                  <div class="card-hd">
+                    <div class="card-hd-main">
+                      <p class="card-eyebrow">Integrations</p>
+                      <h2 class="card-title">Hosts</h2>
+                      <p class="card-desc">Found in the remotes of the repositories you have open. PwrGit only ever talks to a host on this list.</p>
+                    </div>
+                    <span class="chip ok">2 connected</span>
+                  </div>
+                  <div class="hosts">
+                    <div class="host">
+                      <div class="host-main">
+                        <span class="dot ok"></span>
+                        <span class="host-name">github.com</span>
+                        <span class="kind">GitHub</span>
+                        <span class="host-sp"></span>
+                        <span class="chip ok">Connected</span>
+                        <span class="sw on"><span class="sw-track"><span class="sw-thumb"></span></span><span class="sw-word">On</span></span>
+                      </div>
+                      <div class="host-ev">12 repositories &middot; <b>octo-dev</b> via <b>gh</b> &middot; scopes: repo, read:org</div>
+                    </div>
+
+                    <div class="host">
+                      <div class="host-main">
+                        <span class="dot ok"></span>
+                        <span class="host-name">github.acme-inc.com</span>
+                        <span class="kind">GitHub</span>
+                        <span class="host-sp"></span>
+                        <span class="chip ok">Connected</span>
+                        <span class="sw on"><span class="sw-track"><span class="sw-thumb"></span></span><span class="sw-word">On</span></span>
+                      </div>
+                      <div class="host-ev">3 repositories &middot; <b>o.dev</b> via <b>PwrGit sign-in</b> &middot; expires in 58 min, renews itself</div>
+                      <div class="host-act"><button class="btn tiny">Sign out</button></div>
+                    </div>
+
+                    <div class="host">
+                      <div class="host-main">
+                        <span class="dot bad"></span>
+                        <span class="host-name">gitlab.com</span>
+                        <span class="kind">GitLab</span>
+                        <span class="host-sp"></span>
+                        <span class="chip bad">Sign in</span>
+                        <span class="sw on"><span class="sw-track"><span class="sw-thumb"></span></span><span class="sw-word">On</span></span>
+                      </div>
+                      <div class="host-ev">2 repositories &middot; No <b>glab</b> on this machine and no PwrGit sign-in yet.</div>
+                      <div class="host-act">
+                        <button class="btn primary">Sign in to GitLab&hellip;</button>
+                        <span class="cmd"><code>glab auth login --hostname gitlab.com</code><button class="btn tiny">Copy</button></span>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="dv-note">
+          <b>Two sources, one row, and a visible winner.</b> When a host has both a CLI login and a PwrGit
+          sign-in, the row must name which one answered &mdash; otherwise revoking the wrong one looks like a
+          bug. The open question this screen does <i>not</i> settle: a PwrGit-owned token has to live
+          somewhere, which means OS keychain storage and refresh become ours, and the credential-opaque
+          property the identity transports rely on today (<code>gh api</code> / <code>glab api</code>, no
+          token extracted) would need a deliberate answer rather than an accident.
+        </div>
+        <div class="dv-prov">Verified against apps/desktop/src/renderer/src/features/settings/ForgesSettings.tsx, main/forge/{status,resolve,providers,repo-provider}.ts, main/github/pr-client.ts, main/forge/gitlab/{glab-cli,mr-client}.ts &middot; gh 2.100.0, glab 1.117.0, @octokit/graphql 8.2.2 &middot; 2026-09-11. All hosts, accounts and counts are contrived fixture data.</div>
+      </div>
+    </x-dc>
+  </body>
+</html>

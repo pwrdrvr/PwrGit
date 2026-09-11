@@ -15,6 +15,9 @@ import {
   type AppSettingsPatch,
   type AppSettingsSnapshot,
   type DiagnosticsSettings,
+  type ForgeHostConfig,
+  type ForgeKind,
+  type ForgeSettings,
   type ExperimentalSettings,
   type GeneralSettings,
   type UpdatesSelection,
@@ -48,6 +51,7 @@ export function settingsSnapshot(
     experimental: { ...EXPERIMENTAL_DEFAULTS, ...stored.experimental },
     diagnostics: { ...DIAGNOSTICS_DEFAULTS, ...stored.diagnostics },
     updates: resolveUpdateSelection(stored.updates, appVersion),
+    forges: { hosts: stored.forges?.hosts ?? {} },
     diagnosticsEnv: {
       heapMonitorForcedOn: resolveHeapMonitorConfig(off).enabled,
       hotCpuProfilingForcedOn: resolveHotCpuProfileConfig(off).enabled,
@@ -63,11 +67,13 @@ function sanitizePatch(patch: AppSettingsPatch): {
   experimental: Partial<ExperimentalSettings>;
   diagnostics: Partial<DiagnosticsSettings>;
   updates: Partial<UpdatesSettings>;
+  forgeHosts: Record<string, ForgeHostConfig | null> | undefined;
 } {
   const general: Partial<GeneralSettings> = {};
   const experimental: Partial<ExperimentalSettings> = {};
   const diagnostics: Partial<DiagnosticsSettings> = {};
   const updates: Partial<UpdatesSettings> = {};
+  const forgeHosts = sanitizeForgeHosts(patch.forgeHosts);
 
   const gen = patch.general;
   if (gen !== undefined) {
@@ -141,7 +147,44 @@ function sanitizePatch(patch: AppSettingsPatch): {
     // can neither pin a selection nobody clicked nor un-pin one that was.
   }
 
-  return { general, experimental, diagnostics, updates };
+  return { general, experimental, diagnostics, updates, forgeHosts };
+}
+
+function isForgeKind(value: unknown): value is ForgeKind {
+  return value === "github" || value === "gitlab";
+}
+
+/**
+ * Keep only well-formed host entries — the patch crosses IPC.
+ *
+ * A `null` value survives on purpose: it is how the pane clears a host back to
+ * `auto`, which is a different write from setting `enabled: true`. Dropping it
+ * would leave a stale decision on disk that no control can then remove.
+ */
+function sanitizeForgeHosts(
+  patch: Record<string, ForgeHostConfig | null> | undefined
+): Record<string, ForgeHostConfig | null> | undefined {
+  if (patch === undefined) return undefined;
+  const out: Record<string, ForgeHostConfig | null> = {};
+  for (const [rawHost, value] of Object.entries(patch)) {
+    const host = rawHost.trim().toLowerCase();
+    // A hostname with a slash or a space is not a hostname; refuse rather than
+    // storing a key no resolver will ever match.
+    if (host === "" || /[^a-z0-9.:-]/.test(host)) continue;
+    if (value === null) {
+      out[host] = null;
+      continue;
+    }
+    const entry: ForgeHostConfig = {};
+    if (isForgeKind(value.kind)) entry.kind = value.kind;
+    if (typeof value.enabled === "boolean") entry.enabled = value.enabled;
+    // An entry that survived sanitizing with nothing in it says nothing; treat
+    // it as the clear it amounts to.
+    out[host] = entry.kind === undefined && entry.enabled === undefined
+      ? null
+      : entry;
+  }
+  return Object.keys(out).length === 0 ? undefined : out;
 }
 
 export function registerSettingsHandlers(
@@ -170,6 +213,7 @@ export function registerSettingsHandlers(
       experimental: Partial<ExperimentalSettings>;
       diagnostics: Partial<DiagnosticsSettings>;
       updates?: UpdatesSelection;
+      forges?: ForgeSettings;
     } = {
       general: { ...stored.general, ...sanitized.general },
       experimental: { ...stored.experimental, ...sanitized.experimental },
@@ -194,6 +238,18 @@ export function registerSettingsHandlers(
         train: sanitized.updates.train ?? current.train,
         selectionSource: "user"
       };
+    }
+    // Merge host-by-host rather than replacing the map: the pane sends one
+    // host at a time, and a whole-map write would drop every other host's
+    // decision on each toggle. A `null` deletes that host's entry, returning
+    // it to the derived default instead of pinning today's value.
+    if (sanitized.forgeHosts !== undefined) {
+      const hosts = { ...(stored.forges?.hosts ?? {}) };
+      for (const [host, config] of Object.entries(sanitized.forgeHosts)) {
+        if (config === null) delete hosts[host];
+        else hosts[host] = config;
+      }
+      next.forges = { hosts };
     }
     settings.update(next);
     const snapshot = settingsSnapshot(

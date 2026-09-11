@@ -566,6 +566,32 @@ export type ExperimentalSettings = {
   lineageAllBranches: boolean;
 };
 
+/**
+ * What the user has said about one forge host, and nothing more.
+ *
+ * Both fields are OPTIONAL on purpose: absent means "nobody has decided", which
+ * is a different state from a decision that happens to match the default. `kind`
+ * absent leaves the hostname heuristic in charge, and `enabled` absent leaves
+ * the derived default (on when that CLI is signed in here) in charge. Writing a
+ * resolved value back into config would freeze today's derivation into the file
+ * and make a later sign-in unable to change anything.
+ */
+export type ForgeHostConfig = {
+  /** Which product runs here, when the hostname cannot say. */
+  kind?: ForgeKind;
+  /** Whether PwrGit may talk to this host at all. */
+  enabled?: boolean;
+};
+
+/** Per-host forge configuration, keyed by canonical lowercase hostname. */
+export type ForgeSettings = {
+  hosts: Record<string, ForgeHostConfig>;
+};
+
+/** Where a resolved forge-host value came from. The UI shows `auto` so a
+ *  derived default never reads as a choice somebody made. */
+export type ForgeValueSource = "auto" | "config" | "env";
+
 export type DiagnosticsSettings = {
   /** Sample main + renderer heaps; auto-snapshot on growth spikes. */
   heapMonitorEnabled: boolean;
@@ -607,6 +633,9 @@ export type AppSettingsSnapshot = {
   experimental: ExperimentalSettings;
   diagnostics: DiagnosticsSettings;
   updates: UpdatesSelection;
+  /** Per-host forge configuration. Sparse: only hosts somebody has decided
+   *  something about appear, so an empty map is the ordinary state. */
+  forges: ForgeSettings;
   diagnosticsEnv: DiagnosticsEnvOverrides;
   /** Directory diagnostics sessions (profiles, snapshots) are written to. */
   diagnosticsOutputRoot: string;
@@ -620,6 +649,10 @@ export type AppSettingsPatch = {
    *  state — the write path sets it to `"user"` whenever a patch names
    *  either axis, so a renderer can neither forget to send it nor forge it. */
   updates?: Partial<UpdatesSettings>;
+  /** One host at a time, keyed by hostname. A `null` value clears that host's
+   *  entry entirely — which is how the pane returns a host to `auto` rather
+   *  than writing today's derived value in as a choice. */
+  forgeHosts?: Record<string, ForgeHostConfig | null>;
 };
 
 export interface Commands {

@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type {
   DiagnosticsSettings,
+  ForgeSettings,
   ExperimentalSettings,
   GeneralSettings,
   UpdatesSelection
@@ -23,6 +24,10 @@ export type AppSettings = {
    *  alongside the main-owned `selectionSource` that says the pair is a
    *  choice rather than something derived from the installed binary. */
   updates?: Partial<UpdatesSelection>;
+  /** Per-host forge decisions. Sparse — a host only appears once somebody has
+   *  chosen its kind or flipped its switch, so absence stays distinguishable
+   *  from a choice that happens to match the derived default. */
+  forges?: ForgeSettings;
 };
 
 const DEFAULTS: AppSettings = {};
