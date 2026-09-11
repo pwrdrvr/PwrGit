@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { win32 } from "node:path";
+import { delimiter, win32 } from "node:path";
 
 /**
  * Generic hardened runner for a forge's command-line client.
@@ -90,7 +90,8 @@ export type CliClient = {
 };
 
 export function cliSearchPath(): string {
-  return [process.env.PATH ?? "", ...EXTRA_PATH].filter(Boolean).join(":");
+  if (process.platform === "win32") return process.env.PATH ?? "";
+  return [process.env.PATH ?? "", ...EXTRA_PATH].filter(Boolean).join(delimiter);
 }
 
 export function createCliClient(spec: CliSpec): CliClient {

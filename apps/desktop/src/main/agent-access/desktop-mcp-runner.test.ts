@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { execGit, type GitExec } from "../git/dugite";
 import { createDesktopMcpRunner } from "./desktop-mcp-runner";
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 it("runs bundled Git with no Git on PATH", async () => {
   const fallback = vi.fn().mockRejectedValue(new Error("PATH runner must not execute Git"));
@@ -31,7 +31,7 @@ it("preserves Git results and delegates forge commands", async () => {
     await runner(command, ["version"], { cwd: tmpdir(), timeoutMs: 42 });
     expect(fallback).toHaveBeenCalledWith(command, ["version"], {
       cwd: tmpdir(), timeoutMs: 42,
-      env: { PATH: "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" }
+      env: { PATH: process.platform === "win32" ? "/usr/bin:/bin" : "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" }
     });
   }
   expect(git).toHaveBeenCalledTimes(1);
@@ -49,4 +49,18 @@ it("aborts Git at the MCP command deadline", async () => {
     await assertion;
     expect(vi.getTimerCount()).toBe(0);
   } finally { vi.useRealTimers(); }
+});
+
+it("preserves the final Windows PATH entry for both forge CLIs", async () => {
+  vi.spyOn(process, "platform", "get").mockReturnValue("win32");
+  const searchPath = String.raw`C:\Windows\System32;C:\Program Files\Forge CLIs`;
+  vi.stubEnv("PATH", searchPath);
+  const fallback = vi.fn().mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" });
+  const runner = createDesktopMcpRunner(vi.fn<GitExec>(), fallback);
+  for (const command of ["gh", "glab"]) {
+    await runner(command, ["version"], { cwd: tmpdir() });
+    expect(fallback).toHaveBeenLastCalledWith(command, ["version"], {
+      cwd: tmpdir(), env: { PATH: searchPath }
+    });
+  }
 });

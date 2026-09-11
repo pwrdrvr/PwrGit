@@ -8,6 +8,7 @@ export type ConsentWindow = {
   webContents: { id: number };
   once: (event: "closed", listener: () => void) => unknown;
   close: () => void;
+  isDestroyed: () => boolean;
 };
 type Pending = { prompt: AgentConsentPrompt; window: ConsentWindow; finish: (decision: ConsentDecision) => void };
 
@@ -35,7 +36,7 @@ export class ConsentBroker {
         if (!this.pending.delete(id)) return;
         signal.removeEventListener("abort", abort);
         resolve(decision);
-        window.close();
+        if (!window.isDestroyed()) window.close();
       };
       this.pending.set(id, { prompt, window, finish });
       signal.addEventListener("abort", abort, { once: true });

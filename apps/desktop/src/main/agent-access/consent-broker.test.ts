@@ -10,7 +10,7 @@ it("only accepts a decision from the exact consent window's main frame", async (
   try {
     const policy = new McpPolicyStore(join(dir, "policy.json")); policy.initialize();
     const close = vi.fn();
-    const broker = new ConsentBroker(policy, () => ({ webContents: { id: 41 }, once: vi.fn(), close }));
+    const broker = new ConsentBroker(policy, () => ({ webContents: { id: 41 }, once: vi.fn(), isDestroyed: () => false, close }));
     const bus = new CommandBus(); broker.register(bus);
     const abort = new AbortController();
     const decision = broker.request({ clientName: "Client", scopes: [...MCP_AGENT_CAPABILITIES], signal: abort.signal });
@@ -34,7 +34,7 @@ it("limits roles to requested scopes and denies when authorization is aborted", 
   const dir = mkdtempSync(join(tmpdir(), "pwrgit-consent-"));
   try {
     const policy = new McpPolicyStore(join(dir, "policy.json")); policy.initialize();
-    const broker = new ConsentBroker(policy, () => ({ webContents: { id: 1 }, once: vi.fn(), close: vi.fn() }));
+    const broker = new ConsentBroker(policy, () => ({ webContents: { id: 1 }, once: vi.fn(), isDestroyed: () => false, close: vi.fn() }));
     const bus = new CommandBus(); broker.register(bus);
     const abort = new AbortController();
     const decision = broker.request({ clientName: "Reader", scopes: ["repository.roots.read", "repository.checkout.locate"], signal: abort.signal });
@@ -42,5 +42,29 @@ it("limits roles to requested scopes and denies when authorization is aborted", 
     expect(read.ok && read.value.roles.map(r => r.id)).toEqual(["builtin.discovery"]);
     abort.abort();
     expect((await decision).decision).toBe("deny");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+it("denies native dismissal without closing a destroyed window and removes pending consent", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pwrgit-consent-"));
+  try {
+    const policy = new McpPolicyStore(join(dir, "policy.json")); policy.initialize();
+    let destroyed = false;
+    let closed = () => {};
+    const close = vi.fn(() => { if (destroyed) throw new Error("Object has been destroyed"); });
+    const broker = new ConsentBroker(policy, () => ({
+      webContents: { id: 41 }, isDestroyed: () => destroyed, close,
+      once: (_event, listener) => { closed = listener; }
+    }));
+    const bus = new CommandBus(); broker.register(bus);
+    const abort = new AbortController();
+    const decision = broker.request({ clientName: "Client", scopes: [...MCP_AGENT_CAPABILITIES], signal: abort.signal });
+    destroyed = true;
+    expect(() => closed()).not.toThrow();
+    expect((await decision).decision).toBe("deny");
+    expect(close).not.toHaveBeenCalled();
+    expect((await bus.dispatch("agentAccess:consentRead", undefined, { webContentsId: 41, isMainFrame: true })).ok).toBe(false);
+    abort.abort();
+    expect(close).not.toHaveBeenCalled();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
