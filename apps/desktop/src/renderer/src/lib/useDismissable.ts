@@ -56,7 +56,15 @@ function escapeOwner(): Layer | undefined {
     }
     if (best !== undefined) return best;
   }
-  return openOverlays[openOverlays.length - 1];
+  // Focus sits in something that is not a registered overlay. It may still be
+  // an overlay — not everything that floats uses this hook (the ⌘F repo
+  // switcher, for one) — so claiming the key here would close a dialog while
+  // the user was dismissing the thing on top of it. Only "nowhere in
+  // particular" falls through to the newest overlay, which is what lets Escape
+  // keep working after some other surface closed and dropped focus to <body>.
+  const nowhere =
+    active === null || active === document.body || !active.isConnected;
+  return nowhere ? openOverlays[openOverlays.length - 1] : undefined;
 }
 
 /**

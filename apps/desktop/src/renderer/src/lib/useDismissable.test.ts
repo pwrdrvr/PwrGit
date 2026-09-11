@@ -87,6 +87,34 @@ describe("useDismissable", () => {
     expect(document.activeElement).toBe(byText("Trigger"));
   });
 
+  it("leaves the key alone when an unregistered overlay holds focus", () => {
+    // Not everything that floats uses this hook — the repo switcher does not.
+    // Claiming Escape here would close the dialog underneath while the user
+    // was dismissing the thing on top of it.
+    const onDismiss = vi.fn();
+    render({ open: true, onDismiss });
+    const other = document.createElement("input");
+    document.body.appendChild(other);
+    other.focus();
+
+    escape();
+
+    expect(onDismiss).not.toHaveBeenCalled();
+    other.remove();
+  });
+
+  it("still answers when focus is nowhere in particular", () => {
+    // A surface that closed and dropped focus to <body> must not strand the
+    // overlay behind it with no keyboard way out.
+    const onDismiss = vi.fn();
+    render({ open: true, onDismiss });
+    (document.activeElement as HTMLElement | null)?.blur();
+
+    escape();
+
+    expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
   it("does not steal focus from somewhere else on the page", () => {
     // An overlay can be dismissed while the user is typing elsewhere; yanking
     // the caret out of their field would be worse than the bug this fixes.
