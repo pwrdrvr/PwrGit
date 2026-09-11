@@ -209,6 +209,11 @@ test("tags a commit straight from the lineage graph", async () => {
   await expect(create).toHaveCount(0);
 
   expect(box.git(repo.path, "rev-parse", "refs/tags/v0.9.0")).toBe(target);
+  // The chip appears without waiting out the lane cache. `tag:create` used to
+  // emit only `repo:changed`, which the graph does not subscribe to, so the tag
+  // the user had just made stayed invisible here for LANE_TTL_MS (30s). The
+  // default expect timeout is far under that, which is the point.
+  await expect(row.locator(".commit-tag--tag .commit-tag__name")).toHaveText("v0.9.0");
   // Tagging never moves a checkout — HEAD is exactly where it was, not merely
   // somewhere other than the tagged commit.
   expect(box.git(repo.path, "rev-parse", "HEAD")).toBe(headBefore);

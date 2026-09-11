@@ -100,7 +100,9 @@ export function registerGraphHandlers(
   });
 
   bus.register("graph:lanes", async (req) => {
-    if (req.revealHash !== undefined && !/^[0-9a-f]{40,64}$/.test(req.revealHash)) {
+    // SHA-1 and SHA-256 object IDs, and nothing between: a range would admit
+    // lengths git cannot resolve, which then have to fail somewhere worse.
+    if (req.revealHash !== undefined && !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(req.revealHash)) {
       return err({ kind: "git", code: "invalid_commit", message: "Invalid commit object ID" });
     }
     const wt = db
@@ -304,10 +306,12 @@ export function registerGraphHandlers(
         entry.pr = pr;
       }
 
+      // Tags are decoration on a commit row. A refs/tags directory this
+      // process cannot read is a reason to draw no chips, not a reason to
+      // refuse the graph — which is what returning the error here would do.
       const tags = await readGraphTags(execGit, wt.path);
-      if (!tags.ok) return tags;
       cached = {
-        tags: tags.value,
+        tags: tags.ok ? tags.value : {},
         commits: topoMergeCommits([trunk.value, uniques.value]),
         tips: tips.value.local,
         remoteTips: tips.value.remote,
@@ -431,14 +435,23 @@ export function registerGraphHandlers(
     // Navigation is per request: never contaminate the shared repo cache.
     let commits = out.commits;
     if (req.revealHash !== undefined && !commits.some((c) => c.hash === req.revealHash)) {
+      // The reveal is an enhancement to this request, so a hash this repo
+      // cannot resolve costs the caller the jump, not the graph. A stale
+      // target racing a cross-repo switch is the ordinary way that happens.
       const window = await readLogRefs(execGit, wt.path, [req.revealHash], 40);
-      if (!window.ok) return window;
-      commits = topoMergeCommits([commits, window.value]);
+      if (window.ok) commits = topoMergeCommits([commits, window.value]);
     }
-    const visible = new Set(commits.map((commit) => commit.hash));
+    // Built from the commits being drawn, not from every tag in the repo: the
+    // map has at most one entry per row, and a repo with 20k tagged commits
+    // should not pay for 20k of them on a graph that shows 150.
+    const tags: NonNullable<LaneGraph["tags"]> = {};
+    for (const commit of commits) {
+      const tag = out.tags[commit.hash];
+      if (tag !== undefined) tags[commit.hash] = tag;
+    }
     return ok({
       commits,
-      tags: Object.fromEntries(Object.entries(out.tags).filter(([hash]) => visible.has(hash))),
+      tags,
       tips: out.tips,
       remoteTips: out.remoteTips,
       ...(headUpstream === undefined ? {} : { headUpstream }),
