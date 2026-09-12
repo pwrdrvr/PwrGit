@@ -332,20 +332,16 @@ provider or reach a real forge.
   non-resolved outcome that is a **choice** — `unavailable` means we could not
   ask, `unknown` means the forge was asked and would not say, and the refresh
   button must not report a choice as a failure.
-- **Clone and fork are the deliberate exception.** `CloneService`/`ForkService`
-  call `this.forges.get(host)` with no `enabled` check: the user opened a dialog
-  and named that forge, where every gated caller is unprompted background work.
-  The rationale holds for fork, which never sees a hostname — but `runClone`
-  did carry `source.hostname` and used it for the clone URL while picking the
-  provider by kind alone, so a self-managed CLI clone ran against the SaaS
-  instance and cloned a same-named stranger's project. That one is fixed;
-  keying by hostname wherever a caller HAS one is not optional. Because the
-  exception exists, the Hosts
-  pane says so in its section description, where every row sees it —
-  `sourceNote` is skipped entirely for hand-added rows and its off branch never
-  runs for env-controlled ones. The off text also stops short of "runs no
-  command": `ForgeStatusService` probes and host enumeration still spawn a CLI
-  per forge regardless of the switch.
+- **Clone and fork are gated too, but on the SaaS host.** They used to be the
+  documented exception; `forgeSaasBlock`'s `host_off` closed that, and
+  `status.ts` stopped probing a disabled host at all, so "off" now means every
+  reader. Note *which* host they ask about: both reach a provider through
+  `ForgeRepoRegistry.get(kind)` with no hostname, so the gate names the SaaS
+  instance. `runClone` is the seam — it does carry `source.hostname` and now
+  uses it (picking by kind alone cloned a same-named stranger's project from
+  gitlab.com), so a CLI clone can target a self-managed host whose own switch
+  was never consulted. Closing that means teaching the dialogs hostnames, not
+  widening the gate. Fork has no hostname to carry and needs no such change.
 - **A dialog opens on local state; a forge is asked only on debounced input.**
   This is the rule the clone dialog broke. `repo:cloneCatalog` used to list
   every known owner's repositories as it opened — `gh repo list <owner>

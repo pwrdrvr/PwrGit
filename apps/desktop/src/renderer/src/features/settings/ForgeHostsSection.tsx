@@ -18,13 +18,13 @@ const KIND_LABEL: Record<ForgeHostRow["kind"], string> = {
  * Git remotes are deliberately not a source: a remote is an ssh target, and a
  * NAS or a box on a home network is not a forge — see `forge/AGENTS.md`.
  *
- * The switch is enforced in main, not here, and it covers exactly the three
- * background readers: change-request status, commit authors, and the
- * repository identity refresh. Clone and fork are the documented exception
- * (`main/forge/AGENTS.md`). The copy below must not promise more than that —
- * it deliberately does not say "runs no command", because the status probe
- * and host enumeration still run per CLI. This pane only ever writes the
- * setting and re-reads what main says.
+ * The switch is enforced in main, not here, and as of the per-host status work
+ * it covers every reader: request status, commit authors, the identity
+ * refresh, the status probe itself, and the clone and fork dialogs. The one
+ * thing it cannot stop is the CLI sign-in check that discovers the host in the
+ * first place, which is why the copy below names that exception rather than
+ * claiming a clean "runs no command". This pane only ever writes the setting
+ * and re-reads what main says.
  */
 export function ForgeHostsSection(props: { saving: boolean }) {
   const [hosts, setHosts] = useState<ForgeHostRow[] | undefined>();
@@ -92,7 +92,7 @@ export function ForgeHostsSection(props: { saving: boolean }) {
     <SettingsSection
       title="Hosts"
       eyebrow="Integrations"
-      description="Reported by the GitHub and GitLab CLIs. PwrGit only ever talks to a host on this list — a plain ssh remote never appears here. Switching one off stops request status, commit authors and repository identity being read from it; the clone and fork dialogs are not covered."
+      description="Reported by the GitHub and GitLab CLIs. PwrGit only ever talks to a host on this list — a plain ssh remote never appears here. Switching one off stops everything that reads from it: request status, commit authors, repository identity, and the clone and fork dialogs."
       chip={
         hosts === undefined
           ? undefined
@@ -204,7 +204,7 @@ function sourceNote(row: ForgeHostRow): string {
   if (row.enabledSource === "config") {
     return row.enabled
       ? "On because you turned it on."
-      : "Off. No request status, commit authors or repository identity are read from this host.";
+      : "Off. PwrGit reads nothing from this host and mints no token for it. Only the sign-in check that lists it here still runs.";
   }
   // `auto` means nobody has decided — a known forge is on by default. It does
   // NOT mean "on because a CLI is signed in"; permission deliberately does not
