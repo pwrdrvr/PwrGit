@@ -133,6 +133,9 @@ describe("ForgeHosts.isEnabled", () => {
       enabled: false,
       source: "config"
     });
+    // However the caller spells it: `parseForgeRemote` lowercases, but an env
+    // entry or a hand-written config key need not have.
+    expect(hosts.isEnabled("GitLab.com").enabled).toBe(false);
   });
 
   it("honours an explicit on before any sign-in", () => {
@@ -160,6 +163,55 @@ describe("ForgeHosts.isEnabled", () => {
     // A switch flipped on a host that names no forge enables no transport.
     const hosts = make({ hosts: { "nas.local": { enabled: true } } });
     expect(hosts.isEnabled("nas.local").enabled).toBe(false);
+  });
+});
+
+describe("ForgeHosts.isEnabled as the gate every background reader asks", () => {
+  it("is off, and only `auto`-off, for a host nobody has named", () => {
+    // One object answers both halves for a self-managed instance nothing has
+    // reported: it is absent from `overrides()`, so `parseForgeRemote` cannot
+    // even place it, and `isEnabled` says off. The `source` is what keeps the
+    // two apart for a caller that caches — see `identity-service.ts`.
+    const hosts = make({});
+    expect(
+      parseForgeRemote(
+        "git@gitlab.internal.example:group/app.git",
+        hosts.overrides()
+      )?.host
+    ).toBe("other");
+    const { enabled, source } = hosts.isEnabled("gitlab.internal.example");
+    expect(enabled).toBe(false);
+    // `auto`, not `config` — nobody decided this, the host is just unknown.
+    // Callers that cache an "off" must not cache this one for long.
+    expect(source).toBe("auto");
+  });
+
+  it("is on, and placed, once a CLI reports the same host", () => {
+    // The contrast that makes the assertion above mean something: enumeration
+    // is the only thing that changes either answer, and it changes both.
+    const hosts = make({ discovered: [GL("gitlab.internal.example")] });
+    expect(
+      parseForgeRemote(
+        "git@gitlab.internal.example:group/app.git",
+        hosts.overrides()
+      )?.host
+    ).toBe("gitlab");
+    expect(hosts.isEnabled("gitlab.internal.example").enabled).toBe(true);
+  });
+
+  it("survives a settings file with no hosts object", () => {
+    // `isEnabled` runs per repository on a background path with no catch
+    // around it, so a throw here rejects a whole refresh batch. `forges: {}`
+    // reaches this unvalidated: SettingsService spreads whatever parsed.
+    const service = new ForgeHosts({
+      readSettings: () => ({} as ForgeSettings),
+      discovered: () => [],
+      env: {}
+    });
+    expect(() => service.isEnabled("github.com")).not.toThrow();
+    expect(service.isEnabled("github.com").enabled).toBe(true);
+    expect(service.list()).toEqual([]);
+    expect(service.overrides()).toEqual({});
   });
 });
 

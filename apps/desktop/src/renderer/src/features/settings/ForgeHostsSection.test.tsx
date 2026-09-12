@@ -364,8 +364,11 @@ describe("ForgeHostsSection — removing a hand-added host", () => {
 
     expect(removeButton("github.com")).toBeNull();
     expect(container.textContent).not.toContain("Added by you");
-    // And it gets the explanation `sourceNote` exists to give.
-    expect(container.textContent).toContain("PwrGit runs no command");
+    // And it gets the explanation `sourceNote` exists to give — including the
+    // one thing "off" does NOT stop, since a switch that overpromises is the
+    // same lie as one that still shells out.
+    expect(container.textContent).toContain("PwrGit reads nothing from this host");
+    expect(container.textContent).toContain("Only the sign-in check");
   });
 
   it("explains an env-pinned switch on a hand-added host", async () => {

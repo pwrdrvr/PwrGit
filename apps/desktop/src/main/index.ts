@@ -446,7 +446,7 @@ if (!gotSingleInstanceLock) {
      */
     let probedTargets = forgeTargetSignature(forgeHosts);
     let reprobeTimer: NodeJS.Timeout | undefined;
-    const reprobeForgesIfTargetsMoved = (): void => {
+    const onForgeTargetsMaybeMoved = (): void => {
       const next = forgeTargetSignature(forgeHosts);
       if (next === probedTargets) return;
       probedTargets = next;
@@ -455,15 +455,20 @@ if (!gotSingleInstanceLock) {
         reprobeTimer = undefined;
         // A forced read retires the cache and any in-flight pass itself.
         void forgeStatus.list({ force: true }).catch(() => undefined);
+        // Same signature, same debounce: the gate the identity refresh obeys
+        // is built from exactly these targets, so anything that moves them
+        // moves its answer too, and anything that leaves them alone must cost
+        // nothing. Defined below, and only ever reached from a timer.
+        refreshIdentitiesAfterGateChange();
       }, FORGE_REPROBE_DEBOUNCE_MS);
     };
     const forgeHostsView = new ForgeHostsView(forgeHosts, async () => {
       const refreshed = await forgeHostDirectory.refresh({ force: true });
-      reprobeForgesIfTargetsMoved();
+      onForgeTargetsMaybeMoved();
       return refreshed;
     });
     // Enumeration has landed: adopt whatever hosts it found.
-    void forgeDirectoryPrimed.then(reprobeForgesIfTargetsMoved, () => undefined);
+    void forgeDirectoryPrimed.then(onForgeTargetsMaybeMoved, () => undefined);
     const resolveEnabledForge: typeof resolveForge = (url, overrides) => {
       const resolved = resolveForge(url, overrides ?? forgeHosts.overrides());
       if (resolved === null) return null;
@@ -481,17 +486,73 @@ if (!gotSingleInstanceLock) {
     // data that has not moved. The TTL is what makes this cheap; the pane's
     // own Re-check is the forced path.
     forgeStatus.onChange(() => {
-      void forgeHostDirectory.refresh();
+      // Whatever that re-read discovers is a gate input, so it goes through the
+      // same signature check as every other edge — the pane's Re-check reaches
+      // the gate through here, not only through its own callback.
+      void forgeHostDirectory
+        .refresh()
+        .then(onForgeTargetsMaybeMoved, () => undefined);
     });
     // Same host list AND the same off switch the PR and commit-author
     // resolvers use. Without the list an `origin` on a self-managed instance
     // classifies as `other` and the repo silently loses its visibility and
     // fork-lineage marks; without the switch a host turned off in Settings
-    // still spawns its CLI on every identity refresh.
+    // still spawns its CLI on every identity refresh. `isEnabled` is passed
+    // whole rather than narrowed to its boolean: the identity refresh backs
+    // off on a decided "off" and re-asks promptly on a host nothing has
+    // recognized yet, and `.enabled` alone cannot tell those apart.
     const identityService = new IdentityService(db, execGit, forges, {
       overrides: () => forgeHosts.overrides(),
-      isHostEnabled: (hostname) => forgeHosts.isEnabled(hostname).enabled
+      isEnabled: (hostname) => forgeHosts.isEnabled(hostname)
     });
+    /**
+     * Re-ask for identities whose answer the gate may have just changed.
+     *
+     * The gate reads host enumeration and the forge settings, and both land
+     * AFTER the profile-load refresh has already run: enumeration is two
+     * subprocesses primed at boot, and a switch is flipped whenever the user
+     * opens Settings. Without this, a self-managed host that was still
+     * unknown when the window mounted stays unmarked until a profile switch
+     * or a fetch, and turning a host back on repaints nothing at all — the
+     * sidebar glyph is the only manual trigger, and it does not render for a
+     * repository that never got a row.
+     *
+     * Every open profile, not just the active one: windows are per-profile and
+     * several can be up at once, so refreshing only `getActiveId()` makes the
+     * unfocused ones pay the invalidation and get none of the repaint.
+     *
+     * Called only from the debounced, signature-guarded hook above, which is
+     * why nothing here re-checks whether anything forge-related moved. Its
+     * timer also puts every call after `windows` below is initialized.
+     */
+    const refreshIdentitiesAfterGateChange = (): void => {
+      // Async from the first statement: `listRepos` and `settled` can both
+      // throw or reject, and on the settings edge this runs inside the command
+      // handler, where an escaping throw is reported to the user as a failed
+      // save for a save that already succeeded.
+      void (async () => {
+        const byProfile = windows
+          .openProfileIds()
+          .map((profileId) => ({ profileId, repos: indexer.listRepos(profileId) }))
+          .filter(({ repos }) => repos.length > 0);
+        if (byProfile.length === 0) return;
+        // A pass already running holds every repo in its in-flight set, where
+        // the unforced `due` filter drops them — so wait it out rather than
+        // refreshing nothing and never retrying.
+        await identityService.settled();
+        identityService.clearGateBackoff();
+        await Promise.all(
+          byProfile.map(async ({ profileId, repos }) => {
+            const changed = await identityService.refresh(repos);
+            if (changed.length > 0) {
+              emitEvent("repo:identityChanged", { profileId, identities: changed });
+            }
+          })
+        );
+      })().catch((cause: unknown) => {
+        logMain("debug", "forge", "identity refresh after gate change failed:", cause);
+      });
+    };
     const cloneService = new CloneService(
       db,
       execGit,
@@ -768,9 +829,12 @@ if (!gotSingleInstanceLock) {
         emitEvent("settings:changed", snapshot);
         diagnostics.sync();
         refreshMenu(); // Developer Mode toggles View-menu items live
-        // A host switch is an input to the probe; a theme toggle is not. The
-        // signature tells them apart.
-        reprobeForgesIfTargetsMoved();
+        // A host switch is an input to the probe and to the identity gate; a
+        // theme toggle is neither. The signature tells them apart, and costs
+        // nothing when it has not moved — without it a theme toggle re-reads
+        // `origin` for every repository in the profile, because a repo on a
+        // switched-off host has no row for the TTL to suppress.
+        onForgeTargetsMaybeMoved();
       }
     });
     registerLocalAgentHandlers(bus, mcpPolicy, () => {

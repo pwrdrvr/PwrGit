@@ -81,7 +81,7 @@ speaks `PrSummary` and never learns which forge answered.
     asked.** `ForgeHosts.overrides()` deliberately keeps hosts the user
     switched OFF, so classifying with it is not consent to talk to them. Every
     consumer re-checks it — `resolveEnabledForge` in `index.ts`,
-    `IdentityService`'s injected `isHostEnabled`, and `forgeBlockAt(status,
+    `IdentityService`'s injected `hosts.isEnabled`, and `forgeBlockAt(status,
     hostname)` in `clone-service.ts`/`fork-service.ts` (including the two that
     act: `CloneService.runClone`'s CLI branch and `ForkService.fork`, which
     creates a repository). A consumer that skips it spawns a CLI for a host the
@@ -299,15 +299,15 @@ So, when adding anything per-product:
   deliberately no separate `invalidate()` to forget to call.
 - **`forge:status` has three consumers, and two of them ask a narrower
   question.** Settings → Forges wants "can this forge be read at all", which is
-  the summary. The clone and fork dialogs reach their provider through
-  `ForgeRepoRegistry.get(kind)` with no hostname — the **SaaS** instance — so
-  they ask **`forgeSaasBlock`** (shared) — `forgeCanAnswerDialog` in
+  the summary. The clone and fork paths name an instance, so they ask
+  **`forgeBlockAt(status, hostname)`** (shared) — `forgeCanAnswerDialog` in
   `fork-dialog.ts` and `ForkService`/`CloneService`'s own gates are all that one
-  function. Reading the summary there would let a self-managed sign-in enable a
+  function, and `forgeSaasBlock` is now just it with the SaaS hostname filled
+  in. Reading the summary there would let a self-managed sign-in enable a
   gitlab.com search that cannot answer, failing late instead of naming what is
   missing; `clone-service.ts`'s `forgeUnavailable` did exactly that while
   `knownOwners` sixty lines above it did not.
-  - **Three reasons, not two.** `forgeSaasBlock` returns `cli_missing`,
+  - **Three reasons, not two.** `forgeBlockAt` returns `cli_missing`,
     `host_off` or `signed_out`. "Switched off" is not "signed out": telling
     someone to run `glab auth login` for a host they turned off names a remedy
     that cannot work, which is the collapse `ForgeHostStatus.loggedIn` is
@@ -428,6 +428,77 @@ provider or reach a real forge.
   lookup outcome separately from deltas: signed-out attempts may retain a
   known identity, and a change to unknown is still unresolved. Only a resolved
   outcome warrants successful visibility feedback.
+- **The per-host switch gates the three background readers.** Settings →
+  Forges → Hosts writes `enabled`; `ForgeHosts.isEnabled` answers it. `PrService`
+  and `GitHubCommitAuthorIdentityService` reach it through
+  `resolveEnabledForge`/`resolveEnabledForgeRepo` in `index.ts`;
+  `IdentityService` takes it as a required constructor argument
+  (`ForgeHostGate`). Three call sites, one question — grep `isEnabled`, not
+  `resolveEnabledForge`, to find them all. Before the gate, a host switched off
+  still got `gh api`/`glab api` from the identity refresh on every profile load
+  and after every fetch or pull.
+  - **The gate reads the `source`, not just the boolean.** Both "off" arms
+    stamp `gateRetryAfter` — neither writes a row, so without a stamp the repo
+    is due again on the very next pass forever — but for different windows.
+    "Off" from config or env is a decision, cached for the identity TTL and
+    reported as `host_disabled`; "off" from `auto` only means no CLI has
+    reported this host *yet*, because enumeration is two subprocesses that land
+    after the first refresh, so it takes the short retry window and reports
+    plain `unavailable`. Backing off on `auto` for six hours turns a boot race
+    into hours of missing marks; treating a decided "off" as transient re-reads
+    every remote every five minutes to re-derive what the settings file says.
+  - **The `due` filter checks freshness first and the gate never.** An earlier
+    version short-circuited on `switchedOff(storedRow.hostname)` before the TTL
+    — which froze forever any repo whose `origin` had since moved to a host
+    that is on, since the stored hostname is the last host that *answered*.
+    `gateRetryAfter` is the only thing that suppresses a switched-off host, and
+    it expires.
+  - **Anything that can change the gate's answer must call
+    `clearGateBackoff()` and re-refresh** — in `index.ts` that is
+    `onForgeTargetsMaybeMoved`, the *single* hook every edge routes through:
+    boot enumeration landing, the Hosts pane's Re-check, `forgeStatus.onChange`
+    re-reading the directory, and any settings write. It guards on
+    `forgeTargetSignature` and debounces, so a theme toggle costs nothing while
+    a host switch costs one pass — without the guard every settings write
+    re-read `origin` for the whole profile, because a repo on a switched-off
+    host has no row for the TTL to suppress. Those edges land AFTER the
+    profile-load refresh has run, and nothing else would ask again: the sidebar
+    glyph is the only manual trigger and it does not render for a repository
+    that never got a row.
+    - It refreshes **every open profile**, not `getActiveId()`: windows are
+      per-profile and several can be up at once, so the active-only version
+      made the unfocused ones pay `clearGateBackoff()` and get no repaint.
+    - It `await`s `identityService.settled()` first. A pass already running
+      holds every repo in its in-flight set, where the unforced `due` filter
+      drops them — so a gate change landing mid-pass otherwise refreshed
+      nothing and never retried.
+  - **The two "do not ask again" stamps are separate maps on purpose.** A
+    signed-out CLI recovers from outside the app, so its window is short and
+    only a successful read clears it; clearing it on an unrelated settings
+    write turns a theme toggle into a burst of spawns against a CLI already
+    known to be logged out. A switched-off host is the opposite — the answer
+    is pinned in the settings file, the settings write clears the stamp
+    outright, and its window exists only to re-notice a re-pointed `origin`,
+    so it matches the identity TTL. At the retry window instead, 300 repos on
+    a switched-off host cost ~3,600 `git remote` spawns an hour to re-derive
+    what the settings file already says.
+- **Switching a host off stops the asking; it does not clear what was asked.**
+  The stored `repo_identity` row stays and keeps rendering, and the refresh
+  reports `host_disabled` carrying it. Deleting would collapse *asked, and it
+  is private* into *never looked up*, two of the three states above; the env
+  allowlists turn a host off for one session, so a deletion would discard a
+  fact the next launch cannot recover; and re-enabling repaints from a fresh
+  read anyway. `host_disabled` is its own status because it is the only
+  non-resolved outcome that is a **choice** — `unavailable` means we could not
+  ask, `unknown` means the forge was asked and would not say, and the refresh
+  button must not report a choice as a failure.
+- **Clone and fork are gated on their own instance, not on the SaaS one.**
+  They were the documented exception twice over — first ungated, then gated
+  only against github.com/gitlab.com while `runClone` and `fork()` acted on the
+  hostname the request carried. `forgeBlockAt` closed both, and `status.ts`
+  stopped probing a disabled host at all, so "off" now means every reader AND
+  the two paths that write. Say so in the settings copy: a switch that
+  overpromises is the same lie as one that still shells out.
 - **A dialog opens on local state; a forge is asked only on debounced input.**
   This is the rule the clone dialog broke. `repo:cloneCatalog` used to list
   every known owner's repositories as it opened — `gh repo list <owner>

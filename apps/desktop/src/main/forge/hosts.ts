@@ -124,8 +124,16 @@ export class ForgeHosts {
     return this.discoveredFor(host) !== undefined;
   }
 
+  /** Tolerates a settings file whose `forges` object predates `hosts`, or was
+   *  hand-edited without it. `isEnabled` is called per repository on a
+   *  background path with no catch around it, so a throw here rejects a whole
+   *  refresh batch rather than degrading one lookup. */
+  private hostSettings(): ForgeSettings["hosts"] {
+    return this.readSettings().hosts ?? {};
+  }
+
   private configFor(host: string): ForgeHostConfig | undefined {
-    return this.readSettings().hosts[canonical(host)];
+    return this.hostSettings()[canonical(host)];
   }
 
   /**
@@ -232,7 +240,7 @@ export class ForgeHosts {
         ...(found.scopes === undefined ? {} : { scopes: found.scopes })
       });
     }
-    for (const host of Object.keys(this.readSettings().hosts)) {
+    for (const host of Object.keys(this.hostSettings())) {
       const key = canonical(host);
       if (entries.has(key)) continue;
       const resolved = this.resolve(key);
@@ -332,7 +340,7 @@ export class ForgeHosts {
     // in the opposite order is how the resolver and the settings pane end up
     // routing the same host to two different providers.
     for (const found of this.discovered()) map[found.host] = found.kind;
-    for (const [host, config] of Object.entries(this.readSettings().hosts)) {
+    for (const [host, config] of Object.entries(this.hostSettings())) {
       const key = canonical(host);
       if (key !== "" && config.kind !== undefined) map[key] = config.kind;
     }

@@ -856,7 +856,9 @@ export class CloneService {
       return checked.ok ? ok(true) : checked;
     }
     // With the hostname: `gh repo clone`/`glab repo clone` must run against the
-    // instance the source names, not the SaaS default.
+    // instance the source names, not the SaaS default. `source.hostname` is
+    // right here and used below for the ssh/https URLs, so picking by kind
+    // alone cloned a same-named stranger's repository from github.com/gitlab.com.
     const provider = this.forges.get(source.host, source.hostname);
 
     if (source.protocol === "cli") {
