@@ -12,7 +12,6 @@ import {
   type ForgeHost,
   type Profile,
   type ProfileId,
-  type PrSummary,
   type Repo,
   type RepoIdentity,
   type RepoSearchHit,

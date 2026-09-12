@@ -3,8 +3,7 @@ import type {
   CloneRepository,
   ForgeHost,
   ForgeKind,
-  ForgeOwner,
-  ForgeRepoRef
+  ForgeOwner
 } from "@pwrgit/shared";
 
 /** One spelling of the cache key, so `register` and `get` cannot disagree. */

@@ -14,7 +14,6 @@ import {
 import { mapLimit } from "../util/map-limit";
 import {
   NO_OPTIONAL_LOCKS,
-  requireExit0,
   type GitExec,
   type GitExecOptions,
   type GitRecordExec,
