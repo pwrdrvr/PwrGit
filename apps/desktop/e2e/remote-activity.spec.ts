@@ -97,7 +97,12 @@ test("a pull that gets no answer says so, shows Git's command, and cancels", asy
   // The other way in, which the click leaves no room to observe above: leave
   // the button and come back. An operation this old is past the age gate, so
   // the hover is answered on the spot rather than after another wait.
-  await window.mouse.move(20, 300);
+  //
+  // Leaving has to be a real exit, and it is aimed at an element rather than a
+  // coordinate: the pointer must end up somewhere inert and provably outside
+  // the toolbar, which a hard-coded point stops being the moment the layout or
+  // the window size changes.
+  await window.locator(".graph-toolbar__label").hover();
   await expect(card).toBeHidden({ timeout: 10_000 });
   await busy.hover();
   await expect(card).toBeVisible({ timeout: 10_000 });

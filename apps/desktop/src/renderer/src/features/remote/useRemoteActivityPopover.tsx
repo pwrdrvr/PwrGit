@@ -48,6 +48,9 @@ export function useRemoteActivityPopover(
   });
   const { show, update, hide, scheduleHide, visible } = tooltip;
   const pending = useRef<number | undefined>(undefined);
+  /** Which operation the pending open belongs to, so a stale one is not
+   *  mistaken for this one already being handled. */
+  const pendingFor = useRef<string | null>(null);
   // The deferred open below fires from a timer, and the only handler that
   // cancels it is `close()` — which stops existing the moment the operation
   // ends and the trigger drops its listeners. Read the live record through a
@@ -63,6 +66,7 @@ export function useRemoteActivityPopover(
   const now = useSecondsClock(visible);
 
   const cancelPending = useCallback((): void => {
+    pendingFor.current = null;
     if (pending.current === undefined) return;
     window.clearTimeout(pending.current);
     pending.current = undefined;
@@ -127,8 +131,10 @@ export function useRemoteActivityPopover(
         return;
       }
       const id = live.id;
+      pendingFor.current = id;
       pending.current = window.setTimeout(() => {
         pending.current = undefined;
+        pendingFor.current = null;
         const atFire = latest.current;
         if (atFire === null || atFire.id !== id) return;
         show(target, <RemoteActivityCard activity={atFire} now={Date.now()} />);
@@ -150,16 +156,27 @@ export function useRemoteActivityPopover(
   // an event happened to fire.
   //
   // Keyed on the operation, not on every half-second update of it: re-arming
-  // per update would restart the age gate's timer over and over.
+  // per update would restart the age gate's timer over and over. A wait
+  // already counting down for THIS operation is left alone for the same
+  // reason; one left over from a finished operation is not, or an operation
+  // that replaced it inside the gate would never be armed at all.
   const operationId = activity?.id ?? null;
   useEffect(() => {
-    if (operationId === null || visible || pending.current !== undefined) return;
+    if (operationId === null || visible) return;
+    if (pending.current !== undefined && pendingFor.current === operationId) {
+      return;
+    }
     const target = resting.current;
     // A trigger torn out from under a stationary pointer never gets to say the
-    // pointer left it.
-    if (target === null || !target.isConnected) return;
+    // pointer left it, so drop it here rather than hold a detached node and
+    // its listeners for the life of the hook.
+    if (target === null) return;
+    if (!target.isConnected) {
+      forgetTrigger();
+      return;
+    }
     arm(target);
-  }, [arm, operationId, visible]);
+  }, [arm, forgetTrigger, operationId, visible]);
 
   useEffect(() => {
     if (!visible) return;

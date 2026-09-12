@@ -82,15 +82,31 @@ nothing until the pointer leaves the button and returns. Closing that means
 asking the DOM where the pointer is (`:hover`) rather than waiting to be told,
 which jsdom cannot answer — so it needs an e2e, not a unit test.
 
-Two things keep that from becoming a card nobody asked for. The re-arm is keyed
-on the operation's **id**, not on the record — one arrives every half-second,
-and re-arming per update would restart the age gate's timer forever. And the
-popover watches the trigger leave *for itself*, with listeners on the element
-rather than the `close()` prop: that prop rides on a control which stops being
-a trigger the moment its operation ends, so a pointer that wanders off after
-that is never recorded as having left — and the stale trigger would open some
-LATER operation's card beside a pointer that is nowhere near it.
-(`useViewportTooltip` releases an Escape-dismissed trigger the same way.)
+Three things keep that from becoming a card nobody asked for.
+
+The re-arm is keyed on the operation's **id**, not on the record — one arrives
+every half-second, and re-arming per update would restart the age gate's timer
+forever. A wait already counting down for *that same* operation is left alone;
+one left over from a finished operation is not, or an operation that replaced
+it inside the gate would be armed by nothing at all and its predecessor's timer
+would fire into an id check that discards it.
+
+The popover watches the trigger leave *for itself*, with listeners on the
+element rather than the `close()` prop: that prop rides on a control which
+stops being a trigger the moment its operation ends, so a pointer that wanders
+off after that is never recorded as having left — and the stale trigger would
+open some LATER operation's card beside a pointer nowhere near it.
+(`useViewportTooltip` releases an Escape-dismissed trigger the same way.) Both
+exits matter and neither covers for the other: React derives its `mouseleave`
+prop from `mouseout`, so a unit test dispatching one does not exercise the
+other.
+
+And the widening is in **time only, never in scope**. `running` also answers to
+the header's own `busy`, so a locally dispatched fetch can be what makes a
+button busy while the live record for that checkout is a pull started
+elsewhere. `couldCarryCard` keeps the record's kind matched to the button once
+there is a record — a card naming a Pull must never hang off Fetch — while
+still letting the trigger listen through the gap before one exists.
 
 `e2e/remote-activity.spec.ts` covers this. Playwright's `hover()` cannot stand
 in for the fix: after `pull.click()` the pointer is already inside the button,

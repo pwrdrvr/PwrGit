@@ -45,6 +45,31 @@ the Electron build.
   those until Playwright's 60s test timeout. macOS and Linux pass either way,
   so this only ever shows up on the Windows job.
 
+- **`hover()` cannot re-enter an element the pointer is already inside.** It
+  moves the mouse and nothing more: with the pointer already within the target,
+  Chromium dispatches a bare `mousemove` and no `mouseover`/`mouseout` at all,
+  so React's `onMouseEnter` never fires again. A click leaves the pointer on
+  the control it clicked, so `x.click()` followed later by `x.hover()` summons
+  nothing — and the failure reads as "element(s) not found" for whatever the
+  hover was supposed to open, pointing at the assertion rather than at the
+  hover. To genuinely re-enter, leave first (`page.mouse.move` onto an inert
+  element, asserting the old surface is gone) and then hover. This is what made
+  `remote-activity.spec.ts` flaky; see `features/remote/AGENTS.md` for the
+  app-side half.
+
+- **A second Electron app on the machine will steal the pointer.** Playwright's
+  Electron window is a real desktop window, so another suite launching windows
+  — a sibling worktree running its own e2e, a `pnpm dev` from PwrAgnt — takes
+  focus and Chromium fires a window-level `mouseleave` on whatever was hovered
+  and clears the hover state. The signature is unmistakable:
+  `document.querySelectorAll(":hover")` comes back **empty**, not pointing at
+  some other element. Any spec that leaves the pointer resting on something
+  across a wait can lose it that way. Before concluding a hover-dependent spec
+  is broken, check for another `electron`/`playwright` process
+  (`ps aux | grep -iE "[p]laywright|[E]lectron"`) and re-run alone; the
+  config's `retries: 1` exists to absorb exactly this, so reproduce with
+  `--retries=0` only on a quiet machine.
+
 - Specs run as **ESM** — use `import.meta.url` + `fileURLToPath`, not
   `__dirname`.
 - Confirms/alerts are **in-app** dialogs (not native), so drive them by clicking

@@ -307,17 +307,100 @@ describe("WorktreeHeader pull progress", () => {
       busy?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
     });
 
-    // The pointer leaves while there is still nothing to report. React's own
-    // mouseleave prop is not enough to catch this in general — it rides on a
-    // control that stops being a trigger the moment its operation ends — so
-    // the popover listens on the element itself.
+    // The pointer leaves while there is still nothing to report. React derives
+    // its mouseleave prop from `mouseout`, so BOTH exits are dispatched here:
+    // the synthetic one drives `close()` while the control is still a trigger,
+    // and the element-level one is what still works after it stops being one.
+    // Assert them separately or one covers for the other.
+    await act(async () => {
+      busy?.dispatchEvent(
+        new MouseEvent("mouseout", { bubbles: true, relatedTarget: container })
+      );
+    });
+    await emitActivities([
+      { startedAt: Date.now() - 30_000, phase: "fetch", silent: true }
+    ]);
+    expect(
+      document.querySelector(".remote-activity-popover"),
+      "React's own mouseleave must forget the trigger"
+    ).toBeNull();
+  });
+
+  it("forgets a trigger the pointer left after the operation ended", async () => {
+    const pull = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Pull"]'
+    );
+    await act(async () => pull?.click());
+    const busy = container.querySelector<HTMLButtonElement>(
+      'button[aria-busy="true"]'
+    );
+    await act(async () => {
+      busy?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+
+    // Once nothing is running the control is no longer a trigger and React has
+    // dropped its handlers, so the exit arrives as a bare DOM event and
+    // nothing else. Missing it would leave the trigger remembered forever, and
+    // the NEXT operation would throw a card at a pointer that is elsewhere.
+    await emitActivities([]);
     await act(async () => {
       busy?.dispatchEvent(new MouseEvent("mouseleave"));
     });
 
     await emitActivities([
-      { startedAt: Date.now() - 30_000, phase: "fetch", silent: true }
+      { id: "op-2", startedAt: Date.now() - 30_000, phase: "fetch" }
     ]);
+    expect(document.querySelector(".remote-activity-popover")).toBeNull();
+  });
+
+  it("arms the operation that replaced one still inside the age gate", async () => {
+    const pull = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Pull"]'
+    );
+    await act(async () => pull?.click());
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-busy="true"]')
+        ?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+
+    // Young enough that its card is still waiting on the age gate.
+    await emitActivities([{ startedAt: Date.now(), phase: "fetch" }]);
+    expect(document.querySelector(".remote-activity-popover")).toBeNull();
+
+    // It finishes and another takes its place before that wait elapses. The
+    // pending timer belongs to the operation that is over; treating it as "this
+    // one is already being handled" would leave the new one armed by nothing,
+    // and its timer fires into an id check that discards it.
+    await emitActivities([
+      { id: "op-2", startedAt: Date.now() - 30_000, phase: "fetch" }
+    ]);
+    expect(
+      document.querySelector(".remote-activity-popover")?.textContent
+    ).toContain("Pull · project · main");
+  });
+
+  it("never hangs one operation's card off another operation's button", async () => {
+    // `running` answers to this header's own `busy` as well as to the live
+    // record, so a locally dispatched fetch can be what makes a button busy
+    // while the record for this checkout is a pull someone started elsewhere.
+    // The trigger widened in time, not in scope: a card naming a Pull must not
+    // hang off the Fetch button.
+    const fetchButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Fetch"]'
+    );
+    await act(async () => fetchButton?.click());
+    await emitActivities([
+      { kind: "pull", startedAt: Date.now() - 30_000, phase: "fetch" }
+    ]);
+
+    const busy = container.querySelector<HTMLButtonElement>(
+      'button[aria-busy="true"]'
+    );
+    expect(busy?.getAttribute("aria-label")).toBe("Fetching…");
+    await act(async () => {
+      busy?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
     expect(document.querySelector(".remote-activity-popover")).toBeNull();
   });
 
