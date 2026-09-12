@@ -344,16 +344,19 @@ export function createE2EForgeFixtureServices(
   for (const host of ["github", "gitlab"] as const) {
     forges.register(new E2EForgeRepoProvider(host, fixturePath, git));
   }
+  // The fixture's `hosts` map is keyed by forge KIND, not by hostname: E2E
+  // stubs "is this forge usable", and the SaaS host the service falls back to
+  // without a host list is the one contrived hostname that needs no fixture.
   const status = new ForgeStatusService({
-    probes: (["github", "gitlab"] as const).map((host) => ({
-      kind: host,
-      cli: host === "github" ? "gh" : "glab",
+    probes: (["github", "gitlab"] as const).map((kind) => ({
+      kind,
+      cli: kind === "github" ? "gh" : "glab",
       installed: async () => {
-        const config = readFixture(fixturePath).hosts[host];
+        const config = readFixture(fixturePath).hosts[kind];
         return config !== undefined && config.installed !== false;
       },
       loggedIn: async () =>
-        readFixture(fixturePath).hosts[host]?.loggedIn === true
+        readFixture(fixturePath).hosts[kind]?.loggedIn === true
     }))
   });
   return { forges, status };

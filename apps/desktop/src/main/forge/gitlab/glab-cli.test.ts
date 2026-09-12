@@ -143,6 +143,38 @@ describe("getGitLabToken", () => {
     expect(childProcess.spawn).not.toHaveBeenCalled();
   });
 
+  it("does NOT send GITLAB_TOKEN to a self-managed host", async () => {
+    // `GITLAB_TOKEN` authenticates `GITLAB_HOST` (gitlab.com when unset), the
+    // same line `GITHUB_TOKEN` draws. Returning it for every host was invisible
+    // while only gitlab.com was ever asked; once the status probe went per host
+    // it made every enabled instance report a credential it does not have, and
+    // would have cached a gitlab.com PAT under that host's key.
+    process.env.GITLAB_TOKEN = "env-token";
+    settle("keyring-token\n");
+
+    await expect(getGitLabToken("gitlab.acme-inc.com")).resolves.toBe(
+      "keyring-token"
+    );
+    expect(childProcess.spawn).toHaveBeenCalledWith(
+      "glab",
+      ["config", "get", "token", "--host", "gitlab.acme-inc.com"],
+      expect.anything()
+    );
+  });
+
+  it("sends GITLAB_TOKEN to the host GITLAB_HOST names", async () => {
+    process.env.GITLAB_TOKEN = "env-token";
+    process.env.GITLAB_HOST = "gitlab.acme-inc.com";
+    try {
+      await expect(getGitLabToken("gitlab.acme-inc.com")).resolves.toBe(
+        "env-token"
+      );
+      expect(childProcess.spawn).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.GITLAB_HOST;
+    }
+  });
+
   it("falls back to the token glab already holds for that host", async () => {
     settle("keyring-token\n");
 

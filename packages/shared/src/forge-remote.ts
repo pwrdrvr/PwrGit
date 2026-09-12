@@ -1,4 +1,118 @@
-import type { ForgeHost } from "./types";
+import type {
+  ForgeHost,
+  ForgeHostStatus,
+  ForgeKind,
+  ForgeStatus
+} from "./types";
+
+/**
+ * The hosted instance of each forge.
+ *
+ * The one host `ForgeHosts.kindFor` recognises without enumeration, which makes
+ * it both the fallback the status probe falls back to when no CLI reports an
+ * account and the one host whose sign-in command needs no `--hostname`. Shared
+ * because main probes it and the settings pane words a command about it; two
+ * copies would drift into printing a command for a host nothing probed.
+ */
+export const FORGE_SAAS_HOST: Readonly<Record<ForgeKind, string>> = {
+  github: "github.com",
+  gitlab: "gitlab.com"
+};
+
+/**
+ * Whether a forge holds a usable credential for ONE named host.
+ *
+ * `ForgeStatus.loggedIn` summarizes the whole forge — the right question for a
+ * settings pane, and the wrong one for a caller that is about to talk to a
+ * specific instance. A machine signed in only to a self-managed GitLab can read
+ * merge requests and still have nothing at all for gitlab.com, so a caller that
+ * asked the summary and then queried gitlab.com would fail late instead of
+ * saying what is missing.
+ *
+ * A host the probe did not cover falls back to the summary, deliberately. That
+ * window is real: enumeration reports no host on a machine carrying only
+ * `GITHUB_TOKEN`, and again for the seconds before it first lands, and treating
+ * "not probed" as "signed out" there would block a caller whose credential
+ * works. Absence is not evidence.
+ */
+export function forgeLoggedInAt(status: ForgeStatus, hostname: string): boolean {
+  return forgeHostStatus(status, hostname)?.loggedIn ?? status.loggedIn;
+}
+
+/**
+ * The reported entry for one host, matched the way every other layer matches.
+ *
+ * Canonicalized on both sides: `ForgeHostStatus.host` is written through
+ * `canonicalForgeHostname`, while the caller's side is an arbitrary string — a
+ * provider hostname, or one parsed off a remote, which lowercases but does not
+ * strip `www.`. A raw `===` misses on that difference and the miss is silent,
+ * falling through to the forge-wide summary, which is the permissive answer.
+ */
+function forgeHostStatus(
+  status: ForgeStatus,
+  hostname: string
+): ForgeHostStatus | undefined {
+  const key = canonicalForgeHostname(hostname) ?? hostname.trim().toLowerCase();
+  return status.hosts.find((host) => host.host === key);
+}
+
+/**
+ * Why a forge cannot answer for its SaaS instance, or null when it can.
+ *
+ * Three reasons, deliberately not two. "Switched off" is not "signed out": a
+ * user who turned gitlab.com off in Settings is still signed in to it, and
+ * telling them to run `glab auth login` names a remedy that cannot change
+ * anything — the exact collapse `ForgeHostStatus.loggedIn` is documented to
+ * avoid. One function so the clone dialog, the fork preflight and the clone
+ * service's own gate cannot answer this differently, which they did.
+ */
+export function forgeSaasBlock(
+  status: ForgeStatus | undefined
+): ForgeBlock | null {
+  if (status === undefined || !status.installed) return "cli_missing";
+  const host = FORGE_SAAS_HOST[status.kind];
+  if (forgeHostStatus(status, host)?.enabled === false) return "host_off";
+  return forgeLoggedInAt(status, host) ? null : "signed_out";
+}
+
+/**
+ * Every host this forge reports is switched off.
+ *
+ * A configuration, not a fault — which is why it renders as a neutral "Off"
+ * rather than a warning, and why it must not put the status cache on the
+ * one-minute retry cadence reserved for something the user is actively fixing.
+ * Shared so main's backoff and the pane's state machine cannot disagree about
+ * what "off" means.
+ */
+export function forgeAllHostsOff(status: ForgeStatus): boolean {
+  return (
+    status.installed &&
+    status.hosts.length > 0 &&
+    status.hosts.every((host) => !host.enabled)
+  );
+}
+
+/** Whether a forge can answer for its SaaS instance at all. */
+export function forgeCanAnswerSaas(status: ForgeStatus | undefined): boolean {
+  return forgeSaasBlock(status) === null;
+}
+
+/**
+ * The credential for the forge's SaaS instance.
+ *
+ * What the clone and fork dialogs need: both reach their provider through
+ * `ForgeRepoRegistry.get(kind)` with no hostname, which is the SaaS instance, so
+ * the SaaS host is the one whose sign-in state decides whether they can do
+ * anything. Spelled out rather than left as `status.loggedIn` so that widening
+ * either dialog to other hosts has to change this line and notice.
+ */
+export function forgeLoggedInAtSaas(status: ForgeStatus): boolean {
+  return forgeLoggedInAt(status, FORGE_SAAS_HOST[status.kind]);
+}
+
+/** Why a forge is unusable. `host_off` is the user's own switch, so it must
+ *  never be worded as a sign-in problem. */
+export type ForgeBlock = "cli_missing" | "host_off" | "signed_out";
 
 /** A git remote URL resolved to the forge it points at. `hostname` is kept
  *  even for `other`: a self-hosted instance is still worth naming in the UI,
