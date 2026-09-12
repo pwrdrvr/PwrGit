@@ -1,4 +1,8 @@
-import { canonicalForgeHostname, type ForgeKind } from "@pwrgit/shared";
+import {
+  canonicalForgeHostname,
+  FORGE_KINDS,
+  type ForgeKind
+} from "@pwrgit/shared";
 import { runGh } from "../github/gh-cli";
 import { runGlab } from "./gitlab/glab-cli";
 
@@ -167,18 +171,36 @@ async function readGlabAuthStatus(): Promise<string> {
 export async function discoverForgeHosts(
   runners: ForgeCliRunners = {}
 ): Promise<DiscoveredForgeHost[]> {
-  const gh = runners.gh ?? runGh;
-  const glabAuthStatus = runners.glabAuthStatus ?? readGlabAuthStatus;
-  const [github, gitlab] = await Promise.all([
-    gh(["auth", "status", "--json", "hosts"])
-      .then(parseGhHosts)
-      .catch(() => [] as DiscoveredForgeHost[]),
-    glabAuthStatus()
-      .then(parseGlabHosts)
-      .catch(() => [] as DiscoveredForgeHost[])
-  ]);
-  return [...github, ...gitlab];
+  const found = await Promise.all(
+    FORGE_KINDS.map((kind) =>
+      HOST_ENUMERATORS[kind](runners).catch(() => [] as DiscoveredForgeHost[])
+    )
+  );
+  return found.flat();
 }
+
+/**
+ * How each product's CLI reports what it is signed in to.
+ *
+ * A record rather than two awaited calls in the function above: a hand-written
+ * pair is the shape that loses a product in silence — its CLI is simply never
+ * asked, and every host it knows about is missing from Settings with nothing
+ * anywhere saying why. Each entry reads its own override off `ForgeCliRunners`
+ * because the two CLIs answer differently enough that one signature would fit
+ * neither (see `readGlabAuthStatus`).
+ */
+type ForgeHostEnumerator = (
+  runners: ForgeCliRunners
+) => Promise<DiscoveredForgeHost[]>;
+
+const HOST_ENUMERATORS: Readonly<Record<ForgeKind, ForgeHostEnumerator>> = {
+  github: async (runners) =>
+    parseGhHosts(
+      await (runners.gh ?? runGh)(["auth", "status", "--json", "hosts"])
+    ),
+  gitlab: async (runners) =>
+    parseGlabHosts(await (runners.glabAuthStatus ?? readGlabAuthStatus)())
+};
 
 /** Enumeration spawns two subprocesses; a resolve must not. */
 const DIRECTORY_TTL_MS = 5 * 60_000;
