@@ -21,3 +21,20 @@ export type AppMenuPopupRequest = {
   x: number;
   y: number;
 };
+
+/** Linux painted caption buttons: run one window-control action. */
+export const WINDOW_CONTROL_CHANNEL = "pwrgit:window-control:invoke";
+
+/** Linux painted caption buttons: main → renderer frame-state push. */
+export const WINDOW_FRAME_STATE_CHANNEL = "pwrgit:window-control:state";
+
+/** What a painted caption button asks the main process to do. */
+export type WindowControlAction = "minimize" | "toggle-maximize" | "close";
+
+/**
+ * What the maximize button has to draw. The window manager maximizes windows
+ * behind our back — a double-click on the strip, Super+Up, a tiling keybind —
+ * so the glyph follows main's own `maximize` / `unmaximize` events rather than
+ * whatever the last button press asked for.
+ */
+export type WindowFrameState = { maximized: boolean };

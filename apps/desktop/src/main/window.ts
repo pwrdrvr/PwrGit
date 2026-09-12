@@ -2,14 +2,21 @@ import { showWindowWhenReady } from "./show-window-when-ready";
 import { join } from "node:path";
 import { BrowserWindow, shell } from "electron";
 import { serializeAppearanceArg, type AppAppearance } from "@pwrgit/shared";
-import { titleBarOverlay, windowChrome } from "./window-chrome";
+import {
+  hideNativeMenuBar,
+  mainWindowChromeOptions
+} from "./main-window-chrome";
+import { trackWindowFrameState } from "./window-controls-bridge";
+import { windowChrome } from "./window-chrome";
 
 /**
  * Create a profile-bound window (one window per profile). Frameless-inset
- * titlebar on macOS, custom title-bar overlay on Windows; the renderer paints
- * its own titlebar row and Windows top-level menu labels. Native submenus stay
- * in the main process. The bound profile travels via additionalArguments so
- * the preload can expose it before the renderer boots.
+ * titlebar on macOS, custom title-bar overlay on Windows, plain frameless on
+ * Linux; the renderer paints its own titlebar row, the top-level menu labels
+ * everywhere but macOS, and the caption buttons on Linux. Native submenus and
+ * the window itself stay in the main process — see main-window-chrome.ts and
+ * window-controls-bridge.ts. The bound profile travels via additionalArguments
+ * so the preload can expose it before the renderer boots.
  */
 export function createMainWindow(
   profileId: string,
@@ -23,13 +30,7 @@ export function createMainWindow(
     minHeight: 600,
     show: false,
     backgroundColor: chrome.background,
-    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
-    trafficLightPosition: { x: 12, y: 10 },
-    ...(process.platform === "win32"
-      ? {
-          titleBarOverlay: titleBarOverlay(appearance.resolvedTheme)
-        }
-      : {}),
+    ...mainWindowChromeOptions(appearance.resolvedTheme),
     webPreferences: {
       preload: join(__dirname, "../preload/index.cjs"),
       contextIsolation: true,
@@ -42,6 +43,8 @@ export function createMainWindow(
     }
   });
 
+  hideNativeMenuBar(window);
+  trackWindowFrameState(window);
   showWindowWhenReady(window);
 
   // Open external links in the OS browser; never navigate the app frame away.

@@ -8,7 +8,9 @@ import type {
   PwrGitError,
   Req,
   Res,
-  Result
+  Result,
+  WindowControlAction,
+  WindowFrameState
 } from "@pwrgit/shared";
 
 type PwrGitBridge = {
@@ -22,6 +24,12 @@ type PwrGitBridge = {
   on: (channel: string, handler: (payload: unknown) => void) => () => void;
   getAppMenuModel: () => Promise<AppMenuTopLevel[]>;
   popupAppMenu: (payload: AppMenuPopupRequest) => void;
+  /** Linux caption buttons: the renderer paints them, main owns the window. */
+  runWindowControl: (
+    action: WindowControlAction
+  ) => Promise<WindowFrameState | null>;
+  readWindowFrameState: () => Promise<WindowFrameState | null>;
+  onWindowFrameState: (handler: (state: WindowFrameState) => void) => () => void;
 };
 
 declare global {

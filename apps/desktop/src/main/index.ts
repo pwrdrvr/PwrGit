@@ -22,6 +22,8 @@ import {
 import { registerAppIdentityHandlers } from "./app-identity";
 import { registerAppDocumentHandlers } from "./app-document-handlers";
 import { wireAppMenuBridge } from "./app-menu-bridge";
+import { wireWindowControlsBridge } from "./window-controls-bridge";
+import { linuxWindowIconPath } from "./window-icon";
 import { openAppDocumentWindow } from "./app-document-window";
 import {
   initAutoUpdater,
@@ -226,6 +228,35 @@ function installDevelopmentDockIcon(): void {
 }
 
 /**
+ * Give Linux windows an icon of their own.
+ *
+ * A Linux desktop matches a window's WM_CLASS to an installed `.desktop` file
+ * and takes the icon from there, so a dev run — Electron's own binary, nothing
+ * installed — draws the shell's generic application tile instead (the gear in
+ * Ubuntu's dock). Every window gets the icon directly, which also covers a
+ * packaged build whose WM_CLASS never matches its `.desktop` entry. macOS and
+ * Windows read the bundle and the executable, where `linuxWindowIconPath`
+ * answers null.
+ */
+function installWindowIcon(): void {
+  const iconPath = linuxWindowIconPath({
+    platform: process.platform,
+    packaged: app.isPackaged,
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath
+  });
+  if (iconPath === null) return;
+
+  const icon = nativeImage.createFromPath(iconPath);
+  if (icon.isEmpty()) {
+    logMain("warn", "app", "failed to load the window icon", { iconPath });
+    return;
+  }
+
+  app.on("browser-window-created", (_event, window) => window.setIcon(icon));
+}
+
+/**
  * Where the app log file goes. getPath("logs") creates the directory and throws
  * if it cannot — a startup this early has no window and no log to explain
  * itself, so an unwritable log directory falls back to the pre-0.14 location
@@ -260,6 +291,7 @@ if (!gotSingleInstanceLock) {
 
   app.whenReady().then(async () => {
     wireAppMenuBridge();
+    wireWindowControlsBridge();
     // App log: ring buffer + file, streamed to the Logs window (Help › Logs).
     // The file sits in the OS log directory (~/Library/Logs/PwrGit on macOS,
     // <userData>/logs elsewhere) beside the other Pwr apps, rather than in
@@ -273,6 +305,7 @@ if (!gotSingleInstanceLock) {
     logMain("info", "app", `PwrGit ${app.getVersion()} starting pid=${process.pid}`);
     watchProcessIds();
     installDevelopmentDockIcon();
+    installWindowIcon();
     bus.register("logs:read", () => ok(readLogSnapshot()));
     bus.register("logs:openWindow", () => {
       openLogsWindow(appearance.appearance());

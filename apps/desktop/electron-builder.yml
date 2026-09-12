@@ -90,6 +90,11 @@ files:
 extraResources:
   - from: LICENSE
     to: LICENSE
+  # Linux windows carry their own icon (src/main/index.ts): a desktop shell
+  # takes a window's icon from the .desktop file its WM_CLASS matches, and a
+  # run that matches none draws the shell's generic application tile instead.
+  - from: build/icon.png
+    to: icon.png
   - from: THIRD_PARTY_LICENSES
     to: THIRD_PARTY_LICENSES
   - from: CHANGELOG.md

@@ -191,8 +191,22 @@ describe("platform window chrome", () => {
     expect(appCss).toMatch(
       /:root\[data-platform="win32"\]\s+\.titlebar\s*\{[\s\S]*?padding-right:\s*150px;/
     );
+  });
+
+  it("reserves the traffic-light gutter on macOS and nowhere else", () => {
     expect(appCss).toMatch(
-      /:root\[data-platform="win32"\]\s+\.titlebar__gutter\s*\{[\s\S]*?display:\s*none;/
+      /:root\[data-platform="darwin"\]\s+\.titlebar__gutter\s*\{[\s\S]*?width:\s*68px;/
+    );
+    // Unqualified: what reserved 68px of empty strip on Linux and Windows.
+    expect(appCss).not.toMatch(/\n\.titlebar__gutter\s*\{[^}]*width:/);
+  });
+
+  it("paints the Linux caption buttons out of the drag region", () => {
+    expect(appCss).toMatch(
+      /\.titlebar__controls\s*\{[\s\S]*?-webkit-app-region:\s*no-drag;/
+    );
+    expect(appCss).toMatch(
+      /\.titlebar__control--close:hover\s*\{[\s\S]*?background:\s*var\(--danger-soft\);/
     );
   });
 
