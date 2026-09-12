@@ -20,6 +20,7 @@ vi.mock("../../lib/pwrgit", () => ({
 }));
 
 import { ForgesSettings } from "./ForgesSettings";
+import { __resetCollapsedPanesForTests } from "./SettingsLayout";
 
 function host(overrides: Partial<ForgeHostRow> = {}): ForgeHostRow {
   return {
@@ -89,6 +90,9 @@ let forges: () => ForgeStatus[];
 let writes: unknown[];
 
 beforeEach(() => {
+  // This pane's real id is `forges`, and collapse state is module-level —
+  // so without this a folded section survives into the next test.
+  __resetCollapsedPanesForTests();
   vi.clearAllMocks();
   rows = [host()];
   forges = () => statuses();

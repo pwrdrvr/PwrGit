@@ -74,11 +74,45 @@ const SettingsPaneContext = createContext<SettingsPaneContextValue | null>(null)
  */
 const collapsedByPane = new Map<string, Record<string, boolean>>();
 
+/**
+ * Drop every remembered fold. Tests only.
+ *
+ * The map outlives any component, so without this one test's fold is the next
+ * one's starting state — including across files, since panes share ids
+ * (`forges` is written by two suites). Working around that with unique pane
+ * ids per test hides the leak rather than clearing it, and cannot help a test
+ * that needs a REAL pane id.
+ */
+export function __resetCollapsedPanesForTests(): void {
+  collapsedByPane.clear();
+}
+
+/**
+ * A stable, id-safe key for one section.
+ *
+ * The hash suffix is what keeps two titles that differ only in punctuation or
+ * case ("Memory / CPU" and "Memory CPU", "Heap Monitor" and "Heap monitor")
+ * from slugging to the same string: identical keys make `registerSection`
+ * REPLACE instead of insert, so one header disappears from arrow-key roving,
+ * both sections fold together, and both bodies render the same DOM id with
+ * `aria-controls` pointing at whichever comes first. Nothing warns.
+ */
 function slugForSectionId(value: string): string {
-  return value
+  const slug = value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
+  return slug === "" ? "" : `${slug}-${hash(value)}`;
+}
+
+/** djb2, base36. Not security — just enough to separate two titles that share
+ *  a slug, in a value that is stable across renders and safe in an id. */
+function hash(value: string): string {
+  let h = 5381;
+  for (let i = 0; i < value.length; i += 1) {
+    h = ((h << 5) + h + value.charCodeAt(i)) | 0;
+  }
+  return (h >>> 0).toString(36);
 }
 
 /**
@@ -99,6 +133,16 @@ export function SettingsSectionStack(props: {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(
     () => collapsedByPane.get(props.paneId) ?? {}
   );
+  // The initializer runs once, so a `paneId` that changes on a MOUNTED stack
+  // would keep the previous pane's folds and — since `update` already writes
+  // under the current prop — persist them under the new pane's key, corrupting
+  // both. Re-seeding during render (not in an effect) means no frame ever
+  // paints the wrong pane's state.
+  const seededFor = useRef(props.paneId);
+  if (seededFor.current !== props.paneId) {
+    seededFor.current = props.paneId;
+    setCollapsed(collapsedByPane.get(props.paneId) ?? {});
+  }
 
   /** Every write goes through here, or the module map falls out of step with
    *  render state and the next visit to this pane restores a stale fold. */
@@ -116,10 +160,24 @@ export function SettingsSectionStack(props: {
   const registerSection = useCallback((section: SectionRegistration) => {
     setSections((current) => {
       const at = current.findIndex((entry) => entry.id === section.id);
-      if (at === -1) return [...current, section];
-      const next = [...current];
-      next[at] = section;
-      return next;
+      if (at !== -1) {
+        const next = [...current];
+        next[at] = section;
+        return next;
+      }
+      // Spliced by DOM position, not appended. Registration order is MOUNT
+      // order, and the two differ the moment a pane renders a section
+      // conditionally or one re-registers because its `sectionId` changed —
+      // the late arrival would sort last, so ArrowDown would skip the header
+      // that is visually next and End would land on one that is not last.
+      const before = current.findIndex(
+        (entry) =>
+          (entry.element.compareDocumentPosition(section.element) &
+            Node.DOCUMENT_POSITION_PRECEDING) !==
+          0
+      );
+      if (before === -1) return [...current, section];
+      return [...current.slice(0, before), section, ...current.slice(before)];
     });
     return () => {
       setSections((current) =>
@@ -206,9 +264,12 @@ export function SettingsPanelHead(props: {
   action?: ReactNode;
 }) {
   const pane = useContext(SettingsPaneContext);
-  // Only once something has registered: a head that rendered them from the
-  // start would offer to collapse nothing for the length of the first read.
-  const bulk = pane !== null && pane.sections.length > 0 ? <BulkControls /> : null;
+  // Asked once, here, and `BulkControls` trusts it: two copies of "does this
+  // pane have sections yet" is one rule to change in two places, and getting
+  // only one leaves an empty `.settings-head__bulk` still taking its gap.
+  // Only once something has registered, because a head that rendered them from
+  // the start would offer to collapse nothing for the length of the first read.
+  const bulk = pane !== null && pane.sections.length > 0;
 
   return (
     <header className="settings-head">
@@ -217,9 +278,9 @@ export function SettingsPanelHead(props: {
         <h1 className="settings-head__title">{props.title}</h1>
         {props.help ? <p className="settings-head__help">{props.help}</p> : null}
       </div>
-      {bulk !== null || props.action ? (
+      {bulk || props.action ? (
         <div className="settings-head__action">
-          {bulk}
+          {bulk ? <BulkControls /> : null}
           {props.action}
         </div>
       ) : null}
@@ -227,28 +288,41 @@ export function SettingsPanelHead(props: {
   );
 }
 
+/** Rendered only by `SettingsPanelHead`, which owns the "has sections yet"
+ *  question. The null check is for the type, not a second copy of that rule. */
 function BulkControls() {
   const pane = useContext(SettingsPaneContext);
-  if (pane === null || pane.sections.length === 0) return null;
+  if (pane === null) return null;
 
   return (
     <div className="settings-head__bulk" aria-label="Section controls">
-      {/* Genuinely unavailable, not in-flight, so `disabled` is right here —
-          unlike the busy controls elsewhere in Settings, which use
-          aria-disabled to keep Chromium from blurring them mid-operation. */}
+      {/* `aria-disabled`, not `disabled`, even though the state is genuinely
+          unavailable rather than in-flight: activating either button is what
+          makes that same button unavailable, and Chromium blurs an element the
+          moment it becomes `disabled`. A keyboard user pressing Enter on
+          "Collapse all" would be dropped on <body> with nothing to Shift+Tab
+          back from (SC 2.4.3) — the same failure the switch and the modal
+          buttons in this window already avoid this way. Handlers are guarded
+          instead. */}
       <button
+        aria-disabled={pane.allCollapsed}
         className="settings-button settings-button--quiet"
-        disabled={pane.allCollapsed}
         type="button"
-        onClick={pane.collapseAll}
+        onClick={() => {
+          if (pane.allCollapsed) return;
+          pane.collapseAll();
+        }}
       >
         Collapse all
       </button>
       <button
+        aria-disabled={pane.allExpanded}
         className="settings-button settings-button--quiet"
-        disabled={pane.allExpanded}
         type="button"
-        onClick={pane.expandAll}
+        onClick={() => {
+          if (pane.allExpanded) return;
+          pane.expandAll();
+        }}
       >
         Expand all
       </button>
@@ -279,6 +353,7 @@ export function SettingsSection(props: {
   const sectionId = `${pane?.paneId ?? "global"}-${slug === "" ? generatedId : slug}`;
   const headingId = `settings-section-${sectionId}-heading`;
   const bodyId = `settings-section-${sectionId}-body`;
+  const chipId = `settings-section-${sectionId}-chip`;
   const collapsed = pane?.collapsed[sectionId] === true;
   const chipClass = settingsChipClass(props.chipKind);
   const registerSection = pane?.registerSection;
@@ -343,7 +418,11 @@ export function SettingsSection(props: {
           <p className="settings-panel__description">{props.description}</p>
         ) : null}
       </div>
-      {props.chip ? <span className={chipClass}>{props.chip}</span> : null}
+      {props.chip ? (
+        <span className={chipClass} id={chipId}>
+          {props.chip}
+        </span>
+      ) : null}
     </>
   );
 
@@ -369,11 +448,19 @@ export function SettingsSection(props: {
       <div
         ref={headerRef}
         aria-controls={bodyId}
+        // The chip is a DESCRIPTION, not part of the name. It has to be wired
+        // in by id: `role="button"` has presentational children, so a status
+        // chip nested inside one is not exposed at all — a screen reader
+        // focusing this header heard "GitHub, button" and had no way to learn
+        // the product was signed out, which is the whole point of the chip.
+        // `aria-describedby` is computed from the referenced subtree wherever
+        // it sits, so this reaches AT without joining the accessible name.
+        {...(props.chip ? { "aria-describedby": chipId } : {})}
         aria-expanded={!collapsed}
         // Named rather than labelled by the heading: the header also holds the
-        // description and a live status chip, and a role="button" computes its
-        // name from all of its contents — which would read the whole paragraph
-        // out on focus and change the button's name whenever the chip did.
+        // description and the chip, and a role="button" computes its name from
+        // all of its contents — which would read the whole paragraph out on
+        // focus and change the button's name whenever the chip did.
         aria-label={props.title}
         className="settings-panel__header settings-panel__disclosure"
         role="button"
@@ -384,9 +471,11 @@ export function SettingsSection(props: {
         <ChevronGlyph />
         {header}
       </div>
-      {/* `inert` and not an unmount: the body keeps its scroll position and its
-          in-flight state across a fold, and `inert` is what takes its controls
-          out of the tab order — `aria-hidden` alone leaves them focusable. */}
+      {/* `inert` and not an unmount: the body keeps its React state across a
+          fold — a half-typed field, an open sub-panel — and `inert` is what
+          takes its controls out of the tab order, since `aria-hidden` alone
+          leaves them focusable. Layout is NOT kept: the clip is `display:
+          none` when folded, so anything scrolling inside returns at the top. */}
       <div
         aria-hidden={collapsed}
         className="settings-panel__body-clip"

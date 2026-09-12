@@ -73,6 +73,15 @@ const STATE_TONES: Record<
   signedOut: "warn"
 };
 
+/** One product's state as a sentence, for the pane's live region. */
+export function forgeStateSentence(
+  kind: ForgeKind,
+  state: ForgeProductState
+): string | null {
+  if (state === "unknown") return null;
+  return `${forgeProduct(kind).label}: ${STATE_LABELS[state]}`;
+}
+
 export function forgeProductState(
   status: ForgeStatus | undefined
 ): ForgeProductState {
@@ -136,12 +145,13 @@ export function ForgeProductSection(props: {
       {...(state === "unknown"
         ? {}
         : {
+            // No `role="status"` / `aria-live` here: this lands inside the
+            // disclosure header's `role="button"`, whose children ARIA treats
+            // as presentational, so a live region nested in it never fires.
+            // The section wires the chip in as the header's description, and
+            // the pane announces the CHANGE from its own live region below.
             chip: (
-              <span
-                aria-label={`${label}: ${STATE_LABELS[state]}`}
-                aria-live="polite"
-                role="status"
-              >
+              <span aria-label={`${label}: ${STATE_LABELS[state]}`}>
                 {STATE_LABELS[state]}
               </span>
             ),
@@ -292,7 +302,10 @@ export function ForgeProductSection(props: {
   );
 }
 
-function signInCommand(row: ForgeHostRow): string {
+/** The per-host sign-in command. Exported because the row RENDERS it and the
+ *  pane's Copy button puts it on the clipboard — two places that must never
+ *  print different commands. */
+export function signInCommand(row: ForgeHostRow): string {
   return `${row.cli} auth login --hostname ${row.host}`;
 }
 

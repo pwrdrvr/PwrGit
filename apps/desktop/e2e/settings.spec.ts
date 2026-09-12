@@ -199,7 +199,11 @@ test("menu opens the Settings window; panes render and settings persist", async 
     // section is "Not installed" on every run. A missing CLI is the one state
     // with no Add button — there is no binary to sign in with, so adding a
     // host would name an instance nothing can reach.
-    if ((await chip.textContent()) === "Not installed") {
+    // Trimmed: `textContent` is raw, unlike the whitespace-normalizing
+    // `toHaveText` above, so any markup change that puts the label on its own
+    // line would send this to the else branch and assert an Add button a
+    // not-installed product deliberately does not render.
+    if ((await chip.textContent())?.trim() === "Not installed") {
       await expect(section).toContainText(`Install the ${product.label} CLI`);
     } else {
       await expect(

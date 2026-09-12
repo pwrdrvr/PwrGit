@@ -22,6 +22,7 @@ vi.mock("../../lib/pwrgit", () => ({
 }));
 
 import { ForgesSettings } from "./ForgesSettings";
+import { __resetCollapsedPanesForTests } from "./SettingsLayout";
 
 /**
  * A status shaped the way main's probe shapes one.
@@ -63,6 +64,9 @@ const unsubscribe = vi.fn();
 let rows: ForgeHostRow[];
 
 beforeEach(() => {
+  // This pane's real id is `forges`, and collapse state is module-level —
+  // so without this a folded section survives into the next test.
+  __resetCollapsedPanesForTests();
   vi.clearAllMocks();
   listener = undefined;
   rows = [];

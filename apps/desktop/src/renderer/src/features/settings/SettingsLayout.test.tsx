@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   SettingsPanelHead,
   SettingsSection,
-  SettingsSectionStack
+  SettingsSectionStack,
+  __resetCollapsedPanesForTests
 } from "./SettingsLayout";
 
 /**
@@ -27,6 +28,10 @@ let root: Root;
 let paneSeq = 0;
 
 beforeEach(() => {
+  // Cleared, not just stepped around: the map is module state, so the two
+  // tests below that reuse a fixed pane id would otherwise inherit whatever a
+  // previous run of this file left there.
+  __resetCollapsedPanesForTests();
   paneSeq += 1;
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -148,13 +153,99 @@ describe("SettingsSection — disclosure", () => {
     await act(async () => button("Collapse all").click());
     expect(header("First").getAttribute("aria-expanded")).toBe("false");
     expect(header("Second").getAttribute("aria-expanded")).toBe("false");
-    // Nothing left to collapse, so the control that would do it is unavailable.
-    expect(button("Collapse all").disabled).toBe(true);
-    expect(button("Expand all").disabled).toBe(false);
+    // Nothing left to collapse, so the control that would do it is unavailable
+    // — but `aria-disabled`, never `disabled`. Activating it is what makes it
+    // unavailable, and Chromium blurs an element the moment it goes `disabled`,
+    // dropping a keyboard user on <body> mid-gesture (SC 2.4.3).
+    expect(button("Collapse all").getAttribute("aria-disabled")).toBe("true");
+    expect(button("Collapse all").disabled).toBe(false);
+    expect(button("Expand all").getAttribute("aria-disabled")).toBe("false");
 
     await act(async () => button("Expand all").click());
     expect(header("First").getAttribute("aria-expanded")).toBe("true");
-    expect(button("Expand all").disabled).toBe(true);
+    expect(button("Expand all").getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("keeps focus on a bulk control that has just made itself unavailable", async () => {
+    // The whole reason these are aria-disabled: a keyboard user Tabs to
+    // Collapse all and presses Enter, and a real `disabled` would blur the
+    // button they are standing on, leaving nothing to Shift+Tab back from.
+    await renderStack();
+    const collapse = button("Collapse all");
+    collapse.focus();
+
+    await act(async () => collapse.click());
+
+    expect(collapse.getAttribute("aria-disabled")).toBe("true");
+    expect(document.activeElement).toBe(collapse);
+  });
+
+  it("refuses a second Collapse all rather than relying on the attribute", async () => {
+    // aria-disabled stops nothing on its own, so the handler has to.
+    await renderStack();
+    await act(async () => button("Collapse all").click());
+    await act(async () => button("Collapse all").click());
+
+    expect(header("First").getAttribute("aria-expanded")).toBe("false");
+    expect(header("Second").getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("roves in DOM order when a section mounts after its neighbours", async () => {
+    // Registration order is MOUNT order. A section that appears later — a
+    // conditional editor, a section whose sectionId changed — would sort last
+    // and ArrowDown would skip the header that is visually next.
+    function Pane(props: { withMiddle: boolean }) {
+      return (
+        <SettingsSectionStack aria-label="Test pane" paneId={`order-${paneSeq}`}>
+          <SettingsPanelHead eyebrow="Test" title="Test pane" />
+          <SettingsSection title="First">
+            <p>first</p>
+          </SettingsSection>
+          {props.withMiddle ? (
+            <SettingsSection title="Middle">
+              <p>middle</p>
+            </SettingsSection>
+          ) : null}
+          <SettingsSection title="Last">
+            <p>last</p>
+          </SettingsSection>
+        </SettingsSectionStack>
+      );
+    }
+
+    await act(async () => root.render(<Pane withMiddle={false} />));
+    await act(async () => root.render(<Pane withMiddle />));
+
+    header("First").focus();
+    await press(header("First"), "ArrowDown");
+
+    expect(document.activeElement).toBe(header("Middle"));
+  });
+
+  it("keeps two titles that slug alike as two separate sections", async () => {
+    // "Memory / CPU" and "Memory CPU" both slug to `memory-cpu`. Sharing an id
+    // makes registerSection REPLACE, so one header vanishes from roving, both
+    // fold together, and both bodies render the same DOM id.
+    await act(async () => {
+      root.render(
+        <SettingsSectionStack aria-label="Test pane" paneId={`slug-${paneSeq}`}>
+          <SettingsPanelHead eyebrow="Test" title="Test pane" />
+          <SettingsSection title="Memory / CPU">
+            <p>a</p>
+          </SettingsSection>
+          <SettingsSection title="Memory CPU">
+            <p>b</p>
+          </SettingsSection>
+        </SettingsSectionStack>
+      );
+    });
+
+    expect(body("Memory / CPU").id).not.toBe(body("Memory CPU").id);
+
+    await act(async () => header("Memory / CPU").click());
+
+    expect(header("Memory / CPU").getAttribute("aria-expanded")).toBe("false");
+    expect(header("Memory CPU").getAttribute("aria-expanded")).toBe("true");
   });
 
   it("remembers a fold across a trip to another pane", async () => {

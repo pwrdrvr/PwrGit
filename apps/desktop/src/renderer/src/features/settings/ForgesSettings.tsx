@@ -11,7 +11,12 @@ import { copyText } from "../../lib/copyText";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { ReadError } from "../shell/ReadError";
 import { SettingsPanelHead, SettingsSectionStack } from "./SettingsLayout";
-import { ForgeProductSection } from "./ForgeProductSection";
+import {
+  ForgeProductSection,
+  forgeProductState,
+  forgeStateSentence,
+  signInCommand
+} from "./ForgeProductSection";
 import { AddForgeHostDialog } from "./AddForgeHostDialog";
 
 /**
@@ -178,7 +183,12 @@ export function ForgesSettings(props: { saving: boolean }) {
     host: string,
     value: ForgeHostConfig | null
   ): Promise<string | null> => {
-    if (writing.current) return null;
+    // A message, not `null`: `null` is this function's SUCCESS value, so
+    // returning it for a write that never happened told the dialog the host
+    // had been added and let it close over nothing — no row, no error, no
+    // trace. The guard is still right (a second write races the re-read); only
+    // the way it reports itself was wrong.
+    if (writing.current) return "Another change is still saving. Try again.";
     writing.current = true;
     try {
       const result = await dispatch("settings:update", {
@@ -247,6 +257,34 @@ export function ForgesSettings(props: { saving: boolean }) {
           onRetry={() => void readStatus()}
         />
       )}
+      {/* A failure that lands AFTER a first success cannot take the card's
+          place — replacing a working list with an error would lose the state
+          the user is reading. It still has to be said: silently keeping a
+          snapshot that stopped updating shows confident, stale status with no
+          hint the probe has given up. */}
+      {statusError !== undefined && forges !== undefined && (
+        <p className="settings-field__error" role="alert">
+          Forge status stopped updating: {statusError}
+        </p>
+      )}
+      {/* The one live region for the pane.
+          Each section's chip cannot be one: it renders inside the disclosure
+          header's `role="button"`, and ARIA treats a button's children as
+          presentational, so a nested `role="status"` is never announced. Out
+          here it is a plain sibling and works — and one region for every
+          product is right anyway, since a single probe pass can move both. */}
+      <p aria-live="polite" className="a11y-sr-only" role="status">
+        {forges === undefined
+          ? ""
+          : FORGE_KINDS.map((kind) =>
+              forgeStateSentence(
+                kind,
+                forgeProductState(forges.find((forge) => forge.kind === kind))
+              )
+            )
+              .filter((line) => line !== null)
+              .join(". ")}
+      </p>
       {FORGE_KINDS.map((kind) => (
         <ForgeProductSection
           key={kind}
@@ -261,7 +299,10 @@ export function ForgesSettings(props: { saving: boolean }) {
           rowError={rowError}
           onWrite={writeRow}
           onCopy={(row) => {
-            void copyText(`${row.cli} auth login --hostname ${row.host}`);
+            // The command the row RENDERS, from the one function that builds
+            // it. Built here a second time, the clipboard and the text above
+            // the button drift the first time either changes.
+            void copyText(signInCommand(row));
             setCopied(row.host);
           }}
           onAdd={() => setAdding(kind)}

@@ -38,7 +38,8 @@ be supplied:
 - **The body is `inert` when folded**, not merely `aria-hidden`: `aria-hidden`
   alone leaves the controls inside focusable, so Tab walks into a closed section
   and lands on something invisible. It is not unmounted, so the body keeps its
-  state and scroll position across a fold.
+  React state across a fold — but not its layout: the clip is `display: none`
+  when folded, so a scroller inside comes back at the top.
 - **Arrow keys rove between headers** (Up/Down/Home/End), which is why sections
   register their header element with the stack.
 

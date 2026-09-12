@@ -9295,9 +9295,11 @@ body.is-col-resizing {
   transform: rotate(-90deg);
 }
 /* `inert` already blocks interaction; this is what stops the folded body
-   painting and taking up space. Not `display: none` on the body itself —
-   the clip is a separate element so the body keeps its own box, and its
-   scroll position, for when it comes back. */
+   painting and taking up space. What survives a fold is the body's REACT
+   state — it is never unmounted — not its layout: `display: none` on the clip
+   destroys the boxes of everything under it, so a scroller inside comes back
+   at the top. Do not restate this as scroll preservation; a separate wrapper
+   element buys nothing there. */
 .settings-panel__body-clip[inert] {
   display: none;
 }

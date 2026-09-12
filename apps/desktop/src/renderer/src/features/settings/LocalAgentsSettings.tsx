@@ -304,6 +304,11 @@ function RoleEditor(props: {
   const { draft } = props;
   return (
     <SettingsSection
+      // One key for both titles: the default key is the title, and this one
+      // changes the moment the user switches from creating a role to editing
+      // one — which would re-register the section, drop whatever fold it had,
+      // and strand the old key in the pane's collapse map.
+      sectionId="role-editor"
       title={draft.id === null ? "Create custom role" : "Edit custom role"}
       eyebrow="Role policy"
       description="Permissions are additive. Repository roots narrow every path-taking tool and both live-notification transports."
