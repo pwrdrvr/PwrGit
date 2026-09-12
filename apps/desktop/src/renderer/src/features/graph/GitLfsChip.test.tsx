@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { execFileSync } from "node:child_process";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,7 +16,7 @@ const toast = vi.hoisted(() => ({
 }));
 vi.mock("../../lib/toast", () => toast);
 
-import { GitLfsChip } from "./GitLfsChip";
+import { GitLfsChip, setupCommands } from "./GitLfsChip";
 
 const KEY = "git-lfs:/repos/proj";
 const READY = {
@@ -130,12 +131,14 @@ describe("GitLfsChip", () => {
         "proj stores large files with Git LFS, but PwrGit cannot run Git " +
           "LFS and the Git LFS filters are not configured."
       ),
-      detail: "brew install git-lfs\ngit lfs install\ngit lfs pull"
+      detail: setupCommands("darwin"),
+      copyText: setupCommands("darwin"),
+      copyLabel: "Copy commands"
     });
     expect(toast.showInfoToast).not.toHaveBeenCalled();
   });
 
-  it("skips the install step when only the filters are missing", async () => {
+  it("checks terminal LFS even when bundled LFS is installed", async () => {
     await render({
       status: { required: true, installed: true, configured: false },
       announceReady: false
@@ -146,7 +149,8 @@ describe("GitLfsChip", () => {
         message: expect.stringContaining(
           "but the Git LFS filters are not configured"
         ),
-        detail: "git lfs install\ngit lfs pull"
+        detail: setupCommands("darwin"),
+        copyText: expect.stringContaining("brew install git-lfs")
       })
     );
   });
@@ -160,16 +164,14 @@ describe("GitLfsChip", () => {
     await render(broken, "wt-1", "win32");
     expect(toast.showErrorToast).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        detail: "winget install GitHub.GitLFS\ngit lfs install\ngit lfs pull"
+        detail: expect.stringContaining("winget install GitHub.GitLFS")
       })
     );
 
     await render(broken, "wt-2", "linux");
     expect(toast.showErrorToast).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        detail:
-          "# install git-lfs with your package manager\n" +
-          "git lfs install\ngit lfs pull"
+        detail: expect.stringContaining("sudo apt-get update && sudo apt-get install git-lfs")
       })
     );
   });
@@ -219,5 +221,37 @@ describe("GitLfsChip", () => {
     expect(toast.showInfoToast).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ key: KEY, title: "Git LFS ready" })
     );
+  });
+});
+
+// Execute the copied POSIX script against fake commands: no package manager
+// or real repository is touched. Windows CI exercises the PowerShell text above.
+describe.skipIf(process.platform === "win32")("copied Linux setup", () => {
+  it.each([
+    [false, false, "update\ninstall git-lfs\nconfigure\npull\n"],
+    [true, false, "configure\npull\n"],
+    [false, true, "update\ninstall git-lfs\n"]
+  ])("handles installed=%s, failed install=%s", (installed, failed, expected) => {
+    const output = execFileSync("sh", ["-c", `
+      available=${installed ? 1 : 0}
+      git() {
+        case "$2" in
+          version) test "$available" = 1 ;;
+          install) echo configure ;;
+          pull) echo pull ;;
+        esac
+      }
+      command() { test "$2" = apt-get; }
+      sudo() {
+        shift
+        echo "$*"
+        if [ "$1" = install ]; then
+          ${failed ? "return 1" : "available=1"}
+        fi
+      }
+      ${setupCommands("linux")}
+      :
+    `], { encoding: "utf8" });
+    expect(output).toBe(expected);
   });
 });

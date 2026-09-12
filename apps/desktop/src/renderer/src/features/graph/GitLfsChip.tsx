@@ -48,15 +48,39 @@ const POINTER_WARNING =
   "Until this is fixed, large files may remain small text pointer files " +
   "instead of their real contents.";
 
-function setupCommands(status: RequiredLfsStatus, platform: string): string {
-  const lines: string[] = [];
-  if (!status.installed) {
-    if (isMacPlatform(platform)) lines.push("brew install git-lfs");
-    else if (platform === "win32") lines.push("winget install GitHub.GitLFS");
-    else lines.push("# install git-lfs with your package manager");
+/** The probe uses PwrGit's runtime, not the user's terminal Git. Always
+ * check the terminal prerequisite, even when bundled LFS is available. */
+export function setupCommands(platform: string): string {
+  if (platform === "win32") {
+    return [
+      "# Run in PowerShell from the affected repository",
+      "git lfs version",
+      "if ($LASTEXITCODE -ne 0) { winget install GitHub.GitLFS }",
+      "git lfs version",
+      "if ($LASTEXITCODE -eq 0) {",
+      "  git lfs install",
+      "  if ($LASTEXITCODE -eq 0) { git lfs pull }",
+      "} else { Write-Output 'Restart your terminal after installing Git LFS, then run these commands again.' }"
+    ].join("\n");
   }
-  lines.push("git lfs install", "git lfs pull");
-  return lines.join("\n");
+  const install = isMacPlatform(platform)
+    ? ["  brew install git-lfs"]
+    : [
+        "  if command -v apt-get >/dev/null 2>&1; then",
+        "    sudo apt-get update && sudo apt-get install git-lfs",
+        "  elif command -v dnf >/dev/null 2>&1; then",
+        "    sudo dnf install git-lfs",
+        "  else",
+        "    echo 'Install git-lfs with your package manager, then run these commands again.'",
+        "  fi"
+      ];
+  return [
+    "# Run from the affected repository",
+    "if ! git lfs version >/dev/null 2>&1; then",
+    ...install,
+    "fi",
+    "git lfs version && git lfs install && git lfs pull"
+  ].join("\n");
 }
 
 /** Window-level news from one check. Deliberately NOT behind the component's
@@ -84,7 +108,9 @@ function raiseToasts(
       showLogsAction: false,
       title: "Git LFS setup needed",
       message: `${storyLine(repoName, status)} ${POINTER_WARNING}`,
-      detail: setupCommands(status, platform)
+      detail: setupCommands(platform),
+      copyText: setupCommands(platform),
+      copyLabel: "Copy commands"
     });
   } else if (announceReady) {
     // Same key: a repair that follows a standing complaint replaces it in

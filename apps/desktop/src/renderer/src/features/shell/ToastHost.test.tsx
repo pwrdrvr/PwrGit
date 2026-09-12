@@ -59,6 +59,34 @@ afterEach(async () => {
 });
 
 describe("ToastHost", () => {
+  it.each([true, false])("copies the explicit payload when present: %s", async (commandsOnly) => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText }
+    });
+    await act(async () => {
+      showErrorToast({
+        title: "Git LFS setup needed",
+        message: "Explanation",
+        detail: "git lfs install && git lfs pull",
+        ...(commandsOnly ? {
+          copyText: "git lfs install && git lfs pull",
+          copyLabel: "Copy commands"
+        } : {})
+      });
+    });
+    const copy = container.querySelector<HTMLButtonElement>(
+      `[aria-label="${commandsOnly ? "Copy commands" : "Copy error"}"]`
+    );
+    expect(copy).not.toBeNull();
+    await act(async () => copy?.click());
+    expect(writeText).toHaveBeenCalledExactlyOnceWith(commandsOnly
+      ? "git lfs install && git lfs pull"
+      : "Git LFS setup needed\nExplanation\ngit lfs install && git lfs pull");
+    Reflect.deleteProperty(navigator, "clipboard");
+  });
+
   it("keeps a confirmation out of the danger color", async () => {
     await act(async () => {
       showErrorToast({ title: "Push failed", message: "remote rejected" });
