@@ -1,6 +1,8 @@
 import {
-  FORGE_SAAS_HOST,
+  forgeCliNames,
   forgeCloneUrls,
+  forgeKindForCli,
+  forgeSaasHost,
   isSafeProjectPath,
   parseForgeRemote,
   type CloneDestination,
@@ -11,8 +13,13 @@ import {
 
 /** `gh repo clone X` / `glab repo clone X` pasted straight from a terminal.
  *  The CLI in the command names the forge, which is worth honouring — it is
- *  more specific than the dialog's current host. */
-const CLI_CLONE = /^(gh|glab)\s+repo\s+clone\s+(\S+)$/i;
+ *  more specific than the dialog's current host. Built from the product
+ *  registry so a product whose CLI nobody remembered to add to a hand-written
+ *  alternation is not silently unrecognised here. */
+const CLI_CLONE = new RegExp(
+  `^(${forgeCliNames().join("|")})\\s+repo\\s+clone\\s+(\\S+)$`,
+  "i"
+);
 
 /** Path forms whose meaning does not depend on the app process's cwd. Actual
  * existence and Git validity are checked in main, where filesystem access
@@ -30,7 +37,7 @@ export function localRepositoryPath(input: string): string | null {
 }
 
 export function defaultHostname(host: ForgeHost): string {
-  return host === "gitlab" ? FORGE_SAAS_HOST.gitlab : FORGE_SAAS_HOST.github;
+  return forgeSaasHost(host);
 }
 
 /**
@@ -136,11 +143,7 @@ export function exactRepository(
   const cliClone = CLI_CLONE.exec(trimmed);
   const candidate = cliClone?.[2] ?? trimmed;
   const cliHost: ForgeHost | null =
-    cliClone?.[1]?.toLowerCase() === "glab"
-      ? "gitlab"
-      : cliClone !== null
-        ? "github"
-        : null;
+    cliClone?.[1] === undefined ? null : forgeKindForCli(cliClone[1]);
 
   // A URL is only parsed as one when it actually carries a scheme or an
   // scp-style `user@host:` prefix. `parseForgeRemote` would otherwise read a

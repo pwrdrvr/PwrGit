@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   canonicalForgeHostname,
-  FORGE_CLI,
+  FORGE_KINDS,
+  forgeLabel,
+  forgeProduct,
   type ForgeHostConfig,
   type ForgeHostRow,
   type ForgeKind
@@ -12,36 +14,6 @@ import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { useModal } from "../../lib/useModal";
 import { SettingsField, SettingsSection } from "./SettingsLayout";
 import { SettingsSwitch } from "./SettingsSwitch";
-
-const KIND_LABEL: Record<ForgeHostRow["kind"], string> = {
-  github: "GitHub",
-  gitlab: "GitLab"
-};
-
-/**
- * Adding a host by hand, one product at a time.
- *
- * There is a button per product because the product is *chosen* here, never
- * derived. Enumeration carries it for free — `gh` only knows GitHub hosts,
- * `glab` only GitLab ones — but a hostname is not evidence of anything, so a
- * single "Add host…" button would have to guess from the name or ask "which
- * forge is this?" afterwards. Both are the thing `forge/AGENTS.md` rules out.
- */
-const ADD_HOST: Record<
-  ForgeKind,
-  { button: string; title: string; placeholder: string }
-> = {
-  github: {
-    button: "Add GitHub Enterprise…",
-    title: "Add a GitHub Enterprise host",
-    placeholder: "github.acme-inc.com"
-  },
-  gitlab: {
-    button: "Add GitLab instance…",
-    title: "Add a GitLab instance",
-    placeholder: "gitlab.example.com"
-  }
-};
 
 /**
  * Settings → Forges → Hosts.
@@ -218,7 +190,7 @@ export function ForgeHostsSection(props: { saving: boolean }) {
                 // disabled element, throwing keyboard focus to <body> for the
                 // length of the operation. The handler is guarded instead.
                 busy={blocked}
-                label={`Read ${KIND_LABEL[row.kind]} status from ${row.host}`}
+                label={`Read ${forgeLabel(row.kind)} status from ${row.host}`}
                 onChange={(next) => {
                   if (blocked) return;
                   // Always write the value the user asked for. An earlier
@@ -307,7 +279,7 @@ export function ForgeHostsSection(props: { saving: boolean }) {
         sub="For an instance you have not signed in to yet."
         control={
           <div className="settings-field__actions">
-            {(Object.keys(ADD_HOST) as ForgeKind[]).map((kind) => (
+            {FORGE_KINDS.map((kind) => (
               <button
                 key={kind}
                 // Genuinely unavailable, not in-flight: until the list has
@@ -319,7 +291,7 @@ export function ForgeHostsSection(props: { saving: boolean }) {
                 type="button"
                 onClick={() => setAdding(kind)}
               >
-                {ADD_HOST[kind].button}
+                {forgeProduct(kind).addHost.button}
               </button>
             ))}
           </div>
@@ -381,7 +353,7 @@ function AddForgeHostDialog(props: {
     { text: string; seq: number } | undefined
   >();
   const submitting = useRef(false);
-  const { title, placeholder } = ADD_HOST[props.kind];
+  const { title, placeholder } = forgeProduct(props.kind).addHost;
   const titleId = `add-forge-host-${props.kind}-title`;
   // Escape is refused mid-write, matching the backdrop.
   const modalRef = useModal<HTMLDivElement>({
@@ -472,8 +444,8 @@ function AddForgeHostDialog(props: {
           />
         </label>
         <div className="modal__hint">
-          PwrGit will treat this host as {KIND_LABEL[props.kind]} and talk to it
-          through <code>{FORGE_CLI[props.kind]}</code>. The hostname plays no
+          PwrGit will treat this host as {forgeLabel(props.kind)} and talk to it
+          through <code>{forgeProduct(props.kind).cli}</code>. The hostname plays no
           part in that — this choice does.
         </div>
         {error !== undefined && (
@@ -518,7 +490,7 @@ function signInCommand(row: ForgeHostRow): string {
 }
 
 function describe(row: ForgeHostRow): string {
-  const parts = [KIND_LABEL[row.kind]];
+  const parts = [forgeLabel(row.kind)];
   if (row.account !== undefined) parts.push(`signed in as ${row.account}`);
   return parts.join(" · ");
 }

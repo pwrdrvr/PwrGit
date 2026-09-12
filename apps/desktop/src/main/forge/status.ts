@@ -1,7 +1,9 @@
 import {
-  FORGE_CLI,
-  FORGE_SAAS_HOST,
+  FORGE_KINDS,
+  FORGE_PRODUCTS,
   forgeAllHostsOff,
+  forgeCapabilities,
+  forgeProduct,
   type ForgeHostStatus,
   type ForgeKind,
   type ForgeStatus
@@ -9,7 +11,6 @@ import {
 import { runGh } from "../github/gh-cli";
 import { getGitHubToken } from "../github/pr-client";
 import { mapLimit } from "../util/map-limit";
-import { capabilitiesFor } from "./capabilities";
 import { getGitLabToken, runGlab } from "./gitlab/glab-cli";
 
 /** Probing spawns a subprocess; a status read must not. */
@@ -59,27 +60,31 @@ export type ForgeProbeTarget = {
   assumed?: boolean;
 };
 
-/** Re-exported from shared, which owns the one copy: the settings pane names
- *  the CLI too and the renderer may not import from main. */
-export { FORGE_CLI };
-
 export function cliFor(kind: ForgeKind): string {
-  return FORGE_CLI[kind];
+  return forgeProduct(kind).cli;
 }
 
-const DEFAULT_PROBES: ForgeProbe[] = [
-  {
+/**
+ * How each forge answers "installed?" and "signed in?".
+ *
+ * Keyed by kind rather than listed: an array is the shape that loses a product
+ * in silence — a third forge simply never gets probed, and the settings pane
+ * reports nothing about a CLI that is sitting right there. As a record, `tsc`
+ * asks for the entry.
+ */
+const DEFAULT_PROBES: Readonly<Record<ForgeKind, ForgeProbe>> = {
+  github: {
     kind: "github",
-    cli: FORGE_CLI.github,
+    cli: FORGE_PRODUCTS.github.cli,
     installed: async () => {
       await runGh(["--version"]);
       return true;
     },
     loggedIn: async (host) => (await getGitHubToken(host)) !== null
   },
-  {
+  gitlab: {
     kind: "gitlab",
-    cli: FORGE_CLI.gitlab,
+    cli: FORGE_PRODUCTS.gitlab.cli,
     installed: async () => {
       await runGlab(["--version"]);
       return true;
@@ -90,11 +95,11 @@ const DEFAULT_PROBES: ForgeProbe[] = [
     loggedIn: async (host) =>
       (await getGitLabToken(host ?? glabDefaultHost())) !== null
   }
-];
+};
 
 function glabDefaultHost(): string {
   const host = process.env["GITLAB_HOST"]?.trim().toLowerCase();
-  return host === undefined || host === "" ? FORGE_SAAS_HOST.gitlab : host;
+  return host === undefined || host === "" ? FORGE_PRODUCTS.gitlab.saasHost : host;
 }
 
 export type ForgeStatusServiceDeps = {
@@ -124,9 +129,12 @@ export type ForgeStatusServiceDeps = {
 /** Both SaaS hosts, on — what host resolution knows before any CLI has been
  *  enumerated, and so the honest default for a caller that injects nothing. */
 function saasHosts(): ForgeProbeTarget[] {
-  return (Object.entries(FORGE_SAAS_HOST) as [ForgeKind, string][]).map(
-    ([kind, host]) => ({ kind, host, enabled: true, assumed: true })
-  );
+  return FORGE_KINDS.map((kind) => ({
+    kind,
+    host: forgeProduct(kind).saasHost,
+    enabled: true,
+    assumed: true
+  }));
 }
 
 /**
@@ -169,7 +177,7 @@ export class ForgeStatusService {
   private readonly listeners = new Set<(statuses: ForgeStatus[]) => void>();
 
   constructor(deps: ForgeStatusServiceDeps = {}) {
-    this.probes = deps.probes ?? DEFAULT_PROBES;
+    this.probes = deps.probes ?? FORGE_KINDS.map((kind) => DEFAULT_PROBES[kind]);
     this.hosts = deps.hosts ?? saasHosts;
     this.now = deps.now ?? (() => Date.now());
     this.ttlMs = deps.ttlMs ?? STATUS_TTL_MS;
@@ -271,7 +279,7 @@ async function probeOne(
   const base = {
     kind: probe.kind,
     cli: probe.cli,
-    capabilities: capabilitiesFor(probe.kind)
+    capabilities: forgeCapabilities(probe.kind)
   };
   let installed = false;
   try {

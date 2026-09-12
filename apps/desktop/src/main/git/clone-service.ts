@@ -14,8 +14,10 @@ import {
   err,
   forgeCloneUrls,
   forgeLoggedInAtSaas,
-  FORGE_SAAS_HOST,
   forgeBlockAt,
+  forgeLabel,
+  forgeProductOrAssumed,
+  forgeSaasHost,
   isSafeForgeHostname,
   isSafeProjectPath,
   ok,
@@ -289,8 +291,7 @@ function inaccessibleRepositoryMessage(
   host: ForgeHost,
   nameWithOwner: string
 ): string {
-  const forge = host === "gitlab" ? "GitLab" : "GitHub";
-  const cli = host === "gitlab" ? "glab" : "gh";
+  const { label: forge, cli } = forgeProductOrAssumed(host);
   return `${forge} couldn't access ${nameWithOwner}. Check the repository spelling and confirm the active ${forge} CLI account has access by running ${cli} auth status. ${forge} also returns 404 for private repositories you cannot access.`;
 }
 
@@ -1016,7 +1017,7 @@ function forgeUnavailable(
   hostname?: string
 ): Err<PwrGitError> | null {
   const status = statuses.find((candidate) => candidate.kind === host);
-  const label = host === "gitlab" ? "GitLab" : "GitHub";
+  const label = forgeLabel(host);
   // Per instance, never the forge-wide `loggedIn`: asking the summary let a
   // self-managed-only sign-in pass this gate and run an unauthenticated
   // gitlab.com lookup, which answers 404 — so the dialog reported "couldn't
@@ -1113,7 +1114,7 @@ function splitOwner(nameWithOwner: string): string | null {
 }
 
 function defaultHostname(host: ForgeHost): string {
-  return host === "gitlab" ? FORGE_SAAS_HOST.gitlab : FORGE_SAAS_HOST.github;
+  return forgeSaasHost(host);
 }
 
 function dedupeOwners(owners: ForgeOwner[]): ForgeOwner[] {

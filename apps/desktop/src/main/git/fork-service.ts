@@ -1,6 +1,9 @@
 import {
   err,
   forgeBlockAt,
+  forgeCapabilities,
+  forgeLabel,
+  forgeProductOrAssumed,
   forgeWebUrl,
   ok,
   type CloneProtocol,
@@ -20,7 +23,6 @@ import type {
   ForgeRepoProvider,
   ForgeRepoRegistry
 } from "../forge/repo-provider";
-import { capabilitiesFor } from "../forge/capabilities";
 import type { ForgeStatusService } from "../forge/status";
 import type { GitExec } from "./dugite";
 import { requireExit0 } from "./dugite";
@@ -60,7 +62,7 @@ export type ForkRequest = {
 };
 
 function forgeName(host: ForgeHost): string {
-  return host === "gitlab" ? "GitLab" : "GitHub";
+  return forgeLabel(host);
 }
 
 /** The candidates for `upstream`, best answer first.
@@ -369,7 +371,7 @@ export class ForkService {
         targetName: input.targetName,
         defaultBranchOnly:
           input.defaultBranchOnly &&
-          capabilitiesFor(provider.host).forkDefaultBranchOnly,
+          forgeCapabilities(provider.host).forkDefaultBranchOnly,
         onPhase: (phase) => {
           // Both providers enter awaiting_fork only after the remote fork
           // exists: GitHub is reading it back, while GitLab is waiting for its
@@ -559,10 +561,11 @@ export class ForkService {
     targetSlug: string,
     host: ForgeHost
   ): Result<Repo> {
+    const product = forgeProductOrAssumed(host);
     return this.canceled(
       signal,
-      host === "gitlab"
-        ? `Forked to ${targetSlug}, but the local checkout was canceled. GitLab may still be finishing the fork.`
+      product.forkCompletesAsynchronously
+        ? `Forked to ${targetSlug}, but the local checkout was canceled. ${product.label} may still be finishing the fork.`
         : `Forked to ${targetSlug}, but the local checkout was canceled.`
     );
   }

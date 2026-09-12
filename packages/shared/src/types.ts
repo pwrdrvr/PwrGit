@@ -503,18 +503,43 @@ export type RemoteActivity = {
   canceling: boolean;
 };
 
-/** Hosting products PwrGit can read change-request status from. */
-export type ForgeKind = "github" | "gitlab";
+/**
+ * Hosting products PwrGit can read change-request status from.
+ *
+ * The array is the source and `ForgeKind` is derived from it, so the members
+ * are enumerable at runtime as well as checkable at compile time. Every
+ * `Object.keys(someTable) as ForgeKind[]` cast this replaced was a place where
+ * a table could quietly lose a product: the cast asserts the table is complete
+ * instead of asking the type system to prove it.
+ *
+ * Per-product *data* lives in `FORGE_PRODUCTS` (`forge-product.ts`), keyed by
+ * these members, so adding a product is this line plus that entry.
+ */
+export const FORGE_KINDS = ["github", "gitlab"] as const;
 
-/** The binary each forge speaks through. One source: this value reaches the
- *  user as a command they are told to run, so a second copy that drifts would
- *  print a command naming a CLI the app never invokes. It lives in shared
- *  rather than beside the probe because the settings pane names the CLI too,
- *  and the renderer may not import from main. */
-export const FORGE_CLI: Readonly<Record<ForgeKind, string>> = {
-  github: "gh",
-  gitlab: "glab"
-};
+export type ForgeKind = (typeof FORGE_KINDS)[number];
+
+/**
+ * Narrow an unknown to a forge kind.
+ *
+ * One spelling, because there were four: a settings-patch guard, a cached PR
+ * row's guard and two row wideners each spelled out the same two-way string
+ * comparison by hand, and each would have rejected a third product in silence.
+ */
+export function isForgeKind(value: unknown): value is ForgeKind {
+  return (FORGE_KINDS as readonly unknown[]).includes(value);
+}
+
+/**
+ * Widen a persisted host string back to `ForgeHost`.
+ *
+ * A row written by a newer build — or edited by hand — degrades to `other`
+ * rather than producing a value whose type is a lie. Two copies of this lived
+ * in `repo-indexer.ts` and `identity-service.ts`, reading the same column.
+ */
+export function toForgeHost(value: unknown): ForgeHost {
+  return isForgeKind(value) ? value : "other";
+}
 
 /**
  * What a forge can actually answer, so the UI states facts rather than guesses.

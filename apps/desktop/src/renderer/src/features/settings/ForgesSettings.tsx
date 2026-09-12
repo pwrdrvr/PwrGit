@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  FORGE_SAAS_HOST,
+  changeRequestNoun,
   forgeAllHostsOff,
+  forgeLabel,
+  forgeProduct,
   type ForgeCapabilities,
   type ForgeStatus
 } from "@pwrgit/shared";
@@ -18,18 +20,6 @@ import {
   settingsChipClass,
   type SettingsChipTone
 } from "./SettingsLayout";
-
-const FORGE_LABELS: Record<ForgeStatus["kind"], string> = {
-  github: "GitHub",
-  gitlab: "GitLab"
-};
-
-/** The wording each forge's change requests go by, so a limit reads in the
- *  vocabulary of the product it belongs to. */
-const CHANGE_REQUEST_LABELS: Record<ForgeStatus["kind"], string> = {
-  github: "pull request",
-  gitlab: "merge request"
-};
 
 /** What each capability buys the user, in their words rather than the API's. */
 const CAPABILITY_LABELS: Record<keyof ForgeCapabilities, string> = {
@@ -173,13 +163,13 @@ export function ForgesSettings() {
           return (
             <SettingsField
               key={forge.kind}
-              label={FORGE_LABELS[forge.kind]}
+              label={forgeLabel(forge.kind)}
               sub={describe(forge, current)}
               control={
                 // Same pill the section header uses — one state chip family in
                 // the Settings window, not two that drift apart.
                 <span
-                  aria-label={`${FORGE_LABELS[forge.kind]}: ${STATE_LABELS[current]}`}
+                  aria-label={`${forgeLabel(forge.kind)}: ${STATE_LABELS[current]}`}
                   aria-live="polite"
                   className={settingsChipClass(STATE_TONES[current])}
                   role="status"
@@ -273,7 +263,7 @@ function awaitingSignIn(forge: ForgeStatus): string[] {
  * gitlab.com. Naming the hosts makes the claim checkable against the rows above.
  */
 function describe(forge: ForgeStatus, current: ForgeState): string {
-  const noun = `${CHANGE_REQUEST_LABELS[forge.kind]}s`;
+  const noun = `${changeRequestNoun(forge.kind)}s`;
   const readable = readableHosts(forge);
   if (readable.length > 0) {
     return `Reading ${noun} from ${hostsPhrase(readable)}.`;
@@ -285,13 +275,13 @@ function describe(forge: ForgeStatus, current: ForgeState): string {
     return `Reading ${noun} through the \`${forge.cli}\` CLI's default host.`;
   }
   if (current === "off") {
-    return `Every ${FORGE_LABELS[forge.kind]} host is switched off above.`;
+    return `Every ${forgeLabel(forge.kind)} host is switched off above.`;
   }
   // A missing CLI reports no hosts at all, so it lands here too — and saying
   // "no host is signed in" beside a "Not installed" chip blames the login for a
   // missing binary, which the remedy below correctly does not.
   if (current === "missing") {
-    return `${FORGE_LABELS[forge.kind]} ${noun} need the \`${forge.cli}\` CLI.`;
+    return `${forgeLabel(forge.kind)} ${noun} need the \`${forge.cli}\` CLI.`;
   }
   return `No host is signed in to read ${noun} from.`;
 }
@@ -303,14 +293,14 @@ function describe(forge: ForgeStatus, current: ForgeState): string {
  */
 function remedyOrCapabilities(forge: ForgeStatus, current: ForgeState): string {
   if (current === "missing") {
-    return `Install the ${FORGE_LABELS[forge.kind]} CLI (\`${forge.cli}\`) to see status here.`;
+    return `Install the ${forgeLabel(forge.kind)} CLI (\`${forge.cli}\`) to see status here.`;
   }
   if (current === "off") {
     // Says what is actually true: no host is read and no token is minted. The
     // earlier wording claimed no `${forge.cli}` command runs at all, while the
     // probe spawns `--version` on every pass to learn the CLI is there — which
     // is how this row knows to say "Off" rather than "Not installed".
-    return `Turn a host on in Hosts above to read ${CHANGE_REQUEST_LABELS[forge.kind]} status. PwrGit reads no host and mints no token while every host is off.`;
+    return `Turn a host on in Hosts above to read ${changeRequestNoun(forge.kind)} status. PwrGit reads no host and mints no token while every host is off.`;
   }
   if (current === "signedOut") {
     return `Run \`${signInCommand(forge)}\` in a terminal, then this updates on its own.`;
@@ -347,7 +337,7 @@ function remedyOrCapabilities(forge: ForgeStatus, current: ForgeState): string {
  */
 function signInCommand(forge: ForgeStatus): string {
   const waiting = awaitingSignIn(forge);
-  if (waiting.length === 0 || waiting.includes(FORGE_SAAS_HOST[forge.kind])) {
+  if (waiting.length === 0 || waiting.includes(forgeProduct(forge.kind).saasHost)) {
     return `${forge.cli} auth login`;
   }
   return `${forge.cli} auth login --hostname ${waiting[0]}`;

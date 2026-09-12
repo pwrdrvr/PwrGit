@@ -1,6 +1,7 @@
 import {
   canonicalForgeHostname,
-  FORGE_SAAS_HOST,
+  FORGE_KINDS,
+  forgeProduct,
   type ForgeHostConfig,
   type ForgeKind,
   type ForgeSettings,
@@ -12,10 +13,17 @@ import { cliFor, type ForgeProbeTarget } from "./status";
 import type { ForgeHostOverrides } from "./resolve";
 
 /** Env escape hatches, mirroring the `GITHUB_TOKEN`/`GITLAB_TOKEN` pattern
- *  already used by the two CLI clients. A comma-separated allowlist of hosts;
- *  anything absent from a set list is off. */
-const GITHUB_HOSTS_ENV = "PWRGIT_GITHUB_HOSTS";
-const GITLAB_HOSTS_ENV = "PWRGIT_GITLAB_HOSTS";
+ *  already used by the CLI clients. A comma-separated allowlist of hosts;
+ *  anything absent from a set list is off. The variable's name is the
+ *  product's, from `FORGE_PRODUCTS` — a local pair of constants is two more
+ *  lines to remember when a product is added, and forgetting them silently
+ *  leaves that product with no escape hatch at all. */
+function envHostsFor(
+  env: NodeJS.ProcessEnv,
+  kind: ForgeKind
+): ReadonlySet<string> | null {
+  return envHosts(env, forgeProduct(kind).hostAllowlistEnv);
+}
 
 /** One host, after config, env and the hostname heuristic have been reconciled. */
 export type ResolvedForgeHost = {
@@ -145,10 +153,10 @@ export class ForgeHosts {
    */
   kindFor(host: string): { kind: ForgeKind | null; source: ForgeValueSource } {
     const key = canonical(host);
-    const github = envHosts(this.env, GITHUB_HOSTS_ENV);
-    if (github?.has(key) === true) return { kind: "github", source: "env" };
-    const gitlab = envHosts(this.env, GITLAB_HOSTS_ENV);
-    if (gitlab?.has(key) === true) return { kind: "gitlab", source: "env" };
+    const fromEnv = FORGE_KINDS.find(
+      (kind) => envHostsFor(this.env, kind)?.has(key) === true
+    );
+    if (fromEnv !== undefined) return { kind: fromEnv, source: "env" };
 
     const configured = this.configFor(key)?.kind;
     if (configured !== undefined) return { kind: configured, source: "config" };
@@ -156,10 +164,11 @@ export class ForgeHosts {
     const found = this.discoveredFor(key);
     if (found !== undefined) return { kind: found.kind, source: "auto" };
 
-    // The two SaaS hosts only. Everything else must be signed in to or added.
-    if (key === "github.com") return { kind: "github", source: "auto" };
-    if (key === "gitlab.com") return { kind: "gitlab", source: "auto" };
-    return { kind: null, source: "auto" };
+    // The SaaS hosts only. Everything else must be signed in to or added.
+    const saas = FORGE_KINDS.find((kind) => forgeProduct(kind).saasHost === key);
+    return saas === undefined
+      ? { kind: null, source: "auto" }
+      : { kind: saas, source: "auto" };
   }
 
   /**
@@ -184,10 +193,7 @@ export class ForgeHosts {
     // "off" in any sense the user would recognise, and no row is shown for it.
     if (kind === null) return { enabled: false, source: "auto" };
 
-    const env =
-      kind === "github"
-        ? envHosts(this.env, GITHUB_HOSTS_ENV)
-        : envHosts(this.env, GITLAB_HOSTS_ENV);
+    const env = envHostsFor(this.env, kind);
     // A set allowlist is exhaustive: a host it does not name is off, even if
     // config says otherwise. That is what makes it usable to scope a session.
     if (env !== null) return { enabled: env.has(key), source: "env" };
@@ -272,7 +278,7 @@ export class ForgeHosts {
         enabled: entry.enabled
       });
     }
-    // Hosts named only by `PWRGIT_{GITHUB,GITLAB}_HOSTS` have no settings row,
+    // Hosts named only by a product's `hostAllowlistEnv` have no settings row,
     // so `list()` misses them — but `overrides()` has them, and that is the map
     // both resolution and the renderer's dialogs classify with. A host that
     // resolves and is never probed falls through `forgeLoggedInAt` to the
@@ -288,10 +294,8 @@ export class ForgeHosts {
         enabled: this.isEnabled(host).enabled
       });
     }
-    for (const [kind, host] of Object.entries(FORGE_SAAS_HOST) as [
-      ForgeKind,
-      string
-    ][]) {
+    for (const kind of FORGE_KINDS) {
+      const host = forgeProduct(kind).saasHost;
       // Keyed by kind AND host. Matching on the hostname alone let a row that
       // resolves a SaaS hostname to the *other* product — `PWRGIT_GITHUB_HOSTS`
       // naming gitlab.com, say — suppress that product's own target, leaving it
@@ -336,14 +340,17 @@ export class ForgeHosts {
       const key = canonical(host);
       if (key !== "" && config.kind !== undefined) map[key] = config.kind;
     }
-    // GitLab first so GitHub overwrites it: `kindFor` tests the GitHub
-    // allowlist first and returns, so a host named in BOTH variables is GitHub
-    // there. Applying them in reading order made it GitLab here — one host
-    // routed to two different providers depending on which layer asked.
-    const gitlab = envHosts(this.env, GITLAB_HOSTS_ENV);
-    if (gitlab !== null) for (const host of gitlab) map[host] = "gitlab";
-    const github = envHosts(this.env, GITHUB_HOSTS_ENV);
-    if (github !== null) for (const host of github) map[host] = "github";
+    // Walked in REVERSE `FORGE_KINDS` order, so the earliest member overwrites
+    // the rest: `kindFor` tests the allowlists in `FORGE_KINDS` order and
+    // returns at the first match, so a host named in two of them is that
+    // member's there. Applying them in reading order here made it the last
+    // one — the same host routed to two different providers depending on which
+    // layer asked.
+    for (const kind of [...FORGE_KINDS].reverse()) {
+      const allowed = envHostsFor(this.env, kind);
+      if (allowed === null) continue;
+      for (const host of allowed) map[host] = kind;
+    }
     return map;
   }
 }
