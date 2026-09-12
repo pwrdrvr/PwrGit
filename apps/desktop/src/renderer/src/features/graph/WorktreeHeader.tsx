@@ -319,10 +319,29 @@ export function WorktreeHeader({
   // handlers ride on whichever button this operation belongs to — and on the
   // progress chip beside them, which is the wider target and the thing a user
   // is already looking at when they wonder what it is doing.
+  //
+  // They go on from the first busy render, not from the record's arrival,
+  // because clicking Pull leaves the pointer inside the button: the only
+  // `mouseenter` that button will ever see fires when its glyph swaps for the
+  // spinner, one or more renders before main reports the operation. A trigger
+  // that is not listening yet at that moment loses the hover for good. The
+  // popover holds a hover with nothing to report and opens when the record
+  // lands (see useRemoteActivityPopover).
+  //
+  // Widened in time only, never in scope: `running` also answers to this
+  // header's own `busy`, so a locally dispatched fetch can be what makes this
+  // button busy while the live record for the same checkout is a pull started
+  // somewhere else. Hanging that pull's card off the Fetch button would name
+  // an operation this control has nothing to do with, so once a record exists
+  // it still has to be this button's own.
   const carriesCard = (kind: Exclude<Busy, null>): boolean =>
     activity !== null && activity.kind === kind;
+  // The same button, one step earlier: whatever already carries the card, plus
+  // the gap before this operation has a record to carry.
+  const couldCarryCard = (kind: Exclude<Busy, null>): boolean =>
+    carriesCard(kind) || (running === kind && activity === null);
   const statusTrigger = (kind: Exclude<Busy, null>): StatusTriggerProps =>
-    !carriesCard(kind)
+    !couldCarryCard(kind)
       ? {}
       : {
           onMouseEnter: (event) => status.open(event.currentTarget),
@@ -333,6 +352,12 @@ export function WorktreeHeader({
   /**
    * A native tooltip everywhere the status card is NOT coming — the two must
    * never both appear, but a button with neither is worse than either.
+   *
+   * That is `carriesCard`, not `couldCarryCard`: in the gap before the record
+   * arrives the button is already listening for the hover that will summon a
+   * card, and the title is what covers exactly that gap. The two cannot
+   * overlap on screen because the record that lets the card open is the same
+   * record that drops this attribute, in one render.
    *
    * `.wt-btn__label` is `display:none` in the narrow header, so this is the
    * only text left there; dropping it for the whole of a sub-second fetch, or
@@ -386,7 +411,7 @@ export function WorktreeHeader({
           // Pointer only: the chip is not focusable, and making a live status
           // a tab stop would buy the keyboard nothing the working button below
           // does not already offer.
-          {...(activity === null
+          {...(running === null || !couldCarryCard(running)
             ? {}
             : {
                 onMouseEnter: (event: { currentTarget: HTMLElement }) =>
