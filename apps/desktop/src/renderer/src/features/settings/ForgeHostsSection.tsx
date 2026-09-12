@@ -19,8 +19,12 @@ const KIND_LABEL: Record<ForgeHostRow["kind"], string> = {
  * NAS or a box on a home network is not a forge — see `forge/AGENTS.md`.
  *
  * The switch is enforced at the transport, not here: a disabled host resolves
- * to null in main, so nothing spawns its CLI or mints its token. This pane only
- * ever writes the setting and re-reads what main says.
+ * to null in main, so no background reader — change-request status, commit
+ * authors, the repository identity refresh — spawns its CLI or mints its token.
+ * The clone and fork dialogs are the documented exception (see
+ * `main/forge/AGENTS.md`), which is why the help text names them rather than
+ * claiming more than the switch enforces. This pane only ever writes the
+ * setting and re-reads what main says.
  */
 export function ForgeHostsSection(props: { saving: boolean }) {
   const [hosts, setHosts] = useState<ForgeHostRow[] | undefined>();
@@ -200,7 +204,7 @@ function sourceNote(row: ForgeHostRow): string {
   if (row.enabledSource === "config") {
     return row.enabled
       ? "On because you turned it on."
-      : "Off. PwrGit runs no command and mints no token for this host.";
+      : "Off. PwrGit runs no background command and mints no token for this host. The clone and fork dialogs still use its CLI.";
   }
   // `auto` means nobody has decided — a known forge is on by default. It does
   // NOT mean "on because a CLI is signed in"; permission deliberately does not

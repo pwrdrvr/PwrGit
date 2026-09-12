@@ -281,6 +281,55 @@ provider or reach a real forge.
   lookup outcome separately from deltas: signed-out attempts may retain a
   known identity, and a change to unknown is still unresolved. Only a resolved
   outcome warrants successful visibility feedback.
+- **The per-host switch gates every background reader, and `IdentityService`
+  is one of them.** Settings → Forges → Hosts writes `enabled`, and
+  `ForgeHosts.isEnabled` is the single question every caller asks — there is no
+  second spelling. `PrService` and `GitHubCommitAuthorIdentityService` reach it
+  through `resolveEnabledForge`/`resolveEnabledForgeRepo` in `index.ts`;
+  `IdentityService` cannot, because it resolves `origin` itself, so it takes the
+  predicate as a **required** constructor argument instead. It was the one
+  caller that reached `ForgeRepoRegistry` directly, which meant a host switched
+  off still got `gh api`/`glab api` on every profile load and after every
+  successful fetch or pull, and the sidebar kept painting its marks. Do not give
+  that argument a permissive default: "on unless passed otherwise" is how this
+  came back the first time.
+  - **It gates on `origin.hostname`, not `origin.host`.** `parseForgeRemote`
+    still applies the `gitlab.*` prefix rule (see above), so a self-managed
+    instance that `ForgeHosts` refuses to guess at — no settings row, no switch
+    the user could ever have flipped — was being handed to a `glab` subprocess.
+    Gating on the hostname makes the pane and the transport agree.
+  - **The `git remote get-url origin` read still happens.** The hostname is what
+    the decision is made on, so it has to be read first. That is a local git
+    process, not the host's CLI and not its token.
+  - **Identity lookups do not reach a self-managed host at all yet.** For
+    anything that is not github.com, gitlab.com or `gitlab.*`,
+    `parseForgeRemote` returns `other` and the lookup is `unavailable` before
+    the gate is consulted — so GitHub Enterprise has no identity marks. Fixing
+    that means threading `ForgeHosts.overrides()` into the parse, which is a
+    *widening* of what identity reads and a separate change from this gate.
+- **Switching a host off stops the asking; it does not clear what was asked.**
+  A stored `repo_identity` row stays, keeps rendering, and the refresh reports
+  `unavailable` carrying that identity — the same outcome a host with no
+  provider gets, and honest: we could not ask this pass. Three reasons not to
+  delete it. Deleting collapses *asked, and it is private* into *never looked
+  up*, and those are two of the three states above. The env allowlists
+  (`PWRGIT_GITHUB_HOSTS`/`PWRGIT_GITLAB_HOSTS`) can turn a host off for one
+  session, so a deletion driven by the switch would discard a fact the next
+  launch has no way to recover without re-asking a host that may by then be
+  unreachable. And re-enabling repaints from a fresh read on the next pass
+  anyway, so deletion buys nothing. `unavailable` is deliberately not `unknown`:
+  `unknown` claims the forge was asked and would not say.
+- **Clone and fork are the deliberate exception, and the pane says so.**
+  `CloneService`/`ForkService` call `this.forges.get(host)` with no `enabled`
+  check. Two reasons. They are invoked — the user opened a dialog and named
+  that forge — where every gated caller is unprompted background work the user
+  never asked for. And they are keyed on *kind*, not hostname: `forges.get("github")`
+  can only ever reach the SaaS default provider, so gating them on a per-**host**
+  switch would attach the setting to a question it is not asking. If clone/fork
+  ever learn about hostnames, revisit this with them. Until then the help text
+  under an off switch names the exception out loud rather than promising more
+  than the switch enforces — `ForgeHostsSection.tsx` owns that wording, and an
+  "off" that quietly still shells out is exactly the setting that lies.
 - **A dialog opens on local state; a forge is asked only on debounced input.**
   This is the rule the clone dialog broke. `repo:cloneCatalog` used to list
   every known owner's repositories as it opened — `gh repo list <owner>

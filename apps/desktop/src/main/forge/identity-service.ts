@@ -91,7 +91,20 @@ export class IdentityService {
   constructor(
     private readonly db: DB,
     private readonly git: GitExec,
-    private readonly forges: ForgeRepoRegistry
+    private readonly forges: ForgeRepoRegistry,
+    /**
+     * The per-host switch from Settings → Forges, as `ForgeHosts.isEnabled`
+     * answers it.
+     *
+     * Required, not optional with a permissive default: this service is the
+     * one forge caller that reached its registry directly, and every `gh api`
+     * it spawned for a host the user had switched off was a setting lying.
+     * A default of "everything is on" would let the next caller reintroduce
+     * exactly that, silently. `PrService` and the commit-author service get
+     * the same gate through `resolveEnabledForge`; this is its third spelling
+     * and deliberately the same question.
+     */
+    private readonly isHostEnabled: (hostname: string) => boolean
   ) {}
 
   /** Identities already stored, for the repositories given. */
@@ -230,6 +243,18 @@ export class IdentityService {
     };
     const origin = await this.remoteSlots.run(() => readOrigin(this.git, repo));
     if (origin === null || origin.host === "other") return unavailable;
+    // A host switched off is exactly as unaskable as one with no provider:
+    // same `unavailable` outcome, no forge call, no row written. The `git
+    // remote` read above still happens — the hostname is what the decision is
+    // made on, so it has to be read first — but that is a local git process,
+    // not this host's CLI and not its token.
+    //
+    // Gating on the hostname rather than the kind is what makes the settings
+    // pane and this transport agree: `parseForgeRemote` still reads any
+    // `gitlab.*` name as GitLab, so a self-managed instance `ForgeHosts`
+    // refuses to guess at — one with no settings row, and no switch the user
+    // could ever have flipped — was handed to `glab` on every profile load.
+    if (!this.isHostEnabled(origin.hostname)) return unavailable;
     // `origin.hostname` is right here and used below — dropping it read this
     // repo's identity off github.com/gitlab.com instead of its own instance,
     // which for a same-named SaaS slug reports a STRANGER's visibility and
