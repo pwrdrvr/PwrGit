@@ -105,7 +105,7 @@ describe("repo worktree refresh events", () => {
       })
     } as unknown as WorktreeStateService;
     const db = {
-      prepare: (sql: string) => ({
+      prepare: (_sql: string) => ({
         all: () => [{ id: "wt-changed" }, { id: "wt-same" }],
         get: () => ({ profile_id: "profile-1" })
       })

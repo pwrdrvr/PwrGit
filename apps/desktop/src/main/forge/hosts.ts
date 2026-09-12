@@ -127,12 +127,6 @@ export class ForgeHosts {
     return this.discoveredIndex.byHost.get(canonical(host));
   }
 
-  /** Whether a CLI reports an account here. Drives a row's `origin`, never
-   *  permission — see `isEnabled`. */
-  private isSignedIn(host: string): boolean {
-    return this.discoveredFor(host) !== undefined;
-  }
-
   /** Tolerates a settings file whose `forges` object predates `hosts`, or was
    *  hand-edited without it. `isEnabled` is called per repository on a
    *  background path with no catch around it, so a throw here rejects a whole
@@ -193,12 +187,13 @@ export class ForgeHosts {
    * A known forge is on unless somebody turned it off, so the answer never
    * depends on whether two subprocesses have finished or even exist.
    *
-   * That distinction is load-bearing. Deriving "on" from `isSignedIn` meant a
-   * machine with `GITHUB_TOKEN` and no `gh` lost all change-request status,
-   * and so did every caller in the window before the background enumeration
-   * landed — silently, because a disabled host resolves to null rather than
-   * erroring. An explicit config value still wins in both directions: a host
-   * turned off by hand stays off after a later sign-in.
+   * That distinction is load-bearing. Deriving "on" from whether a CLI
+   * reports an account meant a machine with `GITHUB_TOKEN` and no `gh` lost
+   * all change-request status, and so did every caller in the window before
+   * the background enumeration landed — silently, because a disabled host
+   * resolves to null rather than erroring. An explicit config value still
+   * wins in both directions: a host turned off by hand stays off after a
+   * later sign-in.
    */
   isEnabled(host: string): { enabled: boolean; source: ForgeValueSource } {
     const key = canonical(host);

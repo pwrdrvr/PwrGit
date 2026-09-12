@@ -163,7 +163,7 @@ describe.each(THEMES)("native chrome contrast — %s theme", (_name, theme) => {
   });
 });
 
-describe.each(THEMES)("sidebar contrast — %s theme", (themeName, theme) => {
+describe.each(THEMES)("sidebar contrast — %s theme", (_themeName, theme) => {
   // ---- SC 1.4.3, 4.5:1. Every text run in the sidebar is under 18.66px
   // bold / 24px regular, so none of them qualifies for the large-text 3:1.
   describe("1.4.3 text (4.5:1)", () => {
