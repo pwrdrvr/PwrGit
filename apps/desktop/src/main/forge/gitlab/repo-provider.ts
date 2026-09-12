@@ -161,8 +161,23 @@ export class GitLabRepoProvider implements ForgeRepoProvider {
     readonly hostname: string = DEFAULT_HOSTNAME
   ) {}
 
+  /**
+   * Point one `glab` invocation at this provider's instance.
+   *
+   * Omitted for gitlab.com so existing argv is unchanged. Without it every
+   * call lands on whatever instance glab infers from the current directory,
+   * which for a fork target is not the one the user picked.
+   */
+  private args(rest: string[]): string[] {
+    if (this.hostname === DEFAULT_HOSTNAME) return rest;
+    const [verb, ...tail] = rest;
+    return verb === undefined
+      ? rest
+      : [verb, "--hostname", this.hostname, ...tail];
+  }
+
   async owners(): Promise<ForgeOwner[]> {
-    const username = parseGitLabUsername(await this.glab(["api", "user"]));
+    const username = parseGitLabUsername(await this.glab(this.args(["api", "user"])));
     let groups: string[] = [];
     try {
       // min_access_level 30 is Developer — the floor for creating a project
@@ -238,7 +253,7 @@ export class GitLabRepoProvider implements ForgeRepoProvider {
     // whole seam exists to avoid — so it is declined rather than attempted.
     if (term === "") return [];
     const found = parseGitLabProjects(
-      await this.glab(["api", `projects?${paging}${search}`]),
+      await this.glab(this.args(["api", `projects?${paging}${search}`])),
       this.hostname
     );
     if (owners.length === 0) return found;
@@ -351,8 +366,8 @@ export class GitLabRepoProvider implements ForgeRepoProvider {
     const args = ["api", `projects/${encodeProjectPath(nameWithOwner)}`];
     return parseJsonObject(
       await (signal === undefined
-        ? this.glab(args)
-        : this.glab(args, { signal })),
+        ? this.glab(this.args(args))
+        : this.glab(this.args(args), { signal })),
       "GitLab project"
     );
   }

@@ -45,7 +45,7 @@ import { createE2EForgeFixtureServices } from "./forge/e2e-forge-fixture";
 import { IdentityService } from "./forge/identity-service";
 import { ForgeStatusService } from "./forge/status";
 import { ForgeHostDirectory } from "./forge/cli-hosts";
-import { ForgeHosts } from "./forge/hosts";
+import { ForgeHosts, ForgeHostsView } from "./forge/hosts";
 import { resolveForge } from "./forge/providers";
 import { resolveForgeRepo } from "./forge/resolve";
 import { GitHubRepoProvider } from "./forge/github/repo-provider";
@@ -354,8 +354,16 @@ if (!gotSingleInstanceLock) {
         : createE2EForgeFixtureServices(forgeFixturePath, execGit);
     const forges = fixtureServices?.forges ?? new ForgeRepoRegistry();
     if (fixtureServices === null) {
-      forges.register(new GitHubRepoProvider());
-      forges.register(new GitLabRepoProvider());
+      // The factory is what lets the registry reach an Enterprise or
+      // self-managed instance: one provider per hostname, built on demand.
+      forges.register(
+        new GitHubRepoProvider(),
+        (hostname) => new GitHubRepoProvider(undefined, hostname)
+      );
+      forges.register(
+        new GitLabRepoProvider(),
+        (hostname) => new GitLabRepoProvider(undefined, hostname)
+      );
     }
     // One probe for the whole app: `ForgeStatusService` caches and dedups
     // in-flight reads, and a second instance would quietly undo both by
@@ -372,6 +380,26 @@ if (!gotSingleInstanceLock) {
     // Primed in the background: blocking boot on two CLI spawns would delay the
     // first window for a feature that degrades to the two SaaS hosts meanwhile.
     void forgeHostDirectory.refresh();
+    /**
+     * The per-host switch, enforced at the transport rather than in the UI.
+     *
+     * A disabled host resolves to null, so nothing downstream ever spawns its
+     * CLI or mints its token — including on the background refresh. An "off"
+     * that still shells out is a setting that lies.
+     */
+    const forgeHostsView = new ForgeHostsView(forgeHosts, () =>
+      forgeHostDirectory.refresh({ force: true })
+    );
+    const resolveEnabledForge: typeof resolveForge = (url, overrides) => {
+      const resolved = resolveForge(url, overrides ?? forgeHosts.overrides());
+      if (resolved === null) return null;
+      return forgeHosts.isEnabled(resolved.repo.host).enabled ? resolved : null;
+    };
+    const resolveEnabledForgeRepo: typeof resolveForgeRepo = (url, overrides) => {
+      const repo = resolveForgeRepo(url, overrides ?? forgeHosts.overrides());
+      if (repo === null) return null;
+      return forgeHosts.isEnabled(repo.host).enabled ? repo : null;
+    };
     // Re-read when availability changes — signing in to an Enterprise host from
     // a terminal should start resolving it without a restart.
     forgeStatus.onChange(() => {
@@ -404,7 +432,7 @@ if (!gotSingleInstanceLock) {
     const prService = new PrService(db, execGit, {
       // Without the overrides a self-managed or Enterprise host classifies as
       // `other` and silently produces no change-request status at all.
-      resolveForge: (url) => resolveForge(url, forgeHosts.overrides())
+      resolveForge: (url) => resolveEnabledForge(url)
     });
     const avatarThumbnails = new GitHubAvatarThumbnailCache(db, {
       cacheDir: join(app.getPath("userData"), "cache", "github-avatar-thumbnails")
@@ -417,7 +445,7 @@ if (!gotSingleInstanceLock) {
       execGit,
       {
         thumbnailStore: avatarThumbnails,
-        resolveForgeRepo: (url) => resolveForgeRepo(url, forgeHosts.overrides())
+        resolveForgeRepo: (url) => resolveEnabledForgeRepo(url)
       }
     );
 
@@ -642,7 +670,8 @@ if (!gotSingleInstanceLock) {
       bus,
       prService,
       commitAuthorIdentityService,
-      forgeStatus
+      forgeStatus,
+      forgeHostsView
     );
     registerSearchStatusHandlers(bus, db);
     registerSettingsHandlers(bus, settings, {

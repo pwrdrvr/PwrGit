@@ -8,6 +8,7 @@ import { emitEvent } from "../ipc";
 import type { GitHubCommitAuthorIdentityService } from "./commit-author-identity";
 import { CommitAssociationMonitor } from "./commit-association-monitor";
 import { ForgeStatusService } from "../forge/status";
+import type { ForgeHostsView } from "../forge/hosts";
 import { PrStatusMonitor, type PrMonitorTarget } from "./pr-status-monitor";
 import type { PrService, PrStatusDeltas } from "./pr-service";
 
@@ -23,7 +24,9 @@ export function registerGitHubHandlers(
   bus: CommandBus,
   prs: PrService,
   commitAuthorIdentities: GitHubCommitAuthorIdentityService,
-  forgeStatus: ForgeStatusService = new ForgeStatusService()
+  forgeStatus: ForgeStatusService = new ForgeStatusService(),
+  /** Omitted by tests and the E2E fixture, which have no host directory. */
+  forgeHosts?: ForgeHostsView
 ): {
   stop: () => void;
   releaseWebContents: (webContentsId: number) => void;
@@ -161,6 +164,14 @@ export function registerGitHubHandlers(
   bus.register("forge:status", async () =>
     ok({ forges: await forgeStatus.list() })
   );
+  if (forgeHosts !== undefined) {
+    bus.register("forge:hosts", async (req) => {
+      // A refresh is what the pane asks for after the user signs in from a
+      // terminal; an ordinary read is answered from the cached directory.
+      if (req.refresh === true) await forgeHosts.refresh();
+      return ok({ hosts: forgeHosts.rows() });
+    });
+  }
 
   bus.register("pr:replaceVisibleCommits", async (req, ctx) => {
     const hashes = boundedCommitHashes(req.commitHashes);

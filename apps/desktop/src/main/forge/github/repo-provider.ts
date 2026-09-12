@@ -180,16 +180,36 @@ export function parseGhOrgLogins(stdout: string): string[] {
 
 export class GitHubRepoProvider implements ForgeRepoProvider {
   readonly host = "github" as const;
-  readonly hostname = HOSTNAME;
+  readonly hostname: string;
 
-  constructor(private readonly gh: GhRunner = runGh) {}
+  constructor(
+    private readonly gh: GhRunner = runGh,
+    hostname: string = HOSTNAME
+  ) {
+    this.hostname = hostname.trim().toLowerCase() || HOSTNAME;
+  }
+
+  /**
+   * Point one `gh` invocation at this provider's host.
+   *
+   * Omitted for github.com so the argv of every existing call is unchanged —
+   * `gh` would honour it, but `GH_HOST` users rely on the bare form, and an
+   * unchanged argv is what keeps the existing tests meaningful.
+   */
+  private args(rest: string[]): string[] {
+    if (this.hostname === HOSTNAME) return rest;
+    const [verb, ...tail] = rest;
+    return verb === undefined
+      ? rest
+      : [verb, "--hostname", this.hostname, ...tail];
+  }
 
   async owners(): Promise<ForgeOwner[]> {
-    const login = parseGhLogin(await this.gh(["api", "user"]));
+    const login = parseGhLogin(await this.gh(this.args(["api", "user"])));
     let organizations: string[] = [];
     try {
       organizations = parseGhOrgLogins(
-        await this.gh(["api", "user/orgs", "--paginate"])
+        await this.gh(this.args(["api", "user/orgs", "--paginate"]))
       );
     } catch {
       // A token without `read:org` can still fork into the personal account.
@@ -203,8 +223,8 @@ export class GitHubRepoProvider implements ForgeRepoProvider {
   ): Promise<CloneRepository> {
     const args = ["api", `repos/${nameWithOwner}`];
     const stdout = await (signal === undefined
-      ? this.gh(args)
-      : this.gh(args, { signal }));
+      ? this.gh(this.args(args))
+      : this.gh(this.args(args), { signal }));
     const repository = parseGhRestRepo(stdout);
     if (repository === null) {
       throw new Error(`GitHub returned no repository for ${nameWithOwner}`);
@@ -235,7 +255,7 @@ export class GitHubRepoProvider implements ForgeRepoProvider {
     // it. There is no shell involved — the runner spawns an argv array — so
     // this is about `gh`'s own parser, not injection.
     if (term !== "") args.push("--", term);
-    return parseGhSearchRepos(await this.gh(args));
+    return parseGhSearchRepos(await this.gh(this.args(args)));
   }
 
   async fork(input: ForkInput): Promise<CloneRepository> {
@@ -254,7 +274,7 @@ export class GitHubRepoProvider implements ForgeRepoProvider {
     // gh prints a human line on both "created" and "already exists"; the fork
     // is read back either way, which makes the two outcomes identical here.
     // `gh repo fork` already waits for GitHub to finish preparing the copy.
-    await this.gh(args, {
+    await this.gh(this.args(args), {
       timeoutMs: 60_000,
       ...(input.signal === undefined ? {} : { signal: input.signal })
     });
@@ -279,7 +299,13 @@ export class GitHubRepoProvider implements ForgeRepoProvider {
       {
         timeoutMs: 10 * 60_000,
         onStderr: options.onStderr,
-        env: options.env,
+        // `gh repo clone` takes no `--hostname`; GH_HOST is the documented way
+        // to point it at an Enterprise instance. Left unset for github.com so
+        // the caller's own environment still decides.
+        env:
+          this.hostname === HOSTNAME
+            ? options.env
+            : { ...options.env, GH_HOST: this.hostname },
         ...(options.signal === undefined ? {} : { signal: options.signal })
       }
     );

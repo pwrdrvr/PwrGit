@@ -6,6 +6,7 @@ import {
   type ForgeValueSource
 } from "@pwrgit/shared";
 import type { DiscoveredForgeHost } from "./cli-hosts";
+import type { ForgeHostRow } from "@pwrgit/shared";
 import type { ForgeHostOverrides } from "./resolve";
 
 /** Env escape hatches, mirroring the `GITHUB_TOKEN`/`GITLAB_TOKEN` pattern
@@ -259,5 +260,48 @@ export class ForgeHosts {
     const gitlab = envHosts(this.env, GITLAB_HOSTS_ENV);
     if (gitlab !== null) for (const host of gitlab) map[host] = "gitlab";
     return map;
+  }
+}
+
+/** The CLI each forge speaks through, for a row's remediation command. */
+const CLI_FOR: Readonly<Record<ForgeKind, string>> = {
+  github: "gh",
+  gitlab: "glab"
+};
+
+/**
+ * What Settings renders, and the refresh it can ask for.
+ *
+ * A thin façade over `ForgeHosts` plus the directory, so the IPC handler takes
+ * one dependency instead of wiring both — and so the renderer never learns that
+ * enumeration is two subprocesses behind a cache.
+ */
+export class ForgeHostsView {
+  constructor(
+    private readonly hosts: ForgeHosts,
+    private readonly refreshDirectory: () => Promise<unknown>
+  ) {}
+
+  async refresh(): Promise<void> {
+    await this.refreshDirectory();
+  }
+
+  rows(): ForgeHostRow[] {
+    return this.hosts.list().flatMap((entry) =>
+      entry.kind === null
+        ? []
+        : [
+            {
+              host: entry.host,
+              kind: entry.kind,
+              enabled: entry.enabled,
+              enabledSource: entry.enabledSource,
+              origin: entry.origin,
+              cli: CLI_FOR[entry.kind],
+              ...(entry.account === undefined ? {} : { account: entry.account }),
+              ...(entry.scopes === undefined ? {} : { scopes: entry.scopes })
+            }
+          ]
+    );
   }
 }

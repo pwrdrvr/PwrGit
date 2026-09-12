@@ -592,6 +592,21 @@ export type ForgeSettings = {
  *  derived default never reads as a choice somebody made. */
 export type ForgeValueSource = "auto" | "config" | "env";
 
+/** One forge host, resolved, as Settings renders it. */
+export type ForgeHostRow = {
+  host: string;
+  kind: ForgeKind;
+  enabled: boolean;
+  enabledSource: ForgeValueSource;
+  /** `cli` — a CLI is signed in here. `config` — the user added it and no CLI
+   *  reports it, which is the row that offers a sign-in command. */
+  origin: "cli" | "config";
+  account?: string;
+  scopes?: string[];
+  /** The CLI that speaks to this host, for the remediation command. */
+  cli: string;
+};
+
 export type DiagnosticsSettings = {
   /** Sample main + renderer heaps; auto-snapshot on growth spikes. */
   heapMonitorEnabled: boolean;
@@ -901,6 +916,12 @@ export interface Commands {
   "forge:status": {
     req: void;
     res: { forges: ForgeStatus[] };
+  };
+  /** Every forge host PwrGit knows, resolved. Main-owned: the renderer never
+   *  enumerates a CLI itself. */
+  "forge:hosts": {
+    req: { refresh?: boolean };
+    res: { hosts: ForgeHostRow[] };
   };
   /**
    * Return immediately and start any eligible identity verification in the
