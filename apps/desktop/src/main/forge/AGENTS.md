@@ -7,7 +7,8 @@ speaks `PrSummary` and never learns which forge answered.
 - **The seam is `ForgeProvider`** (`types.ts`): four methods — token, branches,
   commits, numbers. That is exactly what `PrService` used to inject as four
   loose functions, which is why the service body did not change. Add a forge by
-  implementing those four, not by touching the service.
+  implementing those four, not by touching the service — and see **Adding a
+  forge** below for the other six entries a product owes.
 - **`ForgeRepo.path` is one string, deliberately.** A GitLab project can live at
   any depth (`pwrdrvr/qa/forge/PwrGit-Test`), so `{owner, repo}` cannot hold it.
   GitHub paths are always exactly one slash and `githubOwnerAndName()` splits
@@ -171,48 +172,78 @@ speaks `PrSummary` and never learns which forge answered.
   `PrStatusMonitor`'s fixed 60s timer, which no UI interaction can accelerate,
   so a mark would save at most one request per minute per repo.
 
-## Adding a forge: one seam, and the drift around it
+## Adding a forge
 
-**A third product is coming, and the goal is that a provider class drops in.**
-Today it would not: the first bullet above ("add a forge by implementing those
-four") is true of change-request status and of nothing else. Clone, fork,
-identity, `repo-indexer` and eight renderer files each grew their own per-product
-branching instead.
+**A provider class per seam, plus one registry entry.** Nothing else should be
+needed, and `tsc` is what proves it. Add the member to `FORGE_KINDS`
+(`packages/shared/src/types.ts`) and run `pnpm typecheck`: every site that needs
+filling in is a missing-property error naming its own file. There are seven.
 
-Recount before trusting the number:
+- `FORGE_PRODUCTS` — `packages/shared/src/forge-product.ts`. **Data only**, and
+  it is the one the renderer reads too: name, CLI, SaaS host, the
+  change-request noun and sigil, the word for a non-personal account, project
+  path depth, the env host allowlist, the "add a host" wording, whether forking
+  is asynchronous, and what the integration can answer (`capabilities`).
+- `PROVIDERS` (`providers.ts`) — change-request status, the `ForgeProvider`
+  seam `PrService` depends on.
+- `REPO_PROVIDERS` (`repo-providers.ts`) — the `ForgeRepoProvider` seam clone
+  and fork reach through `ForgeRepoRegistry`.
+- The commit-author transports (`commit-author-transport.ts`).
+- `HOST_ENUMERATORS` (`cli-hosts.ts`) — how that CLI reports its signed-in
+  hosts.
+- `DEFAULT_PROBES` (`status.ts`) — installed, and signed in at a host.
+- `RATE_LIMIT_DIALECT` (`retry.ts`) — how its rate-limit headers are spelled.
+
+Verify with the acceptance test the refactor was written against: add a
+throwaway third kind, confirm `tsc` names exactly those seven, remove it.
+
+**`packages/mcp-server` is the one place `tsc` cannot help.** It bundles
+standalone and imports nothing from `@pwrgit/shared`, so it keeps its own
+`"github" | "gitlab"` union, its own `classifyProvider`, and its own literal
+`PWRGIT_{GITHUB,GITLAB}_HOSTS` names — the same *rules* as the app, none of the
+same code. A third product has to be added there by hand, or the MCP server
+silently reports its checkouts as `other`.
+
+### Why they are all records
+
+The two shapes fail differently, and that difference is the whole rule:
+
+- **`Record<ForgeKind, …>` fails loudly.** A new kind is a missing-property type
+  error, so `tsc` hands you the list to fill in.
+- **A ternary fails silently.** `kind === "gitlab" ? glab : gh` sends a third
+  forge at GitHub, and nothing catches it — not the compiler, and not a test
+  that only covers the two kinds that exist today. **A hand-written pair of
+  calls is the same failure**: two literal `forges.register(...)` calls left a
+  third product's clone and fork reported as `unsupported_host` on a machine
+  whose CLI was installed and signed in.
+
+This count is a regression test, and it must read zero:
 
 ```bash
 grep -rn '=== "github"\|=== "gitlab"' --include=*.ts --include=*.tsx \
   packages/shared/src apps/desktop/src | grep -v '\.test\.'
 ```
 
-29 across 18 files when this was written. Reducing that is tracked separately;
-the rule here is only that it must not grow.
-
-The two shapes fail differently, and that difference is the whole rule:
-
-- **`Record<ForgeKind, …>` fails loudly.** A new kind is a missing-property type
-  error, so `tsc` hands you the list of tables to fill in. Eight exist —
-  `FORGE_CLI` and `FORGE_SAAS_HOST` (shared), `FORGE_CAPABILITIES`, `PROVIDERS`,
-  `RATE_LIMIT_DIALECT`, the commit-author transports, the E2E fixture. They are
-  spread over two shared files and four main ones; unifying them is the tracked
-  work, but *adding* to the pile in this shape is fine and much better than the
-  alternative.
-- **A ternary fails silently.** `kind === "gitlab" ? glab : gh` sends a third
-  forge at GitHub, and nothing catches it — not the compiler, and not a test
-  that only covers the two kinds that exist today. This is the shape that makes
-  a new provider a 30-site scavenger hunt.
+It was 29 across 18 files before the registry landed.
 
 So, when adding anything per-product:
 
 - **Never write a new `=== "github"` / `=== "gitlab"` comparison.** If you are
-  reaching for one, the value belongs in a `Record<ForgeKind, …>` (data) or
-  behind a provider method (behaviour).
-- **Put the table in `packages/shared`** when the renderer needs it too.
-  `renderer-does-not-import-main` blocks the main-side tables, and a
-  renderer-local copy is how `FORGE_CLI` ended up with two spellings.
-- **One table per question, not per screen.** `KIND_LABEL` and `FORGE_LABELS`
-  are the same map in the same directory, because each new screen added its own.
+  reaching for one, the value belongs in `FORGE_PRODUCTS` (data) or behind a
+  provider method (behaviour). `isForgeKind` and `toForgeHost` (shared) are the
+  guards; `forgeProductFor` / `forgeProductOrAssumed` are the accessors.
+- **`FORGE_KINDS` is the member list.** `Object.keys(table) as ForgeKind[]`
+  asserts a table is complete instead of proving it, which is exactly the
+  assertion that goes stale.
+- **Put data in `packages/shared`**, even where only main reads it today.
+  `renderer-does-not-import-main` blocks main's tables, and a renderer-local
+  copy is how `FORGE_CLI` ended up with two spellings — as did `KIND_LABEL` and
+  `FORGE_LABELS`, the same map in the same directory because each new screen
+  added its own.
+- **`ASSUMED_FORGE_KIND` is the one place `other` becomes GitHub.** Eight
+  ternaries used to answer an unclaimed host as GitHub — a clone hint, a default
+  hostname, an error sentence. That is preserved, not endorsed; it is named so
+  it is greppable when somebody takes the question on.
 
 ## GitLab specifics
 
@@ -269,9 +300,9 @@ So, when adding anything per-product:
   - **The two sections divide the work.** Hosts owns per-host permission and
     sign-in, one row each. The card owns what only a *product* can answer: the
     CLI is missing (there are no host rows at all then), and what the
-    integration can do (`capabilities.ts`). Folding capabilities into host rows
-    would repeat the same sentence once per host of that forge and leave the
-    missing-CLI case nowhere to be reported.
+    integration can do (`FORGE_PRODUCTS[kind].capabilities`). Folding those
+    into host rows would repeat the same sentence once per host of that forge
+    and leave the missing-CLI case nowhere to be reported.
   - **Four states, and "off" is not one of the other three.** A forge whose every
     host is switched off is neither connected nor signed out — reporting it as
     either sends the user to a terminal to sign in to something they are already
@@ -323,10 +354,11 @@ So, when adding anything per-product:
   re-probes sooner than a healthy one, and listeners are woken only when
   something rendered actually changed — which now includes the per-host detail,
   since turning one of two signed-in hosts off leaves the summary alone.
-- **Capabilities describe the integration, not a login** (`capabilities.ts`), so
-  they are static per forge and need no network call. `batchedCommitAssociation`
-  is false for GitLab because it has no batch endpoint; callers use that to
-  avoid asking rather than to handle a failure.
+- **Capabilities describe the integration, not a login**
+  (`FORGE_PRODUCTS[kind].capabilities`, shared), so they are static per forge
+  and need no network call. `batchedCommitAssociation` is false for GitLab
+  because it has no batch endpoint; callers use that to avoid asking rather
+  than to handle a failure.
 
 ## The hover card
 
@@ -395,12 +427,13 @@ fixture file. Keep that wiring in `e2e-forge-fixture.ts`: tests must exercise
 the real renderer/IPC/services/indexer and must never stub commands above the
 provider or reach a real forge.
 
-- **What a forge cannot do belongs in `capabilities.ts`**, the one table both
-  Settings → Forges and the dialogs read. GitLab's fork API has no
-  default-branch-only equivalent, so `forkDefaultBranchOnly` is false there and
-  the fork dialog hides the switch — a control that is accepted and silently
-  ignored is worse than one that is absent. Add a capability there, not as a
-  property on a provider, or the settings screen will not know about it.
+- **What a forge cannot do belongs in its `capabilities`**
+  (`FORGE_PRODUCTS`, shared), the one table both Settings → Forges and the
+  dialogs read. GitLab's fork API has no default-branch-only equivalent, so
+  `forkDefaultBranchOnly` is false there and the fork dialog hides the switch —
+  a control that is accepted and silently ignored is worse than one that is
+  absent. Add a capability there, not as a property on a provider, or the
+  settings screen will not know about it.
 - **Availability is `status.ts`'s job, not a provider's.** `ForgeRepoProvider`
   answers `owners()` and nothing about installed/logged-in: probing is a
   subprocess, `ForgeStatusService` already caches one answer for the whole
@@ -459,6 +492,6 @@ provider or reach a real forge.
   catalog as "install the GitHub CLI" on a machine with `gh` installed and
   signed in — the state it spends its first seconds in. `sourceEmptyMessage`
   owns that wording so a test pins it.
-- **GitLab calls them groups, not organizations.** `ownerKindLabel` picks the
-  noun by host; the fork-target list is the one place the user chooses between
-  them.
+- **GitLab calls them groups, not organizations.** `ownerKindLabel` reads the
+  product's `organizationNoun`; the fork-target list is the one place the user
+  chooses between them, so a wrong noun there is wrong where it shows most.
