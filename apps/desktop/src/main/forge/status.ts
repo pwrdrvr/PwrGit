@@ -1,4 +1,4 @@
-import type { ForgeKind, ForgeStatus } from "@pwrgit/shared";
+import { FORGE_CLI, type ForgeKind, type ForgeStatus } from "@pwrgit/shared";
 import { runGh } from "../github/gh-cli";
 import { getGitHubToken } from "../github/pr-client";
 import { capabilitiesFor } from "./capabilities";
@@ -18,13 +18,9 @@ export type ForgeProbe = {
   loggedIn(): Promise<boolean>;
 };
 
-/** The binary each forge speaks through. One source: this value reaches the
- *  user as a command they are told to run, so a second copy that drifts would
- *  print a command naming a CLI the app never invokes. */
-export const FORGE_CLI: Readonly<Record<ForgeKind, string>> = {
-  github: "gh",
-  gitlab: "glab"
-};
+/** Re-exported from shared, which owns the one copy: the settings pane names
+ *  the CLI too and the renderer may not import from main. */
+export { FORGE_CLI };
 
 export function cliFor(kind: ForgeKind): string {
   return FORGE_CLI[kind];

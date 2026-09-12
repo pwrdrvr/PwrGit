@@ -53,7 +53,11 @@ export type ForgeHostMap = Readonly<Record<string, "github" | "gitlab">>;
  * or a typo, not a host.
  */
 export function canonicalForgeHostname(value: string): string | null {
-  const host = value.trim().toLowerCase().replace(/^www\./, "");
+  // Every leading `www.`, not one: a single strip is not idempotent, so a
+  // caller that canonicalizes before sending and a callee that canonicalizes
+  // on receipt would disagree on `www.www.example.com` — and this function
+  // exists precisely so those two agree byte-for-byte.
+  const host = value.trim().toLowerCase().replace(/^(?:www\.)+/, "");
   if (host === "") return null;
   if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(host)) {
     return null;

@@ -15,6 +15,7 @@ function host(overrides: Partial<ForgeHostRow> = {}): ForgeHostRow {
   return {
     host: "github.com",
     kind: "github",
+    kindSource: "auto",
     enabled: true,
     enabledSource: "auto",
     origin: "cli",
@@ -22,6 +23,25 @@ function host(overrides: Partial<ForgeHostRow> = {}): ForgeHostRow {
     ...overrides
   };
 }
+
+/** A host somebody added by hand: a stored kind is what `kindSource: "config"`
+ *  means, and it is the only thing that earns a Remove button. */
+function added(overrides: Partial<ForgeHostRow> = {}): ForgeHostRow {
+  return host({
+    host: "gitlab.contoso.dev",
+    kind: "gitlab",
+    kindSource: "config",
+    cli: "glab",
+    origin: "config",
+    ...overrides
+  });
+}
+
+const WRITE_FAILED = err({
+  kind: "unknown",
+  code: "settings_write_failed",
+  message: "Settings could not be written."
+});
 
 let container: HTMLDivElement;
 let root: Root;
@@ -63,6 +83,19 @@ async function render(initial?: ForgeHostRow[]): Promise<void> {
   await act(async () => {
     root.render(<ForgeHostsSection saving={false} />);
   });
+}
+
+/** Alerts are scoped: the section renders its own `role="alert"` above the
+ *  dialog, so an unscoped query can match the wrong one and pass for the wrong
+ *  reason. */
+function alertIn(scope: ParentNode): string {
+  return scope.querySelector("[role='alert']")?.textContent ?? "";
+}
+
+function dialog(): HTMLElement {
+  const found = container.querySelector<HTMLElement>("[role='dialog']");
+  if (found === null) throw new Error("no dialog open");
+  return found;
 }
 
 function button(name: string): HTMLButtonElement {
@@ -112,18 +145,21 @@ describe("ForgeHostsSection — adding a host by hand", () => {
     );
   });
 
-  it("writes the hostname and the product together, then re-reads from main", async () => {
+  it("writes the hostname, the product and an explicit on, then re-reads", async () => {
     await render();
     mocks.dispatch.mockClear();
 
     await click(button("Add GitHub Enterprise…"));
     await typeHostname("ghe.acme-inc.com");
     // Main is what turns the entry into a row; stand in for it having stored it.
-    rows = [...rows, host({ host: "ghe.acme-inc.com", origin: "config" })];
+    rows = [...rows, added({ host: "ghe.acme-inc.com", kind: "github", cli: "gh" })];
     await click(button("Add host"));
 
+    // `enabled: true` is not decoration. Main MERGES into the stored entry, so
+    // a stale `enabled:false` from a since-signed-out CLI would otherwise
+    // survive and the host would arrive switched off.
     expect(writes).toEqual([
-      { forgeHosts: { "ghe.acme-inc.com": { kind: "github" } } }
+      { forgeHosts: { "ghe.acme-inc.com": { kind: "github", enabled: true } } }
     ]);
     // Re-read, and never as a refresh: a config entry changes nothing either
     // CLI would report, and a refresh spawns two subprocesses to learn that.
@@ -138,7 +174,11 @@ describe("ForgeHostsSection — adding a host by hand", () => {
     await add("Add GitLab instance…", "gitlab.internal.example");
 
     expect(writes).toEqual([
-      { forgeHosts: { "gitlab.internal.example": { kind: "gitlab" } } }
+      {
+        forgeHosts: {
+          "gitlab.internal.example": { kind: "gitlab", enabled: true }
+        }
+      }
     ]);
   });
 
@@ -150,7 +190,7 @@ describe("ForgeHostsSection — adding a host by hand", () => {
     await add("Add GitHub Enterprise…", "  WWW.GHE.Acme-Inc.Com  ");
 
     expect(writes).toEqual([
-      { forgeHosts: { "ghe.acme-inc.com": { kind: "github" } } }
+      { forgeHosts: { "ghe.acme-inc.com": { kind: "github", enabled: true } } }
     ]);
   });
 
@@ -160,9 +200,10 @@ describe("ForgeHostsSection — adding a host by hand", () => {
     await add("Add GitHub Enterprise…", "https://ghe.acme-inc.com/");
 
     expect(writes).toEqual([]);
-    expect(container.querySelector("[role='alert']")?.textContent).toContain(
-      "Enter just the hostname"
-    );
+    // Names no specific cause: the shared regex also rejects underscores, a
+    // trailing dot and non-ASCII labels, and listing scheme/port/path told
+    // those users they had done something they had not.
+    expect(alertIn(dialog())).toContain("That is not a hostname");
     // Still open, with what they typed, so the fix is one edit away.
     expect(container.querySelector("[role='dialog']")).not.toBeNull();
   });
@@ -173,55 +214,126 @@ describe("ForgeHostsSection — adding a host by hand", () => {
     await add("Add GitHub Enterprise…", "github.com");
 
     expect(writes).toEqual([]);
-    expect(container.querySelector("[role='alert']")?.textContent).toContain(
-      "github.com is already on the list."
-    );
+    expect(alertIn(dialog())).toContain("github.com is already on the list.");
   });
 
   it("keeps the dialog open and says why when the write fails", async () => {
     await render();
-    writeResult = err({
-      kind: "unknown",
-      code: "settings_write_failed",
-      message: "Settings could not be written."
-    });
+    writeResult = WRITE_FAILED;
 
     await add("Add GitHub Enterprise…", "ghe.acme-inc.com");
 
     expect(container.querySelector("[role='dialog']")).not.toBeNull();
-    expect(container.querySelector("[role='alert']")?.textContent).toContain(
-      "Settings could not be written."
-    );
+    expect(alertIn(dialog())).toContain("Settings could not be written.");
   });
 
   it("reaches the add buttons with no host on the list at all", async () => {
     // The state this feature matters most in: nothing enumerated, so without a
-    // reachable affordance there is no way to name an instance.
+    // reachable affordance there is no way to name an instance. An empty list
+    // is still a LOADED list, so the buttons must be live here.
     await render([]);
 
     expect(container.textContent).toContain("Neither");
-    expect(button("Add GitHub Enterprise…")).toBeTruthy();
+    expect(button("Add GitHub Enterprise…").disabled).toBe(false);
+  });
+
+  it("will not open the dialog before the list is known", async () => {
+    // The duplicate check reads the rendered list. Against an unloaded one it
+    // waves everything through, and an add that lands on an existing host
+    // rewrites its product — sending that instance's metadata at the other CLI.
+    let settle: ((value: unknown) => void) | undefined;
+    mocks.dispatch.mockImplementation(async (channel: string) => {
+      if (channel === "forge:hosts") {
+        return await new Promise((resolve) => {
+          settle = resolve;
+        });
+      }
+      return writeResult;
+    });
+    await act(async () => {
+      root.render(<ForgeHostsSection saving={false} />);
+    });
+
+    expect(button("Add GitHub Enterprise…").disabled).toBe(true);
+    await click(button("Add GitHub Enterprise…"));
+    expect(container.querySelector("[role='dialog']")).toBeNull();
+
+    await act(async () => settle?.(ok({ hosts: [host()] })));
+    expect(button("Add GitHub Enterprise…").disabled).toBe(false);
+  });
+
+  it("submits nothing when Enter lands on an untouched field", async () => {
+    // The Enter path used to bypass the button's own unavailable condition and
+    // report an empty field as a malformed hostname.
+    await render();
+    await click(button("Add GitHub Enterprise…"));
+
+    const field = dialog().querySelector<HTMLInputElement>(".modal__input")!;
+    await act(async () => {
+      field.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true })
+      );
+    });
+
+    expect(writes).toEqual([]);
+    expect(alertIn(dialog())).toBe("");
+  });
+
+  it("re-announces an identical rejection instead of going silent", async () => {
+    // React bails out of a state update to the same string, so resubmitting an
+    // unchanged bad value left the alert node untouched and a reader silent.
+    await render();
+    await click(button("Add GitHub Enterprise…"));
+    await typeHostname("https://ghe.acme-inc.com/");
+
+    await click(button("Add host"));
+    const first = dialog().querySelector("[role='alert']");
+    await click(button("Add host"));
+    const second = dialog().querySelector("[role='alert']");
+
+    expect(first?.textContent).toContain("That is not a hostname");
+    expect(second?.textContent).toContain("That is not a hostname");
+    expect(second).not.toBe(first);
+  });
+
+  it("sends one write when the confirm button is double-clicked", async () => {
+    // `busy` is render state and the pane's own `saving` is never true for its
+    // direct dispatches, so only a synchronous ref can gate this.
+    await render();
+    await click(button("Add GitHub Enterprise…"));
+    await typeHostname("ghe.acme-inc.com");
+
+    const confirm = button("Add host");
+    await act(async () => {
+      confirm.click();
+      confirm.click();
+    });
+
+    expect(writes).toHaveLength(1);
   });
 });
 
 describe("ForgeHostsSection — removing a hand-added host", () => {
-  const added = host({
-    host: "gitlab.contoso.dev",
-    kind: "gitlab",
-    cli: "glab",
-    origin: "config",
-    enabledSource: "auto"
-  });
+  const removeButton = (hostname: string): HTMLButtonElement | null =>
+    container.querySelector<HTMLButtonElement>(
+      `[aria-label='Remove host ${hostname}']`
+    );
+
+  /** The row a Remove button belongs to, so a row-scoped assertion cannot pass
+   *  by matching some other row's text. */
+  const rowFor = (hostname: string): HTMLElement => {
+    const found = [...container.querySelectorAll<HTMLElement>(".settings-field")]
+      .find((field) => field.textContent?.includes(hostname) === true);
+    if (found === undefined) throw new Error(`no row for ${hostname}`);
+    return found;
+  };
 
   it("clears the whole entry, which is what makes the row go away", async () => {
-    await render([added]);
+    await render([added()]);
     mocks.dispatch.mockClear();
 
-    const remove = container.querySelector<HTMLButtonElement>(
-      "[aria-label='Remove host gitlab.contoso.dev']"
-    )!;
     rows = [];
-    await click(remove);
+    await click(removeButton("gitlab.contoso.dev")!);
 
     // `null`, not `{kind: undefined}`: the kind is the only thing naming the
     // product, so clearing the entry is what removes the host.
@@ -230,34 +342,64 @@ describe("ForgeHostsSection — removing a hand-added host", () => {
     expect(container.textContent).not.toContain("gitlab.contoso.dev");
   });
 
-  it("offers no Remove for a host a CLI reported", async () => {
-    // Removing it would clear a setting and leave the row exactly where it is,
-    // because enumeration — not config — is what put it there.
-    await render([host({ account: "octo-dev" })]);
+  it("offers Remove on a stored product even once a CLI reports the host", async () => {
+    // `origin` flips to "cli" the moment enumeration finds an account, but the
+    // stored kind still overrides what the CLI reported — so gating Remove on
+    // origin made a mis-chosen product permanent.
+    await render([
+      added({ origin: "cli", account: "o.dev" })
+    ]);
 
-    expect(
-      container.querySelector("[aria-label='Remove host github.com']")
-    ).toBeNull();
-    expect(container.textContent).toContain("signed in as octo-dev");
+    expect(removeButton("gitlab.contoso.dev")).not.toBeNull();
+  });
+
+  it("offers no Remove for a host nobody chose a product for", async () => {
+    // The dangerous case: a host the user merely switched OFF resolves its kind
+    // from the SaaS fallback and reports origin "config" once its CLI signs
+    // out. Clearing that entry would DELETE the `enabled:false` and turn the
+    // host back on, with no row left to turn it off again.
+    await render([
+      host({ enabled: false, enabledSource: "config", origin: "config" })
+    ]);
+
+    expect(removeButton("github.com")).toBeNull();
+    expect(container.textContent).not.toContain("Added by you");
+    // And it gets the explanation `sourceNote` exists to give.
+    expect(container.textContent).toContain("PwrGit runs no command");
+  });
+
+  it("explains an env-pinned switch on a hand-added host", async () => {
+    // Every config row used to take the "Added by you" branch, which made
+    // `sourceNote` unreachable — so a switch that cannot move said nothing.
+    await render([added({ enabled: false, enabledSource: "env" })]);
+
+    expect(container.textContent).toContain("Added by you");
+    expect(container.textContent).toContain("environment variable");
   });
 
   it("shows a failed removal on the row it belongs to", async () => {
-    await render([added]);
-    writeResult = err({
-      kind: "unknown",
-      code: "settings_write_failed",
-      message: "Settings could not be written."
-    });
+    await render([added(), added({ host: "gitlab.other.dev" })]);
+    writeResult = WRITE_FAILED;
 
-    await click(
-      container.querySelector<HTMLButtonElement>(
-        "[aria-label='Remove host gitlab.contoso.dev']"
-      )!
-    );
+    await click(removeButton("gitlab.contoso.dev")!);
 
-    expect(container.querySelector("[role='alert']")?.textContent).toContain(
+    // Row-scoped, so it cannot pass by finding a section-level banner that
+    // names no host — which is what the previous version of this test did.
+    expect(alertIn(rowFor("gitlab.contoso.dev"))).toContain(
       "Settings could not be written."
     );
-    expect(container.textContent).toContain("gitlab.contoso.dev");
+    expect(alertIn(rowFor("gitlab.other.dev"))).toBe("");
+  });
+
+  it("sends one write when Remove is double-clicked", async () => {
+    await render([added()]);
+    const remove = removeButton("gitlab.contoso.dev")!;
+
+    await act(async () => {
+      remove.click();
+      remove.click();
+    });
+
+    expect(writes).toEqual([{ forgeHosts: { "gitlab.contoso.dev": null } }]);
   });
 });

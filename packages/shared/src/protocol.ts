@@ -596,6 +596,10 @@ export type ForgeValueSource = "auto" | "config" | "env";
 export type ForgeHostRow = {
   host: string;
   kind: ForgeKind;
+  /** Where the PRODUCT came from. `config` is the only value that means a
+   *  person chose it, which is what makes the host removable — `origin` below
+   *  answers a different question and must not be used for that. */
+  kindSource: ForgeValueSource;
   enabled: boolean;
   enabledSource: ForgeValueSource;
   /** `cli` — a CLI is signed in here. `config` — the user added it and no CLI

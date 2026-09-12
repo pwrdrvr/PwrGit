@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   canonicalForgeHostname,
+  FORGE_CLI,
   type ForgeHostConfig,
   type ForgeHostRow,
   type ForgeKind
@@ -28,19 +29,17 @@ const KIND_LABEL: Record<ForgeHostRow["kind"], string> = {
  */
 const ADD_HOST: Record<
   ForgeKind,
-  { button: string; title: string; placeholder: string; cli: string }
+  { button: string; title: string; placeholder: string }
 > = {
   github: {
     button: "Add GitHub Enterprise…",
     title: "Add a GitHub Enterprise host",
-    placeholder: "github.acme-inc.com",
-    cli: "gh"
+    placeholder: "github.acme-inc.com"
   },
   gitlab: {
     button: "Add GitLab instance…",
     title: "Add a GitLab instance",
-    placeholder: "gitlab.example.com",
-    cli: "glab"
+    placeholder: "gitlab.example.com"
   }
 };
 
@@ -61,16 +60,39 @@ export function ForgeHostsSection(props: { saving: boolean }) {
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState<string | undefined>();
+  const [rowError, setRowError] = useState<
+    { host: string; message: string } | undefined
+  >();
   const [adding, setAdding] = useState<ForgeKind | undefined>();
   const mounted = useRef(false);
+  const requestRef = useRef(0);
+  /**
+   * In-flight, read synchronously.
+   *
+   * `busy` cannot gate a write: it is render state, so it is not visible to a
+   * second click in the same tick, and `read` only raises it AFTER the write
+   * has resolved. `props.saving` cannot either — it belongs to
+   * `useAppSettings.update`, and this pane dispatches `settings:update`
+   * itself. Without this ref a double-click sent the write twice.
+   */
+  const writing = useRef(false);
 
   const read = useCallback(async (refresh: boolean): Promise<void> => {
+    // Reads DO overlap — StrictMode mounts twice, a write re-reads, and
+    // Re-check can land on top of either — and a plain `mounted` ref does not
+    // order them. Without this token the slower response wins and repaints a
+    // stale list over a fresh one. Same shape as `ForgesSettings`.
+    const request = ++requestRef.current;
     setBusy(true);
     try {
       const result = await dispatch("forge:hosts", refresh ? { refresh } : {});
-      if (!mounted.current) return;
+      if (!mounted.current || request !== requestRef.current) return;
       if (result.ok) {
         setHosts(result.value.hosts);
+        // A latched "Copied" belongs to the row it was clicked on. Rows can be
+        // removed and added back, and the label would otherwise reappear on a
+        // host nothing was ever copied for.
+        setCopied(undefined);
         setError(undefined);
       } else {
         setError(result.error.message);
@@ -78,11 +100,11 @@ export function ForgeHostsSection(props: { saving: boolean }) {
     } catch (cause) {
       // Without this the rejection escapes past `setBusy(false)` and every
       // control stays disabled on "Checking…" forever, with nothing shown.
-      if (mounted.current) {
+      if (mounted.current && request === requestRef.current) {
         setError(cause instanceof Error ? cause.message : String(cause));
       }
     } finally {
-      if (mounted.current) setBusy(false);
+      if (mounted.current && request === requestRef.current) setBusy(false);
     }
   }, []);
 
@@ -94,54 +116,65 @@ export function ForgeHostsSection(props: { saving: boolean }) {
     };
   }, [read]);
 
+  // "Copied" is feedback, not a state the row is in. Left latched it never
+  // reverts, so a second copy of the same command confirms nothing.
+  useEffect(() => {
+    if (copied === undefined) return;
+    const timer = window.setTimeout(() => setCopied(undefined), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
   /**
-   * Write one host's entry and re-read the list from main.
+   * Write one host's entry, then refresh the list.
    *
    * Returns the failure message rather than setting it, so each caller can put
-   * it where the user is looking — the section for a switch or a Remove, the
-   * dialog for an add. A re-read is never a `refresh`: adding or clearing a
-   * config entry changes nothing either CLI would report, and refreshing spawns
-   * two subprocesses to learn that.
+   * it where the user is looking — the row for a switch or a Remove, the dialog
+   * for an add. `null` means it worked, matching every other write callback in
+   * the app.
+   *
+   * The re-read is deliberately NOT awaited: it is what repaints the list, but
+   * a caller that waits on it stays "in flight" until it lands, and the dialog
+   * made that visible — a slow `forge:hosts` left it on "Adding…" with Cancel,
+   * Escape and the backdrop all refused, after the write had already succeeded.
+   * It is never a `refresh` either: a config entry changes nothing either CLI
+   * would report, and refreshing spawns two subprocesses to learn that.
    */
   const writeHost = async (
     host: string,
     value: ForgeHostConfig | null
-  ): Promise<string | undefined> => {
+  ): Promise<string | null> => {
+    if (writing.current) return null;
+    writing.current = true;
     try {
       const result = await dispatch("settings:update", {
         patch: { forgeHosts: { [host]: value } }
       });
-      if (!mounted.current) return undefined;
+      if (!mounted.current) return null;
       if (!result.ok) return result.error.message;
-      await read(false);
-      return undefined;
+      void read(false);
+      return null;
     } catch (cause) {
-      if (!mounted.current) return undefined;
+      if (!mounted.current) return null;
       return cause instanceof Error ? cause.message : String(cause);
+    } finally {
+      writing.current = false;
     }
   };
 
-  const toggle = async (row: ForgeHostRow, next: boolean): Promise<void> => {
-    // Always write the value the user asked for. An earlier version cleared
-    // the entry instead, on the theory that clearing returns the host to its
-    // derived default — but the derived default can BE the value they are
-    // trying to leave, in which case the switch silently snapped back and the
-    // host could not be turned off at all.
-    const message = await writeHost(row.host, { enabled: next });
-    if (message !== undefined) setError(message);
-  };
-
-  const remove = async (row: ForgeHostRow): Promise<void> => {
-    // `null` clears the whole entry, and for a hand-added host that entry is
-    // the only thing naming its product — so the row goes away rather than
-    // lingering as an unknown forge (`ForgeHosts.list` skips a config entry
-    // whose kind resolves to null). No confirmation: nothing is destroyed, and
-    // the two buttons below put it back.
-    const message = await writeHost(row.host, null);
-    if (message !== undefined) setError(message);
+  /** A row's own write. Its failure belongs on that row, not on the section
+   *  header, where it named no host. */
+  const writeRow = async (
+    row: ForgeHostRow,
+    value: ForgeHostConfig | null
+  ): Promise<void> => {
+    const message = await writeHost(row.host, value);
+    setRowError(message === null ? undefined : { host: row.host, message });
   };
 
   const connected = hosts?.filter((row) => row.enabled).length;
+  /** Written four times before this, and the Add buttons still went without
+   *  one — naming it is what made that omission visible. */
+  const blocked = props.saving || busy;
 
   return (
     <SettingsSection
@@ -184,53 +217,87 @@ export function ForgeHostsSection(props: { saving: boolean }) {
                 // In-flight is aria-disabled, never disabled: Chromium blurs a
                 // disabled element, throwing keyboard focus to <body> for the
                 // length of the operation. The handler is guarded instead.
-                busy={props.saving || busy}
+                busy={blocked}
                 label={`Read ${KIND_LABEL[row.kind]} status from ${row.host}`}
                 onChange={(next) => {
-                  if (props.saving || busy) return;
-                  void toggle(row, next);
+                  if (blocked) return;
+                  // Always write the value the user asked for. An earlier
+                  // version cleared the entry instead, on the theory that
+                  // clearing returns the host to its derived default — but the
+                  // derived default can BE the value they are trying to leave,
+                  // in which case the switch silently snapped back and the host
+                  // could not be turned off at all.
+                  void writeRow(row, { enabled: next });
                 }}
               />
             }
+            error={rowError?.host === row.host ? rowError.message : undefined}
             help={
-              row.origin === "config" ? (
-                <>
-                  Added by you. <code>{row.cli}</code> holds no account for this
-                  host yet — run{" "}
-                  <code>{signInCommand(row)}</code>
-                  {" "}
-                  <button
-                    className="settings-inline-button"
-                    type="button"
-                    onClick={() => {
-                      void copyText(signInCommand(row));
-                      setCopied(row.host);
-                    }}
-                  >
-                    {copied === row.host ? "Copied" : "Copy"}
-                  </button>
-                  {" "}
-                  {/* "Remove host", not "Remove": it sits beside a command
-                      the button above copies, and bare "Remove" reads as if it
-                      might take the command or the account instead. The label
-                      names the host so several rows are distinguishable, and
-                      keeps the visible text as its prefix (SC 2.5.3). */}
-                  <button
-                    aria-disabled={props.saving || busy}
-                    aria-label={`Remove host ${row.host}`}
-                    className="settings-inline-button"
-                    type="button"
-                    onClick={() => {
-                      if (props.saving || busy) return;
-                      void remove(row);
-                    }}
-                  >
-                    Remove host
-                  </button>
-                </>
-              ) : (
-                sourceNote(row)
-              )
+              <>
+                {/* Two independent questions, and conflating them was a bug.
+                    `origin` says whether a CLI holds an account here, which is
+                    what earns the sign-in command. `kindSource` says whether a
+                    PERSON chose the product, which is what makes the host
+                    removable. Gating both on `origin` put "Added by you" and a
+                    Remove button on a host the user had merely switched off —
+                    and removing it there cleared the `enabled:false`, turning
+                    the host back ON and dropping the row that could undo it. */}
+                {row.kindSource === "config" ? "Added by you. " : null}
+                {row.origin === "config" ? (
+                  <>
+                    <code>{row.cli}</code> holds no account for this host yet —
+                    run <code>{signInCommand(row)}</code>{" "}
+                    <button
+                      className="settings-inline-button"
+                      type="button"
+                      onClick={() => {
+                        void copyText(signInCommand(row));
+                        setCopied(row.host);
+                      }}
+                    >
+                      {copied === row.host ? "Copied" : "Copy"}
+                    </button>
+                  </>
+                ) : (
+                  sourceNote(row)
+                )}
+                {/* An env-pinned or switched-off row still needs its
+                    explanation; `sourceNote` used to be unreachable for every
+                    config row, so the switch that cannot move said nothing
+                    about why. */}
+                {row.origin === "config" && row.enabledSource !== "auto" ? (
+                  <> {sourceNote(row)}</>
+                ) : null}
+                {row.kindSource === "config" ? (
+                  <>
+                    {" "}
+                    {/* "Remove host", not "Remove": it sits beside a command
+                        the button above copies, and bare "Remove" reads as if
+                        it might take the command or the account instead. The
+                        label names the host so several rows are
+                        distinguishable, and keeps the visible text as its
+                        prefix (SC 2.5.3). */}
+                    <button
+                      aria-disabled={blocked}
+                      aria-label={`Remove host ${row.host}`}
+                      className="settings-inline-button"
+                      type="button"
+                      onClick={() => {
+                        if (blocked) return;
+                        // `null` clears the entry, and for a hand-added host
+                        // the stored kind is the only thing naming its product
+                        // — so the row goes rather than lingering as an unknown
+                        // forge. Safe to offer without confirmation only
+                        // because `kindSource` proves there is a chosen product
+                        // to withdraw.
+                        void writeRow(row, null);
+                      }}
+                    >
+                      Remove host
+                    </button>
+                  </>
+                ) : null}
+              </>
             }
           />
         ))
@@ -243,6 +310,11 @@ export function ForgeHostsSection(props: { saving: boolean }) {
             {(Object.keys(ADD_HOST) as ForgeKind[]).map((kind) => (
               <button
                 key={kind}
+                // Genuinely unavailable, not in-flight: until the list has
+                // loaded the dialog cannot tell a new host from one already
+                // present, and an add that lands on an existing host rewrites
+                // its product — routing that instance at the wrong CLI.
+                disabled={hosts === undefined}
                 className="settings-button"
                 type="button"
                 onClick={() => setAdding(kind)}
@@ -273,11 +345,15 @@ export function ForgeHostsSection(props: { saving: boolean }) {
           </button>
         }
       />
-      {adding !== undefined && (
+      {adding !== undefined && hosts !== undefined && (
         <AddForgeHostDialog
           kind={adding}
-          listed={hosts ?? []}
-          onAdd={(host, kind) => writeHost(host, { kind })}
+          listed={hosts.map((row) => row.host)}
+          // `enabled: true` and not just `{ kind }`: main merges into the
+          // stored entry, so a stale `enabled:false` left behind by a CLI
+          // sign-out would survive and the host would arrive switched off,
+          // moments after the dialog said PwrGit would talk to it.
+          onAdd={(host) => writeHost(host, { kind: adding, enabled: true })}
           onClose={() => setAdding(undefined)}
         />
       )}
@@ -293,16 +369,19 @@ export function ForgeHostsSection(props: { saving: boolean }) {
  */
 function AddForgeHostDialog(props: {
   kind: ForgeKind;
-  /** Hosts already on the list, so a duplicate is refused in front of the user
-   *  instead of writing an entry that changes nothing visible. */
-  listed: readonly ForgeHostRow[];
-  onAdd: (host: string, kind: ForgeKind) => Promise<string | undefined>;
+  /** Hostnames already on the list, so a duplicate is refused in front of the
+   *  user instead of rewriting an existing host's product. */
+  listed: readonly string[];
+  onAdd: (host: string) => Promise<string | null>;
   onClose: () => void;
 }) {
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | undefined>();
-  const copy = ADD_HOST[props.kind];
+  const [error, setError] = useState<
+    { text: string; seq: number } | undefined
+  >();
+  const submitting = useRef(false);
+  const { title, placeholder } = ADD_HOST[props.kind];
   const titleId = `add-forge-host-${props.kind}-title`;
   // Escape is refused mid-write, matching the backdrop.
   const modalRef = useModal<HTMLDivElement>({
@@ -311,27 +390,47 @@ function AddForgeHostDialog(props: {
     }
   });
 
+  /** Re-keyed on every rejection, even an identical one: React bails out of a
+   *  state update to the same string, so resubmitting an unchanged bad value
+   *  left the `role="alert"` node untouched and a screen reader silent. */
+  const reject = (text: string): void => {
+    setError((current) => ({ text, seq: (current?.seq ?? 0) + 1 }));
+  };
+
   const submit = async (): Promise<void> => {
-    if (busy) return;
+    // A ref, not `busy`: Enter key-repeat delivers two keydowns before React
+    // has re-rendered with the new state, and both used to submit.
+    if (submitting.current || busy) return;
+    // Mirrors the Add button's own unavailable condition — the Enter path
+    // bypassed it, so an untouched field was reported as a malformed hostname.
+    if (value.trim() === "") return;
     // Canonicalized HERE, with the function the write path uses. Main silently
     // drops a key it cannot canonicalize, so a URL pasted into this box would
     // otherwise dispatch, succeed, and add no row — the setting appears saved
     // and does nothing.
     const host = canonicalForgeHostname(value);
     if (host === null) {
-      setError("Enter just the hostname — no scheme, port or path.");
+      // Deliberately not a list of causes: the shared regex also rejects
+      // underscores, a trailing dot and non-ASCII labels, and naming only
+      // scheme/port/path told those users they had done something they hadn't.
+      reject("That is not a hostname. Enter one like github.example.com.");
       return;
     }
-    if (props.listed.some((row) => row.host === host)) {
-      setError(`${host} is already on the list.`);
+    if (props.listed.includes(host)) {
+      reject(`${host} is already on the list.`);
       return;
     }
+    submitting.current = true;
     setBusy(true);
     setError(undefined);
-    const message = await props.onAdd(host, props.kind);
-    setBusy(false);
-    if (message === undefined) props.onClose();
-    else setError(message);
+    try {
+      const message = await props.onAdd(host);
+      if (message === null) props.onClose();
+      else reject(message);
+    } finally {
+      submitting.current = false;
+      setBusy(false);
+    }
   };
 
   return (
@@ -351,15 +450,15 @@ function AddForgeHostDialog(props: {
         onClick={(event) => event.stopPropagation()}
       >
         <div className="modal__title" id={titleId}>
-          {copy.title}
+          {title}
         </div>
-        <label className="field add-forge-host__field">
+        <label className="field modal__field">
           <span className="field__label">Hostname</span>
           <input
             className="modal__input"
             autoComplete="off"
             autoFocus
-            placeholder={copy.placeholder}
+            placeholder={placeholder}
             spellCheck={false}
             value={value}
             onChange={(event) => {
@@ -374,27 +473,36 @@ function AddForgeHostDialog(props: {
         </label>
         <div className="modal__hint">
           PwrGit will treat this host as {KIND_LABEL[props.kind]} and talk to it
-          through <code>{copy.cli}</code>. The hostname plays no part in that —
-          this choice does.
+          through <code>{FORGE_CLI[props.kind]}</code>. The hostname plays no
+          part in that — this choice does.
         </div>
         {error !== undefined && (
-          <div className="modal__error" role="alert">
-            {error}
+          <div className="modal__error" key={error.seq} role="alert">
+            {error.text}
           </div>
         )}
         <div className="modal__actions">
+          {/* In-flight is aria-disabled, never disabled: Chromium blurs a
+              disabled element the moment it becomes disabled, and inside a
+              focus trap that drops the user on <body> with nothing to Tab back
+              from (SC 2.4.3). Handlers are guarded instead. An empty field is
+              a genuinely unavailable action, so that half keeps `disabled`. */}
           <button
+            aria-disabled={busy}
             className="modal__cancel"
             type="button"
-            disabled={busy}
-            onClick={props.onClose}
+            onClick={() => {
+              if (busy) return;
+              props.onClose();
+            }}
           >
             Cancel
           </button>
           <button
+            aria-disabled={busy}
             className="modal__create"
             type="button"
-            disabled={busy || value.trim() === ""}
+            disabled={value.trim() === ""}
             onClick={() => void submit()}
           >
             {busy ? "Adding…" : "Add host"}

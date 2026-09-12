@@ -9322,8 +9322,15 @@ body.is-col-resizing {
   padding: 3px 6px;
   vertical-align: baseline;
 }
-.settings-inline-button:hover {
+.settings-inline-button:hover:not([aria-disabled="true"]) {
   background: var(--bg-panel-hover);
+}
+/* Busy is aria-disabled, not `disabled` (see styles/AGENTS.md), so it has to
+   be painted here — otherwise the control hovers and depresses like a live
+   button while its guarded handler drops the click. */
+.settings-inline-button[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* Switch */
@@ -10116,13 +10123,13 @@ button.agent-auth-node {
   margin: 16px 0 0;
 }
 
-/* Add-a-forge-host dialog: one labelled field, so `.modal__input`'s own
-   bottom margin would stack under `.field`'s and push the hint away. */
-.add-forge-host__field {
-  margin: 14px 0 0;
-}
-.add-forge-host__field .modal__input {
-  margin-bottom: 0;
+/* A single labelled `.field` inside a dialog: `.field`'s own bottom margin
+   would otherwise push whatever follows the input away. `.field .modal__input`
+   (above) already zeroes the input's, so this only needs the outer margin.
+   Shared rather than per-dialog — `.delete-profile__confirm` re-solved it once
+   already, at a different value. */
+.modal__field {
+  margin: 16px 0 0;
 }
 
 /* ---- Refresh and fetch affordances: one busy language ----
