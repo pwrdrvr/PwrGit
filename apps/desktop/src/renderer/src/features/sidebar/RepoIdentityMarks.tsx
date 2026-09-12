@@ -1,11 +1,12 @@
 import { useRef, useState } from "react";
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
-import type {
-  CloneRepository,
-  ForgeHost,
-  RepoIdentity,
-  RepoVisibility
+import {
+  forgeProductFor,
+  type CloneRepository,
+  type ForgeHost,
+  type RepoIdentity,
+  type RepoVisibility
 } from "@pwrgit/shared";
 
 /**
@@ -26,8 +27,10 @@ const VISIBILITY_LABEL: Record<RepoVisibility, string> = {
 };
 
 function hostLabel(host: ForgeHost, hostname: string): string {
-  if (host === "github" && hostname === "github.com") return "GITHUB";
-  if (host === "gitlab" && hostname === "gitlab.com") return "GITLAB";
+  const product = forgeProductFor(host);
+  if (product !== null && hostname === product.saasHost) {
+    return product.label.toUpperCase();
+  }
   // A self-hosted instance is named, not badged with a forge that would
   // misstate where the code actually lives.
   return hostname.toUpperCase();

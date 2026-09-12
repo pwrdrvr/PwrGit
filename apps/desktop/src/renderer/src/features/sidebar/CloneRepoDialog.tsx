@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type {
-  CloneCatalog,
-  CloneDestination,
-  CloneProgress,
-  CloneProtocol,
-  CloneRepository,
-  ForgeHost,
-  ForgeKind,
-  Profile,
-  Repo
+import {
+  forgeLabel,
+  type CloneCatalog,
+  type CloneDestination,
+  type CloneProgress,
+  type CloneProtocol,
+  type CloneRepository,
+  type ForgeHost,
+  type ForgeKind,
+  type Profile,
+  type Repo
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { joinDisplayPath } from "../../lib/platform";
@@ -509,7 +510,7 @@ export function CloneRepoDialog({
                       disabled={busy}
                       onClick={() => setHost(candidate)}
                     >
-                      {candidate === "gitlab" ? "GitLab" : "GitHub"}
+                      {forgeLabel(candidate)}
                     </button>
                   ))}
                 </span>

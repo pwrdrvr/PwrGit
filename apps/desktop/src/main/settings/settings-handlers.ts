@@ -9,6 +9,7 @@ import {
   isSidebarDensity,
   isSidebarTextSize,
   isUpdateChannel,
+  isForgeKind,
   isUpdateTrain,
   canonicalForgeHostname,
   ok,
@@ -149,10 +150,6 @@ function sanitizePatch(patch: AppSettingsPatch): {
   }
 
   return { general, experimental, diagnostics, updates, forgeHosts };
-}
-
-function isForgeKind(value: unknown): value is ForgeKind {
-  return value === "github" || value === "gitlab";
 }
 
 /**

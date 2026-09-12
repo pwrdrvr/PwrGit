@@ -1,5 +1,6 @@
 import {
   parseForgeRemote,
+  toForgeHost,
   type ForgeHost,
   type ForgeHostMap,
   type Repo,
@@ -142,9 +143,7 @@ export class IdentityService {
       rows.map((row) => [
         row.repo_id,
         {
-          host: (row.host === "github" || row.host === "gitlab"
-            ? row.host
-            : "other") as ForgeHost,
+          host: toForgeHost(row.host),
           hostname: row.hostname,
           owner: row.owner,
           name: row.name,

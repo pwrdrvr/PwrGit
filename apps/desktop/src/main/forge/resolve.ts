@@ -1,4 +1,4 @@
-import { classifyForgeHost } from "@pwrgit/shared";
+import { classifyForgeHost, forgeAllowsPathDepth } from "@pwrgit/shared";
 import type { ForgeKind, ForgeRepo } from "./types";
 
 /** Host → forge, for hosts whose name doesn't announce what they run. */
@@ -108,9 +108,10 @@ export function classifyHost(
 /**
  * Resolve a remote URL to the repo a provider can query, or null to no-op.
  *
- * A GitHub path must be exactly `owner/repo`; anything deeper is some other
- * GitHub URL (a tree, a gist) rather than a repository. GitLab accepts two or
- * more segments so nested groups work.
+ * Path depth is the product's own rule (`maxPathSegments`): a product without
+ * subgroups must be exactly `owner/repo`, because anything deeper is some other
+ * URL of theirs — a tree, a gist — rather than a repository, while one that
+ * nests accepts whatever depth it was given.
  */
 export function resolveForgeRepo(
   url: string,
@@ -121,8 +122,7 @@ export function resolveForgeRepo(
   const kind = classifyHost(parsed.host, overrides);
   if (kind === null) return null;
   const segments = parsed.path.split("/");
-  if (kind === "github" && segments.length !== 2) return null;
-  if (kind === "gitlab" && segments.length < 2) return null;
+  if (!forgeAllowsPathDepth(kind, segments.length)) return null;
   return {
     kind,
     host: parsed.host,

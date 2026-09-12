@@ -2,6 +2,8 @@ import {
   forgeAllHostsOff,
   forgeBlockAt,
   forgeCanAnswerSaas,
+  forgeProduct,
+  forgeProductOrAssumed,
   forgeSaasBlock,
   type CloneRepository,
   type ForgeHost,
@@ -114,15 +116,10 @@ export function cliProtocolLabel(host: CloneRepository["host"]): {
   label: string;
   detail: (nameWithOwner: string) => string;
 } {
-  if (host === "gitlab") {
-    return {
-      label: "GitLab CLI",
-      detail: (nameWithOwner) => `glab repo clone ${nameWithOwner}`
-    };
-  }
+  const product = forgeProductOrAssumed(host);
   return {
-    label: "GitHub CLI",
-    detail: (nameWithOwner) => `gh repo clone ${nameWithOwner}`
+    label: `${product.label} CLI`,
+    detail: (nameWithOwner) => `${product.cli} repo clone ${nameWithOwner}`
   };
 }
 
@@ -241,7 +238,7 @@ export function sourceEmptyMessage(input: {
  *  wrong in the one place the user is choosing between them. */
 export function ownerKindLabel(owner: ForgeOwner): string {
   if (owner.kind === "user") return "personal account";
-  return owner.host === "gitlab" ? "group" : "organization";
+  return forgeProduct(owner.host).organizationNoun;
 }
 
 /** The catalog rows that belong to the forge currently being browsed.

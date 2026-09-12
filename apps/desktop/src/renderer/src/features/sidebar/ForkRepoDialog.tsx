@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type {
-  CloneDestination,
-  CloneCatalog,
-  CloneProtocol,
-  CloneRepository,
-  ForgeKind,
-  ForgeOwner,
-  ForkPreflight,
-  ForkProgress,
-  Profile,
-  Repo
+import {
+  forgeLabel,
+  type CloneDestination,
+  type CloneCatalog,
+  type CloneProtocol,
+  type CloneRepository,
+  type ForgeKind,
+  type ForgeOwner,
+  type ForkPreflight,
+  type ForkProgress,
+  type Profile,
+  type Repo
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { useForgeHostMap } from "../../lib/useForgeHostMap";
@@ -499,7 +500,7 @@ export function ForkRepoDialog({
                       disabled={busy}
                       onClick={() => selectHost(candidate)}
                     >
-                      {candidate === "gitlab" ? "GitLab" : "GitHub"}
+                      {forgeLabel(candidate)}
                     </button>
                   ))}
                 </span>
