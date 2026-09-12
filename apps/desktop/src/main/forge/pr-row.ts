@@ -1,4 +1,4 @@
-import type { ForgeKind, PrSummary } from "@pwrgit/shared";
+import { isForgeKind, type ForgeKind, type PrSummary } from "@pwrgit/shared";
 
 /**
  * Every column that makes up a cached `PrSummary`, in one place.
@@ -100,7 +100,7 @@ function count(value: unknown): number | undefined {
 
 /** Guard the stored string rather than casting: a stale row may hold anything. */
 function forgeKind(value: unknown): ForgeKind | undefined {
-  return value === "github" || value === "gitlab" ? value : undefined;
+  return isForgeKind(value) ? value : undefined;
 }
 
 function enumValue<T extends string>(value: unknown, values: readonly T[]): T | undefined {

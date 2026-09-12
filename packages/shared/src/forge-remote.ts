@@ -1,23 +1,16 @@
-import type {
-  ForgeHost,
-  ForgeHostStatus,
-  ForgeKind,
-  ForgeStatus
+import {
+  FORGE_PRODUCTS,
+  forgeAllowsPathDepth,
+  forgeProduct
+} from "./forge-product";
+import {
+  FORGE_KINDS,
+  isForgeKind,
+  type ForgeHost,
+  type ForgeHostStatus,
+  type ForgeKind,
+  type ForgeStatus
 } from "./types";
-
-/**
- * The hosted instance of each forge.
- *
- * The one host `ForgeHosts.kindFor` recognises without enumeration, which makes
- * it both the fallback the status probe falls back to when no CLI reports an
- * account and the one host whose sign-in command needs no `--hostname`. Shared
- * because main probes it and the settings pane words a command about it; two
- * copies would drift into printing a command for a host nothing probed.
- */
-export const FORGE_SAAS_HOST: Readonly<Record<ForgeKind, string>> = {
-  github: "github.com",
-  gitlab: "gitlab.com"
-};
 
 /**
  * Whether a forge holds a usable credential for ONE named host.
@@ -73,7 +66,7 @@ export function forgeSaasBlock(
   status: ForgeStatus | undefined
 ): ForgeBlock | null {
   if (status === undefined || !status.installed) return "cli_missing";
-  return forgeBlockAt(status, FORGE_SAAS_HOST[status.kind]);
+  return forgeBlockAt(status, forgeProduct(status.kind).saasHost);
 }
 
 /**
@@ -129,7 +122,7 @@ export function forgeCanAnswerSaas(status: ForgeStatus | undefined): boolean {
  * SaaS host is the right question.
  */
 export function forgeLoggedInAtSaas(status: ForgeStatus): boolean {
-  return forgeLoggedInAt(status, FORGE_SAAS_HOST[status.kind]);
+  return forgeLoggedInAt(status, forgeProduct(status.kind).saasHost);
 }
 
 /** Why a forge is unusable. `host_off` is the user's own switch, so it must
@@ -155,20 +148,23 @@ const URL_STYLE =
 
 /** GitLab nests groups arbitrarily deep — `group/subgroup/team/repo` is one
  *  project. Everything before the last segment is the owner, which is exactly
- *  what `glab` accepts back as a project path. GitHub never has more than
- *  two segments, so the same split is correct there. */
-function splitPath(path: string): { owner: string; repo: string } | null {
+ *  what `glab` accepts back as a project path. A product with no subgroups
+ *  never has more than two segments, so the same split is correct there; the
+ *  count comes back so the caller can hold it to its product's depth rule. */
+function splitPath(
+  path: string
+): { owner: string; repo: string; segments: number } | null {
   const segments = path.split("/").filter((segment) => segment !== "");
   if (segments.length < 2) return null;
   const repo = segments[segments.length - 1]!;
   const owner = segments.slice(0, -1).join("/");
   if (owner === "" || repo === "") return null;
-  return { owner, repo };
+  return { owner, repo, segments: segments.length };
 }
 
 /** Explicit host → forge mapping, for self-hosted instances no heuristic can
  *  identify. Mirrors `ForgeHostOverrides` in main's `forge/resolve.ts`. */
-export type ForgeHostMap = Readonly<Record<string, "github" | "gitlab">>;
+export type ForgeHostMap = Readonly<Record<string, ForgeKind>>;
 
 /**
  * The one spelling of a hostname every layer must agree on.
@@ -221,12 +217,22 @@ export function classifyForgeHost(
   // function rather than a ForgeHost and dies at the IPC boundary, where a
   // function is not structured-cloneable.
   if (Object.hasOwn(overrides, normalized)) {
+    // `isForgeKind`, not `!== undefined`: the map is built from settings.json,
+    // which nothing validates, and it crosses IPC to the renderer's dialogs.
+    // Returning a kind no product claims makes this function's `ForgeHost`
+    // return type a lie, and every caller that indexes a per-product table
+    // with it then fails on a value the type system promised was safe.
     const override = overrides[normalized];
-    if (override !== undefined) return override;
+    if (isForgeKind(override)) return override;
   }
-  if (normalized === "github.com") return "github";
-  if (normalized === "gitlab.com") return "gitlab";
-  return "other";
+  // Each product's SaaS host, read off the registry rather than written out
+  // twice. This is the ONLY thing a hostname is evidence of: anything else
+  // self-managed must be enumerated or added by hand, which is what the
+  // `overrides` map above carries.
+  return (
+    FORGE_KINDS.find((kind) => FORGE_PRODUCTS[kind].saasHost === normalized) ??
+    "other"
+  );
 }
 
 /** Parse any git remote URL into the forge coordinates it names.
@@ -259,12 +265,14 @@ export function parseForgeRemote(
   const split = splitPath(path);
   if (split === null) return null;
   const host = classifyForgeHost(hostname, overrides);
-  // GitHub has no subgroups: a project is always exactly `owner/repo`. A
-  // deeper path is a wiki, a gist, or a page URL that merely looks like a
+  // A product with no subgroups has projects that are exactly `owner/repo`; a
+  // deeper path there is a wiki, a gist, or a page URL that merely looks like a
   // repository (`.../repo/issues`), and reading it as a project would send a
-  // clone at a URL that cannot exist. GitLab nests arbitrarily, so it keeps
-  // whatever depth it was given.
-  if (host === "github" && split.owner.includes("/")) return null;
+  // clone at a URL that cannot exist. A product that nests keeps whatever depth
+  // it was given. `other` is unconstrained: we do not know its rules.
+  if (host !== "other" && !forgeAllowsPathDepth(host, split.segments)) {
+    return null;
+  }
   return {
     host,
     // The SAME spelling every other layer uses. This string is not cosmetic:

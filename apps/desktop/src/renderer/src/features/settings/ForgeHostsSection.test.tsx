@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { err, ok, type ForgeHostRow } from "@pwrgit/shared";
+import { err, forgeCliNames, ok, type ForgeHostRow } from "@pwrgit/shared";
 
 const mocks = vi.hoisted(() => ({ dispatch: vi.fn() }));
 
@@ -233,7 +233,13 @@ describe("ForgeHostsSection — adding a host by hand", () => {
     // is still a LOADED list, so the buttons must be live here.
     await render([]);
 
-    expect(container.textContent).toContain("Neither");
+    // Asserted through the registry, not against the sentence: the copy used to
+    // be "Neither the GitHub CLI nor the GitLab CLI", which has no three-product
+    // form, so a third product would have had to rewrite the string and this
+    // test together.
+    expect(container.textContent).toContain(
+      `No forge CLI (${forgeCliNames().join(", ")}) is signed in to a host.`
+    );
     expect(button("Add GitHub Enterprise…").disabled).toBe(false);
   });
 

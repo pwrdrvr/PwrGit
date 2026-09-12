@@ -7,7 +7,9 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 import {
+  FORGE_KINDS,
   forgeCloneUrls,
+  forgeProduct,
   forgeWebUrl,
   type CloneRepository,
   type ForgeKind,
@@ -327,7 +329,7 @@ class E2EForgeRepoProvider implements ForgeRepoProvider {
   }
 
   private defaultHostname(): string {
-    return this.host === "gitlab" ? "gitlab.com" : "github.com";
+    return forgeProduct(this.host).saasHost;
   }
 }
 
@@ -343,7 +345,7 @@ export function createE2EForgeFixtureServices(
   git: GitExec
 ): { forges: ForgeRepoRegistry; status: ForgeStatusService } {
   const forges = new ForgeRepoRegistry();
-  for (const host of ["github", "gitlab"] as const) {
+  for (const host of FORGE_KINDS) {
     // The factory matters even here. Every provider lookup on the clone and
     // fork paths now passes a hostname, and a registry with no factory answers
     // `null` for any host but the one pre-seeded — so without this the suite
@@ -359,9 +361,9 @@ export function createE2EForgeFixtureServices(
   // stubs "is this forge usable", and the SaaS host the service falls back to
   // without a host list is the one contrived hostname that needs no fixture.
   const status = new ForgeStatusService({
-    probes: (["github", "gitlab"] as const).map((kind) => ({
+    probes: FORGE_KINDS.map((kind) => ({
       kind,
-      cli: kind === "github" ? "gh" : "glab",
+      cli: forgeProduct(kind).cli,
       installed: async () => {
         const config = readFixture(fixturePath).hosts[kind];
         return config !== undefined && config.installed !== false;

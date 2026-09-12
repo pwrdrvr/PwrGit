@@ -1,3 +1,4 @@
+import { forgeProduct } from "@pwrgit/shared";
 import {
   CliError,
   createCliClient,
@@ -13,12 +14,17 @@ import {
  * that must never leak into a diagnostic. `glab-cli.ts` is the same file with
  * GitLab's vocabulary, so the two cannot drift apart in behavior.
  */
+/** Binary and product name come from `FORGE_PRODUCTS`, not from literals here:
+ *  the dialogs word "${label} CLI" and "${cli} repo clone …" from the registry,
+ *  and a second copy would let one product be "GitHub CLI" in an error toast
+ *  and something else everywhere else. */
+const GITHUB = forgeProduct("github");
+
 export const GH_CLI_SPEC: CliSpec = {
-  binary: "gh",
-  label: "GitHub CLI",
+  binary: GITHUB.cli,
+  label: `${GITHUB.label} CLI`,
   errorName: "GhCliError",
-  authenticationRequiredMessage:
-    "GitHub authentication is required. Run gh auth login and verify your Git/SSH credentials, then try again.",
+  authenticationRequiredMessage: `${GITHUB.label} authentication is required. Run ${GITHUB.cli} auth login and verify your Git/SSH credentials, then try again.`,
   nonInteractiveEnv: {
     GH_PROMPT_DISABLED: "1",
     GIT_TERMINAL_PROMPT: "0",

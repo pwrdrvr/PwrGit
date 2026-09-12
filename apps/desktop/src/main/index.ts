@@ -48,8 +48,7 @@ import { ForgeHostDirectory } from "./forge/cli-hosts";
 import { ForgeHosts, ForgeHostsView } from "./forge/hosts";
 import { resolveForge } from "./forge/providers";
 import { resolveForgeRepo } from "./forge/resolve";
-import { GitHubRepoProvider } from "./forge/github/repo-provider";
-import { GitLabRepoProvider } from "./forge/gitlab/repo-provider";
+import { registerRepoProviders } from "./forge/repo-providers";
 import { registerChangesHandlers } from "./git/changes-handlers";
 import { registerOperationHandlers } from "./git/operation-handlers";
 import {
@@ -366,18 +365,7 @@ if (!gotSingleInstanceLock) {
         ? null
         : createE2EForgeFixtureServices(forgeFixturePath, execGit);
     const forges = fixtureServices?.forges ?? new ForgeRepoRegistry();
-    if (fixtureServices === null) {
-      // The factory is what lets the registry reach an Enterprise or
-      // self-managed instance: one provider per hostname, built on demand.
-      forges.register(
-        new GitHubRepoProvider(),
-        (hostname) => new GitHubRepoProvider(undefined, hostname)
-      );
-      forges.register(
-        new GitLabRepoProvider(),
-        (hostname) => new GitLabRepoProvider(undefined, hostname)
-      );
-    }
+    if (fixtureServices === null) registerRepoProviders(forges);
     // Which forge hosts exist, and whether we may read them. Enumeration costs
     // two subprocesses, so the directory caches and the resolvers below read it
     // synchronously — a PR refresh must never wait on `gh auth status`.

@@ -1,4 +1,9 @@
-import type { PrSummary } from "@pwrgit/shared";
+import {
+  ASSUMED_FORGE_KIND,
+  changeRequestLabel,
+  changeRequestSigil,
+  type PrSummary
+} from "@pwrgit/shared";
 import { prPresentation } from "./pr-status";
 import { DiffStat } from "../diff/DiffStat";
 import { longWhen } from "../graph/graph-view";
@@ -117,7 +122,7 @@ export function PrStatusCard({
  * request" is this app's neutral term and the honest default.
  */
 function eyebrow(pr: PrSummary): string {
-  return pr.forge === "gitlab" ? "Merge request" : "Pull request";
+  return changeRequestLabel(pr.forge ?? ASSUMED_FORGE_KIND);
 }
 
 /**
@@ -125,7 +130,7 @@ function eyebrow(pr: PrSummary): string {
  * which is what a reader can paste back into it.
  */
 function identity(pr: PrSummary): string {
-  const sigil = pr.forge === "gitlab" ? "!" : "#";
+  const sigil = changeRequestSigil(pr.forge ?? ASSUMED_FORGE_KIND);
   return `${pr.repoPath ?? ""}${sigil}${pr.number}`;
 }
 

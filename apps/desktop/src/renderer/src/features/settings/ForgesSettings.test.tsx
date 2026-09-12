@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { err, FORGE_SAAS_HOST, ok, type ForgeStatus } from "@pwrgit/shared";
+import { err, forgeProduct, ok, type ForgeStatus } from "@pwrgit/shared";
 
 const mocks = vi.hoisted(() => ({
   dispatch: vi.fn(),
@@ -41,7 +41,7 @@ function forge(overrides: Partial<ForgeStatus> = {}): ForgeStatus {
       forkDefaultBranchOnly: true
     },
     hosts: installed
-      ? [{ host: FORGE_SAAS_HOST[kind], enabled: true, loggedIn }]
+      ? [{ host: forgeProduct(kind).saasHost, enabled: true, loggedIn }]
       : [],
     ...overrides
   };

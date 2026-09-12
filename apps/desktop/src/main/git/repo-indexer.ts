@@ -6,6 +6,7 @@ import { basename, join } from "node:path";
 import {
   err,
   ok,
+  toForgeHost,
   type BranchRef,
   type BranchTrackingStatus,
   type ForgeHost,
@@ -83,8 +84,7 @@ type RepoIdentityRow = {
  *  newer build (or edited by hand) degrades to `other`/`unknown` rather than
  *  producing a Repo whose type is a lie. */
 export function repoIdentityFromRow(row: RepoIdentityRow): RepoIdentity {
-  const host: ForgeHost =
-    row.host === "github" || row.host === "gitlab" ? row.host : "other";
+  const host: ForgeHost = toForgeHost(row.host);
   const visibility: RepoVisibility =
     row.visibility === "public" ||
     row.visibility === "private" ||

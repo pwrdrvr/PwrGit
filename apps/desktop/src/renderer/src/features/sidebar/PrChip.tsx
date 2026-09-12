@@ -1,5 +1,9 @@
 import { useEffect } from "react";
-import type { PrSummary } from "@pwrgit/shared";
+import {
+  ASSUMED_FORGE_KIND,
+  changeRequestLabel,
+  type PrSummary
+} from "@pwrgit/shared";
 import { copyText } from "../../lib/copyText";
 import {
   hoverIntentHandlers,
@@ -37,7 +41,7 @@ export function PrChip({
     interactive: true,
     // The card is a dialog to assistive tech, so it must announce what it
     // actually shows — each forge's own word for the thing, as the card does.
-    label: pr.forge === "gitlab" ? "Merge request" : "Pull request"
+    label: changeRequestLabel(pr.forge ?? ASSUMED_FORGE_KIND)
   });
   // The hook is cheap and must be called unconditionally; a caller-supplied
   // gate simply wins over this instance's own.
@@ -79,9 +83,9 @@ export function PrChip({
         className={`pr-chip pr-chip--${status.dot}${isDraft ? " pr-chip--draft" : ""}${status.running ? " pr-chip--checks-running" : ""}`}
         role="button"
         tabIndex={0}
-        aria-label={`${
-          pr.forge === "gitlab" ? "Merge request" : "Pull request"
-        } #${pr.number} (${status.label}) — Enter opens in browser`}
+        aria-label={`${changeRequestLabel(
+          pr.forge ?? ASSUMED_FORGE_KIND
+        )} #${pr.number} (${status.label}) — Enter opens in browser`}
         onMouseEnter={(e) => chip.onMouseEnter(e.currentTarget)}
         onMouseLeave={chip.onMouseLeave}
         onFocus={(e) => chip.onFocus(e.currentTarget)}

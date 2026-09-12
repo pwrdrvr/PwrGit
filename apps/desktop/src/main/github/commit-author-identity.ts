@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
-import type {
-  GitHubCommitAuthorAvatarCacheStatus,
-  GitHubCommitAuthorIdentity,
-  GitHubCommitAuthorIdentityLookup
+import {
+  forgeAllowsPathDepth,
+  isForgeKind,
+  type GitHubCommitAuthorAvatarCacheStatus,
+  type GitHubCommitAuthorIdentity,
+  type GitHubCommitAuthorIdentityLookup
 } from "@pwrgit/shared";
 import type { GitExec } from "../git/dugite";
 import type { DB } from "../persistence/db";
@@ -1118,15 +1120,14 @@ function normalizeProof(value: unknown): CommitAuthorProof | undefined {
 function normalizeForgeRepo(value: unknown): ForgeRepo | undefined {
   if (!isRecord(value)) return undefined;
   const kind = value.kind;
-  if (kind !== "github" && kind !== "gitlab") return undefined;
+  if (!isForgeKind(kind)) return undefined;
   const host = safeText(value.host, 255)?.toLowerCase();
   const path = safeText(value.path, 1_024);
   if (host === undefined || path === undefined) return undefined;
   if (!/^[A-Za-z0-9.-]+$/.test(host)) return undefined;
   const port = readSafeInteger(value.port);
   const segments = path.split("/");
-  if (segments.length < 2) return undefined;
-  if (kind === "github" && segments.length !== 2) return undefined;
+  if (!forgeAllowsPathDepth(kind, segments.length)) return undefined;
   if (!segments.every((segment) => /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(segment))) {
     return undefined;
   }
