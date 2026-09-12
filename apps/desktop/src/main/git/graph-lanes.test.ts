@@ -135,21 +135,42 @@ function makeDivergedRelease(): Fixture {
  *  offset from the repo's OWN newest commit rather than a fixed epoch: an
  *  absolute date stops being "newer than the fixture" the day the clock
  *  passes it. */
-function commitOnto(repo: string, branch: string, message: string, step: number): void {
-  const tree = git(repo, "rev-parse", "main^{tree}").trim();
-  const parent = git(repo, "rev-parse", "main").trim();
-  const newest = Number(git(repo, "log", "-1", "--format=%ct", "main").trim());
-  const when = `${newest + 60 * (step + 1)} +0000`;
-  const sha = execFileSync(
-    "git",
-    ["commit-tree", tree, "-p", parent, "-m", message],
-    {
-      cwd: repo,
-      env: { ...GIT_ENV, GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when },
-      encoding: "utf8"
-    }
-  ).trim();
-  git(repo, "update-ref", `refs/heads/${branch}`, sha);
+/**
+ * Point each branch at a fresh commit over `main`'s tree, oldest first.
+ *
+ * Everything this needs off `main` is read once, in a single `git log`, because
+ * `main` cannot move while the loop runs: the body is then two plumbing spawns
+ * per branch instead of five. Process spawn is what this suite costs — see
+ * `vitest.config.ts` on Windows runners — and at 31 branches the per-branch
+ * re-reads were three quarters of the spawns and ran the caller into the 20s
+ * timeout there.
+ */
+function commitBranchesOnto(
+  repo: string,
+  commits: { branch: string; message: string }[]
+): void {
+  const [newest, tree, parent] = git(
+    repo,
+    "log",
+    "-1",
+    "--format=%ct%n%T%n%H",
+    "main"
+  )
+    .trim()
+    .split(/\r?\n/);
+  commits.forEach(({ branch, message }, step) => {
+    const when = `${Number(newest) + 60 * (step + 1)} +0000`;
+    const sha = execFileSync(
+      "git",
+      ["commit-tree", tree, "-p", parent, "-m", message],
+      {
+        cwd: repo,
+        env: { ...GIT_ENV, GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when },
+        encoding: "utf8"
+      }
+    ).trim();
+    git(repo, "update-ref", `refs/heads/${branch}`, sha);
+  });
 }
 
 /** A db that answers each of graph:lanes' statements from in-memory rows. */
@@ -278,11 +299,13 @@ describe("graph:lanes — unapplied upstream work on non-default branches", () =
     // 31 branches newer than releases/1.0 push it past ACTIVE_DRAW_CAP (30).
     // The branch the user is actually looking at must survive that cull.
     const extra: WorktreeRow[] = [];
+    const commits: { branch: string; message: string }[] = [];
     for (let i = 0; i < 31; i += 1) {
       const branch = `feature/${i}`;
-      commitOnto(fixture.repo, branch, `feature ${i}`, i);
+      commits.push({ branch, message: `feature ${i}` });
       extra.push({ id: `wt-f${i}`, branch, path: fixture.repo });
     }
+    commitBranchesOnto(fixture.repo, commits);
 
     const graph = await lanes(harness(fixture, extra), "active");
     expect(graph.shownBranches).not.toContain("releases/1.0");
