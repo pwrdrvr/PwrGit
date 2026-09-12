@@ -16,6 +16,15 @@ import type { ReactNode } from "react";
 
 export type SettingsChipTone = "default" | "ok" | "warn" | "err";
 
+/** The chip's class for one tone. Exported so a pane rendering its own chip
+ *  gets the same pill as `SettingsSection`'s header rather than a second copy of
+ *  this expression — "one state chip family in the Settings window". */
+export function settingsChipClass(tone: SettingsChipTone = "default"): string {
+  return tone === "default"
+    ? "settings-card__chip"
+    : `settings-card__chip settings-card__chip--${tone}`;
+}
+
 export function SettingsPanelHead(props: {
   eyebrow: string;
   title: ReactNode;
@@ -46,10 +55,7 @@ export function SettingsSection(props: {
   chip?: ReactNode;
   chipKind?: SettingsChipTone;
 }) {
-  const chipClass =
-    props.chipKind !== undefined && props.chipKind !== "default"
-      ? `settings-card__chip settings-card__chip--${props.chipKind}`
-      : "settings-card__chip";
+  const chipClass = settingsChipClass(props.chipKind);
 
   return (
     <section className="settings-panel" aria-label={props.title}>

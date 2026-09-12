@@ -57,9 +57,10 @@ describe("getGitHubToken", () => {
   });
 
   it("leaves gh's default host alone when no host is named", async () => {
-    // The status probe calls this with no argument. Passing
-    // `--hostname github.com` there would override GH_HOST and flip an
-    // Enterprise operator's Settings → Forges row to "Signed out".
+    // What the status probe's `assumed` target asks — the backfilled SaaS entry
+    // that exists because nothing named a host. Passing `--hostname github.com`
+    // there would override GH_HOST and flip an Enterprise operator's
+    // Settings → Forges row to "Signed out".
     const { runGh } = await import("./gh-cli");
     const { getGitHubToken } = await import("./pr-client");
     await getGitHubToken();
