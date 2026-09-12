@@ -18,13 +18,13 @@ import { stampForge, type ForgeProvider, type ForgeRepo } from "../types";
 export const githubProvider: ForgeProvider = {
   kind: "github",
 
-  getToken: async () => getGitHubToken(),
+  getToken: async (host) => getGitHubToken(host),
 
   fetchPrsForBranches: async (token, repo, branches) => {
     const parts = githubOwnerAndName(repo);
     if (parts === null) return emptyFor(branches);
     return stampForge(
-      await fetchPrsForRepo(token, parts.owner, parts.name, branches),
+      await fetchPrsForRepo(token, repo, parts.owner, parts.name, branches),
       repo
     );
   },
@@ -33,7 +33,13 @@ export const githubProvider: ForgeProvider = {
     const parts = githubOwnerAndName(repo);
     if (parts === null) return emptyFor(commitHashes);
     return stampForge(
-      await fetchPrsForCommits(token, parts.owner, parts.name, commitHashes),
+      await fetchPrsForCommits(
+        token,
+        repo,
+        parts.owner,
+        parts.name,
+        commitHashes
+      ),
       repo
     );
   },
@@ -42,7 +48,7 @@ export const githubProvider: ForgeProvider = {
     const parts = githubOwnerAndName(repo);
     if (parts === null) return new Map<number, PrSummary | null>();
     return stampForge(
-      await fetchPrsByNumbers(token, parts.owner, parts.name, numbers),
+      await fetchPrsByNumbers(token, repo, parts.owner, parts.name, numbers),
       repo
     );
   }

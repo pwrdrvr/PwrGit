@@ -556,3 +556,43 @@ function killChildHandle(child: ChildProcess, signal: NodeJS.Signals): void {
     // A close/error event, or the force-kill timer, will settle the operation.
   }
 }
+
+/** How one CLI invocation is pointed at a non-default host. */
+export type HostTargeting = {
+  args: string[];
+  env: Record<string, string | undefined>;
+};
+
+/**
+ * Point one `gh`/`glab` invocation at a specific instance.
+ *
+ * **`--hostname` is not a global flag on either CLI.** Only `api` (and the
+ * `auth` subcommands) accept it; `gh repo fork`, `gh search repos` and
+ * `glab repo clone` reject it outright, and inserting it after argv[0] also
+ * puts it between a command group and its subcommand. Everything that is not
+ * an `api` call is therefore targeted with the host environment variable
+ * (`GH_HOST` / `GITLAB_HOST`), which is the documented mechanism for exactly
+ * this and what both CLIs read when no hostname is given.
+ *
+ * Returns the argv and env unchanged for the CLI's default host, so an
+ * ordinary github.com/gitlab.com call keeps the argv it has always had — and
+ * keeps honouring a `GH_HOST` the operator set themselves.
+ */
+export function targetHost(params: {
+  hostname: string;
+  defaultHost: string;
+  hostEnvName: string;
+  args: string[];
+  env?: Record<string, string | undefined>;
+}): HostTargeting {
+  const env = params.env ?? {};
+  if (params.hostname === params.defaultHost) return { args: params.args, env };
+  const [verb, ...tail] = params.args;
+  if (verb === "api") {
+    return { args: [verb, "--hostname", params.hostname, ...tail], env };
+  }
+  return {
+    args: params.args,
+    env: { ...env, [params.hostEnvName]: params.hostname }
+  };
+}

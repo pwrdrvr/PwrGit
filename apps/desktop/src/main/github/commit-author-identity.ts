@@ -64,6 +64,9 @@ export type GitHubCommitAuthorIdentityServiceOptions = {
   negativeTtlMs?: number;
   initialBackoffMs?: number;
   maxBackoffMs?: number;
+  /** Resolve `origin` to a forge repo. Injected so main can supply the
+   *  signed-in host overrides; the default knows only the SaaS hosts. */
+  resolveForgeRepo?: typeof resolveForgeRepo;
 };
 
 type CacheStatus = "resolved" | "negative" | "unavailable";
@@ -156,12 +159,17 @@ export class GitHubCommitAuthorIdentityService {
     Promise<CacheEntry | undefined>
   >();
   private lastPrunedAt = Number.NEGATIVE_INFINITY;
+  /** Injected so a self-managed host the user has signed in to resolves here
+   *  exactly as it does for change-request status. Defaults to the bare
+   *  resolver, which knows only the two SaaS hosts. */
+  private readonly resolveForgeRepo: typeof resolveForgeRepo;
 
   constructor(
     private readonly db: DB,
     private readonly git: GitExec,
     options: GitHubCommitAuthorIdentityServiceOptions = {}
   ) {
+    this.resolveForgeRepo = options.resolveForgeRepo ?? resolveForgeRepo;
     this.transport = options.transport ?? new ForgeCommitAuthorIdentityTransport();
     this.thumbnails = options.thumbnailStore ?? new NoopGitHubAvatarThumbnailStore();
     this.now = options.now ?? Date.now;
@@ -634,7 +642,7 @@ export class GitHubCommitAuthorIdentityService {
       .then(async () => {
         const result = await this.git(["remote", "get-url", "origin"], worktreePath);
         if (!result.ok || result.value.exitCode !== 0) return undefined;
-        const repo = resolveForgeRepo(result.value.stdout);
+        const repo = this.resolveForgeRepo(result.value.stdout);
         // Trust this instance to serve its own users' avatars. Needed for a
         // self-managed host, whose name is only knowable at runtime.
         if (repo !== null) rememberForgeAvatarHost(repo.host);

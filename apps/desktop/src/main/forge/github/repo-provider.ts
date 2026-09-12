@@ -20,6 +20,7 @@ import {
   runGh,
   type GhRunOptions
 } from "../../github/gh-cli";
+import { targetHost, type HostTargeting } from "../cli-runner";
 
 const HOSTNAME = "github.com";
 
@@ -180,16 +181,58 @@ export function parseGhOrgLogins(stdout: string): string[] {
 
 export class GitHubRepoProvider implements ForgeRepoProvider {
   readonly host = "github" as const;
-  readonly hostname = HOSTNAME;
+  readonly hostname: string;
 
-  constructor(private readonly gh: GhRunner = runGh) {}
+  constructor(
+    private readonly gh: GhRunner = runGh,
+    hostname: string = HOSTNAME
+  ) {
+    this.hostname = hostname.trim().toLowerCase() || HOSTNAME;
+  }
+
+  /**
+   * Point one `gh` invocation at this provider's host.
+   *
+   * Delegates to the shared `targetHost`, which knows that `--hostname` is an
+   * `api`-only flag: `gh repo fork` and `gh search repos` reject it, so those
+   * are targeted with `GH_HOST` instead. Returns argv and env untouched for
+   * github.com, keeping existing calls byte-identical.
+   */
+  /**
+   * Run one `gh` command against this provider's host.
+   *
+   * Passes NO options object when there is neither env nor caller options, so
+   * a github.com call keeps the exact argv and arity it has always had.
+   */
+  private async runCli(rest: string[], extra?: GhRunOptions): Promise<string> {
+    const targeted = this.target(rest, extra?.env);
+    const hasEnv = Object.keys(targeted.env).length > 0;
+    if (extra === undefined && !hasEnv) return await this.gh(targeted.args);
+    return await this.gh(targeted.args, {
+      ...extra,
+      ...(hasEnv ? { env: targeted.env } : {})
+    });
+  }
+
+  private target(
+    rest: string[],
+    env?: Record<string, string | undefined>
+  ): HostTargeting {
+    return targetHost({
+      hostname: this.hostname,
+      defaultHost: HOSTNAME,
+      hostEnvName: "GH_HOST",
+      args: rest,
+      ...(env === undefined ? {} : { env })
+    });
+  }
 
   async owners(): Promise<ForgeOwner[]> {
-    const login = parseGhLogin(await this.gh(["api", "user"]));
+    const login = parseGhLogin(await this.runCli(["api", "user"]));
     let organizations: string[] = [];
     try {
       organizations = parseGhOrgLogins(
-        await this.gh(["api", "user/orgs", "--paginate"])
+        await this.runCli(["api", "user/orgs", "--paginate"])
       );
     } catch {
       // A token without `read:org` can still fork into the personal account.
@@ -203,8 +246,8 @@ export class GitHubRepoProvider implements ForgeRepoProvider {
   ): Promise<CloneRepository> {
     const args = ["api", `repos/${nameWithOwner}`];
     const stdout = await (signal === undefined
-      ? this.gh(args)
-      : this.gh(args, { signal }));
+      ? this.runCli(args)
+      : this.runCli(args, { signal }));
     const repository = parseGhRestRepo(stdout);
     if (repository === null) {
       throw new Error(`GitHub returned no repository for ${nameWithOwner}`);
@@ -235,7 +278,7 @@ export class GitHubRepoProvider implements ForgeRepoProvider {
     // it. There is no shell involved — the runner spawns an argv array — so
     // this is about `gh`'s own parser, not injection.
     if (term !== "") args.push("--", term);
-    return parseGhSearchRepos(await this.gh(args));
+    return parseGhSearchRepos(await this.runCli(args));
   }
 
   async fork(input: ForkInput): Promise<CloneRepository> {
@@ -254,7 +297,7 @@ export class GitHubRepoProvider implements ForgeRepoProvider {
     // gh prints a human line on both "created" and "already exists"; the fork
     // is read back either way, which makes the two outcomes identical here.
     // `gh repo fork` already waits for GitHub to finish preparing the copy.
-    await this.gh(args, {
+    await this.runCli(args, {
       timeoutMs: 60_000,
       ...(input.signal === undefined ? {} : { signal: input.signal })
     });
@@ -279,7 +322,10 @@ export class GitHubRepoProvider implements ForgeRepoProvider {
       {
         timeoutMs: 10 * 60_000,
         onStderr: options.onStderr,
-        env: options.env,
+        // `gh repo clone` takes no `--hostname`; `targetHost` routes it to
+        // GH_HOST, and leaves github.com's env untouched so the caller's own
+        // GH_HOST still decides there.
+        env: this.target(["repo", "clone"], options.env).env,
         ...(options.signal === undefined ? {} : { signal: options.signal })
       }
     );
@@ -297,3 +343,4 @@ export class GitHubRepoProvider implements ForgeRepoProvider {
     return ghErrorMessage(cause);
   }
 }
+

@@ -21,6 +21,7 @@ import {
   runGlab,
   type GlabRunOptions
 } from "./glab-cli";
+import { targetHost, type HostTargeting } from "../cli-runner";
 
 const DEFAULT_HOSTNAME = "gitlab.com";
 /** A fork is queued server-side; GitLab reports the copy through
@@ -161,17 +162,58 @@ export class GitLabRepoProvider implements ForgeRepoProvider {
     readonly hostname: string = DEFAULT_HOSTNAME
   ) {}
 
+  /**
+   * Point one `glab` invocation at this provider's instance.
+   *
+   * EVERY call must go through this. Without it glab falls back to gitlab.com
+   * or to whatever instance the current directory is authenticated against,
+   * which for a fork target is not the one the user picked — a fork POST would
+   * be created on the wrong server. `glab repo clone` takes no `--hostname`,
+   * so `targetHost` routes that one through GITLAB_HOST instead.
+   */
+  /**
+   * Run one `glab` command against this provider's instance.
+   *
+   * Passes NO options object when there is neither env nor caller options, so
+   * a gitlab.com call keeps the exact argv and arity it has always had.
+   */
+  private async runCli(
+    rest: string[],
+    extra?: GlabRunOptions
+  ): Promise<string> {
+    const targeted = this.target(rest, extra?.env);
+    const hasEnv = Object.keys(targeted.env).length > 0;
+    if (extra === undefined && !hasEnv) return await this.glab(targeted.args);
+    return await this.glab(targeted.args, {
+      ...extra,
+      ...(hasEnv ? { env: targeted.env } : {})
+    });
+  }
+
+  private target(
+    rest: string[],
+    env?: Record<string, string | undefined>
+  ): HostTargeting {
+    return targetHost({
+      hostname: this.hostname,
+      defaultHost: DEFAULT_HOSTNAME,
+      hostEnvName: "GITLAB_HOST",
+      args: rest,
+      ...(env === undefined ? {} : { env })
+    });
+  }
+
   async owners(): Promise<ForgeOwner[]> {
-    const username = parseGitLabUsername(await this.glab(["api", "user"]));
+    const username = parseGitLabUsername(await this.runCli(["api", "user"]));
     let groups: string[] = [];
     try {
       // min_access_level 30 is Developer — the floor for creating a project
       // in a group, which is what a fork target has to allow.
       groups = parseGitLabGroupPaths(
-        await this.glab([
-          "api",
-          "groups?min_access_level=30&per_page=100&all_available=false"
-        ])
+        await this.runCli([
+              "api",
+              "groups?min_access_level=30&per_page=100&all_available=false"
+            ])
       );
     } catch {
       // Personal-namespace forks still work without the group listing.
@@ -214,20 +256,20 @@ export class GitLabRepoProvider implements ForgeRepoProvider {
       // tried first because a subgroup path can never be a username.
       try {
         return parseGitLabProjects(
-          await this.glab([
-            "api",
-            `groups/${encodeProjectPath(owner)}/projects?include_subgroups=true&${paging}${search}`
-          ]),
+          await this.runCli([
+                "api",
+                `groups/${encodeProjectPath(owner)}/projects?include_subgroups=true&${paging}${search}`
+              ]),
           this.hostname
         );
       } catch (cause) {
         if (this.isAuthError(cause)) throw cause;
       }
       return parseGitLabProjects(
-        await this.glab([
-          "api",
-          `users/${encodeProjectPath(owner)}/projects?${paging}${search}`
-        ]),
+        await this.runCli([
+              "api",
+              `users/${encodeProjectPath(owner)}/projects?${paging}${search}`
+            ]),
         this.hostname
       );
     }
@@ -238,7 +280,7 @@ export class GitLabRepoProvider implements ForgeRepoProvider {
     // whole seam exists to avoid — so it is declined rather than attempted.
     if (term === "") return [];
     const found = parseGitLabProjects(
-      await this.glab(["api", `projects?${paging}${search}`]),
+      await this.runCli(["api", `projects?${paging}${search}`]),
       this.hostname
     );
     if (owners.length === 0) return found;
@@ -266,25 +308,23 @@ export class GitLabRepoProvider implements ForgeRepoProvider {
       // returns the new project as JSON — including the import status the
       // clone has to wait on — and its parameters are stable across glab
       // versions in a way the command's flags are not.
+      const forkArgs = ([
+        "api",
+        "--method",
+        "POST",
+        `projects/${encodeProjectPath(input.source)}/fork`,
+        "--field",
+        `namespace_path=${input.targetOwner}`,
+        "--field",
+        `name=${input.targetName}`,
+        "--field",
+        `path=${input.targetName}`
+      ]);
       created = parseJsonObject(
-        await this.glab(
-          [
-            "api",
-            "--method",
-            "POST",
-            `projects/${encodeProjectPath(input.source)}/fork`,
-            "--field",
-            `namespace_path=${input.targetOwner}`,
-            "--field",
-            `name=${input.targetName}`,
-            "--field",
-            `path=${input.targetName}`
-          ],
-          {
-            timeoutMs: 60_000,
-            ...(input.signal === undefined ? {} : { signal: input.signal })
-          }
-        ),
+        await this.runCli(forkArgs, {
+          timeoutMs: 60_000,
+          ...(input.signal === undefined ? {} : { signal: input.signal })
+        }),
         "GitLab fork"
       );
     } catch (cause) {
@@ -324,12 +364,17 @@ export class GitLabRepoProvider implements ForgeRepoProvider {
       signal?: AbortSignal;
     }
   ): Promise<void> {
-    await this.glab(["repo", "clone", nameWithOwner, destination, "--", "--progress"], {
-      timeoutMs: 10 * 60_000,
-      onStderr: options.onStderr,
-      env: options.env,
-      ...(options.signal === undefined ? {} : { signal: options.signal })
-    });
+    // `glab repo clone` has no `--hostname`; GITLAB_HOST is the documented
+    // way to point it at a self-managed instance, and targetHost routes it.
+    await this.runCli(
+      ["repo", "clone", nameWithOwner, destination, "--", "--progress"],
+      {
+        timeoutMs: 10 * 60_000,
+        onStderr: options.onStderr,
+        env: options.env,
+        ...(options.signal === undefined ? {} : { signal: options.signal })
+      }
+    );
   }
 
   isAuthError(cause: unknown): boolean {
@@ -351,8 +396,8 @@ export class GitLabRepoProvider implements ForgeRepoProvider {
     const args = ["api", `projects/${encodeProjectPath(nameWithOwner)}`];
     return parseJsonObject(
       await (signal === undefined
-        ? this.glab(args)
-        : this.glab(args, { signal })),
+        ? this.runCli(args)
+        : this.runCli(args, { signal })),
       "GitLab project"
     );
   }
@@ -401,3 +446,4 @@ export class GitLabRepoProvider implements ForgeRepoProvider {
     );
   }
 }
+

@@ -11,6 +11,7 @@ import { ExperimentalSettings } from "./ExperimentalSettings";
 import { GeneralSettings } from "./GeneralSettings";
 import { ProfilesSettings } from "./ProfilesSettings";
 import { ForgesSettings } from "./ForgesSettings";
+import { ForgeHostsSection } from "./ForgeHostsSection";
 import { UpdatesSettings } from "./UpdatesSettings";
 import { LocalAgentsSettings } from "./LocalAgentsSettings";
 import { useAppSettings, type AppSettingsState } from "./useAppSettings";
@@ -153,7 +154,15 @@ function SettingsSectionBody(props: {
   }
 
   if (props.section === "forges") {
-    return <ForgesSettings />;
+    // Two independent sections: hosts (what PwrGit may talk to) above the
+    // per-forge capability summary. Siblings rather than nested so each owns
+    // its own read and neither re-renders on the other's refresh tick.
+    return (
+      <>
+        <ForgeHostsSection saving={settings.saving} />
+        <ForgesSettings />
+      </>
+    );
   }
 
   if (props.section === "experimental") {

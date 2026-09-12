@@ -44,6 +44,10 @@ import { ForgeRepoRegistry } from "./forge/repo-provider";
 import { createE2EForgeFixtureServices } from "./forge/e2e-forge-fixture";
 import { IdentityService } from "./forge/identity-service";
 import { ForgeStatusService } from "./forge/status";
+import { ForgeHostDirectory } from "./forge/cli-hosts";
+import { ForgeHosts, ForgeHostsView } from "./forge/hosts";
+import { resolveForge } from "./forge/providers";
+import { resolveForgeRepo } from "./forge/resolve";
 import { GitHubRepoProvider } from "./forge/github/repo-provider";
 import { GitLabRepoProvider } from "./forge/gitlab/repo-provider";
 import { registerChangesHandlers } from "./git/changes-handlers";
@@ -350,13 +354,67 @@ if (!gotSingleInstanceLock) {
         : createE2EForgeFixtureServices(forgeFixturePath, execGit);
     const forges = fixtureServices?.forges ?? new ForgeRepoRegistry();
     if (fixtureServices === null) {
-      forges.register(new GitHubRepoProvider());
-      forges.register(new GitLabRepoProvider());
+      // The factory is what lets the registry reach an Enterprise or
+      // self-managed instance: one provider per hostname, built on demand.
+      forges.register(
+        new GitHubRepoProvider(),
+        (hostname) => new GitHubRepoProvider(undefined, hostname)
+      );
+      forges.register(
+        new GitLabRepoProvider(),
+        (hostname) => new GitLabRepoProvider(undefined, hostname)
+      );
     }
     // One probe for the whole app: `ForgeStatusService` caches and dedups
     // in-flight reads, and a second instance would quietly undo both by
     // keeping its own cache and spawning its own `gh`/`glab`.
     const forgeStatus = fixtureServices?.status ?? new ForgeStatusService();
+    // Which forge hosts exist, and whether we may read them. Enumeration costs
+    // two subprocesses, so the directory caches and the resolvers below read it
+    // synchronously — a PR refresh must never wait on `gh auth status`.
+    // Under the E2E forge fixture the registry and status service are stubbed;
+    // enumerating for real would spawn the developer's own `gh`/`glab` and put
+    // their actual Enterprise hostnames and account names on a screen the
+    // fixture exists to keep contrived.
+    const forgeHostDirectory = new ForgeHostDirectory(
+      fixtureServices === null ? {} : { discover: async () => [] }
+    );
+    const forgeHosts = new ForgeHosts({
+      readSettings: () => settings.get().forges ?? { hosts: {} },
+      discovered: () => forgeHostDirectory.current()
+    });
+    // Primed in the background: blocking boot on two CLI spawns would delay the
+    // first window for a feature that degrades to the two SaaS hosts meanwhile.
+    void forgeHostDirectory.refresh();
+    /**
+     * The per-host switch, enforced at the transport rather than in the UI.
+     *
+     * A disabled host resolves to null, so nothing downstream ever spawns its
+     * CLI or mints its token — including on the background refresh. An "off"
+     * that still shells out is a setting that lies.
+     */
+    const forgeHostsView = new ForgeHostsView(forgeHosts, () =>
+      forgeHostDirectory.refresh({ force: true })
+    );
+    const resolveEnabledForge: typeof resolveForge = (url, overrides) => {
+      const resolved = resolveForge(url, overrides ?? forgeHosts.overrides());
+      if (resolved === null) return null;
+      return forgeHosts.isEnabled(resolved.repo.host).enabled ? resolved : null;
+    };
+    const resolveEnabledForgeRepo: typeof resolveForgeRepo = (url, overrides) => {
+      const repo = resolveForgeRepo(url, overrides ?? forgeHosts.overrides());
+      if (repo === null) return null;
+      return forgeHosts.isEnabled(repo.host).enabled ? repo : null;
+    };
+    // Re-read when availability changes — signing in to an Enterprise host from
+    // a terminal should start resolving it without a restart. NOT forced: the
+    // first probe of a session always reports "changed", and a forced refresh
+    // there would re-spawn both CLIs seconds after the boot priming above for
+    // data that has not moved. The TTL is what makes this cheap; the pane's
+    // own Re-check is the forced path.
+    forgeStatus.onChange(() => {
+      void forgeHostDirectory.refresh();
+    });
     const identityService = new IdentityService(db, execGit, forges);
     const cloneService = new CloneService(
       db,
@@ -381,7 +439,11 @@ if (!gotSingleInstanceLock) {
       worktreeOperations
     );
     const refresher = createWorktreeRefresher(stateService, db);
-    const prService = new PrService(db, execGit);
+    const prService = new PrService(db, execGit, {
+      // Without the overrides a self-managed or Enterprise host classifies as
+      // `other` and silently produces no change-request status at all.
+      resolveForge: (url) => resolveEnabledForge(url)
+    });
     const avatarThumbnails = new GitHubAvatarThumbnailCache(db, {
       cacheDir: join(app.getPath("userData"), "cache", "github-avatar-thumbnails")
     });
@@ -391,7 +453,10 @@ if (!gotSingleInstanceLock) {
     const commitAuthorIdentityService = new GitHubCommitAuthorIdentityService(
       db,
       execGit,
-      { thumbnailStore: avatarThumbnails }
+      {
+        thumbnailStore: avatarThumbnails,
+        resolveForgeRepo: (url) => resolveEnabledForgeRepo(url)
+      }
     );
 
     // The worktree the user is currently viewing; refreshed on focus + a gentle
@@ -615,7 +680,8 @@ if (!gotSingleInstanceLock) {
       bus,
       prService,
       commitAuthorIdentityService,
-      forgeStatus
+      forgeStatus,
+      forgeHostsView
     );
     registerSearchStatusHandlers(bus, db);
     registerSettingsHandlers(bus, settings, {
