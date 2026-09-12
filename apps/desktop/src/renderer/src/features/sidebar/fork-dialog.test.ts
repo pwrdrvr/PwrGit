@@ -7,6 +7,8 @@ import type {
 } from "@pwrgit/shared";
 import {
   cliProtocolLabel,
+  forgeCanAnswerAnywhere,
+  forgeCanAnswerDialog,
   defaultForkTarget,
   defaultUpstream,
   forkAction,
@@ -486,5 +488,55 @@ describe("the forge picker is authoritative until a source pins the host", () =>
     expect(repositoriesOnHost(mixed, "github").map((r) => r.nameWithOwner)).toEqual([
       "facebook/react"
     ]);
+  });
+});
+
+describe("which instance a dialog may ask", () => {
+  // The user this exists for: signed in to the company's Enterprise instance
+  // and to nothing on github.com. The dialogs now carry a hostname end to end,
+  // so asking the SaaS question greyed out the CLI protocol and dropped GitHub
+  // from the host toggle for exactly them.
+  const enterpriseOnly: ForgeStatus = {
+    kind: "github",
+    cli: "gh",
+    installed: true,
+    loggedIn: true,
+    capabilities: CAPS,
+    hosts: [
+      { host: "github.com", enabled: true, loggedIn: false },
+      { host: "ghe.acme.example", enabled: true, loggedIn: true }
+    ]
+  };
+
+  it("answers per instance, not for the SaaS host", () => {
+    expect(forgeCanAnswerDialog(enterpriseOnly, "ghe.acme.example")).toBe(true);
+    expect(forgeCanAnswerDialog(enterpriseOnly, "github.com")).toBe(false);
+    // Omitting the hostname still means "the SaaS one" — the callers that
+    // genuinely reach it by kind alone keep their old answer.
+    expect(forgeCanAnswerDialog(enterpriseOnly)).toBe(false);
+  });
+
+  it("keeps a switched-off host off, without calling it a sign-in problem", () => {
+    const off: ForgeStatus = {
+      ...enterpriseOnly,
+      hosts: [{ host: "ghe.acme.example", enabled: false, loggedIn: true }]
+    };
+    expect(forgeCanAnswerDialog(off, "ghe.acme.example")).toBe(false);
+  });
+
+  it("still offers the forge in the host toggle", () => {
+    // A different question: the toggle picks a FORGE, and this one is usable.
+    expect(forgeCanAnswerAnywhere(enterpriseOnly)).toBe(true);
+    expect(forgeCanAnswerAnywhere(undefined)).toBe(false);
+    // ...but not when every host it knows is switched off, or the CLI is gone.
+    expect(
+      forgeCanAnswerAnywhere({
+        ...enterpriseOnly,
+        hosts: [{ host: "ghe.acme.example", enabled: false, loggedIn: true }]
+      })
+    ).toBe(false);
+    expect(forgeCanAnswerAnywhere({ ...enterpriseOnly, installed: false })).toBe(
+      false
+    );
   });
 });

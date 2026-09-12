@@ -53,7 +53,7 @@ const systemGit: GitExec = (args, cwd, options) =>
  *  back to the real probes and the suite starts depending on whether the
  *  machine running it has `gh`/`glab` installed and signed in — which is
  *  exactly how these passed locally and failed on CI. */
-function fakeForgeStatus(): ForgeStatusService {
+function fakeForgeStatus(gitlabUsable = false): ForgeStatusService {
   return new ForgeStatusService({
     probes: [
       {
@@ -65,8 +65,8 @@ function fakeForgeStatus(): ForgeStatusService {
       {
         kind: "gitlab",
         cli: "glab",
-        installed: async () => false,
-        loggedIn: async () => false
+        installed: async () => gitlabUsable,
+        loggedIn: async () => gitlabUsable
       }
     ]
   });
@@ -217,7 +217,14 @@ function fakeGh(
   };
 }
 
-function services(): {
+/** The whole service graph one spec needs. `registry` and `status` are
+ *  parameters rather than a second copy of this function: the Enterprise specs
+ *  below need their own spying registry and a usable-GitLab status, and two
+ *  builders drifted the moment a constructor gained an argument. */
+function services(
+  registry?: ForgeRepoRegistry,
+  status: ForgeStatusService = fakeForgeStatus()
+): {
   root: string;
   forks: ForkService;
   profileId: string;
@@ -252,15 +259,15 @@ function services(): {
       }
     })
   );
-  const registry = new ForgeRepoRegistry();
-  registry.register(new GitHubRepoProvider(gh));
-  const clones = new CloneService(db, systemGit, indexer, profiles, registry, fakeForgeStatus());
+  const forges = registry ?? new ForgeRepoRegistry();
+  if (registry === undefined) forges.register(new GitHubRepoProvider(gh));
+  const clones = new CloneService(db, systemGit, indexer, profiles, forges, status);
   return {
     root,
     parentPath,
     profileId: profile.id,
     gh,
-    forks: new ForkService(systemGit, indexer, profiles, registry, clones, fakeForgeStatus())
+    forks: new ForkService(systemGit, indexer, profiles, forges, clones, status)
   };
 }
 
@@ -665,7 +672,10 @@ describe("ForkService.fork", () => {
       profiles,
       registry,
       {} as CloneService,
-      {} as ForgeStatusService
+      // `fork` gates on the per-host switch before it writes anything, so this
+      // needs a real status reporting a usable GitLab — the point of the spec
+      // is what happens AFTER the fork is created, not whether it is allowed.
+      fakeForgeStatus(true)
     );
     const controller = new AbortController();
 
@@ -773,5 +783,101 @@ describe("ForkService.fork", () => {
         error: { code: "invalid_repository" }
       });
     }
+  });
+});
+
+describe("ForkService and the instance a source lives on", () => {
+  /** A registry with the per-hostname factory `index.ts` registers, and a spy
+   *  on every `--hostname` the CLI is asked for. */
+  const spying = () => {
+    const hostnames: (string | undefined)[] = [];
+    const run =
+      (hostname?: string) =>
+      async (args: string[]): Promise<string> => {
+        hostnames.push(hostname);
+        if (args[0] === "--version") return "gh version 2.92.0";
+        if (args.includes("/user/orgs")) return JSON.stringify([]);
+        if (args.includes("user")) return JSON.stringify({ login: "huntharo" });
+        return JSON.stringify({
+          full_name: "acme/api",
+          name: "api",
+          visibility: "private"
+        });
+      };
+    const registry = new ForgeRepoRegistry();
+    registry.register(
+      new GitHubRepoProvider(run()),
+      (hostname) => new GitHubRepoProvider(run(hostname), hostname)
+    );
+    return { registry, hostnames };
+  };
+
+  it("preflights the source against its own instance, not the SaaS one", async () => {
+    // Sending only the forge KIND had main resolve the default provider, so an
+    // Enterprise source was preflighted — and then forked — against
+    // github.com's repository of the same slug.
+    const { registry, hostnames } = spying();
+    const { forks, profileId } = services(registry);
+    await forks.preflight({
+      profileId,
+      source: "acme/api",
+      host: "github",
+      hostname: "ghe.acme.example"
+    });
+    expect(hostnames.length).toBeGreaterThan(0);
+    expect(hostnames.every((host) => host === "ghe.acme.example")).toBe(true);
+  });
+
+  it("refuses to fork onto a host the user switched off", async () => {
+    // `fork` is the one that WRITES — it creates a repository on the forge.
+    // `preflight` and `targets` both gate, and the dialog's own `forge_host_off`
+    // is a code the clone dialog deliberately swallows, so this cannot be left
+    // to the caller.
+    const { registry } = spying();
+    const { forks, profileId, parentPath } = services(
+      registry,
+      new ForgeStatusService({
+        probes: [
+          {
+            kind: "github",
+            cli: "gh",
+            installed: async () => true,
+            loggedIn: async () => true
+          }
+        ],
+        hosts: () => [
+          { kind: "github", host: "ghe.acme.example", enabled: false }
+        ]
+      })
+    );
+    const result = await forks.fork(
+      {
+        profileId,
+        source: "acme/api",
+        host: "github",
+        hostname: "ghe.acme.example",
+        targetOwner: "huntharo",
+        targetOwnerKind: "user",
+        targetName: "api",
+        parentPath,
+        protocol: "https",
+        upstream: null,
+        defaultBranchOnly: false
+      },
+      () => {}
+    );
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error.code).toBe("forge_host_off");
+    expect(result.ok === false && result.error.message).toContain(
+      "ghe.acme.example"
+    );
+  });
+
+  it("lists fork targets from the instance the source lives on", async () => {
+    const { registry, hostnames } = spying();
+    const { forks } = services(registry);
+    await forks.targets("github", "ghe.acme.example");
+    expect(hostnames.length).toBeGreaterThan(0);
+    expect(hostnames).not.toContain(undefined);
   });
 });

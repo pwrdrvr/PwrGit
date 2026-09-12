@@ -35,6 +35,33 @@ describe("ForgeRepoRegistry keyed by host", () => {
     );
   });
 
+  it("canonicalizes the hostname before keying or building", () => {
+    // The hostname now arrives from the renderer over IPC. Keying on the raw
+    // string let one server become two providers, and — worse — sent
+    // `www.github.com` past the pre-seeded SaaS entry into a `gh api
+    // --hostname www.github.com` that cannot succeed.
+    const { reg } = registry();
+    expect(reg.get("github", "www.github.com")).toBe(reg.get("github"));
+    expect(reg.get("gitlab", " GitLab.com ")).toBe(reg.get("gitlab"));
+    expect(reg.get("github", "GHE.Acme.Example")).toBe(
+      reg.get("github", "ghe.acme.example")
+    );
+    expect(reg.get("github", "GHE.Acme.Example")?.hostname).toBe(
+      "ghe.acme.example"
+    );
+    // Anything that is not a bare hostname is refused outright, so a renderer
+    // string can never reach a subprocess argument as an option or a URL.
+    for (const bogus of [
+      "ghe.acme.example/../evil",
+      "ghe.acme.example:8443",
+      "--version",
+      "a host",
+      "https://ghe.acme.example"
+    ]) {
+      expect(reg.get("github", bogus)).toBeNull();
+    }
+  });
+
   it("caches the built provider rather than rebuilding per call", () => {
     const { reg } = registry();
     expect(reg.get("github", "ghe.acme.com")).toBe(

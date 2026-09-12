@@ -407,9 +407,11 @@ if (!gotSingleInstanceLock) {
     // summary of the same per-host answers the transport obeys rather than a
     // second opinion about two hardcoded SaaS hosts. That second opinion is what
     // made Settings say "GitLab: Signed out" beside a self-managed GitLab the
-    // user was signed in to. (The fork dialog still only forks on the SaaS
-    // instance — `ForkRequest.hostname` is carried and ignored — so it asks
-    // about that host specifically rather than about the forge.)
+    // user was signed in to. The clone and fork paths now ask per instance
+    // (`forgeBlockAt(status, provider.hostname)`), so `statusTargets()` has to
+    // cover every host `overrides()` can resolve — otherwise the probe never
+    // reports a host the dialogs can name, and the forge-wide fallback answers
+    // in its place.
     const forgeStatus =
       fixtureServices?.status ??
       new ForgeStatusService({ hosts: () => forgeHosts.statusTargets() });
@@ -491,12 +493,18 @@ if (!gotSingleInstanceLock) {
         .refresh()
         .then(onForgeTargetsMaybeMoved, () => undefined);
     });
-    const identityService = new IdentityService(
-      db,
-      execGit,
-      forges,
-      (hostname) => forgeHosts.isEnabled(hostname)
-    );
+    // Same host list AND the same off switch the PR and commit-author
+    // resolvers use. Without the list an `origin` on a self-managed instance
+    // classifies as `other` and the repo silently loses its visibility and
+    // fork-lineage marks; without the switch a host turned off in Settings
+    // still spawns its CLI on every identity refresh. `isEnabled` is passed
+    // whole rather than narrowed to its boolean: the identity refresh backs
+    // off on a decided "off" and re-asks promptly on a host nothing has
+    // recognized yet, and `.enabled` alone cannot tell those apart.
+    const identityService = new IdentityService(db, execGit, forges, {
+      overrides: () => forgeHosts.overrides(),
+      isEnabled: (hostname) => forgeHosts.isEnabled(hostname)
+    });
     /**
      * Re-ask for identities whose answer the gate may have just changed.
      *

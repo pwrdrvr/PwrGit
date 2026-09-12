@@ -23,7 +23,12 @@ const SEARCH_DEBOUNCE_MS = 300;
 export const FORGE_UNASKED_CODES: ReadonlySet<string> = new Set([
   "forge_cli_missing",
   "forge_login_required",
-  "forge_host_off"
+  "forge_host_off",
+  // A host no CLI is signed in to and nobody has named in Settings → Forges,
+  // so PwrGit cannot say which forge runs there. There is no API to confirm
+  // the repository with, but `git clone git@host:slug.git` still works — which
+  // is exactly what the unverified placeholder offers.
+  "unsupported_host"
 ]);
 
 export type CloneSearch = {

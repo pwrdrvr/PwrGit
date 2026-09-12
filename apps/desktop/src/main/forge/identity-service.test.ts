@@ -3,7 +3,13 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { err, ok, type RepoIdentity, type Result } from "@pwrgit/shared";
+import {
+  err,
+  ok,
+  type ForgeHostMap,
+  type RepoIdentity,
+  type Result
+} from "@pwrgit/shared";
 import { openDatabase } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
 import { RepoIndexer } from "../git/repo-indexer";
@@ -14,6 +20,7 @@ import { ForgeHosts } from "./hosts";
 import { ForgeRepoRegistry } from "./repo-provider";
 import {
   IdentityService,
+  readOrigin,
   sameIdentity,
   type ForgeHostGate
 } from "./identity-service";
@@ -57,11 +64,19 @@ function initRepo(path: string, origin: string): void {
 
 async function fixture(
   gh: (args: string[]) => Promise<string>,
-  options: { origin?: string; gate?: ForgeHostGate } = {}
+  options: {
+    origin?: string;
+    gate?: ForgeHostGate;
+    /** `ForgeHosts.overrides()`. Needed for any origin off the two SaaS hosts:
+     *  a hostname alone classifies as `other` now that nothing guesses from a
+     *  `gitlab.*` prefix. */
+    overrides?: ForgeHostMap;
+  } = {}
 ) {
   const origin = options.origin ?? "git@github.com:huntharo/react.git";
   const gate: ForgeHostGate =
     options.gate ?? (() => ({ enabled: true, source: "auto" }));
+  const overrides = options.overrides ?? {};
   const root = temporaryRoot();
   const repoPath = join(root, "react");
   initRepo(repoPath, origin);
@@ -89,7 +104,10 @@ async function fixture(
     glab,
     indexer,
     profileId: profile.id,
-    identities: new IdentityService(db, systemGit, registry, gate)
+    identities: new IdentityService(db, systemGit, registry, {
+      overrides: () => overrides,
+      isEnabled: gate
+    })
   };
 }
 
@@ -231,7 +249,10 @@ describe("IdentityService", () => {
     registry.register(new GitHubRepoProvider(gh));
     const service = new IdentityService(db, async () => ok({
       exitCode: 0, stdout: "git@github.com:huntharo/react.git", stderr: ""
-    }), registry, () => ({ enabled: true, source: "auto" }));
+    }), registry, {
+      overrides: () => ({}),
+      isEnabled: () => ({ enabled: true, source: "auto" })
+    });
     const pending = Promise.all([
       service.refresh(repos.slice(0, 6)),
       ...repos.slice(6).map((repo) => service.refresh([repo]))
@@ -398,10 +419,10 @@ describe("IdentityService", () => {
       const { db, indexer, profileId } = await fixture(okGh({}));
       const registry = new ForgeRepoRegistry();
       registry.register(new GitHubRepoProvider(okGh({})));
-      const service = new IdentityService(db, git, registry, () => ({
-        enabled: false,
-        source
-      }));
+      const service = new IdentityService(db, git, registry, {
+        overrides: () => ({}),
+        isEnabled: () => ({ enabled: false, source })
+      });
       const repos = indexer.listRepos(profileId);
 
       for (let pass = 0; pass < 5; pass += 1) await service.refresh(repos);
@@ -491,7 +512,10 @@ describe("IdentityService", () => {
     const gh = vi.fn(okGh({ full_name: "huntharo/react", visibility: "public" }));
     let gate: ForgeHostGate = () => ({ enabled: true, source: "auto" });
     const { db, glab, identities, indexer, profileId } = await fixture(gh, {
-      gate: (hostname) => gate(hostname)
+      gate: (hostname) => gate(hostname),
+      // The host `origin` moves TO. Without it the move lands on `other` and
+      // this test would pass while proving nothing about the due filter.
+      overrides: { "gitlab.internal.example": "gitlab" }
     });
     const repos = indexer.listRepos(profileId);
     await identities.refresh(repos);
@@ -561,10 +585,10 @@ describe("IdentityService", () => {
     const { db, indexer, profileId } = await fixture(okGh({}));
     const registry = new ForgeRepoRegistry();
     registry.register(new GitHubRepoProvider(okGh({})));
-    const service = new IdentityService(db, git, registry, () => ({
-      enabled: false,
-      source: "config"
-    }));
+    const service = new IdentityService(db, git, registry, {
+      overrides: () => ({}),
+      isEnabled: () => ({ enabled: false, source: "config" })
+    });
     const repos = indexer.listRepos(profileId);
 
     await service.refresh(repos);
@@ -596,18 +620,21 @@ describe("IdentityService", () => {
     expect(calledApi(gh)).toBe(false);
   });
 
-  it("follows ForgeHosts rather than the gitlab.* hostname rule", async () => {
-    // `parseForgeRemote` still reads any `gitlab.*` name as GitLab, while
-    // `ForgeHosts` refuses to guess a forge from a name — so this instance has
-    // no settings row at all, and no switch the user could have turned off.
+  const SELF_MANAGED = "git@gitlab.internal.example:group/app.git";
+
+  it("follows ForgeHosts rather than the hostname", async () => {
+    // Nothing guesses a forge from a name any more, so an instance no CLI
+    // reported and nobody added has no place in `overrides()` and no settings
+    // row — it does not even classify, let alone carry a switch somebody could
+    // have turned off.
     const hosts = new ForgeHosts({
       readSettings: () => ({ hosts: {} }),
       discovered: () => [],
       env: {}
     });
-    const origin = "git@gitlab.internal.example:group/app.git";
     const gated = await fixture(okGh({}), {
-      origin,
+      origin: SELF_MANAGED,
+      overrides: hosts.overrides(),
       gate: (hostname) => hosts.isEnabled(hostname)
     });
 
@@ -621,11 +648,22 @@ describe("IdentityService", () => {
     expect(gated.indexer.listRepos(gated.profileId)[0]?.identity).toBeUndefined();
   });
 
-  it("reaches a self-managed GitLab provider once the gate allows it", async () => {
-    // The other half of the claim above: a provider IS reachable for this
-    // hostname, so the silence there is the gate and not a missing factory.
+  it("reaches a self-managed GitLab provider once ForgeHosts places it", async () => {
+    // The other half of the claim above, from the same object: once `glab`
+    // reports the instance, `overrides()` classifies it and `isEnabled` allows
+    // it, so a provider IS reachable — the silence above is ForgeHosts, not a
+    // missing registry factory.
+    const hosts = new ForgeHosts({
+      readSettings: () => ({ hosts: {} }),
+      discovered: () => [
+        { kind: "gitlab", host: "gitlab.internal.example", account: "o.dev" }
+      ],
+      env: {}
+    });
     const ungated = await fixture(okGh({}), {
-      origin: "git@gitlab.internal.example:group/app.git"
+      origin: SELF_MANAGED,
+      overrides: hosts.overrides(),
+      gate: (hostname) => hosts.isEnabled(hostname)
     });
 
     await ungated.identities.refresh(
@@ -681,5 +719,98 @@ describe("sameIdentity", () => {
       sameIdentity(base, { ...base, parent: { nameWithOwner: "f/r", url: "" } })
     ).toBe(false);
     expect(sameIdentity(undefined, base)).toBe(false);
+  });
+});
+
+describe("readOrigin", () => {
+  const repo = { id: "r1", path: "/tmp/whatever" } as Parameters<
+    typeof readOrigin
+  >[1];
+  const remote =
+    (url: string): GitExec =>
+    async () =>
+      ok({ exitCode: 0, stdout: `${url}\n`, stderr: "" });
+
+  it("needs the host list to place a self-managed instance", async () => {
+    // The regression this guards: `gitlab.*` used to classify as GitLab from
+    // its name alone, so removing that rule without passing the enumerated
+    // hosts here would silently drop the visibility and fork-lineage marks for
+    // every company GitLab — the CLI is signed in, and nothing would say why.
+    const url = "git@gitlab.acme-corp.example:acme/platform/billing.git";
+    expect(await readOrigin(remote(url), repo)).toMatchObject({
+      host: "other"
+    });
+    expect(
+      await readOrigin(remote(url), repo, {
+        "gitlab.acme-corp.example": "gitlab"
+      })
+    ).toEqual({
+      repoId: "r1",
+      host: "gitlab",
+      hostname: "gitlab.acme-corp.example",
+      nameWithOwner: "acme/platform/billing"
+    });
+  });
+
+  it("still knows the two SaaS hosts with no list at all", async () => {
+    expect(
+      await readOrigin(remote("git@github.com:huntharo/react.git"), repo)
+    ).toMatchObject({ host: "github", nameWithOwner: "huntharo/react" });
+  });
+});
+
+describe("IdentityService and the per-host switch", () => {
+  const ORIGIN = "git@ghe.acme.example:acme/api.git";
+
+  const fixtureFor = async (enabled: boolean) => {
+    const calls: string[] = [];
+    const run = async (args: string[]): Promise<string> => {
+      calls.push(args.join(" "));
+      if (args[0] === "--version") return "gh version 2.92.0";
+      return JSON.stringify({ full_name: "acme/api", visibility: "private" });
+    };
+    // A real indexed checkout whose `origin` is the Enterprise instance.
+    const { db, indexer, profileId } = await fixture(okGh({}), {
+      origin: ORIGIN,
+      overrides: { "ghe.acme.example": "github" }
+    });
+    const registry = new ForgeRepoRegistry();
+    // With the factory, as `index.ts` registers it — that is what lets the
+    // registry reach an Enterprise instance instead of falling back to
+    // github.com.
+    registry.register(
+      new GitHubRepoProvider(run),
+      (hostname) => new GitHubRepoProvider(run, hostname)
+    );
+    const identities = new IdentityService(db, systemGit, registry, {
+      overrides: () => ({ "ghe.acme.example": "github" }),
+      // `config`, not `auto`: the test is about a host somebody DECIDED about
+      // in Settings → Forges, which is the arm that reports `host_disabled`.
+      isEnabled: () => ({ enabled, source: "config" })
+    });
+    return { identities, repos: indexer.listRepos(profileId), calls };
+  };
+
+  it("reads an enumerated self-managed host, and names the right instance", async () => {
+    const { identities, repos } = await fixtureFor(true);
+    const changes = await identities.refresh(repos);
+    expect(changes[0]?.identity).toMatchObject({
+      host: "github",
+      // The instance it actually lives on. The REST parser used to stamp
+      // `github.com` on every result, so an Enterprise repo's marks named the
+      // wrong server the moment enumeration made them appear at all.
+      hostname: "ghe.acme.example",
+      nameWithOwner: "acme/api"
+    });
+  });
+
+  it("spawns nothing for a host the user switched off", async () => {
+    // `ForgeHosts.overrides()` deliberately keeps disabled hosts, so the map
+    // alone still classifies this one. Without the second question — may we
+    // talk to it — the identity refresh kept running `gh` against a host the
+    // user turned off in Settings → Forges, which is a setting that lies.
+    const { identities, repos, calls } = await fixtureFor(false);
+    expect(await identities.refresh(repos)).toEqual([]);
+    expect(calls).toEqual([]);
   });
 });

@@ -280,6 +280,22 @@ export class ForgeHosts {
         enabled: entry.enabled
       });
     }
+    // Hosts named only by `PWRGIT_{GITHUB,GITLAB}_HOSTS` have no settings row,
+    // so `list()` misses them — but `overrides()` has them, and that is the map
+    // both resolution and the renderer's dialogs classify with. A host that
+    // resolves and is never probed falls through `forgeLoggedInAt` to the
+    // forge-wide summary, which answered "signed out" for the one host such a
+    // user does hold a credential for. Probe set and resolution set are the
+    // same set now, by construction.
+    for (const [host, kind] of Object.entries(this.overrides())) {
+      const key = `${kind} ${host}`;
+      if (targets.has(key)) continue;
+      targets.set(key, {
+        kind,
+        host,
+        enabled: this.isEnabled(host).enabled
+      });
+    }
     for (const [kind, host] of Object.entries(FORGE_SAAS_HOST) as [
       ForgeKind,
       string
@@ -328,10 +344,14 @@ export class ForgeHosts {
       const key = canonical(host);
       if (key !== "" && config.kind !== undefined) map[key] = config.kind;
     }
-    const github = envHosts(this.env, GITHUB_HOSTS_ENV);
-    if (github !== null) for (const host of github) map[host] = "github";
+    // GitLab first so GitHub overwrites it: `kindFor` tests the GitHub
+    // allowlist first and returns, so a host named in BOTH variables is GitHub
+    // there. Applying them in reading order made it GitLab here — one host
+    // routed to two different providers depending on which layer asked.
     const gitlab = envHosts(this.env, GITLAB_HOSTS_ENV);
     if (gitlab !== null) for (const host of gitlab) map[host] = "gitlab";
+    const github = envHosts(this.env, GITHUB_HOSTS_ENV);
+    if (github !== null) for (const host of github) map[host] = "github";
     return map;
   }
 }
@@ -351,6 +371,15 @@ export class ForgeHostsView {
 
   async refresh(): Promise<void> {
     await this.refreshDirectory();
+  }
+
+  /** The map main resolves with, for the renderer to classify a pasted remote
+   *  the same way. Shipped rather than re-derived from `rows()`: `list()` is
+   *  "what has a settings row", which deliberately excludes hosts named only
+   *  by `PWRGIT_{GITHUB,GITLAB}_HOSTS` — and a renderer rebuilding the map
+   *  from rows resolved those hosts differently from every main-side caller. */
+  overrides(): ForgeHostOverrides {
+    return this.hosts.overrides();
   }
 
   rows(): ForgeHostRow[] {

@@ -36,10 +36,14 @@ describe("parseRemoteUrl", () => {
 });
 
 describe("classifyHost", () => {
-  it("recognizes the SaaS hosts and the gitlab.* self-managed convention", () => {
+  it("recognizes the two SaaS hosts and nothing else by name", () => {
     expect(classifyHost("github.com")).toBe("github");
     expect(classifyHost("GitLab.com")).toBe("gitlab");
-    expect(classifyHost("gitlab.example.internal")).toBe("gitlab");
+    // `gitlab.*` used to be read as GitLab here. It is gone: `ForgeHosts`
+    // enumerates hosts from `gh`/`glab` sign-ins and from what the user added,
+    // and never honoured the prefix — so a host nobody was signed in to
+    // resolved for PR status while the settings pane called it unknown.
+    expect(classifyHost("gitlab.example.internal")).toBeNull();
   });
 
   it("returns null for hosts it cannot know, unless overridden", () => {
@@ -47,7 +51,10 @@ describe("classifyHost", () => {
     expect(classifyHost("bitbucket.org")).toBeNull();
     expect(classifyHost("git.example.com", { "git.example.com": "gitlab" }))
       .toBe("gitlab");
-    // An override also wins over the built-in guess.
+    // A self-managed instance resolves only through the map, whatever it is
+    // called — `ForgeHosts.overrides()` is what carries a real sign-in here.
+    expect(classifyHost("gitlab.corp.com", { "gitlab.corp.com": "gitlab" }))
+      .toBe("gitlab");
     expect(classifyHost("gitlab.corp.com", { "gitlab.corp.com": "github" }))
       .toBe("github");
   });
@@ -103,8 +110,14 @@ describe("host and port canonicalization", () => {
     expect(resolveForgeRepo("https://www.gitlab.com/g/p.git")?.host).toBe("gitlab.com");
   });
 
+  // The self-managed instance is known because a CLI is signed in to it, which
+  // reaches this as `ForgeHosts.overrides()`. Its name is not what places it.
+  const selfManaged = { "gitlab.corp.example": "gitlab" } as const;
+
   it("keeps a non-default web port so a self-managed API is reachable", () => {
-    expect(resolveForgeRepo("https://gitlab.corp.example:8443/g/p.git")).toEqual({
+    expect(
+      resolveForgeRepo("https://gitlab.corp.example:8443/g/p.git", selfManaged)
+    ).toEqual({
       kind: "gitlab",
       host: "gitlab.corp.example",
       port: 8443,
@@ -114,7 +127,7 @@ describe("host and port canonicalization", () => {
 
   it("ignores an ssh port, which says nothing about where https lives", () => {
     expect(
-      resolveForgeRepo("ssh://git@gitlab.corp.example:2222/g/p.git")
+      resolveForgeRepo("ssh://git@gitlab.corp.example:2222/g/p.git", selfManaged)
     ).toEqual({
       kind: "gitlab",
       host: "gitlab.corp.example",
@@ -124,7 +137,8 @@ describe("host and port canonicalization", () => {
 
   it("does not carry 443, which https already implies", () => {
     expect(
-      resolveForgeRepo("https://gitlab.corp.example:443/g/p.git")?.port
+      resolveForgeRepo("https://gitlab.corp.example:443/g/p.git", selfManaged)
+        ?.port
     ).toBeUndefined();
   });
 });

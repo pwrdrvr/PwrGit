@@ -99,9 +99,11 @@ class E2EForgeRepoProvider implements ForgeRepoProvider {
   constructor(
     readonly host: ForgeKind,
     private readonly fixturePath: string,
-    private readonly git: GitExec
+    private readonly git: GitExec,
+    hostname?: string
   ) {
     this.hostname =
+      hostname ??
       readFixture(this.fixturePath).hosts[this.host]?.hostname ??
       this.defaultHostname();
   }
@@ -342,7 +344,16 @@ export function createE2EForgeFixtureServices(
 ): { forges: ForgeRepoRegistry; status: ForgeStatusService } {
   const forges = new ForgeRepoRegistry();
   for (const host of ["github", "gitlab"] as const) {
-    forges.register(new E2EForgeRepoProvider(host, fixturePath, git));
+    // The factory matters even here. Every provider lookup on the clone and
+    // fork paths now passes a hostname, and a registry with no factory answers
+    // `null` for any host but the one pre-seeded — so without this the suite
+    // that runs the real IPC end to end could not reach the fixture's own
+    // `hosts[kind].hostname`, and a bare slug (which resolves to the SaaS
+    // host) reported "PwrGit doesn't know which forge runs at that host".
+    forges.register(
+      new E2EForgeRepoProvider(host, fixturePath, git),
+      (hostname) => new E2EForgeRepoProvider(host, fixturePath, git, hostname)
+    );
   }
   // The fixture's `hosts` map is keyed by forge KIND, not by hostname: E2E
   // stubs "is this forge usable", and the SaaS host the service falls back to

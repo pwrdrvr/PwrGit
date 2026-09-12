@@ -104,13 +104,19 @@ function fakeGh(
 function storeIdentity(
   db: ReturnType<typeof openDatabase>,
   repoId: string,
-  identity: { owner: string; name: string; parent?: string }
+  identity: { owner: string; name: string; parent?: string; hostname?: string }
 ): void {
   db.prepare(
     `INSERT INTO repo_identity
        (repo_id, host, hostname, owner, name, visibility, parent_slug)
-     VALUES (?, 'github', 'github.com', ?, ?, 'public', ?)`
-  ).run(repoId, identity.owner, identity.name, identity.parent ?? null);
+     VALUES (?, 'github', ?, ?, ?, 'public', ?)`
+  ).run(
+    repoId,
+    identity.hostname ?? "github.com",
+    identity.owner,
+    identity.name,
+    identity.parent ?? null
+  );
 }
 
 /** A `GitExec` that records every invocation and runs nothing. Any call at all
@@ -434,6 +440,63 @@ describe("CloneService", () => {
     expect(
       searches[0]?.filter((arg) => arg.startsWith("--owner="))
     ).toEqual(["--owner=pwrdrvr"]);
+  });
+
+  it("does not attach an Enterprise checkout to the SaaS repo of the same slug", async () => {
+    // `acme/api` on `ghe.acme.example` and `acme/api` on github.com are
+    // different repositories that happen to share a slug. The local-checkout
+    // index used to be keyed on the forge KIND, which merged them — the dialog
+    // marked the github.com result "already cloned" and its tooltip named the
+    // Enterprise checkout's path. Unreachable while a self-managed origin
+    // classified as `other`; host enumeration is what makes it reachable.
+    const root = temporaryRoot();
+    const enterprisePath = join(root, "work", "api");
+    initRepo(enterprisePath);
+
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "PwrDrvr",
+      email: "test@pwrgit.com",
+      roots: [root]
+    });
+    const indexer = new RepoIndexer(db, systemGit);
+    const indexed = await indexer.indexRepoAt(profile.id, enterprisePath);
+    expect(indexed.ok).toBe(true);
+    if (!indexed.ok) return;
+    storeIdentity(db, indexed.value.id, {
+      owner: "acme",
+      name: "api",
+      hostname: "ghe.acme.example"
+    });
+
+    const gh = vi.fn(
+      fakeGh({
+        search: () => [
+          {
+            name: "api",
+            fullName: "acme/api",
+            visibility: "public",
+            url: "https://github.com/acme/api",
+            updatedAt: "2026-08-01T12:00:00Z"
+          }
+        ]
+      })
+    );
+    const service = new CloneService(
+      db,
+      systemGit,
+      indexer,
+      profiles,
+      githubOnly(gh),
+      fakeForgeStatus()
+    );
+
+    const result = await service.searchSources(profile.id, "acme/api");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value[0]?.hostname).toBe("github.com");
+    expect(result.value[0]?.localPaths).toEqual([]);
   });
 
   it("reads the repo list once per search, not once per thing it needs", async () => {
@@ -1088,13 +1151,38 @@ describe("CloneService", () => {
       new GitLabRepoProvider(glab),
       (hostname) => new GitLabRepoProvider(glab, hostname)
     );
+    // Signed in to the self-managed instance and NOT to gitlab.com — the
+    // machine the whole per-host gate exists for. `runClone` asks
+    // `forgeBlockAt` about the instance it resolved, so the shared
+    // `fakeForgeStatus` (glab not installed) would refuse before spawning and
+    // the assertion below would pass for the wrong reason.
+    const forgeStatus = new ForgeStatusService({
+      probes: [
+        {
+          kind: "github",
+          cli: "gh",
+          installed: async () => true,
+          loggedIn: async () => true
+        },
+        {
+          kind: "gitlab",
+          cli: "glab",
+          installed: async () => true,
+          loggedIn: async (host) => host === "gitlab.corp.example"
+        }
+      ],
+      hosts: () => [
+        { kind: "gitlab", host: "gitlab.corp.example", enabled: true },
+        { kind: "gitlab", host: "gitlab.com", enabled: true }
+      ]
+    });
     const service = new CloneService(
       db,
       systemGit,
       indexer,
       profiles,
       registry,
-      fakeForgeStatus()
+      forgeStatus
     );
 
     await service.clone({

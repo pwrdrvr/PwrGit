@@ -51,17 +51,16 @@ const ADD_HOST: Record<
  * source: a remote is an ssh target, and a NAS or a box on a home network is
  * not a forge — see `forge/AGENTS.md`.
  *
- * The switch is enforced in main, not here. It covers every BACKGROUND reader
- * by hostname: request status, commit authors, the identity refresh, and the
- * status probe itself. It does not cover everything: the CLI sign-in check
- * that discovers the host in the first place still runs, and the clone and
- * fork dialogs gate on `forgeSaasBlock` — the SaaS host — so a CLI clone aimed
- * at a self-managed instance runs against a host whose own switch was never
- * consulted (`forge/AGENTS.md`, "Clone and fork are gated too"). `sourceNote`
- * names both exceptions rather than claiming a clean "runs no command":
- * promising a stop we do not deliver is the setting lying in the other
- * direction, and a per-host claim belongs on the row, not in the section
- * blurb. This pane only ever writes the setting and re-reads what main says.
+ * The switch is enforced at the transport, not here, and it is asked about the
+ * HOSTNAME everywhere: a disabled host resolves to null in main, so nothing
+ * spawns its CLI or mints its token — the background readers, the status probe,
+ * and the two paths that act (`CloneService.runClone`'s CLI branch and
+ * `ForkService.fork`) all re-check it. The one thing it cannot stop is the CLI
+ * sign-in check that discovers the host in the first place, which is why
+ * `sourceNote` names that exception rather than claiming a clean "runs no
+ * command": promising a stop we do not deliver is the same lie as an "off"
+ * that still shells out. This pane only ever writes the setting and re-reads
+ * what main says.
  */
 export function ForgeHostsSection(props: { saving: boolean }) {
   const [hosts, setHosts] = useState<ForgeHostRow[] | undefined>();
@@ -540,7 +539,7 @@ function sourceNote(row: ForgeHostRow): string {
   if (row.enabledSource === "config") {
     return row.enabled
       ? "On because you turned it on."
-      : "Off. Nothing in the background reads this host or mints a token for it. Still running: the sign-in check that lists it here, and any clone you start yourself.";
+      : "Off. PwrGit reads nothing from this host and mints no token for it, clones and forks included. Only the sign-in check that lists it here still runs.";
   }
   // `auto` means nobody has decided — a known forge is on by default. It does
   // NOT mean "on because a CLI is signed in"; permission deliberately does not

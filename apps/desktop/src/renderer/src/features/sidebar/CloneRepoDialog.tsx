@@ -24,12 +24,15 @@ import {
   rankCloneRepositories,
   unverifiedCloneRepository
 } from "./clone-dialog";
+import type { ExactRepository } from "./clone-dialog";
 import {
   cliProtocolLabel,
   sourceEmptyMessage,
   statusFor,
+  forgeCanAnswerAnywhere,
   forgeCanAnswerDialog
 } from "./fork-dialog";
+import { useForgeHostMap } from "../../lib/useForgeHostMap";
 import { FORGE_UNASKED_CODES, useCloneSearch } from "./useCloneSearch";
 import { RepoIdentityChips } from "./RepoIdentityMarks";
 
@@ -212,11 +215,35 @@ export function CloneRepoDialog({
     };
   }, [profile.id]);
 
-  const exactRepo = useMemo(
-    () => exactRepository(sourceQuery, host),
-    [sourceQuery, host]
-  );
+  // Which forge runs at a pasted URL's host. Only main knows — the list is
+  // what `gh`/`glab` are signed in to plus what the user added in Settings —
+  // so without it a self-managed instance reads as `other` and the dialog
+  // falls back to SSH/HTTPS instead of asking its CLI.
+  const forgeHosts = useForgeHostMap();
+  // The row the user picked, remembered as an instance. `chooseRepository`
+  // rewrites the query to the bare slug, and a slug carries no host — so
+  // `exactRepository` has to assume the forge's SaaS one. Re-confirming an
+  // Enterprise repository against github.com/gitlab.com is a wrong answer, not
+  // just a wasted round trip, so the pick is what the slug resolves to.
+  const [picked, setPicked] = useState<ExactRepository | null>(null);
+  const exactRepo = useMemo(() => {
+    const parsed = exactRepository(sourceQuery, host, forgeHosts);
+    if (
+      parsed !== null &&
+      picked !== null &&
+      picked.host === parsed.host &&
+      picked.nameWithOwner === parsed.nameWithOwner
+    ) {
+      return picked;
+    }
+    return parsed;
+  }, [sourceQuery, host, forgeHosts, picked]);
+  // The three strings that ARE an `ExactRepository`, pulled out so the check
+  // effect can depend on values rather than on the memo's object identity —
+  // which changes on every keystroke.
   const exactNameWithOwner = exactRepo?.nameWithOwner ?? null;
+  const exactHostname = exactRepo?.hostname ?? null;
+  const exactHost = exactRepo?.host ?? null;
   const localSourcePath = useMemo(
     () => localRepositoryPath(sourceQuery),
     [sourceQuery]
@@ -226,7 +253,7 @@ export function CloneRepoDialog({
   // toggle that leads straight to "install the CLI" is a dead end dressed up
   // as a choice.
   const usableHosts = (catalog?.forges ?? [])
-    .filter((status) => forgeCanAnswerDialog(status))
+    .filter((status) => forgeCanAnswerAnywhere(status))
     .map((status) => status.kind);
   // Snap onto a forge that can actually answer. Without this a machine with
   // only GitLab signed in leaves `host` on its "github" default forever: the
@@ -240,8 +267,18 @@ export function CloneRepoDialog({
 
   const localSelected = selectedRepository?.localPath !== undefined;
   const activeHost = localSelected ? host : (selectedRepository?.host ?? host);
+  // The instance the CLI would actually be pointed at. Asking about the SaaS
+  // host instead greyed out `gh repo clone` for a user signed in only to their
+  // company's Enterprise instance — the exact case the hostname plumbing
+  // exists to serve.
+  const activeHostname = localSelected
+    ? undefined
+    : (selectedRepository?.hostname ??
+      exactHostname ??
+      (activeHost === "other" ? undefined : defaultHostname(activeHost)));
   const forgeStatus = statusFor(catalog?.forges ?? [], activeHost);
-  const cliDisabled = catalog !== null && !forgeCanAnswerDialog(forgeStatus);
+  const cliDisabled =
+    catalog !== null && !forgeCanAnswerDialog(forgeStatus, activeHostname);
 
   // Nothing is asked of the forge until the box settles — and never on open.
   // The catalog this replaced listed every known owner's repositories up
@@ -271,7 +308,14 @@ export function CloneRepoDialog({
           ? dispatch("repo:checkCloneSource", {
               profileId: profile.id,
               nameWithOwner: exactNameWithOwner!,
-              host: exactRepo?.host ?? host
+              // Non-null for the same reason `exactNameWithOwner` is: this
+              // branch is only reached when `exactRepo` parsed.
+              host: exactHost!,
+              // The instance, not just the forge. Sending only the kind had
+              // main answer from github.com/gitlab.com, so a self-managed
+              // project was confirmed — and then cloned — as whatever repo
+              // shares its slug on the SaaS instance.
+              ...(exactHostname === null ? {} : { hostname: exactHostname })
             })
           : dispatch("repo:checkLocalCloneSource", {
               profileId: profile.id,
@@ -282,9 +326,11 @@ export function CloneRepoDialog({
         setChecking(false);
         if (result.ok) setCheckedRepository(result.value);
         else if (FORGE_UNASKED_CODES.has(result.error.code)) {
-          setCheckedRepository(
-            unverifiedCloneRepository(exactNameWithOwner!, exactRepo?.host ?? host)
-          );
+          // Built from the already-parsed `ExactRepository`, never re-parsed
+          // from the query: `chooseRepository` rewrites `sourceQuery` to the
+          // bare slug, and a slug has lost which instance it came from — a
+          // re-parse would hand back clone URLs pointing at the SaaS host.
+          setCheckedRepository(unverifiedCloneRepository(exactRepo));
         } else {
           setCheckError(result.error.message);
         }
@@ -294,7 +340,15 @@ export function CloneRepoDialog({
       active = false;
       window.clearTimeout(timeout);
     };
-  }, [exactNameWithOwner, exactRepo?.host, host, localSourcePath, profile.id]);
+    // Keyed on what the request actually carries. `sourceQuery` is
+    // deliberately NOT a dependency: it changes for edits that resolve to the
+    // same repository (a trailing space, a `.git` suffix) and again when
+    // `chooseRepository` rewrites it, each costing a redundant CLI round trip.
+    // `host` is NOT a dependency: it is only read through `exactHost`, which
+    // already moves with it. Keeping it re-dispatched an identical
+    // `repo:checkLocalCloneSource` and blanked a confirmed local row every
+    // time the forge toggle moved.
+  }, [exactNameWithOwner, exactHost, exactHostname, localSourcePath, profile.id]);
 
   const sourceResults = useMemo(() => {
     // Filtered to the picked forge: a host switch keeps the previous results
@@ -346,6 +400,11 @@ export function CloneRepoDialog({
 
   const chooseRepository = (repository: CloneRepository): void => {
     setSelectedRepository(repository);
+    setPicked({
+      host: repository.host,
+      hostname: repository.hostname,
+      nameWithOwner: repository.nameWithOwner
+    });
     setSourceQuery(repository.nameWithOwner);
     setSubmitError(null);
     window.requestAnimationFrame(() => destinationInputRef.current?.focus());

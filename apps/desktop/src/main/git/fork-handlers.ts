@@ -12,7 +12,9 @@ export function registerForkHandlers(
   indexer: RepoIndexer
 ): void {
   const active = new Map<string, AbortController>();
-  bus.register("repo:forkTargets", (req) => forks.targets(req.host));
+  bus.register("repo:forkTargets", (req) =>
+    forks.targets(req.host, req.hostname)
+  );
   bus.register("repo:forkPreflight", (req) => forks.preflight(req));
   bus.register("repo:fork", async (req) => {
     if (active.has(req.operationId)) {

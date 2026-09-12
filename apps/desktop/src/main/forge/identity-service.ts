@@ -1,6 +1,7 @@
 import {
   parseForgeRemote,
   type ForgeHost,
+  type ForgeHostMap,
   type ForgeValueSource,
   type Repo,
   type RepoIdentity,
@@ -54,14 +55,19 @@ type OriginRef = {
 
 /** Read `origin` for one repository. `origin` specifically, not the first
  *  forge remote found: a fork checkout has `origin` (the fork) and `upstream`
- *  (the original), and the identity marks describe what you push to. */
+ *  (the original), and the identity marks describe what you push to.
+ *
+ *  `hosts` is `ForgeHosts.overrides()`. Omitting it recognises github.com and
+ *  gitlab.com only — a hostname says nothing about which forge runs on it — so
+ *  a self-managed instance would silently lose its identity marks. */
 export async function readOrigin(
   git: GitExec,
-  repo: Repo
+  repo: Repo,
+  hosts: ForgeHostMap = {}
 ): Promise<OriginRef | null> {
   const result = await git(["remote", "get-url", "origin"], repo.path);
   if (!result.ok || result.value.exitCode !== 0) return null;
-  const parsed = parseForgeRemote(result.value.stdout.trim());
+  const parsed = parseForgeRemote(result.value.stdout.trim(), hosts);
   if (parsed === null) return null;
   return {
     repoId: repo.id,
@@ -128,8 +134,30 @@ export class IdentityService {
     private readonly db: DB,
     private readonly git: GitExec,
     private readonly forges: ForgeRepoRegistry,
-    /** Required, with no permissive default — see `AGENTS.md`. */
-    private readonly hostGate: ForgeHostGate
+    /** How main answers "which forge runs here, and may we talk to it".
+     *
+     *  Both halves, one object: they are two different questions — resolution
+     *  and permission — but they are answered about the same hostname on the
+     *  same code path, and splitting them across two injections is how the two
+     *  drifted apart before.
+     *
+     *  Read per lookup rather than captured: signing in to an instance from a
+     *  terminal refreshes the directory behind it, and identity marks should
+     *  start resolving without a restart.
+     *
+     *  `isEnabled` is not optional decoration. `ForgeHosts.overrides()`
+     *  deliberately keeps hosts the user switched OFF, because resolution and
+     *  permission are separate questions and every other consumer re-checks
+     *  (`resolveEnabledForge` in index.ts). Without the same check here, a host
+     *  turned off in Settings → Forges still spawns its CLI on every refresh.
+     *
+     *  Required, with no permissive default: a default that answers "enabled"
+     *  makes forgetting to wire the switch look exactly like wiring it — see
+     *  `AGENTS.md`. */
+    private readonly hosts: {
+      overrides: () => ForgeHostMap;
+      isEnabled: ForgeHostGate;
+    }
   ) {}
 
   private backedOff(repoId: string): boolean {
@@ -280,14 +308,16 @@ export class IdentityService {
         ...(previous === undefined ? {} : { identity: previous })
       }
     };
-    const origin = await this.remoteSlots.run(() => readOrigin(this.git, repo));
+    const origin = await this.remoteSlots.run(() =>
+      readOrigin(this.git, repo, this.hosts.overrides())
+    );
     if (origin === null || origin.host === "other") return unavailable;
     // Gated on the hostname, not the kind, so the pane and this transport
     // agree about self-managed instances. One call, three answers: on; off
     // because somebody decided so; off because nothing has recognized this
     // host yet. Both "off" arms must stamp a backoff — neither writes a row,
     // so without one the repo is due again on the very next pass, forever.
-    const gate = this.hostGate(origin.hostname);
+    const gate = this.hosts.isEnabled(origin.hostname);
     if (!gate.enabled) {
       const decided = gate.source === "config" || gate.source === "env";
       // A decided "off" cannot change without a settings write, and that write
