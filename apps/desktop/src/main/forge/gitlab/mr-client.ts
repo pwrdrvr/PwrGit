@@ -47,8 +47,11 @@ class GitLabHttpError extends Error {
 /**
  * The shared forge backoff (`../retry`), against GitLab's error shape.
  *
- * Only a `GitLabHttpError` carries a status and headers: a timeout or a DNS
- * failure rejects with neither, and is retried as the transient failure it is.
+ * Only a `GitLabHttpError` carries a status and headers. Everything else the
+ * retried block can throw reaches the policy as the no-status case and is
+ * retried as transient — a timeout or a DNS failure, but also a `SyntaxError`
+ * from `response.json()`, which is what a captive portal answering 200 with
+ * HTML looks like from here.
  */
 function retryDelayMs(error: unknown, attempt: number): number | null {
   const http = error instanceof GitLabHttpError ? error : undefined;

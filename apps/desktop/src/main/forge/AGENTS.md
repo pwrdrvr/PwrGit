@@ -48,17 +48,21 @@ speaks `PrSummary` and never learns which forge answered.
   It is `gh-cli.ts`'s former body with the brand-specific parts lifted into a
   `CliSpec`. Change behavior here, not in a copy; `../github/gh-cli.test.ts`
   covers it and must keep passing.
-- **`retry.ts` holds the one retry/backoff decision** every forge client makes:
-  honour a `Retry-After`, wait out an exhausted rate-limit window, back off
-  exponentially for a 5xx or for a request that never got a status, and do not
-  retry the other 4xx. A forge contributes only vocabulary — how its rate-limit
-  headers are spelled, and which status carries an exhausted window (GitHub's
-  secondary limit answers 403; GitLab rate-limits with 429 only) — as a row in
-  the dialect table there, plus a two-line adapter reading status and headers
-  off its own error type. Both clients carried a copy of the decision before,
-  so a fix to one silently missed the other. Retry *budgets* deliberately stay
-  with the caller: how many attempts a call may spend is not policy, which is
-  what lets commit association below choose fewer than the branch query.
+- **`retry.ts` holds the one retry/backoff decision** every forge client makes,
+  in this order: a `Retry-After` is honoured on **any** status, since the server
+  named its own number; otherwise a rate-limit window that named its reset is
+  waited out; otherwise a 429, any 5xx, or a request that never got a status
+  backs off exponentially; everything else is not retried. A forge contributes
+  a row in the dialect table there — how its rate-limit headers are spelled,
+  and which statuses carry a window besides 429 (GitHub reports a spent hourly
+  budget as 403 as well, GitLab only ever 429) — plus a short adapter reading
+  status and headers off its own error type. Both clients carried a copy of the
+  decision before, so a fix to one silently missed the other; that is also why
+  what it deliberately does *not* do — read the HTTP-date form of `Retry-After`,
+  or floor a reset that has already passed — is pinned by a test rather than
+  left to be rediscovered. It adds no jitter. Retry *budgets* stay with the
+  caller: how many attempts a call may spend is not policy, which is what lets
+  commit association below choose fewer than the branch query.
 
 ## GitLab specifics
 

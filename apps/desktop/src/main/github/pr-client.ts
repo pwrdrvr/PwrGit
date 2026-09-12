@@ -121,17 +121,25 @@ const MAX_RETRIES = 4;
 /**
  * ghcrawl-style backoff, decided in `../forge/retry` so GitLab shares it.
  *
- * Octokit hangs the response — and so the rate-limit headers — off the error;
- * a request that never reached a response carries neither it nor a status.
+ * Octokit hangs the response — and so the rate-limit headers — off the error,
+ * lowercased, and `ResponseHeaders` types its values as string *or* number.
+ * There is no response to read when the request never reached one, but there
+ * is still a status: `@octokit/request` stamps a synthetic 500 on a DNS
+ * failure, a dropped socket and an abort alike, so those arrive here as 5xx
+ * rather than as the no-status case the policy also handles.
+ *
+ * `error` is typed `unknown` and a rejection can be anything, including null —
+ * and throwing from in here would replace the real failure with a TypeError
+ * raised inside `runQuery`'s catch.
  */
 function retryDelayMs(error: unknown, attempt: number): number | null {
-  const { status, response } = error as {
-    status?: number;
-    response?: { headers?: Record<string, string | undefined> };
+  const { status, response } = (error ?? {}) as {
+    status?: unknown;
+    response?: { headers?: Record<string, string | number | undefined> };
   };
   return forgeRetryDelayMs({
     kind: "github",
-    status,
+    status: typeof status === "number" ? status : undefined,
     header: (name) => response?.headers?.[name],
     attempt
   });

@@ -51,6 +51,7 @@ describe("forgeRetryDelayMs", () => {
   it("prefers Retry-After over a window that also said when it refills", () => {
     freezeClock();
     // The server named its own number; a shorter guess only earns another 429.
+    // (The clock is frozen because the losing branch would read it.)
     expect(
       forgeRetryDelayMs({
         kind: "github",
@@ -220,9 +221,10 @@ describe("forgeRetryDelayMs", () => {
 
   it("keeps each forge's spelling of the rate-limit headers", () => {
     freezeClock();
-    // GitHub prefixes with `x-`, GitLab uses the IETF draft names. Read with
-    // the wrong dialect, an exhausted window is simply invisible and the call
-    // falls back to the exponential wait.
+    // GitHub prefixes with `x-`; GitLab borrowed the IETF draft's names (though
+    // not that draft's delta-seconds encoding). Read with the wrong dialect, an
+    // exhausted window is simply invisible and the call falls back to the
+    // exponential wait.
     expect(
       forgeRetryDelayMs({
         kind: "github",
@@ -247,7 +249,7 @@ describe("forgeRetryDelayMs", () => {
     ).toBe(1_000);
   });
 
-  it("waits out GitHub's secondary limit, which answers 403 rather than 429", () => {
+  it("waits out a spent GitHub budget, which answers 403 as well as 429", () => {
     freezeClock();
     expect(
       forgeRetryDelayMs({
@@ -301,8 +303,91 @@ describe("forgeRetryDelayMs", () => {
       forgeRetryDelayMs({
         kind: "github",
         status: 429,
-        header: record({ "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" }),
+        header: record({ "retry-after": "not-a-number" }),
         attempt: 1
+      })
+    ).toBe(1_000);
+  });
+
+  it("does not yet read the HTTP-date form of Retry-After", () => {
+    // RFC 9110 allows either delta-seconds or an HTTP-date, and a WAF in front
+    // of a self-managed instance may send the date. Both clients have always
+    // dropped it and guessed instead; pinned here so the gap is a decision
+    // rather than a surprise, and so one fix would cover both forges.
+    expect(
+      forgeRetryDelayMs({
+        kind: "gitlab",
+        status: 429,
+        header: fetched({ "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" }),
+        attempt: 1
+      })
+    ).toBe(1_000);
+  });
+
+  it("reads a blank header as absent, not as a window with nothing left", () => {
+    // `Number(" ")` is 0, exactly like `Number(null)` — so a header a proxy
+    // rewrote to whitespace would otherwise read as "nothing left, refilled at
+    // the epoch" and compute a zero-length wait on a plain record, which does
+    // not trim its values the way `Headers` does.
+    expect(
+      forgeRetryDelayMs({
+        kind: "github",
+        status: 429,
+        header: record({
+          "x-ratelimit-remaining": " ",
+          "x-ratelimit-reset": " "
+        }),
+        attempt: 1
+      })
+    ).toBe(1_000);
+  });
+
+  it("honours a reset that arrived without a count beside it", () => {
+    freezeClock();
+    // One header of the pair is what a proxy forwards. The server still named
+    // a time, which beats guessing — and reading the missing count as zero is
+    // what the null-coercion trap above used to do for the wrong reason.
+    expect(
+      forgeRetryDelayMs({
+        kind: "gitlab",
+        status: 429,
+        header: fetched({ "ratelimit-reset": resetAt(30_000) }),
+        attempt: 1
+      })
+    ).toBe(30_000);
+  });
+
+  it("does not wait on an ordinary GitHub 403 that named no window", () => {
+    // `exhaustedOn: [403, 429]` is the riskiest row in the dialect table: the
+    // only thing keeping a permissions error from stalling for the whole retry
+    // budget is that it carries no reset.
+    expect(
+      forgeRetryDelayMs({
+        kind: "github",
+        status: 403,
+        header: record({ "x-ratelimit-remaining": "4987" }),
+        attempt: 1
+      })
+    ).toBeNull();
+    expect(
+      forgeRetryDelayMs({
+        kind: "github",
+        status: 403,
+        header: record(),
+        attempt: 1
+      })
+    ).toBeNull();
+  });
+
+  it("holds the 1-based attempt contract against a 0-based caller", () => {
+    // Without the floor this is 500ms — half the intended first wait, silently,
+    // with every other case here still green.
+    expect(
+      forgeRetryDelayMs({
+        kind: "github",
+        status: 500,
+        header: record(),
+        attempt: 0
       })
     ).toBe(1_000);
   });

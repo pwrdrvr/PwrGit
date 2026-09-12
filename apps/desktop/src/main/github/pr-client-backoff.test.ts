@@ -81,6 +81,41 @@ describe("GitHub backoff", () => {
     expect(client).toHaveBeenCalledTimes(2);
   });
 
+  it("retries a network failure, which carries a status but no response", async () => {
+    vi.useFakeTimers();
+    // `@octokit/request` stamps a synthetic 500 on a DNS failure or a dropped
+    // socket and leaves `response` undefined — the one shape that exercises the
+    // adapter's optional chaining before it reads a header.
+    client
+      .mockRejectedValueOnce(
+        Object.assign(new Error("request to ... failed"), { status: 500 })
+      )
+      .mockResolvedValueOnce({ repository: {} });
+
+    const pending = fetchPrsForRepo("t", REPO, "o", "r", ["a"]);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect((await pending).get("a")).toBeNull();
+    expect(client).toHaveBeenCalledTimes(2);
+  });
+
+  it("survives a rejection that is not an object at all", async () => {
+    vi.useFakeTimers();
+    // Reading the status off `null` would throw from inside `runQuery`'s catch,
+    // replacing the real failure with a TypeError and skipping the budget
+    // entirely. With no status to read it is transient, so it spends the four
+    // retries and then rethrows as itself.
+    client.mockRejectedValue(null);
+
+    const settled = fetchPrsForRepo("t", REPO, "o", "r", ["a"]).catch(
+      (error: unknown) => error
+    );
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    expect(await settled).toBeNull();
+    expect(client).toHaveBeenCalledTimes(5);
+  });
+
   it("salvages a GraphQL-level error's partial data instead of retrying", async () => {
     // A missing repo or one bad alias answers 200 with `errors` alongside
     // whatever resolved. That is not backoff's business, and retrying it would
