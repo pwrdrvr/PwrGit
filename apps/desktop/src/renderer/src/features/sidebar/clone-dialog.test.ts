@@ -155,13 +155,15 @@ describe("clone dialog filtering", () => {
 
   it("keeps a self-managed hostname on an unverified placeholder", () => {
     // The placeholder's clone URLs are what the user actually runs when the
-    // CLI cannot confirm the repo. Building them from the forge's default
-    // hostname would hand them gitlab.com's repository of that name.
+    // CLI cannot confirm the repo. It takes the already-resolved repository
+    // rather than the raw text precisely so this cannot be rebuilt from a bare
+    // slug — which resolves to the forge's SaaS hostname and would hand the
+    // user gitlab.com's repository of that name.
     expect(
       unverifiedCloneRepository(
-        "git@gitlab.acme.io:acme/platform/billing.git",
-        "gitlab",
-        { "gitlab.acme.io": "gitlab" }
+        exactRepository("git@gitlab.acme.io:acme/platform/billing.git", "gitlab", {
+          "gitlab.acme.io": "gitlab"
+        })
       )
     ).toMatchObject({
       host: "gitlab",
@@ -223,7 +225,9 @@ describe("clone dialog filtering", () => {
   });
 
   it("builds direct clone metadata without a forge CLI lookup", () => {
-    expect(unverifiedCloneRepository("huntharo/x-code-clone")).toEqual({
+    expect(
+      unverifiedCloneRepository(exactRepository("huntharo/x-code-clone"))
+    ).toEqual({
       name: "x-code-clone",
       owner: "huntharo",
       nameWithOwner: "huntharo/x-code-clone",
@@ -241,7 +245,7 @@ describe("clone dialog filtering", () => {
 
   it("builds unverified metadata against the chosen forge", () => {
     expect(
-      unverifiedCloneRepository("acme/api", "gitlab")
+      unverifiedCloneRepository(exactRepository("acme/api", "gitlab"))
     ).toMatchObject({
       host: "gitlab",
       hostname: "gitlab.com",
@@ -261,5 +265,14 @@ describe("clone dialog filtering", () => {
     expect(cloneRepositoryAtSelection([repositories[0]!], 1)).toBe(
       repositories[0]
     );
+  });
+});
+
+describe("unverifiedCloneRepository", () => {
+  it("is null for input that names no repository", () => {
+    // The dialog hands it whatever `exactRepository` produced, which is null
+    // for a local path or junk — the placeholder must not invent a slug.
+    expect(unverifiedCloneRepository(null)).toBeNull();
+    expect(unverifiedCloneRepository(exactRepository("not a repo"))).toBeNull();
   });
 });

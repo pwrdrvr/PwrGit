@@ -289,6 +289,15 @@ export class ForgeHostsView {
     await this.refreshDirectory();
   }
 
+  /** The map main resolves with, for the renderer to classify a pasted remote
+   *  the same way. Shipped rather than re-derived from `rows()`: `list()` is
+   *  "what has a settings row", which deliberately excludes hosts named only
+   *  by `PWRGIT_{GITHUB,GITLAB}_HOSTS` — and a renderer rebuilding the map
+   *  from rows resolved those hosts differently from every main-side caller. */
+  overrides(): ForgeHostOverrides {
+    return this.hosts.overrides();
+  }
+
   rows(): ForgeHostRow[] {
     return this.hosts.list().flatMap((entry) =>
       entry.kind === null

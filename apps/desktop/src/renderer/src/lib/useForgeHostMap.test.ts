@@ -1,79 +1,72 @@
 import { describe, expect, it } from "vitest";
-import { parseForgeRemote, type ForgeHostRow } from "@pwrgit/shared";
-import { forgeHostMap } from "./useForgeHostMap";
+import { parseForgeRemote } from "@pwrgit/shared";
 // Main-process imports from a renderer spec: allowed for vitest specs
 // specifically, so the two sides of a contract can be asserted together —
 // see the header of `.dependency-cruiser.cjs`.
 import { parseGlabHosts } from "../../../main/forge/cli-hosts";
 import { ForgeHosts, ForgeHostsView } from "../../../main/forge/hosts";
 
-const row = (over: Partial<ForgeHostRow> = {}): ForgeHostRow => ({
-  host: "gitlab.acme-corp.example",
-  kind: "gitlab",
-  enabled: true,
-  enabledSource: "auto",
-  origin: "cli",
-  cli: "glab",
-  ...over
-});
-
-describe("forgeHostMap", () => {
-  it("turns forge:hosts rows into the classifier's host map", () => {
-    expect(
-      forgeHostMap([row(), row({ host: "ghe.acme-corp.example", kind: "github" })])
-    ).toEqual({
-      "gitlab.acme-corp.example": "gitlab",
-      "ghe.acme-corp.example": "github"
-    });
-  });
-
-  it("keeps a disabled host, which is a known forge that is switched off", () => {
-    // "Which forge runs here" and "may we talk to it" are separate questions;
-    // main's `overrides()` keeps disabled hosts for the same reason. Dropping
-    // one would make a host the user switched off read as an unknown forge —
-    // a different message, and a different fix.
-    expect(forgeHostMap([row({ enabled: false })])).toEqual({
-      "gitlab.acme-corp.example": "gitlab"
-    });
-  });
-
-  it("is empty for no rows, which resolves the two SaaS hosts and nothing else", () => {
-    expect(forgeHostMap([])).toEqual({});
-    expect(parseForgeRemote("git@github.com:o/r.git", forgeHostMap([]))?.host).toBe(
-      "github"
-    );
-  });
-});
-
-describe("the renderer's map and main's overrides", () => {
-  // The contract this spec exists for: a self-managed instance `glab` is
-  // signed in to must classify the same way in the clone/fork dialogs as it
-  // does for change-request status in main. One list, two readers — and a
-  // `gitlab.*` hostname is not a third answer any more.
-  const status = `gitlab.acme-corp.example
+/**
+ * The contract `useForgeHostMap` exists for: the map the clone and fork
+ * dialogs classify a pasted URL with is the map main resolves with, not a
+ * second derivation of it. `forge:hosts` ships `ForgeHosts.overrides()`
+ * directly, so this spec pins what that channel carries.
+ */
+const status = `gitlab.acme-corp.example
   ✓ Logged in to gitlab.acme-corp.example as a.dev (keyring)
 `;
-  const hosts = new ForgeHosts({
-    readSettings: () => ({ hosts: {} }),
-    discovered: () => parseGlabHosts(status),
-    env: {}
-  });
 
-  it("agree on every enumerated host", () => {
-    const rows = new ForgeHostsView(hosts, async () => {}).rows();
-    expect(forgeHostMap(rows)).toEqual(hosts.overrides());
-  });
+const view = (env: NodeJS.ProcessEnv = {}, hosts = {}): ForgeHostsView =>
+  new ForgeHostsView(
+    new ForgeHosts({
+      readSettings: () => ({ hosts }),
+      discovered: () => parseGlabHosts(status),
+      env
+    }),
+    async () => {}
+  );
 
-  it("classify a pasted remote on that host identically", () => {
-    const rows = new ForgeHostsView(hosts, async () => {}).rows();
+describe("the map forge:hosts ships", () => {
+  it("places a CLI-enumerated self-managed instance", () => {
+    expect(view().overrides()).toEqual({
+      "gitlab.acme-corp.example": "gitlab"
+    });
     const url = "git@gitlab.acme-corp.example:acme/platform/billing.git";
-    expect(parseForgeRemote(url, forgeHostMap(rows))).toMatchObject({
+    expect(parseForgeRemote(url, view().overrides())).toMatchObject({
       host: "gitlab",
       hostname: "gitlab.acme-corp.example",
       nameWithOwner: "acme/platform/billing"
     });
-    // And without the list it is `other` — the state this whole plumbing
-    // exists to avoid leaving the dialogs in.
+    // And without the list it is `other` — the state this plumbing exists to
+    // avoid leaving the dialogs in.
     expect(parseForgeRemote(url)?.host).toBe("other");
+  });
+
+  it("carries a host named only by the env allowlist", () => {
+    // The regression that made deriving the map from `rows()` wrong: `list()`
+    // is "what has a settings row", and an env-allowlisted host has none — so
+    // main resolved it and the dialogs read the same URL as `other`.
+    const scoped = view({ PWRGIT_GITHUB_HOSTS: "ghe.acme-corp.example" });
+    expect(scoped.overrides()["ghe.acme-corp.example"]).toBe("github");
+    expect(scoped.rows().map((row) => row.host)).not.toContain(
+      "ghe.acme-corp.example"
+    );
+    expect(
+      parseForgeRemote(
+        "git@ghe.acme-corp.example:acme/api.git",
+        scoped.overrides()
+      )?.host
+    ).toBe("github");
+  });
+
+  it("keeps a host the user switched off", () => {
+    // "Which forge runs here" and "may we talk to it" are separate questions.
+    // The map answers the first; `isEnabled` answers the second, and main
+    // gates on it at every site that would spawn a CLI.
+    const off = view({}, {
+      "gitlab.acme-corp.example": { enabled: false }
+    });
+    expect(off.overrides()["gitlab.acme-corp.example"]).toBe("gitlab");
+    expect(off.rows()[0]?.enabled).toBe(false);
   });
 });

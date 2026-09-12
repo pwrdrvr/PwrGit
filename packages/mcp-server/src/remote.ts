@@ -3,12 +3,21 @@ import type { ForgeProvider, RemoteIdentity, RemoteSummary } from "./types.js";
 const SCP_REMOTE = /^(?:[^@\s]+@)?([^\s:/]+):(.+?)\/?$/;
 const SAFE_SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 
+/**
+ * Which forge a hostname belongs to, or `other` when it cannot be known.
+ *
+ * Mirrors the desktop app's `classifyForgeHost` (`packages/shared`), which this
+ * package cannot import — it bundles standalone. The rule that matters is the
+ * one they must agree on: **a hostname is never evidence.** A `gitlab.*` prefix
+ * used to be read as GitLab here and in the app; the app dropped it because a
+ * self-managed instance is known only from a `gh`/`glab` sign-in or an explicit
+ * setting, and keeping it here would mean an agent asking this server got
+ * `gitlab` for a host the app itself calls unknown.
+ */
 export function classifyProvider(host: string): ForgeProvider {
   const normalized = host.trim().toLowerCase().replace(/^www\./, "");
   if (normalized === "github.com") return "github";
-  if (normalized === "gitlab.com" || normalized.startsWith("gitlab.")) {
-    return "gitlab";
-  }
+  if (normalized === "gitlab.com") return "gitlab";
   return "other";
 }
 

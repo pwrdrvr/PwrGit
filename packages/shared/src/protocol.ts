@@ -10,6 +10,7 @@
 // milestones extend `Commands`/`Events` with worktree-state, changes, remote,
 // graph, and rebase entries.
 
+import type { ForgeHostMap } from "./forge-remote";
 import type {
   BranchRef,
   BulkSyncMode,
@@ -743,7 +744,15 @@ export interface Commands {
   };
   /** Verify an exact `owner/name` that was not in the loaded owner catalogs. */
   "repo:checkCloneSource": {
-    req: { profileId: ProfileId; nameWithOwner: string; host?: ForgeHost };
+    req: {
+      profileId: ProfileId;
+      nameWithOwner: string;
+      host?: ForgeHost;
+      /** The instance the slug was named on. Without it a self-managed host
+       *  resolves to the forge's SaaS provider, which answers about a
+       *  different repository that happens to share the slug. */
+      hostname?: string;
+    };
     res: CloneRepository;
   };
   /** Validate a filesystem path as a Git repository clone source. */
@@ -783,6 +792,9 @@ export interface Commands {
       profileId: ProfileId;
       source: string;
       host: ForgeHost;
+      /** The instance the source lives on, for the same reason
+       *  `repo:checkCloneSource` carries it. */
+      hostname?: string;
       /** Account to fork into; defaults to the signed-in user. */
       targetOwner?: string;
       /** Name the fork will be given. Defaults to the source's name — but it
@@ -802,7 +814,7 @@ export interface Commands {
    * clone dialog would pay for a lookup it never reads.
    */
   "repo:forkTargets": {
-    req: { host: ForgeKind };
+    req: { host: ForgeKind; hostname?: string };
     res: ForgeOwner[];
   };
   /** Create a fork, check it out, wire `upstream`, and index the checkout. */
@@ -921,7 +933,16 @@ export interface Commands {
    *  enumerates a CLI itself. */
   "forge:hosts": {
     req: { refresh?: boolean };
-    res: { hosts: ForgeHostRow[] };
+    res: {
+      /** What Settings → Forges renders. */
+      hosts: ForgeHostRow[];
+      /** The host → forge map main itself resolves with, shipped rather than
+       *  re-derived from `hosts`: the rows are what has a settings row, which
+       *  is not the same set (an env allowlist names hosts that get no row),
+       *  and a renderer that rebuilt the map from rows disagreed with main
+       *  about exactly those hosts. */
+      overrides: ForgeHostMap;
+    };
   };
   /**
    * Return immediately and start any eligible identity verification in the

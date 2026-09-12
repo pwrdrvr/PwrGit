@@ -74,8 +74,16 @@ export function classifyForgeHost(
   overrides: ForgeHostMap = {}
 ): ForgeHost {
   const normalized = hostname.trim().toLowerCase().replace(/^www\./, "");
-  const override = overrides[normalized];
-  if (override !== undefined) return override;
+  // `Object.hasOwn`, not a bare index: `overrides` is a plain object, and a
+  // hostname is attacker-adjacent input straight out of a git remote. A single
+  // label of `constructor` or `__proto__` — both legal intranet hostnames —
+  // otherwise returns an inherited member, so `host` comes back as the `Object`
+  // function rather than a ForgeHost and dies at the IPC boundary, where a
+  // function is not structured-cloneable.
+  if (Object.hasOwn(overrides, normalized)) {
+    const override = overrides[normalized];
+    if (override !== undefined) return override;
+  }
   if (normalized === "github.com") return "github";
   if (normalized === "gitlab.com") return "gitlab";
   return "other";

@@ -98,10 +98,21 @@ export class IdentityService {
     private readonly db: DB,
     private readonly git: GitExec,
     private readonly forges: ForgeRepoRegistry,
-    /** Read per lookup rather than captured: signing in to an instance from a
-     *  terminal refreshes the directory behind this, and identity marks should
-     *  start resolving without a restart. */
-    private readonly hostOverrides: () => ForgeHostMap = () => ({})
+    /** How main answers "which forge runs here, and may we talk to it".
+     *
+     *  Read per lookup rather than captured: signing in to an instance from a
+     *  terminal refreshes the directory behind it, and identity marks should
+     *  start resolving without a restart.
+     *
+     *  `isHostEnabled` is not optional decoration. `ForgeHosts.overrides()`
+     *  deliberately keeps hosts the user switched OFF, because resolution and
+     *  permission are separate questions and every other consumer re-checks
+     *  (`resolveEnabledForge` in index.ts). Without the same check here, a host
+     *  turned off in Settings → Forges still spawns its CLI on every refresh. */
+    private readonly hosts: {
+      overrides: () => ForgeHostMap;
+      isHostEnabled: (hostname: string) => boolean;
+    } = { overrides: () => ({}), isHostEnabled: () => true }
   ) {}
 
   /** Identities already stored, for the repositories given. */
@@ -239,9 +250,13 @@ export class IdentityService {
       }
     };
     const origin = await this.remoteSlots.run(() =>
-      readOrigin(this.git, repo, this.hostOverrides())
+      readOrigin(this.git, repo, this.hosts.overrides())
     );
     if (origin === null || origin.host === "other") return unavailable;
+    // The per-host switch, enforced where the subprocess would be spawned. A
+    // host the user turned off must not be read, and `unavailable` is exactly
+    // how an unresolvable host already reports — no row written, no CLI run.
+    if (!this.hosts.isHostEnabled(origin.hostname)) return unavailable;
     // `origin.hostname` is right here and used below — dropping it read this
     // repo's identity off github.com/gitlab.com instead of its own instance,
     // which for a same-named SaaS slug reports a STRANGER's visibility and

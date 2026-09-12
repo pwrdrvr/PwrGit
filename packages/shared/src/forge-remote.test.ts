@@ -87,6 +87,24 @@ describe("parseForgeRemote", () => {
     ).toBeNull();
   });
 
+  it("never reads a prototype member out of the host map", () => {
+    // `overrides` is a plain object and a hostname comes straight out of a git
+    // remote. A bare index returned the `Object` FUNCTION for a host literally
+    // named `constructor` (a legal single-label intranet name), which then died
+    // at the IPC boundary — a function is not structured-cloneable. Only
+    // lowercase members are reachable at all, since the host is lowercased.
+    for (const host of ["constructor", "__proto__"]) {
+      const parsed = parseForgeRemote(`git@${host}:acme/api.git`);
+      expect(parsed?.host).toBe("other");
+      expect(classifyForgeHost(host)).toBe("other");
+    }
+    // An own property of the same name is still honoured — the guard rejects
+    // inheritance, not the key.
+    expect(
+      classifyForgeHost("constructor", { constructor: "gitlab" as const })
+    ).toBe("gitlab");
+  });
+
   it("lowercases the hostname but preserves project-path case", () => {
     expect(parseForgeRemote("git@GitHub.COM:PwrDrvr/PwrGit.git")).toMatchObject({
       hostname: "github.com",

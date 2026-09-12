@@ -775,3 +775,90 @@ describe("ForkService.fork", () => {
     }
   });
 });
+
+describe("ForkService and the instance a source lives on", () => {
+  /** A registry with the per-hostname factory `index.ts` registers, and a spy
+   *  on every `--hostname` the CLI is asked for. */
+  const spying = () => {
+    const hostnames: (string | undefined)[] = [];
+    const run =
+      (hostname?: string) =>
+      async (args: string[]): Promise<string> => {
+        hostnames.push(hostname);
+        if (args[0] === "--version") return "gh version 2.92.0";
+        if (args.includes("/user/orgs")) return JSON.stringify([]);
+        if (args.includes("user")) return JSON.stringify({ login: "huntharo" });
+        return JSON.stringify({
+          full_name: "acme/api",
+          name: "api",
+          visibility: "private"
+        });
+      };
+    const registry = new ForgeRepoRegistry();
+    registry.register(
+      new GitHubRepoProvider(run()),
+      (hostname) => new GitHubRepoProvider(run(hostname), hostname)
+    );
+    return { registry, hostnames };
+  };
+
+  /** `services()` with a caller-supplied registry, so the spy above is the one
+   *  the service actually reaches. */
+  const forkServices = (
+    registry: ForgeRepoRegistry
+  ): { forks: ForkService; profileId: string } => {
+    const root = temporaryRoot();
+    mkdirSync(join(root, "forks"), { recursive: true });
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "Personal",
+      email: "t@pwrgit.com",
+      roots: [root]
+    });
+    const indexer = new RepoIndexer(db, systemGit);
+    const clones = new CloneService(
+      db,
+      systemGit,
+      indexer,
+      profiles,
+      registry,
+      fakeForgeStatus()
+    );
+    return {
+      profileId: profile.id,
+      forks: new ForkService(
+        systemGit,
+        indexer,
+        profiles,
+        registry,
+        clones,
+        fakeForgeStatus()
+      )
+    };
+  };
+
+  it("preflights the source against its own instance, not the SaaS one", async () => {
+    // Sending only the forge KIND had main resolve the default provider, so an
+    // Enterprise source was preflighted — and then forked — against
+    // github.com's repository of the same slug.
+    const { registry, hostnames } = spying();
+    const { forks, profileId } = forkServices(registry);
+    await forks.preflight({
+      profileId,
+      source: "acme/api",
+      host: "github",
+      hostname: "ghe.acme.example"
+    });
+    expect(hostnames.length).toBeGreaterThan(0);
+    expect(hostnames.every((host) => host === "ghe.acme.example")).toBe(true);
+  });
+
+  it("lists fork targets from the instance the source lives on", async () => {
+    const { registry, hostnames } = spying();
+    const { forks } = forkServices(registry);
+    await forks.targets("github", "ghe.acme.example");
+    expect(hostnames.length).toBeGreaterThan(0);
+    expect(hostnames).not.toContain(undefined);
+  });
+});

@@ -76,7 +76,10 @@ function searchVisibility(row: Record<string, unknown>): RepoVisibility {
  *  rather than made tolerant of both shapes: a parser that accepts either key
  *  for the slug silently returns `[]` when a field is renamed, instead of
  *  failing where the command was invoked. */
-export function parseGhSearchRepoJson(raw: unknown): CloneRepository | null {
+export function parseGhSearchRepoJson(
+  raw: unknown,
+  hostname: string = HOSTNAME
+): CloneRepository | null {
   if (raw === null || typeof raw !== "object") return null;
   const row = raw as Record<string, unknown>;
   const nameWithOwner = text(row["fullName"]);
@@ -90,11 +93,11 @@ export function parseGhSearchRepoJson(raw: unknown): CloneRepository | null {
     nameWithOwner,
     visibility: searchVisibility(row),
     host: "github",
-    hostname: HOSTNAME,
+    hostname,
     // Search does not return clone URLs; both forms are a pure function of the
-    // slug on github.com, so deriving them costs nothing and invents nothing.
-    sshUrl: `git@${HOSTNAME}:${nameWithOwner}.git`,
-    httpsUrl: text(row["url"]) ?? forgeWebUrl(HOSTNAME, nameWithOwner),
+    // slug on the instance, so deriving them costs nothing and invents nothing.
+    sshUrl: `git@${hostname}:${nameWithOwner}.git`,
+    httpsUrl: text(row["url"]) ?? forgeWebUrl(hostname, nameWithOwner),
     localPaths: []
   };
   const description = text(row["description"]);
@@ -104,17 +107,28 @@ export function parseGhSearchRepoJson(raw: unknown): CloneRepository | null {
   return repository;
 }
 
-export function parseGhSearchRepos(stdout: string): CloneRepository[] {
+export function parseGhSearchRepos(
+  stdout: string,
+  hostname: string = HOSTNAME
+): CloneRepository[] {
   const parsed = parseJsonObject(stdout, "GitHub repository search");
   const rows = Array.isArray(parsed) ? parsed : [parsed];
   return rows
-    .map((row) => parseGhSearchRepoJson(row))
+    .map((row) => parseGhSearchRepoJson(row, hostname))
     .filter((row): row is CloneRepository => row !== null);
 }
 
 /** `gh api repos/{owner}/{repo}` — REST, snake_case, and the only GitHub
  *  response that carries `source` (the fork-network root) alongside `parent`. */
-export function parseGhRestRepo(stdout: string): CloneRepository | null {
+/** `hostname` defaults to github.com only so existing single-instance callers
+ *  and specs keep working; `GitHubRepoProvider` always passes `this.hostname`.
+ *  Hardcoding it here reported every GitHub Enterprise repository as living on
+ *  github.com, which is the fact the identity marks render and the key fork
+ *  matching compares. */
+export function parseGhRestRepo(
+  stdout: string,
+  hostname: string = HOSTNAME
+): CloneRepository | null {
   const parsed = parseJsonObject(stdout, "GitHub repository");
   if (parsed === null || typeof parsed !== "object") return null;
   const row = parsed as Record<string, unknown>;
@@ -129,9 +143,9 @@ export function parseGhRestRepo(stdout: string): CloneRepository | null {
     nameWithOwner,
     visibility: restVisibility(row),
     host: "github",
-    hostname: HOSTNAME,
-    sshUrl: text(row["ssh_url"]) ?? `git@${HOSTNAME}:${nameWithOwner}.git`,
-    httpsUrl: text(row["html_url"]) ?? forgeWebUrl(HOSTNAME, nameWithOwner),
+    hostname,
+    sshUrl: text(row["ssh_url"]) ?? `git@${hostname}:${nameWithOwner}.git`,
+    httpsUrl: text(row["html_url"]) ?? forgeWebUrl(hostname, nameWithOwner),
     localPaths: []
   };
   const description = text(row["description"]);
@@ -147,7 +161,7 @@ export function parseGhRestRepo(stdout: string): CloneRepository | null {
       nameWithOwner: slug,
       url:
         text((value as Record<string, unknown>)["html_url"]) ??
-        forgeWebUrl(HOSTNAME, slug)
+        forgeWebUrl(hostname, slug)
     };
   };
   const parent = refOf(row["parent"]);
@@ -248,7 +262,7 @@ export class GitHubRepoProvider implements ForgeRepoProvider {
     const stdout = await (signal === undefined
       ? this.runCli(args)
       : this.runCli(args, { signal }));
-    const repository = parseGhRestRepo(stdout);
+    const repository = parseGhRestRepo(stdout, this.hostname);
     if (repository === null) {
       throw new Error(`GitHub returned no repository for ${nameWithOwner}`);
     }
@@ -278,7 +292,7 @@ export class GitHubRepoProvider implements ForgeRepoProvider {
     // it. There is no shell involved — the runner spawns an argv array — so
     // this is about `gh`'s own parser, not injection.
     if (term !== "") args.push("--", term);
-    return parseGhSearchRepos(await this.runCli(args));
+    return parseGhSearchRepos(await this.runCli(args), this.hostname);
   }
 
   async fork(input: ForkInput): Promise<CloneRepository> {

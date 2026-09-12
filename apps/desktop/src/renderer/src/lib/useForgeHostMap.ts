@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
-import type { ForgeHostMap, ForgeHostRow } from "@pwrgit/shared";
-import { dispatch } from "./pwrgit";
+import type { ForgeHostMap } from "@pwrgit/shared";
+import { dispatch, subscribe } from "./pwrgit";
+
+/** Shared so an empty answer keeps its identity across reads — a fresh `{}`
+ *  would invalidate every memo and effect that depends on the map, which for
+ *  the dialogs means dropping a verified row and re-running a CLI lookup. */
+const NO_HOSTS: ForgeHostMap = {};
 
 /**
  * The host → forge map the renderer needs to classify a pasted remote URL.
@@ -8,44 +13,53 @@ import { dispatch } from "./pwrgit";
  * `classifyForgeHost` knows `github.com` and `gitlab.com` and nothing else on
  * its own — a hostname is not evidence, so a self-managed instance is only
  * recognised because `gh`/`glab` are signed in to it or the user named it in
- * Settings → Forges. Main owns that list; `forge:hosts` is how it gets here,
- * and this is the renderer's half of the one answer main resolves with through
- * `ForgeHosts.overrides()`.
+ * Settings → Forges. Main owns that list and resolves with it; `forge:hosts`
+ * ships the map itself rather than the settings rows, because the rows are
+ * "what has a settings row" and the map is "what resolves" — an env allowlist
+ * (`PWRGIT_{GITHUB,GITLAB}_HOSTS`) names hosts that are in the second and not
+ * the first, and a renderer deriving one from the other disagreed with main
+ * about exactly those hosts.
  *
  * Empty is the correct degraded state, not an error: it means the two SaaS
  * hosts resolve and everything else reads as `other`, which is the same no-op
  * the dialogs already give any unrecognised remote.
  */
-export function forgeHostMap(rows: readonly ForgeHostRow[]): ForgeHostMap {
-  // Disabled hosts are deliberately kept. "Which forge runs here" and "may we
-  // talk to it" are separate questions — main's `overrides()` makes the same
-  // choice — and dropping them would make a host the user switched off read as
-  // an unknown forge, which is a different message and a different remedy.
-  return Object.fromEntries(rows.map((row) => [row.host, row.kind]));
-}
-
-/**
- * Read the forge host list once, for as long as the caller is mounted.
- *
- * Deliberately not a refresh: main answers from its cached directory, and the
- * dialogs that use this open on local state (`forge/AGENTS.md`) — a `refresh`
- * here would spawn `gh auth status` and `glab auth status` as the dialog
- * opened, which is the cost that pattern exists to avoid.
- */
 export function useForgeHostMap(): ForgeHostMap {
-  const [hosts, setHosts] = useState<ForgeHostMap>({});
+  const [hosts, setHosts] = useState<ForgeHostMap>(NO_HOSTS);
   useEffect(() => {
     let active = true;
-    void dispatch("forge:hosts", {})
-      .then((result) => {
-        if (active && result.ok) setHosts(forgeHostMap(result.value.hosts));
-      })
-      // Best-effort, exactly like every other forge read: a rejection leaves
-      // the two SaaS hosts resolving rather than failing the dialog.
-      .catch(() => {});
+    const read = (): void => {
+      void dispatch("forge:hosts", {})
+        .then((result) => {
+          if (!active || !result.ok) return;
+          const next = result.value.overrides;
+          // Identity matters: `hosts` is a dependency of the dialogs' memos
+          // and of their debounced check effect, so storing an equal-but-new
+          // object costs a redundant render and a duplicate CLI round trip.
+          setHosts((current) => (sameHosts(current, next) ? current : next));
+        })
+        // Best-effort, exactly like every other forge read: a rejection leaves
+        // the two SaaS hosts resolving rather than failing the dialog.
+        .catch(() => {});
+    };
+    read();
+    // Main enumerates hosts in the background at boot (two CLI spawns), so a
+    // dialog opened in the first second would otherwise cache an empty map for
+    // its whole lifetime. `forge:statusChanged` is what main already uses to
+    // re-read the directory, so it is the signal that the list may have moved.
+    const stop = subscribe("forge:statusChanged", read);
     return () => {
       active = false;
+      stop();
     };
   }, []);
   return hosts;
+}
+
+function sameHosts(a: ForgeHostMap, b: ForgeHostMap): boolean {
+  const keys = Object.keys(a);
+  return (
+    keys.length === Object.keys(b).length &&
+    keys.every((key) => a[key] === b[key])
+  );
 }

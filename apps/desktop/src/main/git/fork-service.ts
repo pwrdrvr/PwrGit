@@ -28,6 +28,7 @@ import {
   normalizeRepositoryPath,
   operationWasCanceled,
   removePartialCheckout,
+  unsupportedHostMessage,
   validateCheckoutDestination
 } from "./clone-service";
 import type { RepoIndexer } from "./repo-indexer";
@@ -130,6 +131,10 @@ export class ForkService {
     profileId: string;
     source: string;
     host: ForgeHost;
+    /** The instance the source lives on. Without it a self-managed project is
+     *  preflighted against the forge's SaaS instance, which answers about a
+     *  different repository that shares the slug. */
+    hostname?: string;
     targetOwner?: string;
     targetName?: string;
   }): Promise<Result<ForkPreflight>> {
@@ -148,11 +153,11 @@ export class ForkService {
         message: "Enter a repository as owner/name."
       });
     }
-    const provider = this.forges.get(input.host);
+    const provider = this.forges.get(input.host, input.hostname);
     if (provider === null) {
       return this.blocked(source, input.targetOwner, {
         code: "unsupported_host",
-        message: `PwrGit cannot fork on ${input.host} yet.`
+        message: unsupportedHostMessage("fork")
       });
     }
     const status = (await this.forgeStatus.list()).find(
@@ -240,8 +245,14 @@ export class ForkService {
   /** Accounts a fork can be created in on one forge, or none when its CLI
    *  cannot answer. Best-effort: an empty list disables the picker rather
    *  than failing the dialog. */
-  async targets(host: ForgeKind): Promise<Result<ForgeOwner[]>> {
-    const provider = this.forges.get(host);
+  async targets(
+    host: ForgeKind,
+    hostname?: string
+  ): Promise<Result<ForgeOwner[]>> {
+    // A fork lands on the instance the source lives on, so the accounts
+    // offered must come from that instance — the SaaS provider would list the
+    // user's github.com/gitlab.com orgs for an Enterprise source.
+    const provider = this.forges.get(host, hostname);
     if (provider === null) return ok([]);
     const status = (await this.forgeStatus.list()).find(
       (candidate) => candidate.kind === host
@@ -288,12 +299,16 @@ export class ForkService {
         message: `Not a usable fork name: ${input.targetOwner}/${input.targetName}`
       });
     }
-    const provider = this.forges.get(input.host);
+    // `input.hostname` is already carried by `repo:fork` and was previously
+    // used only to build remote URLs — so the fork itself was created on the
+    // SaaS instance while the checkout's remotes pointed at the self-managed
+    // one.
+    const provider = this.forges.get(input.host, input.hostname);
     if (provider === null) {
       return err({
         kind: "remote",
         code: "unsupported_host",
-        message: `PwrGit cannot fork on ${input.host} yet.`
+        message: unsupportedHostMessage("fork")
       });
     }
 

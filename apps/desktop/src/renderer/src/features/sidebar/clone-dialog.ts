@@ -1,4 +1,5 @@
 import {
+  forgeCloneUrls,
   isSafeProjectPath,
   parseForgeRemote,
   type CloneDestination,
@@ -162,15 +163,19 @@ export function exactRepository(
   return { host, hostname: defaultHostname(host), nameWithOwner };
 }
 
-/** A stand-in for a repository the forge would not confirm — no CLI, or not
- *  signed in. Its visibility is `unknown`, not `public`: the whole point of
- *  the third state is that we must not guess this one. */
+/** A stand-in for a repository the forge would not confirm — no CLI, not
+ *  signed in, or a host PwrGit cannot place. Its visibility is `unknown`, not
+ *  `public`: the whole point of the third state is that we must not guess
+ *  this one.
+ *
+ *  Takes the already-resolved `ExactRepository` rather than the raw input.
+ *  Re-parsing is what loses the instance: by the time this is needed the
+ *  dialog may have rewritten its query to the bare slug, and a slug resolves
+ *  to the forge's SaaS hostname — so the URLs offered would point at
+ *  github.com's repository of that name, not the one the user pasted. */
 export function unverifiedCloneRepository(
-  input: string,
-  defaultHost: ForgeHost = "github",
-  hosts: ForgeHostMap = {}
+  exact: ExactRepository | null
 ): CloneRepository | null {
-  const exact = exactRepository(input, defaultHost, hosts);
   if (exact === null) return null;
   const slash = exact.nameWithOwner.lastIndexOf("/");
   return {
@@ -181,8 +186,7 @@ export function unverifiedCloneRepository(
     visibility: "unknown",
     host: exact.host,
     hostname: exact.hostname,
-    sshUrl: `git@${exact.hostname}:${exact.nameWithOwner}.git`,
-    httpsUrl: `https://${exact.hostname}/${exact.nameWithOwner}.git`,
+    ...forgeCloneUrls(exact.hostname, exact.nameWithOwner),
     localPaths: []
   };
 }

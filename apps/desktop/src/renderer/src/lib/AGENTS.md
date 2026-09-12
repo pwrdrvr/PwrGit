@@ -188,3 +188,22 @@ plus `tagCount`; tag browsers search and page through `repo:tags` via
 `useTagSearch`. A tag is never a `BranchRef`: do not feed it to branch switching,
 branch pickers, or worktree creation without a separate UI that explicitly
 chooses detached HEAD or a newly named branch.
+
+## Forge host classification comes from main, never from the hostname
+
+`useForgeHostMap` reads the host → forge map over `forge:hosts` and hands it to
+`classifyForgeHost`/`parseForgeRemote`. Do not classify a remote without it: a
+hostname is not evidence of which forge runs on it, so with no map every
+self-managed instance reads as `other` and the clone and fork dialogs silently
+lose a host the user is signed in to. `apps/desktop/src/main/forge/AGENTS.md`
+has the whole rule.
+
+The map is main's own (`ForgeHosts.overrides()`), shipped rather than derived
+from the settings rows in the same response — the two are different sets. The
+hook re-reads on `forge:statusChanged` because main enumerates hosts in two
+background CLI spawns at boot, so a dialog opened in the first second would
+otherwise cache an empty map for its whole lifetime.
+
+Classifying in the renderer picks which forge to ask; it does **not** pick which
+instance. Any IPC that reaches a provider must carry `hostname` as well as the
+kind, or main answers from github.com/gitlab.com.

@@ -254,6 +254,17 @@ function messageFromUnknown(provider: ForgeRepoProvider, cause: unknown): string
   return message.split("\n")[0] ?? message;
 }
 
+/**
+ * One wording for "PwrGit does not know this host".
+ *
+ * Never interpolate the `ForgeHost` enum: it renders as the literal word
+ * "other", which names nothing the user chose or can act on. Every site that
+ * hits a null provider says the same thing and names the same remedy.
+ */
+export function unsupportedHostMessage(verb: string): string {
+  return `PwrGit doesn't know which forge runs at that host, so it can't ${verb} repositories there. Add the host under Settings → Forges, or use SSH or HTTPS.`;
+}
+
 function inaccessibleRepositoryMessage(
   host: ForgeHost,
   nameWithOwner: string
@@ -451,7 +462,7 @@ export class CloneService {
       return err({
         kind: "remote",
         code: "unsupported_host",
-        message: `PwrGit cannot search repositories on ${host}.`
+        message: unsupportedHostMessage("search")
       });
     }
     const forges = await this.statuses();
@@ -527,7 +538,11 @@ export class CloneService {
   async checkSource(
     profileId: string,
     input: string,
-    host: ForgeHost = "github"
+    host: ForgeHost = "github",
+    /** The instance the slug was named on. Omitted means the SaaS instance;
+     *  passing it is what stops a self-managed project being confirmed against
+     *  github.com/gitlab.com's repository of the same name. */
+    hostname?: string
   ): Promise<Result<CloneRepository>> {
     if (this.profiles.get(profileId) === null) {
       return err({
@@ -544,17 +559,17 @@ export class CloneService {
         message: "Enter a repository as owner/name."
       });
     }
-    const provider = this.forges.get(host);
+    const provider = this.forges.get(host, hostname);
     if (provider === null) {
       // `host` is the enum, and `other` is not a word to show anyone. This is
       // reached for a remote on a host no CLI is signed in to and nobody has
-      // named in Settings → Forges, which is a repository PwrGit cannot
-      // confirm — not one it cannot clone.
+      // named in Settings → Forges, or for one whose forge cannot be pointed
+      // at another instance — a repository PwrGit cannot confirm, not one it
+      // cannot clone.
       return err({
         kind: "remote",
         code: "unsupported_host",
-        message:
-          "PwrGit doesn't know which forge runs at that host. Add it under Settings → Forges, or clone with SSH or HTTPS."
+        message: unsupportedHostMessage("look up")
       });
     }
     const unavailable = forgeUnavailable(await this.statuses(), host);
@@ -814,14 +829,16 @@ export class CloneService {
       );
       return checked.ok ? ok(true) : checked;
     }
-    const provider = this.forges.get(source.host);
+    // With the hostname: `gh repo clone`/`glab repo clone` must run against the
+    // instance the source names, not the SaaS default.
+    const provider = this.forges.get(source.host, source.hostname);
 
     if (source.protocol === "cli") {
       if (provider === null) {
         return err({
           kind: "remote",
           code: "unsupported_host",
-          message: `PwrGit has no CLI for ${source.host}. Clone with SSH or HTTPS.`
+          message: unsupportedHostMessage("clone from")
         });
       }
       try {

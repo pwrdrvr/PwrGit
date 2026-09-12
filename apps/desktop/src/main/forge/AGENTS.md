@@ -35,17 +35,40 @@ speaks `PrSummary` and never learns which forge answered.
     instance fails, and the hosts it did reach are still in there).
   - `gh` supports several accounts per host; take the **active** one, since that
     is the credential `gh api --hostname` would use.
-  - **A hostname is never evidence, in either layer.** Shared's
+  - **A hostname is never evidence, in any layer.** Shared's
     `classifyForgeHost` (which `resolve.ts` delegates to) used to read a
     `gitlab.*` prefix as GitLab, so a host no CLI was signed in to resolved for
     change-request status while `ForgeHosts` reported it unknown. That rule is
-    gone: both layers now answer github.com, gitlab.com, or "pass me the list".
-    The list travels as an explicit map — `ForgeHosts.overrides()` in main, the
-    `forge:hosts` rows via `useForgeHostMap` in the renderer — and every caller
-    that has one must pass it. `parseForgeRemote` with no map is `other` for
-    every self-managed instance, which is how identity marks or a clone dialog
-    quietly lose a signed-in Enterprise host; the only caller that may omit it
-    is one already pinned to a single hostname (`parseGitHubRemote`).
+    gone from all three places that had it — shared, `resolve.ts`, and
+    `packages/mcp-server`'s `classifyProvider`, which bundles standalone and so
+    keeps its own copy of the *rule* while importing none of the code. All
+    three answer github.com, gitlab.com, or "pass me the list".
+  - **The list travels as a map, and `forge:hosts` ships main's own.** The
+    channel returns `overrides` beside the settings `hosts` rows, because the
+    two are not the same set: rows are "what has a settings row", and a host
+    named only by `PWRGIT_{GITHUB,GITLAB}_HOSTS` has none. A renderer that
+    rebuilt the map from rows disagreed with every main-side caller about
+    exactly those hosts. Every caller that has a map must pass it —
+    `parseForgeRemote` with no map is `other` for every self-managed instance,
+    which is how identity marks or a clone dialog quietly lose a signed-in
+    Enterprise host. The only caller that may omit it is one already pinned to
+    a single hostname (`parseGitHubRemote`).
+  - **A forge kind is not a host. Pass the hostname too.**
+    `ForgeRepoRegistry.get(kind)` with no hostname returns the **SaaS**
+    provider, so a request that carries only `host: "github"` for a project on
+    `ghe.acme.example` is answered by github.com — and a slug that exists on
+    both confirms, displays, clones, or forks the wrong repository, silently.
+    `repo:checkCloneSource`, `repo:forkPreflight`, `repo:forkTargets` and
+    `repo:clone`/`repo:fork` all carry `hostname` for this reason, and every
+    provider lookup on those paths passes it. The mistake is invisible until
+    someone has an Enterprise host, which is why it survived: before hosts were
+    enumerated, those hosts resolved to `other` and never reached a provider.
+  - **Resolution and permission are different questions, and both must be
+    asked.** `ForgeHosts.overrides()` deliberately keeps hosts the user
+    switched OFF, so classifying with it is not consent to talk to them. Every
+    consumer re-checks `isEnabled` — `resolveEnabledForge` in `index.ts`, and
+    `IdentityService`'s injected `isHostEnabled`. A consumer that skips it
+    spawns a CLI for a host the settings pane paints as off.
   - **Canonicalize with `canonicalForgeHostname` (shared), everywhere.** The
     settings write path and host resolution must agree byte-for-byte, or a
     setting persists under a key no lookup matches and silently does nothing.

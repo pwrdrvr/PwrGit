@@ -421,3 +421,54 @@ describe("readOrigin", () => {
     ).toMatchObject({ host: "github", nameWithOwner: "huntharo/react" });
   });
 });
+
+describe("IdentityService and the per-host switch", () => {
+  const ORIGIN = "git@ghe.acme.example:acme/api.git";
+
+  const fixtureFor = async (enabled: boolean) => {
+    const calls: string[] = [];
+    const run = async (args: string[]): Promise<string> => {
+      calls.push(args.join(" "));
+      if (args[0] === "--version") return "gh version 2.92.0";
+      return JSON.stringify({ full_name: "acme/api", visibility: "private" });
+    };
+    // A real indexed checkout whose `origin` is the Enterprise instance.
+    const { db, indexer, profileId } = await fixture(okGh({}), ORIGIN);
+    const registry = new ForgeRepoRegistry();
+    // With the factory, as `index.ts` registers it — that is what lets the
+    // registry reach an Enterprise instance instead of falling back to
+    // github.com.
+    registry.register(
+      new GitHubRepoProvider(run),
+      (hostname) => new GitHubRepoProvider(run, hostname)
+    );
+    const identities = new IdentityService(db, systemGit, registry, {
+      overrides: () => ({ "ghe.acme.example": "github" }),
+      isHostEnabled: () => enabled
+    });
+    return { identities, repos: indexer.listRepos(profileId), calls };
+  };
+
+  it("reads an enumerated self-managed host, and names the right instance", async () => {
+    const { identities, repos } = await fixtureFor(true);
+    const changes = await identities.refresh(repos);
+    expect(changes[0]?.identity).toMatchObject({
+      host: "github",
+      // The instance it actually lives on. The REST parser used to stamp
+      // `github.com` on every result, so an Enterprise repo's marks named the
+      // wrong server the moment enumeration made them appear at all.
+      hostname: "ghe.acme.example",
+      nameWithOwner: "acme/api"
+    });
+  });
+
+  it("spawns nothing for a host the user switched off", async () => {
+    // `ForgeHosts.overrides()` deliberately keeps disabled hosts, so the map
+    // alone still classifies this one. Without the second question — may we
+    // talk to it — the identity refresh kept running `gh` against a host the
+    // user turned off in Settings → Forges, which is a setting that lies.
+    const { identities, repos, calls } = await fixtureFor(false);
+    expect(await identities.refresh(repos)).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+});

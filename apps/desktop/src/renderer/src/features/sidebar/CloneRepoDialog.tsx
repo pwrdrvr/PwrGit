@@ -221,7 +221,12 @@ export function CloneRepoDialog({
     () => exactRepository(sourceQuery, host, forgeHosts),
     [sourceQuery, host, forgeHosts]
   );
+  // The three strings that ARE an `ExactRepository`, pulled out so the check
+  // effect can depend on values rather than on the memo's object identity —
+  // which changes on every keystroke.
   const exactNameWithOwner = exactRepo?.nameWithOwner ?? null;
+  const exactHostname = exactRepo?.hostname ?? null;
+  const exactHost = exactRepo?.host ?? null;
   const localSourcePath = useMemo(
     () => localRepositoryPath(sourceQuery),
     [sourceQuery]
@@ -278,7 +283,12 @@ export function CloneRepoDialog({
           ? dispatch("repo:checkCloneSource", {
               profileId: profile.id,
               nameWithOwner: exactNameWithOwner!,
-              host: exactRepo?.host ?? host
+              host: exactHost ?? host,
+              // The instance, not just the forge. Sending only the kind had
+              // main answer from github.com/gitlab.com, so a self-managed
+              // project was confirmed — and then cloned — as whatever repo
+              // shares its slug on the SaaS instance.
+              ...(exactHostname === null ? {} : { hostname: exactHostname })
             })
           : dispatch("repo:checkLocalCloneSource", {
               profileId: profile.id,
@@ -297,17 +307,11 @@ export function CloneRepoDialog({
           // the unverified placeholder offers.
           result.error.code === "unsupported_host"
         ) {
-          // The original input, not `exactNameWithOwner`: the slug alone has
-          // lost which instance it came from, and rebuilding the clone URLs
-          // from the default hostname would offer gitlab.com's repository of
-          // that name instead of the self-managed one the user pasted.
-          setCheckedRepository(
-            unverifiedCloneRepository(
-              sourceQuery,
-              exactRepo?.host ?? host,
-              forgeHosts
-            )
-          );
+          // Built from the already-parsed `ExactRepository`, never re-parsed
+          // from the query: `chooseRepository` rewrites `sourceQuery` to the
+          // bare slug, and a slug has lost which instance it came from — a
+          // re-parse would hand back clone URLs pointing at the SaaS host.
+          setCheckedRepository(unverifiedCloneRepository(exactRepo));
         } else {
           setCheckError(result.error.message);
         }
@@ -317,14 +321,17 @@ export function CloneRepoDialog({
       active = false;
       window.clearTimeout(timeout);
     };
+    // Keyed on what the request actually carries. `sourceQuery` is
+    // deliberately NOT a dependency: it changes for edits that resolve to the
+    // same repository (a trailing space, a `.git` suffix) and again when
+    // `chooseRepository` rewrites it, each costing a redundant CLI round trip.
   }, [
     exactNameWithOwner,
-    exactRepo?.host,
-    forgeHosts,
+    exactHost,
+    exactHostname,
     host,
     localSourcePath,
-    profile.id,
-    sourceQuery
+    profile.id
   ]);
 
   const sourceResults = useMemo(() => {

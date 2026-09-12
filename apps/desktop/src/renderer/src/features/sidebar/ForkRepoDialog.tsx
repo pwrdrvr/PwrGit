@@ -169,6 +169,7 @@ export function ForkRepoDialog({
   // may name a different forge than the picker, and fetching for the picker
   // then filtering by the source left the list empty.
   const ownersHost = selectedSource?.host ?? host;
+  const ownersHostname = selectedSource?.hostname ?? null;
   useEffect(() => {
     if (ownersHost === "other") {
       setForkOwners([]);
@@ -176,13 +177,19 @@ export function ForkRepoDialog({
     }
     let active = true;
     setForkOwners([]);
-    void dispatch("repo:forkTargets", { host: ownersHost }).then((result) => {
+    void dispatch("repo:forkTargets", {
+      host: ownersHost,
+      // A fork lands on the instance the source lives on, so the accounts
+      // offered must come from there — without the hostname main lists the
+      // user's github.com/gitlab.com orgs for an Enterprise source.
+      ...(ownersHostname === null ? {} : { hostname: ownersHostname })
+    }).then((result) => {
       if (active && result.ok) setForkOwners(result.value);
     });
     return () => {
       active = false;
     };
-  }, [ownersHost]);
+  }, [ownersHost, ownersHostname]);
 
   // A pasted URL names its own instance, but only main knows which forge runs
   // there — see `useForgeHostMap`. Without the list a self-managed host reads
@@ -212,6 +219,7 @@ export function ForkRepoDialog({
   // for as long as the dialog stayed open, two forge calls per lap.
   const preflightSource = selectedSource?.nameWithOwner ?? null;
   const preflightHost = selectedSource?.host ?? null;
+  const preflightHostname = selectedSource?.hostname ?? null;
   const preflightTargetName =
     forkNameTouched && debouncedForkName.trim() !== ""
       ? debouncedForkName.trim()
@@ -232,6 +240,10 @@ export function ForkRepoDialog({
       profileId: profile.id,
       source: selectedSource.nameWithOwner,
       host: selectedSource.host,
+      // Without the instance, a self-managed source is preflighted against the
+      // forge's SaaS host — reporting a different repository's fork state, and
+      // then creating the fork there.
+      ...(preflightHostname === null ? {} : { hostname: preflightHostname }),
       ...(targetOwner === null ? {} : { targetOwner: targetOwner.login }),
       // Only once the user has actually named it: before that the service's
       // default (the source's name) is the right guess, and sending an empty
@@ -271,6 +283,7 @@ export function ForkRepoDialog({
   }, [
     preflightSource,
     preflightHost,
+    preflightHostname,
     preflightTargetName,
     targetOwner?.login,
     profile.id
