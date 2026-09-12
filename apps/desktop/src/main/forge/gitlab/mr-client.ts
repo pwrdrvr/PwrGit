@@ -1,6 +1,7 @@
 import type { PrSummary } from "@pwrgit/shared";
 import { mapLimit } from "../../util/map-limit";
-import { clampRetryDelayMs, delay } from "../../util/timing";
+import { delay } from "../../util/timing";
+import { forgeRetryDelayMs } from "../retry";
 import type { ForgeRepo } from "../types";
 import { forgeOrigin, withNullsForMissing } from "../types";
 import {
@@ -44,27 +45,19 @@ class GitLabHttpError extends Error {
 }
 
 /**
- * Same backoff policy as the GitHub client, against GitLab's header names.
+ * The shared forge backoff (`../retry`), against GitLab's error shape.
  *
- * GitLab sends `RateLimit-Reset` as a Unix timestamp and `Retry-After` in
- * seconds. 4xx other than 429 will not fix themselves, so they are not retried.
+ * Only a `GitLabHttpError` carries a status and headers: a timeout or a DNS
+ * failure rejects with neither, and is retried as the transient failure it is.
  */
 function retryDelayMs(error: unknown, attempt: number): number | null {
-  const status = error instanceof GitLabHttpError ? error.status : undefined;
-  const headers = error instanceof GitLabHttpError ? error.headers : undefined;
-
-  const retryAfter = Number(headers?.get("retry-after"));
-  if (Number.isFinite(retryAfter) && retryAfter > 0) return clampRetryDelayMs(retryAfter * 1000);
-
-  const remaining = Number(headers?.get("ratelimit-remaining"));
-  const reset = Number(headers?.get("ratelimit-reset"));
-  if (status === 429 && remaining === 0 && Number.isFinite(reset)) {
-    return clampRetryDelayMs(reset * 1000 - Date.now());
-  }
-  if (status === 429 || status === undefined || status >= 500) {
-    return clampRetryDelayMs(1000 * 2 ** (attempt - 1));
-  }
-  return null;
+  const http = error instanceof GitLabHttpError ? error : undefined;
+  return forgeRetryDelayMs({
+    kind: "gitlab",
+    status: http?.status,
+    header: (name) => http?.headers?.get(name),
+    attempt
+  });
 }
 
 async function request(

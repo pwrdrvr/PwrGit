@@ -1,6 +1,7 @@
 import { graphql, GraphqlResponseError } from "@octokit/graphql";
 import type { PrSummary } from "@pwrgit/shared";
-import { clampRetryDelayMs, delay } from "../util/timing";
+import { delay } from "../util/timing";
+import { forgeRetryDelayMs } from "../forge/retry";
 import { forgeOrigin, type ForgeRepo } from "../forge/types";
 import { runGh } from "./gh-cli";
 import {
@@ -117,25 +118,23 @@ const BATCH = 50;
 const MAX_RETRIES = 4;
 
 
-/** ghcrawl-style backoff: respect Retry-After / rate-limit reset, exponential
- *  for transient/5xx, and don't retry GraphQL-level or 4xx errors. */
+/**
+ * ghcrawl-style backoff, decided in `../forge/retry` so GitLab shares it.
+ *
+ * Octokit hangs the response — and so the rate-limit headers — off the error;
+ * a request that never reached a response carries neither it nor a status.
+ */
 function retryDelayMs(error: unknown, attempt: number): number | null {
-  const status = (error as { status?: number }).status;
-  const headers =
-    (error as { response?: { headers?: Record<string, string> } }).response
-      ?.headers ?? {};
-  const retryAfter = Number(headers["retry-after"]);
-  if (Number.isFinite(retryAfter) && retryAfter > 0) return clampRetryDelayMs(retryAfter * 1000);
-
-  const remaining = Number(headers["x-ratelimit-remaining"]);
-  const reset = Number(headers["x-ratelimit-reset"]);
-  if ((status === 403 || status === 429) && remaining === 0 && Number.isFinite(reset)) {
-    return clampRetryDelayMs(reset * 1000 - Date.now());
-  }
-  if (status === 429 || status === undefined || (status !== undefined && status >= 500)) {
-    return clampRetryDelayMs(1000 * 2 ** (attempt - 1));
-  }
-  return null; // 401/403/404/422 etc. — not worth retrying
+  const { status, response } = error as {
+    status?: number;
+    response?: { headers?: Record<string, string | undefined> };
+  };
+  return forgeRetryDelayMs({
+    kind: "github",
+    status,
+    header: (name) => response?.headers?.[name],
+    attempt
+  });
 }
 
 async function runQuery(

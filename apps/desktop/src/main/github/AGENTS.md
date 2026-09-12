@@ -36,7 +36,11 @@ claims `origin`'s host, the CLI isn't logged in, or the network fails.
 - **Backoff**: `pr-client.ts` wraps `@octokit/graphql` (ESM — named import is
   fine) with Retry-After / rate-limit-reset respect + exponential backoff
   (ghcrawl's semantics, without the `bottleneck`-based octokit plugins that a
-  git-hosted transitive dep made uninstallable here).
+  git-hosted transitive dep made uninstallable here). The decision itself is
+  `../forge/retry.ts`, shared with GitLab; this file keeps only the adapter
+  that reads status and headers off an Octokit error. Salvaging partial data
+  from a `GraphqlResponseError` is GraphQL-level error handling rather than
+  backoff, and stays in `runQuery`.
 - **Cache + bus**: `PrService` upserts `branch_pr` (repo+branch, negative-cached)
   and returns the *changed* branches; `pr:refresh` (TTL-throttled 10 min unless
   `force`) emits a targeted `pr:changed { repoId, prs }` delta the renderer
