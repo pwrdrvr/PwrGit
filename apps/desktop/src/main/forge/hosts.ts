@@ -1,5 +1,6 @@
 import {
   canonicalForgeHostname,
+  FORGE_SAAS_HOST,
   type ForgeHostConfig,
   type ForgeKind,
   type ForgeSettings,
@@ -7,8 +8,12 @@ import {
 } from "@pwrgit/shared";
 import type { DiscoveredForgeHost } from "./cli-hosts";
 import type { ForgeHostRow } from "@pwrgit/shared";
-import { cliFor } from "./status";
+import { cliFor, type ForgeStatusHost } from "./status";
 import type { ForgeHostOverrides } from "./resolve";
+
+/** Every product `ForgeHosts` can resolve. Iterated rather than hardcoded twice
+ *  so adding a forge does not leave one of the two lists behind. */
+const FORGE_KINDS = Object.keys(FORGE_SAAS_HOST) as ForgeKind[];
 
 /** Env escape hatches, mirroring the `GITHUB_TOKEN`/`GITLAB_TOKEN` pattern
  *  already used by the two CLI clients. A comma-separated allowlist of hosts;
@@ -241,6 +246,45 @@ export class ForgeHosts {
       entries.set(key, { ...resolved, origin: "config" });
     }
     return [...entries.values()].sort((a, b) => a.host.localeCompare(b.host));
+  }
+
+  /**
+   * Every host the status probe should ask about, with the switch for each.
+   *
+   * `list()` answers a different question — what the settings pane has a row
+   * for, which is enumerated hosts plus ones the user added by hand. This adds
+   * each forge's SaaS host when nothing else names it, because resolution knows
+   * those two unconditionally (`kindFor`) and will route a remote to them
+   * whether or not a CLI ever reported an account.
+   *
+   * Without that, a probe answers "Signed out" for a forge that works: any
+   * `forgeHosts` config entry makes the list non-empty, so a machine whose only
+   * entry is a self-managed instance never probes github.com — and neither does
+   * anything during the second or two before the background enumeration lands,
+   * which is exactly when the first window asks.
+   *
+   * `isEnabled` still decides, so an env allowlist that excludes the SaaS host
+   * keeps it off and unprobed like any other host the user turned off.
+   */
+  statusTargets(): ForgeStatusHost[] {
+    const targets: ForgeStatusHost[] = [];
+    for (const entry of this.list()) {
+      if (entry.kind === null) continue;
+      targets.push({
+        kind: entry.kind,
+        host: entry.host,
+        enabled: entry.enabled
+      });
+    }
+    for (const kind of FORGE_KINDS) {
+      const host = FORGE_SAAS_HOST[kind];
+      if (targets.some((target) => target.host === host)) continue;
+      targets.push({ kind, host, enabled: this.isEnabled(host).enabled });
+    }
+    // Sorted so the reported order is stable across passes: `ForgeStatus.hosts`
+    // is compared position by position to decide whether to wake listeners, and
+    // an appended SaaS host would otherwise move as rows come and go.
+    return targets.sort((a, b) => a.host.localeCompare(b.host));
   }
 
   /**

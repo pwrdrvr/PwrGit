@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ForgeCapabilities, ForgeStatus } from "@pwrgit/shared";
+import {
+  FORGE_SAAS_HOST,
+  type ForgeCapabilities,
+  type ForgeStatus
+} from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import {
   LOADING_READ_STATE,
@@ -7,11 +11,22 @@ import {
   type ReadState
 } from "../../state/readState";
 import { ReadError } from "../shell/ReadError";
-import { SettingsField, SettingsSection } from "./SettingsLayout";
+import {
+  SettingsField,
+  SettingsSection,
+  type SettingsChipTone
+} from "./SettingsLayout";
 
 const FORGE_LABELS: Record<ForgeStatus["kind"], string> = {
   github: "GitHub",
   gitlab: "GitLab"
+};
+
+/** The wording each forge's change requests go by, so a limit reads in the
+ *  vocabulary of the product it belongs to. */
+const CHANGE_REQUEST_LABELS: Record<ForgeStatus["kind"], string> = {
+  github: "pull request",
+  gitlab: "merge request"
 };
 
 /** What each capability buys the user, in their words rather than the API's. */
@@ -40,7 +55,14 @@ const RECHECK_MS = 30_000;
  * Everything here comes from main's cached probe over `forge:status`; this pane
  * never shells a CLI or calls a forge itself. Main pushes `forge:statusChanged`
  * when availability changes, so signing in from a terminal updates this pane
- * without reopening it.
+ * without reopening it — and so does flipping a switch in Hosts above, which is
+ * an input to the same probe.
+ *
+ * This is a summary of the Hosts section above it, never a second opinion. Every
+ * state below is read off `ForgeStatus.hosts`, the same per-host answers that
+ * decide whether a transport spawns anything, so the two sections cannot
+ * disagree: "Signed out" beside a host row that says "signed in as …" was the
+ * bug, and it came from probing one hardcoded SaaS host per forge.
  */
 export function ForgesSettings() {
   const [forges, setForges] = useState<ForgeStatus[] | undefined>();
@@ -100,7 +122,7 @@ export function ForgesSettings() {
     <SettingsSection
       title="Forges"
       eyebrow="Integrations"
-      description="PwrGit reads pull and merge request status through the CLI you already sign in with. It never asks for a password or stores a token of its own."
+      description="A summary of the hosts above: what PwrGit can read through the CLI you already sign in with, and what each product is able to report. It never asks for a password or stores a token of its own."
       chip={
         loadState.status === "error" && forges === undefined
           ? "Unavailable"
@@ -137,10 +159,8 @@ export function ForgesSettings() {
             control={
               // Same pill the section header uses — one state chip family in
               // the Settings window, not two that drift apart.
-              <span
-                className={`settings-card__chip settings-card__chip--${tone(forge)}`}
-              >
-                {state(forge)}
+              <span className={chipClass(forge)}>
+                {STATE_LABELS[state(forge)]}
               </span>
             }
             help={remedyOrCapabilities(forge)}
@@ -151,32 +171,104 @@ export function ForgesSettings() {
   );
 }
 
-function state(forge: ForgeStatus): string {
-  if (!forge.installed) return "Not installed";
-  return forge.loggedIn ? "Connected" : "Signed out";
-}
+/**
+ * The four states a forge can be in, in the order they must be checked.
+ *
+ * `off` is the one that did not exist before and had to: a forge whose every
+ * host the user switched off is neither connected nor signed out, and reporting
+ * it as either sends them somewhere that cannot fix it — to a terminal to sign
+ * in to something they are already signed in to, or nowhere at all while the
+ * summary claims an ability the transport has given up.
+ */
+type ForgeState = "missing" | "connected" | "off" | "signedOut";
 
-function tone(forge: ForgeStatus): "ok" | "warn" {
-  return forge.loggedIn ? "ok" : "warn";
-}
+const STATE_LABELS: Record<ForgeState, string> = {
+  missing: "Not installed",
+  connected: "Connected",
+  off: "Off",
+  signedOut: "Signed out"
+};
 
-function describe(forge: ForgeStatus): string {
-  return forge.kind === "github"
-    ? "Pull requests on github.com."
-    : "Merge requests on gitlab.com and self-managed instances.";
+function state(forge: ForgeStatus): ForgeState {
+  if (!forge.installed) return "missing";
+  // `loggedIn` stays authoritative — main already derived it from the enabled
+  // hosts, and re-deriving it here is how the two drift apart.
+  if (forge.loggedIn) return "connected";
+  if (forge.hosts.length > 0 && forge.hosts.every((host) => !host.enabled)) {
+    return "off";
+  }
+  return "signedOut";
 }
 
 /**
- * A blocked forge gets the exact command that unblocks it; a working one lists
- * what it can actually do, so a missing feature reads as a known limit of that
- * provider rather than as a bug.
+ * Off is neutral, not a warning.
+ *
+ * A host the user switched off is a working configuration, so it gets the plain
+ * chip: painting it amber would be the app second-guessing a choice somebody
+ * made deliberately, next to the switch they made it with.
+ */
+function tone(forge: ForgeStatus): SettingsChipTone {
+  if (forge.loggedIn) return "ok";
+  return state(forge) === "off" ? "default" : "warn";
+}
+
+function chipClass(forge: ForgeStatus): string {
+  const kind = tone(forge);
+  return kind === "default"
+    ? "settings-card__chip"
+    : `settings-card__chip settings-card__chip--${kind}`;
+}
+
+/** Enabled hosts that answered with a credential — what "Connected" is made of,
+ *  and the only hosts this pane may claim anything about. */
+function readableHosts(forge: ForgeStatus): string[] {
+  return forge.hosts
+    .filter((host) => host.enabled && host.loggedIn)
+    .map((host) => host.host);
+}
+
+/** Hosts the user could sign in to: allowed by the switch, no credential yet. */
+function awaitingSignIn(forge: ForgeStatus): string[] {
+  return forge.hosts
+    .filter((host) => host.enabled && !host.loggedIn)
+    .map((host) => host.host);
+}
+
+/**
+ * Which hosts this forge is actually being read from.
+ *
+ * Named rather than described, because the description was part of the problem:
+ * "Merge requests on gitlab.com and self-managed instances" is a sentence about
+ * the product, and it sat directly under a probe that had only ever asked
+ * gitlab.com. Naming the hosts makes the claim checkable against the rows above.
+ */
+function describe(forge: ForgeStatus): string {
+  const noun = `${CHANGE_REQUEST_LABELS[forge.kind]}s`;
+  const readable = readableHosts(forge);
+  if (readable.length > 0) {
+    return `Reading ${noun} from ${readable.join(", ")}.`;
+  }
+  if (state(forge) === "off") {
+    return `Every ${FORGE_LABELS[forge.kind]} host is switched off above.`;
+  }
+  return `No host is signed in to read ${noun} from.`;
+}
+
+/**
+ * A blocked forge gets the exact thing that unblocks it — install the CLI, sign
+ * in, or turn a host back on. A working one lists what it can actually do, so a
+ * missing feature reads as a known limit of that provider rather than a bug.
  */
 function remedyOrCapabilities(forge: ForgeStatus): string {
-  if (!forge.installed) {
+  const current = state(forge);
+  if (current === "missing") {
     return `Install the ${FORGE_LABELS[forge.kind]} CLI (\`${forge.cli}\`) to see status here.`;
   }
-  if (!forge.loggedIn) {
-    return `Run \`${forge.cli} auth login\` in a terminal, then this updates on its own.`;
+  if (current === "off") {
+    return `Turn a host on in Hosts above to read ${CHANGE_REQUEST_LABELS[forge.kind]} status. PwrGit runs no \`${forge.cli}\` command while every host is off.`;
+  }
+  if (current === "signedOut") {
+    return `Run \`${signInCommand(forge)}\` in a terminal, then this updates on its own.`;
   }
   const supported = (
     Object.keys(CAPABILITY_LABELS) as (keyof ForgeCapabilities)[]
@@ -196,4 +288,20 @@ function remedyOrCapabilities(forge: ForgeStatus): string {
   // Either half may be empty; joining only the present ones keeps a stray
   // leading ". " out of the hint.
   return [supportedText, missingText].filter((part) => part !== "").join(". ");
+}
+
+/**
+ * The sign-in command for a signed-out forge.
+ *
+ * `--hostname` is added only when one specific non-SaaS host is waiting, because
+ * that is the case the bare command gets wrong: `glab auth login` signs in to
+ * gitlab.com, which is not the instance the user is missing. Anything more
+ * specific per host belongs to the Hosts section, which owns a row each.
+ */
+function signInCommand(forge: ForgeStatus): string {
+  const waiting = awaitingSignIn(forge);
+  const only = waiting.length === 1 ? waiting[0] : undefined;
+  return only === undefined || only === FORGE_SAAS_HOST[forge.kind]
+    ? `${forge.cli} auth login`
+    : `${forge.cli} auth login --hostname ${only}`;
 }

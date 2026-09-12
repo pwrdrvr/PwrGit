@@ -365,10 +365,6 @@ if (!gotSingleInstanceLock) {
         (hostname) => new GitLabRepoProvider(undefined, hostname)
       );
     }
-    // One probe for the whole app: `ForgeStatusService` caches and dedups
-    // in-flight reads, and a second instance would quietly undo both by
-    // keeping its own cache and spawning its own `gh`/`glab`.
-    const forgeStatus = fixtureServices?.status ?? new ForgeStatusService();
     // Which forge hosts exist, and whether we may read them. Enumeration costs
     // two subprocesses, so the directory caches and the resolvers below read it
     // synchronously — a PR refresh must never wait on `gh auth status`.
@@ -383,6 +379,18 @@ if (!gotSingleInstanceLock) {
       readSettings: () => settings.get().forges ?? { hosts: {} },
       discovered: () => forgeHostDirectory.current()
     });
+    // One probe for the whole app: `ForgeStatusService` caches and dedups
+    // in-flight reads, and a second instance would quietly undo both by
+    // keeping its own cache and spawning its own `gh`/`glab`.
+    //
+    // Built after the host list, and reading it, so "which forges work" is a
+    // summary of the same per-host answers the transport obeys rather than a
+    // second opinion about two hardcoded SaaS hosts. That second opinion is what
+    // made Settings say "GitLab: Signed out" beside a self-managed GitLab the
+    // user was signed in to, and what made the fork dialog refuse to fork there.
+    const forgeStatus =
+      fixtureServices?.status ??
+      new ForgeStatusService({ hosts: () => forgeHosts.statusTargets() });
     // Primed in the background: blocking boot on two CLI spawns would delay the
     // first window for a feature that degrades to the two SaaS hosts meanwhile.
     void forgeHostDirectory.refresh();
@@ -684,6 +692,26 @@ if (!gotSingleInstanceLock) {
       forgeHostsView
     );
     registerSearchStatusHandlers(bus, db);
+    /**
+     * The per-host forge decisions, as a value that can be compared.
+     *
+     * Keyed on what the USER chose, not on the resolved rows: enumeration lands
+     * a second or two after boot, and a signature that included it would read
+     * the directory's arrival as a settings change and re-probe on the first
+     * unrelated write. Sorted because the stored map is sparse and its key order
+     * follows whatever patch wrote it last.
+     */
+    const forgeChoices = (): string => {
+      const hosts = settings.get().forges?.hosts ?? {};
+      return Object.keys(hosts)
+        .sort()
+        .map((host) => {
+          const entry = hosts[host];
+          return `${host} ${entry?.kind ?? ""} ${entry?.enabled ?? ""}`;
+        })
+        .join("\n");
+    };
+    let probedChoices = forgeChoices();
     registerSettingsHandlers(bus, settings, {
       diagnosticsOutputRoot,
       appVersion,
@@ -692,6 +720,18 @@ if (!gotSingleInstanceLock) {
         emitEvent("settings:changed", snapshot);
         diagnostics.sync();
         refreshMenu(); // Developer Mode toggles View-menu items live
+        // The per-host switches are an INPUT to the probe, so flipping one makes
+        // the cached answer wrong immediately — the TTL would otherwise go on
+        // serving a pre-switch "Connected" for five minutes. Forced so both
+        // Settings sections repaint from the same event instead of the summary
+        // trailing the host list that caused it. Gated because
+        // `settings:changed` also fires for a theme toggle, and re-probing there
+        // would spawn both CLIs for a value that did not move.
+        const choices = forgeChoices();
+        if (choices === probedChoices) return;
+        probedChoices = choices;
+        forgeStatus.invalidate();
+        void forgeStatus.list({ force: true });
       }
     });
     registerLocalAgentHandlers(bus, mcpPolicy, () => {

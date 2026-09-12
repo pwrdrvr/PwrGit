@@ -56,13 +56,22 @@ const CAPS = {
 };
 
 const statuses: ForgeStatus[] = [
-  { kind: "github", cli: "gh", installed: true, loggedIn: true, capabilities: CAPS },
+  {
+    kind: "github",
+    cli: "gh",
+    installed: true,
+    loggedIn: true,
+    capabilities: CAPS,
+    hosts: [{ host: "github.com", enabled: true, loggedIn: true }]
+  },
   {
     kind: "gitlab",
     cli: "glab",
     installed: false,
     loggedIn: false,
-    capabilities: { ...CAPS, forkDefaultBranchOnly: false }
+    capabilities: { ...CAPS, forkDefaultBranchOnly: false },
+    // A missing CLI probes nothing, so it reports no hosts at all.
+    hosts: []
   }
 ];
 
@@ -284,9 +293,40 @@ describe("sourceEmptyMessage", () => {
       sourceEmptyMessage({
         ...base,
         catalogLoaded: true,
-        status: { ...signedIn, loggedIn: false }
+        // Signed out per host as well as in the summary: the message reads the
+        // host the search will actually run against, so flipping only the
+        // summary would describe a state main cannot report.
+        status: {
+          ...signedIn,
+          loggedIn: false,
+          hosts: [{ host: "github.com", enabled: true, loggedIn: false }]
+        }
       })
     ).toBe("Sign in with the GitHub CLI to search.");
+  });
+
+  it("does not offer a gitlab.com search off a self-managed sign-in", () => {
+    // `loggedIn` is a forge-wide summary now, so a machine signed in only to a
+    // self-managed instance reports GitLab as connected. The search still runs
+    // against gitlab.com, and saying "no repositories match" there would blame
+    // the query for a missing credential.
+    expect(
+      sourceEmptyMessage({
+        ...base,
+        catalogLoaded: true,
+        cliLabel: "GitLab CLI",
+        status: {
+          ...signedIn,
+          kind: "gitlab",
+          cli: "glab",
+          loggedIn: true,
+          hosts: [
+            { host: "gitlab.com", enabled: true, loggedIn: false },
+            { host: "gitlab.example.com", enabled: true, loggedIn: true }
+          ]
+        }
+      })
+    ).toBe("Sign in with the GitLab CLI to search.");
   });
 
   it("reports a real catalog error ahead of everything else", () => {

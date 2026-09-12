@@ -1,4 +1,54 @@
-import type { ForgeHost } from "./types";
+import type { ForgeHost, ForgeKind, ForgeStatus } from "./types";
+
+/**
+ * The hosted instance of each forge.
+ *
+ * The one host `ForgeHosts.kindFor` recognises without enumeration, which makes
+ * it both the fallback the status probe falls back to when no CLI reports an
+ * account and the one host whose sign-in command needs no `--hostname`. Shared
+ * because main probes it and the settings pane words a command about it; two
+ * copies would drift into printing a command for a host nothing probed.
+ */
+export const FORGE_SAAS_HOST: Readonly<Record<ForgeKind, string>> = {
+  github: "github.com",
+  gitlab: "gitlab.com"
+};
+
+/**
+ * Whether a forge holds a usable credential for ONE named host.
+ *
+ * `ForgeStatus.loggedIn` summarizes the whole forge — the right question for a
+ * settings pane, and the wrong one for a caller that is about to talk to a
+ * specific instance. A machine signed in only to a self-managed GitLab can read
+ * merge requests and still have nothing at all for gitlab.com, so a caller that
+ * asked the summary and then queried gitlab.com would fail late instead of
+ * saying what is missing.
+ *
+ * A host the probe did not cover falls back to the summary, deliberately. That
+ * window is real: enumeration reports no host on a machine carrying only
+ * `GITHUB_TOKEN`, and again for the seconds before it first lands, and treating
+ * "not probed" as "signed out" there would block a caller whose credential
+ * works. Absence is not evidence.
+ */
+export function forgeLoggedInAt(status: ForgeStatus, hostname: string): boolean {
+  return (
+    status.hosts.find((host) => host.host === hostname)?.loggedIn ??
+    status.loggedIn
+  );
+}
+
+/**
+ * The credential for the forge's SaaS instance.
+ *
+ * What the clone and fork dialogs need: both reach their provider through
+ * `ForgeRepoRegistry.get(kind)` with no hostname, which is the SaaS instance, so
+ * the SaaS host is the one whose sign-in state decides whether they can do
+ * anything. Spelled out rather than left as `status.loggedIn` so that widening
+ * either dialog to other hosts has to change this line and notice.
+ */
+export function forgeLoggedInAtSaas(status: ForgeStatus): boolean {
+  return forgeLoggedInAt(status, FORGE_SAAS_HOST[status.kind]);
+}
 
 /** A git remote URL resolved to the forge it points at. `hostname` is kept
  *  even for `other`: a self-hosted instance is still worth naming in the UI,

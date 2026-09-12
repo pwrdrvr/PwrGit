@@ -13,6 +13,7 @@ import {
 import {
   err,
   forgeCloneUrls,
+  forgeLoggedInAtSaas,
   isSafeForgeHostname,
   isSafeProjectPath,
   ok,
@@ -899,9 +900,11 @@ function knownOwners(
   forges: ForgeStatus[],
   local: LocalForgeState
 ): ForgeOwner[] {
+  // Owners exist to scope a search, and search runs against the SaaS instance
+  // (`registry.get(kind)`), so that is the host whose credential decides.
   const usable = new Set(
     forges
-      .filter((status) => status.installed && status.loggedIn)
+      .filter((status) => status.installed && forgeLoggedInAtSaas(status))
       .map((status) => status.kind)
   );
   return dedupeOwners([

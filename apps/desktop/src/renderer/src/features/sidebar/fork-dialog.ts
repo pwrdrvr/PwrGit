@@ -1,10 +1,11 @@
-import type {
-  CloneRepository,
-  ForgeHost,
-  ForgeOwner,
-  ForgeStatus,
-  ForkPreflight,
-  ForkProgress
+import {
+  forgeLoggedInAtSaas,
+  type CloneRepository,
+  type ForgeHost,
+  type ForgeOwner,
+  type ForgeStatus,
+  type ForkPreflight,
+  type ForkProgress
 } from "@pwrgit/shared";
 
 export const FORK_PROGRESS_LABELS: Record<ForkProgress["phase"], string> = {
@@ -133,6 +134,19 @@ export function statusFor(
   return statuses.find((status) => status.kind === host);
 }
 
+/**
+ * Whether a forge can answer either dialog at all.
+ *
+ * Both reach their provider by kind alone, which is the SaaS instance, so the
+ * SaaS host is the one whose credential decides — `ForgeStatus.loggedIn`
+ * summarizes every host the user is signed in to, and a self-managed GitLab
+ * sign-in does not make gitlab.com answerable. One helper so the host toggle,
+ * the protocol list and the empty message cannot disagree about it.
+ */
+export function forgeCanAnswerDialog(status: ForgeStatus | undefined): boolean {
+  return status?.installed === true && forgeLoggedInAtSaas(status);
+}
+
 /** Whether the fork dialog should offer the default-branch-only switch. Read
  *  from the forge's reported capability rather than hardcoding a host, so a
  *  forge that gains the ability needs no change here. */
@@ -175,7 +189,11 @@ export function sourceEmptyMessage(input: {
   if (input.status?.installed !== true) {
     return `Install the ${input.cliLabel} to search.`;
   }
-  if (!input.status.loggedIn) return `Sign in with the ${input.cliLabel} to search.`;
+  // The SaaS instance specifically: that is the provider this search runs
+  // against, and a self-managed sign-in does not make it answerable.
+  if (!forgeLoggedInAtSaas(input.status)) {
+    return `Sign in with the ${input.cliLabel} to search.`;
+  }
   if (input.query.trim() === "") {
     return input.owners.length === 0
       ? "Type a name to search, or paste owner/name."

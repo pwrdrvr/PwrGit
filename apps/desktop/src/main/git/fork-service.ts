@@ -1,5 +1,6 @@
 import {
   err,
+  forgeLoggedInAt,
   forgeWebUrl,
   ok,
   type CloneProtocol,
@@ -164,7 +165,11 @@ export class ForkService {
         message: `Forking on ${forgeName(input.host)} needs the ${forgeName(input.host)} CLI.`
       });
     }
-    if (!status.loggedIn) {
+    // The host the provider will actually talk to, not the forge summary: a
+    // machine signed in only to a self-managed instance reads merge requests
+    // fine and still has no credential for gitlab.com, which is where this fork
+    // is going.
+    if (!forgeLoggedInAt(status, provider.hostname)) {
       return this.blocked(source, input.targetOwner, {
         code: "login_required",
         message: `Sign in with the ${forgeName(input.host)} CLI to fork.`
@@ -246,7 +251,11 @@ export class ForkService {
     const status = (await this.forgeStatus.list()).find(
       (candidate) => candidate.kind === host
     );
-    if (status === undefined || !status.installed || !status.loggedIn) {
+    if (
+      status === undefined ||
+      !status.installed ||
+      !forgeLoggedInAt(status, provider.hostname)
+    ) {
       return ok([]);
     }
     try {

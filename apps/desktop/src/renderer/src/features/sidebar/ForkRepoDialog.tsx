@@ -36,7 +36,8 @@ import {
   supportsDefaultBranchOnly,
   repositoriesOnHost,
   sourceEmptyMessage,
-  statusFor
+  statusFor,
+  forgeCanAnswerDialog
 } from "./fork-dialog";
 import { GitForkIcon, RepoIdentityChips } from "./RepoIdentityMarks";
 
@@ -153,7 +154,7 @@ export function ForkRepoDialog({
   // Only forges whose CLI is actually usable are offered — a host toggle that
   // leads straight to "install the CLI" is a dead end presented as a choice.
   const usableHosts = forges
-    .filter((status) => status.installed && status.loggedIn)
+    .filter((status) => forgeCanAnswerDialog(status))
     .map((status) => status.kind);
 
   useEffect(() => {
@@ -746,8 +747,7 @@ export function ForkRepoDialog({
               <div className="clone-protocols">
                 {(["ssh", "https", "cli"] as const).map((candidate) => {
                   const disabled =
-                    candidate === "cli" &&
-                    (forgeStatus?.installed !== true || !forgeStatus.loggedIn);
+                    candidate === "cli" && !forgeCanAnswerDialog(forgeStatus);
                   const slug =
                     preflight?.target.nameWithOwner ??
                     selectedSource?.nameWithOwner ??
