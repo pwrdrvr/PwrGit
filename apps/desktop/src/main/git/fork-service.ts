@@ -325,6 +325,28 @@ export class ForkService {
         message: unsupportedHostMessage("fork")
       });
     }
+    // `preflight` and `targets` both ask this, and this is the one that WRITES
+    // — it creates a repository on the forge. Resolution and permission are
+    // different questions: `get` answers which instance, the switch answers
+    // whether we may talk to it, and the dialog cannot be relied on to have
+    // asked (its `forge_host_off` is a code the clone dialog deliberately
+    // swallows).
+    const forkStatus = (await this.forgeStatus.list()).find(
+      (candidate) => candidate.kind === input.host
+    );
+    const forkBlock = forgeBlockAt(forkStatus, provider.hostname);
+    if (forkBlock !== null) {
+      return err({
+        kind: "remote",
+        code: forkBlock === "host_off" ? "forge_host_off" : "forge_login_required",
+        message:
+          forkBlock === "host_off"
+            ? `${provider.hostname} is switched off in Settings → Forges.`
+            : forkBlock === "cli_missing"
+              ? `Forking on ${forgeName(input.host)} needs the ${forgeName(input.host)} CLI.`
+              : `Sign in with the ${forgeName(input.host)} CLI to fork.`
+      });
+    }
 
     const destinationCheck = validateCheckoutDestination(
       profile,

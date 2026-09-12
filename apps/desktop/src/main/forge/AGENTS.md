@@ -39,10 +39,13 @@ speaks `PrSummary` and never learns which forge answered.
     `classifyForgeHost` (which `resolve.ts` delegates to) used to read a
     `gitlab.*` prefix as GitLab, so a host no CLI was signed in to resolved for
     change-request status while `ForgeHosts` reported it unknown. That rule is
-    gone from all three places that had it — shared, `resolve.ts`, and
-    `packages/mcp-server`'s `classifyProvider`, which bundles standalone and so
-    keeps its own copy of the *rule* while importing none of the code. All
-    three answer github.com, gitlab.com, or "pass me the list".
+    gone from both places that had it: shared, and `packages/mcp-server`'s
+    `classifyProvider`, which bundles standalone and so keeps its own copy of
+    the *rule* while importing none of the code. (`resolve.ts` never had it —
+    it delegates.) Shared's takes the host map; the MCP server has no settings
+    file and no CLI enumeration, so it takes the same
+    `PWRGIT_{GITHUB,GITLAB}_HOSTS` variables the app reads. Nothing anywhere
+    reads a host's NAME.
   - **The list travels as a map, and `forge:hosts` ships main's own.** The
     channel returns `overrides` beside the settings `hosts` rows, because the
     two are not the same set: rows are "what has a settings row", and a host
@@ -60,15 +63,32 @@ speaks `PrSummary` and never learns which forge answered.
     both confirms, displays, clones, or forks the wrong repository, silently.
     `repo:checkCloneSource`, `repo:forkPreflight`, `repo:forkTargets` and
     `repo:clone`/`repo:fork` all carry `hostname` for this reason, and every
-    provider lookup on those paths passes it. The mistake is invisible until
-    someone has an Enterprise host, which is why it survived: before hosts were
-    enumerated, those hosts resolved to `other` and never reached a provider.
+    provider lookup on those paths passes it. **`repo:searchCloneSources` is
+    the one that does not** — search still runs against the SaaS instance, so a
+    user signed in only to a company host can paste a URL and clone it but gets
+    nothing from typing a partial name. Widening it means adding `hostname` to
+    that channel and to `knownOwners`, whose `ForgeOwner` has no hostname
+    field. The mistake is invisible until someone has an Enterprise host, which
+    is why it survived: before hosts were enumerated, those hosts resolved to
+    `other` and never reached a provider.
+    `ForgeRepoRegistry.get` canonicalizes the hostname it is handed and refuses
+    anything that is not a bare host, so a renderer string cannot reach a `gh
+    --hostname` argument as an option or a URL.
   - **Resolution and permission are different questions, and both must be
     asked.** `ForgeHosts.overrides()` deliberately keeps hosts the user
     switched OFF, so classifying with it is not consent to talk to them. Every
-    consumer re-checks `isEnabled` — `resolveEnabledForge` in `index.ts`, and
-    `IdentityService`'s injected `isHostEnabled`. A consumer that skips it
-    spawns a CLI for a host the settings pane paints as off.
+    consumer re-checks it — `resolveEnabledForge` in `index.ts`,
+    `IdentityService`'s injected `isHostEnabled`, and `forgeBlockAt(status,
+    hostname)` in `clone-service.ts`/`fork-service.ts` (including the two that
+    act: `CloneService.runClone`'s CLI branch and `ForkService.fork`, which
+    creates a repository). A consumer that skips it spawns a CLI for a host the
+    settings pane paints as off, and the dialogs cannot be relied on to have
+    asked — `forge_host_off` is in `FORGE_UNASKED_CODES`, so the clone dialog
+    deliberately swallows it.
+    The probe target set is derived from `overrides()`, not `list()`, so a host
+    that resolves is always a host the probe covered — `forgeLoggedInAt` falls
+    back to the forge-wide summary for anything it did not, and that fallback
+    answered "signed out" for env-allowlisted hosts.
   - **Canonicalize with `canonicalForgeHostname` (shared), everywhere.** The
     settings write path and host resolution must agree byte-for-byte, or a
     setting persists under a key no lookup matches and silently does nothing.

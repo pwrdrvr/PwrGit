@@ -65,6 +65,9 @@ function forgeHostStatus(
  * anything — the exact collapse `ForgeHostStatus.loggedIn` is documented to
  * avoid. One function so the clone dialog, the fork preflight and the clone
  * service's own gate cannot answer this differently, which they did.
+ *
+ * Prefer `forgeBlockAt`: those three all name an instance now, and this is the
+ * special case where that instance happens to be the SaaS host.
  */
 export function forgeSaasBlock(
   status: ForgeStatus | undefined
@@ -118,11 +121,12 @@ export function forgeCanAnswerSaas(status: ForgeStatus | undefined): boolean {
 /**
  * The credential for the forge's SaaS instance.
  *
- * What the clone and fork dialogs need: both reach their provider through
- * `ForgeRepoRegistry.get(kind)` with no hostname, which is the SaaS instance, so
- * the SaaS host is the one whose sign-in state decides whether they can do
- * anything. Spelled out rather than left as `status.loggedIn` so that widening
- * either dialog to other hosts has to change this line and notice.
+ * No longer what the clone and fork dialogs need: both now carry a hostname end
+ * to end and ask `forgeBlockAt(status, hostname)` about the instance they
+ * actually reached. This remains for the callers whose instance genuinely IS
+ * the SaaS one — `repo:searchCloneSources` and `knownOwners`, which have no
+ * hostname to pass. Reach for `forgeLoggedInAt` unless you can say why the
+ * SaaS host is the right question.
  */
 export function forgeLoggedInAtSaas(status: ForgeStatus): boolean {
   return forgeLoggedInAt(status, FORGE_SAAS_HOST[status.kind]);
@@ -224,7 +228,10 @@ export function classifyForgeHost(
 /** Parse any git remote URL into the forge coordinates it names.
  *
  *  `overrides` carries the known host list — `ForgeHosts.overrides()` in main,
- *  the `forge:hosts` rows in the renderer. Omitting it resolves every
+ *  and in the renderer the very same map, shipped over `forge:hosts` and read
+ *  by `useForgeHostMap`. Never rebuild it from that response's settings ROWS:
+ *  the two are different sets, and the difference is exactly the hosts an env
+ *  allowlist names. Omitting it resolves every
  *  self-managed instance to `other`, which is a silent loss of forge features
  *  rather than an error, so omit it only where the host is checked separately
  *  (`parseGitHubRemote` accepts github.com and nothing else). */
@@ -256,7 +263,13 @@ export function parseForgeRemote(
   if (host === "github" && split.owner.includes("/")) return null;
   return {
     host,
-    hostname: hostname.toLowerCase(),
+    // The SAME spelling every other layer uses. This string is not cosmetic:
+    // it travels over IPC as the `hostname` field and keys
+    // `ForgeRepoRegistry.byHost`, so a lone `www.` here builds a second
+    // provider that runs `gh api --hostname www.github.com` and cannot
+    // succeed. `canonicalForgeHostname` rejects a shape it does not recognise,
+    // and the lowercase form is the honest fallback for those.
+    hostname: canonicalForgeHostname(hostname) ?? hostname.trim().toLowerCase(),
     owner: split.owner,
     repo: split.repo,
     nameWithOwner: `${split.owner}/${split.repo}`

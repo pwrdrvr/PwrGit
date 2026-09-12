@@ -272,3 +272,24 @@ it together; breaking any of them corrupts the index quietly.
 Whole-file actions stay available for every kind partial staging refuses
 (binary, conflicted, submodule, non-UTF-8, new, deleted, renamed, mode-only);
 `partialDiffCapability` names the reason and the pane shows it.
+
+## Clone and fork reach a forge INSTANCE, not a forge
+
+`CloneService` and `ForkService` resolve providers through
+`ForgeRepoRegistry.get(kind, hostname)`. Passing only the kind returns the
+**SaaS** provider, so a project on `ghe.acme.example` is answered by github.com
+— and a slug that exists on both confirms, clones, or forks the wrong
+repository, silently. Every lookup here passes the hostname the request
+carried; `repo:searchCloneSources` is the one channel that still cannot.
+
+Resolving an instance is not permission to talk to it. Anything that spawns a
+CLI also asks `forgeBlockAt(status, provider.hostname)` — including
+`runClone`'s CLI branch and `fork`, which writes. SSH and HTTPS clones are
+plain git and are deliberately not gated: the per-host switch governs the
+forge, not `git clone`.
+
+The local-checkout index (`repoKey`) is keyed on the hostname for the same
+reason — two instances can host the same slug.
+
+`apps/desktop/src/main/forge/AGENTS.md` has the whole rule, including why a
+hostname is never evidence of which forge runs on it.

@@ -370,6 +370,41 @@ describe("ForgeHosts.statusTargets", () => {
   });
 });
 
+describe("ForgeHosts env allowlist and the probe", () => {
+  it("probes a host the env names even though it has no settings row", () => {
+    // `list()` is "what has a row"; `overrides()` is "what resolves". An
+    // env-only host is in the second and not the first, so it used to resolve
+    // and never be probed — and `forgeLoggedInAt` then answered from the
+    // forge-wide summary, reporting "signed out" for the one host the user
+    // actually holds a credential for.
+    const hosts = make({ env: { PWRGIT_GITHUB_HOSTS: "ghe.acme.example" } });
+    expect(hosts.overrides()["ghe.acme.example"]).toBe("github");
+    expect(hosts.list().map((row) => row.host)).not.toContain("ghe.acme.example");
+    expect(
+      hosts.statusTargets().map((target) => `${target.kind} ${target.host}`)
+    ).toContain("github ghe.acme.example");
+    // Every host `overrides()` can place is probed: the two sets cannot
+    // disagree about a host any more.
+    for (const host of Object.keys(hosts.overrides())) {
+      expect(hosts.statusTargets().some((t) => t.host === host)).toBe(true);
+    }
+  });
+
+  it("resolves a host named in both allowlists the way kindFor does", () => {
+    // `kindFor` tests the GitHub list first and returns; building the map in
+    // reading order let GitLab win, so one host routed to two providers
+    // depending on which layer asked.
+    const hosts = make({
+      env: {
+        PWRGIT_GITHUB_HOSTS: "code.acme.example",
+        PWRGIT_GITLAB_HOSTS: "code.acme.example"
+      }
+    });
+    expect(hosts.kindFor("code.acme.example").kind).toBe("github");
+    expect(hosts.overrides()["code.acme.example"]).toBe("github");
+  });
+});
+
 describe("ForgeHosts canonicalization", () => {
   it("matches a stored key however the caller spells the host", () => {
     const hosts = make({ hosts: { "git.example": { kind: "gitlab" } } });
@@ -393,34 +428,50 @@ describe("a signed-in self-managed GitLab, end to end", () => {
   // because its name began with `gitlab.`; now it has to resolve because
   // enumeration found it, and every layer has to reach the same answer from
   // that one list. A layer that misses it loses a feature silently.
-  const GLAB_STATUS = `gitlab.acme-corp.example
-  ✓ Logged in to gitlab.acme-corp.example as a.dev (keyring)
+  //
+  // The instance is deliberately named `code.acme-corp.example`, NOT
+  // `gitlab.something`: the deleted rule would have resolved a `gitlab.*` host
+  // on its own, so a spec written around one passes whether or not the rule is
+  // gone and pins nothing. This name is unreachable by any heuristic, so every
+  // assertion below can only be satisfied by enumeration.
+  const GLAB_STATUS = `code.acme-corp.example
+  ✓ Logged in to code.acme-corp.example as a.dev (keyring)
   ✓ Token: **************
 `;
-  const ORIGIN = "git@gitlab.acme-corp.example:acme/platform/billing.git";
+  const HOST = "code.acme-corp.example";
+  const ORIGIN = `git@${HOST}:acme/platform/billing.git`;
 
-  const signedIn = (): ForgeHosts =>
-    new ForgeHosts({
-      readSettings: () => ({ hosts: {} }),
-      discovered: () => parseGlabHosts(GLAB_STATUS),
-      env: {}
-    });
+  const signedIn = (hosts: ForgeSettings["hosts"] = {}): ForgeHosts =>
+    make({ hosts, discovered: parseGlabHosts(GLAB_STATUS) });
 
   it("enumerates the host and calls it a GitLab", () => {
     expect(parseGlabHosts(GLAB_STATUS)).toEqual([
-      { kind: "gitlab", host: "gitlab.acme-corp.example", account: "a.dev" }
+      { kind: "gitlab", host: HOST, account: "a.dev" }
     ]);
     const hosts = signedIn();
-    expect(hosts.kindFor("gitlab.acme-corp.example").kind).toBe("gitlab");
-    expect(hosts.isEnabled("gitlab.acme-corp.example").enabled).toBe(true);
+    expect(hosts.kindFor(HOST).kind).toBe("gitlab");
+    expect(hosts.isEnabled(HOST).enabled).toBe(true);
+    // And nothing about the NAME contributes: an identical host nobody is
+    // signed in to stays unplaceable, `gitlab.` prefix or not.
+    expect(make({}).kindFor(HOST).kind).toBeNull();
+    expect(make({}).kindFor("gitlab.acme-corp.example").kind).toBeNull();
   });
 
   it("resolves change-request status through the overrides map", () => {
     expect(resolveForgeRepo(ORIGIN, signedIn().overrides())).toEqual({
       kind: "gitlab",
-      host: "gitlab.acme-corp.example",
+      host: HOST,
       path: "acme/platform/billing"
     });
+    // Without the map there is nothing to resolve — the honest no-op, and the
+    // state the whole plumbing exists to keep the app out of.
+    expect(resolveForgeRepo(ORIGIN, {})).toBeNull();
+    // And a `gitlab.`-named host nobody enumerated resolves no better. This is
+    // the assertion the deleted prefix rule would fail: enumeration is the only
+    // thing that places a host, and the name contributes nothing.
+    expect(
+      resolveForgeRepo("git@gitlab.acme-corp.example:acme/api.git", {})
+    ).toBeNull();
   });
 
   it("resolves the repo identity marks through the same map", () => {
@@ -428,9 +479,10 @@ describe("a signed-in self-managed GitLab, end to end", () => {
     // as `other` and the repository quietly loses its visibility mark.
     expect(parseForgeRemote(ORIGIN, signedIn().overrides())).toMatchObject({
       host: "gitlab",
-      hostname: "gitlab.acme-corp.example",
+      hostname: HOST,
       nameWithOwner: "acme/platform/billing"
     });
+    expect(parseForgeRemote(ORIGIN)?.host).toBe("other");
   });
 
   it("reaches the renderer's dialogs as a row naming the same forge", () => {
@@ -441,7 +493,7 @@ describe("a signed-in self-managed GitLab, end to end", () => {
     const rows = new ForgeHostsView(signedIn(), async () => {}).rows();
     expect(rows).toMatchObject([
       {
-        host: "gitlab.acme-corp.example",
+        host: HOST,
         kind: "gitlab",
         enabled: true,
         origin: "cli",
@@ -453,16 +505,15 @@ describe("a signed-in self-managed GitLab, end to end", () => {
   it("stops resolving everywhere once the host is switched off", () => {
     // The switch is the one thing that should take a feature away, and it has
     // to take it away in the dialogs too — `rows()` carries `enabled`.
-    const off = new ForgeHosts({
-      readSettings: () => ({
-        hosts: { "gitlab.acme-corp.example": { enabled: false } }
-      }),
-      discovered: () => parseGlabHosts(GLAB_STATUS),
-      env: {}
-    });
-    expect(off.isEnabled("gitlab.acme-corp.example").enabled).toBe(false);
-    expect(
-      new ForgeHostsView(off, async () => {}).rows()[0]?.enabled
-    ).toBe(false);
+    const off = signedIn({ [HOST]: { enabled: false } });
+    expect(off.isEnabled(HOST).enabled).toBe(false);
+    expect(new ForgeHostsView(off, async () => {}).rows()[0]?.enabled).toBe(false);
+    // But it keeps RESOLVING. "Which forge runs here" and "may we talk to it"
+    // are separate questions, and collapsing them would leave a disabled
+    // host's remotes rendering as an unknown forge rather than as a GitLab
+    // nobody may query.
+    expect(off.kindFor(HOST).kind).toBe("gitlab");
+    expect(off.overrides()[HOST]).toBe("gitlab");
+    expect(parseForgeRemote(ORIGIN, off.overrides())?.host).toBe("gitlab");
   });
 });

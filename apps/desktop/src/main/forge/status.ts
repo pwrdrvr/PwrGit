@@ -142,9 +142,12 @@ function saasHosts(): ForgeProbeTarget[] {
  *
  * The answer is per host, then summarized per forge. Probing one hardcoded
  * endpoint per forge is what made Settings → Forges report "GitLab: Signed out"
- * on a machine signed in to a self-managed GitLab. (Forking there is a separate,
- * still-open gap: `ForkRequest` carries a hostname that `forges.get(kind)`
- * ignores, so the fork path is SaaS-only and asks about that host specifically.)
+ * on a machine signed in to a self-managed GitLab. Clone and fork read the
+ * per-host answer through `forgeBlockAt(status, hostname)`, so the target set
+ * must cover every host resolution can place — `ForgeHosts.statusTargets()`
+ * derives it from `overrides()` for that reason. A host that resolves but was
+ * never probed falls back to the forge-wide summary, which is the permissive
+ * answer and was reported as "signed out" for env-allowlisted hosts.
  */
 export class ForgeStatusService {
   private readonly probes: ForgeProbe[];

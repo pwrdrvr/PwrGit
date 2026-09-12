@@ -11,6 +11,13 @@ import { ForgeHosts, ForgeHostsView } from "../../../main/forge/hosts";
  * dialogs classify a pasted URL with is the map main resolves with, not a
  * second derivation of it. `forge:hosts` ships `ForgeHosts.overrides()`
  * directly, so this spec pins what that channel carries.
+ *
+ * Only the case a main-process spec cannot reach lives here — the rest is
+ * `main/forge/hosts.test.ts`'s end-to-end block, which owns the enumerated and
+ * switched-off paths. What is unique here is that a renderer spec may import
+ * main (`.dependency-cruiser.cjs` exempts test files from
+ * `renderer-does-not-import-main`, and not the other way round), so the two
+ * sides of the channel can be asserted against each other at all.
  */
 const status = `gitlab.acme-corp.example
   ✓ Logged in to gitlab.acme-corp.example as a.dev (keyring)
@@ -27,21 +34,6 @@ const view = (env: NodeJS.ProcessEnv = {}, hosts = {}): ForgeHostsView =>
   );
 
 describe("the map forge:hosts ships", () => {
-  it("places a CLI-enumerated self-managed instance", () => {
-    expect(view().overrides()).toEqual({
-      "gitlab.acme-corp.example": "gitlab"
-    });
-    const url = "git@gitlab.acme-corp.example:acme/platform/billing.git";
-    expect(parseForgeRemote(url, view().overrides())).toMatchObject({
-      host: "gitlab",
-      hostname: "gitlab.acme-corp.example",
-      nameWithOwner: "acme/platform/billing"
-    });
-    // And without the list it is `other` — the state this plumbing exists to
-    // avoid leaving the dialogs in.
-    expect(parseForgeRemote(url)?.host).toBe("other");
-  });
-
   it("carries a host named only by the env allowlist", () => {
     // The regression that made deriving the map from `rows()` wrong: `list()`
     // is "what has a settings row", and an env-allowlisted host has none — so
@@ -59,14 +51,4 @@ describe("the map forge:hosts ships", () => {
     ).toBe("github");
   });
 
-  it("keeps a host the user switched off", () => {
-    // "Which forge runs here" and "may we talk to it" are separate questions.
-    // The map answers the first; `isEnabled` answers the second, and main
-    // gates on it at every site that would spawn a CLI.
-    const off = view({}, {
-      "gitlab.acme-corp.example": { enabled: false }
-    });
-    expect(off.overrides()["gitlab.acme-corp.example"]).toBe("gitlab");
-    expect(off.rows()[0]?.enabled).toBe(false);
-  });
 });

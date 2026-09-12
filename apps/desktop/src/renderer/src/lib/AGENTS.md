@@ -191,8 +191,10 @@ chooses detached HEAD or a newly named branch.
 
 ## Forge host classification comes from main, never from the hostname
 
-`useForgeHostMap` reads the host → forge map over `forge:hosts` and hands it to
-`classifyForgeHost`/`parseForgeRemote`. Do not classify a remote without it: a
+`useForgeHostMap` reads the host → forge map over `forge:hosts`, and
+`exactRepository` hands it to `parseForgeRemote` — the renderer's only
+classifier; `classifyForgeHost` itself is called from shared and from main, not
+from here. Do not classify a remote without the map: a
 hostname is not evidence of which forge runs on it, so with no map every
 self-managed instance reads as `other` and the clone and fork dialogs silently
 lose a host the user is signed in to. `apps/desktop/src/main/forge/AGENTS.md`
@@ -202,8 +204,18 @@ The map is main's own (`ForgeHosts.overrides()`), shipped rather than derived
 from the settings rows in the same response — the two are different sets. The
 hook re-reads on `forge:statusChanged` because main enumerates hosts in two
 background CLI spawns at boot, so a dialog opened in the first second would
-otherwise cache an empty map for its whole lifetime.
+otherwise cache an empty map for its whole lifetime. Reads are sequence-numbered
+because those events arrive in bursts and the replies are not ordered — a stale
+empty answer landing last pinned the degraded state for the dialog's lifetime.
 
 Classifying in the renderer picks which forge to ask; it does **not** pick which
-instance. Any IPC that reaches a provider must carry `hostname` as well as the
-kind, or main answers from github.com/gitlab.com.
+instance. `repo:checkCloneSource`, `repo:forkPreflight`, `repo:forkTargets` and
+`repo:clone`/`repo:fork` therefore carry `hostname` as well as the kind, or main
+answers from github.com/gitlab.com. `repo:searchCloneSources` is the exception
+and is still SaaS-only — see `apps/desktop/src/main/forge/AGENTS.md`.
+
+A slug carries no host. `chooseRepository` rewrites the query to
+`owner/name`, which `exactRepository` can only resolve against the forge's SaaS
+hostname — so the dialog remembers the instance the user picked and resolves the
+slug back to it. Re-confirming an Enterprise repository against github.com is a
+wrong answer, not merely a wasted round trip.

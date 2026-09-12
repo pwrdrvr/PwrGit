@@ -1,4 +1,6 @@
 import {
+  forgeAllHostsOff,
+  forgeBlockAt,
   forgeCanAnswerSaas,
   forgeSaasBlock,
   type CloneRepository,
@@ -136,16 +138,41 @@ export function statusFor(
 }
 
 /**
- * Whether a forge can answer either dialog at all.
+ * Whether a forge can answer either dialog for one INSTANCE.
  *
- * Both reach their provider by kind alone, which is the SaaS instance, so the
- * SaaS host is the one whose credential decides — `ForgeStatus.loggedIn`
- * summarizes every host the user is signed in to, and a self-managed GitLab
- * sign-in does not make gitlab.com answerable. One helper so the host toggle,
- * the protocol list and the empty message cannot disagree about it.
+ * It used to ask only about the SaaS host, because both dialogs reached their
+ * provider by kind alone and that is the instance a kind-only lookup gets.
+ * They now carry a hostname end to end, so asking the SaaS question greyed out
+ * the CLI protocol for a machine signed in only to a company host — refusing
+ * the operation main had just learned to do. Omit `hostname` only where the
+ * instance genuinely is the SaaS one.
+ *
+ * One helper so the host toggle, the protocol list and the empty message
+ * cannot disagree about it.
  */
-export function forgeCanAnswerDialog(status: ForgeStatus | undefined): boolean {
-  return forgeCanAnswerSaas(status);
+export function forgeCanAnswerDialog(
+  status: ForgeStatus | undefined,
+  hostname?: string
+): boolean {
+  if (hostname === undefined) return forgeCanAnswerSaas(status);
+  return status !== undefined && forgeBlockAt(status, hostname) === null;
+}
+
+/**
+ * Whether a forge is worth offering in the host toggle at all.
+ *
+ * A different question from the one above: the toggle picks a FORGE, and an
+ * Enterprise-only sign-in makes GitHub perfectly usable while github.com
+ * itself is unauthenticated. Asking the SaaS question here removed the only
+ * forge such a user has.
+ */
+export function forgeCanAnswerAnywhere(status: ForgeStatus | undefined): boolean {
+  return (
+    status !== undefined &&
+    status.installed &&
+    status.loggedIn &&
+    !forgeAllHostsOff(status)
+  );
 }
 
 /** Whether the fork dialog should offer the default-branch-only switch. Read

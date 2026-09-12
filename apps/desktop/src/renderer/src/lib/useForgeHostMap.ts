@@ -2,11 +2,6 @@ import { useEffect, useState } from "react";
 import type { ForgeHostMap } from "@pwrgit/shared";
 import { dispatch, subscribe } from "./pwrgit";
 
-/** Shared so an empty answer keeps its identity across reads — a fresh `{}`
- *  would invalidate every memo and effect that depends on the map, which for
- *  the dialogs means dropping a verified row and re-running a CLI lookup. */
-const NO_HOSTS: ForgeHostMap = {};
-
 /**
  * The host → forge map the renderer needs to classify a pasted remote URL.
  *
@@ -25,13 +20,25 @@ const NO_HOSTS: ForgeHostMap = {};
  * the dialogs already give any unrecognised remote.
  */
 export function useForgeHostMap(): ForgeHostMap {
-  const [hosts, setHosts] = useState<ForgeHostMap>(NO_HOSTS);
+  // `sameHosts` below preserves this object's identity for as long as the map
+  // is equal, including while it is empty, so no shared constant is needed.
+  const [hosts, setHosts] = useState<ForgeHostMap>({});
   useEffect(() => {
     let active = true;
+    // Reads are not ordered by the IPC layer, and main emits
+    // `forge:statusChanged` in bursts — the boot probe, the debounced
+    // re-probe, the Hosts pane's Re-check. Without a sequence number an early
+    // read taken before enumeration landed could resolve last and pin the
+    // empty map for the dialog's whole lifetime, which is the exact degraded
+    // state this hook exists to end.
+    let issued = 0;
+    let applied = 0;
     const read = (): void => {
+      const seq = ++issued;
       void dispatch("forge:hosts", {})
         .then((result) => {
-          if (!active || !result.ok) return;
+          if (!active || !result.ok || seq <= applied) return;
+          applied = seq;
           const next = result.value.overrides;
           // Identity matters: `hosts` is a dependency of the dialogs' memos
           // and of their debounced check effect, so storing an equal-but-new

@@ -105,6 +105,27 @@ describe("parseForgeRemote", () => {
     ).toBe("gitlab");
   });
 
+  it("returns the canonical hostname, www. stripped", () => {
+    // The returned hostname is not cosmetic: it travels over IPC and keys the
+    // provider registry. Classification already strips `www.`, so leaving it
+    // on here split one host into two — `github` resolved, then the registry
+    // missed its own `github:github.com` entry and built a provider running
+    // `gh api --hostname www.github.com`, which cannot succeed.
+    for (const url of [
+      "https://www.github.com/acme/api.git",
+      "https://WWW.GitHub.com/acme/api"
+    ]) {
+      expect(parseForgeRemote(url)).toMatchObject({
+        host: "github",
+        hostname: "github.com",
+        nameWithOwner: "acme/api"
+      });
+    }
+    expect(parseForgeRemote("git@www.gitlab.com:acme/api.git")?.hostname).toBe(
+      "gitlab.com"
+    );
+  });
+
   it("lowercases the hostname but preserves project-path case", () => {
     expect(parseForgeRemote("git@GitHub.COM:PwrDrvr/PwrGit.git")).toMatchObject({
       hostname: "github.com",

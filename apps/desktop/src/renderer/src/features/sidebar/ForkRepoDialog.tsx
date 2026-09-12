@@ -38,6 +38,7 @@ import {
   repositoriesOnHost,
   sourceEmptyMessage,
   statusFor,
+  forgeCanAnswerAnywhere,
   forgeCanAnswerDialog
 } from "./fork-dialog";
 import { GitForkIcon, RepoIdentityChips } from "./RepoIdentityMarks";
@@ -155,7 +156,7 @@ export function ForkRepoDialog({
   // Only forges whose CLI is actually usable are offered — a host toggle that
   // leads straight to "install the CLI" is a dead end presented as a choice.
   const usableHosts = forges
-    .filter((status) => forgeCanAnswerDialog(status))
+    .filter((status) => forgeCanAnswerAnywhere(status))
     .map((status) => status.kind);
 
   useEffect(() => {
@@ -170,7 +171,16 @@ export function ForkRepoDialog({
   // may name a different forge than the picker, and fetching for the picker
   // then filtering by the source left the list empty.
   const ownersHost = selectedSource?.host ?? host;
-  const ownersHostname = selectedSource?.hostname ?? null;
+  // Resolved to an instance up front rather than left null until a source is
+  // picked. Null-then-`github.com` is the SAME instance spelled two ways, and
+  // it re-ran this effect on the first selection of any SaaS repository — for
+  // an identical provider, since the registry pre-seeds the SaaS entry. The
+  // `setForkOwners([])` below then emptied the owner picker, which nulled the
+  // fork target, which re-ran preflight twice more: eight `gh` spawns and a
+  // spurious "Sign in with the gh CLI to choose a fork target."
+  const ownersHostname =
+    selectedSource?.hostname ??
+    (ownersHost === "other" ? null : defaultHostname(ownersHost));
   useEffect(() => {
     if (ownersHost === "other") {
       setForkOwners([]);
@@ -764,14 +774,17 @@ export function ForkRepoDialog({
               <div className="clone-label">Clone with</div>
               <div className="clone-protocols">
                 {(["ssh", "https", "cli"] as const).map((candidate) => {
-                  const disabled =
-                    candidate === "cli" && !forgeCanAnswerDialog(forgeStatus);
                   const slug =
                     preflight?.target.nameWithOwner ??
                     selectedSource?.nameWithOwner ??
                     "owner/name";
                   const hostname =
                     selectedSource?.hostname ?? defaultHostname(sourceHost);
+                  // The instance this fork would actually run against, so an
+                  // Enterprise-only sign-in is not told its CLI cannot answer.
+                  const disabled =
+                    candidate === "cli" &&
+                    !forgeCanAnswerDialog(forgeStatus, hostname);
                   const detail =
                     candidate === "ssh"
                       ? `git@${hostname}:${slug}.git`

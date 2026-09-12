@@ -407,9 +407,11 @@ if (!gotSingleInstanceLock) {
     // summary of the same per-host answers the transport obeys rather than a
     // second opinion about two hardcoded SaaS hosts. That second opinion is what
     // made Settings say "GitLab: Signed out" beside a self-managed GitLab the
-    // user was signed in to. (The fork dialog still only forks on the SaaS
-    // instance — `ForkRequest.hostname` is carried and ignored — so it asks
-    // about that host specifically rather than about the forge.)
+    // user was signed in to. The clone and fork paths now ask per instance
+    // (`forgeBlockAt(status, provider.hostname)`), so `statusTargets()` has to
+    // cover every host `overrides()` can resolve — otherwise the probe never
+    // reports a host the dialogs can name, and the forge-wide fallback answers
+    // in its place.
     const forgeStatus =
       fixtureServices?.status ??
       new ForgeStatusService({ hosts: () => forgeHosts.statusTargets() });
