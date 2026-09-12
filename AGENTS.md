@@ -53,11 +53,11 @@ pnpm typecheck  # tsc across packages
 pnpm lint       # every check CI runs, cheapest-first (see below)
 ```
 
-`pnpm lint` chains `lint:colors` → `deps:maturity` → `licenses:check` →
-`lint:boundaries` → `typecheck`, ordered so a fast failure doesn't wait on the
-slow one. CI's Typecheck job runs exactly this one command, so **add new
-repo-wide checks to the chain in the root `package.json`**, not as another CI
-step.
+`pnpm lint` chains `lint:forge-kinds` → `lint:colors` → `deps:maturity` →
+`licenses:check` → `lint:boundaries` → `typecheck`, ordered so a fast failure
+doesn't wait on the slow one. CI's Typecheck job runs exactly this one command,
+so **add new repo-wide checks to the chain in the root `package.json`**, not as
+another CI step.
 
 `deps:maturity` enforces the seven-day dependency cooldown
 (`minimumReleaseAge` in `pnpm-workspace.yaml`). Adding an exclusion to get past
@@ -74,6 +74,36 @@ that main, preload, and renderer stay three separate bundles sharing only
 `@pwrgit/shared` — violations there type-check and usually bundle, then fail at
 launch, so `tsc` will not catch them. The config's header comments explain each
 rule.
+
+`typecheck` also carries the unused-code gate: `tsconfig.base.json` sets
+`noUnusedLocals` and `noUnusedParameters`, and all three TypeScript projects
+extend it — `apps/desktop`, `packages/mcp-server` and `packages/shared`.
+(`packages/pwrgit` is an npm name placeholder with no TypeScript in it. The
+root `vitest.config.ts` is the one `.ts` file no project's `include` matches,
+so it is the one file the gate does not read.) An unused import, an unread
+local, or a dead value half of `import { x, type X }` fails **`pnpm
+typecheck`**, and so `pnpm lint` and CI's Typecheck job. It is not caught by
+`pnpm build`: the desktop build is electron-vite, which transpiles per file
+and type-checks nothing.
+
+The escape hatch is narrower than it looks, and the difference bites
+immediately. A leading `_` suppresses **`noUnusedParameters` only**:
+
+```ts
+function f(_ignored: string) {}   // fine — parameters honour the prefix
+const _unused = 1;                // still TS6133: locals do NOT
+import { _thing } from "./m";     // still TS6133: imports do NOT
+```
+
+So a parameter that exists to document a signature — a test double's ignored
+argument, a `describe.each` title slot — takes the prefix. An import or local
+you cannot delete needs a real reason, not a rename.
+
+What the gate cannot see is an export nobody imports: removing a symbol's last
+importer leaves its `export` dead and silent. After deleting an import, grep
+for the symbol before assuming the other end is still wanted. And "the
+compiler says unused" is not the same as "dead code" — an unused binding in a
+test is often a missing assertion. Ask what it was for before deleting it.
 
 ## Launch the dev app
 
