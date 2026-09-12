@@ -42,7 +42,8 @@ type RateLimitDialect = {
   exhaustedOn: readonly number[];
 };
 
-/** Add a forge by adding a row, the way `capabilities.ts` is extended. */
+/** Add a forge by adding a row. One of the tables `forge/AGENTS.md` lists
+ *  under "Adding a forge"; `tsc` names this one when a kind is added. */
 const RATE_LIMIT_DIALECT: Readonly<Record<ForgeKind, RateLimitDialect>> = {
   github: {
     remaining: "x-ratelimit-remaining",

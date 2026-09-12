@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   forgeLabel,
+  forgeProductOrAssumed,
   type CloneDestination,
   type CloneCatalog,
   type CloneProtocol,
@@ -760,7 +761,14 @@ export function ForkRepoDialog({
                       <strong>Copy the default branch only</strong>
                       <small>
                         A smaller fork —{" "}
-                        <code>gh repo fork --default-branch-only</code>
+                        {/* The CLI is the source host's, not a literal: this
+                            block is gated on the `forkDefaultBranchOnly`
+                            capability, never on a kind, so any product that
+                            sets it would otherwise be shown GitHub's command. */}
+                        <code>
+                          {forgeProductOrAssumed(sourceHost).cli} repo fork
+                          --default-branch-only
+                        </code>
                       </small>
                     </span>
                   </label>

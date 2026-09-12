@@ -15,11 +15,21 @@ import {
  *  The CLI in the command names the forge, which is worth honouring — it is
  *  more specific than the dialog's current host. Built from the product
  *  registry so a product whose CLI nobody remembered to add to a hand-written
- *  alternation is not silently unrecognised here. */
+ *  alternation is not silently unrecognised here.
+ *
+ *  Escaped, because a registry entry is data and this is the one place data
+ *  becomes code: an unescaped `.` in a CLI name would widen the match, and an
+ *  unbalanced `(` or `[` would throw `SyntaxError` while this module is being
+ *  evaluated — taking the whole clone dialog down rather than failing on the
+ *  paste. The alternation stays capturing: `forgeKindForCli` reads group 1. */
 const CLI_CLONE = new RegExp(
-  `^(${forgeCliNames().join("|")})\\s+repo\\s+clone\\s+(\\S+)$`,
+  `^(${forgeCliNames().map(escapeRegExp).join("|")})\\s+repo\\s+clone\\s+(\\S+)$`,
   "i"
 );
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 /** Path forms whose meaning does not depend on the app process's cwd. Actual
  * existence and Git validity are checked in main, where filesystem access

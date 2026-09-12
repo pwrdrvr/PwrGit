@@ -238,7 +238,11 @@ export function sourceEmptyMessage(input: {
  *  wrong in the one place the user is choosing between them. */
 export function ownerKindLabel(owner: ForgeOwner): string {
   if (owner.kind === "user") return "personal account";
-  return forgeProduct(owner.host).organizationNoun;
+  // `OrAssumed`, matching `cliProtocolLabel` above: `ForgeOwner.host` is typed
+  // `ForgeKind` but the object is built in main and structured-cloned here, so
+  // a strict lookup would throw inside the owner-list render — unmounting the
+  // picker — where the ternary this replaced degraded to "organization".
+  return forgeProductOrAssumed(owner.host).organizationNoun;
 }
 
 /** The catalog rows that belong to the forge currently being browsed.

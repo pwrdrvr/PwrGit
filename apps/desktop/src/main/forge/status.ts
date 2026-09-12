@@ -60,10 +60,6 @@ export type ForgeProbeTarget = {
   assumed?: boolean;
 };
 
-export function cliFor(kind: ForgeKind): string {
-  return forgeProduct(kind).cli;
-}
-
 /**
  * How each forge answers "installed?" and "signed in?".
  *
@@ -71,8 +67,14 @@ export function cliFor(kind: ForgeKind): string {
  * in silence — a third forge simply never gets probed, and the settings pane
  * reports nothing about a CLI that is sitting right there. As a record, `tsc`
  * asks for the entry.
+ *
+ * The key is bound to the entry's own `kind` (`ForgeProbe & { kind: K }`), or
+ * the two could disagree: a copy-pasted `gitlab: { kind: "github", cli: "glab" }`
+ * would type-check, and `probeAll` filters host targets by `probe.kind` while
+ * `probeOne` reports it — so Settings would show that product's card twice,
+ * one of them probing the other's CLI, and the real one not at all.
  */
-const DEFAULT_PROBES: Readonly<Record<ForgeKind, ForgeProbe>> = {
+const DEFAULT_PROBES: Readonly<{ [K in ForgeKind]: ForgeProbe & { kind: K } }> = {
   github: {
     kind: "github",
     cli: FORGE_PRODUCTS.github.cli,

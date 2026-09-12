@@ -2,7 +2,6 @@ import {
   err,
   forgeBlockAt,
   forgeCapabilities,
-  forgeLabel,
   forgeProductOrAssumed,
   forgeWebUrl,
   ok,
@@ -62,7 +61,7 @@ export type ForkRequest = {
 };
 
 function forgeName(host: ForgeHost): string {
-  return forgeLabel(host);
+  return forgeProductOrAssumed(host).label;
 }
 
 /** The candidates for `upstream`, best answer first.

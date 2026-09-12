@@ -1,5 +1,6 @@
 import {
   FORGE_KINDS,
+  isForgeKind,
   type ForgeCapabilities,
   type ForgeHost,
   type ForgeKind
@@ -21,17 +22,15 @@ import {
  * copy is exactly how the CLI name ended up with two spellings.
  */
 export type ForgeProduct = {
-  /** The product's key. Equals the `FORGE_PRODUCTS` key it is stored under. */
-  kind: ForgeKind;
   /** The product's name, as the user sees it written. */
-  label: string;
+  readonly label: string;
   /**
    * The binary PwrGit speaks through.
    *
    * Reaches the user as a command they are told to run, so a second copy that
    * drifted would print a command naming a CLI the app never invokes.
    */
-  cli: string;
+  readonly cli: string;
   /**
    * The hosted instance.
    *
@@ -41,15 +40,15 @@ export type ForgeProduct = {
    * when no CLI reports an account, and the one host whose sign-in command
    * needs no `--hostname`.
    */
-  saasHost: string;
+  readonly saasHost: string;
   /** What this product calls a change request, capitalized as a UI noun. */
-  changeRequestLabel: string;
+  readonly changeRequestLabel: string;
   /** The product's own reference sigil — `owner/repo#4` vs `owner/repo!4`. */
-  changeRequestSigil: string;
+  readonly changeRequestSigil: string;
   /** What this product calls a non-personal account. Calling a GitLab group
    *  an "organization" is wrong in the one screen where the user is choosing
    *  between them. */
-  organizationNoun: string;
+  readonly organizationNoun: string;
   /**
    * How many `/`-separated segments a project path may have.
    *
@@ -57,8 +56,13 @@ export type ForgeProduct = {
    * URL that merely looks like a repository. GitLab nests groups arbitrarily,
    * so `pwrdrvr/qa/forge/PwrGit-Test` is one project. Two is always the
    * minimum — a project has an owner and a name on every product.
+   *
+   * A finite ceiling, not `Infinity`: `JSON.stringify(Infinity)` is `null` and
+   * `n <= null` is false, so one round trip through JSON — a diagnostics dump,
+   * a cached snapshot — would silently reject every path on an unbounded
+   * product rather than accept every path.
    */
-  maxPathSegments: number;
+  readonly maxPathSegments: number;
   /**
    * Env allowlist naming the hosts of this product PwrGit may talk to.
    *
@@ -66,7 +70,7 @@ export type ForgeProduct = {
    * point of this table is that a new product is one entry rather than one
    * entry plus a handful of tables elsewhere that each fail loudly on their own.
    */
-  hostAllowlistEnv: string;
+  readonly hostAllowlistEnv: string;
   /**
    * Wording for adding one of this product's hosts by hand.
    *
@@ -74,13 +78,13 @@ export type ForgeProduct = {
    * derived: enumeration carries it for free, but a hostname is not evidence,
    * so a single "Add host…" button would have to guess or ask afterwards.
    */
-  addHost: {
+  readonly addHost: {
     /** Button label in Settings → Forges → Hosts. */
-    button: string;
+    readonly button: string;
     /** The dialog's title, which is what settles the product. */
-    title: string;
+    readonly title: string;
     /** An example hostname, shown in the field. */
-    placeholder: string;
+    readonly placeholder: string;
   };
   /**
    * Creating a fork returns before the fork is usable.
@@ -89,7 +93,7 @@ export type ForgeProduct = {
    * remote exists says so — but it is a property of the product's API, not of
    * the screen that reports it.
    */
-  forkCompletesAsynchronously: boolean;
+  readonly forkCompletesAsynchronously: boolean;
   /**
    * What the integration can answer at all.
    *
@@ -98,12 +102,21 @@ export type ForgeProduct = {
    * so they need no network call, and they ride on `ForgeStatus` to the
    * settings pane and the dialogs.
    */
-  capabilities: ForgeCapabilities;
+  readonly capabilities: ForgeCapabilities;
 };
 
-export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = {
+/**
+ * Frozen, not merely `Readonly<>`.
+ *
+ * `Readonly<Record<…>>` constrains the top level only: every field below it,
+ * and every field of `capabilities`, stays writable at runtime. This object is
+ * now process-global in both bundles and its `capabilities` ride on
+ * `ForgeStatus` to the settings pane, so one stray write — a test poking a
+ * capability, a helper "patching" a product — would leak into every later
+ * caller in that process.
+ */
+export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze({
   github: {
-    kind: "github",
     label: "GitHub",
     cli: "gh",
     saasHost: "github.com",
@@ -128,14 +141,13 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = {
     }
   },
   gitlab: {
-    kind: "gitlab",
     label: "GitLab",
     cli: "glab",
     saasHost: "gitlab.com",
     changeRequestLabel: "Merge request",
     changeRequestSigil: "!",
     organizationNoun: "group",
-    maxPathSegments: Number.POSITIVE_INFINITY,
+    maxPathSegments: Number.MAX_SAFE_INTEGER,
     hostAllowlistEnv: "PWRGIT_GITLAB_HOSTS",
     addHost: {
       button: "Add GitLab instance…",
@@ -158,7 +170,18 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = {
       forkDefaultBranchOnly: false
     }
   }
-};
+});
+
+function freeze(
+  products: Record<ForgeKind, ForgeProduct>
+): Readonly<Record<ForgeKind, ForgeProduct>> {
+  for (const product of Object.values(products)) {
+    Object.freeze(product.capabilities);
+    Object.freeze(product.addHost);
+    Object.freeze(product);
+  }
+  return Object.freeze(products);
+}
 
 /**
  * The product PwrGit assumes when a host is `other`.
@@ -177,25 +200,41 @@ export function forgeProduct(kind: ForgeKind): ForgeProduct {
   return FORGE_PRODUCTS[kind];
 }
 
-/** The product for a host, or null when no provider claims it. Callers with
- *  nothing sensible to say about `other` use this and say nothing. */
-export function forgeProductFor(host: ForgeHost): ForgeProduct | null {
-  return host === "other" ? null : FORGE_PRODUCTS[host];
+/**
+ * The product for a host, or null when no product claims it.
+ *
+ * Guarded with `isForgeKind` rather than indexed after an `=== "other"` test,
+ * because a bare index answers three ways, not two: a registry entry, or
+ * `undefined` for a string no product claims — which is NOT the declared
+ * `null`, so a caller's `!== null` check passes and the next property access
+ * throws — or, for a key like `constructor` or `__proto__` (both legal
+ * lowercase intranet labels), a truthy member inherited from `Object.prototype`
+ * that defeats `forgeProductOrAssumed`'s `??` entirely. `classifyForgeHost`
+ * guards the same class of input for the same reason.
+ *
+ * Values reach here from SQLite rows, settings.json and IPC payloads, none of
+ * which the type annotation actually constrains.
+ */
+export function forgeProductFor(host: ForgeHost | undefined): ForgeProduct | null {
+  return isForgeKind(host) ? FORGE_PRODUCTS[host] : null;
 }
 
-/** The product for a host, resolving `other` through `ASSUMED_FORGE_KIND`. */
-export function forgeProductOrAssumed(host: ForgeHost): ForgeProduct {
+/** The product for a host, resolving `other` — and anything unrecognized —
+ *  through `ASSUMED_FORGE_KIND`. */
+export function forgeProductOrAssumed(host: ForgeHost | undefined): ForgeProduct {
   return forgeProductFor(host) ?? FORGE_PRODUCTS[ASSUMED_FORGE_KIND];
 }
 
-/** The product's name — "GitHub", "GitLab" — for a host. */
-export function forgeLabel(host: ForgeHost): string {
-  return forgeProductOrAssumed(host).label;
-}
-
-/** The binary a host is spoken to through. */
-export function forgeCli(host: ForgeHost): string {
-  return forgeProductOrAssumed(host).cli;
+/**
+ * The product's name — "GitHub", "GitLab".
+ *
+ * Takes a `ForgeKind`, not a `ForgeHost`: the tables this replaced were keyed
+ * by kind, so passing `other` was a compile error at every call site. A caller
+ * that really does hold an unclassified host asks `forgeProductOrAssumed`
+ * itself, which keeps the assumption at the site that makes it.
+ */
+export function forgeLabel(kind: ForgeKind): string {
+  return FORGE_PRODUCTS[kind].label;
 }
 
 /** The hosted instance of a host's product. */
@@ -208,18 +247,18 @@ export function forgeSaasHost(host: ForgeHost): string {
  * "Merge request". Each forge's own vocabulary, so a card matches the site the
  * row came from.
  */
-export function changeRequestLabel(host: ForgeHost): string {
-  return forgeProductOrAssumed(host).changeRequestLabel;
+export function changeRequestLabel(kind: ForgeKind): string {
+  return FORGE_PRODUCTS[kind].changeRequestLabel;
 }
 
 /** The same word lowercased, for use inside a sentence. */
-export function changeRequestNoun(host: ForgeHost): string {
-  return changeRequestLabel(host).toLowerCase();
+export function changeRequestNoun(kind: ForgeKind): string {
+  return changeRequestLabel(kind).toLowerCase();
 }
 
 /** The product's reference sigil — `owner/repo#4` against `owner/repo!4`. */
-export function changeRequestSigil(host: ForgeHost): string {
-  return forgeProductOrAssumed(host).changeRequestSigil;
+export function changeRequestSigil(kind: ForgeKind): string {
+  return FORGE_PRODUCTS[kind].changeRequestSigil;
 }
 
 /** What a product can answer at all. */
@@ -237,8 +276,14 @@ export function forgeCapabilities(kind: ForgeKind): ForgeCapabilities {
  */
 export function forgeKindForCli(cli: string): ForgeKind | null {
   const normalized = cli.trim().toLowerCase();
+  // Both sides normalized: the regex that produced `cli` carries the `i` flag,
+  // so matching a table value verbatim would answer null for a command the
+  // box had already accepted, and the paste would resolve against whichever
+  // product the host toggle happened to be on.
   return (
-    FORGE_KINDS.find((kind) => FORGE_PRODUCTS[kind].cli === normalized) ?? null
+    FORGE_KINDS.find(
+      (kind) => FORGE_PRODUCTS[kind].cli.trim().toLowerCase() === normalized
+    ) ?? null
   );
 }
 
@@ -256,5 +301,10 @@ export function forgeCliNames(): string[] {
  * repository and clones a URL that cannot exist.
  */
 export function forgeAllowsPathDepth(kind: ForgeKind, segments: number): boolean {
-  return segments >= 2 && segments <= FORGE_PRODUCTS[kind].maxPathSegments;
+  // `forgeProductFor`, not a bare index: this is reached from remote parsing
+  // with a kind that came off an override map, and a product nothing claims
+  // must answer "no path fits" — the module's own null no-op — rather than
+  // throwing out of a resolver whose callers treat it as total.
+  const product = forgeProductFor(kind);
+  return product !== null && segments >= 2 && segments <= product.maxPathSegments;
 }

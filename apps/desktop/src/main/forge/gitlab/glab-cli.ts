@@ -1,3 +1,4 @@
+import { forgeProduct } from "@pwrgit/shared";
 import {
   createCliClient,
   type CliRunOptions,
@@ -12,12 +13,14 @@ import {
  * from `config get token --host <host>`, which is why `getGitLabToken` below
  * exists rather than a one-line alias.
  */
+/** Binary and product name come from `FORGE_PRODUCTS` — see `gh-cli.ts`. */
+const GITLAB = forgeProduct("gitlab");
+
 export const GLAB_CLI_SPEC: CliSpec = {
-  binary: "glab",
-  label: "GitLab CLI",
+  binary: GITLAB.cli,
+  label: `${GITLAB.label} CLI`,
   errorName: "GlabCliError",
-  authenticationRequiredMessage:
-    "GitLab authentication is required. Run glab auth login and verify your Git/SSH credentials, then try again.",
+  authenticationRequiredMessage: `${GITLAB.label} authentication is required. Run ${GITLAB.cli} auth login and verify your Git/SSH credentials, then try again.`,
   nonInteractiveEnv: {
     GIT_TERMINAL_PROMPT: "0",
     GCM_INTERACTIVE: "Never",

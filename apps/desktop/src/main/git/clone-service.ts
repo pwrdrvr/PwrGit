@@ -15,7 +15,7 @@ import {
   forgeCloneUrls,
   forgeLoggedInAtSaas,
   forgeBlockAt,
-  forgeLabel,
+  forgeCliNames,
   forgeProductOrAssumed,
   forgeSaasHost,
   isSafeForgeHostname,
@@ -284,7 +284,11 @@ function messageFromUnknown(provider: ForgeRepoProvider, cause: unknown): string
  * layer runs on: hosts are enumerated, never guessed from a name.
  */
 export function unsupportedHostMessage(verb: string): string {
-  return `PwrGit doesn't know which forge runs at that host, so it can't ${verb} repositories there. Sign in to it with the gh or glab CLI, or use SSH or HTTPS.`;
+  // The CLIs are listed from the registry, not by hand: this sentence names
+  // the remedy, and a hand-written pair would tell the user to sign in with
+  // two CLIs that have nothing to do with the host they are looking at.
+  const clis = forgeCliNames().join(" or ");
+  return `PwrGit doesn't know which forge runs at that host, so it can't ${verb} repositories there. Sign in to it with the ${clis} CLI, or use SSH or HTTPS.`;
 }
 
 function inaccessibleRepositoryMessage(
@@ -1017,7 +1021,7 @@ function forgeUnavailable(
   hostname?: string
 ): Err<PwrGitError> | null {
   const status = statuses.find((candidate) => candidate.kind === host);
-  const label = forgeLabel(host);
+  const label = forgeProductOrAssumed(host).label;
   // Per instance, never the forge-wide `loggedIn`: asking the summary let a
   // self-managed-only sign-in pass this gate and run an unauthenticated
   // gitlab.com lookup, which answers 404 — so the dialog reported "couldn't

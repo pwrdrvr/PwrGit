@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   canonicalForgeHostname,
   FORGE_KINDS,
+  forgeCliNames,
   forgeLabel,
   forgeProduct,
   type ForgeHostConfig,
@@ -174,7 +175,9 @@ export function ForgeHostsSection(props: { saving: boolean }) {
         />
       ) : hosts.length === 0 ? (
         <p className="settings-empty">
-          Neither <code>gh</code> nor <code>glab</code> is signed in to a host.
+          {/* Listed from the registry: a hand-written pair names two CLIs on a
+              machine whose third one is signed in. */}
+          No forge CLI ({forgeCliNames().join(", ")}) is signed in to a host.
           Sign in from a terminal, then re-check — or add the instance below.
         </p>
       ) : (

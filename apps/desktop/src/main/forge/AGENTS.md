@@ -197,12 +197,19 @@ filling in is a missing-property error naming its own file. There are seven.
 Verify with the acceptance test the refactor was written against: add a
 throwaway third kind, confirm `tsc` names exactly those seven, remove it.
 
-**`packages/mcp-server` is the one place `tsc` cannot help.** It bundles
-standalone and imports nothing from `@pwrgit/shared`, so it keeps its own
-`"github" | "gitlab"` union, its own `classifyProvider`, and its own literal
-`PWRGIT_{GITHUB,GITLAB}_HOSTS` names — the same *rules* as the app, none of the
-same code. A third product has to be added there by hand, or the MCP server
-silently reports its checkouts as `other`.
+Three of them bind the key to the value's own kind (`REPO_PROVIDERS`,
+`DEFAULT_PROBES`, and `FORGE_PRODUCTS` by having no `kind` field at all), because
+a record whose value repeats its key can disagree with it — and `ForgeRepoRegistry`
+keys off `provider.host`, not off the key the table is walked by, so a mismatch
+routes one product's hosts at another product's CLI.
+
+**`packages/mcp-server` is the one place neither `tsc` nor the lint can help.**
+It bundles standalone and imports nothing from `@pwrgit/shared`, so it keeps its
+own `"github" | "gitlab"` union, its own `classifyProvider`, and its own literal
+`PWRGIT_{GITHUB,GITLAB}_HOSTS` names — the same *rules* as the app, reimplemented,
+and not even in the same order (it tests the SaaS hostnames before the env
+allowlist; `ForgeHosts.kindFor` tests env first). A third product has to be added
+there by hand, or the MCP server reports that product's checkouts as `other`.
 
 ### Why they are all records
 
@@ -217,14 +224,13 @@ The two shapes fail differently, and that difference is the whole rule:
   third product's clone and fork reported as `unsupported_host` on a machine
   whose CLI was installed and signed in.
 
-This count is a regression test, and it must read zero:
-
-```bash
-grep -rn '=== "github"\|=== "gitlab"' --include=*.ts --include=*.tsx \
-  packages/shared/src apps/desktop/src | grep -v '\.test\.'
-```
-
-It was 29 across 18 files before the registry landed.
+**`pnpm lint:forge-kinds` is the regression test**, first in the `pnpm lint`
+chain and therefore in CI's Typecheck job. It fails on any hand-written
+comparison against a kind — `x === "github"`, `x !== "gitlab"`, `case "gitlab":`
+— in non-test source under `packages/shared/src` or `apps/desktop/src`, and it
+reads the kinds from `FORGE_KINDS` so it cannot fall behind the union. It was 29
+across 18 files before the registry landed; the fix for a violation is never an
+exception in the script.
 
 So, when adding anything per-product:
 

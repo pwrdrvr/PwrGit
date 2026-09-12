@@ -2,6 +2,7 @@ import {
   canonicalForgeHostname,
   FORGE_KINDS,
   forgeProduct,
+  isForgeKind,
   type ForgeHostConfig,
   type ForgeKind,
   type ForgeSettings,
@@ -9,7 +10,7 @@ import {
 } from "@pwrgit/shared";
 import type { DiscoveredForgeHost } from "./cli-hosts";
 import type { ForgeHostRow } from "@pwrgit/shared";
-import { cliFor, type ForgeProbeTarget } from "./status";
+import type { ForgeProbeTarget } from "./status";
 import type { ForgeHostOverrides } from "./resolve";
 
 /** Env escape hatches, mirroring the `GITHUB_TOKEN`/`GITLAB_TOKEN` pattern
@@ -158,8 +159,14 @@ export class ForgeHosts {
     );
     if (fromEnv !== undefined) return { kind: fromEnv, source: "env" };
 
+    // `isForgeKind`, not `!== undefined`: `SettingsService.readFromDisk` is a
+    // bare `JSON.parse(...) as AppSettings`, and `sanitizeForgeHosts` guards
+    // only the IPC patch path. A kind written by a newer build — or by hand —
+    // must read as "not a forge we know" here, which this class already
+    // documents as silent. Letting it through hands an unchecked string to
+    // every per-product table, where it is no longer a miss but a throw.
     const configured = this.configFor(key)?.kind;
-    if (configured !== undefined) return { kind: configured, source: "config" };
+    if (isForgeKind(configured)) return { kind: configured, source: "config" };
 
     const found = this.discoveredFor(key);
     if (found !== undefined) return { kind: found.kind, source: "auto" };
@@ -338,7 +345,9 @@ export class ForgeHosts {
     for (const found of this.discovered()) map[found.host] = found.kind;
     for (const [host, config] of Object.entries(this.readSettings().hosts)) {
       const key = canonical(host);
-      if (key !== "" && config.kind !== undefined) map[key] = config.kind;
+      // Guarded for the same reason as `kindFor` above: this map is what
+      // `resolveForgeRepo` and the renderer's dialogs classify with.
+      if (key !== "" && isForgeKind(config.kind)) map[key] = config.kind;
     }
     // Walked in REVERSE `FORGE_KINDS` order, so the earliest member overwrites
     // the rest: `kindFor` tests the allowlists in `FORGE_KINDS` order and
@@ -393,7 +402,7 @@ export class ForgeHostsView {
               enabled: entry.enabled,
               enabledSource: entry.enabledSource,
               origin: entry.origin,
-              cli: cliFor(entry.kind),
+              cli: forgeProduct(entry.kind).cli,
               ...(entry.account === undefined ? {} : { account: entry.account }),
               ...(entry.scopes === undefined ? {} : { scopes: entry.scopes })
             }

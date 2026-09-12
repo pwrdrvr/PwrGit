@@ -18,7 +18,6 @@ import {
   type AppSettingsSnapshot,
   type DiagnosticsSettings,
   type ForgeHostConfig,
-  type ForgeKind,
   type ForgeSettings,
   type ExperimentalSettings,
   type GeneralSettings,

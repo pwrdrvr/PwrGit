@@ -5,6 +5,7 @@ import {
 } from "./forge-product";
 import {
   FORGE_KINDS,
+  isForgeKind,
   type ForgeHost,
   type ForgeHostStatus,
   type ForgeKind,
@@ -216,8 +217,13 @@ export function classifyForgeHost(
   // function rather than a ForgeHost and dies at the IPC boundary, where a
   // function is not structured-cloneable.
   if (Object.hasOwn(overrides, normalized)) {
+    // `isForgeKind`, not `!== undefined`: the map is built from settings.json,
+    // which nothing validates, and it crosses IPC to the renderer's dialogs.
+    // Returning a kind no product claims makes this function's `ForgeHost`
+    // return type a lie, and every caller that indexes a per-product table
+    // with it then fails on a value the type system promised was safe.
     const override = overrides[normalized];
-    if (override !== undefined) return override;
+    if (isForgeKind(override)) return override;
   }
   // Each product's SaaS host, read off the registry rather than written out
   // twice. This is the ONLY thing a hostname is evidence of: anything else

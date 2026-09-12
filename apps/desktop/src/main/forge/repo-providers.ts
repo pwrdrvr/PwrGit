@@ -1,24 +1,22 @@
-import { FORGE_KINDS, type ForgeKind } from "@pwrgit/shared";
+import { FORGE_KINDS, forgeProduct, type ForgeKind } from "@pwrgit/shared";
 import { GitHubRepoProvider } from "./github/repo-provider";
 import { GitLabRepoProvider } from "./gitlab/repo-provider";
 import type { ForgeRepoProvider, ForgeRepoRegistry } from "./repo-provider";
 
 /**
- * How one product builds the repository provider the clone and fork dialogs
+ * How each product builds the repository provider the clone and fork dialogs
  * reach through `ForgeRepoRegistry`.
  *
- * The factory is what lets the registry reach an Enterprise or self-managed
- * instance: one provider per hostname, built on demand and cached.
- */
-type RepoProviderBuilder = {
-  /** The default instance — the product's SaaS host. */
-  saas: () => ForgeRepoProvider;
-  /** Any other hostname. */
-  atHost: (hostname: string) => ForgeRepoProvider;
-};
-
-/**
- * Every product's repository provider, in one table.
+ * One factory per product, taking the hostname: the registry's default entry is
+ * just that factory applied to the product's SaaS host, so there is no second
+ * constructor expression to keep in sync with the first.
+ *
+ * The value is bound to its key (`ForgeRepoProvider & { host: K }`) because
+ * `ForgeRepoRegistry.register` keys off `provider.host`, NOT off the key this
+ * table is walked by. Without the binding, an entry whose builder returns the
+ * wrong product type-checks, and `get("github", "ghe.acme.com")` then hands
+ * back a provider that spawns the other product's CLI against a GitHub
+ * Enterprise host.
  *
  * This was two hand-written `forges.register(...)` calls in `index.ts`, which
  * is the shape that loses a product in silence: an unregistered forge makes
@@ -27,15 +25,11 @@ type RepoProviderBuilder = {
  * a machine whose CLI is installed and signed in, with nothing naming the
  * omission. As a record, `tsc` asks for the entry.
  */
-const REPO_PROVIDERS: Readonly<Record<ForgeKind, RepoProviderBuilder>> = {
-  github: {
-    saas: () => new GitHubRepoProvider(),
-    atHost: (hostname) => new GitHubRepoProvider(undefined, hostname)
-  },
-  gitlab: {
-    saas: () => new GitLabRepoProvider(),
-    atHost: (hostname) => new GitLabRepoProvider(undefined, hostname)
-  }
+const REPO_PROVIDERS: Readonly<{
+  [K in ForgeKind]: (hostname: string) => ForgeRepoProvider & { host: K };
+}> = {
+  github: (hostname) => new GitHubRepoProvider(undefined, hostname),
+  gitlab: (hostname) => new GitLabRepoProvider(undefined, hostname)
 };
 
 /** Register every product's real repository provider. Not called under the E2E
@@ -43,6 +37,9 @@ const REPO_PROVIDERS: Readonly<Record<ForgeKind, RepoProviderBuilder>> = {
 export function registerRepoProviders(registry: ForgeRepoRegistry): void {
   for (const kind of FORGE_KINDS) {
     const build = REPO_PROVIDERS[kind];
-    registry.register(build.saas(), build.atHost);
+    // The SaaS instance comes from the registry, not from each provider
+    // module's private default, so the hostname `register` seeds `byHost`
+    // under is the same one `ForgeHosts` probes and resolves.
+    registry.register(build(forgeProduct(kind).saasHost), build);
   }
 }
