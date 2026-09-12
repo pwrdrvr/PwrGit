@@ -1,5 +1,5 @@
 import type { ForgeKind } from "@pwrgit/shared";
-import { clampRetryDelayMs } from "../util/timing";
+import { clampRetryDelayMs, RETRY_DELAY_CEILING_MS } from "../util/timing";
 
 /**
  * One retry/backoff decision for every forge client.
@@ -11,10 +11,22 @@ import { clampRetryDelayMs } from "../util/timing";
  * window, and the shape of the error that arrives. That is all the dialect
  * table and the caller's `header` reader supply; the decision lives here.
  *
- * Retry *budgets* are deliberately not here. How many attempts a call may spend
- * is the caller's to choose, and GitLab's commit association picks a smaller
- * one than its branch query on purpose — see `AGENTS.md`, "Commit association
- * has no batch API".
+ * The order, which is the policy: an explicit `Retry-After` on any status; then
+ * a rate-limit window that named its reset and says it is spent; then a 429,
+ * any 5xx, or a request that never got a status, on the exponential ladder;
+ * everything else is not retried.
+ *
+ * What it deliberately does NOT do, each pinned by a test so it stays a
+ * decision rather than a surprise: read the HTTP-date form of `Retry-After`
+ * (RFC 9110 allows it, neither client has ever parsed it); jitter the wait, so
+ * concurrent callers do wake together; or wait out a window that cannot refill
+ * inside the ceiling — that one declines instead, because retrying into a spent
+ * hourly budget is what GitHub warns can get an integration banned.
+ *
+ * Retry *budgets* are deliberately not here either. How many attempts a call
+ * may spend is the caller's to choose, and GitLab's commit association picks a
+ * smaller one than its branch query on purpose — see `AGENTS.md`, "Commit
+ * association has no batch API".
  */
 
 /** How one forge spells the rate-limit conversation. */
@@ -64,7 +76,7 @@ export type ForgeHeaderReader = (
   name: string
 ) => string | number | null | undefined;
 
-export type ForgeRetryInput = {
+type ForgeRetryInput = {
   kind: ForgeKind;
   /** The HTTP status, or undefined when the request never got one — a DNS
    *  failure, a dropped socket, a client-side timeout. */
@@ -98,6 +110,17 @@ function numericHeader(
   return Number.isFinite(value) ? value : undefined;
 }
 
+/**
+ * One second, doubling per attempt, inside the ceiling.
+ *
+ * `Math.max` holds the 1-based contract on `attempt`: a caller passing its own
+ * 0-based loop index would otherwise get 500ms, silently, with every test here
+ * still green.
+ */
+function exponentialMs(attempt: number): number {
+  return clampRetryDelayMs(1000 * 2 ** (Math.max(1, attempt) - 1));
+}
+
 /** How long to wait before retrying, or null when a retry cannot help. */
 export function forgeRetryDelayMs({
   kind,
@@ -115,33 +138,42 @@ export function forgeRetryDelayMs({
     return clampRetryDelayMs(retryAfter * 1000);
   }
 
-  // An exhausted window says exactly when it refills. `clampRetryDelayMs`
-  // absorbs both a reset already in the past (a skewed clock) and one far
-  // enough out to strand the refresh.
+  // An exhausted window says exactly when it refills.
   //
   // A window with requests still left is a burst limit rather than a spent
-  // budget, and its reset says nothing about when this call may go again — so
-  // that case falls through. A reset that arrives with NO count beside it
-  // still counts: it is the server naming a time, which beats guessing, and a
-  // proxy forwarding one of the pair is how that happens.
+  // budget, and its reset says nothing about when this call may go again, so
+  // that falls through. A reset with NO count beside it is trusted only on
+  // 429 — the status that means nothing but "rate limited". GitHub stamps a
+  // reset on almost every response, 403s included, so trusting a lone reset
+  // there would park an ordinary permissions error for the whole budget.
   const remaining = numericHeader(header, dialect.remaining);
   const reset = numericHeader(header, dialect.reset);
+  const spent = remaining === 0 || (remaining === undefined && status === 429);
   if (
     status !== undefined &&
     dialect.exhaustedOn.includes(status) &&
     reset !== undefined &&
-    (remaining === undefined || remaining === 0)
+    spent
   ) {
-    return clampRetryDelayMs(reset * 1000 - Date.now());
+    const untilRefill = reset * 1000 - Date.now();
+    // Past the ceiling the window cannot refill inside any budget a caller
+    // would spend, so waiting it out is four guaranteed refusals — GitHub's
+    // hourly GraphQL budget against a 60s ceiling is exactly that shape, and
+    // GitHub warns that requests sent while limited risk a ban. Give up, and
+    // let the next scheduled refresh find the window open.
+    if (untilRefill > RETRY_DELAY_CEILING_MS) return null;
+    // Floored at the exponential wait, never at zero: a reset that reads as
+    // past — a skewed clock, a cached header, a gateway sending the IETF
+    // draft's delta-seconds instead of a Unix time — would otherwise spend the
+    // whole budget in a few milliseconds against a server saying slow down,
+    // which is the storm this file exists to prevent.
+    return Math.max(clampRetryDelayMs(untilRefill), exponentialMs(attempt));
   }
 
   // Transient by nature: a 429 that named no window, any 5xx, or no status at
   // all, which is a request that never reached an answer.
   if (status === undefined || status === 429 || status >= 500) {
-    // `Math.max` holds the 1-based contract above: a caller that passed its own
-    // 0-based loop index would otherwise get 500ms, silently, and every test
-    // here would still pass.
-    return clampRetryDelayMs(1000 * 2 ** (Math.max(1, attempt) - 1));
+    return exponentialMs(attempt);
   }
 
   // 401/403/404/422 and friends — the same request would get the same answer.

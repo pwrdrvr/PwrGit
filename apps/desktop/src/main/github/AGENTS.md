@@ -44,14 +44,11 @@ claims `origin`'s host, the CLI isn't logged in, or the network fails.
     `GraphqlResponseError` — the same class a missing repo arrives as. It has
     no status, and its headers hang off the error itself (`response` there is
     the GraphQL body), so the adapter reads it as the 429 it means.
-  - **Salvage only what actually resolved.** A missing repo or one bad alias
-    still answers every other alias, and that partial data is returned rather
-    than retried. `data: null` is not partial data — it is a rate limit, a SAML
-    block, a refused query — and returning it would map *every* branch in the
-    batch to "no PR" and negative-cache that for the whole refresh TTL.
-    `runQuery` throws instead, which is what makes `PrService` keep what it had
-    (`pr-service.ts` treats a failed refresh as best-effort). The GitLab client
-    draws the same line in its own `graphql()`.
+  - **Check the container, not `data`.** GraphQL nulls the erroring *field*, so
+    a refusal answers `{"data":{"repository":null},"errors":[…]}` — `data` is an
+    object, and salvaging it maps every alias to "no PR". `repositoryResolved`
+    (`pr-query.ts`) is the test both the success and the failure path apply; see
+    "A refusal is not an answer" in `../forge/AGENTS.md` for why.
 - **Cache + bus**: `PrService` upserts `branch_pr` (repo+branch, negative-cached)
   and returns the *changed* branches; `pr:refresh` (TTL-throttled 10 min unless
   `force`) emits a targeted `pr:changed { repoId, prs }` delta the renderer

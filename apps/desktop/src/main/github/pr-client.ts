@@ -4,13 +4,15 @@ import { delay } from "../util/timing";
 import { forgeRetryDelayMs } from "../forge/retry";
 import { forgeOrigin, type ForgeRepo } from "../forge/types";
 import { runGh } from "./gh-cli";
+import { ForgeResponseError } from "../forge/repo-provider";
 import {
   buildCommitPrQuery,
   buildPrQuery,
   buildPrNumberQuery,
   parseCommitPrResponse,
   parsePrNumberResponse,
-  parsePrResponse
+  parsePrResponse,
+  repositoryResolved
 } from "./pr-query";
 async function gh(args: string[]): Promise<string> {
   return runGh(args);
@@ -127,7 +129,15 @@ const MAX_RETRIES = 4;
  * one error shape the backoff would otherwise never see.
  */
 function isGraphqlRateLimit(error: GraphqlResponseError<unknown>): boolean {
-  return error.errors?.some((entry) => entry.type === "RATE_LIMITED") === true;
+  // `errors` is typed as a required array, but it is whatever the server sent:
+  // Octokit throws on any truthy value, so a proxy answering `{"errors":{…}}`
+  // would make `.some` a TypeError raised inside `runQuery`'s catch, replacing
+  // the real failure — the hazard the adapter below is already written against.
+  const { errors } = error;
+  return (
+    Array.isArray(errors) &&
+    errors.some((entry) => entry?.type === "RATE_LIMITED")
+  );
 }
 
 /**
@@ -150,7 +160,12 @@ function retryDelayMs(error: unknown, attempt: number): number | null {
   // not the HTTP one. Reading it as the 429 it means puts the window it names
   // under the same policy as a REST 429 rather than beside it.
   if (error instanceof GraphqlResponseError) {
-    const { headers } = error as GraphqlResponseError<unknown>;
+    // Only a rate limit is worth retrying here, and the check belongs beside
+    // the synthetic status rather than at the one call site that happens to
+    // filter first — a second caller would otherwise turn a SAML refusal into
+    // four retries of an answer that cannot change.
+    if (!isGraphqlRateLimit(error)) return null;
+    const { headers } = error;
     return forgeRetryDelayMs({
       kind: "github",
       status: 429,
@@ -185,24 +200,31 @@ async function runQuery(
   let attempt = 0;
   for (;;) {
     try {
-      return await client(query, variables);
+      const data = await client(query, variables);
+      // A 200 is not automatically an answer. Octokit only throws when the body
+      // carries `errors`, so a captive portal's HTML, a `{"message":…}` body,
+      // or GitHub's secondary rate limit — which it documents as a 200 — all
+      // resolve here as a shape with no repository in it, and the parsers would
+      // read that as "no PR" on every branch.
+      if (!repositoryResolved(data)) {
+        throw new ForgeResponseError(
+          "GitHub answered without the repository this query asked for."
+        );
+      }
+      return data;
     } catch (error) {
-      if (error instanceof GraphqlResponseError) {
-        const failed = error as GraphqlResponseError<unknown>;
-        // A rate limit is the one GraphQL-level error that *does* fix on retry,
-        // and it names the window to wait out in its own headers, so it falls
-        // through to the backoff below.
-        if (!isGraphqlRateLimit(failed)) {
-          const partial = failed.data ?? null;
-          // A missing repo or one bad alias still resolves every other alias;
-          // salvage that, since asking again returns the same answer.
-          if (partial !== null) return partial;
-          // Nothing resolved at all — a SAML block, a query GitHub refused
-          // outright. Returning null here would map *every* branch in the batch
-          // to "no PR" and negative-cache it for the whole refresh TTL, where
-          // throwing lets `PrService` keep what it already had.
-          throw error;
-        }
+      // A rate limit is the one GraphQL-level error that *does* fix on retry,
+      // and it names the window to wait out in its own headers, so it falls
+      // past this to the backoff below.
+      if (error instanceof GraphqlResponseError && !isGraphqlRateLimit(error)) {
+        // One bad alias among fifty still resolves the other forty-nine, and
+        // asking again returns the same answer — so salvage, but only once the
+        // container itself came back. A null repository is a refusal or an
+        // absence, and returning it would map *every* branch in the batch to
+        // "no PR" and negative-cache that for the whole refresh TTL, where
+        // throwing lets `PrService` keep what it already had.
+        if (repositoryResolved(error.data)) return error.data;
+        throw error;
       }
       attempt += 1;
       const wait = retryDelayMs(error, attempt);

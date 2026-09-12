@@ -29,7 +29,7 @@ function httpError(status: number, headers: Record<string, string> = {}): Error 
  * the GraphQL body.
  */
 function graphqlError(
-  errors: { type: string; message?: string }[],
+  errors: { type?: string; message?: string; path?: string[] }[],
   data: unknown = null,
   headers: Record<string, string> = {}
 ): Error {
@@ -158,6 +158,25 @@ describe("GitHub backoff", () => {
     expect(client).toHaveBeenCalledTimes(2);
   });
 
+  it("gives up on an hourly budget instead of retrying inside it", async () => {
+    vi.useFakeTimers();
+    // The real magnitude: GitHub's GraphQL budget resets hourly, and the 60s
+    // ceiling means waiting it out was four guaranteed refusals against a
+    // server that warns it may ban an integration for exactly that.
+    const reset = String(Math.floor((Date.now() + 3_600_000) / 1000));
+    client.mockRejectedValue(
+      graphqlError([{ type: "RATE_LIMITED" }], null, {
+        "x-ratelimit-remaining": "0",
+        "x-ratelimit-reset": reset
+      })
+    );
+
+    await expect(
+      fetchPrsForRepo("t", REPO, "o", "r", ["a"])
+    ).rejects.toBeInstanceOf(GraphqlResponseError);
+    expect(client).toHaveBeenCalledTimes(1);
+  });
+
   it("fails a spent rate limit rather than reporting no PR on every branch", async () => {
     vi.useFakeTimers();
     // The failure that matters: returning null here would map every branch in
@@ -174,27 +193,62 @@ describe("GitHub backoff", () => {
     expect(client).toHaveBeenCalledTimes(5);
   });
 
-  it("fails an error that resolved nothing, rather than caching it as no PR", async () => {
-    // A SAML-protected org, a query GitHub refused outright: there is no
-    // partial data to salvage, and a retry would be answered the same way.
+  it("fails a refusal that nulled the repository, rather than caching it", async () => {
+    // The shape GitHub actually sends, verified against the live API: GraphQL
+    // nulls the erroring *field*, so a SAML block or a revoked scope answers
+    // 200 with `data.repository === null` and the body is NOT null. Salvaging
+    // that maps every branch in the batch to "no PR" — the blanked sidebar this
+    // guard exists to prevent — so the container has to be checked, not `data`.
     client.mockRejectedValue(
-      graphqlError([{ type: "FORBIDDEN", message: "Resource protected by SAML" }])
+      graphqlError(
+        [
+          {
+            type: "FORBIDDEN",
+            message: "Resource protected by organization SAML enforcement",
+            path: ["repository"]
+          }
+        ],
+        { repository: null }
+      )
     );
 
     await expect(
-      fetchPrsForRepo("t", REPO, "o", "r", ["a"])
+      fetchPrsForRepo("t", REPO, "o", "r", ["a", "b"])
     ).rejects.toBeInstanceOf(GraphqlResponseError);
     expect(client).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails a 200 that answered with no repository at all", async () => {
+    // Octokit only throws when the body carries `errors`, so a captive portal's
+    // HTML, a `{"message":…}` body, and GitHub's secondary rate limit — which
+    // it documents as a 200 — all resolve here instead. The parsers would read
+    // any of them as "no PR" on every branch.
+    vi.useFakeTimers();
+    client.mockResolvedValue({ message: "You have exceeded a secondary rate limit" });
+
+    const settled = fetchPrsForRepo("t", REPO, "o", "r", ["a"]).catch(
+      (error: unknown) => error
+    );
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    expect(await settled).toBeInstanceOf(Error);
+    expect((await settled as Error).name).toBe("ForgeResponseError");
   });
 
   it("salvages a GraphQL-level error's partial data instead of retrying", async () => {
     // A missing repo or one bad alias answers 200 with `errors` alongside
     // whatever resolved. That is not backoff's business, and retrying it would
     // send the same query to the same answer four more times.
+    // The genuine partial shape: the repository resolved, one alias did not.
     client.mockRejectedValue(
       graphqlError(
-        [{ type: "NOT_FOUND", message: "Could not resolve to a Repository" }],
-        { repository: { a0: { nodes: [prNode(7)] } } }
+        [
+          {
+            message: "Something went wrong while executing your query.",
+            path: ["repository", "a1"]
+          }
+        ],
+        { repository: { a0: { nodes: [prNode(7)] }, a1: null } }
       )
     );
 

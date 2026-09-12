@@ -72,6 +72,22 @@ export function buildPrQuery(
   return { query, variables };
 }
 
+/**
+ * Did the response actually resolve the repository every alias hangs off?
+ *
+ * GraphQL nulls the erroring *field*, not the document, so a refusal — SAML
+ * enforcement, a revoked scope, an IP allow-list, a spent budget — answers 200
+ * with `{"data":{"repository":null},"errors":[…]}`, exactly as a deleted repo
+ * does. The parsers below cannot tell those apart from "this repo has no pull
+ * requests": both leave every alias null. Ask this first, and treat a null
+ * container as "nothing was learned" rather than as an answer about branches.
+ */
+export function repositoryResolved(data: unknown): boolean {
+  const repository = (data as { repository?: unknown } | null | undefined)
+    ?.repository;
+  return typeof repository === "object" && repository !== null;
+}
+
 /** Map a GraphQL response back to branch → PrSummary (null = no PR found). */
 export function parsePrResponse(
   branches: string[],

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { forgeRetryDelayMs, type ForgeHeaderReader } from "./retry";
 import { RETRY_DELAY_CEILING_MS } from "../util/timing";
 
@@ -16,13 +16,15 @@ function fetched(bag: Record<string, string> = {}): ForgeHeaderReader {
 const NOW = Date.UTC(2026, 0, 1);
 /** A Unix time in seconds, `offsetMs` from the frozen clock. */
 function resetAt(offsetMs: number): string {
-  return String((NOW + offsetMs) / 1000);
+  return String(Math.floor((NOW + offsetMs) / 1000));
 }
 
-function freezeClock(): void {
+beforeEach(() => {
+  // Every reset case reads the clock; freezing the whole file beats nine calls
+  // a reader has to check individually for whether they are load-bearing.
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
-}
+});
 
 afterEach(() => {
   vi.useRealTimers();
@@ -49,7 +51,6 @@ describe("forgeRetryDelayMs", () => {
   });
 
   it("prefers Retry-After over a window that also said when it refills", () => {
-    freezeClock();
     // The server named its own number; a shorter guess only earns another 429.
     // (The clock is frozen because the losing branch would read it.)
     expect(
@@ -86,7 +87,6 @@ describe("forgeRetryDelayMs", () => {
   });
 
   it("waits out an exhausted window until it refills", () => {
-    freezeClock();
     expect(
       forgeRetryDelayMs({
         kind: "gitlab",
@@ -100,10 +100,10 @@ describe("forgeRetryDelayMs", () => {
     ).toBe(30_000);
   });
 
-  it("retries at once when the reset is already in the past", () => {
-    freezeClock();
-    // A skewed clock, or a window that refilled while the response was in
-    // flight: the wait is negative, and waiting a negative time is waiting none.
+  it("falls back to the ladder when the reset reads as already past", () => {
+    // A skewed clock, a cached header, or a gateway sending the IETF draft's
+    // delta-seconds instead of a Unix time. Waiting zero spent the entire
+    // budget in milliseconds against a server saying slow down.
     for (const input of [
       {
         kind: "github" as const,
@@ -122,12 +122,16 @@ describe("forgeRetryDelayMs", () => {
         })
       }
     ]) {
-      expect(forgeRetryDelayMs({ ...input, attempt: 1 })).toBe(0);
+      expect(forgeRetryDelayMs({ ...input, attempt: 1 })).toBe(1_000);
+      expect(forgeRetryDelayMs({ ...input, attempt: 3 })).toBe(4_000);
     }
   });
 
-  it("never strands a refresh behind a far-future reset", () => {
-    freezeClock();
+  it("declines a window that cannot refill inside the retry budget", () => {
+    // GitHub's GraphQL budget resets hourly against a 60s ceiling, so waiting
+    // it out was four guaranteed refusals — and GitHub warns that requests sent
+    // while limited risk a ban. Failing now lets the caller keep its cache and
+    // the next scheduled refresh find the window open.
     expect(
       forgeRetryDelayMs({
         kind: "github",
@@ -135,6 +139,20 @@ describe("forgeRetryDelayMs", () => {
         header: record({
           "x-ratelimit-remaining": "0",
           "x-ratelimit-reset": resetAt(60 * 60_000)
+        }),
+        attempt: 1
+      })
+    ).toBeNull();
+  });
+
+  it("waits a window that refills just inside the ceiling", () => {
+    expect(
+      forgeRetryDelayMs({
+        kind: "github",
+        status: 429,
+        header: record({
+          "x-ratelimit-remaining": "0",
+          "x-ratelimit-reset": resetAt(RETRY_DELAY_CEILING_MS)
         }),
         attempt: 1
       })
@@ -220,7 +238,6 @@ describe("forgeRetryDelayMs", () => {
   });
 
   it("keeps each forge's spelling of the rate-limit headers", () => {
-    freezeClock();
     // GitHub prefixes with `x-`; GitLab borrowed the IETF draft's names (though
     // not that draft's delta-seconds encoding). Read with the wrong dialect, an
     // exhausted window is simply invisible and the call falls back to the
@@ -250,7 +267,6 @@ describe("forgeRetryDelayMs", () => {
   });
 
   it("waits out a spent GitHub budget, which answers 403 as well as 429", () => {
-    freezeClock();
     expect(
       forgeRetryDelayMs({
         kind: "github",
@@ -265,7 +281,6 @@ describe("forgeRetryDelayMs", () => {
   });
 
   it("still refuses a GitLab 403, where forbidden means forbidden", () => {
-    freezeClock();
     // GitLab rate-limits with 429 only, so waiting here would spend the budget
     // to be told the same thing again.
     expect(
@@ -282,7 +297,6 @@ describe("forgeRetryDelayMs", () => {
   });
 
   it("treats a window with requests left as no reason to wait for a reset", () => {
-    freezeClock();
     // 429 with budget remaining is a secondary/burst limit, not the primary
     // window, so its reset says nothing about when this call may go again.
     expect(
@@ -342,8 +356,7 @@ describe("forgeRetryDelayMs", () => {
     ).toBe(1_000);
   });
 
-  it("honours a reset that arrived without a count beside it", () => {
-    freezeClock();
+  it("honours a lone reset on a 429, which means nothing else", () => {
     // One header of the pair is what a proxy forwards. The server still named
     // a time, which beats guessing — and reading the missing count as zero is
     // what the null-coercion trap above used to do for the wrong reason.
@@ -355,6 +368,20 @@ describe("forgeRetryDelayMs", () => {
         attempt: 1
       })
     ).toBe(30_000);
+  });
+
+  it("does not trust a lone reset on a 403, which means many things", () => {
+    // GitHub stamps a reset on almost every response, permission errors
+    // included, so a proxy that forwards the reset but drops the count would
+    // otherwise park an ordinary 403 for the whole retry budget.
+    expect(
+      forgeRetryDelayMs({
+        kind: "github",
+        status: 403,
+        header: record({ "x-ratelimit-reset": resetAt(30_000) }),
+        attempt: 1
+      })
+    ).toBeNull();
   });
 
   it("does not wait on an ordinary GitHub 403 that named no window", () => {
@@ -377,6 +404,24 @@ describe("forgeRetryDelayMs", () => {
         attempt: 1
       })
     ).toBeNull();
+  });
+
+  it("ignores an unparseable reset rather than computing a wait from NaN", () => {
+    // `clampRetryDelayMs(NaN)` is NaN, and `setTimeout(NaN)` fires on the next
+    // tick — so without the finite check this is a no-wait retry storm, not a
+    // long wait. The Retry-After cases above cannot catch this: `NaN > 0` is
+    // already false there, so they never reach the clamp.
+    expect(
+      forgeRetryDelayMs({
+        kind: "github",
+        status: 429,
+        header: record({
+          "x-ratelimit-remaining": "0",
+          "x-ratelimit-reset": "soon"
+        }),
+        attempt: 1
+      })
+    ).toBe(1_000);
   });
 
   it("holds the 1-based attempt contract against a 0-based caller", () => {

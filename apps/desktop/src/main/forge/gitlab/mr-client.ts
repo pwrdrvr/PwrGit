@@ -3,6 +3,7 @@ import { mapLimit } from "../../util/map-limit";
 import { delay } from "../../util/timing";
 import { forgeRetryDelayMs } from "../retry";
 import type { ForgeRepo } from "../types";
+import { ForgeResponseError } from "../repo-provider";
 import { forgeOrigin, withNullsForMissing } from "../types";
 import {
   buildMrBranchQuery,
@@ -119,7 +120,9 @@ async function graphql(
   // reporting that as an empty page would negative-cache every branch in the
   // batch as "no MR". `PrService` keeps what it had cached when this throws.
   if (data === null) {
-    throw new Error("GitLab returned no data for this query.");
+    throw new ForgeResponseError(
+      "GitLab answered without the data this query asked for."
+    );
   }
   return data;
 }
