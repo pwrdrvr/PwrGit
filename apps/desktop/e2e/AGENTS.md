@@ -70,6 +70,27 @@ the Electron build.
   config's `retries: 1` exists to absorb exactly this, so reproduce with
   `--retries=0` only on a quiet machine.
 
+- **A test that depends on where the pointer is left resting must take the
+  window off the real mouse first** — a third way to lose it, distinct from
+  both above: the hover state is neither stale nor empty, it has moved to
+  whatever sits under the *developer's own cursor*. The fix is
+  `setIgnoreMouseEvents(true)` through `app.evaluate`, as
+  `remote-activity.spec.ts`'s `ownThePointer` does.
+  Playwright's pointer is injected over CDP and never moves the host's cursor,
+  so the two coexist until Chromium recomputes hover after a layout change and
+  dispatches a synthetic "fake mouse move" at the position its input pipeline
+  last saw from the OS — i.e. wherever the developer's actual cursor is
+  sitting. That evicts the synthetic pointer from the control it was parked on:
+  `:hover` genuinely goes false and the feature correctly reacts to a pointer
+  that left. It cost about one run in four, with the window and the real cursor
+  in byte-identical positions every launch, so only the timing of the fake move
+  varies and **no amount of waiting fixes it** — an earlier attempt to settle
+  the window first looked clean over sixteen runs and then failed three in four.
+  `setIgnoreMouseEvents` stops the OS delivering mouse input to the window;
+  CDP injection is unaffected, so a fake move can only re-dispatch where
+  Playwright already is. Ordinary click-and-assert specs are unaffected; this
+  is for a test that reads hover state across a timer.
+
 - Specs run as **ESM** — use `import.meta.url` + `fileURLToPath`, not
   `__dirname`.
 - Confirms/alerts are **in-app** dialogs (not native), so drive them by clicking

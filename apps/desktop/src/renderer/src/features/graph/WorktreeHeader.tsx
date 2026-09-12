@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import type {
   PwrGitError,
   RemoteDivergence,
@@ -76,15 +76,25 @@ type Busy = "fetch" | "pull" | "push" | null;
 /**
  * Hover/focus handlers shared by the sync chip and the action buttons.
  *
- * Structural rather than `ComponentProps<"button">` so one factory serves a
- * `<span>` and a `<button>`; `currentTarget` is all the popover needs to
- * anchor itself.
+ * Structural rather than `ComponentProps<"button">`, and `currentTarget` is
+ * all the popover needs to anchor itself. The chip builds the same shape
+ * inline: it is not focusable and cannot be tabbed out of, so it takes only
+ * the pointer half, and `ref` here is typed for the buttons this factory
+ * actually spreads onto.
  */
 type StatusTriggerProps = {
+  /** Only ever on the one busy button, so one ref serves all three: it is how
+   * the popover finds the button when no event announces it. */
+  ref?: RefObject<HTMLButtonElement | null>;
   onMouseEnter?: (event: { currentTarget: HTMLElement }) => void;
   onMouseLeave?: () => void;
   onFocus?: (event: { currentTarget: HTMLElement }) => void;
   onBlur?: () => void;
+  onKeyDown?: (event: {
+    key: string;
+    shiftKey: boolean;
+    preventDefault: () => void;
+  }) => void;
 };
 type RecoveryBusy = "rebase" | "reset" | null;
 
@@ -106,6 +116,8 @@ export function WorktreeHeader({
   const pullOperation = useRef(0);
   const recoveryInFlight = useRef<string | null>(null);
   const recoveryOperation = useRef(0);
+  const cardButton = useRef<HTMLButtonElement>(null);
+  const cardChip = useRef<HTMLSpanElement>(null);
 
   // Header instances stay mounted while selection changes, so an operation
   // started for one worktree must never surface a dialog or flash on another.
@@ -124,7 +136,11 @@ export function WorktreeHeader({
   // this checkout: an operation started in another repository never reports
   // itself here (it surfaces in the toast instead).
   const activity = useRemoteActivityFor(worktree.id);
-  const status = useRemoteActivityPopover(activity);
+  // The two controls the card hangs from. An operation can start under a
+  // pointer that never moves — pressing Fetch is the plain case — and then no
+  // enter event announces the trigger, so the popover reads these instead.
+  // Button first: it is the thing the user aimed at.
+  const status = useRemoteActivityPopover(activity, [cardButton, cardChip]);
 
   const showFlash = (chip: Chip, ms: number): void => {
     setFlash(chip);
@@ -344,10 +360,21 @@ export function WorktreeHeader({
     !couldCarryCard(kind)
       ? {}
       : {
+          ref: cardButton,
           onMouseEnter: (event) => status.open(event.currentTarget),
           onMouseLeave: status.close,
           onFocus: (event) => status.open(event.currentTarget),
-          onBlur: status.close
+          onBlur: status.close,
+          // The pointer reaches Cancel by moving into the card; Tab is the
+          // keyboard's equivalent, the same handoff `GraphRow` makes into the
+          // commit context card. Without it Tab lands on Pull, blurs the
+          // trigger, and takes the card away — leaving the one control that
+          // stops a wedged fetch reachable by mouse only.
+          onKeyDown: (event) => {
+            if (event.key === "Tab" && !event.shiftKey && status.focusFirst()) {
+              event.preventDefault();
+            }
+          }
         };
   /**
    * A native tooltip everywhere the status card is NOT coming — the two must
@@ -404,6 +431,7 @@ export function WorktreeHeader({
           </span>
         )}
         <span
+          ref={cardChip}
           className={`sync-chip sync-chip--${chip.tone}${
             running !== null ? " sync-chip--progress" : ""
           }`}

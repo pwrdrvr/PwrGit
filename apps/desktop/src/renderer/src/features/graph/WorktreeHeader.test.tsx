@@ -2,7 +2,15 @@
 
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi
+} from "vitest";
 import {
   err,
   ok,
@@ -32,6 +40,7 @@ vi.mock("../../lib/toast", () => ({
 }));
 vi.mock("../shell/WorktreeMenu", () => ({ WorktreeMenu: () => null }));
 
+import { WHERE_THE_USER_IS } from "../remote/useRemoteActivityPopover";
 import { WorktreeHeader } from "./WorktreeHeader";
 
 const repo = { id: "repo-1", name: "project", path: "/repos/project" };
@@ -71,6 +80,39 @@ const idle: RemoteActivity = {
   tail: [],
   canceling: false
 };
+
+/**
+ * Park the user — pointer or focus ring — on one element for the length of a
+ * test.
+ *
+ * jsdom does track `:hover`, but only as bookkeeping on a dispatched
+ * `mouseover` — and dispatching one is precisely what these tests must not do,
+ * since React would turn it into the `onMouseEnter` whose absence is the whole
+ * subject. (It also answers `:focus-visible` for anything merely focused,
+ * which Chromium does not.) Answering the query directly is the only way to
+ * say "the user is here, and nothing told the popover so".
+ *
+ * That covers the wiring — which controls carry the ref, the age gate, the Tab
+ * handoff — and is deliberately blind to which half of the query a real
+ * browser would have set. That half is a browser fact, checked in
+ * `e2e/remote-activity.spec.ts`.
+ */
+function userIsOn(selector: string): void {
+  const real = Element.prototype.matches;
+  function hovering(this: Element, query: string): boolean {
+    return real.call(this, query === WHERE_THE_USER_IS ? selector : query);
+  }
+  // `matches` is typed as a stack of `this is HTMLElementTagNameMap[K]`
+  // predicates; a stub that answers one extra selector cannot narrow anything,
+  // so it is cast back onto the shape it replaces.
+  Element.prototype.matches = hovering as typeof Element.prototype.matches;
+  onTestFinished(() => {
+    Element.prototype.matches = real;
+  });
+}
+
+/** Old enough that the popover's age gate is already satisfied. */
+const WEDGED_SINCE = 60_000;
 
 let container: HTMLDivElement;
 let root: Root;
@@ -342,8 +384,17 @@ describe("WorktreeHeader pull progress", () => {
     // dropped its handlers, so the exit arrives as a bare DOM event and
     // nothing else. Missing it would leave the trigger remembered forever, and
     // the NEXT operation would throw a card at a pointer that is elsewhere.
+    //
+    // Both halves of the exit, as a browser sends them: `mouseleave` is what
+    // `restOn`'s own listener hears, and `mouseout` is what clears jsdom's
+    // `:hover` bookkeeping. Sending only the first leaves jsdom insisting the
+    // pointer is still on the button, which contradicts the premise and hands
+    // the DOM query a trigger the test has just said was abandoned.
     await emitActivities([]);
     await act(async () => {
+      busy?.dispatchEvent(
+        new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body })
+      );
       busy?.dispatchEvent(new MouseEvent("mouseleave"));
     });
 
@@ -450,6 +501,120 @@ describe("WorktreeHeader pull progress", () => {
         .querySelector<HTMLButtonElement>('button[aria-busy="true"]')
         ?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
     });
+
+    expect(document.querySelector(".remote-activity-popover")).toBeNull();
+  });
+
+  // The gap this closes: Pull swaps its glyph for the spinner, so Chromium
+  // re-resolves hover and React reports a `mouseenter` under a pointer that
+  // never moved. Fetch keeps drawing the same <RefreshGlyph/>, so that
+  // accident never happens and the click is followed by no boundary event at
+  // all — the card waited to be told about a pointer already resting on its
+  // trigger.
+  it("opens the card for an operation that starts under a pointer that never moved", async () => {
+    userIsOn('button[aria-busy="true"]');
+    const fetch = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Fetch"]'
+    );
+    await act(async () => fetch?.click());
+    await emitActivities([
+      {
+        kind: "fetch",
+        startedAt: Date.now() - WEDGED_SINCE,
+        command: "git fetch --prune --progress"
+      }
+    ]);
+
+    // Deliberately no synthesized mouseover or focus: the point is that none
+    // is coming.
+    const card = document.querySelector(".remote-activity-popover");
+    expect(card).not.toBeNull();
+    expect(card?.textContent).toContain("git fetch --prune --progress");
+  });
+
+  it("opens it from the progress chip the same way", async () => {
+    userIsOn(".sync-chip--progress");
+    const fetch = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Fetch"]'
+    );
+    await act(async () => fetch?.click());
+    await emitActivities([
+      { kind: "fetch", startedAt: Date.now() - WEDGED_SINCE }
+    ]);
+
+    expect(document.querySelector(".remote-activity-popover")).not.toBeNull();
+  });
+
+  // The card carries Cancel, and the pointer's route into it — just move — has
+  // no keyboard equivalent. Without this handoff Tab lands on Pull, blurs the
+  // trigger and takes the card with it, so the one control that stops a wedged
+  // fetch would be mouse-only. Same handoff GraphRow makes into its commit
+  // context card.
+  it("hands Tab from the working button into the card, not past it", async () => {
+    userIsOn('button[aria-busy="true"]');
+    const fetch = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Fetch"]'
+    );
+    await act(async () => fetch?.click());
+    await emitActivities([
+      { kind: "fetch", startedAt: Date.now() - WEDGED_SINCE }
+    ]);
+    expect(document.querySelector(".remote-activity-popover")).not.toBeNull();
+
+    const busy = container.querySelector<HTMLButtonElement>(
+      'button[aria-busy="true"]'
+    );
+    const tab = new KeyboardEvent("keydown", {
+      key: "Tab",
+      bubbles: true,
+      cancelable: true
+    });
+    await act(async () => {
+      busy?.dispatchEvent(tab);
+    });
+
+    expect(document.activeElement?.textContent).toBe("Cancel");
+    // Swallowed, or the browser moves focus on to Pull straight afterwards.
+    expect(tab.defaultPrevented).toBe(true);
+  });
+
+  // Shift+Tab is the way back out, and the card is not where it leads.
+  it("leaves Shift+Tab on the working button alone", async () => {
+    userIsOn('button[aria-busy="true"]');
+    const fetch = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Fetch"]'
+    );
+    await act(async () => fetch?.click());
+    await emitActivities([
+      { kind: "fetch", startedAt: Date.now() - WEDGED_SINCE }
+    ]);
+
+    const back = new KeyboardEvent("keydown", {
+      key: "Tab",
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true
+    });
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-busy="true"]')
+        ?.dispatchEvent(back);
+    });
+
+    expect(back.defaultPrevented).toBe(false);
+    expect(document.activeElement?.textContent).not.toBe("Cancel");
+  });
+
+  // Reading where the user is is a second way in, not a second policy:
+  // the wait measured from `startedAt` is what keeps an ordinary one-second
+  // fetch from throwing a card over the graph and taking it away again.
+  it("still keeps the card off a fetch too young to have been asked about", async () => {
+    userIsOn('button[aria-busy="true"]');
+    const fetch = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Fetch"]'
+    );
+    await act(async () => fetch?.click());
+    await emitActivities([{ kind: "fetch", startedAt: Date.now() }]);
 
     expect(document.querySelector(".remote-activity-popover")).toBeNull();
   });
