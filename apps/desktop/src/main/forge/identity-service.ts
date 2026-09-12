@@ -350,6 +350,20 @@ export class IdentityService {
     };
   }
 
+  /**
+   * Forget every "do not ask again before" stamp.
+   *
+   * The stamps encode an answer the gate gave, so anything that can change the
+   * gate's answer — host enumeration landing, or a forge setting being written
+   * — has to clear them or a repo sits out its backoff for a decision that no
+   * longer applies. Deliberately not a `force` refresh: the six-hour TTL on
+   * rows that DID resolve is still right, and re-reading every repository on
+   * every settings write is the cost this whole gate exists to avoid.
+   */
+  clearRetryBackoff(): void {
+    this.retryAfter.clear();
+  }
+
   /** Drop stored identities for repositories that no longer exist. The FK
    *  cascade covers deletes through `repos`; this covers a direct call. */
   forget(repoId: string): void {

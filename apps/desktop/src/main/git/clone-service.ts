@@ -812,7 +812,11 @@ export class CloneService {
       );
       return checked.ok ? ok(true) : checked;
     }
-    const provider = this.forges.get(source.host);
+    // Keyed by hostname as well as kind: `source.hostname` is right here and
+    // used below for the ssh/https URLs, and picking the provider by kind
+    // alone ran `gh`/`glab repo clone` against the SaaS instance for a
+    // self-managed remote — cloning a same-named stranger's repository.
+    const provider = this.forges.get(source.host, source.hostname);
 
     if (source.protocol === "cli") {
       if (provider === null) {

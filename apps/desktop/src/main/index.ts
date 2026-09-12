@@ -487,6 +487,40 @@ if (!gotSingleInstanceLock) {
       forges,
       (hostname) => forgeHosts.isEnabled(hostname)
     );
+    /**
+     * Re-ask for identities whose answer the gate may have just changed.
+     *
+     * The gate reads host enumeration and the forge settings, and both land
+     * AFTER the profile-load refresh has already run: enumeration is two
+     * subprocesses primed at boot, and a switch is flipped whenever the user
+     * opens Settings. Without this, a self-managed host that was still
+     * unknown when the window mounted stays unmarked until a profile switch
+     * or a fetch, and turning a host back on repaints nothing at all — the
+     * sidebar glyph is the only manual trigger, and it does not render for a
+     * repository that never got a row.
+     */
+    const refreshIdentitiesAfterGateChange = (): void => {
+      const profileId = profiles.getActiveId();
+      if (profileId === null) return;
+      const repos = indexer.listRepos(profileId);
+      if (repos.length === 0) return;
+      identityService.clearRetryBackoff();
+      void identityService
+        .refresh(repos)
+        .then((changed) => {
+          if (changed.length > 0) {
+            emitEvent("repo:identityChanged", { profileId, identities: changed });
+          }
+        })
+        .catch((cause: unknown) => {
+          logMain("debug", "forge", "identity refresh after gate change failed:", cause);
+        });
+    };
+    // Enumeration decides the gate's answer for every non-SaaS host, so the
+    // lookups that raced it at boot have to be redone once it lands. Chained
+    // off the same primed promise the status re-probe uses rather than a
+    // second `refresh()` call, which would spawn both CLIs again.
+    void forgeDirectoryPrimed.then(refreshIdentitiesAfterGateChange, () => undefined);
     const cloneService = new CloneService(
       db,
       execGit,
@@ -766,6 +800,9 @@ if (!gotSingleInstanceLock) {
         // A host switch is an input to the probe; a theme toggle is not. The
         // signature tells them apart.
         reprobeForgesIfTargetsMoved();
+        // Turning a host back on has to repaint its marks. Cheap when nothing
+        // forge-related changed: the TTL still suppresses fresh rows.
+        refreshIdentitiesAfterGateChange();
       }
     });
     registerLocalAgentHandlers(bus, mcpPolicy, () => {

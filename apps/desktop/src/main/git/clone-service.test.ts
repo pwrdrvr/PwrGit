@@ -1056,6 +1056,66 @@ describe("CloneService", () => {
     );
   });
 
+  it("points a CLI clone at the remote's own instance, not the SaaS one", async () => {
+    const root = temporaryRoot();
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "Personal",
+      email: "test@pwrgit.com",
+      roots: [root]
+    });
+    const indexedRepo = {
+      id: "self-managed-repo",
+      name: "app",
+      path: join(root, "app"),
+      profileId: profile.id,
+      pinned: false,
+      worktrees: []
+    };
+    const indexer = {
+      listRepos: vi.fn(() => []),
+      indexRepoAt: vi.fn(async () => ok(indexedRepo))
+    } as unknown as RepoIndexer;
+    // Registered with a factory, as index.ts does — without one the registry
+    // cannot reach a self-managed host at all.
+    // Params spelled out: an inferred zero-arg spy makes `calls[0][1]` a
+    // type error and the env assertion unwritable.
+    const glab = vi.fn(async (_args: string[], _options?: unknown) => "");
+    const registry = new ForgeRepoRegistry();
+    registry.register(new GitHubRepoProvider(fakeGh()));
+    registry.register(
+      new GitLabRepoProvider(glab),
+      (hostname) => new GitLabRepoProvider(glab, hostname)
+    );
+    const service = new CloneService(
+      db,
+      systemGit,
+      indexer,
+      profiles,
+      registry,
+      fakeForgeStatus()
+    );
+
+    await service.clone({
+      profileId: profile.id,
+      nameWithOwner: "group/app",
+      protocol: "cli",
+      parentPath: root,
+      host: "gitlab",
+      hostname: "gitlab.corp.example"
+    });
+
+    // Picking the provider by kind alone cloned a same-named STRANGER's
+    // project from gitlab.com. `glab repo clone` takes no --hostname, so
+    // GITLAB_HOST is what proves the instance was carried through.
+    expect(glab).toHaveBeenCalledTimes(1);
+    expect(glab.mock.calls[0]?.[1]).toMatchObject({
+      env: expect.objectContaining({ GITLAB_HOST: "gitlab.corp.example" })
+    });
+    db.close();
+  });
+
   it("returns direct clone failures without progress records", async () => {
     const root = temporaryRoot();
     const db = openDatabase(":memory:");

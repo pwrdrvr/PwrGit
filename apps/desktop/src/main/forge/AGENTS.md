@@ -306,6 +306,12 @@ provider or reach a real forge.
   - **A repo whose stored row names a switched-off host is filtered out before
     `readOrigin`**, so it costs no subprocess at all. Only a repo with no row
     yet pays one `git remote` read, then backs off.
+  - **Anything that can change the gate's answer must call
+    `clearRetryBackoff()` and re-refresh** — `refreshIdentitiesAfterGateChange`
+    in `index.ts` does, on the boot enumeration landing and on every settings
+    write. Both land AFTER the profile-load refresh has already run, and
+    nothing else would ask again: the sidebar glyph is the only manual trigger
+    and it does not render for a repository that never got a row.
 - **Switching a host off stops the asking; it does not clear what was asked.**
   The stored `repo_identity` row stays and keeps rendering, and the refresh
   reports `host_disabled` carrying it. Deleting would collapse *asked, and it
@@ -319,10 +325,12 @@ provider or reach a real forge.
 - **Clone and fork are the deliberate exception.** `CloneService`/`ForkService`
   call `this.forges.get(host)` with no `enabled` check: the user opened a dialog
   and named that forge, where every gated caller is unprompted background work.
-  Note the second half of the old rationale was wrong — `runClone` *does* carry
-  `source.hostname` and uses it for the clone URL, then picks the provider by
-  kind alone, so a self-managed CLI clone runs against the SaaS instance. That
-  is a real bug to fix, not a reason. Because the exception exists, the Hosts
+  The rationale holds for fork, which never sees a hostname — but `runClone`
+  did carry `source.hostname` and used it for the clone URL while picking the
+  provider by kind alone, so a self-managed CLI clone ran against the SaaS
+  instance and cloned a same-named stranger's project. That one is fixed;
+  keying by hostname wherever a caller HAS one is not optional. Because the
+  exception exists, the Hosts
   pane says so in its section description, where every row sees it —
   `sourceNote` is skipped entirely for hand-added rows and its off branch never
   runs for env-controlled ones. The off text also stops short of "runs no

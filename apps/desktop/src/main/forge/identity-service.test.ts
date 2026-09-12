@@ -466,6 +466,37 @@ describe("IdentityService", () => {
     );
   });
 
+  it("re-asks once the gate changes, without forcing a full re-read", async () => {
+    // The backoff caches an answer the gate gave. Host enumeration landing, or
+    // a switch being flipped, changes that answer — and nothing else would
+    // ever ask again: a repo gated before it had a row renders no glyph, and
+    // the glyph is the only manual refresh.
+    const gh = vi.fn(okGh({ full_name: "huntharo/react", visibility: "private" }));
+    let gate: ForgeHostGate = () => ({ enabled: false, source: "config" });
+    const { identities, indexer, profileId } = await fixture(gh, {
+      gate: (hostname) => gate(hostname)
+    });
+    const repos = indexer.listRepos(profileId);
+    await identities.refresh(repos);
+    expect(calledApi(gh)).toBe(false);
+
+    // Switched back on: without clearing the stamp the repo sits out its
+    // backoff for a decision that no longer applies.
+    gate = () => ({ enabled: true, source: "config" });
+    expect(await identities.refresh(repos)).toEqual([]);
+    expect(calledApi(gh)).toBe(false);
+
+    identities.clearRetryBackoff();
+    const changed = await identities.refresh(repos);
+    expect(changed[0]?.identity.visibility).toBe("private");
+
+    // And it is not a `force`: the row it just wrote is fresh, so the next
+    // pass still costs nothing.
+    gh.mockClear();
+    expect(await identities.refresh(repos)).toEqual([]);
+    expect(calledApi(gh)).toBe(false);
+  });
+
   it("follows ForgeHosts rather than the gitlab.* hostname rule", async () => {
     // `parseForgeRemote` still reads any `gitlab.*` name as GitLab, while
     // `ForgeHosts` refuses to guess a forge from a name — so this instance has
