@@ -249,8 +249,15 @@ export function registerSettingsHandlers(
     if (sanitized.forgeHosts !== undefined) {
       const hosts = { ...(stored.forges?.hosts ?? {}) };
       for (const [host, config] of Object.entries(sanitized.forgeHosts)) {
-        if (config === null) delete hosts[host];
-        else hosts[host] = config;
+        if (config === null) {
+          delete hosts[host];
+          continue;
+        }
+        // Merge into the stored entry, never replace it. The pane sends one
+        // field at a time — a toggle sends only `enabled` — so a wholesale
+        // write would erase the `kind` that makes a hand-added host resolve
+        // at all, and the row would vanish with no way to bring it back.
+        hosts[host] = { ...hosts[host], ...config };
       }
       next.forges = { hosts };
     }

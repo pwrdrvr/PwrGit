@@ -372,7 +372,13 @@ if (!gotSingleInstanceLock) {
     // Which forge hosts exist, and whether we may read them. Enumeration costs
     // two subprocesses, so the directory caches and the resolvers below read it
     // synchronously — a PR refresh must never wait on `gh auth status`.
-    const forgeHostDirectory = new ForgeHostDirectory();
+    // Under the E2E forge fixture the registry and status service are stubbed;
+    // enumerating for real would spawn the developer's own `gh`/`glab` and put
+    // their actual Enterprise hostnames and account names on a screen the
+    // fixture exists to keep contrived.
+    const forgeHostDirectory = new ForgeHostDirectory(
+      fixtureServices === null ? {} : { discover: async () => [] }
+    );
     const forgeHosts = new ForgeHosts({
       readSettings: () => settings.get().forges ?? { hosts: {} },
       discovered: () => forgeHostDirectory.current()
@@ -401,9 +407,13 @@ if (!gotSingleInstanceLock) {
       return forgeHosts.isEnabled(repo.host).enabled ? repo : null;
     };
     // Re-read when availability changes — signing in to an Enterprise host from
-    // a terminal should start resolving it without a restart.
+    // a terminal should start resolving it without a restart. NOT forced: the
+    // first probe of a session always reports "changed", and a forced refresh
+    // there would re-spawn both CLIs seconds after the boot priming above for
+    // data that has not moved. The TTL is what makes this cheap; the pane's
+    // own Re-check is the forced path.
     forgeStatus.onChange(() => {
-      void forgeHostDirectory.refresh({ force: true });
+      void forgeHostDirectory.refresh();
     });
     const identityService = new IdentityService(db, execGit, forges);
     const cloneService = new CloneService(

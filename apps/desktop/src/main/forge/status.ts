@@ -18,10 +18,22 @@ export type ForgeProbe = {
   loggedIn(): Promise<boolean>;
 };
 
+/** The binary each forge speaks through. One source: this value reaches the
+ *  user as a command they are told to run, so a second copy that drifts would
+ *  print a command naming a CLI the app never invokes. */
+export const FORGE_CLI: Readonly<Record<ForgeKind, string>> = {
+  github: "gh",
+  gitlab: "glab"
+};
+
+export function cliFor(kind: ForgeKind): string {
+  return FORGE_CLI[kind];
+}
+
 const DEFAULT_PROBES: ForgeProbe[] = [
   {
     kind: "github",
-    cli: "gh",
+    cli: FORGE_CLI.github,
     installed: async () => {
       await runGh(["--version"]);
       return true;
@@ -30,7 +42,7 @@ const DEFAULT_PROBES: ForgeProbe[] = [
   },
   {
     kind: "gitlab",
-    cli: "glab",
+    cli: FORGE_CLI.gitlab,
     installed: async () => {
       await runGlab(["--version"]);
       return true;

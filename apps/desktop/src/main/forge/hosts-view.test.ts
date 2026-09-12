@@ -38,7 +38,8 @@ describe("ForgeHostsView.rows", () => {
     const rows = view([], { "git.contoso.dev": { kind: "gitlab" } }).rows();
     expect(rows[0]?.cli).toBe("glab");
     expect(rows[0]?.origin).toBe("config");
-    expect(rows[0]?.enabled).toBe(false);
+    // On by default: a known forge is readable unless somebody turned it off.
+    expect(rows[0]?.enabled).toBe(true);
   });
 
   it("reports an explicit off as a config decision, not a derived one", () => {

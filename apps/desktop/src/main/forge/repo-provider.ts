@@ -137,10 +137,12 @@ export class ForgeRepoRegistry {
     const cached = this.byHost.get(key);
     if (cached !== undefined) return cached;
     const factory = this.factories.get(host);
-    // No factory means this forge cannot be pointed at another host; the
-    // default is still better than nothing for its own hostname.
+    // No factory means this forge cannot be pointed at another host. Return
+    // the default only when it IS that host; otherwise null, so the caller
+    // reports `unsupported_host` instead of silently querying the SaaS
+    // instance for a self-managed project.
     if (factory === undefined) {
-      return fallback?.hostname === hostname ? fallback : fallback;
+      return fallback?.hostname === hostname ? fallback : null;
     }
     const built = factory(hostname);
     this.byHost.set(key, built);

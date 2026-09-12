@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ForgeHostRow } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { copyText } from "../../lib/copyText";
+import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { SettingsField, SettingsSection } from "./SettingsLayout";
 import { SettingsSwitch } from "./SettingsSwitch";
 
@@ -30,15 +31,24 @@ export function ForgeHostsSection(props: { saving: boolean }) {
 
   const read = useCallback(async (refresh: boolean): Promise<void> => {
     setBusy(true);
-    const result = await dispatch("forge:hosts", refresh ? { refresh } : {});
-    if (!mounted.current) return;
-    if (result.ok) {
-      setHosts(result.value.hosts);
-      setError(undefined);
-    } else {
-      setError(result.error.message);
+    try {
+      const result = await dispatch("forge:hosts", refresh ? { refresh } : {});
+      if (!mounted.current) return;
+      if (result.ok) {
+        setHosts(result.value.hosts);
+        setError(undefined);
+      } else {
+        setError(result.error.message);
+      }
+    } catch (cause) {
+      // Without this the rejection escapes past `setBusy(false)` and every
+      // control stays disabled on "Checking…" forever, with nothing shown.
+      if (mounted.current) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      }
+    } finally {
+      if (mounted.current) setBusy(false);
     }
-    setBusy(false);
   }, []);
 
   useEffect(() => {
@@ -50,21 +60,26 @@ export function ForgeHostsSection(props: { saving: boolean }) {
   }, [read]);
 
   const toggle = async (row: ForgeHostRow, next: boolean): Promise<void> => {
-    // `null` clears the entry rather than writing today's derived value back,
-    // so a host returns to following its sign-in state.
-    const patch =
-      row.enabledSource === "config" && next === !row.enabled
-        ? { [row.host]: null }
-        : { [row.host]: { enabled: next } };
-    const result = await dispatch("settings:update", {
-      patch: { forgeHosts: patch }
-    });
-    if (!mounted.current) return;
-    if (!result.ok) {
-      setError(result.error.message);
-      return;
+    // Always write the value the user asked for. An earlier version cleared
+    // the entry instead, on the theory that clearing returns the host to its
+    // derived default — but the derived default can BE the value they are
+    // trying to leave, in which case the switch silently snapped back and the
+    // host could not be turned off at all.
+    try {
+      const result = await dispatch("settings:update", {
+        patch: { forgeHosts: { [row.host]: { enabled: next } } }
+      });
+      if (!mounted.current) return;
+      if (!result.ok) {
+        setError(result.error.message);
+        return;
+      }
+      await read(false);
+    } catch (cause) {
+      if (mounted.current) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      }
     }
-    await read(false);
   };
 
   const connected = hosts?.filter((row) => row.enabled).length;
@@ -107,9 +122,15 @@ export function ForgeHostsSection(props: { saving: boolean }) {
             control={
               <SettingsSwitch
                 checked={row.enabled}
-                disabled={props.saving || busy}
+                // In-flight is aria-disabled, never disabled: Chromium blurs a
+                // disabled element, throwing keyboard focus to <body> for the
+                // length of the operation. The handler is guarded instead.
+                busy={props.saving || busy}
                 label={`Read ${KIND_LABEL[row.kind]} status from ${row.host}`}
-                onChange={(next) => void toggle(row, next)}
+                onChange={(next) => {
+                  if (props.saving || busy) return;
+                  void toggle(row, next);
+                }}
               />
             }
             help={
@@ -142,11 +163,16 @@ export function ForgeHostsSection(props: { saving: boolean }) {
         sub="Ask both CLIs again — after signing in from a terminal."
         control={
           <button
+            aria-busy={busy}
+            aria-disabled={busy}
             className="settings-button"
-            disabled={busy}
             type="button"
-            onClick={() => void read(true)}
+            onClick={() => {
+              if (busy) return;
+              void read(true);
+            }}
           >
+            <RefreshGlyph />
             {busy ? "Checking…" : "Re-check"}
           </button>
         }
@@ -176,6 +202,10 @@ function sourceNote(row: ForgeHostRow): string {
       ? "On because you turned it on."
       : "Off. PwrGit runs no command and mints no token for this host.";
   }
-  const scopes = row.scopes === undefined ? "" : ` · scopes: ${row.scopes.join(", ")}`;
-  return `On because ${row.cli} is signed in here${scopes}`;
+  // `auto` means nobody has decided — a known forge is on by default. It does
+  // NOT mean "on because a CLI is signed in"; permission deliberately does not
+  // depend on enumeration having succeeded.
+  const scopes =
+    row.scopes === undefined ? "" : ` · scopes: ${row.scopes.join(", ")}`;
+  return `On by default${scopes}`;
 }

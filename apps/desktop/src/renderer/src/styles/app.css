@@ -9297,32 +9297,23 @@ body.is-col-resizing {
   color: var(--text-muted);
 }
 
-/* Small inline actions inside a settings field's help text. */
-.settings-inline-button,
-.settings-button {
+/* Small inline action inside a settings field's help text. `.settings-button`
+   is NOT redefined here — it already exists below, with its --primary and
+   --danger variants; a second block at equal specificity would lose every
+   conflict to it and read as load-bearing while being inert. */
+.settings-inline-button {
   appearance: none;
   border: 1px solid var(--border-default);
   background: var(--bg-panel-elevated);
   color: var(--text-primary);
   border-radius: var(--radius-sm);
   cursor: pointer;
-}
-.settings-inline-button {
   font: 600 10px/1 var(--font-sans);
   padding: 3px 6px;
   vertical-align: baseline;
 }
-.settings-button {
-  font: 550 11.5px/1 var(--font-sans);
-  padding: 7px 12px;
-}
-.settings-inline-button:hover,
-.settings-button:hover {
+.settings-inline-button:hover {
   background: var(--bg-panel-hover);
-}
-.settings-button:disabled {
-  opacity: 0.6;
-  cursor: default;
 }
 
 /* Switch */

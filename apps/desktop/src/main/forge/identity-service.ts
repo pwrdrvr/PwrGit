@@ -230,7 +230,11 @@ export class IdentityService {
     };
     const origin = await this.remoteSlots.run(() => readOrigin(this.git, repo));
     if (origin === null || origin.host === "other") return unavailable;
-    const provider = this.forges.get(origin.host);
+    // `origin.hostname` is right here and used below — dropping it read this
+    // repo's identity off github.com/gitlab.com instead of its own instance,
+    // which for a same-named SaaS slug reports a STRANGER's visibility and
+    // fork lineage as this repo's.
+    const provider = this.forges.get(origin.host, origin.hostname);
     if (provider === null) return unavailable;
     let identity: RepoIdentity;
     try {

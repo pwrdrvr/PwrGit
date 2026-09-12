@@ -7,6 +7,7 @@ import {
 } from "@pwrgit/shared";
 import type { DiscoveredForgeHost } from "./cli-hosts";
 import type { ForgeHostRow } from "@pwrgit/shared";
+import { cliFor } from "./status";
 import type { ForgeHostOverrides } from "./resolve";
 
 /** Env escape hatches, mirroring the `GITHUB_TOKEN`/`GITLAB_TOKEN` pattern
@@ -116,6 +117,8 @@ export class ForgeHosts {
     return this.discoveredIndex.byHost.get(canonical(host));
   }
 
+  /** Whether a CLI reports an account here. Drives a row's `origin`, never
+   *  permission — see `isEnabled`. */
   private isSignedIn(host: string): boolean {
     return this.discoveredFor(host) !== undefined;
   }
@@ -161,11 +164,16 @@ export class ForgeHosts {
   /**
    * Whether PwrGit may talk to this host at all.
    *
-   * The default is DERIVED from sign-in rather than hardcoded to on, so a
-   * machine that has never signed in to a forge does not report that forge as
-   * broken — and so nobody who is already signed in loses anything on upgrade.
-   * An explicit config value always wins, in both directions: a host turned off
-   * by hand stays off after a later sign-in.
+   * Enumeration decides which hosts get a ROW; it does not grant permission.
+   * A known forge is on unless somebody turned it off, so the answer never
+   * depends on whether two subprocesses have finished or even exist.
+   *
+   * That distinction is load-bearing. Deriving "on" from `isSignedIn` meant a
+   * machine with `GITHUB_TOKEN` and no `gh` lost all change-request status,
+   * and so did every caller in the window before the background enumeration
+   * landed — silently, because a disabled host resolves to null rather than
+   * erroring. An explicit config value still wins in both directions: a host
+   * turned off by hand stays off after a later sign-in.
    */
   isEnabled(host: string): { enabled: boolean; source: ForgeValueSource } {
     const key = canonical(host);
@@ -187,7 +195,8 @@ export class ForgeHosts {
     if (configured !== undefined) {
       return { enabled: configured, source: "config" };
     }
-    return { enabled: this.isSignedIn(key), source: "auto" };
+    // Known forge, nobody decided otherwise: on.
+    return { enabled: true, source: "auto" };
   }
 
   /** Everything resolved, for one host. */
@@ -263,12 +272,6 @@ export class ForgeHosts {
   }
 }
 
-/** The CLI each forge speaks through, for a row's remediation command. */
-const CLI_FOR: Readonly<Record<ForgeKind, string>> = {
-  github: "gh",
-  gitlab: "glab"
-};
-
 /**
  * What Settings renders, and the refresh it can ask for.
  *
@@ -297,7 +300,7 @@ export class ForgeHostsView {
               enabled: entry.enabled,
               enabledSource: entry.enabledSource,
               origin: entry.origin,
-              cli: CLI_FOR[entry.kind],
+              cli: cliFor(entry.kind),
               ...(entry.account === undefined ? {} : { account: entry.account }),
               ...(entry.scopes === undefined ? {} : { scopes: entry.scopes })
             }

@@ -104,18 +104,23 @@ describe("ForgeHosts.isEnabled", () => {
     });
   });
 
-  it("derives off when that CLI holds no account for the host", () => {
-    // The GitHub-only machine: nothing is broken, so nothing should be probed.
-    const hosts = make({ discovered: [GH("github.com")] });
-    expect(hosts.isEnabled("gitlab.com")).toEqual({
-      enabled: false,
+  it("stays on for a known forge nobody has signed in to", () => {
+    // Enumeration decides which hosts get a ROW; it does not grant permission.
+    // Deriving "on" from sign-in meant a machine with GITHUB_TOKEN and no gh
+    // lost all change-request status, silently.
+    const hosts = make({ discovered: [] });
+    expect(hosts.isEnabled("github.com")).toEqual({
+      enabled: true,
       source: "auto"
     });
+    expect(hosts.isEnabled("gitlab.com").enabled).toBe(true);
   });
 
-  it("derives per host, not per forge", () => {
-    const hosts = make({ discovered: [GH("github.com")] });
-    expect(hosts.isEnabled("github.acme-inc.com").enabled).toBe(false);
+  it("stays on before enumeration has landed", () => {
+    // The window between boot and the background refresh resolving. Gating on
+    // discovery here made every PR refresh in that window a silent no-op.
+    const hosts = make({ discovered: [] });
+    expect(hosts.isEnabled("github.com").enabled).toBe(true);
   });
 
   it("keeps an explicit off after a later sign-in", () => {
@@ -262,7 +267,7 @@ describe("ForgeHosts.list", () => {
     const [entry] = hosts.list();
     expect(entry?.origin).toBe("config");
     expect(entry?.kind).toBe("gitlab");
-    expect(entry?.enabled).toBe(false);
+    expect(entry?.enabled).toBe(true);
   });
 
   it("does not duplicate a host that is both added and signed in", () => {

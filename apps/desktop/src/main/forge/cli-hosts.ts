@@ -1,4 +1,4 @@
-import type { ForgeKind } from "@pwrgit/shared";
+import { canonicalForgeHostname, type ForgeKind } from "@pwrgit/shared";
 import { runGh } from "../github/gh-cli";
 import { runGlab } from "./gitlab/glab-cli";
 
@@ -19,9 +19,11 @@ export type DiscoveredForgeHost = {
   scopes?: string[];
 };
 
+/** The shared spelling, so a host enumerated here matches the key every
+ *  lookup and every settings write uses. A second normalizer is how a host
+ *  gets enumerated under a key nothing can resolve. */
 function canonical(host: string): string {
-  const trimmed = host.trim().toLowerCase();
-  return trimmed.startsWith("www.") ? trimmed.slice(4) : trimmed;
+  return canonicalForgeHostname(host) ?? "";
 }
 
 type GhAuthStatus = {
@@ -55,6 +57,8 @@ export function parseGhHosts(json: string): DiscoveredForgeHost[] {
   const out: DiscoveredForgeHost[] = [];
   for (const [rawHost, accounts] of Object.entries(hosts)) {
     const host = canonical(rawHost);
+    // Rejected by the shared validator (a port, a path, a malformed label):
+    // enumerating it would create a row no lookup could ever match.
     if (host === "") continue;
     const list = Array.isArray(accounts) ? accounts : [];
     const chosen = list.find((entry) => entry?.active === true) ?? list[0];
@@ -105,7 +109,8 @@ export function parseGlabHosts(text: string): DiscoveredForgeHost[] {
     const line = raw.replace(/\u001b\[[0-9;]*m/g, "").replace(/\r$/, "");
     const hostMatch = GLAB_HOST_LINE.exec(line);
     if (hostMatch?.[1] !== undefined) {
-      current = canonical(hostMatch[1]);
+      const canonicalHost = canonical(hostMatch[1]);
+      current = canonicalHost === "" ? null : canonicalHost;
       continue;
     }
     if (current === null) continue;
@@ -227,8 +232,16 @@ export class ForgeHostDirectory {
     if (opts.force !== true && this.now() - this.at < this.ttlMs && this.at !== 0) {
       return this.hosts;
     }
-    const existing = this.inFlight;
-    if (existing !== null) return await existing;
+    // A forced refresh exists to observe something the caller just did —
+    // signing in from a terminal. Adopting a pass that STARTED before that
+    // action answers with pre-action state, so wait it out and run a fresh
+    // one. An ordinary refresh still coalesces.
+    if (opts.force === true) {
+      while (this.inFlight !== null) await this.inFlight;
+    } else {
+      const existing = this.inFlight;
+      if (existing !== null) return await existing;
+    }
 
     const running = this.discover()
       .then((hosts) => {
