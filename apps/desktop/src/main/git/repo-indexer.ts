@@ -21,6 +21,7 @@ import {
   type Worktree
 } from "@pwrgit/shared";
 import type { DB } from "../persistence/db";
+import { parseJsonStringList } from "../persistence/json-string-list";
 import { mapLimit } from "../util/map-limit";
 import type { GitExec } from "./dugite";
 import { buildFtsQuery } from "./fts-query";
@@ -76,6 +77,7 @@ type RepoIdentityRow = {
   parent_url: string | null;
   root_slug: string | null;
   root_url: string | null;
+  remote_hosts: string | null;
   fetched_at: string;
 };
 
@@ -111,6 +113,11 @@ export function repoIdentityFromRow(row: RepoIdentityRow): RepoIdentity {
       url: row.root_url ?? `https://${row.hostname}/${row.root_slug}`
     };
   }
+  // Left absent when the column is NULL, which is a row written before it
+  // existed. That is "not known", and the forge chip stays quiet about second
+  // remotes rather than claiming there are none.
+  const remoteHostnames = parseJsonStringList(row.remote_hosts);
+  if (remoteHostnames !== null) identity.remoteHostnames = remoteHostnames;
   return identity;
 }
 type WorktreeRow = {
@@ -1030,7 +1037,7 @@ export class RepoIndexer {
       .prepare(
         `SELECT i.repo_id, i.host, i.hostname, i.owner, i.name, i.visibility,
                 i.parent_slug, i.parent_url, i.root_slug, i.root_url,
-                i.fetched_at
+                i.remote_hosts, i.fetched_at
          FROM repo_identity i
          JOIN repos r ON r.id = i.repo_id
          WHERE r.profile_id = ?`

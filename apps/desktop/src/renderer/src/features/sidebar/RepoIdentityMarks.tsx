@@ -321,6 +321,15 @@ export function identityDescription(identity: RepoIdentity): string {
       : identity.visibility,
     `on ${identity.hostname}`
   ];
+  // The forge chip beside the name is `aria-hidden`, so its `+n` reaches
+  // nobody using a screen reader unless the same fact is spelled out here.
+  // Origin's own host is already named above; only the others add anything.
+  const others = (identity.remoteHostnames ?? []).filter(
+    (hostname) => hostname !== identity.hostname
+  );
+  if (others.length > 0) {
+    parts.push(`also has remotes on ${others.join(", ")}`);
+  }
   if (identity.parent !== undefined) {
     parts.push(`fork of ${identity.parent.nameWithOwner}`);
   }

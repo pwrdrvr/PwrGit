@@ -582,6 +582,15 @@ export type ForgeHostConfig = {
   kind?: ForgeKind;
   /** Whether PwrGit may talk to this host at all. */
   enabled?: boolean;
+  /**
+   * What to call this host on screen, when its own name is too long to draw.
+   *
+   * Display only — it never reaches a `--hostname` argument, a URL, or any
+   * decision about which CLI to spawn. Absent means "nobody has named it" and
+   * leaves `derivedForgeHostName` in charge, which is why the empty string is
+   * how the pane CLEARS a name rather than a name of its own.
+   */
+  label?: string;
 };
 
 /** Per-host forge configuration, keyed by canonical lowercase hostname. */
@@ -610,6 +619,10 @@ export type ForgeHostRow = {
   scopes?: string[];
   /** The CLI that speaks to this host, for the remediation command. */
   cli: string;
+  /** What the user called this host, unresolved. Absent means nobody has —
+   *  `forgeHostName` derives one, and the pane shows that as a placeholder so
+   *  an empty field never reads as an unnamed host. */
+  label?: string;
 };
 
 export type DiagnosticsSettings = {

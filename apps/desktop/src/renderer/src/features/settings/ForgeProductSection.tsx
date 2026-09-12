@@ -1,6 +1,7 @@
-import type { ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import {
   changeRequestNoun,
+  FORGE_HOST_LABEL_MAX,
   forgeAllHostsOff,
   forgeProduct,
   type ForgeCapabilities,
@@ -122,6 +123,17 @@ export function ForgeProductSection(props: {
   /** The host list has not loaded yet, so Add is genuinely unavailable. */
   loading: boolean;
   copied: string | undefined;
+  /**
+   * Every host's resolved short name, keyed by hostname — the placeholder each
+   * name field states as its default.
+   *
+   * Resolved by the pane across BOTH products, never per section: a derived
+   * name that collides is abandoned for the full hostname, and two hosts can
+   * collide across products (`github.acme.example` and `gitlab.acme.example`
+   * both derive "acme"). A section that resolved only its own rows would
+   * promise a short name the sidebar will not use.
+   */
+  names: ReadonlyMap<string, string>;
   rowError: { host: string; message: string } | undefined;
   onWrite: (row: ForgeHostRow, value: ForgeHostConfig | null) => void;
   onCopy: (row: ForgeHostRow) => void;
@@ -172,24 +184,33 @@ export function ForgeProductSection(props: {
             label={row.host}
             sub={describeRow(row)}
             control={
-              <SettingsSwitch
-                checked={row.enabled}
-                // In-flight is aria-disabled, never disabled: Chromium blurs a
-                // disabled element, throwing keyboard focus to <body> for the
-                // length of the operation. The handler is guarded instead.
-                busy={props.blocked}
-                label={`Read ${label} status from ${row.host}`}
-                onChange={(next) => {
-                  if (props.blocked) return;
-                  // Always write the value the user asked for. An earlier
-                  // version cleared the entry instead, on the theory that
-                  // clearing returns the host to its derived default — but the
-                  // derived default can BE the value they are trying to leave,
-                  // in which case the switch silently snapped back and the host
-                  // could not be turned off at all.
-                  props.onWrite(row, { enabled: next });
-                }}
-              />
+              <div className="settings-field__actions">
+                <ForgeHostNameField
+                  row={row}
+                  blocked={props.blocked}
+                  derived={props.names.get(row.host) ?? row.host}
+                  onCommit={(label) => props.onWrite(row, { label })}
+                />
+                <SettingsSwitch
+                  checked={row.enabled}
+                  // In-flight is aria-disabled, never disabled: Chromium
+                  // blurs a disabled element, throwing keyboard focus to
+                  // <body> for the length of the operation. The handler is
+                  // guarded instead.
+                  busy={props.blocked}
+                  label={`Read ${label} status from ${row.host}`}
+                  onChange={(next) => {
+                    if (props.blocked) return;
+                    // Always write the value the user asked for. An earlier
+                    // version cleared the entry instead, on the theory that
+                    // clearing returns the host to its derived default — but
+                    // the derived default can BE the value they are trying to
+                    // leave, in which case the switch silently snapped back and
+                    // the host could not be turned off at all.
+                    props.onWrite(row, { enabled: next });
+                  }}
+                />
+              </div>
             }
             error={
               props.rowError?.host === row.host
@@ -299,6 +320,79 @@ export function ForgeProductSection(props: {
         />
       )}
     </SettingsSection>
+  );
+}
+
+/**
+ * What this host is called in a chip, when its own name is too long to draw.
+ *
+ * A text field rather than a dialog because the answer is one word and the
+ * reason to change it is visible right here — the placeholder is exactly what
+ * the sidebar will print if this is left empty, so the field states the
+ * default instead of describing it.
+ *
+ * Committed on blur and on Enter, never per keystroke: every write re-reads
+ * the whole host list, and doing that on each character would fight the
+ * cursor. Escape restores what is stored, which is the only way back from a
+ * half-typed name without guessing at it.
+ */
+function ForgeHostNameField(props: {
+  row: ForgeHostRow;
+  blocked: boolean;
+  /** The name in force while this field is empty. */
+  derived: string;
+  onCommit: (label: string) => void;
+}) {
+  const stored = props.row.label ?? "";
+  const [value, setValue] = useState(stored);
+  // Rows are replaced wholesale by every re-read, so a name written in another
+  // window — or the sanitized form of the one just sent — has to land in the
+  // field. Keyed on the stored value, not on mount: re-seeding unconditionally
+  // would clear what is being typed on every unrelated refresh.
+  const lastStored = useRef(stored);
+  if (lastStored.current !== stored) {
+    lastStored.current = stored;
+    setValue(stored);
+  }
+  const commit = (): void => {
+    if (props.blocked) return;
+    if (value.trim() === stored.trim()) return;
+    props.onCommit(value);
+  };
+  return (
+    // Visibly labelled, not placeholder-labelled: the placeholder here holds
+    // the DEFAULT name, so a box with no label beside a switch reads as a box
+    // that already has a value in it. The accessible name names the host as
+    // well, because several identical "Name" fields are one list apart — and
+    // it keeps the visible word as a substring (SC 2.5.3).
+    <label className="settings-inline-field">
+      <span className="settings-inline-field__label">Name</span>
+      <input
+        aria-label={`Name for ${props.row.host}`}
+        autoComplete="off"
+        className="settings-input settings-input--short"
+        maxLength={FORGE_HOST_LABEL_MAX}
+        placeholder={props.derived}
+        spellCheck={false}
+        // In-flight is aria-disabled, never disabled: Chromium blurs a disabled
+        // element, and blurring the field being typed in is what commits it.
+        aria-disabled={props.blocked}
+        value={value}
+        onBlur={commit}
+        onChange={(event) => setValue(event.target.value)}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commit();
+          }
+          if (event.key === "Escape") {
+            event.preventDefault();
+            setValue(stored);
+          }
+        }}
+      />
+    </label>
   );
 }
 

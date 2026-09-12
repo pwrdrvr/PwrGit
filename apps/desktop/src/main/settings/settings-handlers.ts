@@ -14,6 +14,7 @@ import {
   canonicalForgeHostname,
   ok,
   resolveUpdateSelection,
+  sanitizeForgeHostLabel,
   type AppSettingsPatch,
   type AppSettingsSnapshot,
   type DiagnosticsSettings,
@@ -177,11 +178,22 @@ function sanitizeForgeHosts(
     const entry: ForgeHostConfig = {};
     if (isForgeKind(value.kind)) entry.kind = value.kind;
     if (typeof value.enabled === "boolean") entry.enabled = value.enabled;
+    // The empty string survives on purpose: it is how the pane says "forget
+    // the name I gave this host". Dropping it here instead would leave the
+    // merge below with nothing to act on, and a cleared field would silently
+    // keep the old name. `sanitizeForgeHostLabel` answers null for anything
+    // that says nothing, which is the same instruction.
+    if (typeof value.label === "string") {
+      entry.label = sanitizeForgeHostLabel(value.label) ?? "";
+    }
     // An entry that survived sanitizing with nothing in it says nothing; treat
     // it as the clear it amounts to.
-    out[host] = entry.kind === undefined && entry.enabled === undefined
-      ? null
-      : entry;
+    out[host] =
+      entry.kind === undefined &&
+      entry.enabled === undefined &&
+      entry.label === undefined
+        ? null
+        : entry;
   }
   return Object.keys(out).length === 0 ? undefined : out;
 }
@@ -253,7 +265,17 @@ export function registerSettingsHandlers(
         // field at a time — a toggle sends only `enabled` — so a wholesale
         // write would erase the `kind` that makes a hand-added host resolve
         // at all, and the row would vanish with no way to bring it back.
-        hosts[host] = { ...hosts[host], ...config };
+        const merged = { ...hosts[host], ...config };
+        // Merging cannot express a removal, and a name is the one field the
+        // user can take back: `label: ""` arrives as the instruction to drop
+        // it, and leaving the key in place would persist an empty name that
+        // every reader then has to treat as absent anyway.
+        if (merged.label === "") delete merged.label;
+        // A host left with no decisions on it is a host nobody has decided
+        // anything about — same state as never having had a row, and keeping
+        // an empty object would make it one that cannot be returned to `auto`.
+        if (Object.keys(merged).length === 0) delete hosts[host];
+        else hosts[host] = merged;
       }
       next.forges = { hosts };
     }

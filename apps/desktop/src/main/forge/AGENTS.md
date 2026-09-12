@@ -466,6 +466,37 @@ provider or reach a real forge.
   arriving blank and filling in. Refreshes answer a `repo:identityChanged`
   delta the renderer patches in place — a full reload would collapse every
   expanded repo.
+- **The OTHER remotes are read in the same breath, and only for naming.**
+  `readRemotes` runs one `git remote -v` where it used to run `git remote
+  get-url origin` — the same single process — and keeps every forge hostname
+  it finds in `RepoIdentity.remoteHostnames` (`repo_identity.remote_hosts`, a
+  JSON array). A checkout can push to GitHub and mirror to GitLab, so
+  `origin`'s host is not the whole answer to "which forge is this on", and the
+  sidebar's forge chip says `+n` rather than asserting one. Three rules:
+  - **`origin` still means `origin`.** The fetch URL, not a push URL pointing
+    elsewhere; visibility and fork lineage read off a mirror describe a
+    different project.
+  - **A host no product claims is left out**, same rule as enumeration: a bare
+    repo on a NAS parses as a remote perfectly well and is not a forge.
+  - **NULL is "not known", not "no others".** A row written before the column
+    existed has never been asked, and readers render silence rather than a
+    confident zero. `persistence/json-string-list.ts` is the one decoder, so
+    the two readers of that column (`IdentityService.read` and `RepoIndexer`)
+    cannot disagree about what NULL means.
+
+  The remote set is part of the row, so `remote:add` / `remote:update` /
+  `remote:remove` refresh identity with **`force`** — the freshness gate would
+  otherwise hold a just-changed repo's chip for up to six hours. A fetch does
+  not force; it cannot change the remote list.
+- **A forge host has a name, and it is display-only.** `ForgeHostConfig.label`
+  is what the user typed in Settings → Forges → Hosts, carried to the renderer
+  on `ForgeHostRow` **unresolved** — `packages/shared/src/forge-host-name.ts`
+  derives a short name for the hosts nobody names, and one derivation is
+  enough. That module reads hostname labels, which is *not* the rule this file
+  forbids: "a hostname is never evidence" is about which product runs at a
+  host — which CLI is spawned, whose token is minted — and naming is handed
+  the already-resolved kind and only decides which characters to print. A
+  wrong answer there is an ugly chip, not a request at the wrong API.
 - **Three states, not two.** No `repo_identity` row means *never looked up*;
   `visibility: "unknown"` means *asked, and the forge would not say*. They
   render differently, and neither collapses into `public` — that would

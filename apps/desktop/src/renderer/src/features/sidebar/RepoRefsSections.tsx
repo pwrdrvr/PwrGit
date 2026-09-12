@@ -11,6 +11,7 @@ import type { TagSummary, LocalBranchSummary, Repo, RepoRefs, Worktree } from "@
 import { dispatch } from "../../lib/pwrgit";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
+import { useForgeNaming } from "../../state/useForgeNaming";
 import { CopyTarget } from "../shell/CopyTarget";
 import { guardedSwitchBranch } from "../shell/branchSwitch";
 import {
@@ -20,6 +21,8 @@ import {
   holderWorktreeId,
   visibleBranches as pinCurrentFirst
 } from "./branch-focus";
+import { remoteForgeChip } from "./forge-chip";
+import { ForgeChip } from "./ForgeChip";
 import { lastSegment, worktreeFolderLabel } from "./repo-view";
 import {
   localBranchForRemote,
@@ -71,6 +74,15 @@ export function RepoRefsSections({
     startPoint?: string
   ) => void;
 }) {
+  const forgeNaming = useForgeNaming();
+  /** Null whenever a chip would say nothing — one forge host on, or a remote
+   *  no product claims. Same gate the repo row uses, so the two surfaces
+   *  cannot disagree about whether forges are worth naming here. */
+  const forgeChipFor = (url: string) => {
+    if (!forgeNaming.showChips) return null;
+    const chip = remoteForgeChip(url, forgeNaming.overrides, forgeNaming.names);
+    return chip === null ? null : <ForgeChip chip={chip} />;
+  };
   const [refs, setRefs] = useState<RepoRefs | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -601,6 +613,12 @@ export function RepoRefsSections({
                     >
                       <SectionChevron open={open} />
                       <span>{remote.name}</span>
+                      {/* Per remote, because the repo row above can only
+                          carry a count: this is where a checkout that pushes
+                          to one forge and mirrors to another says which is
+                          which. Read from the fetch URL, and silent for a
+                          remote no product claims. */}
+                      {forgeChipFor(remote.fetchUrl)}
                       <small>
                         {remote.name === "origin"
                           ? "default"

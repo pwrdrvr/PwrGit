@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, expect, it, vi } from "vitest";
 import { ok, type RepoIdentityRefreshOutcome } from "@pwrgit/shared";
-import { RepoIdentityGlyphs } from "./RepoIdentityMarks";
+import { identityDescription, RepoIdentityGlyphs } from "./RepoIdentityMarks";
 
 const { dispatch, showErrorToast, showInfoToast } = vi.hoisted(() => ({
   dispatch: vi.fn(), showErrorToast: vi.fn(), showInfoToast: vi.fn()
@@ -139,4 +139,28 @@ it("names the host main gated on, not the one in the stored row", async () => {
   } finally {
     await act(async () => root.unmount());
   }
+});
+
+it("describes the other forges a repo has remotes on, which the chip only counts", () => {
+  // The forge chip is aria-hidden and its `+n` is a number, so this sentence
+  // is the only place a screen reader learns there is a second forge at all.
+  const base = {
+    host: "gitlab" as const,
+    hostname: "gitlab.com",
+    owner: "pwrdrvr",
+    name: "PwrGit",
+    nameWithOwner: "pwrdrvr/PwrGit",
+    visibility: "public" as const
+  };
+  expect(identityDescription(base)).toBe("public, on gitlab.com");
+  expect(
+    identityDescription({
+      ...base,
+      remoteHostnames: ["github.com", "gitlab.com"]
+    })
+  ).toBe("public, on gitlab.com, also has remotes on github.com");
+  // Origin's own host is already named; repeating it adds nothing.
+  expect(
+    identityDescription({ ...base, remoteHostnames: ["gitlab.com"] })
+  ).toBe("public, on gitlab.com");
 });

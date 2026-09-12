@@ -2,7 +2,11 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ok, type AppSettingsPatch } from "@pwrgit/shared";
+import {
+  FORGE_HOST_LABEL_MAX,
+  ok,
+  type AppSettingsPatch
+} from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import { SettingsService } from "./settings-service";
 import { registerSettingsHandlers } from "./settings-handlers";
@@ -32,6 +36,53 @@ describe("forgeHosts patch path", () => {
     expect(settings.get().forges?.hosts["git.contoso.dev"]).toEqual({
       kind: "gitlab",
       enabled: false
+    });
+  });
+
+  it("stores a short name for a host, and clears it on an empty one", async () => {
+    // Merging cannot express a removal, so `label: ""` is the instruction to
+    // drop the name — without it a cleared field silently kept the old one.
+    const { settings, update } = harness();
+    await update({ forgeHosts: { "ghe.acme.example": { kind: "github" } } });
+    await update({ forgeHosts: { "ghe.acme.example": { label: "  Acme  " } } });
+    expect(settings.get().forges?.hosts["ghe.acme.example"]).toEqual({
+      kind: "github",
+      label: "Acme"
+    });
+    await update({ forgeHosts: { "ghe.acme.example": { label: "" } } });
+    expect(settings.get().forges?.hosts["ghe.acme.example"]).toEqual({
+      kind: "github"
+    });
+  });
+
+  it("caps a pasted short name rather than storing an essay", async () => {
+    const { settings, update } = harness();
+    await update({ forgeHosts: { "a.example": { label: "z".repeat(400) } } });
+    expect(
+      settings.get().forges?.hosts["a.example"]?.label
+    ).toHaveLength(FORGE_HOST_LABEL_MAX);
+  });
+
+  it("drops a host left with nothing decided about it", async () => {
+    // A name is the only thing on this host, and clearing it leaves no
+    // decision at all — the same state as never having had a row, which is
+    // what returns the host to `auto`.
+    const { settings, update } = harness();
+    await update({ forgeHosts: { "a.example": { label: "Acme" } } });
+    await update({ forgeHosts: { "a.example": { label: "" } } });
+    expect(settings.get().forges?.hosts["a.example"]).toBeUndefined();
+  });
+
+  it("ignores a label that is not a string", async () => {
+    // settings.json is parsed unvalidated and this crosses IPC.
+    const { settings, update } = harness();
+    await update({
+      forgeHosts: {
+        "a.example": { kind: "github", label: 7 as unknown as string }
+      }
+    });
+    expect(settings.get().forges?.hosts["a.example"]).toEqual({
+      kind: "github"
     });
   });
 

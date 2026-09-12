@@ -183,6 +183,143 @@ async function add(product: string, hostname: string): Promise<void> {
   await click(button("Add host"));
 }
 
+/** The short-name box on one host's row. */
+function nameField(hostname: string): HTMLInputElement {
+  const found = container.querySelector<HTMLInputElement>(
+    `input[aria-label="Name for ${hostname}"]`
+  );
+  if (found === null) throw new Error(`no short-name field for ${hostname}`);
+  return found;
+}
+
+/** React delegates `onBlur` from the bubbling `focusout`, so a plain `blur`
+ *  event dispatched on the element never reaches it. */
+async function blur(field: HTMLInputElement): Promise<void> {
+  await act(async () => {
+    field.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+  });
+}
+
+async function typeInto(field: HTMLInputElement, value: string): Promise<void> {
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value"
+    )?.set;
+    setter?.call(field, value);
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+describe("Settings → Forges — naming a host", () => {
+  it("shows the name the chip will use as the placeholder", async () => {
+    // The field states the default rather than describing it: what is greyed
+    // out here is exactly what the sidebar prints while it is empty.
+    await render([
+      host(),
+      added({
+        host: "github.acme.huge-corp.southeast.us.corp",
+        kind: "github",
+        cli: "gh"
+      })
+    ]);
+
+    expect(nameField("github.com").placeholder).toBe("GitHub");
+    expect(
+      nameField("github.acme.huge-corp.southeast.us.corp").placeholder
+    ).toBe("acme");
+  });
+
+  it("falls back to the hostname when two hosts derive the same name", async () => {
+    // A chip that answers "which one?" with the same word twice is worse than
+    // the long hostname it replaced, so the placeholder says so up front.
+    await render([
+      added({ host: "github.acme.example", kind: "github", cli: "gh" }),
+      added({ host: "gitlab.acme.example" })
+    ]);
+
+    expect(nameField("github.acme.example").placeholder).toBe(
+      "github.acme.example"
+    );
+    expect(nameField("gitlab.acme.example").placeholder).toBe(
+      "gitlab.acme.example"
+    );
+  });
+
+  it("writes the name on blur, and only when it changed", async () => {
+    await render([host(), added()]);
+    const field = nameField("gitlab.contoso.dev");
+
+    await typeInto(field, "Contoso");
+    // Every write is followed by a re-read; stand in for main having stored it.
+    rows = [host(), added({ label: "Contoso" })];
+    await blur(field);
+    expect(writes).toEqual([
+      { forgeHosts: { "gitlab.contoso.dev": { label: "Contoso" } } }
+    ]);
+
+    // A second blur with nothing typed must not re-send: a write re-reads the
+    // whole host list, and tabbing through the pane would do it on every row.
+    await blur(nameField("gitlab.contoso.dev"));
+    expect(writes).toHaveLength(1);
+  });
+
+  it("writes on Enter without leaving the field", async () => {
+    await render([host(), added()]);
+    const field = nameField("gitlab.contoso.dev");
+    await typeInto(field, "Contoso");
+    await act(async () => {
+      field.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true })
+      );
+    });
+    expect(writes).toEqual([
+      { forgeHosts: { "gitlab.contoso.dev": { label: "Contoso" } } }
+    ]);
+  });
+
+  it("sends the empty string to clear a name, not nothing at all", async () => {
+    // Main merges into the stored entry, so omitting the field would keep the
+    // old name and the cleared box would silently do nothing.
+    await render([host(), added({ label: "Contoso" })]);
+    const field = nameField("gitlab.contoso.dev");
+    expect(field.value).toBe("Contoso");
+
+    await typeInto(field, "");
+    await blur(field);
+    expect(writes).toEqual([
+      { forgeHosts: { "gitlab.contoso.dev": { label: "" } } }
+    ]);
+  });
+
+  it("restores the stored name on Escape", async () => {
+    await render([host(), added({ label: "Contoso" })]);
+    const field = nameField("gitlab.contoso.dev");
+    await typeInto(field, "half-typed");
+    await act(async () => {
+      field.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+      );
+    });
+    expect(field.value).toBe("Contoso");
+    expect(writes).toEqual([]);
+  });
+
+  it("shows the stored form of a name it just sent", async () => {
+    // Main trims and caps what it stores, and the write is followed by a
+    // re-read. The field has to land on what was STORED, not on what was
+    // typed, or the next blur sends the untrimmed text all over again.
+    await render([host(), added()]);
+    const field = nameField("gitlab.contoso.dev");
+    await typeInto(field, "  Contoso  ");
+    rows = [host(), added({ label: "Contoso" })];
+    await blur(field);
+    expect(nameField("gitlab.contoso.dev").value).toBe("Contoso");
+    await blur(nameField("gitlab.contoso.dev"));
+    expect(writes).toHaveLength(1);
+  });
+});
+
 describe("Settings → Forges — adding a host by hand", () => {
   it("offers one button per product, because the product is chosen not guessed", async () => {
     await render();

@@ -1,5 +1,6 @@
 export * from "./result";
 export * from "./types";
+export * from "./forge-host-name";
 export * from "./forge-product";
 export * from "./forge-remote";
 export * from "./image";
