@@ -1,4 +1,5 @@
 import type { PrSummary } from "@pwrgit/shared";
+import { fetchInChunks } from "../chunked";
 import { mapLimit } from "../../util/map-limit";
 import { delay } from "../../util/timing";
 import { forgeRetryDelayMs } from "../retry";
@@ -129,92 +130,93 @@ async function graphql(
 }
 
 /**
- * Newest merge request per source branch.
+ * Newest merge request per source branch, for one batch.
  *
  * Pages newest-first and stops as soon as every requested branch has a match,
- * so the common case costs one request. Branches still unmatched when paging
- * ends are returned as explicit nulls, which is what lets them negative-cache.
+ * so the common case costs one request. Paging decisions need parsed data, so
+ * unlike the other clients this batch cannot separate fetch from parse — which
+ * is exactly why it is a named function rather than a block inside the walk.
+ */
+async function newestMrPerBranch(
+  token: string,
+  repo: ForgeRepo,
+  chunk: string[]
+): Promise<Map<string, PrSummary>> {
+  const requested = new Set(chunk);
+  const found = new Map<string, PrSummary>();
+  let after: string | null = null;
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const { query, variables } = buildMrBranchQuery(repo.path, chunk, after);
+    const parsed = parseMrPage(await graphql(repo, token, query, variables));
+    for (const [branch, best] of pickBestByBranch(parsed.nodes)) {
+      // Ignore anything outside the requested set: counting a stray node
+      // toward the early exit below would stop paging while a branch we did
+      // ask about is still unseen, and then negative-cache it.
+      if (!requested.has(branch)) continue;
+      const current = found.get(branch);
+      // Sorted newest-first, so the first sighting of a branch wins unless a
+      // later page turns up the live MR behind a newer terminal one.
+      if (current === undefined) found.set(branch, best.summary);
+      else if (current.state !== "open" && best.summary.state === "open") {
+        found.set(branch, best.summary);
+      }
+    }
+    if (found.size === requested.size || !parsed.hasNextPage) break;
+    after = parsed.endCursor;
+    if (after === null) break;
+  }
+  return found;
+}
+
+/**
+ * Newest merge request per source branch.
  *
- * A chunk that fails ends the walk with whatever the earlier chunks resolved,
- * so a refusal on the fourth of five requests no longer discards the first
- * three. The half-paged chunk itself contributes nothing: filling its nulls
- * would negative-cache branches whose MR is on a page we never read. Only a
- * first chunk failing rethrows, which is what keeps "nothing resolved" from
- * being cached as "no MR anywhere".
+ * Branches still unmatched when paging ends are returned as explicit nulls,
+ * which is what lets them negative-cache — but only for a batch that finished.
+ * A batch abandoned mid-paging contributes nothing, because filling its nulls
+ * would negative-cache branches whose MR is on a page we never read.
  */
 export async function fetchMrsForBranches(
   token: string,
   repo: ForgeRepo,
   branches: string[]
 ): Promise<Map<string, PrSummary | null>> {
-  const result = new Map<string, PrSummary | null>();
-  for (let i = 0; i < branches.length; i += BRANCH_BATCH) {
-    const chunk = branches.slice(i, i + BRANCH_BATCH);
-    const requested = new Set(chunk);
-    const found = new Map<string, PrSummary>();
-    let after: string | null = null;
-    try {
-      for (let page = 0; page < MAX_PAGES; page += 1) {
-        const { query, variables } = buildMrBranchQuery(repo.path, chunk, after);
-        const parsed = parseMrPage(await graphql(repo, token, query, variables));
-        for (const [branch, best] of pickBestByBranch(parsed.nodes)) {
-          // Ignore anything outside the requested set: counting a stray node
-          // toward the early exit below would stop paging while a branch we did
-          // ask about is still unseen, and then negative-cache it.
-          if (!requested.has(branch)) continue;
-          const current = found.get(branch);
-          // Sorted newest-first, so the first sighting of a branch wins unless a
-          // later page turns up the live MR behind a newer terminal one.
-          if (current === undefined) found.set(branch, best.summary);
-          else if (current.state !== "open" && best.summary.state === "open") {
-            found.set(branch, best.summary);
-          }
-        }
-        if (found.size === requested.size || !parsed.hasNextPage) break;
-        after = parsed.endCursor;
-        if (after === null) break;
-      }
-    } catch (error) {
-      if (result.size === 0) throw error;
-      return result;
-    }
-    for (const [branch, summary] of withNullsForMissing(chunk, found)) {
-      result.set(branch, summary);
-    }
-  }
-  return result;
+  return await fetchInChunks(
+    branches,
+    BRANCH_BATCH,
+    async (chunk) => await newestMrPerBranch(token, repo, chunk),
+    withNullsForMissing
+  );
 }
 
-/** Current status of merge requests already discovered by iid. */
+/**
+ * Current status of merge requests already discovered by iid.
+ *
+ * Nulls are filled per batch rather than once at the end: each query asks for
+ * its own batch's iids, so a later batch's failure must not turn numbers we
+ * never asked about into "this MR is gone".
+ */
 export async function fetchMrsByNumbers(
   token: string,
   repo: ForgeRepo,
   numbers: number[]
 ): Promise<Map<number, PrSummary | null>> {
-  const result = new Map<number, PrSummary | null>();
-  for (let i = 0; i < numbers.length; i += BRANCH_BATCH) {
-    const chunk = numbers.slice(i, i + BRANCH_BATCH);
-    const { query, variables } = buildMrNumberQuery(repo.path, chunk);
-    let parsed: MrPage;
-    try {
-      parsed = parseMrPage(await graphql(repo, token, query, variables));
-    } catch (error) {
-      if (result.size === 0) throw error;
-      return result;
+  return await fetchInChunks(
+    numbers,
+    BRANCH_BATCH,
+    async (chunk) => {
+      const { query, variables } = buildMrNumberQuery(repo.path, chunk);
+      return parseMrPage(await graphql(repo, token, query, variables));
+    },
+    (chunk, parsed: MrPage) => {
+      const found = new Map<number, PrSummary>();
+      for (const node of parsed.nodes) {
+        const summary = toSummary(node);
+        if (summary.number > 0) found.set(summary.number, summary);
+      }
+      return withNullsForMissing(chunk, found);
     }
-    // Nulls are filled per chunk rather than once at the end: the query asks
-    // for this chunk's iids, so a later chunk's failure must not turn its
-    // unanswered numbers into "this MR is gone".
-    const found = new Map<number, PrSummary>();
-    for (const node of parsed.nodes) {
-      const summary = toSummary(node);
-      if (summary.number > 0) found.set(summary.number, summary);
-    }
-    for (const [number, summary] of withNullsForMissing(chunk, found)) {
-      result.set(number, summary);
-    }
-  }
-  return result;
+  );
 }
 
 /**
@@ -231,6 +233,7 @@ export async function fetchMrsForCommits(
 ): Promise<Map<string, PrSummary | null>> {
   const requested = commitHashes.slice(0, MAX_COMMITS_PER_REFRESH);
   const resolved = new Map<string, PrSummary | null>();
+  let failure: { error: unknown } | undefined;
   const project = encodeURIComponent(repo.path);
   await mapLimit(requested, COMMIT_CONCURRENCY, async (sha) => {
     try {
@@ -247,10 +250,17 @@ export async function fetchMrsForCommits(
         sha,
         pickBestAssociation(Array.isArray(body) ? (body as MrNode[]) : [])
       );
-    } catch {
+    } catch (error) {
       // One unreachable commit must not fail the whole visible set; it simply
       // stays unknown and is retried on the next refresh.
+      failure ??= { error };
     }
   });
+  // Not one unreachable commit but every one of them: a revoked token or an
+  // unreachable host. Resolving that as an empty map reads to `PrService` as a
+  // clean answer, so it would clear the backoff instead of arming it and the
+  // 60s poll would re-fan-out all sixty REST calls forever. Same first-chunk
+  // rule as every other client here — "nothing resolved" must fail.
+  if (resolved.size === 0 && failure !== undefined) throw failure.error;
   return resolved;
 }

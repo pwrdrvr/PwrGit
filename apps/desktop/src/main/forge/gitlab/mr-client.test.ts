@@ -249,6 +249,31 @@ describe("fetchMrsForCommits", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it("fails when every commit lookup failed, rather than reporting no MR", async () => {
+    // A revoked token or an unreachable host fails all of them. Resolving that
+    // as an empty map reads to `PrService` as a clean answer, so it clears the
+    // backoff instead of arming it and the 60s poll re-fans-out forever.
+    fetchMock.mockResolvedValue(jsonResponse({ message: "unauthorized" }, 401));
+
+    await expect(
+      fetchMrsForCommits("t", REPO, ["a".repeat(40), "b".repeat(40)])
+    ).rejects.toThrow();
+  });
+
+  it("still salvages the commits that did answer", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse([mr({ iid: "3" })]))
+      .mockResolvedValue(jsonResponse({ message: "unauthorized" }, 401));
+
+    const result = await fetchMrsForCommits("t", REPO, [
+      "a".repeat(40),
+      "b".repeat(40)
+    ]);
+
+    expect(result.get("a".repeat(40))).toMatchObject({ number: 3 });
+    expect(result.has("b".repeat(40))).toBe(false);
+  });
+
   it("encodes the nested project path into the REST route", async () => {
     fetchMock.mockResolvedValue(jsonResponse([]));
 

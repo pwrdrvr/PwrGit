@@ -56,9 +56,10 @@ claims `origin`'s host, the CLI isn't logged in, or the network fails.
   LEFT JOINs `branch_pr` onto `Worktree.pr` for the initial load.
   - **A refresh that could not finish is throttled by `lastFailedAt`, not by
     the cache.** It writes no row, so `fetched_at` — and therefore `isFresh` —
-    cannot hold the retry back. See "Never negative-cache a failure, but do
-    remember that you tried" in `../forge/AGENTS.md` for the window it uses and
-    why a partial branch answer counts as one.
+    cannot hold the retry back. The check sits above `branchesToCheck`, so a
+    throttled refresh costs no `git for-each-ref` either. See "Never
+    negative-cache a failure, but do remember that you tried" in
+    `../forge/AGENTS.md` for why it is keyed by scope rather than by repo.
 - **Commit PR monitoring**: exact visible SHAs are association-cached in
   `commit_pr`; never enroll an entire history window. Renderers debounce one
   atomic visible-set replacement. Main keeps unknown visible associations in a

@@ -11,6 +11,19 @@ const TERMINAL_USER_BRANCH_REFRESH_TTL_MS = 60_000;
 
 type PrRefreshTrigger = "scheduled" | "user";
 
+/**
+ * Which question failed, not merely which repository.
+ *
+ * A forge that refuses one query shape routinely answers another — a
+ * complexity cap on a 250-branch sweep still answers a single branch — so a
+ * repo-wide mark is wrong in both directions: a hover's success would delete
+ * the sweep's backoff, and a hover's repeated failure would re-stamp it faster
+ * than the sweep's ten-minute window could ever elapse, starving the only
+ * refresh that covers every branch. A union rather than a template string, so
+ * a mistyped scope cannot compile into a bucket nothing reads.
+ */
+type FailureScope = "branches:all" | "branches:targeted" | "commits";
+
 type PrServiceDeps = {
   /** Swap in a fake forge; the default reads `origin` and picks a provider. */
   resolveForge?: typeof resolveForge;
@@ -86,19 +99,24 @@ export class PrService {
     Promise<PrStatusDeltas>
   >();
   /**
-   * When a repo's last refresh could not finish, per cache. A refusal writes no
-   * row — see "A refusal is not an answer" in ../forge/AGENTS.md — so the
-   * `fetched_at` the TTL checks reads exactly as it did before the attempt, and
-   * nothing throttles the retry: every repo-row expand, hover, worktree monitor
-   * replacement and 60s poll re-enters the network path, and the queued callers
-   * `refreshRepoAtGeneration` wakes each start an attempt of their own.
+   * When a repo's last refresh could not finish, per repository and scope.
    *
-   * Remembering the *attempt* in memory is the fix, rather than writing a row
-   * that would claim the branch has no change request. Same shape as the
-   * signed-out backoff in ../forge/identity-service.ts, and same reason: never
-   * negative-cache a failure, but do remember that you tried.
+   * A refusal writes no row — see "A refusal is not an answer" in
+   * ../forge/AGENTS.md — so the `fetched_at` every TTL checks reads exactly as
+   * it did before the attempt, and nothing throttles the retry: every repo-row
+   * expand, hover and worktree-monitor replacement re-enters the network path,
+   * and the callers queued behind an in-flight refresh each start an attempt of
+   * their own when it settles. Remembering the *attempt* in memory is the fix,
+   * rather than writing a row that would claim the branch has no change
+   * request. Same shape as the signed-out backoff in
+   * ../forge/identity-service.ts, and same reason: never negative-cache a
+   * failure, but do remember that you tried.
+   *
+   * Keyed by repository so `forget` is one delete, and within it by scope
+   * because a whole-repo sweep and a one-branch hover are different questions —
+   * see `BranchFailureScope`.
    */
-  private readonly lastFailedAt = new Map<string, number>();
+  private readonly lastFailedAt = new Map<string, Map<FailureScope, number>>();
 
   constructor(
     private readonly db: DB,
@@ -118,7 +136,9 @@ export class PrService {
   invalidatePendingWrites(): void {
     this.writeGeneration += 1;
     // A recreated profile reusing these ids should get a fresh attempt, not
-    // the deleted one's backoff.
+    // the deleted one's backoff. The generation guard on every mark write is
+    // the other half: a refresh already in flight must not re-arm what this
+    // just cleared.
     this.lastFailedAt.clear();
   }
 
@@ -314,15 +334,14 @@ export class PrService {
       ? commitHashes
       : this.staleCommitHashes(repoId, commitHashes, opts.trigger);
     if (stale.length === 0) return new Map();
-    // Same throttle as the branch path, against the TTL this trigger uses.
-    // Only a *total* failure is remembered here: commit freshness is per hash,
-    // so a partly answered batch writes rows and shrinks the next `stale` set
-    // by itself — real forward progress the branch path cannot make.
-    const failureKey = `commits:${repoId}`;
-    const ttlMs = opts.trigger === "user"
-      ? USER_BRANCH_REFRESH_TTL_MS
-      : SCHEDULED_BRANCH_REFRESH_TTL_MS;
-    if (opts.force !== true && this.failedWithin(failureKey, ttlMs)) {
+    // Same throttle as the branch path, sharing its one TTL spelling. Only a
+    // *total* failure is remembered here: commit freshness is per hash, so a
+    // partly answered batch writes rows and shrinks the next `stale` set by
+    // itself — real forward progress the branch path cannot make.
+    if (
+      opts.force !== true &&
+      this.failedWithin(repoId, "commits", this.failureTtlMs("commits", opts.trigger))
+    ) {
       return new Map();
     }
 
@@ -331,18 +350,19 @@ export class PrService {
     const token = await forge.provider.getToken(forge.repo.host);
     if (token === null || !this.isCurrent(generation)) return new Map();
 
+    let prs: Map<string, PrSummary | null>;
     try {
-      const prs = await forge.provider.fetchPrsForCommits(
-        token,
-        forge.repo,
-        stale
-      );
-      this.lastFailedAt.delete(failureKey);
-      return this.upsertCommits(repoId, prs, generation);
+      prs = await forge.provider.fetchPrsForCommits(token, forge.repo, stale);
     } catch {
-      this.lastFailedAt.set(failureKey, this.now());
+      this.recordFailure(repoId, "commits", generation);
       return new Map();
     }
+    // Only the fetch belongs in the `try`. A SQLITE_BUSY raised inside
+    // `upsertCommits` — it transacts over up to 200 hashes while other writers
+    // are live — would otherwise be recorded as a refusal by a forge that
+    // answered correctly, silencing this repo's associations for the window.
+    this.clearFailure(repoId, "commits", generation);
+    return this.upsertCommits(repoId, prs, generation);
   }
 
   private staleCommitHashes(
@@ -401,6 +421,18 @@ export class PrService {
     },
     generation: number
   ): Promise<Map<string, PrSummary | null>> {
+    if (!this.isCurrent(generation)) return new Map();
+    // Ahead of `branchesToCheck`, which spawns `git for-each-ref`: a throttled
+    // refresh must cost no subprocess either. Every caller queued behind an
+    // in-flight refresh recurses back through here when it settles, so this is
+    // also where they see a mark the refresh they waited on just wrote.
+    const scope = branchFailureScope(opts);
+    if (
+      opts.force !== true &&
+      this.failedWithin(repoId, scope, this.failureTtlMs(scope, opts.trigger))
+    ) {
+      return new Map();
+    }
     const branches = await this.branchesToCheck(repoId, opts.branches);
     if (branches.length === 0 || !this.isCurrent(generation)) return new Map();
     const pendingStatus = this.pendingPrNumberRefreshes.get(repoId);
@@ -440,16 +472,14 @@ export class PrService {
       .prepare("SELECT path FROM repos WHERE id = ?")
       .get(repoId) as { path: string } | undefined;
     if (repo === undefined) return empty;
-    const ttlMs = this.refreshTtlMs(repoId, branches, opts);
-    const failureKey = `branches:${repoId}`;
-    if (opts.force !== true) {
-      if (this.isFresh(repoId, branches, ttlMs)) return empty;
-      // Throttled by the very TTL a successful refresh would have earned, so a
-      // permanently refused query costs one attempt per TTL instead of one per
-      // UI interaction. Each trigger brings its own TTL, so a hover still gets
-      // its ten-second retry after a whole-repo sweep failed.
-      if (this.failedWithin(failureKey, ttlMs)) return empty;
+    // The failure throttle is checked by the caller, above `branchesToCheck`.
+    if (
+      opts.force !== true &&
+      this.isFresh(repoId, branches, this.refreshTtlMs(repoId, branches, opts))
+    ) {
+      return empty;
     }
+    const scope = branchFailureScope(opts);
 
     const forge = await this.originForge(repo.path);
     if (forge === null || !this.isCurrent(generation)) return empty;
@@ -466,7 +496,7 @@ export class PrService {
     } catch {
       // Best-effort; keep whatever's cached — but remember the attempt, or
       // nothing throttles the next one.
-      this.lastFailedAt.set(failureKey, this.now());
+      this.recordFailure(repoId, scope, generation);
       return empty;
     }
     // A batched client answers what it could and omits the chunks it never
@@ -475,17 +505,89 @@ export class PrService {
     // the next trigger would re-send every batch. The batches that *did*
     // resolve are still written below — that is the forward progress.
     if (branches.every((branch) => prs.has(branch))) {
-      this.lastFailedAt.delete(failureKey);
+      this.clearFailure(repoId, scope, generation);
     } else {
-      this.lastFailedAt.set(failureKey, this.now());
+      this.recordFailure(repoId, scope, generation);
     }
     return this.upsert(repoId, prs, generation);
   }
 
-  /** Did the last attempt for this cache fail inside the window it earned? */
-  private failedWithin(key: string, ttlMs: number): boolean {
-    const failedAt = this.lastFailedAt.get(key);
-    return failedAt !== undefined && failedAt > this.now() - ttlMs;
+  /** Did the last attempt at this scope fail inside the window it earned? */
+  private failedWithin(
+    repoId: string,
+    scope: FailureScope,
+    ttlMs: number
+  ): boolean {
+    const failedAt = this.lastFailedAt.get(repoId)?.get(scope);
+    if (failedAt === undefined) return false;
+    const now = this.now();
+    // A mark from the future is a backward wall-clock step (NTP, a corrected
+    // timezone, a wake from sleep), not a fresh failure. Without the upper
+    // bound it suppresses every refresh until the clock catches up, which
+    // `force` is the only escape from — and nothing in the renderer sends it.
+    // `isFresh` guards its stored timestamps the same way.
+    return failedAt <= now && failedAt > now - ttlMs;
+  }
+
+  /** Generation-guarded, so a refresh that was in flight when the profile was
+   *  deleted cannot re-arm the backoff `invalidatePendingWrites` just cleared. */
+  private recordFailure(
+    repoId: string,
+    scope: FailureScope,
+    generation: number
+  ): void {
+    if (!this.isCurrent(generation)) return;
+    const scopes = this.lastFailedAt.get(repoId) ?? new Map<FailureScope, number>();
+    scopes.set(scope, this.now());
+    this.lastFailedAt.set(repoId, scopes);
+  }
+
+  private clearFailure(
+    repoId: string,
+    scope: FailureScope,
+    generation: number
+  ): void {
+    if (!this.isCurrent(generation)) return;
+    const scopes = this.lastFailedAt.get(repoId);
+    if (scopes === undefined) return;
+    scopes.delete(scope);
+    if (scopes.size === 0) this.lastFailedAt.delete(repoId);
+  }
+
+  /**
+   * Drop a removed repository's backoff.
+   *
+   * Repo ids are `sha1(path)` (`RepoIndexer`), so they are stable and reused: a
+   * checkout pruned by a scan and re-indexed minutes later, or removed and
+   * re-added by hand, would otherwise inherit the dead row's throttle — the
+   * same hazard `IdentityService.forget` exists for.
+   */
+  forget(repoId: string): void {
+    this.lastFailedAt.delete(repoId);
+  }
+
+  /**
+   * How long an attempt of this shape is not worth repeating once it failed:
+   * the TTL a successful one would have earned.
+   *
+   * `refreshTtlMs`'s terminal-state refinement is deliberately absent. That
+   * refinement asks whether the *cached* rows are all merged/closed, and a
+   * refusal cached nothing — so there is no terminal state to be slow about,
+   * and the unrefined value is the shorter, retry-sooner half anyway. Both the
+   * branch and commit paths read this one spelling, so a TTL change cannot
+   * reach the freshness check and miss the throttle.
+   */
+  private failureTtlMs(
+    scope: FailureScope,
+    trigger?: PrRefreshTrigger
+  ): number {
+    if (trigger === "user") return USER_BRANCH_REFRESH_TTL_MS;
+    // Keyed off the scope, not off `opts.branches` being absent: the commit
+    // path has no branch list at all, and reading its absence as "whole repo"
+    // would hand commit association the ten-minute sweep window.
+    return scope === "branches:all"
+      ? REPO_REFRESH_TTL_MS
+      : SCHEDULED_BRANCH_REFRESH_TTL_MS;
   }
 
   private refreshTtlMs(
@@ -745,6 +847,11 @@ export class PrService {
         undefined
     );
   }
+}
+
+/** A whole-repo sweep and a targeted refresh back off independently. */
+function branchFailureScope(opts: { branches?: string[] }): FailureScope {
+  return opts.branches === undefined ? "branches:all" : "branches:targeted";
 }
 
 function normalizeCommitHashes(commitHashes: string[]): string[] {

@@ -482,7 +482,7 @@ describe("PrService", () => {
       expect(sent).toHaveLength(2);
     });
 
-    it("still lets a hover retry on its own ten-second TTL, and force bypass", async () => {
+    it("backs a hover off on its own scope, and never on the sweep's", async () => {
       const { service, sent } = refusingService();
 
       const hover = async (): Promise<void> => {
@@ -492,21 +492,223 @@ describe("PrService", () => {
         });
       };
 
+      // A refused sweep says nothing about a one-branch query — a complexity
+      // cap refuses the first and answers the second — so the hover is not
+      // held back by it at all.
       await service.refreshRepo("repo");
       await hover();
-      expect(sent).toHaveLength(1);
+      expect(sent).toEqual([["feature/pr-state"], ["feature/pr-state"]]);
 
-      // Deep inside the sweep's ten-minute window, but past the hover's own
-      // ten seconds — the mark is one timestamp read against each caller's TTL,
-      // not a single window that freezes the repo for whoever failed first.
-      now += 10_001;
+      // It is held back by its own previous failure, for its own ten seconds.
+      now += 9_000;
       await hover();
       expect(sent).toHaveLength(2);
+      now += 1_001;
+      await hover();
+      expect(sent).toHaveLength(3);
 
       // An explicit force is never held back, exactly as it is never held back
       // by `isFresh`.
       await service.refreshRepo("repo", { force: true });
-      expect(sent).toHaveLength(3);
+      expect(sent).toHaveLength(4);
+    });
+
+    it("does not let a failing hover starve the whole-repo sweep", async () => {
+      const { service, sent } = refusingService();
+
+      // The damaging shape: the user keeps hovering a repo whose forge is
+      // refusing. Each hover failure used to re-stamp the one shared mark, so
+      // the sweep's ten-minute window never elapsed and the only refresh that
+      // covers every branch never ran again.
+      await service.refreshRepo("repo");
+      for (let i = 0; i < 110; i += 1) {
+        now += 11_000;
+        await service.refreshRepo("repo", {
+          branches: ["feature/pr-state"],
+          trigger: "user"
+        });
+      }
+      // Twenty minutes have passed; the sweep is due regardless of the hovers.
+      const before = sent.length;
+      await service.refreshRepo("repo");
+      expect(sent.length).toBe(before + 1);
+    });
+
+    it("lets a one-branch success stand without clearing the sweep's backoff", async () => {
+      // A complexity cap refuses the wide query and answers a narrow one. The
+      // narrow success must not be read as evidence that the wide query works.
+      const sent: string[][] = [];
+      db.prepare(
+        "INSERT INTO worktrees (id, repo_id, branch, path) VALUES ('wt-b', 'repo', 'feature/other', '/repo/other')"
+      ).run();
+      const service = new PrService(db, git, {
+        resolveForge: fakeForge({
+          fetchPrsForBranches: async (_token, _repo, branches) => {
+            sent.push(branches);
+            if (branches.length > 1) throw new Error("query is too complex");
+            return new Map(branches.map((branch) => [branch, pr()]));
+          }
+        }),
+        now: () => now
+      });
+
+      await service.refreshRepo("repo");
+      expect(sent).toHaveLength(1);
+
+      now += 11_000;
+      await service.refreshRepo("repo", {
+        branches: ["feature/pr-state"],
+        trigger: "user"
+      });
+      expect(sent).toHaveLength(2);
+
+      // The sweep is still inside the ten minutes its own failure earned.
+      now += 1_000;
+      await service.refreshRepo("repo");
+      expect(sent).toHaveLength(2);
+    });
+
+    it("spawns no ref listing while the sweep is throttled", async () => {
+      const gitCalls: string[][] = [];
+      const countingGit: GitExec = async (args, cwd) => {
+        gitCalls.push(args);
+        return await git(args, cwd);
+      };
+      const sent: string[][] = [];
+      const service = new PrService(db, countingGit, {
+        resolveForge: fakeForge({
+          fetchPrsForBranches: async (_token, _repo, branches) => {
+            sent.push(branches);
+            throw new Error("422 query is not valid");
+          }
+        }),
+        now: () => now
+      });
+
+      await service.refreshRepo("repo");
+      gitCalls.length = 0;
+
+      // Three overlapping expands behind one mark. The throttle sits above
+      // `branchesToCheck`, so none of them costs a `git for-each-ref` either —
+      // the recursion would otherwise spawn two per queued caller.
+      await Promise.all([
+        service.refreshRepo("repo"),
+        service.refreshRepo("repo"),
+        service.refreshRepo("repo")
+      ]);
+
+      expect(sent).toHaveLength(1);
+      expect(gitCalls).toEqual([]);
+    });
+
+    it("ignores a mark from the future, so a clock step cannot wedge refreshes", async () => {
+      const { service, sent, setAnswer } = refusingService();
+
+      await service.refreshRepo("repo");
+      expect(sent).toHaveLength(1);
+
+      // NTP corrects a machine that was an hour fast. Without the upper bound
+      // the mark stays "inside the window" for the whole hour, and no renderer
+      // dispatch sends `force` to escape it.
+      now -= 60 * 60_000;
+      setAnswer(new Map([["feature/pr-state", pr()]]));
+      await service.refreshRepo("repo");
+
+      expect(sent).toHaveLength(2);
+      expect(service.cachedBranchPr("repo", "feature/pr-state")).toMatchObject({
+        number: 42
+      });
+    });
+
+    it("does not let a rejection land a backoff on a recreated repository", async () => {
+      let releaseFetch = (): void => undefined;
+      const blocked = new Promise<void>((resolve) => {
+        releaseFetch = resolve;
+      });
+      let announce = (): void => undefined;
+      const started = new Promise<void>((resolve) => {
+        announce = resolve;
+      });
+      const sent: string[][] = [];
+      const service = new PrService(db, git, {
+        resolveForge: fakeForge({
+          fetchPrsForBranches: async (_token, _repo, branches) => {
+            sent.push(branches);
+            announce();
+            await blocked;
+            throw new Error("token revoked");
+          }
+        }),
+        now: () => now
+      });
+
+      const inFlight = service.refreshRepo("repo");
+      await started;
+      // Profile deletion: the generation moves and the backoff is cleared.
+      service.invalidatePendingWrites();
+      releaseFetch();
+      await inFlight;
+
+      // The rejection landed after the clear; it must not have re-armed it.
+      await service.refreshRepo("repo");
+      expect(sent).toHaveLength(2);
+    });
+
+    it("drops every backoff when pending writes are invalidated", async () => {
+      const { service, sent } = refusingService();
+
+      await service.refreshRepo("repo");
+      expect(sent).toHaveLength(1);
+
+      // Profile deletion. A profile recreated with the same ids must get a
+      // fresh attempt, so this must clear inside the window, not wait it out.
+      service.invalidatePendingWrites();
+      now += 1_000;
+      await service.refreshRepo("repo");
+      expect(sent).toHaveLength(2);
+    });
+
+    it("clears the commit mark on a success, inside its own window", async () => {
+      const sha = "a".repeat(40);
+      const commitSent: string[][] = [];
+      let answering = false;
+      const service = new PrService(db, git, {
+        resolveForge: fakeForge({
+          fetchPrsForCommits: async (_token, _repo, hashes) => {
+            commitSent.push(hashes);
+            if (!answering) throw new Error("422 query is not valid");
+            return new Map(hashes.map((hash) => [hash, null]));
+          }
+        }),
+        now: () => now
+      });
+
+      await service.refreshCommits("repo", [sha], { trigger: "scheduled" });
+      expect(commitSent).toHaveLength(1);
+
+      answering = true;
+      await service.refreshCommits("repo", [sha], { force: true });
+      expect(commitSent).toHaveLength(2);
+
+      // Inside the 60s the failure had earned. Drop the row so freshness is
+      // not what lets this through — only the cleared mark can be.
+      db.prepare("DELETE FROM commit_pr WHERE repo_id = 'repo'").run();
+      now += 30_000;
+      await service.refreshCommits("repo", [sha], { trigger: "scheduled" });
+      expect(commitSent).toHaveLength(3);
+    });
+
+    it("forgets a removed repository's backoff", async () => {
+      const { service, sent } = refusingService();
+
+      await service.refreshRepo("repo");
+      expect(sent).toHaveLength(1);
+
+      // Repo ids are derived from the path, so a pruned-and-reindexed checkout
+      // reuses this one and must not inherit its throttle.
+      service.forget("repo");
+      await service.refreshRepo("repo");
+      expect(sent).toHaveLength(2);
     });
 
     it("does not let each queued caller start an attempt of its own", async () => {
@@ -538,6 +740,30 @@ describe("PrService", () => {
       // And the mark is cleared, so the next refresh is throttled by the row's
       // own fetched_at rather than by a failure that is no longer true.
       now += 11 * 60_000;
+      await service.refreshRepo("repo");
+      expect(sent).toHaveLength(3);
+    });
+
+    it("clears the mark on a full success, inside the window it had earned", async () => {
+      // Pins the `delete` itself: every assertion here sits *inside* the ten
+      // minutes the failure earned, so a no-op delete changes the result.
+      const { service, sent, setAnswer } = refusingService();
+
+      await service.refreshRepo("repo");
+      expect(sent).toHaveLength(1);
+
+      now += 30_000;
+      await service.refreshRepo("repo");
+      expect(sent).toHaveLength(1); // still throttled
+
+      setAnswer(new Map([["feature/pr-state", pr()]]));
+      await service.refreshRepo("repo", { force: true });
+      expect(sent).toHaveLength(2);
+
+      // The row is now fresh, so drop it to isolate the mark: `isFresh` must
+      // not be what lets the next call through.
+      db.prepare("DELETE FROM branch_pr WHERE repo_id = 'repo'").run();
+      now += 30_000;
       await service.refreshRepo("repo");
       expect(sent).toHaveLength(3);
     });

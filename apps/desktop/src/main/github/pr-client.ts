@@ -1,6 +1,7 @@
 import { graphql, GraphqlResponseError } from "@octokit/graphql";
 import type { PrSummary } from "@pwrgit/shared";
 import { delay } from "../util/timing";
+import { fetchInChunks } from "../forge/chunked";
 import { forgeRetryDelayMs } from "../forge/retry";
 import { forgeOrigin, type ForgeRepo } from "../forge/types";
 import { runGh } from "./gh-cli";
@@ -237,18 +238,7 @@ async function runQuery(
   }
 }
 
-/**
- * Fetch the most-recent PR for each branch in one repo (batched + backed off).
- *
- * A chunk that fails ends the walk with whatever the earlier chunks resolved,
- * rather than discarding them: 250 branches refused on the fourth request
- * would otherwise throw away 150 branches of answered data. Only a first chunk
- * failing — nothing resolved at all — rethrows, because that is the case the
- * caller must not read as "no PR anywhere". Stopping rather than skipping to
- * the next chunk is deliberate: a revoked token or a complexity cap refuses
- * every chunk alike, and continuing would spend the whole retry budget again
- * per chunk for an answer that cannot change.
- */
+/** Fetch the most-recent PR for each branch in one repo (batched + backed off). */
 export async function fetchPrsForRepo(
   token: string,
   repo: Pick<ForgeRepo, "host" | "port">,
@@ -256,22 +246,15 @@ export async function fetchPrsForRepo(
   name: string,
   branches: string[]
 ): Promise<Map<string, PrSummary | null>> {
-  const result = new Map<string, PrSummary | null>();
-  for (let i = 0; i < branches.length; i += BATCH) {
-    const chunk = branches.slice(i, i + BATCH);
-    const { query, variables } = buildPrQuery(owner, name, chunk);
-    let data: unknown;
-    try {
-      data = await runQuery(token, repo, query, variables);
-    } catch (error) {
-      if (result.size === 0) throw error;
-      return result;
-    }
-    for (const [branch, pr] of parsePrResponse(chunk, data)) {
-      result.set(branch, pr);
-    }
-  }
-  return result;
+  return await fetchInChunks(
+    branches,
+    BATCH,
+    async (chunk) => {
+      const { query, variables } = buildPrQuery(owner, name, chunk);
+      return await runQuery(token, repo, query, variables);
+    },
+    parsePrResponse
+  );
 }
 
 /** Fetch the best PR associated with each exact commit in batched GraphQL calls. */
@@ -282,24 +265,15 @@ export async function fetchPrsForCommits(
   name: string,
   commitHashes: string[]
 ): Promise<Map<string, PrSummary | null>> {
-  const result = new Map<string, PrSummary | null>();
-  for (let i = 0; i < commitHashes.length; i += BATCH) {
-    const chunk = commitHashes.slice(i, i + BATCH);
-    const { query, variables } = buildCommitPrQuery(owner, name, chunk);
-    let data: unknown;
-    try {
-      data = await runQuery(token, repo, query, variables);
-    } catch (error) {
-      // Same salvage as above; an omitted hash is simply not cached, which
-      // `staleCommitHashes` already treats as "never looked up".
-      if (result.size === 0) throw error;
-      return result;
-    }
-    for (const [hash, pr] of parseCommitPrResponse(chunk, data)) {
-      result.set(hash, pr);
-    }
-  }
-  return result;
+  return await fetchInChunks(
+    commitHashes,
+    BATCH,
+    async (chunk) => {
+      const { query, variables } = buildCommitPrQuery(owner, name, chunk);
+      return await runQuery(token, repo, query, variables);
+    },
+    parseCommitPrResponse
+  );
 }
 
 /** Refresh already-discovered PRs once per unique number. */
@@ -310,20 +284,13 @@ export async function fetchPrsByNumbers(
   name: string,
   numbers: number[]
 ): Promise<Map<number, PrSummary | null>> {
-  const result = new Map<number, PrSummary | null>();
-  for (let i = 0; i < numbers.length; i += BATCH) {
-    const chunk = numbers.slice(i, i + BATCH);
-    const { query, variables } = buildPrNumberQuery(owner, name, chunk);
-    let data: unknown;
-    try {
-      data = await runQuery(token, repo, query, variables);
-    } catch (error) {
-      if (result.size === 0) throw error;
-      return result;
-    }
-    for (const [number, pr] of parsePrNumberResponse(chunk, data)) {
-      result.set(number, pr);
-    }
-  }
-  return result;
+  return await fetchInChunks(
+    numbers,
+    BATCH,
+    async (chunk) => {
+      const { query, variables } = buildPrNumberQuery(owner, name, chunk);
+      return await runQuery(token, repo, query, variables);
+    },
+    parsePrNumberResponse
+  );
 }
