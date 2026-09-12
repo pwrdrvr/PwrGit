@@ -27,10 +27,11 @@ import {
 import {
   cliProtocolLabel,
   sourceEmptyMessage,
-  statusFor
+  statusFor,
+  forgeCanAnswerDialog
 } from "./fork-dialog";
 import { useForgeHostMap } from "../../lib/useForgeHostMap";
-import { useCloneSearch } from "./useCloneSearch";
+import { FORGE_UNASKED_CODES, useCloneSearch } from "./useCloneSearch";
 import { RepoIdentityChips } from "./RepoIdentityMarks";
 
 const PROTOCOL_IDS = ["ssh", "https", "cli"] as const;
@@ -236,7 +237,7 @@ export function CloneRepoDialog({
   // toggle that leads straight to "install the CLI" is a dead end dressed up
   // as a choice.
   const usableHosts = (catalog?.forges ?? [])
-    .filter((status) => status.installed && status.loggedIn)
+    .filter((status) => forgeCanAnswerDialog(status))
     .map((status) => status.kind);
   // Snap onto a forge that can actually answer. Without this a machine with
   // only GitLab signed in leaves `host` on its "github" default forever: the
@@ -251,9 +252,7 @@ export function CloneRepoDialog({
   const localSelected = selectedRepository?.localPath !== undefined;
   const activeHost = localSelected ? host : (selectedRepository?.host ?? host);
   const forgeStatus = statusFor(catalog?.forges ?? [], activeHost);
-  const cliDisabled =
-    catalog !== null &&
-    (forgeStatus?.installed !== true || !forgeStatus.loggedIn);
+  const cliDisabled = catalog !== null && !forgeCanAnswerDialog(forgeStatus);
 
   // Nothing is asked of the forge until the box settles — and never on open.
   // The catalog this replaced listed every known owner's repositories up
@@ -298,15 +297,7 @@ export function CloneRepoDialog({
         if (!active) return;
         setChecking(false);
         if (result.ok) setCheckedRepository(result.value);
-        else if (
-          result.error.code === "forge_cli_missing" ||
-          result.error.code === "forge_login_required" ||
-          // A host no CLI is signed in to and nobody has named in Settings →
-          // Forges. There is no API to confirm the repository with, but
-          // `git clone git@host:slug.git` still works, which is exactly what
-          // the unverified placeholder offers.
-          result.error.code === "unsupported_host"
-        ) {
+        else if (FORGE_UNASKED_CODES.has(result.error.code)) {
           // Built from the already-parsed `ExactRepository`, never re-parsed
           // from the query: `chooseRepository` rewrites `sourceQuery` to the
           // bare slug, and a slug has lost which instance it came from — a

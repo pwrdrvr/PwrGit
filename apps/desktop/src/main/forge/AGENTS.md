@@ -77,6 +77,24 @@ speaks `PrSummary` and never learns which forge answered.
   It is `gh-cli.ts`'s former body with the brand-specific parts lifted into a
   `CliSpec`. Change behavior here, not in a copy; `../github/gh-cli.test.ts`
   covers it and must keep passing.
+- **`retry.ts` holds the one retry/backoff decision** every forge client makes.
+  A forge contributes a row in the dialect table there — how its rate-limit
+  headers are spelled, and every status that carries a window (GitHub reports a
+  spent hourly budget as 403 as well as 429; GitLab only ever 429) — plus a
+  short adapter reading status and headers off its own error type. Both clients
+  carried a copy of the decision before, so a fix to one silently missed the
+  other; the ordering, and what it deliberately does not do, are in the file's
+  own header. Retry *budgets* stay with the caller: how many attempts a call may
+  spend is not policy, which is what lets commit association below choose fewer
+  than the branch query.
+- **A refusal is not an answer.** Both clients negative-cache "no change
+  request" from what a query returns, so a response that resolved nothing must
+  fail rather than return — a null `repository`/`project` container, or a 200
+  that was never the JSON we asked for, would otherwise write "no PR" onto every
+  branch in the batch and hold it for the refresh TTL. `PrService` treats a
+  thrown refresh as best-effort and keeps what it had. This is the other half of
+  "return an entry for every key requested" above: the rule applies to keys the
+  forge actually answered about.
 
 ## GitLab specifics
 
@@ -105,16 +123,88 @@ speaks `PrSummary` and never learns which forge answered.
   React StrictMode: every effect runs twice in dev, so one careless `useEffect`
   is two calls per mount per chip, and a sweep across a commit list becomes a
   burst that gets rate limited.
-- **`forge:status` has one consumer: Settings → Forges** (`ForgesSettings.tsx`),
-  which is the point of the channel — it names the exact command that unblocks a
-  signed-out or missing CLI, and lists capabilities so a feature this forge
-  cannot do reads as a known limit rather than a bug. A channel with no consumer
-  is how the `github:status` it replaced ended up dead.
+- **`forge:status` is a summary of the per-host state, not a second opinion on
+  it.** Settings renders two sections — Hosts (`ForgeHostsSection.tsx`, from
+  `forge:hosts`) and the per-forge card below it (`ForgesSettings.tsx`, from
+  `forge:status`) — and they must never contradict each other. They did: the
+  probe was hardcoded to `github.com` and `gitlab.com`, so the card read "GitLab:
+  Signed out" directly under a Hosts row naming a self-managed instance and its
+  account, and read "Connected" for a forge whose only host had been switched
+  off. `ForgeStatus` now carries `hosts[]` — `{host, enabled, loggedIn}` per
+  instance — and `loggedIn` is *derived* from it: true when any **enabled** host
+  holds a credential. `index.ts` supplies that list from
+  **`ForgeHosts.statusTargets()`**, not `list()`: `list()` answers "what has a row
+  in the Hosts pane", and driving the probe from it means any single config entry
+  makes the list non-empty, so a machine whose only entry is a self-managed
+  instance never asks about github.com at all — and neither does anything in the
+  window before enumeration lands. `statusTargets()` adds each forge's SaaS host
+  when nothing names it, still gated by `isEnabled`. Do not re-derive the summary
+  in the renderer, and do not wire a probe from `list()`.
+  - **An `assumed` target is probed but not reported.** The backfilled SaaS host
+    has no row in the Hosts pane, so `ForgeStatus.hosts` omits it — naming a host
+    the user can neither see nor switch is the two-sections-disagree bug from the
+    other direction, and it would also keep the pane's "Off" state unreachable by
+    never letting `every` clear. It is probed **without naming a host**, because
+    `GH_HOST`/`GITLAB_HOST` move the CLI's default and `--hostname github.com`
+    overrides them (`../github/pr-client.ts` spells this out). Its credential
+    still counts toward the summary.
+  - **The two sections divide the work.** Hosts owns per-host permission and
+    sign-in, one row each. The card owns what only a *product* can answer: the
+    CLI is missing (there are no host rows at all then), and what the
+    integration can do (`capabilities.ts`). Folding capabilities into host rows
+    would repeat the same sentence once per host of that forge and leave the
+    missing-CLI case nowhere to be reported.
+  - **Four states, and "off" is not one of the other three.** A forge whose every
+    host is switched off is neither connected nor signed out — reporting it as
+    either sends the user to a terminal to sign in to something they are already
+    signed in to. It renders neutral, not amber: they chose it.
+- **A disabled host is never probed.** Gating on `enabled` is what makes "off"
+  mean off — the switch exists to stop PwrGit spawning that CLI, and a probe that
+  ran anyway would spawn it to populate a settings pane. `loggedIn` on a disabled
+  host is therefore *not asked*, not *false*; `enabled` is what says why, and
+  collapsing the two is what made "off" read as "signed out".
+- **Both inputs to the host list re-probe; neither is allowed to be forgotten.**
+  The switches AND the enumerated directory feed `statusTargets()`, and both are
+  inputs to a five-minute cache. `index.ts` compares the *resolved target
+  signature* and forces a read when it moves — which covers a settings write, the
+  arrival of boot enumeration, and the Hosts pane's own **Re-check** button, while
+  costing nothing for a theme toggle. Keying it on the stored settings alone left
+  the card reading "Signed out" beneath a row saying "signed in as …" until the
+  TTL expired, with no user-reachable way to force it. It is debounced: each host
+  switch is its own settings write, so a burst otherwise chained one full pass per
+  click.
+- **A forced read is the whole invalidation story.** `list({force:true})` retires
+  the cache *and* bumps an epoch, so a pass already in flight still resolves for
+  whoever awaited it but may not cache or broadcast. Without the epoch, nulling
+  the cache made that stale pass compare as "changed" and publish its pre-action
+  answer, painting the state the user had just changed away from. There is
+  deliberately no separate `invalidate()` to forget to call.
+- **`forge:status` has three consumers, and two of them ask a narrower
+  question.** Settings → Forges wants "can this forge be read at all", which is
+  the summary. The clone and fork dialogs reach their provider through
+  `ForgeRepoRegistry.get(kind)` with no hostname — the **SaaS** instance — so
+  they ask **`forgeSaasBlock`** (shared) — `forgeCanAnswerDialog` in
+  `fork-dialog.ts` and `ForkService`/`CloneService`'s own gates are all that one
+  function. Reading the summary there would let a self-managed sign-in enable a
+  gitlab.com search that cannot answer, failing late instead of naming what is
+  missing; `clone-service.ts`'s `forgeUnavailable` did exactly that while
+  `knownOwners` sixty lines above it did not.
+  - **Three reasons, not two.** `forgeSaasBlock` returns `cli_missing`,
+    `host_off` or `signed_out`. "Switched off" is not "signed out": telling
+    someone to run `glab auth login` for a host they turned off names a remedy
+    that cannot work, which is the collapse `ForgeHostStatus.loggedIn` is
+    documented to avoid. `forge_host_off` joins the codes the clone dialog treats
+    as "the forge was not asked".
+  - A host the probe did not cover falls back to the summary deliberately — an
+    `assumed` host is reported nowhere, and absence is not evidence. Matching is
+    canonicalized on both sides (`canonicalForgeHostname`), or the miss is silent
+    and lands on the permissive answer.
 - **`forge:status` is answered from a cached probe** (`status.ts`). Probing
-  spawns a subprocess, so the cache is the point — repeat reads collapse onto
-  one value and one in-flight promise. A broken forge re-probes sooner than a
-  healthy one, and listeners are woken only when availability actually changed,
-  never merely because someone asked.
+  spawns a subprocess *per enabled host*, so the cache is the point — repeat
+  reads collapse onto one value and one in-flight promise. A broken forge
+  re-probes sooner than a healthy one, and listeners are woken only when
+  something rendered actually changed — which now includes the per-host detail,
+  since turning one of two signed-in hosts off leaves the summary alone.
 - **Capabilities describe the integration, not a login** (`capabilities.ts`), so
   they are static per forge and need no network call. `batchedCommitAssociation`
   is false for GitLab because it has no batch endpoint; callers use that to

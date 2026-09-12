@@ -1,5 +1,6 @@
 import {
   err,
+  forgeBlockAt,
   forgeWebUrl,
   ok,
   type CloneProtocol,
@@ -169,7 +170,22 @@ export class ForkService {
         message: `Forking on ${forgeName(input.host)} needs the ${forgeName(input.host)} CLI.`
       });
     }
-    if (!status.loggedIn) {
+    // The host the provider will actually talk to, not the forge summary: a
+    // machine signed in only to a self-managed instance reads merge requests
+    // fine and still has no credential for gitlab.com. `provider.hostname` is
+    // literally that host now that the request carries one, so this asks about
+    // the instance the fork is really going to rather than assuming the SaaS
+    // one. A host the user switched OFF is reported separately — telling them
+    // to sign in to something they are already signed in to names a remedy
+    // that cannot work.
+    const block = forgeBlockAt(status, provider.hostname);
+    if (block === "host_off") {
+      return this.blocked(source, input.targetOwner, {
+        code: "login_required",
+        message: `${provider.hostname} is switched off in Settings → Forges.`
+      });
+    }
+    if (block !== null) {
       return this.blocked(source, input.targetOwner, {
         code: "login_required",
         message: `Sign in with the ${forgeName(input.host)} CLI to fork.`
@@ -257,9 +273,7 @@ export class ForkService {
     const status = (await this.forgeStatus.list()).find(
       (candidate) => candidate.kind === host
     );
-    if (status === undefined || !status.installed || !status.loggedIn) {
-      return ok([]);
-    }
+    if (forgeBlockAt(status, provider.hostname) !== null) return ok([]);
     try {
       return ok(await provider.owners());
     } catch {

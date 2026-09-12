@@ -13,6 +13,9 @@ import {
 import {
   err,
   forgeCloneUrls,
+  forgeLoggedInAtSaas,
+  FORGE_SAAS_HOST,
+  forgeBlockAt,
   isSafeForgeHostname,
   isSafeProjectPath,
   ok,
@@ -572,7 +575,13 @@ export class CloneService {
         message: unsupportedHostMessage("look up")
       });
     }
-    const unavailable = forgeUnavailable(await this.statuses(), host);
+    // The instance the provider actually points at, so a machine signed in
+    // only to a company host is not told to sign in to github.com.
+    const unavailable = forgeUnavailable(
+      await this.statuses(),
+      host,
+      provider.hostname
+    );
     if (unavailable !== null) return unavailable;
     try {
       const repository = await provider.viewRepo(nameWithOwner);
@@ -921,9 +930,11 @@ function knownOwners(
   forges: ForgeStatus[],
   local: LocalForgeState
 ): ForgeOwner[] {
+  // Owners exist to scope a search, and search runs against the SaaS instance
+  // (`registry.get(kind)`), so that is the host whose credential decides.
   const usable = new Set(
     forges
-      .filter((status) => status.installed && status.loggedIn)
+      .filter((status) => status.installed && forgeLoggedInAtSaas(status))
       .map((status) => status.kind)
   );
   return dedupeOwners([
@@ -972,25 +983,48 @@ export function parseSearchInput(
  *  than showing a failure. */
 function forgeUnavailable(
   statuses: ForgeStatus[],
-  host: ForgeHost
+  host: ForgeHost,
+  /** The instance the caller resolved a provider for. Omitted means the SaaS
+   *  one, which is what a kind-only lookup reaches. */
+  hostname?: string
 ): Err<PwrGitError> | null {
   const status = statuses.find((candidate) => candidate.kind === host);
   const label = host === "gitlab" ? "GitLab" : "GitHub";
-  if (status === undefined || !status.installed) {
-    return err({
-      kind: "remote",
-      code: "forge_cli_missing",
-      message: `Install the ${label} CLI to look up repositories.`
-    });
+  // Per instance, never the forge-wide `loggedIn`: asking the summary let a
+  // self-managed-only sign-in pass this gate and run an unauthenticated
+  // gitlab.com lookup, which answers 404 — so the dialog reported "couldn't
+  // find it" instead of falling back to an unverified row, blaming the query
+  // for a missing credential. The mirror of that mistake is asking the SaaS
+  // question about a caller that resolved a self-managed provider, which
+  // reports "sign in to gitlab.com" about a credential it does not need —
+  // hence `hostname`. `knownOwners` below asks the same question; these two
+  // must not drift.
+  const saas = FORGE_SAAS_HOST[host === "gitlab" ? "gitlab" : "github"];
+  const instance = hostname ?? saas;
+  switch (forgeBlockAt(status, instance)) {
+    case "cli_missing":
+      return err({
+        kind: "remote",
+        code: "forge_cli_missing",
+        message: `Install the ${label} CLI to look up repositories.`
+      });
+    case "host_off":
+      // Not a sign-in problem: they turned the host off, and `auth login`
+      // cannot change that.
+      return err({
+        kind: "remote",
+        code: "forge_host_off",
+        message: `${instance} is switched off in Settings → Forges.`
+      });
+    case "signed_out":
+      return err({
+        kind: "remote",
+        code: "forge_login_required",
+        message: `Sign in with the ${label} CLI to look up repositories.`
+      });
+    default:
+      return null;
   }
-  if (!status.loggedIn) {
-    return err({
-      kind: "remote",
-      code: "forge_login_required",
-      message: `Sign in with the ${label} CLI to look up repositories.`
-    });
-  }
-  return null;
 }
 
 /** Owners and existing checkouts, read from the identities already joined onto
@@ -1050,7 +1084,7 @@ function splitOwner(nameWithOwner: string): string | null {
 }
 
 function defaultHostname(host: ForgeHost): string {
-  return host === "gitlab" ? "gitlab.com" : "github.com";
+  return host === "gitlab" ? FORGE_SAAS_HOST.gitlab : FORGE_SAAS_HOST.github;
 }
 
 function dedupeOwners(owners: ForgeOwner[]): ForgeOwner[] {

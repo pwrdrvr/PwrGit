@@ -291,6 +291,85 @@ describe("ForgeHosts.list", () => {
   });
 });
 
+describe("ForgeHosts.statusTargets", () => {
+  it("always includes both SaaS hosts, so a working forge is never reported out", () => {
+    // The regression this exists for: any config entry makes `list()` non-empty,
+    // so a probe driven by `list()` alone never asked about github.com on a
+    // machine whose only entry is a self-managed instance — and reported the
+    // signed-in SaaS host as "Signed out" until something else forced a re-probe.
+    const hosts = make({ hosts: { "gitlab.acme-inc.com": { kind: "gitlab" } } });
+
+    expect(hosts.statusTargets()).toEqual([
+      // `assumed`: nothing names these, so they are probed through the CLI's own
+      // default host and kept out of the reported list.
+      { kind: "github", host: "github.com", enabled: true, assumed: true },
+      { kind: "gitlab", host: "gitlab.acme-inc.com", enabled: true },
+      { kind: "gitlab", host: "gitlab.com", enabled: true, assumed: true }
+    ]);
+  });
+
+  it("keys the backfill by kind as well as host", () => {
+    // A row that resolves a SaaS hostname to the OTHER product must not suppress
+    // that product's own target: matching on the hostname alone left GitLab with
+    // no target at all, reported as signed out while `glab` was signed in.
+    const hosts = make({ hosts: { "gitlab.com": { kind: "github" } } });
+
+    expect(hosts.statusTargets()).toEqual([
+      { kind: "github", host: "github.com", enabled: true, assumed: true },
+      // The row, resolved to GitHub by the config entry …
+      { kind: "github", host: "gitlab.com", enabled: true },
+      // … and GitLab still gets a target of its own.
+      { kind: "gitlab", host: "gitlab.com", enabled: true, assumed: true }
+    ]);
+  });
+
+  it("names each SaaS host once when a CLI already reports it", () => {
+    const hosts = make({ discovered: [GH("github.com"), GL("gitlab.com")] });
+
+    expect(hosts.statusTargets().map((target) => target.host)).toEqual([
+      "github.com",
+      "gitlab.com"
+    ]);
+  });
+
+  it("carries the switch, so a host the user turned off is never probed", () => {
+    const hosts = make({
+      discovered: [GL("gitlab.acme-inc.com")],
+      hosts: { "gitlab.acme-inc.com": { enabled: false } }
+    });
+
+    expect(
+      hosts.statusTargets().find((target) => target.host === "gitlab.acme-inc.com")
+    ).toEqual({ kind: "gitlab", host: "gitlab.acme-inc.com", enabled: false });
+  });
+
+  it("respects an env allowlist that excludes the SaaS host", () => {
+    // A set allowlist is exhaustive. The SaaS host is added because resolution
+    // knows it, not because it is exempt from the switches.
+    const hosts = make({
+      discovered: [GH("github.acme-inc.com")],
+      env: { PWRGIT_GITHUB_HOSTS: "github.acme-inc.com" }
+    });
+
+    expect(hosts.statusTargets()).toEqual([
+      { kind: "github", host: "github.acme-inc.com", enabled: true },
+      { kind: "github", host: "github.com", enabled: false, assumed: true },
+      { kind: "gitlab", host: "gitlab.com", enabled: true, assumed: true }
+    ]);
+  });
+
+  it("skips a host whose forge cannot be identified", () => {
+    // A bare ssh remote earns no row and no probe — there is no transport to
+    // ask, and asking would mean guessing which product runs there.
+    const hosts = make({ hosts: { "nas.local": { enabled: true } } });
+
+    expect(hosts.statusTargets().map((target) => target.host)).toEqual([
+      "github.com",
+      "gitlab.com"
+    ]);
+  });
+});
+
 describe("ForgeHosts canonicalization", () => {
   it("matches a stored key however the caller spells the host", () => {
     const hosts = make({ hosts: { "git.example": { kind: "gitlab" } } });

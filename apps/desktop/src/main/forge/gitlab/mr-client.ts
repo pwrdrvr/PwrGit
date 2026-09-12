@@ -1,7 +1,9 @@
 import type { PrSummary } from "@pwrgit/shared";
 import { mapLimit } from "../../util/map-limit";
-import { clampRetryDelayMs, delay } from "../../util/timing";
+import { delay } from "../../util/timing";
+import { forgeRetryDelayMs } from "../retry";
 import type { ForgeRepo } from "../types";
+import { ForgeResponseError } from "../repo-provider";
 import { forgeOrigin, withNullsForMissing } from "../types";
 import {
   buildMrBranchQuery,
@@ -44,27 +46,22 @@ class GitLabHttpError extends Error {
 }
 
 /**
- * Same backoff policy as the GitHub client, against GitLab's header names.
+ * The shared forge backoff (`../retry`), against GitLab's error shape.
  *
- * GitLab sends `RateLimit-Reset` as a Unix timestamp and `Retry-After` in
- * seconds. 4xx other than 429 will not fix themselves, so they are not retried.
+ * Only a `GitLabHttpError` carries a status and headers. Everything else the
+ * retried block can throw reaches the policy as the no-status case and is
+ * retried as transient — a timeout or a DNS failure, but also a `SyntaxError`
+ * from `response.json()`, which is what a captive portal answering 200 with
+ * HTML looks like from here.
  */
 function retryDelayMs(error: unknown, attempt: number): number | null {
-  const status = error instanceof GitLabHttpError ? error.status : undefined;
-  const headers = error instanceof GitLabHttpError ? error.headers : undefined;
-
-  const retryAfter = Number(headers?.get("retry-after"));
-  if (Number.isFinite(retryAfter) && retryAfter > 0) return clampRetryDelayMs(retryAfter * 1000);
-
-  const remaining = Number(headers?.get("ratelimit-remaining"));
-  const reset = Number(headers?.get("ratelimit-reset"));
-  if (status === 429 && remaining === 0 && Number.isFinite(reset)) {
-    return clampRetryDelayMs(reset * 1000 - Date.now());
-  }
-  if (status === 429 || status === undefined || status >= 500) {
-    return clampRetryDelayMs(1000 * 2 ** (attempt - 1));
-  }
-  return null;
+  const http = error instanceof GitLabHttpError ? error : undefined;
+  return forgeRetryDelayMs({
+    kind: "gitlab",
+    status: http?.status,
+    header: (name) => http?.headers?.get(name),
+    attempt
+  });
 }
 
 async function request(
@@ -114,10 +111,20 @@ async function graphql(
     method: "POST",
     body: JSON.stringify({ query, variables })
   });
-  // GraphQL-level errors (a project we cannot see, one bad argument) will not
-  // fix on retry — salvage whatever partial data came back, as the GitHub
-  // client does with GraphqlResponseError.
-  return (body as { data?: unknown } | null)?.data ?? null;
+  // GraphQL-level errors will not fix on retry — salvage whatever partial data
+  // came back, as the GitHub client does with a `GraphqlResponseError`. A
+  // project we cannot see is answered as a null `project` *inside* `data`, so
+  // it still lands here and still negative-caches, which is intended.
+  const data = (body as { data?: unknown } | null)?.data ?? null;
+  // `data` itself being absent is a different thing: nothing resolved, and
+  // reporting that as an empty page would negative-cache every branch in the
+  // batch as "no MR". `PrService` keeps what it had cached when this throws.
+  if (data === null) {
+    throw new ForgeResponseError(
+      "GitLab answered without the data this query asked for."
+    );
+  }
+  return data;
 }
 
 /**

@@ -532,14 +532,59 @@ export type ForgeCapabilities = {
   forkDefaultBranchOnly: boolean;
 };
 
+/**
+ * One host's contribution to a forge's status.
+ *
+ * A forge is not a single endpoint: `gh` can be signed in to github.com and an
+ * Enterprise instance at once, and `glab` to gitlab.com and any number of
+ * self-managed ones. Reporting a forge without naming its hosts is what let the
+ * settings pane say "GitLab: Signed out" while the Hosts list above it showed a
+ * self-managed GitLab the user was signed in to.
+ */
+export type ForgeHostStatus = {
+  /** Canonical lowercase hostname, as `canonicalForgeHostname` produces it. */
+  host: string;
+  /** The user's per-host switch. A disabled host is never probed. */
+  enabled: boolean;
+  /**
+   * A usable credential was found here. Always false when `enabled` is false —
+   * that host was not asked, so this is "not known" and `enabled` is what says
+   * why. Collapsing the two would make "off" read as "signed out" and send the
+   * user to a terminal to fix a switch.
+   */
+  loggedIn: boolean;
+};
+
 /** Whether one forge is usable right now, and what it can do when it is. */
 export type ForgeStatus = {
   kind: ForgeKind;
   /** The CLI PwrGit shells out to, e.g. `gh` or `glab`. */
   cli: string;
   installed: boolean;
+  /**
+   * At least one ENABLED host holds a usable credential.
+   *
+   * Derived from `hosts`, never from one hardcoded endpoint, so this cannot
+   * contradict the per-host list the settings pane renders beside it. A host the
+   * user switched off never makes this true: "off" means PwrGit spawns nothing
+   * for that host, and a summary that still read "Connected" would be claiming
+   * an ability the transport has given up.
+   */
   loggedIn: boolean;
   capabilities: ForgeCapabilities;
+  /**
+   * Every host of this kind that the settings pane has a row for, with the switch
+   * and the probe result for each.
+   *
+   * Deliberately not every host probed: the probe also asks about a forge's SaaS
+   * host when nothing names it, and reporting a host the user can neither see nor
+   * switch would be the settings sections disagreeing again — and would keep the
+   * pane's "Off" state unreachable. That credential still reaches `loggedIn`. So
+   * this is empty whenever the CLI is missing, and also on a machine where no CLI
+   * reports a host and nothing was added by hand; `loggedIn` may be true anyway,
+   * which reads as "connected, through the CLI's own default host".
+   */
+  hosts: ForgeHostStatus[];
 };
 
 /** Lifecycle of a change request, in the vocabulary both forges collapse into. */

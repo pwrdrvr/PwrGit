@@ -36,11 +36,15 @@ function graphqlPage(nodes: unknown[], hasNextPage = false, endCursor = "C"): un
   };
 }
 
-function jsonResponse(body: unknown, status = 200): Response {
+function jsonResponse(
+  body: unknown,
+  status = 200,
+  headers: Record<string, string> = {}
+): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
-    headers: new Headers(),
+    headers: new Headers(headers),
     json: async () => body
   } as unknown as Response;
 }
@@ -224,6 +228,39 @@ describe("backoff", () => {
 
     const pending = fetchMrsForBranches("t", REPO, ["a"]);
     await vi.advanceTimersByTimeAsync(2_000);
+
+    expect((await pending).get("a")).toMatchObject({ number: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails a query that resolved nothing, rather than caching it as no MR", async () => {
+    // A 200 whose body carries only `errors` — a rejected argument, an expired
+    // token. Reading that as an empty page would negative-cache every branch
+    // in the batch as "no MR"; throwing lets `PrService` keep what it had.
+    fetchMock.mockResolvedValue(
+      jsonResponse({ errors: [{ message: "invalid value for iids" }] })
+    );
+
+    await expect(fetchMrsForBranches("t", REPO, ["a"])).rejects.toThrow();
+    // The body came back 200, so this is not the retry path.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits the Retry-After off the response's own headers", async () => {
+    vi.useFakeTimers();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({}, 429, { "retry-after": "5" }))
+      .mockResolvedValueOnce(
+        jsonResponse(graphqlPage([mr({ iid: "1", sourceBranch: "a" })]))
+      );
+
+    const pending = fetchMrsForBranches("t", REPO, ["a"]);
+    // Not the one-second exponential wait: the server named five. Nothing else
+    // in the suite puts a header on a GitLab error, so this is what proves the
+    // adapter reaches `GitLabHttpError.headers` at all.
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1_000);
 
     expect((await pending).get("a")).toMatchObject({ number: 1 });
     expect(fetchMock).toHaveBeenCalledTimes(2);
