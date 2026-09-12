@@ -307,11 +307,21 @@ provider or reach a real forge.
     `readOrigin`**, so it costs no subprocess at all. Only a repo with no row
     yet pays one `git remote` read, then backs off.
   - **Anything that can change the gate's answer must call
-    `clearRetryBackoff()` and re-refresh** — `refreshIdentitiesAfterGateChange`
+    `clearGateBackoff()` and re-refresh** — `refreshIdentitiesAfterGateChange`
     in `index.ts` does, on the boot enumeration landing and on every settings
     write. Both land AFTER the profile-load refresh has already run, and
     nothing else would ask again: the sidebar glyph is the only manual trigger
     and it does not render for a repository that never got a row.
+  - **The two "do not ask again" stamps are separate maps on purpose.** A
+    signed-out CLI recovers from outside the app, so its window is short and
+    only a successful read clears it; clearing it on an unrelated settings
+    write turns a theme toggle into a burst of spawns against a CLI already
+    known to be logged out. A switched-off host is the opposite — the answer
+    is pinned in the settings file, the settings write clears the stamp
+    outright, and its window exists only to re-notice a re-pointed `origin`,
+    so it matches the identity TTL. At the retry window instead, 300 repos on
+    a switched-off host cost ~3,600 `git remote` spawns an hour to re-derive
+    what the settings file already says.
 - **Switching a host off stops the asking; it does not clear what was asked.**
   The stored `repo_identity` row stays and keeps rendering, and the refresh
   reports `host_disabled` carrying it. Deleting would collapse *asked, and it

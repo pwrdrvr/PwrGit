@@ -96,10 +96,28 @@ export class IdentityService {
   private readonly remoteSlots = new IdentitySlots(REMOTE_CONCURRENCY);
   private readonly forgeSlots = new IdentitySlots(FORGE_CONCURRENCY);
   private readonly refreshing = new Map<string, Promise<IdentityLookup>>();
-  /** Per-repo "do not ask again before" stamps: signed-out CLIs and hosts
-   *  the user switched off. Both are transient and fixable, and neither may
-   *  write a row. Explicit refresh bypasses it. */
-  private readonly retryAfter = new Map<string, number>();
+  /**
+   * Per-repo "do not ask again before" stamps. Two maps, not one, because the
+   * two reasons recover differently and merging them gets both wrong.
+   *
+   * A signed-out CLI is transient and fixable from outside the app, so its
+   * window is short and nothing but a successful read may clear it — dropping
+   * it on an unrelated settings write is how a theme toggle turns into a burst
+   * of spawns against a CLI we already know is logged out.
+   *
+   * A host the user switched off is the opposite: the answer cannot change
+   * without a settings write or an env change, and the settings write clears
+   * `gateRetryAfter` outright. Its window therefore exists only to re-notice a
+   * re-pointed `origin`, which is the identity TTL's job, not the retry one's.
+   * At `IDENTITY_RETRY_MS` a profile of 300 repos on a switched-off host costs
+   * ~3,600 `git remote` spawns an hour to re-derive an answer that is pinned
+   * in the settings file; at `IDENTITY_TTL_MS` it costs 50, the same as a host
+   * that is on.
+   *
+   * Neither may write a row, and an explicit refresh bypasses both.
+   */
+  private readonly authRetryAfter = new Map<string, number>();
+  private readonly gateRetryAfter = new Map<string, number>();
 
   constructor(
     private readonly db: DB,
@@ -108,6 +126,14 @@ export class IdentityService {
     /** Required, with no permissive default — see `AGENTS.md`. */
     private readonly hostGate: ForgeHostGate
   ) {}
+
+  private backedOff(repoId: string): boolean {
+    const now = Date.now();
+    return (
+      now < (this.authRetryAfter.get(repoId) ?? 0) ||
+      now < (this.gateRetryAfter.get(repoId) ?? 0)
+    );
+  }
 
   /** Whether the switch is off AND somebody actually decided that, rather than
    *  the host merely not being recognized yet. Only a decided "off" is stable
@@ -202,7 +228,7 @@ export class IdentityService {
     const due = repos.filter((repo) => {
       if (this.refreshing.has(repo.id)) return options.force === true;
       if (options.force === true) return true;
-      if (Date.now() < (this.retryAfter.get(repo.id) ?? 0)) return false;
+      if (this.backedOff(repo.id)) return false;
       const existing = stored.get(repo.id);
       // The stored row already names the host, so a switched-off one is
       // answered here without spawning `git remote get-url origin` at all.
@@ -265,7 +291,7 @@ export class IdentityService {
     // its remote on every pass — the answer cannot change without a settings
     // write, which resets the backoff by writing a row on the next success.
     if (this.switchedOff(origin.hostname)) {
-      this.retryAfter.set(origin.repoId, Date.now() + IDENTITY_RETRY_MS);
+      this.gateRetryAfter.set(origin.repoId, Date.now() + IDENTITY_TTL_MS);
       return {
         outcome: {
           repoId: repo.id,
@@ -326,7 +352,7 @@ export class IdentityService {
         // Not signed in is a transient, fixable state — leave the row alone
         // so signing in can recover. Back off briefly in memory so fetches
         // do not repeatedly spawn a signed-out CLI. Explicit refresh bypasses it.
-        this.retryAfter.set(origin.repoId, Date.now() + IDENTITY_RETRY_MS);
+        this.authRetryAfter.set(origin.repoId, Date.now() + IDENTITY_RETRY_MS);
         return {
           outcome: {
             repoId: repo.id,
@@ -336,7 +362,8 @@ export class IdentityService {
         };
       }
     }
-    this.retryAfter.delete(origin.repoId);
+    this.authRetryAfter.delete(origin.repoId);
+    this.gateRetryAfter.delete(origin.repoId);
     this.write(origin.repoId, identity);
     return {
       outcome: {
@@ -360,14 +387,15 @@ export class IdentityService {
    * rows that DID resolve is still right, and re-reading every repository on
    * every settings write is the cost this whole gate exists to avoid.
    */
-  clearRetryBackoff(): void {
-    this.retryAfter.clear();
+  clearGateBackoff(): void {
+    this.gateRetryAfter.clear();
   }
 
   /** Drop stored identities for repositories that no longer exist. The FK
    *  cascade covers deletes through `repos`; this covers a direct call. */
   forget(repoId: string): void {
-    this.retryAfter.delete(repoId);
+    this.authRetryAfter.delete(repoId);
+    this.gateRetryAfter.delete(repoId);
     this.db.prepare("DELETE FROM repo_identity WHERE repo_id = ?").run(repoId);
   }
 

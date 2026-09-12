@@ -486,13 +486,63 @@ describe("IdentityService", () => {
     expect(await identities.refresh(repos)).toEqual([]);
     expect(calledApi(gh)).toBe(false);
 
-    identities.clearRetryBackoff();
+    identities.clearGateBackoff();
     const changed = await identities.refresh(repos);
     expect(changed[0]?.identity.visibility).toBe("private");
 
     // And it is not a `force`: the row it just wrote is fresh, so the next
     // pass still costs nothing.
     gh.mockClear();
+    expect(await identities.refresh(repos)).toEqual([]);
+    expect(calledApi(gh)).toBe(false);
+  });
+
+  it("holds a switched-off host past the signed-out window", async () => {
+    // The two windows differ on purpose. A signed-out CLI recovers from
+    // outside the app, so it re-asks in five minutes; a switched-off host can
+    // only change through a settings write, which clears the stamp outright.
+    // Re-deriving that answer every five minutes costs ~3,600 `git remote`
+    // spawns an hour on a 300-repo profile and can tell us nothing new.
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.now());
+    let remoteReads = 0;
+    const git: GitExec = async (args, cwd, options) => {
+      if (args[0] === "remote") remoteReads += 1;
+      return systemGit(args, cwd, options);
+    };
+    const { db, indexer, profileId } = await fixture(okGh({}));
+    const registry = new ForgeRepoRegistry();
+    registry.register(new GitHubRepoProvider(okGh({})));
+    const service = new IdentityService(db, git, registry, () => ({
+      enabled: false,
+      source: "config"
+    }));
+    const repos = indexer.listRepos(profileId);
+
+    await service.refresh(repos);
+    expect(remoteReads).toBe(1);
+
+    // Well past IDENTITY_RETRY_MS, still inside IDENTITY_TTL_MS.
+    now.mockReturnValue(Date.now() + 30 * 60_000);
+    await service.refresh(repos);
+    expect(remoteReads).toBe(1);
+  });
+
+  it("does not drop a signed-out backoff when the gate changes", async () => {
+    // The two stamps recover differently. A settings write invalidates what
+    // the GATE said and nothing else — clearing the signed-out stamp too
+    // turned an unrelated toggle (a theme, say) into a burst of spawns
+    // against a CLI already known to be logged out.
+    const gh = vi.fn<(args: string[]) => Promise<string>>(async () => {
+      throw new Error("gh auth login");
+    });
+    const { identities, indexer, profileId } = await fixture(gh);
+    const repos = indexer.listRepos(profileId);
+    await identities.refresh(repos);
+    expect(calledApi(gh)).toBe(true);
+
+    identities.clearGateBackoff();
+    gh.mockClear();
+
     expect(await identities.refresh(repos)).toEqual([]);
     expect(calledApi(gh)).toBe(false);
   });

@@ -504,7 +504,7 @@ if (!gotSingleInstanceLock) {
       if (profileId === null) return;
       const repos = indexer.listRepos(profileId);
       if (repos.length === 0) return;
-      identityService.clearRetryBackoff();
+      identityService.clearGateBackoff();
       void identityService
         .refresh(repos)
         .then((changed) => {
