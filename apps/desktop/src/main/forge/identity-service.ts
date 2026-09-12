@@ -1,6 +1,7 @@
 import {
   parseForgeRemote,
   type ForgeHost,
+  type ForgeValueSource,
   type Repo,
   type RepoIdentity,
   type RepoIdentityRefreshOutcome
@@ -32,6 +33,15 @@ type IdentityLookup = {
 };
 
 export type IdentityChange = { repoId: string; identity: RepoIdentity };
+
+/** `ForgeHosts.isEnabled`, injected. The `source` matters as much as the
+ *  answer: "off" from config or env is a durable decision worth backing off
+ *  on, while "off" from `auto` only means no CLI has reported this host YET —
+ *  enumeration is two subprocesses that land after the first refresh. Backing
+ *  off on the latter would turn a boot race into minutes of missing marks. */
+export type ForgeHostGate = (
+  hostname: string
+) => { enabled: boolean; source: ForgeValueSource };
 
 type OriginRef = {
   repoId: string;
@@ -86,26 +96,26 @@ export class IdentityService {
   private readonly remoteSlots = new IdentitySlots(REMOTE_CONCURRENCY);
   private readonly forgeSlots = new IdentitySlots(FORGE_CONCURRENCY);
   private readonly refreshing = new Map<string, Promise<IdentityLookup>>();
-  private readonly authRetryAfter = new Map<string, number>();
+  /** Per-repo "do not ask again before" stamps: signed-out CLIs and hosts
+   *  the user switched off. Both are transient and fixable, and neither may
+   *  write a row. Explicit refresh bypasses it. */
+  private readonly retryAfter = new Map<string, number>();
 
   constructor(
     private readonly db: DB,
     private readonly git: GitExec,
     private readonly forges: ForgeRepoRegistry,
-    /**
-     * The per-host switch from Settings → Forges, as `ForgeHosts.isEnabled`
-     * answers it.
-     *
-     * Required, not optional with a permissive default: this service is the
-     * one forge caller that reached its registry directly, and every `gh api`
-     * it spawned for a host the user had switched off was a setting lying.
-     * A default of "everything is on" would let the next caller reintroduce
-     * exactly that, silently. `PrService` and the commit-author service get
-     * the same gate through `resolveEnabledForge`; this is its third spelling
-     * and deliberately the same question.
-     */
-    private readonly isHostEnabled: (hostname: string) => boolean
+    /** Required, with no permissive default — see `AGENTS.md`. */
+    private readonly hostGate: ForgeHostGate
   ) {}
+
+  /** Whether the switch is off AND somebody actually decided that, rather than
+   *  the host merely not being recognized yet. Only a decided "off" is stable
+   *  enough to cache against. */
+  private switchedOff(hostname: string): boolean {
+    const { enabled, source } = this.hostGate(hostname);
+    return !enabled && (source === "config" || source === "env");
+  }
 
   /** Identities already stored, for the repositories given. */
   read(repoIds: string[]): Map<string, RepoIdentity> {
@@ -192,8 +202,13 @@ export class IdentityService {
     const due = repos.filter((repo) => {
       if (this.refreshing.has(repo.id)) return options.force === true;
       if (options.force === true) return true;
-      if (Date.now() < (this.authRetryAfter.get(repo.id) ?? 0)) return false;
+      if (Date.now() < (this.retryAfter.get(repo.id) ?? 0)) return false;
       const existing = stored.get(repo.id);
+      // The stored row already names the host, so a switched-off one is
+      // answered here without spawning `git remote get-url origin` at all.
+      if (existing !== undefined && this.switchedOff(existing.hostname)) {
+        return false;
+      }
       if (existing?.fetchedAt === undefined) return true;
       const age = Date.now() - Date.parse(`${existing.fetchedAt}Z`);
       const ttl = existing.visibility === "unknown"
@@ -243,18 +258,23 @@ export class IdentityService {
     };
     const origin = await this.remoteSlots.run(() => readOrigin(this.git, repo));
     if (origin === null || origin.host === "other") return unavailable;
-    // A host switched off is exactly as unaskable as one with no provider:
-    // same `unavailable` outcome, no forge call, no row written. The `git
-    // remote` read above still happens — the hostname is what the decision is
-    // made on, so it has to be read first — but that is a local git process,
-    // not this host's CLI and not its token.
-    //
-    // Gating on the hostname rather than the kind is what makes the settings
-    // pane and this transport agree: `parseForgeRemote` still reads any
-    // `gitlab.*` name as GitLab, so a self-managed instance `ForgeHosts`
-    // refuses to guess at — one with no settings row, and no switch the user
-    // could ever have flipped — was handed to `glab` on every profile load.
-    if (!this.isHostEnabled(origin.hostname)) return unavailable;
+    // Gated on the hostname, not the kind, so the pane and this transport
+    // agree about self-managed instances. Reported as its own status rather
+    // than `unavailable`: nothing failed, the user turned it off. Backed off
+    // like a signed-out attempt so a repo that has no row yet stops re-reading
+    // its remote on every pass — the answer cannot change without a settings
+    // write, which resets the backoff by writing a row on the next success.
+    if (this.switchedOff(origin.hostname)) {
+      this.retryAfter.set(origin.repoId, Date.now() + IDENTITY_RETRY_MS);
+      return {
+        outcome: {
+          repoId: repo.id,
+          status: "host_disabled",
+          ...(previous === undefined ? {} : { identity: previous })
+        }
+      };
+    }
+    if (!this.hostGate(origin.hostname).enabled) return unavailable;
     // `origin.hostname` is right here and used below — dropping it read this
     // repo's identity off github.com/gitlab.com instead of its own instance,
     // which for a same-named SaaS slug reports a STRANGER's visibility and
@@ -306,7 +326,7 @@ export class IdentityService {
         // Not signed in is a transient, fixable state — leave the row alone
         // so signing in can recover. Back off briefly in memory so fetches
         // do not repeatedly spawn a signed-out CLI. Explicit refresh bypasses it.
-        this.authRetryAfter.set(origin.repoId, Date.now() + IDENTITY_RETRY_MS);
+        this.retryAfter.set(origin.repoId, Date.now() + IDENTITY_RETRY_MS);
         return {
           outcome: {
             repoId: repo.id,
@@ -316,7 +336,7 @@ export class IdentityService {
         };
       }
     }
-    this.authRetryAfter.delete(origin.repoId);
+    this.retryAfter.delete(origin.repoId);
     this.write(origin.repoId, identity);
     return {
       outcome: {
@@ -333,7 +353,7 @@ export class IdentityService {
   /** Drop stored identities for repositories that no longer exist. The FK
    *  cascade covers deletes through `repos`; this covers a direct call. */
   forget(repoId: string): void {
-    this.authRetryAfter.delete(repoId);
+    this.retryAfter.delete(repoId);
     this.db.prepare("DELETE FROM repo_identity WHERE repo_id = ?").run(repoId);
   }
 

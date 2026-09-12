@@ -481,14 +481,11 @@ if (!gotSingleInstanceLock) {
     forgeStatus.onChange(() => {
       void forgeHostDirectory.refresh();
     });
-    // The identity refresh is background work by construction — it runs on
-    // profile load and after every successful fetch/pull — so it is the path
-    // where an un-gated host is most expensive and least visible.
     const identityService = new IdentityService(
       db,
       execGit,
       forges,
-      (hostname) => forgeHosts.isEnabled(hostname).enabled
+      (hostname) => forgeHosts.isEnabled(hostname)
     );
     const cloneService = new CloneService(
       db,

@@ -132,6 +132,9 @@ describe("ForgeHosts.isEnabled", () => {
       enabled: false,
       source: "config"
     });
+    // However the caller spells it: `parseForgeRemote` lowercases, but an env
+    // entry or a hand-written config key need not have.
+    expect(hosts.isEnabled("GitLab.com").enabled).toBe(false);
   });
 
   it("honours an explicit on before any sign-in", () => {
@@ -162,51 +165,36 @@ describe("ForgeHosts.isEnabled", () => {
   });
 });
 
-describe("ForgeHosts.isEnabled is the only gate on talking to a host", () => {
-  it("answers for every caller, not just change-request status", () => {
-    // `PrService`, the commit-author service and the background identity
-    // refresh all gate on this one answer. `IdentityService` used to reach its
-    // provider registry directly, so a host switched off here still produced
-    // `gh api` / `glab api` subprocesses on profile load and after every
-    // fetch — an "off" that shells out is a setting that lies.
-    const hosts = make({
-      hosts: { "github.com": { enabled: false } },
-      discovered: [GH("github.com")]
-    });
-    expect(hosts.isEnabled("github.com").enabled).toBe(false);
-    // However the caller spells it: `parseForgeRemote` lowercases, but a
-    // hand-written config key or an env entry need not have.
-    expect(hosts.isEnabled("GitHub.com").enabled).toBe(false);
-    // Resolution is untouched — a disabled host still resolves to its kind,
-    // so callers can tell "off" from "not a forge we know".
-    expect(hosts.overrides()["github.com"]).toBe("github");
-  });
-
+describe("ForgeHosts.isEnabled as the gate every background reader asks", () => {
   it("is off for a gitlab.* host the shared remote parser calls GitLab", () => {
     // The two classifiers disagree by design: `parseForgeRemote` still applies
     // the `gitlab.*` prefix rule, `ForgeHosts` refuses to guess a forge from a
-    // name. Callers follow ForgeHosts, so this instance gets no settings row
-    // AND no subprocess — including from the identity refresh, which reads the
-    // remote through the prefix-rule parser.
+    // name. `IdentityService` reads the remote through the prefix-rule parser
+    // and gates on this, so the disagreement resolves in ForgeHosts' favour —
+    // no settings row AND no subprocess.
     expect(
       parseForgeRemote("git@gitlab.internal.example:group/app.git")?.host
     ).toBe("gitlab");
-    expect(make({}).isEnabled("gitlab.internal.example").enabled).toBe(false);
+    const { enabled, source } = make({}).isEnabled("gitlab.internal.example");
+    expect(enabled).toBe(false);
+    // `auto`, not `config` — nobody decided this, the host is just unknown.
+    // Callers that cache an "off" must not cache this one.
+    expect(source).toBe("auto");
   });
 
-  it("turns back on without reconstruction once the setting changes", () => {
-    // The gate is a function read per lookup, not a value captured at
-    // construction: flipping the switch must take effect on the next refresh
-    // rather than at the next app start.
-    let hosts: ForgeSettings["hosts"] = { "github.com": { enabled: false } };
+  it("survives a settings file with no hosts object", () => {
+    // `isEnabled` runs per repository on a background path with no catch
+    // around it, so a throw here rejects a whole refresh batch. `forges: {}`
+    // reaches this unvalidated: SettingsService spreads whatever parsed.
     const service = new ForgeHosts({
-      readSettings: () => ({ hosts }),
+      readSettings: () => ({} as ForgeSettings),
       discovered: () => [],
       env: {}
     });
-    expect(service.isEnabled("github.com").enabled).toBe(false);
-    hosts = { "github.com": { enabled: true } };
+    expect(() => service.isEnabled("github.com")).not.toThrow();
     expect(service.isEnabled("github.com").enabled).toBe(true);
+    expect(service.list()).toEqual([]);
+    expect(service.overrides()).toEqual({});
   });
 });
 

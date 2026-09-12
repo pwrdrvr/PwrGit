@@ -196,13 +196,20 @@ export function RepoIdentityGlyphs({
       const outcome = result.ok
         ? result.value.outcomes.find((entry) => entry.repoId === repoId)
         : undefined;
-      const unresolved = outcome?.status !== "resolved";
+      // A host the user switched off is the one outcome here that is a choice
+      // rather than a failure: say so, and do not paint it red. Reporting it as
+      // "still unknown" contradicted a lock glyph rendering a known `private`
+      // and sent the user to an empty log.
+      const disabled = outcome?.status === "host_disabled";
+      const unresolved = !disabled && outcome?.status !== "resolved";
       const message = !result.ok ? result.error.message
-        : outcome?.status === "signed_out"
-          ? "Sign in to the forge in Settings → Forges, then refresh visibility again."
-          : unresolved
-            ? "Visibility is still unknown. Check Settings → Forges or Logs."
-            : "Repository visibility refreshed.";
+        : disabled
+          ? `${identity.hostname} is switched off in Settings → Forges, so its visibility was not re-read.`
+          : outcome?.status === "signed_out"
+            ? "Sign in to the forge in Settings → Forges, then refresh visibility again."
+            : unresolved
+              ? "Visibility is still unknown. Check Settings → Forges or Logs."
+              : "Repository visibility refreshed.";
       setFeedback(message);
       if (!result.ok || unresolved) {
         showErrorToast({ title: "Repository visibility", message });

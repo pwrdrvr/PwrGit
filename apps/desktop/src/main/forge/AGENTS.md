@@ -281,55 +281,53 @@ provider or reach a real forge.
   lookup outcome separately from deltas: signed-out attempts may retain a
   known identity, and a change to unknown is still unresolved. Only a resolved
   outcome warrants successful visibility feedback.
-- **The per-host switch gates every background reader, and `IdentityService`
-  is one of them.** Settings → Forges → Hosts writes `enabled`, and
-  `ForgeHosts.isEnabled` is the single question every caller asks — there is no
-  second spelling. `PrService` and `GitHubCommitAuthorIdentityService` reach it
-  through `resolveEnabledForge`/`resolveEnabledForgeRepo` in `index.ts`;
-  `IdentityService` cannot, because it resolves `origin` itself, so it takes the
-  predicate as a **required** constructor argument instead. It was the one
-  caller that reached `ForgeRepoRegistry` directly, which meant a host switched
-  off still got `gh api`/`glab api` on every profile load and after every
-  successful fetch or pull, and the sidebar kept painting its marks. Do not give
-  that argument a permissive default: "on unless passed otherwise" is how this
-  came back the first time.
-  - **It gates on `origin.hostname`, not `origin.host`.** `parseForgeRemote`
-    still applies the `gitlab.*` prefix rule (see above), so a self-managed
-    instance that `ForgeHosts` refuses to guess at — no settings row, no switch
-    the user could ever have flipped — was being handed to a `glab` subprocess.
-    Gating on the hostname makes the pane and the transport agree.
-  - **The `git remote get-url origin` read still happens.** The hostname is what
-    the decision is made on, so it has to be read first. That is a local git
-    process, not the host's CLI and not its token.
-  - **Identity lookups do not reach a self-managed host at all yet.** For
-    anything that is not github.com, gitlab.com or `gitlab.*`,
-    `parseForgeRemote` returns `other` and the lookup is `unavailable` before
-    the gate is consulted — so GitHub Enterprise has no identity marks. Fixing
-    that means threading `ForgeHosts.overrides()` into the parse, which is a
-    *widening* of what identity reads and a separate change from this gate.
+- **The per-host switch gates the three background readers.** Settings →
+  Forges → Hosts writes `enabled`; `ForgeHosts.isEnabled` answers it. `PrService`
+  and `GitHubCommitAuthorIdentityService` reach it through
+  `resolveEnabledForge`/`resolveEnabledForgeRepo` in `index.ts`;
+  `IdentityService` takes it as a required constructor argument
+  (`ForgeHostGate`). Three call sites, one question — grep `isEnabled`, not
+  `resolveEnabledForge`, to find them all. Before the gate, a host switched off
+  still got `gh api`/`glab api` from the identity refresh on every profile load
+  and after every fetch or pull.
+  - **`IdentityService` should eventually take `resolveEnabledForgeRepo`
+    instead**, the way the other two do — they also run `git remote get-url
+    origin` themselves, so resolving `origin` is not what stops it. Its own
+    `parseForgeRemote` call passes no `ForgeHostOverrides`, so a user-added
+    Enterprise host classifies as `other` and identity marks are structurally
+    unreachable there, while PR status sees it. One injection fixes both; until
+    then the gate and the classifier are two objects that must stay in step.
+  - **The gate reads the `source`, not just the boolean.** "Off" from config or
+    env is a decision and is cached against (`retryAfter`); "off" from `auto`
+    only means no CLI has reported this host *yet*, because enumeration is two
+    subprocesses that land after the first refresh. Backing off on `auto` turns
+    a boot race into minutes of missing marks; treating a decided "off" as
+    transient re-reads every remote on every pass forever.
+  - **A repo whose stored row names a switched-off host is filtered out before
+    `readOrigin`**, so it costs no subprocess at all. Only a repo with no row
+    yet pays one `git remote` read, then backs off.
 - **Switching a host off stops the asking; it does not clear what was asked.**
-  A stored `repo_identity` row stays, keeps rendering, and the refresh reports
-  `unavailable` carrying that identity — the same outcome a host with no
-  provider gets, and honest: we could not ask this pass. Three reasons not to
-  delete it. Deleting collapses *asked, and it is private* into *never looked
-  up*, and those are two of the three states above. The env allowlists
-  (`PWRGIT_GITHUB_HOSTS`/`PWRGIT_GITLAB_HOSTS`) can turn a host off for one
-  session, so a deletion driven by the switch would discard a fact the next
-  launch has no way to recover without re-asking a host that may by then be
-  unreachable. And re-enabling repaints from a fresh read on the next pass
-  anyway, so deletion buys nothing. `unavailable` is deliberately not `unknown`:
-  `unknown` claims the forge was asked and would not say.
-- **Clone and fork are the deliberate exception, and the pane says so.**
-  `CloneService`/`ForkService` call `this.forges.get(host)` with no `enabled`
-  check. Two reasons. They are invoked — the user opened a dialog and named
-  that forge — where every gated caller is unprompted background work the user
-  never asked for. And they are keyed on *kind*, not hostname: `forges.get("github")`
-  can only ever reach the SaaS default provider, so gating them on a per-**host**
-  switch would attach the setting to a question it is not asking. If clone/fork
-  ever learn about hostnames, revisit this with them. Until then the help text
-  under an off switch names the exception out loud rather than promising more
-  than the switch enforces — `ForgeHostsSection.tsx` owns that wording, and an
-  "off" that quietly still shells out is exactly the setting that lies.
+  The stored `repo_identity` row stays and keeps rendering, and the refresh
+  reports `host_disabled` carrying it. Deleting would collapse *asked, and it
+  is private* into *never looked up*, two of the three states above; the env
+  allowlists turn a host off for one session, so a deletion would discard a
+  fact the next launch cannot recover; and re-enabling repaints from a fresh
+  read anyway. `host_disabled` is its own status because it is the only
+  non-resolved outcome that is a **choice** — `unavailable` means we could not
+  ask, `unknown` means the forge was asked and would not say, and the refresh
+  button must not report a choice as a failure.
+- **Clone and fork are the deliberate exception.** `CloneService`/`ForkService`
+  call `this.forges.get(host)` with no `enabled` check: the user opened a dialog
+  and named that forge, where every gated caller is unprompted background work.
+  Note the second half of the old rationale was wrong — `runClone` *does* carry
+  `source.hostname` and uses it for the clone URL, then picks the provider by
+  kind alone, so a self-managed CLI clone runs against the SaaS instance. That
+  is a real bug to fix, not a reason. Because the exception exists, the Hosts
+  pane says so in its section description, where every row sees it —
+  `sourceNote` is skipped entirely for hand-added rows and its off branch never
+  runs for env-controlled ones. The off text also stops short of "runs no
+  command": `ForgeStatusService` probes and host enumeration still spawn a CLI
+  per forge regardless of the switch.
 - **A dialog opens on local state; a forge is asked only on debounced input.**
   This is the rule the clone dialog broke. `repo:cloneCatalog` used to list
   every known owner's repositories as it opened — `gh repo list <owner>

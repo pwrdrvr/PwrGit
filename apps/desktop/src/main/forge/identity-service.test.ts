@@ -12,7 +12,11 @@ import { GitHubRepoProvider } from "../forge/github/repo-provider";
 import { GitLabRepoProvider } from "../forge/gitlab/repo-provider";
 import { ForgeHosts } from "./hosts";
 import { ForgeRepoRegistry } from "./repo-provider";
-import { IdentityService, sameIdentity } from "./identity-service";
+import {
+  IdentityService,
+  sameIdentity,
+  type ForgeHostGate
+} from "./identity-service";
 
 const systemGit: GitExec = (args, cwd, options) =>
   new Promise<Result<GitOutput>>((resolve) => {
@@ -53,9 +57,11 @@ function initRepo(path: string, origin: string): void {
 
 async function fixture(
   gh: (args: string[]) => Promise<string>,
-  origin = "git@github.com:huntharo/react.git",
-  isHostEnabled: (hostname: string) => boolean = () => true
+  options: { origin?: string; gate?: ForgeHostGate } = {}
 ) {
+  const origin = options.origin ?? "git@github.com:huntharo/react.git";
+  const gate: ForgeHostGate =
+    options.gate ?? (() => ({ enabled: true, source: "auto" }));
   const root = temporaryRoot();
   const repoPath = join(root, "react");
   initRepo(repoPath, origin);
@@ -83,8 +89,17 @@ async function fixture(
     glab,
     indexer,
     profileId: profile.id,
-    identities: new IdentityService(db, systemGit, registry, isHostEnabled)
+    identities: new IdentityService(db, systemGit, registry, gate)
   };
+}
+
+/** True when the provider actually reached the forge. Scans the whole argv:
+ *  `targetHost` inserts `--hostname <host>` before the path for a non-default
+ *  host, so an index-pinned check silently stops testing anything there. */
+function calledApi(gh: { mock: { calls: unknown[][] } }): boolean {
+  return gh.mock.calls.some((call) =>
+    (call[0] as string[] | undefined)?.some((arg) => arg.startsWith("repos/")) === true
+  );
 }
 
 const okGh =
@@ -216,7 +231,7 @@ describe("IdentityService", () => {
     registry.register(new GitHubRepoProvider(gh));
     const service = new IdentityService(db, async () => ok({
       exitCode: 0, stdout: "git@github.com:huntharo/react.git", stderr: ""
-    }), registry, () => true);
+    }), registry, () => ({ enabled: true, source: "auto" }));
     const pending = Promise.all([
       service.refresh(repos.slice(0, 6)),
       ...repos.slice(6).map((repo) => service.refresh([repo]))
@@ -336,10 +351,9 @@ describe("IdentityService", () => {
 
   it("ignores a repo whose origin is on no known forge", async () => {
     const gh = vi.fn(okGh({ full_name: "x/y", visibility: "public" }));
-    const { identities, indexer, profileId } = await fixture(
-      gh,
-      "https://code.acme.io/acme/api.git"
-    );
+    const { identities, indexer, profileId } = await fixture(gh, {
+      origin: "https://code.acme.io/acme/api.git"
+    });
 
     expect(await identities.refresh(indexer.listRepos(profileId))).toEqual([]);
     // No provider was asked; a row here would suppress a later retry.
@@ -350,67 +364,106 @@ describe("IdentityService", () => {
 
   it("asks nothing and writes no row for a host switched off in Settings", async () => {
     const gh = vi.fn(okGh({ full_name: "huntharo/react", visibility: "private" }));
-    const { identities, indexer, profileId } = await fixture(
-      gh,
-      "git@github.com:huntharo/react.git",
-      () => false
-    );
+    const { identities, indexer, profileId } = await fixture(gh, {
+      gate: () => ({ enabled: false, source: "config" })
+    });
 
     const result = await identities.refreshWithOutcomes(
       indexer.listRepos(profileId)
     );
 
-    // The switch has to reach the transport, not just the pane: this refresh
-    // runs on profile load and after every successful fetch or pull, so an
-    // ungated host means background `gh api` for a forge the user turned off.
-    expect(gh.mock.calls.some((c) => c[0]?.[1]?.startsWith("repos/"))).toBe(
-      false
-    );
+    // Asserted against the whole argv, not slot 1: `targetHost` inserts
+    // `--hostname <host>` there for a non-default host, which would make an
+    // index-pinned assertion pass while the subprocess still ran.
+    expect(calledApi(gh)).toBe(false);
     expect(result.changes).toEqual([]);
-    // Same outcome as a host with no provider: we could not ask. Not
-    // `unknown`, which claims the forge was asked and refused.
-    expect(result.outcomes[0]?.status).toBe("unavailable");
+    // Its own status: nothing failed, the user turned it off. `unavailable`
+    // would say we could not ask; `unknown` would say the forge refused.
+    expect(result.outcomes[0]?.status).toBe("host_disabled");
     expect(indexer.listRepos(profileId)[0]?.identity).toBeUndefined();
+  });
+
+  it("stops re-reading the remote for a host that is staying off", async () => {
+    // The gate writes no row, so without a backoff every pass would re-run
+    // `git remote get-url origin` forever and fill REFRESH_BATCH with repos
+    // that can never resolve — starving repos on hosts that ARE on.
+    let remoteReads = 0;
+    const git: GitExec = async (args, cwd, options) => {
+      if (args[0] === "remote") remoteReads += 1;
+      return systemGit(args, cwd, options);
+    };
+    const { db, indexer, profileId } = await fixture(okGh({}));
+    const registry = new ForgeRepoRegistry();
+    registry.register(new GitHubRepoProvider(okGh({})));
+    const service = new IdentityService(db, git, registry, () => ({
+      enabled: false,
+      source: "config"
+    }));
+    const repos = indexer.listRepos(profileId);
+
+    for (let pass = 0; pass < 5; pass += 1) await service.refresh(repos);
+
+    expect(remoteReads).toBe(1);
   });
 
   it("keeps the identity it already stored when the host is switched off", async () => {
     const gh = vi.fn(okGh({ full_name: "huntharo/react", visibility: "private" }));
-    let enabled = true;
-    const { identities, indexer, profileId } = await fixture(
-      gh,
-      "git@github.com:huntharo/react.git",
-      () => enabled
-    );
+    let gate: ForgeHostGate = () => ({ enabled: true, source: "auto" });
+    const { identities, indexer, profileId } = await fixture(gh, {
+      gate: (hostname) => gate(hostname)
+    });
     const repos = indexer.listRepos(profileId);
     await identities.refresh(repos);
 
-    enabled = false;
+    gate = () => ({ enabled: false, source: "config" });
     gh.mockClear();
     const off = await identities.refreshWithOutcomes(repos, { force: true });
 
     // "Off" means stop asking, not forget. Clearing the row would collapse
     // "asked, and it is private" into "never looked up" — and the env
-    // allowlists that can flip this are scoped to one session, so a deletion
-    // would discard a fact the next launch has no way to recover without
-    // re-asking a host that may by then be unreachable.
-    expect(gh.mock.calls.some((c) => c[0]?.[1]?.startsWith("repos/"))).toBe(
-      false
-    );
+    // allowlists that can flip this are scoped to one session.
+    expect(calledApi(gh)).toBe(false);
     expect(off.changes).toEqual([]);
     expect(off.outcomes[0]).toMatchObject({
-      status: "unavailable",
+      status: "host_disabled",
       identity: { visibility: "private" }
     });
     expect(indexer.listRepos(profileId)[0]?.identity?.visibility).toBe("private");
 
-    // Back on, and the very next pass reads it again — no restart, because
-    // the predicate is read per lookup rather than captured at construction.
-    enabled = true;
+    // A stored row names its host, so the next background pass answers from it
+    // without spawning git at all.
+    gh.mockClear();
+    expect(await identities.refresh(repos)).toEqual([]);
+    expect(calledApi(gh)).toBe(false);
+
+    // Back on, and the very next pass reads it again — the gate is consulted
+    // per lookup rather than captured at construction.
+    gate = () => ({ enabled: true, source: "auto" });
     gh.mockImplementation(
       okGh({ full_name: "huntharo/react", visibility: "public" })
     );
     const on = await identities.refresh(repos, { force: true });
     expect(on[0]?.identity.visibility).toBe("public");
+  });
+
+  it("does not back off a host that is merely unrecognized yet", async () => {
+    // `auto` means enumeration has not landed — two subprocesses that finish
+    // after the first refresh. Caching that as "off" would leave a
+    // self-managed host without marks for the length of the backoff.
+    const gh = vi.fn(okGh({ full_name: "huntharo/react", visibility: "public" }));
+    let known = false;
+    const { identities, indexer, profileId } = await fixture(gh, {
+      gate: () => ({ enabled: known, source: "auto" })
+    });
+    const repos = indexer.listRepos(profileId);
+
+    expect((await identities.refreshWithOutcomes(repos)).outcomes[0]?.status)
+      .toBe("unavailable");
+
+    known = true;
+    expect((await identities.refresh(repos))[0]?.identity.visibility).toBe(
+      "public"
+    );
   });
 
   it("follows ForgeHosts rather than the gitlab.* hostname rule", async () => {
@@ -423,24 +476,32 @@ describe("IdentityService", () => {
       env: {}
     });
     const origin = "git@gitlab.internal.example:group/app.git";
-    const gated = await fixture(okGh({}), origin, (hostname) =>
-      hosts.isEnabled(hostname).enabled
-    );
+    const gated = await fixture(okGh({}), {
+      origin,
+      gate: (hostname) => hosts.isEnabled(hostname)
+    });
 
     const result = await gated.identities.refreshWithOutcomes(
       gated.indexer.listRepos(gated.profileId)
     );
 
     expect(gated.glab).not.toHaveBeenCalled();
+    // Unrecognized, not switched off — nobody ever decided about this host.
     expect(result.outcomes[0]?.status).toBe("unavailable");
     expect(gated.indexer.listRepos(gated.profileId)[0]?.identity).toBeUndefined();
+  });
 
-    // The other half of the claim: a provider IS reachable for this hostname,
-    // so the silence above is the gate and not a missing registration.
-    const ungated = await fixture(okGh({}), origin, () => true);
+  it("reaches a self-managed GitLab provider once the gate allows it", async () => {
+    // The other half of the claim above: a provider IS reachable for this
+    // hostname, so the silence there is the gate and not a missing factory.
+    const ungated = await fixture(okGh({}), {
+      origin: "git@gitlab.internal.example:group/app.git"
+    });
+
     await ungated.identities.refresh(
       ungated.indexer.listRepos(ungated.profileId)
     );
+
     expect(ungated.glab).toHaveBeenCalled();
   });
 

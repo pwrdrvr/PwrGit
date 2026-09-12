@@ -77,3 +77,31 @@ it.each([
     await act(async () => root.unmount());
   }
 });
+
+it("names the switch, and does not raise an error, for a disabled host", async () => {
+  // The one non-resolved outcome that is a choice rather than a failure.
+  // Reporting it like the rest said "Visibility is still unknown" beside a
+  // lock glyph rendering a known `private`, and pointed at an empty log.
+  vi.clearAllMocks();
+  dispatch.mockResolvedValue(
+    ok({ changed: 0, outcomes: [{ repoId: "repo-1", status: "host_disabled" }] })
+  );
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(
+      <RepoIdentityGlyphs repoId="repo-1" profileId="profile-1" identity={{
+        host: "github", hostname: "github.com", owner: "example",
+        name: "demo", nameWithOwner: "example/demo", visibility: "private"
+      }} />
+    ));
+    await act(async () => container.querySelector("button")!.click());
+    expect(showErrorToast).not.toHaveBeenCalled();
+    expect(showInfoToast).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(showInfoToast).mock.calls[0]?.[0]?.message).toContain(
+      "github.com is switched off in Settings → Forges"
+    );
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
