@@ -514,6 +514,10 @@ export type RemoteActivity = {
  *
  * Per-product *data* lives in `FORGE_PRODUCTS` (`forge-product.ts`), keyed by
  * these members, so adding a product is this line plus that entry.
+ *
+ * The ORDER is presentation, not an implementation detail: Settings → Forges
+ * stacks one section per member in this sequence, so a product is placed here
+ * deliberately rather than wherever a sort happens to put it.
  */
 export const FORGE_KINDS = ["github", "gitlab"] as const;
 

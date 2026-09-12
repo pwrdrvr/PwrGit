@@ -3,7 +3,11 @@ import type { Profile } from "@pwrgit/shared";
 import { ProfileModal } from "../sidebar/ProfileModal";
 import { ReadError } from "../shell/ReadError";
 import { useProfiles } from "../../state/useProfiles";
-import { SettingsPanelHead, SettingsSection } from "./SettingsLayout";
+import {
+  SettingsPanelHead,
+  SettingsSection,
+  SettingsSectionStack
+} from "./SettingsLayout";
 import { useModal } from "../../lib/useModal";
 
 /**
@@ -22,7 +26,7 @@ export function ProfilesSettings() {
   const [deleting, setDeleting] = useState<Profile | null>(null);
 
   return (
-    <div className="settings-stack" aria-label="Profile settings">
+    <SettingsSectionStack aria-label="Profile settings" paneId="profiles">
       <SettingsPanelHead
         eyebrow="Profiles"
         title="PwrGit profiles"
@@ -99,7 +103,7 @@ export function ProfilesSettings() {
           onClose={() => setDeleting(null)}
         />
       )}
-    </div>
+    </SettingsSectionStack>
   );
 }
 

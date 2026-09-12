@@ -3,13 +3,23 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { err, forgeCliNames, ok, type ForgeHostRow } from "@pwrgit/shared";
+import {
+  err,
+  FORGE_KINDS,
+  forgeProduct,
+  ok,
+  type ForgeHostRow,
+  type ForgeStatus
+} from "@pwrgit/shared";
 
-const mocks = vi.hoisted(() => ({ dispatch: vi.fn() }));
+const mocks = vi.hoisted(() => ({ dispatch: vi.fn(), subscribe: vi.fn() }));
 
-vi.mock("../../lib/pwrgit", () => ({ dispatch: mocks.dispatch }));
+vi.mock("../../lib/pwrgit", () => ({
+  dispatch: mocks.dispatch,
+  subscribe: mocks.subscribe
+}));
 
-import { ForgeHostsSection } from "./ForgeHostsSection";
+import { ForgesSettings } from "./ForgesSettings";
 
 function host(overrides: Partial<ForgeHostRow> = {}): ForgeHostRow {
   return {
@@ -37,6 +47,26 @@ function added(overrides: Partial<ForgeHostRow> = {}): ForgeHostRow {
   });
 }
 
+/** A probe answer for both products. This file is about the host rows; the
+ *  status half is `ForgesSettings.test.tsx`. Installed and signed in, so no
+ *  section paints a remedy over the rows under test. */
+function statuses(loggedIn = true): ForgeStatus[] {
+  return FORGE_KINDS.map((kind) => ({
+    kind,
+    cli: forgeProduct(kind).cli,
+    installed: true,
+    loggedIn,
+    capabilities: {
+      batchedBranchLookup: true,
+      batchedCommitAssociation: true,
+      changeSizeAndTimeline: true,
+      commitAuthorIdentity: true,
+      forkDefaultBranchOnly: true
+    },
+    hosts: []
+  }));
+}
+
 const WRITE_FAILED = err({
   kind: "unknown",
   code: "settings_write_failed",
@@ -50,6 +80,9 @@ let root: Root;
 let rows: ForgeHostRow[];
 /** What `settings:update` answers. */
 let writeResult: unknown;
+/** What `forge:status` answers. Replaced by a test that needs a product in a
+ *  state other than plain signed-in. */
+let forges: () => ForgeStatus[];
 
 /** Every `settings:update` patch the pane sent, in order — the contract with
  *  main, and the thing a UI-only change can still get wrong. */
@@ -58,10 +91,13 @@ let writes: unknown[];
 beforeEach(() => {
   vi.clearAllMocks();
   rows = [host()];
+  forges = () => statuses();
   writeResult = ok({});
   writes = [];
+  mocks.subscribe.mockImplementation(() => () => {});
   mocks.dispatch.mockImplementation(async (channel: string, req: unknown) => {
     if (channel === "forge:hosts") return ok({ hosts: rows });
+    if (channel === "forge:status") return ok({ forges: forges() });
     if (channel === "settings:update") {
       writes.push((req as { patch: unknown }).patch);
       return writeResult;
@@ -81,8 +117,18 @@ afterEach(async () => {
 async function render(initial?: ForgeHostRow[]): Promise<void> {
   if (initial !== undefined) rows = initial;
   await act(async () => {
-    root.render(<ForgeHostsSection saving={false} />);
+    root.render(<ForgesSettings saving={false} />);
   });
+}
+
+/** One product's section, so a row assertion cannot pass by matching the other
+ *  product's — the whole point of the split. */
+function section(product: string): HTMLElement {
+  const found = container.querySelector<HTMLElement>(
+    `section[aria-label='${product}']`
+  );
+  if (found === null) throw new Error(`no section for ${product}`);
+  return found;
 }
 
 /** Alerts are scoped: the section renders its own `role="alert"` above the
@@ -133,7 +179,7 @@ async function add(product: string, hostname: string): Promise<void> {
   await click(button("Add host"));
 }
 
-describe("ForgeHostsSection — adding a host by hand", () => {
+describe("Settings → Forges — adding a host by hand", () => {
   it("offers one button per product, because the product is chosen not guessed", async () => {
     await render();
 
@@ -141,8 +187,12 @@ describe("ForgeHostsSection — adding a host by hand", () => {
     expect(button("Add GitLab instance…")).toBeTruthy();
     // The rule this UI exists to uphold, said where the user is deciding.
     expect(container.textContent).toContain(
-      "You name the host and its product. Nothing is inferred from a hostname, and no ssh remote ever appears here on its own."
+      "You name the instance. Nothing is inferred from a hostname, and no ssh remote ever appears here on its own."
     );
+    // And each button sits in its own product's section, which is what lets
+    // the row sub-lines stop repeating the product on every host.
+    expect(section("GitHub").textContent).toContain("Add GitHub Enterprise…");
+    expect(section("GitLab").textContent).toContain("Add GitLab instance…");
   });
 
   it("writes the hostname, the product and an explicit on, then re-reads", async () => {
@@ -231,15 +281,22 @@ describe("ForgeHostsSection — adding a host by hand", () => {
     // The state this feature matters most in: nothing enumerated, so without a
     // reachable affordance there is no way to name an instance. An empty list
     // is still a LOADED list, so the buttons must be live here.
+    forges = () => statuses(false);
     await render([]);
 
-    // Asserted through the registry, not against the sentence: the copy used to
-    // be "Neither the GitHub CLI nor the GitLab CLI", which has no three-product
-    // form, so a third product would have had to rewrite the string and this
-    // test together.
-    expect(container.textContent).toContain(
-      `No forge CLI (${forgeCliNames().join(", ")}) is signed in to a host.`
+    // Each product says which CLI is not signed in, in its own section. Both
+    // sentences are built from the registry, so a third product gets a third
+    // accurate one — where a single shared line has no three-product form at
+    // all: it was "Neither gh nor glab", then "No forge CLI (gh, glab)", and
+    // neither could say which of them the reader needs to go and fix.
+    expect(section("GitHub").textContent).toContain(
+      "gh is not signed in to a GitHub host"
     );
+    expect(section("GitLab").textContent).toContain(
+      "glab is not signed in to a GitLab host"
+    );
+    expect(container.textContent).not.toContain("Neither");
+    expect(container.textContent).not.toContain("No forge CLI");
     expect(button("Add GitHub Enterprise…").disabled).toBe(false);
   });
 
@@ -257,7 +314,7 @@ describe("ForgeHostsSection — adding a host by hand", () => {
       return writeResult;
     });
     await act(async () => {
-      root.render(<ForgeHostsSection saving={false} />);
+      root.render(<ForgesSettings saving={false} />);
     });
 
     expect(button("Add GitHub Enterprise…").disabled).toBe(true);
@@ -319,7 +376,7 @@ describe("ForgeHostsSection — adding a host by hand", () => {
   });
 });
 
-describe("ForgeHostsSection — removing a hand-added host", () => {
+describe("Settings → Forges — removing a hand-added host", () => {
   const removeButton = (hostname: string): HTMLButtonElement | null =>
     container.querySelector<HTMLButtonElement>(
       `[aria-label='Remove host ${hostname}']`
@@ -369,7 +426,7 @@ describe("ForgeHostsSection — removing a hand-added host", () => {
     ]);
 
     expect(removeButton("github.com")).toBeNull();
-    expect(container.textContent).not.toContain("Added by you");
+    expect(container.textContent).not.toContain("added by you");
     // And it gets the explanation `sourceNote` exists to give — including the
     // one thing "off" does NOT stop, since a switch that overpromises is the
     // same lie as one that still shells out.
@@ -382,7 +439,7 @@ describe("ForgeHostsSection — removing a hand-added host", () => {
     // `sourceNote` unreachable — so a switch that cannot move said nothing.
     await render([added({ enabled: false, enabledSource: "env" })]);
 
-    expect(container.textContent).toContain("Added by you");
+    expect(rowFor("gitlab.contoso.dev").textContent).toContain("added by you");
     expect(container.textContent).toContain("environment variable");
   });
 
@@ -410,5 +467,73 @@ describe("ForgeHostsSection — removing a hand-added host", () => {
     });
 
     expect(writes).toEqual([{ forgeHosts: { "gitlab.contoso.dev": null } }]);
+  });
+});
+
+describe("Settings → Forges — one section per product", () => {
+  it("puts each host under its own product, never in one interleaved list", async () => {
+    // Sorted by hostname, main's order interleaves the two products — which is
+    // exactly what the flat list used to render, directly above a card that
+    // separated them.
+    await render([
+      added({ host: "ghe.contoso.dev", kind: "github", cli: "gh" }),
+      host({ host: "github.com" }),
+      host({ host: "gitlab.com", kind: "gitlab", cli: "glab" }),
+      added({ host: "gitlab.contoso.dev" })
+    ]);
+
+    const hostsIn = (product: string): string[] =>
+      [...section(product).querySelectorAll(".settings-field__label > span:first-child")]
+        .map((node) => node.textContent ?? "")
+        .filter((text) => text.includes("."));
+
+    expect(hostsIn("GitHub")).toEqual(["ghe.contoso.dev", "github.com"]);
+    expect(hostsIn("GitLab")).toEqual(["gitlab.com", "gitlab.contoso.dev"]);
+  });
+
+  it("stops repeating the product on every row, because the section says it", async () => {
+    await render([host({ host: "github.com", account: "octo-dev" })]);
+
+    const row = section("GitHub").querySelector(".settings-field__sub");
+    expect(row?.textContent).toBe("signed in as octo-dev");
+    // The old sub-line was "GitHub · signed in as octo-dev", which only existed
+    // because a row could not otherwise say which product it belonged to.
+    expect(row?.textContent).not.toContain("GitHub");
+  });
+
+  it("gives a product with no hosts its own section anyway", async () => {
+    // The state this split exists for: the section is where a signed-out
+    // product names its own CLI, and it cannot do that from inside a list of
+    // the other product's hosts.
+    forges = () => statuses(false);
+    await render([host({ host: "github.com" })]);
+
+    expect(section("GitLab").textContent).toContain(
+      "glab is not signed in to a GitLab host"
+    );
+    expect(section("GitLab").textContent).toContain("Add GitLab instance…");
+  });
+
+  it("draws its sections from the product list rather than naming products", async () => {
+    // The guarantee behind "a third product is a row in FORGE_KINDS": every
+    // kind gets a section, and no more than the kinds get one.
+    await render([]);
+
+    const titles = [...container.querySelectorAll(".settings-panel__title")].map(
+      (node) => node.textContent
+    );
+    expect(titles).toEqual(FORGE_KINDS.map((kind) => forgeProduct(kind).label));
+  });
+
+  it("refuses a duplicate against every product's hosts, not just this one's", async () => {
+    // The add dialog is per product, but a hostname is global: letting GitLab
+    // claim a host `gh` already reports would rewrite its product and route
+    // that instance at the wrong CLI.
+    await render([host({ host: "github.com" })]);
+
+    await add("Add GitLab instance…", "github.com");
+
+    expect(writes).toEqual([]);
+    expect(alertIn(dialog())).toContain("github.com is already on the list.");
   });
 });

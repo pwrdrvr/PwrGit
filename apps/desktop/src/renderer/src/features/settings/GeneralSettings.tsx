@@ -12,6 +12,7 @@ import {
 import {
   SettingsField,
   SettingsPanelHead,
+  SettingsSectionStack,
   SettingsSection,
   SettingsSegmented
 } from "./SettingsLayout";
@@ -66,7 +67,7 @@ export function GeneralSettings(props: {
   ].join(", ");
 
   return (
-    <div className="settings-stack" aria-label="General settings">
+    <SettingsSectionStack aria-label="General settings" paneId="general">
       <SettingsPanelHead
         eyebrow="General"
         title="General settings"
@@ -162,6 +163,6 @@ export function GeneralSettings(props: {
           />
         </div>
       </SettingsSection>
-    </div>
+    </SettingsSectionStack>
   );
 }

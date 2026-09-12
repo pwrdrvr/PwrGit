@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --bg-app: #000000; --bg-panel: #0a0a0a; --bg-input: #080808;
+            --bg-elev: #101010; --bg-row-active: #1a1206;
+            --line-faint: rgba(247, 243, 235, 0.06);
+            --line: rgba(247, 243, 235, 0.1);
+            --line-def: rgba(247, 243, 235, 0.14);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a;
+            --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42);
+            --ok: #5fa969; --okt: #9ce5b3; --oksoft: rgba(74, 148, 92, 0.18);
+            --warn: #d99a3d; --warnsoft: rgba(217, 154, 61, 0.14);
+            --bad: #b94232; --badt: #ffb0a1; --badsoft: rgba(185, 66, 50, 0.24);
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          * { box-sizing: border-box; }
+          body { margin: 0; background: #050505; font-family: var(--sans); color: var(--t1); }
+          a { color: var(--accb); } a:hover { color: var(--acc); }
+
+          .dv-turn { padding: 40px 44px 32px; }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.6 var(--sans); color: var(--t3); max-width: 760px; text-wrap: pretty; }
+          .dv-sub code, .dv-note code, .dv-olabel code, .dv-flag code, .dv-tbl code { font: 500 10.5px var(--mono); color: var(--accb); }
+          .dv-sub b, .dv-note b { color: var(--t2); font-weight: 600; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.4 var(--sans); color: var(--tsub); max-width: 680px; }
+          .dv-card { background: var(--bg-app); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+          .dv-note { margin: 24px 0 0; padding: 14px 16px; border: 1px solid var(--line); border-left: 3px solid var(--acc); border-radius: 0 8px 8px 0; background: var(--bg-panel); font: 400 11.5px/1.7 var(--sans); color: var(--t2); max-width: 940px; }
+          .dv-prov { margin-top: 10px; font: 500 10px/1.6 var(--mono); color: var(--tsub); }
+
+          /* Critique gutter: a column of call-outs beside the card. No leader
+             lines — each flag names the row it is about, which survives a
+             re-flow that hand-placed pixel offsets would not. */
+          .dv-annot { display: flex; align-items: flex-start; gap: 16px; }
+          .dv-gutter { display: flex; flex-direction: column; gap: 8px; width: 260px; padding-top: 4px; }
+          .dv-flag { padding: 8px 10px; border-radius: 7px; background: var(--badsoft); border: 1px solid var(--bad); color: var(--badt); font: 500 10px/1.5 var(--sans); }
+          .dv-flag b { display: block; font: 600 10px/1.4 var(--mono); color: #ffd7cd; margin-bottom: 3px; }
+          .dv-flag.fix { background: var(--oksoft); border-color: var(--ok); color: var(--okt); }
+          .dv-flag.fix b { color: #cdf3d9; }
+
+          /* Measurement table — the review's evidence, not decoration. */
+          .dv-tbl { border-collapse: collapse; margin-top: 6px; font: 400 11px/1.5 var(--sans); color: var(--t2); }
+          .dv-tbl th { text-align: left; font: 600 9.5px/1 var(--sans); letter-spacing: 0.09em; text-transform: uppercase; color: var(--t3); padding: 0 22px 8px 0; }
+          .dv-tbl td { padding: 5px 22px 5px 0; border-top: 1px solid var(--line-faint); }
+          .dv-tbl td b { color: var(--t1); font-weight: 600; }
+          .dv-num { font: 600 11px var(--mono); color: var(--accb); }
+          .dv-bad { font: 600 11px var(--mono); color: var(--badt); }
+
+          /* ---- Settings chrome, lifted from PwrGit app.css ---- */
+          .pane { padding: 22px; display: flex; flex-direction: column; gap: 14px; }
+          .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 2px 2px 6px; }
+          .head-eyebrow { margin: 0 0 3px; font: 600 10.5px/1 var(--sans); letter-spacing: 0.09em; text-transform: uppercase; color: var(--acc); }
+          .head-title { margin: 0; font: 650 19px/1.25 var(--sans); color: var(--t1); }
+          .head-help { margin: 6px 0 0; font: 400 12.5px/1.5 var(--sans); color: var(--t3); max-width: 56ch; }
+
+          .card { border: 1px solid var(--line); border-radius: 10px; background: var(--bg-panel); overflow: hidden; }
+          .card-hd { display: flex; align-items: flex-start; gap: 12px; padding: 13px 16px 11px; border-bottom: 1px solid var(--line); }
+          .card-hd-main { min-width: 0; flex: 1; }
+          .card-eyebrow { margin: 0 0 2px; font: 600 10px/1 var(--sans); letter-spacing: 0.09em; text-transform: uppercase; color: var(--t3); }
+          .card-eyebrow.cli { font-family: var(--mono); letter-spacing: 0.04em; text-transform: none; color: var(--tsub); }
+          .card-title { margin: 0; font: 600 13.5px/1.3 var(--sans); color: var(--t1); }
+          .card-desc { margin: 5px 0 0; font: 400 12px/1.5 var(--sans); color: var(--t3); max-width: 62ch; }
+          .card-bd { padding: 6px 16px 12px; }
+          .chip { flex: none; align-self: flex-start; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg-elev); color: var(--t3); font: 600 10.5px/1 var(--sans); letter-spacing: 0.03em; }
+          .chip.ok { color: var(--okt); background: var(--oksoft); border-color: transparent; }
+          .chip.warn { color: var(--warn); background: var(--warnsoft); border-color: transparent; }
+
+          /* Collapsible header, ported from PwrAgnt's SettingsLayout. */
+          .card-hd.press { cursor: pointer; }
+          .card-hd.press:hover { background: rgba(247, 243, 235, 0.02); }
+          .chev { flex: none; width: 16px; height: 16px; margin-top: 1px; color: var(--t3); transition: transform 120ms ease; }
+          .card.folded .chev { transform: rotate(-90deg); }
+          .card.folded .card-hd { border-bottom: none; }
+          .pane-tools { display: flex; align-items: center; gap: 8px; }
+
+          .field { display: flex; align-items: flex-start; gap: 18px; padding: 11px 0; }
+          .field + .field { border-top: 1px solid var(--line); }
+          .field-l { width: 230px; flex: none; display: flex; flex-direction: column; gap: 3px; font: 550 12.5px/1.35 var(--sans); color: var(--t1); }
+          .field-sub { font: 400 11.5px/1.45 var(--sans); color: var(--t3); }
+          .field-c { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+          .field-help { font: 400 11px/1.45 var(--sans); color: var(--tsub); max-width: 46ch; }
+          .field-help b { color: var(--t2); font-weight: 600; }
+          .empty { margin: 4px 0; font: 400 12.5px/1.5 var(--sans); color: var(--t3); }
+          .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+          .hostname { font: 600 12.5px/1.2 var(--mono); color: var(--t1); }
+
+          /* switch, mirroring SettingsSwitch */
+          .sw { display: inline-flex; align-items: center; gap: 7px; flex: none; }
+          .sw-track { width: 30px; height: 17px; border-radius: 999px; background: var(--bg-input); border: 1px solid var(--line-def); position: relative; }
+          .sw-thumb { position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--t3); }
+          .sw.on .sw-track { background: var(--asoft); border-color: var(--abord); }
+          .sw.on .sw-thumb { left: auto; right: 2px; background: var(--accb); }
+          .sw-word { font: 600 10px/1 var(--sans); color: var(--t3); width: 20px; }
+          .sw.on .sw-word { color: var(--accb); }
+
+          .btn { padding: 6px 11px; border: 1px solid var(--line-def); border-radius: 7px; background: var(--bg-elev); color: var(--t1); font: 550 10.5px/1 var(--sans); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+          .btn.tiny { padding: 4px 8px; font-size: 9.5px; }
+          .ilink { padding: 0; border: 0; background: none; color: var(--accb); font: 550 10.5px/1.4 var(--sans); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+        </style>
+      </helmet>
+
+      <!-- ================= TURN 1 ================= -->
+      <div class="dv-turn">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1" id="t1">1</a>
+          <span class="dv-tname">Settings &rsaquo; Forges &mdash; as built</span>
+        </div>
+        <p class="dv-sub">
+          Captured from the shipped app on <b>2026-09-12</b>, driven through its real UI. The host estate is
+          100% contrived &mdash; <code>gh</code> and <code>glab</code> are shell stubs on <code>PATH</code>, so no
+          real account, instance or token appears. Every number below was read off the live DOM, not a ruler.
+          The pane is not <i>wrong</i> about anything it says; it is the only pane in the window that opted out
+          of the layout every other pane uses, and it splits its two products in one half and merges them in the other.
+        </p>
+
+        <div class="dv-opts">
+          <div class="dv-opt" id="o1a">
+            <div class="dv-olabel">
+              <a class="dv-oid" href="#o1a">1a</a>
+              <span>Two hosts per product, one switched off, one added by hand. The window is 1180&times;860.</span>
+            </div>
+            <div class="dv-annot">
+              <div class="dv-card">
+                <img src="assets/forges-before.png" alt="Settings → Forges as built: one Hosts card listing four interleaved GitHub and GitLab hosts, with the Forges summary card butted directly against its bottom edge." width="1180" style="display: block; width: 1180px; height: auto;" />
+              </div>
+              <div class="dv-gutter">
+                <div class="dv-flag">
+                  <b>0px between the cards</b>
+                  Hosts and Forges meet at exactly zero &mdash; two 1px borders and nothing else. Every other pane
+                  gets 14px.
+                </div>
+                <div class="dv-flag">
+                  <b>919px wide, not 760px</b>
+                  This is the only pane that renders straight into <code>.settings-content</code> instead of
+                  wrapping in <code>.settings-stack</code>, so it loses that rule's gap <i>and</i> its max-width.
+                </div>
+                <div class="dv-flag">
+                  <b>Two cards, one voice</b>
+                  Both are headed <code>INTEGRATIONS</code> at the same size and weight. Nothing says one is a list
+                  of instances and the other a summary of it.
+                </div>
+                <div class="dv-flag">
+                  <b>Nothing folds</b>
+                  1,512px of pane at four hosts, and no disclosure anywhere.
+                </div>
+                <div class="dv-flag">
+                  <b>Products interleaved&hellip;</b>
+                  Sorted by hostname, so GitHub and GitLab alternate and each row has to re-state its product as a
+                  text prefix: <code>GitHub&nbsp;&middot;&nbsp;signed in as&hellip;</code>
+                </div>
+                <div class="dv-flag">
+                  <b>&hellip;then split, 8px lower</b>
+                  The card directly beneath separates the same two products. A reader correlating
+                  &ldquo;GitLab: Connected&rdquo; with its hosts has to filter the list above by eye.
+                </div>
+                <div class="dv-flag">
+                  <b>One empty state for every product</b>
+                  &ldquo;No forge CLI (<code>gh</code>, <code>glab</code>) is signed in&rdquo; scales to a third
+                  product but still cannot say <i>which</i> one to go and fix &mdash; and this is the state
+                  where naming the right sign-in matters most.
+                </div>
+              </div>
+            </div>
+            <table class="dv-tbl">
+              <tr>
+                <th>Measured</th><th>Forges</th><th>Every other pane</th><th>Why</th>
+              </tr>
+              <tr>
+                <td>Card width</td>
+                <td><span class="dv-bad">919px</span></td>
+                <td><span class="dv-num">760px</span></td>
+                <td><code>.settings-stack</code> sets <code>max-width: 760px</code></td>
+              </tr>
+              <tr>
+                <td>Gap between cards</td>
+                <td><span class="dv-bad">0px</span></td>
+                <td><span class="dv-num">14px</span></td>
+                <td>&hellip;and <code>gap: 14px</code></td>
+              </tr>
+              <tr>
+                <td>Sections that collapse</td>
+                <td><span class="dv-bad">0 of 2</span></td>
+                <td><span class="dv-bad">0 of 3</span></td>
+                <td>The machinery was dropped on import from PwrAgnt</td>
+              </tr>
+            </table>
+            <p class="dv-prov">
+              SettingsWindow.tsx &sect;forges renders a bare fragment &mdash; &lt;ForgeHostsSection/&gt;&lt;ForgesSettings/&gt;
+              &mdash; where GeneralSettings, UpdatesSettings, DiagnosticsSettings, ProfilesSettings, AboutSettings,
+              ExperimentalSettings and LocalAgentsSettings each open with &lt;div class="settings-stack"&gt;.
+            </p>
+          </div>
+        </div>
+
+        <p class="dv-note">
+          <b>The collapsible header was a deliberate drop, and the premise has expired.</b>
+          <code>SettingsLayout.tsx</code> says so in its own header: &ldquo;PwrAgnt&rsquo;s collapsible-section
+          machinery is intentionally dropped &mdash; PwrGit&rsquo;s panes are short enough to render flat.&rdquo;
+          That was true of a three-card General pane. It is not true of a pane that already runs 1,512px at four
+          hosts and is about to gain a section per product, with a third product (Cursor Origin) queued behind
+          GitHub and GitLab.
+        </p>
+      </div>
+
+      <!-- ================= TURN 2 ================= -->
+      <div class="dv-turn">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2" id="t2">2</a>
+          <span class="dv-tname">The chrome &mdash; two fixes, different sizes</span>
+        </div>
+        <p class="dv-sub">
+          These are independent of the product split in turn 3, and of each other. <b>2a</b> is one wrapper
+          element and touches only this pane. <b>2b</b> is a change to <code>SettingsLayout</code> and therefore
+          to every pane in the window &mdash; worth doing, worth doing on its own.
+        </p>
+
+        <div class="dv-opts">
+          <div class="dv-opt" id="o2a">
+            <div class="dv-olabel">
+              <a class="dv-oid" href="#o2a">2a</a>
+              <span>Wrap the pane in <code>.settings-stack</code>. The measured defect, gone, at 760px with 14px between cards.</span>
+            </div>
+            <div class="dv-card" style="width: 830px;">
+              <div class="pane">
+                <div class="card" style="max-width: 760px;">
+                  <div class="card-hd">
+                    <div class="card-hd-main">
+                      <p class="card-eyebrow">Integrations</p>
+                      <h2 class="card-title">Hosts</h2>
+                      <p class="card-desc">Reported by the GitHub and GitLab CLIs, plus hosts you add.</p>
+                    </div>
+                    <span class="chip ok">3 of 4 on</span>
+                  </div>
+                  <div class="card-bd">
+                    <div class="field">
+                      <div class="field-l"><span class="hostname">github.com</span><span class="field-sub">GitHub &middot; signed in as octo-dev</span></div>
+                      <div class="field-c"><span class="sw on"><span class="sw-track"><span class="sw-thumb"></span></span><span class="sw-word">On</span></span></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="card" style="max-width: 760px;">
+                  <div class="card-hd">
+                    <div class="card-hd-main">
+                      <p class="card-eyebrow">Integrations</p>
+                      <h2 class="card-title">Forges</h2>
+                      <p class="card-desc">A summary of the hosts above.</p>
+                    </div>
+                    <span class="chip ok">2 connected</span>
+                  </div>
+                  <div class="card-bd">
+                    <div class="field">
+                      <div class="field-l"><span>GitHub</span><span class="field-sub">Reading pull requests from github.com.</span></div>
+                      <div class="field-c"><span class="chip ok">Connected</span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="dv-gutter" style="width: 760px;">
+              <div class="dv-flag fix">
+                <b>Fixes the measurement, nothing else</b>
+                The two cards still say <code>INTEGRATIONS</code> in the same voice, still don&rsquo;t fold, and
+                still split the products in one and merge them in the other.
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="o2b">
+            <div class="dv-olabel">
+              <a class="dv-oid" href="#o2b">2b</a>
+              <span>Collapsible section headers, ported from PwrAgnt &mdash; plus a pane head that outranks them.</span>
+            </div>
+            <div class="dv-card" style="width: 830px;">
+              <div class="pane">
+                <div class="head">
+                  <div>
+                    <p class="head-eyebrow">Integrations</p>
+                    <h1 class="head-title">Forges</h1>
+                    <p class="head-help">PwrGit reads change-request status through the CLI you already sign in with. It never asks for a password and stores no token of its own.</p>
+                  </div>
+                  <div class="pane-tools">
+                    <button class="btn tiny" type="button">Collapse all</button>
+                    <button class="btn tiny" type="button">
+                      <svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; margin: 0;" aria-hidden="true"><path d="M14 8a6 6 0 1 1-1.8-4.3" /><path d="M14 2.5V6h-3.5" /></svg>
+                      Re-check
+                    </button>
+                  </div>
+                </div>
+                <div class="card" style="max-width: 760px;">
+                  <div class="card-hd press">
+                    <svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg>
+                    <div class="card-hd-main">
+                      <p class="card-eyebrow cli">gh</p>
+                      <h2 class="card-title">GitHub</h2>
+                      <p class="card-desc">Pull requests from 2 of 3 hosts.</p>
+                    </div>
+                    <span class="chip ok">Connected</span>
+                  </div>
+                  <div class="card-bd">
+                    <div class="field">
+                      <div class="field-l"><span class="hostname">github.com</span><span class="field-sub">signed in as octo-dev</span></div>
+                      <div class="field-c"><span class="sw on"><span class="sw-track"><span class="sw-thumb"></span></span><span class="sw-word">On</span></span></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="card folded" style="max-width: 760px;">
+                  <div class="card-hd press">
+                    <svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg>
+                    <div class="card-hd-main">
+                      <p class="card-eyebrow cli">glab</p>
+                      <h2 class="card-title">GitLab</h2>
+                      <p class="card-desc">Merge requests from 1 of 2 hosts.</p>
+                    </div>
+                    <span class="chip ok">Connected</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="dv-gutter" style="width: 760px;">
+              <div class="dv-flag fix">
+                <b>Three type sizes, three ranks</b>
+                19px pane head &rsaquo; 13.5px section title &rsaquo; 12.5px field label. Today the pane has only
+                the middle one, twice.
+              </div>
+              <div class="dv-flag fix">
+                <b>Re-check moves up</b>
+                It asks <i>both</i> CLIs, so it was never a property of one section &mdash; it belongs in the pane
+                head, which is also the only place that survives N product sections.
+              </div>
+              <div class="dv-flag">
+                <b>Cost: it is not local</b>
+                Collapse state, persistence, &ldquo;Collapse all&rdquo;, arrow-key roving and the deep-link
+                scroll-and-expand all live in <code>SettingsLayout</code>. Landing it here changes every pane, so
+                it wants its own change and its own review.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= TURN 3 ================= -->
+      <div class="dv-turn">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3" id="t3">3</a>
+          <span class="dv-tname">One section per product</span>
+        </div>
+        <p class="dv-sub">
+          The split the pane is asking for. Each product owns one card: its hosts, its own way in, and the two
+          questions only a <i>product</i> can answer &mdash; whether its CLI is installed, and what the integration
+          can report. That last pair is why this <b>merges</b> <code>ForgesSettings</code> into the host sections
+          rather than leaving it as a separate card: <code>forge/AGENTS.md</code> warns against folding
+          capabilities into <i>host rows</i>, because the sentence would repeat once per host and a missing CLI
+          would have nowhere to be reported. A per-<i>product</i> section is exactly the home that objection asks
+          for &mdash; stated once, and present even when the product has no hosts at all.
+        </p>
+
+        <div class="dv-opts">
+          <div class="dv-opt" id="o3s">
+            <div class="dv-olabel">
+              <a class="dv-oid" href="#o3s">3s</a>
+              <span><b>As shipped</b> &mdash; the same contrived estate as 1a, captured from the built app. Compare it row for row with the capture above.</span>
+            </div>
+            <div class="dv-card">
+              <img src="assets/forges-after.png" alt="Settings → Forges as shipped: a Forges pane head with Collapse all, Expand all and Re-check, above a GitHub section and a GitLab section, each with its own hosts, Add button and capability line." width="1180" style="display: block; width: 1180px; height: auto;" />
+            </div>
+            <table class="dv-tbl">
+              <tr><th>Measured</th><th>Before</th><th>After</th><th>Every other pane</th></tr>
+              <tr>
+                <td>Card width</td>
+                <td><span class="dv-bad">919px</span></td>
+                <td><span class="dv-num">760px</span></td>
+                <td><span class="dv-num">760px</span></td>
+              </tr>
+              <tr>
+                <td>Gap between cards</td>
+                <td><span class="dv-bad">0px</span></td>
+                <td><span class="dv-num">14px</span></td>
+                <td><span class="dv-num">14px</span></td>
+              </tr>
+              <tr>
+                <td>Sections that collapse</td>
+                <td><span class="dv-bad">0 of 2</span></td>
+                <td><span class="dv-num">2 of 2</span></td>
+                <td><span class="dv-num">all</span></td>
+              </tr>
+            </table>
+          </div>
+
+          <div class="dv-opt" id="o3f">
+            <div class="dv-olabel">
+              <a class="dv-oid" href="#o3f">3f</a>
+              <span><b>Folded</b> &mdash; what the disclosure is for. Each header still says which product, how it is doing, and from where.</span>
+            </div>
+            <div class="dv-card">
+              <img src="assets/forges-collapsed.png" alt="Both product sections collapsed to one row each: GitHub and GitLab, each with a Connected chip and the hosts it is reading from." width="1180" style="display: block; width: 1180px; height: auto;" />
+            </div>
+            <div class="dv-gutter" style="width: 760px;">
+              <div class="dv-flag fix">
+                <b>The description earns its line here</b>
+                Folded, it is all there is &mdash; which is why the host tally lives in it rather than in the chip, and why the chip stays a state.
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="o3a">
+            <div class="dv-olabel">
+              <a class="dv-oid" href="#o3a">3a</a>
+              <span>The drawing this was designed from, kept for the annotations. It differs from what shipped in the eyebrow, which became the accent category spine PwrAgnt uses.</span>
+            </div>
+            <div class="dv-card" style="width: 830px;">
+              <div class="pane">
+                <div class="head">
+                  <div>
+                    <p class="head-eyebrow">Integrations</p>
+                    <h1 class="head-title">Forges</h1>
+                    <p class="head-help">PwrGit reads change-request status through the CLI you already sign in with. It never asks for a password and stores no token of its own.</p>
+                  </div>
+                  <div class="pane-tools">
+                    <button class="btn tiny" type="button">
+                      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;" aria-hidden="true"><path d="M14 8a6 6 0 1 1-1.8-4.3" /><path d="M14 2.5V6h-3.5" /></svg>
+                      Re-check
+                    </button>
+                  </div>
+                </div>
+
+                <div class="card" style="max-width: 760px;">
+                  <div class="card-hd">
+                    <div class="card-hd-main">
+                      <p class="card-eyebrow cli">gh</p>
+                      <h2 class="card-title">GitHub</h2>
+                      <p class="card-desc">Pull requests, read from 1 of 2 hosts.</p>
+                    </div>
+                    <span class="chip ok">Connected</span>
+                  </div>
+                  <div class="card-bd">
+                    <div class="field">
+                      <div class="field-l"><span class="hostname">github.com</span><span class="field-sub">signed in as octo-dev</span></div>
+                      <div class="field-c">
+                        <span class="sw on"><span class="sw-track"><span class="sw-thumb"></span></span><span class="sw-word">On</span></span>
+                        <span class="field-help">On by default &middot; scopes: repo, read:org, gist</span>
+                      </div>
+                    </div>
+                    <div class="field">
+                      <div class="field-l"><span class="hostname">ghe.contoso-labs.test</span><span class="field-sub">signed in as a.hopper</span></div>
+                      <div class="field-c">
+                        <span class="sw"><span class="sw-track"><span class="sw-thumb"></span></span><span class="sw-word">Off</span></span>
+                        <span class="field-help">Off. PwrGit reads nothing from this host and mints no token for it, clones and forks included.</span>
+                      </div>
+                    </div>
+                    <div class="field">
+                      <div class="field-l"><span>Add a host</span><span class="field-sub">For an Enterprise instance you have not signed in to yet.</span></div>
+                      <div class="field-c">
+                        <div class="actions"><button class="btn" type="button">Add GitHub Enterprise&hellip;</button></div>
+                        <span class="field-help">You name the instance. Nothing is inferred from a hostname, and no ssh remote ever appears here on its own.</span>
+                      </div>
+                    </div>
+                    <div class="field">
+                      <div class="field-l"><span>What GitHub can report</span></div>
+                      <div class="field-c">
+                        <span class="field-help">Branch status in bulk &middot; Commit links in bulk &middot; Diff size and timeline &middot; Fork just the default branch &middot; Commit author avatars</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="card" style="max-width: 760px;">
+                  <div class="card-hd">
+                    <div class="card-hd-main">
+                      <p class="card-eyebrow cli">glab</p>
+                      <h2 class="card-title">GitLab</h2>
+                      <p class="card-desc">Merge requests, read from 1 of 2 hosts.</p>
+                    </div>
+                    <span class="chip ok">Connected</span>
+                  </div>
+                  <div class="card-bd">
+                    <div class="field">
+                      <div class="field-l"><span class="hostname">gitlab.com</span><span class="field-sub">signed in as ada-l</span></div>
+                      <div class="field-c">
+                        <span class="sw on"><span class="sw-track"><span class="sw-thumb"></span></span><span class="sw-word">On</span></span>
+                        <span class="field-help">On by default</span>
+                      </div>
+                    </div>
+                    <div class="field">
+                      <div class="field-l"><span class="hostname">gitlab.contoso-labs.test</span><span class="field-sub">added by you</span></div>
+                      <div class="field-c">
+                        <span class="sw on"><span class="sw-track"><span class="sw-thumb"></span></span><span class="sw-word">On</span></span>
+                        <span class="field-help"><code>glab</code> holds no account here yet &mdash; run <code>glab auth login --hostname gitlab.contoso-labs.test</code></span>
+                        <div class="actions">
+                          <button class="btn tiny" type="button">Copy command</button>
+                          <button class="btn tiny" type="button">Remove host</button>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="field">
+                      <div class="field-l"><span>Add a host</span><span class="field-sub">For a self-managed instance you have not signed in to yet.</span></div>
+                      <div class="field-c">
+                        <div class="actions"><button class="btn" type="button">Add GitLab instance&hellip;</button></div>
+                        <span class="field-help">You name the instance. Nothing is inferred from a hostname, and no ssh remote ever appears here on its own.</span>
+                      </div>
+                    </div>
+                    <div class="field">
+                      <div class="field-l"><span>What GitLab can report</span></div>
+                      <div class="field-c">
+                        <span class="field-help">Branch status in bulk &middot; Diff size and timeline &middot; Commit author avatars. <b>Not supported by this forge:</b> commit links in bulk, fork just the default branch.</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="dv-gutter" style="width: 760px;">
+              <div class="dv-flag fix">
+                <b>The product leaves the row</b>
+                <code>GitHub&nbsp;&middot;&nbsp;signed in as octo-dev</code> becomes
+                <code>signed in as octo-dev</code>. The section already said it, on every row, once.
+              </div>
+              <div class="dv-flag fix">
+                <b>The chip is a state again</b>
+                Connected / Signed out / Off / Not installed &mdash; the four <code>ForgesSettings</code> already
+                computes. The tally it replaces (&ldquo;3 of 4 on&rdquo;) moves into the description, per product,
+                where it is checkable against the rows beneath it.
+              </div>
+              <div class="dv-flag fix">
+                <b>The eyebrow earns its line</b>
+                It names the binary this section speaks through, which is the thing every remedy in the card tells
+                you to run.
+              </div>
+              <div class="dv-flag fix">
+                <b>Capabilities, once per product</b>
+                Not once per host, and reachable even when the product has no hosts &mdash; the two things
+                <code>forge/AGENTS.md</code> asks of them.
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="o3b">
+            <div class="dv-olabel">
+              <a class="dv-oid" href="#o3b">3b</a>
+              <span>The states that had nowhere to go. A product with no hosts still gets its section &mdash; that is the point.</span>
+            </div>
+            <div class="dv-card" style="width: 830px;">
+              <div class="pane">
+                <div class="card" style="max-width: 760px;">
+                  <div class="card-hd">
+                    <div class="card-hd-main">
+                      <p class="card-eyebrow cli">gh</p>
+                      <h2 class="card-title">GitHub</h2>
+                      <p class="card-desc">No host is signed in to read pull requests from.</p>
+                    </div>
+                    <span class="chip warn">Signed out</span>
+                  </div>
+                  <div class="card-bd">
+                    <p class="empty">Run <code>gh auth login</code> in a terminal and this updates on its own.</p>
+                    <div class="field">
+                      <div class="field-l"><span>Add a host</span><span class="field-sub">For an Enterprise instance you have not signed in to yet.</span></div>
+                      <div class="field-c"><div class="actions"><button class="btn" type="button">Add GitHub Enterprise&hellip;</button></div></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="card" style="max-width: 760px;">
+                  <div class="card-hd">
+                    <div class="card-hd-main">
+                      <p class="card-eyebrow cli">glab</p>
+                      <h2 class="card-title">GitLab</h2>
+                      <p class="card-desc">GitLab merge requests need the <code>glab</code> CLI.</p>
+                    </div>
+                    <span class="chip warn">Not installed</span>
+                  </div>
+                  <div class="card-bd">
+                    <p class="empty">Install the GitLab CLI (<code>glab</code>) to see merge-request status here.</p>
+                  </div>
+                </div>
+                <div class="card" style="max-width: 760px;">
+                  <div class="card-hd">
+                    <div class="card-hd-main">
+                      <p class="card-eyebrow cli">cursor</p>
+                      <h2 class="card-title">Cursor Origin</h2>
+                      <p class="card-desc">Every Cursor Origin host is switched off.</p>
+                    </div>
+                    <span class="chip">Off</span>
+                  </div>
+                  <div class="card-bd">
+                    <div class="field">
+                      <div class="field-l"><span class="hostname">origin.cursor.test</span><span class="field-sub">signed in as g.hopper</span></div>
+                      <div class="field-c">
+                        <span class="sw"><span class="sw-track"><span class="sw-thumb"></span></span><span class="sw-word">Off</span></span>
+                        <span class="field-help">Off. PwrGit reads nothing from this host and mints no token for it, clones and forks included.</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="dv-gutter" style="width: 760px;">
+              <div class="dv-flag fix">
+                <b>Each empty state names one CLI</b>
+                One sentence per section, built from the registry. The shared line had two spellings &mdash;
+                &ldquo;Neither <code>gh</code> nor <code>glab</code>&rdquo;, then &ldquo;No forge CLI
+                (<code>gh</code>, <code>glab</code>)&rdquo; &mdash; and neither could point at one CLI.
+              </div>
+              <div class="dv-flag fix">
+                <b>&ldquo;Off&rdquo; stays neutral</b>
+                A grey chip, not amber. Somebody chose it, and the pane must not second-guess a switch it is
+                sitting next to.
+              </div>
+              <div class="dv-flag fix">
+                <b>The third product is just data</b>
+                Cursor Origin is drawn here to make the point that these sections come from the product list.
+                Nothing in the pane names a product; adding one adds a row to a <code>Record&lt;ForgeKind, …&gt;</code>
+                and the section appears.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <p class="dv-note">
+          <b>What this deliberately does not change.</b> No main-process work: <code>forge:hosts</code> already
+          returns <code>kind</code> on every row, so the grouping is a renderer concern. And the three behaviours
+          the current tests pin stay exactly as they are &mdash; Remove is gated on
+          <code>kindSource === "config"</code> and never on <code>origin</code> (gating it on <code>origin</code>
+          silently re-enabled a host somebody had switched off), the Add buttons stay disabled until the host list
+          has loaded, and an add writes <code>{kind, enabled: true}</code> because main merges rather than replaces.
+          <br /><br />
+          <b>It supersedes artboard 2a of &ldquo;Forge Hosts &mdash; UX Review&rdquo;</b>, which drew the single
+          interleaved list. That artboard was right about the row anatomy and the evidence line, and is still the
+          reference for both; it is only the one-list-for-two-products decision that this replaces.
+        </p>
+        <p class="dv-prov">
+          Captures: apps/desktop/e2e/design-shots.spec.ts &mdash; contrived gh/glab stubs from
+          e2e/fixtures/forge-cli-stubs on PATH, PWRGIT_USER_DATA_DIR temp dir, dark theme, 1180&times;860.
+          Re-shoot with PWRGIT_DESIGN_SHOTS=1. Measurements read from getBoundingClientRect() in the running app.
+        </p>
+      </div>
+    </x-dc>
+  </body>
+</html>

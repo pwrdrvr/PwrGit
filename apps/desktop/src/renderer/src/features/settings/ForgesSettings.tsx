@@ -1,34 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  changeRequestNoun,
-  forgeAllHostsOff,
-  forgeLabel,
-  forgeProduct,
-  type ForgeCapabilities,
+  FORGE_KINDS,
+  type ForgeHostConfig,
+  type ForgeHostRow,
+  type ForgeKind,
   type ForgeStatus
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
-import {
-  LOADING_READ_STATE,
-  READY_READ_STATE,
-  type ReadState
-} from "../../state/readState";
+import { copyText } from "../../lib/copyText";
+import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { ReadError } from "../shell/ReadError";
-import {
-  SettingsField,
-  SettingsSection,
-  settingsChipClass,
-  type SettingsChipTone
-} from "./SettingsLayout";
-
-/** What each capability buys the user, in their words rather than the API's. */
-const CAPABILITY_LABELS: Record<keyof ForgeCapabilities, string> = {
-  batchedBranchLookup: "Branch status in bulk",
-  batchedCommitAssociation: "Commit links in bulk",
-  changeSizeAndTimeline: "Diff size and timeline",
-  forkDefaultBranchOnly: "Fork just the default branch",
-  commitAuthorIdentity: "Commit author avatars"
-};
+import { SettingsPanelHead, SettingsSectionStack } from "./SettingsLayout";
+import { ForgeProductSection } from "./ForgeProductSection";
+import { AddForgeHostDialog } from "./AddForgeHostDialog";
 
 /**
  * How often this pane asks main to re-examine its probe while it is open.
@@ -42,303 +26,261 @@ const CAPABILITY_LABELS: Record<keyof ForgeCapabilities, string> = {
 const RECHECK_MS = 30_000;
 
 /**
- * Which forges PwrGit can read right now, and what each one can do.
+ * Settings → Forges: one section per hosting product.
  *
- * Everything here comes from main's cached probe over `forge:status`; this pane
- * never shells a CLI or calls a forge itself. Main pushes `forge:statusChanged`
- * when availability changes, so signing in from a terminal updates this pane
- * without reopening it — and so does flipping a switch in Hosts above, which is
- * an input to the same probe.
+ * Sections come from `FORGE_KINDS`, never from a list written here, so a third
+ * product is a row in that table and not an edit to this file. Nothing below
+ * compares a kind to a literal.
  *
- * This is a summary of the Hosts section above it, never a second opinion. Every
- * state below is read off `ForgeStatus.hosts`, the same per-host answers that
- * decide whether a transport spawns anything, so the two sections cannot
- * disagree: "Signed out" beside a host row that says "signed in as …" was the
- * bug, and it came from probing one hardcoded SaaS host per forge.
+ * This pane used to be two sibling cards — a flat "Hosts" list of every host
+ * from both products, sorted by hostname, above a per-product capability
+ * summary. That made a reader correlate two lists by eye to answer "which hosts
+ * is GitLab actually reading", and it gave the two products one shared empty
+ * state ("Neither gh nor glab is signed in") that could only ever be half
+ * right. The product is now the section, so each one owns its hosts, its way
+ * in, and its own remedy.
+ *
+ * Both reads live here rather than in the sections, for the same reason the
+ * host list is fetched once: `forge:hosts` and `forge:status` each answer for
+ * every product at once, and a read per section would spawn N of each on mount
+ * — doubled again under StrictMode.
+ *
+ * Rows come from main, which enumerates what each CLI is signed in to plus the
+ * hosts the user added by hand. Git remotes are deliberately not a source: a
+ * remote is an ssh target, and a NAS or a box on a home network is not a forge
+ * — see `forge/AGENTS.md`. The switch is enforced at the transport, not here: a
+ * disabled host resolves to null in main, so nothing spawns its CLI or mints
+ * its token. This pane only ever writes the setting and re-reads what main
+ * says.
  */
-export function ForgesSettings() {
+export function ForgesSettings(props: { saving: boolean }) {
+  const [hosts, setHosts] = useState<ForgeHostRow[] | undefined>();
   const [forges, setForges] = useState<ForgeStatus[] | undefined>();
-  const [loadState, setLoadState] =
-    useState<ReadState>(LOADING_READ_STATE);
-  const mountedRef = useRef(false);
-  const requestRef = useRef(0);
+  const [hostsError, setHostsError] = useState<string | undefined>();
+  const [statusError, setStatusError] = useState<string | undefined>();
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState<string | undefined>();
+  const [rowError, setRowError] = useState<
+    { host: string; message: string } | undefined
+  >();
+  const [adding, setAdding] = useState<ForgeKind | undefined>();
+  const mounted = useRef(false);
+  const hostsRequest = useRef(0);
+  const statusRequest = useRef(0);
   const pushRef = useRef(0);
+  /**
+   * In-flight, read synchronously.
+   *
+   * `busy` cannot gate a write: it is render state, so it is not visible to a
+   * second click in the same tick, and `readHosts` only raises it AFTER the
+   * write has resolved. `props.saving` cannot either — it belongs to
+   * `useAppSettings.update`, and this pane dispatches `settings:update`
+   * itself. Without this ref a double-click sent the write twice.
+   */
+  const writing = useRef(false);
 
-  const read = useCallback(async (): Promise<void> => {
-    const request = ++requestRef.current;
+  const readHosts = useCallback(async (refresh: boolean): Promise<void> => {
+    // Reads DO overlap — StrictMode mounts twice, a write re-reads, and
+    // Re-check can land on top of either — and a plain `mounted` ref does not
+    // order them. Without this token the slower response wins and repaints a
+    // stale list over a fresh one.
+    const request = ++hostsRequest.current;
+    setBusy(true);
+    try {
+      const result = await dispatch("forge:hosts", refresh ? { refresh } : {});
+      if (!mounted.current || request !== hostsRequest.current) return;
+      if (result.ok) {
+        setHosts(result.value.hosts);
+        // A latched "Copied" belongs to the row it was clicked on. Rows can be
+        // removed and added back, and the label would otherwise reappear on a
+        // host nothing was ever copied for.
+        setCopied(undefined);
+        setHostsError(undefined);
+      } else {
+        setHostsError(result.error.message);
+      }
+    } catch (cause) {
+      // Without this the rejection escapes past `setBusy(false)` and every
+      // control stays disabled on "Checking…" forever, with nothing shown.
+      if (mounted.current && request === hostsRequest.current) {
+        setHostsError(cause instanceof Error ? cause.message : String(cause));
+      }
+    } finally {
+      if (mounted.current && request === hostsRequest.current) setBusy(false);
+    }
+  }, []);
+
+  const readStatus = useCallback(async (): Promise<void> => {
+    const request = ++statusRequest.current;
     const startedAfterPush = pushRef.current;
-    // Keep a usable status list in place during its ordinary 30-second probe.
-    // Initial reads and retries still say plainly that work is in progress.
-    setLoadState((current) =>
-      current.status === "ready" ? current : LOADING_READ_STATE
-    );
     const result = await dispatch("forge:status", undefined);
     if (
-      !mountedRef.current ||
-      request !== requestRef.current ||
+      !mounted.current ||
+      request !== statusRequest.current ||
       pushRef.current !== startedAfterPush
     ) {
       return;
     }
     if (result.ok) {
       setForges(result.value.forges);
-      setLoadState(READY_READ_STATE);
+      setStatusError(undefined);
     } else {
-      setLoadState({ status: "error", message: result.error.message });
+      setStatusError(result.error.message);
     }
   }, []);
 
   useEffect(() => {
-    mountedRef.current = true;
+    mounted.current = true;
     const unsubscribe = subscribe("forge:statusChanged", ({ forges: next }) => {
       // A push is newer than every read currently in flight. Invalidating the
       // request also prevents a late failure from replacing this success.
       pushRef.current += 1;
-      requestRef.current += 1;
+      statusRequest.current += 1;
       setForges(next);
-      setLoadState(READY_READ_STATE);
+      setStatusError(undefined);
     });
-    void read();
-    const timer = window.setInterval(() => void read(), RECHECK_MS);
+    void readHosts(false);
+    void readStatus();
+    const timer = window.setInterval(() => void readStatus(), RECHECK_MS);
     return () => {
-      mountedRef.current = false;
-      requestRef.current += 1;
+      mounted.current = false;
+      hostsRequest.current += 1;
+      statusRequest.current += 1;
       window.clearInterval(timer);
       unsubscribe();
     };
-  }, [read]);
+  }, [readHosts, readStatus]);
 
-  const states = forges?.map((forge) => state(forge));
-  const connected = states?.filter((current) => current === "connected").length;
-  // Every forge deliberately switched off is a configuration, not a failure —
-  // the header must not paint amber above rows that are all neutral "Off".
-  const allOff =
-    states !== undefined && states.length > 0 && states.every((c) => c === "off");
+  // "Copied" is feedback, not a state the row is in. Left latched it never
+  // reverts, so a second copy of the same command confirms nothing.
+  useEffect(() => {
+    if (copied === undefined) return;
+    const timer = window.setTimeout(() => setCopied(undefined), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
+  /**
+   * Write one host's entry, then refresh the list.
+   *
+   * Returns the failure message rather than setting it, so each caller can put
+   * it where the user is looking — the row for a switch or a Remove, the dialog
+   * for an add. `null` means it worked, matching every other write callback in
+   * the app.
+   *
+   * The re-read is deliberately NOT awaited: it is what repaints the list, but
+   * a caller that waits on it stays "in flight" until it lands, and the dialog
+   * made that visible — a slow `forge:hosts` left it on "Adding…" with Cancel,
+   * Escape and the backdrop all refused, after the write had already succeeded.
+   * It is never a `refresh` either: a config entry changes nothing either CLI
+   * would report, and refreshing spawns a subprocess per product to learn that.
+   */
+  const writeHost = async (
+    host: string,
+    value: ForgeHostConfig | null
+  ): Promise<string | null> => {
+    if (writing.current) return null;
+    writing.current = true;
+    try {
+      const result = await dispatch("settings:update", {
+        patch: { forgeHosts: { [host]: value } }
+      });
+      if (!mounted.current) return null;
+      if (!result.ok) return result.error.message;
+      void readHosts(false);
+      return null;
+    } catch (cause) {
+      if (!mounted.current) return null;
+      return cause instanceof Error ? cause.message : String(cause);
+    } finally {
+      writing.current = false;
+    }
+  };
+
+  /** A row's own write. Its failure belongs on that row, not on the pane
+   *  header, where it named no host. */
+  const writeRow = (row: ForgeHostRow, value: ForgeHostConfig | null): void => {
+    void writeHost(row.host, value).then((message) => {
+      if (!mounted.current) return;
+      setRowError(message === null ? undefined : { host: row.host, message });
+    });
+  };
+
+  /** Genuinely unavailable, not in-flight — the dialog cannot tell a new host
+   *  from one already present until the list has loaded. */
+  const loading = hosts === undefined;
+  const blocked = props.saving || busy;
 
   return (
-    <SettingsSection
-      title="Forges"
-      eyebrow="Integrations"
-      description="A summary of the hosts above: what PwrGit can read through the CLI you already sign in with, and what each product is able to report. It never asks for a password or stores a token of its own."
-      chip={
-        loadState.status === "error" && forges === undefined
-          ? "Unavailable"
-          : forges === undefined
-          ? undefined
-          : allOff
-            ? "All off"
-            : connected === 0
-              ? "None connected"
-              : `${connected} connected`
-      }
-      chipKind={
-        loadState.status === "error"
-          ? "warn"
-          : allOff
-            ? "default"
-            : connected === 0
-              ? "warn"
-              : "ok"
-      }
-    >
-      {loadState.status === "error" && (
+    <SettingsSectionStack aria-label="Forge settings" paneId="forges">
+      <SettingsPanelHead
+        eyebrow="Integrations"
+        title="Forges"
+        help="PwrGit reads change-request status through the CLI you already sign in with. It never asks for a password and stores no token of its own."
+        action={
+          // One control for the pane, not one per section: it asks every CLI,
+          // so it was never a property of one product.
+          <button
+            aria-busy={busy}
+            aria-disabled={busy}
+            className="settings-button"
+            type="button"
+            onClick={() => {
+              if (busy) return;
+              void readHosts(true);
+              void readStatus();
+            }}
+          >
+            <RefreshGlyph />
+            {busy ? "Checking…" : "Re-check"}
+          </button>
+        }
+      />
+      {hostsError !== undefined && (
+        <p className="settings-field__error" role="alert">
+          {hostsError}
+        </p>
+      )}
+      {statusError !== undefined && forges === undefined && (
         <ReadError
           title="Forge connections couldn’t be checked"
-          message={loadState.message}
-          onRetry={() => void read()}
+          message={statusError}
+          onRetry={() => void readStatus()}
         />
       )}
-      {forges === undefined && loadState.status !== "error" ? (
-        <SettingsField
-          label="Checking…"
-          control={<span className="settings-card__chip">Probing</span>}
+      {FORGE_KINDS.map((kind) => (
+        <ForgeProductSection
+          key={kind}
+          kind={kind}
+          // Filtered, not sorted-then-grouped: the row order inside a product
+          // is main's, and main already sorts by hostname.
+          hosts={hosts?.filter((row) => row.kind === kind)}
+          status={forges?.find((forge) => forge.kind === kind)}
+          blocked={blocked}
+          loading={loading}
+          copied={copied}
+          rowError={rowError}
+          onWrite={writeRow}
+          onCopy={(row) => {
+            void copyText(`${row.cli} auth login --hostname ${row.host}`);
+            setCopied(row.host);
+          }}
+          onAdd={() => setAdding(kind)}
         />
-      ) : forges?.length === 0 ? (
-        <p className="settings-empty">No forge integrations are available.</p>
-      ) : (
-        forges?.map((forge, index) => {
-          // Once per row: four call sites each deriving the state for themselves
-          // is how they end up disagreeing about it.
-          const current = states?.[index] ?? state(forge);
-          return (
-            <SettingsField
-              key={forge.kind}
-              label={forgeLabel(forge.kind)}
-              sub={describe(forge, current)}
-              control={
-                // Same pill the section header uses — one state chip family in
-                // the Settings window, not two that drift apart.
-                <span
-                  aria-label={`${forgeLabel(forge.kind)}: ${STATE_LABELS[current]}`}
-                  aria-live="polite"
-                  className={settingsChipClass(STATE_TONES[current])}
-                  role="status"
-                >
-                  {STATE_LABELS[current]}
-                </span>
-              }
-              help={remedyOrCapabilities(forge, current)}
-            />
-          );
-        })
+      ))}
+      {adding !== undefined && hosts !== undefined && (
+        <AddForgeHostDialog
+          kind={adding}
+          // Every product's hostnames, so adding a GitLab instance cannot
+          // silently rewrite the product of a host `gh` already reports.
+          listed={hosts.map((row) => row.host)}
+          // `enabled: true` and not just `{ kind }`: main merges into the
+          // stored entry, so a stale `enabled:false` left behind by a CLI
+          // sign-out would survive and the host would arrive switched off,
+          // moments after the dialog said PwrGit would talk to it.
+          onAdd={(host) => writeHost(host, { kind: adding, enabled: true })}
+          onClose={() => setAdding(undefined)}
+        />
       )}
-    </SettingsSection>
+    </SettingsSectionStack>
   );
-}
-
-/**
- * The four states a forge can be in, in the order they must be checked.
- *
- * `off` is the one that did not exist before and had to: a forge whose every
- * host the user switched off is neither connected nor signed out, and reporting
- * it as either sends them somewhere that cannot fix it — to a terminal to sign
- * in to something they are already signed in to, or nowhere at all while the
- * summary claims an ability the transport has given up.
- */
-type ForgeState = "missing" | "connected" | "off" | "signedOut";
-
-const STATE_LABELS: Record<ForgeState, string> = {
-  missing: "Not installed",
-  connected: "Connected",
-  off: "Off",
-  signedOut: "Signed out"
-};
-
-function state(forge: ForgeStatus): ForgeState {
-  if (!forge.installed) return "missing";
-  // `loggedIn` stays authoritative — main already derived it from the enabled
-  // hosts, and re-deriving it here is how the two drift apart.
-  if (forge.loggedIn) return "connected";
-  if (forgeAllHostsOff(forge)) return "off";
-  return "signedOut";
-}
-
-/**
- * One tone per state.
- *
- * `off` is neutral, not a warning: a host the user switched off is a working
- * configuration, and painting it amber would be the app second-guessing a choice
- * somebody made deliberately, next to the switch they made it with.
- *
- * Keyed on the state rather than re-read from `loggedIn`, so the chip's colour
- * and its label can never describe different states — reading `loggedIn` here
- * put an `installed: false` forge in a green pill labelled "Not installed".
- */
-const STATE_TONES: Record<ForgeState, SettingsChipTone> = {
-  missing: "warn",
-  connected: "ok",
-  off: "default",
-  signedOut: "warn"
-};
-
-/** Name a few hosts, then count the rest — a row subtitle is a sentence, and
- *  `gh` can be signed in to a dozen Enterprise instances. Mirrors the cap
- *  `ownersPhrase` applies to the fork dialog's owner list. */
-function hostsPhrase(hosts: string[]): string {
-  if (hosts.length <= 3) return hosts.join(", ");
-  return `${hosts.slice(0, 3).join(", ")} and ${hosts.length - 3} more`;
-}
-
-/** Enabled hosts that answered with a credential — what "Connected" is made of,
- *  and the only hosts this pane may claim anything about. */
-function readableHosts(forge: ForgeStatus): string[] {
-  return forge.hosts
-    .filter((host) => host.enabled && host.loggedIn)
-    .map((host) => host.host);
-}
-
-/** Hosts the user could sign in to: allowed by the switch, no credential yet. */
-function awaitingSignIn(forge: ForgeStatus): string[] {
-  return forge.hosts
-    .filter((host) => host.enabled && !host.loggedIn)
-    .map((host) => host.host);
-}
-
-/**
- * Which hosts this forge is actually being read from.
- *
- * Named rather than described, because the description was part of the problem:
- * "Merge requests on gitlab.com and self-managed instances" is a sentence about
- * the product, and it sat directly under a probe that had only ever asked
- * gitlab.com. Naming the hosts makes the claim checkable against the rows above.
- */
-function describe(forge: ForgeStatus, current: ForgeState): string {
-  const noun = `${changeRequestNoun(forge.kind)}s`;
-  const readable = readableHosts(forge);
-  if (readable.length > 0) {
-    return `Reading ${noun} from ${hostsPhrase(readable)}.`;
-  }
-  if (current === "connected") {
-    // Connected through the CLI's own default host, which has no row above and
-    // so is not named here. Claiming "no host is signed in" beside a "Connected"
-    // chip would be the two halves of this row contradicting each other.
-    return `Reading ${noun} through the \`${forge.cli}\` CLI's default host.`;
-  }
-  if (current === "off") {
-    return `Every ${forgeLabel(forge.kind)} host is switched off above.`;
-  }
-  // A missing CLI reports no hosts at all, so it lands here too — and saying
-  // "no host is signed in" beside a "Not installed" chip blames the login for a
-  // missing binary, which the remedy below correctly does not.
-  if (current === "missing") {
-    return `${forgeLabel(forge.kind)} ${noun} need the \`${forge.cli}\` CLI.`;
-  }
-  return `No host is signed in to read ${noun} from.`;
-}
-
-/**
- * A blocked forge gets the exact thing that unblocks it — install the CLI, sign
- * in, or turn a host back on. A working one lists what it can actually do, so a
- * missing feature reads as a known limit of that provider rather than a bug.
- */
-function remedyOrCapabilities(forge: ForgeStatus, current: ForgeState): string {
-  if (current === "missing") {
-    return `Install the ${forgeLabel(forge.kind)} CLI (\`${forge.cli}\`) to see status here.`;
-  }
-  if (current === "off") {
-    // Says what is actually true: no host is read and no token is minted. The
-    // earlier wording claimed no `${forge.cli}` command runs at all, while the
-    // probe spawns `--version` on every pass to learn the CLI is there — which
-    // is how this row knows to say "Off" rather than "Not installed".
-    return `Turn a host on in Hosts above to read ${changeRequestNoun(forge.kind)} status. PwrGit reads no host and mints no token while every host is off.`;
-  }
-  if (current === "signedOut") {
-    return `Run \`${signInCommand(forge)}\` in a terminal, then this updates on its own.`;
-  }
-  const supported = (
-    Object.keys(CAPABILITY_LABELS) as (keyof ForgeCapabilities)[]
-  ).filter((capability) => forge.capabilities[capability]);
-  const missing = (
-    Object.keys(CAPABILITY_LABELS) as (keyof ForgeCapabilities)[]
-  ).filter((capability) => !forge.capabilities[capability]);
-  const supportedText = supported
-    .map((capability) => CAPABILITY_LABELS[capability])
-    .join(" · ");
-  const missingText =
-    missing.length === 0
-      ? ""
-      : `Not supported by this forge: ${missing
-          .map((capability) => CAPABILITY_LABELS[capability].toLowerCase())
-          .join(", ")}.`;
-  // Either half may be empty; joining only the present ones keeps a stray
-  // leading ". " out of the hint.
-  return [supportedText, missingText].filter((part) => part !== "").join(". ");
-}
-
-/**
- * The sign-in command for a signed-out forge.
- *
- * The bare command authenticates the forge's SaaS host, so it is only right when
- * that host is one of the ones waiting. Otherwise it names a host explicitly —
- * `glab auth login` would send someone to gitlab.com when the instance they are
- * missing is a self-managed one, or when an env allowlist has switched gitlab.com
- * off entirely. With several waiting, the first is named: any of them moves the
- * state, and the Hosts section above owns the full per-row list.
- */
-function signInCommand(forge: ForgeStatus): string {
-  const waiting = awaitingSignIn(forge);
-  if (waiting.length === 0 || waiting.includes(forgeProduct(forge.kind).saasHost)) {
-    return `${forge.cli} auth login`;
-  }
-  return `${forge.cli} auth login --hostname ${waiting[0]}`;
 }

@@ -3,7 +3,13 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { err, forgeProduct, ok, type ForgeStatus } from "@pwrgit/shared";
+import {
+  err,
+  forgeProduct,
+  ok,
+  type ForgeHostRow,
+  type ForgeStatus
+} from "@pwrgit/shared";
 
 const mocks = vi.hoisted(() => ({
   dispatch: vi.fn(),
@@ -28,9 +34,10 @@ function forge(overrides: Partial<ForgeStatus> = {}): ForgeStatus {
   const kind = overrides.kind ?? "github";
   const installed = overrides.installed ?? true;
   const loggedIn = overrides.loggedIn ?? true;
+  const product = forgeProduct(kind);
   return {
     kind,
-    cli: kind === "github" ? "gh" : "glab",
+    cli: product.cli,
     installed,
     loggedIn,
     capabilities: {
@@ -41,7 +48,7 @@ function forge(overrides: Partial<ForgeStatus> = {}): ForgeStatus {
       forkDefaultBranchOnly: true
     },
     hosts: installed
-      ? [{ host: forgeProduct(kind).saasHost, enabled: true, loggedIn }]
+      ? [{ host: product.saasHost, enabled: true, loggedIn }]
       : [],
     ...overrides
   };
@@ -51,10 +58,14 @@ let container: HTMLDivElement;
 let root: Root;
 let listener: ((payload: { forges: ForgeStatus[] }) => void) | undefined;
 const unsubscribe = vi.fn();
+/** What `forge:hosts` answers. Empty unless a test is about the rows — this
+ *  file is about what a PRODUCT reports; `ForgeHosts.test.tsx` owns the rows. */
+let rows: ForgeHostRow[];
 
 beforeEach(() => {
   vi.clearAllMocks();
   listener = undefined;
+  rows = [];
   mocks.subscribe.mockImplementation((_channel: string, cb: typeof listener) => {
     listener = cb;
     return unsubscribe;
@@ -69,10 +80,34 @@ afterEach(() => {
   container.remove();
 });
 
+/** Answer each channel separately. A blanket `mockResolvedValue` cannot: the
+ *  pane reads the host list and the status probe, and a failure injected for
+ *  one would arrive on both. */
+function respond(handlers: {
+  status?: () => unknown;
+  hosts?: () => unknown;
+}): void {
+  mocks.dispatch.mockImplementation(async (channel: string) => {
+    if (channel === "forge:hosts") {
+      return handlers.hosts?.() ?? ok({ hosts: rows });
+    }
+    if (channel === "forge:status") {
+      return handlers.status?.() ?? ok({ forges: [] });
+    }
+    throw new Error(`unexpected channel: ${channel}`);
+  });
+}
+
+/** Every `forge:status` call the pane made — the reads this file counts, with
+ *  the host read that accompanies each mount left out of the tally. */
+function statusCalls(): unknown[][] {
+  return mocks.dispatch.mock.calls.filter((call) => call[0] === "forge:status");
+}
+
 async function render(forges: ForgeStatus[]): Promise<void> {
-  mocks.dispatch.mockResolvedValue(ok({ forges }));
+  respond({ status: () => ok({ forges }) });
   await act(async () => {
-    root.render(<ForgesSettings />);
+    root.render(<ForgesSettings saving={false} />);
   });
 }
 
@@ -81,28 +116,32 @@ describe("ForgesSettings", () => {
     await render([forge()]);
 
     expect(mocks.dispatch).toHaveBeenCalledWith("forge:status", undefined);
-    // Exactly one channel, and nothing that reaches a vendor API.
-    expect(mocks.dispatch).toHaveBeenCalledTimes(1);
+    // Two reads, both over the bus, and nothing that reaches a vendor API.
+    expect(
+      new Set(mocks.dispatch.mock.calls.map((call) => call[0]))
+    ).toEqual(new Set(["forge:hosts", "forge:status"]));
+    expect(statusCalls()).toHaveLength(1);
     expect(container.textContent).toContain("GitHub");
     expect(container.textContent).toContain("Connected");
   });
 
   it("replaces an initial failure with useful retry UI and recovers", async () => {
-    mocks.dispatch.mockResolvedValue(
-      err({
-        kind: "unknown",
-        code: "probe_failed",
-        message: "The local service did not answer."
-      })
-    );
-    await act(async () => root.render(<ForgesSettings />));
+    respond({
+      status: () =>
+        err({
+          kind: "unknown",
+          code: "probe_failed",
+          message: "The local service did not answer."
+        })
+    });
+    await act(async () => root.render(<ForgesSettings saving={false} />));
 
     const alert = container.querySelector<HTMLElement>("[role='alert']");
     expect(alert?.textContent).toContain("Forge connections couldn’t be checked");
     expect(alert?.textContent).toContain("The local service did not answer.");
     expect(container.textContent).not.toContain("Checking…");
 
-    mocks.dispatch.mockResolvedValue(ok({ forges: [forge()] }));
+    respond({ status: () => ok({ forges: [forge()] }) });
     await act(async () => {
       alert?.querySelector<HTMLButtonElement>("button")?.click();
     });
@@ -159,7 +198,13 @@ describe("ForgesSettings", () => {
     // A deliberate choice is not a warning — anywhere on the pane. Scoping this
     // to `.settings-field` hid the section header, which was still amber.
     expect(container.querySelector(".settings-card__chip--warn")).toBeNull();
-    expect(container.textContent).toContain("All off");
+    // The product's own chip, in its own section header — there is no longer an
+    // aggregate one to summarize both products into a single "All off".
+    expect(
+      container
+        .querySelector("section[aria-label='GitLab'] .settings-card__chip")
+        ?.textContent
+    ).toBe("Off");
   });
 
   it("puts the instance in the sign-in command when one self-managed host is waiting", async () => {
@@ -225,9 +270,9 @@ describe("ForgesSettings", () => {
     await render([forge({ installed: false, loggedIn: true })]);
 
     expect(container.textContent).toContain("Not installed");
-    expect(
-      container.querySelector(".settings-field .settings-card__chip--ok")
-    ).toBeNull();
+    // Anywhere on the pane, not just in a field: the chip now lives in the
+    // section header, where scoping the old query would have missed it.
+    expect(container.querySelector(".settings-card__chip--ok")).toBeNull();
   });
 
   it("names a waiting host when the bare command would sign in elsewhere", async () => {
@@ -280,18 +325,17 @@ describe("ForgesSettings", () => {
 
     expect(container.textContent).toContain("Connected");
     // Signing in from a terminal must not require a second request.
-    expect(mocks.dispatch).toHaveBeenCalledTimes(1);
+    expect(statusCalls()).toHaveLength(1);
   });
 
   it("lets a pushed success win over a slower failed read", async () => {
     let settle: ((value: unknown) => void) | undefined;
-    mocks.dispatch.mockReturnValue(
-      new Promise((resolve) => {
-        settle = resolve;
-      })
-    );
+    const hanging = new Promise((resolve) => {
+      settle = resolve;
+    });
+    respond({ status: () => hanging });
     await act(async () => {
-      root.render(<ForgesSettings />);
+      root.render(<ForgesSettings saving={false} />);
     });
 
     // The push lands first, then the stale read resolves.
@@ -319,14 +363,14 @@ describe("ForgesSettings", () => {
     vi.useFakeTimers();
     try {
       await render([forge({ loggedIn: false })]);
-      expect(mocks.dispatch).toHaveBeenCalledTimes(1);
+      expect(statusCalls()).toHaveLength(1);
 
-      mocks.dispatch.mockResolvedValue(ok({ forges: [forge({ loggedIn: true })] }));
+      respond({ status: () => ok({ forges: [forge({ loggedIn: true })] }) });
       await act(async () => {
         await vi.advanceTimersByTimeAsync(30_000);
       });
 
-      expect(mocks.dispatch.mock.calls.length).toBeGreaterThan(1);
+      expect(statusCalls().length).toBeGreaterThan(1);
       expect(container.textContent).toContain("Connected");
     } finally {
       vi.useRealTimers();
