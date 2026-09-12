@@ -12,7 +12,8 @@ import {
   pickBestAssociation,
   pickBestByBranch,
   toSummary,
-  type MrNode
+  type MrNode,
+  type MrPage
 } from "./mr-query";
 
 /** Branches per GraphQL request; keeps one query's complexity bounded. */
@@ -133,6 +134,13 @@ async function graphql(
  * Pages newest-first and stops as soon as every requested branch has a match,
  * so the common case costs one request. Branches still unmatched when paging
  * ends are returned as explicit nulls, which is what lets them negative-cache.
+ *
+ * A chunk that fails ends the walk with whatever the earlier chunks resolved,
+ * so a refusal on the fourth of five requests no longer discards the first
+ * three. The half-paged chunk itself contributes nothing: filling its nulls
+ * would negative-cache branches whose MR is on a page we never read. Only a
+ * first chunk failing rethrows, which is what keeps "nothing resolved" from
+ * being cached as "no MR anywhere".
  */
 export async function fetchMrsForBranches(
   token: string,
@@ -145,25 +153,30 @@ export async function fetchMrsForBranches(
     const requested = new Set(chunk);
     const found = new Map<string, PrSummary>();
     let after: string | null = null;
-    for (let page = 0; page < MAX_PAGES; page += 1) {
-      const { query, variables } = buildMrBranchQuery(repo.path, chunk, after);
-      const parsed = parseMrPage(await graphql(repo, token, query, variables));
-      for (const [branch, best] of pickBestByBranch(parsed.nodes)) {
-        // Ignore anything outside the requested set: counting a stray node
-        // toward the early exit below would stop paging while a branch we did
-        // ask about is still unseen, and then negative-cache it.
-        if (!requested.has(branch)) continue;
-        const current = found.get(branch);
-        // Sorted newest-first, so the first sighting of a branch wins unless a
-        // later page turns up the live MR behind a newer terminal one.
-        if (current === undefined) found.set(branch, best.summary);
-        else if (current.state !== "open" && best.summary.state === "open") {
-          found.set(branch, best.summary);
+    try {
+      for (let page = 0; page < MAX_PAGES; page += 1) {
+        const { query, variables } = buildMrBranchQuery(repo.path, chunk, after);
+        const parsed = parseMrPage(await graphql(repo, token, query, variables));
+        for (const [branch, best] of pickBestByBranch(parsed.nodes)) {
+          // Ignore anything outside the requested set: counting a stray node
+          // toward the early exit below would stop paging while a branch we did
+          // ask about is still unseen, and then negative-cache it.
+          if (!requested.has(branch)) continue;
+          const current = found.get(branch);
+          // Sorted newest-first, so the first sighting of a branch wins unless a
+          // later page turns up the live MR behind a newer terminal one.
+          if (current === undefined) found.set(branch, best.summary);
+          else if (current.state !== "open" && best.summary.state === "open") {
+            found.set(branch, best.summary);
+          }
         }
+        if (found.size === requested.size || !parsed.hasNextPage) break;
+        after = parsed.endCursor;
+        if (after === null) break;
       }
-      if (found.size === requested.size || !parsed.hasNextPage) break;
-      after = parsed.endCursor;
-      if (after === null) break;
+    } catch (error) {
+      if (result.size === 0) throw error;
+      return result;
     }
     for (const [branch, summary] of withNullsForMissing(chunk, found)) {
       result.set(branch, summary);
@@ -178,17 +191,30 @@ export async function fetchMrsByNumbers(
   repo: ForgeRepo,
   numbers: number[]
 ): Promise<Map<number, PrSummary | null>> {
-  const found = new Map<number, PrSummary>();
+  const result = new Map<number, PrSummary | null>();
   for (let i = 0; i < numbers.length; i += BRANCH_BATCH) {
     const chunk = numbers.slice(i, i + BRANCH_BATCH);
     const { query, variables } = buildMrNumberQuery(repo.path, chunk);
-    const parsed = parseMrPage(await graphql(repo, token, query, variables));
+    let parsed: MrPage;
+    try {
+      parsed = parseMrPage(await graphql(repo, token, query, variables));
+    } catch (error) {
+      if (result.size === 0) throw error;
+      return result;
+    }
+    // Nulls are filled per chunk rather than once at the end: the query asks
+    // for this chunk's iids, so a later chunk's failure must not turn its
+    // unanswered numbers into "this MR is gone".
+    const found = new Map<number, PrSummary>();
     for (const node of parsed.nodes) {
       const summary = toSummary(node);
       if (summary.number > 0) found.set(summary.number, summary);
     }
+    for (const [number, summary] of withNullsForMissing(chunk, found)) {
+      result.set(number, summary);
+    }
   }
-  return withNullsForMissing(numbers, found);
+  return result;
 }
 
 /**

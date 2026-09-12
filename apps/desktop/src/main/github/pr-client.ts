@@ -237,7 +237,18 @@ async function runQuery(
   }
 }
 
-/** Fetch the most-recent PR for each branch in one repo (batched + backed off). */
+/**
+ * Fetch the most-recent PR for each branch in one repo (batched + backed off).
+ *
+ * A chunk that fails ends the walk with whatever the earlier chunks resolved,
+ * rather than discarding them: 250 branches refused on the fourth request
+ * would otherwise throw away 150 branches of answered data. Only a first chunk
+ * failing — nothing resolved at all — rethrows, because that is the case the
+ * caller must not read as "no PR anywhere". Stopping rather than skipping to
+ * the next chunk is deliberate: a revoked token or a complexity cap refuses
+ * every chunk alike, and continuing would spend the whole retry budget again
+ * per chunk for an answer that cannot change.
+ */
 export async function fetchPrsForRepo(
   token: string,
   repo: Pick<ForgeRepo, "host" | "port">,
@@ -249,7 +260,13 @@ export async function fetchPrsForRepo(
   for (let i = 0; i < branches.length; i += BATCH) {
     const chunk = branches.slice(i, i + BATCH);
     const { query, variables } = buildPrQuery(owner, name, chunk);
-    const data = await runQuery(token, repo, query, variables);
+    let data: unknown;
+    try {
+      data = await runQuery(token, repo, query, variables);
+    } catch (error) {
+      if (result.size === 0) throw error;
+      return result;
+    }
     for (const [branch, pr] of parsePrResponse(chunk, data)) {
       result.set(branch, pr);
     }
@@ -269,7 +286,15 @@ export async function fetchPrsForCommits(
   for (let i = 0; i < commitHashes.length; i += BATCH) {
     const chunk = commitHashes.slice(i, i + BATCH);
     const { query, variables } = buildCommitPrQuery(owner, name, chunk);
-    const data = await runQuery(token, repo, query, variables);
+    let data: unknown;
+    try {
+      data = await runQuery(token, repo, query, variables);
+    } catch (error) {
+      // Same salvage as above; an omitted hash is simply not cached, which
+      // `staleCommitHashes` already treats as "never looked up".
+      if (result.size === 0) throw error;
+      return result;
+    }
     for (const [hash, pr] of parseCommitPrResponse(chunk, data)) {
       result.set(hash, pr);
     }
@@ -289,7 +314,13 @@ export async function fetchPrsByNumbers(
   for (let i = 0; i < numbers.length; i += BATCH) {
     const chunk = numbers.slice(i, i + BATCH);
     const { query, variables } = buildPrNumberQuery(owner, name, chunk);
-    const data = await runQuery(token, repo, query, variables);
+    let data: unknown;
+    try {
+      data = await runQuery(token, repo, query, variables);
+    } catch (error) {
+      if (result.size === 0) throw error;
+      return result;
+    }
     for (const [number, pr] of parsePrNumberResponse(chunk, data)) {
       result.set(number, pr);
     }

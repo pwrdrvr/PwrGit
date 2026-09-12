@@ -405,6 +405,260 @@ describe("PrService", () => {
     ]);
     expect(service.cachedBranchPr("repo", "feature/pr-state")?.number).toBe(43);
   });
+
+  /**
+   * A refused query throws rather than answering "no PR" on every branch (see
+   * "A refusal is not an answer" in ../forge/AGENTS.md). Nothing is written, so
+   * `isFresh` cannot throttle the retry — that is what these four pin.
+   */
+  describe("when the forge refuses", () => {
+    /** Rejects until `answer` is set, recording every branch list it was sent. */
+    function refusingService(): {
+      service: PrService;
+      sent: string[][];
+      setAnswer: (answer: Map<string, PrSummary | null>) => void;
+    } {
+      const sent: string[][] = [];
+      let answer: Map<string, PrSummary | null> | undefined;
+      const service = new PrService(db, git, {
+        resolveForge: fakeForge({
+          fetchPrsForBranches: async (_token, _repo, branches) => {
+            sent.push(branches);
+            if (answer === undefined) throw new Error("422 query is not valid");
+            return answer;
+          }
+        }),
+        now: () => now
+      });
+      return {
+        service,
+        sent,
+        setAnswer: (next) => {
+          answer = next;
+        }
+      };
+    }
+
+    it("writes no branch_pr row, so nothing is cached as 'no PR'", async () => {
+      db.prepare(
+        `INSERT INTO branch_pr (repo_id, branch, number, url, title, state, is_draft, fetched_at)
+         VALUES ('repo', 'feature/pr-state', 7, 'u', 't', 'open', 0, '1970-01-01T00:00:00.000Z')`
+      ).run();
+      const { service } = refusingService();
+
+      await expect(service.refreshRepo("repo")).resolves.toEqual(new Map());
+
+      // The stale row survives untouched — including its fetched_at, which a
+      // salvage path that wrote rows would have stamped forward.
+      expect(
+        db
+          .prepare(
+            "SELECT branch, number, fetched_at FROM branch_pr WHERE repo_id = 'repo'"
+          )
+          .all()
+      ).toEqual([
+        {
+          branch: "feature/pr-state",
+          number: 7,
+          fetched_at: "1970-01-01T00:00:00.000Z"
+        }
+      ]);
+    });
+
+    it("throttles the retry for the TTL a successful refresh would have earned", async () => {
+      const { service, sent } = refusingService();
+
+      await service.refreshRepo("repo");
+      expect(sent).toHaveLength(1);
+
+      // A whole-repo sweep earns the 10-minute TTL, so every repo-row expand
+      // inside it must stay off the network rather than re-sending the query.
+      now += 9 * 60_000;
+      await service.refreshRepo("repo");
+      expect(sent).toHaveLength(1);
+
+      now += 2 * 60_000;
+      await service.refreshRepo("repo");
+      expect(sent).toHaveLength(2);
+    });
+
+    it("still lets a hover retry on its own ten-second TTL, and force bypass", async () => {
+      const { service, sent } = refusingService();
+
+      const hover = async (): Promise<void> => {
+        await service.refreshRepo("repo", {
+          branches: ["feature/pr-state"],
+          trigger: "user"
+        });
+      };
+
+      await service.refreshRepo("repo");
+      await hover();
+      expect(sent).toHaveLength(1);
+
+      // Deep inside the sweep's ten-minute window, but past the hover's own
+      // ten seconds — the mark is one timestamp read against each caller's TTL,
+      // not a single window that freezes the repo for whoever failed first.
+      now += 10_001;
+      await hover();
+      expect(sent).toHaveLength(2);
+
+      // An explicit force is never held back, exactly as it is never held back
+      // by `isFresh`.
+      await service.refreshRepo("repo", { force: true });
+      expect(sent).toHaveLength(3);
+    });
+
+    it("does not let each queued caller start an attempt of its own", async () => {
+      const { service, sent } = refusingService();
+
+      // Three overlapping triggers — a repo-row expand, a worktree monitor and
+      // a poll. The two that join the in-flight refresh recurse when it settles
+      // and would otherwise each re-enter the network path.
+      await Promise.all([
+        service.refreshRepo("repo"),
+        service.refreshRepo("repo"),
+        service.refreshRepo("repo")
+      ]);
+
+      expect(sent).toHaveLength(1);
+    });
+
+    it("recovers on the next trigger once the forge answers again", async () => {
+      const { service, sent, setAnswer } = refusingService();
+
+      await service.refreshRepo("repo");
+      now += 11 * 60_000;
+      setAnswer(new Map([["feature/pr-state", pr()]]));
+      const changed = await service.refreshRepo("repo");
+
+      expect(sent).toHaveLength(2);
+      expect(changed.get("feature/pr-state")).toMatchObject({ number: 42 });
+
+      // And the mark is cleared, so the next refresh is throttled by the row's
+      // own fetched_at rather than by a failure that is no longer true.
+      now += 11 * 60_000;
+      await service.refreshRepo("repo");
+      expect(sent).toHaveLength(3);
+    });
+
+    it("keeps commit associations and throttles that retry separately", async () => {
+      const sha = "a".repeat(40);
+      const commitSent: string[][] = [];
+      const service = new PrService(db, git, {
+        resolveForge: fakeForge({
+          fetchPrsForCommits: async (_token, _repo, hashes) => {
+            commitSent.push(hashes);
+            throw new Error("422 query is not valid");
+          }
+        }),
+        now: () => now
+      });
+
+      await expect(service.refreshCommits("repo", [sha])).resolves.toEqual(
+        new Map()
+      );
+      expect(
+        db.prepare("SELECT COUNT(*) AS n FROM commit_pr").get()
+      ).toEqual({ n: 0 });
+
+      // A scheduled poll inside the 60s window does not re-dispatch.
+      now += 30_000;
+      await service.refreshCommits("repo", [sha], { trigger: "scheduled" });
+      expect(commitSent).toHaveLength(1);
+
+      now += 31_000;
+      await service.refreshCommits("repo", [sha], { trigger: "scheduled" });
+      expect(commitSent).toHaveLength(2);
+    });
+  });
+
+  /**
+   * A batched client answers the chunks it reached and omits the rest rather
+   * than discarding everything (see `fetchPrsForRepo`). The service must keep
+   * what arrived and still treat the gap as an unfinished attempt.
+   */
+  describe("when only some batches resolved", () => {
+    beforeEach(() => {
+      db.prepare(
+        "INSERT INTO worktrees (id, repo_id, branch, path) VALUES ('wt-other', 'repo', 'feature/other', '/repo/other')"
+      ).run();
+    });
+
+    it("writes the branches that resolved and leaves the rest uncached", async () => {
+      const sent: string[][] = [];
+      const service = new PrService(db, git, {
+        resolveForge: fakeForge({
+          fetchPrsForBranches: async (_token, _repo, branches) => {
+            sent.push(branches);
+            return new Map([["feature/pr-state", pr()]]); // "feature/other" never reached
+          }
+        }),
+        now: () => now
+      });
+
+      const changed = await service.refreshRepo("repo");
+
+      expect(sent).toEqual([["feature/pr-state", "feature/other"]]);
+      expect(changed.get("feature/pr-state")).toMatchObject({ number: 42 });
+      expect(service.cachedBranchPr("repo", "feature/pr-state")).toMatchObject({
+        number: 42
+      });
+      // Absent, not null: an omitted key has never been looked up, and caching
+      // it as null is exactly the negative-cache this must not produce.
+      expect(service.cachedBranchPr("repo", "feature/other")).toBeUndefined();
+    });
+
+    it("throttles the next attempt, because one gap leaves the repo stale", async () => {
+      const sent: string[][] = [];
+      const service = new PrService(db, git, {
+        resolveForge: fakeForge({
+          fetchPrsForBranches: async (_token, _repo, branches) => {
+            sent.push(branches);
+            return new Map([["feature/pr-state", pr()]]);
+          }
+        }),
+        now: () => now
+      });
+
+      await service.refreshRepo("repo");
+      // `isFresh` is all-or-nothing, so "feature/other" alone keeps the repo
+      // stale and every expand would re-send both batches without the mark.
+      now += 60_000;
+      await service.refreshRepo("repo");
+      expect(sent).toHaveLength(1);
+
+      now += 10 * 60_000;
+      await service.refreshRepo("repo");
+      expect(sent).toHaveLength(2);
+    });
+
+    it("keeps the commit associations that resolved and refetches only the gap", async () => {
+      const hashes = ["a".repeat(40), "b".repeat(40)];
+      const commitSent: string[][] = [];
+      const service = new PrService(db, git, {
+        resolveForge: fakeForge({
+          fetchPrsForCommits: async (_token, _repo, requested) => {
+            commitSent.push(requested);
+            return new Map([[hashes[0]!, pr({ number: 4 })]]);
+          }
+        }),
+        now: () => now
+      });
+
+      await service.refreshCommits("repo", hashes);
+      expect(
+        service.cachedCommitPrs("repo", hashes).get(hashes[0]!)
+      ).toMatchObject({ number: 4 });
+
+      // Commit freshness is per hash, so the answered one is now fresh and the
+      // gap shrinks the next request by itself — real forward progress, and
+      // why a partial commit batch needs no repo-wide throttle.
+      now += 30_000;
+      await service.refreshCommits("repo", hashes, { trigger: "scheduled" });
+      expect(commitSent).toEqual([hashes, [hashes[1]!]]);
+    });
+  });
 });
 
 describe("PrService across forges", () => {

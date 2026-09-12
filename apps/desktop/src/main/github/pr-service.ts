@@ -85,6 +85,20 @@ export class PrService {
     string,
     Promise<PrStatusDeltas>
   >();
+  /**
+   * When a repo's last refresh could not finish, per cache. A refusal writes no
+   * row — see "A refusal is not an answer" in ../forge/AGENTS.md — so the
+   * `fetched_at` the TTL checks reads exactly as it did before the attempt, and
+   * nothing throttles the retry: every repo-row expand, hover, worktree monitor
+   * replacement and 60s poll re-enters the network path, and the queued callers
+   * `refreshRepoAtGeneration` wakes each start an attempt of their own.
+   *
+   * Remembering the *attempt* in memory is the fix, rather than writing a row
+   * that would claim the branch has no change request. Same shape as the
+   * signed-out backoff in ../forge/identity-service.ts, and same reason: never
+   * negative-cache a failure, but do remember that you tried.
+   */
+  private readonly lastFailedAt = new Map<string, number>();
 
   constructor(
     private readonly db: DB,
@@ -103,6 +117,9 @@ export class PrService {
    */
   invalidatePendingWrites(): void {
     this.writeGeneration += 1;
+    // A recreated profile reusing these ids should get a fresh attempt, not
+    // the deleted one's backoff.
+    this.lastFailedAt.clear();
   }
 
   /** Exact commit hashes whose PR association/status changed. */
@@ -297,6 +314,17 @@ export class PrService {
       ? commitHashes
       : this.staleCommitHashes(repoId, commitHashes, opts.trigger);
     if (stale.length === 0) return new Map();
+    // Same throttle as the branch path, against the TTL this trigger uses.
+    // Only a *total* failure is remembered here: commit freshness is per hash,
+    // so a partly answered batch writes rows and shrinks the next `stale` set
+    // by itself — real forward progress the branch path cannot make.
+    const failureKey = `commits:${repoId}`;
+    const ttlMs = opts.trigger === "user"
+      ? USER_BRANCH_REFRESH_TTL_MS
+      : SCHEDULED_BRANCH_REFRESH_TTL_MS;
+    if (opts.force !== true && this.failedWithin(failureKey, ttlMs)) {
+      return new Map();
+    }
 
     const forge = await this.originForge(repo.path);
     if (forge === null || !this.isCurrent(generation)) return new Map();
@@ -309,8 +337,10 @@ export class PrService {
         forge.repo,
         stale
       );
+      this.lastFailedAt.delete(failureKey);
       return this.upsertCommits(repoId, prs, generation);
     } catch {
+      this.lastFailedAt.set(failureKey, this.now());
       return new Map();
     }
   }
@@ -410,11 +440,15 @@ export class PrService {
       .prepare("SELECT path FROM repos WHERE id = ?")
       .get(repoId) as { path: string } | undefined;
     if (repo === undefined) return empty;
-    if (
-      opts.force !== true &&
-      this.isFresh(repoId, branches, this.refreshTtlMs(repoId, branches, opts))
-    ) {
-      return empty;
+    const ttlMs = this.refreshTtlMs(repoId, branches, opts);
+    const failureKey = `branches:${repoId}`;
+    if (opts.force !== true) {
+      if (this.isFresh(repoId, branches, ttlMs)) return empty;
+      // Throttled by the very TTL a successful refresh would have earned, so a
+      // permanently refused query costs one attempt per TTL instead of one per
+      // UI interaction. Each trigger brings its own TTL, so a hover still gets
+      // its ten-second retry after a whole-repo sweep failed.
+      if (this.failedWithin(failureKey, ttlMs)) return empty;
     }
 
     const forge = await this.originForge(repo.path);
@@ -430,9 +464,28 @@ export class PrService {
         branches
       );
     } catch {
-      return empty; // best-effort; keep whatever's cached
+      // Best-effort; keep whatever's cached — but remember the attempt, or
+      // nothing throttles the next one.
+      this.lastFailedAt.set(failureKey, this.now());
+      return empty;
+    }
+    // A batched client answers what it could and omits the chunks it never
+    // reached, so a partial answer counts as a failed attempt too: `isFresh`
+    // is all-or-nothing, so one omitted branch leaves the whole repo stale and
+    // the next trigger would re-send every batch. The batches that *did*
+    // resolve are still written below — that is the forward progress.
+    if (branches.every((branch) => prs.has(branch))) {
+      this.lastFailedAt.delete(failureKey);
+    } else {
+      this.lastFailedAt.set(failureKey, this.now());
     }
     return this.upsert(repoId, prs, generation);
+  }
+
+  /** Did the last attempt for this cache fail inside the window it earned? */
+  private failedWithin(key: string, ttlMs: number): boolean {
+    const failedAt = this.lastFailedAt.get(key);
+    return failedAt !== undefined && failedAt > this.now() - ttlMs;
   }
 
   private refreshTtlMs(

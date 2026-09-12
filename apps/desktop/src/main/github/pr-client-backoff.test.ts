@@ -235,6 +235,37 @@ describe("GitHub backoff", () => {
     expect((await settled as Error).name).toBe("ForgeResponseError");
   });
 
+  it("keeps the batches that resolved when a later one is refused", async () => {
+    // 60 branches is two requests. The second failing used to discard the
+    // first fifty, and because nothing was written `fetched_at` never moved —
+    // the next refresh re-sent both batches, forever.
+    const branches = Array.from({ length: 60 }, (_, i) => `b${i}`);
+    client
+      .mockResolvedValueOnce({ repository: { a0: { nodes: [prNode(7)] } } })
+      .mockRejectedValueOnce(httpError(404));
+
+    const result = await fetchPrsForRepo("t", REPO, "o", "r", branches);
+
+    expect(result.size).toBe(50);
+    expect(result.get("b0")).toMatchObject({ number: 7 });
+    // Omitted, not null — the service refetches an absent key and would
+    // negative-cache a null one.
+    expect(result.has("b50")).toBe(false);
+    // Stopping rather than skipping to a third batch: a refusal answers every
+    // batch alike, and continuing would spend the retry budget again per batch.
+    expect(client).toHaveBeenCalledTimes(2);
+  });
+
+  it("rethrows when the first batch fails, so nothing resolved is not 'no PR'", async () => {
+    const branches = Array.from({ length: 60 }, (_, i) => `b${i}`);
+    client.mockRejectedValue(httpError(404));
+
+    await expect(
+      fetchPrsForRepo("t", REPO, "o", "r", branches)
+    ).rejects.toThrow();
+    expect(client).toHaveBeenCalledTimes(1);
+  });
+
   it("salvages a GraphQL-level error's partial data instead of retrying", async () => {
     // A missing repo or one bad alias answers 200 with `errors` alongside
     // whatever resolved. That is not backoff's business, and retrying it would

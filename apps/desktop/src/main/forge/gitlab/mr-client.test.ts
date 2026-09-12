@@ -143,9 +143,72 @@ describe("fetchMrsForBranches", () => {
     expect(fetchMock).toHaveBeenCalledTimes(5);
     expect(result.get("never")).toBeNull();
   });
+
+  it("keeps the batches that resolved when a later one is refused", async () => {
+    // 60 branches is two batches. Losing the first fifty to the second's
+    // refusal made a refresh under sustained pressure pure cost: nothing
+    // written, so `PrService` re-sent both batches on the next trigger.
+    const branches = Array.from({ length: 60 }, (_, i) => `b${i}`);
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse(graphqlPage([mr({ iid: "1", sourceBranch: "b0" })], false))
+      )
+      .mockResolvedValueOnce(jsonResponse({ message: "not found" }, 404));
+
+    const result = await fetchMrsForBranches("t", REPO, branches);
+
+    expect(result.size).toBe(50);
+    expect(result.get("b0")).toMatchObject({ number: 1 });
+    expect(result.has("b50")).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("contributes nothing for a batch that failed mid-paging", async () => {
+    // The half-paged batch must not reach `withNullsForMissing`: its unmatched
+    // branches may have an MR on a page we never read, and a null there is
+    // negative-cached as "no MR" for the whole refresh TTL.
+    const branches = Array.from({ length: 60 }, (_, i) => `b${i}`);
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse(graphqlPage([mr({ iid: "1", sourceBranch: "b0" })], false))
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(graphqlPage([mr({ iid: "2", sourceBranch: "b50" })], true, "C1"))
+      )
+      .mockResolvedValueOnce(jsonResponse({ message: "not found" }, 404));
+
+    const result = await fetchMrsForBranches("t", REPO, branches);
+
+    expect(result.size).toBe(50);
+    expect(result.has("b50")).toBe(false);
+    expect(result.has("b51")).toBe(false);
+  });
+
+  it("rethrows when the first batch fails, so nothing resolved is not 'no MR'", async () => {
+    const branches = Array.from({ length: 60 }, (_, i) => `b${i}`);
+    fetchMock.mockResolvedValue(jsonResponse({ message: "not found" }, 404));
+
+    await expect(fetchMrsForBranches("t", REPO, branches)).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("fetchMrsByNumbers", () => {
+  it("keeps the iids a refused later batch never reached out of the result", async () => {
+    const numbers = Array.from({ length: 60 }, (_, i) => i + 1);
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(graphqlPage([mr({ iid: "1" })])))
+      .mockResolvedValueOnce(jsonResponse({ message: "not found" }, 404));
+
+    const result = await fetchMrsByNumbers("t", REPO, numbers);
+
+    // Nulls are filled per batch, so iid 51 is absent rather than reported as
+    // a merge request that is gone.
+    expect(result.get(1)).toMatchObject({ number: 1 });
+    expect(result.get(2)).toBeNull();
+    expect(result.has(51)).toBe(false);
+  });
+
   it("returns null for an iid GitLab did not return", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse(graphqlPage([mr({ iid: "4", state: "merged" })]))

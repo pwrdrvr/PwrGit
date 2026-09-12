@@ -54,6 +54,11 @@ claims `origin`'s host, the CLI isn't logged in, or the network fails.
   `force`) emits a targeted `pr:changed { repoId, prs }` delta the renderer
   patches onto the tree in place — no full `repo:list` reload. `listRepos` also
   LEFT JOINs `branch_pr` onto `Worktree.pr` for the initial load.
+  - **A refresh that could not finish is throttled by `lastFailedAt`, not by
+    the cache.** It writes no row, so `fetched_at` — and therefore `isFresh` —
+    cannot hold the retry back. See "Never negative-cache a failure, but do
+    remember that you tried" in `../forge/AGENTS.md` for the window it uses and
+    why a partial branch answer counts as one.
 - **Commit PR monitoring**: exact visible SHAs are association-cached in
   `commit_pr`; never enroll an entire history window. Renderers debounce one
   atomic visible-set replacement. Main keeps unknown visible associations in a

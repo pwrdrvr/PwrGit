@@ -66,6 +66,33 @@ speaks `PrSummary` and never learns which forge answered.
   thrown refresh as best-effort and keeps what it had. This is the other half of
   "return an entry for every key requested" above: the rule applies to keys the
   forge actually answered about.
+- **A batch that fails keeps the batches before it.** Every client walks its
+  keys in chunks (~50) and accumulates as it goes, so 250 branches refused on
+  the fourth request must still return the 150 that resolved; only a *first*
+  chunk failing rethrows, because that is the "nothing resolved" the rule above
+  is about. A GitLab chunk abandoned mid-paging contributes nothing at all —
+  filling its nulls would negative-cache branches whose MR is on a page never
+  read. The walk **stops** at the failing chunk rather than skipping to the
+  next: a revoked token or a complexity cap refuses every chunk alike, and
+  continuing would spend the whole retry budget again per chunk.
+- **Never negative-cache a failure, but do remember that you tried.** A refusal
+  writes no row, so the `fetched_at` every TTL reads is unchanged and nothing
+  throttles the retry — without a separate mark, a permanently refused query
+  (a GHES validation error, a complexity cap, a revoked token) is re-sent on
+  every repo-row expand, hover, worktree-monitor replacement and 60s poll, and
+  the callers queued behind an in-flight refresh each start an attempt of their
+  own when it settles. `PrService.lastFailedAt` is the in-memory per-repo,
+  per-cache answer, the same shape as the signed-out backoff below. It is read
+  against **the TTL the calling trigger would have earned** — ten minutes for a
+  whole-repo sweep, ten seconds for a hover — so a failure costs one attempt
+  per TTL rather than one per interaction, without one caller's window
+  freezing another's. `force` bypasses it exactly as it bypasses `isFresh`.
+  - **A partial branch answer counts as a failed attempt too.** `isFresh` is
+    all-or-nothing, so one omitted branch leaves the whole repo stale and the
+    next trigger re-sends every chunk. The chunks that did resolve are still
+    written — that is the forward progress. Commits are the opposite: freshness
+    is per hash, so a partial batch shrinks the next `stale` set by itself and
+    only a total failure is marked.
 
 ## Adding a forge: one seam, and the drift around it
 
