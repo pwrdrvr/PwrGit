@@ -9299,6 +9299,14 @@ body.is-col-resizing {
   color: var(--text-muted);
 }
 
+/* Peer actions inside a field's control column, which is otherwise a vertical
+   stack — two buttons that offer the same kind of thing belong side by side. */
+.settings-field__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* Small inline action inside a settings field's help text. `.settings-button`
    is NOT redefined here — it already exists below, with its --primary and
    --danger variants; a second block at equal specificity would lose every
@@ -10106,6 +10114,15 @@ button.agent-auth-node {
 }
 .delete-profile__confirm {
   margin: 16px 0 0;
+}
+
+/* Add-a-forge-host dialog: one labelled field, so `.modal__input`'s own
+   bottom margin would stack under `.field`'s and push the hint away. */
+.add-forge-host__field {
+  margin: 14px 0 0;
+}
+.add-forge-host__field .modal__input {
+  margin-bottom: 0;
 }
 
 /* ---- Refresh and fetch affordances: one busy language ----
