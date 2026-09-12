@@ -119,6 +119,18 @@ const MAX_RETRIES = 4;
 
 
 /**
+ * Is this GraphQL-level error GitHub saying "rate limited"?
+ *
+ * The REST API answers a spent budget with 403/429. GraphQL answers it with
+ * **HTTP 200** and an `errors` entry, so `@octokit/graphql` raises it as a
+ * `GraphqlResponseError` — the same class a missing repo arrives as, and the
+ * one error shape the backoff would otherwise never see.
+ */
+function isGraphqlRateLimit(error: GraphqlResponseError<unknown>): boolean {
+  return error.errors?.some((entry) => entry.type === "RATE_LIMITED") === true;
+}
+
+/**
  * ghcrawl-style backoff, decided in `../forge/retry` so GitLab shares it.
  *
  * Octokit hangs the response — and so the rate-limit headers — off the error,
@@ -133,6 +145,19 @@ const MAX_RETRIES = 4;
  * raised inside `runQuery`'s catch.
  */
 function retryDelayMs(error: unknown, attempt: number): number | null {
+  // A GraphQL rate limit came back 200, so it has no status of its own, and its
+  // headers hang directly off the error — `response` there is the GraphQL body,
+  // not the HTTP one. Reading it as the 429 it means puts the window it names
+  // under the same policy as a REST 429 rather than beside it.
+  if (error instanceof GraphqlResponseError) {
+    const { headers } = error as GraphqlResponseError<unknown>;
+    return forgeRetryDelayMs({
+      kind: "github",
+      status: 429,
+      header: (name) => headers?.[name],
+      attempt
+    });
+  }
   const { status, response } = (error ?? {}) as {
     status?: unknown;
     response?: { headers?: Record<string, string | number | undefined> };
@@ -162,10 +187,22 @@ async function runQuery(
     try {
       return await client(query, variables);
     } catch (error) {
-      // GraphQL-level errors (missing repo, one bad alias) won't fix on retry —
-      // salvage whatever partial data came back.
       if (error instanceof GraphqlResponseError) {
-        return (error as GraphqlResponseError<unknown>).data ?? null;
+        const failed = error as GraphqlResponseError<unknown>;
+        // A rate limit is the one GraphQL-level error that *does* fix on retry,
+        // and it names the window to wait out in its own headers, so it falls
+        // through to the backoff below.
+        if (!isGraphqlRateLimit(failed)) {
+          const partial = failed.data ?? null;
+          // A missing repo or one bad alias still resolves every other alias;
+          // salvage that, since asking again returns the same answer.
+          if (partial !== null) return partial;
+          // Nothing resolved at all — a SAML block, a query GitHub refused
+          // outright. Returning null here would map *every* branch in the batch
+          // to "no PR" and negative-cache it for the whole refresh TTL, where
+          // throwing lets `PrService` keep what it already had.
+          throw error;
+        }
       }
       attempt += 1;
       const wait = retryDelayMs(error, attempt);

@@ -110,10 +110,18 @@ async function graphql(
     method: "POST",
     body: JSON.stringify({ query, variables })
   });
-  // GraphQL-level errors (a project we cannot see, one bad argument) will not
-  // fix on retry — salvage whatever partial data came back, as the GitHub
-  // client does with GraphqlResponseError.
-  return (body as { data?: unknown } | null)?.data ?? null;
+  // GraphQL-level errors will not fix on retry — salvage whatever partial data
+  // came back, as the GitHub client does with a `GraphqlResponseError`. A
+  // project we cannot see is answered as a null `project` *inside* `data`, so
+  // it still lands here and still negative-caches, which is intended.
+  const data = (body as { data?: unknown } | null)?.data ?? null;
+  // `data` itself being absent is a different thing: nothing resolved, and
+  // reporting that as an empty page would negative-cache every branch in the
+  // batch as "no MR". `PrService` keeps what it had cached when this throws.
+  if (data === null) {
+    throw new Error("GitLab returned no data for this query.");
+  }
+  return data;
 }
 
 /**

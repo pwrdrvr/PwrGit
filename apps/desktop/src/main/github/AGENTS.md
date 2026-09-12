@@ -38,9 +38,20 @@ claims `origin`'s host, the CLI isn't logged in, or the network fails.
   (ghcrawl's semantics, without the `bottleneck`-based octokit plugins that a
   git-hosted transitive dep made uninstallable here). The decision itself is
   `../forge/retry.ts`, shared with GitLab; this file keeps only the adapter
-  that reads status and headers off an Octokit error. Salvaging partial data
-  from a `GraphqlResponseError` is GraphQL-level error handling rather than
-  backoff, and stays in `runQuery`.
+  that reads status and headers off GitHub's two error shapes.
+  - **The second shape is the trap.** GraphQL answers a spent rate limit with
+    **HTTP 200** and an `errors` entry, which `@octokit/graphql` raises as a
+    `GraphqlResponseError` — the same class a missing repo arrives as. It has
+    no status, and its headers hang off the error itself (`response` there is
+    the GraphQL body), so the adapter reads it as the 429 it means.
+  - **Salvage only what actually resolved.** A missing repo or one bad alias
+    still answers every other alias, and that partial data is returned rather
+    than retried. `data: null` is not partial data — it is a rate limit, a SAML
+    block, a refused query — and returning it would map *every* branch in the
+    batch to "no PR" and negative-cache that for the whole refresh TTL.
+    `runQuery` throws instead, which is what makes `PrService` keep what it had
+    (`pr-service.ts` treats a failed refresh as best-effort). The GitLab client
+    draws the same line in its own `graphql()`.
 - **Cache + bus**: `PrService` upserts `branch_pr` (repo+branch, negative-cached)
   and returns the *changed* branches; `pr:refresh` (TTL-throttled 10 min unless
   `force`) emits a targeted `pr:changed { repoId, prs }` delta the renderer

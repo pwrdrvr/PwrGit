@@ -233,6 +233,19 @@ describe("backoff", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("fails a query that resolved nothing, rather than caching it as no MR", async () => {
+    // A 200 whose body carries only `errors` — a rejected argument, an expired
+    // token. Reading that as an empty page would negative-cache every branch
+    // in the batch as "no MR"; throwing lets `PrService` keep what it had.
+    fetchMock.mockResolvedValue(
+      jsonResponse({ errors: [{ message: "invalid value for iids" }] })
+    );
+
+    await expect(fetchMrsForBranches("t", REPO, ["a"])).rejects.toThrow();
+    // The body came back 200, so this is not the retry path.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("waits the Retry-After off the response's own headers", async () => {
     vi.useFakeTimers();
     fetchMock
