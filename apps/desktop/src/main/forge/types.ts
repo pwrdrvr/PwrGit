@@ -39,8 +39,15 @@ export function forgeOrigin(repo: Pick<ForgeRepo, "host" | "port">): string {
  * Each method is best-effort from the service's point of view: it may throw,
  * and the caller keeps whatever it had cached. Returning an explicit `null` for
  * a key means "this forge has no change request for it" and is what drives
- * negative caching — omitting the key instead would make the service re-fetch
- * it forever, so implementations must return an entry for every key requested.
+ * negative caching, so return an entry for every key the forge actually
+ * answered about.
+ *
+ * Omit a key only where the lookup *failed* — an unreachable commit, or a
+ * batch the walk never reached. The service reads an omitted key as "never
+ * looked up" and remembers the attempt in memory instead, which is what keeps
+ * a blip from being cached as "no change request". Never fill a null for a key
+ * you did not get an answer for. See ./AGENTS.md, "Return an entry for every
+ * key requested" and the two bullets that qualify it.
  */
 export type ForgeProvider = {
   kind: ForgeKind;
