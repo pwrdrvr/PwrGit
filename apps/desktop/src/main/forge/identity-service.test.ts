@@ -383,33 +383,37 @@ describe("IdentityService", () => {
     expect(indexer.listRepos(profileId)[0]?.identity).toBeUndefined();
   });
 
-  it("stops re-reading the remote for a host that is staying off", async () => {
-    // The gate writes no row, so without a backoff every pass would re-run
-    // `git remote get-url origin` forever and fill REFRESH_BATCH with repos
-    // that can never resolve — starving repos on hosts that ARE on.
-    let remoteReads = 0;
-    const git: GitExec = async (args, cwd, options) => {
-      if (args[0] === "remote") remoteReads += 1;
-      return systemGit(args, cwd, options);
-    };
-    const { db, indexer, profileId } = await fixture(okGh({}));
-    const registry = new ForgeRepoRegistry();
-    registry.register(new GitHubRepoProvider(okGh({})));
-    const service = new IdentityService(db, git, registry, () => ({
-      enabled: false,
-      source: "config"
-    }));
-    const repos = indexer.listRepos(profileId);
+  it.each(["config", "auto"] as const)(
+    "stops re-reading the remote for a host that is off by %s",
+    async (source) => {
+      // NEITHER "off" arm writes a row, so without a backoff every pass would
+      // re-run `git remote get-url origin` forever and fill REFRESH_BATCH with
+      // repos that can never resolve — starving repos on hosts that ARE on.
+      // The two windows differ; that they exist at all does not.
+      let remoteReads = 0;
+      const git: GitExec = async (args, cwd, options) => {
+        if (args[0] === "remote") remoteReads += 1;
+        return systemGit(args, cwd, options);
+      };
+      const { db, indexer, profileId } = await fixture(okGh({}));
+      const registry = new ForgeRepoRegistry();
+      registry.register(new GitHubRepoProvider(okGh({})));
+      const service = new IdentityService(db, git, registry, () => ({
+        enabled: false,
+        source
+      }));
+      const repos = indexer.listRepos(profileId);
 
-    for (let pass = 0; pass < 5; pass += 1) await service.refresh(repos);
+      for (let pass = 0; pass < 5; pass += 1) await service.refresh(repos);
 
-    expect(remoteReads).toBe(1);
-  });
+      expect(remoteReads).toBe(1);
+    }
+  );
 
   it("keeps the identity it already stored when the host is switched off", async () => {
     const gh = vi.fn(okGh({ full_name: "huntharo/react", visibility: "private" }));
     let gate: ForgeHostGate = () => ({ enabled: true, source: "auto" });
-    const { identities, indexer, profileId } = await fixture(gh, {
+    const { db, identities, indexer, profileId } = await fixture(gh, {
       gate: (hostname) => gate(hostname)
     });
     const repos = indexer.listRepos(profileId);
@@ -430,11 +434,18 @@ describe("IdentityService", () => {
     });
     expect(indexer.listRepos(profileId)[0]?.identity?.visibility).toBe("private");
 
-    // A stored row names its host, so the next background pass answers from it
-    // without spawning git at all.
+    // Age the row past its TTL and drop the stamp, so everything that could
+    // suppress this lookup is gone except the gate itself. Without both, the
+    // assertion below passes on the backoff set one line earlier and keeps
+    // passing with the gate deleted.
+    db.prepare(
+      "UPDATE repo_identity SET fetched_at = datetime('now', '-7 hours')"
+    ).run();
+    identities.clearGateBackoff();
     gh.mockClear();
     expect(await identities.refresh(repos)).toEqual([]);
     expect(calledApi(gh)).toBe(false);
+    expect(indexer.listRepos(profileId)[0]?.identity?.visibility).toBe("private");
 
     // Back on, and the very next pass reads it again — the gate is consulted
     // per lookup rather than captured at construction.
@@ -446,10 +457,12 @@ describe("IdentityService", () => {
     expect(on[0]?.identity.visibility).toBe("public");
   });
 
-  it("does not back off a host that is merely unrecognized yet", async () => {
+  it("re-asks an unrecognized host the moment enumeration lands", async () => {
     // `auto` means enumeration has not landed — two subprocesses that finish
-    // after the first refresh. Caching that as "off" would leave a
-    // self-managed host without marks for the length of the backoff.
+    // after the first refresh. It still backs off, because nothing on this
+    // path writes a row, but briefly, and `clearGateBackoff` releases it at
+    // once. Caching it for the identity TTL like a decided "off" would leave a
+    // self-managed host unmarked for hours over a boot race.
     const gh = vi.fn(okGh({ full_name: "huntharo/react", visibility: "public" }));
     let known = false;
     const { identities, indexer, profileId } = await fixture(gh, {
@@ -457,13 +470,49 @@ describe("IdentityService", () => {
     });
     const repos = indexer.listRepos(profileId);
 
+    // Not `host_disabled`: nobody decided anything, so this is "could not
+    // ask", and the refresh button must not name a switch the user never set.
     expect((await identities.refreshWithOutcomes(repos)).outcomes[0]?.status)
       .toBe("unavailable");
 
     known = true;
+    identities.clearGateBackoff();
     expect((await identities.refresh(repos))[0]?.identity.visibility).toBe(
       "public"
     );
+  });
+
+  it("re-reads a repository whose origin moved off the switched-off host", async () => {
+    // The stored row names the last host that ANSWERED, which is not where
+    // `origin` points any more. Short-circuiting the due filter on it — ahead
+    // of the TTL — froze such a repo forever: every background pass skipped
+    // it, and `clearGateBackoff` clears a map, not a row. Only a forced glyph
+    // click recovered, and the glyph is what was rendering the stale mark.
+    const gh = vi.fn(okGh({ full_name: "huntharo/react", visibility: "public" }));
+    let gate: ForgeHostGate = () => ({ enabled: true, source: "auto" });
+    const { db, glab, identities, indexer, profileId } = await fixture(gh, {
+      gate: (hostname) => gate(hostname)
+    });
+    const repos = indexer.listRepos(profileId);
+    await identities.refresh(repos);
+    expect(indexer.listRepos(profileId)[0]?.identity?.hostname).toBe("github.com");
+
+    db.prepare(
+      "UPDATE repo_identity SET fetched_at = datetime('now', '-7 hours')"
+    ).run();
+    execFileSync(
+      "git",
+      ["remote", "set-url", "origin", "git@gitlab.internal.example:group/app.git"],
+      { cwd: repos[0]!.path, stdio: "ignore" }
+    );
+    gate = (hostname) =>
+      hostname === "github.com"
+        ? { enabled: false, source: "config" }
+        : { enabled: true, source: "auto" };
+
+    await identities.refresh(repos);
+
+    expect(glab).toHaveBeenCalled();
   });
 
   it("re-asks once the gate changes, without forcing a full re-read", async () => {

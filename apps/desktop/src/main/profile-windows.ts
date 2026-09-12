@@ -23,6 +23,10 @@ export type ProfileWindows = {
   /** Re-resolve every profile window after the app default changes. */
   syncAllAppearances: () => void;
   focusedProfileId: () => string | null;
+  /** Every profile with a live window. Not the same as "the active profile":
+   *  several windows can be up at once, and work that repaints a sidebar has
+   *  to cover all of them or the unfocused ones silently stay stale. */
+  openProfileIds: () => string[];
 };
 
 export function createProfileWindows(options: {
@@ -82,6 +86,8 @@ export function createProfileWindows(options: {
     syncAllAppearances: () => {
       for (const profileId of byProfile.keys()) syncAppearance(profileId);
     },
-    focusedProfileId: () => profileFor(BrowserWindow.getFocusedWindow())
+    focusedProfileId: () => profileFor(BrowserWindow.getFocusedWindow()),
+    openProfileIds: () =>
+      [...byProfile.keys()].filter((profileId) => alive(profileId) !== null)
   };
 }

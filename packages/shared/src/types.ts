@@ -737,6 +737,11 @@ export type RepoIdentityRefreshOutcome = {
   repoId: RepoId;
   status: "resolved" | "unknown" | "signed_out" | "unavailable" | "host_disabled";
   identity?: RepoIdentity;
+  /** The host the decision was made against, on `host_disabled`. Carried
+   *  rather than re-derived: `identity` is the LAST host that answered, and a
+   *  re-pointed `origin` makes those two different hosts — naming the stored
+   *  one sends the user to a switch that is already on. */
+  hostname?: string;
 };
 
 /** Ways the clone dialog can hand a repository to the local machine. `cli`

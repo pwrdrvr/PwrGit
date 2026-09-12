@@ -152,9 +152,9 @@ speaks `PrSummary` and never learns which forge answered.
   deliberately no separate `invalidate()` to forget to call.
 - **`forge:status` has three consumers, and two of them ask a narrower
   question.** Settings → Forges wants "can this forge be read at all", which is
-  the summary. The clone and fork dialogs reach their provider through
-  `ForgeRepoRegistry.get(kind)` with no hostname — the **SaaS** instance — so
-  they ask **`forgeSaasBlock`** (shared) — `forgeCanAnswerDialog` in
+  the summary. The clone and fork dialogs pick their provider by kind alone —
+  the **SaaS** instance — so they ask **`forgeSaasBlock`** (shared):
+  `forgeCanAnswerDialog` in
   `fork-dialog.ts` and `ForkService`/`CloneService`'s own gates are all that one
   function. Reading the summary there would let a self-managed sign-in enable a
   gitlab.com search that cannot answer, failing late instead of naming what is
@@ -297,21 +297,41 @@ provider or reach a real forge.
     Enterprise host classifies as `other` and identity marks are structurally
     unreachable there, while PR status sees it. One injection fixes both; until
     then the gate and the classifier are two objects that must stay in step.
-  - **The gate reads the `source`, not just the boolean.** "Off" from config or
-    env is a decision and is cached against (`retryAfter`); "off" from `auto`
-    only means no CLI has reported this host *yet*, because enumeration is two
-    subprocesses that land after the first refresh. Backing off on `auto` turns
-    a boot race into minutes of missing marks; treating a decided "off" as
-    transient re-reads every remote on every pass forever.
-  - **A repo whose stored row names a switched-off host is filtered out before
-    `readOrigin`**, so it costs no subprocess at all. Only a repo with no row
-    yet pays one `git remote` read, then backs off.
+  - **The gate reads the `source`, not just the boolean.** Both "off" arms
+    stamp `gateRetryAfter` — neither writes a row, so without a stamp the repo
+    is due again on the very next pass forever — but for different windows.
+    "Off" from config or env is a decision, cached for the identity TTL and
+    reported as `host_disabled`; "off" from `auto` only means no CLI has
+    reported this host *yet*, because enumeration is two subprocesses that land
+    after the first refresh, so it takes the short retry window and reports
+    plain `unavailable`. Backing off on `auto` for six hours turns a boot race
+    into hours of missing marks; treating a decided "off" as transient re-reads
+    every remote every five minutes to re-derive what the settings file says.
+  - **The `due` filter checks freshness first and the gate never.** An earlier
+    version short-circuited on `switchedOff(storedRow.hostname)` before the TTL
+    — which froze forever any repo whose `origin` had since moved to a host
+    that is on, since the stored hostname is the last host that *answered*.
+    `gateRetryAfter` is the only thing that suppresses a switched-off host, and
+    it expires.
   - **Anything that can change the gate's answer must call
-    `clearGateBackoff()` and re-refresh** — `refreshIdentitiesAfterGateChange`
-    in `index.ts` does, on the boot enumeration landing and on every settings
-    write. Both land AFTER the profile-load refresh has already run, and
-    nothing else would ask again: the sidebar glyph is the only manual trigger
-    and it does not render for a repository that never got a row.
+    `clearGateBackoff()` and re-refresh** — in `index.ts` that is
+    `onForgeTargetsMaybeMoved`, the *single* hook every edge routes through:
+    boot enumeration landing, the Hosts pane's Re-check, `forgeStatus.onChange`
+    re-reading the directory, and any settings write. It guards on
+    `forgeTargetSignature` and debounces, so a theme toggle costs nothing while
+    a host switch costs one pass — without the guard every settings write
+    re-read `origin` for the whole profile, because a repo on a switched-off
+    host has no row for the TTL to suppress. Those edges land AFTER the
+    profile-load refresh has run, and nothing else would ask again: the sidebar
+    glyph is the only manual trigger and it does not render for a repository
+    that never got a row.
+    - It refreshes **every open profile**, not `getActiveId()`: windows are
+      per-profile and several can be up at once, so the active-only version
+      made the unfocused ones pay `clearGateBackoff()` and get no repaint.
+    - It `await`s `identityService.settled()` first. A pass already running
+      holds every repo in its in-flight set, where the unforced `due` filter
+      drops them — so a gate change landing mid-pass otherwise refreshed
+      nothing and never retried.
   - **The two "do not ask again" stamps are separate maps on purpose.** A
     signed-out CLI recovers from outside the app, so its window is short and
     only a successful read clears it; clearing it on an unrelated settings
@@ -341,7 +361,16 @@ provider or reach a real forge.
   uses it (picking by kind alone cloned a same-named stranger's project from
   gitlab.com), so a CLI clone can target a self-managed host whose own switch
   was never consulted. Closing that means teaching the dialogs hostnames, not
-  widening the gate. Fork has no hostname to carry and needs no such change.
+  widening the gate.
+  - **`ForkService` has the identical bug, still open.** `ForkRequest.hostname`
+    is a required field that `fork()` drops on the floor at `forges.get(input.host)`,
+    so forking a self-managed project runs against gitlab.com — `status.ts`
+    says the same thing where it explains why the fork dialog asks about the
+    SaaS host. It is not the one-line fix `runClone` was: `targets()` takes a
+    bare `ForgeKind` and `preflight()` gates on `forgeSaasBlock`, so the
+    dialog would list SaaS owners and then fork somewhere else. Fix the three
+    together or not at all. `fork()` itself also re-checks no status — only
+    `preflight()` and `targets()` do.
 - **A dialog opens on local state; a forge is asked only on debounced input.**
   This is the rule the clone dialog broke. `repo:cloneCatalog` used to list
   every known owner's repositories as it opened — `gh repo list <owner>

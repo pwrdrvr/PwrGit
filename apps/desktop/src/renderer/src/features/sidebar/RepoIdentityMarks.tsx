@@ -204,7 +204,10 @@ export function RepoIdentityGlyphs({
       const unresolved = !disabled && outcome?.status !== "resolved";
       const message = !result.ok ? result.error.message
         : disabled
-          ? `${identity.hostname} is switched off in Settings → Forges, so its visibility was not re-read.`
+          // The host main gated on, not the one in the stored row: those differ
+          // whenever `origin` has moved, and naming the stored one sends the
+          // user to a switch that is already on.
+          ? `${outcome?.hostname ?? identity.hostname} is switched off in Settings → Forges, so its visibility was not re-read.`
           : outcome?.status === "signed_out"
             ? "Sign in to the forge in Settings → Forges, then refresh visibility again."
             : unresolved

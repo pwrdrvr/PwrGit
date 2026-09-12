@@ -35,10 +35,12 @@ type IdentityLookup = {
 export type IdentityChange = { repoId: string; identity: RepoIdentity };
 
 /** `ForgeHosts.isEnabled`, injected. The `source` matters as much as the
- *  answer: "off" from config or env is a durable decision worth backing off
- *  on, while "off" from `auto` only means no CLI has reported this host YET —
- *  enumeration is two subprocesses that land after the first refresh. Backing
- *  off on the latter would turn a boot race into minutes of missing marks. */
+ *  answer: "off" from config or env is a durable decision, reported as a
+ *  choice and cached for the identity TTL, while "off" from `auto` only means
+ *  no CLI has reported this host YET — enumeration is two subprocesses that
+ *  land after the first refresh — so it reports plain `unavailable` and backs
+ *  off only for the short retry window. Caching a boot race for six hours
+ *  would leave a self-managed host unmarked all morning. */
 export type ForgeHostGate = (
   hostname: string
 ) => { enabled: boolean; source: ForgeValueSource };
@@ -105,14 +107,17 @@ export class IdentityService {
    * it on an unrelated settings write is how a theme toggle turns into a burst
    * of spawns against a CLI we already know is logged out.
    *
-   * A host the user switched off is the opposite: the answer cannot change
-   * without a settings write or an env change, and the settings write clears
-   * `gateRetryAfter` outright. Its window therefore exists only to re-notice a
-   * re-pointed `origin`, which is the identity TTL's job, not the retry one's.
-   * At `IDENTITY_RETRY_MS` a profile of 300 repos on a switched-off host costs
-   * ~3,600 `git remote` spawns an hour to re-derive an answer that is pinned
-   * in the settings file; at `IDENTITY_TTL_MS` it costs 50, the same as a host
-   * that is on.
+   * The gate is the opposite, and is cleared only by `clearGateBackoff` —
+   * never by a successful read of some other repo. A host the user switched
+   * off cannot change without a settings write or an env change, and every
+   * edge that can change the gate's answer calls `clearGateBackoff` outright.
+   * Its window therefore exists only to re-notice a re-pointed `origin`, which
+   * is the identity TTL's job, not the retry one's. At `IDENTITY_RETRY_MS` a
+   * profile of 300 repos on a switched-off host costs ~3,600 `git remote`
+   * spawns an hour to re-derive an answer that is pinned in the settings file;
+   * at `IDENTITY_TTL_MS` it costs 50, the same as a host that is on. A host
+   * that is merely unrecognized so far keeps the short window instead: nobody
+   * decided it, and enumeration lands on its own.
    *
    * Neither may write a row, and an explicit refresh bypasses both.
    */
@@ -133,14 +138,6 @@ export class IdentityService {
       now < (this.authRetryAfter.get(repoId) ?? 0) ||
       now < (this.gateRetryAfter.get(repoId) ?? 0)
     );
-  }
-
-  /** Whether the switch is off AND somebody actually decided that, rather than
-   *  the host merely not being recognized yet. Only a decided "off" is stable
-   *  enough to cache against. */
-  private switchedOff(hostname: string): boolean {
-    const { enabled, source } = this.hostGate(hostname);
-    return !enabled && (source === "config" || source === "env");
   }
 
   /** Identities already stored, for the repositories given. */
@@ -230,17 +227,18 @@ export class IdentityService {
       if (options.force === true) return true;
       if (this.backedOff(repo.id)) return false;
       const existing = stored.get(repo.id);
-      // The stored row already names the host, so a switched-off one is
-      // answered here without spawning `git remote get-url origin` at all.
-      if (existing !== undefined && this.switchedOff(existing.hostname)) {
-        return false;
-      }
       if (existing?.fetchedAt === undefined) return true;
       const age = Date.now() - Date.parse(`${existing.fetchedAt}Z`);
       const ttl = existing.visibility === "unknown"
         ? IDENTITY_RETRY_MS
         : IDENTITY_TTL_MS;
-      return !Number.isFinite(age) || age > ttl;
+      if (!Number.isFinite(age) || age > ttl) return true;
+      // Fresh row, so nothing is due yet whatever the gate says. Checked last,
+      // NOT before the TTL: the stored hostname is the last host that
+      // answered, so short-circuiting on it unconditionally freezes a repo
+      // whose `origin` has since moved to a host that is on — the one case
+      // this window exists to re-notice.
+      return false;
     });
     const batch = due.slice(0, REFRESH_BATCH);
     if (due.length > batch.length) {
@@ -285,22 +283,34 @@ export class IdentityService {
     const origin = await this.remoteSlots.run(() => readOrigin(this.git, repo));
     if (origin === null || origin.host === "other") return unavailable;
     // Gated on the hostname, not the kind, so the pane and this transport
-    // agree about self-managed instances. Reported as its own status rather
-    // than `unavailable`: nothing failed, the user turned it off. Backed off
-    // like a signed-out attempt so a repo that has no row yet stops re-reading
-    // its remote on every pass — the answer cannot change without a settings
-    // write, which resets the backoff by writing a row on the next success.
-    if (this.switchedOff(origin.hostname)) {
-      this.gateRetryAfter.set(origin.repoId, Date.now() + IDENTITY_TTL_MS);
+    // agree about self-managed instances. One call, three answers: on; off
+    // because somebody decided so; off because nothing has recognized this
+    // host yet. Both "off" arms must stamp a backoff — neither writes a row,
+    // so without one the repo is due again on the very next pass, forever.
+    const gate = this.hostGate(origin.hostname);
+    if (!gate.enabled) {
+      const decided = gate.source === "config" || gate.source === "env";
+      // A decided "off" cannot change without a settings write, and that write
+      // calls `clearGateBackoff`, so the window here is only ever about
+      // re-noticing a re-pointed `origin` — the identity TTL's cadence, not
+      // the retry one's. An `auto` "off" is the opposite: enumeration is still
+      // landing, so it recovers on its own and must be re-asked promptly.
+      this.gateRetryAfter.set(
+        origin.repoId,
+        Date.now() + (decided ? IDENTITY_TTL_MS : IDENTITY_RETRY_MS)
+      );
+      // Reported as its own status only when it IS a choice; an `auto` "off"
+      // is "we could not ask", which is exactly `unavailable`.
+      if (!decided) return unavailable;
       return {
         outcome: {
           repoId: repo.id,
           status: "host_disabled",
+          hostname: origin.hostname,
           ...(previous === undefined ? {} : { identity: previous })
         }
       };
     }
-    if (!this.hostGate(origin.hostname).enabled) return unavailable;
     // `origin.hostname` is right here and used below — dropping it read this
     // repo's identity off github.com/gitlab.com instead of its own instance,
     // which for a same-named SaaS slug reports a STRANGER's visibility and
@@ -378,17 +388,33 @@ export class IdentityService {
   }
 
   /**
-   * Forget every "do not ask again before" stamp.
+   * Forget the GATE's "do not ask again before" stamps — not the signed-out
+   * ones, which only a successful read may clear.
    *
-   * The stamps encode an answer the gate gave, so anything that can change the
-   * gate's answer — host enumeration landing, or a forge setting being written
-   * — has to clear them or a repo sits out its backoff for a decision that no
-   * longer applies. Deliberately not a `force` refresh: the six-hour TTL on
-   * rows that DID resolve is still right, and re-reading every repository on
-   * every settings write is the cost this whole gate exists to avoid.
+   * These stamps encode an answer the gate gave, so anything that can change
+   * the gate's answer — host enumeration landing, or a forge setting being
+   * written — has to clear them or a repo sits out its backoff for a decision
+   * that no longer applies. Deliberately not a `force` refresh: the six-hour
+   * TTL on rows that DID resolve is still right, and re-reading every
+   * repository on every settings write is the cost this whole gate exists to
+   * avoid.
    */
   clearGateBackoff(): void {
     this.gateRetryAfter.clear();
+  }
+
+  /**
+   * Resolve once the lookups running RIGHT NOW have finished.
+   *
+   * A background pass adds every repo to `refreshing` up front, and the `due`
+   * filter drops those unless forced — so a gate change landing mid-pass would
+   * otherwise refresh nothing at all and never retry, leaving the repos whose
+   * lookup already read the old answer unmarked until a fetch. One snapshot,
+   * not a loop: the gate is read live per lookup, so anything STARTED after
+   * the change already sees the new answer and needs no waiting on.
+   */
+  async settled(): Promise<void> {
+    await Promise.allSettled([...this.refreshing.values()]);
   }
 
   /** Drop stored identities for repositories that no longer exist. The FK
