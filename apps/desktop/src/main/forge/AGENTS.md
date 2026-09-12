@@ -67,6 +67,49 @@ speaks `PrSummary` and never learns which forge answered.
   "return an entry for every key requested" above: the rule applies to keys the
   forge actually answered about.
 
+## Adding a forge: one seam, and the drift around it
+
+**A third product is coming, and the goal is that a provider class drops in.**
+Today it would not: the first bullet above ("add a forge by implementing those
+four") is true of change-request status and of nothing else. Clone, fork,
+identity, `repo-indexer` and eight renderer files each grew their own per-product
+branching instead.
+
+Recount before trusting the number:
+
+```bash
+grep -rn '=== "github"\|=== "gitlab"' --include=*.ts --include=*.tsx \
+  packages/shared/src apps/desktop/src | grep -v '\.test\.'
+```
+
+29 across 18 files when this was written. Reducing that is tracked separately;
+the rule here is only that it must not grow.
+
+The two shapes fail differently, and that difference is the whole rule:
+
+- **`Record<ForgeKind, …>` fails loudly.** A new kind is a missing-property type
+  error, so `tsc` hands you the list of tables to fill in. Eight exist —
+  `FORGE_CLI` and `FORGE_SAAS_HOST` (shared), `FORGE_CAPABILITIES`, `PROVIDERS`,
+  `RATE_LIMIT_DIALECT`, the commit-author transports, the E2E fixture. They are
+  spread over two shared files and four main ones; unifying them is the tracked
+  work, but *adding* to the pile in this shape is fine and much better than the
+  alternative.
+- **A ternary fails silently.** `kind === "gitlab" ? glab : gh` sends a third
+  forge at GitHub, and nothing catches it — not the compiler, and not a test
+  that only covers the two kinds that exist today. This is the shape that makes
+  a new provider a 30-site scavenger hunt.
+
+So, when adding anything per-product:
+
+- **Never write a new `=== "github"` / `=== "gitlab"` comparison.** If you are
+  reaching for one, the value belongs in a `Record<ForgeKind, …>` (data) or
+  behind a provider method (behaviour).
+- **Put the table in `packages/shared`** when the renderer needs it too.
+  `renderer-does-not-import-main` blocks the main-side tables, and a
+  renderer-local copy is how `FORGE_CLI` ended up with two spellings.
+- **One table per question, not per screen.** `KIND_LABEL` and `FORGE_LABELS`
+  are the same map in the same directory, because each new screen added its own.
+
 ## GitLab specifics
 
 - **Batching is native, not aliased.** `mergeRequests(sourceBranches: [...])`

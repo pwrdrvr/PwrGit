@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canonicalForgeHostname,
   classifyForgeHost,
   forgeWebUrl,
   parseForgeRemote
@@ -103,5 +104,30 @@ describe("forgeWebUrl", () => {
     expect(forgeWebUrl("gitlab.acme.io", "g/s/p")).toBe(
       "https://gitlab.acme.io/g/s/p"
     );
+  });
+});
+
+describe("canonicalForgeHostname", () => {
+  it("is idempotent, so two callers cannot store two different keys", () => {
+    // The settings pane canonicalizes before sending and main canonicalizes
+    // again on receipt. Stripping only one `www.` made those two disagree:
+    // the pane checked `www.gitlab.com` against its list while main stored the
+    // entry under `gitlab.com`, silently merging onto a different host.
+    for (const value of [
+      "gitlab.com",
+      "www.gitlab.com",
+      "www.www.gitlab.com",
+      "  WWW.WWW.GitLab.Com  "
+    ]) {
+      const once = canonicalForgeHostname(value);
+      expect(once).toBe("gitlab.com");
+      expect(canonicalForgeHostname(once!)).toBe(once);
+    }
+  });
+
+  it("refuses anything that is not a bare hostname", () => {
+    for (const value of ["", "ghe.example:8443", "has space", "https://x.dev/"]) {
+      expect(canonicalForgeHostname(value)).toBeNull();
+    }
   });
 });

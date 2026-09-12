@@ -24,6 +24,7 @@ describe("ForgeHostsView.rows", () => {
       {
         host: "github.acme-inc.com",
         kind: "github",
+        kindSource: "auto",
         enabled: true,
         enabledSource: "auto",
         origin: "cli",
@@ -32,6 +33,22 @@ describe("ForgeHostsView.rows", () => {
         scopes: ["repo"]
       }
     ]);
+  });
+
+  it("distinguishes a chosen product from a derived one", () => {
+    // `origin` answers "does a CLI hold an account here", `kindSource` answers
+    // "did a person choose this product". Settings gates its Remove control on
+    // the second: gating on the first offered to clear the entry of a host the
+    // user had merely switched off, which turned that host back ON and dropped
+    // the row that could undo it.
+    const chosen = view([], { "git.contoso.dev": { kind: "gitlab" } }).rows();
+    expect(chosen[0]?.kindSource).toBe("config");
+
+    // Switched off, product never chosen: the kind comes from the SaaS
+    // fallback, so there is nothing for the user to withdraw.
+    const derived = view([], { "github.com": { enabled: false } }).rows();
+    expect(derived[0]?.origin).toBe("config");
+    expect(derived[0]?.kindSource).toBe("auto");
   });
 
   it("names glab for a GitLab row, so the sign-in command is right", () => {
