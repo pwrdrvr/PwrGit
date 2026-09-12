@@ -44,6 +44,10 @@ import { ForgeRepoRegistry } from "./forge/repo-provider";
 import { createE2EForgeFixtureServices } from "./forge/e2e-forge-fixture";
 import { IdentityService } from "./forge/identity-service";
 import { ForgeStatusService } from "./forge/status";
+import { ForgeHostDirectory } from "./forge/cli-hosts";
+import { ForgeHosts } from "./forge/hosts";
+import { resolveForge } from "./forge/providers";
+import { resolveForgeRepo } from "./forge/resolve";
 import { GitHubRepoProvider } from "./forge/github/repo-provider";
 import { GitLabRepoProvider } from "./forge/gitlab/repo-provider";
 import { registerChangesHandlers } from "./git/changes-handlers";
@@ -357,6 +361,22 @@ if (!gotSingleInstanceLock) {
     // in-flight reads, and a second instance would quietly undo both by
     // keeping its own cache and spawning its own `gh`/`glab`.
     const forgeStatus = fixtureServices?.status ?? new ForgeStatusService();
+    // Which forge hosts exist, and whether we may read them. Enumeration costs
+    // two subprocesses, so the directory caches and the resolvers below read it
+    // synchronously — a PR refresh must never wait on `gh auth status`.
+    const forgeHostDirectory = new ForgeHostDirectory();
+    const forgeHosts = new ForgeHosts({
+      readSettings: () => settings.get().forges ?? { hosts: {} },
+      discovered: () => forgeHostDirectory.current()
+    });
+    // Primed in the background: blocking boot on two CLI spawns would delay the
+    // first window for a feature that degrades to the two SaaS hosts meanwhile.
+    void forgeHostDirectory.refresh();
+    // Re-read when availability changes — signing in to an Enterprise host from
+    // a terminal should start resolving it without a restart.
+    forgeStatus.onChange(() => {
+      void forgeHostDirectory.refresh({ force: true });
+    });
     const identityService = new IdentityService(db, execGit, forges);
     const cloneService = new CloneService(
       db,
@@ -381,7 +401,11 @@ if (!gotSingleInstanceLock) {
       worktreeOperations
     );
     const refresher = createWorktreeRefresher(stateService, db);
-    const prService = new PrService(db, execGit);
+    const prService = new PrService(db, execGit, {
+      // Without the overrides a self-managed or Enterprise host classifies as
+      // `other` and silently produces no change-request status at all.
+      resolveForge: (url) => resolveForge(url, forgeHosts.overrides())
+    });
     const avatarThumbnails = new GitHubAvatarThumbnailCache(db, {
       cacheDir: join(app.getPath("userData"), "cache", "github-avatar-thumbnails")
     });
@@ -391,7 +415,10 @@ if (!gotSingleInstanceLock) {
     const commitAuthorIdentityService = new GitHubCommitAuthorIdentityService(
       db,
       execGit,
-      { thumbnailStore: avatarThumbnails }
+      {
+        thumbnailStore: avatarThumbnails,
+        resolveForgeRepo: (url) => resolveForgeRepo(url, forgeHosts.overrides())
+      }
     );
 
     // The worktree the user is currently viewing; refreshed on focus + a gentle

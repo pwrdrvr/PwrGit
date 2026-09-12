@@ -174,3 +174,73 @@ export async function discoverForgeHosts(
   ]);
   return [...github, ...gitlab];
 }
+
+/** Enumeration spawns two subprocesses; a resolve must not. */
+const DIRECTORY_TTL_MS = 5 * 60_000;
+
+export type ForgeHostDirectoryDeps = {
+  discover?: () => Promise<DiscoveredForgeHost[]>;
+  now?: () => number;
+  ttlMs?: number;
+};
+
+/**
+ * The app's one cached answer to "which forge hosts are signed in".
+ *
+ * `ForgeHosts` is synchronous on purpose — `PrService` resolves a remote on
+ * every refresh, long after startup, and an async gate there would either block
+ * the refresh or race it. So the subprocess cost lives here instead: this is
+ * primed once at boot and re-read from memory forever after, exactly the shape
+ * `ForgeStatusService` uses for the same reason.
+ *
+ * `current()` never spawns and never throws. Before the first refresh lands it
+ * answers empty, which degrades to "github.com and gitlab.com only" rather than
+ * to an error — the two hosts `ForgeHosts.kindFor` knows without help.
+ */
+export class ForgeHostDirectory {
+  private hosts: readonly DiscoveredForgeHost[] = [];
+  private at = 0;
+  private inFlight: Promise<readonly DiscoveredForgeHost[]> | null = null;
+  private readonly discover: () => Promise<DiscoveredForgeHost[]>;
+  private readonly now: () => number;
+  private readonly ttlMs: number;
+
+  constructor(deps: ForgeHostDirectoryDeps = {}) {
+    this.discover = deps.discover ?? (async () => await discoverForgeHosts());
+    this.now = deps.now ?? (() => Date.now());
+    this.ttlMs = deps.ttlMs ?? DIRECTORY_TTL_MS;
+  }
+
+  /** Last known hosts. Synchronous, cheap, and safe to call per resolve. */
+  current(): readonly DiscoveredForgeHost[] {
+    return this.hosts;
+  }
+
+  /**
+   * Re-read both CLIs, coalescing concurrent callers onto one pass.
+   *
+   * A failed enumeration keeps the previous list rather than emptying it: a
+   * transient spawn failure must not make every Enterprise host stop resolving
+   * mid-session.
+   */
+  async refresh(opts: { force?: boolean } = {}): Promise<readonly DiscoveredForgeHost[]> {
+    if (opts.force !== true && this.now() - this.at < this.ttlMs && this.at !== 0) {
+      return this.hosts;
+    }
+    const existing = this.inFlight;
+    if (existing !== null) return await existing;
+
+    const running = this.discover()
+      .then((hosts) => {
+        this.hosts = hosts;
+        this.at = this.now();
+        return this.hosts;
+      })
+      .catch(() => this.hosts)
+      .finally(() => {
+        if (this.inFlight === running) this.inFlight = null;
+      });
+    this.inFlight = running;
+    return await running;
+  }
+}
