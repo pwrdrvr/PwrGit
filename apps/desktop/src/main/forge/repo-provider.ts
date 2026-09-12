@@ -1,3 +1,4 @@
+import { canonicalForgeHostname } from "@pwrgit/shared";
 import type {
   CloneRepository,
   ForgeHost,
@@ -5,6 +6,11 @@ import type {
   ForgeOwner,
   ForgeRepoRef
 } from "@pwrgit/shared";
+
+/** One spelling of the cache key, so `register` and `get` cannot disagree. */
+function hostKey(host: ForgeHost, hostname: string): string {
+  return `${host}:${canonicalForgeHostname(hostname) ?? hostname}`;
+}
 
 /** What one forge must answer for the clone and fork dialogs.
  *
@@ -119,7 +125,7 @@ export class ForgeRepoRegistry {
     factory?: (hostname: string) => ForgeRepoProvider
   ): void {
     this.defaults.set(provider.host, provider);
-    this.byHost.set(`${provider.host}:${provider.hostname}`, provider);
+    this.byHost.set(hostKey(provider.host, provider.hostname), provider);
     if (factory !== undefined) this.factories.set(provider.host, factory);
   }
 
@@ -130,10 +136,17 @@ export class ForgeRepoRegistry {
    * working against the SaaS instance; passing it is what reaches an
    * Enterprise or self-managed host.
    */
-  get(host: ForgeHost, hostname?: string): ForgeRepoProvider | null {
+  get(host: ForgeHost, rawHostname?: string): ForgeRepoProvider | null {
     const fallback = this.defaults.get(host) ?? null;
-    if (hostname === undefined || hostname === "") return fallback;
-    const key = `${host}:${hostname}`;
+    if (rawHostname === undefined || rawHostname === "") return fallback;
+    // Canonicalized once, here, rather than by each provider's constructor:
+    // the hostname arrives from the renderer over IPC, and keying the cache on
+    // the raw string let `GHE.Acme.Example` and `ghe.acme.example` build two
+    // providers for one server while `www.github.com` missed the pre-seeded
+    // SaaS entry entirely.
+    const hostname = canonicalForgeHostname(rawHostname);
+    if (hostname === null) return null;
+    const key = hostKey(host, hostname);
     const cached = this.byHost.get(key);
     if (cached !== undefined) return cached;
     const factory = this.factories.get(host);
@@ -142,7 +155,8 @@ export class ForgeRepoRegistry {
     // reports `unsupported_host` instead of silently querying the SaaS
     // instance for a self-managed project.
     if (factory === undefined) {
-      return fallback?.hostname === hostname ? fallback : null;
+      const only = canonicalForgeHostname(fallback?.hostname ?? "");
+      return only !== null && only === hostname ? fallback : null;
     }
     const built = factory(hostname);
     this.byHost.set(key, built);

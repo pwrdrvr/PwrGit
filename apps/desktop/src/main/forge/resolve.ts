@@ -87,11 +87,12 @@ function normalizePath(rawPath: string): string | null {
 /**
  * Which forge a host runs, or null when we can't tell.
  *
- * Only the two SaaS hostnames are certain. A `gitlab.*` prefix is the near
- * universal self-managed convention and is worth honoring, but self-managed
- * instances on unrelated hostnames are unknowable from the URL alone — those
- * need an explicit override, and until one exists PwrGit no-ops exactly as it
- * does today for any unrecognized remote.
+ * Only the two SaaS hostnames are certain. Every self-managed instance —
+ * `gitlab.corp.example` as much as `git.acme.com` — is unknowable from the URL
+ * alone and needs an entry in `overrides`, which `ForgeHosts.overrides()`
+ * builds from what `gh`/`glab` are signed in to plus what the user added by
+ * hand. Until a host is in there PwrGit no-ops exactly as it does for any
+ * unrecognized remote.
  */
 export function classifyHost(
   host: string,

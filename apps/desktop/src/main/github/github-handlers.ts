@@ -169,7 +169,10 @@ export function registerGitHubHandlers(
       // A refresh is what the pane asks for after the user signs in from a
       // terminal; an ordinary read is answered from the cached directory.
       if (req.refresh === true) await forgeHosts.refresh();
-      return ok({ hosts: forgeHosts.rows() });
+      return ok({
+        hosts: forgeHosts.rows(),
+        overrides: forgeHosts.overrides()
+      });
     });
   }
 

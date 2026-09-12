@@ -1,6 +1,7 @@
 import {
   parseForgeRemote,
   type ForgeHost,
+  type ForgeHostMap,
   type Repo,
   type RepoIdentity,
   type RepoIdentityRefreshOutcome
@@ -42,14 +43,19 @@ type OriginRef = {
 
 /** Read `origin` for one repository. `origin` specifically, not the first
  *  forge remote found: a fork checkout has `origin` (the fork) and `upstream`
- *  (the original), and the identity marks describe what you push to. */
+ *  (the original), and the identity marks describe what you push to.
+ *
+ *  `hosts` is `ForgeHosts.overrides()`. Omitting it recognises github.com and
+ *  gitlab.com only — a hostname says nothing about which forge runs on it — so
+ *  a self-managed instance would silently lose its identity marks. */
 export async function readOrigin(
   git: GitExec,
-  repo: Repo
+  repo: Repo,
+  hosts: ForgeHostMap = {}
 ): Promise<OriginRef | null> {
   const result = await git(["remote", "get-url", "origin"], repo.path);
   if (!result.ok || result.value.exitCode !== 0) return null;
-  const parsed = parseForgeRemote(result.value.stdout.trim());
+  const parsed = parseForgeRemote(result.value.stdout.trim(), hosts);
   if (parsed === null) return null;
   return {
     repoId: repo.id,
@@ -91,7 +97,22 @@ export class IdentityService {
   constructor(
     private readonly db: DB,
     private readonly git: GitExec,
-    private readonly forges: ForgeRepoRegistry
+    private readonly forges: ForgeRepoRegistry,
+    /** How main answers "which forge runs here, and may we talk to it".
+     *
+     *  Read per lookup rather than captured: signing in to an instance from a
+     *  terminal refreshes the directory behind it, and identity marks should
+     *  start resolving without a restart.
+     *
+     *  `isHostEnabled` is not optional decoration. `ForgeHosts.overrides()`
+     *  deliberately keeps hosts the user switched OFF, because resolution and
+     *  permission are separate questions and every other consumer re-checks
+     *  (`resolveEnabledForge` in index.ts). Without the same check here, a host
+     *  turned off in Settings → Forges still spawns its CLI on every refresh. */
+    private readonly hosts: {
+      overrides: () => ForgeHostMap;
+      isHostEnabled: (hostname: string) => boolean;
+    } = { overrides: () => ({}), isHostEnabled: () => true }
   ) {}
 
   /** Identities already stored, for the repositories given. */
@@ -228,8 +249,14 @@ export class IdentityService {
         ...(previous === undefined ? {} : { identity: previous })
       }
     };
-    const origin = await this.remoteSlots.run(() => readOrigin(this.git, repo));
+    const origin = await this.remoteSlots.run(() =>
+      readOrigin(this.git, repo, this.hosts.overrides())
+    );
     if (origin === null || origin.host === "other") return unavailable;
+    // The per-host switch, enforced where the subprocess would be spawned. A
+    // host the user turned off must not be read, and `unavailable` is exactly
+    // how an unresolvable host already reports — no row written, no CLI run.
+    if (!this.hosts.isHostEnabled(origin.hostname)) return unavailable;
     // `origin.hostname` is right here and used below — dropping it read this
     // repo's identity off github.com/gitlab.com instead of its own instance,
     // which for a same-named SaaS slug reports a STRANGER's visibility and
