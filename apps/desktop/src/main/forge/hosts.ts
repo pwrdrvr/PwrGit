@@ -361,6 +361,7 @@ export class ForgeHostsView {
             {
               host: entry.host,
               kind: entry.kind,
+              kindSource: entry.kindSource,
               enabled: entry.enabled,
               enabledSource: entry.enabledSource,
               origin: entry.origin,

@@ -143,9 +143,72 @@ describe("fetchMrsForBranches", () => {
     expect(fetchMock).toHaveBeenCalledTimes(5);
     expect(result.get("never")).toBeNull();
   });
+
+  it("keeps the batches that resolved when a later one is refused", async () => {
+    // 60 branches is two batches. Losing the first fifty to the second's
+    // refusal made a refresh under sustained pressure pure cost: nothing
+    // written, so `PrService` re-sent both batches on the next trigger.
+    const branches = Array.from({ length: 60 }, (_, i) => `b${i}`);
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse(graphqlPage([mr({ iid: "1", sourceBranch: "b0" })], false))
+      )
+      .mockResolvedValueOnce(jsonResponse({ message: "not found" }, 404));
+
+    const result = await fetchMrsForBranches("t", REPO, branches);
+
+    expect(result.size).toBe(50);
+    expect(result.get("b0")).toMatchObject({ number: 1 });
+    expect(result.has("b50")).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("contributes nothing for a batch that failed mid-paging", async () => {
+    // The half-paged batch must not reach `withNullsForMissing`: its unmatched
+    // branches may have an MR on a page we never read, and a null there is
+    // negative-cached as "no MR" for the whole refresh TTL.
+    const branches = Array.from({ length: 60 }, (_, i) => `b${i}`);
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse(graphqlPage([mr({ iid: "1", sourceBranch: "b0" })], false))
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(graphqlPage([mr({ iid: "2", sourceBranch: "b50" })], true, "C1"))
+      )
+      .mockResolvedValueOnce(jsonResponse({ message: "not found" }, 404));
+
+    const result = await fetchMrsForBranches("t", REPO, branches);
+
+    expect(result.size).toBe(50);
+    expect(result.has("b50")).toBe(false);
+    expect(result.has("b51")).toBe(false);
+  });
+
+  it("rethrows when the first batch fails, so nothing resolved is not 'no MR'", async () => {
+    const branches = Array.from({ length: 60 }, (_, i) => `b${i}`);
+    fetchMock.mockResolvedValue(jsonResponse({ message: "not found" }, 404));
+
+    await expect(fetchMrsForBranches("t", REPO, branches)).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("fetchMrsByNumbers", () => {
+  it("keeps the iids a refused later batch never reached out of the result", async () => {
+    const numbers = Array.from({ length: 60 }, (_, i) => i + 1);
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(graphqlPage([mr({ iid: "1" })])))
+      .mockResolvedValueOnce(jsonResponse({ message: "not found" }, 404));
+
+    const result = await fetchMrsByNumbers("t", REPO, numbers);
+
+    // Nulls are filled per batch, so iid 51 is absent rather than reported as
+    // a merge request that is gone.
+    expect(result.get(1)).toMatchObject({ number: 1 });
+    expect(result.get(2)).toBeNull();
+    expect(result.has(51)).toBe(false);
+  });
+
   it("returns null for an iid GitLab did not return", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse(graphqlPage([mr({ iid: "4", state: "merged" })]))
@@ -184,6 +247,31 @@ describe("fetchMrsForCommits", () => {
     expect(result.has(OTHER)).toBe(false);
     // One retry, not the branch query's four — see COMMIT_MAX_RETRIES.
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("fails when every commit lookup failed, rather than reporting no MR", async () => {
+    // A revoked token or an unreachable host fails all of them. Resolving that
+    // as an empty map reads to `PrService` as a clean answer, so it clears the
+    // backoff instead of arming it and the 60s poll re-fans-out forever.
+    fetchMock.mockResolvedValue(jsonResponse({ message: "unauthorized" }, 401));
+
+    await expect(
+      fetchMrsForCommits("t", REPO, ["a".repeat(40), "b".repeat(40)])
+    ).rejects.toThrow();
+  });
+
+  it("still salvages the commits that did answer", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse([mr({ iid: "3" })]))
+      .mockResolvedValue(jsonResponse({ message: "unauthorized" }, 401));
+
+    const result = await fetchMrsForCommits("t", REPO, [
+      "a".repeat(40),
+      "b".repeat(40)
+    ]);
+
+    expect(result.get("a".repeat(40))).toMatchObject({ number: 3 });
+    expect(result.has("b".repeat(40))).toBe(false);
   });
 
   it("encodes the nested project path into the REST route", async () => {

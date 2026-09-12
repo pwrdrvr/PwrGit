@@ -506,6 +506,16 @@ export type RemoteActivity = {
 /** Hosting products PwrGit can read change-request status from. */
 export type ForgeKind = "github" | "gitlab";
 
+/** The binary each forge speaks through. One source: this value reaches the
+ *  user as a command they are told to run, so a second copy that drifts would
+ *  print a command naming a CLI the app never invokes. It lives in shared
+ *  rather than beside the probe because the settings pane names the CLI too,
+ *  and the renderer may not import from main. */
+export const FORGE_CLI: Readonly<Record<ForgeKind, string>> = {
+  github: "gh",
+  gitlab: "glab"
+};
+
 /**
  * What a forge can actually answer, so the UI states facts rather than guesses.
  *

@@ -15,9 +15,12 @@ speaks `PrSummary` and never learns which forge answered.
   nested one.
 - **Return an entry for every key requested.** An explicit `null` is what makes
   a branch or commit negative-cache; omitting the key makes the service refetch
-  it forever. `withNullsForMissing()` does this. The one deliberate exception is
-  a *failed* commit lookup, which is omitted so a network blip is not cached as
-  "no MR".
+  it forever. `withNullsForMissing()` does this. Keys are omitted only where a
+  lookup *failed*, never where it answered: a single unreachable commit, and a
+  batch the walk never reached (see "A batch that fails keeps the batches
+  before it"). Both exist so a blip is not cached as "no change request", and
+  `PrService` remembers the attempt instead — the two bullets near the end of
+  this list are the other half of this rule.
 - **Forge hosts are enumerated, not guessed** (`cli-hosts.ts`, `hosts.ts`).
   `gh auth status --json hosts` and `glab auth status --all` report what each
   CLI is signed in to, and enumeration carries the product with it — `gh` only
@@ -66,6 +69,101 @@ speaks `PrSummary` and never learns which forge answered.
   thrown refresh as best-effort and keeps what it had. This is the other half of
   "return an entry for every key requested" above: the rule applies to keys the
   forge actually answered about.
+- **A batch that fails keeps the batches before it** — `chunked.ts`, one
+  helper, for the same reason `retry.ts` is one helper. Every client walks its
+  keys in chunks (~50), so 250 branches refused on the fourth request must
+  still return the 150 that resolved; only a *first* chunk failing rethrows,
+  because that is the "nothing resolved" the rule above is about. Two details
+  the helper's shape enforces rather than leaves to each caller:
+  - **Only the fetch is inside the `try`.** Parsing sits outside, because a
+    parser throwing is a bug in us, not a refusal by the forge — swallowing it
+    would turn a `TypeError` into a silent short map whose visibility depends
+    on how many branches the repo happens to have.
+  - **The walk stops at the failing chunk** rather than skipping to the next: a
+    revoked token or a complexity cap refuses every chunk alike, so continuing
+    would spend the whole retry budget again per chunk.
+  GitLab's branch query is the one batch that cannot separate fetch from parse
+  (paging decisions need parsed data), so it is a named function,
+  `newestMrPerBranch`, and an abandoned batch contributes nothing at all —
+  filling its nulls would negative-cache branches whose MR is on a page never
+  read.
+- **Never negative-cache a failure, but do remember that you tried.** A refusal
+  writes no row, so the `fetched_at` every TTL reads is unchanged and nothing
+  throttles the retry — without a separate mark, a permanently refused query
+  (a GHES validation error, a complexity cap, a revoked token) is re-sent on
+  every repo-row expand, hover and worktree-monitor replacement, and the
+  callers queued behind an in-flight refresh each start an attempt of their own
+  when it settles. `PrService.lastFailedAt` is the in-memory answer, the same
+  shape as the signed-out backoff below, and it is read against the TTL a
+  successful attempt would have earned. Four things about it are load-bearing:
+  - **It is keyed by scope, not just by repository** (`FailureScope`: a
+    whole-repo sweep, a targeted refresh, commits). A forge that refuses one
+    query shape routinely answers another, so a repo-wide mark is wrong in
+    *both* directions: a hover's success would delete the sweep's backoff, and
+    a hover's repeated failure would re-stamp it faster than the sweep's ten
+    minutes could elapse — starving the only refresh that covers every branch.
+  - **A mark from the future is ignored.** `Date.now()` is not monotonic, and
+    without the upper bound a backward clock step suppresses every refresh
+    until the clock catches up. Nothing in the renderer sends `force`, so
+    there would be no escape short of a restart.
+  - **Writes are generation-guarded**, or a refresh already in flight re-arms
+    what `invalidatePendingWrites` just cleared. `forget(repoId)` drops one
+    repository's marks; repo ids are path-derived and reused.
+  - **A partial branch answer counts as a failed attempt too.** `isFresh` is
+    all-or-nothing, so one omitted branch leaves the whole repo stale and the
+    next trigger re-sends every chunk. The chunks that did resolve are still
+    written — that is the forward progress. Commits are the opposite: freshness
+    is per hash, so a partial batch shrinks the next `stale` set by itself and
+    only a total failure is marked. Which is why `fetchMrsForCommits` **throws**
+    when every SHA failed: reporting that as an empty map would read as a clean
+    answer, clear the backoff, and let the 60s poll re-fan-out sixty REST calls
+    forever.
+  `refreshPrNumbers` deliberately has no mark: its only caller is
+  `PrStatusMonitor`'s fixed 60s timer, which no UI interaction can accelerate,
+  so a mark would save at most one request per minute per repo.
+
+## Adding a forge: one seam, and the drift around it
+
+**A third product is coming, and the goal is that a provider class drops in.**
+Today it would not: the first bullet above ("add a forge by implementing those
+four") is true of change-request status and of nothing else. Clone, fork,
+identity, `repo-indexer` and eight renderer files each grew their own per-product
+branching instead.
+
+Recount before trusting the number:
+
+```bash
+grep -rn '=== "github"\|=== "gitlab"' --include=*.ts --include=*.tsx \
+  packages/shared/src apps/desktop/src | grep -v '\.test\.'
+```
+
+29 across 18 files when this was written. Reducing that is tracked separately;
+the rule here is only that it must not grow.
+
+The two shapes fail differently, and that difference is the whole rule:
+
+- **`Record<ForgeKind, …>` fails loudly.** A new kind is a missing-property type
+  error, so `tsc` hands you the list of tables to fill in. Eight exist —
+  `FORGE_CLI` and `FORGE_SAAS_HOST` (shared), `FORGE_CAPABILITIES`, `PROVIDERS`,
+  `RATE_LIMIT_DIALECT`, the commit-author transports, the E2E fixture. They are
+  spread over two shared files and four main ones; unifying them is the tracked
+  work, but *adding* to the pile in this shape is fine and much better than the
+  alternative.
+- **A ternary fails silently.** `kind === "gitlab" ? glab : gh` sends a third
+  forge at GitHub, and nothing catches it — not the compiler, and not a test
+  that only covers the two kinds that exist today. This is the shape that makes
+  a new provider a 30-site scavenger hunt.
+
+So, when adding anything per-product:
+
+- **Never write a new `=== "github"` / `=== "gitlab"` comparison.** If you are
+  reaching for one, the value belongs in a `Record<ForgeKind, …>` (data) or
+  behind a provider method (behaviour).
+- **Put the table in `packages/shared`** when the renderer needs it too.
+  `renderer-does-not-import-main` blocks the main-side tables, and a
+  renderer-local copy is how `FORGE_CLI` ended up with two spellings.
+- **One table per question, not per screen.** `KIND_LABEL` and `FORGE_LABELS`
+  are the same map in the same directory, because each new screen added its own.
 
 ## GitLab specifics
 
@@ -355,13 +453,12 @@ provider or reach a real forge.
 - **Clone and fork are gated too, but on the SaaS host.** They used to be the
   documented exception; `forgeSaasBlock`'s `host_off` closed that, and
   `status.ts` stopped probing a disabled host at all, so "off" now means every
-  reader. Note *which* host they ask about: both reach a provider through
-  `ForgeRepoRegistry.get(kind)` with no hostname, so the gate names the SaaS
-  instance. `runClone` is the seam — it does carry `source.hostname` and now
-  uses it (picking by kind alone cloned a same-named stranger's project from
-  gitlab.com), so a CLI clone can target a self-managed host whose own switch
-  was never consulted. Closing that means teaching the dialogs hostnames, not
-  widening the gate.
+  reader. Note *which* host they ask about: the dialogs pick a provider by
+  kind alone, so the gate names the SaaS instance. `runClone` is the seam —
+  it does carry `source.hostname` and now uses it (picking by kind alone
+  cloned a same-named stranger's project from gitlab.com), so a CLI clone can
+  target a self-managed host whose own switch was never consulted. Closing
+  that means teaching the dialogs hostnames, not widening the gate.
   - **`ForkService` has the identical bug, still open.** `ForkRequest.hostname`
     is a required field that `fork()` drops on the floor at `forges.get(input.host)`,
     so forking a self-managed project runs against gitlab.com — `status.ts`

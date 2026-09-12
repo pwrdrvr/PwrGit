@@ -9299,6 +9299,14 @@ body.is-col-resizing {
   color: var(--text-muted);
 }
 
+/* Peer actions inside a field's control column, which is otherwise a vertical
+   stack — two buttons that offer the same kind of thing belong side by side. */
+.settings-field__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* Small inline action inside a settings field's help text. `.settings-button`
    is NOT redefined here — it already exists below, with its --primary and
    --danger variants; a second block at equal specificity would lose every
@@ -9314,8 +9322,15 @@ body.is-col-resizing {
   padding: 3px 6px;
   vertical-align: baseline;
 }
-.settings-inline-button:hover {
+.settings-inline-button:hover:not([aria-disabled="true"]) {
   background: var(--bg-panel-hover);
+}
+/* Busy is aria-disabled, not `disabled` (see styles/AGENTS.md), so it has to
+   be painted here — otherwise the control hovers and depresses like a live
+   button while its guarded handler drops the click. */
+.settings-inline-button[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* Switch */
@@ -10105,6 +10120,15 @@ button.agent-auth-node {
   color: var(--danger-text);
 }
 .delete-profile__confirm {
+  margin: 16px 0 0;
+}
+
+/* A single labelled `.field` inside a dialog: `.field`'s own bottom margin
+   would otherwise push whatever follows the input away. `.field .modal__input`
+   (above) already zeroes the input's, so this only needs the outer margin.
+   Shared rather than per-dialog — `.delete-profile__confirm` re-solved it once
+   already, at a different value. */
+.modal__field {
   margin: 16px 0 0;
 }
 

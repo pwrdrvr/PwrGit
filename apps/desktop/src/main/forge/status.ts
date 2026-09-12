@@ -1,4 +1,5 @@
 import {
+  FORGE_CLI,
   FORGE_SAAS_HOST,
   forgeAllHostsOff,
   type ForgeHostStatus,
@@ -58,13 +59,9 @@ export type ForgeProbeTarget = {
   assumed?: boolean;
 };
 
-/** The binary each forge speaks through. One source: this value reaches the
- *  user as a command they are told to run, so a second copy that drifts would
- *  print a command naming a CLI the app never invokes. */
-export const FORGE_CLI: Readonly<Record<ForgeKind, string>> = {
-  github: "gh",
-  gitlab: "glab"
-};
+/** Re-exported from shared, which owns the one copy: the settings pane names
+ *  the CLI too and the renderer may not import from main. */
+export { FORGE_CLI };
 
 export function cliFor(kind: ForgeKind): string {
   return FORGE_CLI[kind];
