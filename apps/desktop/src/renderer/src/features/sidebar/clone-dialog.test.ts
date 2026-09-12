@@ -129,12 +129,47 @@ describe("clone dialog filtering", () => {
       hostname: "gitlab.com",
       nameWithOwner: "huntharo/x-code-clone"
     });
+  });
+
+  it("places a self-managed instance from the host list, not its name", () => {
+    // `gitlab.*` was once read as GitLab here on the strength of the name.
+    // Main never agreed — it enumerates hosts from `gh`/`glab` sign-ins and
+    // from what the user added in Settings → Forges — so a host nobody was
+    // signed in to got a GitLab clone URL from this dialog while the settings
+    // pane showed no row for it. The list now arrives over `forge:hosts`
+    // (`useForgeHostMap`), and it is the only thing that places the host.
+    const url = "git@gitlab.acme.io:acme/platform/billing.git";
+    expect(exactRepository(url)).toEqual({
+      host: "other",
+      hostname: "gitlab.acme.io",
+      nameWithOwner: "acme/platform/billing"
+    });
     expect(
-      exactRepository("git@gitlab.acme.io:acme/platform/billing.git")
+      exactRepository(url, "github", { "gitlab.acme.io": "gitlab" })
     ).toEqual({
       host: "gitlab",
       hostname: "gitlab.acme.io",
       nameWithOwner: "acme/platform/billing"
+    });
+  });
+
+  it("keeps a self-managed hostname on an unverified placeholder", () => {
+    // The placeholder's clone URLs are what the user actually runs when the
+    // CLI cannot confirm the repo. It takes the already-resolved repository
+    // rather than the raw text precisely so this cannot be rebuilt from a bare
+    // slug — which resolves to the forge's SaaS hostname and would hand the
+    // user gitlab.com's repository of that name.
+    expect(
+      unverifiedCloneRepository(
+        exactRepository("git@gitlab.acme.io:acme/platform/billing.git", "gitlab", {
+          "gitlab.acme.io": "gitlab"
+        })
+      )
+    ).toMatchObject({
+      host: "gitlab",
+      hostname: "gitlab.acme.io",
+      sshUrl: "git@gitlab.acme.io:acme/platform/billing.git",
+      httpsUrl: "https://gitlab.acme.io/acme/platform/billing.git"
     });
   });
 
@@ -190,7 +225,9 @@ describe("clone dialog filtering", () => {
   });
 
   it("builds direct clone metadata without a forge CLI lookup", () => {
-    expect(unverifiedCloneRepository("huntharo/x-code-clone")).toEqual({
+    expect(
+      unverifiedCloneRepository(exactRepository("huntharo/x-code-clone"))
+    ).toEqual({
       name: "x-code-clone",
       owner: "huntharo",
       nameWithOwner: "huntharo/x-code-clone",
@@ -208,7 +245,7 @@ describe("clone dialog filtering", () => {
 
   it("builds unverified metadata against the chosen forge", () => {
     expect(
-      unverifiedCloneRepository("acme/api", "gitlab")
+      unverifiedCloneRepository(exactRepository("acme/api", "gitlab"))
     ).toMatchObject({
       host: "gitlab",
       hostname: "gitlab.com",
@@ -228,5 +265,14 @@ describe("clone dialog filtering", () => {
     expect(cloneRepositoryAtSelection([repositories[0]!], 1)).toBe(
       repositories[0]
     );
+  });
+});
+
+describe("unverifiedCloneRepository", () => {
+  it("is null for input that names no repository", () => {
+    // The dialog hands it whatever `exactRepository` produced, which is null
+    // for a local path or junk — the placeholder must not invent a slug.
+    expect(unverifiedCloneRepository(null)).toBeNull();
+    expect(unverifiedCloneRepository(exactRepository("not a repo"))).toBeNull();
   });
 });

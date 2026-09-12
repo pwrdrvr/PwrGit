@@ -1,5 +1,8 @@
 import {
   err,
+  forgeBlockAt,
+  forgeCapabilities,
+  forgeProductOrAssumed,
   forgeWebUrl,
   ok,
   type CloneProtocol,
@@ -19,7 +22,6 @@ import type {
   ForgeRepoProvider,
   ForgeRepoRegistry
 } from "../forge/repo-provider";
-import { capabilitiesFor } from "../forge/capabilities";
 import type { ForgeStatusService } from "../forge/status";
 import type { GitExec } from "./dugite";
 import { requireExit0 } from "./dugite";
@@ -28,6 +30,7 @@ import {
   normalizeRepositoryPath,
   operationWasCanceled,
   removePartialCheckout,
+  unsupportedHostMessage,
   validateCheckoutDestination
 } from "./clone-service";
 import type { RepoIndexer } from "./repo-indexer";
@@ -58,7 +61,7 @@ export type ForkRequest = {
 };
 
 function forgeName(host: ForgeHost): string {
-  return host === "gitlab" ? "GitLab" : "GitHub";
+  return forgeProductOrAssumed(host).label;
 }
 
 /** The candidates for `upstream`, best answer first.
@@ -130,6 +133,10 @@ export class ForkService {
     profileId: string;
     source: string;
     host: ForgeHost;
+    /** The instance the source lives on. Without it a self-managed project is
+     *  preflighted against the forge's SaaS instance, which answers about a
+     *  different repository that shares the slug. */
+    hostname?: string;
     targetOwner?: string;
     targetName?: string;
   }): Promise<Result<ForkPreflight>> {
@@ -148,11 +155,11 @@ export class ForkService {
         message: "Enter a repository as owner/name."
       });
     }
-    const provider = this.forges.get(input.host);
+    const provider = this.forges.get(input.host, input.hostname);
     if (provider === null) {
       return this.blocked(source, input.targetOwner, {
         code: "unsupported_host",
-        message: `PwrGit cannot fork on ${input.host} yet.`
+        message: unsupportedHostMessage("fork")
       });
     }
     const status = (await this.forgeStatus.list()).find(
@@ -164,7 +171,22 @@ export class ForkService {
         message: `Forking on ${forgeName(input.host)} needs the ${forgeName(input.host)} CLI.`
       });
     }
-    if (!status.loggedIn) {
+    // The host the provider will actually talk to, not the forge summary: a
+    // machine signed in only to a self-managed instance reads merge requests
+    // fine and still has no credential for gitlab.com. `provider.hostname` is
+    // literally that host now that the request carries one, so this asks about
+    // the instance the fork is really going to rather than assuming the SaaS
+    // one. A host the user switched OFF is reported separately — telling them
+    // to sign in to something they are already signed in to names a remedy
+    // that cannot work.
+    const block = forgeBlockAt(status, provider.hostname);
+    if (block === "host_off") {
+      return this.blocked(source, input.targetOwner, {
+        code: "login_required",
+        message: `${provider.hostname} is switched off in Settings → Forges.`
+      });
+    }
+    if (block !== null) {
       return this.blocked(source, input.targetOwner, {
         code: "login_required",
         message: `Sign in with the ${forgeName(input.host)} CLI to fork.`
@@ -240,15 +262,19 @@ export class ForkService {
   /** Accounts a fork can be created in on one forge, or none when its CLI
    *  cannot answer. Best-effort: an empty list disables the picker rather
    *  than failing the dialog. */
-  async targets(host: ForgeKind): Promise<Result<ForgeOwner[]>> {
-    const provider = this.forges.get(host);
+  async targets(
+    host: ForgeKind,
+    hostname?: string
+  ): Promise<Result<ForgeOwner[]>> {
+    // A fork lands on the instance the source lives on, so the accounts
+    // offered must come from that instance — the SaaS provider would list the
+    // user's github.com/gitlab.com orgs for an Enterprise source.
+    const provider = this.forges.get(host, hostname);
     if (provider === null) return ok([]);
     const status = (await this.forgeStatus.list()).find(
       (candidate) => candidate.kind === host
     );
-    if (status === undefined || !status.installed || !status.loggedIn) {
-      return ok([]);
-    }
+    if (forgeBlockAt(status, provider.hostname) !== null) return ok([]);
     try {
       return ok(await provider.owners());
     } catch {
@@ -288,12 +314,38 @@ export class ForkService {
         message: `Not a usable fork name: ${input.targetOwner}/${input.targetName}`
       });
     }
-    const provider = this.forges.get(input.host);
+    // `input.hostname` is already carried by `repo:fork` and was previously
+    // used only to build remote URLs — so the fork itself was created on the
+    // SaaS instance while the checkout's remotes pointed at the self-managed
+    // one.
+    const provider = this.forges.get(input.host, input.hostname);
     if (provider === null) {
       return err({
         kind: "remote",
         code: "unsupported_host",
-        message: `PwrGit cannot fork on ${input.host} yet.`
+        message: unsupportedHostMessage("fork")
+      });
+    }
+    // `preflight` and `targets` both ask this, and this is the one that WRITES
+    // — it creates a repository on the forge. Resolution and permission are
+    // different questions: `get` answers which instance, the switch answers
+    // whether we may talk to it, and the dialog cannot be relied on to have
+    // asked (its `forge_host_off` is a code the clone dialog deliberately
+    // swallows).
+    const forkStatus = (await this.forgeStatus.list()).find(
+      (candidate) => candidate.kind === input.host
+    );
+    const forkBlock = forgeBlockAt(forkStatus, provider.hostname);
+    if (forkBlock !== null) {
+      return err({
+        kind: "remote",
+        code: forkBlock === "host_off" ? "forge_host_off" : "forge_login_required",
+        message:
+          forkBlock === "host_off"
+            ? `${provider.hostname} is switched off in Settings → Forges.`
+            : forkBlock === "cli_missing"
+              ? `Forking on ${forgeName(input.host)} needs the ${forgeName(input.host)} CLI.`
+              : `Sign in with the ${forgeName(input.host)} CLI to fork.`
       });
     }
 
@@ -318,7 +370,7 @@ export class ForkService {
         targetName: input.targetName,
         defaultBranchOnly:
           input.defaultBranchOnly &&
-          capabilitiesFor(provider.host).forkDefaultBranchOnly,
+          forgeCapabilities(provider.host).forkDefaultBranchOnly,
         onPhase: (phase) => {
           // Both providers enter awaiting_fork only after the remote fork
           // exists: GitHub is reading it back, while GitLab is waiting for its
@@ -508,10 +560,11 @@ export class ForkService {
     targetSlug: string,
     host: ForgeHost
   ): Result<Repo> {
+    const product = forgeProductOrAssumed(host);
     return this.canceled(
       signal,
-      host === "gitlab"
-        ? `Forked to ${targetSlug}, but the local checkout was canceled. GitLab may still be finishing the fork.`
+      product.forkCompletesAsynchronously
+        ? `Forked to ${targetSlug}, but the local checkout was canceled. ${product.label} may still be finishing the fork.`
         : `Forked to ${targetSlug}, but the local checkout was canceled.`
     );
   }

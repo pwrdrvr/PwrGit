@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import type {
   PwrGitError,
-  PullProgressPhase,
   RemoteDivergence,
   Repo,
   Result,
@@ -9,9 +8,12 @@ import type {
   Worktree,
   WorktreeState
 } from "@pwrgit/shared";
-import { dispatch, subscribe } from "../../lib/pwrgit";
+import { dispatch } from "../../lib/pwrgit";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { showErrorToast } from "../../lib/toast";
+import { remoteActivityPhaseLabel } from "../remote/remote-activity";
+import { useRemoteActivityPopover } from "../remote/useRemoteActivityPopover";
+import { useRemoteActivityFor } from "../../state/useRemoteActivity";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
 import { GitLfsChip } from "./GitLfsChip";
 import { PullDivergenceDialog } from "./PullDivergenceDialog";
@@ -70,22 +72,31 @@ function defaultBranchDrift(
 }
 
 type Busy = "fetch" | "pull" | "push" | null;
-type RecoveryBusy = "rebase" | "reset" | null;
 
-export function pullPhaseLabel(phase: PullProgressPhase): string {
-  switch (phase) {
-    case "fetch":
-      return "Fetching updates…";
-    case "prepare":
-      return "Preparing local changes…";
-    case "fast_forward":
-      return "Fast-forwarding and checking out files…";
-    case "reapply":
-      return "Reapplying local changes…";
-    case "refresh":
-      return "Finishing refresh…";
-  }
-}
+/**
+ * Hover/focus handlers shared by the sync chip and the action buttons.
+ *
+ * Structural rather than `ComponentProps<"button">`, and `currentTarget` is
+ * all the popover needs to anchor itself. The chip builds the same shape
+ * inline: it is not focusable and cannot be tabbed out of, so it takes only
+ * the pointer half, and `ref` here is typed for the buttons this factory
+ * actually spreads onto.
+ */
+type StatusTriggerProps = {
+  /** Only ever on the one busy button, so one ref serves all three: it is how
+   * the popover finds the button when no event announces it. */
+  ref?: RefObject<HTMLButtonElement | null>;
+  onMouseEnter?: (event: { currentTarget: HTMLElement }) => void;
+  onMouseLeave?: () => void;
+  onFocus?: (event: { currentTarget: HTMLElement }) => void;
+  onBlur?: () => void;
+  onKeyDown?: (event: {
+    key: string;
+    shiftKey: boolean;
+    preventDefault: () => void;
+  }) => void;
+};
+type RecoveryBusy = "rebase" | "reset" | null;
 
 export function WorktreeHeader({
   repo,
@@ -97,7 +108,6 @@ export function WorktreeHeader({
   state: WorktreeState | null;
 }) {
   const [busy, setBusy] = useState<Busy>(null);
-  const [pullPhase, setPullPhase] = useState<PullProgressPhase>("fetch");
   const [divergence, setDivergence] = useState<RemoteDivergence | null>(null);
   const [recoveryBusy, setRecoveryBusy] = useState<RecoveryBusy>(null);
   const [sshRecovery, setSshRecovery] = useState<SshRemoteRecovery | null>(null);
@@ -106,6 +116,8 @@ export function WorktreeHeader({
   const pullOperation = useRef(0);
   const recoveryInFlight = useRef<string | null>(null);
   const recoveryOperation = useRef(0);
+  const cardButton = useRef<HTMLButtonElement>(null);
+  const cardChip = useRef<HTMLSpanElement>(null);
 
   // Header instances stay mounted while selection changes, so an operation
   // started for one worktree must never surface a dialog or flash on another.
@@ -115,21 +127,20 @@ export function WorktreeHeader({
     recoveryOperation.current += 1;
     recoveryInFlight.current = null;
     setBusy(null);
-    setPullPhase("fetch");
     setDivergence(null);
     setRecoveryBusy(null);
     setSshRecovery(null);
   }, [worktree.id]);
 
-  useEffect(
-    () =>
-      subscribe("worktree:pullProgress", (event) => {
-        if (event.worktreeId === activeWorktreeId.current) {
-          setPullPhase(event.phase);
-        }
-      }),
-    []
-  );
+  // Phase, Git's output and the cancel all ride on one live record, scoped to
+  // this checkout: an operation started in another repository never reports
+  // itself here (it surfaces in the toast instead).
+  const activity = useRemoteActivityFor(worktree.id);
+  // The two controls the card hangs from. An operation can start under a
+  // pointer that never moves — pressing Fetch is the plain case — and then no
+  // enter event announces the trigger, so the popover reads these instead.
+  // Button first: it is the thing the user aimed at.
+  const status = useRemoteActivityPopover(activity, [cardButton, cardChip]);
 
   const showFlash = (chip: Chip, ms: number): void => {
     setFlash(chip);
@@ -139,7 +150,15 @@ export function WorktreeHeader({
   // Failures surface twice on purpose: the inline chip flash (collapsed away
   // in narrow headers) AND an error toast, which is visible at any width and
   // links to the Logs window.
+  //
+  // A cancel takes neither. The user stopped it themselves a second ago and
+  // is watching the button they pressed; dressing their own decision as a
+  // failure card is noise, and an error toast would outlive the gesture.
   const flashError = (kind: string, error: PwrGitError): void => {
+    if (error.code === "canceled") {
+      showFlash({ text: `${kind.toLowerCase()} canceled`, tone: "muted" }, 2000);
+      return;
+    }
     const firstLine = error.message.split("\n")[0];
     showFlash({ text: firstLine.slice(0, 64), tone: "warn" }, 3200);
     showErrorToast({
@@ -174,7 +193,6 @@ export function WorktreeHeader({
   const onPull = (): void => {
     const worktreeId = id;
     const operation = ++pullOperation.current;
-    setPullPhase("fetch");
     setBusy("pull");
     void dispatch("remote:pull", { worktreeId }).then(async (result) => {
       if (!result.ok) {
@@ -292,11 +310,94 @@ export function WorktreeHeader({
     );
   };
 
-  const pullLabel = pullPhaseLabel(pullPhase);
+  // What is running, from either side: `busy` covers this header's own
+  // dispatch before main has registered it, the activity covers an operation
+  // started somewhere else against the same checkout (the sidebar, a second
+  // window). Either one makes the matching button busy.
+  const running: Busy = busy ?? activity?.kind ?? null;
+  const IDLE_LABEL = {
+    fetch: "Fetching…",
+    pull: "Pulling…",
+    push: "Pushing…"
+  } as const;
+  // The phase alone, with no counter in it: the chip is a live region, and a
+  // label carrying seconds would re-announce every second. The detail — how
+  // long, how quiet, what Git last said — lives in the status popover.
+  const busyLabel = (kind: Exclude<Busy, null>): string =>
+    activity !== null && activity.kind === kind
+      ? `${remoteActivityPhaseLabel(activity.phase)}…`
+      : IDLE_LABEL[kind];
   const chip =
-    busy === "pull"
-      ? { text: pullLabel, tone: "muted" as const }
+    running !== null
+      ? { text: busyLabel(running), tone: "muted" as const }
       : (flash ?? baseChip(state, worktree));
+  // Hovering the working control is how the status card is summoned, so the
+  // handlers ride on whichever button this operation belongs to — and on the
+  // progress chip beside them, which is the wider target and the thing a user
+  // is already looking at when they wonder what it is doing.
+  //
+  // They go on from the first busy render, not from the record's arrival,
+  // because clicking Pull leaves the pointer inside the button: the only
+  // `mouseenter` that button will ever see fires when its glyph swaps for the
+  // spinner, one or more renders before main reports the operation. A trigger
+  // that is not listening yet at that moment loses the hover for good. The
+  // popover holds a hover with nothing to report and opens when the record
+  // lands (see useRemoteActivityPopover).
+  //
+  // Widened in time only, never in scope: `running` also answers to this
+  // header's own `busy`, so a locally dispatched fetch can be what makes this
+  // button busy while the live record for the same checkout is a pull started
+  // somewhere else. Hanging that pull's card off the Fetch button would name
+  // an operation this control has nothing to do with, so once a record exists
+  // it still has to be this button's own.
+  const carriesCard = (kind: Exclude<Busy, null>): boolean =>
+    activity !== null && activity.kind === kind;
+  // The same button, one step earlier: whatever already carries the card, plus
+  // the gap before this operation has a record to carry.
+  const couldCarryCard = (kind: Exclude<Busy, null>): boolean =>
+    carriesCard(kind) || (running === kind && activity === null);
+  const statusTrigger = (kind: Exclude<Busy, null>): StatusTriggerProps =>
+    !couldCarryCard(kind)
+      ? {}
+      : {
+          ref: cardButton,
+          onMouseEnter: (event) => status.open(event.currentTarget),
+          onMouseLeave: status.close,
+          onFocus: (event) => status.open(event.currentTarget),
+          onBlur: status.close,
+          // The pointer reaches Cancel by moving into the card; Tab is the
+          // keyboard's equivalent, the same handoff `GraphRow` makes into the
+          // commit context card. Without it Tab lands on Pull, blurs the
+          // trigger, and takes the card away — leaving the one control that
+          // stops a wedged fetch reachable by mouse only.
+          onKeyDown: (event) => {
+            if (event.key === "Tab" && !event.shiftKey && status.focusFirst()) {
+              event.preventDefault();
+            }
+          }
+        };
+  /**
+   * A native tooltip everywhere the status card is NOT coming — the two must
+   * never both appear, but a button with neither is worse than either.
+   *
+   * That is `carriesCard`, not `couldCarryCard`: in the gap before the record
+   * arrives the button is already listening for the hover that will summon a
+   * card, and the title is what covers exactly that gap. The two cannot
+   * overlap on screen because the record that lets the card open is the same
+   * record that drops this attribute, in one render.
+   *
+   * `.wt-btn__label` is `display:none` in the narrow header, so this is the
+   * only text left there; dropping it for the whole of a sub-second fetch, or
+   * for the gap before main registers the operation, left a spinning button
+   * that explained nothing.
+   */
+  const busyTitle = (
+    kind: Exclude<Busy, null>,
+    idle: string
+  ): { title?: string } =>
+    carriesCard(kind)
+      ? {}
+      : { title: running === kind ? busyLabel(kind) : idle };
   const dirty = state?.dirty ?? worktree.dirty;
   const behind = state?.behind ?? worktree.behind;
   const drift = defaultBranchDrift(state, worktree);
@@ -319,20 +420,32 @@ export function WorktreeHeader({
         />
         <span style={{ flex: 1 }} />
         {/* Left of the sync chip, which stays adjacent to the buttons it maps
-            onto. Hidden mid-pull so the progress label keeps the width it
+            onto. Hidden while ANY remote operation runs (not just a pull, as
+            it once was) so the progress label keeps the width it
             ellipsizes into; on width it outlives the sync chip (see the
             container queries — ↓behind has the Pull accent, drift has nothing
             else). */}
-        {drift !== null && busy !== "pull" && (
+        {drift !== null && running === null && (
           <span className="sync-chip sync-chip--drift" title={drift.title}>
             {drift.text}
           </span>
         )}
         <span
+          ref={cardChip}
           className={`sync-chip sync-chip--${chip.tone}${
-            busy === "pull" ? " sync-chip--progress" : ""
+            running !== null ? " sync-chip--progress" : ""
           }`}
-          role={busy === "pull" ? "status" : undefined}
+          role={running !== null ? "status" : undefined}
+          // Pointer only: the chip is not focusable, and making a live status
+          // a tab stop would buy the keyboard nothing the working button below
+          // does not already offer.
+          {...(running === null || !couldCarryCard(running)
+            ? {}
+            : {
+                onMouseEnter: (event: { currentTarget: HTMLElement }) =>
+                  status.open(event.currentTarget),
+                onMouseLeave: status.close
+              })}
         >
           {chip.text}
         </span>
@@ -360,34 +473,37 @@ export function WorktreeHeader({
           <button
             className="wt-btn"
             onClick={() => {
-              if (busy !== null) return;
+              if (running !== null) return;
               onFetch();
             }}
-            aria-disabled={busy !== null}
-            aria-label="Fetch"
-            aria-busy={busy === "fetch"}
-            /* The label span is display:none in the narrow header, so this is
-               the only text left — it has to track busy, as Pull's does. */
-            title={busy === "fetch" ? "Fetching…" : "Fetch"}
+            aria-disabled={running !== null}
+            aria-label={running === "fetch" ? busyLabel("fetch") : "Fetch"}
+            aria-busy={running === "fetch"}
+            /* Title comes from busyTitle: a button that carries the status
+               card gets none, because a native tooltip would cover the card
+               it summons. */
+            {...busyTitle("fetch", "Fetch")}
+            {...statusTrigger("fetch")}
           >
             <RefreshGlyph />
             <span className="wt-btn__label">
-              {busy === "fetch" ? "Fetching…" : "Fetch"}
+              {running === "fetch" ? busyLabel("fetch") : "Fetch"}
             </span>
           </button>
 
           <button
             className={`wt-btn wt-btn--pull${behind > 0 ? " is-behind" : ""}`}
             onClick={() => {
-              if (busy !== null) return;
+              if (running !== null) return;
               onPull();
             }}
-            aria-disabled={busy !== null}
-            aria-label={busy === "pull" ? pullLabel : "Pull"}
-            aria-busy={busy === "pull"}
-            title={busy === "pull" ? pullLabel : "Pull · fetch + fast-forward"}
+            aria-disabled={running !== null}
+            aria-label={running === "pull" ? busyLabel("pull") : "Pull"}
+            aria-busy={running === "pull"}
+            {...busyTitle("pull", "Pull · fetch + fast-forward")}
+            {...statusTrigger("pull")}
           >
-            {busy === "pull" ? (
+            {running === "pull" ? (
               <span className="wt-btn__spinner" />
             ) : (
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -397,22 +513,23 @@ export function WorktreeHeader({
               </svg>
             )}
             <span className="wt-btn__label">
-              {busy === "pull" ? pullLabel : "Pull"}
+              {running === "pull" ? busyLabel("pull") : "Pull"}
             </span>
           </button>
 
           <button
             className="wt-btn"
             onClick={() => {
-              if (busy !== null) return;
+              if (running !== null) return;
               onPush();
             }}
-            aria-disabled={busy !== null}
-            aria-label="Push"
-            aria-busy={busy === "push"}
-            title={busy === "push" ? "Pushing…" : "Push"}
+            aria-disabled={running !== null}
+            aria-label={running === "push" ? busyLabel("push") : "Push"}
+            aria-busy={running === "push"}
+            {...busyTitle("push", "Push")}
+            {...statusTrigger("push")}
           >
-            {busy === "push" ? (
+            {running === "push" ? (
               <span className="wt-btn__spinner" />
             ) : (
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -422,10 +539,11 @@ export function WorktreeHeader({
               </svg>
             )}
             <span className="wt-btn__label">
-              {busy === "push" ? "Pushing…" : "Push"}
+              {running === "push" ? busyLabel("push") : "Push"}
             </span>
           </button>
         </div>
+        {status.node}
         <WorktreeMenu
           className="kebab--toolbar"
           worktree={worktree}

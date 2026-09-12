@@ -16,7 +16,7 @@ export function registerCloneHandlers(
     clones.searchSources(req.profileId, req.query, req.host)
   );
   bus.register("repo:checkCloneSource", (req) =>
-    clones.checkSource(req.profileId, req.nameWithOwner, req.host)
+    clones.checkSource(req.profileId, req.nameWithOwner, req.host, req.hostname)
   );
   bus.register("repo:checkLocalCloneSource", (req) =>
     clones.checkLocalSource(req.profileId, req.path)

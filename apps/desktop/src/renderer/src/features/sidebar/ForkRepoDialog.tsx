@@ -1,17 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type {
-  CloneDestination,
-  CloneCatalog,
-  CloneProtocol,
-  CloneRepository,
-  ForgeKind,
-  ForgeOwner,
-  ForkPreflight,
-  ForkProgress,
-  Profile,
-  Repo
+import {
+  forgeLabel,
+  forgeProductOrAssumed,
+  type CloneDestination,
+  type CloneCatalog,
+  type CloneProtocol,
+  type CloneRepository,
+  type ForgeKind,
+  type ForgeOwner,
+  type ForkPreflight,
+  type ForkProgress,
+  type Profile,
+  type Repo
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { useForgeHostMap } from "../../lib/useForgeHostMap";
 import { useCloneSearch } from "./useCloneSearch";
 import {
   cloneDestinationLabel,
@@ -36,7 +39,9 @@ import {
   supportsDefaultBranchOnly,
   repositoriesOnHost,
   sourceEmptyMessage,
-  statusFor
+  statusFor,
+  forgeCanAnswerAnywhere,
+  forgeCanAnswerDialog
 } from "./fork-dialog";
 import { GitForkIcon, RepoIdentityChips } from "./RepoIdentityMarks";
 
@@ -153,7 +158,7 @@ export function ForkRepoDialog({
   // Only forges whose CLI is actually usable are offered — a host toggle that
   // leads straight to "install the CLI" is a dead end presented as a choice.
   const usableHosts = forges
-    .filter((status) => status.installed && status.loggedIn)
+    .filter((status) => forgeCanAnswerAnywhere(status))
     .map((status) => status.kind);
 
   useEffect(() => {
@@ -168,6 +173,16 @@ export function ForkRepoDialog({
   // may name a different forge than the picker, and fetching for the picker
   // then filtering by the source left the list empty.
   const ownersHost = selectedSource?.host ?? host;
+  // Resolved to an instance up front rather than left null until a source is
+  // picked. Null-then-`github.com` is the SAME instance spelled two ways, and
+  // it re-ran this effect on the first selection of any SaaS repository — for
+  // an identical provider, since the registry pre-seeds the SaaS entry. The
+  // `setForkOwners([])` below then emptied the owner picker, which nulled the
+  // fork target, which re-ran preflight twice more: eight `gh` spawns and a
+  // spurious "Sign in with the gh CLI to choose a fork target."
+  const ownersHostname =
+    selectedSource?.hostname ??
+    (ownersHost === "other" ? null : defaultHostname(ownersHost));
   useEffect(() => {
     if (ownersHost === "other") {
       setForkOwners([]);
@@ -175,17 +190,27 @@ export function ForkRepoDialog({
     }
     let active = true;
     setForkOwners([]);
-    void dispatch("repo:forkTargets", { host: ownersHost }).then((result) => {
+    void dispatch("repo:forkTargets", {
+      host: ownersHost,
+      // A fork lands on the instance the source lives on, so the accounts
+      // offered must come from there — without the hostname main lists the
+      // user's github.com/gitlab.com orgs for an Enterprise source.
+      ...(ownersHostname === null ? {} : { hostname: ownersHostname })
+    }).then((result) => {
       if (active && result.ok) setForkOwners(result.value);
     });
     return () => {
       active = false;
     };
-  }, [ownersHost]);
+  }, [ownersHost, ownersHostname]);
 
+  // A pasted URL names its own instance, but only main knows which forge runs
+  // there — see `useForgeHostMap`. Without the list a self-managed host reads
+  // as `other`, which has no provider to fork with.
+  const forgeHosts = useForgeHostMap();
   const exact = useMemo(
-    () => exactRepository(sourceQuery, host),
-    [sourceQuery, host]
+    () => exactRepository(sourceQuery, host, forgeHosts),
+    [sourceQuery, host, forgeHosts]
   );
 
   // Debounced, and only on what was typed. The catalog this replaced listed
@@ -207,6 +232,7 @@ export function ForkRepoDialog({
   // for as long as the dialog stayed open, two forge calls per lap.
   const preflightSource = selectedSource?.nameWithOwner ?? null;
   const preflightHost = selectedSource?.host ?? null;
+  const preflightHostname = selectedSource?.hostname ?? null;
   const preflightTargetName =
     forkNameTouched && debouncedForkName.trim() !== ""
       ? debouncedForkName.trim()
@@ -227,6 +253,10 @@ export function ForkRepoDialog({
       profileId: profile.id,
       source: selectedSource.nameWithOwner,
       host: selectedSource.host,
+      // Without the instance, a self-managed source is preflighted against the
+      // forge's SaaS host — reporting a different repository's fork state, and
+      // then creating the fork there.
+      ...(preflightHostname === null ? {} : { hostname: preflightHostname }),
       ...(targetOwner === null ? {} : { targetOwner: targetOwner.login }),
       // Only once the user has actually named it: before that the service's
       // default (the source's name) is the right guess, and sending an empty
@@ -266,6 +296,7 @@ export function ForkRepoDialog({
   }, [
     preflightSource,
     preflightHost,
+    preflightHostname,
     preflightTargetName,
     targetOwner?.login,
     profile.id
@@ -470,7 +501,7 @@ export function ForkRepoDialog({
                       disabled={busy}
                       onClick={() => selectHost(candidate)}
                     >
-                      {candidate === "gitlab" ? "GitLab" : "GitHub"}
+                      {forgeLabel(candidate)}
                     </button>
                   ))}
                 </span>
@@ -730,7 +761,14 @@ export function ForkRepoDialog({
                       <strong>Copy the default branch only</strong>
                       <small>
                         A smaller fork —{" "}
-                        <code>gh repo fork --default-branch-only</code>
+                        {/* The CLI is the source host's, not a literal: this
+                            block is gated on the `forkDefaultBranchOnly`
+                            capability, never on a kind, so any product that
+                            sets it would otherwise be shown GitHub's command. */}
+                        <code>
+                          {forgeProductOrAssumed(sourceHost).cli} repo fork
+                          --default-branch-only
+                        </code>
                       </small>
                     </span>
                   </label>
@@ -745,15 +783,17 @@ export function ForkRepoDialog({
               <div className="clone-label">Clone with</div>
               <div className="clone-protocols">
                 {(["ssh", "https", "cli"] as const).map((candidate) => {
-                  const disabled =
-                    candidate === "cli" &&
-                    (forgeStatus?.installed !== true || !forgeStatus.loggedIn);
                   const slug =
                     preflight?.target.nameWithOwner ??
                     selectedSource?.nameWithOwner ??
                     "owner/name";
                   const hostname =
                     selectedSource?.hostname ?? defaultHostname(sourceHost);
+                  // The instance this fork would actually run against, so an
+                  // Enterprise-only sign-in is not told its CLI cannot answer.
+                  const disabled =
+                    candidate === "cli" &&
+                    !forgeCanAnswerDialog(forgeStatus, hostname);
                   const detail =
                     candidate === "ssh"
                       ? `git@${hostname}:${slug}.git`

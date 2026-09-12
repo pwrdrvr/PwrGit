@@ -37,6 +37,60 @@ the Electron build.
 
 ## Gotchas
 
+- **Tear down anything a Git process is blocked on BEFORE `handle.cleanup()`.**
+  `remote-activity.spec.ts` wedges a fetch against a `git://` socket it owns.
+  Git for Windows runs git behind a launcher, so terminating the process
+  PwrGit spawned can leave that grandchild alive, still blocked on the read
+  and still holding the stdio pipes it inherited — and `app.close()` waits on
+  those until Playwright's 60s test timeout. macOS and Linux pass either way,
+  so this only ever shows up on the Windows job.
+
+- **`hover()` cannot re-enter an element the pointer is already inside.** It
+  moves the mouse and nothing more: with the pointer already within the target,
+  Chromium dispatches a bare `mousemove` and no `mouseover`/`mouseout` at all,
+  so React's `onMouseEnter` never fires again. A click leaves the pointer on
+  the control it clicked, so `x.click()` followed later by `x.hover()` summons
+  nothing — and the failure reads as "element(s) not found" for whatever the
+  hover was supposed to open, pointing at the assertion rather than at the
+  hover. To genuinely re-enter, leave first (`page.mouse.move` onto an inert
+  element, asserting the old surface is gone) and then hover. This is what made
+  `remote-activity.spec.ts` flaky; see `features/remote/AGENTS.md` for the
+  app-side half.
+
+- **A second Electron app on the machine will steal the pointer.** Playwright's
+  Electron window is a real desktop window, so another suite launching windows
+  — a sibling worktree running its own e2e, a `pnpm dev` from PwrAgnt — takes
+  focus and Chromium fires a window-level `mouseleave` on whatever was hovered
+  and clears the hover state. The signature is unmistakable:
+  `document.querySelectorAll(":hover")` comes back **empty**, not pointing at
+  some other element. Any spec that leaves the pointer resting on something
+  across a wait can lose it that way. Before concluding a hover-dependent spec
+  is broken, check for another `electron`/`playwright` process
+  (`ps aux | grep -iE "[p]laywright|[E]lectron"`) and re-run alone; the
+  config's `retries: 1` exists to absorb exactly this, so reproduce with
+  `--retries=0` only on a quiet machine.
+
+- **A test that depends on where the pointer is left resting must take the
+  window off the real mouse first** — a third way to lose it, distinct from
+  both above: the hover state is neither stale nor empty, it has moved to
+  whatever sits under the *developer's own cursor*. The fix is
+  `setIgnoreMouseEvents(true)` through `app.evaluate`, as
+  `remote-activity.spec.ts`'s `ownThePointer` does.
+  Playwright's pointer is injected over CDP and never moves the host's cursor,
+  so the two coexist until Chromium recomputes hover after a layout change and
+  dispatches a synthetic "fake mouse move" at the position its input pipeline
+  last saw from the OS — i.e. wherever the developer's actual cursor is
+  sitting. That evicts the synthetic pointer from the control it was parked on:
+  `:hover` genuinely goes false and the feature correctly reacts to a pointer
+  that left. It cost about one run in four, with the window and the real cursor
+  in byte-identical positions every launch, so only the timing of the fake move
+  varies and **no amount of waiting fixes it** — an earlier attempt to settle
+  the window first looked clean over sixteen runs and then failed three in four.
+  `setIgnoreMouseEvents` stops the OS delivering mouse input to the window;
+  CDP injection is unaffected, so a fake move can only re-dispatch where
+  Playwright already is. Ordinary click-and-assert specs are unaffected; this
+  is for a test that reads hover state across a timer.
+
 - Specs run as **ESM** — use `import.meta.url` + `fileURLToPath`, not
   `__dirname`.
 - Confirms/alerts are **in-app** dialogs (not native), so drive them by clicking

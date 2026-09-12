@@ -1,10 +1,16 @@
-import type {
-  CloneRepository,
-  ForgeHost,
-  ForgeOwner,
-  ForgeStatus,
-  ForkPreflight,
-  ForkProgress
+import {
+  forgeAllHostsOff,
+  forgeBlockAt,
+  forgeCanAnswerSaas,
+  forgeProduct,
+  forgeProductOrAssumed,
+  forgeSaasBlock,
+  type CloneRepository,
+  type ForgeHost,
+  type ForgeOwner,
+  type ForgeStatus,
+  type ForkPreflight,
+  type ForkProgress
 } from "@pwrgit/shared";
 
 export const FORK_PROGRESS_LABELS: Record<ForkProgress["phase"], string> = {
@@ -110,15 +116,10 @@ export function cliProtocolLabel(host: CloneRepository["host"]): {
   label: string;
   detail: (nameWithOwner: string) => string;
 } {
-  if (host === "gitlab") {
-    return {
-      label: "GitLab CLI",
-      detail: (nameWithOwner) => `glab repo clone ${nameWithOwner}`
-    };
-  }
+  const product = forgeProductOrAssumed(host);
   return {
-    label: "GitHub CLI",
-    detail: (nameWithOwner) => `gh repo clone ${nameWithOwner}`
+    label: `${product.label} CLI`,
+    detail: (nameWithOwner) => `${product.cli} repo clone ${nameWithOwner}`
   };
 }
 
@@ -131,6 +132,44 @@ export function statusFor(
   host: ForgeHost
 ): ForgeStatus | undefined {
   return statuses.find((status) => status.kind === host);
+}
+
+/**
+ * Whether a forge can answer either dialog for one INSTANCE.
+ *
+ * It used to ask only about the SaaS host, because both dialogs reached their
+ * provider by kind alone and that is the instance a kind-only lookup gets.
+ * They now carry a hostname end to end, so asking the SaaS question greyed out
+ * the CLI protocol for a machine signed in only to a company host — refusing
+ * the operation main had just learned to do. Omit `hostname` only where the
+ * instance genuinely is the SaaS one.
+ *
+ * One helper so the host toggle, the protocol list and the empty message
+ * cannot disagree about it.
+ */
+export function forgeCanAnswerDialog(
+  status: ForgeStatus | undefined,
+  hostname?: string
+): boolean {
+  if (hostname === undefined) return forgeCanAnswerSaas(status);
+  return status !== undefined && forgeBlockAt(status, hostname) === null;
+}
+
+/**
+ * Whether a forge is worth offering in the host toggle at all.
+ *
+ * A different question from the one above: the toggle picks a FORGE, and an
+ * Enterprise-only sign-in makes GitHub perfectly usable while github.com
+ * itself is unauthenticated. Asking the SaaS question here removed the only
+ * forge such a user has.
+ */
+export function forgeCanAnswerAnywhere(status: ForgeStatus | undefined): boolean {
+  return (
+    status !== undefined &&
+    status.installed &&
+    status.loggedIn &&
+    !forgeAllHostsOff(status)
+  );
 }
 
 /** Whether the fork dialog should offer the default-branch-only switch. Read
@@ -172,10 +211,18 @@ export function sourceEmptyMessage(input: {
 }): string | null {
   if (input.catalogError !== null) return input.catalogError;
   if (!input.catalogLoaded) return "Checking which forges are signed in…";
-  if (input.status?.installed !== true) {
-    return `Install the ${input.cliLabel} to search.`;
+  // The SaaS instance specifically: that is the provider this search runs
+  // against, and a self-managed sign-in does not make it answerable.
+  const block = forgeSaasBlock(input.status);
+  if (block === "cli_missing") return `Install the ${input.cliLabel} to search.`;
+  if (block === "host_off") {
+    // They are signed in; they switched the host off. "Sign in" would name a
+    // remedy that cannot change this.
+    return `Turn this host on in Settings → Forges to search.`;
   }
-  if (!input.status.loggedIn) return `Sign in with the ${input.cliLabel} to search.`;
+  if (block === "signed_out") {
+    return `Sign in with the ${input.cliLabel} to search.`;
+  }
   if (input.query.trim() === "") {
     return input.owners.length === 0
       ? "Type a name to search, or paste owner/name."
@@ -191,7 +238,11 @@ export function sourceEmptyMessage(input: {
  *  wrong in the one place the user is choosing between them. */
 export function ownerKindLabel(owner: ForgeOwner): string {
   if (owner.kind === "user") return "personal account";
-  return owner.host === "gitlab" ? "group" : "organization";
+  // `OrAssumed`, matching `cliProtocolLabel` above: `ForgeOwner.host` is typed
+  // `ForgeKind` but the object is built in main and structured-cloned here, so
+  // a strict lookup would throw inside the owner-list render — unmounting the
+  // picker — where the ternary this replaced degraded to "organization".
+  return forgeProductOrAssumed(owner.host).organizationNoun;
 }
 
 /** The catalog rows that belong to the forge currently being browsed.

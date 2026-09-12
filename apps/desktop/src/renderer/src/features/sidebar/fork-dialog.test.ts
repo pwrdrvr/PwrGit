@@ -7,6 +7,8 @@ import type {
 } from "@pwrgit/shared";
 import {
   cliProtocolLabel,
+  forgeCanAnswerAnywhere,
+  forgeCanAnswerDialog,
   defaultForkTarget,
   defaultUpstream,
   forkAction,
@@ -56,13 +58,22 @@ const CAPS = {
 };
 
 const statuses: ForgeStatus[] = [
-  { kind: "github", cli: "gh", installed: true, loggedIn: true, capabilities: CAPS },
+  {
+    kind: "github",
+    cli: "gh",
+    installed: true,
+    loggedIn: true,
+    capabilities: CAPS,
+    hosts: [{ host: "github.com", enabled: true, loggedIn: true }]
+  },
   {
     kind: "gitlab",
     cli: "glab",
     installed: false,
     loggedIn: false,
-    capabilities: { ...CAPS, forkDefaultBranchOnly: false }
+    capabilities: { ...CAPS, forkDefaultBranchOnly: false },
+    // A missing CLI probes nothing, so it reports no hosts at all.
+    hosts: []
   }
 ];
 
@@ -284,9 +295,59 @@ describe("sourceEmptyMessage", () => {
       sourceEmptyMessage({
         ...base,
         catalogLoaded: true,
-        status: { ...signedIn, loggedIn: false }
+        // Signed out per host as well as in the summary: the message reads the
+        // host the search will actually run against, so flipping only the
+        // summary would describe a state main cannot report.
+        status: {
+          ...signedIn,
+          loggedIn: false,
+          hosts: [{ host: "github.com", enabled: true, loggedIn: false }]
+        }
       })
     ).toBe("Sign in with the GitHub CLI to search.");
+  });
+
+  it("names the switch, not a sign-in, for a host the user turned off", () => {
+    // They are signed in to gitlab.com and switched it off. "Sign in with the
+    // GitLab CLI" names a remedy that cannot change this.
+    expect(
+      sourceEmptyMessage({
+        ...base,
+        catalogLoaded: true,
+        cliLabel: "GitLab CLI",
+        status: {
+          ...signedIn,
+          kind: "gitlab",
+          cli: "glab",
+          loggedIn: false,
+          hosts: [{ host: "gitlab.com", enabled: false, loggedIn: false }]
+        }
+      })
+    ).toBe("Turn this host on in Settings → Forges to search.");
+  });
+
+  it("does not offer a gitlab.com search off a self-managed sign-in", () => {
+    // `loggedIn` is a forge-wide summary now, so a machine signed in only to a
+    // self-managed instance reports GitLab as connected. The search still runs
+    // against gitlab.com, and saying "no repositories match" there would blame
+    // the query for a missing credential.
+    expect(
+      sourceEmptyMessage({
+        ...base,
+        catalogLoaded: true,
+        cliLabel: "GitLab CLI",
+        status: {
+          ...signedIn,
+          kind: "gitlab",
+          cli: "glab",
+          loggedIn: true,
+          hosts: [
+            { host: "gitlab.com", enabled: true, loggedIn: false },
+            { host: "gitlab.example.com", enabled: true, loggedIn: true }
+          ]
+        }
+      })
+    ).toBe("Sign in with the GitLab CLI to search.");
   });
 
   it("reports a real catalog error ahead of everything else", () => {
@@ -427,5 +488,55 @@ describe("the forge picker is authoritative until a source pins the host", () =>
     expect(repositoriesOnHost(mixed, "github").map((r) => r.nameWithOwner)).toEqual([
       "facebook/react"
     ]);
+  });
+});
+
+describe("which instance a dialog may ask", () => {
+  // The user this exists for: signed in to the company's Enterprise instance
+  // and to nothing on github.com. The dialogs now carry a hostname end to end,
+  // so asking the SaaS question greyed out the CLI protocol and dropped GitHub
+  // from the host toggle for exactly them.
+  const enterpriseOnly: ForgeStatus = {
+    kind: "github",
+    cli: "gh",
+    installed: true,
+    loggedIn: true,
+    capabilities: CAPS,
+    hosts: [
+      { host: "github.com", enabled: true, loggedIn: false },
+      { host: "ghe.acme.example", enabled: true, loggedIn: true }
+    ]
+  };
+
+  it("answers per instance, not for the SaaS host", () => {
+    expect(forgeCanAnswerDialog(enterpriseOnly, "ghe.acme.example")).toBe(true);
+    expect(forgeCanAnswerDialog(enterpriseOnly, "github.com")).toBe(false);
+    // Omitting the hostname still means "the SaaS one" — the callers that
+    // genuinely reach it by kind alone keep their old answer.
+    expect(forgeCanAnswerDialog(enterpriseOnly)).toBe(false);
+  });
+
+  it("keeps a switched-off host off, without calling it a sign-in problem", () => {
+    const off: ForgeStatus = {
+      ...enterpriseOnly,
+      hosts: [{ host: "ghe.acme.example", enabled: false, loggedIn: true }]
+    };
+    expect(forgeCanAnswerDialog(off, "ghe.acme.example")).toBe(false);
+  });
+
+  it("still offers the forge in the host toggle", () => {
+    // A different question: the toggle picks a FORGE, and this one is usable.
+    expect(forgeCanAnswerAnywhere(enterpriseOnly)).toBe(true);
+    expect(forgeCanAnswerAnywhere(undefined)).toBe(false);
+    // ...but not when every host it knows is switched off, or the CLI is gone.
+    expect(
+      forgeCanAnswerAnywhere({
+        ...enterpriseOnly,
+        hosts: [{ host: "ghe.acme.example", enabled: false, loggedIn: true }]
+      })
+    ).toBe(false);
+    expect(forgeCanAnswerAnywhere({ ...enterpriseOnly, installed: false })).toBe(
+      false
+    );
   });
 });

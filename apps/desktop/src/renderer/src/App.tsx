@@ -941,7 +941,7 @@ export function App() {
         />
       )}
 
-      <ToastHost />
+      <ToastHost selectedWorktreeId={selection?.worktreeId ?? null} />
       <DialogHost />
       <ResetToRemoteHost />
     </div>

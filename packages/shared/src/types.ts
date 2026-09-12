@@ -429,8 +429,117 @@ export type PullProgressPhase =
   | "reapply"
   | "refresh";
 
-/** Hosting products PwrGit can read change-request status from. */
-export type ForgeKind = "github" | "gitlab";
+/**
+ * One line of Git's transfer meter — `Receiving objects:  43% (860/2000)`.
+ *
+ * The label is carried as text rather than a union because every network
+ * command prints its own set (`Writing objects` on push, `Receiving objects`
+ * on fetch) and Git adds more between versions. A meter PwrGit cannot name is
+ * still a meter worth drawing, and the UI only ever prints the label.
+ */
+export type GitTransferProgress = {
+  label: string;
+  percent: number;
+  completed: number;
+  total: number;
+  /** Git's human-readable transferred byte count, such as `12.4 MiB`. */
+  bytes?: string;
+  /** Git's human-readable transfer rate, such as `3.1 MiB/s`. */
+  rate?: string;
+};
+
+/** The long-running remote operations PwrGit reports live status for. */
+export type RemoteActivityKind = "fetch" | "pull" | "push";
+
+/**
+ * Where a remote operation has got to. `queued` is the wait for another
+ * operation's repository lock — time that is not a Git stall and must not be
+ * reported as one. The pull phases are `PullProgressPhase`; `push` and
+ * `recovery` have no sub-steps worth naming.
+ */
+export type RemoteActivityPhase =
+  | PullProgressPhase
+  | "queued"
+  | "push"
+  | "recovery";
+
+/**
+ * One live remote operation, as the UI needs to describe, follow, and stop it.
+ *
+ * Everything here is a *fact observed in main*, not a guess: `silent` says Git
+ * has written nothing at all, and `lastOutputAt` dates the last byte it did
+ * write. Those two are what distinguish "a big transfer is underway" from
+ * "this has been wedged for five minutes", which a spinner cannot express.
+ */
+export type RemoteActivity = {
+  id: string;
+  kind: RemoteActivityKind;
+  phase: RemoteActivityPhase;
+  profileId: ProfileId;
+  repoId: string;
+  repoName: string;
+  /** Absent on a repo-wide fetch, which no single checkout owns. */
+  worktreeId: string | null;
+  branch: string | null;
+  /** Epoch ms. The renderer derives elapsed from its own clock. */
+  startedAt: number;
+  /** Epoch ms the current phase began. */
+  phaseSince: number;
+  /**
+   * Epoch ms of the last byte the running Git command wrote, or of when that
+   * command started if it has written none. Scoped to the command rather than
+   * the operation: a pull's `rev-parse` writing one line says nothing about
+   * whether the fetch after it is alive.
+   */
+  lastOutputAt: number;
+  /** The Git command now running has produced no output at all. */
+  silent: boolean;
+  progress: GitTransferProgress | null;
+  /** The sanitized Git command line running right now. */
+  command: string | null;
+  /** Most recent sanitized Git output lines, oldest first. */
+  tail: string[];
+  /** A cancel was requested and Git has been signalled. */
+  canceling: boolean;
+};
+
+/**
+ * Hosting products PwrGit can read change-request status from.
+ *
+ * The array is the source and `ForgeKind` is derived from it, so the members
+ * are enumerable at runtime as well as checkable at compile time. Every
+ * `Object.keys(someTable) as ForgeKind[]` cast this replaced was a place where
+ * a table could quietly lose a product: the cast asserts the table is complete
+ * instead of asking the type system to prove it.
+ *
+ * Per-product *data* lives in `FORGE_PRODUCTS` (`forge-product.ts`), keyed by
+ * these members, so adding a product is this line plus that entry.
+ */
+export const FORGE_KINDS = ["github", "gitlab"] as const;
+
+export type ForgeKind = (typeof FORGE_KINDS)[number];
+
+/**
+ * Narrow an unknown to a forge kind.
+ *
+ * One spelling, because there were four: a settings-patch guard, a cached PR
+ * row's guard and two row wideners each spelled out the same two-way string
+ * comparison by hand, and each would have rejected a third product in silence.
+ */
+export function isForgeKind(value: unknown): value is ForgeKind {
+  return (FORGE_KINDS as readonly unknown[]).includes(value);
+}
+
+/**
+ * Widen a persisted host string back to `ForgeHost`.
+ *
+ * A row written by a newer build — or edited by hand — degrades to `other`
+ * rather than producing a value whose type is a lie. Two copies of this lived
+ * in `repo-indexer.ts` and `identity-service.ts`, reading the same column.
+ */
+export function toForgeHost(value: unknown): ForgeHost {
+  return isForgeKind(value) ? value : "other";
+}
 
 /**
  * What a forge can actually answer, so the UI states facts rather than guesses.
@@ -458,14 +567,59 @@ export type ForgeCapabilities = {
   forkDefaultBranchOnly: boolean;
 };
 
+/**
+ * One host's contribution to a forge's status.
+ *
+ * A forge is not a single endpoint: `gh` can be signed in to github.com and an
+ * Enterprise instance at once, and `glab` to gitlab.com and any number of
+ * self-managed ones. Reporting a forge without naming its hosts is what let the
+ * settings pane say "GitLab: Signed out" while the Hosts list above it showed a
+ * self-managed GitLab the user was signed in to.
+ */
+export type ForgeHostStatus = {
+  /** Canonical lowercase hostname, as `canonicalForgeHostname` produces it. */
+  host: string;
+  /** The user's per-host switch. A disabled host is never probed. */
+  enabled: boolean;
+  /**
+   * A usable credential was found here. Always false when `enabled` is false —
+   * that host was not asked, so this is "not known" and `enabled` is what says
+   * why. Collapsing the two would make "off" read as "signed out" and send the
+   * user to a terminal to fix a switch.
+   */
+  loggedIn: boolean;
+};
+
 /** Whether one forge is usable right now, and what it can do when it is. */
 export type ForgeStatus = {
   kind: ForgeKind;
   /** The CLI PwrGit shells out to, e.g. `gh` or `glab`. */
   cli: string;
   installed: boolean;
+  /**
+   * At least one ENABLED host holds a usable credential.
+   *
+   * Derived from `hosts`, never from one hardcoded endpoint, so this cannot
+   * contradict the per-host list the settings pane renders beside it. A host the
+   * user switched off never makes this true: "off" means PwrGit spawns nothing
+   * for that host, and a summary that still read "Connected" would be claiming
+   * an ability the transport has given up.
+   */
   loggedIn: boolean;
   capabilities: ForgeCapabilities;
+  /**
+   * Every host of this kind that the settings pane has a row for, with the switch
+   * and the probe result for each.
+   *
+   * Deliberately not every host probed: the probe also asks about a forge's SaaS
+   * host when nothing names it, and reporting a host the user can neither see nor
+   * switch would be the settings sections disagreeing again — and would keep the
+   * pane's "Off" state unreachable. That credential still reaches `loggedIn`. So
+   * this is empty whenever the CLI is missing, and also on a machine where no CLI
+   * reports a host and nothing was added by hand; `loggedIn` may be true anyway,
+   * which reads as "connected, through the CLI's own default host".
+   */
+  hosts: ForgeHostStatus[];
 };
 
 /** Lifecycle of a change request, in the vocabulary both forges collapse into. */
@@ -607,11 +761,22 @@ export type RepoIdentity = {
 };
 
 /** Result of an attempted identity lookup, independent of whether stored facts changed.
- *  A signed-out/unavailable result may carry an older cached identity. */
+ *  A signed-out/unavailable/host_disabled result may carry an older cached identity.
+ *
+ *  `host_disabled` is separate from `unavailable` because it is the only one of
+ *  the four that is a CHOICE the user made rather than something that failed.
+ *  Collapsing it into `unavailable` is what made the refresh button report
+ *  "visibility is still unknown" next to a lock glyph rendering a known
+ *  `private`. `unavailable` keeps its old meaning: we could not ask. */
 export type RepoIdentityRefreshOutcome = {
   repoId: RepoId;
-  status: "resolved" | "unknown" | "signed_out" | "unavailable";
+  status: "resolved" | "unknown" | "signed_out" | "unavailable" | "host_disabled";
   identity?: RepoIdentity;
+  /** The host the decision was made against, on `host_disabled`. Carried
+   *  rather than re-derived: `identity` is the LAST host that answered, and a
+   *  re-pointed `origin` makes those two different hosts — naming the stored
+   *  one sends the user to a switch that is already on. */
+  hostname?: string;
 };
 
 /** Ways the clone dialog can hand a repository to the local machine. `cli`

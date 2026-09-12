@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { err, ok, type ForgeStatus } from "@pwrgit/shared";
+import { err, forgeProduct, ok, type ForgeStatus } from "@pwrgit/shared";
 
 const mocks = vi.hoisted(() => ({
   dispatch: vi.fn(),
@@ -17,12 +17,22 @@ vi.mock("../../lib/pwrgit", () => ({
 
 import { ForgesSettings } from "./ForgesSettings";
 
+/**
+ * A status shaped the way main's probe shapes one.
+ *
+ * `hosts` is derived from the same two values the summary is, because the pane
+ * reads it: a fixture that set `loggedIn` without a matching host would exercise
+ * a state main cannot produce, and a missing CLI probes nothing at all.
+ */
 function forge(overrides: Partial<ForgeStatus> = {}): ForgeStatus {
+  const kind = overrides.kind ?? "github";
+  const installed = overrides.installed ?? true;
+  const loggedIn = overrides.loggedIn ?? true;
   return {
-    kind: "github",
-    cli: "gh",
-    installed: true,
-    loggedIn: true,
+    kind,
+    cli: kind === "github" ? "gh" : "glab",
+    installed,
+    loggedIn,
     capabilities: {
       batchedBranchLookup: true,
       batchedCommitAssociation: true,
@@ -30,6 +40,9 @@ function forge(overrides: Partial<ForgeStatus> = {}): ForgeStatus {
       commitAuthorIdentity: true,
       forkDefaultBranchOnly: true
     },
+    hosts: installed
+      ? [{ host: forgeProduct(kind).saasHost, enabled: true, loggedIn }]
+      : [],
     ...overrides
   };
 }
@@ -105,12 +118,136 @@ describe("ForgesSettings", () => {
     expect(container.textContent).toContain("glab auth login");
   });
 
+  it("reports a self-managed host as connected, and names it", async () => {
+    // The complaint that started this: gitlab.com is signed out, but the
+    // instance the user actually works on is not. A summary that probed only
+    // gitlab.com said "Signed out" directly below a Hosts row reading
+    // "signed in as huntharo".
+    await render([
+      forge({
+        kind: "gitlab",
+        loggedIn: true,
+        hosts: [
+          { host: "gitlab.com", enabled: true, loggedIn: false },
+          { host: "gitlab.example.com", enabled: true, loggedIn: true }
+        ]
+      })
+    ]);
+
+    expect(container.textContent).toContain("Connected");
+    expect(container.textContent).toContain("gitlab.example.com");
+    // It may not claim to be reading a host that answered with no credential.
+    expect(container.textContent).not.toContain("from gitlab.com");
+    expect(container.textContent).not.toContain("auth login");
+  });
+
+  it("reads a forge whose every host is switched off as off, not signed out", async () => {
+    await render([
+      forge({
+        kind: "gitlab",
+        loggedIn: false,
+        hosts: [{ host: "gitlab.example.com", enabled: false, loggedIn: false }]
+      })
+    ]);
+
+    expect(container.textContent).toContain("Off");
+    expect(container.textContent).toContain("switched off");
+    // Sending someone to a terminal cannot fix a switch, and they are already
+    // signed in to the host they turned off.
+    expect(container.textContent).not.toContain("Signed out");
+    expect(container.textContent).not.toContain("auth login");
+    // A deliberate choice is not a warning — anywhere on the pane. Scoping this
+    // to `.settings-field` hid the section header, which was still amber.
+    expect(container.querySelector(".settings-card__chip--warn")).toBeNull();
+    expect(container.textContent).toContain("All off");
+  });
+
+  it("puts the instance in the sign-in command when one self-managed host is waiting", async () => {
+    // `glab auth login` signs in to gitlab.com, which is not the instance this
+    // user is missing.
+    await render([
+      forge({
+        kind: "gitlab",
+        loggedIn: false,
+        hosts: [{ host: "gitlab.example.com", enabled: true, loggedIn: false }]
+      })
+    ]);
+
+    expect(container.textContent).toContain(
+      "glab auth login --hostname gitlab.example.com"
+    );
+  });
+
+  it("ignores a disabled host when wording the sign-in command", async () => {
+    // Two hosts, but only one the user allows — naming the disabled one would
+    // send them to sign in to something they have switched off.
+    await render([
+      forge({
+        kind: "gitlab",
+        loggedIn: false,
+        hosts: [
+          { host: "gitlab.example.com", enabled: true, loggedIn: false },
+          { host: "gitlab.internal", enabled: false, loggedIn: false }
+        ]
+      })
+    ]);
+
+    expect(container.textContent).toContain(
+      "glab auth login --hostname gitlab.example.com"
+    );
+    expect(container.textContent).not.toContain("gitlab.internal");
+  });
+
   it("tells the user to install a missing CLI instead of blaming the login", async () => {
     await render([forge({ kind: "gitlab", cli: "glab", installed: false, loggedIn: false })]);
 
     expect(container.textContent).toContain("Not installed");
     expect(container.textContent).toContain("Install the GitLab CLI");
     expect(container.textContent).not.toContain("auth login");
+    // Not in the sub-line either: a missing CLI reports no hosts, which used to
+    // fall through to "No host is signed in…" beside the "Not installed" chip.
+    expect(container.textContent).not.toContain("No host is signed in");
+  });
+
+  it("does not claim to read a host it cannot name", async () => {
+    // Connected through the CLI's own default host: that host has no row in
+    // Hosts, so main does not report it. Saying "no host is signed in" next to a
+    // "Connected" chip would be the row contradicting itself.
+    await render([forge({ loggedIn: true, hosts: [] })]);
+
+    expect(container.textContent).toContain("Connected");
+    expect(container.textContent).not.toContain("No host is signed in");
+  });
+
+  it("keeps the chip colour and the chip label describing the same state", async () => {
+    // `tone()` used to read `loggedIn` while the label read the state, so this
+    // pair rendered "Not installed" in a green pill.
+    await render([forge({ installed: false, loggedIn: true })]);
+
+    expect(container.textContent).toContain("Not installed");
+    expect(
+      container.querySelector(".settings-field .settings-card__chip--ok")
+    ).toBeNull();
+  });
+
+  it("names a waiting host when the bare command would sign in elsewhere", async () => {
+    // Two Enterprise hosts waiting and gitlab.com switched off: `glab auth
+    // login` authenticates gitlab.com, the one host the user cannot use.
+    await render([
+      forge({
+        kind: "gitlab",
+        loggedIn: false,
+        hosts: [
+          { host: "gitlab.com", enabled: false, loggedIn: false },
+          { host: "gitlab.a.example", enabled: true, loggedIn: false },
+          { host: "gitlab.b.example", enabled: true, loggedIn: false }
+        ]
+      })
+    ]);
+
+    expect(container.textContent).toContain(
+      "glab auth login --hostname gitlab.a.example"
+    );
   });
 
   it("states an unsupported capability as a limit of that forge", async () => {

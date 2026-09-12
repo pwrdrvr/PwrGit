@@ -10,6 +10,7 @@
 // milestones extend `Commands`/`Events` with worktree-state, changes, remote,
 // graph, and rebase entries.
 
+import type { ForgeHostMap } from "./forge-remote";
 import type {
   BranchRef,
   BulkSyncMode,
@@ -29,6 +30,7 @@ import type {
   RepoIdentityRefreshOutcome,
   PushRefPlan,
   PushRefResult,
+  RemoteActivity,
   ChangeSet,
   GitOperationKind,
   OperationContinueOutcome,
@@ -50,7 +52,6 @@ import type {
   Profile,
   ProfileId,
   ProfileThemeOverride,
-  PullProgressPhase,
   PartialFileDiff,
   RebaseCommitRef,
   RebaseCheckResult,
@@ -566,6 +567,51 @@ export type ExperimentalSettings = {
   lineageAllBranches: boolean;
 };
 
+/**
+ * What the user has said about one forge host, and nothing more.
+ *
+ * Both fields are OPTIONAL on purpose: absent means "nobody has decided", which
+ * is a different state from a decision that happens to match the default. `kind`
+ * absent leaves the hostname heuristic in charge, and `enabled` absent leaves
+ * the derived default (on when that CLI is signed in here) in charge. Writing a
+ * resolved value back into config would freeze today's derivation into the file
+ * and make a later sign-in unable to change anything.
+ */
+export type ForgeHostConfig = {
+  /** Which product runs here, when the hostname cannot say. */
+  kind?: ForgeKind;
+  /** Whether PwrGit may talk to this host at all. */
+  enabled?: boolean;
+};
+
+/** Per-host forge configuration, keyed by canonical lowercase hostname. */
+export type ForgeSettings = {
+  hosts: Record<string, ForgeHostConfig>;
+};
+
+/** Where a resolved forge-host value came from. The UI shows `auto` so a
+ *  derived default never reads as a choice somebody made. */
+export type ForgeValueSource = "auto" | "config" | "env";
+
+/** One forge host, resolved, as Settings renders it. */
+export type ForgeHostRow = {
+  host: string;
+  kind: ForgeKind;
+  /** Where the PRODUCT came from. `config` is the only value that means a
+   *  person chose it, which is what makes the host removable — `origin` below
+   *  answers a different question and must not be used for that. */
+  kindSource: ForgeValueSource;
+  enabled: boolean;
+  enabledSource: ForgeValueSource;
+  /** `cli` — a CLI is signed in here. `config` — the user added it and no CLI
+   *  reports it, which is the row that offers a sign-in command. */
+  origin: "cli" | "config";
+  account?: string;
+  scopes?: string[];
+  /** The CLI that speaks to this host, for the remediation command. */
+  cli: string;
+};
+
 export type DiagnosticsSettings = {
   /** Sample main + renderer heaps; auto-snapshot on growth spikes. */
   heapMonitorEnabled: boolean;
@@ -607,6 +653,9 @@ export type AppSettingsSnapshot = {
   experimental: ExperimentalSettings;
   diagnostics: DiagnosticsSettings;
   updates: UpdatesSelection;
+  /** Per-host forge configuration. Sparse: only hosts somebody has decided
+   *  something about appear, so an empty map is the ordinary state. */
+  forges: ForgeSettings;
   diagnosticsEnv: DiagnosticsEnvOverrides;
   /** Directory diagnostics sessions (profiles, snapshots) are written to. */
   diagnosticsOutputRoot: string;
@@ -620,6 +669,10 @@ export type AppSettingsPatch = {
    *  state — the write path sets it to `"user"` whenever a patch names
    *  either axis, so a renderer can neither forget to send it nor forge it. */
   updates?: Partial<UpdatesSettings>;
+  /** One host at a time, keyed by hostname. A `null` value clears that host's
+   *  entry entirely — which is how the pane returns a host to `auto` rather
+   *  than writing today's derived value in as a choice. */
+  forgeHosts?: Record<string, ForgeHostConfig | null>;
 };
 
 export interface Commands {
@@ -695,7 +748,15 @@ export interface Commands {
   };
   /** Verify an exact `owner/name` that was not in the loaded owner catalogs. */
   "repo:checkCloneSource": {
-    req: { profileId: ProfileId; nameWithOwner: string; host?: ForgeHost };
+    req: {
+      profileId: ProfileId;
+      nameWithOwner: string;
+      host?: ForgeHost;
+      /** The instance the slug was named on. Without it a self-managed host
+       *  resolves to the forge's SaaS provider, which answers about a
+       *  different repository that happens to share the slug. */
+      hostname?: string;
+    };
     res: CloneRepository;
   };
   /** Validate a filesystem path as a Git repository clone source. */
@@ -735,6 +796,9 @@ export interface Commands {
       profileId: ProfileId;
       source: string;
       host: ForgeHost;
+      /** The instance the source lives on, for the same reason
+       *  `repo:checkCloneSource` carries it. */
+      hostname?: string;
       /** Account to fork into; defaults to the signed-in user. */
       targetOwner?: string;
       /** Name the fork will be given. Defaults to the source's name — but it
@@ -754,7 +818,7 @@ export interface Commands {
    * clone dialog would pay for a lookup it never reads.
    */
   "repo:forkTargets": {
-    req: { host: ForgeKind };
+    req: { host: ForgeKind; hostname?: string };
     res: ForgeOwner[];
   };
   /** Create a fork, check it out, wire `upstream`, and index the checkout. */
@@ -868,6 +932,21 @@ export interface Commands {
   "forge:status": {
     req: void;
     res: { forges: ForgeStatus[] };
+  };
+  /** Every forge host PwrGit knows, resolved. Main-owned: the renderer never
+   *  enumerates a CLI itself. */
+  "forge:hosts": {
+    req: { refresh?: boolean };
+    res: {
+      /** What Settings → Forges renders. */
+      hosts: ForgeHostRow[];
+      /** The host → forge map main itself resolves with, shipped rather than
+       *  re-derived from `hosts`: the rows are what has a settings row, which
+       *  is not the same set (an env allowlist names hosts that get no row),
+       *  and a renderer that rebuilt the map from rows disagreed with main
+       *  about exactly those hosts. */
+      overrides: ForgeHostMap;
+    };
   };
   /**
    * Return immediately and start any eligible identity verification in the
@@ -1093,6 +1172,29 @@ export interface Commands {
   };
 
   // Remotes (U9 / U13)
+  /**
+   * Every live remote operation in this process, for a window that opened (or
+   * reloaded) while one was already running. `remote:activity` carries every
+   * later move, but it only fires when something *changes* — a fetch that has
+   * been silent for four minutes emits nothing, so a new window would show an
+   * empty toolbar over a running Git process without this snapshot.
+   */
+  "remote:activities": { req: void; res: RemoteActivity[] };
+  /**
+   * The complete retained Git output for one live operation — what the status
+   * popover's Copy action hands over. The live event carries only a short tail
+   * so a per-chunk broadcast stays small. Null once the operation is gone.
+   */
+  "remote:activityLog": {
+    req: { operationId: string };
+    res: { lines: string[] } | null;
+  };
+  /** Ask a live remote operation to stop. Git is signalled; Pull then rolls
+   *  its checkout back exactly as it does for a watchdog timeout. */
+  "remote:cancelActivity": {
+    req: { operationId: string };
+    res: { canceled: boolean };
+  };
   "remote:fetch": { req: { worktreeId: string }; res: null };
   /** Fetch one named remote, or every non-skipped remote when omitted. */
   "remote:fetchRepo": {
@@ -1522,11 +1624,15 @@ export interface Events {
    * signal or it silently shows a stale set.
    */
   "changes:changed": { worktreeId: string };
-  /** Coarse live pull progress for one worktree. */
-  "worktree:pullProgress": {
-    worktreeId: string;
-    phase: PullProgressPhase;
-  };
+  /**
+   * Every live remote operation, whenever the set or any member moves.
+   *
+   * The whole set travels on each emit rather than a per-operation delta: it
+   * is a handful of small records, and a renderer that misses one delta would
+   * otherwise keep a finished operation on screen forever. Broadcast to every
+   * window; each filters to its own profile.
+   */
+  "remote:activity": { activities: RemoteActivity[] };
   /** Per-repository progress for profile-wide fetch / conservative pull. */
   "remote:bulkSyncProgress": BulkSyncProgress;
   /** A worktree finished being removed (streamed during a batch remove). */

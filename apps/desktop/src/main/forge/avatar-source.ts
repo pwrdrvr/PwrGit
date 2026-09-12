@@ -14,8 +14,15 @@
  *   `rememberForgeAvatarHost`, which the resolver calls for each origin.
  */
 
+import { FORGE_KINDS, forgeProduct } from "@pwrgit/shared";
+
 const GRAVATAR_HOSTS = new Set(["secure.gravatar.com", "www.gravatar.com"]);
-const SAAS_FORGE_HOSTS = new Set(["gitlab.com", "github.com"]);
+/** Derived, not listed: this is an enumeration over products, and a hand-written
+ *  copy silently refuses every avatar from a product nobody remembered to add
+ *  here — with no error, because an untrusted host is simply not persisted. */
+const SAAS_FORGE_HOSTS = new Set(
+  FORGE_KINDS.map((kind) => forgeProduct(kind).saasHost)
+);
 
 /**
  * Query parameters worth preserving, by meaning:

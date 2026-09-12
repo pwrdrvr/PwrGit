@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
-import type {
-  GitHubCommitAuthorAvatarCacheStatus,
-  GitHubCommitAuthorIdentity,
-  GitHubCommitAuthorIdentityLookup
+import {
+  forgeAllowsPathDepth,
+  isForgeKind,
+  type GitHubCommitAuthorAvatarCacheStatus,
+  type GitHubCommitAuthorIdentity,
+  type GitHubCommitAuthorIdentityLookup
 } from "@pwrgit/shared";
 import type { GitExec } from "../git/dugite";
 import type { DB } from "../persistence/db";
@@ -64,6 +66,9 @@ export type GitHubCommitAuthorIdentityServiceOptions = {
   negativeTtlMs?: number;
   initialBackoffMs?: number;
   maxBackoffMs?: number;
+  /** Resolve `origin` to a forge repo. Injected so main can supply the
+   *  signed-in host overrides; the default knows only the SaaS hosts. */
+  resolveForgeRepo?: typeof resolveForgeRepo;
 };
 
 type CacheStatus = "resolved" | "negative" | "unavailable";
@@ -156,12 +161,17 @@ export class GitHubCommitAuthorIdentityService {
     Promise<CacheEntry | undefined>
   >();
   private lastPrunedAt = Number.NEGATIVE_INFINITY;
+  /** Injected so a self-managed host the user has signed in to resolves here
+   *  exactly as it does for change-request status. Defaults to the bare
+   *  resolver, which knows only the two SaaS hosts. */
+  private readonly resolveForgeRepo: typeof resolveForgeRepo;
 
   constructor(
     private readonly db: DB,
     private readonly git: GitExec,
     options: GitHubCommitAuthorIdentityServiceOptions = {}
   ) {
+    this.resolveForgeRepo = options.resolveForgeRepo ?? resolveForgeRepo;
     this.transport = options.transport ?? new ForgeCommitAuthorIdentityTransport();
     this.thumbnails = options.thumbnailStore ?? new NoopGitHubAvatarThumbnailStore();
     this.now = options.now ?? Date.now;
@@ -634,7 +644,7 @@ export class GitHubCommitAuthorIdentityService {
       .then(async () => {
         const result = await this.git(["remote", "get-url", "origin"], worktreePath);
         if (!result.ok || result.value.exitCode !== 0) return undefined;
-        const repo = resolveForgeRepo(result.value.stdout);
+        const repo = this.resolveForgeRepo(result.value.stdout);
         // Trust this instance to serve its own users' avatars. Needed for a
         // self-managed host, whose name is only knowable at runtime.
         if (repo !== null) rememberForgeAvatarHost(repo.host);
@@ -1110,15 +1120,14 @@ function normalizeProof(value: unknown): CommitAuthorProof | undefined {
 function normalizeForgeRepo(value: unknown): ForgeRepo | undefined {
   if (!isRecord(value)) return undefined;
   const kind = value.kind;
-  if (kind !== "github" && kind !== "gitlab") return undefined;
+  if (!isForgeKind(kind)) return undefined;
   const host = safeText(value.host, 255)?.toLowerCase();
   const path = safeText(value.path, 1_024);
   if (host === undefined || path === undefined) return undefined;
   if (!/^[A-Za-z0-9.-]+$/.test(host)) return undefined;
   const port = readSafeInteger(value.port);
   const segments = path.split("/");
-  if (segments.length < 2) return undefined;
-  if (kind === "github" && segments.length !== 2) return undefined;
+  if (!forgeAllowsPathDepth(kind, segments.length)) return undefined;
   if (!segments.every((segment) => /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(segment))) {
     return undefined;
   }

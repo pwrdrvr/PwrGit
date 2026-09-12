@@ -1,3 +1,4 @@
+import { forgeProduct } from "@pwrgit/shared";
 import {
   createCliClient,
   type CliRunOptions,
@@ -12,12 +13,14 @@ import {
  * from `config get token --host <host>`, which is why `getGitLabToken` below
  * exists rather than a one-line alias.
  */
+/** Binary and product name come from `FORGE_PRODUCTS` — see `gh-cli.ts`. */
+const GITLAB = forgeProduct("gitlab");
+
 export const GLAB_CLI_SPEC: CliSpec = {
-  binary: "glab",
-  label: "GitLab CLI",
+  binary: GITLAB.cli,
+  label: `${GITLAB.label} CLI`,
   errorName: "GlabCliError",
-  authenticationRequiredMessage:
-    "GitLab authentication is required. Run glab auth login and verify your Git/SSH credentials, then try again.",
+  authenticationRequiredMessage: `${GITLAB.label} authentication is required. Run ${GITLAB.cli} auth login and verify your Git/SSH credentials, then try again.`,
   nonInteractiveEnv: {
     GIT_TERMINAL_PROMPT: "0",
     GCM_INTERACTIVE: "Never",
@@ -114,11 +117,35 @@ export function clearGitLabTokenCache(): void {
 }
 
 /**
- * `GITLAB_TOKEN` if set, else the token `glab` already holds for this host.
+ * The host `GITLAB_TOKEN` belongs to.
+ *
+ * `glab`'s own pairing: `GITLAB_TOKEN` authenticates whatever `GITLAB_HOST`
+ * points at, and gitlab.com when it is unset. Reading the pair is what keeps the
+ * token host-scoped — see `getGitLabToken`.
+ */
+function envTokenHost(): string {
+  const host = process.env.GITLAB_HOST?.trim().toLowerCase();
+  return host === undefined || host === "" ? GITLAB_DOT_COM : host;
+}
+
+export const GITLAB_DOT_COM = "gitlab.com";
+
+/**
+ * `GITLAB_TOKEN` if set for THIS host, else the token `glab` already holds for
+ * it.
  *
  * Cached per host because a self-managed instance and gitlab.com are different
  * credentials. Returns null rather than throwing, so an unauthenticated user
  * simply gets no PR status instead of an error surface.
+ *
+ * `GITLAB_TOKEN` is scoped to `GITLAB_HOST` (gitlab.com when unset), mirroring
+ * `GITHUB_TOKEN`/`GH_ENTERPRISE_TOKEN` in `../../github/pr-client.ts`. Returning
+ * it for every host was invisible while only gitlab.com was ever asked; once the
+ * status probe began asking per host it made every enabled instance report a
+ * credential it does not have — Settings named a host it cannot read, and a fork
+ * passed preflight and then 401'd. It would also have written a gitlab.com PAT
+ * into this cache under a self-managed host's key, where any later caller would
+ * send it to that server.
  */
 export async function getGitLabToken(host: string): Promise<string | null> {
   const key = host.trim().toLowerCase();
@@ -126,7 +153,8 @@ export async function getGitLabToken(host: string): Promise<string | null> {
   if (cached !== undefined && Date.now() - cached.at < TOKEN_TTL_MS) {
     return cached.token;
   }
-  const fromEnv = process.env.GITLAB_TOKEN?.trim();
+  const fromEnv =
+    key === envTokenHost() ? process.env.GITLAB_TOKEN?.trim() : undefined;
   if (fromEnv !== undefined && fromEnv !== "") {
     tokenCache.set(key, { token: fromEnv, at: Date.now() });
     return fromEnv;

@@ -50,6 +50,51 @@ renderer does not own process lifetime and its bugs are exactly the case the
 bound exists for. Fan-out over a list already has `mapLimit` (`util/map-limit.ts`)
 for the same reason; a per-message spawn needs its own ceiling.
 
+## Every long-running remote command registers an activity
+
+`remote-activity.ts` holds one record per live fetch / pull / push, and the
+toolbar popover, the elsewhere-toast and the cancel button all read it. A new
+network command belongs in it too — wrap it in `tracked()` in
+`remote-handlers.ts` rather than calling `execGit` directly.
+
+What the registry is *for* is the distinction a spinner cannot draw. Three
+fields carry it, and none of them is decoration:
+
+- **`queued`.** An operation waits for `WorktreeOperationQueue`'s repository
+  lock before it runs any Git at all. That wait is not Git being slow, and the
+  watchdog deliberately does not start until the lock is held — so registering
+  BEFORE taking the lock is what keeps the two stories consistent.
+- **`silent` / `lastOutputAt`.** `--progress` is forced on fetch and push
+  (`forceProgress`), so those phases are *obliged* to emit; silence there is
+  evidence. The local phases promise nothing, which is why the renderer only
+  warns about quiet during network phases.
+- **`command` + `tail`.** Git's own words. A wedged transfer is diagnosed from
+  "which command" and "what did it last print", and both used to exist only
+  inside a process that had not exited yet.
+
+Two rules that are easy to undo:
+
+- **Cancel and the watchdog are different endings, and both must reach Git.**
+  Pull combines them with `AbortSignal.any([watchdog.signal, activity.signal])`
+  and hands Git one signal. Passing either alone silently disables the other.
+  Rollback/recovery is deliberately NOT cancellable — stopping a rollback is
+  how a checkout is left broken.
+- **A cancel is an outcome, not a failure.** `safePullError` returns it
+  untouched and the pull logs at `info`; the renderer shows a neutral flash
+  and raises no error toast. Anything that routes `code: "canceled"` into the
+  failure path is reporting the user's own decision back to them as a fault.
+
+Output lines are sanitized through `sanitizeGitLogDetail` on the way in, so a
+credential in a remote URL never reaches the record, the event, or the clipboard.
+
+The failure that motivated all of this: an SSH agent that is present but cannot
+answer (1Password's agent with 1Password stopped or locked) accepts the
+connection and then blocks forever. Git prints nothing, exits never, and every
+timeout in the app is measured in *minutes* by design because a large clone
+looks the same from the outside. Nothing short of "Git has written nothing at
+all since this command started" separates the two — which is why `silent` is
+scoped to the command and why Cancel exists.
+
 ## Paths from git are always forward-slash
 
 `git status`, `ls-files` and `ls-tree` report `a/b/c` on every platform, so
@@ -227,3 +272,24 @@ it together; breaking any of them corrupts the index quietly.
 Whole-file actions stay available for every kind partial staging refuses
 (binary, conflicted, submodule, non-UTF-8, new, deleted, renamed, mode-only);
 `partialDiffCapability` names the reason and the pane shows it.
+
+## Clone and fork reach a forge INSTANCE, not a forge
+
+`CloneService` and `ForkService` resolve providers through
+`ForgeRepoRegistry.get(kind, hostname)`. Passing only the kind returns the
+**SaaS** provider, so a project on `ghe.acme.example` is answered by github.com
+— and a slug that exists on both confirms, clones, or forks the wrong
+repository, silently. Every lookup here passes the hostname the request
+carried; `repo:searchCloneSources` is the one channel that still cannot.
+
+Resolving an instance is not permission to talk to it. Anything that spawns a
+CLI also asks `forgeBlockAt(status, provider.hostname)` — including
+`runClone`'s CLI branch and `fork`, which writes. SSH and HTTPS clones are
+plain git and are deliberately not gated: the per-host switch governs the
+forge, not `git clone`.
+
+The local-checkout index (`repoKey`) is keyed on the hostname for the same
+reason — two instances can host the same slug.
+
+`apps/desktop/src/main/forge/AGENTS.md` has the whole rule, including why a
+hostname is never evidence of which forge runs on it.

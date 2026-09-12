@@ -8,6 +8,8 @@ import { createPortal } from "react-dom";
 import type { Worktree } from "@pwrgit/shared";
 import { copyText } from "../../lib/copyText";
 import { revealLabel, revealPath } from "./reveal";
+import { useDismissable } from "../../lib/useDismissable";
+import { useMenuNavigation } from "../../lib/useMenuNavigation";
 
 /**
  * A "⋯" actions menu for a worktree: copy branch/path, reveal in the OS file
@@ -45,6 +47,12 @@ export function WorktreeMenu({
     if (r) setPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
   };
 
+  // Escape + focus back to the kebab, and the arrow/typeahead contract this
+  // menu's role="menu" already promised. The menu portals to <body>, which is
+  // why useDismissable resolves Escape by focus rather than DOM containment.
+  useDismissable({ open, onDismiss: close, triggerRef: btnRef, surfaceRef: menuRef });
+  useMenuNavigation({ open, menuRef, onClose: close });
+
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent): void => {
@@ -52,16 +60,11 @@ export function WorktreeMenu({
       if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return;
       close();
     };
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") close();
-    };
     window.addEventListener("mousedown", onDown, true);
-    window.addEventListener("keydown", onKey);
     window.addEventListener("scroll", close, true);
     window.addEventListener("resize", close);
     return () => {
       window.removeEventListener("mousedown", onDown, true);
-      window.removeEventListener("keydown", onKey);
       window.removeEventListener("scroll", close, true);
       window.removeEventListener("resize", close);
     };

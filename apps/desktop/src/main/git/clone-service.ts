@@ -13,6 +13,11 @@ import {
 import {
   err,
   forgeCloneUrls,
+  forgeLoggedInAtSaas,
+  forgeBlockAt,
+  forgeCliNames,
+  forgeProductOrAssumed,
+  forgeSaasHost,
   isSafeForgeHostname,
   isSafeProjectPath,
   ok,
@@ -47,13 +52,24 @@ const SEARCH_LIMIT = 40;
 
 type LocalForgeState = {
   owners: ForgeOwner[];
-  /** Keyed `host:nameWithOwner`, lowercased — two forges can host the same
+  /** Keyed `hostname:nameWithOwner`, lowercased — two forges can host the same
    *  slug, and merging them would attach the wrong checkout to a repository. */
   pathsByRepo: Map<string, string[]>;
 };
 
-function repoKey(host: ForgeHost, nameWithOwner: string): string {
-  return `${host}:${nameWithOwner}`.toLowerCase();
+/**
+ * The INSTANCE, not the kind.
+ *
+ * `acme/api` on `ghe.acme.example` and `acme/api` on github.com are different
+ * repositories that happen to share a slug, and keying on `ForgeHost` merged
+ * them — the clone dialog then marked the SaaS one "already cloned" and its
+ * tooltip named the Enterprise checkout's path. That was unreachable while a
+ * self-managed origin classified as `other` and was skipped; once host
+ * enumeration makes those identities resolve, the kind stops being unique.
+ * `ForkService.checkoutsFor` already compares host + hostname.
+ */
+function repoKey(hostname: string, nameWithOwner: string): string {
+  return `${hostname}:${nameWithOwner}`.toLowerCase();
 }
 
 type RootIdentity = { display: string; canonical: string };
@@ -254,12 +270,32 @@ function messageFromUnknown(provider: ForgeRepoProvider, cause: unknown): string
   return message.split("\n")[0] ?? message;
 }
 
+/**
+ * One wording for "PwrGit does not know this host".
+ *
+ * Never interpolate the `ForgeHost` enum: it renders as the literal word
+ * "other", which names nothing the user chose or can act on. Every site that
+ * hits a null provider says the same thing and names the same remedy.
+ *
+ * The remedy has to be one the user can actually carry out today. Settings →
+ * Forges lists and switches the hosts enumeration already found; it has no
+ * add-a-host control, so pointing there is a dead end. Signing the CLI in is
+ * what puts a host on the list — which is the same rule the rest of this
+ * layer runs on: hosts are enumerated, never guessed from a name.
+ */
+export function unsupportedHostMessage(verb: string): string {
+  // The CLIs are listed from the registry, not by hand: this sentence names
+  // the remedy, and a hand-written pair would tell the user to sign in with
+  // two CLIs that have nothing to do with the host they are looking at.
+  const clis = forgeCliNames().join(" or ");
+  return `PwrGit doesn't know which forge runs at that host, so it can't ${verb} repositories there. Sign in to it with the ${clis} CLI, or use SSH or HTTPS.`;
+}
+
 function inaccessibleRepositoryMessage(
   host: ForgeHost,
   nameWithOwner: string
 ): string {
-  const forge = host === "gitlab" ? "GitLab" : "GitHub";
-  const cli = host === "gitlab" ? "glab" : "gh";
+  const { label: forge, cli } = forgeProductOrAssumed(host);
   return `${forge} couldn't access ${nameWithOwner}. Check the repository spelling and confirm the active ${forge} CLI account has access by running ${cli} auth status. ${forge} also returns 404 for private repositories you cannot access.`;
 }
 
@@ -451,7 +487,7 @@ export class CloneService {
       return err({
         kind: "remote",
         code: "unsupported_host",
-        message: `PwrGit cannot search repositories on ${host}.`
+        message: unsupportedHostMessage("search")
       });
     }
     const forges = await this.statuses();
@@ -483,7 +519,7 @@ export class CloneService {
           ...repository,
           localPaths:
             local.pathsByRepo.get(
-              repoKey(repository.host, repository.nameWithOwner)
+              repoKey(repository.hostname, repository.nameWithOwner)
             ) ?? []
         }))
       );
@@ -527,7 +563,11 @@ export class CloneService {
   async checkSource(
     profileId: string,
     input: string,
-    host: ForgeHost = "github"
+    host: ForgeHost = "github",
+    /** The instance the slug was named on. Omitted means the SaaS instance;
+     *  passing it is what stops a self-managed project being confirmed against
+     *  github.com/gitlab.com's repository of the same name. */
+    hostname?: string
   ): Promise<Result<CloneRepository>> {
     if (this.profiles.get(profileId) === null) {
       return err({
@@ -544,22 +584,33 @@ export class CloneService {
         message: "Enter a repository as owner/name."
       });
     }
-    const provider = this.forges.get(host);
+    const provider = this.forges.get(host, hostname);
     if (provider === null) {
+      // `host` is the enum, and `other` is not a word to show anyone. This is
+      // reached for a remote on a host no CLI is signed in to and nobody has
+      // named in Settings → Forges, or for one whose forge cannot be pointed
+      // at another instance — a repository PwrGit cannot confirm, not one it
+      // cannot clone.
       return err({
         kind: "remote",
         code: "unsupported_host",
-        message: `PwrGit cannot look up repositories on ${host}.`
+        message: unsupportedHostMessage("look up")
       });
     }
-    const unavailable = forgeUnavailable(await this.statuses(), host);
+    // The instance the provider actually points at, so a machine signed in
+    // only to a company host is not told to sign in to github.com.
+    const unavailable = forgeUnavailable(
+      await this.statuses(),
+      host,
+      provider.hostname
+    );
     if (unavailable !== null) return unavailable;
     try {
       const repository = await provider.viewRepo(nameWithOwner);
       const local = localForgeState(this.indexer.listRepos(profileId));
       repository.localPaths =
         local.pathsByRepo.get(
-          repoKey(repository.host, repository.nameWithOwner)
+          repoKey(repository.hostname, repository.nameWithOwner)
         ) ?? [];
       return ok(repository);
     } catch (cause) {
@@ -809,16 +860,30 @@ export class CloneService {
       );
       return checked.ok ? ok(true) : checked;
     }
-    const provider = this.forges.get(source.host);
+    // With the hostname: `gh repo clone`/`glab repo clone` must run against the
+    // instance the source names, not the SaaS default. `source.hostname` is
+    // right here and used below for the ssh/https URLs, so picking by kind
+    // alone cloned a same-named stranger's repository from github.com/gitlab.com.
+    const provider = this.forges.get(source.host, source.hostname);
 
     if (source.protocol === "cli") {
       if (provider === null) {
         return err({
           kind: "remote",
           code: "unsupported_host",
-          message: `PwrGit has no CLI for ${source.host}. Clone with SSH or HTTPS.`
+          message: unsupportedHostMessage("clone from")
         });
       }
+      // Only this branch spawns a CLI, so only this branch asks. SSH and HTTPS
+      // are plain git against a URL: the per-host switch governs whether
+      // PwrGit may talk to the FORGE, and refusing an ordinary `git clone`
+      // over it would be a different, wrong promise.
+      const blocked = forgeUnavailable(
+        await this.statuses(),
+        source.host,
+        provider.hostname
+      );
+      if (blocked !== null) return blocked;
       try {
         await provider.cloneWithCli(source.nameWithOwner, destination, {
           onStderr: readProgress,
@@ -899,9 +964,11 @@ function knownOwners(
   forges: ForgeStatus[],
   local: LocalForgeState
 ): ForgeOwner[] {
+  // Owners exist to scope a search, and search runs against the SaaS instance
+  // (`registry.get(kind)`), so that is the host whose credential decides.
   const usable = new Set(
     forges
-      .filter((status) => status.installed && status.loggedIn)
+      .filter((status) => status.installed && forgeLoggedInAtSaas(status))
       .map((status) => status.kind)
   );
   return dedupeOwners([
@@ -950,25 +1017,50 @@ export function parseSearchInput(
  *  than showing a failure. */
 function forgeUnavailable(
   statuses: ForgeStatus[],
-  host: ForgeHost
+  host: ForgeHost,
+  /** The instance the caller resolved a provider for. Omitted means the SaaS
+   *  one, which is what a kind-only lookup reaches. */
+  hostname?: string
 ): Err<PwrGitError> | null {
   const status = statuses.find((candidate) => candidate.kind === host);
-  const label = host === "gitlab" ? "GitLab" : "GitHub";
-  if (status === undefined || !status.installed) {
-    return err({
-      kind: "remote",
-      code: "forge_cli_missing",
-      message: `Install the ${label} CLI to look up repositories.`
-    });
+  const label = forgeProductOrAssumed(host).label;
+  // Per instance, never the forge-wide `loggedIn`: asking the summary let a
+  // self-managed-only sign-in pass this gate and run an unauthenticated
+  // gitlab.com lookup, which answers 404 — so the dialog reported "couldn't
+  // find it" instead of falling back to an unverified row, blaming the query
+  // for a missing credential. The mirror of that mistake is asking the SaaS
+  // question about a caller that resolved a self-managed provider, which
+  // reports "sign in to gitlab.com" about a credential it does not need —
+  // hence `hostname`. `knownOwners` below still asks the SaaS question, and
+  // correctly: search reaches `registry.get(kind)` with no hostname, and
+  // `ForgeOwner` has no hostname field to carry one. They agree today only
+  // because the single path that calls both — `searchSources` — omits the
+  // hostname here too. Widen search and these two move together or not at all.
+  const instance = hostname ?? defaultHostname(host);
+  switch (forgeBlockAt(status, instance)) {
+    case "cli_missing":
+      return err({
+        kind: "remote",
+        code: "forge_cli_missing",
+        message: `Install the ${label} CLI to look up repositories.`
+      });
+    case "host_off":
+      // Not a sign-in problem: they turned the host off, and `auth login`
+      // cannot change that.
+      return err({
+        kind: "remote",
+        code: "forge_host_off",
+        message: `${instance} is switched off in Settings → Forges.`
+      });
+    case "signed_out":
+      return err({
+        kind: "remote",
+        code: "forge_login_required",
+        message: `Sign in with the ${label} CLI to look up repositories.`
+      });
+    default:
+      return null;
   }
-  if (!status.loggedIn) {
-    return err({
-      kind: "remote",
-      code: "forge_login_required",
-      message: `Sign in with the ${label} CLI to look up repositories.`
-    });
-  }
-  return null;
 }
 
 /** Owners and existing checkouts, read from the identities already joined onto
@@ -1013,7 +1105,7 @@ function localForgeState(repos: Repo[]): LocalForgeState {
       if (split !== null) addOwner(identity.host, split);
     }
     if (identity.host === "other") continue;
-    const key = repoKey(identity.host, identity.nameWithOwner);
+    const key = repoKey(identity.hostname, identity.nameWithOwner);
     const paths = pathsByRepo.get(key) ?? [];
     const path = canonicalExistingPath(repo.path);
     if (!paths.includes(path)) paths.push(path);
@@ -1028,7 +1120,7 @@ function splitOwner(nameWithOwner: string): string | null {
 }
 
 function defaultHostname(host: ForgeHost): string {
-  return host === "gitlab" ? "gitlab.com" : "github.com";
+  return forgeSaasHost(host);
 }
 
 function dedupeOwners(owners: ForgeOwner[]): ForgeOwner[] {

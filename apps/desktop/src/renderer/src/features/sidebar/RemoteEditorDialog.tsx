@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { RemoteSummary, Repo } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
+import { useModal } from "../../lib/useModal";
 
 export function RemoteEditorDialog({
   repo,
@@ -48,9 +49,14 @@ export function RemoteEditorDialog({
     onClose();
   };
 
+  const modalRef = useModal<HTMLDivElement>({ onClose });
+
   return (
     <div className="overlay-backdrop refs-push-backdrop" onClick={onClose}>
       <div
+        ref={modalRef}
+        aria-modal="true"
+        tabIndex={-1}
         className="modal remote-editor"
         role="dialog"
         aria-label={editing ? `Edit remote ${remote.name}` : "Add remote"}

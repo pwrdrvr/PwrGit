@@ -11,6 +11,7 @@ import {
   type BranchPickerOption
 } from "../shell/BranchRefPicker";
 import { CopyTarget } from "../shell/CopyTarget";
+import { useModal } from "../../lib/useModal";
 
 /**
  * The branch name a push should default to for `option` — the name relative to
@@ -129,9 +130,14 @@ export function PushRefsDialog({
   const equalCount = plans?.filter((plan) => plan.relation === "equal").length ?? 0;
   const pushedCount = results?.filter((result) => result.outcome === "pushed").length;
 
+  const modalRef = useModal<HTMLDivElement>({ onClose });
+
   return (
     <div className="overlay-backdrop refs-push-backdrop" onClick={onClose}>
       <div
+        ref={modalRef}
+        aria-modal="true"
+        tabIndex={-1}
         className="modal refs-push"
         role="dialog"
         aria-label={`Push ${repo.name} branch to remotes`}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canonicalForgeHostname,
   classifyForgeHost,
   forgeWebUrl,
   parseForgeRemote
@@ -42,28 +43,88 @@ describe("parseForgeRemote", () => {
     );
   });
 
-  it("recognizes a self-hosted GitLab, and admits it cannot know otherwise", () => {
-    // `gitlab.*` is a real deployment convention, so it is inferable. GitHub
-    // Enterprise has no equivalent — its hostnames are arbitrary
-    // (`git.acme.com`) — so `github.acme.io` stays `other` rather than being
-    // guessed, which would aim API calls at the wrong product. A self-hosted
-    // GitHub needs an explicit override; see classifyForgeHost.
-    expect(parseForgeRemote("git@gitlab.acme.io:acme/api.git")?.host).toBe(
-      "gitlab"
+  it("admits it cannot place any self-managed host, gitlab.* included", () => {
+    // `gitlab.*` used to be read as GitLab on the strength of the naming
+    // convention. It is gone because main's `ForgeHosts` never honoured it —
+    // hosts are enumerated from `gh`/`glab` sign-ins or named by the user — so
+    // the two layers disagreed about a host nobody was signed in to. A name is
+    // not evidence in either direction now: `gitlab.acme.io` is exactly as
+    // unknowable as `github.acme.io` and `code.acme.io`, and all three keep
+    // their hostname so the UI can still name the instance.
+    for (const url of [
+      "git@gitlab.acme.io:acme/api.git",
+      "https://github.acme.io/acme/api",
+      "https://code.acme.io/acme/api"
+    ]) {
+      expect(parseForgeRemote(url)?.host).toBe("other");
+    }
+    expect(parseForgeRemote("https://code.acme.io/acme/api")?.hostname).toBe(
+      "code.acme.io"
     );
-    expect(parseForgeRemote("https://github.acme.io/acme/api")?.host).toBe(
-      "other"
-    );
-    const other = parseForgeRemote("https://code.acme.io/acme/api");
-    expect(other?.host).toBe("other");
-    expect(other?.hostname).toBe("code.acme.io");
   });
 
-  it("takes an explicit override for a host no heuristic can place", () => {
+  it("takes the known-host map for anything but the two SaaS names", () => {
     expect(
       classifyForgeHost("git.acme.com", { "git.acme.com": "github" })
     ).toBe("github");
     expect(classifyForgeHost("git.acme.com")).toBe("other");
+    // The map is what a signed-in self-managed instance arrives as, and it is
+    // the only thing that makes one resolve.
+    expect(
+      parseForgeRemote("git@gitlab.acme.io:acme/platform/api.git", {
+        "gitlab.acme.io": "gitlab"
+      })
+    ).toMatchObject({
+      host: "gitlab",
+      hostname: "gitlab.acme.io",
+      nameWithOwner: "acme/platform/api"
+    });
+    // And a mapped GitHub Enterprise host inherits GitHub's path rules, so a
+    // page URL is still not read as a project.
+    expect(
+      parseForgeRemote("https://github.acme.io/o/r/issues", {
+        "github.acme.io": "github"
+      })
+    ).toBeNull();
+  });
+
+  it("never reads a prototype member out of the host map", () => {
+    // `overrides` is a plain object and a hostname comes straight out of a git
+    // remote. A bare index returned the `Object` FUNCTION for a host literally
+    // named `constructor` (a legal single-label intranet name), which then died
+    // at the IPC boundary — a function is not structured-cloneable. Only
+    // lowercase members are reachable at all, since the host is lowercased.
+    for (const host of ["constructor", "__proto__"]) {
+      const parsed = parseForgeRemote(`git@${host}:acme/api.git`);
+      expect(parsed?.host).toBe("other");
+      expect(classifyForgeHost(host)).toBe("other");
+    }
+    // An own property of the same name is still honoured — the guard rejects
+    // inheritance, not the key.
+    expect(
+      classifyForgeHost("constructor", { constructor: "gitlab" as const })
+    ).toBe("gitlab");
+  });
+
+  it("returns the canonical hostname, www. stripped", () => {
+    // The returned hostname is not cosmetic: it travels over IPC and keys the
+    // provider registry. Classification already strips `www.`, so leaving it
+    // on here split one host into two — `github` resolved, then the registry
+    // missed its own `github:github.com` entry and built a provider running
+    // `gh api --hostname www.github.com`, which cannot succeed.
+    for (const url of [
+      "https://www.github.com/acme/api.git",
+      "https://WWW.GitHub.com/acme/api"
+    ]) {
+      expect(parseForgeRemote(url)).toMatchObject({
+        host: "github",
+        hostname: "github.com",
+        nameWithOwner: "acme/api"
+      });
+    }
+    expect(parseForgeRemote("git@www.gitlab.com:acme/api.git")?.hostname).toBe(
+      "gitlab.com"
+    );
   });
 
   it("lowercases the hostname but preserves project-path case", () => {
@@ -103,5 +164,30 @@ describe("forgeWebUrl", () => {
     expect(forgeWebUrl("gitlab.acme.io", "g/s/p")).toBe(
       "https://gitlab.acme.io/g/s/p"
     );
+  });
+});
+
+describe("canonicalForgeHostname", () => {
+  it("is idempotent, so two callers cannot store two different keys", () => {
+    // The settings pane canonicalizes before sending and main canonicalizes
+    // again on receipt. Stripping only one `www.` made those two disagree:
+    // the pane checked `www.gitlab.com` against its list while main stored the
+    // entry under `gitlab.com`, silently merging onto a different host.
+    for (const value of [
+      "gitlab.com",
+      "www.gitlab.com",
+      "www.www.gitlab.com",
+      "  WWW.WWW.GitLab.Com  "
+    ]) {
+      const once = canonicalForgeHostname(value);
+      expect(once).toBe("gitlab.com");
+      expect(canonicalForgeHostname(once!)).toBe(once);
+    }
+  });
+
+  it("refuses anything that is not a bare hostname", () => {
+    for (const value of ["", "ghe.example:8443", "has space", "https://x.dev/"]) {
+      expect(canonicalForgeHostname(value)).toBeNull();
+    }
   });
 });

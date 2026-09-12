@@ -14,8 +14,18 @@ claims `origin`'s host, the CLI isn't logged in, or the network fails.
   `gh api repos/{nwo}` for one repository — REST is the only GitHub response
   carrying `source`, the fork-network root, alongside `parent`. `fork()` reads
   the result back, which makes "created" and "already exists" one path.
-- **Auth**: `getGitHubToken()` prefers `GITHUB_TOKEN`, else `gh auth token`
-  (reuses the user's gh login — no separate flow). Cached ~5 min.
+- **Auth**: `getGitHubToken(host)` takes the host it is about to query and
+  runs `gh auth token --hostname <host>` (reuses the user's gh login — no
+  separate flow). Cached ~5 min, **keyed by host**: a single-slot cache hands
+  one host's token to another for the rest of the TTL.
+  `GITHUB_TOKEN` applies to **github.com only** — it is a github.com PAT by
+  every convention that sets it, and sending it to a self-managed Enterprise
+  host would hand that server a credential for an unrelated forge. `gh` draws
+  the same line with a separate `GH_ENTERPRISE_TOKEN`.
+- **Enterprise endpoints**: `githubGraphqlBaseUrl(repo)` builds the GraphQL
+  base from `forgeOrigin` — the same helper the GitLab client uses — so a
+  remote that named a non-default web port keeps it. github.com returns
+  undefined so Octokit's own default stands rather than being restated.
 - **`gh-cli.ts` is a thin binding** over the shared, audited spawner in
   `../forge/cli-runner.ts`; it holds GitHub's vocabulary (binary, token shapes,
   sensitive env names) and nothing else. Its test still covers the runner.
@@ -26,12 +36,30 @@ claims `origin`'s host, the CLI isn't logged in, or the network fails.
 - **Backoff**: `pr-client.ts` wraps `@octokit/graphql` (ESM — named import is
   fine) with Retry-After / rate-limit-reset respect + exponential backoff
   (ghcrawl's semantics, without the `bottleneck`-based octokit plugins that a
-  git-hosted transitive dep made uninstallable here).
+  git-hosted transitive dep made uninstallable here). The decision itself is
+  `../forge/retry.ts`, shared with GitLab; this file keeps only the adapter
+  that reads status and headers off GitHub's two error shapes.
+  - **The second shape is the trap.** GraphQL answers a spent rate limit with
+    **HTTP 200** and an `errors` entry, which `@octokit/graphql` raises as a
+    `GraphqlResponseError` — the same class a missing repo arrives as. It has
+    no status, and its headers hang off the error itself (`response` there is
+    the GraphQL body), so the adapter reads it as the 429 it means.
+  - **Check the container, not `data`.** GraphQL nulls the erroring *field*, so
+    a refusal answers `{"data":{"repository":null},"errors":[…]}` — `data` is an
+    object, and salvaging it maps every alias to "no PR". `repositoryResolved`
+    (`pr-query.ts`) is the test both the success and the failure path apply; see
+    "A refusal is not an answer" in `../forge/AGENTS.md` for why.
 - **Cache + bus**: `PrService` upserts `branch_pr` (repo+branch, negative-cached)
   and returns the *changed* branches; `pr:refresh` (TTL-throttled 10 min unless
   `force`) emits a targeted `pr:changed { repoId, prs }` delta the renderer
   patches onto the tree in place — no full `repo:list` reload. `listRepos` also
   LEFT JOINs `branch_pr` onto `Worktree.pr` for the initial load.
+  - **A refresh that could not finish is throttled by `lastFailedAt`, not by
+    the cache.** It writes no row, so `fetched_at` — and therefore `isFresh` —
+    cannot hold the retry back. The check sits above `branchesToCheck`, so a
+    throttled refresh costs no `git for-each-ref` either. See "Never
+    negative-cache a failure, but do remember that you tried" in
+    `../forge/AGENTS.md` for why it is keyed by scope rather than by repo.
 - **Commit PR monitoring**: exact visible SHAs are association-cached in
   `commit_pr`; never enroll an entire history window. Renderers debounce one
   atomic visible-set replacement. Main keeps unknown visible associations in a

@@ -1,4 +1,4 @@
-import { classifyForgeHost } from "@pwrgit/shared";
+import { classifyForgeHost, forgeAllowsPathDepth } from "@pwrgit/shared";
 import type { ForgeKind, ForgeRepo } from "./types";
 
 /** Host → forge, for hosts whose name doesn't announce what they run. */
@@ -87,11 +87,12 @@ function normalizePath(rawPath: string): string | null {
 /**
  * Which forge a host runs, or null when we can't tell.
  *
- * Only the two SaaS hostnames are certain. A `gitlab.*` prefix is the near
- * universal self-managed convention and is worth honoring, but self-managed
- * instances on unrelated hostnames are unknowable from the URL alone — those
- * need an explicit override, and until one exists PwrGit no-ops exactly as it
- * does today for any unrecognized remote.
+ * Only the two SaaS hostnames are certain. Every self-managed instance —
+ * `gitlab.corp.example` as much as `git.acme.com` — is unknowable from the URL
+ * alone and needs an entry in `overrides`, which `ForgeHosts.overrides()`
+ * builds from what `gh`/`glab` are signed in to plus what the user added by
+ * hand. Until a host is in there PwrGit no-ops exactly as it does for any
+ * unrecognized remote.
  */
 export function classifyHost(
   host: string,
@@ -107,9 +108,10 @@ export function classifyHost(
 /**
  * Resolve a remote URL to the repo a provider can query, or null to no-op.
  *
- * A GitHub path must be exactly `owner/repo`; anything deeper is some other
- * GitHub URL (a tree, a gist) rather than a repository. GitLab accepts two or
- * more segments so nested groups work.
+ * Path depth is the product's own rule (`maxPathSegments`): a product without
+ * subgroups must be exactly `owner/repo`, because anything deeper is some other
+ * URL of theirs — a tree, a gist — rather than a repository, while one that
+ * nests accepts whatever depth it was given.
  */
 export function resolveForgeRepo(
   url: string,
@@ -120,8 +122,7 @@ export function resolveForgeRepo(
   const kind = classifyHost(parsed.host, overrides);
   if (kind === null) return null;
   const segments = parsed.path.split("/");
-  if (kind === "github" && segments.length !== 2) return null;
-  if (kind === "gitlab" && segments.length < 2) return null;
+  if (!forgeAllowsPathDepth(kind, segments.length)) return null;
   return {
     kind,
     host: parsed.host,

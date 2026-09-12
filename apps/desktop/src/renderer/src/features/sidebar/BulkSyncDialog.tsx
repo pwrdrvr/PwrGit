@@ -7,6 +7,7 @@ import type {
   Repo
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { useModal } from "../../lib/useModal";
 
 type RepoProgress =
   | { phase: "waiting" | "running" }
@@ -260,12 +261,16 @@ export function BulkSyncDialog({
     if (!result.ok) setError(result.error.message);
   };
 
+  const modalRef = useModal<HTMLDivElement>({ onClose });
+
   return (
     <div
       className="overlay-backdrop bulk-sync-backdrop"
       onClick={running ? undefined : onClose}
     >
       <section
+        ref={modalRef}
+        tabIndex={-1}
         className="modal bulk-sync"
         role="dialog"
         aria-modal="true"

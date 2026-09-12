@@ -245,10 +245,23 @@ export function useViewportTooltip(
     if (!visible) return;
     const onScroll = (): void => {
       // Playwright and browsers can emit a scroll while bringing a control in
-      // this card into view. Once the pointer has reached an interactive card,
+      // this card into view. Once the user has reached an interactive card,
       // that mechanical scroll must not make the card run away from its own
       // controls. A scroll while outside the card still dismisses it normally.
+      //
+      // Focus counts as having reached it, not just the pointer: a keyboard
+      // user tabs in (see the trigger handoffs in `GraphRow` and
+      // `WorktreeHeader`) and never sets the pointer flag, so without this
+      // any scroll anywhere — the graph adjusting scrollTop as commits stream
+      // in — would take the card away with their focus still inside it.
       if (interactive && pointerInInteractiveTooltipRef.current) return;
+      if (
+        interactive &&
+        tooltipRef.current !== null &&
+        tooltipRef.current.contains(document.activeElement)
+      ) {
+        return;
+      }
       hide();
     };
     // WCAG 2.1 SC 1.4.13: content shown on hover must be dismissible without
@@ -257,6 +270,11 @@ export function useViewportTooltip(
     // not want it needs a way out that is not "move the mouse and wait".
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
+      // Defer if something already claimed it — the same rule this handler
+      // relies on surfaces underneath obeying. A click-opened overlay
+      // (useDismissable) can be up at the same time as a hover card, and one
+      // keystroke must not dismiss both.
+      if (event.defaultPrevented) return;
       // This listener only exists while a card is showing, so the Escape is
       // spent on the card. Say so: surfaces underneath (the diff pane) defer
       // to a claimed Escape rather than closing on the same keystroke.

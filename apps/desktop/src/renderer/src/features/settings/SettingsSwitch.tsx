@@ -6,6 +6,10 @@
 export function SettingsSwitch(props: {
   checked: boolean;
   disabled?: boolean;
+  /** In-flight, not unavailable. Rendered as `aria-disabled` so Chromium does
+   *  not blur the control mid-operation and throw keyboard focus to <body>
+   *  (see styles/AGENTS.md). Callers guard their own handler. */
+  busy?: boolean;
   /** Used for `aria-label` and the visible "On"/"Off" word. */
   label: string;
   onChange: (next: boolean) => void;
@@ -13,12 +17,16 @@ export function SettingsSwitch(props: {
   return (
     <button
       aria-checked={props.checked}
+      aria-disabled={props.busy === true ? true : undefined}
       aria-label={props.label}
       className={`settings-switch${props.checked ? " is-on" : ""}`}
       disabled={props.disabled}
       role="switch"
       type="button"
-      onClick={() => props.onChange(!props.checked)}
+      onClick={() => {
+        if (props.busy === true) return;
+        props.onChange(!props.checked);
+      }}
     >
       <span aria-hidden="true" className="settings-switch__track">
         <span className="settings-switch__thumb" />

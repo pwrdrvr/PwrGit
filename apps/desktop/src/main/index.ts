@@ -44,8 +44,11 @@ import { ForgeRepoRegistry } from "./forge/repo-provider";
 import { createE2EForgeFixtureServices } from "./forge/e2e-forge-fixture";
 import { IdentityService } from "./forge/identity-service";
 import { ForgeStatusService } from "./forge/status";
-import { GitHubRepoProvider } from "./forge/github/repo-provider";
-import { GitLabRepoProvider } from "./forge/gitlab/repo-provider";
+import { ForgeHostDirectory } from "./forge/cli-hosts";
+import { ForgeHosts, ForgeHostsView } from "./forge/hosts";
+import { resolveForge } from "./forge/providers";
+import { resolveForgeRepo } from "./forge/resolve";
+import { registerRepoProviders } from "./forge/repo-providers";
 import { registerChangesHandlers } from "./git/changes-handlers";
 import { registerOperationHandlers } from "./git/operation-handlers";
 import {
@@ -156,6 +159,19 @@ if (app.isPackaged && !process.env["LOCAL_GIT_DIRECTORY"]) {
 // PWRGIT_USER_DATA_DIR is set. e2e uses this to give each run an isolated,
 // disposable data dir; unset in normal use, so production is unaffected. Must
 // run before anything reads app.getPath("userData").
+/** Collapse a burst of per-host settings writes into one probe pass. */
+const FORGE_REPROBE_DEBOUNCE_MS = 300;
+
+/** The resolved probe targets as a comparable value — what the forge status is
+ *  computed against, so a change to either input is detectable and anything else
+ *  is free. */
+function forgeTargetSignature(hosts: ForgeHosts): string {
+  return hosts
+    .statusTargets()
+    .map((target) => `${target.kind} ${target.host} ${target.enabled}`)
+    .join("\n");
+}
+
 const dataDirOverride = process.env["PWRGIT_USER_DATA_DIR"];
 if (dataDirOverride !== undefined && dataDirOverride !== "") {
   app.setPath("userData", dataDirOverride);
@@ -349,15 +365,182 @@ if (!gotSingleInstanceLock) {
         ? null
         : createE2EForgeFixtureServices(forgeFixturePath, execGit);
     const forges = fixtureServices?.forges ?? new ForgeRepoRegistry();
-    if (fixtureServices === null) {
-      forges.register(new GitHubRepoProvider());
-      forges.register(new GitLabRepoProvider());
-    }
+    if (fixtureServices === null) registerRepoProviders(forges);
+    // Which forge hosts exist, and whether we may read them. Enumeration costs
+    // two subprocesses, so the directory caches and the resolvers below read it
+    // synchronously — a PR refresh must never wait on `gh auth status`.
+    // Under the E2E forge fixture the registry and status service are stubbed;
+    // enumerating for real would spawn the developer's own `gh`/`glab` and put
+    // their actual Enterprise hostnames and account names on a screen the
+    // fixture exists to keep contrived.
+    const forgeHostDirectory = new ForgeHostDirectory(
+      fixtureServices === null ? {} : { discover: async () => [] }
+    );
+    const forgeHosts = new ForgeHosts({
+      // `?.hosts` as well as `?.forges`: nothing validates settings.json, so a
+      // hand-edited or truncated `"forges": {}` reaches `Object.keys(undefined)`
+      // — now inside an unawaited probe, where it becomes an unhandled rejection
+      // rather than a caught read failure.
+      readSettings: () => {
+        const forges = settings.get().forges;
+        return forges?.hosts === undefined ? { hosts: {} } : forges;
+      },
+      discovered: () => forgeHostDirectory.current()
+    });
     // One probe for the whole app: `ForgeStatusService` caches and dedups
     // in-flight reads, and a second instance would quietly undo both by
     // keeping its own cache and spawning its own `gh`/`glab`.
-    const forgeStatus = fixtureServices?.status ?? new ForgeStatusService();
-    const identityService = new IdentityService(db, execGit, forges);
+    //
+    // Built after the host list, and reading it, so "which forges work" is a
+    // summary of the same per-host answers the transport obeys rather than a
+    // second opinion about two hardcoded SaaS hosts. That second opinion is what
+    // made Settings say "GitLab: Signed out" beside a self-managed GitLab the
+    // user was signed in to. The clone and fork paths now ask per instance
+    // (`forgeBlockAt(status, provider.hostname)`), so `statusTargets()` has to
+    // cover every host `overrides()` can resolve — otherwise the probe never
+    // reports a host the dialogs can name, and the forge-wide fallback answers
+    // in its place.
+    const forgeStatus =
+      fixtureServices?.status ??
+      new ForgeStatusService({ hosts: () => forgeHosts.statusTargets() });
+    // Primed in the background: blocking boot on two CLI spawns would delay the
+    // first window for a feature that degrades to the two SaaS hosts meanwhile.
+    // The first probe can therefore run before this lands; `reprobe` below is
+    // what picks up the Enterprise hosts it did not know about yet.
+    const forgeDirectoryPrimed = forgeHostDirectory.refresh();
+    /**
+     * The per-host switch, enforced at the transport rather than in the UI.
+     *
+     * A disabled host resolves to null, so nothing downstream ever spawns its
+     * CLI or mints its token — including on the background refresh. An "off"
+     * that still shells out is a setting that lies.
+     */
+    /**
+     * Re-probe when the resolved host list moves, and only then.
+     *
+     * `statusTargets()` has two inputs — the per-host switches and the enumerated
+     * directory — and both are *inputs* to a five-minute cache, so a change to
+     * either makes the cached answer wrong immediately. Keying on the resolved
+     * output covers both with one rule: an unrelated settings write (a theme
+     * toggle) leaves the signature alone and costs nothing, while a terminal
+     * `gh auth login` followed by the Hosts pane's own Re-check moves it and
+     * re-probes. Without this the card kept reading "Signed out" beneath a row
+     * that said "signed in as …" until the TTL expired — the exact contradiction
+     * the per-host status exists to remove.
+     *
+     * Debounced because each host switch is its own settings write: turning four
+     * hosts off otherwise chained four full probe passes, three of them
+     * immediately superseded.
+     */
+    let probedTargets = forgeTargetSignature(forgeHosts);
+    let reprobeTimer: NodeJS.Timeout | undefined;
+    const onForgeTargetsMaybeMoved = (): void => {
+      const next = forgeTargetSignature(forgeHosts);
+      if (next === probedTargets) return;
+      probedTargets = next;
+      if (reprobeTimer !== undefined) clearTimeout(reprobeTimer);
+      reprobeTimer = setTimeout(() => {
+        reprobeTimer = undefined;
+        // A forced read retires the cache and any in-flight pass itself.
+        void forgeStatus.list({ force: true }).catch(() => undefined);
+        // Same signature, same debounce: the gate the identity refresh obeys
+        // is built from exactly these targets, so anything that moves them
+        // moves its answer too, and anything that leaves them alone must cost
+        // nothing. Defined below, and only ever reached from a timer.
+        refreshIdentitiesAfterGateChange();
+      }, FORGE_REPROBE_DEBOUNCE_MS);
+    };
+    const forgeHostsView = new ForgeHostsView(forgeHosts, async () => {
+      const refreshed = await forgeHostDirectory.refresh({ force: true });
+      onForgeTargetsMaybeMoved();
+      return refreshed;
+    });
+    // Enumeration has landed: adopt whatever hosts it found.
+    void forgeDirectoryPrimed.then(onForgeTargetsMaybeMoved, () => undefined);
+    const resolveEnabledForge: typeof resolveForge = (url, overrides) => {
+      const resolved = resolveForge(url, overrides ?? forgeHosts.overrides());
+      if (resolved === null) return null;
+      return forgeHosts.isEnabled(resolved.repo.host).enabled ? resolved : null;
+    };
+    const resolveEnabledForgeRepo: typeof resolveForgeRepo = (url, overrides) => {
+      const repo = resolveForgeRepo(url, overrides ?? forgeHosts.overrides());
+      if (repo === null) return null;
+      return forgeHosts.isEnabled(repo.host).enabled ? repo : null;
+    };
+    // Re-read when availability changes — signing in to an Enterprise host from
+    // a terminal should start resolving it without a restart. NOT forced: the
+    // first probe of a session always reports "changed", and a forced refresh
+    // there would re-spawn both CLIs seconds after the boot priming above for
+    // data that has not moved. The TTL is what makes this cheap; the pane's
+    // own Re-check is the forced path.
+    forgeStatus.onChange(() => {
+      // Whatever that re-read discovers is a gate input, so it goes through the
+      // same signature check as every other edge — the pane's Re-check reaches
+      // the gate through here, not only through its own callback.
+      void forgeHostDirectory
+        .refresh()
+        .then(onForgeTargetsMaybeMoved, () => undefined);
+    });
+    // Same host list AND the same off switch the PR and commit-author
+    // resolvers use. Without the list an `origin` on a self-managed instance
+    // classifies as `other` and the repo silently loses its visibility and
+    // fork-lineage marks; without the switch a host turned off in Settings
+    // still spawns its CLI on every identity refresh. `isEnabled` is passed
+    // whole rather than narrowed to its boolean: the identity refresh backs
+    // off on a decided "off" and re-asks promptly on a host nothing has
+    // recognized yet, and `.enabled` alone cannot tell those apart.
+    const identityService = new IdentityService(db, execGit, forges, {
+      overrides: () => forgeHosts.overrides(),
+      isEnabled: (hostname) => forgeHosts.isEnabled(hostname)
+    });
+    /**
+     * Re-ask for identities whose answer the gate may have just changed.
+     *
+     * The gate reads host enumeration and the forge settings, and both land
+     * AFTER the profile-load refresh has already run: enumeration is two
+     * subprocesses primed at boot, and a switch is flipped whenever the user
+     * opens Settings. Without this, a self-managed host that was still
+     * unknown when the window mounted stays unmarked until a profile switch
+     * or a fetch, and turning a host back on repaints nothing at all — the
+     * sidebar glyph is the only manual trigger, and it does not render for a
+     * repository that never got a row.
+     *
+     * Every open profile, not just the active one: windows are per-profile and
+     * several can be up at once, so refreshing only `getActiveId()` makes the
+     * unfocused ones pay the invalidation and get none of the repaint.
+     *
+     * Called only from the debounced, signature-guarded hook above, which is
+     * why nothing here re-checks whether anything forge-related moved. Its
+     * timer also puts every call after `windows` below is initialized.
+     */
+    const refreshIdentitiesAfterGateChange = (): void => {
+      // Async from the first statement: `listRepos` and `settled` can both
+      // throw or reject, and on the settings edge this runs inside the command
+      // handler, where an escaping throw is reported to the user as a failed
+      // save for a save that already succeeded.
+      void (async () => {
+        const byProfile = windows
+          .openProfileIds()
+          .map((profileId) => ({ profileId, repos: indexer.listRepos(profileId) }))
+          .filter(({ repos }) => repos.length > 0);
+        if (byProfile.length === 0) return;
+        // A pass already running holds every repo in its in-flight set, where
+        // the unforced `due` filter drops them — so wait it out rather than
+        // refreshing nothing and never retrying.
+        await identityService.settled();
+        identityService.clearGateBackoff();
+        await Promise.all(
+          byProfile.map(async ({ profileId, repos }) => {
+            const changed = await identityService.refresh(repos);
+            if (changed.length > 0) {
+              emitEvent("repo:identityChanged", { profileId, identities: changed });
+            }
+          })
+        );
+      })().catch((cause: unknown) => {
+        logMain("debug", "forge", "identity refresh after gate change failed:", cause);
+      });
+    };
     const cloneService = new CloneService(
       db,
       execGit,
@@ -381,7 +564,11 @@ if (!gotSingleInstanceLock) {
       worktreeOperations
     );
     const refresher = createWorktreeRefresher(stateService, db);
-    const prService = new PrService(db, execGit);
+    const prService = new PrService(db, execGit, {
+      // Without the overrides a self-managed or Enterprise host classifies as
+      // `other` and silently produces no change-request status at all.
+      resolveForge: (url) => resolveEnabledForge(url)
+    });
     const avatarThumbnails = new GitHubAvatarThumbnailCache(db, {
       cacheDir: join(app.getPath("userData"), "cache", "github-avatar-thumbnails")
     });
@@ -391,7 +578,10 @@ if (!gotSingleInstanceLock) {
     const commitAuthorIdentityService = new GitHubCommitAuthorIdentityService(
       db,
       execGit,
-      { thumbnailStore: avatarThumbnails }
+      {
+        thumbnailStore: avatarThumbnails,
+        resolveForgeRepo: (url) => resolveEnabledForgeRepo(url)
+      }
     );
 
     // The worktree the user is currently viewing; refreshed on focus + a gentle
@@ -615,7 +805,8 @@ if (!gotSingleInstanceLock) {
       bus,
       prService,
       commitAuthorIdentityService,
-      forgeStatus
+      forgeStatus,
+      forgeHostsView
     );
     registerSearchStatusHandlers(bus, db);
     registerSettingsHandlers(bus, settings, {
@@ -626,6 +817,12 @@ if (!gotSingleInstanceLock) {
         emitEvent("settings:changed", snapshot);
         diagnostics.sync();
         refreshMenu(); // Developer Mode toggles View-menu items live
+        // A host switch is an input to the probe and to the identity gate; a
+        // theme toggle is neither. The signature tells them apart, and costs
+        // nothing when it has not moved — without it a theme toggle re-reads
+        // `origin` for every repository in the profile, because a repo on a
+        // switched-off host has no row for the TTL to suppress.
+        onForgeTargetsMaybeMoved();
       }
     });
     registerLocalAgentHandlers(bus, mcpPolicy, () => {

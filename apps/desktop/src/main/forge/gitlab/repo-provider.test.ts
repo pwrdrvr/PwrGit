@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { capabilitiesFor } from "../capabilities";
+import { forgeCapabilities } from "@pwrgit/shared";
 import {
   encodeProjectPath,
   forkImportFailed,
@@ -400,7 +400,7 @@ describe("GitLabRepoProvider", () => {
     // GitLab's fork API has no equivalent. The claim lives in the one
     // capabilities table so Settings → Forges and the fork dialog read the
     // same answer.
-    expect(capabilitiesFor("gitlab").forkDefaultBranchOnly).toBe(false);
-    expect(capabilitiesFor("github").forkDefaultBranchOnly).toBe(true);
+    expect(forgeCapabilities("gitlab").forkDefaultBranchOnly).toBe(false);
+    expect(forgeCapabilities("github").forkDefaultBranchOnly).toBe(true);
   });
 });

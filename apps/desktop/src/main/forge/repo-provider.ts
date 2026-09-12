@@ -1,3 +1,4 @@
+import { canonicalForgeHostname } from "@pwrgit/shared";
 import type {
   CloneRepository,
   ForgeHost,
@@ -5,6 +6,11 @@ import type {
   ForgeOwner,
   ForgeRepoRef
 } from "@pwrgit/shared";
+
+/** One spelling of the cache key, so `register` and `get` cannot disagree. */
+function hostKey(host: ForgeHost, hostname: string): string {
+  return `${host}:${canonicalForgeHostname(hostname) ?? hostname}`;
+}
 
 /** What one forge must answer for the clone and fork dialogs.
  *
@@ -94,22 +100,71 @@ export type ForkInput = {
   signal?: AbortSignal;
 };
 
-/** Picks the provider for a host. Registered at startup so a forge with no
- *  usable CLI simply is not in the map — callers then report
- *  `unsupported_host` rather than guessing GitHub. */
+/**
+ * Picks the provider for a forge host.
+ *
+ * Keyed by kind **and hostname**, not kind alone: one GitHub provider cannot
+ * serve github.com and an Enterprise Server at once, because every call it
+ * makes carries a `--hostname`. A registered provider is the default instance
+ * for its kind (the SaaS host); any other hostname is built on demand by that
+ * kind's factory and cached, so repeated clone/fork calls do not rebuild it.
+ *
+ * A forge with no usable CLI is simply absent — callers then report
+ * `unsupported_host` rather than guessing GitHub.
+ */
 export class ForgeRepoRegistry {
-  private readonly providers = new Map<ForgeHost, ForgeRepoProvider>();
+  private readonly defaults = new Map<ForgeHost, ForgeRepoProvider>();
+  private readonly factories = new Map<
+    ForgeHost,
+    (hostname: string) => ForgeRepoProvider
+  >();
+  private readonly byHost = new Map<string, ForgeRepoProvider>();
 
-  register(provider: ForgeRepoProvider): void {
-    this.providers.set(provider.host, provider);
+  register(
+    provider: ForgeRepoProvider,
+    factory?: (hostname: string) => ForgeRepoProvider
+  ): void {
+    this.defaults.set(provider.host, provider);
+    this.byHost.set(hostKey(provider.host, provider.hostname), provider);
+    if (factory !== undefined) this.factories.set(provider.host, factory);
   }
 
-  get(host: ForgeHost): ForgeRepoProvider | null {
-    return this.providers.get(host) ?? null;
+  /**
+   * The provider for one host.
+   *
+   * `hostname` is optional so the many callers that only know the kind keep
+   * working against the SaaS instance; passing it is what reaches an
+   * Enterprise or self-managed host.
+   */
+  get(host: ForgeHost, rawHostname?: string): ForgeRepoProvider | null {
+    const fallback = this.defaults.get(host) ?? null;
+    if (rawHostname === undefined || rawHostname === "") return fallback;
+    // Canonicalized once, here, rather than by each provider's constructor:
+    // the hostname arrives from the renderer over IPC, and keying the cache on
+    // the raw string let `GHE.Acme.Example` and `ghe.acme.example` build two
+    // providers for one server while `www.github.com` missed the pre-seeded
+    // SaaS entry entirely.
+    const hostname = canonicalForgeHostname(rawHostname);
+    if (hostname === null) return null;
+    const key = hostKey(host, hostname);
+    const cached = this.byHost.get(key);
+    if (cached !== undefined) return cached;
+    const factory = this.factories.get(host);
+    // No factory means this forge cannot be pointed at another host. Return
+    // the default only when it IS that host; otherwise null, so the caller
+    // reports `unsupported_host` instead of silently querying the SaaS
+    // instance for a self-managed project.
+    if (factory === undefined) {
+      const only = canonicalForgeHostname(fallback?.hostname ?? "");
+      return only !== null && only === hostname ? fallback : null;
+    }
+    const built = factory(hostname);
+    this.byHost.set(key, built);
+    return built;
   }
 
   all(): ForgeRepoProvider[] {
-    return [...this.providers.values()];
+    return [...this.defaults.values()];
   }
 }
 
