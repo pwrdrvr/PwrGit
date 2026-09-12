@@ -35,11 +35,17 @@ speaks `PrSummary` and never learns which forge answered.
     instance fails, and the hosts it did reach are still in there).
   - `gh` supports several accounts per host; take the **active** one, since that
     is the credential `gh api --hostname` would use.
-  - **`resolve.ts`'s `classifyForgeHost` still applies a `gitlab.*` prefix
-    rule.** That predates enumeration and `ForgeHosts` deliberately does not
-    honour it. Until the two are reconciled, a `gitlab.*` host resolves for PR
-    status while `ForgeHosts` reports it unknown — do not add a third spelling
-    of this question.
+  - **A hostname is never evidence, in either layer.** Shared's
+    `classifyForgeHost` (which `resolve.ts` delegates to) used to read a
+    `gitlab.*` prefix as GitLab, so a host no CLI was signed in to resolved for
+    change-request status while `ForgeHosts` reported it unknown. That rule is
+    gone: both layers now answer github.com, gitlab.com, or "pass me the list".
+    The list travels as an explicit map — `ForgeHosts.overrides()` in main, the
+    `forge:hosts` rows via `useForgeHostMap` in the renderer — and every caller
+    that has one must pass it. `parseForgeRemote` with no map is `other` for
+    every self-managed instance, which is how identity marks or a clone dialog
+    quietly lose a signed-in Enterprise host; the only caller that may omit it
+    is one already pinned to a single hostname (`parseGitHubRemote`).
   - **Canonicalize with `canonicalForgeHostname` (shared), everywhere.** The
     settings write path and host resolution must agree byte-for-byte, or a
     setting persists under a key no lookup matches and silently does nothing.

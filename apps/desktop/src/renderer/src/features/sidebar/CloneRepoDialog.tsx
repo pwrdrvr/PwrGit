@@ -29,6 +29,7 @@ import {
   sourceEmptyMessage,
   statusFor
 } from "./fork-dialog";
+import { useForgeHostMap } from "../../lib/useForgeHostMap";
 import { useCloneSearch } from "./useCloneSearch";
 import { RepoIdentityChips } from "./RepoIdentityMarks";
 
@@ -211,9 +212,14 @@ export function CloneRepoDialog({
     };
   }, [profile.id]);
 
+  // Which forge runs at a pasted URL's host. Only main knows — the list is
+  // what `gh`/`glab` are signed in to plus what the user added in Settings —
+  // so without it a self-managed instance reads as `other` and the dialog
+  // falls back to SSH/HTTPS instead of asking its CLI.
+  const forgeHosts = useForgeHostMap();
   const exactRepo = useMemo(
-    () => exactRepository(sourceQuery, host),
-    [sourceQuery, host]
+    () => exactRepository(sourceQuery, host, forgeHosts),
+    [sourceQuery, host, forgeHosts]
   );
   const exactNameWithOwner = exactRepo?.nameWithOwner ?? null;
   const localSourcePath = useMemo(
@@ -284,10 +290,23 @@ export function CloneRepoDialog({
         if (result.ok) setCheckedRepository(result.value);
         else if (
           result.error.code === "forge_cli_missing" ||
-          result.error.code === "forge_login_required"
+          result.error.code === "forge_login_required" ||
+          // A host no CLI is signed in to and nobody has named in Settings →
+          // Forges. There is no API to confirm the repository with, but
+          // `git clone git@host:slug.git` still works, which is exactly what
+          // the unverified placeholder offers.
+          result.error.code === "unsupported_host"
         ) {
+          // The original input, not `exactNameWithOwner`: the slug alone has
+          // lost which instance it came from, and rebuilding the clone URLs
+          // from the default hostname would offer gitlab.com's repository of
+          // that name instead of the self-managed one the user pasted.
           setCheckedRepository(
-            unverifiedCloneRepository(exactNameWithOwner!, exactRepo?.host ?? host)
+            unverifiedCloneRepository(
+              sourceQuery,
+              exactRepo?.host ?? host,
+              forgeHosts
+            )
           );
         } else {
           setCheckError(result.error.message);
@@ -298,7 +317,15 @@ export function CloneRepoDialog({
       active = false;
       window.clearTimeout(timeout);
     };
-  }, [exactNameWithOwner, exactRepo?.host, host, localSourcePath, profile.id]);
+  }, [
+    exactNameWithOwner,
+    exactRepo?.host,
+    forgeHosts,
+    host,
+    localSourcePath,
+    profile.id,
+    sourceQuery
+  ]);
 
   const sourceResults = useMemo(() => {
     // Filtered to the picked forge: a host switch keeps the previous results

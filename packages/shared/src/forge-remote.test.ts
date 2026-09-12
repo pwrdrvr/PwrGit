@@ -42,28 +42,49 @@ describe("parseForgeRemote", () => {
     );
   });
 
-  it("recognizes a self-hosted GitLab, and admits it cannot know otherwise", () => {
-    // `gitlab.*` is a real deployment convention, so it is inferable. GitHub
-    // Enterprise has no equivalent — its hostnames are arbitrary
-    // (`git.acme.com`) — so `github.acme.io` stays `other` rather than being
-    // guessed, which would aim API calls at the wrong product. A self-hosted
-    // GitHub needs an explicit override; see classifyForgeHost.
-    expect(parseForgeRemote("git@gitlab.acme.io:acme/api.git")?.host).toBe(
-      "gitlab"
+  it("admits it cannot place any self-managed host, gitlab.* included", () => {
+    // `gitlab.*` used to be read as GitLab on the strength of the naming
+    // convention. It is gone because main's `ForgeHosts` never honoured it —
+    // hosts are enumerated from `gh`/`glab` sign-ins or named by the user — so
+    // the two layers disagreed about a host nobody was signed in to. A name is
+    // not evidence in either direction now: `gitlab.acme.io` is exactly as
+    // unknowable as `github.acme.io` and `code.acme.io`, and all three keep
+    // their hostname so the UI can still name the instance.
+    for (const url of [
+      "git@gitlab.acme.io:acme/api.git",
+      "https://github.acme.io/acme/api",
+      "https://code.acme.io/acme/api"
+    ]) {
+      expect(parseForgeRemote(url)?.host).toBe("other");
+    }
+    expect(parseForgeRemote("https://code.acme.io/acme/api")?.hostname).toBe(
+      "code.acme.io"
     );
-    expect(parseForgeRemote("https://github.acme.io/acme/api")?.host).toBe(
-      "other"
-    );
-    const other = parseForgeRemote("https://code.acme.io/acme/api");
-    expect(other?.host).toBe("other");
-    expect(other?.hostname).toBe("code.acme.io");
   });
 
-  it("takes an explicit override for a host no heuristic can place", () => {
+  it("takes the known-host map for anything but the two SaaS names", () => {
     expect(
       classifyForgeHost("git.acme.com", { "git.acme.com": "github" })
     ).toBe("github");
     expect(classifyForgeHost("git.acme.com")).toBe("other");
+    // The map is what a signed-in self-managed instance arrives as, and it is
+    // the only thing that makes one resolve.
+    expect(
+      parseForgeRemote("git@gitlab.acme.io:acme/platform/api.git", {
+        "gitlab.acme.io": "gitlab"
+      })
+    ).toMatchObject({
+      host: "gitlab",
+      hostname: "gitlab.acme.io",
+      nameWithOwner: "acme/platform/api"
+    });
+    // And a mapped GitHub Enterprise host inherits GitHub's path rules, so a
+    // page URL is still not read as a project.
+    expect(
+      parseForgeRemote("https://github.acme.io/o/r/issues", {
+        "github.acme.io": "github"
+      })
+    ).toBeNull();
   });
 
   it("lowercases the hostname but preserves project-path case", () => {

@@ -12,6 +12,7 @@ import type {
   Repo
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { useForgeHostMap } from "../../lib/useForgeHostMap";
 import { useCloneSearch } from "./useCloneSearch";
 import {
   cloneDestinationLabel,
@@ -183,9 +184,13 @@ export function ForkRepoDialog({
     };
   }, [ownersHost]);
 
+  // A pasted URL names its own instance, but only main knows which forge runs
+  // there — see `useForgeHostMap`. Without the list a self-managed host reads
+  // as `other`, which has no provider to fork with.
+  const forgeHosts = useForgeHostMap();
   const exact = useMemo(
-    () => exactRepository(sourceQuery, host),
-    [sourceQuery, host]
+    () => exactRepository(sourceQuery, host, forgeHosts),
+    [sourceQuery, host, forgeHosts]
   );
 
   // Debounced, and only on what was typed. The catalog this replaced listed

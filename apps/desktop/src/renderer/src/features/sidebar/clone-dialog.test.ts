@@ -129,12 +129,45 @@ describe("clone dialog filtering", () => {
       hostname: "gitlab.com",
       nameWithOwner: "huntharo/x-code-clone"
     });
+  });
+
+  it("places a self-managed instance from the host list, not its name", () => {
+    // `gitlab.*` was once read as GitLab here on the strength of the name.
+    // Main never agreed — it enumerates hosts from `gh`/`glab` sign-ins and
+    // from what the user added in Settings → Forges — so a host nobody was
+    // signed in to got a GitLab clone URL from this dialog while the settings
+    // pane showed no row for it. The list now arrives over `forge:hosts`
+    // (`useForgeHostMap`), and it is the only thing that places the host.
+    const url = "git@gitlab.acme.io:acme/platform/billing.git";
+    expect(exactRepository(url)).toEqual({
+      host: "other",
+      hostname: "gitlab.acme.io",
+      nameWithOwner: "acme/platform/billing"
+    });
     expect(
-      exactRepository("git@gitlab.acme.io:acme/platform/billing.git")
+      exactRepository(url, "github", { "gitlab.acme.io": "gitlab" })
     ).toEqual({
       host: "gitlab",
       hostname: "gitlab.acme.io",
       nameWithOwner: "acme/platform/billing"
+    });
+  });
+
+  it("keeps a self-managed hostname on an unverified placeholder", () => {
+    // The placeholder's clone URLs are what the user actually runs when the
+    // CLI cannot confirm the repo. Building them from the forge's default
+    // hostname would hand them gitlab.com's repository of that name.
+    expect(
+      unverifiedCloneRepository(
+        "git@gitlab.acme.io:acme/platform/billing.git",
+        "gitlab",
+        { "gitlab.acme.io": "gitlab" }
+      )
+    ).toMatchObject({
+      host: "gitlab",
+      hostname: "gitlab.acme.io",
+      sshUrl: "git@gitlab.acme.io:acme/platform/billing.git",
+      httpsUrl: "https://gitlab.acme.io/acme/platform/billing.git"
     });
   });
 

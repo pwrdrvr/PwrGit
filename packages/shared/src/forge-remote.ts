@@ -35,15 +35,6 @@ function splitPath(path: string): { owner: string; repo: string } | null {
 export type ForgeHostMap = Readonly<Record<string, "github" | "gitlab">>;
 
 /**
- * Which forge a hostname belongs to. `other` means "cannot be certain", which
- * is the honest answer for a self-hosted instance until an override says
- * otherwise — a wrong guess sends API calls at the wrong product.
- *
- * This is the ONE classifier: main's `classifyHost` delegates here, so the
- * renderer's dialogs and the main process can never disagree about which
- * provider owns a remote.
- */
-/**
  * The one spelling of a hostname every layer must agree on.
  *
  * Config keys are written by the settings pane and read by host resolution; if
@@ -61,6 +52,23 @@ export function canonicalForgeHostname(value: string): string | null {
   return host;
 }
 
+/**
+ * Which forge a hostname belongs to. `other` means "cannot be certain", which
+ * is the honest answer for a self-hosted instance until `overrides` says
+ * otherwise — a wrong guess sends API calls at the wrong product.
+ *
+ * A hostname is never evidence beyond the two SaaS names. `gitlab.*` used to
+ * be read as GitLab on the strength of the naming convention, and that made
+ * this function disagree with `ForgeHosts` in main, which enumerates hosts
+ * from `gh`/`glab` sign-ins and from what the user added by hand. One answer
+ * beats two: a self-managed instance is known because somebody signed in to it
+ * or named it, and `overrides` is how that knowledge reaches here.
+ *
+ * This is the ONE classifier: main's `classifyHost` delegates here, so the
+ * renderer's dialogs and the main process can never disagree about which
+ * provider owns a remote. Callers that have the host list must pass it —
+ * without it this is only ever `github.com`, `gitlab.com`, or `other`.
+ */
 export function classifyForgeHost(
   hostname: string,
   overrides: ForgeHostMap = {}
@@ -70,12 +78,20 @@ export function classifyForgeHost(
   if (override !== undefined) return override;
   if (normalized === "github.com") return "github";
   if (normalized === "gitlab.com") return "gitlab";
-  if (normalized.startsWith("gitlab.")) return "gitlab";
   return "other";
 }
 
-/** Parse any git remote URL into the forge coordinates it names. */
-export function parseForgeRemote(url: string): ForgeRemote | null {
+/** Parse any git remote URL into the forge coordinates it names.
+ *
+ *  `overrides` carries the known host list — `ForgeHosts.overrides()` in main,
+ *  the `forge:hosts` rows in the renderer. Omitting it resolves every
+ *  self-managed instance to `other`, which is a silent loss of forge features
+ *  rather than an error, so omit it only where the host is checked separately
+ *  (`parseGitHubRemote` accepts github.com and nothing else). */
+export function parseForgeRemote(
+  url: string,
+  overrides: ForgeHostMap = {}
+): ForgeRemote | null {
   const trimmed = url.trim();
   if (trimmed === "") return null;
 
@@ -91,7 +107,7 @@ export function parseForgeRemote(url: string): ForgeRemote | null {
 
   const split = splitPath(path);
   if (split === null) return null;
-  const host = classifyForgeHost(hostname);
+  const host = classifyForgeHost(hostname, overrides);
   // GitHub has no subgroups: a project is always exactly `owner/repo`. A
   // deeper path is a wiki, a gist, or a page URL that merely looks like a
   // repository (`.../repo/issues`), and reading it as a project would send a

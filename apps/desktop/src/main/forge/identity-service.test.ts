@@ -10,7 +10,7 @@ import { RepoIndexer } from "../git/repo-indexer";
 import type { GitExec, GitOutput } from "../git/dugite";
 import { GitHubRepoProvider } from "../forge/github/repo-provider";
 import { ForgeRepoRegistry } from "./repo-provider";
-import { IdentityService, sameIdentity } from "./identity-service";
+import { IdentityService, readOrigin, sameIdentity } from "./identity-service";
 
 const systemGit: GitExec = (args, cwd, options) =>
   new Promise<Result<GitOutput>>((resolve) => {
@@ -382,5 +382,42 @@ describe("sameIdentity", () => {
       sameIdentity(base, { ...base, parent: { nameWithOwner: "f/r", url: "" } })
     ).toBe(false);
     expect(sameIdentity(undefined, base)).toBe(false);
+  });
+});
+
+describe("readOrigin", () => {
+  const repo = { id: "r1", path: "/tmp/whatever" } as Parameters<
+    typeof readOrigin
+  >[1];
+  const remote =
+    (url: string): GitExec =>
+    async () =>
+      ok({ exitCode: 0, stdout: `${url}\n`, stderr: "" });
+
+  it("needs the host list to place a self-managed instance", async () => {
+    // The regression this guards: `gitlab.*` used to classify as GitLab from
+    // its name alone, so removing that rule without passing the enumerated
+    // hosts here would silently drop the visibility and fork-lineage marks for
+    // every company GitLab — the CLI is signed in, and nothing would say why.
+    const url = "git@gitlab.acme-corp.example:acme/platform/billing.git";
+    expect(await readOrigin(remote(url), repo)).toMatchObject({
+      host: "other"
+    });
+    expect(
+      await readOrigin(remote(url), repo, {
+        "gitlab.acme-corp.example": "gitlab"
+      })
+    ).toEqual({
+      repoId: "r1",
+      host: "gitlab",
+      hostname: "gitlab.acme-corp.example",
+      nameWithOwner: "acme/platform/billing"
+    });
+  });
+
+  it("still knows the two SaaS hosts with no list at all", async () => {
+    expect(
+      await readOrigin(remote("git@github.com:huntharo/react.git"), repo)
+    ).toMatchObject({ host: "github", nameWithOwner: "huntharo/react" });
   });
 });

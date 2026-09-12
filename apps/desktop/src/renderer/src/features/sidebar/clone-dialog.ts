@@ -3,7 +3,8 @@ import {
   parseForgeRemote,
   type CloneDestination,
   type CloneRepository,
-  type ForgeHost
+  type ForgeHost,
+  type ForgeHostMap
 } from "@pwrgit/shared";
 
 /** `gh repo clone X` / `glab repo clone X` pasted straight from a terminal.
@@ -117,10 +118,16 @@ export type ExactRepository = {
  * A full remote URL names its own forge and wins. A bare `owner/name` cannot
  * — the same slug exists on both — so it falls back to `defaultHost`, which
  * is the host toggle's current value.
+ *
+ * `hosts` is the map `useForgeHostMap` reads over `forge:hosts`, and it is
+ * what makes a self-managed instance resolve at all: a hostname is not
+ * evidence of which forge runs on it, so without an entry `gitlab.acme.io` is
+ * `other` — the same honest no-op `git.acme.com` has always been.
  */
 export function exactRepository(
   input: string,
-  defaultHost: ForgeHost = "github"
+  defaultHost: ForgeHost = "github",
+  hosts: ForgeHostMap = {}
 ): ExactRepository | null {
   const trimmed = input.trim();
   if (localRepositoryPath(trimmed) !== null) return null;
@@ -140,7 +147,7 @@ export function exactRepository(
     /^(?:https?|ssh|git):\/\//i.test(candidate) ||
     /^[^\s/]+@[^\s:/]+:/.test(candidate);
   if (isUrl) {
-    const remote = parseForgeRemote(candidate);
+    const remote = parseForgeRemote(candidate, hosts);
     if (remote === null || !isSafeProjectPath(remote.nameWithOwner)) return null;
     return {
       host: remote.host,
@@ -160,9 +167,10 @@ export function exactRepository(
  *  the third state is that we must not guess this one. */
 export function unverifiedCloneRepository(
   input: string,
-  defaultHost: ForgeHost = "github"
+  defaultHost: ForgeHost = "github",
+  hosts: ForgeHostMap = {}
 ): CloneRepository | null {
-  const exact = exactRepository(input, defaultHost);
+  const exact = exactRepository(input, defaultHost, hosts);
   if (exact === null) return null;
   const slash = exact.nameWithOwner.lastIndexOf("/");
   return {

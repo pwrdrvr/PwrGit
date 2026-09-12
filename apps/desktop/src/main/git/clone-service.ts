@@ -546,10 +546,15 @@ export class CloneService {
     }
     const provider = this.forges.get(host);
     if (provider === null) {
+      // `host` is the enum, and `other` is not a word to show anyone. This is
+      // reached for a remote on a host no CLI is signed in to and nobody has
+      // named in Settings → Forges, which is a repository PwrGit cannot
+      // confirm — not one it cannot clone.
       return err({
         kind: "remote",
         code: "unsupported_host",
-        message: `PwrGit cannot look up repositories on ${host}.`
+        message:
+          "PwrGit doesn't know which forge runs at that host. Add it under Settings → Forges, or clone with SSH or HTTPS."
       });
     }
     const unavailable = forgeUnavailable(await this.statuses(), host);

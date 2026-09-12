@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { ForgeSettings } from "@pwrgit/shared";
-import type { DiscoveredForgeHost } from "./cli-hosts";
-import { ForgeHosts } from "./hosts";
+import { parseForgeRemote, type ForgeSettings } from "@pwrgit/shared";
+import { parseGlabHosts, type DiscoveredForgeHost } from "./cli-hosts";
+import { ForgeHosts, ForgeHostsView } from "./hosts";
+import { resolveForgeRepo } from "./resolve";
 
 function make(opts: {
   hosts?: ForgeSettings["hosts"];
@@ -304,5 +305,85 @@ describe("ForgeHosts canonicalization", () => {
     const hosts = make({ hosts: { "ghe.example:8443": { kind: "github" } } });
     expect(hosts.kindFor("ghe.example").kind).toBeNull();
     expect(hosts.list()).toEqual([]);
+  });
+});
+
+describe("a signed-in self-managed GitLab, end to end", () => {
+  // The user this has to keep working: a company instance called
+  // `gitlab.acme-corp.example` that `glab` is signed in to. It used to resolve
+  // because its name began with `gitlab.`; now it has to resolve because
+  // enumeration found it, and every layer has to reach the same answer from
+  // that one list. A layer that misses it loses a feature silently.
+  const GLAB_STATUS = `gitlab.acme-corp.example
+  ✓ Logged in to gitlab.acme-corp.example as a.dev (keyring)
+  ✓ Token: **************
+`;
+  const ORIGIN = "git@gitlab.acme-corp.example:acme/platform/billing.git";
+
+  const signedIn = (): ForgeHosts =>
+    new ForgeHosts({
+      readSettings: () => ({ hosts: {} }),
+      discovered: () => parseGlabHosts(GLAB_STATUS),
+      env: {}
+    });
+
+  it("enumerates the host and calls it a GitLab", () => {
+    expect(parseGlabHosts(GLAB_STATUS)).toEqual([
+      { kind: "gitlab", host: "gitlab.acme-corp.example", account: "a.dev" }
+    ]);
+    const hosts = signedIn();
+    expect(hosts.kindFor("gitlab.acme-corp.example").kind).toBe("gitlab");
+    expect(hosts.isEnabled("gitlab.acme-corp.example").enabled).toBe(true);
+  });
+
+  it("resolves change-request status through the overrides map", () => {
+    expect(resolveForgeRepo(ORIGIN, signedIn().overrides())).toEqual({
+      kind: "gitlab",
+      host: "gitlab.acme-corp.example",
+      path: "acme/platform/billing"
+    });
+  });
+
+  it("resolves the repo identity marks through the same map", () => {
+    // `readOrigin` parses with exactly this map; without one the origin reads
+    // as `other` and the repository quietly loses its visibility mark.
+    expect(parseForgeRemote(ORIGIN, signedIn().overrides())).toMatchObject({
+      host: "gitlab",
+      hostname: "gitlab.acme-corp.example",
+      nameWithOwner: "acme/platform/billing"
+    });
+  });
+
+  it("reaches the renderer's dialogs as a row naming the same forge", () => {
+    // `forge:hosts` rows are what `useForgeHostMap` turns into the map the
+    // clone and fork dialogs classify a pasted URL with; that the two agree is
+    // pinned from the renderer side, in `lib/useForgeHostMap.test.ts` — a main
+    // spec may not import renderer code (`.dependency-cruiser.cjs`).
+    const rows = new ForgeHostsView(signedIn(), async () => {}).rows();
+    expect(rows).toMatchObject([
+      {
+        host: "gitlab.acme-corp.example",
+        kind: "gitlab",
+        enabled: true,
+        origin: "cli",
+        account: "a.dev"
+      }
+    ]);
+  });
+
+  it("stops resolving everywhere once the host is switched off", () => {
+    // The switch is the one thing that should take a feature away, and it has
+    // to take it away in the dialogs too — `rows()` carries `enabled`.
+    const off = new ForgeHosts({
+      readSettings: () => ({
+        hosts: { "gitlab.acme-corp.example": { enabled: false } }
+      }),
+      discovered: () => parseGlabHosts(GLAB_STATUS),
+      env: {}
+    });
+    expect(off.isEnabled("gitlab.acme-corp.example").enabled).toBe(false);
+    expect(
+      new ForgeHostsView(off, async () => {}).rows()[0]?.enabled
+    ).toBe(false);
   });
 });

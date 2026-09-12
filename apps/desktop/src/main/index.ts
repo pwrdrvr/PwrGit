@@ -415,7 +415,12 @@ if (!gotSingleInstanceLock) {
     forgeStatus.onChange(() => {
       void forgeHostDirectory.refresh();
     });
-    const identityService = new IdentityService(db, execGit, forges);
+    // Same host list the PR and commit-author resolvers use. Without it an
+    // `origin` on a self-managed instance classifies as `other` and the repo
+    // silently loses its visibility and fork-lineage marks.
+    const identityService = new IdentityService(db, execGit, forges, () =>
+      forgeHosts.overrides()
+    );
     const cloneService = new CloneService(
       db,
       execGit,
