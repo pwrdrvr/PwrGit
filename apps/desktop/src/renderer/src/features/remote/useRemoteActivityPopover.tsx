@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  type ReactNode,
+  type RefObject
+} from "react";
 import type { RemoteActivity } from "@pwrgit/shared";
 import { useViewportTooltip } from "../../lib/useViewportTooltip";
 import { useSecondsClock } from "../../state/useRemoteActivity";
@@ -20,6 +26,22 @@ import { RemoteActivityCard } from "./RemoteActivityCard";
 export const REMOTE_ACTIVITY_POPOVER_AFTER_MS = 1_200;
 
 /**
+ * Where the user's attention already is, asked of the DOM rather than waited
+ * for as an event.
+ *
+ * `:hover` matches the whole hover chain, so a pointer resting on a button's
+ * glyph still answers for the button. `:focus-visible` is the keyboard half
+ * and is deliberately not `:focus`: clicking a button focuses it in Chromium
+ * without making it focus-visible, so this cannot resurrect a card for a
+ * pointer that has already moved away — measured, not assumed, in
+ * `e2e/remote-activity.spec.ts`.
+ *
+ * Exported so the jsdom harness can stub exactly this query rather than
+ * carrying its own copy of it.
+ */
+export const WHERE_THE_USER_IS = ":hover, :focus-visible";
+
+/**
  * A trigger the pointer is on, and the wait it has earned.
  *
  * `wait` carries the operation it was armed for: a countdown left over from an
@@ -38,8 +60,22 @@ export type RemoteActivityPopover = {
   open: (target: HTMLElement) => void;
   /** Wire to mouseleave/blur; the pointer keeps a grace period to cross in. */
   close: () => void;
+  /**
+   * Move focus into the card's first control. Wire to Tab on the trigger and
+   * swallow the key when it returns true — the card carries Cancel, and the
+   * pointer's route into it (just move) has no keyboard equivalent.
+   */
+  focusFirst: () => boolean;
   node: ReactNode;
 };
+
+/**
+ * The controls the card hangs from while an operation runs, in the order the
+ * card would rather anchor to them. Handed in as refs because a trigger can
+ * *become* one with the user already on it and no event to say so — see the
+ * arming effect below.
+ */
+export type RemoteActivityTriggers = readonly RefObject<HTMLElement | null>[];
 
 /**
  * The status card, hung off whichever toolbar control is currently working.
@@ -54,13 +90,14 @@ export type RemoteActivityPopover = {
  * be able to travel from the trigger into it.
  */
 export function useRemoteActivityPopover(
-  activity: RemoteActivity | null
+  activity: RemoteActivity | null,
+  triggers: RemoteActivityTriggers = []
 ): RemoteActivityPopover {
   const tooltip = useViewportTooltip("remote-activity-popover", {
     interactive: true,
     label: "Git operation status"
   });
-  const { show, update, hide, scheduleHide, visible } = tooltip;
+  const { show, update, hide, scheduleHide, focusFirst, visible } = tooltip;
   // The deferred open fires from a timer, long after the render that armed it.
   // Read the live record through a ref so the timer can tell "still running"
   // from "finished while I waited".
@@ -74,6 +111,10 @@ export function useRemoteActivityPopover(
   // at a pointer that had gone. `restOn` and `release` own the record's
   // lifetime; `arm` and `disarm` own its `wait`, and nothing else writes it.
   const resting = useRef<Resting | null>(null);
+  // Latched: the caller rebuilds this array every render, and the only thing
+  // that reads it is an effect keyed on the operation.
+  const triggersRef = useRef<RemoteActivityTriggers>(triggers);
+  triggersRef.current = triggers;
   // One tick per second, and only while the card is on screen — the readouts
   // it exists for ("no response for 2m 41s") are counted in seconds.
   const now = useSecondsClock(visible);
@@ -172,9 +213,33 @@ export function useRemoteActivityPopover(
   // already counting down for THIS operation is left alone for the same
   // reason; one left over from a finished operation is not, or an operation
   // that replaced it inside the gate would never be armed at all.
+  //
+  // And a hover that never lands at all must not be lost either.
+  //
+  // The race above at least produces an event. Fetch produces none: it draws
+  // the same `<RefreshGlyph/>` busy or idle — the arrow spins in place — so
+  // nothing under the pointer is replaced, Chromium has no reason to
+  // re-resolve hover, and the pointer that clicked is already inside the
+  // button when it becomes a trigger. The keyboard fails the same way from
+  // the other side: the click's or Enter's `focusin` lands before the button
+  // is busy, and no second focus event follows. There is nothing to remember
+  // because nothing was ever reported — so ask the DOM where the user is
+  // instead of waiting to be told.
+  //
+  // Resting on what it finds, rather than arming it directly, is what makes
+  // the answer hold: `restOn` puts real `mouseleave`/`blur` listeners on the
+  // element, so a user who does move away calls the whole thing off exactly
+  // as if they had arrived by event.
   const operationId = activity?.id ?? null;
   useEffect(() => {
     if (operationId === null || visible) return;
+    if (resting.current === null) {
+      const found = triggersRef.current
+        .map((trigger) => trigger.current)
+        .find((element) => element !== null && element.matches(WHERE_THE_USER_IS));
+      if (found === undefined || found === null) return;
+      restOn(found);
+    }
     const held = resting.current;
     if (held === null) return;
     // A trigger torn out from under a stationary pointer never gets to say the
@@ -186,7 +251,7 @@ export function useRemoteActivityPopover(
     }
     if (held.wait?.operationId === operationId) return;
     arm(held.target);
-  }, [arm, forgetTrigger, operationId, visible]);
+  }, [arm, forgetTrigger, operationId, restOn, visible]);
 
   useEffect(() => {
     if (!visible) return;
@@ -207,6 +272,7 @@ export function useRemoteActivityPopover(
       forgetTrigger();
       scheduleHide();
     },
+    focusFirst,
     node: tooltip.tooltipNode
   };
 }

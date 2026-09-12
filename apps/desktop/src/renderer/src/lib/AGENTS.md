@@ -54,6 +54,13 @@ card. A sweep satisfies neither, so the extra path costs no suppression.
 the trigger when the user had tabbed into the card. Anything that renders its
 own hover surface outside that hook owes the same.
 
+An interactive card is dismissed by any scroll — **unless the user has reached
+it**, by pointer or by focus. Both halves matter: the pointer flag came first,
+and focus was added when a second trigger (`WorktreeHeader`, after `GraphRow`)
+started handing Tab into a card. A keyboard user sets no pointer flag, so
+without it an unrelated scroll — the graph adjusting `scrollTop` as commits
+stream in — took the card away with their focus still inside it.
+
 ## Click-opened overlays go through `useDismissable` / `useModal`
 
 The same rule, for the surfaces a click opens. Do not hand-roll a keydown

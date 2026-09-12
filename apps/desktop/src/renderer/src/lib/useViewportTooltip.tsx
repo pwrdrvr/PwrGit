@@ -245,10 +245,23 @@ export function useViewportTooltip(
     if (!visible) return;
     const onScroll = (): void => {
       // Playwright and browsers can emit a scroll while bringing a control in
-      // this card into view. Once the pointer has reached an interactive card,
+      // this card into view. Once the user has reached an interactive card,
       // that mechanical scroll must not make the card run away from its own
       // controls. A scroll while outside the card still dismisses it normally.
+      //
+      // Focus counts as having reached it, not just the pointer: a keyboard
+      // user tabs in (see the trigger handoffs in `GraphRow` and
+      // `WorktreeHeader`) and never sets the pointer flag, so without this
+      // any scroll anywhere — the graph adjusting scrollTop as commits stream
+      // in — would take the card away with their focus still inside it.
       if (interactive && pointerInInteractiveTooltipRef.current) return;
+      if (
+        interactive &&
+        tooltipRef.current !== null &&
+        tooltipRef.current.contains(document.activeElement)
+      ) {
+        return;
+      }
       hide();
     };
     // WCAG 2.1 SC 1.4.13: content shown on hover must be dismissible without

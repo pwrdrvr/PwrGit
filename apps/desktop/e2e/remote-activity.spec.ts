@@ -59,19 +59,79 @@ test.afterEach(async () => {
   sandbox = null;
 });
 
-test("a pull that gets no answer says so, shows Git's command, and cancels", async () => {
+/**
+ * A repository one commit behind a remote that accepts and then says nothing.
+ *
+ * Every test here needs the same wedge, and five hand-rolled copies of it is
+ * five places to miss when the fixture changes.
+ */
+async function wedgedRepo(
+  name: string,
+  /**
+   * Any other repository this test needs. It runs before the app launches,
+   * because `addRootAndExpand` scans the folder once — a repo created after
+   * that is simply not there.
+   */
+  alsoOnDisk?: (box: GitSandbox) => void
+): Promise<{ box: GitSandbox; window: AppHandle["window"] }> {
   sandbox = createGitSandbox();
   const box = sandbox;
-  const repo = box.makeRepoBehindRemote("svc", { behindBy: 1 });
+  const repo = box.makeRepoBehindRemote(name, { behindBy: 1 });
   const port = await startSilentRemote();
-  box.git(repo.path, "remote", "set-url", "origin", `git://127.0.0.1:${port}/svc.git`);
+  box.git(
+    repo.path,
+    "remote",
+    "set-url",
+    "origin",
+    `git://127.0.0.1:${port}/${name}.git`
+  );
+  alsoOnDisk?.(box);
 
   handle = await launchApp();
   const { window } = handle;
-  await addRootAndExpand(window, handle, box, "svc");
+  await addRootAndExpand(window, handle, box, name);
+  return { box, window };
+}
+
+/**
+ * Give a test sole ownership of the pointer before a gesture whose whole point
+ * is where that pointer is left resting.
+ *
+ * Playwright's pointer is injected over CDP and never moves the host's real
+ * cursor, so the two coexist — until Chromium recomputes hover after a layout
+ * change and dispatches a synthetic "fake mouse move" at the position its
+ * input pipeline last saw from the OS. That lands wherever the machine's
+ * actual cursor happens to be, evicting the synthetic pointer parked on a
+ * button: `:hover` really goes false, the popover's `onMouseLeave` correctly
+ * cancels an armed card, and the test fails having proved nothing. Measured
+ * here at roughly one run in four, with the window and the real cursor in
+ * identical positions every launch — the timing of the fake move is the only
+ * variable, so no amount of waiting fixes it.
+ *
+ * `setIgnoreMouseEvents` stops the OS delivering real mouse input to the
+ * window at all. CDP injection goes straight to the renderer and is
+ * unaffected, so the synthetic pointer becomes the only one the page has ever
+ * seen, and a fake move can only re-dispatch where Playwright already is.
+ */
+async function ownThePointer(h: AppHandle): Promise<void> {
+  await h.app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.setIgnoreMouseEvents(true);
+  });
+  await expect(h.window.locator(".graph-row").first()).toBeVisible({
+    timeout: 20_000
+  });
+}
+
+
+test("a pull that gets no answer says so, shows Git's command, and cancels", async () => {
+  const { window } = await wedgedRepo("svc");
 
   const pull = window.getByRole("button", { name: /^Pull/ });
   await expect(pull).toBeVisible({ timeout: 20_000 });
+  // This one hovers to summon the card, but the age gate still has to elapse
+  // with the pointer where the hover left it — the same premise the tests
+  // below rest on, and the same reason to let the window settle first.
+  await ownThePointer(handle!);
   await pull.click();
 
   // Phase first: the toolbar has to stop saying "Pull" and start saying what
@@ -118,17 +178,9 @@ test("a pull that gets no answer says so, shows Git's command, and cancels", asy
 });
 
 test("an operation in another repository stays visible and cancellable after you navigate away", async () => {
-  sandbox = createGitSandbox();
-  const box = sandbox;
-  const stuck = box.makeRepoBehindRemote("stuck", { behindBy: 1 });
-  box.makeRepo("other");
-  const port = await startSilentRemote();
-  box.git(stuck.path, "remote", "set-url", "origin", `git://127.0.0.1:${port}/stuck.git`);
-
-  handle = await launchApp();
-  const { window } = handle;
-  await addRootAndExpand(window, handle, box, "stuck");
-
+  const { window } = await wedgedRepo("stuck", (box) => {
+    box.makeRepo("other");
+  });
   const pull = window.getByRole("button", { name: /^Pull/ });
   await expect(pull).toBeVisible({ timeout: 20_000 });
   await pull.click();
@@ -148,4 +200,134 @@ test("an operation in another repository stays visible and cancellable after you
 
   await toast.getByRole("button", { name: "Cancel" }).click();
   await expect(toast).toHaveCount(0, { timeout: 20_000 });
+});
+
+/**
+ * The pointer never moves after the click, and nothing under it changes.
+ *
+ * Pull can lean on an accident to get here: swapping its glyph for the
+ * spinner makes Chromium re-resolve hover, which React reports as a
+ * `mouseenter` nobody made. Fetch keeps the same glyph spinning in place, so
+ * that accident does not happen and no boundary event follows the click at
+ * all. This test is deliberately the pull test *without* the `hover()` — if
+ * the card only appears when something tells the popover where the pointer
+ * is, it fails here.
+ *
+ * `WorktreeHeader.test.tsx` covers the wiring by answering `WHERE_THE_USER_IS`
+ * for one element, because jsdom has no pointer to ask. What only a browser
+ * can say is whether Chromium really leaves the pointer on a button it
+ * re-rendered under — which is this test.
+ */
+test("a wedged fetch opens its card under the pointer that started it", async () => {
+  const { window } = await wedgedRepo("svc");
+
+  // The sidebar has Fetch buttons of its own, so reach for the toolbar's.
+  const fetch = window.locator('.wt-actions .wt-btn[aria-label="Fetch"]');
+  await expect(fetch).toBeVisible({ timeout: 20_000 });
+  await ownThePointer(handle!);
+  await fetch.click();
+
+  const busy = window.locator('.wt-btn[aria-busy="true"]');
+  await expect(busy).toHaveAttribute("aria-label", "Fetching updates…", {
+    timeout: 20_000
+  });
+
+  // No second hover: the pointer is still resting where the click left it.
+  const card = window.locator(".remote-activity-popover");
+  await expect(card).toBeVisible({ timeout: 10_000 });
+  await expect(card).toContainText("Fetch · svc · main");
+  await expect(card).toContainText("git fetch --prune --progress");
+  await expect(card).toContainText("Git has produced no output yet.");
+
+  // Reachable means reachable all the way to the way out.
+  await card.getByRole("button", { name: "Cancel" }).click();
+  await expect(busy).toHaveCount(0, { timeout: 20_000 });
+  await expect(window.locator(".sync-chip")).toContainText("fetch canceled", {
+    timeout: 10_000
+  });
+});
+
+/**
+ * The same gap from the other side, and the same fix.
+ *
+ * Enter on Fetch leaves focus on a button that was not yet a trigger when
+ * `focusin` fired, and no second focus event follows — so the keyboard had no
+ * way to the card at all, and through it no way to Cancel.
+ *
+ * `press()` moves no mouse, so nothing here can pass by way of `:hover`; and
+ * Tab must hand focus INTO the card rather than on to Pull, or the only
+ * control that stops a wedged fetch stays mouse-only.
+ */
+test("a wedged fetch opens its card for the keyboard, and Tab reaches Cancel", async () => {
+  const { window } = await wedgedRepo("svc");
+
+  const fetch = window.locator('.wt-actions .wt-btn[aria-label="Fetch"]');
+  await expect(fetch).toBeVisible({ timeout: 20_000 });
+  await ownThePointer(handle!);
+  await fetch.press("Enter");
+
+  const busy = window.locator('.wt-btn[aria-busy="true"]');
+  await expect(busy).toHaveAttribute("aria-label", "Fetching updates…", {
+    timeout: 20_000
+  });
+
+  const card = window.locator(".remote-activity-popover");
+  await expect(card).toBeVisible({ timeout: 10_000 });
+  await expect(card).toContainText("Fetch · svc · main");
+
+  const cancel = card.getByRole("button", { name: "Cancel" });
+  await window.keyboard.press("Tab");
+  await expect(cancel).toBeFocused();
+
+  await window.keyboard.press("Enter");
+  await expect(busy).toHaveCount(0, { timeout: 20_000 });
+  await expect(window.locator(".sync-chip")).toContainText("fetch canceled", {
+    timeout: 10_000
+  });
+});
+
+/**
+ * Two things at once, because they share a launch.
+ *
+ * The premise first: the arming selector is `:focus-visible`, never `:focus`,
+ * and the difference is a browser fact worth pinning down rather than
+ * assuming. Chromium focuses a button on click WITHOUT making it
+ * focus-visible, so the keyboard half above cannot leave anything behind that
+ * would arm a card for a pointer which has walked off.
+ *
+ * Then the behaviour: walking away from a wedged fetch leaves the graph
+ * uncovered. Note what this does NOT isolate — the record lands inside the
+ * click (measured at ~30ms, faster than a pointer can leave), so the card is
+ * armed while the pointer is still on the button and `onMouseLeave` is what
+ * cancels it. That makes this a test of the outcome, not of the selector; the
+ * assertion above is what holds the selector honest.
+ */
+test("a fetch clicked and walked away from leaves no card behind", async () => {
+  const { window } = await wedgedRepo("svc");
+
+  const fetch = window.locator('.wt-actions .wt-btn[aria-label="Fetch"]');
+  await expect(fetch).toBeVisible({ timeout: 20_000 });
+  await ownThePointer(handle!);
+  await fetch.click();
+  // Out into the graph, well before the age gate elapses. A named row rather
+  // than coordinates: a fixed point silently stops meaning "away from the
+  // toolbar" the moment the window size or the layout changes.
+  await window.locator(".graph-row").first().hover();
+
+  const busy = window.locator('.wt-btn[aria-busy="true"]');
+  await expect(busy).toHaveAttribute("aria-label", "Fetching updates…", {
+    timeout: 20_000
+  });
+
+  // The click left focus on the button — and left it NOT focus-visible.
+  expect(
+    await busy.evaluate((el) => ({
+      focused: el === document.activeElement,
+      focusVisible: el.matches(":focus-visible")
+    }))
+  ).toEqual({ focused: true, focusVisible: false });
+
+  // Several times the age gate, with nothing to summon a card.
+  await window.waitForTimeout(4_000);
+  await expect(window.locator(".remote-activity-popover")).toHaveCount(0);
 });

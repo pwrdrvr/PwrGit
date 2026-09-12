@@ -55,7 +55,7 @@ every ordinary one-second pull threw a card over the graph and took it away
 again. Measuring from `startedAt` means a hover onto something that has already
 been running opens instantly, which is the case the card is for.
 
-## A hover is a place, not a moment
+## A hover is a place, not a moment — and so is focus
 
 That same stationary-pointer `mouseenter` is the ONLY enter the button will
 ever see, and it fires while the button is busy from the renderer's own
@@ -73,14 +73,32 @@ the popover **remembers the trigger** a hover landed on even with nothing to
 report, and it re-arms when the record arrives. An enter that lands anywhere in
 the busy period is now kept until there is something to answer it with.
 
-What this does NOT do is invent a hover that never happened, and Fetch is where
-that shows: its glyph does not swap (the arrow spins in place), so a click
-leaves the pointer on a button that dispatches no boundary event at all, and
-the `focusin` the click does fire lands on mousedown — before `running` is set
-and before any handler is listening. Resting on a wedged *fetch* still shows
-nothing until the pointer leaves the button and returns. Closing that means
-asking the DOM where the pointer is (`:hover`) rather than waiting to be told,
-which jsdom cannot answer — so it needs an e2e, not a unit test.
+None of that invents a hover that never happened, and Fetch is where that
+shows: its glyph does not swap (the arrow spins in place), so a click leaves
+the pointer on a button that dispatches no boundary event at all. The keyboard
+fails the same way from the other side — the `focusin` a click or Enter fires
+lands on mousedown, before `running` is set and before any handler is
+listening, and no second focus event follows. There is nothing to remember
+because nothing was ever reported.
+
+So when the record arrives with **no trigger rested on at all**, the popover
+asks the DOM where the user is instead of waiting to be told —
+`WHERE_THE_USER_IS`, exported from that file, against refs to the controls that
+can carry the card (the busy `.wt-btn` and the `.sync-chip--progress` beside
+it). What it finds it hands to `restOn`, not to `arm` directly, so a pointer
+that does then move away calls the whole thing off through the element's own
+listeners exactly as if it had arrived by event.
+
+**`:focus-visible`, never `:focus`.** Chromium focuses a button on click
+without making it focus-visible, so the keyboard half cannot resurrect a card
+for a pointer that has walked away. That is a browser fact the code leans on,
+so it is asserted directly rather than assumed, in the "walked away" e2e.
+
+**Tab hands off into the card.** The pointer reaches Cancel by moving into the
+card; the keyboard needs the handoff `GraphRow` already makes into its commit
+context card (`focusFirst`, swallowing the key). Without it Tab lands on Pull,
+blurs the trigger and takes the card with it — so opening the card for the
+keyboard without this would show a Cancel button only a mouse could press.
 
 Three things keep that from becoming a card nobody asked for.
 
@@ -118,6 +136,22 @@ elsewhere. `couldCarryCard` keeps the record's kind matched to the button once
 there is a record — a card naming a Pull must never hang off Fetch — while
 still letting the trigger listen through the gap before one exists.
 
-`e2e/remote-activity.spec.ts` covers this. Playwright's `hover()` cannot stand
-in for the fix: after `pull.click()` the pointer is already inside the button,
-so the hover dispatches a bare `mousemove` and no boundary event at all.
+Testing splits along what jsdom can say. It does track `:hover` — but only as
+bookkeeping on a dispatched `mouseover`, and dispatching one is exactly what
+these tests must not do, since React turns it into the `onMouseEnter` whose
+absence is the subject. (It also answers `:focus-visible` for anything merely
+focused, which Chromium does not, and it clears hover on `mouseout` rather than
+on `mouseleave` — so a simulated exit needs both.) `WorktreeHeader.test.tsx`
+therefore answers `WHERE_THE_USER_IS` directly for one element: enough for the
+wiring (which controls carry the ref), the age gate and the Tab handoff, and
+deliberately blind to which half of that query a real browser would have set.
+
+The browser facts live in `e2e/remote-activity.spec.ts`: the pull test, the
+same test for Fetch *without* its `hover()`, the Enter-then-Tab-to-Cancel walk,
+and the walked-away guard. Playwright's `hover()` cannot stand in for any of
+it: after `pull.click()` the pointer is already inside the button, so the hover
+dispatches a bare `mousemove` and no boundary event at all. One caveat on the
+walked-away guard — the record lands inside the click (~30ms, faster than a
+pointer can leave), so the card is armed while the pointer is still there and
+`onMouseLeave` is what cancels it. Its explicit `:focus-visible` assertion is
+what holds the selector honest.
