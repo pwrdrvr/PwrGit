@@ -19,6 +19,20 @@ import { RemoteActivityCard } from "./RemoteActivityCard";
  */
 export const REMOTE_ACTIVITY_POPOVER_AFTER_MS = 1_200;
 
+/**
+ * A trigger the pointer is on, and the wait it has earned.
+ *
+ * `wait` carries the operation it was armed for: a countdown left over from an
+ * operation that has since finished must not read as "this one is already
+ * being handled", or an operation that replaced another inside the age gate
+ * would be armed by nothing at all.
+ */
+type Resting = {
+  target: HTMLElement;
+  release: () => void;
+  wait: { operationId: string; timer: number } | undefined;
+};
+
 export type RemoteActivityPopover = {
   /** Wire to the busy control's mouseenter/focus, passing `currentTarget`. */
   open: (target: HTMLElement) => void;
@@ -47,33 +61,34 @@ export function useRemoteActivityPopover(
     label: "Git operation status"
   });
   const { show, update, hide, scheduleHide, visible } = tooltip;
-  const pending = useRef<number | undefined>(undefined);
-  /** Which operation the pending open belongs to, so a stale one is not
-   *  mistaken for this one already being handled. */
-  const pendingFor = useRef<string | null>(null);
-  // The deferred open below fires from a timer, and the only handler that
-  // cancels it is `close()` — which stops existing the moment the operation
-  // ends and the trigger drops its listeners. Read the live record through a
-  // ref so the timer can tell "still running" from "finished while I waited".
+  // The deferred open fires from a timer, long after the render that armed it.
+  // Read the live record through a ref so the timer can tell "still running"
+  // from "finished while I waited".
   const latest = useRef<RemoteActivity | null>(activity);
   latest.current = activity;
-  // The trigger the pointer (or focus) is resting on, whether or not there is
-  // yet a record to report. See the re-arm effect below.
-  const resting = useRef<HTMLElement | null>(null);
-  const releaseResting = useRef<(() => void) | null>(null);
+  // Where the pointer (or focus) is resting, whether or not there is yet a
+  // record to report, and the wait it has earned — as ONE record, because
+  // "the pointer is here" and "an open is counting down for this operation"
+  // are halves of a single fact. Held apart, one call site updated a half and
+  // left the other armed: a forgotten trigger kept its timer and threw a card
+  // at a pointer that had gone. `restOn` and `release` own the record's
+  // lifetime; `arm` and `disarm` own its `wait`, and nothing else writes it.
+  const resting = useRef<Resting | null>(null);
   // One tick per second, and only while the card is on screen — the readouts
   // it exists for ("no response for 2m 41s") are counted in seconds.
   const now = useSecondsClock(visible);
 
-  const cancelPending = useCallback((): void => {
-    pendingFor.current = null;
-    if (pending.current === undefined) return;
-    window.clearTimeout(pending.current);
-    pending.current = undefined;
+  /** Drop any wait counting down, leaving the trigger itself remembered. */
+  const disarm = useCallback((): void => {
+    const held = resting.current;
+    if (held === null || held.wait === undefined) return;
+    window.clearTimeout(held.wait.timer);
+    held.wait = undefined;
   }, []);
 
+  /** Forget the trigger entirely — and with it, anything armed from it. */
   const forgetTrigger = useCallback((): void => {
-    releaseResting.current?.();
+    resting.current?.release();
   }, []);
 
   /**
@@ -86,35 +101,29 @@ export function useRemoteActivityPopover(
    * `useViewportTooltip` uses to release an Escape-dismissed trigger — and it
    * is what keeps a remembered trigger from opening a card for some LATER
    * operation, beside a pointer that is no longer anywhere near it.
+   *
+   * Releasing takes the wait with it. The listener exists because `close()`
+   * may never run, so anything only `close()` undid would be left armed.
    */
-  const restOn = useCallback(
-    (target: HTMLElement): void => {
-      if (resting.current === target) return;
-      forgetTrigger();
-      resting.current = target;
-      const release = (): void => {
-        target.removeEventListener("mouseleave", release);
-        target.removeEventListener("blur", release);
-        // Only this trigger's own record is ours to drop: the pointer may
-        // already have been handed on to the chip beside us.
-        if (resting.current !== target) return;
-        resting.current = null;
-        releaseResting.current = null;
-      };
-      releaseResting.current = release;
-      target.addEventListener("mouseleave", release);
-      target.addEventListener("blur", release);
-    },
-    [forgetTrigger]
-  );
+  const restOn = useCallback((target: HTMLElement): void => {
+    if (resting.current?.target === target) return;
+    resting.current?.release();
+    const release = (): void => {
+      target.removeEventListener("mouseleave", release);
+      target.removeEventListener("blur", release);
+      // Only this trigger's own record is ours to drop: the pointer may
+      // already have been handed on to the chip beside us.
+      if (resting.current?.target !== target) return;
+      const wait = resting.current.wait;
+      if (wait !== undefined) window.clearTimeout(wait.timer);
+      resting.current = null;
+    };
+    resting.current = { target, release, wait: undefined };
+    target.addEventListener("mouseleave", release);
+    target.addEventListener("blur", release);
+  }, []);
 
-  useEffect(
-    () => () => {
-      cancelPending();
-      forgetTrigger();
-    },
-    [cancelPending, forgetTrigger]
-  );
+  useEffect(() => forgetTrigger, [forgetTrigger]);
 
   /** Open the card for the live record, once it is old enough to earn one. */
   const arm = useCallback(
@@ -123,24 +132,27 @@ export function useRemoteActivityPopover(
       // Nothing to report yet. The trigger is remembered, and the effect below
       // comes back here the moment a record arrives.
       if (live === null) return;
-      cancelPending();
-      const wait =
+      disarm();
+      const remaining =
         REMOTE_ACTIVITY_POPOVER_AFTER_MS - (Date.now() - live.startedAt);
-      if (wait <= 0) {
+      if (remaining <= 0) {
         show(target, <RemoteActivityCard activity={live} now={Date.now()} />);
         return;
       }
-      const id = live.id;
-      pendingFor.current = id;
-      pending.current = window.setTimeout(() => {
-        pending.current = undefined;
-        pendingFor.current = null;
+      const held = resting.current;
+      // Only ever armed from the trigger the pointer is on, so that letting
+      // that trigger go is all it takes to call the whole thing off.
+      if (held === null || held.target !== target) return;
+      const operationId = live.id;
+      const timer = window.setTimeout(() => {
+        if (resting.current?.target === target) resting.current.wait = undefined;
         const atFire = latest.current;
-        if (atFire === null || atFire.id !== id) return;
+        if (atFire === null || atFire.id !== operationId) return;
         show(target, <RemoteActivityCard activity={atFire} now={Date.now()} />);
-      }, wait);
+      }, remaining);
+      held.wait = { operationId, timer };
     },
-    [cancelPending, show]
+    [disarm, show]
   );
 
   // A hover that lands before the operation's record does must not be lost.
@@ -163,19 +175,17 @@ export function useRemoteActivityPopover(
   const operationId = activity?.id ?? null;
   useEffect(() => {
     if (operationId === null || visible) return;
-    if (pending.current !== undefined && pendingFor.current === operationId) {
-      return;
-    }
-    const target = resting.current;
+    const held = resting.current;
+    if (held === null) return;
     // A trigger torn out from under a stationary pointer never gets to say the
     // pointer left it, so drop it here rather than hold a detached node and
     // its listeners for the life of the hook.
-    if (target === null) return;
-    if (!target.isConnected) {
+    if (!held.target.isConnected) {
       forgetTrigger();
       return;
     }
-    arm(target);
+    if (held.wait?.operationId === operationId) return;
+    arm(held.target);
   }, [arm, forgetTrigger, operationId, visible]);
 
   useEffect(() => {
@@ -195,7 +205,6 @@ export function useRemoteActivityPopover(
     },
     close: () => {
       forgetTrigger();
-      cancelPending();
       scheduleHide();
     },
     node: tooltip.tooltipNode

@@ -404,6 +404,38 @@ describe("WorktreeHeader pull progress", () => {
     expect(document.querySelector(".remote-activity-popover")).toBeNull();
   });
 
+  it("takes the waiting card away with the trigger the pointer left", async () => {
+    const pull = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Pull"]'
+    );
+    await act(async () => pull?.click());
+    const busy = container.querySelector<HTMLButtonElement>(
+      'button[aria-busy="true"]'
+    );
+    await act(async () => {
+      busy?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+
+    // Old enough that the wait is nearly up, so the card is genuinely armed
+    // rather than merely not due yet.
+    await emitActivities([
+      { startedAt: Date.now() - 1_150, phase: "fetch", silent: true }
+    ]);
+    expect(document.querySelector(".remote-activity-popover")).toBeNull();
+
+    // Letting the trigger go has to take the wait with it. The element-level
+    // listener exists because `close()` may never run, so anything only
+    // `close()` undid would still be armed — and would throw the card at a
+    // pointer that has gone.
+    await act(async () => {
+      busy?.dispatchEvent(new MouseEvent("mouseleave"));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+    expect(document.querySelector(".remote-activity-popover")).toBeNull();
+  });
+
   it("keeps the card off a pull short enough that nobody asked", async () => {
     const pull = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Pull"]'

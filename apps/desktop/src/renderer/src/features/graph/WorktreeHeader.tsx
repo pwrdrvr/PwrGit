@@ -336,8 +336,10 @@ export function WorktreeHeader({
   // it still has to be this button's own.
   const carriesCard = (kind: Exclude<Busy, null>): boolean =>
     activity !== null && activity.kind === kind;
+  // The same button, one step earlier: whatever already carries the card, plus
+  // the gap before this operation has a record to carry.
   const couldCarryCard = (kind: Exclude<Busy, null>): boolean =>
-    running === kind && (activity === null || activity.kind === kind);
+    carriesCard(kind) || (running === kind && activity === null);
   const statusTrigger = (kind: Exclude<Busy, null>): StatusTriggerProps =>
     !couldCarryCard(kind)
       ? {}

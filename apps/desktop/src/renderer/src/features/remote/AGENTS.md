@@ -101,6 +101,16 @@ exits matter and neither covers for the other: React derives its `mouseleave`
 prop from `mouseout`, so a unit test dispatching one does not exercise the
 other.
 
+**Where the pointer is and what it has earned are ONE record.** `Resting`
+holds the trigger, its release, and the wait counting down on it, because
+every bug this has had was two halves of that fact updated by different code
+paths — a wait outliving the operation it was armed for, then a wait outliving
+the trigger it was armed from, still firing a card at a pointer that had gone.
+`restOn` and `forgetTrigger` are the only writers, arming lives on the record
+so letting the trigger go takes the wait with it, and `arm` refuses to arm from
+anything but the trigger currently rested on. Keep it that way: a second cell
+tracking part of this is how each of those bugs started.
+
 And the widening is in **time only, never in scope**. `running` also answers to
 the header's own `busy`, so a locally dispatched fetch can be what makes a
 button busy while the live record for that checkout is a pull started
