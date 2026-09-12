@@ -14,7 +14,17 @@ const SEARCH_DEBOUNCE_MS = 300;
 /** Refusals the dialogs already explain from `catalog.forges`, in wording that
  *  names the command that fixes them. Repeating the service's version of the
  *  same message in the results list says it twice. */
-const AVAILABILITY_CODES = new Set(["forge_cli_missing", "forge_login_required"]);
+/** Codes that mean "the forge could not be asked", as opposed to "it answered
+ *  no". A switched-off host belongs here for the same reason a missing CLI does:
+ *  nothing was looked up, so an unverified row is the honest result.
+ *
+ *  Exported because `CloneRepoDialog` keys the same fallback off the same codes;
+ *  two copies drifted the moment a third code existed. */
+export const FORGE_UNASKED_CODES: ReadonlySet<string> = new Set([
+  "forge_cli_missing",
+  "forge_login_required",
+  "forge_host_off"
+]);
 
 export type CloneSearch = {
   repositories: CloneRepository[];
@@ -63,7 +73,7 @@ export function useCloneSearch(input: {
           setState({
             repositories: [],
             searching: false,
-            error: AVAILABILITY_CODES.has(result.error.code)
+            error: FORGE_UNASKED_CODES.has(result.error.code)
               ? null
               : result.error.message
           });

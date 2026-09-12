@@ -1,5 +1,6 @@
 import {
-  forgeLoggedInAtSaas,
+  forgeCanAnswerSaas,
+  forgeSaasBlock,
   type CloneRepository,
   type ForgeHost,
   type ForgeOwner,
@@ -144,7 +145,7 @@ export function statusFor(
  * the protocol list and the empty message cannot disagree about it.
  */
 export function forgeCanAnswerDialog(status: ForgeStatus | undefined): boolean {
-  return status?.installed === true && forgeLoggedInAtSaas(status);
+  return forgeCanAnswerSaas(status);
 }
 
 /** Whether the fork dialog should offer the default-branch-only switch. Read
@@ -186,12 +187,16 @@ export function sourceEmptyMessage(input: {
 }): string | null {
   if (input.catalogError !== null) return input.catalogError;
   if (!input.catalogLoaded) return "Checking which forges are signed in…";
-  if (input.status?.installed !== true) {
-    return `Install the ${input.cliLabel} to search.`;
-  }
   // The SaaS instance specifically: that is the provider this search runs
   // against, and a self-managed sign-in does not make it answerable.
-  if (!forgeLoggedInAtSaas(input.status)) {
+  const block = forgeSaasBlock(input.status);
+  if (block === "cli_missing") return `Install the ${input.cliLabel} to search.`;
+  if (block === "host_off") {
+    // They are signed in; they switched the host off. "Sign in" would name a
+    // remedy that cannot change this.
+    return `Turn this host on in Settings → Forges to search.`;
+  }
+  if (block === "signed_out") {
     return `Sign in with the ${input.cliLabel} to search.`;
   }
   if (input.query.trim() === "") {

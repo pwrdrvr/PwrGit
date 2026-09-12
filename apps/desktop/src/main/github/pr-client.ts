@@ -47,7 +47,10 @@ export function clearGitHubTokenCache(): void {
  * to github.com here would pass `--hostname github.com` and override it — so an
  * operator who points `GH_HOST` at their Enterprise instance would watch
  * Settings → Forges flip from Connected to Signed out. Callers that know which
- * host they are about to query pass it; the status probe deliberately does not.
+ * host they are about to query pass it. The status probe names the hosts it
+ * reports on and omits the host for its `assumed` target — the backfilled SaaS
+ * entry that exists precisely because nothing named a host — so `GH_HOST` still
+ * decides there. See `ForgeStatusHost.assumed` in `../forge/status.ts`.
  */
 export async function getGitHubToken(
   host?: string

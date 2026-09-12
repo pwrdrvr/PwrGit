@@ -573,9 +573,16 @@ export type ForgeStatus = {
   loggedIn: boolean;
   capabilities: ForgeCapabilities;
   /**
-   * Every host of this kind PwrGit would talk to, with the switch and the probe
-   * result for each. Empty only when the CLI is missing — otherwise it carries
-   * at least the forge's SaaS host, which resolution knows without enumeration.
+   * Every host of this kind that the settings pane has a row for, with the switch
+   * and the probe result for each.
+   *
+   * Deliberately not every host probed: the probe also asks about a forge's SaaS
+   * host when nothing names it, and reporting a host the user can neither see nor
+   * switch would be the settings sections disagreeing again — and would keep the
+   * pane's "Off" state unreachable. That credential still reaches `loggedIn`. So
+   * this is empty whenever the CLI is missing, and also on a machine where no CLI
+   * reports a host and nothing was added by hand; `loggedIn` may be true anyway,
+   * which reads as "connected, through the CLI's own default host".
    */
   hosts: ForgeHostStatus[];
 };

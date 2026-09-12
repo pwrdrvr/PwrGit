@@ -8,12 +8,8 @@ import {
 } from "@pwrgit/shared";
 import type { DiscoveredForgeHost } from "./cli-hosts";
 import type { ForgeHostRow } from "@pwrgit/shared";
-import { cliFor, type ForgeStatusHost } from "./status";
+import { cliFor, type ForgeProbeTarget } from "./status";
 import type { ForgeHostOverrides } from "./resolve";
-
-/** Every product `ForgeHosts` can resolve. Iterated rather than hardcoded twice
- *  so adding a forge does not leave one of the two lists behind. */
-const FORGE_KINDS = Object.keys(FORGE_SAAS_HOST) as ForgeKind[];
 
 /** Env escape hatches, mirroring the `GITHUB_TOKEN`/`GITLAB_TOKEN` pattern
  *  already used by the two CLI clients. A comma-separated allowlist of hosts;
@@ -266,25 +262,41 @@ export class ForgeHosts {
    * `isEnabled` still decides, so an env allowlist that excludes the SaaS host
    * keeps it off and unprobed like any other host the user turned off.
    */
-  statusTargets(): ForgeStatusHost[] {
-    const targets: ForgeStatusHost[] = [];
+  statusTargets(): ForgeProbeTarget[] {
+    const targets = new Map<string, ForgeProbeTarget>();
     for (const entry of this.list()) {
       if (entry.kind === null) continue;
-      targets.push({
+      targets.set(`${entry.kind} ${entry.host}`, {
         kind: entry.kind,
         host: entry.host,
         enabled: entry.enabled
       });
     }
-    for (const kind of FORGE_KINDS) {
-      const host = FORGE_SAAS_HOST[kind];
-      if (targets.some((target) => target.host === host)) continue;
-      targets.push({ kind, host, enabled: this.isEnabled(host).enabled });
+    for (const [kind, host] of Object.entries(FORGE_SAAS_HOST) as [
+      ForgeKind,
+      string
+    ][]) {
+      // Keyed by kind AND host. Matching on the hostname alone let a row that
+      // resolves a SaaS hostname to the *other* product — `PWRGIT_GITHUB_HOSTS`
+      // naming gitlab.com, say — suppress that product's own target, leaving it
+      // with no target at all and reported as signed out while its CLI is
+      // signed in.
+      const key = `${kind} ${host}`;
+      if (targets.has(key)) continue;
+      // `assumed`: nothing names this host, so it is probed through the CLI's
+      // own default host and kept out of the reported list. See
+      // `ForgeProbeTarget.assumed`.
+      targets.set(key, {
+        kind,
+        host,
+        enabled: this.isEnabled(host).enabled,
+        assumed: true
+      });
     }
     // Sorted so the reported order is stable across passes: `ForgeStatus.hosts`
     // is compared position by position to decide whether to wake listeners, and
     // an appended SaaS host would otherwise move as rows come and go.
-    return targets.sort((a, b) => a.host.localeCompare(b.host));
+    return [...targets.values()].sort((a, b) => a.host.localeCompare(b.host));
   }
 
   /**

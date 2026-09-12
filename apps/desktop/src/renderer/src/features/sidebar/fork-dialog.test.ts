@@ -305,6 +305,25 @@ describe("sourceEmptyMessage", () => {
     ).toBe("Sign in with the GitHub CLI to search.");
   });
 
+  it("names the switch, not a sign-in, for a host the user turned off", () => {
+    // They are signed in to gitlab.com and switched it off. "Sign in with the
+    // GitLab CLI" names a remedy that cannot change this.
+    expect(
+      sourceEmptyMessage({
+        ...base,
+        catalogLoaded: true,
+        cliLabel: "GitLab CLI",
+        status: {
+          ...signedIn,
+          kind: "gitlab",
+          cli: "glab",
+          loggedIn: false,
+          hosts: [{ host: "gitlab.com", enabled: false, loggedIn: false }]
+        }
+      })
+    ).toBe("Turn this host on in Settings → Forges to search.");
+  });
+
   it("does not offer a gitlab.com search off a self-managed sign-in", () => {
     // `loggedIn` is a forge-wide summary now, so a machine signed in only to a
     // self-managed instance reports GitLab as connected. The search still runs

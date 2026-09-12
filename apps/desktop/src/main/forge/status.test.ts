@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ForgeStatusService,
   type ForgeProbe,
-  type ForgeStatusHost
+  type ForgeProbeTarget
 } from "./status";
 
 function probe(
@@ -22,21 +22,25 @@ function probe(
   };
 }
 
+/** Stands in for "the host the CLI itself considers default" — what an
+ *  `assumed` target asks about, spelled `undefined` on the wire. */
+const ANY_DEFAULT_HOST = "\u0000default";
+
 /** A probe holding a credential for exactly these hosts, recording every host
- *  it was actually asked about. */
+ *  it was actually asked about (`undefined` for the CLI's default host). */
 function hostProbe(
   kind: "github" | "gitlab",
   signedInAt: string[],
-  asked: string[] = []
-): ForgeProbe & { asked: string[] } {
+  asked: (string | undefined)[] = []
+): ForgeProbe & { asked: (string | undefined)[] } {
   return {
     kind,
     cli: kind === "github" ? "gh" : "glab",
     asked,
     installed: async () => true,
-    loggedIn: async (host: string) => {
+    loggedIn: async (host: string | undefined) => {
       asked.push(host);
-      return signedInAt.includes(host);
+      return signedInAt.includes(host ?? ANY_DEFAULT_HOST);
     }
   };
 }
@@ -45,7 +49,7 @@ function host(
   kind: "github" | "gitlab",
   name: string,
   enabled = true
-): ForgeStatusHost {
+): ForgeProbeTarget {
   return { kind, host: name, enabled };
 }
 
@@ -251,20 +255,45 @@ describe("ForgeStatusService", () => {
     await expect(service.list()).resolves.toMatchObject([{ loggedIn: false }]);
   });
 
-  it("probes the SaaS hosts when no list is injected", async () => {
+  it("asks the CLI about its own default host when no list is injected", async () => {
     // The default a caller that knows nothing about hosts gets, and what the E2E
-    // fixture relies on. Completeness beyond this belongs to
-    // `ForgeHosts.statusTargets()`, which is the only thing that can say whether
-    // the user turned a host off.
-    const gh = hostProbe("github", ["github.com"]);
+    // fixture relies on. `undefined`, not "github.com": naming the host would
+    // pass `--hostname github.com` and override an operator's `GH_HOST`, which
+    // is what flipped a working Enterprise machine to "Signed out".
+    const gh = hostProbe("github", [ANY_DEFAULT_HOST]);
     const glab = hostProbe("gitlab", []);
     const service = new ForgeStatusService({ probes: [gh, glab] });
 
     const [github] = await service.list();
 
-    expect(gh.asked).toEqual(["github.com"]);
-    expect(glab.asked).toEqual(["gitlab.com"]);
+    expect(gh.asked).toEqual([undefined]);
+    expect(glab.asked).toEqual([undefined]);
+    // The credential still counts toward the summary …
     expect(github?.loggedIn).toBe(true);
+    // … but an assumed host has no row in Settings, so it is not reported as one.
+    expect(github?.hosts).toEqual([]);
+  });
+
+  it("keeps an assumed host out of the report while counting its credential", async () => {
+    // github.com is enumerated (a real row); gitlab.com is only assumed.
+    const gh = hostProbe("github", ["github.com"]);
+    const glab = hostProbe("gitlab", [ANY_DEFAULT_HOST]);
+    const service = new ForgeStatusService({
+      probes: [gh, glab],
+      hosts: () => [
+        host("github", "github.com"),
+        { kind: "gitlab", host: "gitlab.com", enabled: true, assumed: true }
+      ]
+    });
+
+    const [github, gitlab] = await service.list();
+
+    expect(gh.asked).toEqual(["github.com"]);
+    expect(glab.asked).toEqual([undefined]);
+    expect(github?.hosts).toEqual([
+      { host: "github.com", enabled: true, loggedIn: true }
+    ]);
+    expect(gitlab).toMatchObject({ loggedIn: true, hosts: [] });
   });
 
   it("probes exactly the hosts it is given, and nothing else", async () => {
@@ -343,7 +372,7 @@ describe("ForgeStatusService", () => {
     await expect(service.list()).resolves.toMatchObject([{ loggedIn: true }]);
   });
 
-  it("re-probes after invalidate rather than serving a pre-switch answer", async () => {
+  it("a forced read retires the cache, so a flipped switch is never waited out", async () => {
     let enabled = true;
     let now = 1_000;
     const service = new ForgeStatusService({
@@ -355,10 +384,60 @@ describe("ForgeStatusService", () => {
     await expect(service.list()).resolves.toMatchObject([{ loggedIn: true }]);
 
     // The switch is an INPUT to the answer, so the TTL must not go on serving a
-    // value computed under the old one.
+    // value computed under the old one. Forcing is the whole of that guarantee —
+    // there is no separate invalidate() to forget.
     enabled = false;
-    service.invalidate();
-
+    await expect(service.list({ force: true })).resolves.toMatchObject([
+      { loggedIn: false }
+    ]);
+    // And the retired value is gone from the cache, not merely superseded.
     await expect(service.list()).resolves.toMatchObject([{ loggedIn: false }]);
+  });
+
+  it("never caches or broadcasts a pass a forced read has already retired", async () => {
+    // The bug: nulling the cache made the stale pass compare as "changed", so it
+    // wrote its pre-switch answer back AND woke the renderer with it, which
+    // painted the state the user had just changed away from.
+    let enabled = true;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // Each pass answers with the state as of when IT started, which is what
+    // makes "published a pass that began before the switch" observable.
+    const snapshots: boolean[] = [];
+    let passes = 0;
+    const service = new ForgeStatusService({
+      probes: [
+        {
+          kind: "github",
+          cli: "gh",
+          installed: async () => {
+            snapshots[passes] = enabled;
+            passes += 1;
+            if (passes === 1) await gate;
+            return true;
+          },
+          loggedIn: async () => snapshots[passes - 1] ?? false
+        }
+      ],
+      hosts: () => [host("github", "github.internal", true)]
+    });
+    const listener = vi.fn();
+    service.onChange(listener);
+
+    const stale = service.list();
+    enabled = false;
+    const forced = service.list({ force: true });
+    release?.();
+
+    // The awaiting caller still gets its own pass's answer …
+    await expect(stale).resolves.toMatchObject([{ loggedIn: true }]);
+    await expect(forced).resolves.toMatchObject([{ loggedIn: false }]);
+    // … but it never reached the cache or the renderer.
+    await expect(service.list()).resolves.toMatchObject([{ loggedIn: false }]);
+    for (const call of listener.mock.calls) {
+      expect(call[0]).toMatchObject([{ loggedIn: false }]);
+    }
   });
 });

@@ -1,4 +1,5 @@
 import {
+  FORGE_SAAS_HOST,
   isSafeProjectPath,
   parseForgeRemote,
   type CloneDestination,
@@ -27,7 +28,7 @@ export function localRepositoryPath(input: string): string | null {
 }
 
 export function defaultHostname(host: ForgeHost): string {
-  return host === "gitlab" ? "gitlab.com" : "github.com";
+  return host === "gitlab" ? FORGE_SAAS_HOST.gitlab : FORGE_SAAS_HOST.github;
 }
 
 /**

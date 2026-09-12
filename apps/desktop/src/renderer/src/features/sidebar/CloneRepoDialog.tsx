@@ -30,7 +30,7 @@ import {
   statusFor,
   forgeCanAnswerDialog
 } from "./fork-dialog";
-import { useCloneSearch } from "./useCloneSearch";
+import { FORGE_UNASKED_CODES, useCloneSearch } from "./useCloneSearch";
 import { RepoIdentityChips } from "./RepoIdentityMarks";
 
 const PROTOCOL_IDS = ["ssh", "https", "cli"] as const;
@@ -281,10 +281,7 @@ export function CloneRepoDialog({
         if (!active) return;
         setChecking(false);
         if (result.ok) setCheckedRepository(result.value);
-        else if (
-          result.error.code === "forge_cli_missing" ||
-          result.error.code === "forge_login_required"
-        ) {
+        else if (FORGE_UNASKED_CODES.has(result.error.code)) {
           setCheckedRepository(
             unverifiedCloneRepository(exactNameWithOwner!, exactRepo?.host ?? host)
           );

@@ -156,10 +156,10 @@ describe("ForgesSettings", () => {
     // signed in to the host they turned off.
     expect(container.textContent).not.toContain("Signed out");
     expect(container.textContent).not.toContain("auth login");
-    // A deliberate choice is not a warning.
-    expect(
-      container.querySelector(".settings-field .settings-card__chip--warn")
-    ).toBeNull();
+    // A deliberate choice is not a warning — anywhere on the pane. Scoping this
+    // to `.settings-field` hid the section header, which was still amber.
+    expect(container.querySelector(".settings-card__chip--warn")).toBeNull();
+    expect(container.textContent).toContain("All off");
   });
 
   it("puts the instance in the sign-in command when one self-managed host is waiting", async () => {
@@ -204,6 +204,50 @@ describe("ForgesSettings", () => {
     expect(container.textContent).toContain("Not installed");
     expect(container.textContent).toContain("Install the GitLab CLI");
     expect(container.textContent).not.toContain("auth login");
+    // Not in the sub-line either: a missing CLI reports no hosts, which used to
+    // fall through to "No host is signed in…" beside the "Not installed" chip.
+    expect(container.textContent).not.toContain("No host is signed in");
+  });
+
+  it("does not claim to read a host it cannot name", async () => {
+    // Connected through the CLI's own default host: that host has no row in
+    // Hosts, so main does not report it. Saying "no host is signed in" next to a
+    // "Connected" chip would be the row contradicting itself.
+    await render([forge({ loggedIn: true, hosts: [] })]);
+
+    expect(container.textContent).toContain("Connected");
+    expect(container.textContent).not.toContain("No host is signed in");
+  });
+
+  it("keeps the chip colour and the chip label describing the same state", async () => {
+    // `tone()` used to read `loggedIn` while the label read the state, so this
+    // pair rendered "Not installed" in a green pill.
+    await render([forge({ installed: false, loggedIn: true })]);
+
+    expect(container.textContent).toContain("Not installed");
+    expect(
+      container.querySelector(".settings-field .settings-card__chip--ok")
+    ).toBeNull();
+  });
+
+  it("names a waiting host when the bare command would sign in elsewhere", async () => {
+    // Two Enterprise hosts waiting and gitlab.com switched off: `glab auth
+    // login` authenticates gitlab.com, the one host the user cannot use.
+    await render([
+      forge({
+        kind: "gitlab",
+        loggedIn: false,
+        hosts: [
+          { host: "gitlab.com", enabled: false, loggedIn: false },
+          { host: "gitlab.a.example", enabled: true, loggedIn: false },
+          { host: "gitlab.b.example", enabled: true, loggedIn: false }
+        ]
+      })
+    ]);
+
+    expect(container.textContent).toContain(
+      "glab auth login --hostname gitlab.a.example"
+    );
   });
 
   it("states an unsupported capability as a limit of that forge", async () => {

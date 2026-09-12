@@ -85,9 +85,22 @@ speaks `PrSummary` and never learns which forge answered.
   account, and read "Connected" for a forge whose only host had been switched
   off. `ForgeStatus` now carries `hosts[]` — `{host, enabled, loggedIn}` per
   instance — and `loggedIn` is *derived* from it: true when any **enabled** host
-  holds a credential. `index.ts` supplies that list from `ForgeHosts.list()`, the
-  same resolution the transports obey. Do not re-derive the summary in the
-  renderer, and do not add a second probe target here.
+  holds a credential. `index.ts` supplies that list from
+  **`ForgeHosts.statusTargets()`**, not `list()`: `list()` answers "what has a row
+  in the Hosts pane", and driving the probe from it means any single config entry
+  makes the list non-empty, so a machine whose only entry is a self-managed
+  instance never asks about github.com at all — and neither does anything in the
+  window before enumeration lands. `statusTargets()` adds each forge's SaaS host
+  when nothing names it, still gated by `isEnabled`. Do not re-derive the summary
+  in the renderer, and do not wire a probe from `list()`.
+  - **An `assumed` target is probed but not reported.** The backfilled SaaS host
+    has no row in the Hosts pane, so `ForgeStatus.hosts` omits it — naming a host
+    the user can neither see nor switch is the two-sections-disagree bug from the
+    other direction, and it would also keep the pane's "Off" state unreachable by
+    never letting `every` clear. It is probed **without naming a host**, because
+    `GH_HOST`/`GITLAB_HOST` move the CLI's default and `--hostname github.com`
+    overrides them (`../github/pr-client.ts` spells this out). Its credential
+    still counts toward the summary.
   - **The two sections divide the work.** Hosts owns per-host permission and
     sign-in, one row each. The card owns what only a *product* can answer: the
     CLI is missing (there are no host rows at all then), and what the
@@ -103,21 +116,42 @@ speaks `PrSummary` and never learns which forge answered.
   ran anyway would spawn it to populate a settings pane. `loggedIn` on a disabled
   host is therefore *not asked*, not *false*; `enabled` is what says why, and
   collapsing the two is what made "off" read as "signed out".
-- **Settings writes invalidate the probe.** The switches are an **input** to the
-  answer, so `index.ts` calls `invalidate()` and forces a read when the resolved
-  host signature changes — otherwise the TTL serves a pre-switch "Connected" for
-  five minutes. It is keyed on that signature because `settings:changed` also
-  fires for a theme toggle, and re-probing there spawns both CLIs for nothing.
+- **Both inputs to the host list re-probe; neither is allowed to be forgotten.**
+  The switches AND the enumerated directory feed `statusTargets()`, and both are
+  inputs to a five-minute cache. `index.ts` compares the *resolved target
+  signature* and forces a read when it moves — which covers a settings write, the
+  arrival of boot enumeration, and the Hosts pane's own **Re-check** button, while
+  costing nothing for a theme toggle. Keying it on the stored settings alone left
+  the card reading "Signed out" beneath a row saying "signed in as …" until the
+  TTL expired, with no user-reachable way to force it. It is debounced: each host
+  switch is its own settings write, so a burst otherwise chained one full pass per
+  click.
+- **A forced read is the whole invalidation story.** `list({force:true})` retires
+  the cache *and* bumps an epoch, so a pass already in flight still resolves for
+  whoever awaited it but may not cache or broadcast. Without the epoch, nulling
+  the cache made that stale pass compare as "changed" and publish its pre-action
+  answer, painting the state the user had just changed away from. There is
+  deliberately no separate `invalidate()` to forget to call.
 - **`forge:status` has three consumers, and two of them ask a narrower
   question.** Settings → Forges wants "can this forge be read at all", which is
   the summary. The clone and fork dialogs reach their provider through
   `ForgeRepoRegistry.get(kind)` with no hostname — the **SaaS** instance — so
-  they ask `forgeLoggedInAtSaas` (shared), via `forgeCanAnswerDialog` in
-  `fork-dialog.ts`. Reading the summary there would let a self-managed sign-in
-  enable a gitlab.com search that cannot answer, failing late instead of naming
-  what is missing. A host the probe did not cover falls back to the summary
-  deliberately: enumeration reports nothing on a machine carrying only
-  `GITHUB_TOKEN`, and absence is not evidence.
+  they ask **`forgeSaasBlock`** (shared) — `forgeCanAnswerDialog` in
+  `fork-dialog.ts` and `ForkService`/`CloneService`'s own gates are all that one
+  function. Reading the summary there would let a self-managed sign-in enable a
+  gitlab.com search that cannot answer, failing late instead of naming what is
+  missing; `clone-service.ts`'s `forgeUnavailable` did exactly that while
+  `knownOwners` sixty lines above it did not.
+  - **Three reasons, not two.** `forgeSaasBlock` returns `cli_missing`,
+    `host_off` or `signed_out`. "Switched off" is not "signed out": telling
+    someone to run `glab auth login` for a host they turned off names a remedy
+    that cannot work, which is the collapse `ForgeHostStatus.loggedIn` is
+    documented to avoid. `forge_host_off` joins the codes the clone dialog treats
+    as "the forge was not asked".
+  - A host the probe did not cover falls back to the summary deliberately — an
+    `assumed` host is reported nowhere, and absence is not evidence. Matching is
+    canonicalized on both sides (`canonicalForgeHostname`), or the miss is silent
+    and lands on the permissive answer.
 - **`forge:status` is answered from a cached probe** (`status.ts`). Probing
   spawns a subprocess *per enabled host*, so the cache is the point — repeat
   reads collapse onto one value and one in-flight promise. A broken forge

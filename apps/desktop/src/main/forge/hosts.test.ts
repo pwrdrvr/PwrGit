@@ -299,9 +299,26 @@ describe("ForgeHosts.statusTargets", () => {
     const hosts = make({ hosts: { "gitlab.acme-inc.com": { kind: "gitlab" } } });
 
     expect(hosts.statusTargets()).toEqual([
-      { kind: "github", host: "github.com", enabled: true },
+      // `assumed`: nothing names these, so they are probed through the CLI's own
+      // default host and kept out of the reported list.
+      { kind: "github", host: "github.com", enabled: true, assumed: true },
       { kind: "gitlab", host: "gitlab.acme-inc.com", enabled: true },
-      { kind: "gitlab", host: "gitlab.com", enabled: true }
+      { kind: "gitlab", host: "gitlab.com", enabled: true, assumed: true }
+    ]);
+  });
+
+  it("keys the backfill by kind as well as host", () => {
+    // A row that resolves a SaaS hostname to the OTHER product must not suppress
+    // that product's own target: matching on the hostname alone left GitLab with
+    // no target at all, reported as signed out while `glab` was signed in.
+    const hosts = make({ hosts: { "gitlab.com": { kind: "github" } } });
+
+    expect(hosts.statusTargets()).toEqual([
+      { kind: "github", host: "github.com", enabled: true, assumed: true },
+      // The row, resolved to GitHub by the config entry …
+      { kind: "github", host: "gitlab.com", enabled: true },
+      // … and GitLab still gets a target of its own.
+      { kind: "gitlab", host: "gitlab.com", enabled: true, assumed: true }
     ]);
   });
 
@@ -335,8 +352,8 @@ describe("ForgeHosts.statusTargets", () => {
 
     expect(hosts.statusTargets()).toEqual([
       { kind: "github", host: "github.acme-inc.com", enabled: true },
-      { kind: "github", host: "github.com", enabled: false },
-      { kind: "gitlab", host: "gitlab.com", enabled: true }
+      { kind: "github", host: "github.com", enabled: false, assumed: true },
+      { kind: "gitlab", host: "gitlab.com", enabled: true, assumed: true }
     ]);
   });
 

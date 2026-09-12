@@ -160,6 +160,19 @@ if (app.isPackaged && !process.env["LOCAL_GIT_DIRECTORY"]) {
 // PWRGIT_USER_DATA_DIR is set. e2e uses this to give each run an isolated,
 // disposable data dir; unset in normal use, so production is unaffected. Must
 // run before anything reads app.getPath("userData").
+/** Collapse a burst of per-host settings writes into one probe pass. */
+const FORGE_REPROBE_DEBOUNCE_MS = 300;
+
+/** The resolved probe targets as a comparable value — what the forge status is
+ *  computed against, so a change to either input is detectable and anything else
+ *  is free. */
+function forgeTargetSignature(hosts: ForgeHosts): string {
+  return hosts
+    .statusTargets()
+    .map((target) => `${target.kind} ${target.host} ${target.enabled}`)
+    .join("\n");
+}
+
 const dataDirOverride = process.env["PWRGIT_USER_DATA_DIR"];
 if (dataDirOverride !== undefined && dataDirOverride !== "") {
   app.setPath("userData", dataDirOverride);
@@ -376,7 +389,14 @@ if (!gotSingleInstanceLock) {
       fixtureServices === null ? {} : { discover: async () => [] }
     );
     const forgeHosts = new ForgeHosts({
-      readSettings: () => settings.get().forges ?? { hosts: {} },
+      // `?.hosts` as well as `?.forges`: nothing validates settings.json, so a
+      // hand-edited or truncated `"forges": {}` reaches `Object.keys(undefined)`
+      // — now inside an unawaited probe, where it becomes an unhandled rejection
+      // rather than a caught read failure.
+      readSettings: () => {
+        const forges = settings.get().forges;
+        return forges?.hosts === undefined ? { hosts: {} } : forges;
+      },
       discovered: () => forgeHostDirectory.current()
     });
     // One probe for the whole app: `ForgeStatusService` caches and dedups
@@ -387,13 +407,17 @@ if (!gotSingleInstanceLock) {
     // summary of the same per-host answers the transport obeys rather than a
     // second opinion about two hardcoded SaaS hosts. That second opinion is what
     // made Settings say "GitLab: Signed out" beside a self-managed GitLab the
-    // user was signed in to, and what made the fork dialog refuse to fork there.
+    // user was signed in to. (The fork dialog still only forks on the SaaS
+    // instance — `ForkRequest.hostname` is carried and ignored — so it asks
+    // about that host specifically rather than about the forge.)
     const forgeStatus =
       fixtureServices?.status ??
       new ForgeStatusService({ hosts: () => forgeHosts.statusTargets() });
     // Primed in the background: blocking boot on two CLI spawns would delay the
     // first window for a feature that degrades to the two SaaS hosts meanwhile.
-    void forgeHostDirectory.refresh();
+    // The first probe can therefore run before this lands; `reprobe` below is
+    // what picks up the Enterprise hosts it did not know about yet.
+    const forgeDirectoryPrimed = forgeHostDirectory.refresh();
     /**
      * The per-host switch, enforced at the transport rather than in the UI.
      *
@@ -401,9 +425,43 @@ if (!gotSingleInstanceLock) {
      * CLI or mints its token — including on the background refresh. An "off"
      * that still shells out is a setting that lies.
      */
-    const forgeHostsView = new ForgeHostsView(forgeHosts, () =>
-      forgeHostDirectory.refresh({ force: true })
-    );
+    /**
+     * Re-probe when the resolved host list moves, and only then.
+     *
+     * `statusTargets()` has two inputs — the per-host switches and the enumerated
+     * directory — and both are *inputs* to a five-minute cache, so a change to
+     * either makes the cached answer wrong immediately. Keying on the resolved
+     * output covers both with one rule: an unrelated settings write (a theme
+     * toggle) leaves the signature alone and costs nothing, while a terminal
+     * `gh auth login` followed by the Hosts pane's own Re-check moves it and
+     * re-probes. Without this the card kept reading "Signed out" beneath a row
+     * that said "signed in as …" until the TTL expired — the exact contradiction
+     * the per-host status exists to remove.
+     *
+     * Debounced because each host switch is its own settings write: turning four
+     * hosts off otherwise chained four full probe passes, three of them
+     * immediately superseded.
+     */
+    let probedTargets = forgeTargetSignature(forgeHosts);
+    let reprobeTimer: NodeJS.Timeout | undefined;
+    const reprobeForgesIfTargetsMoved = (): void => {
+      const next = forgeTargetSignature(forgeHosts);
+      if (next === probedTargets) return;
+      probedTargets = next;
+      if (reprobeTimer !== undefined) clearTimeout(reprobeTimer);
+      reprobeTimer = setTimeout(() => {
+        reprobeTimer = undefined;
+        // A forced read retires the cache and any in-flight pass itself.
+        void forgeStatus.list({ force: true }).catch(() => undefined);
+      }, FORGE_REPROBE_DEBOUNCE_MS);
+    };
+    const forgeHostsView = new ForgeHostsView(forgeHosts, async () => {
+      const refreshed = await forgeHostDirectory.refresh({ force: true });
+      reprobeForgesIfTargetsMoved();
+      return refreshed;
+    });
+    // Enumeration has landed: adopt whatever hosts it found.
+    void forgeDirectoryPrimed.then(reprobeForgesIfTargetsMoved, () => undefined);
     const resolveEnabledForge: typeof resolveForge = (url, overrides) => {
       const resolved = resolveForge(url, overrides ?? forgeHosts.overrides());
       if (resolved === null) return null;
@@ -692,26 +750,6 @@ if (!gotSingleInstanceLock) {
       forgeHostsView
     );
     registerSearchStatusHandlers(bus, db);
-    /**
-     * The per-host forge decisions, as a value that can be compared.
-     *
-     * Keyed on what the USER chose, not on the resolved rows: enumeration lands
-     * a second or two after boot, and a signature that included it would read
-     * the directory's arrival as a settings change and re-probe on the first
-     * unrelated write. Sorted because the stored map is sparse and its key order
-     * follows whatever patch wrote it last.
-     */
-    const forgeChoices = (): string => {
-      const hosts = settings.get().forges?.hosts ?? {};
-      return Object.keys(hosts)
-        .sort()
-        .map((host) => {
-          const entry = hosts[host];
-          return `${host} ${entry?.kind ?? ""} ${entry?.enabled ?? ""}`;
-        })
-        .join("\n");
-    };
-    let probedChoices = forgeChoices();
     registerSettingsHandlers(bus, settings, {
       diagnosticsOutputRoot,
       appVersion,
@@ -720,18 +758,9 @@ if (!gotSingleInstanceLock) {
         emitEvent("settings:changed", snapshot);
         diagnostics.sync();
         refreshMenu(); // Developer Mode toggles View-menu items live
-        // The per-host switches are an INPUT to the probe, so flipping one makes
-        // the cached answer wrong immediately — the TTL would otherwise go on
-        // serving a pre-switch "Connected" for five minutes. Forced so both
-        // Settings sections repaint from the same event instead of the summary
-        // trailing the host list that caused it. Gated because
-        // `settings:changed` also fires for a theme toggle, and re-probing there
-        // would spawn both CLIs for a value that did not move.
-        const choices = forgeChoices();
-        if (choices === probedChoices) return;
-        probedChoices = choices;
-        forgeStatus.invalidate();
-        void forgeStatus.list({ force: true });
+        // A host switch is an input to the probe; a theme toggle is not. The
+        // signature tells them apart.
+        reprobeForgesIfTargetsMoved();
       }
     });
     registerLocalAgentHandlers(bus, mcpPolicy, () => {

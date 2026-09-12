@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FORGE_SAAS_HOST,
+  forgeAllHostsOff,
   type ForgeCapabilities,
   type ForgeStatus
 } from "@pwrgit/shared";
@@ -14,6 +15,7 @@ import { ReadError } from "../shell/ReadError";
 import {
   SettingsField,
   SettingsSection,
+  settingsChipClass,
   type SettingsChipTone
 } from "./SettingsLayout";
 
@@ -116,7 +118,12 @@ export function ForgesSettings() {
     };
   }, [read]);
 
-  const connected = forges?.filter((forge) => forge.loggedIn).length;
+  const states = forges?.map((forge) => state(forge));
+  const connected = states?.filter((current) => current === "connected").length;
+  // Every forge deliberately switched off is a configuration, not a failure —
+  // the header must not paint amber above rows that are all neutral "Off".
+  const allOff =
+    states !== undefined && states.length > 0 && states.every((c) => c === "off");
 
   return (
     <SettingsSection
@@ -128,12 +135,20 @@ export function ForgesSettings() {
           ? "Unavailable"
           : forges === undefined
           ? undefined
-          : connected === 0
-            ? "None connected"
-            : `${connected} connected`
+          : allOff
+            ? "All off"
+            : connected === 0
+              ? "None connected"
+              : `${connected} connected`
       }
       chipKind={
-        loadState.status === "error" || connected === 0 ? "warn" : "ok"
+        loadState.status === "error"
+          ? "warn"
+          : allOff
+            ? "default"
+            : connected === 0
+              ? "warn"
+              : "ok"
       }
     >
       {loadState.status === "error" && (
@@ -151,21 +166,31 @@ export function ForgesSettings() {
       ) : forges?.length === 0 ? (
         <p className="settings-empty">No forge integrations are available.</p>
       ) : (
-        forges?.map((forge) => (
-          <SettingsField
-            key={forge.kind}
-            label={FORGE_LABELS[forge.kind]}
-            sub={describe(forge)}
-            control={
-              // Same pill the section header uses — one state chip family in
-              // the Settings window, not two that drift apart.
-              <span className={chipClass(forge)}>
-                {STATE_LABELS[state(forge)]}
-              </span>
-            }
-            help={remedyOrCapabilities(forge)}
-          />
-        ))
+        forges?.map((forge, index) => {
+          // Once per row: four call sites each deriving the state for themselves
+          // is how they end up disagreeing about it.
+          const current = states?.[index] ?? state(forge);
+          return (
+            <SettingsField
+              key={forge.kind}
+              label={FORGE_LABELS[forge.kind]}
+              sub={describe(forge, current)}
+              control={
+                // Same pill the section header uses — one state chip family in
+                // the Settings window, not two that drift apart.
+                <span
+                  aria-label={`${FORGE_LABELS[forge.kind]}: ${STATE_LABELS[current]}`}
+                  aria-live="polite"
+                  className={settingsChipClass(STATE_TONES[current])}
+                  role="status"
+                >
+                  {STATE_LABELS[current]}
+                </span>
+              }
+              help={remedyOrCapabilities(forge, current)}
+            />
+          );
+        })
       )}
     </SettingsSection>
   );
@@ -194,29 +219,34 @@ function state(forge: ForgeStatus): ForgeState {
   // `loggedIn` stays authoritative — main already derived it from the enabled
   // hosts, and re-deriving it here is how the two drift apart.
   if (forge.loggedIn) return "connected";
-  if (forge.hosts.length > 0 && forge.hosts.every((host) => !host.enabled)) {
-    return "off";
-  }
+  if (forgeAllHostsOff(forge)) return "off";
   return "signedOut";
 }
 
 /**
- * Off is neutral, not a warning.
+ * One tone per state.
  *
- * A host the user switched off is a working configuration, so it gets the plain
- * chip: painting it amber would be the app second-guessing a choice somebody
- * made deliberately, next to the switch they made it with.
+ * `off` is neutral, not a warning: a host the user switched off is a working
+ * configuration, and painting it amber would be the app second-guessing a choice
+ * somebody made deliberately, next to the switch they made it with.
+ *
+ * Keyed on the state rather than re-read from `loggedIn`, so the chip's colour
+ * and its label can never describe different states — reading `loggedIn` here
+ * put an `installed: false` forge in a green pill labelled "Not installed".
  */
-function tone(forge: ForgeStatus): SettingsChipTone {
-  if (forge.loggedIn) return "ok";
-  return state(forge) === "off" ? "default" : "warn";
-}
+const STATE_TONES: Record<ForgeState, SettingsChipTone> = {
+  missing: "warn",
+  connected: "ok",
+  off: "default",
+  signedOut: "warn"
+};
 
-function chipClass(forge: ForgeStatus): string {
-  const kind = tone(forge);
-  return kind === "default"
-    ? "settings-card__chip"
-    : `settings-card__chip settings-card__chip--${kind}`;
+/** Name a few hosts, then count the rest — a row subtitle is a sentence, and
+ *  `gh` can be signed in to a dozen Enterprise instances. Mirrors the cap
+ *  `ownersPhrase` applies to the fork dialog's owner list. */
+function hostsPhrase(hosts: string[]): string {
+  if (hosts.length <= 3) return hosts.join(", ");
+  return `${hosts.slice(0, 3).join(", ")} and ${hosts.length - 3} more`;
 }
 
 /** Enabled hosts that answered with a credential — what "Connected" is made of,
@@ -242,14 +272,26 @@ function awaitingSignIn(forge: ForgeStatus): string[] {
  * the product, and it sat directly under a probe that had only ever asked
  * gitlab.com. Naming the hosts makes the claim checkable against the rows above.
  */
-function describe(forge: ForgeStatus): string {
+function describe(forge: ForgeStatus, current: ForgeState): string {
   const noun = `${CHANGE_REQUEST_LABELS[forge.kind]}s`;
   const readable = readableHosts(forge);
   if (readable.length > 0) {
-    return `Reading ${noun} from ${readable.join(", ")}.`;
+    return `Reading ${noun} from ${hostsPhrase(readable)}.`;
   }
-  if (state(forge) === "off") {
+  if (current === "connected") {
+    // Connected through the CLI's own default host, which has no row above and
+    // so is not named here. Claiming "no host is signed in" beside a "Connected"
+    // chip would be the two halves of this row contradicting each other.
+    return `Reading ${noun} through the \`${forge.cli}\` CLI's default host.`;
+  }
+  if (current === "off") {
     return `Every ${FORGE_LABELS[forge.kind]} host is switched off above.`;
+  }
+  // A missing CLI reports no hosts at all, so it lands here too — and saying
+  // "no host is signed in" beside a "Not installed" chip blames the login for a
+  // missing binary, which the remedy below correctly does not.
+  if (current === "missing") {
+    return `${FORGE_LABELS[forge.kind]} ${noun} need the \`${forge.cli}\` CLI.`;
   }
   return `No host is signed in to read ${noun} from.`;
 }
@@ -259,13 +301,16 @@ function describe(forge: ForgeStatus): string {
  * in, or turn a host back on. A working one lists what it can actually do, so a
  * missing feature reads as a known limit of that provider rather than a bug.
  */
-function remedyOrCapabilities(forge: ForgeStatus): string {
-  const current = state(forge);
+function remedyOrCapabilities(forge: ForgeStatus, current: ForgeState): string {
   if (current === "missing") {
     return `Install the ${FORGE_LABELS[forge.kind]} CLI (\`${forge.cli}\`) to see status here.`;
   }
   if (current === "off") {
-    return `Turn a host on in Hosts above to read ${CHANGE_REQUEST_LABELS[forge.kind]} status. PwrGit runs no \`${forge.cli}\` command while every host is off.`;
+    // Says what is actually true: no host is read and no token is minted. The
+    // earlier wording claimed no `${forge.cli}` command runs at all, while the
+    // probe spawns `--version` on every pass to learn the CLI is there — which
+    // is how this row knows to say "Off" rather than "Not installed".
+    return `Turn a host on in Hosts above to read ${CHANGE_REQUEST_LABELS[forge.kind]} status. PwrGit reads no host and mints no token while every host is off.`;
   }
   if (current === "signedOut") {
     return `Run \`${signInCommand(forge)}\` in a terminal, then this updates on its own.`;
@@ -293,15 +338,17 @@ function remedyOrCapabilities(forge: ForgeStatus): string {
 /**
  * The sign-in command for a signed-out forge.
  *
- * `--hostname` is added only when one specific non-SaaS host is waiting, because
- * that is the case the bare command gets wrong: `glab auth login` signs in to
- * gitlab.com, which is not the instance the user is missing. Anything more
- * specific per host belongs to the Hosts section, which owns a row each.
+ * The bare command authenticates the forge's SaaS host, so it is only right when
+ * that host is one of the ones waiting. Otherwise it names a host explicitly —
+ * `glab auth login` would send someone to gitlab.com when the instance they are
+ * missing is a self-managed one, or when an env allowlist has switched gitlab.com
+ * off entirely. With several waiting, the first is named: any of them moves the
+ * state, and the Hosts section above owns the full per-row list.
  */
 function signInCommand(forge: ForgeStatus): string {
   const waiting = awaitingSignIn(forge);
-  const only = waiting.length === 1 ? waiting[0] : undefined;
-  return only === undefined || only === FORGE_SAAS_HOST[forge.kind]
-    ? `${forge.cli} auth login`
-    : `${forge.cli} auth login --hostname ${only}`;
+  if (waiting.length === 0 || waiting.includes(FORGE_SAAS_HOST[forge.kind])) {
+    return `${forge.cli} auth login`;
+  }
+  return `${forge.cli} auth login --hostname ${waiting[0]}`;
 }
