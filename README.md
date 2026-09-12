@@ -53,6 +53,10 @@ features, and troubleshooting live at
 
 ### Just want to use it
 
+> **PwrGit is not installed through npm.** The `pwrgit` package on npm only
+> reserves the product name and contains no application, launcher, CLI,
+> library, SDK, or API. Use the downloads below.
+
 1. **Download PwrGit.**
    - macOS: [PwrGit.dmg](https://github.com/pwrdrvr/PwrGit/releases/latest/download/PwrGit.dmg),
      a Developer ID-signed and Apple-notarized universal build for Apple
