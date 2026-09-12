@@ -308,10 +308,7 @@ export function RepoRefsModal({
     onRefresh();
   };
 
-  const reportDeleteFailure = async (
-    branch: LocalBranchSummary,
-    message: string
-  ): Promise<void> => {
+  const reportDeleteFailure = async (message: string): Promise<void> => {
     showErrorToast({
       title: "Delete branch failed",
       message: message.split("\n")[0] ?? message,
@@ -350,7 +347,7 @@ export function RepoRefsModal({
       return;
     }
     if (result.error.code !== "unmerged") {
-      await reportDeleteFailure(branch, result.error.message);
+      await reportDeleteFailure(result.error.message);
       return;
     }
 
@@ -372,7 +369,7 @@ export function RepoRefsModal({
     });
     setDeleting(null);
     if (!forcedResult.ok) {
-      await reportDeleteFailure(branch, forcedResult.error.message);
+      await reportDeleteFailure(forcedResult.error.message);
       return;
     }
     showInfoToast({

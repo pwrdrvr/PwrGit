@@ -1,3 +1,4 @@
+import { showWindowWhenReady } from "./show-window-when-ready";
 import { join } from "node:path";
 import { BrowserWindow, shell } from "electron";
 import { serializeAppearanceArg, type AppAppearance } from "@pwrgit/shared";
@@ -43,7 +44,7 @@ export function openSettingsWindow(appearance: AppAppearance): void {
 
   hideAuxiliaryWindowMenuBar(window);
 
-  window.once("ready-to-show", () => window.show());
+  showWindowWhenReady(window);
   window.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
     return { action: "deny" };

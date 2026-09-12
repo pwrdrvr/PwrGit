@@ -18,7 +18,6 @@ import { homedir } from "node:os";
 import {
   dirname,
   isAbsolute,
-  join,
   posix,
   relative,
   sep,

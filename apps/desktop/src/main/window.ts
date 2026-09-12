@@ -1,3 +1,4 @@
+import { showWindowWhenReady } from "./show-window-when-ready";
 import { join } from "node:path";
 import { BrowserWindow, shell } from "electron";
 import { serializeAppearanceArg, type AppAppearance } from "@pwrgit/shared";
@@ -41,7 +42,7 @@ export function createMainWindow(
     }
   });
 
-  window.once("ready-to-show", () => window.show());
+  showWindowWhenReady(window);
 
   // Open external links in the OS browser; never navigate the app frame away.
   window.webContents.setWindowOpenHandler(({ url }) => {

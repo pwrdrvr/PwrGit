@@ -152,7 +152,6 @@ beforeEach(() => {
   Element.prototype.setPointerCapture ??= () => {};
   Element.prototype.hasPointerCapture ??= () => false;
   Element.prototype.releasePointerCapture ??= () => {};
-  Element.prototype.releasePointerCapture ??= () => {};
 });
 
 afterEach(async () => {

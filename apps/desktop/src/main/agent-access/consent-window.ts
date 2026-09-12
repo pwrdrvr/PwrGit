@@ -1,3 +1,4 @@
+import { showWindowWhenReady } from "../show-window-when-ready";
 import { join } from "node:path";
 import { BrowserWindow } from "electron";
 import { serializeAppearanceArg, type AppAppearance } from "@pwrgit/shared";
@@ -17,7 +18,7 @@ export function createConsentWindow(appearance: AppAppearance): BrowserWindow {
   window.setMenuBarVisibility(false);
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", event => event.preventDefault());
-  window.once("ready-to-show", () => window.show());
+  showWindowWhenReady(window);
   const rendererUrl = process.env["ELECTRON_RENDERER_URL"];
   if (rendererUrl) void window.loadURL(rendererUrl + "#agent-consent");
   else void window.loadFile(join(__dirname, "../renderer/index.html"), { hash: "agent-consent" });

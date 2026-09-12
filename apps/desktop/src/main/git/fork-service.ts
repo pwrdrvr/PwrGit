@@ -18,10 +18,7 @@ import {
   type Result
 } from "@pwrgit/shared";
 import type { ProfileService } from "../profiles/profile-service";
-import type {
-  ForgeRepoProvider,
-  ForgeRepoRegistry
-} from "../forge/repo-provider";
+import type { ForgeRepoRegistry } from "../forge/repo-provider";
 import type { ForgeStatusService } from "../forge/status";
 import type { GitExec } from "./dugite";
 import { requireExit0 } from "./dugite";
