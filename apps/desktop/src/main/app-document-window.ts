@@ -1,3 +1,4 @@
+import { showWindowWhenReady } from "./show-window-when-ready";
 import { join } from "node:path";
 import { BrowserWindow } from "electron";
 import {
@@ -53,7 +54,7 @@ export function openAppDocumentWindow(
 
   hideAuxiliaryWindowMenuBar(window);
 
-  window.once("ready-to-show", () => window.show());
+  showWindowWhenReady(window);
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
   const rendererUrl = process.env["ELECTRON_RENDERER_URL"];
