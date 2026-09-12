@@ -97,17 +97,17 @@ function ToastCard({ toast }: { toast: Toast }) {
           <button
             className="app-toast__button"
             type="button"
-            aria-label="Copy error"
-            title="Copy error"
+            aria-label={toast.copyLabel ?? "Copy error"}
+            title={toast.copyLabel ?? "Copy error"}
             onClick={() => {
               void navigator.clipboard.writeText(
-                [toast.title, toast.message, toast.detail]
+                toast.copyText ?? [toast.title, toast.message, toast.detail]
                   .filter(Boolean)
                   .join("\n")
               );
             }}
           >
-            Copy
+            {toast.copyLabel ?? "Copy"}
           </button>
         )}
         <button

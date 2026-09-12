@@ -11,6 +11,9 @@ export type Toast = {
   title: string;
   message: string;
   detail?: string;
+  /** Optional action payload, separate from the explanatory card text. */
+  copyText?: string;
+  copyLabel?: string;
   /** Errors head the card in the danger color; anything else is not a
    *  failure and must not be dressed as one. */
   tone: "error" | "info";
