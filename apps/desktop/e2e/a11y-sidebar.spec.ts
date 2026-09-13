@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
 import {
@@ -65,7 +65,6 @@ async function targetSize(
 
 /** Does a point land on `control` (or something inside it)? */
 async function hitsControl(
-  window: Page,
   control: Locator,
   dx: number,
   dy: number
@@ -129,7 +128,7 @@ test("sub-24px sidebar controls still expose a 24×24 pointer target", async () 
     [0, 11]
   ] as const) {
     expect(
-      await hitsControl(window, pin, dx, dy),
+      await hitsControl(pin, dx, dy),
       `pin hit at ${dx},${dy}`
     ).toBe(true);
   }

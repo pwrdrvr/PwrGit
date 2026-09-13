@@ -40,7 +40,10 @@ vi.mock("../../lib/toast", () => ({
 }));
 vi.mock("../shell/WorktreeMenu", () => ({ WorktreeMenu: () => null }));
 
-import { WHERE_THE_USER_IS } from "../remote/useRemoteActivityPopover";
+import {
+  REMOTE_ACTIVITY_POPOVER_AFTER_MS,
+  WHERE_THE_USER_IS
+} from "../remote/useRemoteActivityPopover";
 import { WorktreeHeader } from "./WorktreeHeader";
 
 const repo = { id: "repo-1", name: "project", path: "/repos/project" };
@@ -111,8 +114,34 @@ function userIsOn(selector: string): void {
   });
 }
 
+/**
+ * Stop the clock, for a test that means something precise by an operation's
+ * age.
+ *
+ * The age gate is measured from `startedAt` against `Date.now()`, so a test
+ * that arms a wait and then says the card is *not* there yet is otherwise
+ * racing the real clock: nothing holds the wait open, and any stall between
+ * emitting the record and reading the DOM lets it elapse and put the card on
+ * screen. Frozen, "50ms of the wait still to run" is 50ms however loaded the
+ * machine is, and only `vi.advanceTimersByTime` moves it on.
+ *
+ * Restored in `afterEach` rather than the `onTestFinished` its neighbour
+ * above uses: Vitest runs `afterEach` first, and teardown there unmounts the
+ * tree.
+ */
+function freezeClock(): void {
+  vi.useFakeTimers();
+}
+
 /** Old enough that the popover's age gate is already satisfied. */
 const WEDGED_SINCE = 60_000;
+
+/**
+ * Started late enough that its card is armed with 50ms of the wait left — near
+ * enough the end that advancing by the whole gate is past the moment it would
+ * have opened, which is what makes "and it still did not open" mean anything.
+ */
+const ALMOST_DUE = REMOTE_ACTIVITY_POPOVER_AFTER_MS - 50;
 
 let container: HTMLDivElement;
 let root: Root;
@@ -145,6 +174,9 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  // Ahead of the teardown below, so unmounting is never waiting on a clock
+  // that no longer runs on its own.
+  vi.useRealTimers();
   await emitActivities([]);
   await act(async () => root.unmount());
   container.remove();
@@ -405,6 +437,7 @@ describe("WorktreeHeader pull progress", () => {
   });
 
   it("arms the operation that replaced one still inside the age gate", async () => {
+    freezeClock();
     const pull = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Pull"]'
     );
@@ -456,6 +489,7 @@ describe("WorktreeHeader pull progress", () => {
   });
 
   it("takes the waiting card away with the trigger the pointer left", async () => {
+    freezeClock();
     const pull = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Pull"]'
     );
@@ -470,7 +504,7 @@ describe("WorktreeHeader pull progress", () => {
     // Old enough that the wait is nearly up, so the card is genuinely armed
     // rather than merely not due yet.
     await emitActivities([
-      { startedAt: Date.now() - 1_150, phase: "fetch", silent: true }
+      { startedAt: Date.now() - ALMOST_DUE, phase: "fetch", silent: true }
     ]);
     expect(document.querySelector(".remote-activity-popover")).toBeNull();
 
@@ -481,13 +515,16 @@ describe("WorktreeHeader pull progress", () => {
     await act(async () => {
       busy?.dispatchEvent(new MouseEvent("mouseleave"));
     });
+    // Well past the moment the wait was due to fire: had letting the trigger go
+    // left it armed, the card would be here by now.
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      vi.advanceTimersByTime(REMOTE_ACTIVITY_POPOVER_AFTER_MS);
     });
     expect(document.querySelector(".remote-activity-popover")).toBeNull();
   });
 
   it("keeps the card off a pull short enough that nobody asked", async () => {
+    freezeClock();
     const pull = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Pull"]'
     );
@@ -609,6 +646,7 @@ describe("WorktreeHeader pull progress", () => {
   // the wait measured from `startedAt` is what keeps an ordinary one-second
   // fetch from throwing a card over the graph and taking it away again.
   it("still keeps the card off a fetch too young to have been asked about", async () => {
+    freezeClock();
     userIsOn('button[aria-busy="true"]');
     const fetch = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Fetch"]'

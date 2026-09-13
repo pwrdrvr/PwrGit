@@ -11,7 +11,6 @@ import { ExperimentalSettings } from "./ExperimentalSettings";
 import { GeneralSettings } from "./GeneralSettings";
 import { ProfilesSettings } from "./ProfilesSettings";
 import { ForgesSettings } from "./ForgesSettings";
-import { ForgeHostsSection } from "./ForgeHostsSection";
 import { UpdatesSettings } from "./UpdatesSettings";
 import { LocalAgentsSettings } from "./LocalAgentsSettings";
 import { useAppSettings, type AppSettingsState } from "./useAppSettings";
@@ -154,15 +153,10 @@ function SettingsSectionBody(props: {
   }
 
   if (props.section === "forges") {
-    // Two independent sections: hosts (what PwrGit may talk to) above the
-    // per-forge capability summary. Siblings rather than nested so each owns
-    // its own read and neither re-renders on the other's refresh tick.
-    return (
-      <>
-        <ForgeHostsSection saving={settings.saving} />
-        <ForgesSettings />
-      </>
-    );
+    // One pane, one section per product. It was two sibling cards — a flat host
+    // list above a per-forge summary — which rendered outside `.settings-stack`
+    // and so lost the 14px gap and 760px column every other pane has.
+    return <ForgesSettings saving={settings.saving} />;
   }
 
   if (props.section === "experimental") {

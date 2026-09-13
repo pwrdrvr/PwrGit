@@ -38,6 +38,7 @@ import { useAppUpdateStatus } from "../update/useAppUpdateStatus";
 import {
   SettingsField,
   SettingsPanelHead,
+  SettingsSectionStack,
   SettingsSection
 } from "./SettingsLayout";
 
@@ -288,7 +289,7 @@ export function UpdatesSettings(props: {
   );
 
   return (
-    <div className="settings-stack" aria-label="Update settings">
+    <SettingsSectionStack aria-label="Update settings" paneId="updates">
       <SettingsPanelHead
         eyebrow="Updates"
         title="Updates"
@@ -438,6 +439,6 @@ export function UpdatesSettings(props: {
           />
         </div>
       </SettingsSection>
-    </div>
+    </SettingsSectionStack>
   );
 }

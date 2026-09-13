@@ -279,9 +279,13 @@ So, when adding anything per-product:
   is two calls per mount per chip, and a sweep across a commit list becomes a
   burst that gets rate limited.
 - **`forge:status` is a summary of the per-host state, not a second opinion on
-  it.** Settings renders two sections — Hosts (`ForgeHostsSection.tsx`, from
-  `forge:hosts`) and the per-forge card below it (`ForgesSettings.tsx`, from
-  `forge:status`) — and they must never contradict each other. They did: the
+  it.** Settings → Forges renders **one section per product**
+  (`ForgeProductSection.tsx`), and `ForgesSettings.tsx` is the pane that holds
+  both reads — `forge:hosts` for the rows and `forge:status` for the probe — and
+  maps `FORGE_KINDS` over them. The two must never contradict each other. They
+  did, and the layout was half the reason: the pane used to be a flat Hosts list
+  of every product's hosts above a separate per-forge card, so the same question
+  was answered in two places eight pixels apart. The
   probe was hardcoded to `github.com` and `gitlab.com`, so the card read "GitLab:
   Signed out" directly under a Hosts row naming a self-managed instance and its
   account, and read "Connected" for a forge whose only host had been switched
@@ -303,12 +307,22 @@ So, when adding anything per-product:
     `GH_HOST`/`GITLAB_HOST` move the CLI's default and `--hostname github.com`
     overrides them (`../github/pr-client.ts` spells this out). Its credential
     still counts toward the summary.
-  - **The two sections divide the work.** Hosts owns per-host permission and
-    sign-in, one row each. The card owns what only a *product* can answer: the
-    CLI is missing (there are no host rows at all then), and what the
-    integration can do (`FORGE_PRODUCTS[kind].capabilities`). Folding those
-    into host rows would repeat the same sentence once per host of that forge
-    and leave the missing-CLI case nowhere to be reported.
+  - **A product section, not a host row, is where a product-level answer goes.**
+    Rows own per-host permission and sign-in, one each. The *section* owns what
+    only a product can answer: whether its CLI is installed (there are no host
+    rows at all then), and what the integration can do
+    (`FORGE_PRODUCTS[kind].capabilities`). Folding capabilities into host rows
+    would repeat the same sentence once per host and leave the missing-CLI case
+    nowhere to be reported — which is why they sit once at the foot of the
+    section, which exists whether or not the product has a single host.
+  - **Sections come from `FORGE_KINDS`, never from the rows.** Deriving them
+    from the hosts that happen to exist would silently drop a product the user
+    has not signed in to — exactly the product that needs a section, because
+    that is where its sign-in lives. A shared empty state cannot do this job:
+    "Neither `gh` nor `glab` is signed in to a host" was only ever half right,
+    and listing every CLI instead ("No forge CLI (`gh`, `glab`) is signed in")
+    scales to a third product without ever telling the reader *which* one they
+    need to go and fix. One sentence per section says it.
   - **Four states, and "off" is not one of the other three.** A forge whose every
     host is switched off is neither connected nor signed out — reporting it as
     either sends the user to a terminal to sign in to something they are already

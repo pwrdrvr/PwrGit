@@ -4,7 +4,6 @@ import {
   type ForgeOwner,
   type RepoVisibility
 } from "@pwrgit/shared";
-import { logMain } from "../../logs";
 import { delay } from "../../util/timing";
 import {
   ownersFrom,

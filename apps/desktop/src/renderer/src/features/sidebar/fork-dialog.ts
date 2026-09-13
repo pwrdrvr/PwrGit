@@ -2,7 +2,6 @@ import {
   forgeAllHostsOff,
   forgeBlockAt,
   forgeCanAnswerSaas,
-  forgeProduct,
   forgeProductOrAssumed,
   forgeSaasBlock,
   type CloneRepository,

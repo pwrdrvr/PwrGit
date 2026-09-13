@@ -2,6 +2,7 @@ import type { AppSettingsSnapshot } from "@pwrgit/shared";
 import {
   SettingsField,
   SettingsPanelHead,
+  SettingsSectionStack,
   SettingsSection
 } from "./SettingsLayout";
 import { SettingsSwitch } from "./SettingsSwitch";
@@ -15,7 +16,7 @@ export function ExperimentalSettings(props: {
   const lineageAllBranches = props.snapshot.experimental.lineageAllBranches;
 
   return (
-    <div className="settings-stack" aria-label="Experimental settings">
+    <SettingsSectionStack aria-label="Experimental settings" paneId="experimental">
       <SettingsPanelHead
         eyebrow="Experimental"
         title="Experimental features"
@@ -45,6 +46,6 @@ export function ExperimentalSettings(props: {
           />
         </div>
       </SettingsSection>
-    </div>
+    </SettingsSectionStack>
   );
 }

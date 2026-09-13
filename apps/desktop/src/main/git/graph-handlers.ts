@@ -3,8 +3,7 @@ import {
   type LaneGraph,
   err,
   type LaneBranchInfo,
-  ok,
-  type PrSummary
+  ok
 } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { prSummaryFromRow, prSummarySelect } from "../forge/pr-row";

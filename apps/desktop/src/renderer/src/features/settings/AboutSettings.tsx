@@ -10,6 +10,7 @@ import { dispatch } from "../../lib/pwrgit";
 import {
   SettingsField,
   SettingsPanelHead,
+  SettingsSectionStack,
   SettingsSection
 } from "./SettingsLayout";
 
@@ -248,7 +249,7 @@ export function AboutSettings() {
     ));
 
   return (
-    <div className="settings-stack" aria-label="About PwrGit">
+    <SettingsSectionStack aria-label="About PwrGit" paneId="about">
       <SettingsPanelHead
         eyebrow="About"
         title="About PwrGit"
@@ -437,6 +438,6 @@ export function AboutSettings() {
         </div>
       </SettingsSection>
 
-    </div>
+    </SettingsSectionStack>
   );
 }

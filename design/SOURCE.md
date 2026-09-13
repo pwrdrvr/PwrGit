@@ -34,12 +34,14 @@ and records where the retired wireframe disagreed with the code. Read it first.
 | `Reset to Remote - UX Review.dc.html` | Reset-to-remote findings and redesign. |
 | `Refresh Affordances - Normalization.dc.html` | The six refresh/fetch controls, why they diverged, and the one busy language that replaced them. |
 | `Settings Updates.dc.html` | Settings › Updates — the four-slot release matrix, and the two-control layout it replaced. |
+| `Settings Forges - UX Review.dc.html` | Settings › Forges — the pane's measured layout defects, and the per-product sections that replace the one interleaved host list. |
 | `Tag Chips and Locate - UX Review.dc.html` | The lineage tag chip and the tag locator — chip vocabulary, the light-theme contrast the accent tint could not hold, and the sidebar action column. |
 | `PwrGit Icon.dc.html` | App icon, size ladder, tray templates, DMG background. |
 | `support.js` | Generated `dc-runtime` bundle every `.dc.html` loads. |
 | `github.md` | Provenance note for the icon asset set (matched to PwrSnap's). |
 | `assets/logo-pwrgit.svg` | The lineage mark. |
 | `assets/tag-locate-{before,after}.png` | Shipped-app captures for the tag chip artboard, from the Playwright tag scenario on contrived fixture repos. |
+| `assets/forges-before.png` | Shipped-app capture of Settings › Forges, from a Playwright scenario against contrived `gh`/`glab` stubs. |
 
 ### History and leftovers
 
@@ -72,6 +74,13 @@ Claude Design project, which is the opposite of the usual direction. That is
 fine — the project is the source of truth for what the design *is*, and it now
 carries this artboard — but it means a re-export must not treat the file as
 foreign and drop it. It is a normal member of the bundle from here on.
+
+`Settings Forges - UX Review.dc.html` and `assets/forges-before.png` were
+written here the same way, and pushed up the same way. It **supersedes artboard
+2a of `Forge Hosts - UX Review.dc.html`**, which drew Settings › Forges as one
+interleaved list of every host; the products now get a section each. The rest of
+that file still stands — it owns the host row anatomy, the evidence line, and
+the rule that a product is chosen and never guessed from a hostname.
 
 Its two screenshots are 100% contrived: fixture repositories built by
 `apps/desktop/e2e/fixtures/git-sandbox.ts`, a seeded default profile, and a

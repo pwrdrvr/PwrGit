@@ -53,11 +53,11 @@ pnpm typecheck  # tsc across packages
 pnpm lint       # every check CI runs, cheapest-first (see below)
 ```
 
-`pnpm lint` chains `lint:colors` → `deps:maturity` → `licenses:check` →
-`lint:boundaries` → `typecheck`, ordered so a fast failure doesn't wait on the
-slow one. CI's Typecheck job runs exactly this one command, so **add new
-repo-wide checks to the chain in the root `package.json`**, not as another CI
-step.
+`pnpm lint` chains `lint:forge-kinds` → `lint:colors` → `deps:maturity` →
+`licenses:check` → `lint:boundaries` → `typecheck`, ordered so a fast failure
+doesn't wait on the slow one. CI's Typecheck job runs exactly this one command,
+so **add new repo-wide checks to the chain in the root `package.json`**, not as
+another CI step.
 
 `deps:maturity` enforces the seven-day dependency cooldown
 (`minimumReleaseAge` in `pnpm-workspace.yaml`). Adding an exclusion to get past
@@ -74,6 +74,29 @@ that main, preload, and renderer stay three separate bundles sharing only
 `@pwrgit/shared` — violations there type-check and usually bundle, then fail at
 launch, so `tsc` will not catch them. The config's header comments explain each
 rule.
+
+`typecheck` also carries the unused-code gate: `tsconfig.base.json` sets
+`noUnusedLocals` and `noUnusedParameters`, which `apps/desktop`,
+`packages/mcp-server` and `packages/shared` all extend. An unused import, an
+unread local, or the dead value half of `import { x, type X }` fails **`pnpm
+typecheck`**, and so `pnpm lint` and CI's Typecheck job. It also fails `pnpm
+build` for `packages/mcp-server`, whose build is `tsc`; the desktop half of
+that build is electron-vite and type-checks nothing, so `pnpm typecheck` is
+the command to trust. Two blind spots worth knowing, both verified by probe
+rather than assumed:
+
+- **A leading `_` exempts parameters _and imports_, but not locals.**
+  `function f(_x: string) {}` and `import { y as _y } from "./m"` are both
+  silent; `const _z = 1` is still TS6133. So the prefix is right for a
+  parameter that documents a signature — a test double's ignored argument, a
+  `describe.each` title slot — and is a way to wave a dead import straight
+  past this gate. Don't use it for that.
+- **An export nobody imports stays invisible.** Removing a symbol's last
+  importer leaves its `export` dead and silent. Grep for the symbol after
+  deleting an import.
+
+And "the compiler says unused" is not "dead code" — an unused binding in a
+test is often a missing assertion. Ask what it was for before deleting it.
 
 ## Launch the dev app
 

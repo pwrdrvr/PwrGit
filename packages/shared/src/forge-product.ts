@@ -79,8 +79,17 @@ export type ForgeProduct = {
    * so a single "Add host…" button would have to guess or ask afterwards.
    */
   readonly addHost: {
-    /** Button label in Settings → Forges → Hosts. */
+    /** Button label in the product's section of Settings → Forges. */
     readonly button: string;
+    /**
+     * The helper line under that button.
+     *
+     * Per-product because the self-hosted thing has a different NAME on each
+     * one — GitHub calls it Enterprise, GitLab calls it self-managed — and a
+     * shared "for an instance you have not signed in to yet" is the wording
+     * that made the button look like it might add anything at all.
+     */
+    readonly sub: string;
     /** The dialog's title, which is what settles the product. */
     readonly title: string;
     /** An example hostname, shown in the field. */
@@ -127,6 +136,7 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
     hostAllowlistEnv: "PWRGIT_GITHUB_HOSTS",
     addHost: {
       button: "Add GitHub Enterprise…",
+      sub: "For an Enterprise instance you have not signed in to yet.",
       title: "Add a GitHub Enterprise host",
       placeholder: "github.acme-inc.com"
     },
@@ -151,6 +161,7 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
     hostAllowlistEnv: "PWRGIT_GITLAB_HOSTS",
     addHost: {
       button: "Add GitLab instance…",
+      sub: "For a self-managed instance you have not signed in to yet.",
       title: "Add a GitLab instance",
       placeholder: "gitlab.example.com"
     },
