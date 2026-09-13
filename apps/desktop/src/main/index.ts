@@ -99,6 +99,7 @@ import { ensureMacKeychainAccess } from "./mac-keychain-access";
 import { openDatabase } from "./persistence/db";
 import { readGitIdentityDefaults } from "./profiles/git-identity";
 import { registerProfileHandlers } from "./profiles/profile-handlers";
+import { readEffectiveGitIdentity } from "./profiles/git-identity-read";
 import {
   ProfileScanCoordinator,
   survivingActiveWorktreeId
@@ -415,14 +416,23 @@ if (!gotSingleInstanceLock) {
     // not a person — the git identity name seeds the commit AUTHOR instead.
     // (Seeding name from user.name gave every profile the same title.)
     const identity = readGitIdentityDefaults(process.env["PWRGIT_GITCONFIG"]);
-    profiles.ensureSeed({
-      name: "Personal",
-      email: identity.email ?? "",
-      ...(identity.name !== undefined ? { authorName: identity.name } : {}),
-      mono: "",
-      kind: "Personal",
-      roots: []
-    });
+    profiles.ensureSeed(
+      {
+        name: "Personal",
+        email: identity.email ?? "",
+        ...(identity.name !== undefined ? { authorName: identity.name } : {}),
+        mono: "",
+        kind: "Personal",
+        roots: []
+      },
+      // PWRGIT_E2E_ONBOARDING_DONE (e2e seam): seed the profile as already set
+      // up so the first-run wizard does not cover the window every spec drives.
+      // Unset in a real install, which is how the wizard gets its first run.
+      {
+        onboardingCompleted:
+          process.env["PWRGIT_E2E_ONBOARDING_DONE"] === "1"
+      }
+    );
     const indexer = new RepoIndexer(db, execGit);
     // Both forges are registered unconditionally. A provider whose CLI is
     // missing reports that through `status()`, which is what the dialogs
@@ -783,6 +793,7 @@ if (!gotSingleInstanceLock) {
         onOpenProfile: (profileId) => openProfileWindow(profileId),
         onNewProfile: () => emitEvent("ui:newProfile", {}),
         onManageProfiles: () => emitEvent("ui:manageProfile", {}),
+        onReplayOnboarding: () => emitEvent("ui:replayOnboarding", {}),
         onCheckForUpdates: () => {
           void checkForAppUpdatesFromMenu();
         },
@@ -935,6 +946,12 @@ if (!gotSingleInstanceLock) {
     registerSubmoduleHandlers(bus, db);
     const fileInsightHandlers = registerFileInsightHandlers(bus, db);
     registerRebaseHandlers(bus, db, refresher, worktreeOperations);
+    // Asked of git rather than parsed out of ~/.gitconfig: the first-run seed
+    // above is not section-aware and does not follow `include`, and the wizard
+    // puts this value on screen as what commits will carry.
+    bus.register("git:readIdentity", async () =>
+      ok(await readEffectiveGitIdentity(execGit))
+    );
     registerDialogHandlers(bus);
     registerClipboardHandlers(bus);
     registerShellHandlers(bus);

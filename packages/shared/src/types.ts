@@ -9,6 +9,22 @@ export type WorktreeId = string;
 /** A fixed palette for one profile window; absence inherits the app setting. */
 export type ProfileThemeOverride = "dark" | "light";
 
+/**
+ * The git identity a commit would actually carry, as `git config` reports it.
+ *
+ * Read from the user's home directory, so it is the *global* answer: a
+ * conditional include (`includeIf "gitdir:~/work/"`) re-points identity only
+ * inside the directories it names, and those are listed separately rather than
+ * folded in — the wizard says "this is the default, and these directories
+ * differ" instead of promising one identity everywhere.
+ */
+export type GitIdentityRead = {
+  name: string | null;
+  email: string | null;
+  /** `gitdir:`-style prefixes a conditional include re-points identity for. */
+  conditionalDirs: string[];
+};
+
 export type Profile = {
   id: ProfileId;
   name: string;
@@ -31,6 +47,15 @@ export type Profile = {
   roots: string[];
   /** ISO-8601 timestamp of the last time this profile was active. */
   lastUsedAt?: string;
+  /**
+   * Whether this profile has been through first-run setup.
+   *
+   * Set by the onboarding wizard on Finish *and* on Skip — a wizard that
+   * re-fires because you closed it is a wizard you close harder. The Help-menu
+   * replay deliberately does not clear it: replay is a transient re-entry
+   * path, not a reset.
+   */
+  onboardingCompleted: boolean;
 };
 
 export type Worktree = {

@@ -23,6 +23,7 @@ type ProfileRow = {
   roots: string;
   last_used_at: string | null;
   sort_order: number;
+  onboarding_completed: number;
 };
 
 function slugify(name: string): string {
@@ -43,7 +44,8 @@ function rowToProfile(r: ProfileRow): Profile {
     name: r.name,
     email: r.email,
     mono: r.mono,
-    roots: JSON.parse(r.roots) as string[]
+    roots: JSON.parse(r.roots) as string[],
+    onboardingCompleted: r.onboarding_completed !== 0
   };
   if (r.author_name !== null) p.authorName = r.author_name;
   if (r.kind !== null) p.kind = r.kind;
@@ -93,7 +95,17 @@ export class ProfileService {
     return { activeProfileId: this.getActiveId(), profiles: this.list() };
   }
 
-  create(input: CreateProfileRequest): Profile {
+  /**
+   * `onboardingCompleted` defaults to **true**: a profile made through the UI
+   * is made by someone already using PwrGit, and the New-profile dialog
+   * collects the identity and the scan roots the wizard would ask for. Only
+   * `ensureSeed`'s first-run seed passes `false`. Getting this backwards
+   * opened every newly created profile's window behind the wizard's scrim.
+   */
+  create(
+    input: CreateProfileRequest,
+    opts: { onboardingCompleted?: boolean } = {}
+  ): Profile {
     const id = this.uniqueId(input.name);
     const mono = input.mono?.trim() ? input.mono.trim() : deriveMono(input.name);
     const nextOrder = (
@@ -104,8 +116,8 @@ export class ProfileService {
 
     this.db
       .prepare(
-        `INSERT INTO profiles (id, name, email, author_name, mono, kind, org, theme, roots, sort_order)
-         VALUES (@id, @name, @email, @author_name, @mono, @kind, @org, @theme, @roots, @sort_order)`
+        `INSERT INTO profiles (id, name, email, author_name, mono, kind, org, theme, roots, sort_order, onboarding_completed)
+         VALUES (@id, @name, @email, @author_name, @mono, @kind, @org, @theme, @roots, @sort_order, @onboarding_completed)`
       )
       .run({
         id,
@@ -117,7 +129,8 @@ export class ProfileService {
         org: input.org?.trim() ? input.org.trim() : null,
         theme: input.theme ?? null,
         roots: JSON.stringify(input.roots ?? []),
-        sort_order: nextOrder
+        sort_order: nextOrder,
+        onboarding_completed: (opts.onboardingCompleted ?? true) ? 1 : 0
       });
 
     if (this.getActiveId() === null) this.setActiveId(id);
@@ -270,8 +283,34 @@ export class ProfileService {
     return this.get(id);
   }
 
-  /** Ensure at least one profile exists; seeds a default on first run. */
-  ensureSeed(seed: CreateProfileRequest): void {
+  /**
+   * Mark first-run setup finished for a profile.
+   *
+   * One-way on purpose. The wizard sends this on Finish and on Skip, and the
+   * Help-menu replay does not send it at all — replay re-opens the wizard for
+   * someone who wants another look, and flipping the flag back would re-arm it
+   * for the next launch of a profile that is demonstrably already set up.
+   */
+  completeOnboarding(id: ProfileId): Profile | null {
+    if (this.get(id) === null) return null;
+    this.db
+      .prepare("UPDATE profiles SET onboarding_completed = 1 WHERE id = ?")
+      .run(id);
+    return this.get(id);
+  }
+
+  /**
+   * Ensure at least one profile exists; seeds a default on first run.
+   *
+   * `onboardingCompleted` marks the seeded profile as already set up. Only the
+   * E2E harness passes it: a genuinely fresh install must get the wizard, but
+   * every spec launches into a fresh userData dir and would otherwise open
+   * behind a full-screen overlay. See `e2e/fixtures/electron-app.ts`.
+   */
+  ensureSeed(
+    seed: CreateProfileRequest,
+    opts: { onboardingCompleted?: boolean } = {}
+  ): void {
     const count = (
       this.db.prepare("SELECT COUNT(*) AS n FROM profiles").get() as {
         n: number;
@@ -285,7 +324,10 @@ export class ProfileService {
       }
       return;
     }
-    this.create(seed);
+    // The one profile that has genuinely never been set up.
+    this.create(seed, {
+      onboardingCompleted: opts.onboardingCompleted ?? false
+    });
   }
 
   private setActiveId(id: ProfileId): void {

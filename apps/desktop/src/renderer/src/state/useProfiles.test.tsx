@@ -24,7 +24,8 @@ const personal: ProfileList = {
       name: "Personal",
       email: "me@example.com",
       mono: "P",
-      roots: []
+      roots: [],
+      onboardingCompleted: true
     }
   ]
 };

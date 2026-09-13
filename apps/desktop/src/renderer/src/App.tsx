@@ -25,6 +25,7 @@ import { PaneResizer } from "./features/shell/PaneResizer";
 import { ToastHost } from "./features/shell/ToastHost";
 import { Rail } from "./features/rail/Rail";
 import { ProfileModal } from "./features/sidebar/ProfileModal";
+import { OnboardingWizard } from "./features/onboarding/OnboardingWizard";
 import { CloneRepoDialog } from "./features/sidebar/CloneRepoDialog";
 import { ForkRepoDialog } from "./features/sidebar/ForkRepoDialog";
 import { NewWorktreeModal } from "./features/sidebar/NewWorktreeModal";
@@ -118,6 +119,42 @@ export function App() {
     if (picked.length === 0) return;
     await setRoots(activeProfile.id, [...activeProfile.roots, ...picked]);
   }, [activeProfile, pickDirectories, setRoots]);
+  // First-run setup. Per profile, because PwrGit is one window per profile — a
+  // second profile is a second first run. `replay` is the Help-menu re-entry,
+  // which shows the wizard without ever clearing the completion flag.
+  const [onboardingReplay, setOnboardingReplay] = useState(false);
+  const [onboardingDone, setOnboardingDone] = useState(false);
+  const showOnboarding =
+    activeProfile !== null &&
+    (onboardingReplay ||
+      (!activeProfile.onboardingCompleted && !onboardingDone));
+
+  const dismissOnboarding = useCallback(
+    (persistCompleted: boolean) => {
+      setOnboardingReplay(false);
+      setOnboardingDone(true);
+      if (!persistCompleted || activeProfile === null) return;
+      void dispatch("profile:completeOnboarding", {
+        profileId: activeProfile.id
+      });
+    },
+    [activeProfile]
+  );
+
+  const setOnboardingIdentity = useCallback(
+    async (
+      profileId: string,
+      identity: { authorName: string; email: string }
+    ): Promise<void> => {
+      await updateProfile({
+        profileId,
+        authorName: identity.authorName,
+        email: identity.email
+      });
+    },
+    [updateProfile]
+  );
+
   const worktreeState = useWorktreeState(selection?.worktreeId ?? null);
   const [selectedCommits, setSelectedCommits] = useState<Set<string>>(
     new Set()
@@ -327,9 +364,18 @@ export function App() {
         setProfileModal({ mode: "edit", profile: activeProfile });
       }
     });
+    // Replay is a look, not a reset: it re-opens the wizard without ever
+    // clearing `onboardingCompleted`, so the next launch stays quiet.
+    const offReplay = subscribe("ui:replayOnboarding", () => {
+      if (document.hasFocus()) {
+        setOnboardingDone(false);
+        setOnboardingReplay(true);
+      }
+    });
     return () => {
       offNew();
       offManage();
+      offReplay();
     };
   }, [activeProfile]);
 
@@ -927,6 +973,17 @@ export function App() {
         </div>
       )}
 
+      {showOnboarding && activeProfile !== null && (
+        <OnboardingWizard
+          profile={activeProfile}
+          repos={repos}
+          isReplay={onboardingReplay}
+          pickDirectories={pickDirectories}
+          onSetRoots={setRoots}
+          onSetIdentity={setOnboardingIdentity}
+          onDismiss={dismissOnboarding}
+        />
+      )}
       {profileModal !== null && (
         <ProfileModal
           mode={profileModal.mode}

@@ -15,6 +15,44 @@ afterEach(() => {
 });
 
 describe("ProfileService", () => {
+  it("a seeded first-run profile has not been through setup", () => {
+    const s = service();
+    s.ensureSeed({
+      name: "Personal",
+      email: "",
+      mono: "",
+      kind: "Personal",
+      roots: []
+    });
+    // The whole point of the flag: a fresh install fires the wizard. Existing
+    // installs are marked done by the migration, not by this path.
+    expect(s.list()[0]?.onboardingCompleted).toBe(false);
+  });
+
+  it("completeOnboarding is one-way and survives other writes", () => {
+    const s = service();
+    s.ensureSeed({
+      name: "Personal",
+      email: "",
+      mono: "",
+      kind: "Personal",
+      roots: []
+    });
+    const id = s.list()[0]!.id;
+
+    expect(s.completeOnboarding(id)?.onboardingCompleted).toBe(true);
+    // Idempotent — Skip after Finish, or a second window finishing, is a no-op.
+    expect(s.completeOnboarding(id)?.onboardingCompleted).toBe(true);
+    // Nothing else the wizard writes may quietly re-arm it.
+    s.setRoots(id, ["/code"]);
+    expect(s.get(id)?.onboardingCompleted).toBe(true);
+  });
+
+  it("completeOnboarding on an unknown profile reports not-found", () => {
+    const s = service();
+    expect(s.completeOnboarding("nope")).toBeNull();
+  });
+
   it("ensureSeed creates exactly one default profile and is idempotent", () => {
     const s = service();
     const seed = {
@@ -28,6 +66,37 @@ describe("ProfileService", () => {
     s.ensureSeed(seed);
     expect(s.list()).toHaveLength(1);
     expect(s.getActiveId()).not.toBeNull();
+  });
+
+  it("seeds a first-run profile that has NOT been onboarded", () => {
+    const s = service();
+    s.ensureSeed({ name: "Default", email: "me@example.com", roots: [] });
+    expect(s.list()[0]?.onboardingCompleted).toBe(false);
+  });
+
+  it("seeds an onboarded profile when asked (the E2E seam)", () => {
+    const s = service();
+    s.ensureSeed(
+      { name: "Default", email: "me@example.com", roots: [] },
+      { onboardingCompleted: true }
+    );
+    expect(s.list()[0]?.onboardingCompleted).toBe(true);
+  });
+
+  it("a profile created through the UI is not a first run", () => {
+    const s = service();
+    // The New-profile dialog collects identity and roots, so there is nothing
+    // left for the wizard to ask — and its overlay would cover the new window.
+    const p = s.create({ name: "Acme", email: "me@acme.dev", roots: ["/x"] });
+    expect(p.onboardingCompleted).toBe(true);
+  });
+
+  it("does not re-onboard an existing profile that is mid-setup", () => {
+    const s = service();
+    const seed = { name: "Default", email: "me@example.com", roots: [] };
+    s.ensureSeed(seed);
+    s.ensureSeed(seed, { onboardingCompleted: true });
+    expect(s.list()[0]?.onboardingCompleted).toBe(false);
   });
 
   it("derives a slug id and mono and persists email + roots", () => {

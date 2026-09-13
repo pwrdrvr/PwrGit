@@ -23,6 +23,16 @@ the Electron build.
   also redirects the app log to `<dir>/logs/main.log`: macOS keys the default
   log directory off the app *name*, so without that a run would append to the
   installed app's own log.
+- **Onboarding**: `launchApp` passes `PWRGIT_E2E_ONBOARDING_DONE=1`, which makes
+  main's `ensureSeed` mark the seeded profile as already set up. Without it
+  every launch is a genuine first run and the wizard's overlay
+  (`position: fixed; inset: 0`) eats every click the spec makes — and says
+  nothing about itself while doing it: two shards once burned the full
+  20-minute job limit and the only annotation was "exceeded the maximum
+  execution time". `launchApp` therefore reads the flag back through
+  `profile:list` before returning and throws a named error if the seed did not
+  take. `onboarding-wizard.spec.ts` is the one spec that passes
+  `seedOnboarding: false`.
 - **Folder picker**: `dialog.showOpenDialog` is stubbed in the main process
   (`setPickDirectory`) so "Add repo folder…" is driven from the UI, not a native
   dialog.

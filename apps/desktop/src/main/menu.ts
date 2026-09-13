@@ -19,6 +19,7 @@ export function rebuildAppMenu(opts: {
   onOpenLicense: () => void;
   onOpenThirdPartyNotices: () => void;
   onOpenExternalLink: (label: string, url: string) => void;
+  onReplayOnboarding: () => void;
   /** Settings → General → Developer Mode: expose Reload / Force Reload /
    *  Toggle Developer Tools (and their shortcuts) in the View menu. */
   developerMode: boolean;
@@ -126,6 +127,11 @@ export function rebuildAppMenu(opts: {
     {
       role: "help",
       submenu: [
+        {
+          label: "Replay First-Run Setup…",
+          click: () => opts.onReplayOnboarding()
+        },
+        { type: "separator" },
         {
           label: "PwrGit Documentation",
           click: () =>
