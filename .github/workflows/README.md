@@ -104,3 +104,29 @@ Use the guarded release workflow to publish macOS. Direct macOS publication
 through `pnpm release` is rejected so electron-builder cannot publish an
 unvalidated intermediate manifest. `package` and `package:dryrun` still build
 both architectures locally without publication.
+
+## Windows installer name
+
+The release publishes two installer assets that are the same bytes:
+`PwrGit-<version>-windows-x64-setup.exe`, which `latest.yml` names and
+electron-updater downloads, and `PwrGit.Setup.exe`, a stable alias so
+`releases/latest/download/PwrGit.Setup.exe` keeps working across versions. The
+versioned asset is never renamed away.
+
+`windows-sign` cuts the alias with
+`apps/desktop/scripts/windows-release-artifacts.mjs`, after the Authenticode
+verification step and never before it: the alias is a byte-for-byte copy and
+would otherwise inherit an unsigned intermediate. The script checks each
+installer against its `SHA256SUMS` entry before copying and the copy against the
+original after, and refuses an architecture it has no agreed alias for rather
+than pointing a stable URL at the wrong installer. The aliases stay out of
+`SHA256SUMS`; the runbook says why.
+
+The name has no space on purpose. GitHub Releases replaces spaces in an
+uploaded asset's filename with periods — on `gh`, the REST API and the web UI
+alike — and a later rename cannot restore one, so `PwrGit Setup.exe` would
+publish as `PwrGit.Setup.exe` regardless. Naming the build output that way
+keeps it spelled the same as the published asset. A future Windows ARM build
+takes `PwrGit.Setup.Arm.exe`. This does not match the macOS aliases
+(`PwrGit.dmg`, `PwrGit-arm64.dmg`), which are already published URLs that must
+keep working; each platform keeps its own spelling deliberately.

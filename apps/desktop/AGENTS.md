@@ -158,3 +158,25 @@ names; electron-updater uses that substring to select architecture.
 The metadata helper is imported by the common orchestrator, so include it in
 both macOS and Windows signing-input archives. Direct macOS publication is
 blocked; use the release workflow, which uploads only after validation.
+
+## Windows installer names
+
+`windows-release-artifacts.mjs` owns two things: the `SHA256SUMS` manifest
+(written during packaging, parsed again later — keep both halves in that one
+file) and the stable `PwrGit.Setup.exe` alias beside the versioned installer.
+`release.mjs` imports it, so it belongs in **both** signing-input archives, the
+same rule the macOS helper above follows.
+
+The alias is cut by `release.yml`'s `windows-sign` job *after* Authenticode
+verification, never during packaging: it is a byte-for-byte copy and would
+otherwise inherit an unsigned intermediate. That step also asserts the file
+exists, because a script that no-ops still exits 0 and `upload-artifact` only
+warns when one of several globs matches nothing. Never rename the versioned
+installer away — `latest.yml` names it and electron-updater fetches it by name.
+
+The alias carries no space because GitHub Releases rewrites spaces in an asset
+filename to periods and a rename cannot undo it, so the build output would
+otherwise disagree with the published asset. A Windows ARM build takes
+`PwrGit.Setup.Arm.exe`; this deliberately does not match `PwrGit-arm64.dmg`,
+whose URL is already published. Aliases stay out of `SHA256SUMS` — same bytes,
+second name. `.github/workflows/README.md` carries the operator-facing version.

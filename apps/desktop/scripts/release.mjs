@@ -46,7 +46,6 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
   chmodSync,
   copyFileSync,
@@ -62,6 +61,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { MAC_ARCHITECTURES, writeMacReleaseArtifacts } from "./mac-release-artifacts.mjs";
+// The checksum manifest is written here and parsed by the signing job when it
+// cuts the stable aliases; one module owns both halves of that format.
+import { writeWindowsChecksums } from "./windows-release-artifacts.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -224,33 +226,6 @@ function findWindowsUnpackedDir(distDir) {
     throw new Error(`No windows unpacked app directory found under ${distDir}`);
   }
   return candidates[0];
-}
-
-function windowsInstallerArtifacts(distDir) {
-  const artifacts = readdirSync(distDir)
-    .filter((entry) => entry.endsWith("-setup.exe"))
-    .sort()
-    .map((name) => ({ name, path: join(distDir, name) }));
-  if (artifacts.length === 0) {
-    throw new Error(
-      `electron-builder reported success but produced no *-setup.exe in ${distDir}. ` +
-        `Check the electron-builder output above (icon conversion, native rebuilds).`,
-    );
-  }
-  return artifacts;
-}
-
-function writeWindowsChecksums(distDir) {
-  const artifacts = windowsInstallerArtifacts(distDir);
-  const lines = artifacts
-    .map(({ name, path }) => {
-      const digest = createHash("sha256").update(readFileSync(path)).digest("hex");
-      return `${digest}  ${name}`;
-    })
-    .join("\n");
-  const checksumPath = join(distDir, "SHA256SUMS");
-  writeFileSync(checksumPath, `${lines}\n`);
-  return checksumPath;
 }
 
 function assertWindowsReleaseInputs() {
