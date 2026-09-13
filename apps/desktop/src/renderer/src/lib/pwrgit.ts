@@ -38,6 +38,7 @@ declare global {
 
 /** The profile this window was opened for (null only in dev edge cases). */
 export function windowProfileId(): string | null {
+  if (typeof window === "undefined") return null;
   return window.pwrgit.profileId ?? null;
 }
 
