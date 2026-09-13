@@ -51,6 +51,29 @@ test("clone action stays visible above a long scrolling repo list", async () => 
 
   await expect(clone).toBeEnabled();
   await expect(clone).toBeInViewport();
+
+  // One rhythm down the action block: `.sidebar__actions` spaces its rows with
+  // `gap` and no child adds a margin of its own, because a margin on a flex
+  // child does not collapse into the gap — it adds to it. That is what drew the
+  // Clone row 16px under "Add folders…" while every neighbouring seam was 8px.
+  // Asserted as equality rather than a pinned 8, so retuning the gap is free.
+  const [underJump, underAddFolders, underCloneRow] = await window.evaluate(
+    () => {
+      const box = (selector: string): DOMRect => {
+        const element = document.querySelector(selector);
+        if (element === null) throw new Error(`missing ${selector}`);
+        return element.getBoundingClientRect();
+      };
+      return [
+        box(".add-folder").top - box(".jump-btn").bottom,
+        box(".clone-repo").top - box(".add-folder").bottom,
+        box(".bulk-sync-action").top - box(".clone-repo").bottom
+      ].map((seam) => Math.round(seam));
+    }
+  );
+  expect(underAddFolders).toBe(underJump);
+  expect(underCloneRow).toBe(underJump);
+
   const beforeScroll = await clone.boundingBox();
   await window.locator(".sidebar__list").evaluate((element) => {
     element.scrollTop = element.scrollHeight;

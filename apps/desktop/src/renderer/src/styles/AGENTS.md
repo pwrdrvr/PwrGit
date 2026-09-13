@@ -15,6 +15,16 @@ fixed-height rows could not express. So don't add a font-size to a
 Sidebar rows are `min-height` + padding, never `height`. A fixed height cannot
 grow with the type axis — the text clips instead. Same rule for any new row.
 
+## Spacing inside `.sidebar__actions` belongs to the container
+
+That block and the rows nested in it (`.clone-repo-row`, `.bulk-sync-actions`)
+separate their children with `gap`, so the children declare no `margin-top`: a
+margin on a flex child does not collapse into a gap, it adds to it, and the
+seam draws double. The shared ghost-button rule (`.new-wt`, `.clone-repo`,
+`.fork-repo`, `.add-folder`) hands out no margin for the same reason — those
+four sit in four different parents. `.new-wt` and `.add-folder` set their own,
+because theirs are plain blocks with no gap to inherit.
+
 ## PwrGit deliberately has no centre-column cap
 
 PwrAgnt caps its chat column (`--chat-column-max: 940px`) because a transcript
