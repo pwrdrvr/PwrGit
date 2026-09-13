@@ -7,6 +7,7 @@ import {
   type ReclaimSummary,
   type ReclaimWorktreeResult
 } from "@pwrgit/shared";
+import { currentPlatform } from "../../lib/platform";
 import { confirmDialog } from "../shell/dialogs";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import {
@@ -173,8 +174,11 @@ export function ReclaimDiskPanel({
       title: `Delete ignored files in ${totals.worktrees} worktree${
         totals.worktrees === 1 ? "" : "s"
       }?`,
-      message: reclaimConfirmMessage(totals, appliedExcludes),
-      confirmLabel: `Delete, free ${describeReclaimBytes(totals)}`,
+      message: reclaimConfirmMessage(totals, appliedExcludes, currentPlatform()),
+      // "Delete X", not "free X": the apparent size of the files is a fact,
+      // the space returned to the volume is not ours to promise. The confirm
+      // body carries `diskSpaceNote` for the why.
+      confirmLabel: `Delete ${describeReclaimBytes(totals)}`,
       danger: true
     });
     if (!go) return;
@@ -232,7 +236,9 @@ export function ReclaimDiskPanel({
             Deletes only what <code>.gitignore</code> covers — node_modules,
             build output, caches. Tracked files, branches and commits stay, and
             each worktree stays usable after a reinstall or rebuild. Ignored
-            files have no commit behind them, so this cannot be undone.
+            files have no commit behind them, so this cannot be undone. Sizes
+            are the files' own, not space the disk gives back straight away —
+            shared clones and snapshots release it later.
           </p>
         </div>
         <span className="prune__count" aria-live="polite">
@@ -259,7 +265,7 @@ export function ReclaimDiskPanel({
           <strong>{summary.cancelled ? "Cancelled" : "Finished"}</strong>
           <span>
             {summary.counts.worktrees.reclaimed} reclaimed ·{" "}
-            {formatBytes(summary.counts.freedBytes)} freed
+            {formatBytes(summary.counts.deletedBytes)} deleted
             {summary.counts.worktrees.failed > 0
               ? ` · ${summary.counts.worktrees.failed} failed`
               : ""}

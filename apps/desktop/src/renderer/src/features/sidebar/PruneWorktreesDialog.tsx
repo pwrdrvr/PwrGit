@@ -7,6 +7,7 @@ import {
 } from "@pwrgit/shared";
 import { confirmDialog } from "../shell/dialogs";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { currentPlatform } from "../../lib/platform";
 import { relativeAge } from "../../lib/relativeAge";
 import { useModal } from "../../lib/useModal";
 import { ReclaimDiskPanel } from "./ReclaimDiskPanel";
@@ -197,7 +198,7 @@ export function PruneWorktreesDialog({
     if (picked.length === 0) return;
     const go = await confirmDialog({
       title: `Remove ${picked.length} worktree${picked.length === 1 ? "" : "s"}?`,
-      message: removalConfirmMessage(picked, totals),
+      message: removalConfirmMessage(picked, totals, currentPlatform()),
       confirmLabel: `Remove ${picked.length}`,
       danger: true
     });

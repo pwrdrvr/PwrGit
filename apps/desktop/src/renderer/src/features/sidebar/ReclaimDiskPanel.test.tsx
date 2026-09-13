@@ -19,6 +19,15 @@ vi.mock("../../lib/pwrgit", () => ({ dispatch, subscribe }));
 const { confirmDialog } = vi.hoisted(() => ({ confirmDialog: vi.fn() }));
 vi.mock("../shell/dialogs", () => ({ confirmDialog }));
 
+// Only `currentPlatform` is stubbed, and only because it reads the preload
+// bridge, which jsdom has no reason to carry. `isMacPlatform` and the rest of
+// the module stay real, so the note this produces is the one the app produces.
+vi.mock("../../lib/platform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/platform")>()),
+  currentPlatform: () => "darwin"
+}));
+
+
 import { ReclaimDiskPanel } from "./ReclaimDiskPanel";
 
 const candidates: PruneCandidate[] = [
@@ -75,7 +84,7 @@ const summary: ReclaimSummary = {
       failed: 0,
       cancelled: 0
     },
-    freedBytes: 8_080_060
+    deletedBytes: 8_080_060
   },
   results: []
 };
@@ -300,13 +309,19 @@ describe("ReclaimDiskPanel", () => {
     expect(confirmDialog).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "Delete ignored files in 2 worktrees?",
-        confirmLabel: "Delete, free 7.7 MB",
+        confirmLabel: "Delete 7.7 MB",
         danger: true
       })
     );
     expect(confirmDialog.mock.calls[0]?.[0].message).toContain(
       "cannot be undone"
     );
+    // The figure is the size of the files, not a promise about free space.
+    expect(confirmDialog.mock.calls[0]?.[0].message).toContain(
+      "may not shrink by this much"
+    );
+    expect(confirmDialog.mock.calls[0]?.[0].message).toContain("Time Machine");
+    expect(confirmDialog.mock.calls[0]?.[0].message).not.toContain("freeing");
   });
 
   it("deletes with the patterns the preview was taken with", async () => {

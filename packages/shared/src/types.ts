@@ -1537,8 +1537,13 @@ export type ReclaimSummary = {
   finishedAt: string;
   counts: {
     worktrees: Record<ReclaimWorktreeOutcome, number>;
-    /** Summed `plannedBytes` of the worktrees actually reclaimed. */
-    freedBytes: number;
+    /**
+     * Summed `plannedBytes` of the worktrees actually reclaimed — the apparent
+     * size of what was deleted, NOT bytes returned to the volume. Shared
+     * clones and hard links mean those differ, sometimes by a lot; see
+     * `diskSpaceNote` in the renderer's prune-view.ts.
+     */
+    deletedBytes: number;
   };
   results: ReclaimWorktreeResult[];
 };

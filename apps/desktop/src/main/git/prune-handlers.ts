@@ -427,17 +427,17 @@ export function registerPruneHandlers(
     }
 
     const counts = emptyReclaimCounts();
-    let freedBytes = 0;
+    let deletedBytes = 0;
     for (const result of results) {
       counts[result.outcome] += 1;
-      if (result.outcome === "reclaimed") freedBytes += result.plannedBytes;
+      if (result.outcome === "reclaimed") deletedBytes += result.plannedBytes;
     }
     const summary: ReclaimSummary = {
       operationId: req.operationId,
       cancelled: controller.signal.aborted,
       startedAt,
       finishedAt: new Date().toISOString(),
-      counts: { worktrees: counts, freedBytes },
+      counts: { worktrees: counts, deletedBytes },
       results
     };
     logMain(

@@ -322,6 +322,22 @@ a confirm promising "Remove 3 worktrees" followed by a failure notice for one of
 them. `PruneCandidate` therefore carries no `locked` field: nothing that reaches
 the dialog can be locked.
 
+**The byte figure is the size of the files, never a promise about free space.**
+Both confirms say what is being deleted ("holding 4.9 GB on disk", "totalling
+3.9 GB") and never "freeing X", because the space returned to the volume is not
+knowable ahead of time and sometimes not even afterwards. Measured on an APFS
+volume: `cp -c` clone and a real `cp` copy of the same 20 MB file are
+indistinguishable in every field `stat` exposes — same `nlink=1`, same
+`st_blocks=40960`, same `du` — yet the volume lost 20 MB for both, and deleting
+the clone returned nothing. `du` accordingly reported 60 MB for 20 MB of real
+consumption. macOS adds a second layer: a local Time Machine snapshot pins the
+blocks of anything deleted until it expires, so a correct measurement would
+read zero and be right. `diskSpaceNote` in the renderer's prune-view.ts carries
+this to the user, in two variants (APFS clones + Time Machine on darwin, hard
+links elsewhere), and says the space does come back — later. Do not "fix" this
+by reintroducing a free-space delta: on a live machine `f_bavail` drifted 1.1 MB
+in the one second of an idle measurement.
+
 **Sizes de-duplicate hard links, and are still a floor.** pnpm fills
 `node_modules` by hard-linking one store blob into every package that needs it,
 so summing `stat.size` per directory entry counts the same blocks repeatedly —

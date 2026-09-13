@@ -18,6 +18,15 @@ vi.mock("../../lib/pwrgit", () => ({ dispatch, subscribe }));
 const { confirmDialog } = vi.hoisted(() => ({ confirmDialog: vi.fn() }));
 vi.mock("../shell/dialogs", () => ({ confirmDialog }));
 
+// Only `currentPlatform` is stubbed, and only because it reads the preload
+// bridge, which jsdom has no reason to carry. `isMacPlatform` and the rest of
+// the module stay real, so the note this produces is the one the app produces.
+vi.mock("../../lib/platform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/platform")>()),
+  currentPlatform: () => "darwin"
+}));
+
+
 import { PruneWorktreesDialog } from "./PruneWorktreesDialog";
 
 function candidate(

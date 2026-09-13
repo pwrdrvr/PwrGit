@@ -1,3 +1,4 @@
+import { isMacPlatform } from "../../lib/platform";
 import {
   formatBytes,
   normalizeExcludes,
@@ -109,13 +110,49 @@ export function describeBytes(totals: {
 }
 
 /**
+ * Why the byte figure is the size of what is being deleted, and never a
+ * promise about free space.
+ *
+ * Both are measured the same way — summed apparent size of the files — and
+ * that quantity is well defined. What is not available is "bytes this will
+ * return to the volume", and no per-file API offers it. A package store shares
+ * one file's contents between every checkout that needs it: pnpm hard-links on
+ * Linux, and on APFS it clones, which `stat` cannot distinguish from a real
+ * copy at all — same `nlink`, same `st_blocks`, same `du`. So deleting a
+ * checkout's `node_modules` can return a fraction of its apparent size, or
+ * none of it. macOS adds a second layer: a local Time Machine snapshot pins
+ * the blocks of anything deleted until it expires, so even a correct
+ * measurement would read zero and be right.
+ *
+ * The conclusion is a wording one, not an arithmetic one: say what is being
+ * deleted, and say plainly that the disk follows later.
+ */
+export function diskSpaceNote(platform: string): string {
+  if (isMacPlatform(platform)) {
+    return (
+      "The disk may not shrink by this much straight away: APFS shares file" +
+      " contents between clones, so the space returns once the last copy of" +
+      " each file is gone, and Time Machine's local snapshots hold deleted" +
+      " blocks until they expire. Removing what you are not using is still" +
+      " what frees the space — it just arrives later."
+    );
+  }
+  return (
+    "The disk may not shrink by this much straight away: package stores" +
+    " hard-link one file's contents into every checkout that needs it, so the" +
+    " space returns once the last copy of each file is gone."
+  );
+}
+
+/**
  * The confirm's body. It names the count, every repo involved, and why each
  * row qualified — the pruner's whole claim, in the one place the user is
  * committing to it.
  */
 export function removalConfirmMessage(
   selected: PruneCandidate[],
-  totals: SelectionTotals
+  totals: SelectionTotals,
+  platform: string
 ): string {
   const lines = sortCandidates(selected)
     .slice(0, 8)
@@ -128,12 +165,14 @@ export function removalConfirmMessage(
   const scope =
     totals.repos === 1 ? "1 repository" : `${totals.repos} repositories`;
   return [
-    `${totals.count} worktree${totals.count === 1 ? "" : "s"} across ${scope}, freeing ${describeBytes(totals)}.`,
+    `${totals.count} worktree${totals.count === 1 ? "" : "s"} across ${scope}, holding ${describeBytes(totals)} on disk.`,
     "",
     ...lines,
     ...more,
     "",
-    "Their working directories are deleted. Branches and commits are kept."
+    "Their working directories are deleted. Branches and commits are kept.",
+    "",
+    diskSpaceNote(platform)
   ].join("\n");
 }
 
@@ -184,7 +223,8 @@ export function describeReclaimBytes(totals: ReclaimTotals): string {
  */
 export function reclaimConfirmMessage(
   totals: ReclaimTotals,
-  excludes: readonly string[]
+  excludes: readonly string[],
+  platform: string
 ): string {
   const spared =
     excludes.length === 0
@@ -193,11 +233,13 @@ export function reclaimConfirmMessage(
   return [
     `${totals.paths} ignored path${totals.paths === 1 ? "" : "s"} across ${totals.worktrees} worktree${
       totals.worktrees === 1 ? "" : "s"
-    }, freeing ${describeReclaimBytes(totals)}.`,
+    }, totalling ${describeReclaimBytes(totals)}.`,
     "",
     "Tracked files, branches and commits are untouched, and the worktrees stay usable — they will need a reinstall or rebuild.",
     "",
     "Ignored files have no commit behind them, so this cannot be undone.",
-    spared
+    spared,
+    "",
+    diskSpaceNote(platform)
   ].join("\n");
 }

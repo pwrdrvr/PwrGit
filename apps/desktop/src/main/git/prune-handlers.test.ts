@@ -309,7 +309,7 @@ describe("prune:reclaim", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.counts.worktrees.reclaimed).toBe(1);
-    expect(result.value.counts.freedBytes).toBeGreaterThan(2000);
+    expect(result.value.counts.deletedBytes).toBeGreaterThan(2000);
     expect(result.value.results[0]).toMatchObject({
       outcome: "reclaimed",
       branch: "feat/done",
@@ -331,7 +331,7 @@ describe("prune:reclaim", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.counts.worktrees.nothing_to_reclaim).toBe(1);
-    expect(result.value.counts.freedBytes).toBe(0);
+    expect(result.value.counts.deletedBytes).toBe(0);
   });
 
   it("skips a gone checkout rather than failing the batch", async () => {

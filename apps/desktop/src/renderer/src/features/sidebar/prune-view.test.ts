@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { PruneCandidate, ReclaimPlan } from "@pwrgit/shared";
 import {
   describeBytes,
+  diskSpaceNote,
   describeReclaimBytes,
   formatExcludeLines,
   parseExcludeLines,
@@ -151,10 +152,14 @@ describe("removalConfirmMessage", () => {
   it("names the count, the repos, and why each row qualified", () => {
     const message = removalConfirmMessage(
       picked,
-      selectionTotals(picked, new Set(["a", "b"]))
+      selectionTotals(picked, new Set(["a", "b"])),
+      "darwin"
     );
     expect(message).toContain("2 worktrees across 2 repositories");
-    expect(message).toContain("freeing 3 KB");
+    // What the worktrees hold, not what the volume will hand back.
+    expect(message).toContain("holding 3 KB on disk");
+    expect(message).not.toContain("freeing");
+    expect(message).toContain("may not shrink by this much");
     expect(message).toContain("alpha · feat/a — its pull request #7 is merged");
     expect(message).toContain("beta · feat/b — every commit is already in main");
     expect(message).toContain("Branches and commits are kept.");
@@ -166,7 +171,8 @@ describe("removalConfirmMessage", () => {
     );
     const message = removalConfirmMessage(
       many,
-      selectionTotals(many, new Set(many.map((c) => c.worktreeId)))
+      selectionTotals(many, new Set(many.map((c) => c.worktreeId))),
+      "darwin"
     );
     expect(message).toContain("…and 12 more");
   });
@@ -217,13 +223,13 @@ describe("reclaim totals and confirm", () => {
 
   it("carries an incomplete sizing upward, so the total reads as a floor", () => {
     // A cancelled sizing pass leaves rows at zero bytes. Presenting that sum
-    // as exact would put "free 1 KB" on a button that deletes gigabytes.
+    // as exact would put "Delete 1 KB" on a button that deletes gigabytes.
     const cut: ReclaimPlan = { ...plan("a", 1024, 30), sizesPartial: true };
     const totals = reclaimTotals([cut]);
     expect(totals.partial).toBe(true);
     expect(describeReclaimBytes(totals)).toBe("at least 1 KB");
-    expect(reclaimConfirmMessage(totals, [".env*"])).toContain(
-      "freeing at least 1 KB"
+    expect(reclaimConfirmMessage(totals, [".env*"], "darwin")).toContain(
+      "totalling at least 1 KB"
     );
   });
 
@@ -240,17 +246,46 @@ describe("reclaim totals and confirm", () => {
   it("says what survives as plainly as what does not", () => {
     const message = reclaimConfirmMessage(
       reclaimTotals([plan("a", 1024, 3)]),
-      [".env*", "*.sqlite"]
+      [".env*", "*.sqlite"],
+      "darwin"
     );
     expect(message).toContain("3 ignored paths across 1 worktree");
-    expect(message).toContain("freeing 1 KB");
+    // The size of what is deleted, never a promise about free space.
+    expect(message).toContain("totalling 1 KB");
+    expect(message).not.toContain("freeing");
+    expect(message).toContain("may not shrink by this much");
     expect(message).toContain("Tracked files, branches and commits are untouched");
     expect(message).toContain("cannot be undone");
     expect(message).toContain("Spared by your exclude list: .env*, *.sqlite.");
   });
 
   it("says so when the user has cleared every guard", () => {
-    const message = reclaimConfirmMessage(reclaimTotals([plan("a", 10, 1)]), []);
+    const message = reclaimConfirmMessage(reclaimTotals([plan("a", 10, 1)]), [], "darwin");
     expect(message).toContain("Nothing is being spared");
+  });
+});
+
+describe("diskSpaceNote", () => {
+  it("names Time Machine and clones on macOS, and says the space still comes back", () => {
+    const note = diskSpaceNote("darwin");
+    expect(note).toContain("APFS shares file contents between clones");
+    expect(note).toContain("Time Machine");
+    // The point is not to discourage the action: deleting unused files is
+    // still what returns the space, just not on the same tick.
+    expect(note).toContain("still");
+    expect(note).toContain("arrives later");
+  });
+
+  it("talks about hard links, not snapshots, off macOS", () => {
+    const note = diskSpaceNote("linux");
+    expect(note).toContain("hard-link");
+    expect(note).not.toContain("Time Machine");
+    expect(note).not.toContain("APFS");
+  });
+
+  it("never promises the figure as freed space", () => {
+    for (const platform of ["darwin", "linux", "win32"]) {
+      expect(diskSpaceNote(platform)).toContain("may not shrink by this much");
+    }
   });
 });
