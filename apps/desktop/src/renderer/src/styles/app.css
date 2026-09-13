@@ -9220,9 +9220,13 @@ body.is-col-resizing {
   background: transparent;
   cursor: pointer;
 }
+/* Inset, as `.repo-row` insets its ring: the nav is a scroll container on both
+   axes (an `overflow-y` that is not `visible` computes `overflow-x` to `auto`
+   too), so a ring drawn outside the box would add a horizontal scrollbar. */
 .settings-nav__caret:focus-visible {
   background: var(--accent-soft);
-  outline: none;
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 .settings-nav__caret:hover .settings-nav__caret-mark,
 .settings-nav__caret:focus-visible .settings-nav__caret-mark {
@@ -9293,13 +9297,6 @@ body.is-col-resizing {
   min-height: 0;
   overflow: hidden;
 }
-@media (prefers-reduced-motion: reduce) {
-  .settings-nav__sublist,
-  .settings-nav__caret-mark {
-    transition: none;
-  }
-}
-
 /* 28px = the row's 24px gutter + the label's 4px padding, so the sub-list's
    left rule lands under the first character of the section label above it.
    The width has to track that margin: a <button> shrink-to-fits even as a
@@ -9329,7 +9326,14 @@ body.is-col-resizing {
 .settings-nav__subbutton.is-active {
   border-left-color: var(--accent);
   color: var(--accent);
-  outline: none;
+}
+/* Its own rule, and never `outline: none`: the accent recolouring above is
+   also exactly what `.is-active` paints, so suppressing the ring would leave a
+   keyboard user tabbing onto the row they are already on with no change to see
+   at all (SC 2.4.7). Inset for the reason the caret's is. */
+.settings-nav__subbutton:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 
 /* Toneless until a probe answers: it holds the lane and paints nothing, so

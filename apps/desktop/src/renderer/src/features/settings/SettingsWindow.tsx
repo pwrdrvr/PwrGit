@@ -72,9 +72,9 @@ type SettingsRoute = {
 };
 
 type SettingsNavChild = {
-  key: string;
   label: string;
-  /** The `SettingsSection` `sectionId` this scrolls the pane to. */
+  /** The `SettingsSection` `sectionId` this scrolls the pane to. Also the
+   *  React key — one value, so the key and the route id cannot drift apart. */
   sectionId: string;
   /** Status dot tone. Absent while nothing is known. */
   dot?: ForgeNavDot;
@@ -98,21 +98,18 @@ function forgeNavChild(
   kind: ForgeKind,
   forges: ForgeStatus[] | undefined
 ): SettingsNavChild {
-  const base = { key: kind, label: forgeLabel(kind), sectionId: kind };
-  const state = forgeProductState(
-    forges?.find((forge) => forge.kind === kind)
-  );
-  const sentence = forgeStateSentence(kind, state);
+  const base = { label: forgeLabel(kind), sectionId: kind };
+  const state = forgeProductState(forges?.find((forge) => forge.kind === kind));
   // `unknown` — no probe has answered yet. No dot and no word, because that
   // reads as "we do not know", which is honest: a neutral dot would be a guess
   // and a green one a wrong guess, and this row's whole job is to be trusted at
   // a glance.
-  if (state === "unknown" || sentence === null) return base;
+  if (state === "unknown") return base;
   const { dot, chip } = FORGE_STATE_NAV[state];
   return {
     ...base,
     dot,
-    stateLabel: sentence,
+    stateLabel: forgeStateSentence(kind, state),
     ...(chip === undefined ? {} : { chip })
   };
 }
@@ -170,13 +167,21 @@ export function SettingsWindow() {
             const open = openGroups[item.id] === true;
             const sublistId = `settings-nav-sublist-${item.id}`;
             const holdsRoute = route.section === item.id;
-            // A folded group hides its `aria-current` child inside an inert,
-            // aria-hidden sublist, so the parent takes the marker back: the nav
-            // must always show where the reader is, even when the row that
-            // knows is out of reach.
-            const parentMarks =
-              holdsRoute && (route.focus === undefined || !open);
             const children = isGroup ? navChildren(item.id, forges) : [];
+            // The child that actually carries the marker — routed to, and
+            // reachable. Derived rather than inferred from "is there a focus,
+            // is the group open", because those are proxies: a folded group's
+            // child is inside an inert, aria-hidden sublist, and a focus slug
+            // no child matches would leave the marker on nothing at all.
+            const markedChild =
+              holdsRoute && open
+                ? children.find(
+                    (child) => child.sectionId === route.focus?.sectionId
+                  )
+                : undefined;
+            // Exactly one row in the nav says where the reader is. The parent
+            // takes it back whenever no child can hold it.
+            const parentMarks = holdsRoute && markedChild === undefined;
             return (
               <Fragment key={item.id}>
                 <div className="settings-nav__row">
@@ -228,12 +233,10 @@ export function SettingsWindow() {
                   >
                     <div className="settings-nav__sublist-clip">
                       {children.map((child) => {
-                        const active =
-                          holdsRoute &&
-                          route.focus?.sectionId === child.sectionId;
+                        const active = child === markedChild;
                         return (
                           <button
-                            key={child.key}
+                            key={child.sectionId}
                             aria-current={active ? "page" : undefined}
                             {...(child.stateLabel === undefined
                               ? {}

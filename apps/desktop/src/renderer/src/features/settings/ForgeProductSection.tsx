@@ -102,8 +102,22 @@ export const FORGE_STATE_NAV: Record<
   signedOut: { dot: "warn", chip: "sign in" }
 };
 
-/** One product's state as a sentence, for the pane's live region — and for the
- *  accessible name of the nav row that reports the same thing in a dot. */
+/**
+ * One product's state as a sentence, for the pane's live region — and for the
+ * accessible name of the nav row that reports the same thing in a dot.
+ *
+ * Overloaded rather than always `string | null`, so a caller that has already
+ * ruled `unknown` out does not have to re-test for a `null` this cannot return
+ * — the nav read as though it had two ways of knowing nothing.
+ */
+export function forgeStateSentence(
+  kind: ForgeKind,
+  state: Exclude<ForgeProductState, "unknown">
+): string;
+export function forgeStateSentence(
+  kind: ForgeKind,
+  state: ForgeProductState
+): string | null;
 export function forgeStateSentence(
   kind: ForgeKind,
   state: ForgeProductState

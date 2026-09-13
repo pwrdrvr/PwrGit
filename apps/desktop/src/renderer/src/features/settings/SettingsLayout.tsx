@@ -122,6 +122,15 @@ function slugForSectionId(value: string): string {
   return slug === "" ? "" : `${slug}-${hash(value)}`;
 }
 
+/** Whether the reader has asked for less motion. Defensive about `matchMedia`
+ *  itself: jsdom and other non-browser hosts may not carry one. */
+function prefersReducedMotion(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return false;
+  }
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 /** djb2, base36. Not security — just enough to separate two titles that share
  *  a slug, in a value that is stable across renders and safe in an id. */
 function hash(value: string): string {
@@ -162,9 +171,24 @@ export function SettingsSectionStack(props: {
   // both. Re-seeding during render (not in an effect) means no frame ever
   // paints the wrong pane's state.
   const seededFor = useRef(props.paneId);
+  /**
+   * The reveal request already acted on. Declared here, beside the other
+   * per-pane state, so the re-seed below can clear it too.
+   *
+   * Sections re-register whenever one is added, removed, or re-keyed — a probe
+   * landing is enough — so without this the effect would re-run and yank the
+   * pane back to the nav's card while the reader was somewhere else entirely.
+   * Cleared when the nav drops the request (the reader clicked the parent row),
+   * so returning to the same child scrolls again rather than sitting inert.
+   */
+  const honored = useRef<SettingsFocusRequest | undefined>(undefined);
   if (seededFor.current !== props.paneId) {
     seededFor.current = props.paneId;
     setCollapsed(collapsedByPane.get(props.paneId) ?? {});
+    // Same reason the folds are re-seeded: a request honored under the previous
+    // pane must not count as honored here, or the new pane's first reveal would
+    // silently do nothing.
+    honored.current = undefined;
   }
 
   /** Every write goes through here, or the module map falls out of step with
@@ -242,16 +266,6 @@ export function SettingsSectionStack(props: {
     sections.length > 0 &&
     sections.every((section) => collapsed[section.id] !== true);
 
-  /**
-   * The request already acted on.
-   *
-   * Sections re-register whenever one is added, removed, or re-keyed — a probe
-   * landing is enough — so without this the effect would re-run and yank the
-   * pane back to the nav's card while the reader was somewhere else entirely.
-   * Cleared when the nav drops the request (the reader clicked the parent row),
-   * so returning to the same child scrolls again rather than sitting inert.
-   */
-  const honored = useRef<SettingsFocusRequest | undefined>(undefined);
   useEffect(() => {
     const request = props.focusSection;
     if (request === undefined) {
@@ -278,7 +292,14 @@ export function SettingsSectionStack(props: {
     // Guarded as `FileInsightsPane` guards it: jsdom elements carry no
     // scrollIntoView.
     if (typeof target.element.scrollIntoView === "function") {
-      target.element.scrollIntoView({ block: "start", behavior: "smooth" });
+      // `scrollIntoView` is a script API, so the blanket
+      // `prefers-reduced-motion` rule at the top of `app.css` — which kills
+      // every CSS transition in the app — cannot reach it. Asked directly, or
+      // this is the one piece of motion the setting fails to suppress.
+      target.element.scrollIntoView({
+        block: "start",
+        behavior: prefersReducedMotion() ? "auto" : "smooth"
+      });
     }
     // `preventScroll`, because the line above already chose where to land.
     // Without it focus() scrolls a second time to `block: "nearest"`, which

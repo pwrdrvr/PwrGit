@@ -118,6 +118,12 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  // Torn down, as `lib/pwrgit.test.ts` tears its bridge down: left installed it
+  // outlives every test in the file, so one that means to assert behaviour with
+  // no bridge present would silently get this one instead.
+  // `Reflect.deleteProperty`, not `delete`: the bridge is declared non-optional
+  // on `Window`, so `delete window.pwrgit` is a type error however it is cast.
+  Reflect.deleteProperty(window, "pwrgit");
 });
 
 async function render(): Promise<void> {
@@ -238,6 +244,25 @@ describe("Settings nav — groups", () => {
     );
     await act(async () => caret?.click());
 
+    expect(navButton("Forges").getAttribute("aria-current")).toBe("page");
+  });
+
+  it("never marks two rows as the current page", async () => {
+    // Handing the marker over has to be a MOVE, not a copy. The folded child
+    // kept its own `aria-current` at first, so two rows claimed to be the
+    // current page — hidden from AT only by the sublist's `aria-hidden`.
+    const [first] = FORGE_KINDS;
+    if (first === undefined) return;
+    await render();
+    await act(async () => navChild(forgeProduct(first).label).click());
+    expect(container.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+
+    const caret = container.querySelector<HTMLButtonElement>(
+      ".settings-nav__caret"
+    );
+    await act(async () => caret?.click());
+
+    expect(container.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
     expect(navButton("Forges").getAttribute("aria-current")).toBe("page");
   });
 });
