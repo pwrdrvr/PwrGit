@@ -47,6 +47,37 @@ Collapse state is deliberately **not** persisted to settings: which sections you
 had folded is a reading position, not a preference, and writing it would put a
 settings write behind every click.
 
+## A nav child is a route to a card, never a pane of its own
+
+`SettingsWindow.tsx` renders the left nav. A section in `SETTINGS_NAV_GROUPS`
+grows a caret and a sub-list; each child names a `SettingsSection` `sectionId`
+inside the parent's pane, and clicking it scrolls to that card, unfolds it and
+focuses its header (`SettingsSectionStack`'s `focusSection`). Nothing about a
+child mounts a second pane, which is why a child can carry live status: it is
+reporting on something already one click away.
+
+Two things here are easy to get subtly wrong:
+
+- **The request is an object, not the slug.** The stack honors a request once
+  and then ignores it, because sections re-register whenever one is added or
+  re-keyed — a probe landing is enough — and re-running the reveal would yank
+  the scroll back while the reader was elsewhere. Comparing slugs instead would
+  make the second click on a child do nothing at all, which is exactly the click
+  a reader makes to get back to a card they scrolled away from.
+- **A folded group hands its `aria-current` back to the parent row.** The
+  sub-list is `inert` and `aria-hidden` when folded, so the child holding the
+  marker is unreachable; without the handover the nav shows the reader nowhere.
+  Navigating to a group always unfolds it, so the children are discoverable
+  without anyone thinking to click a caret — only the caret folds one.
+
+The dots are `aria-hidden`, so every state that is not "fine" also carries a
+word, and the row's accessible name is the full sentence the pane's live region
+reads (`forgeStateSentence`) rather than a second phrasing of it. An unprobed
+product gets neither a dot nor a word: "we do not know" is honest, and a green
+dot would be a wrong guess. `useForgeStatuses.ts` is the nav's read — one
+`forge:status` on mount plus pushes, because main answers from cache and the
+whole point of the children is a state the reader has *not* opened the pane for.
+
 ## Forges is one section per product
 
 `ForgesSettings.tsx` is the pane — it holds both reads (`forge:hosts` and

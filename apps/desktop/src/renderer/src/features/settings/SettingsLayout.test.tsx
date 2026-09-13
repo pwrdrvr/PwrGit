@@ -7,7 +7,8 @@ import {
   SettingsPanelHead,
   SettingsSection,
   SettingsSectionStack,
-  __resetCollapsedPanesForTests
+  __resetCollapsedPanesForTests,
+  type SettingsFocusRequest
 } from "./SettingsLayout";
 
 /**
@@ -300,5 +301,90 @@ describe("SettingsSection — disclosure", () => {
     });
 
     expect(container.textContent).not.toContain("Collapse all");
+  });
+});
+
+describe("SettingsSectionStack — nav reveal", () => {
+  /** The same two-section pane, plus whatever the nav is asking for. */
+  async function renderWithFocus(
+    focusSection: SettingsFocusRequest | undefined
+  ): Promise<void> {
+    await act(async () => {
+      root.render(
+        <SettingsSectionStack
+          aria-label="Test pane"
+          paneId={`focus-pane-${paneSeq}`}
+          {...(focusSection === undefined ? {} : { focusSection })}
+        >
+          <SettingsPanelHead eyebrow="Test" title="Test pane" />
+          <SettingsSection sectionId="first" title="First">
+            <button type="button">inside first</button>
+          </SettingsSection>
+          <SettingsSection sectionId="second" title="Second">
+            <button type="button">inside second</button>
+          </SettingsSection>
+        </SettingsSectionStack>
+      );
+    });
+  }
+
+  it("focuses the card the nav asked for", async () => {
+    // Focus and not merely a scroll: a reader who arrived from the nav by
+    // keyboard has to be able to Tab straight into the card, and one who
+    // arrived by mouse gets the focus ring as confirmation of where they are.
+    await renderWithFocus({ sectionId: "second" });
+
+    expect(document.activeElement).toBe(header("Second"));
+  });
+
+  it("unfolds a card it was sent to", async () => {
+    // Otherwise the nav scrolls to a collapsed header and the reader is told
+    // nothing — the card they asked for is the one thing not on screen.
+    await renderWithFocus(undefined);
+    await act(async () => header("Second").click());
+    expect(header("Second").getAttribute("aria-expanded")).toBe("false");
+
+    await renderWithFocus({ sectionId: "second" });
+
+    expect(header("Second").getAttribute("aria-expanded")).toBe("true");
+    // Only the one asked for. Unfolding the pane would discard every other
+    // fold the reader had made to get the pane down to what they care about.
+    expect(header("First").getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("leaves a fold alone when the request has not changed", async () => {
+    // Requests are honored once. Sections re-register whenever one is added or
+    // re-keyed — a probe landing is enough — and re-running the reveal would
+    // both yank the scroll back and re-open a card the reader had just folded.
+    const request: SettingsFocusRequest = { sectionId: "second" };
+    await renderWithFocus(request);
+    await act(async () => header("Second").click());
+
+    await renderWithFocus(request);
+
+    expect(header("Second").getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("honors the same card again once the nav has dropped the request", async () => {
+    // Clicking the parent row and then the child again is one of the two ways
+    // back to a card the reader has scrolled away from; comparing slugs rather
+    // than requests would make the second click do nothing at all.
+    const first: SettingsFocusRequest = { sectionId: "second" };
+    await renderWithFocus(first);
+    await act(async () => header("Second").click());
+    await renderWithFocus(undefined);
+
+    await renderWithFocus({ sectionId: "second" });
+
+    expect(header("Second").getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("ignores a card that is not in this pane", async () => {
+    // A slug with no section is not an error to report — it is a nav and a
+    // pane that have drifted, and the pane's job is to render normally.
+    await renderWithFocus({ sectionId: "nonexistent" });
+
+    expect(document.activeElement).toBe(document.body);
+    expect(header("First").getAttribute("aria-expanded")).toBe("true");
   });
 });

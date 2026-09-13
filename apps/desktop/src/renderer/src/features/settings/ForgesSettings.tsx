@@ -10,7 +10,11 @@ import { dispatch, subscribe } from "../../lib/pwrgit";
 import { copyText } from "../../lib/copyText";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { ReadError } from "../shell/ReadError";
-import { SettingsPanelHead, SettingsSectionStack } from "./SettingsLayout";
+import {
+  SettingsPanelHead,
+  SettingsSectionStack,
+  type SettingsFocusRequest
+} from "./SettingsLayout";
 import {
   ForgeProductSection,
   forgeProductState,
@@ -58,7 +62,11 @@ const RECHECK_MS = 30_000;
  * its token. This pane only ever writes the setting and re-reads what main
  * says.
  */
-export function ForgesSettings(props: { saving: boolean }) {
+export function ForgesSettings(props: {
+  saving: boolean;
+  /** The product card the Settings nav asked to reveal, if any. */
+  focusSection?: SettingsFocusRequest;
+}) {
   const [hosts, setHosts] = useState<ForgeHostRow[] | undefined>();
   const [forges, setForges] = useState<ForgeStatus[] | undefined>();
   const [hostsError, setHostsError] = useState<string | undefined>();
@@ -221,7 +229,16 @@ export function ForgesSettings(props: { saving: boolean }) {
   const blocked = props.saving || busy;
 
   return (
-    <SettingsSectionStack aria-label="Forge settings" paneId="forges">
+    <SettingsSectionStack
+      aria-label="Forge settings"
+      paneId="forges"
+      // Spread rather than passed as undefined: `exactOptionalPropertyTypes`
+      // tells "absent" from "present and undefined", and the stack clears the
+      // request it last acted on when the prop is absent.
+      {...(props.focusSection === undefined
+        ? {}
+        : { focusSection: props.focusSection })}
+    >
       <SettingsPanelHead
         eyebrow="Integrations"
         title="Forges"

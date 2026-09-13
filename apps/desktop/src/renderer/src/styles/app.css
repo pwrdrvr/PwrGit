@@ -9187,6 +9187,64 @@ body.is-col-resizing {
   text-transform: uppercase;
   color: var(--text-subtle);
 }
+/* Section row: the disclosure gutter plus the label button. Every row has the
+   gutter, group or not — a nav whose labels jog 24px left and right depending
+   on whether a section has children reads as two interleaved lists.
+
+   `flex: 0 0 auto` because the nav is a scrolling flex column: without it the
+   rows share the overflow by shrinking, and the list quietly loses a few px per
+   row instead of scrolling. */
+.settings-nav__row {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+  width: 100%;
+}
+
+/* 24px, which is WCAG 2.2 target-size (AA) — and the exception for a small
+   target with space around it does not apply, because the caret sits flush
+   against the label button it shares a row with. */
+.settings-nav__caret,
+.settings-nav__caret-spacer {
+  display: inline-flex;
+  flex: 0 0 24px;
+  width: 24px;
+  align-items: center;
+  justify-content: center;
+}
+.settings-nav__caret {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+.settings-nav__caret:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}
+.settings-nav__caret:hover .settings-nav__caret-mark,
+.settings-nav__caret:focus-visible .settings-nav__caret-mark {
+  border-left-color: var(--text-primary);
+  opacity: 1;
+}
+
+/* The same filled triangle the repo tree uses — the app carries one disclosure
+   vocabulary. Points right when folded, turns down when open. */
+.settings-nav__caret-mark {
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid var(--text-muted);
+  opacity: 0.82;
+  transition: transform 120ms ease;
+}
+.settings-nav__caret-mark.is-open {
+  transform: rotate(90deg);
+}
+
 .settings-nav__button {
   appearance: none;
   border: 0;
@@ -9198,6 +9256,13 @@ body.is-col-resizing {
   border-radius: var(--radius-md);
   cursor: pointer;
 }
+/* The gutter already supplies the row's left inset, so the label drops most of
+   its own and sits beside the caret rather than a second inset away from it. */
+.settings-nav__row .settings-nav__button {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-left: 4px;
+}
 .settings-nav__button:hover {
   background: var(--bg-panel-hover);
   color: var(--text-primary);
@@ -9205,6 +9270,110 @@ body.is-col-resizing {
 .settings-nav__button.is-active {
   background: var(--bg-row-active);
   color: var(--accent-bright);
+}
+
+/* Sub-list under a group row — the same 0fr→1fr grid collapse the section
+   bodies use, so the window has one fold animation and not two. */
+.settings-nav__sublist {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 120ms ease,
+    opacity 120ms ease;
+}
+.settings-nav__sublist.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+/* The clip is what the 0fr row collapses; the transition needs a child that
+   can actually reach zero height. */
+.settings-nav__sublist-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-nav__sublist,
+  .settings-nav__caret-mark {
+    transition: none;
+  }
+}
+
+/* 28px = the row's 24px gutter + the label's 4px padding, so the sub-list's
+   left rule lands under the first character of the section label above it.
+   The width has to track that margin: a <button> shrink-to-fits even as a
+   block-level flex box, so `width: auto` would collapse the row to its label
+   and leave the chip floating mid-column. */
+.settings-nav__subbutton {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 28px);
+  margin: 0 0 2px 28px;
+  padding: 6px 8px;
+  appearance: none;
+  border: 0;
+  border-left: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-muted);
+  font: 600 12px/1.2 var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+.settings-nav__subbutton:last-child {
+  margin-bottom: 4px;
+}
+.settings-nav__subbutton:hover,
+.settings-nav__subbutton:focus-visible,
+.settings-nav__subbutton.is-active {
+  border-left-color: var(--accent);
+  color: var(--accent);
+  outline: none;
+}
+
+/* Toneless until a probe answers: it holds the lane and paints nothing, so
+   learning a product's state does not shunt every label sideways. */
+.settings-nav__subdot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.settings-nav__subdot--ok {
+  background: var(--status-ok);
+}
+.settings-nav__subdot--off {
+  background: color-mix(in srgb, var(--text-primary) 16%, transparent);
+}
+/* `--warn` and `--bad` are deliberately not folded into `--off`: "you switched
+   this off" and "this is broken" are exactly the two conditions these rows
+   exist to tell apart. Every dot is `aria-hidden`, so the row carries a word
+   too — colour is the redundant channel here, never the only one. */
+.settings-nav__subdot--warn {
+  background: var(--status-warning);
+}
+.settings-nav__subdot--bad {
+  background: var(--status-error);
+}
+
+.settings-nav__sublabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-nav__subchip {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 1px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 /* Right pane */

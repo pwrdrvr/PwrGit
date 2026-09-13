@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useId,
   useLayoutEffect,
   useMemo,
@@ -22,6 +23,9 @@ import {
  * - pane head: eyebrow + title + helper paragraph, plus Collapse/Expand all
  * - section cards: a disclosure header — eyebrow + title + optional status chip
  * - field rows: label column on the left, control + help on the right
+ * - nav reveal: `focusSection` scrolls one card to the top of the pane, unfolds
+ *   it if it was folded, and focuses its header — this is what the Settings
+ *   nav's children (Forges → GitHub, GitLab) route through
  *
  * **Every pane must render its sections inside a `SettingsSectionStack`.** The
  * gap and the max-width live on that element, so a pane that returns a bare
@@ -47,6 +51,19 @@ type SectionRegistration = {
   /** The header element, so roving focus and Collapse all can reach it. */
   element: HTMLElement;
   id: string;
+};
+
+/**
+ * One "take me to this card" request from the Settings nav.
+ *
+ * An object and not the bare slug, because the stack compares requests by
+ * identity: a second click on the same nav child has to scroll back to a card
+ * the reader has since scrolled away from, and two equal strings cannot say
+ * "asked again". Whoever owns the route mints a fresh one per click.
+ */
+export type SettingsFocusRequest = {
+  /** The `SettingsSection` `sectionId` to reveal. */
+  sectionId: string;
 };
 
 type SettingsPaneContextValue = {
@@ -127,6 +144,12 @@ export function SettingsSectionStack(props: {
   paneId: string;
   /** Extra class for a pane that needs its own column rule (see `--agents`). */
   className?: string;
+  /**
+   * A card the nav has asked to reveal. Scrolls it into view, unfolds it if it
+   * was collapsed, and puts focus on its header so the keyboard lands where the
+   * eye does.
+   */
+  focusSection?: SettingsFocusRequest;
   children: ReactNode;
 }) {
   const [sections, setSections] = useState<SectionRegistration[]>([]);
@@ -218,6 +241,50 @@ export function SettingsSectionStack(props: {
   const allExpanded =
     sections.length > 0 &&
     sections.every((section) => collapsed[section.id] !== true);
+
+  /**
+   * The request already acted on.
+   *
+   * Sections re-register whenever one is added, removed, or re-keyed — a probe
+   * landing is enough — so without this the effect would re-run and yank the
+   * pane back to the nav's card while the reader was somewhere else entirely.
+   * Cleared when the nav drops the request (the reader clicked the parent row),
+   * so returning to the same child scrolls again rather than sitting inert.
+   */
+  const honored = useRef<SettingsFocusRequest | undefined>(undefined);
+  useEffect(() => {
+    const request = props.focusSection;
+    if (request === undefined) {
+      honored.current = undefined;
+      return;
+    }
+    if (honored.current === request || sections.length === 0) return;
+    // Built with the same function the section registers under, hash suffix and
+    // all, so the nav's slug and the card's id cannot drift into a lookup that
+    // silently finds nothing.
+    const id = `${props.paneId}-${slugForSectionId(request.sectionId)}`;
+    const target = sections.find((section) => section.id === id);
+    // Nothing by that name — yet. Leaving `honored` alone is what lets this run
+    // again on the render that registers it, which is what a pane whose cards
+    // arrive with their data needs.
+    if (target === undefined) return;
+    honored.current = request;
+    // Through `update`, never `setCollapsed`: the module map is what a later
+    // visit to this pane re-seeds from, so an unfold written straight to state
+    // would be forgotten the next time the reader came back.
+    update((current) =>
+      current[id] === true ? { ...current, [id]: false } : current
+    );
+    // Guarded as `FileInsightsPane` guards it: jsdom elements carry no
+    // scrollIntoView.
+    if (typeof target.element.scrollIntoView === "function") {
+      target.element.scrollIntoView({ block: "start", behavior: "smooth" });
+    }
+    // `preventScroll`, because the line above already chose where to land.
+    // Without it focus() scrolls a second time to `block: "nearest"`, which
+    // undoes the "card at the top of the pane" the nav just promised.
+    target.element.focus({ preventScroll: true });
+  }, [props.focusSection, props.paneId, sections, update]);
 
   const value = useMemo<SettingsPaneContextValue>(
     () => ({
