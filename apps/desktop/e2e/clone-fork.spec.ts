@@ -378,3 +378,38 @@ test("forge authentication and provider failures remain retryable", async () => 
   await expectIndexedAndSelected(window, name);
   expect(existsSync(join(sandbox.reposDir, name, ".git"))).toBe(true);
 });
+
+test("SSH host verification offers a safe command and an explicit CLI retry", async () => {
+  sandbox = createGitSandbox();
+  const name = "ssh-trust-retry";
+  const { fixture, source } = githubCloneFixture(sandbox, name);
+  handle = await launchApp({ forgeFixturePath: fixture.path });
+  const { window } = handle;
+  await addRoot(window, handle, sandbox);
+  // Git runs this local failure stub instead of SSH: no real host is contacted.
+  await handle.app.evaluate(() => {
+    process.env.GIT_SSH_COMMAND = 'echo "Host key verification failed." >&2; exit 1 #';
+    process.env.GIT_SSH_VARIANT = "ssh";
+  });
+  await window.locator(".clone-repo").click();
+  const dialog = window.getByRole("dialog", { name: "Clone a repository" });
+  await chooseCloneSource(dialog, source);
+  await chooseDestination(dialog, sandbox.reposDir, "clone");
+  await dialog.locator(".clone-dialog__submit").click();
+  const recovery = dialog.locator(".clone-submit-error");
+  await expect(recovery).toContainText("SSH could not verify the server’s identity");
+  await expect(recovery.locator("code")).toHaveText("ssh -T -o StrictHostKeyChecking=ask -- 'git@github.com'");
+  await expect(recovery.getByRole("button", { name: "Copy command" })).toBeVisible();
+  await expect(recovery).toContainText("Compare the fingerprint");
+  await recovery.getByRole("button", { name: "Use GitHub CLI" }).click();
+  await expect(dialog.locator(".clone-protocol.is-active")).toContainText("GitHub CLI");
+  await expect(recovery).toBeHidden();
+  await expect(dialog).toBeVisible();
+  await handle.app.evaluate(() => {
+    delete process.env.GIT_SSH_COMMAND;
+    delete process.env.GIT_SSH_VARIANT;
+  });
+  await dialog.locator(".clone-dialog__submit").click();
+  await expect(dialog).toBeHidden();
+  await expectIndexedAndSelected(window, name);
+});

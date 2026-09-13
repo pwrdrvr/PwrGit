@@ -12,6 +12,7 @@ import {
   type Repo
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { copyText } from "../../lib/copyText";
 import { joinDisplayPath } from "../../lib/platform";
 import {
   cloneDestinationLabel,
@@ -23,6 +24,7 @@ import {
   localRepositoryPath,
   moveCloneSelection,
   rankCloneRepositories,
+  sshHostVerificationCommand,
   unverifiedCloneRepository
 } from "./clone-dialog";
 import type { ExactRepository } from "./clone-dialog";
@@ -141,6 +143,8 @@ export function CloneRepoDialog({
   const [canceling, setCanceling] = useState(false);
   const [cloneProgress, setCloneProgress] = useState<CloneProgress | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [hostVerificationCommand, setHostVerificationCommand] = useState<string | null>(null);
+  const [commandCopied, setCommandCopied] = useState(false);
   const activeCloneIdRef = useRef<string | null>(null);
   const sourceInputRef = useRef<HTMLInputElement>(null);
   const destinationInputRef = useRef<HTMLInputElement>(null);
@@ -441,6 +445,10 @@ export function CloneRepoDialog({
     else {
       setCloneProgress(null);
       setSubmitError(result.error.message);
+      setCommandCopied(false);
+      setHostVerificationCommand(protocol === "ssh"
+        ? sshHostVerificationCommand(result.error.message, selectedRepository.sshUrl)
+        : null);
     }
   };
 
@@ -818,7 +826,26 @@ export function CloneRepoDialog({
           </section>
 
           {submitError !== null && (
-            <div className="clone-submit-error">{submitError}</div>
+            <div className="clone-submit-error" role="alert">
+              {hostVerificationCommand === null ? submitError : (
+                <>
+                  <strong>SSH could not verify the server’s identity.</strong>
+                  <p>Run this in a terminal. Compare the fingerprint with one published by the host or supplied by its administrator before accepting it, then retry the clone. If the key has changed, verify why before replacing a saved key.</p>
+                  <code>{hostVerificationCommand}</code>{" "}
+                  <button type="button" className="settings-button" onClick={() => {
+                    void copyText(hostVerificationCommand).then(() => setCommandCopied(true)).catch(() => setCommandCopied(false));
+                  }}>{commandCopied ? "Copied" : "Copy command"}</button>
+                  {!cliDisabled && (
+                    <p><button type="button" className="settings-button" onClick={() => {
+                      setProtocol("cli");
+                      setSubmitError(null);
+                    }}>Use {cliProtocolLabel(activeHost).label}</button>{" "}
+                    Selects the CLI option; click Clone repository to retry. CLI login is separate from SSH trust, and some CLIs may still use SSH.</p>
+                  )}
+                  <details><summary>Git error</summary>{submitError}</details>
+                </>
+              )}
+            </div>
           )}
         </div>
 

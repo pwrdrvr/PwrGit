@@ -31,6 +31,31 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** A terminal handshake for the exact SSH endpoint, with no trust bypass. */
+export function sshHostVerificationCommand(error: string, remote: string): string | null {
+  if (!/host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED/i.test(error)) return null;
+  let target: string;
+  let port = "";
+  if (remote.startsWith("ssh://")) {
+    try {
+      const url = new URL(remote);
+      if (url.password !== "") return null;
+      target = `${url.username === "" ? "" : `${url.username}@`}${url.hostname}`;
+      port = url.port;
+    } catch {
+      return null;
+    }
+  } else {
+    if (remote.includes("://")) return null;
+    const match = /^(?:([\w.-]+)@)?(\[[\da-fA-F:]+\]|[\w.-]+):.+$/.exec(remote);
+    if (match === null) return null;
+    target = `${match[1] === undefined ? "" : `${match[1]}@`}${match[2]}`;
+  }
+  // Keep the copied command safe in both POSIX shells and PowerShell.
+  if (!/^[\w.\-@:[\]]+$/.test(target)) return null;
+  return `ssh -T -o StrictHostKeyChecking=ask${port === "" ? "" : ` -p ${port}`} -- '${target}'`;
+}
+
 /** Path forms whose meaning does not depend on the app process's cwd. Actual
  * existence and Git validity are checked in main, where filesystem access
  * belongs. */

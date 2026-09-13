@@ -9,6 +9,7 @@ import {
   localRepositoryPath,
   moveCloneSelection,
   rankCloneRepositories,
+  sshHostVerificationCommand,
   unverifiedCloneRepository
 } from "./clone-dialog";
 
@@ -274,5 +275,21 @@ describe("unverifiedCloneRepository", () => {
     // for a local path or junk — the placeholder must not invent a slug.
     expect(unverifiedCloneRepository(null)).toBeNull();
     expect(unverifiedCloneRepository(exactRepository("not a repo"))).toBeNull();
+  });
+});
+
+
+describe("SSH host verification recovery", () => {
+  it("offers an interactive handshake for the selected SSH host", () => {
+    expect(sshHostVerificationCommand("Host key verification failed.", "git@git.cafe:sample/demo.git"))
+      .toBe("ssh -T -o StrictHostKeyChecking=ask -- 'git@git.cafe'");
+    expect(sshHostVerificationCommand("REMOTE HOST IDENTIFICATION HAS CHANGED", "ssh://deploy@cafe.example:2222/sample/demo.git"))
+      .toBe("ssh -T -o StrictHostKeyChecking=ask -p 2222 -- 'deploy@cafe.example'");
+  });
+  it("does not confuse account-key failures with host trust", () => {
+    expect(sshHostVerificationCommand("Permission denied (publickey).", "git@git.cafe:sample/demo.git")).toBeNull();
+  });
+  it.each(["ssh://git%27%3Becho@cafe.example/repo", "git@bad;echo:repo", "https://git.cafe/repo", "ssh://git:secret@git.cafe/repo"])("refuses unsafe or non-SSH targets: %s", (remote) => {
+    expect(sshHostVerificationCommand("Host key verification failed.", remote)).toBeNull();
   });
 });
