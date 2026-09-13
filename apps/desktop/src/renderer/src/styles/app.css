@@ -1040,7 +1040,7 @@ textarea,
    forge host is switched on — with one, every chip in the sidebar would read
    the same word.
 
-   Fixed 9px like the counts and the focus reason beside it, deliberately off
+   Fixed size like the counts and the focus reason beside it, deliberately off
    the `--sidebar-title-size` ladder: these are qualifiers, and a bigger name
    should read as a bigger name rather than as page zoom. */
 .forge-chip {
@@ -1048,19 +1048,33 @@ textarea,
   min-width: 0;
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 0 5px;
-  min-height: 15px;
+  gap: 4px;
+  padding: 0 6px;
+  /* 16px is the ceiling for a chip on a repo row, not a taste: the row is
+     content-sized over a 26.25px floor with 4px of padding and a 1px border,
+     leaving 16.25px, so anything taller stops fitting and starts DRIVING the
+     row height. It is the same arithmetic that trims `.repo-row .badge` from
+     18px. */
+  min-height: 16px;
   border-radius: 4px;
   border: 1px solid var(--border-subtle);
   color: var(--text-muted);
-  font: 600 9px/1 var(--font-mono);
+  /* The house tier for sidebar chrome: `.badge`, `.badge-text`, `.wt-tag` and
+     `.wt-age` all read 10px mono. This chip shipped at 9px — the one thing in
+     the sidebar under that tier — and the `+n` was what paid for it. */
+  font: 600 10px/1 var(--font-mono);
 }
-/* A chip that is only a mark is square, not a pill with a glyph rattling
-   around in it — the horizontal padding exists to set words off from the
-   border, and there are none. */
+/* A chip that is only a mark keeps no pill at all.
+   The border and the fill exist to bind a mark to the word beside it. With no
+   word they are a box drawn around a logo, and inside the 16px ceiling above
+   there is exactly 1px between the two — which does not read as a gap, it
+   reads as touching, because at that size it is. A bare mark sits among the
+   identity glyphs as the peer it is, and spends the room it gives back on
+   being larger (see `ForgeChip.tsx`). */
 .forge-chip--mark {
-  padding: 0 2px;
+  padding: 0;
+  gap: 3px;
+  border-color: transparent;
 }
 /* The name is the half that gives way. A derived name that collided with
    another host's is abandoned for the full hostname, which is long enough to
@@ -1073,10 +1087,13 @@ textarea,
   white-space: nowrap;
 }
 /* The count never gives way: it is what says the name is not the whole
-   answer, and it sits at the end, where an ellipsis would eat it first. */
+   answer, and it sits at the end, where an ellipsis would eat it first. Which
+   is also why it is not quieted any further than the chip already is — at the
+   old 9px in --text-subtle it was the smallest, faintest thing in the sidebar,
+   and it is the half that cannot be recovered from the rest of the row. */
 .forge-chip__more {
   flex: 0 0 auto;
-  color: var(--text-subtle);
+  color: var(--text-muted);
 }
 
 /* The sidebar's ONE disclosure glyph — a filled caret, matching PwrAgnt's

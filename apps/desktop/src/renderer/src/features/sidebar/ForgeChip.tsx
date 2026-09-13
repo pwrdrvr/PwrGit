@@ -22,6 +22,21 @@ import { ForgeMark } from "./ForgeMark";
  * and the `+n` beside it must survive that — it is the part saying the chip is
  * not the whole answer.
  */
+
+/**
+ * How big the mark is drawn, in each of the chip's two shapes.
+ *
+ * A bare mark has no pill around it, so its size is set by the company it
+ * keeps: `RepoIdentityMarks` draws the lock, globe and fork at 12px right
+ * beside it, and matching them is what makes the group read as one row of
+ * glyphs rather than as a logo dropped among icons.
+ *
+ * Inside a pill it is bounded by the pill instead. 16px is as tall as a chip
+ * on a repo row can be (`app.css`, `.forge-chip`), which leaves 14px between
+ * the borders — so 11px is what keeps visible air on both sides, and it sets
+ * the mark against the 10px word beside it rather than towering over it.
+ */
+const MARK_SIZE = { bare: 12, inPill: 11 } as const;
 export function ForgeChip({ chip }: { chip: ForgeChipView }) {
   return (
     <span
@@ -29,7 +44,12 @@ export function ForgeChip({ chip }: { chip: ForgeChipView }) {
       className={`forge-chip${chip.name === null ? " forge-chip--mark" : ""}`}
       title={chip.title}
     >
-      {chip.kind !== null && <ForgeMark kind={chip.kind} />}
+      {chip.kind !== null && (
+        <ForgeMark
+          kind={chip.kind}
+          size={chip.name === null ? MARK_SIZE.bare : MARK_SIZE.inPill}
+        />
+      )}
       {chip.name !== null && (
         <span className="forge-chip__name">{chip.name}</span>
       )}
