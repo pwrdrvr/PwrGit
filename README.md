@@ -97,6 +97,20 @@ pnpm install
 pnpm dev
 ```
 
+On Linux, install and launch warn if Electron's setuid sandbox helper lacks
+root ownership and mode `4755`. If launch reports the SUID sandbox error, run:
+
+```bash
+pnpm fix:linux-sandbox
+pnpm dev
+```
+
+The fixer uses `sudo` only for the helper's ownership and permissions; run
+PwrGit as your normal user. It resolves the installed Electron version, so
+there is no version-specific path to maintain. Repeat after Electron is
+replaced if needed. `pnpm check:linux-sandbox` repeats the advisory check;
+user namespaces and mount policy can also affect sandbox availability.
+
 One install prepares `better-sqlite3` for both Node-based tests and Electron.
 The full development workflow, repository boundaries, checks, and pull-request
 expectations live in **[CONTRIBUTING.md](CONTRIBUTING.md)** and
