@@ -95,9 +95,12 @@ export function spareArgs(spares: readonly string[]): string[] {
  */
 export function parseCleanDryRun(stdout: string): {
   paths: string[];
+  /** Paths git reported, which may exceed `paths.length` past the cap. */
+  reported: number;
   truncated: boolean;
 } {
   const paths: string[] = [];
+  let reported = 0;
   let truncated = false;
   for (const raw of stdout.split("\n")) {
     const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
@@ -106,13 +109,17 @@ export function parseCleanDryRun(stdout: string): {
     if (path === "") continue;
     if (path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path)) continue;
     if (path.split("/").includes("..")) continue;
+    // Keep counting past the cap. `pathCount` is what the confirm says the
+    // command will delete, so stopping the tally at 5,000 would promise to
+    // remove 5,000 of 12,000 paths.
+    reported += 1;
     if (paths.length >= RECLAIM_PARSE_CAP) {
       truncated = true;
-      break;
+      continue;
     }
     paths.push(path);
   }
-  return { paths, truncated };
+  return { paths, reported, truncated };
 }
 
 export type ReclaimPreviewInput = {
@@ -177,12 +184,18 @@ export async function previewReclaim(
 
   const entries: ReclaimEntry[] = [];
   let totalBytes = 0;
+  // Set when the signal cut sizing short. Every unsized path still gets a row
+  // — dropping them would misrepresent what the command deletes — but at zero
+  // bytes, so the total becomes a floor and has to say so: a confirm reading
+  // "free 8 KB" for a multi-gigabyte delete is the worst outcome here.
+  let sizesPartial = false;
   for (const path of parsed.paths) {
     const isDirectory = path.endsWith("/");
     // Git paths are always forward-slash, on every platform. Joining with
     // node:path would produce separators git never emitted.
     const absolute = `${input.path.replace(/[/\\]+$/, "")}/${path}`;
-    const measured = options.signal?.aborted === true
+    if (options.signal?.aborted === true) sizesPartial = true;
+    const measured = sizesPartial
       ? { bytes: 0, partial: true }
       : await sizeOf(absolute, options.signal);
     const entry: ReclaimEntry = {
@@ -196,7 +209,7 @@ export async function previewReclaim(
   }
   entries.sort((a, b) => b.sizeBytes - a.sizeBytes || a.path.localeCompare(b.path));
 
-  return ok({
+  const plan: ReclaimPlan = {
     worktreeId: input.worktreeId,
     repoName: input.repoName,
     branch: input.branch,
@@ -204,9 +217,11 @@ export async function previewReclaim(
     excludes,
     entries: entries.slice(0, RECLAIM_PLAN_ROW_CAP),
     totalBytes,
-    pathCount: entries.length,
+    pathCount: parsed.reported,
     truncated: parsed.truncated || entries.length > RECLAIM_PLAN_ROW_CAP
-  });
+  };
+  if (sizesPartial) plan.sizesPartial = true;
+  return ok(plan);
 }
 
 /**

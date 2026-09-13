@@ -311,6 +311,36 @@ the user can narrow it; `discardAllChanges`' own `clean -fd` must keep
 excluding ignored paths — two commands, two blast radii, and neither may
 quietly acquire the other's flags.
 
+**A lock is a refusal, and the predicate honours it.** `prunableReason` returns
+null for `locked === true`, alongside dirty and missing. Two reasons, and the
+second is the one that bites: `git worktree lock` is the only explicit "do not
+touch this" in git's worktree model — repo-indexer.ts already reasons from it
+("Git never reports a LOCKED worktree prunable ... that is what locking is
+for") — and removing one needs `--force`, which `removeWorktrees` only offers
+for the *dirty* set behind its own prompt. So a locked row in the list would be
+a confirm promising "Remove 3 worktrees" followed by a failure notice for one of
+them. `PruneCandidate` therefore carries no `locked` field: nothing that reaches
+the dialog can be locked.
+
+**Sizes de-duplicate hard links, and are still a floor.** pnpm fills
+`node_modules` by hard-linking one store blob into every package that needs it,
+so summing `stat.size` per directory entry counts the same blocks repeatedly —
+a 400 MB checkout measures as several GB, and that number becomes "freeing
+4.2 GB" on a confirm. `directorySize` keys multiply-linked files by `dev:ino`
+and counts each once (`hardLinks` reports how many repeats it skipped). Links
+from *another* worktree into the same blob are still counted, because from this
+root's view they are its bytes; what a delete returns to the filesystem is at
+most this, never more.
+
+**The reclaim panel will not delete with unapplied edits.** `reclaim()` sends
+`appliedExcludes` — the patterns the visible preview was taken with — so a
+pattern typed but not applied via "Update preview" would be silently dropped
+and the file it was meant to protect deleted. The Delete button is disabled
+while the field differs from the applied list, and the footer says both things:
+what is currently spared, *and* that it is not applied yet. Do not collapse
+those two messages into one; the dangerous fact must not be displaced by the
+procedural one.
+
 ## Partial staging works through Git, never through renderer patch text
 
 `partial-staging.ts` stages and unstages hunks and lines. Four invariants hold

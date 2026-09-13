@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { PruneCandidate, ReclaimPlan } from "@pwrgit/shared";
 import {
   describeBytes,
+  describeReclaimBytes,
   formatExcludeLines,
   parseExcludeLines,
   reasonDetail,
@@ -209,8 +210,31 @@ describe("reclaim totals and confirm", () => {
       worktrees: 2,
       bytes: 3072,
       paths: 7,
-      truncated: true
+      truncated: true,
+      partial: false
     });
+  });
+
+  it("carries an incomplete sizing upward, so the total reads as a floor", () => {
+    // A cancelled sizing pass leaves rows at zero bytes. Presenting that sum
+    // as exact would put "free 1 KB" on a button that deletes gigabytes.
+    const cut: ReclaimPlan = { ...plan("a", 1024, 30), sizesPartial: true };
+    const totals = reclaimTotals([cut]);
+    expect(totals.partial).toBe(true);
+    expect(describeReclaimBytes(totals)).toBe("at least 1 KB");
+    expect(reclaimConfirmMessage(totals, [".env*"])).toContain(
+      "freeing at least 1 KB"
+    );
+  });
+
+  it("treats a single floored entry as flooring the whole total", () => {
+    const capped: ReclaimPlan = {
+      ...plan("a", 4096, 1),
+      entries: [
+        { path: "node_modules/", isDirectory: true, sizeBytes: 4096, sizePartial: true }
+      ]
+    };
+    expect(reclaimTotals([capped]).partial).toBe(true);
   });
 
   it("says what survives as plainly as what does not", () => {

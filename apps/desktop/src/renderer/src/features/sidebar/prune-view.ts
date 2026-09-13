@@ -151,18 +151,30 @@ export type ReclaimTotals = {
   bytes: number;
   paths: number;
   truncated: boolean;
+  /** Some plan's sizing was cut short, so `bytes` is a floor. */
+  partial: boolean;
 };
 
 export function reclaimTotals(plans: ReclaimPlan[]): ReclaimTotals {
   let bytes = 0;
   let paths = 0;
   let truncated = false;
+  let partial = false;
   for (const plan of plans) {
     bytes += plan.totalBytes;
     paths += plan.pathCount;
     if (plan.truncated) truncated = true;
+    if (plan.sizesPartial === true) partial = true;
+    if (plan.entries.some((entry) => entry.sizePartial === true)) partial = true;
   }
-  return { worktrees: plans.length, bytes, paths, truncated };
+  return { worktrees: plans.length, bytes, paths, truncated, partial };
+}
+
+/** "3.4 GB", or "at least 3.4 GB" when any size is a floor. */
+export function describeReclaimBytes(totals: ReclaimTotals): string {
+  return totals.partial
+    ? `at least ${formatBytes(totals.bytes)}`
+    : formatBytes(totals.bytes);
 }
 
 /**
@@ -181,7 +193,7 @@ export function reclaimConfirmMessage(
   return [
     `${totals.paths} ignored path${totals.paths === 1 ? "" : "s"} across ${totals.worktrees} worktree${
       totals.worktrees === 1 ? "" : "s"
-    }, freeing ${formatBytes(totals.bytes)}.`,
+    }, freeing ${describeReclaimBytes(totals)}.`,
     "",
     "Tracked files, branches and commits are untouched, and the worktrees stay usable — they will need a reinstall or rebuild.",
     "",

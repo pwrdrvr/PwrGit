@@ -1,4 +1,5 @@
 import {
+  linkSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -34,6 +35,32 @@ describe("directorySize", () => {
     expect(result.entries).toBe(5);
     expect(result.partial).toBe(false);
     expect(result.inaccessible).toBe(0);
+  });
+
+  it("counts a hard-linked file once, however many links point at it", async () => {
+    // This is how pnpm fills node_modules: one store blob, hard-linked into
+    // every package that depends on it. Counting per link turns a few hundred
+    // MB into several GB, and that number is what the confirm promises to free.
+    file("store/blob.js", 1000);
+    mkdirSync(join(root, "pkg-a"), { recursive: true });
+    mkdirSync(join(root, "pkg-b"), { recursive: true });
+    linkSync(join(root, "store/blob.js"), join(root, "pkg-a/blob.js"));
+    linkSync(join(root, "store/blob.js"), join(root, "pkg-b/blob.js"));
+    file("own.txt", 7);
+
+    const result = await directorySize(root);
+    expect(result.bytes).toBe(1007);
+    expect(result.hardLinks).toBe(2);
+    // Every link is still an entry it had to visit.
+    expect(result.entries).toBe(7);
+  });
+
+  it("counts a single-link file normally, with no dedupe bookkeeping", async () => {
+    file("a.txt", 10);
+    file("b.txt", 10);
+    const result = await directorySize(root);
+    expect(result.bytes).toBe(20);
+    expect(result.hardLinks).toBe(0);
   });
 
   it("does not follow a symlink out of the tree", async () => {

@@ -109,6 +109,20 @@ describe("prunableReason", () => {
     ).toBeNull();
   });
 
+  it("refuses a locked worktree, however finished it looks", () => {
+    // `git worktree lock` is the one explicit "do not touch this" in git's
+    // worktree model, and removal needs --force — which the bulk remove only
+    // offers for the dirty set, behind its own prompt.
+    const old = { lastActivityAt: ago(90), mergedIntoDefault: true };
+    expect(
+      prunableReason(wt({ branch: "l", ...old, locked: true }), NOW)
+    ).toBeNull();
+    // A merged PR outranks age, but not a lock.
+    expect(
+      prunableReason(wt({ branch: "lp", pr: mergedPr, locked: true }), NOW)
+    ).toBeNull();
+  });
+
   it("refuses a merged branch with no activity date, or an unparseable one", () => {
     expect(prunableReason(wt({ branch: "a", mergedIntoDefault: true }), NOW)).toBeNull();
     expect(

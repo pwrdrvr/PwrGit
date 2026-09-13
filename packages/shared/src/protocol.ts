@@ -1310,6 +1310,13 @@ export interface Commands {
       worktreeId: string;
       /** `-e` patterns; omitted means RECLAIM_DEFAULT_EXCLUDES. */
       excludes?: string[];
+      /**
+       * Pass one to make this preview cancellable via `prune:cancelReclaim`.
+       * A preview walks every ignored directory it finds, so previewing a
+       * selection of worktrees is minutes of filesystem work holding one
+       * worktree lock at a time — the user has to be able to stop it.
+       */
+      operationId?: string;
     };
     res: ReclaimPlan;
   };

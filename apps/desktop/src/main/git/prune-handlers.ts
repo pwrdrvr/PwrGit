@@ -274,7 +274,7 @@ export function registerPruneHandlers(
     }
   });
 
-  bus.register("prune:reclaimPreview", async (req) => {
+  bus.register("prune:reclaimPreview", async (req, ctx) => {
     const row = reclaimRow(db, req.worktreeId);
     if (row === undefined) {
       return err({
@@ -285,17 +285,36 @@ export function registerPruneHandlers(
     }
     const gone = missingWorktreeError(db, req.worktreeId);
     if (gone !== null) return err(gone);
+    const input = {
+      worktreeId: row.id,
+      repoName: row.repoName,
+      branch: row.branch,
+      path: row.path,
+      ...(req.excludes === undefined ? {} : { excludes: req.excludes })
+    };
     // A dry run reads the worktree; the lock keeps it from interleaving with a
     // checkout mutation that would change the answer while it is being read.
-    return operations.run(req.worktreeId, () =>
-      previewReclaim(git, {
-        worktreeId: row.id,
-        repoName: row.repoName,
-        branch: row.branch,
-        path: row.path,
-        ...(req.excludes === undefined ? {} : { excludes: req.excludes })
-      })
-    );
+    //
+    // With an operationId the walk joins the same registry the reclaim uses,
+    // so `prune:cancelReclaim` stops it. Previews of a whole selection are
+    // issued one after another under one id: cancelling reaches the one that
+    // is running, and the caller stops asking for the rest.
+    const operationId = req.operationId?.trim() ?? "";
+    if (operationId === "") {
+      return operations.run(req.worktreeId, () => previewReclaim(git, input));
+    }
+    const existing = active.get(operationId);
+    const { controller, release } =
+      existing === undefined
+        ? begin(operationId, ctx)
+        : { controller: existing.controller, release: () => {} };
+    try {
+      return await operations.run(req.worktreeId, () =>
+        previewReclaim(git, input, { signal: controller.signal })
+      );
+    } finally {
+      release();
+    }
   });
 
   bus.register("prune:reclaim", async (req, ctx) => {
@@ -329,10 +348,14 @@ export function registerPruneHandlers(
         ...payload
       });
 
+    // The patterns, not just the count. This is the only unrecoverable action
+    // in the pruner, and "sparing 9 patterns" cannot answer the one question
+    // asked afterwards — whether `.env*` was still on the list.
     logMain(
       "info",
       "prune",
-      `reclaim started for ${total} worktrees, sparing ${excludes.length} patterns`
+      `reclaim started for ${total} worktrees, sparing ${excludes.length} patterns: ` +
+        (excludes.length === 0 ? "(none)" : excludes.join(" "))
     );
     try {
       progress({ phase: "starting", completedWorktrees: 0 });
@@ -501,6 +524,26 @@ export function registerPruneHandlers(
           signal
         });
         if (!cleaned.ok) {
+          // `git clean` is not atomic, so a cancel that kills it mid-run has
+          // already deleted an unknown part of the set. Reporting that as a
+          // plain failure would tell the user nothing happened, which is the
+          // one thing it must not say about an unrecoverable deletion.
+          if (signal.aborted) {
+            logMain(
+              "warn",
+              "prune",
+              `reclaim cancelled mid-clean in ${base.path}: some of the ${plannedPaths} planned paths may already be deleted`
+            );
+            return {
+              ...base,
+              outcome: "cancelled" as const,
+              reason: "cancelled" as const,
+              plannedBytes: 0,
+              plannedPaths,
+              message:
+                "Cancelled while deleting — some ignored files in this worktree may already be gone."
+            };
+          }
           return {
             ...base,
             outcome: "failed" as const,

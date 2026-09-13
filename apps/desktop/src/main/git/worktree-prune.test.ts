@@ -81,7 +81,7 @@ describe("needsStateCompute", () => {
 });
 
 describe("candidatesForRepo", () => {
-  it("carries the reason, age, lock flag and repo identity onto each row", () => {
+  it("carries the reason, age and repo identity onto each row", () => {
     const candidates = candidatesForRepo(
       repo("svc", [
         wt({ id: "primary", branch: "main", isPrimary: true, isDefaultBranch: true }),
@@ -89,8 +89,7 @@ describe("candidatesForRepo", () => {
           id: "done",
           branch: "feat/done",
           mergedIntoDefault: true,
-          lastActivityAt: ago(40),
-          locked: true
+          lastActivityAt: ago(40)
         }),
         wt({ id: "busy", branch: "feat/busy", dirty: 2 })
       ]),
@@ -105,10 +104,24 @@ describe("candidatesForRepo", () => {
         path: "/w/done",
         reason: { kind: "merged_into_default", defaultBranch: "main" },
         lastActivityAt: ago(40),
-        locked: true,
         sizeBytes: null
       }
     ]);
+  });
+
+  it("never offers a locked checkout, however finished it looks", () => {
+    // A lock is git's explicit "do not touch this", and removal would need
+    // --force, which the bulk remove only offers for the dirty set.
+    const locked = repo("svc", [
+      wt({
+        id: "held",
+        branch: "feat/held",
+        mergedIntoDefault: true,
+        lastActivityAt: ago(400),
+        locked: true
+      })
+    ]);
+    expect(candidatesForRepo(locked, NOW)).toEqual([]);
   });
 
   it("returns nothing for a repo with only its primary checkout", () => {
@@ -303,6 +316,34 @@ describe("sweepPrunableWorktrees", () => {
     expect(summary.counts.repos.cancelled).toBe(2);
     expect(summary.counts.candidates).toBe(1);
     expect(summary.results.map((result) => result.repoId)).toEqual(["a", "b", "c"]);
+  });
+
+  it("does not announce the repos a cancel never started", async () => {
+    // 150 repos cancelled after 4 would otherwise emit 146 progress events in
+    // one burst, each a renderer re-render, for work that never began.
+    const onProgress = vi.fn();
+    const controller = new AbortController();
+    const repos = Object.fromEntries(
+      Array.from({ length: 6 }, (_, at) => [`r${at}`, repo(`r${at}`, [stale(`w${at}`)])])
+    );
+    const summary = await sweepPrunableWorktrees(
+      Array.from({ length: 6 }, (_, at) => input(`r${at}`, [`w${at}`], null)),
+      options(repos, {
+        concurrency: 1,
+        signal: controller.signal,
+        onProgress,
+        computeRepoState: async (repoId) => {
+          if (repoId === "r0") controller.abort();
+        }
+      })
+    );
+    expect(summary.counts.repos.cancelled).toBe(5);
+    // Every repo is still in the answer — just not in the event stream.
+    expect(summary.results).toHaveLength(6);
+    const completions = onProgress.mock.calls
+      .map((call) => call[0] as PruneScanProgress)
+      .filter((progress) => progress.phase === "repo_completed");
+    expect(completions.map((progress) => progress.repoId)).toEqual(["r0"]);
   });
 
   it("reports every repo exactly once, in input order", async () => {

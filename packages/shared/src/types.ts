@@ -1404,8 +1404,6 @@ export type PruneCandidate = {
   reason: PrunableReason;
   /** ISO-8601 time of the branch's last commit, when git could report one. */
   lastActivityAt?: string;
-  /** `git worktree lock`ed — removal needs `--force`, so the row says so. */
-  locked?: boolean;
   /** Bytes on disk, or null when sizing was cancelled or never ran. */
   sizeBytes: number | null;
   /** The size walk hit its entry ceiling: `sizeBytes` is a lower bound. */
@@ -1507,6 +1505,8 @@ export type ReclaimPlan = {
   pathCount: number;
   /** `entries` is a prefix of `pathCount` — the preview is showing fewer. */
   truncated: boolean;
+  /** Sizing was cut short, so `totalBytes` is a floor and rows may read 0. */
+  sizesPartial?: boolean;
 };
 
 export type ReclaimWorktreeOutcome =

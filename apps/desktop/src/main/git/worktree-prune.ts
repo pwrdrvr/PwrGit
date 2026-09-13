@@ -38,6 +38,11 @@ export const PRUNE_STATE_FRESH_MS = 5 * 60 * 1000;
 /** Candidates measured at once during the sizing phase. */
 const PRUNE_SIZE_CONCURRENCY = 4;
 
+/** Candidates sized between sizing-progress events, at most. */
+const SIZING_PROGRESS_STRIDE = 8;
+/** …and at least this many events over the whole phase, for small sets. */
+const SIZING_PROGRESS_STEPS = 20;
+
 export type PruneScanRepoInput = {
   id: string;
   name: string;
@@ -125,7 +130,6 @@ export function candidatesForRepo(
     if (worktree.lastActivityAt !== undefined) {
       candidate.lastActivityAt = worktree.lastActivityAt;
     }
-    if (worktree.locked === true) candidate.locked = true;
     out.push(candidate);
   }
   return out;
@@ -168,9 +172,14 @@ export async function sweepPrunableWorktrees(
     completedRepos
   });
 
-  const complete = (index: number, result: PruneScanRepoResult): void => {
+  const complete = (
+    index: number,
+    result: PruneScanRepoResult,
+    announce = true
+  ): void => {
     results[index] = result;
     completedRepos += 1;
+    if (!announce) return;
     options.onProgress?.({
       operationId: options.operationId,
       phase: "repo_completed",
@@ -266,9 +275,13 @@ export async function sweepPrunableWorktrees(
     Math.min(options.concurrency ?? PRUNE_SCAN_CONCURRENCY, totalRepos || 1)
   );
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  // Silently, on purpose. Cancelling a 150-repo sweep after 4 would otherwise
+  // emit 146 progress events in one synchronous burst — a renderer state
+  // update each — to report repos that were never started. The summary's
+  // `counts.repos.cancelled` already carries it.
   for (let index = 0; index < repos.length; index += 1) {
     if (results[index] !== undefined) continue;
-    complete(index, cancelledRepo(repos[index]!));
+    complete(index, cancelledRepo(repos[index]!), false);
   }
   const ordered = results as PruneScanRepoResult[];
 
@@ -290,6 +303,17 @@ export async function sweepPrunableWorktrees(
         sizedCandidates: sized,
         totalCandidates: candidates.length
       });
+    // One event per candidate is one renderer re-render per candidate, to move
+    // a counter nobody reads at that resolution. Report at most every
+    // SIZING_PROGRESS_STRIDE, plus the last one so the line always lands on
+    // "n of n".
+    const stride = Math.max(
+      1,
+      Math.min(
+        SIZING_PROGRESS_STRIDE,
+        Math.ceil(candidates.length / SIZING_PROGRESS_STEPS)
+      )
+    );
     emit();
     const sizeWorker = async (): Promise<void> => {
       for (;;) {
@@ -306,7 +330,7 @@ export async function sweepPrunableWorktrees(
           candidate.sizeBytes = null;
         }
         sized += 1;
-        emit();
+        if (sized % stride === 0 || sized === candidates.length) emit();
       }
     };
     await Promise.all(

@@ -84,17 +84,26 @@ export function normalizeExcludes(patterns: readonly string[]): string[] {
   return out;
 }
 
-/** Bytes as a short human string. Shared so the dialog, the confirm, and the
- *  summary all round the same way. */
+/**
+ * Bytes as a short human string. Shared so the dialog, the confirm, and the
+ * summary all round the same way.
+ *
+ * Rounding is applied *before* the unit is settled, because doing it after
+ * prints the rolled-over value in the smaller unit: 1048575 B is 1023.999 KB,
+ * which rounds to 1024 and would read "1024 KB" rather than "1 MB". The
+ * reclaim confirm's own button label is built from this, so the carry matters.
+ */
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
   const units = ["B", "KB", "MB", "GB", "TB"];
   let value = bytes;
   let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
+  const round = (at: number): number =>
+    value >= 100 || at === 0 ? Math.round(value) : Number(value.toFixed(1));
+  while (unit < units.length - 1) {
+    if (value < 1024 && round(unit) < 1024) break;
     value /= 1024;
     unit += 1;
   }
-  const rounded = value >= 100 || unit === 0 ? Math.round(value) : Number(value.toFixed(1));
-  return `${rounded} ${units[unit]}`;
+  return `${round(unit)} ${units[unit]}`;
 }

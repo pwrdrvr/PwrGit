@@ -21,6 +21,12 @@ const STALE_AGE_MS = STALE_AGE_DAYS * 24 * 60 * 60 * 1000;
  * - never a checkout whose directory is gone (the row already says so, and
  *   removal there is its own affordance);
  * - never a dirty worktree;
+ * - never a `git worktree lock`ed checkout. A lock is the one explicit "do not
+ *   touch this" in git's worktree model, and repo-indexer.ts relies on the same
+ *   reading: "Git never reports a LOCKED worktree prunable ... (that is what
+ *   locking is for)". Removing one needs `--force`, which the bulk remove only
+ *   offers for the dirty set behind its own prompt — so offering a locked row
+ *   would promise a removal that then fails;
  * - a **merged PR** is definitive at any age — it catches squash and rebase
  *   merges, whose original commits are not in the default branch and so are
  *   invisible to the git-ancestry check below;
@@ -33,6 +39,7 @@ export function prunableReason(
 ): PrunableReason | null {
   if (w.isDefaultBranch || w.isPrimary) return null;
   if (w.missing === true) return null;
+  if (w.locked === true) return null;
   if (w.dirty > 0) return null;
   if (w.pr?.state === "merged") {
     return { kind: "merged_pr", prNumber: w.pr.number };

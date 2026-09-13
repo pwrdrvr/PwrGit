@@ -69,6 +69,8 @@ export function PruneWorktreesDialog({
   const sweepRunRef = useRef(0);
   /** Set once ignored files have actually been deleted; see `onBack` below. */
   const reclaimedRef = useRef(false);
+  /** The reclaim panel is mid-`git clean`; see `busy` below. */
+  const [reclaiming, setReclaiming] = useState(false);
 
   const runSweep = useCallback(
     (force: boolean): void => {
@@ -207,8 +209,20 @@ export function PruneWorktreesDialog({
     setStage({ kind: "review" });
   };
 
-  const modalRef = useModal<HTMLDivElement>({ onClose });
-  const busy = stage.kind === "sweeping" || stage.kind === "removing";
+  const busy =
+    stage.kind === "sweeping" || stage.kind === "removing" || reclaiming;
+  // useModal: "A dialog mid-flight ... should pass an `onClose` that refuses,
+  // exactly as its backdrop click already does — this hook does not decide
+  // that." Escape during a removal would unmount the dialog while
+  // `worktree:removeMany` keeps deleting working directories, taking the
+  // progress and the `worktree:removed` subscription with it; the sweep has
+  // its own Cancel button, which is the way out that actually stops the work.
+  const modalRef = useModal<HTMLDivElement>({
+    onClose: () => {
+      if (busy) return;
+      onClose();
+    }
+  });
   const selectedCandidates = candidates.filter((candidate) =>
     selected.has(candidate.worktreeId)
   );
@@ -245,6 +259,7 @@ export function PruneWorktreesDialog({
             onFinished={() => {
               reclaimedRef.current = true;
             }}
+            onRunningChange={setReclaiming}
           />
         ) : (
           <>
@@ -450,7 +465,6 @@ function PruneRow({
           {candidate.lastActivityAt === undefined
             ? "no commits"
             : relativeAge(candidate.lastActivityAt)}
-          {candidate.locked === true ? " · locked" : ""}
           {" · "}
           {candidate.sizeBytes === null
             ? "size unknown"

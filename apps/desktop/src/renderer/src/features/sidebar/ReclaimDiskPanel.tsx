@@ -10,6 +10,7 @@ import {
 import { confirmDialog } from "../shell/dialogs";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import {
+  describeReclaimBytes,
   formatExcludeLines,
   parseExcludeLines,
   reclaimConfirmMessage,
@@ -53,13 +54,19 @@ type Stage =
 export function ReclaimDiskPanel({
   candidates,
   onBack,
-  onFinished
+  onFinished,
+  onRunningChange
 }: {
   /** The worktrees the review step selected. */
   candidates: PruneCandidate[];
   onBack: () => void;
   /** Reclaim finished — the caller may want to re-sweep sizes. */
   onFinished: (summary: ReclaimSummary) => void;
+  /**
+   * Files are being deleted right now. The host dialog owns Escape and the
+   * backdrop, and neither may dismiss a `git clean` that is already running.
+   */
+  onRunningChange?: (running: boolean) => void;
 }) {
   const worktrees = useRef(candidates).current;
   const [excludeText, setExcludeText] = useState(() =>
@@ -76,15 +83,30 @@ export function ReclaimDiskPanel({
   >(new Map());
   const operationIdRef = useRef("");
   const previewRunRef = useRef(0);
+  /** The id the in-flight preview run is registered under, so it can be
+   *  cancelled when the run is superseded or the panel goes away. */
+  const previewOperationRef = useRef("");
+
+  /** Stop whatever preview walk main is still doing for a superseded run. */
+  const cancelPreview = useCallback((): void => {
+    const operationId = previewOperationRef.current;
+    if (operationId === "") return;
+    previewOperationRef.current = "";
+    void dispatch("prune:cancelReclaim", { operationId });
+  }, []);
 
   const runPreview = useCallback(
     async (excludes: string[]): Promise<void> => {
+      cancelPreview();
       const run = ++previewRunRef.current;
+      const operationId = crypto.randomUUID();
+      previewOperationRef.current = operationId;
       setAppliedExcludes(excludes);
       setPlans([]);
       setError(null);
       setStage({ kind: "previewing", done: 0 });
       const collected: ReclaimPlan[] = [];
+      const failures: string[] = [];
       // One worktree at a time: each preview is a Git dry run plus a bounded
       // stat walk, and main serializes per worktree anyway. Asking for all of
       // them at once would only queue in the main process while this side
@@ -92,18 +114,32 @@ export function ReclaimDiskPanel({
       for (const candidate of worktrees) {
         const result = await dispatch("prune:reclaimPreview", {
           worktreeId: candidate.worktreeId,
-          excludes
+          excludes,
+          operationId
         });
         if (previewRunRef.current !== run) return;
         if (result.ok) collected.push(result.value);
-        else setError(result.error.message);
+        else {
+          // Every failure, not just the last: five selected worktrees can fail
+          // for five different reasons, and overwriting leaves the successful
+          // plans looking like the whole answer.
+          failures.push(result.error.message);
+          setError(
+            failures.length === 1
+              ? failures[0]!
+              : `${failures.length} worktrees could not be previewed:\n${failures
+                  .map((message) => `• ${message}`)
+                  .join("\n")}`
+          );
+        }
         setPlans([...collected]);
         setStage({ kind: "previewing", done: collected.length });
       }
       if (previewRunRef.current !== run) return;
+      previewOperationRef.current = "";
       setStage({ kind: "review" });
     },
-    [worktrees]
+    [cancelPreview, worktrees]
   );
 
   useEffect(() => {
@@ -121,8 +157,11 @@ export function ReclaimDiskPanel({
     return () => {
       live = false;
       previewRunRef.current += 1;
+      // Leaving the panel must stop the walk, not just stop reading its
+      // answer: the in-flight preview holds a worktree lock until it finishes.
+      cancelPreview();
     };
-  }, [runPreview]);
+  }, [cancelPreview, runPreview]);
 
   const totals = useMemo(() => reclaimTotals(plans), [plans]);
   const pendingExcludes = parseExcludeLines(excludeText);
@@ -135,7 +174,7 @@ export function ReclaimDiskPanel({
         totals.worktrees === 1 ? "" : "s"
       }?`,
       message: reclaimConfirmMessage(totals, appliedExcludes),
-      confirmLabel: `Delete, free ${formatBytes(totals.bytes)}`,
+      confirmLabel: `Delete, free ${describeReclaimBytes(totals)}`,
       danger: true
     });
     if (!go) return;
@@ -143,18 +182,23 @@ export function ReclaimDiskPanel({
     operationIdRef.current = operationId;
     setProgress(new Map());
     setStage({ kind: "running" });
-    const result = await dispatch("prune:reclaim", {
-      operationId,
-      worktreeIds: plans.map((plan) => plan.worktreeId),
-      excludes: appliedExcludes
-    });
-    if (!result.ok) {
-      setError(result.error.message);
-      setStage({ kind: "review" });
-      return;
+    onRunningChange?.(true);
+    try {
+      const result = await dispatch("prune:reclaim", {
+        operationId,
+        worktreeIds: plans.map((plan) => plan.worktreeId),
+        excludes: appliedExcludes
+      });
+      if (!result.ok) {
+        setError(result.error.message);
+        setStage({ kind: "review" });
+        return;
+      }
+      setStage({ kind: "done", summary: result.value });
+      onFinished(result.value);
+    } finally {
+      onRunningChange?.(false);
     }
-    setStage({ kind: "done", summary: result.value });
-    onFinished(result.value);
   };
 
   useEffect(() => {
@@ -194,7 +238,7 @@ export function ReclaimDiskPanel({
         <span className="prune__count" aria-live="polite">
           {stage.kind === "previewing"
             ? `${stage.done} / ${worktrees.length}`
-            : `${formatBytes(totals.bytes)}`}
+            : describeReclaimBytes(totals)}
         </span>
       </div>
 
@@ -241,10 +285,16 @@ export function ReclaimDiskPanel({
             onChange={(event) => setExcludeText(event.target.value)}
           />
           <div className="prune__excludes-foot">
+            {/* Two different facts, and the dangerous one must not be hidden
+                by the procedural one: what the field currently says, then
+                whether git has been asked for it yet. */}
             <span>
               {pendingExcludes.length === 0
                 ? "Nothing spared — local config and databases will be deleted too."
                 : `${pendingExcludes.length} patterns spared.`}
+              {excludesDiffer
+                ? " Not applied yet — update the preview to use them."
+                : ""}
             </span>
             <button
               type="button"
@@ -287,7 +337,9 @@ export function ReclaimDiskPanel({
                   {state === "running"
                     ? "deleting…"
                     : outcome === null
-                      ? `${formatBytes(plan.totalBytes)} · ${plan.pathCount} paths`
+                      ? `${plan.sizesPartial === true ? "≥ " : ""}${formatBytes(
+                          plan.totalBytes
+                        )} · ${plan.pathCount} paths`
                       : OUTCOME_LABEL[outcome]}
                 </span>
               </div>
@@ -334,9 +386,24 @@ export function ReclaimDiskPanel({
             <button className="modal__cancel" onClick={onBack}>
               Back
             </button>
+            {/* Deleting is refused while the spare list has unapplied edits.
+                `reclaim()` sends `appliedExcludes`, so a pattern the user just
+                typed to protect something would be silently dropped and the
+                file it names deleted — the field would promise one thing and
+                git be asked another. "Update preview" is the only way to move
+                the two together. */}
             <button
               className="modal__create modal__create--danger"
-              disabled={stage.kind === "previewing" || totals.paths === 0}
+              disabled={
+                stage.kind === "previewing" ||
+                totals.paths === 0 ||
+                excludesDiffer
+              }
+              title={
+                excludesDiffer
+                  ? "Update the preview first — the spare list has unapplied edits."
+                  : undefined
+              }
               onClick={() => void reclaim()}
             >
               Delete ignored files…

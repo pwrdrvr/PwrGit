@@ -442,6 +442,14 @@ test("the pruner never offers a dirty or unmerged worktree", async () => {
   // Clean and old, but never merged anywhere.
   const open = repo.addWorktree("feat/open");
   box.commitEmptyAt(open, "open work", 1_735_689_600);
+  // Merged, old and clean — but locked, which is git's explicit "do not touch
+  // this". Removing one needs --force, which the bulk remove only offers for
+  // the dirty set behind its own prompt, so offering it would promise a
+  // removal that then fails.
+  const held = repo.addWorktree("feat/held");
+  box.commitEmptyAt(held, "held work", 1_735_689_600);
+  box.git(repo.path, "merge", "--no-ff", "-m", "merge feat/held", "feat/held");
+  box.git(repo.path, "worktree", "lock", held);
 
   handle = await launchApp();
   const { window } = handle;
@@ -456,4 +464,5 @@ test("the pruner never offers a dirty or unmerged worktree", async () => {
   await expect(dialog.locator(".prune__row")).toContainText("feat/finished");
   await expect(dialog.locator(".prune__rows")).not.toContainText("feat/dirty");
   await expect(dialog.locator(".prune__rows")).not.toContainText("feat/open");
+  await expect(dialog.locator(".prune__rows")).not.toContainText("feat/held");
 });

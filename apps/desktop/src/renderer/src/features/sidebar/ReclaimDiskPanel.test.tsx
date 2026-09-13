@@ -100,6 +100,9 @@ beforeEach(() => {
     if (command === "prune:reclaim") {
       return Promise.resolve({ ok: true, value: summary });
     }
+    if (command === "prune:cancelReclaim") {
+      return Promise.resolve({ ok: true, value: { cancelled: true } });
+    }
     return Promise.resolve({ ok: true, value: null });
   });
 });
@@ -128,10 +131,24 @@ async function render(
   });
 }
 
-const previewRequests = (): { worktreeId: string; excludes: string[] }[] =>
+type PreviewRequest = {
+  worktreeId: string;
+  excludes: string[];
+  operationId: string;
+};
+
+const rawPreviewRequests = (): PreviewRequest[] =>
   dispatch.mock.calls
     .filter(([command]) => command === "prune:reclaimPreview")
-    .map(([, request]) => request as { worktreeId: string; excludes: string[] });
+    .map(([, request]) => request as PreviewRequest);
+
+/** Without the cancellation id, which every request carries and no assertion
+ *  about *which patterns git was asked for* should have to spell out. */
+const previewRequests = (): { worktreeId: string; excludes: string[] }[] =>
+  rawPreviewRequests().map(({ worktreeId, excludes }) => ({
+    worktreeId,
+    excludes
+  }));
 
 const field = (): HTMLTextAreaElement => {
   const found = container.querySelector<HTMLTextAreaElement>(
@@ -207,9 +224,70 @@ describe("ReclaimDiskPanel", () => {
       "patterns spared"
     );
     await act(async () => typeInto(field(), ""));
-    expect(container.querySelector(".prune__excludes-foot")?.textContent).toContain(
-      "Nothing spared"
-    );
+    // The dangerous fact stays visible even though the edit is also unapplied:
+    // "not applied yet" must never displace "nothing spared".
+    const foot = container.querySelector(".prune__excludes-foot")?.textContent;
+    expect(foot).toContain("Nothing spared");
+    expect(foot).toContain("Not applied yet");
+  });
+
+  it("refuses to delete while the spare list has unapplied edits", async () => {
+    // `reclaim()` sends the applied list, so deleting here would drop a
+    // pattern the user just typed to protect something.
+    await render();
+    expect(buttonNamed("Delete ignored files").disabled).toBe(false);
+    await act(async () => typeInto(field(), "dist/"));
+    expect(buttonNamed("Delete ignored files").disabled).toBe(true);
+    await act(async () => buttonNamed("Update preview").click());
+    expect(buttonNamed("Delete ignored files").disabled).toBe(false);
+  });
+
+  it("runs every preview in a run under one cancellable id", async () => {
+    // One id per run, not per worktree: a cancel has to reach whichever
+    // worktree the walk is currently inside.
+    await render();
+    const ids = rawPreviewRequests().map((request) => request.operationId);
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).toMatch(/\S/);
+    expect(new Set(ids).size).toBe(1);
+
+    await act(async () => typeInto(field(), "dist/"));
+    await act(async () => buttonNamed("Update preview").click());
+    // A new run gets a new id, so cancelling one never stops the other.
+    expect(rawPreviewRequests().at(-1)?.operationId).not.toBe(ids[0]);
+  });
+
+  it("cancels the walk main is still doing when the panel goes away", async () => {
+    // A preview holds the worktree lock and walks every ignored directory it
+    // finds. Leaving must stop that work, not just stop reading its answer.
+    const held: { release: (() => void) | null } = { release: null };
+    dispatch.mockImplementation((command: string, request: unknown) => {
+      if (command === "prune:reclaimPreview") {
+        const { worktreeId, excludes } = request as {
+          worktreeId: string;
+          excludes: string[];
+        };
+        if (worktreeId === "w2") {
+          return new Promise((resolve) => {
+            held.release = () =>
+              resolve({ ok: true, value: plan(worktreeId, excludes) });
+          });
+        }
+        return Promise.resolve({ ok: true, value: plan(worktreeId, excludes) });
+      }
+      return Promise.resolve({ ok: true, value: null });
+    });
+
+    await render();
+    const inFlight = rawPreviewRequests().at(-1)?.operationId;
+    expect(inFlight).toMatch(/\S/);
+    await act(async () => root.unmount());
+
+    const cancels = dispatch.mock.calls
+      .filter(([command]) => command === "prune:cancelReclaim")
+      .map(([, request]) => (request as { operationId: string }).operationId);
+    expect(cancels).toContain(inFlight);
+    held.release?.();
   });
 
   it("confirms with the byte total before deleting anything", async () => {

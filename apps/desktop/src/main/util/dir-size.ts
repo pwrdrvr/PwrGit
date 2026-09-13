@@ -16,6 +16,16 @@ import { join } from "node:path";
  * Symlinks are never followed: their target may be outside the tree (a pnpm
  * store elsewhere on the disk) and counting it would attribute another
  * checkout's bytes to this one — or loop.
+ *
+ * **Hard links are counted once.** pnpm builds `node_modules` by hard-linking
+ * one store blob into every package directory that needs it, so summing
+ * `stat.size` per directory entry reports the same blocks over and over: a
+ * checkout that really occupies a few hundred MB measures as several GB. Since
+ * the number here becomes "freeing 4.2 GB" in a confirm the user is about to
+ * act on, multiply-linked files are de-duplicated by `dev:ino` within one
+ * walk. Links into the same file from *another* worktree are still counted
+ * here, because from this root's point of view they are its bytes — what a
+ * deletion actually returns to the filesystem is a floor, not this number.
  */
 export const DIR_SIZE_ENTRY_CAP = 250_000;
 
@@ -35,6 +45,8 @@ export type DirSizeResult = {
   partial: boolean;
   /** Entries that could not be read (permissions, or deleted mid-walk). */
   inaccessible: number;
+  /** Multiply-linked files seen more than once, and so counted only once. */
+  hardLinks: number;
 };
 
 export type DirSizeOptions = {
@@ -61,8 +73,12 @@ export async function directorySize(
     bytes: 0,
     entries: 0,
     partial: false,
-    inaccessible: 0
+    inaccessible: 0,
+    hardLinks: 0
   };
+  // Only files with nlink > 1 are recorded, so the ordinary case costs nothing:
+  // a tree with no hard links never puts a key in here.
+  const seenLinks = new Set<string>();
   // Read through a call, not a property: `signal.aborted` is a readonly
   // boolean, so TypeScript narrows it permanently after the first check and
   // a later `=== true` reads as dead code — while the value really does flip
@@ -115,15 +131,27 @@ export async function directorySize(
       const sizes = await Promise.all(
         files.slice(at, at + STAT_BATCH).map(async (file) => {
           try {
-            return (await lstat(file)).size;
+            const stats = await lstat(file);
+            if (stats.nlink <= 1) return { size: stats.size, key: null };
+            return { size: stats.size, key: `${stats.dev}:${stats.ino}` };
           } catch {
             return null;
           }
         })
       );
-      for (const size of sizes) {
-        if (size === null) result.inaccessible += 1;
-        else result.bytes += size;
+      for (const measured of sizes) {
+        if (measured === null) {
+          result.inaccessible += 1;
+          continue;
+        }
+        if (measured.key !== null) {
+          if (seenLinks.has(measured.key)) {
+            result.hardLinks += 1;
+            continue;
+          }
+          seenLinks.add(measured.key);
+        }
+        result.bytes += measured.size;
       }
     }
     // Sized what this directory had, then stop: `partial` is already set.
@@ -144,10 +172,16 @@ export async function pathSize(
   try {
     stats = await lstat(target);
   } catch {
-    return { bytes: 0, entries: 0, partial: false, inaccessible: 1 };
+    return {
+      bytes: 0,
+      entries: 0,
+      partial: false,
+      inaccessible: 1,
+      hardLinks: 0
+    };
   }
   if (stats.isDirectory()) return directorySize(target, options);
   // A symlink's target is somebody else's bytes (see directorySize).
   const bytes = stats.isFile() ? stats.size : 0;
-  return { bytes, entries: 1, partial: false, inaccessible: 0 };
+  return { bytes, entries: 1, partial: false, inaccessible: 0, hardLinks: 0 };
 }
