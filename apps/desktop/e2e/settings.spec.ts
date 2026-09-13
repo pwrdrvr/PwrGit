@@ -204,7 +204,9 @@ test("menu opens the Settings window; panes render and settings persist", async 
     // line would send this to the else branch and assert an Add button a
     // not-installed product deliberately does not render.
     if ((await chip.textContent())?.trim() === "Not installed") {
-      await expect(section).toContainText(`Install the ${product.label} CLI`);
+      await expect(section).toContainText(
+        product.installHint ?? `Install the ${product.label} CLI`
+      );
     } else {
       await expect(
         section.getByRole("button", { name: product.addHost.button })
