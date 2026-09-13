@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, win32 } from "node:path";
+import { posix, win32 } from "node:path";
 import { canonicalForgeHostname } from "@pwrgit/shared";
 import {
   createCliClient,
@@ -13,7 +13,9 @@ export function cafePaths(
   env: NodeJS.ProcessEnv,
   platform = process.platform
 ): string[] {
-  const path = platform === "win32" ? win32 : { join };
+  // Use the requested platform's rules, even when it differs from the host
+  // running this helper (as in the cross-platform discovery tests).
+  const path = platform === "win32" ? win32 : posix;
   const home = (platform === "win32" ? env.USERPROFILE : env.HOME) || homedir();
   return [
     env.BUN_INSTALL_BIN,
