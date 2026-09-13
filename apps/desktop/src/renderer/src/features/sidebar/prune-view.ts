@@ -176,6 +176,37 @@ export function removalConfirmMessage(
   ].join("\n");
 }
 
+/**
+ * What the review list says when it has no rows — and it has two very
+ * different reasons to be empty.
+ *
+ * Removing everything the sweep offered leaves exactly the same empty list as
+ * a sweep that found nothing, and the "nothing is safe to remove" copy then
+ * reads as a report that nothing happened, moments after 265 working
+ * directories were deleted. The count the user just acted on is the single
+ * most important thing on the surface at that point, so the removal is what
+ * this says, and the never-offered explanation is kept for the case it
+ * actually describes.
+ *
+ * Past tense and "deleted", not "freed": see `diskSpaceNote`.
+ */
+export function emptyReviewCopy(removed: SelectionTotals): string {
+  if (removed.count === 0) {
+    return (
+      "Nothing is safe to remove. Worktrees with uncommitted changes," +
+      " unmerged work, or recent commits are never offered here."
+    );
+  }
+  const worktrees = `${removed.count} worktree${removed.count === 1 ? "" : "s"}`;
+  const scope =
+    removed.repos === 1 ? "1 repository" : `${removed.repos} repositories`;
+  return (
+    `Removed ${worktrees} across ${scope}, deleting ${describeBytes(removed)}` +
+    " of working directories. Their branches and commits are kept, and" +
+    " nothing else the sweep found is left to remove."
+  );
+}
+
 /** One exclude pattern per line, which is how the field is edited. */
 export function parseExcludeLines(text: string): string[] {
   return normalizeExcludes(text.split("\n"));

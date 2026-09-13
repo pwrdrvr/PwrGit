@@ -13,6 +13,7 @@ import { useModal } from "../../lib/useModal";
 import { ReclaimDiskPanel } from "./ReclaimDiskPanel";
 import {
   describeBytes,
+  emptyReviewCopy,
   reasonLabel,
   removalConfirmMessage,
   selectionTotals,
@@ -156,18 +157,26 @@ export function PruneWorktreesDialog({
     });
   }, []);
 
-  const candidates = useMemo(
+  const swept = useMemo(
     () =>
       summary === null
         ? []
-        : sortCandidates(
-            summary.results.flatMap((repo) => repo.candidates)
-          ).filter((candidate) => !removed.has(candidate.worktreeId)),
-    [removed, summary]
+        : sortCandidates(summary.results.flatMap((repo) => repo.candidates)),
+    [summary]
+  );
+  const candidates = useMemo(
+    () => swept.filter((candidate) => !removed.has(candidate.worktreeId)),
+    [removed, swept]
   );
   const totals = useMemo(
     () => selectionTotals(candidates, selected),
     [candidates, selected]
+  );
+  // What this sweep has already removed, so an emptied list can report the
+  // removal instead of reading as "nothing was ever here".
+  const removedTotals = useMemo(
+    () => selectionTotals(swept, removed),
+    [removed, swept]
   );
   const allSelected =
     candidates.length > 0 && totals.count === candidates.length;
@@ -277,7 +286,9 @@ export function PruneWorktreesDialog({
               <span className="prune__count" aria-live="polite">
                 {stage.kind === "sweeping"
                   ? `${sweep.completedRepos} / ${sweep.totalRepos}`
-                  : `${candidates.length} found`}
+                  : removedTotals.count > 0
+                    ? `${removedTotals.count} removed`
+                    : `${candidates.length} found`}
               </span>
             </div>
 
@@ -354,10 +365,12 @@ export function PruneWorktreesDialog({
               {stage.kind === "review" &&
                 candidates.length === 0 &&
                 error === null && (
-                  <p className="prune__empty">
-                    Nothing is safe to remove. Worktrees with uncommitted
-                    changes, unmerged work, or recent commits are never offered
-                    here.
+                  <p
+                    className={`prune__empty${
+                      removedTotals.count > 0 ? " is-done" : ""
+                    }`}
+                  >
+                    {emptyReviewCopy(removedTotals)}
                   </p>
                 )}
               {candidates.map((candidate) => (

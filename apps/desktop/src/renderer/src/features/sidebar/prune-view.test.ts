@@ -4,6 +4,7 @@ import {
   describeBytes,
   diskSpaceNote,
   describeReclaimBytes,
+  emptyReviewCopy,
   formatExcludeLines,
   parseExcludeLines,
   reasonDetail,
@@ -287,5 +288,46 @@ describe("diskSpaceNote", () => {
     for (const platform of ["darwin", "linux", "win32"]) {
       expect(diskSpaceNote(platform)).toContain("may not shrink by this much");
     }
+  });
+});
+
+describe("emptyReviewCopy", () => {
+  const picked: PruneCandidate[] = [
+    candidate({ worktreeId: "a", repoId: "r1", repoName: "alpha", sizeBytes: 2048 }),
+    candidate({ worktreeId: "b", repoId: "r2", repoName: "beta", sizeBytes: 1024 })
+  ];
+
+  it("explains the never-offered rule when the sweep found nothing", () => {
+    const none = selectionTotals(picked, new Set());
+    expect(emptyReviewCopy(none)).toContain("Nothing is safe to remove");
+    expect(emptyReviewCopy(none)).toContain("uncommitted changes");
+  });
+
+  it("reports the removal instead, once one has happened", () => {
+    // The bug this exists for: removing everything offered leaves the same
+    // empty list as finding nothing, and the explanation then reads as "nothing
+    // happened" moments after the working directories were deleted.
+    const all = selectionTotals(picked, new Set(["a", "b"]));
+    const copy = emptyReviewCopy(all);
+    expect(copy).toContain("Removed 2 worktrees across 2 repositories");
+    expect(copy).toContain("deleting 3 KB of working directories");
+    expect(copy).toContain("branches and commits are kept");
+    expect(copy).not.toContain("Nothing is safe to remove");
+    // Consistent with diskSpaceNote: deleted, never freed.
+    expect(copy).not.toContain("freed");
+    expect(copy).not.toContain("freeing");
+  });
+
+  it("counts one worktree and one repository in the singular", () => {
+    const one = selectionTotals([picked[0]!], new Set(["a"]));
+    expect(emptyReviewCopy(one)).toContain("Removed 1 worktree across 1 repository");
+  });
+
+  it("carries an unmeasured or floored size into the receipt", () => {
+    const floored = selectionTotals(
+      [candidate({ worktreeId: "a", sizeBytes: 2048, sizePartial: true })],
+      new Set(["a"])
+    );
+    expect(emptyReviewCopy(floored)).toContain("deleting at least 2 KB");
   });
 });

@@ -4144,6 +4144,13 @@ textarea,
   color: var(--text-muted);
   font: 500 11.5px/1.5 var(--font-sans);
 }
+/* The same empty list, but reporting a removal that just happened rather than
+   explaining why nothing qualified. Muted secondary text is right for an
+   explanation and wrong for the receipt of 265 deleted working directories,
+   which is the one thing on screen the user is looking for. */
+.prune__empty.is-done {
+  color: var(--text-primary);
+}
 .prune__row input,
 .prune__select input {
   accent-color: var(--accent);
@@ -4281,6 +4288,17 @@ textarea,
 .prune__ghost:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+/* `.prune__ghost` is sized for the reclaim panel's exclude-list footer, where
+   it sits inline beside 10.5px caption text. The modal action row is the other
+   caller, and there it stood 26px tall between 32px buttons with visibly
+   smaller type — so the metrics, and only the metrics, come from its
+   neighbours. Kept as a contextual rule rather than a second class because
+   there is one ghost treatment here, at two scales. */
+.modal__actions .prune__ghost {
+  height: 32px;
+  padding: 0 14px;
+  font-size: 12px;
 }
 .prune__plan {
   padding: 10px 12px;

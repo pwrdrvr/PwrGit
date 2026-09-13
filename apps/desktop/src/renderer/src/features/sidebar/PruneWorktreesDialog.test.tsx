@@ -290,6 +290,38 @@ describe("PruneWorktreesDialog", () => {
     expect(rows()[0]?.textContent).toContain("b");
   });
 
+  it("reports what it removed once the last row leaves", async () => {
+    // Removing everything offered leaves the same empty list as a sweep that
+    // found nothing, and "Nothing is safe to remove" then reads as a report
+    // that nothing happened — directly after the directories were deleted.
+    dispatch.mockResolvedValue({
+      ok: true,
+      value: summary([
+        candidate({ worktreeId: "a", repoId: "r1", sizeBytes: 2048 }),
+        candidate({ worktreeId: "b", repoId: "r2", sizeBytes: 1024 })
+      ])
+    });
+    await render();
+    expect(container.querySelector(".prune__count")?.textContent).toBe("2 found");
+
+    await act(async () => {
+      handlers.get("worktree:removed")?.({ worktreeId: "a" });
+      handlers.get("worktree:removed")?.({ worktreeId: "b" });
+    });
+
+    expect(rows()).toHaveLength(0);
+    const empty = container.querySelector(".prune__empty");
+    expect(empty?.textContent).toContain("Removed 2 worktrees");
+    expect(empty?.textContent).toContain("deleting 3 KB");
+    expect(empty?.textContent).not.toContain("Nothing is safe to remove");
+    // The receipt is the thing being looked for, so it is not muted.
+    expect(empty?.className).toContain("is-done");
+    // And the counter agrees, rather than saying "0 found".
+    expect(container.querySelector(".prune__count")?.textContent).toBe(
+      "2 removed"
+    );
+  });
+
   it("names each reason on its row", async () => {
     dispatch.mockResolvedValue({
       ok: true,

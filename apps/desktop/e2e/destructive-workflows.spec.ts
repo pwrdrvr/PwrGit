@@ -420,6 +420,13 @@ test("removing from the pruner confirms the count, deletes the checkout, and kee
   await expect(dialog.locator(".prune__row")).toHaveCount(0, {
     timeout: 40_000
   });
+  // An emptied list must report the removal, not explain why nothing
+  // qualified: the two states look identical and the explanation reads as
+  // "nothing happened" directly after the directory was deleted.
+  const empty = dialog.locator(".prune__empty");
+  await expect(empty).toContainText("Removed 1 worktree");
+  await expect(empty).not.toContainText("Nothing is safe to remove");
+  await expect(dialog.locator(".prune__count")).toHaveText("1 removed");
   expect(existsSync(worktreePath)).toBe(false);
   // The branch and its commit survive — that is what "remove the worktree"
   // has to mean, or the confirm above is a lie.
