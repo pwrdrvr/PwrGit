@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.15.0 - 2026-09-13
+
+- Getting Started - Added a guided first-run setup that helps you confirm your Git identity, review forge connections, choose safe folders to scan, and understand the repository lenses before you begin.
+- Updates - **Help → Check for Updates** now stays visible while it works, showing download progress and transferred bytes with a safe Cancel action before offering Restart when an update is ready.
+- Windows - Added `PwrGit.Setup.exe`, a stable direct-download alias for the verified, signed Windows installer while retaining the versioned installer used by automatic updates.
+- Focused Lens - New profiles open on **All** until the focused data exists, unavailable lenses explain what will populate them, and selecting a repository no longer re-sorts rows beneath the pointer.
+
 ## v0.14.0 - 2026-09-13
 
 - GitCafe - Added GitCafe forge support through the `cafe` CLI (version 0.5.0 or newer), including sign-in guidance, repository discovery, clone and fork suggestions, and pull-request status.
