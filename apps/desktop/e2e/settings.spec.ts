@@ -3,18 +3,23 @@ import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { FORGE_KINDS, forgeProduct } from "@pwrgit/shared";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
+import { createForgeFixture } from "./fixtures/forge-fixture";
+import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
 
 // The Settings window is a singleton aux window on the `#settings` hash route,
 // opened from the app menu (Settings…, CmdOrCtrl+,). It is not profile-bound:
 // the Profiles pane manages every profile; Experimental/Diagnostics write
 // app-level settings that round-trip through settings:update.
 let handle: AppHandle | null = null;
+let sandbox: GitSandbox | null = null;
 
 test.afterEach(async () => {
   if (handle !== null) {
     await handle.cleanup();
     handle = null;
   }
+  sandbox?.cleanup();
+  sandbox = null;
 });
 
 /** Click the Settings… item in the application menu (macOS: app menu;
@@ -68,7 +73,14 @@ async function mainFetchedUrls(app: AppHandle["app"]): Promise<string[]> {
 }
 
 test("menu opens the Settings window; panes render and settings persist", async () => {
-  handle = await launchApp();
+  sandbox = createGitSandbox();
+  // Exercise both installed and missing CLI remedies on every machine.
+  const forgeFixture = createForgeFixture(sandbox, {
+    github: { loggedIn: false, owners: [], repositories: {} },
+    gitlab: { installed: false, owners: [], repositories: {} },
+    gitcafe: { installed: false, owners: [], repositories: {} }
+  });
+  handle = await launchApp({ forgeFixturePath: forgeFixture.path });
   const { app } = handle;
   await recordMainFetches(app);
 
@@ -177,10 +189,8 @@ test("menu opens the Settings window; panes render and settings persist", async 
     )
   ).toEqual([]);
 
-  // Forges: one section per product, each from main's probe. Which forges are
-  // logged in varies by machine, so assert each pane resolved to a real state
-  // rather than a particular one — the point is that it consumes forge:status
-  // and forge:hosts at all.
+  // Forges: one section per product, consuming main's fixture-backed status
+  // and hosts through the normal IPC path.
   await settings.locator(".settings-nav__button", { hasText: "Forges" }).click();
   // Driven from the product list rather than a pair written here, so this is
   // the assertion that a third registry entry gets a section in the running
@@ -195,8 +205,7 @@ test("menu opens the Settings window; panes render and settings persist", async 
     await expect(chip).toHaveText(/Connected|Signed out|Off|Not installed/);
     // Each product owns its own way in, which is what a shared empty state
     // could not offer. WHICH way in depends on the product's state, and both
-    // branches are real here: CI runners carry `gh` but not `glab`, so one
-    // section is "Not installed" on every run. A missing CLI is the one state
+    // branches are covered by the fixture. A missing CLI is the one state
     // with no Add button — there is no binary to sign in with, so adding a
     // host would name an instance nothing can reach.
     // Trimmed: `textContent` is raw, unlike the whitespace-normalizing
@@ -205,8 +214,11 @@ test("menu opens the Settings window; panes render and settings persist", async 
     // not-installed product deliberately does not render.
     if ((await chip.textContent())?.trim() === "Not installed") {
       await expect(section).toContainText(
-        product.installHint ?? `Install the ${product.label} CLI`
+        product.installHint?.replaceAll("`", "") ?? `Install the ${product.label} CLI`
       );
+      for (const command of product.installHint?.matchAll(/`([^`]+)`/g) ?? []) {
+        await expect(section.locator("code", { hasText: command[1] })).toBeVisible();
+      }
     } else {
       await expect(
         section.getByRole("button", { name: product.addHost.button })
