@@ -1999,7 +1999,13 @@ textarea,
 .clone-repo,
 .fork-repo {
   height: 32px;
-  margin-top: 8px;
+  /* No margin-top: these sit inside `.sidebar__actions`, which owns the
+     spacing between its rows with `gap: 8px`. A margin here does not collapse
+     into that gap, it adds to it — which is what made the one seam under
+     Add folders 16px while every other seam in the block was 8px. `.add-folder`
+     keeps its margin because it is the first row, and `.sidebar__search` above
+     it is a plain block with no gap to inherit. */
+  margin-top: 0;
   /* Was an accent-bordered, accent-filled bar. Cloning is a secondary action
      — the sidebar's primary job is picking among repos you already have — and
      PwrAgnt's theme doc rules out large accent panels outright. Solid-bordered
