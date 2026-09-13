@@ -51,6 +51,7 @@
           .note b { color: var(--t2); font-weight: 650; }
           .note code, .fitem code, .tr code, .dv-sub code { font: 500 10px/1.4 var(--mono); color: var(--t2); }
           .pair { display: flex; gap: 24px; align-items: flex-start; }
+          .shot { display: block; border: 1px solid var(--line); border-radius: 8px; max-width: 100%; }
 
           /* ---- pins + findings ---- */
           .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); }
@@ -320,6 +321,33 @@
 
         </div>
         <p class="dv-next">Try next: &#8220;design the reflog&#8209;ranked list from 3b&#8202;E&#8221; &#183; &#8220;what should Gone rows offer in bulk?&#8221;</p>
+      </section>
+
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t4">4</a>
+          <span class="dv-tname">In the shipped app</span>
+        </div>
+        <p class="dv-sub">Both pairs come from one Playwright scenario in <code>design-shots.spec.ts</code>, run twice against the same contrived repository &#8212; once with the renderer sources checked out at the base commit, once after. <code>northwind&#8209;labs</code> has four local branches (two of them merged and deleted upstream) and ten on <code>origin</code>, so the six&#8209;row previews have to choose. Nothing in these frames came from a real account or a real repository.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="4a" data-screen-label="4a Sidebar before">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Sidebar &#8212; before</div>
+            <img class="shot" src="./assets/branch-switch-sidebar-before.png" width="320" alt="PwrGit sidebar before: four local branches ordered by tip date, so the one live branch sits between two marked Missing; every row's only control is a plus; origin's first preview row is main, which the list above already shows">
+          </div>
+          <div class="dv-opt" id="4b" data-screen-label="4b Sidebar after">
+            <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>Sidebar &#8212; after</div>
+            <img class="shot" src="./assets/branch-switch-sidebar-after.png" width="320" alt="PwrGit sidebar after: the live branch ranks second and the two merged ones fall to the bottom reading Gone, the section head carries a 2 gone count, the focused row shows a switch control beside its plus, and origin's preview no longer spends a row on main">
+          </div>
+          <div class="dv-opt" id="4c" data-screen-label="4c Browser before">
+            <div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>Refs browser &#8212; before</div>
+            <img class="shot" src="./assets/branch-switch-browser-before.png" width="620" alt="PwrGit refs browser before: fourteen branches whose only constructive action is New worktree, with Delete painted in the same accent border and fill as it">
+          </div>
+          <div class="dv-opt" id="4d" data-screen-label="4d Browser after">
+            <div class="dv-olabel"><a class="dv-oid" href="#4d">4d</a>Refs browser &#8212; after</div>
+            <img class="shot" src="./assets/branch-switch-browser-after.png" width="620" alt="PwrGit refs browser after: every row leads with an accented Switch here, the remaining actions drop to quiet outlines, Delete reads as a danger outline, and the status column says Upstream gone">
+          </div>
+        </div>
+        <p class="dv-next">Try next: &#8220;compare the same two frames in light theme&#8221; &#183; &#8220;what does this look like at 940px, the narrowest window?&#8221;</p>
       </section>
     </x-dc>
     <script

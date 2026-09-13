@@ -190,14 +190,14 @@ test("branch lists and the refs browser, on a contrived repository", async () =>
   const block = window.locator(".repo-block").first();
   await block.scrollIntoViewIfNeeded();
 
-  // Resting on a row, because that is when the sidebar shows what a row can do
-  // — but on its right-hand end, NOT on the name: the name is a copy target
-  // whose hover card would cover the two rows under it.
-  const row = refBranchRow(window, "feat/headless-capture");
-  const box2 = await row.boundingBox();
-  await row.hover({
-    position: { x: Math.max(0, (box2?.width ?? 200) - 78), y: 14 }
-  });
+  // A row carrying FOCUS, not hover. Focus reveals the same row controls, and
+  // it keeps the pointer off the branch name — whose copy card would otherwise
+  // cover the two rows underneath, and would cover different rows in each build
+  // this scenario is run against.
+  await refBranchRow(window, "feat/headless-capture").focus();
+  // Park the pointer on inert chrome, or the last control clicked keeps its
+  // hover tint and reads as a second highlighted row.
+  await window.mouse.move(6, 6);
   await window.waitForTimeout(400);
   await window
     .getByTestId("sidebar")
