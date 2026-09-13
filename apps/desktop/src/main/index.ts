@@ -96,6 +96,7 @@ import { ensureMacKeychainAccess } from "./mac-keychain-access";
 import { openDatabase } from "./persistence/db";
 import { readGitIdentityDefaults } from "./profiles/git-identity";
 import { registerProfileHandlers } from "./profiles/profile-handlers";
+import { readEffectiveGitIdentity } from "./profiles/git-identity-read";
 import {
   ProfileScanCoordinator,
   survivingActiveWorktreeId
@@ -705,6 +706,7 @@ if (!gotSingleInstanceLock) {
         onOpenProfile: (profileId) => openProfileWindow(profileId),
         onNewProfile: () => emitEvent("ui:newProfile", {}),
         onManageProfiles: () => emitEvent("ui:manageProfile", {}),
+        onReplayOnboarding: () => emitEvent("ui:replayOnboarding", {}),
         onCheckForUpdates: () => {
           void checkForAppUpdatesFromMenu();
         },
@@ -845,6 +847,12 @@ if (!gotSingleInstanceLock) {
     registerSubmoduleHandlers(bus, db);
     const fileInsightHandlers = registerFileInsightHandlers(bus, db);
     registerRebaseHandlers(bus, db, refresher, worktreeOperations);
+    // Asked of git rather than parsed out of ~/.gitconfig: the first-run seed
+    // above is not section-aware and does not follow `include`, and the wizard
+    // puts this value on screen as what commits will carry.
+    bus.register("git:readIdentity", async () =>
+      ok(await readEffectiveGitIdentity(execGit))
+    );
     registerDialogHandlers(bus);
     registerClipboardHandlers(bus);
     registerShellHandlers(bus);

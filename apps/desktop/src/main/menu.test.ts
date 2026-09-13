@@ -17,6 +17,7 @@ function rebuild(
   overrides: {
     onCheckForUpdates?: () => void;
     onOpenExternalLink?: (label: string, url: string) => void;
+    onReplayOnboarding?: () => void;
   } = {}
 ): void {
   rebuildAppMenu({
@@ -31,6 +32,7 @@ function rebuild(
     onOpenLicense: vi.fn(),
     onOpenThirdPartyNotices: vi.fn(),
     onOpenExternalLink: overrides.onOpenExternalLink ?? vi.fn(),
+    onReplayOnboarding: overrides.onReplayOnboarding ?? vi.fn(),
     developerMode: false
   });
 }

@@ -20,14 +20,16 @@ const personal: Profile = {
   name: "Personal",
   email: "me@example.com",
   mono: "P",
-  roots: []
+  roots: [],
+  onboardingCompleted: true
 };
 const acme: Profile = {
   id: "acme",
   name: "Acme",
   email: "me@acme.dev",
   mono: "A",
-  roots: ["/projects/acme"]
+  roots: ["/projects/acme"],
+  onboardingCompleted: true
 };
 
 let container: HTMLDivElement;

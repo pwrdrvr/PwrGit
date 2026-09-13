@@ -23,6 +23,7 @@ type ProfileRow = {
   roots: string;
   last_used_at: string | null;
   sort_order: number;
+  onboarding_completed: number;
 };
 
 function slugify(name: string): string {
@@ -43,7 +44,8 @@ function rowToProfile(r: ProfileRow): Profile {
     name: r.name,
     email: r.email,
     mono: r.mono,
-    roots: JSON.parse(r.roots) as string[]
+    roots: JSON.parse(r.roots) as string[],
+    onboardingCompleted: r.onboarding_completed !== 0
   };
   if (r.author_name !== null) p.authorName = r.author_name;
   if (r.kind !== null) p.kind = r.kind;
@@ -267,6 +269,22 @@ export class ProfileService {
     this.db
       .prepare("UPDATE profiles SET roots = ? WHERE id = ?")
       .run(JSON.stringify(cleaned), id);
+    return this.get(id);
+  }
+
+  /**
+   * Mark first-run setup finished for a profile.
+   *
+   * One-way on purpose. The wizard sends this on Finish and on Skip, and the
+   * Help-menu replay does not send it at all — replay re-opens the wizard for
+   * someone who wants another look, and flipping the flag back would re-arm it
+   * for the next launch of a profile that is demonstrably already set up.
+   */
+  completeOnboarding(id: ProfileId): Profile | null {
+    if (this.get(id) === null) return null;
+    this.db
+      .prepare("UPDATE profiles SET onboarding_completed = 1 WHERE id = ?")
+      .run(id);
     return this.get(id);
   }
 

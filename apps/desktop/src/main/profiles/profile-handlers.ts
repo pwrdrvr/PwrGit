@@ -106,6 +106,23 @@ export function registerProfileHandlers(
     return ok(profile);
   });
 
+  bus.register("profile:completeOnboarding", (req) => {
+    const profile = profiles.completeOnboarding(req.profileId);
+    if (profile === null) {
+      return err({
+        kind: "profile",
+        code: "not_found",
+        message: `No profile "${req.profileId}"`
+      });
+    }
+    // The snapshot carries `onboardingCompleted`, and every window reads the
+    // flag to decide whether to mount the wizard — so a second window on the
+    // same profile stops offering setup the moment the first one finishes it.
+    emitEvent("profile:changed", profiles.snapshot());
+    onChanged?.(profile);
+    return ok(profile);
+  });
+
   bus.register("profile:create", (req) => {
     if (req.name.trim() === "") {
       return err({

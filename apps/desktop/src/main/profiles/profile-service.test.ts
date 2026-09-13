@@ -15,6 +15,44 @@ afterEach(() => {
 });
 
 describe("ProfileService", () => {
+  it("a seeded first-run profile has not been through setup", () => {
+    const s = service();
+    s.ensureSeed({
+      name: "Personal",
+      email: "",
+      mono: "",
+      kind: "Personal",
+      roots: []
+    });
+    // The whole point of the flag: a fresh install fires the wizard. Existing
+    // installs are marked done by the migration, not by this path.
+    expect(s.list()[0]?.onboardingCompleted).toBe(false);
+  });
+
+  it("completeOnboarding is one-way and survives other writes", () => {
+    const s = service();
+    s.ensureSeed({
+      name: "Personal",
+      email: "",
+      mono: "",
+      kind: "Personal",
+      roots: []
+    });
+    const id = s.list()[0]!.id;
+
+    expect(s.completeOnboarding(id)?.onboardingCompleted).toBe(true);
+    // Idempotent — Skip after Finish, or a second window finishing, is a no-op.
+    expect(s.completeOnboarding(id)?.onboardingCompleted).toBe(true);
+    // Nothing else the wizard writes may quietly re-arm it.
+    s.setRoots(id, ["/code"]);
+    expect(s.get(id)?.onboardingCompleted).toBe(true);
+  });
+
+  it("completeOnboarding on an unknown profile reports not-found", () => {
+    const s = service();
+    expect(s.completeOnboarding("nope")).toBeNull();
+  });
+
   it("ensureSeed creates exactly one default profile and is idempotent", () => {
     const s = service();
     const seed = {

@@ -75,6 +75,7 @@ import type {
   TagSummary,
   RepoSearchHit,
   RepoWorktreeRefresh,
+  GitIdentityRead,
   SearchHitStatus,
   SubmoduleSnapshot,
   SshRemoteRecovery,
@@ -726,6 +727,22 @@ export interface Commands {
     req: { profileId: ProfileId; roots: string[] };
     res: Repo[];
   };
+  /** Mark a profile's first-run setup finished. Sent on Finish and on Skip;
+   *  a Help-menu replay does not send it, so the flag stays true once set. */
+  "profile:completeOnboarding": {
+    req: { profileId: ProfileId };
+    res: Profile;
+  };
+  /**
+   * The git identity a commit would actually carry, asked of git itself.
+   *
+   * `git config --get` resolves section scoping, precedence and `include` /
+   * `includeIf` — none of which the first-run seed's regex over `~/.gitconfig`
+   * can see. That seed can read a name out of one section and an email out of
+   * another, or come back empty while `git config` answers fine, so the wizard
+   * must not repeat it.
+   */
+  "git:readIdentity": { req: void; res: GitIdentityRead };
 
   // Repos & discovery (U6)
   "repo:list": { req: { profileId?: ProfileId }; res: Repo[] };
@@ -1680,6 +1697,9 @@ export interface Events {
   /** Native Profiles-menu actions — handled by whichever window has focus. */
   "ui:newProfile": Record<string, never>;
   "ui:manageProfile": Record<string, never>;
+  /** Help → Replay First-Run Setup. Re-opens the wizard for a look;
+   *  deliberately never clears `onboardingCompleted`. */
+  "ui:replayOnboarding": Record<string, never>;
   /** App settings changed (any window) — payload is the fresh snapshot. */
   "settings:changed": AppSettingsSnapshot;
   /** Sessions, roles, or repository boundaries changed in Settings. */
