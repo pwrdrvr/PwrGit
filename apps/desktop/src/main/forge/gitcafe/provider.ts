@@ -80,9 +80,14 @@ export function createGitCafeProvider(
         );
         for (const item of page.items) {
           const row = object(item);
-          const pr = parseCafePr(row, repo);
-          const branch = pr.headRefName!;
-          if (wanted.has(branch))
+          // Only the branch is needed to decide whether this row is wanted, and
+          // it is the field `parseCafePr` would read anyway. Validating the
+          // whole summary here made one malformed PR anywhere in the repository
+          // throw away the lookup for every OTHER branch too — and paid for a
+          // PrSummary plus three Date.parse calls on up to 10,000 rows we
+          // discard. Rows that survive the filter are still fully parsed below.
+          const branch = row.sourceBranch;
+          if (typeof branch === "string" && wanted.has(branch))
             candidates.set(branch, [...(candidates.get(branch) ?? []), row]);
         }
         cursor = page.nextCursor;

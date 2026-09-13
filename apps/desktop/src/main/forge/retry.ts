@@ -31,13 +31,16 @@ import { clampRetryDelayMs, RETRY_DELAY_CEILING_MS } from "../util/timing";
 
 /** How one forge spells the rate-limit conversation. */
 type RateLimitDialect = {
-  /** Header naming the requests left in the current window. */
-  remaining: string;
+  /** Header naming the requests left in the current window, or null for a
+   *  forge that sends none. Null rather than "": an empty name still reaches
+   *  the caller's reader, and `Headers.get("")` throws `TypeError: "" is an
+   *  invalid header name` — a rate limit would crash instead of backing off. */
+  remaining: string | null;
   /** Header naming when that window refills. Both forges send a Unix time in
    *  seconds — GitLab's spelling is borrowed from the IETF draft, but not that
    *  draft's delta-seconds encoding, and a proxy that sent delta-seconds would
    *  read as long past and retry at once. */
-  reset: string;
+  reset: string | null;
   /** Statuses on which an exhausted window is believed, and waited out. */
   exhaustedOn: readonly number[];
 };
@@ -45,7 +48,9 @@ type RateLimitDialect = {
 /** Add a forge by adding a row. One of the tables `forge/AGENTS.md` lists
  *  under "Adding a forge"; `tsc` names this one when a kind is added. */
 const RATE_LIMIT_DIALECT: Readonly<Record<ForgeKind, RateLimitDialect>> = {
-  gitcafe: { remaining: "", reset: "", exhaustedOn: [429] },
+  // CLI-only: no HTTP response, so no rate-limit headers to spell. The row
+  // exists to keep this table exhaustive over ForgeKind.
+  gitcafe: { remaining: null, reset: null, exhaustedOn: [429] },
   github: {
     remaining: "x-ratelimit-remaining",
     reset: "x-ratelimit-reset",
@@ -99,8 +104,9 @@ type ForgeRetryInput = {
  */
 function numericHeader(
   header: ForgeHeaderReader,
-  name: string
+  name: string | null
 ): number | undefined {
+  if (name === null) return undefined;
   const raw = header(name);
   if (raw === null || raw === undefined) return undefined;
   // Blank, not just empty: `Number(" ")` is 0 too, so a header a proxy rewrote

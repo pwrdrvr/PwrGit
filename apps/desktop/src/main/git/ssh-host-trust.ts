@@ -65,6 +65,13 @@ export class SshHostTrustService {
     const host = canonicalForgeHostname(rawHost);
     // Forge canonicalization strips www.; SSH routing must never do that.
     if (host !== rawHost) throw new Error("This SSH hostname requires terminal verification.");
+    // The caller authorized ONE hostname — `allowed()` was asked about the
+    // forge host the renderer named. A `Host x / HostName y` stanza makes
+    // `ssh -G` answer with a different endpoint, and everything downstream
+    // (the keyscan, and the known_hosts line `trust()` appends) would then act
+    // on a host that was never checked against the enabled-host list. Refuse,
+    // the way the proxycommand/knownhostscommand redirects above are refused.
+    if (host !== hostname) throw new Error("This host is redirected by your SSH configuration. Use the terminal command.");
     const port = Number(value("port"));
     if (host === null || !Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Unsupported SSH endpoint.");
     const paths = (text: string) => (text.match(/"[^"]*"|'[^']*'|\S+/g) ?? []).map((path) => {
@@ -128,13 +135,53 @@ export class SshHostTrustService {
         proposal.message = "The published key lookup failed. This key has NOT been verified. Verify it independently before trusting, or cancel and try again.";
       }
       if (existing) {
-        proposal.verification = "existing-key";
+        // Both states refuse the write, so this only decides what the user is
+        // told — and a key that CONTRADICTS the forge's published list while a
+        // different one is already trusted is the signature of an active
+        // interception, not a housekeeping note. Keep the stronger verdict:
+        // overwriting it buried "Do not connect" under "an entry already
+        // exists" and painted the worst case in the milder tone.
         proposal.canTrust = false;
-        proposal.message = "An SSH trust entry already exists for this endpoint. PwrGit will not replace it. A changed, revoked, or conflicting key requires investigation in your terminal.";
+        if (proposal.verification !== "mismatch") {
+          proposal.verification = "existing-key";
+          proposal.message = "An SSH trust entry already exists for this endpoint. PwrGit will not replace it. A changed, revoked, or conflicting key requires investigation in your terminal.";
+        } else {
+          proposal.message = `${proposal.message} A different key is already trusted for this endpoint; PwrGit will not replace it.`;
+        }
       }
       this.pending.set(proposal.id, { owner, at: this.now, kind, originalHost: canonical, context, snapshots: snapshots.map(digest), key: `${key.algorithm} ${key.key}`, proposal });
       return proposal;
     } finally { this.busy = false; }
+  }
+
+  /**
+   * The exclusive `wx` create that serializes two PwrGit windows against one
+   * known_hosts, plus the recovery a bare `wx` has none of.
+   *
+   * Without it, one kill between the create and the `unlink` in `trust()`'s
+   * finally leaves the file behind and every later approval — for any host,
+   * forever — fails with a raw `EEXIST` the panel prints verbatim. A lock this
+   * process is not holding and has not touched for a minute cannot belong to a
+   * live approval: `trust()` holds it across a handful of small file
+   * operations, and the proposal it serves expires after five.
+   */
+  private async acquireLock(lockPath: string): Promise<Awaited<ReturnType<typeof open>>> {
+    try {
+      return await open(lockPath, "wx", 0o600);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const info = await lstat(lockPath).catch(() => null);
+      if (info === null) return await open(lockPath, "wx", 0o600);
+      if (info.isSymbolicLink() || !info.isFile()) {
+        throw new Error("An unexpected SSH trust lock file is present. Remove ~/.ssh/.pwrgit-host-trust.lock, then inspect the host again.");
+      }
+      // Wall clock on both sides. `this.now` is the injected proposal clock,
+      // which a test moves freely; an mtime is real time, so comparing the two
+      // would answer from whatever offset the fake clock happens to sit at.
+      if (Date.now() - info.mtimeMs < 60000) throw new Error("Another SSH host approval is in progress. Try again in a moment.");
+      await unlink(lockPath);
+      return await open(lockPath, "wx", 0o600);
+    }
   }
 
   async trust(id: string, owner: number): Promise<void> {
@@ -152,7 +199,7 @@ export class SshHostTrustService {
       if (context.config !== item.context.config) throw new Error("SSH configuration changed. Inspect the host again.");
       await mkdir(directory, { recursive: true, mode: 0o700 });
       if ((await lstat(directory)).isSymbolicLink()) throw new Error("A linked SSH directory requires terminal verification.");
-      lock = await open(lockPath, "wx", 0o600);
+      lock = await this.acquireLock(lockPath);
       const snapshots = await Promise.all(context.files.map(contents));
       if (snapshots.some((text, i) => digest(text) !== item.snapshots[i])) throw new Error("SSH trust changed while approval was open. Inspect the host again.");
       const target = context.port === 22 ? context.host : `[${context.host}]:${context.port}`;

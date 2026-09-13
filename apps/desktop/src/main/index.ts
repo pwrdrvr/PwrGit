@@ -505,8 +505,11 @@ if (!gotSingleInstanceLock) {
       // Login/logout can change credentials without changing a configured
       // host's target signature. An explicit Re-check must refresh auth too;
       // changed targets already schedule their forced probe above.
+      // Swallowed like the forced read above: a probe that refuses is not a
+      // reason to discard host enumeration that already succeeded, and Re-check
+      // must still hand back `refreshed`.
       if (probedTargets === previousTargets) {
-        await forgeStatus.list({ force: true });
+        await forgeStatus.list({ force: true }).catch(() => undefined);
       }
       return refreshed;
     });

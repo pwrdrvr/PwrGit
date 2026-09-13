@@ -5,6 +5,7 @@ const SAFE_SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 
 const GITHUB_HOSTS_ENV = "PWRGIT_GITHUB_HOSTS";
 const GITLAB_HOSTS_ENV = "PWRGIT_GITLAB_HOSTS";
+const GITCAFE_HOSTS_ENV = "PWRGIT_GITCAFE_HOSTS";
 
 /**
  * Self-managed hosts named by the environment, the same two variables the
@@ -21,7 +22,7 @@ function envProviders(env: NodeJS.ProcessEnv): ReadonlyMap<string, ForgeProvider
   for (const [name, provider] of [
     [GITHUB_HOSTS_ENV, "github"],
     [GITLAB_HOSTS_ENV, "gitlab"],
-    ["PWRGIT_GITCAFE_HOSTS", "gitcafe"]
+    [GITCAFE_HOSTS_ENV, "gitcafe"]
   ] as const) {
     for (const entry of (env[name] ?? "").split(",")) {
       const host = entry.trim().toLowerCase().replace(/^www\./, "");

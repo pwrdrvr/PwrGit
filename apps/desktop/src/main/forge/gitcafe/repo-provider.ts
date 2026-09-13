@@ -1,5 +1,10 @@
 import { setTimeout as delay } from "node:timers/promises";
-import type { CloneRepository, ForgeOwner, ForgeRepoRef } from "@pwrgit/shared";
+import type {
+  CloneRepository,
+  ForgeOwner,
+  ForgeRepoRef,
+  RepoVisibility
+} from "@pwrgit/shared";
 import {
   ForgeResponseError,
   type ForgeRepoProvider,
@@ -39,7 +44,17 @@ export function parseCafeRepo(
 ): CloneRepository {
   const row = object(value);
   const { owner, name } = coordinates(row);
-  if (row.visibility !== "public" && row.visibility !== "private") {
+  // `RepoVisibility` has four members, and the third state exists for exactly
+  // this: a value the forge DID answer that we cannot place. Rejecting it threw
+  // out the whole 50-row page over one internal repository, and said "returned
+  // no visibility" about a response that returned one. Never widen to `public`.
+  const visibility: RepoVisibility =
+    row.visibility === "public" ||
+    row.visibility === "private" ||
+    row.visibility === "internal"
+      ? row.visibility
+      : "unknown";
+  if (typeof row.visibility !== "string" || row.visibility === "") {
     throw new ForgeResponseError("GitCafe returned no repository visibility.");
   }
   let parent: ForgeRepoRef | undefined;
@@ -56,7 +71,7 @@ export function parseCafeRepo(
     owner,
     name,
     nameWithOwner: `${owner}/${name}`,
-    visibility: row.visibility,
+    visibility,
     // cafe clone uses HTTPS and installs its own credential helper per call.
     httpsUrl: `https://${hostname}/${owner}/${name}.git`,
     sshUrl: `git@${hostname}:${owner}/${name}.git`,

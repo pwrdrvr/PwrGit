@@ -36,6 +36,16 @@ describe("GitCafe repositories", () => {
     expect(() =>
       parseCafeRepo(resource("demo", { visibility: undefined }), "git.cafe")
     ).toThrow("visibility");
+    // A visibility the forge DID answer that we cannot place is the third
+    // state, not a reason to throw away the row (and with it the whole page).
+    expect(
+      parseCafeRepo(resource("demo", { visibility: "internal" }), "git.cafe")
+        .visibility
+    ).toBe("internal");
+    expect(
+      parseCafeRepo(resource("demo", { visibility: "secret" }), "git.cafe")
+        .visibility
+    ).toBe("unknown");
   });
   it("targets the selected host and rejects mismatched repository responses", async () => {
     const run = vi.fn<CafeRunner>(async () => wrapped(resource()));

@@ -45,6 +45,11 @@ describe("GitCafe CLI", () => {
       )
     ).toBeNull();
   });
+  // `{"error": null}` is an ordinary success envelope, not a failure.
+  it("reads a success envelope that spells its absent error as null", () => {
+    expect(cafeData('{"schemaVersion":1,"error":null,"data":{"resource":{"name":"demo"}}}'))
+      .toEqual({ resource: { name: "demo" } });
+  });
   it("rejects errors and incompatible schemas instead of caching negative answers", () => {
     expect(() =>
       cafeData(

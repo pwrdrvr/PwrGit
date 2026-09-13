@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, mkdir, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -104,4 +104,43 @@ it("never rewrites an SSH HostName through forge www canonicalization", async ()
   config = config.replace("hostname git.cafe", "hostname www.git.cafe");
   await expect(service.inspect("gitcafe", "git.cafe", 7)).rejects.toThrow("terminal verification");
   expect(run.mock.calls.some(([binary]) => binary === "ssh-keyscan")).toBe(false);
+});
+
+// `allowed()` was asked about the host the renderer named. A HostName stanza
+// makes `ssh -G` answer with a different endpoint, and the keyscan and the
+// known_hosts line would then act on a host nothing checked.
+it("refuses a host redirected elsewhere by SSH configuration", async () => {
+  config = config.replace("hostname git.cafe", "hostname other.example");
+  await expect(service.inspect("gitcafe", "git.cafe", 7)).rejects.toThrow("redirected");
+  expect(run.mock.calls.some(([binary]) => binary === "ssh-keyscan")).toBe(false);
+});
+
+// Both states refuse the write; this is about which one the user is shown.
+// A key that contradicts the published list while another is already trusted
+// is an interception signature, not a housekeeping note.
+it("keeps a published mismatch when trust for the endpoint already exists", async () => {
+  lookup.mockResolvedValue({ sourceUrl: "https://example.com/keys", keys: [] });
+  // `existing` is only consulted for a known_hosts file that has content.
+  await writeFile(join(home, "global_hosts"), "@revoked |1|hashed key\n");
+  found = true;
+  const proposal = await service.inspect("gitcafe", "git.cafe", 7);
+  expect(proposal).toMatchObject({ verification: "mismatch", canTrust: false });
+  expect(proposal.message).toContain("Do not connect");
+  expect(proposal.message).toContain("already trusted");
+});
+
+it("recovers from a lock file a killed approval left behind", async () => {
+  await mkdir(join(home, ".ssh"), { recursive: true });
+  const lockPath = join(home, ".ssh", ".pwrgit-host-trust.lock");
+  await writeFile(lockPath, "");
+  const proposal = await service.inspect("gitcafe", "git.cafe", 7);
+  // Still inside the window a live approval could hold it: refuse.
+  await expect(service.trust(proposal.id, 7)).rejects.toThrow("in progress");
+  const stale = await service.inspect("gitcafe", "git.cafe", 7);
+  // Backdate the lock itself: staleness is real wall-clock against the file's
+  // mtime, not the injected proposal clock.
+  const old = new Date(Date.now() - 120000);
+  await utimes(lockPath, old, old);
+  await service.trust(stale.id, 7);
+  expect(await readFile(join(home, ".ssh", "known_hosts"), "utf8")).toBe(`git.cafe ${key}\n`);
 });

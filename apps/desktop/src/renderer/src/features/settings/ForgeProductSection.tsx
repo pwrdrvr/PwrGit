@@ -629,7 +629,12 @@ function blocks(state: ForgeProductState): boolean {
  * with its quotes in Settings → Forges.
  */
 export function codeSpans(text: string): ReactNode {
-  return text.split("`").map((part, index) =>
+  const parts = text.split("`");
+  // An odd count means an unclosed backtick, which would otherwise render the
+  // whole rest of the sentence as the command to run — prose the reader would
+  // paste into a shell. Print it verbatim instead.
+  if (parts.length % 2 === 0) return text;
+  return parts.map((part, index) =>
     index % 2 === 0 ? part : <code key={index}>{part}</code>
   );
 }
@@ -670,8 +675,10 @@ function capabilities(status: ForgeStatus): ReactNode {
   const keys = Object.keys(CAPABILITY_LABELS) as (keyof ForgeCapabilities)[];
   const supported = keys.filter((key) => status.capabilities[key]);
   const missing = keys.filter((key) => !status.capabilities[key]);
+  // Lowercased like the missing list below it: these are sentence fragments
+  // after "Also available:", not headings, and the two lines sit adjacent.
   const supportedText = supported
-    .map((key) => CAPABILITY_LABELS[key])
+    .map((key) => CAPABILITY_LABELS[key].toLowerCase())
     .join(" · ");
   const missingText =
     missing.length === 0

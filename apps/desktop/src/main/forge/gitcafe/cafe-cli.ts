@@ -82,7 +82,7 @@ export type CafeRunner = (
 ) => Promise<string>;
 
 /** Every command is noninteractive. Explicit targets always override CAFE_HOST. */
-export const runCafe: CafeRunner = (args, options = {}) => {
+export const runCafe: CafeRunner = async (args, options = {}) => {
   const env = { ...options.env };
   const targetIndex = args.indexOf("--host");
   const target = targetIndex < 0 ? undefined : args[targetIndex + 1];
@@ -143,7 +143,10 @@ export function cafeData(stdout: string): Record<string, unknown> {
     throw new ForgeResponseError("GitCafe returned invalid JSON.");
   }
   const envelope = object(parsed);
-  if (envelope.error !== undefined) {
+  // `null`, not just absent: `{"error": null, "data": {...}}` is an ordinary
+  // success envelope, and reading it as a failure sent every GitCafe call
+  // through `object(null)` and out as "invalid response — update cafe".
+  if (envelope.error !== undefined && envelope.error !== null) {
     const error = object(envelope.error);
     throw new Error(
       cafeClient.sanitize(
