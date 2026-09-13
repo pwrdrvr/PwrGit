@@ -20,10 +20,7 @@ import {
 } from "../git/rebase-handlers";
 import { WorktreeOperationQueue } from "../git/worktree-operation-queue";
 import type { WorktreeRefresher } from "../git/worktree-handlers";
-import {
-  registerAgentHandlers,
-  type AgentHandlerDependencies
-} from "./agent-handlers";
+import { registerAgentHandlers } from "./agent-handlers";
 import type { AgentSession } from "./agent-session";
 
 const commits: RebaseCommitRef[] = [
