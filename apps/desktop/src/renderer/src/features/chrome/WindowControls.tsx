@@ -1,6 +1,13 @@
-import { useCallback, type ReactElement } from "react";
+import {
+  useCallback,
+  useSyncExternalStore,
+  type ReactElement
+} from "react";
 import type { WindowControlAction } from "@pwrgit/shared";
-import { useWindowFrameState } from "./use-window-frame-state";
+import {
+  isWindowMaximized,
+  subscribeWindowFrame
+} from "../../lib/window-frame";
 
 /** One glyph geometry for all three buttons, so their weights match. */
 const glyph = {
@@ -31,7 +38,11 @@ export function WindowControls(): ReactElement {
   // The window's own maximize events are the truth, not this button's last
   // click: `maximize()` that the WM refuses fires nothing, and a maximize from
   // anywhere else fires all the same.
-  const maximized = useWindowFrameState();
+  const maximized = useSyncExternalStore(
+    subscribeWindowFrame,
+    isWindowMaximized,
+    isWindowMaximized
+  );
 
   const run = useCallback((action: WindowControlAction): void => {
     void window.pwrgit.runWindowControl(action);

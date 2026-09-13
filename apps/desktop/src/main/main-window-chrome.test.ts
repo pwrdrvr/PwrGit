@@ -1,8 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import {
-  hideNativeMenuBar,
-  mainWindowChromeOptions
-} from "./main-window-chrome";
+import { describe, expect, it } from "vitest";
+import { mainWindowChromeOptions } from "./main-window-chrome";
 import { titleBarOverlay } from "./window-chrome";
 
 describe("main window chrome", () => {
@@ -23,33 +20,12 @@ describe("main window chrome", () => {
     }
   );
 
-  it("goes frameless on Linux without arming the Alt menu-bar reveal", () => {
+  it("goes frameless on Linux, where nothing else is on offer", () => {
+    // No overlay to reserve and no menu bar to suppress — Electron builds none
+    // for a frameless window, which is what `hidden` makes this.
     expect(mainWindowChromeOptions("dark", "linux")).toEqual({
-      titleBarStyle: "hidden",
-      autoHideMenuBar: false
+      titleBarStyle: "hidden"
     });
   });
 
-  it("hides the Linux menu bar while leaving the menu attached", () => {
-    const window = {
-      setAutoHideMenuBar: vi.fn(),
-      setMenuBarVisibility: vi.fn()
-    };
-    hideNativeMenuBar(window, "linux");
-    expect(window.setAutoHideMenuBar).toHaveBeenCalledWith(false);
-    expect(window.setMenuBarVisibility).toHaveBeenCalledWith(false);
-  });
-
-  it.each(["darwin", "win32"] as const)(
-    "leaves the %s menu bar alone — there is none in the window",
-    (platform) => {
-      const window = {
-        setAutoHideMenuBar: vi.fn(),
-        setMenuBarVisibility: vi.fn()
-      };
-      hideNativeMenuBar(window, platform);
-      expect(window.setAutoHideMenuBar).not.toHaveBeenCalled();
-      expect(window.setMenuBarVisibility).not.toHaveBeenCalled();
-    }
-  );
 });

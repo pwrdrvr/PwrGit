@@ -4,17 +4,21 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WindowFrameState } from "@pwrgit/shared";
+import {
+  __resetWindowFrameForTests,
+  startWindowFrameSync
+} from "../../lib/window-frame";
 import { WindowControls } from "./WindowControls";
 
 let container: HTMLDivElement;
 let root: Root;
 const runWindowControl = vi.fn();
 const readWindowFrameState = vi.fn();
-const stopListening = vi.fn();
 let pushFrameState: ((state: WindowFrameState) => void) | undefined;
 
 beforeEach(() => {
-  runWindowControl.mockResolvedValue(null);
+  __resetWindowFrameForTests();
+  runWindowControl.mockResolvedValue(undefined);
   readWindowFrameState.mockResolvedValue({ maximized: false });
   container = document.createElement("div");
   document.body.append(container);
@@ -30,7 +34,7 @@ beforeEach(() => {
       readWindowFrameState,
       onWindowFrameState: (handler: (state: WindowFrameState) => void) => {
         pushFrameState = handler;
-        return stopListening;
+        return vi.fn();
       }
     }
   });
@@ -41,12 +45,12 @@ afterEach(async () => {
   container.remove();
   runWindowControl.mockReset();
   readWindowFrameState.mockReset();
-  stopListening.mockReset();
   pushFrameState = undefined;
   Reflect.deleteProperty(window, "pwrgit");
 });
 
 async function renderControls(): Promise<void> {
+  await act(async () => startWindowFrameSync("linux"));
   await act(async () => {
     root.render(<WindowControls />);
   });
@@ -71,14 +75,6 @@ describe("Linux caption buttons", () => {
     expect(runWindowControl.mock.calls).toEqual([["minimize"], ["close"]]);
   });
 
-  it("stamps the frame state on the document for the window hairline", async () => {
-    await renderControls();
-    expect(document.documentElement.dataset["windowFrame"]).toBe("restored");
-
-    await act(async () => pushFrameState?.({ maximized: true }));
-    expect(document.documentElement.dataset["windowFrame"]).toBe("maximized");
-  });
-
   it("opens on Restore when the window is already maximized", async () => {
     readWindowFrameState.mockResolvedValue({ maximized: true });
     await renderControls();
@@ -99,19 +95,12 @@ describe("Linux caption buttons", () => {
 
   it("waits for the window to actually maximize before flipping the glyph", async () => {
     // A `maximize()` the window manager declines emits no event, and the glyph
-    // has to still say Maximize. The action's own reply is only an ack.
-    runWindowControl.mockResolvedValue({ maximized: true });
+    // has to still say Maximize.
     await renderControls();
     await act(async () => button("Maximize")?.click());
     expect(button("Maximize")).not.toBeNull();
 
     await act(async () => pushFrameState?.({ maximized: true }));
     expect(button("Restore")).not.toBeNull();
-  });
-
-  it("stops listening when the strip goes away", async () => {
-    await renderControls();
-    await act(async () => root.render(null));
-    expect(stopListening).toHaveBeenCalledOnce();
   });
 });

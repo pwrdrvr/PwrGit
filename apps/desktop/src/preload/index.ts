@@ -73,12 +73,11 @@ const api = {
 
   // Linux paints its own caption buttons: a frameless window there has no
   // traffic lights and no Window Controls Overlay to hand them to.
-  runWindowControl: (
-    action: WindowControlAction
-  ): Promise<WindowFrameState | null> =>
-    ipcRenderer.invoke(WINDOW_CONTROL_CHANNEL, action) as Promise<
-      WindowFrameState | null
-    >,
+  // Invoke, not send: a control that never reached a handler should reject
+  // rather than look like it worked. The button redraws from the frame-state
+  // pushes below, so there is nothing to answer with.
+  runWindowControl: (action: WindowControlAction): Promise<void> =>
+    ipcRenderer.invoke(WINDOW_CONTROL_CHANNEL, action) as Promise<void>,
 
   readWindowFrameState: (): Promise<WindowFrameState | null> =>
     ipcRenderer.invoke(WINDOW_FRAME_STATE_CHANNEL) as Promise<

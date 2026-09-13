@@ -44,41 +44,37 @@ beforeEach(() => {
 });
 
 describe("window control actions", () => {
-  it("minimizes without claiming the window is now maximized", () => {
+  it("minimizes the window it was handed", () => {
     const window = fakeWindow();
-    expect(applyWindowControl(window, "minimize")).toEqual({ maximized: false });
+    applyWindowControl(window, "minimize");
     expect(window.minimize).toHaveBeenCalledOnce();
   });
 
   it("toggles both ways from the window's own state", () => {
     const window = fakeWindow();
-    expect(applyWindowControl(window, "toggle-maximize")).toEqual({
-      maximized: true
-    });
-    expect(applyWindowControl(window, "toggle-maximize")).toEqual({
-      maximized: false
-    });
+    applyWindowControl(window, "toggle-maximize");
     expect(window.maximize).toHaveBeenCalledOnce();
+    applyWindowControl(window, "toggle-maximize");
     expect(window.unmaximize).toHaveBeenCalledOnce();
   });
 
-  it("closes and reports no state for a window on its way out", () => {
+  it("closes", () => {
     const window = fakeWindow();
-    expect(applyWindowControl(window, "close")).toBeNull();
+    applyWindowControl(window, "close");
     expect(window.close).toHaveBeenCalledOnce();
   });
 
   it("ignores an action name it does not know rather than falling through", () => {
     const window = fakeWindow();
-    expect(applyWindowControl(window, "quit")).toBeNull();
-    expect(applyWindowControl(window, { action: "close" })).toBeNull();
+    applyWindowControl(window, "quit");
+    applyWindowControl(window, { action: "close" });
     expect(window.close).not.toHaveBeenCalled();
     expect(window.minimize).not.toHaveBeenCalled();
   });
 
   it("touches nothing on a destroyed window", () => {
     const window = fakeWindow({ destroyed: true });
-    expect(applyWindowControl(window, "minimize")).toBeNull();
+    applyWindowControl(window, "minimize");
     expect(window.minimize).not.toHaveBeenCalled();
   });
 });
@@ -121,6 +117,8 @@ describe("window frame state", () => {
   it("ignores a request from a renderer with no window", () => {
     electronMock.fromWebContents.mockReturnValue(null);
     const control = electronMock.handlers.get("pwrgit:window-control:invoke");
-    expect(control?.({ sender: {} }, "close")).toBeNull();
+    expect(control?.({ sender: {} }, "close")).toBeUndefined();
+    const read = electronMock.handlers.get("pwrgit:window-control:state");
+    expect(read?.({ sender: {} })).toBeNull();
   });
 });

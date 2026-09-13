@@ -25,9 +25,7 @@ type PwrGitBridge = {
   getAppMenuModel: () => Promise<AppMenuTopLevel[]>;
   popupAppMenu: (payload: AppMenuPopupRequest) => void;
   /** Linux caption buttons: the renderer paints them, main owns the window. */
-  runWindowControl: (
-    action: WindowControlAction
-  ) => Promise<WindowFrameState | null>;
+  runWindowControl: (action: WindowControlAction) => Promise<void>;
   readWindowFrameState: () => Promise<WindowFrameState | null>;
   onWindowFrameState: (handler: (state: WindowFrameState) => void) => () => void;
 };

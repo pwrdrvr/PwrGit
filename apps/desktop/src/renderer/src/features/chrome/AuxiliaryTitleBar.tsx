@@ -1,17 +1,7 @@
-import { useWindowFrameState } from "./use-window-frame-state";
-
-/**
- * The strip every supporting window wears. These windows keep the platform's
- * own frame, so — unlike the profile window's `TitleBar` — it paints no window
- * buttons; it tracks the frame state only so the Linux window hairline knows
- * when the window is maximized and there is no edge left to draw.
- */
 export function AuxiliaryTitleBar(props: {
   section: string;
   title: string;
 }) {
-  useWindowFrameState();
-
   return (
     <header className="titlebar auxiliary-titlebar">
       <div className="titlebar__gutter" />
