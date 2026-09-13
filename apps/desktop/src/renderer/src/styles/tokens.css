@@ -25,10 +25,32 @@
      name. 13px is the "md" default and, like the other appearance axes,
      carries no attribute; the notch ladder at the bottom of this file moves it
      ±2px. Repo names read it directly and worktree branches derive from it
-     (−1px), so the header/row hierarchy survives every notch. Counts, tags,
-     and section labels deliberately hold still — a notch should read as
-     "bigger names there", not as page zoom. */
+     (−1px), so the header/row hierarchy survives every notch.
+
+     The sidebar's smaller type derives from it too, through the two tokens
+     below. That is a REVERSAL: counts, tags and section labels used to hold
+     still on a fixed 9–10px tier, on the reasoning that a notch should read as
+     "bigger names there" rather than as page zoom. It read instead as a
+     setting that half-worked — at "md" the qualifiers beside a 13px name were
+     9–10px and too small to read comfortably, and no notch moved them. The
+     axis now scales the whole sidebar surface, which is what the control's
+     name promises. */
   --sidebar-title-size: 13px;
+  /* Chips, tags, count badges and ages — everything in the sidebar tree that
+     qualifies a name rather than being one. −2px keeps it a step below the
+     name at every notch, and resolves to 11px at "md", so the tier that used
+     to sit at a fixed 10px gains the 1px it needed to be readable while the
+     handful of sidebar chrome already at 11px is left exactly where it was.
+
+     Read it from a SIDEBAR-SCOPED rule for anything that also ships outside
+     the sidebar. `.badge` is the case that bites: the main pane's dirty count
+     in `.wt-header` uses it, and that surface must not move when this control
+     does. */
+  --sidebar-chip-size: calc(var(--sidebar-title-size) - 2px);
+  /* Section eyebrows — WORKTREES, BRANCHES, the group-by-folder heading — and
+     the uppercase qualifiers that share their tier. One step below the chips,
+     as they were when both were fixed (9px under 10px). 10px at "md". */
+  --sidebar-eyebrow-size: calc(var(--sidebar-title-size) - 3px);
   /* The repo header's height, derived from the axis so anything that must
      clear it (the selected worktree row sticks just below it) follows the
      notch and the density. title × 1.25 line-height + vertical padding ×2 +
@@ -37,7 +59,9 @@
   /* The group-by-folder heading's height. A token because THREE rules have to
      agree on it: the heading's own box, the repo row that sticks below it, and
      the selected worktree row that sticks below both. It holds still across the
-     notches — the heading is a fixed-tier 10px label, like the counts. */
+     notches even though its label no longer does: 28px already clears the
+     label's largest tier (13px at "xl"), so deriving it would move three
+     sticky offsets to buy nothing. */
   --sidebar-group-head-height: 28px;
   /* The repo row's inline padding, split in two because the left side has to
      seat the drag grip and the right side does not. A token pair because THREE
@@ -286,9 +310,11 @@
 
    These are NOT theme blocks: they carry no colors and are declared once, not
    per theme (see `--sidebar-title-size` in `:root` above, and the "Not colors"
-   exemptions in theme-contract.test.ts). Only the named surface's typography
-   scales, so a notch reads as "bigger names in the sidebar" rather than a page
-   zoom. "md" is the tuned default and, like the theme, carries no attribute.
+   exemptions in theme-contract.test.ts). A notch moves the sidebar's whole
+   type scale — names, chips and eyebrows together, through the two derived
+   tokens beside the axis — and nothing outside the sidebar, so it is a sidebar
+   zoom rather than a page zoom. "md" is the tuned default and, like the theme,
+   carries no attribute.
    --------------------------------------------------------------------------- */
 :root[data-sidebar-text="xs"] {
   --sidebar-title-size: 11px;

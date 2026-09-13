@@ -85,6 +85,8 @@ const INHERITS_FROM_DARK = new Set([
   "--font-sans",
   "--font-mono",
   "--sidebar-title-size", // appearance axis, theme-neutral (see tokens.css)
+  "--sidebar-chip-size", // derived from the axis; not a color
+  "--sidebar-eyebrow-size", // derived from the axis; not a color
   "--sidebar-repo-row-height", // derived from the axis; not a color
   "--sidebar-group-head-height", // sticky-stack geometry; not a color
   "--sidebar-repo-inset", // repo-row inline padding; not a color

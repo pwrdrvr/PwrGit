@@ -31,10 +31,12 @@ import { ForgeMark } from "./ForgeMark";
  * beside it, and matching them is what makes the group read as one row of
  * glyphs rather than as a logo dropped among icons.
  *
- * Inside a pill it is bounded by the pill instead. 16px is as tall as a chip
- * on a repo row can be (`app.css`, `.forge-chip`), which leaves 14px between
- * the borders — so 11px is what keeps visible air on both sides, and it sets
- * the mark against the 10px word beside it rather than towering over it.
+ * Inside a pill it is bounded by the pill instead, and the pill now grows
+ * with `--sidebar-chip-size`. So this 11px is only the value at the default
+ * notch and the fallback for the img's own attributes: `app.css` sizes the
+ * in-pill mark at `1em`, which is that same 11px at "md" and keeps the mark
+ * set against the word beside it rather than towering over it — or being
+ * towered over — at the notches either side.
  */
 const MARK_SIZE = { bare: 12, inPill: 11 } as const;
 export function ForgeChip({ chip }: { chip: ForgeChipView }) {
