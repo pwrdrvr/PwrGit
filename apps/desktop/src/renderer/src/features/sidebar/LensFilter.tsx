@@ -1,6 +1,7 @@
 import { useRef, type ReactNode } from "react";
 import type { Lens } from "@pwrgit/shared";
-import { formatLensCount, LENSES } from "./repo-view";
+import { useViewportTooltip } from "../../lib/useViewportTooltip";
+import { formatLensCount, LENSES, selectableLenses } from "./repo-view";
 import { tablistKeyHandler } from "../../lib/tablistKeys";
 
 /**
@@ -64,6 +65,21 @@ const DESCRIPTION: Record<Lens, string> = {
   All: "Every indexed repo"
 };
 
+/**
+ * What would put something in an empty lens, for the chip that can't be
+ * entered. "Unavailable" is not an answer anybody can act on — and three of
+ * these read as empty on a fresh scan for a reason the user has no way to
+ * guess, which is that PwrGit hasn't looked at those repos yet.
+ */
+const WHEN_EMPTY: Record<Lens, string> = {
+  Focused: "Nothing here yet. Open or pin a repo and it lands in Focused.",
+  Pinned: "Nothing pinned yet. Star a repo to keep it here.",
+  Behind: "Nothing here yet. PwrGit compares a repo with its upstream once you open its row.",
+  Stale: "Nothing here yet. PwrGit works out what's prunable once you open a repo's row.",
+  // All is never unavailable — it is the lens everything else falls back to.
+  All: ""
+};
+
 export function LensFilter({
   lens,
   counts,
@@ -77,11 +93,20 @@ export function LensFilter({
   controlsId: string;
 }) {
   const activeCount = counts[lens];
+  // An in-app tooltip, not `title`. These five icons are the only label the
+  // control has, so the explanation cannot be left to a native tooltip that a
+  // dimmed chip would not show at all — a `disabled` button receives no
+  // pointer events, so the one chip most in need of explaining itself would be
+  // the one that stayed silent. This is the same primitive the repo rows use.
+  const tip = useViewportTooltip();
   // role="tablist" promises one Tab stop with the arrows moving inside it.
   // Every chip used to be its own stop and the arrows did nothing, so reaching
   // the repo list from the sidebar search meant tabbing past all six.
   const chipRefs = useRef<Partial<Record<Lens, HTMLButtonElement>>>({});
-  const onKeyDown = tablistKeyHandler(LENSES, lens, (next) => {
+  // Arrows travel over the lenses that can be entered, so the strip never
+  // selects its way into a view that is empty by construction.
+  const reachable = selectableLenses(counts, lens);
+  const onKeyDown = tablistKeyHandler(reachable, lens, (next) => {
     onChange(next);
     chipRefs.current[next]?.focus();
   });
@@ -95,6 +120,8 @@ export function LensFilter({
       {LENSES.map((l) => {
         const count = counts[l];
         const label = count > 0 ? `${l} (${count})` : l;
+        const available = reachable.includes(l);
+        const tooltip = `${label}\n${available ? DESCRIPTION[l] : WHEN_EMPTY[l]}`;
         return (
           <button
             key={l}
@@ -109,9 +136,22 @@ export function LensFilter({
             aria-selected={l === lens}
             aria-controls={controlsId}
             aria-label={label}
-            title={`${label} — ${DESCRIPTION[l]}`}
-            className={`lens-chip${l === lens ? " is-active" : ""}`}
-            onClick={() => onChange(l)}
+            // aria-disabled rather than `disabled`, so the chip keeps its
+            // hover and its tooltip: "why is this one grey" is exactly the
+            // question it has to be able to answer.
+            aria-disabled={available ? undefined : true}
+            className={`lens-chip${l === lens ? " is-active" : ""}${
+              available ? "" : " is-empty"
+            }`}
+            onMouseEnter={(e) => tip.show(e.currentTarget, tooltip)}
+            onMouseLeave={tip.hide}
+            onFocus={(e) => tip.show(e.currentTarget, tooltip)}
+            onBlur={tip.hide}
+            onClick={() => {
+              if (!available) return;
+              tip.hide();
+              onChange(l);
+            }}
           >
             <svg
               width="15"
@@ -148,6 +188,7 @@ export function LensFilter({
           {formatLensCount(activeCount)}
         </span>
       )}
+      {tip.tooltipNode}
     </div>
   );
 }

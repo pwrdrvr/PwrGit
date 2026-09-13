@@ -32,9 +32,10 @@ test("failed boot reads explain the problem and recover without relaunching", as
   await repoError.getByRole("button", { name: "Try again" }).click();
 
   // The successful retry resolves to a real empty list, not another error and
-  // not an indefinite scanner. Focused is the default lens, so recovery returns
-  // to its honest first-run copy and leaves the ordinary add action usable.
-  await expect(window.getByText("No focused repos yet.")).toBeVisible();
+  // not an indefinite scanner. A window with no remembered lens lands in All,
+  // so recovery returns to the one empty state that says what to do next and
+  // leaves the ordinary add action usable.
+  await expect(window.getByText("No repos yet")).toBeVisible();
   await expect(window.getByRole("alert")).toHaveCount(0);
   await expect(window.getByRole("button", { name: "Add folders…" })).toBeEnabled();
 });
