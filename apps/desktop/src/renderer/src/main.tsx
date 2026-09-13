@@ -6,6 +6,7 @@ import { AppDocumentWindow } from "./features/documents/AppDocumentWindow";
 import { LogsWindow } from "./features/logs/LogsWindow";
 import { SettingsWindow } from "./features/settings/SettingsWindow";
 import { startAppearanceSync } from "./lib/appearance";
+import { startWindowFrameSync } from "./lib/window-frame";
 import "./styles/app.css";
 
 const container = document.getElementById("root");
@@ -15,6 +16,12 @@ if (container === null) throw new Error("root element not found");
 // the left; Windows caption buttons overlay the right side of our titlebar.
 // Stamp this before React renders so the first frame uses the correct layout.
 document.documentElement.dataset["platform"] = window.pwrgit.platform;
+
+// Linux gives a window no frame of its own to be told apart from what sits
+// behind it, so the app paints its own edge and has to know when the window is
+// maximized and there is no edge left to draw. Every window kind starts this,
+// the same way every one of them stamps the platform above.
+startWindowFrameSync();
 
 // Stamp the appearance axes on <html> before the first render, for every
 // window kind — otherwise a non-default text size would flash at its default

@@ -13,6 +13,9 @@ function installBridge(
       appearance: { theme: "dark", resolvedTheme: "dark" },
       getAppMenuModel: async () => [],
       popupAppMenu: () => {},
+      runWindowControl: async () => undefined,
+      readWindowFrameState: async () => null,
+      onWindowFrameState: () => () => {},
       ...bridge
     }
   };

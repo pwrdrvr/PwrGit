@@ -202,21 +202,24 @@ textarea,
   -webkit-app-region: drag;
 }
 
-/* macOS traffic lights occupy the left side of the hidden-inset title bar. */
+/* macOS traffic lights occupy the left side of the hidden-inset title bar, so
+   the strip keeps that much clear for them. Only macOS: Windows overlays its
+   caption buttons on the right and Linux paints its own there, and a gutter
+   reserved on every platform is 68px of empty strip in front of the wordmark
+   on both of them. */
 .titlebar__gutter {
-  width: 68px;
   flex: 0 0 auto;
 }
 
-/* Windows caption buttons overlay the right edge instead. Clear the macOS
-   gutter and reserve the native min/max/close strip on the correct side. */
+:root[data-platform="darwin"] .titlebar__gutter {
+  width: 68px;
+}
+
+/* Windows caption buttons overlay the right edge instead: reserve the native
+   min/max/close strip on that side. */
 :root[data-platform="win32"] .titlebar {
   padding-left: 12px;
   padding-right: 150px;
-}
-
-:root[data-platform="win32"] .titlebar__gutter {
-  display: none;
 }
 
 /* Wordmark, Pwr-family house style: neutral stem, accent tail. */
@@ -275,6 +278,74 @@ textarea,
 .titlebar__spacer {
   flex: 1;
   min-width: 12px;
+}
+
+/* Linux caption buttons. A frameless window there gets neither traffic lights
+   nor a Windows controls overlay, so nothing draws min/max/close unless the
+   strip does — GNOME's side, order and roundness, in our own palette. Close
+   hovers to the danger wash rather than a solid red fill: the glyph has to
+   stay legible in both themes, and `--danger-base` is a mid red in one and a
+   near-black red in the other. */
+.titlebar__controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 10px;
+  -webkit-app-region: no-drag;
+}
+
+.titlebar__control {
+  appearance: none;
+  border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--bg-panel-hover);
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+.titlebar__control:hover {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+
+.titlebar__control--close:hover {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+
+.titlebar__control:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* Every window's own edge, on the one platform that draws us none.
+   Electron gives a frameless Linux window an `OpaqueFrameView`: no border, no
+   GTK shadow on X11, and no rounded corners — `roundedCorners` is a Windows
+   option, and the only way to round a frameless window's corners is to make it
+   transparent, which Electron documents as giving up resizing. So the edge is
+   a hairline we paint, and the corners stay square.
+   Fixed and `pointer-events: none`, above every pane and modal (the ceiling
+   elsewhere in this file is 140): it costs no layout and swallows no clicks.
+   It goes away when the frame is flush with the screen — a maximized window
+   has no edge to show. `#root`, not the app shell: Settings, Logs and the
+   document windows keep the native Linux frame, whose border and shadow
+   vanish against our own dark surfaces, and they need the edge just as much.
+   On Wayland Electron does give frameless windows a GTK
+   drop shadow, which is what really separates a GNOME window from the one
+   behind it; on X11 this hairline is all there is. */
+:root[data-platform="linux"]:not([data-window-frame="maximized"]) #root::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  border: 1px solid var(--border-strong);
+  pointer-events: none;
+  z-index: 200;
 }
 
 .auxiliary-titlebar__breadcrumb {

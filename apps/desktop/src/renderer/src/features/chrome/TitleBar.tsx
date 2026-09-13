@@ -4,6 +4,7 @@ import { currentPlatform, pathTail } from "../../lib/platform";
 import { CopyTarget } from "../shell/CopyTarget";
 import { BranchSwitcher } from "../graph/BranchSwitcher";
 import { AppMenuBar } from "./AppMenuBar";
+import { WindowControls } from "./WindowControls";
 
 /**
  * The window's top strip: wordmark, then the selected worktree's identity as a
@@ -39,13 +40,17 @@ export function TitleBar({
   return (
     <>
       <div className="titlebar">
-        {/* macOS-only traffic-light reservation; CSS removes it on Windows. */}
+        {/* macOS-only traffic-light reservation; CSS gives it width there
+            and nowhere else. */}
         <div className="titlebar__gutter" />
         <p className="titlebar__brand">
           Pwr<span className="titlebar__brand-accent">Git</span>
         </p>
 
-        {platform === "win32" && <AppMenuBar />}
+        {/* macOS keeps File/Edit in the system menu bar. Windows and Linux
+            hid the title bar the native row lived in, so the strip paints the
+            top-level labels and pops the real submenus. */}
+        {platform !== "darwin" && <AppMenuBar />}
 
         {repo !== null && worktree !== null && (
           <div className="titlebar__id">
@@ -92,6 +97,10 @@ export function TitleBar({
         )}
 
         <div className="titlebar__spacer" />
+
+        {/* Linux frameless windows get neither traffic lights nor a Windows
+            controls overlay — nobody draws min/max/close but us. */}
+        {platform === "linux" && <WindowControls />}
       </div>
 
       {/* Sibling of the strip, never inside it: a full-window modal nested in

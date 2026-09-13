@@ -5,10 +5,14 @@ import {
   APP_MENU_POPUP_CHANNEL,
   IPC_DISPATCH_CHANNEL,
   IPC_EVENT_CHANNEL,
+  WINDOW_CONTROL_CHANNEL,
+  WINDOW_FRAME_STATE_CHANNEL,
   type AppMenuPopupRequest,
   parseAppearanceArg,
   type AppAppearance,
-  type AppMenuTopLevel
+  type AppMenuTopLevel,
+  type WindowControlAction,
+  type WindowFrameState
 } from "@pwrgit/shared";
 
 // Each window is bound to one profile, passed by the main process via
@@ -65,7 +69,31 @@ const api = {
     ipcRenderer.invoke(APP_MENU_MODEL_CHANNEL) as Promise<AppMenuTopLevel[]>,
 
   popupAppMenu: (payload: AppMenuPopupRequest): void =>
-    ipcRenderer.send(APP_MENU_POPUP_CHANNEL, payload)
+    ipcRenderer.send(APP_MENU_POPUP_CHANNEL, payload),
+
+  // Linux paints its own caption buttons: a frameless window there has no
+  // traffic lights and no Window Controls Overlay to hand them to.
+  // Invoke, not send: a control that never reached a handler should reject
+  // rather than look like it worked. The button redraws from the frame-state
+  // pushes below, so there is nothing to answer with.
+  runWindowControl: (action: WindowControlAction): Promise<void> =>
+    ipcRenderer.invoke(WINDOW_CONTROL_CHANNEL, action) as Promise<void>,
+
+  readWindowFrameState: (): Promise<WindowFrameState | null> =>
+    ipcRenderer.invoke(WINDOW_FRAME_STATE_CHANNEL) as Promise<
+      WindowFrameState | null
+    >,
+
+  onWindowFrameState: (
+    handler: (state: WindowFrameState) => void
+  ): (() => void) => {
+    const listener = (
+      _event: IpcRendererEvent,
+      state: WindowFrameState
+    ): void => handler(state);
+    ipcRenderer.on(WINDOW_FRAME_STATE_CHANNEL, listener);
+    return () => ipcRenderer.off(WINDOW_FRAME_STATE_CHANNEL, listener);
+  }
 };
 
 contextBridge.exposeInMainWorld("pwrgit", api);
