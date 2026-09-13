@@ -129,7 +129,7 @@ export function ForgeProductSection(props: {
 }) {
   const { kind, hosts, status } = props;
   const state = forgeProductState(status);
-  const { label, cli, addHost } = forgeProduct(kind);
+  const { label, addHost } = forgeProduct(kind);
   const rows = hosts ?? [];
 
   return (
