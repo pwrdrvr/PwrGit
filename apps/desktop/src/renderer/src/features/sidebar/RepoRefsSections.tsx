@@ -5,21 +5,24 @@ import {
   useMemo,
   useRef,
   useState,
-  type KeyboardEvent as ReactKeyboardEvent
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactElement
 } from "react";
 import type { TagSummary, LocalBranchSummary, Repo, RepoRefs, Worktree } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
+import { SwitchGlyph } from "../../lib/SwitchGlyph";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { useForgeNaming } from "../../state/useForgeNaming";
 import { CopyTarget } from "../shell/CopyTarget";
-import { guardedSwitchBranch } from "../shell/branchSwitch";
+import { switchWorktreeToBranch } from "../shell/branchSwitch";
 import {
   branchActivation,
   branchFocusState,
   branchSectionSummary,
+  goneBranchCount,
   holderWorktreeId,
-  visibleBranches as pinCurrentFirst
+  visibleBranches as byRelevance
 } from "./branch-focus";
 import { remoteForgeChip } from "./forge-chip";
 import { ForgeChip } from "./ForgeChip";
@@ -45,8 +48,13 @@ function compactTrackingLabel(tracking: ReturnType<typeof trackingLabel>): strin
       return "Synced";
     case "No upstream":
       return "Local only";
-    case "Upstream missing":
-      return "Missing";
+    // Git's own word for it (`git branch -vv` prints `[origin/x: gone]`), and
+    // the reason the row needs one: "Missing" sits in the same warning amber as
+    // *behind* and *diverged* — states that want action — while this one means
+    // the upstream branch was deleted, i.e. the work landed and the branch is
+    // finished. It reads as breakage and means completion.
+    case "Upstream gone":
+      return "Gone";
     default:
       return tracking;
   }
@@ -169,15 +177,18 @@ export function RepoRefsSections({
     () => new Map(repo.worktrees.map((w) => [w.id, w])),
     [repo.worktrees]
   );
-  // The working target's branch is pinned first: the slice is short, and
-  // without the pin the pairing is invisible for any branch that doesn't
-  // happen to sort into the first few rows.
-  const shownBranches = pinCurrentFirst(
+  // Ranked, not sliced off the top: `repo:refs` arrives by committer date,
+  // which spends a six-row budget on whatever moved last rather than on what
+  // the user is working in. `branchRelevance` puts the working target's branch
+  // first (the pairing is invisible otherwise), then held branches, and drops
+  // branches whose upstream is gone to the bottom.
+  const shownBranches = byRelevance(
     refs?.branches ?? [],
     focusedWorktree,
     BRANCH_SLICE
   );
   const summary = branchSectionSummary(focusedWorktree);
+  const gone = goneBranchCount(refs?.branches ?? []);
 
   /**
    * "Make this branch the one I am working on", by the cheapest safe route: a
@@ -208,49 +219,69 @@ export function RepoRefsSections({
   };
 
   /** The checkout half of `activate`, split out so the in-flight flag has one
-   *  obvious scope. */
+   *  obvious scope. Every branch list in the app calls the same helper, so the
+   *  dirty confirm and the "held elsewhere" recovery cannot drift apart. */
   const switchTo = async (
     target: Worktree,
     branchName: string
   ): Promise<void> => {
-    const outcome = await guardedSwitchBranch({
+    const outcome = await switchWorktreeToBranch({
+      repoId: repo.id,
       worktreeId: target.id,
       worktreeLabel: lastSegment(target.path),
-      branch: branchName
+      branch: branchName,
+      onRevealWorktree,
+      onRefs: setRefs
     });
-    if (outcome.kind === "held") {
-      // The refs snapshot was stale — something checked this branch out after
-      // we read it. Re-list and go to whoever holds it now, which is what the
-      // user asked for; only fall back to a message if it has since vanished.
-      const fresh = await dispatch("repo:refs", { repoId: repo.id });
-      if (fresh.ok) {
-        setRefs(fresh.value);
-        const held = fresh.value.branches.find((b) => b.name === branchName);
-        const holder =
-          held === undefined ? null : holderWorktreeId(held, target.id);
-        if (holder !== null) {
-          onRevealWorktree(holder);
-          return;
-        }
+    if (outcome === "switched") await load();
+  };
+
+  /**
+   * The row control for "switch the working target onto this branch".
+   *
+   * Rendered even with nothing to move, rather than hidden: the column these
+   * mini actions share stays a column, and a control whose absence is the only
+   * explanation teaches nothing. A disabled button still announces its name, so
+   * the reason lives in the name — `title` is hover-only and AT reads the label
+   * over it.
+   */
+  const switchAction = (
+    branchName: string,
+    onSwitch: () => void
+  ): ReactElement => (
+    <button
+      className="ref-mini-action ref-mini-action--switch"
+      aria-label={
+        focusedWorktree === null
+          ? `Switch to ${branchName} — unavailable, nothing in this repository is the working target`
+          : `Switch ${lastSegment(focusedWorktree.path)} to ${branchName}`
       }
-      showErrorToast({
-        title: "Switch failed",
-        message: `${branchName} is checked out in another worktree.`
-      });
-      return;
+      title={
+        focusedWorktree === null
+          ? "Select a worktree in this repository first"
+          : `Switch ${lastSegment(focusedWorktree.path)} to ${branchName}`
+      }
+      disabled={focusedWorktree === null}
+      onClick={(event) => {
+        event.stopPropagation();
+        onSwitch();
+      }}
+    >
+      <SwitchGlyph />
+    </button>
+  );
+
+  /** A remote row's switch. It shares `activate`'s in-flight flag: Enter
+   *  auto-repeats, and `dialogs.ts` queues confirms rather than coalescing
+   *  them, so without it a held key stacks identical prompts. */
+  const switchToRemote = async (branchName: string): Promise<void> => {
+    if (activating.current || focusedWorktree === null) return;
+    activating.current = true;
+    try {
+      await switchTo(focusedWorktree, branchName);
+    } finally {
+      activating.current = false;
     }
-    if (outcome.kind === "failed") {
-      showErrorToast({
-        title: "Switch failed",
-        message:
-          outcome.code === "dirty"
-            ? `${branchName} could not be checked out without overwriting local changes. Commit or stash them first.`
-            : outcome.message.split("\n")[0],
-        detail: outcome.message
-      });
-      return;
-    }
-    if (outcome.kind === "switched") await load();
   };
 
   /** Roving tabindex across the branch rows: one tab stop for the group, arrows
@@ -312,6 +343,11 @@ export function RepoRefsSections({
                 `↑${refs.branches.filter((branch) => branch.ahead > 0).length}`}
               {refs.branches.filter((branch) => branch.behind > 0).length > 0 &&
                 ` ↓${refs.branches.filter((branch) => branch.behind > 0).length}`}
+              {/* Branches whose upstream was deleted. They rank last in the
+                  slice, so without this a repository full of finished work
+                  would say nothing about it at the one moment the reader could
+                  act — while the section is still collapsed. */}
+              {gone > 0 && ` ·${gone} gone`}
             </span>
           )}
         </button>
@@ -395,6 +431,23 @@ export function RepoRefsSections({
                     >
                       {compactTrackingLabel(trackingLabel(branch))}
                     </span>
+                    {/* The verb the row already performs on double-click, given
+                        a control. It was reachable only through a `title`
+                        tooltip, so the one visible action on a branch row was
+                        the expensive one — build a whole worktree.
+
+                        Free rows only, matching what `branchActivation` can
+                        actually do: on the current row a switch is a no-op, and
+                        on an occupied one git refuses the second checkout — the
+                        chip beside it already offers the answer the reader
+                        wanted, which is that worktree. Rendering it anyway also
+                        broke the row's own gesture: the sidebar is narrow
+                        enough that a fifth control lands under the row's centre
+                        point, so the first click of a DOUBLE-click activated it
+                        on its own, re-ranked the list, and left the `dblclick`
+                        to fire on whichever row had moved underneath. */}
+                    {state === "free" &&
+                      switchAction(branch.name, () => void activate(branch))}
                     {/* The chip names the WORKTREE, by its folder — branch and
                         worktree are 1:1, so labelling it by its branch would
                         only repeat the row. Where on disk is the new fact. */}
@@ -684,6 +737,18 @@ export function RepoRefsSections({
                             {branch.name === remote.defaultBranch && (
                               <small>default</small>
                             )}
+                            {/* A fetched branch with no local counterpart is
+                                exactly the case "switch me to it" is for, and
+                                it was the one row in the app with no switch at
+                                all. `git switch <short name>` DWIMs the local
+                                tracking branch into existence, so this costs a
+                                checkout and no directory. A branch some
+                                worktree already holds resolves to that
+                                worktree instead — see `switchWorktreeToBranch`. */}
+                            {checkedOutId === undefined &&
+                              switchAction(branch.name, () =>
+                                void switchToRemote(branch.name)
+                              )}
                             <button
                               className="ref-mini-action"
                               aria-label={
@@ -768,6 +833,7 @@ export function RepoRefsSections({
           onLocateTag={onLocateTag}
           repo={repo}
           refs={refs}
+          focusedWorktree={focusedWorktree}
           now={now}
           initialTab={browser}
           onRefresh={load}

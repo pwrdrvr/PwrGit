@@ -29,10 +29,14 @@ const repo: Repo = {
   worktrees: [worktree]
 };
 
+/** These specs render the strip at rest — the branch picker is never opened,
+ *  so its "held elsewhere" escape hatch has nothing to do. */
+const chrome = { onRevealBranchWorktree: () => {} };
+
 describe("TitleBar path chip", () => {
   it("renders a Windows path tail instead of the entire backslash path", () => {
     const markup = renderToStaticMarkup(
-      <TitleBar repo={repo} worktree={worktree} platform="win32" />
+      <TitleBar {...chrome} repo={repo} worktree={worktree} platform="win32" />
     );
     expect(markup).toContain("pwrdrvr\\PwrGit");
     expect(markup).not.toContain(">C:\\Users\\me\\pwrdrvr\\PwrGit<");
@@ -41,6 +45,7 @@ describe("TitleBar path chip", () => {
   it("keeps slash-separated macOS path tails", () => {
     const markup = renderToStaticMarkup(
       <TitleBar
+        {...chrome}
         repo={repo}
         worktree={{ ...worktree, path: "/Users/me/pwrdrvr/PwrGit" }}
         platform="darwin"
@@ -53,7 +58,7 @@ describe("TitleBar path chip", () => {
 describe("TitleBar window chrome", () => {
   it("paints caption buttons on Linux, where no frame provides them", () => {
     const markup = renderToStaticMarkup(
-      <TitleBar repo={repo} worktree={worktree} platform="linux" />
+      <TitleBar {...chrome} repo={repo} worktree={worktree} platform="linux" />
     );
     expect(markup).toContain('aria-label="Minimize"');
     expect(markup).toContain('aria-label="Maximize"');
@@ -64,7 +69,7 @@ describe("TitleBar window chrome", () => {
     "leaves %s window buttons to the OS",
     (platform) => {
       const markup = renderToStaticMarkup(
-        <TitleBar repo={repo} worktree={worktree} platform={platform} />
+        <TitleBar {...chrome} repo={repo} worktree={worktree} platform={platform} />
       );
       expect(markup).not.toContain('aria-label="Close"');
     }
@@ -72,7 +77,7 @@ describe("TitleBar window chrome", () => {
 
   it("keeps the gutter element everywhere and leaves its width to CSS", () => {
     const markup = renderToStaticMarkup(
-      <TitleBar repo={null} worktree={null} platform="linux" />
+      <TitleBar {...chrome} repo={null} worktree={null} platform="linux" />
     );
     // Width is CSS's call (darwin only) — the element itself stays, so the
     // strip has the same shape on every platform.

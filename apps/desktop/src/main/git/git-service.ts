@@ -3499,7 +3499,8 @@ async function remoteSummary(
   git: GitExec,
   cwd: string,
   name: string,
-  rows: RepoRefRow[]
+  rows: RepoRefRow[],
+  localNames: ReadonlySet<string>
 ): Promise<RemoteSummary> {
   const [fetchUrl, pushUrl, symbolicHead, skipFetchAll] = await Promise.all([
     remoteValue(git, cwd, ["remote", "get-url", name]),
@@ -3533,12 +3534,41 @@ async function remoteSummary(
       ? { defaultBranch: symbolicHead.slice(headPrefix.length) }
       : {}),
     skipFetchAll: skipFetchAll === "true",
-    // `rows` is already sorted newest-first, so the preview is a plain prefix.
-    previewBranches: branches
-      .slice(0, REMOTE_BRANCH_PREVIEW)
-      .map((row) => remoteBranchOf(row, prefix)),
+    previewBranches: previewRemoteBranches(branches, prefix, localNames),
     branchCount: branches.length
   };
+}
+
+/**
+ * Which six of a remote's branches the sidebar disclosure is worth spending on.
+ *
+ * `rows` arrives newest-first, so the preview used to be a plain prefix — and
+ * on any repository whose trunk is also checked out locally, one of those six
+ * rows went to a branch the Branches section immediately above already lists,
+ * *with more information on it* (the local row says ahead/behind; the remote
+ * row cannot). Ranking branches with no local counterpart first spends the
+ * scarce rows on branches the reader cannot already see.
+ *
+ * This is a ranked sample, not a filter: nothing is dropped, `branchCount`
+ * still counts the whole remote, and the disclosure's footer still offers all
+ * of them. `BranchSwitcher` already hides a remote whose local head exists, so
+ * this also brings the three branch lists into agreement about the redundancy.
+ *
+ * The sort is stable, so committer date still orders each group.
+ */
+export function previewRemoteBranches(
+  branches: readonly RepoRefRow[],
+  prefix: string,
+  localNames: ReadonlySet<string>
+): RemoteBranchSummary[] {
+  return [...branches]
+    .sort(
+      (a, b) =>
+        Number(localNames.has(a.fullName.slice(prefix.length))) -
+        Number(localNames.has(b.fullName.slice(prefix.length)))
+    )
+    .slice(0, REMOTE_BRANCH_PREVIEW)
+    .map((row) => remoteBranchOf(row, prefix));
 }
 
 /** Shape one `for-each-ref` row as a remote branch, given its remote's prefix. */
@@ -3598,8 +3628,9 @@ export async function listRepoRefs(
         ...(row.subject === "" ? {} : { subject: row.subject })
       };
     });
+  const localNames = new Set(branches.map((branch) => branch.name));
   const remotes = await Promise.all(
-    names.value.map((name) => remoteSummary(git, cwd, name, rows))
+    names.value.map((name) => remoteSummary(git, cwd, name, rows, localNames))
   );
   return ok({
     branches,

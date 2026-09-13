@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --bg-app: #000000; --bg-panel: #0a0a0a; --bg-input: #080808;
+            --bg-elev: #101010; --bg-hover: #14110d; --bg-row-active: #120800; --bg-active-strong: #241000;
+            --line: rgba(247, 243, 235, 0.1); --line2: rgba(247, 243, 235, 0.14); --line3: rgba(247, 243, 235, 0.2);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a;
+            --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42);
+            --ok: #5fa969; --okt: #9ce5b3;
+            --warn: #d99a3d;
+            --bad: #b94232; --badsoft: rgba(185, 66, 50, 0.24); --badbord: rgba(185, 66, 50, 0.28); --badt: #ffb0a1;
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #050505; }
+          body { margin: 0; background: #050505; font-family: var(--sans); }
+          a { color: var(--accb); text-decoration: none; } a:hover { color: var(--acc); }
+
+          /* ---- review chrome (matches "Tag Chips and Locate - UX Review") ---- */
+          .dv-turn { padding: 40px 44px 32px; background: #050505; }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--sans); color: var(--t3); max-width: 760px; text-wrap: pretty; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--sans); color: var(--tsub); max-width: 700px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+
+          /* ---- specimen stage ---- */
+          .stage { display: flex; flex-direction: column; gap: 11px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); }
+          .stage-h { display: flex; align-items: baseline; gap: 8px; font: 600 9.5px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); }
+          .stage-h em { font: 500 9.5px/1 var(--mono); font-style: normal; color: var(--tsub); text-transform: none; letter-spacing: 0; }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .note b { color: var(--t2); font-weight: 650; }
+          .note code, .fitem code, .tr code, .dv-sub code { font: 500 10px/1.4 var(--mono); color: var(--t2); }
+          .pair { display: flex; gap: 24px; align-items: flex-start; }
+
+          /* ---- pins + findings ---- */
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); }
+          .pin.q { background: var(--t3); color: #050505; }
+          .pin.ok { background: var(--ok); color: #050505; }
+          .find { width: 400px; display: flex; flex-direction: column; gap: 10px; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--sans); color: var(--t1); }
+          .fitem p { margin: 0 0 5px; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .fitem p:last-child { margin-bottom: 0; }
+
+          /* ---- matrix table ---- */
+          .tbl { border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); overflow: hidden; }
+          .tr { display: grid; grid-template-columns: 232px 150px 150px minmax(0, 1fr); gap: 12px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); font: 500 10.5px/1.4 var(--sans); color: var(--t2); }
+          .tr.rank { grid-template-columns: 26px 128px 150px minmax(0, 1fr); }
+          .tr.lab { grid-template-columns: 168px 118px 118px minmax(0, 1fr); }
+          .tr.last { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--t3); background: rgba(247, 243, 235, 0.03); }
+          .tr .where { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+          .tr .where em { font: 500 9.5px/1.35 var(--mono); font-style: normal; color: var(--tsub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .st { display: inline-flex; padding: 2px 6px; border-radius: 999px; font: 700 8.5px/1.35 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; }
+          .st.keep { background: rgba(95, 169, 105, 0.16); color: var(--okt); }
+          .st.chg { background: var(--asoft); color: var(--accb); border: 1px solid var(--abord); }
+          .st.bug { background: var(--badsoft); color: var(--badt); }
+          .st.q { background: rgba(247, 243, 235, 0.06); color: var(--t3); }
+          .tier { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 5px; background: rgba(247,243,235,.07); color: var(--t2); font: 700 9.5px/1 var(--mono); }
+          .tier.t1 { background: var(--acc); color: var(--accon); }
+          .tier.t4 { background: rgba(217,154,61,.16); color: var(--warn); }
+
+          /* ---- sidebar specimens, true size from the shipped CSS ---- */
+          .side { width: 336px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: #050505; }
+          .shead { display: flex; align-items: center; gap: 7px; height: 31px; padding: 0 6px 0 4px; color: var(--t3); }
+          .slabel { font: 600 9px/1 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--tsub); }
+          .scount { font: 600 9px/1 var(--mono); color: var(--tsub); }
+          .son { font: 600 9px/1 var(--mono); color: var(--acc); }
+          .ssum { margin-left: auto; font: 600 9px/1 var(--mono); color: var(--warn); }
+          .chev { flex: none; width: 0; height: 0; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 4px solid currentColor; opacity: .82; }
+          .chev.open { transform: rotate(90deg); }
+          .grow { flex: 1; }
+          .rrow { position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; height: 29px; padding: 0 4px 0 7px; border-radius: 6px; color: var(--t2); }
+          .rrow.hov { background: var(--bg-hover); }
+          .rrow.cur { background: var(--bg-row-active); box-shadow: inset 2px 0 0 0 var(--acc); }
+          .rrow.cur .nm { font-weight: 600; }
+          .rrow.cur .bico { color: var(--accb); }
+          .rrow .bico { flex: none; color: var(--tsub); font: 600 12px/1 var(--mono); }
+          .rrow .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t1); font: 500 11px/1 var(--mono); }
+          .rrow small { flex: none; max-width: 82px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 8.5px/1 var(--mono); color: var(--t3); }
+          .rrow small.warn { color: var(--warn); }
+          .rrow small.ok { color: var(--okt); }
+          .mini { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 24px; height: 24px; margin: -2px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--t3); font: 600 12px/1 var(--mono); }
+          .mini.on { color: var(--accb); border-color: var(--abord); background: var(--asoft); }
+          .mini.ghost { opacity: .35; }
+          .wtchip { display: inline-flex; align-items: center; gap: 4px; flex: none; max-width: 116px; height: 16px; padding: 0 5px; border: 1px solid var(--line); border-radius: 5px; color: var(--t3); font: 600 9px/1 var(--mono); }
+          .wtchip.here { border-color: var(--abord); background: var(--asoft); color: var(--accb); }
+          .viewall { width: 100%; height: 26px; margin-top: 3px; border: 0; border-radius: 6px; background: transparent; color: var(--acc); text-align: left; font: 600 10px/1 var(--sans); padding: 0 7px; }
+          .dead { position: absolute; inset: 0; border-radius: 6px; border: 1px dashed var(--badbord); pointer-events: none; }
+
+          /* ---- refs browser specimens, true size from the shipped CSS ---- */
+          .browser { width: 900px; border: 1px solid var(--line2); border-radius: 10px; background: var(--bg-panel); overflow: hidden; }
+          .btr { display: grid; grid-template-columns: minmax(150px, 1.5fr) minmax(100px, 1fr) 88px 66px minmax(0, auto); gap: 12px; align-items: center; padding: 6px 9px; border-top: 1px solid var(--line); }
+          .btr.h { border-top: 0; height: 30px; padding: 0 9px; color: var(--tsub); font: 700 9px/1 var(--sans); letter-spacing: .07em; text-transform: uppercase; }
+          .btr.wide { grid-template-columns: minmax(150px, 1.5fr) 96px 88px 66px minmax(0, auto); }
+          .bid { display: flex; align-items: center; gap: 8px; min-width: 0; }
+          .bid .bico { flex: none; color: var(--tsub); font: 600 12px/1 var(--mono); }
+          .bid > div { min-width: 0; }
+          .bid strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t1); font: 600 11.5px/1.2 var(--mono); }
+          .bid small { display: block; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t3); font: 500 10px/1.25 var(--sans); }
+          .bmut { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t3); font: 500 10px/1.3 var(--mono); }
+          .bstat { font: 600 10px/1.3 var(--mono); color: var(--t2); }
+          .bstat.warn { color: var(--warn); }
+          .bstat.ok { color: var(--okt); }
+          .bstat.rem { color: var(--tsub); }
+          .bact { display: flex; justify-content: flex-end; gap: 6px; }
+          .ra { height: 30px; padding: 0 11px; border: 1px solid var(--abord); border-radius: 7px; background: var(--asoft); color: var(--accb); font: 600 10.5px/1 var(--sans); white-space: nowrap; display: inline-flex; align-items: center; }
+          .ra.quiet { border-color: var(--line2); background: transparent; color: var(--t2); }
+          .ra.danger { border-color: var(--badbord); background: transparent; color: var(--badt); }
+          .ra.dangerloud { border-color: var(--abord); background: var(--asoft); color: var(--badt); }
+        </style>
+      </helmet>
+
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Findings &#8212; the primary verb is missing from the surfaces built for browsing branches</span>
+        </div>
+        <p class="dv-sub">PwrGit draws a branch name in seven places. In two of them you can move your checkout onto it; in one it is hidden behind an undocumented double&#8209;click; in four &#8212; including the <em>Repository refs</em> browser, the only surface that shows all 37 local and all 34 fetched branches &#8212; the single offered verb is <b style="color:var(--t2)">create a new worktree on disk</b>. That is the most expensive answer to &#8220;put me on that branch&#8221;, and it is the only one. Specimens below are reproduced at shipped size from <code>app.css</code>, in PwrGit&#8217;s own font stacks.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a The verb matrix">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Every surface that names a branch, and what it lets you do with it</div>
+            <div class="tbl" style="width:832px">
+              <div class="tr head"><span>Surface</span><span>Switch the checkout</span><span>Make a worktree</span><span>Note</span></div>
+              <div class="tr"><div class="where"><span>Title bar branch chip</span><em>chrome/TitleBar &#8594; graph/BranchSwitcher</em></div><span class="st keep">Yes &#183; only verb</span><span class="st q">No</span><span>The one unconditional switch UI. No keyboard shortcut opens it, and it is the one caller that skips the dirty guard &#8212; see <a href="#3a">3a</a>.</span></div>
+              <div class="tr"><div class="where"><span>Lineage branch&#8209;tip chip</span><em>graph/BranchChipMenu</em></div><span class="st keep">Yes</span><span class="st q">No</span><span>Correct and guarded. Only reachable for a branch whose tip is on screen.</span></div>
+              <div class="tr"><div class="where"><span>Lineage commit row</span><em>graph/CommitContextMenu</em></div><span class="st keep">Yes</span><span class="st q">No</span><span>Same menu vocabulary. Also guarded.</span></div>
+              <div class="tr"><div class="where"><span>Sidebar &#8250; Branches row</span><em>sidebar/RepoRefsSections</em></div><span class="st bug">Hidden</span><span class="st keep">Yes &#183; <code>+</code></span><span>Double&#8209;click or Enter switches. Nothing on the row says so &#8212; the only notice is inside a <code>title</code> tooltip. The one <em>visible</em> control is the expensive verb.</span></div>
+              <div class="tr"><div class="where"><span>Sidebar &#8250; Remotes &#8250; branch row</span><em>sidebar/RepoRefsSections</em></div><span class="st bug">No</span><span class="st keep">Yes &#183; <code>+</code></span><span>A fetched branch you have not checked out yet is exactly the case &#8220;switch me to it&#8221; is for, and it is the one row with no switch at all.</span></div>
+              <div class="tr"><div class="where"><span>Refs browser &#8250; Branches</span><em>sidebar/RepoRefsModal</em></div><span class="st bug">No</span><span class="st keep">Yes</span><span>Local rows offer New worktree / Show worktree, Rename, Delete. Remote rows offer New worktree. 71 branches, no switch.</span></div>
+              <div class="tr last"><div class="where"><span>Refs browser &#8250; Remotes</span><em>sidebar/RepoRefsModal</em></div><span class="st bug">No</span><span class="st keep">Yes</span><span>The surface in the screenshot that prompted this review. Every row&#8217;s one button builds a directory.</span></div>
+            </div>
+            <p class="note"><b>The pattern:</b> switching is available wherever a branch appears <em>incidentally</em> &#8212; on a graph row, in the title bar &#8212; and absent wherever the user went looking for a branch <em>on purpose</em>. Browsing is how you find the branch you cannot already see, so the browser is precisely where the verb has to be.</p>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b Refs browser row">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>The refs&#8209;browser row &#8212; before, then after</div>
+            <div class="stage" style="width:940px">
+              <div class="stage-h"><span class="pin">1</span>Before <em>.refs-table__row &#183; four columns and a button that builds a folder</em></div>
+              <div class="browser">
+                <div class="btr h"><span>Branch</span><span>Upstream</span><span>Status</span><span>Last commit</span><span></span></div>
+                <div class="btr"><div class="bid"><span class="bico">&#8969;</span><div><strong>fix/recording&#8209;permission&#8209;dialog&#8209;focused</strong><small>fix(desktop): add focused recording permission prompt</small></div></div><span class="bmut">&#8212;</span><span class="bstat rem">Remote</span><span class="bmut">1d</span><div class="bact"><span class="ra">New worktree</span></div></div>
+                <div class="btr"><div class="bid"><span class="bico">&#8969;</span><div><strong>feat/editor&#8209;blur&#8209;styles</strong><small>feat(desktop): soften the editor blur ramp</small></div></div><span class="bmut">origin/feat/editor&#8209;blur&#8209;styles</span><span class="bstat warn">Upstream missing</span><span class="bmut">14w</span><div class="bact"><span class="ra">New worktree</span><span class="ra">Rename</span><span class="ra dangerloud">Delete</span></div></div>
+              </div>
+              <p class="note">There is no way from this dialog to do the thing the dialog exists to help you decide. <code>Delete</code> also carries the same accent border and accent fill as <code>New&nbsp;worktree</code> &#8212; <code>.refs-row-action.is-danger</code> overrides only <code>color</code> &#8212; so the destructive verb is painted at the weight of a primary action, and the row offers three equally loud buttons with no ranking between them.</p>
+              <div class="stage-h" style="margin-top:4px"><span class="pin ok">2</span>After <em>one primary verb, the rest quiet</em></div>
+              <div class="browser">
+                <div class="btr h"><span>Branch</span><span>Upstream</span><span>Status</span><span>Last commit</span><span></span></div>
+                <div class="btr"><div class="bid"><span class="bico">&#8969;</span><div><strong>fix/recording&#8209;permission&#8209;dialog&#8209;focused</strong><small>fix(desktop): add focused recording permission prompt</small></div></div><span class="bmut">&#8212;</span><span class="bstat rem">Remote</span><span class="bmut">1d</span><div class="bact"><span class="ra">Switch here</span><span class="ra quiet">New worktree</span></div></div>
+                <div class="btr"><div class="bid"><span class="bico">&#8969;</span><div><strong>feat/editor&#8209;blur&#8209;styles</strong><small>feat(desktop): soften the editor blur ramp</small></div></div><span class="bmut">origin/feat/editor&#8209;blur&#8209;styles</span><span class="bstat warn">Upstream gone</span><span class="bmut">14w</span><div class="bact"><span class="ra">Switch here</span><span class="ra quiet">New worktree</span><span class="ra quiet">Rename</span><span class="ra danger">Delete</span></div></div>
+              </div>
+              <p class="note"><b>Switch here</b> is the primary and the leftmost, because it is the cheap, reversible, overwhelmingly common answer. Everything else drops to a quiet outline, which is also what finally separates <code>Delete</code> from its neighbours. On a remote row it means what <code>git switch</code> already means for a bare name: create the local tracking branch and check it out &#8212; no directory, no cleanup later.</p>
+              <p class="note"><b>&#8220;Here&#8221; is the working target</b> &#8212; the selected worktree, the one every other git verb in the window already aims at. When the repo owning the row holds no working target there is nothing to move, so the button is genuinely unavailable and says why rather than disappearing.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1c" data-screen-label="1c Sidebar rows">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>The sidebar ref rows &#8212; a 29px row with one slot, spent on the wrong verb</div>
+            <div class="pair">
+              <div class="stage" style="width:372px">
+                <div class="stage-h"><span class="pin">3</span>Before <em>switch is double&#8209;click only</em></div>
+                <div class="side">
+                  <div class="shead"><span class="chev open"></span><span class="slabel">Branches</span><span class="scount">3</span><span class="son">&#183; on main</span></div>
+                  <div class="rrow cur"><span class="bico">&#8969;</span><span class="nm">main</span><small class="ok">Synced</small><span class="wtchip here">&#8962;</span></div>
+                  <div class="rrow hov"><span class="bico">&#8969;</span><span class="nm">fix/linux&#8209;window&#8209;show</span><small class="warn">Missing</small><span class="mini">+</span></div>
+                  <div class="rrow"><span class="bico">&#8969;</span><span class="nm">feat/editor&#8209;blur&#8209;styles</span><small class="warn">Missing</small><span class="mini">+</span></div>
+                  <button class="viewall">View all 3 branches&#8230;</button>
+                </div>
+                <p class="note">Hovered row, and the only control is <code>+</code>. The switch is real &#8212; <code>onDoubleClick</code> and <code>Enter</code> both reach it &#8212; but it is announced nowhere on screen. A user who never guesses double&#8209;click never learns the feature exists.</p>
+              </div>
+              <div class="stage" style="width:372px">
+                <div class="stage-h"><span class="pin ok">4</span>After <em>the verb has a control</em></div>
+                <div class="side">
+                  <div class="shead"><span class="chev open"></span><span class="slabel">Branches</span><span class="scount">3</span><span class="son">&#183; on main</span><span class="ssum">2 gone</span></div>
+                  <div class="rrow cur"><span class="bico">&#8969;</span><span class="nm">main</span><small class="ok">Synced</small><span class="wtchip here">&#8962;</span></div>
+                  <div class="rrow hov"><span class="bico">&#8969;</span><span class="nm">fix/linux&#8209;window&#8209;show</span><small class="warn">Gone</small><span class="mini on">&#8677;</span><span class="mini">+</span></div>
+                  <div class="rrow"><span class="bico">&#8969;</span><span class="nm">feat/editor&#8209;blur&#8209;styles</span><small class="warn">Gone</small><span class="mini ghost">&#8677;</span><span class="mini ghost">+</span></div>
+                  <button class="viewall">View all 3 branches&#8230;</button>
+                </div>
+                <p class="note">A second 24px slot, revealed on hover and on keyboard focus &#8212; the treatment <code>.refs-copyable-name</code>&#8217;s copy glyph already uses on these same rows. It is in the accessibility tree unconditionally, so it is not hover&#8209;gated for anyone driving by keyboard or screen reader; double&#8209;click and Enter keep working unchanged. The row is 29px and the button is a 24px target with <code>margin:-2px</code>, so this costs no height.</p>
+              </div>
+            </div>
+            <p class="note" style="max-width:768px"><b>Why a second slot and not a state swap.</b> The existing slot already carries two meanings &#8212; <code>+</code> when the branch is free, a worktree chip when something holds it &#8212; and those answer &#8220;where does this branch live&#8221;. Switching answers &#8220;where do <em>I</em> go&#8221;. Folding a third meaning into one control would make the row&#8217;s only action depend on facts the reader has to reconstruct.</p>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;draw the disabled Switch here state&#8221; &#183; &#8220;what does the row look like at <code>data-density=&quot;comfortable&quot;</code>?&#8221;</p>
+      </section>
+
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">Relevance &#8212; the lists rank by tip date, which is not the same as mattering</span>
+        </div>
+        <p class="dv-sub">Both lists are <code>for-each-ref --sort=-committerdate</code>, newest tip first. That is the right primitive and the wrong ranking: it measures when a branch last moved, not whether it is still alive or anything to do with you. The reported symptom &#8212; &#8220;a couple of local branches from months ago&#8221; &#8212; is what that ordering looks like on a repository whose local branches are mostly finished work whose remote has since been deleted.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a The ladder">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>What the six visible rows should be spent on</div>
+            <div class="tbl" style="width:748px">
+              <div class="tr rank head"><span></span><span>Tier</span><span>Decided by</span><span>Why it outranks the one below</span></div>
+              <div class="tr rank"><span class="tier t1">1</span><span>Current</span><span><code>focusedWorktree.branch</code></span><span>Already pinned first today. The pair the sidebar exists to show.</span></div>
+              <div class="tr rank"><span class="tier">2</span><span>Held</span><span><code>checkedOutWorktreeIds</code></span><span>A worktree is sitting on it, so there is work parked there. Reaching it is one click and no git.</span></div>
+              <div class="tr rank"><span class="tier">3</span><span>Live</span><span>everything else, tip date desc</span><span>Has an upstream that still exists, or is unpublished local work. The ordinary case.</span></div>
+              <div class="tr rank last"><span class="tier t4">4</span><span>Gone</span><span><code>tracking === "upstream_missing"</code></span><span>Its remote branch was deleted &#8212; in practice the PR merged. Not where anyone&#8217;s next commit goes.</span></div>
+            </div>
+            <p class="note">Within a tier the arrival order is kept, so tip date still breaks every tie and nothing is re&#8209;sorted that the ladder does not have an opinion about. The change is cheap: every input is already on <code>LocalBranchSummary</code>, so no new git runs and no new IPC.</p>
+            <p class="note"><b>Deliberately not in the ladder:</b> authorship and branch&#8209;name shape. &#8220;Mine&#8221; needs a per&#8209;tip <code>%(authoremail)</code> probe and is wrong for any branch you inherited; demoting <code>dependabot/*</code> or <code>claude/*</code> by prefix would be a guess about a naming convention this app does not own. See <a href="#3b">3b&#8202;E</a> for the signal that would actually carry &#8220;mine&#8221;.</p>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Gone is not Missing">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>&#8220;Missing&#8221; is the wrong word for the most common state in the list</div>
+            <div class="tbl" style="width:600px">
+              <div class="tr lab head"><span>Tracking state</span><span>Sidebar, before</span><span>Sidebar, after</span><span>What it actually means</span></div>
+              <div class="tr lab"><span><code>up_to_date</code></span><span>Synced</span><span class="st keep">Synced</span><span>Correct.</span></div>
+              <div class="tr lab"><span><code>unpublished</code></span><span>Local only</span><span class="st keep">Local only</span><span>Correct.</span></div>
+              <div class="tr lab last"><span><code>upstream_missing</code></span><span style="color:var(--warn)">Missing</span><span class="st chg">Gone</span><span>The upstream ref was deleted. Reads as &#8220;something is broken&#8221;; means &#8220;this is finished &#8212; you can delete it&#8221;.</span></div>
+            </div>
+            <p class="note">Two of the three local rows in the reported repository say <b>Missing</b>, in the same warning amber the sidebar uses for <em>behind</em> and <em>diverged</em> &#8212; states that do want action. <code>gone</code> is git&#8217;s own word for this (<code>git branch -vv</code> prints <code>[origin/x: gone]</code>), it is shorter, and it does not read as an error. The browser&#8217;s wider Status column says <b>Upstream gone</b> for the same state.</p>
+            <p class="note">The section head gains a <b>&#183;&nbsp;N&nbsp;gone</b> count beside the existing <code>&#8593;n&#8202;&#8595;n</code> summary, so a repository carrying a pile of merged branches says so while collapsed &#8212; which is the moment the user can act on it.</p>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c Six slots on origin">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>origin has 34 branches and six slots &#8212; one is spent on a branch listed directly above</div>
+            <div class="pair">
+              <div class="stage" style="width:372px">
+                <div class="stage-h"><span class="pin">5</span>Before <em>previewBranches = newest 6, whatever they are</em></div>
+                <div class="side">
+                  <div class="shead"><span class="chev open"></span><span class="slabel">Branches</span><span class="scount">3</span><span class="son">&#183; on main</span></div>
+                  <div class="rrow cur"><span class="bico">&#8969;</span><span class="nm">main</span><small class="ok">Synced</small><span class="wtchip here">&#8962;</span></div>
+                  <div class="shead" style="margin-top:4px"><span class="chev open"></span><span class="slabel">origin</span><span class="scount">default</span></div>
+                  <div class="rrow"><span class="bico">&#8969;</span><span class="nm">claude/recursing&#8209;hertz&#8209;66c7d8</span><span class="mini">+</span></div>
+                  <div class="rrow" style="position:relative"><span class="bico">&#8969;</span><span class="nm">main</span><small>default</small><span class="mini">+</span><span class="dead"></span></div>
+                  <div class="rrow"><span class="bico">&#8969;</span><span class="nm">dependabot/npm_and_yarn/&#8230;</span><span class="mini">+</span></div>
+                  <div class="rrow"><span class="bico">&#8969;</span><span class="nm">fix/recording&#8209;permission&#8209;&#8230;</span><span class="mini">+</span></div>
+                  <div class="rrow"><span class="bico">&#8969;</span><span class="nm">codex/video&#8209;audio&#8209;selector</span><span class="mini">+</span></div>
+                  <div class="rrow"><span class="bico">&#8969;</span><span class="nm">feat/headless&#8209;capture&#8209;window</span><span class="mini">+</span></div>
+                  <button class="viewall">View all 34 branches on origin&#8230;</button>
+                </div>
+                <p class="note">The dashed row is <code>origin/main</code>, four rows under the local <code>main</code> that tracks it &#8212; and the local row carries strictly more information, because it also says whether you are ahead or behind. One of six slots, gone.</p>
+              </div>
+              <div class="stage" style="width:372px">
+                <div class="stage-h"><span class="pin ok">6</span>After <em>branches you do not already have, first</em></div>
+                <div class="side">
+                  <div class="shead"><span class="chev open"></span><span class="slabel">Branches</span><span class="scount">3</span><span class="son">&#183; on main</span></div>
+                  <div class="rrow cur"><span class="bico">&#8969;</span><span class="nm">main</span><small class="ok">Synced</small><span class="wtchip here">&#8962;</span></div>
+                  <div class="shead" style="margin-top:4px"><span class="chev open"></span><span class="slabel">origin</span><span class="scount">default</span></div>
+                  <div class="rrow"><span class="bico">&#8969;</span><span class="nm">claude/recursing&#8209;hertz&#8209;66c7d8</span><span class="mini">&#8677;</span><span class="mini">+</span></div>
+                  <div class="rrow"><span class="bico">&#8969;</span><span class="nm">dependabot/npm_and_yarn/&#8230;</span><span class="mini">&#8677;</span><span class="mini">+</span></div>
+                  <div class="rrow"><span class="bico">&#8969;</span><span class="nm">fix/recording&#8209;permission&#8209;&#8230;</span><span class="mini">&#8677;</span><span class="mini">+</span></div>
+                  <div class="rrow"><span class="bico">&#8969;</span><span class="nm">codex/video&#8209;audio&#8209;selector</span><span class="mini">&#8677;</span><span class="mini">+</span></div>
+                  <div class="rrow"><span class="bico">&#8969;</span><span class="nm">feat/headless&#8209;capture&#8209;window</span><span class="mini">&#8677;</span><span class="mini">+</span></div>
+                  <div class="rrow"><span class="bico">&#8969;</span><span class="nm">fix/tray&#8209;chord&#8209;dismiss</span><span class="mini">&#8677;</span><span class="mini">+</span></div>
+                  <button class="viewall">View all 34 branches on origin&#8230;</button>
+                </div>
+                <p class="note">The preview prefers remote branches with no local counterpart, so the reclaimed slot goes to a branch you cannot already see. <code>branchCount</code> is untouched and the footer still says 34, so the list is a ranked sample and never claims to be the remote. This is the dedupe <code>BranchSwitcher</code> already performs &#8212; the three branch lists now agree about it.</p>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;show the ladder on a 40&#8209;branch repo&#8221; &#183; &#8220;should Gone rows offer Delete inline?&#8221;</p>
+      </section>
+
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3">3</a>
+          <span class="dv-tname">One verb, one guard &#8212; and what is left open</span>
+        </div>
+        <p class="dv-sub">Adding a verb to five more surfaces is only safe if every one of them behaves identically. Today the two existing implementations already disagree, and the busier of the two is the unguarded one.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a Two paths">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>The same verb, two implementations</div>
+            <div class="tbl" style="width:812px">
+              <div class="tr head"><span>Behaviour</span><span>guardedSwitchBranch</span><span>BranchSwitcher</span><span>Consequence</span></div>
+              <div class="tr"><span>Uncommitted changes in the destination</span><span class="st keep">Counts them, confirms</span><span class="st bug">Silent</span><span><code>git switch</code> succeeds when changes do not conflict and <em>carries them over</em>. From the title bar that happens with no notice at all &#8212; the exact scattering the guard was written to prevent.</span></div>
+              <div class="tr"><span>Branch held by another worktree</span><span class="st keep">Reveals that worktree</span><span class="st bug">Prints git stderr</span><span>&#8220;fatal: &#8216;x&#8217; is already used by worktree at &#8230;&#8221; in a dialog footer, instead of taking you to the checkout that has it.</span></div>
+              <div class="tr"><span>Destination worktree is gone from disk</span><span class="st keep">Refuses, names it</span><span class="st bug">Generic failure</span><span>Nothing to switch and nothing to carry, so a confirm would be a lie either way.</span></div>
+              <div class="tr last"><span>Repeated activation</span><span class="st keep">One at a time</span><span class="st q">n/a</span><span>Enter auto&#8209;repeats while held and <code>dialogs.ts</code> queues rather than coalesces &#8212; the sidebar already guards this with an in&#8209;flight flag.</span></div>
+            </div>
+            <p class="note"><b>Resolution:</b> <code>BranchSwitcher</code> routes through <code>guardedSwitchBranch</code> like every other caller, and the five new controls call the same function. One code path, one confirm, one meaning for <code>checked_out_elsewhere</code>. The overlay keeps its own inline error line for anything that is genuinely a failure.</p>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Smaller findings, and two left open</div>
+            <div class="pair" style="align-items:flex-start">
+              <div class="find">
+                <div class="fitem"><span class="pin ok">A</span><div><h4>The decorative branch glyph announced itself</h4><p>The sidebar hides <code>&#8969;</code> with <code>aria-hidden</code>; the refs browser&#8217;s three copies do not, so a screen reader reads the character before every branch name in a 71&#8209;row table. Same glyph, same job, one of the two surfaces got it right.</p></div></div>
+                <div class="fitem"><span class="pin ok">B</span><div><h4>A row&#8217;s largest target is bound to its smallest action</h4><p>Single&#8209;click on a branch name copies it. That is the least consequential thing a branch row can do, and it holds the widest hit area on the row while the primary verb had none. The collision is already visible in the code as <code>deferForDoubleClick</code>, which exists so that switching does not also silently replace the clipboard. Copy stays &#8212; it is genuinely useful here &#8212; but it is no longer the only thing a pointer can reach.</p></div></div>
+                <div class="fitem"><span class="pin ok">C</span><div><h4>&#8220;Switch here&#8221; needs a subject, and sometimes there isn&#8217;t one</h4><p>When the repository owning the row holds no working target there is no checkout to move. The control is <code>disabled</code> with the reason in its accessible name rather than in a <code>title</code>, because assistive tech reads the label over the tooltip and a disabled control still announces its name.</p></div></div>
+              </div>
+              <div class="find">
+                <div class="fitem"><span class="pin q">D</span><div><h4>Still open: the browser&#8217;s table is not a table</h4><p><code>.refs-table</code> is a CSS grid of <code>div</code>s with a header row of bare <code>span</code>s, so &#8220;Branch / Upstream / Status / Last commit&#8221; are not associated with the cells under them. The obvious fix &#8212; <code>role="table"</code> and friends &#8212; conflicts with <code>display:grid</code> on the same elements, which suppresses row and cell exposure in Chromium. Doing it properly means restructuring the grid, which is more than this change should carry.</p></div></div>
+                <div class="fitem"><span class="pin q">E</span><div><h4>Still open: nothing knows which branches are <em>yours</em></h4><p>The strongest relevance signal available is the one nobody is reading: git&#8217;s own HEAD reflog records every <code>checkout: moving from A to B</code> with a timestamp, which is a true record of where this checkout has actually been. It would rank &#8220;the branch I was on yesterday&#8221; above &#8220;the branch a bot pushed an hour ago&#8221; &#8212; which tip date can never do. It is per&#8209;worktree (each linked worktree keeps its own <code>logs/HEAD</code>), so folding it into a repository&#8209;wide list is a real design question, not a sort key. Left for its own pass.</p></div></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;design the reflog&#8209;ranked list from 3b&#8202;E&#8221; &#183; &#8220;what should Gone rows offer in bulk?&#8221;</p>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        renderVals() { return {}; }
+      }
+    </script>
+  </body>
+</html>

@@ -2,14 +2,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const dispatch = vi.hoisted(() => vi.fn());
 const confirmDialog = vi.hoisted(() => vi.fn());
+const showErrorToast = vi.hoisted(() => vi.fn());
 
 vi.mock("../../lib/pwrgit", () => ({ dispatch }));
 vi.mock("./dialogs", () => ({ confirmDialog }));
+vi.mock("../../lib/toast", () => ({ showErrorToast }));
 
 const {
   dirtySwitchMessage,
   guardedSwitchBranch,
-  readDirtyState
+  readDirtyState,
+  switchWorktreeToBranch
 } = await import("./branchSwitch");
 
 const dirtyResult = (dirty: number) => ({
@@ -20,6 +23,7 @@ const dirtyResult = (dirty: number) => ({
 beforeEach(() => {
   dispatch.mockReset();
   confirmDialog.mockReset();
+  showErrorToast.mockReset();
 });
 
 describe("readDirtyState", () => {
@@ -185,5 +189,130 @@ describe("guardedSwitchBranch", () => {
       code: "dirty",
       message: "would be overwritten"
     });
+  });
+});
+
+/**
+ * The gesture every branch list now shares. The two outcomes worth pinning are
+ * the ones that are NOT failures: a lost occupancy race resolves into a
+ * navigation, and a declined dirty confirm leaves the world alone.
+ */
+describe("switchWorktreeToBranch", () => {
+  const onRevealWorktree = vi.fn();
+  const onRefs = vi.fn();
+  const args = {
+    repoId: "repo-1",
+    worktreeId: "wt-1",
+    worktreeLabel: "PwrSnap",
+    branch: "feature/x",
+    onRevealWorktree,
+    onRefs
+  };
+
+  const refsWith = (checkedOutWorktreeIds: string[]) => ({
+    ok: true as const,
+    value: {
+      branches: [
+        {
+          name: "feature/x",
+          fullName: "refs/heads/feature/x",
+          head: "0".repeat(40),
+          ahead: 0,
+          behind: 0,
+          tracking: "up_to_date",
+          checkedOutWorktreeIds
+        }
+      ],
+      previewTags: [],
+      tagCount: 0,
+      remotes: []
+    }
+  });
+
+  beforeEach(() => {
+    onRevealWorktree.mockReset();
+    onRefs.mockReset();
+  });
+
+  it("reports a clean switch and raises nothing", async () => {
+    dispatch
+      .mockResolvedValueOnce(dirtyResult(0))
+      .mockResolvedValueOnce({ ok: true, value: null });
+    await expect(switchWorktreeToBranch(args)).resolves.toBe("switched");
+    expect(showErrorToast).not.toHaveBeenCalled();
+    expect(onRevealWorktree).not.toHaveBeenCalled();
+  });
+
+  // The whole point of resolving `held` here: git refuses the second checkout,
+  // and its refusal names a path, not an id — so the fresh snapshot is what
+  // turns "someone else has it" into "go here".
+  it("takes the caller to whoever holds the branch now", async () => {
+    dispatch
+      .mockResolvedValueOnce(dirtyResult(0))
+      .mockResolvedValueOnce({
+        ok: false,
+        error: {
+          kind: "repo",
+          code: "checked_out_elsewhere",
+          message: "fatal: already used by worktree at '/repos/b'"
+        }
+      })
+      .mockResolvedValueOnce(refsWith(["wt-2"]));
+    await expect(switchWorktreeToBranch(args)).resolves.toBe("revealed");
+    expect(onRevealWorktree).toHaveBeenCalledWith("wt-2");
+    expect(onRefs).toHaveBeenCalledOnce();
+    expect(showErrorToast).not.toHaveBeenCalled();
+  });
+
+  // The re-read is not free, and the caller is holding the snapshot it just
+  // invalidated — handing it back is what keeps the row states honest.
+  it("hands the refreshed snapshot back to the caller", async () => {
+    dispatch
+      .mockResolvedValueOnce(dirtyResult(0))
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { kind: "repo", code: "checked_out_elsewhere", message: "held" }
+      })
+      .mockResolvedValueOnce(refsWith(["wt-2"]));
+    await switchWorktreeToBranch(args);
+    expect(onRefs.mock.calls[0]?.[0]?.branches?.[0]?.name).toBe("feature/x");
+  });
+
+  // A branch that was held a moment ago and is held by nobody now means the
+  // snapshot moved under us twice. There is no worktree to go to, so say so.
+  it("falls back to a message when the holder has since vanished", async () => {
+    dispatch
+      .mockResolvedValueOnce(dirtyResult(0))
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { kind: "repo", code: "checked_out_elsewhere", message: "held" }
+      })
+      .mockResolvedValueOnce(refsWith([]));
+    await expect(switchWorktreeToBranch(args)).resolves.toBe("failed");
+    expect(onRevealWorktree).not.toHaveBeenCalled();
+    expect(showErrorToast).toHaveBeenCalledOnce();
+  });
+
+  it("translates a dirty refusal into what the reader has to do", async () => {
+    dispatch.mockResolvedValueOnce(dirtyResult(0)).mockResolvedValueOnce({
+      ok: false,
+      error: {
+        kind: "repo",
+        code: "dirty",
+        message: "error: Your local changes would be overwritten"
+      }
+    });
+    await expect(switchWorktreeToBranch(args)).resolves.toBe("failed");
+    expect(showErrorToast.mock.calls[0]?.[0]?.message).toContain(
+      "Commit or stash them first"
+    );
+  });
+
+  it("stays quiet when the dirty confirm is declined", async () => {
+    dispatch.mockResolvedValueOnce(dirtyResult(3));
+    confirmDialog.mockResolvedValueOnce(false);
+    await expect(switchWorktreeToBranch(args)).resolves.toBe("cancelled");
+    expect(showErrorToast).not.toHaveBeenCalled();
+    expect(onRevealWorktree).not.toHaveBeenCalled();
   });
 });

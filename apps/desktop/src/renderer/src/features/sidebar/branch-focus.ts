@@ -100,13 +100,58 @@ export function branchSectionSummary(
 }
 
 /**
- * The branches the collapsed slice shows, with the working target's branch
- * pinned first.
+ * Where a branch sits on the relevance ladder the collapsed slice spends its
+ * rows on. Lower is more relevant.
  *
- * Without the pin the pairing vanishes in the case that matters most: the list
+ * `repo:refs` arrives sorted by committer date, which measures when a branch
+ * last *moved* — not whether it is still alive, and not whether it is anything
+ * to do with you. On a repository whose finished work outnumbers its live
+ * branches that ordering fills a six-row slice with merged branches, which is
+ * the reported symptom. The ladder re-spends those rows without discarding tip
+ * date: it only ever reorders across tiers, and arrival order breaks every tie
+ * inside one.
+ *
+ * Every input is already on `LocalBranchSummary`, so this costs no extra git.
+ *
+ * Deliberately NOT tiers: authorship (needs a per-tip `%(authoremail)` probe,
+ * and is wrong for any branch you inherited) and branch-name shape (demoting
+ * `dependabot/*` by prefix guesses at a convention this app does not own). See
+ * `design/Branch Switching and Ref Relevance - UX Review.dc.html`, card 3b·E.
+ */
+export type BranchRelevance = 1 | 2 | 3 | 4;
+
+export function branchRelevance(
+  branch: LocalBranchSummary,
+  focusedWorktree: Worktree | null
+): BranchRelevance {
+  if (focusedWorktree !== null && focusedWorktree.branch === branch.name) {
+    return 1;
+  }
+  if (branch.checkedOutWorktreeIds.length > 0) return 2;
+  // The upstream ref was deleted — in practice the pull request merged and the
+  // forge removed the branch. Not where anyone's next commit goes.
+  return branch.tracking === "upstream_missing" ? 4 : 3;
+}
+
+/** How many of these branches git would print as `[origin/x: gone]`. */
+export function goneBranchCount(
+  branches: readonly LocalBranchSummary[]
+): number {
+  return branches.filter((b) => b.tracking === "upstream_missing").length;
+}
+
+/**
+ * The branches the collapsed slice shows, ranked by `branchRelevance` — which
+ * pins the working target's branch first, because tier 1 is unique to it.
+ *
+ * Without that pin the pairing vanishes in the case that matters most: the list
  * is truncated, and only a branch that happens to sort into the first few rows
- * would ever show as current. Occupied branches are deliberately *not* pinned
- * — a repo with dozens of worktrees would fill the whole slice with them.
+ * would ever show as current. Held branches rank second but are not pinned
+ * individually — a repo with dozens of worktrees fills the slice with them and
+ * that is the correct outcome, since each one has work parked in it.
+ *
+ * The sort is stable, so within a tier the caller's order (committer date,
+ * newest first) survives untouched.
  */
 export function visibleBranches(
   branches: readonly LocalBranchSummary[],
@@ -114,14 +159,11 @@ export function visibleBranches(
   limit: number
 ): LocalBranchSummary[] {
   if (limit <= 0) return [];
-  const currentName = focusedWorktree?.branch ?? null;
-  const current =
-    currentName === null
-      ? undefined
-      : branches.find((b) => b.name === currentName);
-  if (current === undefined) return branches.slice(0, limit);
-  return [
-    current,
-    ...branches.filter((b) => b.fullName !== current.fullName)
-  ].slice(0, limit);
+  return [...branches]
+    .sort(
+      (a, b) =>
+        branchRelevance(a, focusedWorktree) -
+        branchRelevance(b, focusedWorktree)
+    )
+    .slice(0, limit);
 }

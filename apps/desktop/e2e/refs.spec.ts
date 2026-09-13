@@ -1,7 +1,12 @@
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
-import { addRootAndExpand } from "./fixtures/steps";
+import {
+  addRootAndExpand,
+  branchRow,
+  expandBranchesSection,
+  refBranchRow
+} from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -628,4 +633,132 @@ test("force deletion requires a second confirmation and leaves the remote branch
   await expect(
     remote.getByRole("button", { name: /Delete local branch/ })
   ).toHaveCount(0);
+});
+
+/**
+ * The verb the refs browser was missing.
+ *
+ * Before this, every row in the surface that lists *all* of a repository's
+ * branches offered exactly one action — build a worktree on disk. "Switch here"
+ * moves the working target instead, which is the cheap, reversible answer to
+ * "put me on that branch".
+ */
+test("the branch browser switches the working target to a local branch", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepo("browser-switch");
+  repo.createBranch("feature/pick-me");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, box, "browser-switch");
+  await branchRow(window, "main").first().click();
+  await expect(window.locator(".titlebar__branch-name")).toHaveText("main");
+
+  const browser = await openBranchBrowser(window, "browser-switch");
+  const row = browser.locator(".refs-table__row", {
+    hasText: "feature/pick-me"
+  });
+  await row.getByRole("button", { name: /^Switch .* to feature\/pick-me$/ }).click();
+
+  // The checkout moved, and the dialog stayed put — the reader came here to
+  // browse branches and usually has more to do.
+  await expect(window.locator(".titlebar__branch-name")).toHaveText(
+    "feature/pick-me"
+  );
+  await expect(browser).toBeVisible();
+  // A clean tree asks nothing on the way.
+  await expect(window.locator(".modal--dialog")).toHaveCount(0);
+});
+
+/**
+ * A fetched branch with no local head is the case "switch me to it" exists for,
+ * and it was the row with no switch at all. `git switch <short name>` DWIMs the
+ * local tracking branch into existence — a checkout, not a directory.
+ */
+test("the branch browser checks out a remote-only branch in place", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepoBehindRemote("browser-remote-switch");
+  addRemoteOnlyBranch(box, repo);
+
+  handle = await launchApp({ worktreeRoot: box.worktreeRoot });
+  const { window } = handle;
+  await addRootAndExpand(window, handle, box, "browser-remote-switch");
+  await branchRow(window, "main").first().click();
+  await expect(window.locator(".titlebar__branch-name")).toHaveText("main");
+
+  const browser = await openBranchBrowser(window, "browser-remote-switch");
+  await browser.getByPlaceholder("Filter branches…").fill("releases/1.0");
+  const row = browser.locator(".refs-table__row", { hasText: "releases/1.0" });
+  await expect(row).toContainText("origin/releases/1.0");
+  await row.getByRole("button", { name: /^Switch .* to releases\/1\.0$/ }).click();
+
+  await expect(window.locator(".titlebar__branch-name")).toHaveText(
+    "releases/1.0"
+  );
+  // It really is a local tracking branch now, not a detached head.
+  expect(
+    box.git(repo.path, "rev-parse", "--abbrev-ref", "HEAD").trim()
+  ).toBe("releases/1.0");
+});
+
+/** A branch another worktree holds cannot be checked out twice, so the row
+ *  offers that worktree instead of a switch that git would refuse. */
+test("a branch held by another worktree offers the worktree, not a switch", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepo("held-elsewhere");
+  repo.createBranch("feature/parked");
+  box.git(repo.path, "worktree", "add", `${repo.path}-parked`, "feature/parked");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootAndExpand(window, handle, box, "held-elsewhere");
+  await branchRow(window, "main").first().click();
+
+  const browser = await openBranchBrowser(window, "held-elsewhere");
+  const row = browser.locator(".refs-table__row", {
+    hasText: "feature/parked"
+  });
+  await expect(row.getByRole("button", { name: "Show worktree" })).toBeVisible();
+  await expect(row.getByRole("button", { name: /^Switch / })).toHaveCount(0);
+});
+
+/**
+ * The sidebar's compact status column called a deleted upstream "Missing", in
+ * the same warning amber it uses for *behind* and *diverged* — states that want
+ * action. This one means the branch landed. Git's own word for it is `gone`.
+ */
+test("a deleted upstream reads as gone, not as something broken", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepoBehindRemote("gone-upstream");
+  repo.createBranch("feature/merged");
+  box.git(repo.path, "push", "-u", "origin", "feature/merged");
+  box.git(repo.path, "push", "origin", "--delete", "feature/merged");
+  box.git(repo.path, "fetch", "--prune", "origin");
+
+  handle = await launchApp({ worktreeRoot: box.worktreeRoot });
+  const { window } = handle;
+  await addRootAndExpand(window, handle, box, "gone-upstream");
+  await branchRow(window, "main").first().click();
+  await expandBranchesSection(window, "gone-upstream");
+
+  await expect(
+    refBranchRow(window, "feature/merged").locator(".ref-branch-row__status")
+  ).toHaveText("Gone");
+
+  // The wider column in the browser has room to say which thing is gone. The
+  // section is already open, so reach the browser directly rather than through
+  // `openBranchBrowser`, whose first click would toggle it shut.
+  await window
+    .getByRole("button", { name: /^View all \d+ branches…$/ })
+    .click();
+  const browser = window.getByRole("dialog", {
+    name: "gone-upstream branches, tags, and remotes"
+  });
+  await expect(
+    browser.locator(".refs-table__row", { hasText: "feature/merged" })
+  ).toContainText("Upstream gone");
 });

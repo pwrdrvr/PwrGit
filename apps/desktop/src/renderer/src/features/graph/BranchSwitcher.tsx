@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { BranchRef } from "@pwrgit/shared";
+import type { BranchRef, WorktreeId } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { useRelativeClock } from "../../lib/useRelativeClock";
+import { guardedSwitchBranch } from "../shell/branchSwitch";
 import { shortWhen } from "./graph-view";
 
 /** The name to hand `git switch` — a remote ref drops its remote prefix so the
@@ -13,16 +14,30 @@ function switchTarget(ref: BranchRef): string {
 /**
  * Pick the branch a worktree checks out. Lists local heads and remote-only
  * branches (a remote whose local counterpart already exists is hidden as
- * redundant), current first. Selecting one runs `branch:switch`; the tree,
- * header, and graph refresh off the resulting events.
+ * redundant), current first. Selecting one goes through `guardedSwitchBranch`;
+ * the tree, header, and graph refresh off the resulting events.
+ *
+ * This overlay used to dispatch `branch:switch` itself, and so was the one
+ * switch entry point in the app with no dirty guard — the busiest one. A switch
+ * with uncommitted changes that do not conflict *succeeds* and carries them
+ * onto the destination branch, which from a title-bar menu happened with no
+ * notice at all. It also rendered git's raw "already used by worktree at …"
+ * into the footer where every other surface takes you to that worktree.
  */
 export function BranchSwitcher({
   worktreeId,
+  worktreeLabel,
   currentBranch,
+  onHeldElsewhere,
   onClose
 }: {
   worktreeId: string;
+  /** How the dirty confirm names this checkout — its folder, not its branch. */
+  worktreeLabel: string;
   currentBranch: string;
+  /** Another worktree holds the picked branch. Navigating there is the caller's
+   *  job; the overlay only knows it should get out of the way. */
+  onHeldElsewhere: (branch: string) => void;
   onClose: () => void;
 }) {
   const now = useRelativeClock();
@@ -86,10 +101,22 @@ export function BranchSwitcher({
     const target = switchTarget(ref);
     setBusy(target);
     setError(null);
-    const r = await dispatch("branch:switch", { worktreeId, branch: target });
+    const outcome = await guardedSwitchBranch({
+      worktreeId: worktreeId as WorktreeId,
+      worktreeLabel,
+      branch: target
+    });
     setBusy(null);
-    if (r.ok) onClose();
-    else setError(r.error.message.split("\n")[0]);
+    if (outcome.kind === "switched") {
+      onClose();
+    } else if (outcome.kind === "held") {
+      onClose();
+      onHeldElsewhere(target);
+    } else if (outcome.kind === "failed") {
+      setError(outcome.message.split("\n")[0]);
+    }
+    // "cancelled" means the dirty confirm was declined — the picker stays open
+    // so the reader can choose differently rather than starting over.
   };
 
   return (
