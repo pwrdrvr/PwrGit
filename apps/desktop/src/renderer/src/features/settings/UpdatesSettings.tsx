@@ -92,6 +92,9 @@ function updateResultText(result: AppUpdateCheckResult): string {
   if (result.status === "downloaded") {
     return `Update ready: v${result.version}. Restart to install.`;
   }
+  if (result.status === "canceled") {
+    return `Download canceled. v${result.version} is still available — check again to download it.`;
+  }
   return `Update available: v${result.version}. Downloading in the background.`;
 }
 

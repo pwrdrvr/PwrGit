@@ -35,6 +35,10 @@ function button(label: string): HTMLButtonElement | undefined {
   );
 }
 
+function progressBar(): HTMLElement | null {
+  return container.querySelector("[role='progressbar']");
+}
+
 async function mount(initial: AppUpdateStatus): Promise<void> {
   dispatchMock.mockImplementation((name: string) =>
     Promise.resolve(
@@ -158,23 +162,113 @@ describe("AppUpdateToast", () => {
     expect(container.textContent).not.toContain("Restart refused.");
   });
 
-  it("replaces its own checking notice with the menu check outcome", async () => {
+  it("reports a menu check live, then hands the outcome to the toast stack", async () => {
     await mount({ status: "idle" });
 
     await emit("app:updateCheckResult", { status: "checking" });
-    expect(toasts).toHaveLength(1);
-    expect(toasts[0]?.title).toBe("Checking for updates");
+    // The live card, NOT a countdown toast: the check has no fixed duration,
+    // so nothing may drain toward a dismissal while it is still working.
+    expect(container.textContent).toContain("Checking for updates");
+    expect(toasts).toHaveLength(0);
+    expect(progressBar()?.getAttribute("aria-valuenow")).toBe(null);
 
     await emit("app:updateCheckResult", {
       status: "no-update",
       version: "0.8.0"
     });
 
+    expect(container.textContent).toBe("");
     expect(toasts).toHaveLength(1);
     expect(toasts[0]?.title).toBe("PwrGit is up to date");
     expect(toasts[0]?.message).toBe("You’re running v0.8.0.");
     // Nothing is broken, so the toast doesn't offer Logs / Copy.
     expect(toasts[0]?.showLogsAction).toBe(false);
+  });
+
+  it("follows the download with a meter and a way out", async () => {
+    await mount({ status: "idle" });
+    await emit("app:updateCheckResult", { status: "checking" });
+
+    await emit("app:updateStatus", { status: "available", version: "1.0.0" });
+    expect(container.textContent).toContain("Starting download of v1.0.0…");
+
+    await emit("app:updateStatus", {
+      status: "downloading",
+      version: "1.0.0",
+      percent: 42,
+      transferred: 50_000_000,
+      total: 118_000_000,
+      bytesPerSecond: 3_300_000
+    });
+
+    expect(container.textContent).toContain("PwrGit v1.0.0 — 42%");
+    expect(container.textContent).toContain("47.7 MB of 112.5 MB");
+    expect(progressBar()?.getAttribute("aria-valuenow")).toBe("42");
+    // Still not a countdown toast, and still nothing in the stack to expire.
+    expect(toasts).toHaveLength(0);
+
+    await act(async () => button("Cancel")?.click());
+    expect(dispatchMock).toHaveBeenLastCalledWith(
+      "app:cancelUpdateDownload",
+      undefined
+    );
+    expect(button("Canceling…")?.getAttribute("aria-disabled")).toBe("true");
+
+    await emit("app:updateCheckResult", {
+      status: "canceled",
+      version: "1.0.0"
+    });
+
+    expect(container.textContent).toBe("");
+    expect(toasts[0]?.title).toBe("Download canceled");
+    // A cancel is not a failure: no danger eyebrow, no Logs button.
+    expect(toasts[0]?.tone).toBe("info");
+    expect(toasts[0]?.showLogsAction).toBe(false);
+  });
+
+  it("stays silent while a background check downloads", async () => {
+    await mount({ status: "idle" });
+
+    // No `app:updateCheckResult` — nobody asked, so nothing may appear until
+    // there is something to act on.
+    await emit("app:updateStatus", { status: "checking" });
+    await emit("app:updateStatus", {
+      status: "downloading",
+      version: "1.0.0",
+      percent: 30
+    });
+
+    expect(container.textContent).toBe("");
+    expect(toasts).toHaveLength(0);
+  });
+
+  it("picks the live card up mid-download when a check joins one", async () => {
+    // Help -> Check for Updates while a background download is already
+    // running joins it in main, so the `checking` tick arrives after the
+    // status has moved on. Rewinding the card to "Checking for updates" there
+    // would report a step that is already finished.
+    await mount({ status: "downloading", version: "1.0.0", percent: 70 });
+
+    await emit("app:updateCheckResult", { status: "checking" });
+
+    expect(container.textContent).toContain("PwrGit v1.0.0 — 70%");
+    expect(container.textContent).not.toContain("Asking GitHub");
+  });
+
+  it("drops the live card the moment the download is ready to install", async () => {
+    await mount({ status: "idle" });
+    await emit("app:updateCheckResult", { status: "checking" });
+    await emit("app:updateStatus", {
+      status: "downloading",
+      version: "1.0.0",
+      percent: 99
+    });
+    expect(container.textContent).toContain("Downloading update");
+
+    await emit("app:updateStatus", { status: "downloaded", version: "1.0.0" });
+
+    expect(container.textContent).not.toContain("Downloading update");
+    expect(container.textContent).toContain("Restart to update to v1.0.0.");
   });
 
   it("reports an unavailable updater without dressing it as a failure", async () => {
@@ -207,11 +301,13 @@ describe("AppUpdateToast", () => {
   it("reports a failed menu check as an error toast", async () => {
     await mount({ status: "idle" });
 
+    await emit("app:updateCheckResult", { status: "checking" });
     await emit("app:updateCheckResult", {
       status: "error",
       message: "GitHub releases request failed with 404"
     });
 
+    expect(container.textContent).toBe("");
     expect(toasts[0]?.title).toBe("Update check failed");
     expect(toasts[0]?.showLogsAction).toBe(true);
   });

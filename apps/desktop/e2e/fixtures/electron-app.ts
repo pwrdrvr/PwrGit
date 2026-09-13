@@ -55,6 +55,10 @@ export async function launchApp(
      *  silently ignored (git's own last-wins semantics do not apply). */
     identity?: { name: string; email: string };
     failReadOnce?: RecoverableBootRead[];
+    /** Milliseconds per step of the dev/QA fake update (see
+     *  `simulateDevUpdateCheck`). Slow it down to act on a card that only
+     *  exists mid-download. */
+    updateStepMs?: number;
   } = {}
 ): Promise<AppHandle> {
   const userData = mkdtempSync(join(tmpdir(), "pwrgit-e2e-ud-"));
@@ -99,7 +103,10 @@ export async function launchApp(
         : { PWRGIT_E2E_FORGE_FIXTURE: opts.forgeFixturePath }),
       ...(opts.failReadOnce === undefined
         ? {}
-        : { PWRGIT_E2E_FAIL_READ_ONCE: opts.failReadOnce.join(",") })
+        : { PWRGIT_E2E_FAIL_READ_ONCE: opts.failReadOnce.join(",") }),
+      ...(opts.updateStepMs === undefined
+        ? {}
+        : { PWRGIT_E2E_UPDATE_STEP_MS: String(opts.updateStepMs) })
     })
   });
   const window = await app.firstWindow();
