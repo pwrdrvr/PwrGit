@@ -4,9 +4,16 @@ import { fileURLToPath } from "node:url";
 import { test, type Page } from "@playwright/test";
 import { forgeProduct } from "@pwrgit/shared";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
+import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
+import {
+  addRootAndExpand,
+  branchRow,
+  expandBranchesSection,
+  refBranchRow
+} from "./fixtures/steps";
 
 /**
- * Captures Settings → Forges for the design bundle.
+ * Captures design-bundle artwork for the repo's PRs and `design/**` artboards.
  *
  * Opt-in only — it writes artifacts into a repo that publishes them, and a
  * caption changing is not a regression:
@@ -26,6 +33,7 @@ const OUT =
 const WINDOW = { width: 1180, height: 860 };
 
 let handle: AppHandle | null = null;
+let sandbox: GitSandbox | null = null;
 let realPath: string | undefined;
 
 test.skip(
@@ -46,6 +54,8 @@ test.afterEach(async () => {
     await handle.cleanup();
     handle = null;
   }
+  sandbox?.cleanup();
+  sandbox = null;
 });
 
 async function openSettings(app: AppHandle["app"]): Promise<Page> {
@@ -112,4 +122,94 @@ test("Settings → Forges, on a contrived estate", async () => {
   await settings.getByRole("button", { name: "Collapse all" }).click();
   await settings.waitForTimeout(300);
   await settings.screenshot({ path: join(OUT, "forges-collapsed.png") });
+});
+
+
+/**
+ * The branch-switching surfaces, for `design/Branch Switching and Ref Relevance
+ * - UX Review.dc.html` and its PR.
+ *
+ * Runs identically against the code before and after the change, so it uses no
+ * selector the old build lacks — capture "before" by checking the renderer
+ * sources out at the base commit, building, and running this with
+ * `PWRGIT_DESIGN_SHOTS_DIR` pointed somewhere else.
+ *
+ * The repository is **100% contrived**: `git-sandbox.ts` builds it under a temp
+ * dir with `GIT_CONFIG_GLOBAL=/dev/null`, the profile is the seeded default,
+ * and every branch name here is invented. Nothing in the frame came from a real
+ * account or a real repository — the rule `design/SOURCE.md` states for
+ * anything that ships under `design/assets/`.
+ */
+test("branch lists and the refs browser, on a contrived repository", async () => {
+  mkdirSync(OUT, { recursive: true });
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepoBehindRemote("northwind-labs");
+
+  // Two branches whose remote was deleted — finished work, which is what fills
+  // a short list on a repository that has been shipping for a while.
+  for (const merged of ["fix/tray-chord-dismiss", "feat/editor-blur-styles"]) {
+    repo.createBranch(merged);
+    box.git(repo.path, "push", "-u", "origin", merged);
+    box.git(repo.path, "push", "origin", "--delete", merged);
+  }
+  // One branch still in flight, and four more that exist only on the remote.
+  repo.createBranch("feat/headless-capture");
+  box.git(repo.path, "push", "-u", "origin", "feat/headless-capture");
+  // More remote-only branches than the six-row preview can hold, so which six
+  // it picks is a visible choice rather than "all of them".
+  for (const remoteOnly of [
+    "fix/recording-permission",
+    "codex/video-audio-selector",
+    "deps/bump-app-server-protocol",
+    "feat/lineage-scope",
+    "fix/window-chrome-decision",
+    "chore/regenerate-licenses",
+    "feat/tray-audio-toggles",
+    "fix/keychain-prompt"
+  ]) {
+    repo.createBranch(remoteOnly);
+    box.git(repo.path, "push", "origin", remoteOnly);
+    box.git(repo.path, "branch", "-D", remoteOnly);
+  }
+  box.git(repo.path, "fetch", "--prune", "origin");
+
+  handle = await launchApp({ theme: "dark", worktreeRoot: box.worktreeRoot });
+  const { app, window } = handle;
+  await app.evaluate(async ({ BrowserWindow }, size) => {
+    BrowserWindow.getAllWindows()[0]?.setBounds({ x: 0, y: 0, ...size });
+  }, WINDOW);
+
+  await addRootAndExpand(window, handle, box, "northwind-labs");
+  await branchRow(window, "main").first().click();
+  await expandBranchesSection(window, "northwind-labs");
+  await window.getByRole("button", { name: /^Remotes/ }).click();
+  await window.locator(".ref-remote__main", { hasText: "origin" }).click();
+
+  // The repository, not the masthead above it.
+  const block = window.locator(".repo-block").first();
+  await block.scrollIntoViewIfNeeded();
+
+  // A row carrying FOCUS, not hover. Focus reveals the same row controls, and
+  // it keeps the pointer off the branch name — whose copy card would otherwise
+  // cover the two rows underneath, and would cover different rows in each build
+  // this scenario is run against.
+  await refBranchRow(window, "feat/headless-capture").focus();
+  // Park the pointer on inert chrome, or the last control clicked keeps its
+  // hover tint and reads as a second highlighted row.
+  await window.mouse.move(6, 6);
+  await window.waitForTimeout(400);
+  await window
+    .getByTestId("sidebar")
+    .screenshot({ path: join(OUT, "branch-switch-sidebar.png") });
+
+  await window
+    .getByRole("button", { name: /^View all \d+ branches…$/ })
+    .click();
+  const browser = window.getByRole("dialog", {
+    name: "northwind-labs branches, tags, and remotes"
+  });
+  await browser.waitFor();
+  await window.waitForTimeout(500);
+  await browser.screenshot({ path: join(OUT, "branch-switch-browser.png") });
 });

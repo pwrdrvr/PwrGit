@@ -1,5 +1,7 @@
-import type { WorktreeId } from "@pwrgit/shared";
+import type { RepoRefs, WorktreeId } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
+import { showErrorToast } from "../../lib/toast";
+import { holderWorktreeId } from "../sidebar/branch-focus";
 import { confirmDialog } from "./dialogs";
 
 /**
@@ -123,4 +125,75 @@ export async function guardedSwitchBranch({
     code: result.error.code,
     message: result.error.message
   };
+}
+
+/**
+ * The whole "make this branch the one I am working on" gesture, including the
+ * two recoveries that are not failures — shared by every branch list so they
+ * cannot drift into behaving differently for the same verb.
+ *
+ * `held` is resolved here rather than reported: occupancy is decided from a
+ * `repo:refs` snapshot the caller is holding in state, and a second window or a
+ * terminal can check the branch out after that read. Going to whoever holds it
+ * now is what the user asked for either way, so the fresh snapshot is used to
+ * find them — and handed back through `onRefs`, since the caller that owns a
+ * snapshot should not then have to re-read it.
+ *
+ * Remote-only branches pass their SHORT name: `git switch foo` DWIMs a bare
+ * remote name into a new local tracking branch, which is exactly what "switch
+ * me to origin/foo" should mean.
+ */
+export async function switchWorktreeToBranch({
+  repoId,
+  worktreeId,
+  worktreeLabel,
+  branch,
+  onRevealWorktree,
+  onRefs
+}: {
+  repoId: string;
+  worktreeId: WorktreeId;
+  /** How the dirty confirm names the checkout being moved — its folder. */
+  worktreeLabel: string;
+  branch: string;
+  onRevealWorktree: (worktreeId: WorktreeId) => void;
+  /** Receives a snapshot read during `held` recovery, when one was read. */
+  onRefs?: ((refs: RepoRefs) => void) | undefined;
+}): Promise<"switched" | "revealed" | "cancelled" | "failed"> {
+  const outcome = await guardedSwitchBranch({
+    worktreeId,
+    worktreeLabel,
+    branch
+  });
+  if (outcome.kind === "switched") return "switched";
+  if (outcome.kind === "cancelled") return "cancelled";
+
+  if (outcome.kind === "held") {
+    const fresh = await dispatch("repo:refs", { repoId });
+    if (fresh.ok) {
+      onRefs?.(fresh.value);
+      const held = fresh.value.branches.find((b) => b.name === branch);
+      const holder =
+        held === undefined ? null : holderWorktreeId(held, worktreeId);
+      if (holder !== null) {
+        onRevealWorktree(holder);
+        return "revealed";
+      }
+    }
+    showErrorToast({
+      title: "Switch failed",
+      message: `${branch} is checked out in another worktree.`
+    });
+    return "failed";
+  }
+
+  showErrorToast({
+    title: "Switch failed",
+    message:
+      outcome.code === "dirty"
+        ? `${branch} could not be checked out without overwriting local changes. Commit or stash them first.`
+        : outcome.message.split("\n")[0],
+    detail: outcome.message
+  });
+  return "failed";
 }

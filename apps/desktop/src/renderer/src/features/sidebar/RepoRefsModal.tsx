@@ -6,9 +6,11 @@ import type {
   RemoteSummary,
   Repo,
   RepoRefs,
-  TagSummary
+  TagSummary,
+  Worktree
 } from "@pwrgit/shared";
 import { shortWhen } from "../graph/graph-view";
+import { switchWorktreeToBranch } from "../shell/branchSwitch";
 import { confirmDialog } from "../shell/dialogs";
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
@@ -18,6 +20,7 @@ import {
   type RemoteBranchSearch
 } from "../../lib/useRemoteBranchSearch";
 import { CopyTarget } from "../shell/CopyTarget";
+import { lastSegment } from "./repo-view";
 import { BranchRenameDialog } from "./BranchRenameDialog";
 import { PushRefsDialog } from "./PushRefsDialog";
 import { CreateTagDialog } from "./CreateTagDialog";
@@ -37,7 +40,10 @@ export function trackingLabel(branch: LocalBranchSummary): string {
     case "unpublished":
       return "No upstream";
     case "upstream_missing":
-      return "Upstream missing";
+      // Git's word — `git branch -vv` prints `[origin/x: gone]`. "Missing"
+      // reads as breakage; this state means the branch landed and its remote
+      // was deleted. The sidebar's compact column says just "Gone".
+      return "Upstream gone";
   }
 }
 
@@ -51,6 +57,73 @@ export function localBranchForRemote(
 type BrowserBranch =
   | { kind: "local"; branch: LocalBranchSummary }
   | { kind: "remote"; branch: RemoteBranchSummary };
+
+/**
+ * "Move the working target onto this branch" — the verb this browser was
+ * missing entirely.
+ *
+ * It is the PRIMARY action on every branch row and the leftmost, because it is
+ * the cheap, reversible, overwhelmingly common answer to "put me on that
+ * branch". Creating a worktree — which writes a directory the user then has to
+ * remember to remove — used to be the only one offered, and every row's buttons
+ * were painted at the same weight; the rest are `--quiet` now so this one reads
+ * as the default and `Delete` stops looking like a primary action.
+ *
+ * "Here" is the working target, the checkout every other git verb in the window
+ * aims at. With none in this repository there is nothing to move, so the button
+ * is genuinely `disabled` — and carries its reason in the accessible NAME,
+ * since a disabled control still announces its name and AT reads that over a
+ * `title`.
+ */
+function SwitchHereButton({
+  branch,
+  worktree,
+  rowKey,
+  inFlight,
+  onSwitch
+}: {
+  branch: string;
+  /** The working target, or null when this repository holds none. */
+  worktree: Worktree | null;
+  /** Identifies THIS row's switch. The bare branch name is not enough: two
+   *  remotes can both carry `feature/x`, and keying on the name lit up
+   *  "Switching…" on a row that was not acting. */
+  rowKey: string;
+  /** The `rowKey` of the switch currently running, or null. */
+  inFlight: string | null;
+  onSwitch: () => void;
+}) {
+  const busy = inFlight === rowKey;
+  // Only one switch runs at a time — `switchHere` refuses a second outright.
+  // Without saying so, every other row stayed enabled and swallowed its click
+  // silently: no toast, no spinner, nothing. `aria-disabled` rather than
+  // `disabled`, per styles/AGENTS.md, so a keyboard user is not blurred
+  // mid-operation; the handler does the refusing.
+  const blocked = inFlight !== null && !busy;
+  const label =
+    worktree === null
+      ? `Switch to ${branch} — unavailable, nothing in this repository is the working target`
+      : `Switch ${lastSegment(worktree.path)} to ${branch}`;
+  return (
+    <button
+      className="refs-row-action"
+      aria-label={label}
+      title={
+        worktree === null
+          ? "Select a worktree in this repository first"
+          : label
+      }
+      disabled={worktree === null}
+      aria-disabled={busy || blocked}
+      onClick={() => {
+        if (busy || blocked) return;
+        onSwitch();
+      }}
+    >
+      {busy ? "Switching…" : "Switch here"}
+    </button>
+  );
+}
 
 /**
  * "Showing X of Y" plus the control that extends the page.
@@ -104,6 +177,9 @@ function RemoteBranchList({
   query,
   now,
   refs,
+  focusedWorktree,
+  switching,
+  onSwitch,
   onPick
 }: {
   repoId: string;
@@ -111,6 +187,10 @@ function RemoteBranchList({
   query: string;
   now: number;
   refs: RepoRefs;
+  focusedWorktree: Worktree | null;
+  /** The `fullName` of the row whose switch is running, or null. */
+  switching: string | null;
+  onSwitch: (rowKey: string, branch: string) => void;
   onPick: (branch: RemoteBranchSummary) => void;
 }) {
   const search = useRemoteBranchSearch({ repoId, remote, query });
@@ -121,7 +201,7 @@ function RemoteBranchList({
         const checkedOut = (local?.checkedOutWorktreeIds.length ?? 0) > 0;
         return (
           <div className="refs-remote-branch" key={branch.fullName}>
-            <span className="refs-branch-icon">⑂</span>
+            <span className="refs-branch-icon" aria-hidden="true">⑂</span>
             <div>
               <CopyTarget
                 value={branch.name}
@@ -138,9 +218,27 @@ function RemoteBranchList({
                 ? "—"
                 : shortWhen(branch.lastCommitAt, now)}
             </span>
-            <button className="refs-row-action" onClick={() => onPick(branch)}>
-              {checkedOut ? "Show worktree" : "New worktree"}
-            </button>
+            <div className="refs-row-actions">
+              {/* A branch a worktree already holds is a navigation problem, not
+                  a checkout one — git refuses the second checkout anyway, so
+                  the row offers the worktree instead of a switch that cannot
+                  succeed. */}
+              {!checkedOut && (
+                <SwitchHereButton
+                  branch={branch.name}
+                  worktree={focusedWorktree}
+                  rowKey={branch.fullName}
+                  inFlight={switching}
+                  onSwitch={() => onSwitch(branch.fullName, branch.name)}
+                />
+              )}
+              <button
+                className={`refs-row-action${checkedOut ? "" : " refs-row-action--quiet"}`}
+                onClick={() => onPick(branch)}
+              >
+                {checkedOut ? "Show worktree" : "New worktree"}
+              </button>
+            </div>
           </div>
         );
       })}
@@ -161,6 +259,7 @@ function RemoteBranchList({
 export function RepoRefsModal({
   repo,
   refs,
+  focusedWorktree,
   now,
   initialTab,
   onRefresh,
@@ -171,6 +270,10 @@ export function RepoRefsModal({
 }: {
   repo: Repo;
   refs: RepoRefs;
+  /** The working target, but only when it belongs to THIS repo — the checkout
+   *  "Switch here" moves. Null leaves every switch control disabled with its
+   *  reason in the label, rather than silently absent. */
+  focusedWorktree: Worktree | null;
   now: number;
   initialTab: "branches" | "tags" | "remotes";
   onRefresh: () => void | Promise<void>;
@@ -193,6 +296,7 @@ export function RepoRefsModal({
     null
   );
   const [renaming, setRenaming] = useState<LocalBranchSummary | null>(null);
+  const [switching, setSwitching] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [deletingTag, setDeletingTag] = useState<string | null>(null);
   const q = query.trim().toLowerCase();
@@ -242,6 +346,38 @@ export function RepoRefsModal({
   const branchTabCount =
     refs.branches.length +
     refs.remotes.reduce((total, remote) => total + remote.branchCount, 0);
+
+  /**
+   * Move the working target onto `branchName`, through the one helper every
+   * branch surface shares — so the dirty confirm, and the recovery when another
+   * worktree grabbed the branch after this snapshot was read, behave here
+   * exactly as they do in the sidebar and the lineage graph.
+   *
+   * The dialog stays open on success. The reader came here to browse branches
+   * and frequently has more to do; the row's own state (and the refreshed
+   * snapshot behind it) is what confirms the switch landed. Revealing a
+   * worktree is a navigation, so that one closes.
+   */
+  const switchHere = async (
+    rowKey: string,
+    branchName: string
+  ): Promise<void> => {
+    if (switching !== null || focusedWorktree === null) return;
+    setSwitching(rowKey);
+    const outcome = await switchWorktreeToBranch({
+      repoId: repo.id,
+      worktreeId: focusedWorktree.id,
+      worktreeLabel: lastSegment(focusedWorktree.path),
+      branch: branchName,
+      onRevealWorktree
+    });
+    setSwitching(null);
+    if (outcome === "revealed") {
+      onClose();
+      return;
+    }
+    if (outcome === "switched") await onRefresh();
+  };
 
   const createRemoteWorktree = (branch: RemoteBranchSummary): void => {
     const local = localBranchForRemote(refs, branch);
@@ -477,7 +613,7 @@ export function RepoRefsModal({
                   return (
                     <div className="refs-table__row" key={branch.fullName}>
                       <div className="refs-table__identity">
-                        <span className="refs-branch-icon">⑂</span>
+                        <span className="refs-branch-icon" aria-hidden="true">⑂</span>
                         <div>
                           <CopyTarget
                             value={branch.name}
@@ -506,12 +642,23 @@ export function RepoRefsModal({
                           ? "—"
                           : shortWhen(branch.lastCommitAt, now)}
                       </span>
-                      <button
-                        className="refs-row-action"
-                        onClick={() => createRemoteWorktree(branch)}
-                      >
-                        New worktree
-                      </button>
+                      <div className="refs-row-actions">
+                        <SwitchHereButton
+                          branch={branch.name}
+                          worktree={focusedWorktree}
+                          rowKey={branch.fullName}
+                          inFlight={switching}
+                          onSwitch={() =>
+                            void switchHere(branch.fullName, branch.name)
+                          }
+                        />
+                        <button
+                          className="refs-row-action refs-row-action--quiet"
+                          onClick={() => createRemoteWorktree(branch)}
+                        >
+                          New worktree
+                        </button>
+                      </div>
                     </div>
                   );
                 }
@@ -519,7 +666,7 @@ export function RepoRefsModal({
                 return (
                   <div className="refs-table__row" key={branch.fullName}>
                     <div className="refs-table__identity">
-                      <span className="refs-branch-icon">⑂</span>
+                      <span className="refs-branch-icon" aria-hidden="true">⑂</span>
                       <div>
                         <CopyTarget
                           value={branch.name}
@@ -567,18 +714,29 @@ export function RepoRefsModal({
                           Show worktree
                         </button>
                       ) : (
-                        <button
-                          className="refs-row-action"
-                          onClick={() => {
-                            onCreateWorktree(branch.name, false);
-                            onClose();
-                          }}
-                        >
-                          New worktree
-                        </button>
+                        <>
+                          <SwitchHereButton
+                            branch={branch.name}
+                            worktree={focusedWorktree}
+                            rowKey={branch.fullName}
+                            inFlight={switching}
+                            onSwitch={() =>
+                              void switchHere(branch.fullName, branch.name)
+                            }
+                          />
+                          <button
+                            className="refs-row-action refs-row-action--quiet"
+                            onClick={() => {
+                              onCreateWorktree(branch.name, false);
+                              onClose();
+                            }}
+                          >
+                            New worktree
+                          </button>
+                        </>
                       )}
                       <button
-                        className="refs-row-action"
+                        className="refs-row-action refs-row-action--quiet"
                         aria-label={`Rename local branch ${branch.name}`}
                         title={
                           branch.checkedOutWorktreeIds.length > 0
@@ -591,7 +749,7 @@ export function RepoRefsModal({
                         Rename
                       </button>
                       <button
-                        className="refs-row-action is-danger"
+                        className="refs-row-action refs-row-action--quiet is-danger"
                         aria-label={`Delete local branch ${branch.name}`}
                         title={
                           branch.checkedOutWorktreeIds.length > 0
@@ -823,6 +981,9 @@ export function RepoRefsModal({
                     query={query}
                     now={now}
                     refs={refs}
+                    focusedWorktree={focusedWorktree}
+                    switching={switching}
+                    onSwitch={(rowKey, branch) => void switchHere(rowKey, branch)}
                     onPick={createRemoteWorktree}
                   />
                 </section>

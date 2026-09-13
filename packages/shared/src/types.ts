@@ -228,11 +228,16 @@ export type RemoteSummary = {
   defaultBranch?: string;
   skipFetchAll: boolean;
   /**
-   * The newest `REMOTE_BRANCH_PREVIEW` branches by committer date — enough for
-   * the sidebar disclosure, and deliberately NOT the whole set. A fetched fork
-   * network runs to thousands of remote-tracking refs (openclaw: 4,466), which
-   * is megabytes of IPC to hand a surface that renders six rows. Page the rest
-   * through `repo:remoteBranches`.
+   * `REMOTE_BRANCH_PREVIEW` branches for the sidebar disclosure — deliberately
+   * NOT the whole set. A fetched fork network runs to thousands of
+   * remote-tracking refs (openclaw: 4,466), which is megabytes of IPC to hand a
+   * surface that renders six rows. Page the rest through `repo:remoteBranches`.
+   *
+   * A ranked sample, not the newest six: branches with no local counterpart
+   * come first, because the Branches section above already lists the others
+   * with more on them (ahead/behind, which a remote row cannot say). Committer
+   * date, newest first, orders within each group. `branchCount` is still the
+   * whole remote.
    */
   previewBranches: RemoteBranchSummary[];
   /** Total branches on this remote, of which `previewBranches` is a prefix. */

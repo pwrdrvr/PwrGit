@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Repo, Worktree } from "@pwrgit/shared";
-import { currentPlatform, pathTail } from "../../lib/platform";
+import { currentPlatform, pathLeaf, pathTail } from "../../lib/platform";
 import { CopyTarget } from "../shell/CopyTarget";
 import { BranchSwitcher } from "../graph/BranchSwitcher";
 import { AppMenuBar } from "./AppMenuBar";
@@ -28,10 +28,14 @@ import { WindowControls } from "./WindowControls";
 export function TitleBar({
   repo,
   worktree,
+  onRevealBranchWorktree,
   platform = currentPlatform()
 }: {
   repo: Repo | null;
   worktree: Worktree | null;
+  /** Go to the worktree already holding a branch the picker could not check
+   *  out. The strip has no worktree list of its own, so the owner resolves it. */
+  onRevealBranchWorktree: (branch: string) => void;
   /** Explicit only in deterministic platform component tests. */
   platform?: string;
 }) {
@@ -110,7 +114,9 @@ export function TitleBar({
       {switching && worktree !== null && (
         <BranchSwitcher
           worktreeId={worktree.id}
+          worktreeLabel={pathLeaf(worktree.path)}
           currentBranch={worktree.branch}
+          onHeldElsewhere={onRevealBranchWorktree}
           onClose={() => setSwitching(false)}
         />
       )}

@@ -3499,7 +3499,8 @@ async function remoteSummary(
   git: GitExec,
   cwd: string,
   name: string,
-  rows: RepoRefRow[]
+  rows: RepoRefRow[],
+  localNames: ReadonlySet<string>
 ): Promise<RemoteSummary> {
   const [fetchUrl, pushUrl, symbolicHead, skipFetchAll] = await Promise.all([
     remoteValue(git, cwd, ["remote", "get-url", name]),
@@ -3533,12 +3534,53 @@ async function remoteSummary(
       ? { defaultBranch: symbolicHead.slice(headPrefix.length) }
       : {}),
     skipFetchAll: skipFetchAll === "true",
-    // `rows` is already sorted newest-first, so the preview is a plain prefix.
-    previewBranches: branches
-      .slice(0, REMOTE_BRANCH_PREVIEW)
-      .map((row) => remoteBranchOf(row, prefix)),
+    previewBranches: previewRemoteBranches(branches, prefix, localNames),
     branchCount: branches.length
   };
+}
+
+/**
+ * Which six of a remote's branches the sidebar disclosure is worth spending on.
+ *
+ * `rows` arrives newest-first, so the preview used to be a plain prefix — and
+ * on any repository whose trunk is also checked out locally, one of those six
+ * rows went to a branch the Branches section immediately above already lists,
+ * *with more information on it* (the local row says ahead/behind; the remote
+ * row cannot). Ranking branches with no local counterpart first spends the
+ * scarce rows on branches the reader cannot already see.
+ *
+ * This is a ranked sample, not a filter: nothing is dropped, `branchCount`
+ * still counts the whole remote, and the disclosure's footer still offers all
+ * of them. `BranchSwitcher` already hides a remote whose local head exists, so
+ * this also brings the three branch lists into agreement about the redundancy.
+ *
+ * One pass, two buckets, each capped at the preview size — NOT a sort. Sorting
+ * to keep six of a fetched fork network's refs (openclaw: 4,466) copies the
+ * whole array and runs the comparator ~107,000 times, each call slicing two
+ * fresh substrings, and `repo:refs` is called on every expansion, switch and
+ * fetch. Appending in arrival order keeps committer date ordering each bucket
+ * exactly as a stable sort did.
+ */
+export function previewRemoteBranches(
+  branches: readonly RepoRefRow[],
+  prefix: string,
+  localNames: ReadonlySet<string>
+): RemoteBranchSummary[] {
+  const fresh: RepoRefRow[] = [];
+  const shadowed: RepoRefRow[] = [];
+  for (const row of branches) {
+    if (fresh.length >= REMOTE_BRANCH_PREVIEW) break;
+    const bucket = localNames.has(row.fullName.slice(prefix.length))
+      ? shadowed
+      : fresh;
+    // A shadowed row is only ever a filler, so stop collecting them once there
+    // are enough to fill a preview that finds no unshadowed branch at all.
+    if (bucket === shadowed && shadowed.length >= REMOTE_BRANCH_PREVIEW) continue;
+    bucket.push(row);
+  }
+  return [...fresh, ...shadowed]
+    .slice(0, REMOTE_BRANCH_PREVIEW)
+    .map((row) => remoteBranchOf(row, prefix));
 }
 
 /** Shape one `for-each-ref` row as a remote branch, given its remote's prefix. */
@@ -3598,8 +3640,9 @@ export async function listRepoRefs(
         ...(row.subject === "" ? {} : { subject: row.subject })
       };
     });
+  const localNames = new Set(branches.map((branch) => branch.name));
   const remotes = await Promise.all(
-    names.value.map((name) => remoteSummary(git, cwd, name, rows))
+    names.value.map((name) => remoteSummary(git, cwd, name, rows, localNames))
   );
   return ok({
     branches,

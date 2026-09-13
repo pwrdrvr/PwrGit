@@ -1598,6 +1598,20 @@ textarea,
   font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
   color: var(--status-warning);
 }
+/* Branches whose upstream was deleted. Deliberately NOT the warning tier its
+   neighbour uses: ↑n / ↓n mean the branch and its remote have drifted and
+   something wants doing, while `gone` means the work landed and the branch is
+   finished. Painting completion amber is the same mistake the row label made
+   when it read "Missing". `margin-left: auto` lives on whichever of the two is
+   first, so this one only claims the gap when it stands alone. */
+.ref-section__gone {
+  margin-left: auto;
+  font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
+  color: var(--text-subtle);
+}
+.ref-section__summary + .ref-section__gone {
+  margin-left: 6px;
+}
 .ref-section__body {
   padding: 1px 3px 6px;
 }
@@ -1779,6 +1793,44 @@ textarea,
 .ref-fetch-all {
   margin-right: 5px;
   border-color: var(--border-subtle);
+}
+/* "Switch the working target onto this branch" — the verb the row already
+   performed on double-click, finally given a control.
+
+   Held back until the row is hovered or carries focus, the way
+   `.refs-copyable-name`'s copy glyph is on these same rows: a branch list is
+   read far more often than it is acted on, and a permanent second button on
+   every row would cost the branch name 24px it does not have to spare. Unlike
+   that glyph this one keeps its BOX at rest — the mini actions share one
+   right-hand column down the whole panel (see the Tag Chips review), and a
+   control that widens on hover would bend it and reflow the name under the
+   pointer.
+
+   `opacity`, not `visibility` or `display`: both of those take the button out
+   of the accessibility tree, and the keyboard path must not depend on a
+   pointer being anywhere. It is reachable by Tab at all times and paints itself
+   the moment it takes focus. */
+.ref-mini-action--switch {
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+.ref-branch-row:hover .ref-mini-action--switch,
+.ref-branch-row:focus-within .ref-mini-action--switch,
+.ref-remote-branch-row:hover .ref-mini-action--switch,
+.ref-remote-branch-row:focus-within .ref-mini-action--switch,
+.ref-mini-action--switch:focus-visible {
+  opacity: 1;
+}
+/* A switch with nothing to move (no working target in this repository) still
+   occupies its slot and still announces its reason — see RepoRefsSections. */
+.ref-mini-action--switch:disabled {
+  cursor: not-allowed;
+}
+.ref-branch-row:hover .ref-mini-action--switch:disabled,
+.ref-branch-row:focus-within .ref-mini-action--switch:disabled,
+.ref-remote-branch-row:hover .ref-mini-action--switch:disabled,
+.ref-remote-branch-row:focus-within .ref-mini-action--switch:disabled {
+  opacity: 0.4;
 }
 .ref-view-all {
   width: 100%;
@@ -4524,8 +4576,37 @@ textarea,
   font: 600 10.5px/1 var(--font-sans);
   cursor: pointer;
 }
+/* The secondary verbs on a branch row.
+
+   Every action used to be painted as `.refs-row-action` — accent border, accent
+   fill, accent text — so a row offered three primaries and no ranking, and
+   `Delete` (which only overrode `color`) arrived wearing a primary action's
+   border and fill. Now exactly one control per row is accented: `Switch here`,
+   the cheap reversible verb that is the right answer almost every time. */
+.refs-row-action--quiet {
+  border-color: var(--border-default);
+  background: transparent;
+  color: var(--text-secondary);
+}
+/* Hover lands on the accent tint, the way `.ref-mini-action` does — which is
+   also what lets it use `--accent-bright`. That token is floored against a
+   tint, not against a flat surface; `theme-contract.test.ts` fails a rule that
+   paints it on one. */
+.refs-row-action--quiet:hover:not(:disabled):not([aria-disabled="true"]) {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
 .refs-row-action.is-danger {
   color: var(--danger-text);
+}
+.refs-row-action--quiet.is-danger {
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+.refs-row-action--quiet.is-danger:hover:not(:disabled) {
+  border-color: var(--danger-text);
+  background: var(--danger-soft);
 }
 /* A button is `display: block` with centred contents, so a glyph and a label
    inside one baseline-align against a raw text space. Every other glyph+label
@@ -4551,10 +4632,16 @@ textarea,
   overflow: auto;
   padding: 10px 16px 18px;
 }
+/* The fr ratio, not the minimums: the row grew a fourth action (`Switch here`)
+   and the action column is `auto`, so the slack left for the two flexible
+   columns shrank — and all of it came out of Upstream, which starved to about
+   22 characters while Branch kept room it was not using. Raising Upstream's
+   MINIMUM instead would push the row past the 940px the app window can be
+   narrowed to, and overflow it horizontally. */
 .refs-table__header,
 .refs-table__row {
   display: grid;
-  grid-template-columns: minmax(190px, 1.5fr) minmax(120px, 1fr) 105px 80px minmax(210px, auto);
+  grid-template-columns: minmax(190px, 1.2fr) minmax(120px, 1fr) 105px 80px minmax(210px, auto);
   gap: 12px;
   align-items: center;
 }
@@ -4759,9 +4846,6 @@ textarea,
 .refs-row-actions .refs-row-action {
   min-width: 0;
   padding: 0 7px;
-}
-.refs-row-action.is-danger {
-  color: var(--danger-text);
 }
 .refs-row-action:disabled {
   cursor: not-allowed;

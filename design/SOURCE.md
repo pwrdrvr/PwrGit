@@ -38,12 +38,14 @@ and records where the retired wireframe disagreed with the code. Read it first.
 | `Focused Lens Stability - UX Review.dc.html` | The Focused lens re-sorting under the pointer &mdash; the ladder rule that fires on click, the options weighed, and a live prototype of the hold. |
 | `Tag Chips and Locate - UX Review.dc.html` | The lineage tag chip and the tag locator — chip vocabulary, the light-theme contrast the accent tint could not hold, and the sidebar action column. |
 | `Onboarding Wizard.dc.html` | The first-run wizard — step model, the four steps, the scan explained, and the Done payoff. Interactive. |
+| `Branch Switching and Ref Relevance - UX Review.dc.html` | Where "switch my checkout to this branch" was missing, the relevance ladder the six-row branch slices are spent on, and the one guarded switch path. |
 | `PwrGit Icon.dc.html` | App icon, size ladder, tray templates, DMG background. |
 | `support.js` | Generated `dc-runtime` bundle every `.dc.html` loads. |
 | `github.md` | Provenance note for the icon asset set (matched to PwrSnap's). |
 | `assets/logo-pwrgit.svg` | The lineage mark. |
 | `assets/tag-locate-{before,after}.png` | Shipped-app captures for the tag chip artboard, from the Playwright tag scenario on contrived fixture repos. |
 | `assets/forges-before.png` | Shipped-app capture of Settings › Forges, from a Playwright scenario against contrived `gh`/`glab` stubs. |
+| `assets/branch-switch-{sidebar,browser}-{before,after}.png` | Shipped-app captures of the sidebar ref sections and the refs browser, from one Playwright scenario on a contrived repository, run against the renderer before and after the change. |
 
 ### History and leftovers
 
@@ -115,6 +117,23 @@ It carries no `assets/` of its own. Every frame in it is drawn from PwrGit's own
 tokens and markup rather than captured, so there is no screenshot to keep in
 sync — and the fixture data in it (`northwind-labs`, `atlas-forge`,
 `ledger-api`, `dana@example.com`) is invented, not sampled from a real machine.
+
+`Branch Switching and Ref Relevance - UX Review.dc.html` was written here and
+pushed up the same way, during
+[#255](https://github.com/pwrdrvr/PwrGit/pull/255). It owns the branch-switching
+verb: the matrix of every surface that names a branch and what it lets you do
+with it, the four-tier relevance ladder the six-row branch and remote previews
+are spent on, and the two implementations of "switch" that had drifted apart. A
+re-export must not treat it as foreign and drop it.
+
+Its four `assets/branch-switch-*.png` captures are **100% contrived**: one
+Playwright scenario in `apps/desktop/e2e/design-shots.spec.ts` against a
+fixture repository built by `e2e/fixtures/git-sandbox.ts`, the seeded default
+profile, and a `PWRGIT_USER_DATA_DIR` temp dir. Every branch name in them is
+invented. The before/after pairs come from running that one scenario twice —
+the second time with `apps/desktop/src` and `packages` checked out at the base
+commit — so the two frames differ only by the change. It uses no selector the
+older build lacks, which is what makes that possible; keep it that way.
 
 ## Deliberately NOT copied in
 

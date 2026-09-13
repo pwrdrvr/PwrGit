@@ -21,6 +21,8 @@ import {
   inspectRemoteDivergence,
   listRemoteBranchPage,
   listRepoRefs,
+  parseRepoRefRows,
+  previewRemoteBranches,
   planPushRefs,
   pullFastForward,
   pushPlannedRefs,
@@ -1620,7 +1622,9 @@ describe("listRemoteBranchPage (paged remote refs)", () => {
       "feature/page-08",
       "feature/page-07"
     ]);
-    // The preview is a prefix of the paged listing, not a separate ordering.
+    // With no local counterpart among the newest six, the preview is still a
+    // plain prefix of the paged listing — the ranking only ever moves a branch
+    // the Branches section above already lists, and there is none here.
     const page = await listRemoteBranchPage(systemGit, fixture.local, {
       remote: "origin",
       limit: REMOTE_BRANCH_PREVIEW
@@ -1632,6 +1636,119 @@ describe("listRemoteBranchPage (paged remote refs)", () => {
       );
     }
   }, 20_000);
+});
+
+/**
+ * Which six of a remote's branches the sidebar disclosure spends its rows on.
+ * Exercised directly rather than through a fixture repository: the input is one
+ * `for-each-ref` listing and one set of local names, and building a repo whose
+ * newest remote branches happen to shadow local heads is a lot of setup for a
+ * pure ranking.
+ */
+describe("previewRemoteBranches", () => {
+  const PREFIX = "refs/remotes/origin/";
+
+  /** `for-each-ref` rows, newest committer date first — how they arrive. */
+  function rows(...names: string[]) {
+    return parseRepoRefRows(
+      names
+        .map(
+          (name, index) =>
+            `${PREFIX}${name}\torigin/${name}\t${String(index).repeat(40)}\t\t\t2026-09-0${index + 1}T00:00:00+00:00\tsubject ${name}`
+        )
+        .join("\n")
+    );
+  }
+
+  it("is a plain prefix when nothing is shadowed", () => {
+    const preview = previewRemoteBranches(
+      rows("a", "b", "c"),
+      PREFIX,
+      new Set(["unrelated"])
+    );
+    expect(preview.map((b) => b.name)).toEqual(["a", "b", "c"]);
+  });
+
+  // The reported case: origin/main sits four rows under the local `main` that
+  // tracks it, and the local row carries strictly more information.
+  it("spends the slice on branches with no local counterpart", () => {
+    const preview = previewRemoteBranches(
+      rows("claude/x", "main", "dependabot/y", "fix/z", "codex/w", "feat/v", "fix/tray"),
+      PREFIX,
+      new Set(["main"])
+    );
+    expect(preview.map((b) => b.name)).toEqual([
+      "claude/x",
+      "dependabot/y",
+      "fix/z",
+      "codex/w",
+      "feat/v",
+      "fix/tray"
+    ]);
+  });
+
+  // Ranked, not filtered: with nothing else to show, a shadowed branch is still
+  // better than a blank row.
+  it("still shows shadowed branches when they are all there is", () => {
+    const preview = previewRemoteBranches(
+      rows("main", "release"),
+      PREFIX,
+      new Set(["main", "release"])
+    );
+    expect(preview.map((b) => b.name)).toEqual(["main", "release"]);
+  });
+
+  // The bucketing is capped at the preview size, so a remote whose newest refs
+  // are ALL shadowed must still fill six rows rather than come back short.
+  it("fills the preview from shadowed branches when nothing else is left", () => {
+    const preview = previewRemoteBranches(
+      rows("m1", "m2", "m3", "m4", "m5", "m6", "m7", "solo"),
+      PREFIX,
+      new Set(["m1", "m2", "m3", "m4", "m5", "m6", "m7"])
+    );
+    expect(preview).toHaveLength(REMOTE_BRANCH_PREVIEW);
+    expect(preview[0]?.name).toBe("solo");
+    expect(preview.map((b) => b.name)).toEqual([
+      "solo",
+      "m1",
+      "m2",
+      "m3",
+      "m4",
+      "m5"
+    ]);
+  });
+
+  it("keeps committer-date order inside each group", () => {
+    const preview = previewRemoteBranches(
+      rows("mine-1", "theirs-1", "mine-2", "theirs-2"),
+      PREFIX,
+      new Set(["mine-1", "mine-2"])
+    );
+    expect(preview.map((b) => b.name)).toEqual([
+      "theirs-1",
+      "theirs-2",
+      "mine-1",
+      "mine-2"
+    ]);
+  });
+
+  it("compares against the branch name, not the remote-qualified one", () => {
+    // `origin/main` is never a local head; matching on it would make the
+    // ranking a no-op and the defect silently survive.
+    const preview = previewRemoteBranches(
+      rows("main", "solo"),
+      PREFIX,
+      new Set(["main"])
+    );
+    expect(preview[0]?.name).toBe("solo");
+  });
+
+  it("never lists more than the preview budget", () => {
+    const many = rows(...Array.from({ length: 9 }, (_, i) => `b${i}`));
+    expect(previewRemoteBranches(many, PREFIX, new Set())).toHaveLength(
+      REMOTE_BRANCH_PREVIEW
+    );
+  });
 });
 
 describe("reset target ranking", () => {

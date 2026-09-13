@@ -629,7 +629,33 @@ export function App() {
 
   return (
     <div className="app">
-      <TitleBar repo={selectedRepo} worktree={selectedWorktree} />
+      <TitleBar
+        repo={selectedRepo}
+        worktree={selectedWorktree}
+        /* The branch picker refused because another worktree holds the branch.
+           Every other branch surface answers that by going to that worktree —
+           git will not check a branch out twice, and its refusal teaches the
+           reader nothing they wanted to know. Only the title bar had to be
+           told how, because it is the one switch surface with no list of
+           worktrees of its own. */
+        onRevealBranchWorktree={(branch) => {
+          const holder = selectedRepo?.worktrees.find(
+            (candidate) => candidate.branch === branch
+          );
+          if (selectedRepo === null || holder === undefined) {
+            showErrorToast({
+              title: "Switch failed",
+              message: `${branch} is checked out in another worktree.`
+            });
+            return;
+          }
+          setPendingReveal({
+            repoId: selectedRepo.id,
+            worktreeId: holder.id,
+            branch: null
+          });
+        }}
+      />
 
       <div className="app-body" style={{ gridTemplateColumns }}>
         <Sidebar
