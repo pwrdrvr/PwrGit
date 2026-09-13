@@ -51,14 +51,22 @@ test("GitCafe appears alongside GitHub and GitLab and saves its host switch", as
       throw new Error("Settings menu is missing");
     });
     const page = await opened;
+    await handle.app.evaluate(({ BrowserWindow }) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (window.webContents.getURL().includes("settings"))
+          window.setSize(1180, 1100);
+      }
+    });
     await page.waitForSelector(".settings-screen");
     await page.locator(".settings-nav__button", { hasText: "Forges" }).click();
+    const cafeNav = page.locator(".settings-nav__subbutton", { hasText: "GitCafe" });
+    await expect(cafeNav).toHaveAttribute("aria-label", "GitCafe: Connected");
+    await cafeNav.click();
+    await expect(cafeNav).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("button", { name: "GitCafe", exact: true })).toBeFocused();
     for (const product of ["GitHub", "GitLab", "GitCafe"]) {
       await expect(
-        page.getByRole("status", {
-          name: `${product}: Connected`,
-          exact: true
-        })
+        page.locator(`section[aria-label='${product}']`).getByLabel(`${product}: Connected`, { exact: true })
       ).toBeVisible();
     }
     await page
@@ -77,6 +85,13 @@ test("GitCafe appears alongside GitHub and GitLab and saves its host switch", as
         hasText: "cafe auth login --host https://git.cafe/api"
       })
     ).toBeVisible();
+    const name = page.getByRole("textbox", { name: "Name for git.cafe", exact: true });
+    await name.fill("Cafe fixture");
+    await name.press("Enter");
+    await expect.poll(() =>
+      JSON.parse(readFileSync(join(userData, "settings.json"), "utf8"))
+        .forges.hosts["git.cafe"].label
+    ).toBe("Cafe fixture");
     await hostSwitch.click();
     await expect(hostSwitch).toHaveAttribute("aria-checked", "false");
     await expect
@@ -86,25 +101,36 @@ test("GitCafe appears alongside GitHub and GitLab and saves its host switch", as
             .forges.hosts["git.cafe"]
       )
       .toMatchObject({ kind: "gitcafe", enabled: false });
+    await expect(cafeNav).toHaveAttribute("aria-label", "GitCafe: Off");
     await hostSwitch.click();
     await expect(hostSwitch).toHaveAttribute("aria-checked", "true");
+    await expect(cafeNav).toHaveAttribute("aria-label", "GitCafe: Connected");
+    const signedOut = JSON.parse(readFileSync(fixture, "utf8"));
+    signedOut.hosts.gitcafe.loggedIn = false;
+    writeFileSync(fixture, JSON.stringify(signedOut));
+    await page.getByRole("button", { name: "Re-check", exact: true }).click();
+    await expect(cafeNav).toHaveAttribute("aria-label", "GitCafe: Signed out");
     // Simulate signing in externally, then exercise the real directory refresh.
     const signedIn = JSON.parse(readFileSync(fixture, "utf8"));
+    signedIn.hosts.gitcafe.loggedIn = true;
     signedIn.discoveredHosts = [
       { kind: "gitcafe", host: "git.cafe", account: "fixture-user" }
     ];
     writeFileSync(fixture, JSON.stringify(signedIn));
     await page.getByRole("button", { name: "Re-check", exact: true }).click();
+    await expect(cafeNav).toHaveAttribute("aria-label", "GitCafe: Connected");
     await expect(
-      page.getByText("GitCafe · signed in as fixture-user", { exact: true })
+      page.getByText("signed in as fixture-user · added by you", { exact: true })
     ).toBeVisible();
     // Entirely contrived providers and account data, safe for a PR.
-    await handle.app.evaluate(({ BrowserWindow }) => {
-      for (const window of BrowserWindow.getAllWindows()) {
-        if (window.webContents.getURL().includes("settings"))
-          window.setSize(1180, 1100);
-      }
-    });
+    for (const product of ["GitHub", "GitLab"]) {
+      const header = page.getByRole("button", { name: product, exact: true });
+      await header.click();
+      await expect(header).toHaveAttribute("aria-expanded", "false");
+    }
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }));
     await page.screenshot({
       path: testInfo.outputPath("gitcafe-settings.png"),
       fullPage: true

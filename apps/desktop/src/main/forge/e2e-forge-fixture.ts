@@ -26,7 +26,7 @@ import {
   type ForkInput,
   type RepoSearch
 } from "./repo-provider";
-import { ForgeStatusService } from "./status";
+import { ForgeStatusService, type ForgeStatusServiceDeps } from "./status";
 
 /** A repository exposed by the hermetic Electron E2E forge. `remotePath` is
  *  an on-disk bare remote; the provider rewrites origin to the forge URL after
@@ -344,7 +344,8 @@ function readFixture(path: string): E2EForgeFixtureFile {
  *  SQLite, selection and identity refresh all run normally. */
 export function createE2EForgeFixtureServices(
   fixturePath: string,
-  git: GitExec
+  git: GitExec,
+  hosts?: ForgeStatusServiceDeps["hosts"]
 ): { forges: ForgeRepoRegistry; status: ForgeStatusService; discoverHosts: () => Promise<DiscoveredForgeHost[]> } {
   const forges = new ForgeRepoRegistry();
   for (const host of FORGE_KINDS) {
@@ -359,10 +360,10 @@ export function createE2EForgeFixtureServices(
       (hostname) => new E2EForgeRepoProvider(host, fixturePath, git, hostname)
     );
   }
-  // The fixture's `hosts` map is keyed by forge KIND, not by hostname: E2E
-  // stubs "is this forge usable", and the SaaS host the service falls back to
-  // without a host list is the one contrived hostname that needs no fixture.
+  // Stub CLI availability and authentication, but keep the app's real host
+  // targets so enable switches drive status and its pushed nav updates.
   const status = new ForgeStatusService({
+    ...(hosts === undefined ? {} : { hosts }),
     probes: FORGE_KINDS.map((kind) => ({
       kind,
       cli: forgeProduct(kind).cli,

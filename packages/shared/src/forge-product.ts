@@ -138,7 +138,7 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
     organizationNoun: "organization",
     maxPathSegments: 2,
     hostAllowlistEnv: "PWRGIT_GITCAFE_HOSTS",
-    addHost: { button: "Add GitCafe host…", title: "Add a GitCafe host", placeholder: "git.cafe" },
+    addHost: { button: "Add GitCafe host…", sub: "For a GitCafe host you have not signed in to yet.", title: "Add a GitCafe host", placeholder: "git.cafe" },
     forkCompletesAsynchronously: true,
     capabilities: {
       batchedBranchLookup: false,

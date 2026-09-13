@@ -268,6 +268,34 @@ describe("Settings nav — groups", () => {
 });
 
 describe("Settings nav — forge status", () => {
+  it("keeps GitCafe's nav current through installation, login and enable changes", async () => {
+    await render();
+    const child = navChild("GitCafe");
+    expect(dotTone(child)).toBeUndefined();
+    const listener = mocks.subscribe.mock.calls.find(
+      ([name]) => name === "forge:statusChanged"
+    )?.[1];
+    expect(listener).toBeTypeOf("function");
+    const cases: { status: Partial<ForgeStatus>; tone: string; word?: string; label: string }[] = [
+      { status: { installed: false, loggedIn: false }, tone: "bad", word: "missing", label: "Not installed" },
+      { status: { loggedIn: false }, tone: "warn", word: "sign in", label: "Signed out" },
+      { status: { loggedIn: true }, tone: "ok", label: "Connected" },
+      { status: { loggedIn: false, hosts: [{ host: "git.cafe", enabled: false, loggedIn: true }] }, tone: "off", word: "off", label: "Off" },
+      { status: { loggedIn: true }, tone: "ok", label: "Connected" }
+    ];
+    for (const { status, tone, word, label } of cases) {
+      forges = [forge({ kind: "gitcafe", ...status })];
+      await act(async () => listener({ forges }));
+      expect(dotTone(child)).toBe(tone);
+      expect(chip(child)).toBe(word);
+      expect(child.getAttribute("aria-label")).toBe(`GitCafe: ${label}`);
+    }
+    await act(async () => child.click());
+    expect(card("GitCafe").getAttribute("aria-expanded")).toBe("true");
+    expect(document.activeElement).toBe(card("GitCafe"));
+    expect(child.getAttribute("aria-current")).toBe("page");
+  });
+
   it("reports each product's state in a dot and a word", async () => {
     const [first, second] = FORGE_KINDS;
     if (first === undefined || second === undefined) return;

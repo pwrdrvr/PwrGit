@@ -4,6 +4,7 @@ import { useBrandTheme, type BrandTheme } from "../../lib/brandTheme";
 import invertocatBlackUrl from "../../assets/github/invertocat-black.svg";
 import invertocatWhiteUrl from "../../assets/github/invertocat-white.svg";
 import tanukiUrl from "../../assets/gitlab/tanuki.svg";
+import cafeUrl from "../../assets/gitcafe/favicon.svg";
 
 /**
  * One forge's mark, as that forge publishes it.
@@ -51,7 +52,8 @@ const MARKS: Record<ForgeKind, Mark> = {
     url: (theme) => (theme === "light" ? invertocatBlackUrl : invertocatWhiteUrl)
   },
   /** GitLab publishes the tanuki in full color, and it reads on both themes. */
-  gitlab: { themed: false, url: () => tanukiUrl }
+  gitlab: { themed: false, url: () => tanukiUrl },
+  gitcafe: { themed: false, url: () => cafeUrl }
 };
 
 /**
