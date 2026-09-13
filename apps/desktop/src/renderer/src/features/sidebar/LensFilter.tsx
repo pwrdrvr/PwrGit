@@ -153,21 +153,29 @@ export function LensFilter({
               onChange(l);
             }}
           >
-            <svg
-              width="15"
-              height="15"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.7"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              {ICONS[l]}
-            </svg>
-            {/* Presence, not quantity — the number is in the accessible name. */}
-            {count > 0 && <span className="lens-chip__dot" aria-hidden="true" />}
+            {/* The glyph and its dot travel together. The dot used to hang
+                off the chip's own corner, which was the same thing while every
+                chip was exactly one glyph wide — but the chips now divide the
+                sidebar's surplus, and a dot pinned to a 57px chip's corner
+                drifts halfway to the next icon and starts reading as that
+                one's. */}
+            <span className="lens-chip__glyph">
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                {ICONS[l]}
+              </svg>
+              {/* Presence, not quantity — the number is in the accessible name. */}
+              {count > 0 && <span className="lens-chip__dot" aria-hidden="true" />}
+            </span>
           </button>
         );
       })}

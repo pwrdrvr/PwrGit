@@ -686,9 +686,24 @@ textarea,
      five-track text grid was pinned to its own content width and cleared
      "Pinned 13" by ~0.5px at a 320px sidebar — one notch of
      --sidebar-title-size, a sixth lens, or a four-digit count all overflowed
-     it. Icons are fixed-size, so this row is now width-independent and the
-     surplus goes to the active count instead of to five competing labels. */
-  display: flex;
+     it.
+
+     The chips DIVIDE the surplus rather than clustering at the left edge.
+     This was a flex row of fixed 30px chips, so every pixel the sidebar gained
+     past its minimum opened as dead space between the last chip and the count
+     — five controls huddled in one corner of a pill built to hold them, and a
+     count marooned at the far end reading as unrelated to them. It is also a
+     family divergence: PwrAgnt's `.lens-switch` is this same control, one
+     `minmax(min-content, 1fr)` grid wide, and its own CSS note asks for the
+     two to be kept in step because the sidebars are read side by side.
+
+     `min-content`, not `auto`, is the floor that keeps the narrow end safe:
+     each track can never fall below its chip's own width, so at the 240px
+     sidebar minimum this lays out exactly as the fixed-width row did, and only
+     the surplus above that is shared out. The trailing `auto` track is the
+     active lens's count, which keeps its content width at every size. */
+  display: grid;
+  grid-template-columns: repeat(5, minmax(min-content, 1fr)) auto;
   align-items: center;
   gap: 2px;
   padding: 3px;
@@ -697,10 +712,10 @@ textarea,
   background: var(--bg-panel);
 }
 .lens-chip {
-  position: relative;
-  width: 30px;
+  /* A floor, not a width: the grid track stretches the chip into its share of
+     the surplus, and an explicit `width` would opt it out of that stretch. */
+  min-width: 30px;
   height: 26px;
-  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -749,12 +764,26 @@ textarea,
   outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
+/* The dot's anchor. The chips stretch to divide the row's surplus, so the
+   chip box is no longer a fixed glyph-sized square to hang the dot off — at a
+   widened sidebar a chip-anchored dot sat nearer its neighbour's icon than its
+   own. This wrapper is always exactly the glyph. */
+.lens-chip__glyph {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 /* Presence, not quantity: the exact number lives in the button's accessible
-   name, so this only has to answer "is there anything in there". */
+   name, so this only has to answer "is there anything in there".
+
+   The offsets are negative because the anchor is now the 15px glyph rather
+   than the 30px chip, and they resolve to the same pixels the chip-anchored
+   4px/5px did: the dot still straddles the glyph's top-right corner. */
 .lens-chip__dot {
   position: absolute;
-  top: 4px;
-  right: 5px;
+  top: -1.5px;
+  right: -2.5px;
   width: 4px;
   height: 4px;
   border-radius: 999px;
@@ -766,9 +795,8 @@ textarea,
 /* The active lens's count, spelled out in the room the icons freed. Fixed
    tier — it holds still across text-size notches like the other counts. */
 .lens-filter__count {
-  margin-left: auto;
+  /* Its own grid track now, so no auto margin is needed to push it right. */
   padding: 0 6px 0 4px;
-  flex: 0 0 auto;
   font: 600 11px/1 var(--font-mono);
   color: var(--text-subtle);
 }

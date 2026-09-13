@@ -145,6 +145,67 @@ test("the lens row survives the narrowest sidebar at the largest text size", asy
   expect(await lensRowOverflow(window)).toBeLessThanOrEqual(0);
 });
 
+test("the lens chips divide the sidebar's surplus width", async () => {
+  sandbox = createGitSandbox();
+  for (let i = 0; i < 4; i += 1) sandbox.makeRepo(`repo-${i}`);
+
+  handle = await launchApp();
+  const { window } = handle;
+  await handle.setPickDirectory(sandbox.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await expect(window.locator(".repo-row__name")).toHaveCount(4, {
+    timeout: 20_000
+  });
+
+  const chipWidth = (): Promise<number> =>
+    window
+      .locator(".lens-chip")
+      .first()
+      .evaluate((el) => el.getBoundingClientRect().width);
+
+  const setWidth = async (px: string): Promise<void> => {
+    await window.evaluate((value) => {
+      window.localStorage.setItem("pwrgit.sidebarWidth", value);
+    }, px);
+    await window.reload();
+    await expect(window.locator(".lens-chip").first()).toBeVisible({
+      timeout: 20_000
+    });
+  };
+
+  // 240 is useColumnResize's floor. Every track floors at its own chip, so the
+  // row lays out here exactly as a fixed-width row did — which is what keeps
+  // the narrow end safe.
+  await setWidth("240");
+  const atFloor = await chipWidth();
+  expect(Math.round(atFloor)).toBe(30);
+  expect(await lensRowOverflow(window)).toBeLessThanOrEqual(0);
+
+  // Widen, and the chips take the surplus instead of leaving it as dead space
+  // between the last chip and the count. This was five 30px controls huddled
+  // at the left of a pill built to hold them; PwrAgnt's `.lens-switch` is the
+  // same control as one minmax(min-content, 1fr) grid, and its own CSS asks
+  // for the two to be kept in step.
+  await setWidth("420");
+  const widened = await chipWidth();
+  expect(widened).toBeGreaterThan(atFloor + 10);
+  expect(await lensRowOverflow(window)).toBeLessThanOrEqual(0);
+
+  // And the presence dot rides its own glyph rather than the chip's corner —
+  // at this width a chip-anchored dot sat nearer the next icon than its own.
+  const drift = await window
+    .locator(".lens-chip", { has: window.locator(".lens-chip__dot") })
+    .first()
+    .evaluate((chip) => {
+      const glyph = chip
+        .querySelector(".lens-chip__glyph")!
+        .getBoundingClientRect();
+      const dot = chip.querySelector(".lens-chip__dot")!.getBoundingClientRect();
+      return dot.left - glyph.right;
+    });
+  expect(Math.abs(drift)).toBeLessThanOrEqual(4);
+});
+
 test("sidebar rows are sized by their content, not by a fixed box", async () => {
   sandbox = createGitSandbox();
   sandbox.makeRepo("dense", { worktrees: ["feature/one"] });
