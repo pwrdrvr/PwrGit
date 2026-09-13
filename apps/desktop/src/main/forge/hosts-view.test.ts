@@ -4,7 +4,10 @@ import { ForgeHosts, ForgeHostsView } from "./hosts";
 
 const view = (
   discovered: DiscoveredForgeHost[],
-  hosts: Record<string, { kind?: "github" | "gitlab"; enabled?: boolean }> = {}
+  hosts: Record<
+    string,
+    { kind?: "github" | "gitlab"; enabled?: boolean; label?: string }
+  > = {}
 ) =>
   new ForgeHostsView(
     new ForgeHosts({
@@ -33,6 +36,26 @@ describe("ForgeHostsView.rows", () => {
         scopes: ["repo"]
       }
     ]);
+  });
+
+  it("carries the name the user gave a host, unresolved", () => {
+    // Carried rather than derived here: deriving a short name is the
+    // renderer's job, and a second derivation in main would be one more thing
+    // to keep in step with the one drawing the chips.
+    const rows = view([], {
+      "ghe.acme.example": { kind: "github", label: "Acme" }
+    }).rows();
+    expect(rows[0]?.label).toBe("Acme");
+  });
+
+  it("leaves the name absent for a host nobody has named", () => {
+    // Absent means "nobody decided", which is what leaves the derivation in
+    // charge. An empty string would be a name of its own.
+    const named = view([], { "a.example": { kind: "github", label: "" } }).rows();
+    expect(named[0]?.label).toBeUndefined();
+    const unnamed = view([{ kind: "github", host: "github.com" }]).rows();
+    expect(unnamed[0]?.label).toBeUndefined();
+    expect("label" in (unnamed[0] ?? {})).toBe(false);
   });
 
   it("distinguishes a chosen product from a derived one", () => {

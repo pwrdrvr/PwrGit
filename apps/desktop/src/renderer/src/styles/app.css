@@ -1107,6 +1107,66 @@ textarea,
   font: 600 9px/1 var(--font-mono);
 }
 
+/* Which forge a row's repository lives on. Drawn only while more than one
+   forge host is switched on — with one, every chip in the sidebar would read
+   the same word.
+
+   Fixed size like the counts and the focus reason beside it, deliberately off
+   the `--sidebar-title-size` ladder: these are qualifiers, and a bigger name
+   should read as a bigger name rather than as page zoom. */
+.forge-chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  /* 16px is the ceiling for a chip on a repo row, not a taste: the row is
+     content-sized over a 26.25px floor with 4px of padding and a 1px border,
+     leaving 16.25px, so anything taller stops fitting and starts DRIVING the
+     row height. It is the same arithmetic that trims `.repo-row .badge` from
+     18px. */
+  min-height: 16px;
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  /* The house tier for sidebar chrome: `.badge`, `.badge-text`, `.wt-tag` and
+     `.wt-age` all read 10px mono. This chip shipped at 9px — the one thing in
+     the sidebar under that tier — and the `+n` was what paid for it. */
+  font: 600 10px/1 var(--font-mono);
+}
+/* A chip that is only a mark keeps no pill at all.
+   The border and the fill exist to bind a mark to the word beside it. With no
+   word they are a box drawn around a logo, and inside the 16px ceiling above
+   there is exactly 1px between the two — which does not read as a gap, it
+   reads as touching, because at that size it is. A bare mark sits among the
+   identity glyphs as the peer it is, and spends the room it gives back on
+   being larger (see `ForgeChip.tsx`). */
+.forge-chip--mark {
+  padding: 0;
+  gap: 3px;
+  border-color: transparent;
+}
+/* The name is the half that gives way. A derived name that collided with
+   another host's is abandoned for the full hostname, which is long enough to
+   push the repo name out of a 240px sidebar — and the `title` carries it in
+   full, so truncating here loses nothing (SC 1.4.4). */
+.forge-chip__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The count never gives way: it is what says the name is not the whole
+   answer, and it sits at the end, where an ellipsis would eat it first. Which
+   is also why it is not quieted any further than the chip already is — at the
+   old 9px in --text-subtle it was the smallest, faintest thing in the sidebar,
+   and it is the half that cannot be recovered from the rest of the row. */
+.forge-chip__more {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
 /* The sidebar's ONE disclosure glyph — a filled caret, matching PwrAgnt's
    `.directory-row__chevron`. It replaced two different border-stroke chevrons
    (7px/1.7px here, 6px/1.5px on ref sections) that disagreed with each other
@@ -9465,7 +9525,45 @@ body.is-col-resizing {
 .settings-field__actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
+}
+
+/* Short free-text entry inside a settings field's control column — the forge
+   host's chip name today. Sized to the answer (a word), not to the column: a
+   full-width box next to a switch reads as the field's main control, and the
+   switch is. */
+.settings-input {
+  appearance: none;
+  height: 26px;
+  padding: 0 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font: 500 12px/1 var(--font-mono);
+  outline: none;
+}
+.settings-input:focus {
+  border-color: var(--accent-border);
+}
+.settings-input::placeholder {
+  color: var(--text-subtle);
+}
+.settings-input--short {
+  width: 11ch;
+}
+/* A field small enough to sit beside another control, with its label on the
+   same line. Placeholder text cannot be the label here: it holds the value
+   that applies while the box is empty. */
+.settings-inline-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.settings-inline-field__label {
+  color: var(--text-subtle);
+  font: 500 11px/1 var(--font-sans);
 }
 
 /* Small inline action inside a settings field's help text. `.settings-button`

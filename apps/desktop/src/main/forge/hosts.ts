@@ -36,6 +36,10 @@ export type ResolvedForgeHost = {
   kindSource: ForgeValueSource;
   enabled: boolean;
   enabledSource: ForgeValueSource;
+  /** What the user called this host, when they have. Carried unresolved:
+   *  deriving a name is the renderer's job, and a name derived here would be
+   *  a second implementation to keep in step with the one drawing the chips. */
+  label?: string;
 };
 
 export type ForgeHostsDeps = {
@@ -221,12 +225,17 @@ export class ForgeHosts {
     const key = canonical(host);
     const kind = this.kindFor(key);
     const enabled = this.isEnabled(key);
+    // A name is the one field with no env layer and no derivation: either a
+    // person typed it or nobody did. `typeof`, not a bare read, for the same
+    // reason `kindFor` guards its own: settings.json is parsed unvalidated.
+    const label = this.configFor(key)?.label;
     return {
       host: key,
       kind: kind.kind,
       kindSource: kind.source,
       enabled: enabled.enabled,
-      enabledSource: enabled.source
+      enabledSource: enabled.source,
+      ...(typeof label === "string" && label !== "" ? { label } : {})
     };
   }
 
@@ -407,7 +416,8 @@ export class ForgeHostsView {
               origin: entry.origin,
               cli: forgeProduct(entry.kind).cli,
               ...(entry.account === undefined ? {} : { account: entry.account }),
-              ...(entry.scopes === undefined ? {} : { scopes: entry.scopes })
+              ...(entry.scopes === undefined ? {} : { scopes: entry.scopes }),
+              ...(entry.label === undefined ? {} : { label: entry.label })
             }
           ]
     );

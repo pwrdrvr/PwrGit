@@ -1,0 +1,16 @@
+-- Every forge hostname a repository has a remote on, not just `origin`'s.
+--
+-- A checkout can push to GitHub and mirror to GitLab, so "which forge is this
+-- repo on" has more than one answer, and the sidebar's forge chip says so
+-- rather than printing `origin`'s host as the whole truth. Written by the same
+-- `git remote -v` the identity refresh already runs for `origin`, so it costs
+-- no extra process.
+--
+-- NULL is meaningful and distinct from an empty list: NULL is a row written
+-- before this column existed and never refreshed since, which a reader must
+-- treat as "not known" and stay quiet about. The refresh fills it in on the
+-- row's next pass.
+--
+-- Stored as a JSON array rather than its own table: it is read only as a whole,
+-- always alongside the rest of the identity row, and never joined or searched.
+ALTER TABLE repo_identity ADD COLUMN remote_hosts TEXT;

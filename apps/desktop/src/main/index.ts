@@ -799,13 +799,18 @@ if (!gotSingleInstanceLock) {
       settings
     );
     registerTagHandlers(bus, db);
-    const refreshIdentity = (repoId: string): void => {
+    const refreshIdentity = (
+      repoId: string,
+      options: { force?: boolean } = {}
+    ): void => {
       // Fetch carries no forge visibility. Ask separately in the background;
       // IdentityService skips fresh rows and concurrent lookups of this repo.
+      // A remote edit passes `force`, because the thing that changed is one of
+      // the facts the stored row holds.
       const repo = indexer.getRepo(repoId);
       if (repo === null) return;
       void identityService
-        .refresh([repo])
+        .refresh([repo], options)
         .then((changed) => {
           if (changed.length > 0) {
             emitEvent("repo:identityChanged", {

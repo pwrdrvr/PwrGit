@@ -15,6 +15,7 @@ import {
 } from "../../lib/platform";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { useViewportTooltip } from "../../lib/useViewportTooltip";
+import { useForgeNaming } from "../../state/useForgeNaming";
 import type { FocusVisits } from "./focus-visits";
 import {
   type FocusReason,
@@ -28,6 +29,8 @@ import {
   type DropPosition,
   type SelectionModifiers
 } from "./repo-view";
+import { repoForgeChip } from "./forge-chip";
+import { ForgeChip } from "./ForgeChip";
 import {
   identityDescription,
   RepoIdentityGlyphs
@@ -427,6 +430,13 @@ export function RepoRow({
   // the repo rather than under it.
   const worktreeGroupId = `wt-group-${repo.id}`;
 
+  // One renderer-wide store, so every row reads the same names from one
+  // `forge:hosts` call rather than one per row.
+  const forgeNaming = useForgeNaming();
+  const forgeChip = forgeNaming.showChips
+    ? repoForgeChip(repo.identity, forgeNaming.displays)
+    : null;
+
   // `aria-label` pins the row's name to the repo name alone — every E2E step
   // helper resolves rows by that exact name, and it is the right name. But a
   // label REPLACES the name computed from contents, so the two things the row
@@ -532,6 +542,11 @@ export function RepoRow({
           {repo.name}
         </span>
         {behind > 0 && <span className="badge badge--warn">↓{behind}</span>}
+        {/* Which forge this row's repo lives on, drawn only while that tells
+            the rows apart — one forge host on, and every chip in the sidebar
+            would read the same word. Before the counts, beside the identity
+            marks: like them it qualifies the repository, not its contents. */}
+        {forgeChip !== null && <ForgeChip chip={forgeChip} />}
         {/* Forge marks sit between the name and the counts: they qualify the
             repository (what it is), where the counts describe its contents.
             Absent `identity` means "not looked up yet" and draws nothing —

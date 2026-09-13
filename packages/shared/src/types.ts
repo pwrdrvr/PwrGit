@@ -762,6 +762,22 @@ export type RepoIdentity = {
   root?: ForgeRepoRef;
   /** ISO timestamp of the last successful read from the forge. */
   fetchedAt?: string;
+  /**
+   * Every forge hostname this repository has a remote on, `origin` included,
+   * sorted and deduplicated.
+   *
+   * A checkout can push to GitHub and mirror to GitLab, so "which forge is
+   * this repo on" has more than one answer and `hostname` — which is
+   * `origin`'s, and only ever `origin`'s — is not it. Remotes no product
+   * claims are absent: a NAS or a box on a home network is not a forge, the
+   * same rule host enumeration follows.
+   *
+   * Optional, and absent is NOT "no other remotes": rows written before this
+   * existed will never gain it until their next refresh, so a reader must
+   * treat absence as "not known" and say nothing, never as a single-forge
+   * repository.
+   */
+  remoteHostnames?: string[];
 };
 
 /** Result of an attempted identity lookup, independent of whether stored facts changed.

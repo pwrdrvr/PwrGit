@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FORGE_KINDS,
+  resolveForgeHostNames,
   type ForgeHostConfig,
   type ForgeHostRow,
   type ForgeKind,
@@ -215,6 +216,25 @@ export function ForgesSettings(props: { saving: boolean }) {
     });
   };
 
+  /**
+   * Every host's short name, resolved here rather than inside a section.
+   *
+   * The resolution is a property of the whole list: a derived name used by two
+   * hostnames is abandoned for the full hostname, and the two can belong to
+   * different products (`github.acme.example` and `gitlab.acme.example` both
+   * derive "acme"). Per section, each would promise a short name the sidebar
+   * will not print.
+   *
+   * `resolveForgeHostNames`, not `resolveForgeHostDisplays`: what the field
+   * needs is the name in full, which is what this returns. The displays half
+   * additionally decides whether a MARK can stand in for that name, and a
+   * placeholder has no mark to stand in — reading `display.name` here would
+   * leave the field empty-looking for every host whose chip is a bare glyph.
+   */
+  const names = resolveForgeHostNames(
+    (hosts ?? []).map((row) => ({ hostname: row.host, host: row.kind }))
+  );
+
   /** Genuinely unavailable, not in-flight — the dialog cannot tell a new host
    *  from one already present until the list has loaded. */
   const loading = hosts === undefined;
@@ -296,6 +316,7 @@ export function ForgesSettings(props: { saving: boolean }) {
           blocked={blocked}
           loading={loading}
           copied={copied}
+          names={names}
           rowError={rowError}
           onWrite={writeRow}
           onCopy={(row) => {

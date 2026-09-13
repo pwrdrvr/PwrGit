@@ -20,7 +20,7 @@ import { ForgeHosts } from "./hosts";
 import { ForgeRepoRegistry } from "./repo-provider";
 import {
   IdentityService,
-  readOrigin,
+  readRemotes,
   sameIdentity,
   type ForgeHostGate
 } from "./identity-service";
@@ -152,6 +152,74 @@ describe("IdentityService", () => {
     });
   });
 
+  it("stores every forge host the repo has a remote on, and joins it onto repo:list", async () => {
+    // The sidebar's forge chip is drawn from `repo:list`, so a set that only
+    // survives inside the service is a chip that never says `+1`.
+    const { db, identities, indexer, profileId } = await fixture(
+      okGh({ full_name: "huntharo/react", visibility: "public" }),
+      { overrides: { "ghe.acme.example": "github" } }
+    );
+    const repo = indexer.listRepos(profileId)[0]!;
+    execFileSync(
+      "git",
+      ["remote", "add", "mirror", "git@ghe.acme.example:acme/react.git"],
+      { cwd: repo.path, stdio: "ignore" }
+    );
+    // A remote no product claims must not join the set: a bare repo on a NAS
+    // parses fine and is not a forge.
+    execFileSync(
+      "git",
+      ["remote", "add", "nas", "git@nas.local:backups/react.git"],
+      { cwd: repo.path, stdio: "ignore" }
+    );
+
+    const changes = await identities.refresh([repo]);
+
+    expect(changes[0]?.identity.remoteHostnames).toEqual([
+      "ghe.acme.example",
+      "github.com"
+    ]);
+    // Through SQLite and back out the read path, which is what the row draws.
+    expect(indexer.listRepos(profileId)[0]?.identity?.remoteHostnames).toEqual([
+      "ghe.acme.example",
+      "github.com"
+    ]);
+    expect(
+      identities.read([repo.id]).get(repo.id)?.remoteHostnames
+    ).toEqual(["ghe.acme.example", "github.com"]);
+
+    // A row written before the column existed says nothing about second
+    // remotes, and must not read as "checked, and there are none".
+    db.prepare("UPDATE repo_identity SET remote_hosts = NULL").run();
+    expect(
+      identities.read([repo.id]).get(repo.id)?.remoteHostnames
+    ).toBeUndefined();
+  });
+
+  it("reports a new mirror as a change, so the row repaints", async () => {
+    // `sameIdentity` decides whether the renderer hears about a refresh at
+    // all. Adding a GitLab mirror changes nothing else about the repository.
+    const { identities, indexer, profileId } = await fixture(
+      okGh({ full_name: "huntharo/react", visibility: "public" }),
+      { overrides: { "ghe.acme.example": "github" } }
+    );
+    const repo = indexer.listRepos(profileId)[0]!;
+    await identities.refresh([repo]);
+    execFileSync(
+      "git",
+      ["remote", "add", "mirror", "git@ghe.acme.example:acme/react.git"],
+      { cwd: repo.path, stdio: "ignore" }
+    );
+
+    const changes = await identities.refresh([repo], { force: true });
+
+    expect(changes).toHaveLength(1);
+    expect(changes[0]?.identity.remoteHostnames).toEqual([
+      "ghe.acme.example",
+      "github.com"
+    ]);
+  });
+
   it.each(["unknown", "private", "internal"])(
     "refreshes stale %s visibility without querying again on every fetch",
     async (visibility) => {
@@ -248,7 +316,9 @@ describe("IdentityService", () => {
     const registry = new ForgeRepoRegistry();
     registry.register(new GitHubRepoProvider(gh));
     const service = new IdentityService(db, async () => ok({
-      exitCode: 0, stdout: "git@github.com:huntharo/react.git", stderr: ""
+      exitCode: 0,
+      stdout: "origin\tgit@github.com:huntharo/react.git (fetch)",
+      stderr: ""
     }), registry, {
       overrides: () => ({}),
       isEnabled: () => ({ enabled: true, source: "auto" })
@@ -722,14 +792,25 @@ describe("sameIdentity", () => {
   });
 });
 
-describe("readOrigin", () => {
+describe("readRemotes", () => {
   const repo = { id: "r1", path: "/tmp/whatever" } as Parameters<
-    typeof readOrigin
+    typeof readRemotes
   >[1];
-  const remote =
-    (url: string): GitExec =>
+  /** `git remote -v` prints a fetch and a push line per remote. */
+  const listing =
+    (...remotes: [name: string, url: string][]): GitExec =>
     async () =>
-      ok({ exitCode: 0, stdout: `${url}\n`, stderr: "" });
+      ok({
+        exitCode: 0,
+        stdout: remotes
+          .flatMap(([name, url]) => [
+            `${name}\t${url} (fetch)`,
+            `${name}\t${url} (push)`
+          ])
+          .join("\n"),
+        stderr: ""
+      });
+  const origin = (url: string): GitExec => listing(["origin", url]);
 
   it("needs the host list to place a self-managed instance", async () => {
     // The regression this guards: `gitlab.*` used to classify as GitLab from
@@ -737,13 +818,15 @@ describe("readOrigin", () => {
     // hosts here would silently drop the visibility and fork-lineage marks for
     // every company GitLab — the CLI is signed in, and nothing would say why.
     const url = "git@gitlab.acme-corp.example:acme/platform/billing.git";
-    expect(await readOrigin(remote(url), repo)).toMatchObject({
+    expect((await readRemotes(origin(url), repo)).origin).toMatchObject({
       host: "other"
     });
     expect(
-      await readOrigin(remote(url), repo, {
-        "gitlab.acme-corp.example": "gitlab"
-      })
+      (
+        await readRemotes(origin(url), repo, {
+          "gitlab.acme-corp.example": "gitlab"
+        })
+      ).origin
     ).toEqual({
       repoId: "r1",
       host: "gitlab",
@@ -754,8 +837,85 @@ describe("readOrigin", () => {
 
   it("still knows the two SaaS hosts with no list at all", async () => {
     expect(
-      await readOrigin(remote("git@github.com:huntharo/react.git"), repo)
+      (await readRemotes(origin("git@github.com:huntharo/react.git"), repo))
+        .origin
     ).toMatchObject({ host: "github", nameWithOwner: "huntharo/react" });
+  });
+
+  it("reads origin's FETCH url, not a push url pointing elsewhere", async () => {
+    // A push url on another host is a mirror. Reading this repo's visibility
+    // and fork lineage off the mirror would describe a different project.
+    const git: GitExec = async () =>
+      ok({
+        exitCode: 0,
+        stdout: [
+          "origin\tgit@github.com:pwrdrvr/PwrGit.git (fetch)",
+          "origin\tgit@gitlab.com:pwrdrvr/PwrGit.git (push)"
+        ].join("\n"),
+        stderr: ""
+      });
+    const read = await readRemotes(git, repo);
+    expect(read.origin).toMatchObject({ hostname: "github.com" });
+    // Both still count as hosts this repo has a remote on.
+    expect(read.hostnames).toEqual(["github.com", "gitlab.com"]);
+  });
+
+  it("collects every forge host across every remote, sorted and deduped", async () => {
+    const read = await readRemotes(
+      listing(
+        ["origin", "git@gitlab.com:pwrdrvr/PwrGit.git"],
+        ["github", "git@github.com:pwrdrvr/PwrGit.git"],
+        ["upstream", "git@github.com:someone/PwrGit.git"]
+      ),
+      repo
+    );
+    expect(read.hostnames).toEqual(["github.com", "gitlab.com"]);
+    expect(read.origin).toMatchObject({ hostname: "gitlab.com" });
+  });
+
+  it("leaves out a remote no product claims", async () => {
+    // "A git remote is never a source": a bare repo on a NAS parses fine and
+    // is not a forge. Listing it would put a forge chip on it.
+    const read = await readRemotes(
+      listing(
+        ["origin", "git@github.com:pwrdrvr/PwrGit.git"],
+        ["nas", "git@nas.local:backups/PwrGit.git"]
+      ),
+      repo
+    );
+    expect(read.hostnames).toEqual(["github.com"]);
+  });
+
+  it("counts a self-managed instance once the host list names it", async () => {
+    const remotes = listing(
+      ["origin", "git@github.com:pwrdrvr/PwrGit.git"],
+      ["acme", "git@ghe.acme.example:acme/PwrGit.git"]
+    );
+    expect((await readRemotes(remotes, repo)).hostnames).toEqual([
+      "github.com"
+    ]);
+    expect(
+      (await readRemotes(remotes, repo, { "ghe.acme.example": "github" }))
+        .hostnames
+    ).toEqual(["ghe.acme.example", "github.com"]);
+  });
+
+  it("answers empty for a repo with no remotes at all", async () => {
+    const git: GitExec = async () =>
+      ok({ exitCode: 0, stdout: "", stderr: "" });
+    expect(await readRemotes(git, repo)).toEqual({
+      origin: null,
+      hostnames: []
+    });
+  });
+
+  it("answers empty when git refuses", async () => {
+    const git: GitExec = async () =>
+      ok({ exitCode: 128, stdout: "", stderr: "not a git repository" });
+    expect(await readRemotes(git, repo)).toEqual({
+      origin: null,
+      hostnames: []
+    });
   });
 });
 

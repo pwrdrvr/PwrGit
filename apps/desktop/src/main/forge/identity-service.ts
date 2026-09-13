@@ -1,4 +1,5 @@
 import {
+  isForgeKind,
   parseForgeRemote,
   toForgeHost,
   type ForgeHost,
@@ -9,6 +10,10 @@ import {
   type RepoIdentityRefreshOutcome
 } from "@pwrgit/shared";
 import type { DB } from "../persistence/db";
+import {
+  parseJsonStringList,
+  serializeJsonStringList
+} from "../persistence/json-string-list";
 import type { GitExec } from "../git/dugite";
 import { logMain } from "../logs";
 import type { ForgeRepoRegistry } from "./repo-provider";
@@ -54,28 +59,67 @@ type OriginRef = {
   nameWithOwner: string;
 };
 
-/** Read `origin` for one repository. `origin` specifically, not the first
- *  forge remote found: a fork checkout has `origin` (the fork) and `upstream`
- *  (the original), and the identity marks describe what you push to.
+/** What one repository's remotes say about it. */
+export type RepoRemotes = {
+  /** `origin`, when it exists and parses. `origin` specifically, not the first
+   *  forge remote found: a fork checkout has `origin` (the fork) and
+   *  `upstream` (the original), and the identity marks describe what you push
+   *  to. Null covers both "no origin" and "origin is not a remote URL". */
+  origin: OriginRef | null;
+  /** Every forge hostname across every remote, sorted and deduplicated —
+   *  `RepoIdentity.remoteHostnames`. A checkout can push to GitHub and mirror
+   *  to GitLab, and `origin` alone cannot say so. */
+  hostnames: string[];
+};
+
+/** `name\turl (fetch|push)`, which is `git remote -v`'s whole format. */
+const REMOTE_LINE = /^(\S+)\s+(\S+)\s+\((fetch|push)\)$/;
+
+/**
+ * Read every remote of one repository, and pick `origin` out of them.
  *
- *  `hosts` is `ForgeHosts.overrides()`. Omitting it recognises github.com and
- *  gitlab.com only — a hostname says nothing about which forge runs on it — so
- *  a self-managed instance would silently lose its identity marks. */
-export async function readOrigin(
+ * One `git remote -v` rather than a `git remote get-url origin`, which is the
+ * same single process for strictly more: the hostnames of the OTHER remotes
+ * are what let a row say a repo lives on two forges instead of asserting
+ * `origin`'s as the whole truth.
+ *
+ * `hosts` is `ForgeHosts.overrides()`. Omitting it recognises github.com and
+ * gitlab.com only — a hostname says nothing about which forge runs on it — so
+ * a self-managed instance would silently lose its identity marks.
+ */
+export async function readRemotes(
   git: GitExec,
   repo: Repo,
   hosts: ForgeHostMap = {}
-): Promise<OriginRef | null> {
-  const result = await git(["remote", "get-url", "origin"], repo.path);
-  if (!result.ok || result.value.exitCode !== 0) return null;
-  const parsed = parseForgeRemote(result.value.stdout.trim(), hosts);
-  if (parsed === null) return null;
-  return {
-    repoId: repo.id,
-    host: parsed.host,
-    hostname: parsed.hostname,
-    nameWithOwner: parsed.nameWithOwner
-  };
+): Promise<RepoRemotes> {
+  const empty: RepoRemotes = { origin: null, hostnames: [] };
+  const result = await git(["remote", "-v"], repo.path);
+  if (!result.ok || result.value.exitCode !== 0) return empty;
+  let origin: OriginRef | null = null;
+  const hostnames = new Set<string>();
+  for (const line of result.value.stdout.split("\n")) {
+    const match = REMOTE_LINE.exec(line.trim());
+    if (match === null) continue;
+    const [, name, url, direction] = match;
+    const parsed = parseForgeRemote(url ?? "", hosts);
+    if (parsed === null) continue;
+    // Only hosts a product actually claims. "A git remote is never a source"
+    // (see `forge/AGENTS.md`): a bare repo on a NAS parses perfectly well and
+    // is not a forge, and listing it would put a forge chip on it.
+    if (isForgeKind(parsed.host)) hostnames.add(parsed.hostname);
+    // The FETCH url for origin, matching what `git remote get-url origin`
+    // returned before — a push url pointed elsewhere is a mirror, and reading
+    // this repo's visibility off the mirror would describe the wrong project.
+    if (name === "origin" && direction === "fetch") {
+      origin = {
+        repoId: repo.id,
+        host: parsed.host,
+        hostname: parsed.hostname,
+        nameWithOwner: parsed.nameWithOwner
+      };
+    }
+  }
+  return { origin, hostnames: [...hostnames].sort() };
 }
 
 /** One FIFO semaphore per service, shared by every refresh invocation. */
@@ -176,7 +220,8 @@ export class IdentityService {
     const rows = this.db
       .prepare(
         `SELECT repo_id, host, hostname, owner, name, visibility,
-                parent_slug, parent_url, root_slug, root_url, fetched_at
+                parent_slug, parent_url, root_slug, root_url, remote_hosts,
+                fetched_at
          FROM repo_identity WHERE repo_id IN (${placeholders})`
       )
       .all(...repoIds) as {
@@ -190,12 +235,13 @@ export class IdentityService {
       parent_url: string | null;
       root_slug: string | null;
       root_url: string | null;
+      remote_hosts: string | null;
       fetched_at: string;
     }[];
     return new Map(
-      rows.map((row) => [
-        row.repo_id,
-        {
+      rows.map((row) => {
+        const remoteHostnames = parseJsonStringList(row.remote_hosts);
+        const identity = {
           host: toForgeHost(row.host),
           hostname: row.hostname,
           owner: row.owner,
@@ -220,9 +266,11 @@ export class IdentityService {
             : {
                 root: { nameWithOwner: row.root_slug, url: row.root_url ?? "" }
               }),
+          ...(remoteHostnames === null ? {} : { remoteHostnames }),
           fetchedAt: row.fetched_at
-        } satisfies RepoIdentity
-      ])
+        } satisfies RepoIdentity;
+        return [row.repo_id, identity] as const;
+      })
     );
   }
 
@@ -307,10 +355,12 @@ export class IdentityService {
         ...(previous === undefined ? {} : { identity: previous })
       }
     };
-    const origin = await this.remoteSlots.run(() =>
-      readOrigin(this.git, repo, this.hosts.overrides())
+    const { origin, hostnames } = await this.remoteSlots.run(() =>
+      readRemotes(this.git, repo, this.hosts.overrides())
     );
-    if (origin === null || origin.host === "other") return unavailable;
+    // `isForgeKind`, not a comparison against `other`: the check is "did a
+    // product claim this host", and the guard is the one the lint points at.
+    if (origin === null || !isForgeKind(origin.host)) return unavailable;
     // Gated on the hostname, not the kind, so the pane and this transport
     // agree about self-managed instances. One call, three answers: on; off
     // because somebody decided so; off because nothing has recognized this
@@ -361,7 +411,8 @@ export class IdentityService {
         ...(repository.parent === undefined
           ? {}
           : { parent: repository.parent }),
-        ...(repository.root === undefined ? {} : { root: repository.root })
+        ...(repository.root === undefined ? {} : { root: repository.root }),
+        remoteHostnames: hostnames
       };
     } catch (cause) {
       // A forge that will not answer is recorded as `unknown` rather than
@@ -385,7 +436,8 @@ export class IdentityService {
             origin.nameWithOwner.lastIndexOf("/") + 1
           ),
           nameWithOwner: origin.nameWithOwner,
-          visibility: "unknown"
+          visibility: "unknown",
+          remoteHostnames: hostnames
         };
       } else {
         // Not signed in is a transient, fixable state — leave the row alone
@@ -458,8 +510,9 @@ export class IdentityService {
     this.db
       .prepare(
         `INSERT INTO repo_identity (repo_id, host, hostname, owner, name,
-           visibility, parent_slug, parent_url, root_slug, root_url, fetched_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+           visibility, parent_slug, parent_url, root_slug, root_url,
+           remote_hosts, fetched_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
          ON CONFLICT(repo_id) DO UPDATE SET
            host = excluded.host,
            hostname = excluded.hostname,
@@ -470,6 +523,7 @@ export class IdentityService {
            parent_url = excluded.parent_url,
            root_slug = excluded.root_slug,
            root_url = excluded.root_url,
+           remote_hosts = excluded.remote_hosts,
            fetched_at = datetime('now')`
       )
       .run(
@@ -482,13 +536,16 @@ export class IdentityService {
         identity.parent?.nameWithOwner ?? null,
         identity.parent?.url ?? null,
         identity.root?.nameWithOwner ?? null,
-        identity.root?.url ?? null
+        identity.root?.url ?? null,
+        serializeJsonStringList(identity.remoteHostnames)
       );
   }
 }
 
 /** `fetchedAt` is deliberately excluded — a refresh that confirms the same
- *  facts is not a change the renderer needs to repaint for. */
+ *  facts is not a change the renderer needs to repaint for. `remoteHostnames`
+ *  is NOT excluded: adding a GitLab mirror changes what the row's chip says,
+ *  and the renderer patches identity rows in place from this answer. */
 export function sameIdentity(
   a: RepoIdentity | undefined,
   b: RepoIdentity
@@ -500,6 +557,16 @@ export function sameIdentity(
     a.nameWithOwner === b.nameWithOwner &&
     a.visibility === b.visibility &&
     a.parent?.nameWithOwner === b.parent?.nameWithOwner &&
-    a.root?.nameWithOwner === b.root?.nameWithOwner
+    a.root?.nameWithOwner === b.root?.nameWithOwner &&
+    sameHostnames(a.remoteHostnames, b.remoteHostnames)
   );
+}
+
+/** Both sides are sorted by `readRemotes`, so order is not a difference. */
+function sameHostnames(
+  a: readonly string[] | undefined,
+  b: readonly string[] | undefined
+): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return a.length === b.length && a.every((host, index) => host === b[index]);
 }

@@ -154,7 +154,10 @@ export function registerRemoteHandlers(
   refresher: WorktreeRefresher,
   operations: WorktreeOperationQueue,
   indexer?: Pick<RepoIndexer, "refreshRepoRemoteBranches">,
-  refreshIdentity?: (repoId: string) => void
+  /** Re-read this repo's forge identity. `force` skips the freshness gate —
+   *  the repo's own remotes just changed, so the stored row is wrong now
+   *  however recently it was written. */
+  refreshIdentity?: (repoId: string, options?: { force?: boolean }) => void
 ): void {
   // Every long-running remote command reports through one registry: the live
   // status surfaces read it, and the cancel button acts on it.
@@ -383,6 +386,10 @@ export function registerRemoteHandlers(
     });
     if (!result.ok) return result;
     logMain("info", "remote", `added remote ${req.name} to ${repo.path}`);
+    // Forced: the remote set is part of the stored identity, and it just
+    // changed. Without `force` the freshness gate skips the row and the
+    // repo row keeps its old forge chip for up to six hours.
+    refreshIdentity?.(req.repoId, { force: true });
     refresher.refreshRepoWorktrees(req.repoId);
     return ok(null);
   });
@@ -401,6 +408,10 @@ export function registerRemoteHandlers(
       "remote",
       `updated remote ${req.originalName} as ${req.name} in ${repo.path}`
     );
+    // Forced: the remote set is part of the stored identity, and it just
+    // changed. Without `force` the freshness gate skips the row and the
+    // repo row keeps its old forge chip for up to six hours.
+    refreshIdentity?.(req.repoId, { force: true });
     refresher.refreshRepoWorktrees(req.repoId);
     return ok(null);
   });
@@ -461,6 +472,10 @@ export function registerRemoteHandlers(
     });
     if (!result.ok) return result;
     logMain("info", "remote", `removed remote ${req.remote} from ${repo.path}`);
+    // Forced: the remote set is part of the stored identity, and it just
+    // changed. Without `force` the freshness gate skips the row and the
+    // repo row keeps its old forge chip for up to six hours.
+    refreshIdentity?.(req.repoId, { force: true });
     refresher.refreshRepoWorktrees(req.repoId);
     return ok(null);
   });
