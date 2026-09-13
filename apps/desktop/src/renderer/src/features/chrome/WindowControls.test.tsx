@@ -71,6 +71,14 @@ describe("Linux caption buttons", () => {
     expect(runWindowControl.mock.calls).toEqual([["minimize"], ["close"]]);
   });
 
+  it("stamps the frame state on the document for the window hairline", async () => {
+    await renderControls();
+    expect(document.documentElement.dataset["windowFrame"]).toBe("restored");
+
+    await act(async () => pushFrameState?.({ maximized: true }));
+    expect(document.documentElement.dataset["windowFrame"]).toBe("maximized");
+  });
+
   it("opens on Restore when the window is already maximized", async () => {
     readWindowFrameState.mockResolvedValue({ maximized: true });
     await renderControls();
@@ -89,10 +97,15 @@ describe("Linux caption buttons", () => {
     expect(button("Maximize")).not.toBeNull();
   });
 
-  it("redraws from the state the action answers with", async () => {
+  it("waits for the window to actually maximize before flipping the glyph", async () => {
+    // A `maximize()` the window manager declines emits no event, and the glyph
+    // has to still say Maximize. The action's own reply is only an ack.
     runWindowControl.mockResolvedValue({ maximized: true });
     await renderControls();
     await act(async () => button("Maximize")?.click());
+    expect(button("Maximize")).not.toBeNull();
+
+    await act(async () => pushFrameState?.({ maximized: true }));
     expect(button("Restore")).not.toBeNull();
   });
 

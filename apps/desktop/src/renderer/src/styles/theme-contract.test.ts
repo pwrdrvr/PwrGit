@@ -210,6 +210,15 @@ describe("platform window chrome", () => {
     );
   });
 
+  it("draws a window edge on Linux, and drops it when maximized", () => {
+    expect(appCss).toMatch(
+      /:root\[data-platform="linux"\]:not\(\[data-window-frame="maximized"\]\)\s+\.app::after\s*\{[\s\S]*?border:\s*1px solid var\(--border-strong\);/
+    );
+    expect(appCss).toMatch(
+      /\.app::after\s*\{[\s\S]*?pointer-events:\s*none;/
+    );
+  });
+
   it("uses the same platform-aware title strip in auxiliary windows", () => {
     expect(appCss).toMatch(
       /\.auxiliary-titlebar__breadcrumb\s*\{[\s\S]*?margin-left:\s*14px;/

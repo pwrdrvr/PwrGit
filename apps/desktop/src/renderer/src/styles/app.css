@@ -324,6 +324,27 @@ textarea,
   outline-offset: -2px;
 }
 
+/* The window's own edge, on the one platform that draws us none.
+   Electron gives a frameless Linux window an `OpaqueFrameView`: no border, no
+   GTK shadow on X11, and no rounded corners — `roundedCorners` is a Windows
+   option, and the only way to round a frameless window's corners is to make it
+   transparent, which Electron documents as giving up resizing. So the edge is
+   a hairline we paint, and the corners stay square.
+   Fixed and `pointer-events: none`, above every pane and modal (the ceiling
+   elsewhere in this file is 140): it costs no layout and swallows no clicks.
+   It goes away when the frame is flush with the screen — a maximized window
+   has no edge to show. On Wayland Electron does give frameless windows a GTK
+   drop shadow, which is what really separates a GNOME window from the one
+   behind it; on X11 this hairline is all there is. */
+:root[data-platform="linux"]:not([data-window-frame="maximized"]) .app::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  border: 1px solid var(--border-strong);
+  pointer-events: none;
+  z-index: 200;
+}
+
 .auxiliary-titlebar__breadcrumb {
   display: flex;
   align-items: center;

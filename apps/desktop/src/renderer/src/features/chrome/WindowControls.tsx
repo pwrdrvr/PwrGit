@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { useCallback, type ReactElement } from "react";
 import type { WindowControlAction } from "@pwrgit/shared";
+import { useWindowFrameState } from "./use-window-frame-state";
 
 /** One glyph geometry for all three buttons, so their weights match. */
 const glyph = {
@@ -27,26 +28,13 @@ const glyph = {
  * behind our back, and main pushes those through `onWindowFrameState`.
  */
 export function WindowControls(): ReactElement {
-  const [maximized, setMaximized] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    void window.pwrgit.readWindowFrameState().then((state) => {
-      if (!cancelled && state !== null) setMaximized(state.maximized);
-    });
-    const stopListening = window.pwrgit.onWindowFrameState((state) => {
-      setMaximized(state.maximized);
-    });
-    return () => {
-      cancelled = true;
-      stopListening();
-    };
-  }, []);
+  // The window's own maximize events are the truth, not this button's last
+  // click: `maximize()` that the WM refuses fires nothing, and a maximize from
+  // anywhere else fires all the same.
+  const maximized = useWindowFrameState();
 
   const run = useCallback((action: WindowControlAction): void => {
-    void window.pwrgit.runWindowControl(action).then((state) => {
-      if (state !== null) setMaximized(state.maximized);
-    });
+    void window.pwrgit.runWindowControl(action);
   }, []);
 
   return (
