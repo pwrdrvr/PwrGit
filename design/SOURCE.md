@@ -120,7 +120,7 @@ sync — and the fixture data in it (`northwind-labs`, `atlas-forge`,
 
 `Branch Switching and Ref Relevance - UX Review.dc.html` was written here and
 pushed up the same way, during
-[#252](https://github.com/pwrdrvr/PwrGit/pull/252). It owns the branch-switching
+[#255](https://github.com/pwrdrvr/PwrGit/pull/255). It owns the branch-switching
 verb: the matrix of every surface that names a branch and what it lets you do
 with it, the four-tier relevance ladder the six-row branch and remote previews
 are spent on, and the two implementations of "switch" that had drifted apart. A
