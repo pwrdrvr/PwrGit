@@ -4,7 +4,11 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { WINDOWS_ALIAS_NAMES, writeWindowsReleaseAliases } from "./windows-release-artifacts.mjs";
+import {
+  WINDOWS_ALIAS_NAMES,
+  writeWindowsChecksums,
+  writeWindowsReleaseAliases,
+} from "./windows-release-artifacts.mjs";
 
 const require = createRequire(import.meta.url);
 const { findFile, parseUpdateInfo } = require("electron-updater/out/providers/Provider");
@@ -49,15 +53,15 @@ function fixture(architectures = ["x64"]) {
       "",
     ].join("\n"),
   );
-  writeChecksums(dist, architectures);
+  writeChecksums(dist);
   return dist;
 }
 
-function writeChecksums(dist, architectures) {
-  const lines = architectures
-    .map((arch) => `${sha256(readFileSync(join(dist, installerName(arch))))}  ${installerName(arch)}`)
-    .join("\n");
-  writeFileSync(join(dist, "SHA256SUMS"), `${lines}\n`);
+// The real writer, not a re-spelling of its format: readChecksums parses what
+// this produces, and the two drifting apart only ever failed on the release
+// runner. Keeping the test on the production writer is the point.
+function writeChecksums(dist) {
+  writeWindowsChecksums(dist);
 }
 
 afterEach(() => directories.splice(0).forEach((dir) => rmSync(dir, { recursive: true, force: true })));
@@ -80,7 +84,8 @@ describe("Windows release aliases", () => {
   test("uses the spelling GitHub Releases stores, with no space and no version", () => {
     for (const name of Object.values(WINDOWS_ALIAS_NAMES)) {
       expect(name).not.toMatch(/\s/);
-      expect(name).not.toMatch(/\d/);
+      // No version, but an architecture may carry digits (Arm64 stays open).
+      expect(name).not.toMatch(/\d+\.\d+\.\d+/);
       expect(name).toBe(name.replace(/ /g, "."));
     }
     expect(WINDOWS_ALIAS_NAMES).toEqual({ x64: "PwrGit.Setup.exe", arm64: "PwrGit.Setup.Arm.exe" });
@@ -144,9 +149,34 @@ describe("Windows release aliases", () => {
   test("refuses an architecture with no agreed alias rather than guessing one", () => {
     const dist = fixture(["x64"]);
     writeFileSync(join(dist, `PwrGit-${version}-windows-ia32-setup.exe`), "surprise");
-    writeChecksums(dist, ["x64"]);
+    writeChecksums(dist);
     expect(() => writeWindowsReleaseAliases(dist, version)).toThrow("no stable alias is defined");
     // Validation runs to completion before any copy, so x64 gets no stale alias.
+    expect(existsSync(join(dist, "PwrGit.Setup.exe"))).toBe(false);
+  });
+
+  // release.mjs clears dist for macOS but not for Windows, so a repeated local
+  // build leaves earlier versions lying around. They are not ours to alias.
+  test("ignores an installer left behind by an earlier version", () => {
+    const dist = fixture();
+    const stale = "PwrGit-0.0.1-windows-x64-setup.exe";
+    writeFileSync(join(dist, stale), "an older build");
+    writeChecksums(dist);
+
+    const [alias] = writeWindowsReleaseAliases(dist, version);
+    expect(alias.installer).toBe(installerName("x64"));
+    expect(readFileSync(join(dist, "PwrGit.Setup.exe"), "utf8")).toBe("installer bytes for x64");
+  });
+
+  test("says so when only another version's installer is present", () => {
+    const dist = fixture();
+    rmSync(join(dist, installerName("x64")));
+    writeFileSync(join(dist, "PwrGit-0.0.1-windows-x64-setup.exe"), "an older build");
+    writeChecksums(dist);
+
+    expect(() => writeWindowsReleaseAliases(dist, version)).toThrow(
+      `No Windows installer for ${version}`,
+    );
     expect(existsSync(join(dist, "PwrGit.Setup.exe"))).toBe(false);
   });
 
@@ -155,7 +185,8 @@ describe("Windows release aliases", () => {
     for (const name of readdirSync(dist).filter((entry) => entry.endsWith("-setup.exe"))) {
       rmSync(join(dist, name));
     }
-    expect(() => writeWindowsReleaseAliases(dist, version)).toThrow("No Windows installer");
+    // The shared installer scan already words this one for a failed package run.
+    expect(() => writeWindowsReleaseAliases(dist, version)).toThrow("produced no *-setup.exe");
     expect(() => writeWindowsReleaseAliases(fixture(), "1.2.3-windows-x64")).toThrow("Invalid");
     expect(() => writeWindowsReleaseAliases(fixture(), "v1.2.3")).toThrow("Invalid");
   });

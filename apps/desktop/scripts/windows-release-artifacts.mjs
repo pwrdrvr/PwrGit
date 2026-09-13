@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { copyFileSync, readdirSync, readFileSync } from "node:fs";
+import { copyFileSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isCliEntrypoint } from "../../../scripts/lib/cli-entrypoint.mjs";
 
@@ -30,17 +30,50 @@ export const WINDOWS_ALIAS_NAMES = {
 
 const INSTALLER_SUFFIX = "-setup.exe";
 
+// One definition of the checksum manifest's shape, because both halves live in
+// this file: writeWindowsChecksums emits it during packaging and readChecksums
+// parses it back when the signing job cuts the aliases. Splitting the two
+// across modules let the format drift with every unit test still green, and the
+// reader only failed on the release runner.
+const CHECKSUM_SEPARATOR = "  ";
+const CHECKSUM_LINE = /^([0-9a-f]{64}) {2}(.+)$/;
+
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-// `SHA256SUMS` lines are `<hex>  <name>`, written by writeWindowsChecksums in
-// release.mjs from the same packaged bytes.
+export function installerName(version, arch) {
+  return `PwrGit-${version}-windows-${arch}${INSTALLER_SUFFIX}`;
+}
+
+export function windowsInstallerArtifacts(distDir) {
+  const artifacts = readdirSync(distDir)
+    .filter((entry) => entry.endsWith(INSTALLER_SUFFIX))
+    .sort()
+    .map((name) => ({ name, path: join(distDir, name) }));
+  if (artifacts.length === 0) {
+    throw new Error(
+      `electron-builder reported success but produced no *${INSTALLER_SUFFIX} in ${distDir}. ` +
+        `Check the electron-builder output above (icon conversion, native rebuilds).`,
+    );
+  }
+  return artifacts;
+}
+
+export function writeWindowsChecksums(distDir) {
+  const lines = windowsInstallerArtifacts(distDir)
+    .map(({ name, path }) => `${sha256(readFileSync(path))}${CHECKSUM_SEPARATOR}${name}`)
+    .join("\n");
+  const checksumPath = join(distDir, "SHA256SUMS");
+  writeFileSync(checksumPath, `${lines}\n`);
+  return checksumPath;
+}
+
 function readChecksums(dist) {
   const entries = new Map();
   for (const line of readFileSync(join(dist, "SHA256SUMS"), "utf8").split(/\r?\n/)) {
     if (line.trim() === "") continue;
-    const match = /^([0-9a-f]{64})\s\s(.+)$/.exec(line);
+    const match = CHECKSUM_LINE.exec(line);
     if (match === null) throw new Error(`Malformed SHA256SUMS line: ${line}`);
     entries.set(match[2], match[1]);
   }
@@ -61,19 +94,25 @@ function readChecksums(dist) {
  * The aliases are deliberately absent from `SHA256SUMS`: they are the same bytes
  * under a second name, so a second line states no new fact, and a checksum
  * manifest listing one build twice reads like two builds. Each installer is
- * instead checked against its recorded entry before the copy, and the copy
- * against the original after, so the existing versioned line vouches for the
- * alias as well.
+ * instead checked against its recorded entry before it is copied, so the
+ * existing versioned line vouches for the alias as well.
  */
 export function writeWindowsReleaseAliases(dist, version) {
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version) || version.includes("windows")) {
     throw new Error(`Invalid Windows release version: ${version}`);
   }
-  const checksums = readChecksums(dist);
-  const installers = readdirSync(dist).filter((name) => name.endsWith(INSTALLER_SUFFIX)).sort();
+
+  // Only this version's installers. release.mjs clears dist for macOS but not
+  // for Windows, so a repeated local build leaves earlier versions sitting
+  // here; they are not ours to alias and must not look like a broken release.
+  const present = windowsInstallerArtifacts(dist).map(({ name }) => name);
+  const installers = present.filter((name) => name.startsWith(`PwrGit-${version}-windows-`));
   if (installers.length === 0) {
-    throw new Error(`No Windows installer (*${INSTALLER_SUFFIX}) found in ${dist}`);
+    throw new Error(
+      `No Windows installer for ${version} in ${dist}; found ${present.join(", ")}`,
+    );
   }
+  const checksums = readChecksums(dist);
 
   // Validate every installer before copying any of them, so a release that is
   // wrong in one architecture does not leave a stale alias for another.
@@ -81,32 +120,36 @@ export function writeWindowsReleaseAliases(dist, version) {
     // An architecture with no agreed alias must fail here rather than publish a
     // release whose stable URL silently points at some other installer.
     const arch = Object.keys(WINDOWS_ALIAS_NAMES).find(
-      (candidate) => installer === `PwrGit-${version}-windows-${candidate}${INSTALLER_SUFFIX}`,
+      (candidate) => installer === installerName(version, candidate),
     );
     if (arch === undefined) {
       throw new Error(
         `Unexpected Windows installer ${installer}: no stable alias is defined for it. ` +
           `Expected one of ${Object.keys(WINDOWS_ALIAS_NAMES)
-            .map((candidate) => `PwrGit-${version}-windows-${candidate}${INSTALLER_SUFFIX}`)
+            .map((candidate) => installerName(version, candidate))
             .join(", ")}.`,
       );
     }
 
-    const bytes = readFileSync(join(dist, installer));
-    const digest = sha256(bytes);
+    const size = statSync(join(dist, installer)).size;
+    const digest = sha256(readFileSync(join(dist, installer)));
     const recorded = checksums.get(installer);
     if (recorded === undefined) throw new Error(`SHA256SUMS has no entry for ${installer}`);
     if (recorded !== digest) {
       throw new Error(`${installer} does not match SHA256SUMS: recorded ${recorded}, got ${digest}`);
     }
-    return { installer, alias: WINDOWS_ALIAS_NAMES[arch], arch, sha256: digest, size: bytes.length };
+    return { installer, alias: WINDOWS_ALIAS_NAMES[arch], arch, sha256: digest, size };
   });
 
-  for (const { installer, alias, sha256: digest, size } of planned) {
+  for (const { installer, alias, size } of planned) {
     copyFileSync(join(dist, installer), join(dist, alias));
-    const copied = readFileSync(join(dist, alias));
-    if (copied.length !== size || sha256(copied) !== digest) {
-      throw new Error(`${alias} is not a byte-for-byte copy of ${installer}`);
+    // The installer is ~145 MB, so compare sizes rather than reading it back and
+    // hashing it again; copyFileSync raises on a failed or short write.
+    const copiedSize = statSync(join(dist, alias)).size;
+    if (copiedSize !== size) {
+      throw new Error(
+        `${alias} is ${copiedSize} bytes but ${installer} is ${size}; the copy did not complete`,
+      );
     }
   }
   return planned;
@@ -124,7 +167,11 @@ if (isCliEntrypoint(import.meta.url)) {
     process.exit(1);
   }
   const { version } = JSON.parse(readFileSync(join(stage, "package.json"), "utf8"));
-  for (const { installer, alias } of writeWindowsReleaseAliases(join(stage, "dist"), version)) {
+  const aliases = writeWindowsReleaseAliases(join(stage, "dist"), version);
+  for (const { installer, alias } of aliases) {
     console.log(`  ${alias} <- ${installer}`);
   }
+  // The workflow step that runs this treats a zero exit as "the alias shipped".
+  // Say so explicitly so a future no-op cannot pass for success.
+  console.log(`wrote ${aliases.length} stable Windows alias(es)`);
 }

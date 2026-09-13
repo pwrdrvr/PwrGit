@@ -102,6 +102,8 @@ jobs:
             .github/actions/select-xcode-for-actool \
             apps/desktop/scripts/release.mjs \
             apps/desktop/scripts/mac-release-artifacts.mjs \
+            apps/desktop/scripts/windows-release-artifacts.mjs \
+            scripts/lib/cli-entrypoint.mjs \
             apps/desktop/scripts/beforepack-dugite-arch.mjs \
             apps/desktop/scripts/stage-better-sqlite3-arch.mjs \
             apps/desktop/scripts/verify-asar-contents.mjs \
@@ -388,7 +390,20 @@ jobs:
       # that name.
       - name: Add the stable Windows installer alias
         shell: pwsh
-        run: node apps/desktop/scripts/windows-release-artifacts.mjs apps/desktop/release-stage
+        run: |
+          node apps/desktop/scripts/windows-release-artifacts.mjs apps/desktop/release-stage
+          if ($LASTEXITCODE -ne 0) {
+            throw "Cutting the stable Windows alias failed (exit code $LASTEXITCODE)."
+          }
+          # Assert the file exists rather than trusting the exit code: a script
+          # that no-ops still exits 0, and the upload step only warns when one
+          # of several globs matches nothing. Without this the release ships
+          # without its stable URL and nothing goes red.
+          $aliases = @(Get-ChildItem "apps/desktop/release-stage/dist" -File -Filter "PwrGit.Setup*.exe")
+          if ($aliases.Count -eq 0) {
+            throw "No PwrGit.Setup*.exe was produced; the stable download URL would 404."
+          }
+          $aliases | ForEach-Object { "cut alias $($_.Name) ($($_.Length) bytes)" }
 
       - name: Upload Windows installer artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

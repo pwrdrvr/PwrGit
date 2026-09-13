@@ -276,7 +276,7 @@ Verify the macOS release contains:
 Verify the Windows release contains one of these intentional shapes:
 
 - Authenticode-signed `PwrGit-<version>-windows-x64-setup.exe`, its blockmap,
-  `SHA256SUMS`, and `latest.yml`; or
+  `SHA256SUMS`, `latest.yml`, and the stable-name `PwrGit.Setup.exe` alias; or
 - `PwrGit-<version>-windows-x64-unsigned-setup.exe` while
   `WINDOWS_UNSIGNED_RELEASE=true`, with no updater feed.
 
