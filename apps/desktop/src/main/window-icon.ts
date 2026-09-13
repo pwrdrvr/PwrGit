@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { posix } from "node:path";
 
 /**
  * Where the icon a Linux window has to carry lives, or `null` on a platform
@@ -15,6 +15,10 @@ import { join } from "node:path";
  * Packaged builds read it back out of `resources/`, where
  * `electron-builder.yml` stages the same master PNG the `.deb` installs into
  * the icon theme.
+ *
+ * Joined with `posix`, not `join`: this is a Linux path on every platform that
+ * gets one, and the host separator is only the right answer by accident —
+ * a Windows test runner computing the same Linux path got backslashes.
  */
 export function linuxWindowIconPath(env: {
   platform: NodeJS.Platform;
@@ -24,6 +28,6 @@ export function linuxWindowIconPath(env: {
 }): string | null {
   if (env.platform !== "linux") return null;
   return env.packaged
-    ? join(env.resourcesPath, "icon.png")
-    : join(env.appPath, "build", "icon.png");
+    ? posix.join(env.resourcesPath, "icon.png")
+    : posix.join(env.appPath, "build", "icon.png");
 }

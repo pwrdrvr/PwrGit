@@ -48,7 +48,9 @@ async function expectAuxiliaryChrome(
     const gutter = element.querySelector<HTMLElement>(".titlebar__gutter");
     return {
       backgroundColor: style.backgroundColor,
-      gutterDisplay: gutter === null ? "missing" : getComputedStyle(gutter).display,
+      // Width, not `display`: the gutter element exists on every platform and
+      // only macOS gives it a width.
+      gutterWidth: gutter === null ? -1 : gutter.getBoundingClientRect().width,
       paddingRight: style.paddingRight
     };
   });
@@ -58,7 +60,7 @@ async function expectAuxiliaryChrome(
   if (platform === "win32") {
     expect(layout).toEqual({
       backgroundColor: expectedBackground,
-      gutterDisplay: "none",
+      gutterWidth: 0,
       paddingRight: "150px"
     });
     const menuVisible = await app.evaluate(({ BrowserWindow }, url) => {
@@ -69,7 +71,7 @@ async function expectAuxiliaryChrome(
     }, window.url());
     expect(menuVisible).toBe(false);
   } else if (platform === "darwin") {
-    expect(layout.gutterDisplay).not.toBe("none");
+    expect(layout.gutterWidth).toBeGreaterThan(0);
   }
 }
 
