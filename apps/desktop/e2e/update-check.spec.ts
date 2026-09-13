@@ -4,9 +4,20 @@
 // (`simulateDevUpdateCheck`) rather than reaching GitHub — which is the point:
 // the fake walks the same status machine a real check does, so the toast is
 // driven here exactly as it would be by a real download.
+//
+// Except on Linux, where `checkForAppUpdatesNow` answers `skipped` before the
+// fake is reached: those builds update through the package manager and never
+// offer an in-app download, so there is no progress to report and previewing
+// some would demo UI that platform cannot reach. The last test covers what
+// Linux does instead; the two before it are skipped there.
 
 import { expect, test, type ElectronApplication } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
+
+/** See the header: no in-app update path, so no progress card to drive. */
+const LINUX = process.platform === "linux";
+const LINUX_SKIP =
+  "Linux builds update through the package manager; the check answers `skipped`.";
 
 const FAKE_VERSION = "420.0.0";
 /** Slow enough that the mid-download card is a target, not a race. Seven
@@ -38,6 +49,7 @@ async function checkForUpdates(app: ElectronApplication): Promise<void> {
 }
 
 test("a menu check reports itself live and ends on an actionable offer", async () => {
+  test.skip(LINUX, LINUX_SKIP);
   handle = await launchApp({ updateStepMs: UPDATE_STEP_MS });
   const { app, window } = handle;
 
@@ -71,6 +83,7 @@ test("a menu check reports itself live and ends on an actionable offer", async (
 });
 
 test("Cancel stops the download and says so without crying failure", async () => {
+  test.skip(LINUX, LINUX_SKIP);
   handle = await launchApp({ updateStepMs: UPDATE_STEP_MS });
   const { app, window } = handle;
 
@@ -95,4 +108,24 @@ test("Cancel stops the download and says so without crying failure", async () =>
   await expect(
     window.getByRole("button", { name: "Restart" })
   ).toHaveCount(0);
+});
+
+test("a Linux build says so rather than showing progress it cannot make", async () => {
+  test.skip(!LINUX, "Covers the branch only Linux takes.");
+  handle = await launchApp({ updateStepMs: UPDATE_STEP_MS });
+  const { app, window } = handle;
+
+  await checkForUpdates(app);
+
+  const toast = window.locator(".toast-host .app-toast").first();
+  await expect(toast).toContainText("Updates unavailable", { timeout: 15_000 });
+  await expect(toast).toContainText(
+    "Linux builds are updated by installing a newer package."
+  );
+  // It is an answer, not work in flight: no progress track, and it goes on the
+  // ordinary dismiss countdown.
+  await expect(toast.locator(".app-toast__track")).toHaveCount(0);
+  await expect(toast.locator(".app-toast__timer")).toBeVisible();
+  // Not dressed as a failure either — nothing is broken.
+  await expect(toast.locator(".app-toast__eyebrow--info")).toBeVisible();
 });
