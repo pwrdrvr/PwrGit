@@ -107,18 +107,47 @@ let heldDownloadedUpdate:
   | { selection: UpdateSelectionKey; version: string }
   | undefined;
 const pendingDownloadChannelsByVersion = new Map<string, UpdateSelectionKey>();
-/** The download the user can still stop. Held rather than derived because
- *  `cancel` has to reach electron-updater's own token, and because the
- *  rejection it produces is indistinguishable from a network failure unless
- *  we remember that we were the ones who asked. */
-let activeDownload:
-  | {
-      version: string;
-      cancel: () => void;
-      /** Set by `cancelAppUpdateDownload`, read where the download rejects. */
-      canceled: boolean;
-    }
-  | undefined;
+/**
+ * The download the user can still stop.
+ *
+ * Held rather than derived because `cancel` has to reach electron-updater's
+ * own token, and because the rejection that token produces is
+ * indistinguishable from a network failure unless we remember that we were
+ * the ones who asked.
+ *
+ * Registered as soon as the status reaches `available` — NOT when the bytes
+ * start moving. The toast offers Cancel from `available` onwards, so anything
+ * later leaves a window in which the button is on screen and does nothing:
+ * the click sets `canceling` in the renderer, finds no download here, and the
+ * update installs anyway. `cancel` is therefore a mutable slot, filled in
+ * once electron-updater hands over its token.
+ */
+type ActiveDownload = {
+  version: string;
+  cancel: () => void;
+  /** Set by `cancelAppUpdateDownload`, read wherever the download can stop. */
+  canceled: boolean;
+};
+
+let activeDownload: ActiveDownload | undefined;
+
+/** Take the cancel a user asked for before there was anything to ask. Called
+ *  wherever a download becomes stoppable, so a click that landed early is
+ *  honoured instead of dropped. */
+function applyPendingCancel(download: ActiveDownload): boolean {
+  if (!download.canceled) return false;
+  try {
+    download.cancel();
+  } catch (err) {
+    logMain(
+      "warn",
+      "updater",
+      "failed to apply a cancel requested before the download started",
+      err instanceof Error ? err.message : String(err)
+    );
+  }
+  return true;
+}
 let releaseCache: ReleaseCacheEntry | undefined;
 let releaseFetchInFlight: Promise<GitHubRelease[]> | undefined;
 let rateLimitResetAt: number | undefined;
@@ -377,19 +406,42 @@ async function runUpdateCheck(
   }
   configureAutoUpdaterFeedForRelease(release);
   updateCheckChannelInFlight = selection;
+  // Registered before the call, not after it: `checkForUpdates` emits
+  // `update-available` — the status that puts Cancel on screen — from inside
+  // itself, and with `autoDownload` on it has already started fetching by the
+  // time it resolves.
+  const download: ActiveDownload = {
+    version: selectedVersion,
+    cancel: () => {},
+    canceled: false
+  };
+  activeDownload = download;
+  try {
+    return await runAvailableUpdateDownload(download, selection, currentVersion);
+  } finally {
+    if (activeDownload === download) activeDownload = undefined;
+  }
+}
+
+/** The half of a check that can be cancelled, split out so one `finally` can
+ *  own `activeDownload` for its whole life. */
+async function runAvailableUpdateDownload(
+  download: ActiveDownload,
+  selection: UpdateSelectionKey,
+  currentVersion: string
+): Promise<AppUpdateCheckResult> {
   const result = await autoUpdater.checkForUpdates();
   if (result?.isUpdateAvailable && result.updateInfo?.version) {
     recordPendingDownloadChannel(result.updateInfo.version, selection);
   }
   if (result?.isUpdateAvailable && result.downloadPromise) {
-    const downloadingVersion = result.updateInfo?.version ?? "unknown";
+    const downloadingVersion = result.updateInfo?.version ?? download.version;
+    download.version = downloadingVersion;
     const token = result.cancellationToken;
-    activeDownload = {
-      version: downloadingVersion,
-      cancel: () => token?.cancel(),
-      canceled: false
-    };
-    const download = activeDownload;
+    download.cancel = () => token?.cancel();
+    // A cancel that arrived while the token did not yet exist: honour it now
+    // rather than letting the download it asked to stop run to completion.
+    applyPendingCancel(download);
     try {
       await result.downloadPromise;
     } catch (err) {
@@ -413,9 +465,10 @@ async function runUpdateCheck(
       setUpdateStatusUnlessDownloaded(downloadError);
       logMain("warn", "updater", "update download failed", message);
       return downloadError;
-    } finally {
-      if (activeDownload === download) activeDownload = undefined;
     }
+    // The download resolved after a cancel we could not deliver in time (the
+    // token was already past its last abort point). Report what happened
+    // rather than what was asked for — an update IS on disk.
   }
   const matchingDownloadedResult = downloadedUpdateMatchesChannel(selection);
   if (matchingDownloadedResult) return matchingDownloadedResult;
@@ -493,22 +546,23 @@ async function simulateDevUpdateCheck(
     const stepMs = devFakeUpdateStepMs();
     setUpdateStatus({ status: "checking" });
     await delay(stepMs, { unref: true });
-    setUpdateStatus({ status: "available", version });
-    await delay(stepMs, { unref: true });
     // The fake has no request to abort, so its cancel is the flag alone — but
-    // it must be registered the same way and read at the same cadence a real
-    // download's would be, or the Cancel button is only ever exercised
-    // against production code nobody can run in `pnpm dev`.
-    const download = {
+    // it must be registered at the same point and read at the same cadence a
+    // real download's would be, or the Cancel button is only ever exercised
+    // against production code nobody can run in `pnpm dev`. Registered before
+    // `available`, which is the status that puts the button on screen.
+    const download: ActiveDownload = {
       version,
       cancel: () => {},
       canceled: false
     };
     activeDownload = download;
+    const canceled = { status: "canceled", version } as const;
     try {
+      setUpdateStatus({ status: "available", version });
+      await delay(stepMs, { unref: true });
       for (const percent of DEV_FAKE_UPDATE_PERCENT_STEPS) {
         if (download.canceled) {
-          const canceled = { status: "canceled", version } as const;
           setUpdateStatus(canceled);
           return canceled;
         }
@@ -522,6 +576,13 @@ async function simulateDevUpdateCheck(
           total: DEV_FAKE_UPDATE_TOTAL_BYTES
         });
         await delay(stepMs, { unref: true });
+      }
+      // Once more after the loop: a cancel during the last step would
+      // otherwise be dropped, and the preview would offer a Restart for an
+      // update the user had just declined.
+      if (download.canceled) {
+        setUpdateStatus(canceled);
+        return canceled;
       }
     } finally {
       if (activeDownload === download) activeDownload = undefined;
@@ -1106,19 +1167,11 @@ export function cancelAppUpdateDownload(): AppUpdateCancelResult {
   if (!download || download.canceled) return { canceled: false };
   download.canceled = true;
   logMain("info", "updater", `canceling update download ${download.version}`);
-  try {
-    download.cancel();
-  } catch (err) {
-    // The token is electron-updater's; a throw here leaves the flag set, so
-    // the download's own rejection still reads as a cancel rather than as a
-    // network failure. Nothing to recover, but it must not be silent.
-    logMain(
-      "warn",
-      "updater",
-      "failed to cancel update download",
-      err instanceof Error ? err.message : String(err)
-    );
-  }
+  // The flag is set first and unconditionally: `cancel` may be the empty slot
+  // an offered-but-not-yet-started download carries, and it may throw (the
+  // token is electron-updater's). Either way the download's own rejection
+  // must still read as a cancel rather than as a network failure.
+  applyPendingCancel(download);
   return { canceled: true };
 }
 

@@ -8,10 +8,12 @@
 - **`app:updateStatus`** carries *what the updater is doing* — checking,
   available, downloading (with percent and bytes), downloaded, canceled,
   error. Every check moves it, including the hourly background ones.
-- **`app:updateCheckResult`** is emitted **only** for a check the user asked
-  for (`menu-update-check.ts`, and `app:checkForUpdate` from Settings). It is
-  the only thing that distinguishes "the user is waiting for this answer" from
-  "the hour hand looked again".
+- **`app:updateCheckResult`** is emitted from exactly one place —
+  `menu-update-check.ts`, i.e. Help → Check for Updates. It is the only thing
+  that distinguishes "the user is waiting for this answer" from "the hour hand
+  looked again". Settings' own **Check for Update** button deliberately does
+  not emit it: that surface reports its result inline, and a toast repeating
+  the answer next to it would be saying the same thing twice.
 
 So the live progress card is gated on having seen a `checking` tick on the
 *result* channel, and is then driven by the *status* channel. A background
@@ -35,6 +37,17 @@ card (progress track, byte meter, Cancel) outside the toast store, with no
 countdown. Only when the check settles does the outcome go to the store, where
 the countdown is correct. Don't move the in-flight card back into
 `showInfoToast`.
+
+## Cancel is offered from `available`, so main must be ready by then
+
+`updateProgressCopy` turns Cancel on as soon as the status reaches
+`available` — before any bytes have moved. `auto-updater.ts` therefore
+registers its `activeDownload` at that same moment, with an empty `cancel`
+slot that electron-updater's token fills in once it exists, and honours a flag
+that was already set (`applyPendingCancel`). Register it any later and there
+is a window where the button is on screen and does nothing: the click sets
+`canceling` in the renderer, main finds no download, and the update installs
+anyway.
 
 ## A cancel is not an error
 
