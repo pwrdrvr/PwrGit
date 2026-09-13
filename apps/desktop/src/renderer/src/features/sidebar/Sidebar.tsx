@@ -441,12 +441,18 @@ export function Sidebar({
     ids: lensRepos.map((repo) => repo.id),
     context: focusContext
   });
-  const orderContext = held.context;
-  const reposById = new Map(lensRepos.map((repo) => [repo.id, repo]));
-  const allFiltered = held.ids.flatMap((id) => {
-    const repo = reposById.get(id);
-    return repo === undefined ? [] : [repo];
-  });
+  // Only pay for the remap when the held order actually differs from the one
+  // just computed — the pointer is off the sidebar for most of the app's life,
+  // and there `held.ids` IS `lensRepos`'s order.
+  const allFiltered = held.holding
+    ? (() => {
+        const byId = new Map(lensRepos.map((repo) => [repo.id, repo]));
+        return held.ids.flatMap((id) => {
+          const repo = byId.get(id);
+          return repo === undefined ? [] : [repo];
+        });
+      })()
+    : lensRepos;
   const focusedPage = focusedRepoPage(allFiltered, showAllFocused);
   const filtered = lens === "Focused" ? focusedPage.repos : allFiltered;
   const hiddenFocused = lens === "Focused" ? focusedPage.hidden : 0;
@@ -742,7 +748,7 @@ export function Sidebar({
         customOrder={orderByRepo[repo.id]}
         now={now}
         focused={lens === "Focused"}
-        focusContext={orderContext}
+        focusContext={held.context}
         {...(focusReason === null ? {} : { focusReason })}
         onToggleExpand={() => toggleExpand(repo)}
         onToggleRepoPin={() => onSetRepoPin(repo.id, !repo.pinned)}
