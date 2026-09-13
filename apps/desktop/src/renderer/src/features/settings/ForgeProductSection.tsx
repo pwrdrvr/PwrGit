@@ -74,7 +74,51 @@ const STATE_TONES: Record<
   signedOut: "warn"
 };
 
-/** One product's state as a sentence, for the pane's live region. */
+/** The tones the Settings nav paints a product's dot in. */
+export type ForgeNavDot = "ok" | "off" | "warn" | "bad";
+
+/**
+ * How the Settings nav renders each state, beside the labels and tones the card
+ * uses — so a sixth state cannot be given a chip here and forgotten there.
+ *
+ * The words are shorter than `STATE_LABELS` because the sub-row is 208px of
+ * nav, not a 760px card: "Not installed" does not fit beside a product name.
+ * They are also the *remedy* where there is one — "sign in" is what the reader
+ * has to go and do, which is more use in a nav than "signed out".
+ *
+ * `connected` carries no word on purpose. Every state that needs attention says
+ * so in text, because the dot is `aria-hidden` and colour must never be the
+ * only channel; the one state that needs nothing is the one that can be quiet.
+ *
+ * `bad` is deliberately not `off`: "you switched this off" and "this is broken"
+ * are exactly the two conditions these rows exist to tell apart at a glance.
+ */
+export const FORGE_STATE_NAV: Record<
+  Exclude<ForgeProductState, "unknown">,
+  { dot: ForgeNavDot; chip?: string }
+> = {
+  connected: { dot: "ok" },
+  off: { dot: "off", chip: "off" },
+  missing: { dot: "bad", chip: "missing" },
+  signedOut: { dot: "warn", chip: "sign in" }
+};
+
+/**
+ * One product's state as a sentence, for the pane's live region — and for the
+ * accessible name of the nav row that reports the same thing in a dot.
+ *
+ * Overloaded rather than always `string | null`, so a caller that has already
+ * ruled `unknown` out does not have to re-test for a `null` this cannot return
+ * — the nav read as though it had two ways of knowing nothing.
+ */
+export function forgeStateSentence(
+  kind: ForgeKind,
+  state: Exclude<ForgeProductState, "unknown">
+): string;
+export function forgeStateSentence(
+  kind: ForgeKind,
+  state: ForgeProductState
+): string | null;
 export function forgeStateSentence(
   kind: ForgeKind,
   state: ForgeProductState

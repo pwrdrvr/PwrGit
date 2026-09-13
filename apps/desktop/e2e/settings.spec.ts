@@ -221,9 +221,31 @@ test("menu opens the Settings window; panes render and settings persist", async 
     await expect(
       section.getByRole("button", { name: first, exact: true })
     ).toHaveAttribute("aria-expanded", "false");
+    // Scoped to the neighbour's own section, not the whole window: the nav now
+    // carries a row per product too, and while its probe is still unanswered
+    // that row's accessible name is the bare product label.
     await expect(
-      settings.getByRole("button", { name: second, exact: true })
+      settings
+        .locator(`section[aria-label='${second}']`)
+        .getByRole("button", { name: second, exact: true })
     ).toHaveAttribute("aria-expanded", "true");
+
+    // The nav's Forges children — one per product, from the same registry the
+    // sections come from, and each one a route back to its card. Clicking the
+    // child unfolds the section the line above just folded and lands focus on
+    // it, which is the whole contract: a child is a way to a card, not a pane.
+    await expect(settings.locator(".settings-nav__subbutton")).toHaveCount(
+      FORGE_KINDS.length
+    );
+    await settings
+      .locator(".settings-nav__subbutton", { hasText: first })
+      .click();
+    await expect(
+      section.getByRole("button", { name: first, exact: true })
+    ).toHaveAttribute("aria-expanded", "true");
+    await expect(
+      section.getByRole("button", { name: first, exact: true })
+    ).toBeFocused();
   }
 
   // Experimental: the lineage-scope toggle round-trips through
