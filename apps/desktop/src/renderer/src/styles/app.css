@@ -1978,6 +1978,13 @@ textarea,
   flex: 0 0 auto;
 }
 
+/* Four ghost buttons that share a shape but not a parent, so this rule hands
+   out no margin: spacing belongs to whatever each one sits in. `.new-wt` and
+   `.add-folder` space themselves because their parents are plain blocks;
+   `.clone-repo`/`.fork-repo` declare nothing, because `.sidebar__actions`
+   separates its rows with `gap`. A margin on a flex child does not collapse
+   into that gap, it adds to it — which is how the seam under Add folders drew
+   at 16px in a block whose every other seam was 8px. */
 .new-wt,
 .clone-repo,
 .fork-repo,
@@ -1988,7 +1995,6 @@ textarea,
   width: 100%;
   height: 28px;
   padding: 0 8px;
-  margin-top: 4px;
   background: transparent;
   border: 1px dashed var(--border-default);
   border-radius: 7px;
@@ -1996,16 +2002,13 @@ textarea,
   font: 500 11px/1 var(--font-sans);
   cursor: pointer;
 }
+/* `.wt-section__body` is a plain block, so this one spaces itself. */
+.new-wt {
+  margin-top: 4px;
+}
 .clone-repo,
 .fork-repo {
   height: 32px;
-  /* No margin-top: these sit inside `.sidebar__actions`, which owns the
-     spacing between its rows with `gap: 8px`. A margin here does not collapse
-     into that gap, it adds to it — which is what made the one seam under
-     Add folders 16px while every other seam in the block was 8px. `.add-folder`
-     keeps its margin because it is the first row, and `.sidebar__search` above
-     it is a plain block with no gap to inherit. */
-  margin-top: 0;
   /* Was an accent-bordered, accent-filled bar. Cloning is a secondary action
      — the sidebar's primary job is picking among repos you already have — and
      PwrAgnt's theme doc rules out large accent panels outright. Solid-bordered
@@ -2031,6 +2034,10 @@ textarea,
 }
 .add-folder {
   height: 32px;
+  /* Load-bearing, unlike the margins its siblings in `.sidebar__actions` do
+     NOT carry: this is the first row, and `.sidebar__search` above it is a
+     plain block with no `gap` to separate them. Removing it closes the seam
+     under the jump field rather than evening it out. */
   margin-top: 8px;
 }
 /* The bring-a-repo-in actions, under the jump field. Add folders is the
