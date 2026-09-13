@@ -406,3 +406,25 @@ describe("ForgesSettings", () => {
     root = createRoot(container);
   });
 });
+
+describe("GitCafe settings", () => {
+  it("shows the Bun installation and minimum CLI version remedy", async () => {
+    await render([forge({ kind: "gitcafe", installed: false, loggedIn: false })]);
+    expect(container.textContent).toContain("GitCafe");
+    expect(container.textContent).toContain("bun i -g @gitcafe/cli");
+    expect(container.textContent).toContain("0.5.0");
+    expect(container.querySelector('[aria-label="GitCafe: Not installed"]')).not.toBeNull();
+  });
+  it("uses GitCafe's host syntax when signed out of an added host", async () => {
+    await render([forge({ kind: "gitcafe", loggedIn: false, hosts: [{ host: "cafe.example", enabled: true, loggedIn: false }] })]);
+    expect(container.textContent).toContain("cafe auth login --host https://cafe.example/api");
+    expect(container.textContent).not.toContain("--hostname");
+  });
+  it("shows Connected and Off with the integration's actual capabilities", async () => {
+    await render([forge({ kind: "gitcafe", capabilities: forgeProduct("gitcafe").capabilities })]);
+    expect(container.querySelector('[aria-label="GitCafe: Connected"]')).not.toBeNull();
+    expect(container.textContent).toContain("Not supported");
+    await act(async () => listener?.({ forges: [forge({ kind: "gitcafe", loggedIn: false, hosts: [{ host: "git.cafe", enabled: false, loggedIn: false }] })] }));
+    expect(container.querySelector('[aria-label="GitCafe: Off"]')).not.toBeNull();
+  });
+});

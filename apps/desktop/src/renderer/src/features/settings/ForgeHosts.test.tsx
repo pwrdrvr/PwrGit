@@ -611,6 +611,13 @@ describe("Settings → Forges — removing a hand-added host", () => {
   });
 });
 
+it("offers a GitCafe host and its provider-specific sign-in command", async () => {
+  await render([host({ kind: "gitcafe", cli: "cafe", host: "git.cafe", origin: "config" })]);
+  expect(button("Add GitCafe host…")).toBeDefined();
+  expect(container.textContent).toContain("cafe auth login --host https://git.cafe/api");
+  expect(container.textContent).not.toContain("--hostname");
+});
+
 describe("Settings → Forges — one section per product", () => {
   it("puts each host under its own product, never in one interleaved list", async () => {
     // Sorted by hostname, main's order interleaves the two products — which is

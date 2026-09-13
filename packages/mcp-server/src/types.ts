@@ -1,4 +1,4 @@
-export type ForgeProvider = "github" | "gitlab" | "other";
+export type ForgeProvider = "github" | "gitlab" | "gitcafe" | "other";
 
 export type RemoteIdentity = {
   provider: ForgeProvider;
@@ -113,7 +113,7 @@ export type ReviewState = {
 };
 
 export type ChangeRequestState = {
-  provider: "github" | "gitlab";
+  provider: "github" | "gitlab" | "gitcafe";
   host: string;
   repository: string;
   number: number;

@@ -405,7 +405,11 @@ if (!gotSingleInstanceLock) {
     const fixtureServices =
       forgeFixturePath === undefined || forgeFixturePath === ""
         ? null
-        : createE2EForgeFixtureServices(forgeFixturePath, execGit);
+        : createE2EForgeFixtureServices(
+            forgeFixturePath,
+            execGit,
+            () => forgeHosts.statusTargets()
+          );
     const forges = fixtureServices?.forges ?? new ForgeRepoRegistry();
     if (fixtureServices === null) registerRepoProviders(forges);
     // Which forge hosts exist, and whether we may read them. Enumeration costs
@@ -416,9 +420,9 @@ if (!gotSingleInstanceLock) {
     // their actual Enterprise hostnames and account names on a screen the
     // fixture exists to keep contrived.
     const forgeHostDirectory = new ForgeHostDirectory(
-      fixtureServices === null ? {} : { discover: async () => [] }
+      fixtureServices === null ? {} : { discover: fixtureServices.discoverHosts }
     );
-    const forgeHosts = new ForgeHosts({
+    const forgeHosts: ForgeHosts = new ForgeHosts({
       // `?.hosts` as well as `?.forges`: nothing validates settings.json, so a
       // hand-edited or truncated `"forges": {}` reaches `Object.keys(undefined)`
       // — now inside an unawaited probe, where it becomes an unhandled rejection
@@ -493,8 +497,15 @@ if (!gotSingleInstanceLock) {
       }, FORGE_REPROBE_DEBOUNCE_MS);
     };
     const forgeHostsView = new ForgeHostsView(forgeHosts, async () => {
+      const previousTargets = probedTargets;
       const refreshed = await forgeHostDirectory.refresh({ force: true });
       onForgeTargetsMaybeMoved();
+      // Login/logout can change credentials without changing a configured
+      // host's target signature. An explicit Re-check must refresh auth too;
+      // changed targets already schedule their forced probe above.
+      if (probedTargets === previousTargets) {
+        await forgeStatus.list({ force: true });
+      }
       return refreshed;
     });
     // Enumeration has landed: adopt whatever hosts it found.

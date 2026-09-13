@@ -19,7 +19,8 @@ export class ForgeCommitAuthorIdentityTransport
   ) {
     this.byKind = {
       github: overrides.github ?? new GhCliCommitAuthorIdentityTransport(),
-      gitlab: overrides.gitlab ?? new GlabCliCommitAuthorIdentityTransport()
+      gitlab: overrides.gitlab ?? new GlabCliCommitAuthorIdentityTransport(),
+      gitcafe: overrides.gitcafe ?? { fetchCommit: async () => ({}) }
     };
   }
 

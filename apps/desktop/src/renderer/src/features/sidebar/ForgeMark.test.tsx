@@ -115,7 +115,8 @@ it("ships each vendor's file unaltered", () => {
   const assets = [
     ["../../assets/github/invertocat-black.svg", "black"],
     ["../../assets/github/invertocat-white.svg", "white"],
-    ["../../assets/gitlab/tanuki.svg", null]
+    ["../../assets/gitlab/tanuki.svg", null],
+    ["../../assets/gitcafe/favicon.svg", null]
   ] as const;
   for (const [rel, fill] of assets) {
     const svg = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");

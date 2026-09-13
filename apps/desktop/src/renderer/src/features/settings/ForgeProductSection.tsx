@@ -4,6 +4,7 @@ import {
   FORGE_HOST_LABEL_MAX,
   forgeAllHostsOff,
   forgeProduct,
+  forgeSignInCommand,
   type ForgeCapabilities,
   type ForgeHostConfig,
   type ForgeHostRow,
@@ -444,7 +445,7 @@ function ForgeHostNameField(props: {
  *  pane's Copy button puts it on the clipboard — two places that must never
  *  print different commands. */
 export function signInCommand(row: ForgeHostRow): string {
-  return `${row.cli} auth login --hostname ${row.host}`;
+  return forgeSignInCommand(row.kind, row.host);
 }
 
 /**
@@ -621,6 +622,8 @@ function remedy(status: ForgeStatus, state: ForgeProductState): ReactNode {
   const label = forgeProduct(status.kind).label;
   const noun = changeRequestNoun(status.kind);
   if (state === "missing") {
+    const installHint = forgeProduct(status.kind).installHint;
+    if (installHint !== undefined) return installHint;
     return (
       <>
         Install the {label} CLI (<code>{status.cli}</code>) to see status here.
@@ -675,7 +678,7 @@ function capabilities(status: ForgeStatus): string {
 function signInCommandFor(status: ForgeStatus): string {
   const waiting = awaitingSignIn(status);
   if (waiting.length === 0 || waiting.includes(forgeProduct(status.kind).saasHost)) {
-    return `${status.cli} auth login`;
+    return forgeSignInCommand(status.kind);
   }
-  return `${status.cli} auth login --hostname ${waiting[0]}`;
+  return forgeSignInCommand(status.kind, waiting[0]);
 }

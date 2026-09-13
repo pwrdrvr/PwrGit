@@ -45,6 +45,7 @@ type RateLimitDialect = {
 /** Add a forge by adding a row. One of the tables `forge/AGENTS.md` lists
  *  under "Adding a forge"; `tsc` names this one when a kind is added. */
 const RATE_LIMIT_DIALECT: Readonly<Record<ForgeKind, RateLimitDialect>> = {
+  gitcafe: { remaining: "", reset: "", exhaustedOn: [429] },
   github: {
     remaining: "x-ratelimit-remaining",
     reset: "x-ratelimit-reset",
