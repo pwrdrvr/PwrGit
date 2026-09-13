@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -9,11 +9,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import { err, ok, type Result } from "@pwrgit/shared";
 import { openDatabase } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
-import type { GitExec, GitOutput } from "./dugite";
+import type { GitExec } from "./dugite";
 import { findRepoDirs, RepoIndexer, scanRepoRoot } from "./repo-indexer";
+import { createSystemGit } from "./test-support/system-git";
 
 // Drive the indexer with system git so the test is independent of dugite's
 // bundled binary. Address the repo with `-C` and keep the process cwd out of
@@ -21,20 +21,7 @@ import { findRepoDirs, RepoIndexer, scanRepoRoot } from "./repo-indexer";
 // rename a scanned directory out from under a git run, and on Windows a
 // descendant git.exe still holding it as its native cwd fails that rename with
 // EPERM/EBUSY (see this directory's AGENTS.md).
-const systemGit: GitExec = (args, cwd) =>
-  new Promise<Result<GitOutput>>((resolve) => {
-    const proc = spawn("git", ["-C", cwd, ...args], { cwd: tmpdir() });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
-    proc.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-    proc.on("close", (code) =>
-      resolve(ok({ stdout, stderr, exitCode: code ?? 0 }))
-    );
-    proc.on("error", (e) =>
-      resolve(err({ kind: "git", code: "spawn_failed", message: e.message }))
-    );
-  });
+const systemGit: GitExec = createSystemGit();
 
 function git(dir: string, args: string[]): void {
   execFileSync("git", args, { cwd: dir, stdio: "ignore" });

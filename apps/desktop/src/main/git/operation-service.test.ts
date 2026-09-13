@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   chmodSync,
   mkdirSync,
@@ -10,7 +10,6 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { err, ok } from "@pwrgit/shared";
 import type { GitExec } from "./dugite";
 import {
   abortOperation,
@@ -22,6 +21,7 @@ import {
   readOperationState,
   scanConflictMarkers
 } from "./operation-service";
+import { createSystemGit } from "./test-support/system-git";
 
 const GIT_ENV = {
   ...process.env,
@@ -35,23 +35,7 @@ const GIT_ENV = {
 
 /** The service takes GitExec by injection, so point it straight at system git. */
 function makeExecGit(base: NodeJS.ProcessEnv = GIT_ENV): GitExec {
-  return (args, cwd, options) =>
-    new Promise((resolve) => {
-      const proc = spawn("git", args, {
-        cwd,
-        env: { ...base, ...(options?.env ?? {}) }
-      });
-      let stdout = "";
-      let stderr = "";
-      proc.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
-      proc.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-      proc.on("close", (code) =>
-        resolve(ok({ stdout, stderr, exitCode: code ?? 0 }))
-      );
-      proc.on("error", (e: Error) =>
-        resolve(err({ kind: "git", code: "spawn_failed", message: e.message }))
-      );
-    });
+  return createSystemGit({ env: base });
 }
 
 const execGit = makeExecGit();

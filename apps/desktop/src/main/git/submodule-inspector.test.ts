@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   cpSync,
   mkdirSync,
@@ -9,12 +9,11 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { err, ok } from "@pwrgit/shared";
+import { ok } from "@pwrgit/shared";
 import {
   execGitRecords,
   gitProcessInvocation,
   type GitExec,
-  type GitOutput,
   type GitRecordExec
 } from "./dugite";
 import {
@@ -25,6 +24,7 @@ import {
   parseSubmoduleConfig,
   SUBMODULE_DEPTH_LIMIT
 } from "./submodule-inspector";
+import { createSystemGit } from "./test-support/system-git";
 
 const GIT_ENV: NodeJS.ProcessEnv = {
   ...process.env,
@@ -37,32 +37,7 @@ const GIT_ENV: NodeJS.ProcessEnv = {
   GIT_ALLOW_PROTOCOL: "file"
 };
 
-const systemGit: GitExec = (args, cwd, options) =>
-  new Promise((resolveResult) => {
-    const invocation = gitProcessInvocation(args, cwd);
-    const proc = spawn("git", invocation.args, {
-      cwd: invocation.processCwd,
-      env: { ...GIT_ENV, ...options?.env }
-    });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
-    proc.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
-    proc.on("error", (cause) =>
-      resolveResult(
-        err({ kind: "git", code: "spawn_failed", message: cause.message })
-      )
-    );
-    proc.on("close", (exitCode) =>
-      resolveResult(
-        ok({
-          stdout,
-          stderr,
-          exitCode: exitCode ?? 1
-        } satisfies GitOutput)
-      )
-    );
-  });
+const systemGit: GitExec = createSystemGit({ env: GIT_ENV });
 
 const systemGitRecords: GitRecordExec = (args, cwd, options) =>
   execGitRecords(args, cwd, {

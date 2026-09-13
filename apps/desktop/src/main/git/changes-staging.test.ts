@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -13,12 +13,11 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   CHANGE_LIST_LIMIT,
-  err,
   ok,
   type ChangeSet,
   type FileChange
 } from "@pwrgit/shared";
-import type { GitExec, GitOutput } from "./dugite";
+import type { GitExec } from "./dugite";
 import {
   capChangeSet,
   discardPaths,
@@ -26,21 +25,9 @@ import {
   stagePaths
 } from "./git-service";
 import { parseStatus } from "./worktree-state";
+import { createSystemGit } from "./test-support/system-git";
 
-const systemGit: GitExec = (args, cwd) =>
-  new Promise((resolve) => {
-    const proc = spawn("git", args, { cwd });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
-    proc.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
-    proc.on("error", (cause) =>
-      resolve(err({ kind: "git", code: "spawn_failed", message: cause.message }))
-    );
-    proc.on("close", (exitCode) =>
-      resolve(ok({ stdout, stderr, exitCode: exitCode ?? 1 } satisfies GitOutput))
-    );
-  });
+const systemGit: GitExec = createSystemGit();
 
 function git(repo: string, args: string[]): string {
   return execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();

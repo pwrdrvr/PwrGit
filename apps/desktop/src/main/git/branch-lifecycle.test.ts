@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -9,26 +9,12 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { err, ok, type Result } from "@pwrgit/shared";
-import type { GitExec, GitOutput } from "./dugite";
+import { ok } from "@pwrgit/shared";
+import type { GitExec } from "./dugite";
 import { deleteLocalBranch, renameLocalBranch } from "./branch-lifecycle";
+import { createSystemGit } from "./test-support/system-git";
 
-const systemGit: GitExec = (args, cwd) =>
-  new Promise<Result<GitOutput>>((resolve) => {
-    const proc = spawn("git", args, { cwd });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (data: Buffer) => (stdout += data.toString()));
-    proc.stderr.on("data", (data: Buffer) => (stderr += data.toString()));
-    proc.on("close", (code) =>
-      resolve(ok({ stdout, stderr, exitCode: code ?? 0 }))
-    );
-    proc.on("error", (error) =>
-      resolve(
-        err({ kind: "git", code: "spawn_failed", message: error.message })
-      )
-    );
-  });
+const systemGit: GitExec = createSystemGit();
 
 function git(cwd: string, ...args: string[]): void {
   execFileSync("git", args, { cwd, stdio: "ignore" });

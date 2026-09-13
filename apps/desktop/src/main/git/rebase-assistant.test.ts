@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -11,33 +11,15 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { err, ok, type RebaseCommitRef, type Result } from "@pwrgit/shared";
-import type { GitExec, GitOutput } from "./dugite";
+import { type RebaseCommitRef } from "@pwrgit/shared";
+import type { GitExec } from "./dugite";
 import {
   applyRebase,
   dryRunRebase,
   planRebase,
   validateSelection
 } from "./rebase-assistant";
-
-function createSystemGit(
-  env: NodeJS.ProcessEnv = process.env
-): GitExec {
-  return (args, cwd) =>
-    new Promise<Result<GitOutput>>((resolve) => {
-      const proc = spawn("git", args, { cwd, env });
-      let stdout = "";
-      let stderr = "";
-      proc.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
-      proc.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-      proc.on("close", (code) =>
-        resolve(ok({ stdout, stderr, exitCode: code ?? 0 }))
-      );
-      proc.on("error", (e) =>
-        resolve(err({ kind: "git", code: "spawn_failed", message: e.message }))
-      );
-    });
-}
+import { createSystemGit } from "./test-support/system-git";
 
 const systemGit = createSystemGit();
 
@@ -217,9 +199,11 @@ describe("applyRebase (system git)", () => {
       '[merge "reject"]\n\tname = Normal text merge in isolated copies\n\tdriver = git merge-file %A %O %B\n'
     );
     const configuredGit = createSystemGit({
-      ...process.env,
-      GIT_CONFIG_GLOBAL: globalConfig,
-      GIT_CONFIG_SYSTEM: "/dev/null"
+      env: {
+        ...process.env,
+        GIT_CONFIG_GLOBAL: globalConfig,
+        GIT_CONFIG_SYSTEM: "/dev/null"
+      }
     });
     const commits = topCommits(repo, 2);
     const before = sourceSnapshot(repo);

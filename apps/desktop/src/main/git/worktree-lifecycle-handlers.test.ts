@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -9,17 +9,17 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { err, ok, type Result } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import { openDatabase, type DB } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
 import { SettingsService } from "../settings/settings-service";
-import type { GitExec, GitOutput } from "./dugite";
+import type { GitExec } from "./dugite";
 import { worktreeAdd } from "./git-service";
 import { RepoIndexer } from "./repo-indexer";
 import { registerWorktreeLifecycleHandlers } from "./worktree-lifecycle-handlers";
 import { WorktreeStateService } from "./worktree-state";
+import { createSystemGit } from "./test-support/system-git";
 
 // The handlers spawn git through dugite's execGit and broadcast over Electron
 // IPC; neither exists under vitest. Route execGit through the test's recording
@@ -41,20 +41,7 @@ vi.mock("./dugite", async (importActual) => {
   };
 });
 
-const systemGit: GitExec = (args, cwd) =>
-  new Promise<Result<GitOutput>>((resolve) => {
-    const proc = spawn("git", args, { cwd });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
-    proc.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-    proc.on("close", (code) =>
-      resolve(ok({ stdout, stderr, exitCode: code ?? 0 }))
-    );
-    proc.on("error", (e) =>
-      resolve(err({ kind: "git", code: "spawn_failed", message: e.message }))
-    );
-  });
+const systemGit: GitExec = createSystemGit();
 
 function git(dir: string, args: string[]): void {
   execFileSync("git", args, { cwd: dir, stdio: "ignore" });
