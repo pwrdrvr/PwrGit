@@ -9,7 +9,7 @@
 <p>
   <a href="https://github.com/pwrdrvr/PwrGit/releases/latest/download/PwrGit-arm64.dmg"><img src="docs/assets/buttons/download-mac-apple-silicon.png" alt="Download for Mac — Apple Silicon" width="250"></a>
   <a href="https://github.com/pwrdrvr/PwrGit/releases/latest/download/PwrGit.dmg"><img src="docs/assets/buttons/download-mac-universal.png" alt="Download for Mac — Universal, Intel and Apple Silicon" width="250"></a>
-  <a href="https://github.com/pwrdrvr/PwrGit/releases/latest"><img src="docs/assets/buttons/download-windows.png" alt="Download for Windows — x64 installer" width="250"></a>
+  <a href="https://github.com/pwrdrvr/PwrGit/releases/latest/download/PwrGit.Setup.exe"><img src="docs/assets/buttons/download-windows.png" alt="Download for Windows — x64 installer" width="250"></a>
 </p>
 
 <p>
@@ -29,8 +29,7 @@ No account, no telemetry, no PwrGit server. Git ships inside the app.</sub>
 
 Not sure which Mac? **Apple Silicon** is the right download for an M1 or newer,
 and the smaller one. **Universal** runs natively on both Intel and Apple
-Silicon. The Windows chip opens the latest release, where
-`PwrGit-<version>-windows-x64-setup.exe` is the installer.
+Silicon.
 
 A desktop Git client for macOS and Windows, built around worktrees. Every
 repository you have checked out lives in one window, and every branch you are
@@ -79,8 +78,10 @@ features, and troubleshooting live at
    - macOS on Intel, or if you are not sure which Mac you have:
      [PwrGit.dmg](https://github.com/pwrdrvr/PwrGit/releases/latest/download/PwrGit.dmg),
      the universal build that runs natively on both architectures.
-   - Windows: choose the `windows-x64-setup.exe` asset from the
-     [latest GitHub release](https://github.com/pwrdrvr/PwrGit/releases/latest).
+   - Windows:
+     [PwrGit.Setup.exe](https://github.com/pwrdrvr/PwrGit/releases/latest/download/PwrGit.Setup.exe),
+     the x64 installer. Every release also carries a version-stamped copy of
+     the same file.
 
    Both macOS builds are Developer ID-signed and Apple-notarized, so first
    launch is a single Gatekeeper prompt. An existing universal install on an
