@@ -40,6 +40,8 @@ import { execGit } from "./git/dugite";
 import { openExternalUrlFromMenu } from "./external-links";
 import { registerBranchHandlers } from "./git/branch-handlers";
 import { registerBulkSyncHandlers } from "./git/bulk-sync-handlers";
+import { SshHostTrustService } from "./git/ssh-host-trust";
+import { registerSshHostTrustHandlers } from "./git/ssh-host-trust-handlers";
 import { registerCloneHandlers } from "./git/clone-handlers";
 import { CloneService } from "./git/clone-service";
 import { registerForkHandlers } from "./git/fork-handlers";
@@ -796,6 +798,9 @@ if (!gotSingleInstanceLock) {
     });
     registerRepoHandlers(bus, indexer, profiles, refresher);
     registerCloneHandlers(bus, cloneService);
+    registerSshHostTrustHandlers(bus, new SshHostTrustService({
+      allowed: (kind, hostname) => forgeHosts.kindFor(hostname).kind === kind && forgeHosts.isEnabled(hostname).enabled
+    }));
     registerForkHandlers(bus, forkService, identityService, indexer);
     registerWorktreeHandlers(bus, stateService, db, refresher, execGit, (id) => {
       activeWorktreeId = id;

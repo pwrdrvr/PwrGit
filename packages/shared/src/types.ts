@@ -1535,3 +1535,16 @@ export type RepoSearchHit = {
   /** The branch's PR, when known (worktree hits only). */
   pr?: PrSummary;
 };
+
+/** A main-owned, expiring SSH trust proposal; never accepts key bytes from UI. */
+export type SshHostTrustProposal = {
+  id: string;
+  hostname: string;
+  port: number;
+  algorithm: string;
+  fingerprint: string;
+  verification: "published-match" | "unpublished" | "lookup-failed" | "mismatch" | "existing-key";
+  sourceUrl: string | null;
+  message: string;
+  canTrust: boolean;
+};

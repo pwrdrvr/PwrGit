@@ -37,6 +37,7 @@ import {
 } from "./fork-dialog";
 import { useForgeHostMap } from "../../lib/useForgeHostMap";
 import { FORGE_UNASKED_CODES, useCloneSearch } from "./useCloneSearch";
+import { SshHostTrustPanel } from "./SshHostTrustPanel";
 import { RepoIdentityChips } from "./RepoIdentityMarks";
 
 const PROTOCOL_IDS = ["ssh", "https", "cli"] as const;
@@ -665,7 +666,7 @@ export function CloneRepoDialog({
                         ? `${label} must be installed and signed in`
                         : detail
                     }
-                    onClick={() => setProtocol(candidate)}
+                    onClick={() => { setProtocol(candidate); setSubmitError(null); }}
                   >
                     <strong>{label}</strong>
                     <small>{detail}</small>
@@ -830,6 +831,12 @@ export function CloneRepoDialog({
               {hostVerificationCommand === null ? submitError : (
                 <>
                   <strong>SSH could not verify the server’s identity.</strong>
+                  {selectedRepository !== null && selectedRepository.host !== "other" && <SshHostTrustPanel
+                    key={selectedRepository.hostname}
+                    kind={selectedRepository.host}
+                    hostname={selectedRepository.hostname}
+                    onTrusted={() => { void submit(); }}
+                  />}
                   <p>Run this in a terminal. Compare the fingerprint with one published by the host or supplied by its administrator before accepting it, then retry the clone. If the key has changed, verify why before replacing a saved key.</p>
                   <code>{hostVerificationCommand}</code>{" "}
                   <button type="button" className="settings-button" onClick={() => {

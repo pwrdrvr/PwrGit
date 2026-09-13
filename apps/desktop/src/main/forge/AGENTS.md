@@ -639,3 +639,12 @@ provider or reach a real forge.
 - **GitLab calls them groups, not organizations.** `ownerKindLabel` reads the
   product's `organizationNoun`; the fork-target list is the one place the user
   chooses between them, so a wrong noun there is wrong where it shows most.
+
+## Published SSH server keys
+
+`ssh-host-keys.ts` is a separate, per-host `ForgeSshHostKeyProvider` registry.
+These are server identity keys, never account/deploy keys. A provider returns
+an HTTPS source and full keys, `null` when no source is known, or throws when
+its source cannot be retrieved or parsed. Never substitute `ssh-keyscan` for a
+published source or apply SaaS keys to another hostname/port. GitCafe has no
+verified publication endpoint yet; keep its provider unknown until documented.
