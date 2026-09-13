@@ -43,6 +43,7 @@ import {
   SORT_CYCLE,
   type SelectionModifiers
 } from "./repo-view";
+import { useHoverStableOrder } from "./useHoverStableOrder";
 import { useListReorder } from "./useListReorder";
 
 /** Distinguishes repo drags from worktree drags (see useListReorder). */
@@ -428,7 +429,30 @@ export function Sidebar({
 
   const focusContext = { selectedWorktreeId, visits: focusVisits };
   const counts = lensCounts(repos, now, focusContext);
-  const allFiltered = filterReposByLens(repos, lens, now, focusContext);
+  const lensRepos = filterReposByLens(repos, lens, now, focusContext);
+  // Selecting a worktree makes its repo `current` — rank 0 of the Focus ladder
+  // — so without this the row the user just clicked would leave from under the
+  // cursor. The lens keeps answering the question; the answer is only *shown*
+  // once the pointer is off the list. The held focus context travels down to
+  // RepoRow so an expanded repo's Working section can't re-partition while the
+  // list around it is being held still either.
+  const held = useHoverStableOrder({
+    scope: `${activeProfile?.id ?? "none"}:${lens}`,
+    ids: lensRepos.map((repo) => repo.id),
+    context: focusContext
+  });
+  // Only pay for the remap when the held order actually differs from the one
+  // just computed — the pointer is off the sidebar for most of the app's life,
+  // and there `held.ids` IS `lensRepos`'s order.
+  const allFiltered = held.holding
+    ? (() => {
+        const byId = new Map(lensRepos.map((repo) => [repo.id, repo]));
+        return held.ids.flatMap((id) => {
+          const repo = byId.get(id);
+          return repo === undefined ? [] : [repo];
+        });
+      })()
+    : lensRepos;
   const focusedPage = focusedRepoPage(allFiltered, showAllFocused);
   const filtered = lens === "Focused" ? focusedPage.repos : allFiltered;
   const hiddenFocused = lens === "Focused" ? focusedPage.hidden : 0;
@@ -461,6 +485,9 @@ export function Sidebar({
     // of the flat order, so numbering the full list keeps one coherent
     // arrangement instead of per-group indices that collide.
     onCommit: (dragId, targetId, position) => {
+      // A drag leaves the ids untouched and only moves them, so the held order
+      // would silently undo the drop the user just made.
+      held.release();
       onPersistRepoOrder(reorder(filteredIds, dragId, targetId, position));
     }
   });
@@ -513,6 +540,9 @@ export function Sidebar({
         neighbor,
         event.key === "ArrowUp" ? "before" : "after"
       );
+      // Same reason as the drag's onCommit: the move is the user's, so it is
+      // shown even if the pointer happens to be parked on the list.
+      held.release();
       onPersistRepoOrder(moved);
       // Focus stays on the row that moved, so nothing is re-announced on its
       // own — see lib/announce (SC 4.1.3). Announce against the group the row
@@ -690,6 +720,13 @@ export function Sidebar({
   // pair each row needs — within its folder group when grouped, within the
   // filtered list when not. See RepoRow for why they are stated explicitly.
   const renderRepo = (repo: Repo, index: number, list: Repo[]) => {
+    // Live, not held — unlike the row's position. The selected tint below
+    // (`containsSelection`) follows the selection immediately and cannot
+    // sensibly do otherwise, so a held reason would put two disagreeing signals
+    // on one row: an accent-tinted row still labelled "Recent". Live on both,
+    // the row reads "this is the current one, where it already was", and the
+    // stale part stays the invisible one. The badge is a fixed-height pill at
+    // the end of a flex row, so a word change reflows nothing but itself.
     const focusReason =
       lens === "Focused"
         ? focusReasonForRepo(repo, focusContext, now)
@@ -711,7 +748,7 @@ export function Sidebar({
         customOrder={orderByRepo[repo.id]}
         now={now}
         focused={lens === "Focused"}
-        focusVisits={focusVisits}
+        focusContext={held.context}
         {...(focusReason === null ? {} : { focusReason })}
         onToggleExpand={() => toggleExpand(repo)}
         onToggleRepoPin={() => onSetRepoPin(repo.id, !repo.pinned)}
@@ -1004,6 +1041,7 @@ export function Sidebar({
           id={REPO_TREE_ID}
           role="tree"
           aria-label="Repositories"
+          {...held.containerProps}
         >
           {grouped
             ? groups.map((g) => (
