@@ -1,43 +1,16 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import { err, ok, type Result } from "@pwrgit/shared";
-import type { GitBinaryOutput, GitExec, GitExecBinary, GitOutput } from "./dugite";
+import { ok } from "@pwrgit/shared";
+import type { GitExec, GitExecBinary } from "./dugite";
 import { readImagePreview } from "./image-preview";
+import { createSystemGit, createSystemGitBinary } from "./test-support/system-git";
 
-const systemGit: GitExec = (args, cwd) =>
-  new Promise<Result<GitOutput>>((resolve) => {
-    const proc = spawn("git", args, { cwd });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
-    proc.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-    proc.on("close", (code) =>
-      resolve(ok({ stdout, stderr, exitCode: code ?? 0 }))
-    );
-    proc.on("error", (e) =>
-      resolve(err({ kind: "git", code: "spawn_failed", message: e.message }))
-    );
-  });
+const systemGit: GitExec = createSystemGit();
 
-const systemGitBinary: GitExecBinary = (args, cwd) =>
-  new Promise<Result<GitBinaryOutput>>((resolve) => {
-    const proc = spawn("git", args, { cwd });
-    const chunks: Buffer[] = [];
-    let stderr = "";
-    proc.stdout.on("data", (d: Buffer) => chunks.push(d));
-    proc.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-    proc.on("close", (code) =>
-      resolve(
-        ok({ stdout: Buffer.concat(chunks), stderr, exitCode: code ?? 0 })
-      )
-    );
-    proc.on("error", (e) =>
-      resolve(err({ kind: "git", code: "spawn_failed", message: e.message }))
-    );
-  });
+const systemGitBinary: GitExecBinary = createSystemGitBinary();
 
 const read = (cwd: string, path: string, rev: Parameters<typeof readImagePreview>[4]) =>
   readImagePreview(systemGit, systemGitBinary, cwd, path, rev);

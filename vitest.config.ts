@@ -12,6 +12,13 @@ export default defineConfig({
     // where spawning is dearest, `rebase-assistant.test.ts` alone has run
     // 14s and 24s for its 14 tests on identical code. A genuinely hung test
     // still fails here — just not before a slow-but-healthy one has finished.
+    //
+    // A per-test third argument overrides this unconditionally, including
+    // downwards: a suite that carries `}, 15_000)` from before this line
+    // existed runs on a *tighter* budget than the default, on exactly the
+    // platform named above. Add one only to go higher than 20s, say why, and
+    // never restate 20_000 — a hand-copied duplicate is what goes stale the
+    // next time this number moves.
     testTimeout: 20_000,
     include: [
       "packages/*/src/**/*.test.ts",

@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -9,8 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { err, ok, type Result } from "@pwrgit/shared";
-import type { GitExec, GitOutput } from "./dugite";
+import type { GitExec } from "./dugite";
 import {
   FILE_BLAME_MAX_BYTES,
   parseFileHistory,
@@ -18,35 +17,15 @@ import {
   readFileContents,
   readFileHistory
 } from "./file-insights";
+import { createSystemGit } from "./test-support/system-git";
 
-const systemGit: GitExec = (args, cwd, options) =>
-  new Promise<Result<GitOutput>>((resolve) => {
-    const child = spawn("git", args, {
-      cwd,
-      signal: options?.signal,
-      env: {
-        ...process.env,
-        GIT_CONFIG_GLOBAL: "/dev/null",
-        GIT_CONFIG_SYSTEM: "/dev/null"
-      }
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
-    child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
-    child.on("close", (code) =>
-      resolve(ok({ stdout, stderr, exitCode: code ?? 0 }))
-    );
-    child.on("error", (cause) =>
-      resolve(
-        err({
-          kind: "git",
-          code: cause.name === "AbortError" ? "aborted" : "spawn_failed",
-          message: cause.message
-        })
-      )
-    );
-  });
+const GIT_ENV: NodeJS.ProcessEnv = {
+  ...process.env,
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_SYSTEM: "/dev/null"
+};
+
+const systemGit: GitExec = createSystemGit({ env: GIT_ENV });
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, {

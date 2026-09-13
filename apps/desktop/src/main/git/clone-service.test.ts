@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { err, ok, type CloneProgress, type Result } from "@pwrgit/shared";
+import { ok, type CloneProgress } from "@pwrgit/shared";
 import { openDatabase } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
 import {
@@ -26,32 +26,11 @@ import { ForgeRepoRegistry } from "../forge/repo-provider";
 import { ForgeStatusService } from "../forge/status";
 import { GitHubRepoProvider } from "../forge/github/repo-provider";
 import { GitLabRepoProvider } from "../forge/gitlab/repo-provider";
-import type { GitExec, GitExecOptions, GitOutput } from "./dugite";
+import type { GitExec, GitExecOptions } from "./dugite";
 import { RepoIndexer } from "./repo-indexer";
+import { createSystemGit } from "./test-support/system-git";
 
-const systemGit: GitExec = (args, cwd, options) =>
-  new Promise<Result<GitOutput>>((resolve) => {
-    const proc = spawn("git", args, {
-      cwd,
-      env: { ...process.env, ...options?.env }
-    });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
-    proc.stderr.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      stderr += text;
-      options?.onStderr?.(text);
-    });
-    proc.on("close", (code) =>
-      resolve(ok({ stdout, stderr, exitCode: code ?? 0 }))
-    );
-    proc.on("error", (error) =>
-      resolve(
-        err({ kind: "git", code: "spawn_failed", message: error.message })
-      )
-    );
-  });
+const systemGit: GitExec = createSystemGit();
 
 function git(cwd: string, ...args: string[]): void {
   execFileSync("git", args, { cwd, stdio: "ignore" });

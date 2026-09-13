@@ -1,10 +1,10 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { err, ok, TAG_PAGE_MAX, type Result } from "@pwrgit/shared";
-import type { GitExec, GitOutput } from "./dugite";
+import { ok, TAG_PAGE_MAX } from "@pwrgit/shared";
+import type { GitExec } from "./dugite";
 import {
   applyRemoteTagPlan,
   createTagAt,
@@ -13,33 +13,18 @@ import {
   planRemoteTag,
   resolveTagTarget
 } from "./git-service";
+import { createSystemGit } from "./test-support/system-git";
 
 const roots: string[] = [];
 const identity = { name: "Tag Tester", email: "tags@pwrgit.test" };
 
-const systemGit: GitExec = (args, cwd) =>
-  new Promise<Result<GitOutput>>((resolve) => {
-    const proc = spawn("git", args, {
-      cwd,
-      env: {
-        ...process.env,
-        GIT_CONFIG_GLOBAL: "/dev/null",
-        GIT_CONFIG_SYSTEM: "/dev/null"
-      }
-    });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (data: Buffer) => (stdout += data.toString()));
-    proc.stderr.on("data", (data: Buffer) => (stderr += data.toString()));
-    proc.on("close", (code) =>
-      resolve(ok({ stdout, stderr, exitCode: code ?? 0 }))
-    );
-    proc.on("error", (cause) =>
-      resolve(
-        err({ kind: "git", code: "spawn_failed", message: cause.message })
-      )
-    );
-  });
+const GIT_ENV: NodeJS.ProcessEnv = {
+  ...process.env,
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_SYSTEM: "/dev/null"
+};
+
+const systemGit: GitExec = createSystemGit({ env: GIT_ENV });
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -362,7 +347,7 @@ describe("reviewed remote Git tag actions", () => {
     expect(
       git(fixture.path, "ls-remote", "--tags", "origin", "refs/tags/unrelated")
     ).toBe("");
-  }, 20_000);
+  });
 
   it("reviews and mutates the configured push endpoint, not the fetch URL", async () => {
     const fixture = repo();

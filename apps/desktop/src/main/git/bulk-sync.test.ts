@@ -1,4 +1,4 @@
-import { execFile, execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { err, ok } from "@pwrgit/shared";
 import { bulkSyncRepositories, type BulkSyncRepoInput } from "./bulk-sync";
 import type { GitExec } from "./dugite";
+import { createSystemGit } from "./test-support/system-git";
 
 const GIT_ENV: NodeJS.ProcessEnv = {
   ...process.env,
@@ -26,37 +27,7 @@ const GIT_ENV: NodeJS.ProcessEnv = {
   GIT_COMMITTER_EMAIL: "test@pwrgit.dev"
 };
 
-const systemGit: GitExec = (args, cwd, options) =>
-  new Promise((resolve) => {
-    execFile(
-      "git",
-      args,
-      {
-        cwd,
-        env: { ...GIT_ENV, ...options?.env },
-        encoding: "utf8",
-        ...(options?.signal === undefined ? {} : { signal: options.signal })
-      },
-      (error, stdout, stderr) => {
-        if (error === null) {
-          resolve(ok({ stdout, stderr, exitCode: 0 }));
-          return;
-        }
-        if (typeof error.code === "number") {
-          resolve(ok({ stdout, stderr, exitCode: error.code }));
-          return;
-        }
-        resolve(
-          err({
-            kind: "git",
-            code: error.name === "AbortError" ? "aborted" : "spawn_failed",
-            message: error.message,
-            cause: error
-          })
-        );
-      }
-    );
-  });
+const systemGit: GitExec = createSystemGit({ env: GIT_ENV });
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, {

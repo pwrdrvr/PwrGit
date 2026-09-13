@@ -1,10 +1,10 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { err, ok, RECLAIM_DEFAULT_EXCLUDES } from "@pwrgit/shared";
-import type { GitExec, GitOutput } from "./dugite";
+import { RECLAIM_DEFAULT_EXCLUDES } from "@pwrgit/shared";
+import type { GitExec } from "./dugite";
 import {
   describePlan,
   parseCleanDryRun,
@@ -12,27 +12,12 @@ import {
   reclaimIgnored,
   spareArgs
 } from "./worktree-reclaim";
+import { createSystemGit } from "./test-support/system-git";
 
-// `-C` rather than a native cwd inside the repo: Git for Windows can hand
-// execution to a descendant that keeps the directory busy, and these tests
-// delete their tree in afterEach. Mirrors `gitProcessInvocation`.
-const systemGit: GitExec = (args, cwd, options) =>
-  new Promise((resolve) => {
-    const proc = spawn("git", ["-C", cwd, ...args], {
-      cwd: tmpdir(),
-      env: { ...process.env, ...options?.env }
-    });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
-    proc.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
-    proc.on("error", (cause) =>
-      resolve(err({ kind: "git", code: "spawn_failed", message: cause.message }))
-    );
-    proc.on("close", (exitCode) =>
-      resolve(ok({ stdout, stderr, exitCode: exitCode ?? 1 } satisfies GitOutput))
-    );
-  });
+// These tests delete their tree in afterEach, so the `-C` invocation that
+// keeps Git's native cwd outside the repo matters here; the shared helper
+// applies it, along with awaiting `exit` rather than `close`.
+const systemGit: GitExec = createSystemGit();
 
 function git(repo: string, args: string[]): string {
   return execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();

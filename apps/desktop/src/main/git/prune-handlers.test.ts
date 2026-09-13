@@ -1,43 +1,27 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { err, ok, RECLAIM_DEFAULT_EXCLUDES } from "@pwrgit/shared";
+import { RECLAIM_DEFAULT_EXCLUDES } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import { openDatabase, type DB } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
-import type { GitExec, GitOutput } from "./dugite";
+import type { GitExec } from "./dugite";
 import { worktreeAdd } from "./git-service";
 import { registerPruneHandlers } from "./prune-handlers";
 import { RepoIndexer } from "./repo-indexer";
 import { createWorktreeRefresher } from "./worktree-handlers";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 import { WorktreeStateService } from "./worktree-state";
+import { createSystemGit } from "./test-support/system-git";
 
 vi.mock("../ipc", () => ({ registerIpc: vi.fn(), emitEvent: vi.fn() }));
 vi.mock("../logs", () => ({ logMain: vi.fn() }));
 
 const OLD_COMMIT_DATE = "2025-01-05T10:00:00+0000";
 
-const systemGit: GitExec = (args, cwd, options) =>
-  new Promise((resolve) => {
-    // `-C`, never a native cwd inside a checkout this suite deletes.
-    const proc = spawn("git", ["-C", cwd, ...args], {
-      cwd: tmpdir(),
-      env: { ...process.env, ...options?.env }
-    });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
-    proc.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
-    proc.on("error", (cause) =>
-      resolve(err({ kind: "git", code: "spawn_failed", message: cause.message }))
-    );
-    proc.on("close", (code) =>
-      resolve(ok({ stdout, stderr, exitCode: code ?? 0 } satisfies GitOutput))
-    );
-  });
+const systemGit: GitExec = createSystemGit();
 
 const spawned: string[][] = [];
 const recordingGit: GitExec = (args, cwd, options) => {

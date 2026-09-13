@@ -1,35 +1,29 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { err, ok, type LaneGraph, type Result } from "@pwrgit/shared";
+import { ok, type LaneGraph } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import { openDatabase } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
-import type { GitExec, GitOutput } from "./dugite";
+import type { GitExec } from "./dugite";
 import { RepoIndexer } from "./repo-indexer";
 import { WorktreeStateService } from "./worktree-state";
+import { createSystemGit } from "./test-support/system-git";
 
 // graph-handlers reaches for `execGit` directly rather than taking a GitExec,
 // so the only way to drive it against a real repo is to swap the module. System
 // git keeps the test independent of dugite's bundled binary, as elsewhere here.
-const { systemGit } = vi.hoisted(() => ({
-  systemGit: ((args: string[], cwd: string) =>
-    new Promise<Result<GitOutput>>((resolve) => {
-      const proc = spawn("git", args, { cwd });
-      let stdout = "";
-      let stderr = "";
-      proc.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
-      proc.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-      proc.on("close", (code) =>
-        resolve(ok({ stdout, stderr, exitCode: code ?? 0 }))
-      );
-      proc.on("error", (e) =>
-        resolve(err({ kind: "git", code: "spawn_failed", message: e.message }))
-      );
-    })) satisfies GitExec
-}));
+const { systemGit } = vi.hoisted(() => {
+  // This factory is hoisted above the imports, so `createSystemGit` is still
+  // in its temporal dead zone here; build the real exec on first call.
+  let impl: GitExec | undefined;
+  return {
+    systemGit: ((args, cwd, options) =>
+      (impl ??= createSystemGit())(args, cwd, options)) satisfies GitExec
+  };
+});
 
 vi.mock("./dugite", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./dugite")>();

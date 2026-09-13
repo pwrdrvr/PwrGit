@@ -8,6 +8,8 @@ import { CommandBus } from "../command-bus";
 import type { DB } from "../persistence/db";
 import { registerGraphHandlers } from "./graph-handlers";
 import type { WorktreeStateService } from "./worktree-state";
+import { createSystemGit } from "./test-support/system-git";
+import type { GitExecOptions } from "./dugite";
 
 // The handler reaches for the real git binary via `execGit`; point that at the
 // system git so these run against actual repositories. The rest of ./dugite
@@ -15,24 +17,13 @@ import type { WorktreeStateService } from "./worktree-state";
 // runtime, not just as types.
 vi.mock("./dugite", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./dugite")>();
-  const { spawn } = await import("node:child_process");
-  const { ok, err } = await import("@pwrgit/shared");
+  // This factory resolves before the test module's own body runs, so build the
+  // exec on first call rather than reaching for the import here.
+  let impl: ReturnType<typeof createSystemGit> | undefined;
   return {
     ...actual,
-    execGit: (args: string[], cwd: string) =>
-      new Promise((resolve) => {
-        const proc = spawn("git", args, { cwd });
-        let stdout = "";
-        let stderr = "";
-        proc.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
-        proc.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-        proc.on("close", (code) =>
-          resolve(ok({ stdout, stderr, exitCode: code ?? 0 }))
-        );
-        proc.on("error", (e: Error) =>
-          resolve(err({ kind: "git", code: "spawn_failed", message: e.message }))
-        );
-      })
+    execGit: (args: string[], cwd: string, options?: GitExecOptions) =>
+      (impl ??= createSystemGit())(args, cwd, options)
   };
 });
 

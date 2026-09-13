@@ -14,6 +14,19 @@ fail on the Windows runner, so a green local run proves nothing about them:
   `EBUSY`. Keep the process cwd in a stable directory and address the repo with
   `git -C <repo>` (use `gitProcessInvocation` in `dugite.ts`).
 
+- **Get the `GitExec` from `test-support/system-git.ts`; never hand-roll one.**
+  A spawned git must be awaited on `exit`, not `close`. `close` waits for every
+  process still holding the child's inherited stdio pipes, and the launcher
+  handoff above means a grandchild can hold them after git itself has exited —
+  so the helper waits out the stranger rather than the command. A 4ms git call
+  becomes a multi-second hang, and the test dies on the Vitest timeout having
+  never learned what git did. It is bimodal by nature (the handoff either
+  lingers or it doesn't), so it reads as a flake and raising the timeout only
+  buys the hang more room. Twenty-four copies of that helper each carried the
+  bug; there is one now, and it takes a base env if your suite needs one. It
+  also honours `signal` / `killSignal` / `onStderr` / `onActivity` the way
+  production's `execGit` does, so a cancelling test cancels for real.
+
 - **`core.autocrlf` defaults to true on Windows.** Anything restored out of
   HEAD comes back with CRLF, and a test comparing file *contents* against the
   bytes it committed fails on that alone. Set it off in the repo setup, beside

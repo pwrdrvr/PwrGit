@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { err, ok, type CloneRepository, type Result } from "@pwrgit/shared";
+import { type CloneRepository } from "@pwrgit/shared";
 import { openDatabase } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
 import { ForgeRepoRegistry } from "../forge/repo-provider";
@@ -23,31 +23,12 @@ import {
   upstreamChoicesFor,
   UPSTREAM_REMOTE
 } from "./fork-service";
-import type { GitExec, GitOutput } from "./dugite";
+import type { GitExec } from "./dugite";
 import { RepoIndexer } from "./repo-indexer";
 import { ForgeStatusService } from "../forge/status";
+import { createSystemGit } from "./test-support/system-git";
 
-const systemGit: GitExec = (args, cwd, options) =>
-  new Promise<Result<GitOutput>>((resolve) => {
-    const proc = spawn("git", args, {
-      cwd,
-      env: { ...process.env, ...options?.env }
-    });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
-    proc.stderr.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      stderr += text;
-      options?.onStderr?.(text);
-    });
-    proc.on("close", (code) =>
-      resolve(ok({ stdout, stderr, exitCode: code ?? 0 }))
-    );
-    proc.on("error", (error) =>
-      resolve(err({ kind: "git", code: "spawn_failed", message: error.message }))
-    );
-  });
+const systemGit: GitExec = createSystemGit();
 
 /** Forge availability with no subprocesses. Without this the services fall
  *  back to the real probes and the suite starts depending on whether the

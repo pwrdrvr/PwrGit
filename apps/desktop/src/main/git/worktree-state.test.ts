@@ -1,35 +1,22 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import { err, ok, type Result } from "@pwrgit/shared";
 import { openDatabase, type DB } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
-import type { GitExec, GitOutput } from "./dugite";
+import type { GitExec } from "./dugite";
 import { RepoIndexer } from "./repo-indexer";
 import { parseStatus, WorktreeStateService } from "./worktree-state";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
+import { createSystemGit } from "./test-support/system-git";
 
 // Address the repo with `-C` and keep the process cwd out of it, as
 // `gitProcessInvocation` does in production: a test here deletes a worktree
 // the probe just ran git in, and on Windows a descendant git.exe still
 // holding that directory as its native cwd fails the delete with EPERM/EBUSY
 // (see this directory's AGENTS.md).
-const systemGit: GitExec = (args, cwd) =>
-  new Promise<Result<GitOutput>>((resolve) => {
-    const proc = spawn("git", ["-C", cwd, ...args], { cwd: tmpdir() });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
-    proc.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-    proc.on("close", (code) =>
-      resolve(ok({ stdout, stderr, exitCode: code ?? 0 }))
-    );
-    proc.on("error", (e) =>
-      resolve(err({ kind: "git", code: "spawn_failed", message: e.message }))
-    );
-  });
+const systemGit: GitExec = createSystemGit();
 
 function git(dir: string, args: string[]): void {
   execFileSync("git", args, { cwd: dir, stdio: "ignore" });
