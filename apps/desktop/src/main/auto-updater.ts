@@ -4,6 +4,7 @@ import { app } from "electron";
 import electronUpdater from "electron-updater";
 import {
   ok,
+  type AppUpdateCancelResult,
   type AppUpdateCheckResult,
   type AppUpdateInstallResult,
   type AppUpdateReleaseInfo,
@@ -39,7 +40,25 @@ const WINDOWS_UPDATE_CHANNEL_FILE = "latest.yml";
  *  genuine offer. */
 const DEV_FAKE_UPDATE_VERSION = "420.0.0";
 /** Long enough to watch each transition land, short enough not to feel hung. */
-const DEV_FAKE_UPDATE_STEP_MS = 300;
+const DEV_FAKE_UPDATE_DEFAULT_STEP_MS = 300;
+
+/** e2e seam, alongside `PWRGIT_USER_DATA_DIR` and `PWRGIT_GITCONFIG`. The
+ *  Cancel button can only be exercised while the fake is mid-download, and at
+ *  the dev pace that window is a couple of seconds — comfortable by hand, a
+ *  race on a loaded CI runner. The spec widens it rather than asserting
+ *  something weaker. Only ever read in an unpackaged build: the whole fake is
+ *  behind `productionUpdatesEnabled()`. */
+function devFakeUpdateStepMs(): number {
+  const raw = Number(process.env["PWRGIT_E2E_UPDATE_STEP_MS"]);
+  return Number.isFinite(raw) && raw > 0
+    ? raw
+    : DEV_FAKE_UPDATE_DEFAULT_STEP_MS;
+}
+/** Percent ticks the fake download reports. Enough of them that the meter is
+ *  visibly a meter and the Cancel button has a window to be pressed in. */
+const DEV_FAKE_UPDATE_PERCENT_STEPS = [0, 15, 34, 58, 79, 93, 100];
+/** A plausible universal-mac zip, so the byte line is exercised too. */
+const DEV_FAKE_UPDATE_TOTAL_BYTES = 118_000_000;
 
 type UpdateSelectionKey = `${UpdateTrain}:${UpdateChannel}`;
 type AppUpdateCheckTrigger = "startup" | "periodic" | "manual" | "menu";
@@ -88,6 +107,47 @@ let heldDownloadedUpdate:
   | { selection: UpdateSelectionKey; version: string }
   | undefined;
 const pendingDownloadChannelsByVersion = new Map<string, UpdateSelectionKey>();
+/**
+ * The download the user can still stop.
+ *
+ * Held rather than derived because `cancel` has to reach electron-updater's
+ * own token, and because the rejection that token produces is
+ * indistinguishable from a network failure unless we remember that we were
+ * the ones who asked.
+ *
+ * Registered as soon as the status reaches `available` — NOT when the bytes
+ * start moving. The toast offers Cancel from `available` onwards, so anything
+ * later leaves a window in which the button is on screen and does nothing:
+ * the click sets `canceling` in the renderer, finds no download here, and the
+ * update installs anyway. `cancel` is therefore a mutable slot, filled in
+ * once electron-updater hands over its token.
+ */
+type ActiveDownload = {
+  version: string;
+  cancel: () => void;
+  /** Set by `cancelAppUpdateDownload`, read wherever the download can stop. */
+  canceled: boolean;
+};
+
+let activeDownload: ActiveDownload | undefined;
+
+/** Take the cancel a user asked for before there was anything to ask. Called
+ *  wherever a download becomes stoppable, so a click that landed early is
+ *  honoured instead of dropped. */
+function applyPendingCancel(download: ActiveDownload): boolean {
+  if (!download.canceled) return false;
+  try {
+    download.cancel();
+  } catch (err) {
+    logMain(
+      "warn",
+      "updater",
+      "failed to apply a cancel requested before the download started",
+      err instanceof Error ? err.message : String(err)
+    );
+  }
+  return true;
+}
 let releaseCache: ReleaseCacheEntry | undefined;
 let releaseFetchInFlight: Promise<GitHubRelease[]> | undefined;
 let rateLimitResetAt: number | undefined;
@@ -195,6 +255,7 @@ function preserveDownloadedStatus(nextStatus: AppUpdateStatus): boolean {
   return (
     nextStatus.status === "checking" ||
     nextStatus.status === "no-update" ||
+    nextStatus.status === "canceled" ||
     nextStatus.status === "error"
   );
 }
@@ -345,20 +406,69 @@ async function runUpdateCheck(
   }
   configureAutoUpdaterFeedForRelease(release);
   updateCheckChannelInFlight = selection;
+  // Registered before the call, not after it: `checkForUpdates` emits
+  // `update-available` — the status that puts Cancel on screen — from inside
+  // itself, and with `autoDownload` on it has already started fetching by the
+  // time it resolves.
+  const download: ActiveDownload = {
+    version: selectedVersion,
+    cancel: () => {},
+    canceled: false
+  };
+  activeDownload = download;
+  try {
+    return await runAvailableUpdateDownload(download, selection, currentVersion);
+  } finally {
+    if (activeDownload === download) activeDownload = undefined;
+  }
+}
+
+/** The half of a check that can be cancelled, split out so one `finally` can
+ *  own `activeDownload` for its whole life. */
+async function runAvailableUpdateDownload(
+  download: ActiveDownload,
+  selection: UpdateSelectionKey,
+  currentVersion: string
+): Promise<AppUpdateCheckResult> {
   const result = await autoUpdater.checkForUpdates();
   if (result?.isUpdateAvailable && result.updateInfo?.version) {
     recordPendingDownloadChannel(result.updateInfo.version, selection);
   }
   if (result?.isUpdateAvailable && result.downloadPromise) {
+    const downloadingVersion = result.updateInfo?.version ?? download.version;
+    download.version = downloadingVersion;
+    const token = result.cancellationToken;
+    download.cancel = () => token?.cancel();
+    // A cancel that arrived while the token did not yet exist: honour it now
+    // rather than letting the download it asked to stop run to completion.
+    applyPendingCancel(download);
     try {
       await result.downloadPromise;
     } catch (err) {
+      // A cancel rejects this promise exactly like a failed request would, and
+      // electron-updater deliberately does NOT dispatch its `error` event for
+      // one. Only our own flag separates "the user stopped it" from "the
+      // download broke", and dressing the first as a failure would put a red
+      // toast and an Open Logs button in front of someone who got what they
+      // asked for.
+      if (download.canceled) {
+        const canceled = {
+          status: "canceled",
+          version: downloadingVersion
+        } as const;
+        setUpdateStatusUnlessDownloaded(canceled);
+        logMain("info", "updater", `update download canceled ${downloadingVersion}`);
+        return canceled;
+      }
       const message = err instanceof Error ? err.message : String(err);
       const downloadError = { status: "error", message } as const;
       setUpdateStatusUnlessDownloaded(downloadError);
       logMain("warn", "updater", "update download failed", message);
       return downloadError;
     }
+    // The download resolved after a cancel we could not deliver in time (the
+    // token was already past its last abort point). Report what happened
+    // rather than what was asked for — an update IS on disk.
   }
   const matchingDownloadedResult = downloadedUpdateMatchesChannel(selection);
   if (matchingDownloadedResult) return matchingDownloadedResult;
@@ -433,12 +543,50 @@ async function simulateDevUpdateCheck(
   const version = DEV_FAKE_UPDATE_VERSION;
   logMain("info", "updater", `simulating dev update check (${trigger})`);
   updateCheckInFlight = (async (): Promise<AppUpdateCheckResult> => {
+    const stepMs = devFakeUpdateStepMs();
     setUpdateStatus({ status: "checking" });
-    await delay(DEV_FAKE_UPDATE_STEP_MS, { unref: true });
-    setUpdateStatus({ status: "available", version });
-    await delay(DEV_FAKE_UPDATE_STEP_MS, { unref: true });
-    setUpdateStatus({ status: "downloading", version, percent: 60 });
-    await delay(DEV_FAKE_UPDATE_STEP_MS, { unref: true });
+    await delay(stepMs, { unref: true });
+    // The fake has no request to abort, so its cancel is the flag alone — but
+    // it must be registered at the same point and read at the same cadence a
+    // real download's would be, or the Cancel button is only ever exercised
+    // against production code nobody can run in `pnpm dev`. Registered before
+    // `available`, which is the status that puts the button on screen.
+    const download: ActiveDownload = {
+      version,
+      cancel: () => {},
+      canceled: false
+    };
+    activeDownload = download;
+    const canceled = { status: "canceled", version } as const;
+    try {
+      setUpdateStatus({ status: "available", version });
+      await delay(stepMs, { unref: true });
+      for (const percent of DEV_FAKE_UPDATE_PERCENT_STEPS) {
+        if (download.canceled) {
+          setUpdateStatus(canceled);
+          return canceled;
+        }
+        setUpdateStatus({
+          status: "downloading",
+          version,
+          percent,
+          transferred: Math.round(
+            (DEV_FAKE_UPDATE_TOTAL_BYTES * percent) / 100
+          ),
+          total: DEV_FAKE_UPDATE_TOTAL_BYTES
+        });
+        await delay(stepMs, { unref: true });
+      }
+      // Once more after the loop: a cancel during the last step would
+      // otherwise be dropped, and the preview would offer a Restart for an
+      // update the user had just declined.
+      if (download.canceled) {
+        setUpdateStatus(canceled);
+        return canceled;
+      }
+    } finally {
+      if (activeDownload === download) activeDownload = undefined;
+    }
     heldDownloadedUpdate = {
       selection: currentUpdateSelectionKey(),
       version
@@ -960,15 +1108,31 @@ export function initAutoUpdater(options: AutoUpdaterOptions): void {
   });
   autoUpdater.on("download-progress", (progress) => {
     const version =
-      updateStatus.status === "available" ||
+      activeDownload?.version ??
+      (updateStatus.status === "available" ||
       updateStatus.status === "downloading"
         ? updateStatus.version
-        : "unknown";
+        : "unknown");
+    // The bytes come along for the meter's label: a percent alone cannot tell
+    // a 4 MB delta apart from a 120 MB full download, and on a slow link the
+    // difference is the whole question of whether waiting is worth it.
     setUpdateStatus({
       status: "downloading",
       version,
-      percent: Math.round(progress.percent)
+      percent: Math.round(progress.percent),
+      transferred: progress.transferred,
+      total: progress.total,
+      bytesPerSecond: progress.bytesPerSecond
     });
+  });
+  // electron-updater reports its own aborts here and, deliberately, not
+  // through `error`. Settling on `canceled` rather than back on `available`
+  // keeps Settings from promising a download that is no longer running.
+  autoUpdater.on("update-cancelled", (info) => {
+    const version = info?.version ?? activeDownload?.version ?? "unknown";
+    logMain("info", "updater", `update-cancelled ${version}`);
+    if (info?.version) pendingDownloadChannelsByVersion.delete(info.version);
+    setUpdateStatusUnlessDownloaded({ status: "canceled", version });
   });
   autoUpdater.on("update-downloaded", (info) => {
     logMain("info", "updater", `update-downloaded ${info.version}`);
@@ -989,6 +1153,26 @@ export function initAutoUpdater(options: AutoUpdaterOptions): void {
 
   startPeriodicUpdateChecks();
   runBackgroundUpdateCheck("startup");
+}
+
+/**
+ * Stop the download the update toast is reporting.
+ *
+ * `canceled: false` is the ordinary race, not a fault: the download finished
+ * (or never started) while the click was in flight. The caller has a check
+ * result coming either way, so there is nothing for it to do about that.
+ */
+export function cancelAppUpdateDownload(): AppUpdateCancelResult {
+  const download = activeDownload;
+  if (!download || download.canceled) return { canceled: false };
+  download.canceled = true;
+  logMain("info", "updater", `canceling update download ${download.version}`);
+  // The flag is set first and unconditionally: `cancel` may be the empty slot
+  // an offered-but-not-yet-started download carries, and it may throw (the
+  // token is electron-updater's). Either way the download's own rejection
+  // must still read as a cancel rather than as a network failure.
+  applyPendingCancel(download);
+  return { canceled: true };
 }
 
 export async function installDownloadedAppUpdate(): Promise<AppUpdateInstallResult> {
@@ -1040,5 +1224,8 @@ export function registerAppUpdateHandlers(bus: CommandBus): void {
   );
   bus.register("app:installUpdate", async () =>
     ok(await installDownloadedAppUpdate())
+  );
+  bus.register("app:cancelUpdateDownload", () =>
+    ok(cancelAppUpdateDownload())
   );
 }

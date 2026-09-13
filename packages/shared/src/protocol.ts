@@ -518,7 +518,18 @@ export type AppUpdateCheckResult =
   | { status: "checking" }
   | { status: "no-update"; version: string }
   | { status: "downloaded"; version: string }
-  | { status: "available"; version: string };
+  | { status: "available"; version: string }
+  | { status: "canceled"; version: string };
+
+/** Bytes moved so far on the update payload. Optional throughout: a provider
+ *  that reports no content length gives a percent and nothing else, and the
+ *  meter has to degrade to that rather than print `NaN MB`. */
+export type AppUpdateDownloadProgress = {
+  percent?: number;
+  transferred?: number;
+  total?: number;
+  bytesPerSecond?: number;
+};
 
 export type AppUpdateStatus =
   | { status: "idle" }
@@ -526,9 +537,17 @@ export type AppUpdateStatus =
   | { status: "checking" }
   | { status: "no-update"; version: string }
   | { status: "available"; version: string }
-  | { status: "downloading"; version: string; percent?: number }
+  | ({ status: "downloading"; version: string } & AppUpdateDownloadProgress)
   | { status: "downloaded"; version: string }
+  /** The user stopped the download. The release is still out there, so this
+   *  is not `available` (which promises a download is under way) and not an
+   *  `error` (nothing failed) — it stands until the next check. */
+  | { status: "canceled"; version: string }
   | { status: "error"; message: string };
+
+/** Whether a download was actually running to stop. `false` is the ordinary
+ *  race — the download finished while the click was in flight — not a fault. */
+export type AppUpdateCancelResult = { canceled: boolean };
 
 export type AppUpdateInstallResult =
   | { status: "restarting" }
@@ -1606,6 +1625,7 @@ export interface Commands {
   "app:readUpdateReleases": { req: void; res: AppUpdateReleaseVersions };
   "app:checkForUpdate": { req: void; res: AppUpdateCheckResult };
   "app:installUpdate": { req: void; res: AppUpdateInstallResult };
+  "app:cancelUpdateDownload": { req: void; res: AppUpdateCancelResult };
 
   // App logs (diagnosability — silent failures must be findable somewhere)
   "logs:read": { req: void; res: LogSnapshot };

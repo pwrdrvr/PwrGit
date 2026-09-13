@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 type UpdateEventHandler = (info?: {
   version?: string;
   percent?: number;
+  transferred?: number;
+  total?: number;
+  bytesPerSecond?: number;
 }) => void;
 
 const updateEventHandlers = new Map<string, UpdateEventHandler>();
@@ -118,6 +121,11 @@ function requestHeader(callIndex: number, name: string): string | undefined {
 }
 
 const fetchMock = vi.fn();
+
+/** Let the microtask queue drain without leaning on the fake clock. */
+async function delayTicks(count = 3): Promise<void> {
+  for (let i = 0; i < count; i += 1) await Promise.resolve();
+}
 
 function createDeferred<T>(): {
   promise: Promise<T>;
@@ -328,8 +336,16 @@ describe("auto updater", () => {
       trigger: "manual" | "menu" | "startup" | "periodic"
     ) {
       const pending = updater.checkForAppUpdatesNow(trigger);
-      await vi.advanceTimersByTimeAsync(2_000);
+      // Generous: the fake walks one delay per percent tick, and a short
+      // advance would resolve nothing and time the test out rather than fail.
+      await vi.advanceTimersByTimeAsync(10_000);
       return await pending;
+    }
+
+    function broadcastStatuses(): Array<{ status: string; percent?: number }> {
+      return emitEventMock.mock.calls
+        .filter(([channel]) => channel === "app:updateStatus")
+        .map(([, payload]) => payload as { status: string; percent?: number });
     }
 
     beforeEach(() => {
@@ -345,11 +361,95 @@ describe("auto updater", () => {
       expect(fetchMock).not.toHaveBeenCalled();
       expect(checkForUpdatesMock).not.toHaveBeenCalled();
       // Every transition is broadcast, so the whole flow is watchable in dev.
+      const statuses = broadcastStatuses();
+      expect([
+        ...new Set(statuses.map((entry) => entry.status))
+      ]).toEqual(["checking", "available", "downloading", "downloaded"]);
+      // And the download half is a RAMP, not a single frozen sample: the
+      // toast's meter cannot be judged in dev against one 60% tick.
+      const percents = statuses
+        .filter((entry) => entry.status === "downloading")
+        .map((entry) => entry.percent);
+      expect(percents.length).toBeGreaterThan(3);
+      expect(percents.at(0)).toBe(0);
+      expect(percents.at(-1)).toBe(100);
+      expect([...percents].sort((a, b) => (a ?? 0) - (b ?? 0))).toEqual(
+        percents
+      );
+    });
+
+    it("stops the fake download when the user cancels it", async () => {
+      const updater = await importAutoUpdater();
+      const pending = updater.checkForAppUpdatesNow("menu");
+      // Far enough in to be downloading, not far enough to have finished.
+      await vi.advanceTimersByTimeAsync(900);
+      expect(updater.readAppUpdateStatus().status).toBe("downloading");
+
+      expect(updater.cancelAppUpdateDownload()).toEqual({ canceled: true });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(await pending).toEqual({ status: "canceled", version: "420.0.0" });
+      // Nothing is held, so no Restart is offered for an update that never
+      // finished arriving.
+      expect(updater.readAppUpdateStatus()).toEqual({
+        status: "canceled",
+        version: "420.0.0"
+      });
       expect(
-        emitEventMock.mock.calls
-          .filter(([channel]) => channel === "app:updateStatus")
-          .map(([, payload]) => (payload as { status: string }).status)
-      ).toEqual(["checking", "available", "downloading", "downloaded"]);
+        broadcastStatuses().some((entry) => entry.status === "downloaded")
+      ).toBe(false);
+    });
+
+    it("takes a cancel pressed before the bytes start moving", async () => {
+      // The toast offers Cancel from `available` onward. Main must already be
+      // able to take one there, or the button sits on screen doing nothing
+      // and the update installs anyway.
+      const updater = await importAutoUpdater();
+      const pending = updater.checkForAppUpdatesNow("menu");
+      await vi.advanceTimersByTimeAsync(400);
+      expect(updater.readAppUpdateStatus().status).toBe("available");
+
+      expect(updater.cancelAppUpdateDownload()).toEqual({ canceled: true });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(await pending).toEqual({ status: "canceled", version: "420.0.0" });
+      expect(
+        broadcastStatuses().some((entry) => entry.status === "downloaded")
+      ).toBe(false);
+    });
+
+    it("takes a cancel pressed on the last step of the download", async () => {
+      const updater = await importAutoUpdater();
+      const pending = updater.checkForAppUpdatesNow("menu");
+      // Two phase steps plus every percent tick but the final delay.
+      await vi.advanceTimersByTimeAsync(300 * 8 + 150);
+      const percents = broadcastStatuses()
+        .filter((entry) => entry.status === "downloading")
+        .map((entry) => entry.percent);
+      expect(percents.at(-1)).toBe(100);
+
+      expect(updater.cancelAppUpdateDownload()).toEqual({ canceled: true });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      // A cancel read only at the top of the loop would have been dropped
+      // here, and the preview would offer a Restart the user just declined.
+      expect(await pending).toEqual({ status: "canceled", version: "420.0.0" });
+      expect(updater.readAppUpdateStatus().status).toBe("canceled");
+    });
+
+    it("answers a cancel with nothing to stop without inventing one", async () => {
+      const updater = await importAutoUpdater();
+
+      expect(updater.cancelAppUpdateDownload()).toEqual({ canceled: false });
+
+      await runDevCheck(updater, "menu");
+      // The download is over; a click that lost the race must not rewrite the
+      // offer the user now has.
+      expect(updater.cancelAppUpdateDownload()).toEqual({ canceled: false });
+      expect(updater.readAppUpdateStatus()).toEqual({
+        status: "downloaded",
+        version: "420.0.0"
+      });
     });
 
     it("stays silent on startup and periodic checks", async () => {
@@ -611,6 +711,150 @@ describe("auto updater", () => {
     await expect(joined).resolves.toEqual({
       status: "downloaded",
       version: "1.0.0-beta.8"
+    });
+  });
+
+  it("cancels a download the user stopped without calling it a failure", async () => {
+    const download = createDeferred<string[]>();
+    const cancel = vi.fn(() => {
+      download.reject(new Error("cancelled"));
+    });
+    checkForUpdatesMock.mockImplementation(async () => ({
+      isUpdateAvailable: true,
+      updateInfo: { version: "1.0.0-beta.8" },
+      cancellationToken: { cancel },
+      downloadPromise: download.promise
+    }));
+    const updater = await startUpdater();
+    await vi.waitFor(() => {
+      expect(checkForUpdatesMock).toHaveBeenCalledTimes(1);
+    });
+
+    expect(updater.cancelAppUpdateDownload()).toEqual({ canceled: true });
+
+    expect(cancel).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(updater.readAppUpdateStatus()).toEqual({
+        status: "canceled",
+        version: "1.0.0-beta.8"
+      });
+    });
+  });
+
+  it("aborts a download that had not handed over its token yet", async () => {
+    // `update-available` — the status that puts Cancel on screen — is emitted
+    // from inside `checkForUpdates`, which does not resolve (and so does not
+    // yield its cancellationToken) until the download is already under way.
+    const download = createDeferred<string[]>();
+    const cancel = vi.fn(() => {
+      download.reject(new Error("cancelled"));
+    });
+    let released: (() => void) | undefined;
+    const reachedUpdater = new Promise<void>((resolve) => {
+      released = resolve;
+    });
+    checkForUpdatesMock.mockImplementation(async () => {
+      released?.();
+      await delayTicks();
+      return {
+        isUpdateAvailable: true,
+        updateInfo: { version: "1.0.0-beta.8" },
+        cancellationToken: { cancel },
+        downloadPromise: download.promise
+      };
+    });
+    const updater = await startUpdater();
+    await reachedUpdater;
+
+    expect(updater.cancelAppUpdateDownload()).toEqual({ canceled: true });
+
+    // The token arrives after the click; the cancel must be applied to it
+    // rather than discarded.
+    await vi.waitFor(() => {
+      expect(cancel).toHaveBeenCalledTimes(1);
+    });
+    await vi.waitFor(() => {
+      expect(updater.readAppUpdateStatus()).toEqual({
+        status: "canceled",
+        version: "1.0.0-beta.8"
+      });
+    });
+  });
+
+  it("still reports a download that broke on its own as an error", async () => {
+    // The rejection looks identical to a cancel's; only our own flag tells
+    // them apart, so a genuine failure must not be swallowed as "canceled".
+    checkForUpdatesMock.mockImplementation(async () => ({
+      isUpdateAvailable: true,
+      updateInfo: { version: "1.0.0-beta.8" },
+      cancellationToken: { cancel: vi.fn() },
+      downloadPromise: Promise.reject(new Error("socket hang up"))
+    }));
+    const updater = await startUpdater();
+
+    await expect(updater.checkForAppUpdatesNow("menu")).resolves.toEqual({
+      status: "error",
+      message: "socket hang up"
+    });
+  });
+
+  it("carries the download's byte counts to the toast, not just a percent", async () => {
+    const updater = await startUpdater();
+    await vi.waitFor(() => {
+      expect(updateEventHandlers.has("download-progress")).toBe(true);
+    });
+
+    updateEventHandlers.get("update-available")?.({ version: "1.0.0-beta.8" });
+    updateEventHandlers.get("download-progress")?.({
+      percent: 42.4,
+      transferred: 50_000_000,
+      total: 118_000_000,
+      bytesPerSecond: 3_300_000
+    });
+
+    expect(updater.readAppUpdateStatus()).toEqual({
+      status: "downloading",
+      version: "1.0.0-beta.8",
+      percent: 42,
+      transferred: 50_000_000,
+      total: 118_000_000,
+      bytesPerSecond: 3_300_000
+    });
+  });
+
+  it("settles on canceled when electron-updater reports its own abort", async () => {
+    const updater = await startUpdater();
+    await vi.waitFor(() => {
+      expect(updateEventHandlers.has("update-cancelled")).toBe(true);
+    });
+
+    updateEventHandlers.get("update-cancelled")?.({ version: "1.0.0-beta.8" });
+
+    // Not `available`, which promises a download is under way, and not
+    // `error`, which claims something broke.
+    expect(updater.readAppUpdateStatus()).toEqual({
+      status: "canceled",
+      version: "1.0.0-beta.8"
+    });
+  });
+
+  it("keeps a held download when a cancel arrives for something else", async () => {
+    const updater = await startUpdater();
+    await vi.waitFor(() => {
+      expect(updateEventHandlers.has("update-downloaded")).toBe(true);
+    });
+    updateEventHandlers.get("update-downloaded")?.({ version: "1.1.0" });
+    expect(updater.readAppUpdateStatus()).toEqual({
+      status: "downloaded",
+      version: "1.1.0"
+    });
+
+    updateEventHandlers.get("update-cancelled")?.({ version: "1.0.0-beta.8" });
+
+    // The Restart the user has already been offered is still good.
+    expect(updater.readAppUpdateStatus()).toEqual({
+      status: "downloaded",
+      version: "1.1.0"
     });
   });
 
