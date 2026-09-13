@@ -216,3 +216,29 @@ it("runs the Bun package entry point on Windows without a Node or shell shim", (
   );
   expect(cafeInvocation({}, "darwin")).toEqual({ binary: "cafe", prefix: [] });
 });
+
+it.each([
+  ["git.cafe", undefined, "git.cafe"],
+  ["cafe.example", undefined, "cafe.example"],
+  ["cafe.example", 8443, "cafe.example:8443"]
+])("pins clone transport to %s even with inherited overrides", async (host, port, expected) => {
+  vi.stubEnv("CAFE_HOST", "https://git.cafe/api");
+  vi.stubEnv("CAFE_TOKEN", "contrived-secret");
+  vi.stubEnv("CAFE_GIT_HOST", "unrelated.example");
+  vi.spyOn(process, "platform", "get").mockReturnValue("linux");
+  const child = Object.assign(new EventEmitter(), {
+    stdout: new EventEmitter(),
+    stderr: new EventEmitter(),
+    kill: vi.fn()
+  });
+  mocks.spawn.mockReturnValue(child);
+  const result = runCafe(
+    ["repo", "clone", "sample/demo", "/tmp/demo", ...cafeHostArgs(host, port)],
+    { env: { CAFE_GIT_HOST: "another-unrelated.example" } }
+  );
+  child.emit("close", 0, null);
+  await result;
+  const env = mocks.spawn.mock.calls.at(-1)?.[2].env;
+  expect(env.CAFE_GIT_HOST).toBe(expected);
+  expect(env.CAFE_TOKEN).toBe(host === "git.cafe" ? "contrived-secret" : undefined);
+});

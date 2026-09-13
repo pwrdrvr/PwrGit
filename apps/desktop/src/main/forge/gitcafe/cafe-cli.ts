@@ -86,6 +86,11 @@ export const runCafe: CafeRunner = (args, options = {}) => {
   const env = { ...options.env };
   const targetIndex = args.indexOf("--host");
   const target = targetIndex < 0 ? undefined : args[targetIndex + 1];
+  if (target !== undefined) {
+    // cafe's Git transport override takes precedence over --host and receives
+    // that API host's credential. Pin both destinations, including the port.
+    env.CAFE_GIT_HOST = new URL(target).host;
+  }
   const defaultHost =
     env.CAFE_HOST ?? process.env.CAFE_HOST ?? "https://git.cafe/api";
   // An environment credential belongs to the CLI's configured default host.
