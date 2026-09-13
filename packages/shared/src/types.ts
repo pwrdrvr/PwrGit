@@ -1379,6 +1379,181 @@ export type BulkSyncProgress = {
   result?: BulkSyncRepoResult;
 };
 
+/**
+ * Why a worktree counts as prunable. The rule that produces it is
+ * `prunableReason` in prunable.ts — one definition, read from both processes.
+ */
+export type PrunableReason =
+  | { kind: "merged_pr"; prNumber: number }
+  | { kind: "merged_into_default"; defaultBranch: string }
+  | { kind: "diverged"; defaultBranch: string };
+
+/**
+ * One worktree the pruner proposes to act on, with the evidence behind it.
+ *
+ * The reason travels with the row because "safe to remove" is a conclusion,
+ * and a confirm that only shows the conclusion gives the user nothing to
+ * check it against. `PrunableReason` (shared/prunable.ts) is the rule.
+ */
+export type PruneCandidate = {
+  worktreeId: WorktreeId;
+  repoId: RepoId;
+  repoName: string;
+  branch: string;
+  path: string;
+  reason: PrunableReason;
+  /** ISO-8601 time of the branch's last commit, when git could report one. */
+  lastActivityAt?: string;
+  /** `git worktree lock`ed — removal needs `--force`, so the row says so. */
+  locked?: boolean;
+  /** Bytes on disk, or null when sizing was cancelled or never ran. */
+  sizeBytes: number | null;
+  /** The size walk hit its entry ceiling: `sizeBytes` is a lower bound. */
+  sizePartial?: boolean;
+};
+
+export type PruneScanRepoOutcome =
+  /** State was computed for this repo's worktrees in this pass. */
+  | "scanned"
+  /** Every worktree already had a state snapshot fresh enough to trust. */
+  | "cached"
+  /** Nothing to compute — no linked worktrees to judge. */
+  | "skipped"
+  | "failed"
+  | "cancelled";
+
+export type PruneScanRepoResult = {
+  repoId: RepoId;
+  name: string;
+  path: string;
+  outcome: PruneScanRepoOutcome;
+  /** Worktrees whose git state this pass computed (0 for a cached repo). */
+  computed: number;
+  /** Candidates found in this repo. */
+  candidates: PruneCandidate[];
+  message?: string;
+};
+
+/**
+ * A finished (or cancelled) sweep.
+ *
+ * `cancelled` does not mean "no answer": every repo the sweep reached keeps
+ * its candidates, and the states it computed stay cached — which is what makes
+ * a re-run resume rather than restart.
+ */
+export type PruneScanSummary = {
+  operationId: string;
+  cancelled: boolean;
+  startedAt: string;
+  finishedAt: string;
+  counts: {
+    repos: Record<PruneScanRepoOutcome, number>;
+    /** Worktrees considered — i.e. judged against the staleness rule. */
+    worktreesConsidered: number;
+    candidates: number;
+    /** Summed `sizeBytes` of candidates that were sized. */
+    sizeBytes: number;
+  };
+  results: PruneScanRepoResult[];
+};
+
+/** Incremental progress for the pruner's profile-wide sweep. */
+export type PruneScanProgress = {
+  operationId: string;
+  phase:
+    | "starting"
+    | "repo_started"
+    | "repo_completed"
+    /** Candidates are known; their directories are being measured. */
+    | "sizing";
+  totalRepos: number;
+  completedRepos: number;
+  repoId?: RepoId;
+  repoName?: string;
+  result?: PruneScanRepoResult;
+  /** During "sizing": candidates measured / to measure. */
+  sizedCandidates?: number;
+  totalCandidates?: number;
+};
+
+/** One path `git clean -Xdn` says it would delete, with its weight. */
+export type ReclaimEntry = {
+  /** Repository-relative, forward-slash, `/`-suffixed for a directory. */
+  path: string;
+  isDirectory: boolean;
+  sizeBytes: number;
+  /** The size walk hit its entry ceiling: `sizeBytes` is a lower bound. */
+  sizePartial?: boolean;
+};
+
+/**
+ * What reclaiming one worktree would delete — git's own dry-run answer.
+ *
+ * Deletion re-runs `git clean` with the same excludes rather than feeding
+ * these paths back to it, so this list is evidence for the user, never an
+ * instruction to git. See src/main/git/AGENTS.md.
+ */
+export type ReclaimPlan = {
+  worktreeId: WorktreeId;
+  repoName: string;
+  branch: string;
+  path: string;
+  /** The `-e` patterns this preview was taken with. */
+  excludes: string[];
+  entries: ReclaimEntry[];
+  /** Summed `sizeBytes` across `entries`. */
+  totalBytes: number;
+  /** Paths git reported, which may exceed `entries.length` (display ceiling). */
+  pathCount: number;
+  /** `entries` is a prefix of `pathCount` — the preview is showing fewer. */
+  truncated: boolean;
+};
+
+export type ReclaimWorktreeOutcome =
+  | "reclaimed"
+  | "nothing_to_reclaim"
+  | "skipped"
+  | "failed"
+  | "cancelled";
+
+export type ReclaimWorktreeResult = {
+  worktreeId: WorktreeId;
+  repoName: string;
+  branch: string;
+  path: string;
+  outcome: ReclaimWorktreeOutcome;
+  reason?: "worktree_missing" | "clean_failed" | "cancelled";
+  /** Bytes the preview expected to free (a lower bound where partial). */
+  plannedBytes: number;
+  /** Paths git reported it would remove. */
+  plannedPaths: number;
+  message?: string;
+};
+
+export type ReclaimSummary = {
+  operationId: string;
+  cancelled: boolean;
+  startedAt: string;
+  finishedAt: string;
+  counts: {
+    worktrees: Record<ReclaimWorktreeOutcome, number>;
+    /** Summed `plannedBytes` of the worktrees actually reclaimed. */
+    freedBytes: number;
+  };
+  results: ReclaimWorktreeResult[];
+};
+
+export type ReclaimProgress = {
+  operationId: string;
+  phase: "starting" | "worktree_started" | "worktree_completed";
+  totalWorktrees: number;
+  completedWorktrees: number;
+  worktreeId?: WorktreeId;
+  branch?: string;
+  repoName?: string;
+  result?: ReclaimWorktreeResult;
+};
+
 /** A commit that exists on only one side of a diverged tracked branch. */
 export type DivergenceCommit = {
   /** Full object name, used to correlate range-diff output. */

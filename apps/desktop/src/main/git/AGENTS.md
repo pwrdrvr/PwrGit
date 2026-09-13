@@ -233,6 +233,84 @@ line. `worktrees.missing` (0027) records that so the sidebar can say
   DB with paths that do not exist, and a live check would turn every one of
   them into a "missing" worktree.
 
+## The pruner: one rule, one removal path, and `clean -X` is not what it looks like
+
+The worktree pruner is `worktree-prune.ts` (the sweep), `worktree-reclaim.ts`
+(the `git clean -Xd` operation) and `prune-handlers.ts` (both commands). Four
+things about it are load-bearing.
+
+**"Safe to prune" has exactly one definition, and it is in `@pwrgit/shared`.**
+`prunableReason` / `isPrunableWorktree` (`packages/shared/src/prunable.ts`) are
+run by the Stale lens in the renderer *and* by the sweep in main. It lives in
+shared because two processes ask the same question from opposite sides of the
+IPC boundary, and a second copy would let the lens and the verb disagree about
+which rows the pruner may touch. Loosening or tightening the rule moves both —
+that is the point, not a side effect.
+
+**The sweep exists because the tree cannot answer.** Per-worktree Git state is
+computed lazily, one repo at a time, on expand (`repo:computeState`) —
+computing all ~150 at launch storms git. So on a profile nobody has browsed the
+Stale lens is empty *by construction*, and a pruner that read the current tree
+would report "nothing to prune" on a disk full of finished worktrees
+(pwrdrvr/PwrGit#248 fixed the first-run confusion this caused; it did not
+change the constraint). `sweepPrunableWorktrees` therefore computes its own,
+capped at `PRUNE_SCAN_CONCURRENCY` (4 — inside the indexer's
+`HYDRATION_GIT_CONCURRENCY` budget) and taking the repository lock per repo.
+It is resumable for free: everything it computes lands in `worktree_state`, so
+a cancelled sweep is not wasted and a re-run reports those repos as `cached`
+and spawns no git. `prune-handlers.test.ts` pins that against real git.
+
+Sizing is a **separate phase** after the candidate set is known, because it is
+the slow half and it is not git — measuring a checkout means walking its
+`node_modules`. `util/dir-size.ts` bounds it: an entry ceiling (the answer
+comes back as a floor, which is the same decision), an abort signal, a yield
+every few directories, and symlinks never followed (a pnpm store outside the
+tree is not this worktree's bytes).
+
+**Removal is `worktree:removeMany`, not a second path.** That command already
+removes in bulk, streams `worktree:removed`, prunes the sidebar rows live and
+owns the dirty/force retry. The pruner passes `{ confirmed: true }` to
+`useRepoTree.removeWorktrees` because its own confirm names the repos, the
+reasons and the bytes; two confirms in a row train people to click through
+both.
+
+**`git clean -e <pattern>` does not spare anything under `-X`.** This is the
+trap, and it is silent. `-e` *adds* to git's ignore rules and `-X` deletes
+exactly the ignored set, so `clean -Xdn -e '.env'` still reports
+`Would remove .env` — a "default spare list" implemented that way would delete
+precisely the files it advertises as protected. Sparing needs a **negated**
+command-line pattern (`-e '!.env'`), which un-ignores the path so `-X` has no
+reason to touch it; command-line excludes outrank `.gitignore`, and globs and
+trailing-slash directory patterns work the same way. `spareArgs` does the
+negation, `excludePatternProblem` refuses a user-typed `!` (it would become
+`!!foo`), and `worktree-reclaim.test.ts` pins both directions against real git.
+If that test ever looks redundant, it is the only thing between this feature
+and a silent data-loss bug.
+
+Three more invariants in the same file:
+
+- **`-X`, never `-x`.** `-x` also deletes untracked files that no rule covers,
+  which is uncommitted work. There is no UI for it, deliberately.
+- **The preview is git's own dry run; the deletion re-runs git.** The parsed
+  `Would remove …` paths are shown to the user and then thrown away. Do not
+  "optimize" `reclaimIgnored` into `clean -- <paths>`: as written, a mis-parse
+  can only mis-*draw* a row, never widen what gets deleted. The dry run is
+  also the reason that command forces `LC_ALL=C` (git translates its own
+  messages, so the prefix would otherwise be a guess) and
+  `-c core.quotePath=false` (or a non-ASCII path arrives as octal escapes).
+- **A single `-f`.** Git refuses to delete a directory holding its own `.git`
+  unless `-f` is given twice, which is what keeps a vendored clone inside an
+  ignored directory alive. One `-f` is the whole authorization wanted here.
+
+And the reason all of this care is warranted: **ignored does not mean
+worthless.** `.env` files, local SQLite databases, keys and scratch notes are
+all routinely gitignored and have no object in the object store, so
+`clean -X` is unrecoverable in a way that `discardAllChanges` (which restores
+from HEAD) is not. `RECLAIM_DEFAULT_EXCLUDES` spares that class by default and
+the user can narrow it; `discardAllChanges`' own `clean -fd` must keep
+excluding ignored paths — two commands, two blast radii, and neither may
+quietly acquire the other's flags.
+
 ## Partial staging works through Git, never through renderer patch text
 
 `partial-staging.ts` stages and unstages hunks and lines. Four invariants hold

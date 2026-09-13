@@ -10,6 +10,7 @@ import {
 import type { TagSummary, Lens, Profile, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
 import { announce, mountLiveRegion, movedMessage } from "../../lib/announce";
 import type { ReadState } from "../../state/readState";
+import type { RemoveWorktreesOptions } from "../../state/useRepoTree";
 import { copyText } from "../../lib/copyText";
 import {
   currentPlatform,
@@ -30,6 +31,7 @@ import { NewWorktreeModal } from "./NewWorktreeModal";
 import { ProfileChip } from "./ProfileChip";
 import { RepoRow } from "./RepoRow";
 import { BulkSyncDialog } from "./BulkSyncDialog";
+import { PruneWorktreesDialog } from "./PruneWorktreesDialog";
 import {
   DEFAULT_LENS,
   filterReposByLens,
@@ -103,6 +105,25 @@ type NewWorktreeState = {
   startPoint?: string;
 };
 
+/** Lucide `trash-2`, at the size the sidebar's bulk-action buttons use. */
+function PruneGlyph() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5" />
+    </svg>
+  );
+}
+
 /** Lucide `git-fork`, at the size the sidebar's ghost buttons use. */
 function ForkGlyph() {
   return (
@@ -171,7 +192,10 @@ export function Sidebar({
   onSetRepoPin: (repoId: string, pinned: boolean) => void;
   onSetWorktreePin: (worktreeId: string, pinned: boolean) => void;
   onRemoveWorktree: (worktreeId: string) => void;
-  onRemoveWorktrees: (worktreeIds: string[]) => void;
+  onRemoveWorktrees: (
+    worktreeIds: string[],
+    options?: RemoveWorktreesOptions
+  ) => Promise<void>;
   onCreateWorktree: (
     repoId: string,
     branch: string,
@@ -280,6 +304,7 @@ export function Sidebar({
   const [bulkSyncMode, setBulkSyncMode] = useState<
     "fetch" | "soft-pull" | null
   >(null);
+  const [pruning, setPruning] = useState(false);
   const [sel, setSel] = useState<Selection>({
     repoId: "",
     ids: EMPTY_IDS,
@@ -689,7 +714,7 @@ export function Sidebar({
           type: "item",
           label: `Remove ${targets.length} worktrees…`,
           danger: true,
-          onSelect: () => onRemoveWorktrees(ids)
+          onSelect: () => void onRemoveWorktrees(ids)
         },
         { type: "sep" },
         {
@@ -788,7 +813,7 @@ export function Sidebar({
         }
         onToggleWorktreePin={onSetWorktreePin}
         onRemoveWorktree={onRemoveWorktree}
-        onRemoveSelected={() => onRemoveWorktrees(Array.from(sel.ids))}
+        onRemoveSelected={() => void onRemoveWorktrees(Array.from(sel.ids))}
         onClearSelected={clearSel}
         onCycleSort={() => cycleSort(repo.id)}
         onReorder={(ids) => {
@@ -967,6 +992,22 @@ export function Sidebar({
               ↓ Try pull all
             </button>
           </div>
+          {/* Its own row, for the reason recorded on .clone-repo-row: three
+              labels do not fit one row at the 240px resize floor, and this
+              one is the longest of the three. Kept next to the bulk-sync pair
+              rather than beside the lens chips — the Stale lens filters the
+              rows it can already see, while this sweeps every repository
+              whether or not it has ever been expanded. */}
+          <div className="prune-actions" aria-label="Reclaim worktrees">
+            <button
+              className="bulk-sync-action"
+              disabled={activeProfile === null || repos.length === 0}
+              title="Find worktrees that are safe to remove, across every repository"
+              onClick={() => setPruning(true)}
+            >
+              <PruneGlyph /> Prune worktrees…
+            </button>
+          </div>
           {activeProfile !== null && activeProfile.roots.length === 0 && (
             <span className="sidebar__actions-hint">
               Add a repo folder to enable clone and fork.
@@ -1131,6 +1172,14 @@ export function Sidebar({
           repos={repos}
           mode={bulkSyncMode}
           onClose={() => setBulkSyncMode(null)}
+        />
+      )}
+
+      {pruning && activeProfile !== null && (
+        <PruneWorktreesDialog
+          profileId={activeProfile.id}
+          onRemove={(ids) => onRemoveWorktrees(ids, { confirmed: true })}
+          onClose={() => setPruning(false)}
         />
       )}
 

@@ -1,4 +1,10 @@
-import type { Lens, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
+import {
+  isPrunableWorktree,
+  type Lens,
+  type Repo,
+  type Worktree,
+  type WorktreeSort
+} from "@pwrgit/shared";
 import { pathLeaf } from "../../lib/platform";
 import type { FocusVisits } from "./focus-visits";
 
@@ -348,27 +354,11 @@ export function groupReposByRoot(repos: Repo[], roots: string[]): RepoGroup[] {
   return groups;
 }
 
-/** A worktree is "safe to prune": clean, fully merged into the default branch,
- *  not the default/primary checkout, and untouched for a while. */
-export const STALE_AGE_DAYS = 14;
-
-export function isPrunableWorktree(w: Worktree, now: number = Date.now()): boolean {
-  if (w.isDefaultBranch || w.isPrimary) return false;
-  // Nothing to prune: the checkout is already gone. The row says so itself,
-  // and "stale" beside "directory missing" would be two answers to one row.
-  if (w.missing === true) return false;
-  if (w.dirty > 0) return false;
-  // A merged PR is definitive — the work is in the base branch, so it's safe to
-  // prune at any age. This catches squash/rebase merges that the git-ancestry
-  // check below can't see (the original commits aren't in the default branch).
-  if (w.pr?.state === "merged") return true;
-  // Otherwise fall back to the git heuristic: contained in the default branch,
-  // or sharing no history with it (rewritten/orphaned) — both plus old + clean.
-  if (!w.mergedIntoDefault && !w.divergedFromDefault) return false;
-  if (w.lastActivityAt === undefined) return false;
-  const ageMs = now - new Date(w.lastActivityAt).getTime();
-  return ageMs > STALE_AGE_DAYS * 24 * 60 * 60 * 1000;
-}
+/** The staleness rule itself lives in `@pwrgit/shared` — the pruner's sweep
+ *  runs it in the main process over freshly computed state, and the Stale lens
+ *  runs it here over the tree it already has. Re-exported so the lens, the
+ *  rows, and their tests keep reading it from one place. */
+export { isPrunableWorktree, STALE_AGE_DAYS } from "@pwrgit/shared";
 
 function repoIsPinned(r: Repo): boolean {
   return r.pinned || r.worktrees.some((w) => w.pinned);

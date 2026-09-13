@@ -11,6 +11,17 @@ import {
 
 export type RemovalProgress = { done: number; total: number };
 
+export type RemoveWorktreesOptions = {
+  /**
+   * The caller has already shown a confirm naming the count — skip this one.
+   *
+   * The pruner does: its confirm names the repos, the reasons and the bytes,
+   * which is strictly more than the generic prompt below, and asking twice
+   * trains people to click through both.
+   */
+  confirmed?: boolean;
+};
+
 /**
  * Creating a worktree is only half of what the user asked for — they want to
  * be *in* it. Carry the new worktree's id (null when the post-create refresh
@@ -37,7 +48,10 @@ export type UseRepoTree = {
     newBranch: boolean,
     startPoint?: string
   ) => Promise<CreateWorktreeResult>;
-  removeWorktrees: (worktreeIds: string[]) => Promise<void>;
+  removeWorktrees: (
+    worktreeIds: string[],
+    options?: RemoveWorktreesOptions
+  ) => Promise<void>;
   persistWorktreeOrder: (repoId: string, orderedIds: string[]) => void;
   persistRepoOrder: (orderedRepoIds: string[]) => void;
   computeRepoState: (repoId: string) => void;
@@ -217,12 +231,15 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     []
   );
 
-  const removeWorktrees = useCallback(async (worktreeIds: string[]) => {
+  const removeWorktrees = useCallback(async (
+    worktreeIds: string[],
+    options: RemoveWorktreesOptions = {}
+  ) => {
     if (worktreeIds.length === 0) return;
     // Removing >1 is a bulk destructive action → confirm up front. A single
     // removal (trash icon / context menu) goes straight to the attempt and
     // only prompts if that worktree is dirty, matching the prior behaviour.
-    if (worktreeIds.length > 1) {
+    if (worktreeIds.length > 1 && options.confirmed !== true) {
       const go = await confirmDialog({
         title: `Remove ${worktreeIds.length} worktrees?`,
         message:

@@ -1,13 +1,14 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import {
   createGitSandbox,
   type GitSandbox,
-  type RemoteTestRepo
+  type RemoteTestRepo,
+  type TestRepo
 } from "./fixtures/git-sandbox";
-import { addRootAndExpand } from "./fixtures/steps";
+import { addRootAndExpand, lensChip, repoGroup } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -266,4 +267,193 @@ test("a source-only Apply conflict aborts and restores the approved checkout exa
   ).toContainText("change second setting");
   await window.getByRole("button", { name: "Changes", exact: true }).click();
   await expect(window.locator(".changes-clean")).toBeVisible();
+});
+
+/**
+ * A repo with one genuinely finished worktree: its branch is merged into main,
+ * its last commit is months old, and it holds both regenerable bulk
+ * (`node_modules`) and an unrecoverable local file (`.env`).
+ *
+ * Deliberately set up WITHOUT expanding the repo in the sidebar, because that
+ * is the case the pruner exists for: per-worktree Git state is computed lazily
+ * on expand, so until something computes it the Stale lens is empty and there
+ * is nothing to prune from.
+ */
+function makeFinishedWorktree(
+  box: GitSandbox,
+  name: string
+): { repo: TestRepo; worktreePath: string } {
+  const repo = box.makeRepo(name);
+  writeFileSync(join(repo.path, ".gitignore"), "node_modules/\n.env\n");
+  box.git(repo.path, "add", ".gitignore");
+  box.git(repo.path, "commit", "-m", "ignore build output");
+
+  const worktreePath = repo.addWorktree("feat/finished");
+  // Months old: the staleness rule reads the branch tip's committer date.
+  box.commitEmptyAt(worktreePath, "finished work", 1_735_689_600);
+  box.git(repo.path, "merge", "--no-ff", "-m", "merge feat/finished", "feat/finished");
+
+  mkdirSync(join(worktreePath, "node_modules", "left-pad"), { recursive: true });
+  writeFileSync(
+    join(worktreePath, "node_modules", "left-pad", "index.js"),
+    "x".repeat(4096)
+  );
+  writeFileSync(join(worktreePath, ".env"), "SECRET=hunter2\n");
+  return { repo, worktreePath };
+}
+
+/** Add the sandbox as a repo folder and switch to All — WITHOUT expanding any
+ *  repo, so no worktree Git state is computed. */
+async function addRootUnexpanded(
+  window: Page,
+  app: AppHandle,
+  box: GitSandbox
+): Promise<void> {
+  await app.setPickDirectory(box.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await lensChip(window, "All").click();
+}
+
+const confirmDialogButton = (window: Page): Locator =>
+  window.locator(".modal--dialog .modal__create");
+
+test("the pruner sweeps a never-browsed profile, then reclaims only ignored files", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const { repo, worktreePath } = makeFinishedWorktree(box, "prune-reclaim");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootUnexpanded(window, handle, box);
+  await expect(repoGroup(window, repo.name)).toBeVisible({ timeout: 20_000 });
+
+  // The premise: nothing has computed Git state, so the lens has no answer.
+  await expect(lensChip(window, "Stale")).toHaveAttribute("aria-label", "Stale");
+
+  await window.getByRole("button", { name: /Prune worktrees/ }).click();
+  const dialog = window.getByRole("dialog", { name: "Prune worktrees" });
+  await expect(dialog).toBeVisible({ timeout: 20_000 });
+
+  const row = dialog.locator(".prune__row");
+  await expect(row).toHaveCount(1, { timeout: 40_000 });
+  await expect(row).toContainText("feat/finished");
+  await expect(row.locator(".prune__reason")).toHaveText("merged into main");
+
+  // The sweep's states are cached, so the lens it could not answer now can.
+  await expect(lensChip(window, "Stale")).toHaveAttribute(
+    "aria-label",
+    "Stale (1)"
+  );
+
+  await dialog.locator(".prune__select input").click();
+  await dialog.getByRole("button", { name: /Reclaim disk space/ }).click();
+
+  const plan = dialog.locator(".prune__plan");
+  await expect(plan).toHaveCount(1, { timeout: 40_000 });
+  await expect(plan.locator(".prune__paths li > span")).toHaveText([
+    "node_modules/"
+  ]);
+  // The whole safety claim of this action, visible in the preview: a spared
+  // `.env` is never offered for deletion.
+  await expect(plan).not.toContainText(".env");
+
+  await dialog.getByRole("button", { name: /Delete ignored files/ }).click();
+  await expect(confirmDialogButton(window)).toBeVisible({ timeout: 20_000 });
+  await expect(window.locator(".dialog__message")).toContainText(
+    "cannot be undone"
+  );
+  await confirmDialogButton(window).click();
+
+  await expect(dialog.locator(".prune__summary")).toContainText("1 reclaimed", {
+    timeout: 40_000
+  });
+
+  // Ignored bulk gone; everything that has no commit behind it kept; the
+  // worktree still a worktree.
+  expect(existsSync(join(worktreePath, "node_modules"))).toBe(false);
+  expect(existsSync(join(worktreePath, ".env"))).toBe(true);
+  expect(existsSync(join(worktreePath, ".git"))).toBe(true);
+  expect(existsSync(join(worktreePath, "README.md"))).toBe(true);
+  expect(box.git(worktreePath, "status", "--porcelain=v1")).toBe("");
+  expect(box.git(worktreePath, "log", "-1", "--format=%s")).toBe(
+    "finished work"
+  );
+});
+
+test("removing from the pruner confirms the count, deletes the checkout, and keeps the commits", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const { repo, worktreePath } = makeFinishedWorktree(box, "prune-remove");
+  const branchTip = box.git(repo.path, "rev-parse", "refs/heads/feat/finished");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootUnexpanded(window, handle, box);
+  await expect(repoGroup(window, repo.name)).toBeVisible({ timeout: 20_000 });
+
+  await window.getByRole("button", { name: /Prune worktrees/ }).click();
+  const dialog = window.getByRole("dialog", { name: "Prune worktrees" });
+  await expect(dialog.locator(".prune__row")).toHaveCount(1, {
+    timeout: 40_000
+  });
+
+  // Nothing is selected when the sweep lands: this dialog's output is a list
+  // of things it believes are safe to delete, and pre-ticking them would make
+  // it a dialog that deletes by default.
+  await expect(dialog.locator(".prune__row input:checked")).toHaveCount(0);
+  const remove = dialog.getByRole("button", { name: /Remove .*worktree/ });
+  await expect(remove).toBeDisabled();
+
+  await dialog.locator(".prune__row input").click();
+  await expect(remove).toBeEnabled();
+  await remove.click();
+
+  await expect(confirmDialogButton(window)).toHaveText("Remove 1");
+  await expect(window.locator(".dialog__message")).toContainText(
+    "every commit is already in main"
+  );
+  await expect(window.locator(".dialog__message")).toContainText(
+    "Branches and commits are kept."
+  );
+  await confirmDialogButton(window).click();
+
+  await expect(dialog.locator(".prune__row")).toHaveCount(0, {
+    timeout: 40_000
+  });
+  expect(existsSync(worktreePath)).toBe(false);
+  // The branch and its commit survive — that is what "remove the worktree"
+  // has to mean, or the confirm above is a lie.
+  expect(box.git(repo.path, "rev-parse", "refs/heads/feat/finished")).toBe(
+    branchTip
+  );
+  expect(box.git(repo.path, "cat-file", "-t", branchTip)).toBe("commit");
+  expect(box.git(repo.path, "worktree", "list")).not.toContain(worktreePath);
+});
+
+test("the pruner never offers a dirty or unmerged worktree", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const { repo } = makeFinishedWorktree(box, "prune-guards");
+  // Merged and old, but with uncommitted work in the checkout.
+  const dirty = repo.addWorktree("feat/dirty");
+  box.commitEmptyAt(dirty, "dirty work", 1_735_689_600);
+  box.git(repo.path, "merge", "--no-ff", "-m", "merge feat/dirty", "feat/dirty");
+  writeFileSync(join(dirty, "uncommitted.txt"), "work in progress\n");
+  // Clean and old, but never merged anywhere.
+  const open = repo.addWorktree("feat/open");
+  box.commitEmptyAt(open, "open work", 1_735_689_600);
+
+  handle = await launchApp();
+  const { window } = handle;
+  await addRootUnexpanded(window, handle, box);
+  await expect(repoGroup(window, repo.name)).toBeVisible({ timeout: 20_000 });
+
+  await window.getByRole("button", { name: /Prune worktrees/ }).click();
+  const dialog = window.getByRole("dialog", { name: "Prune worktrees" });
+  await expect(dialog.locator(".prune__row")).toHaveCount(1, {
+    timeout: 40_000
+  });
+  await expect(dialog.locator(".prune__row")).toContainText("feat/finished");
+  await expect(dialog.locator(".prune__rows")).not.toContainText("feat/dirty");
+  await expect(dialog.locator(".prune__rows")).not.toContainText("feat/open");
 });
