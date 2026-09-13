@@ -149,7 +149,7 @@ test("sub-24px sidebar controls still expose a 24×24 pointer target", async () 
 });
 
 test(
-  "the Focused first-run escape is named, keyboard reachable, and target-sized",
+  "the Focused escape is named, keyboard reachable, and target-sized",
   async () => {
     sandbox = createGitSandbox();
     sandbox.makeRepo("alpha");
@@ -159,6 +159,17 @@ test(
     await handle.setPickDirectory(sandbox.reposDir);
     await window.getByRole("button", { name: /Add folders/i }).click();
 
+    // A first run lands in All (lens-row.spec.ts owns that rule). Pin the repo
+    // to put something in Focused — the note, and the escape hatch this test
+    // is about, only exist once that lens can be entered at all.
+    await expect(window.locator(".repo-row__name")).toHaveCount(1, {
+      timeout: 20_000
+    });
+    await window
+      .locator(".repo-row", { hasText: "alpha" })
+      .locator(".pin")
+      .click();
+    await lensChip(window, "Focused").click();
     await expect(lensChip(window, "Focused")).toHaveAttribute(
       "aria-selected",
       "true"
@@ -399,6 +410,19 @@ test("the lens switch is one tab stop, with the arrows moving inside it", async 
   handle = await launchApp();
   const { window } = handle;
   await addRootAndExpand(window, handle, sandbox, "alpha");
+
+  // The arrows travel over the lenses that can be entered, and a lens with
+  // nothing in it cannot. Pin the repo so a second one reliably can: pins are
+  // an explicit rule that updates optimistically, unlike the lazily computed
+  // Git state behind Behind and Stale.
+  await window
+    .locator(".repo-row", { hasText: "alpha" })
+    .locator(".pin")
+    .click();
+  await expect(lensChip(window, "Pinned")).not.toHaveAttribute(
+    "aria-disabled",
+    "true"
+  );
 
   // role="tablist" promises exactly this. Before, every chip was its own tab
   // stop and the arrows did nothing, so crossing the strip took six presses.

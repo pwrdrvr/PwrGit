@@ -711,9 +711,19 @@ textarea,
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
 }
-.lens-chip:hover {
+.lens-chip:hover:not(.is-empty) {
   background: var(--bg-panel-hover);
   color: var(--text-secondary);
+}
+/* A lens with nothing in it. Dimmed and inert rather than hidden: the strip is
+   the map of what PwrGit can tell you about these repos, and a chip that
+   vanished and reappeared would be a moving target. Signalled with
+   aria-disabled, not `disabled`, so the chip still takes a pointer and can
+   explain itself — see LensFilter.tsx. The house dim for an unavailable
+   control, and exempt from SC 1.4.3 as an inactive component. */
+.lens-chip.is-empty {
+  opacity: 0.42;
+  cursor: default;
 }
 /* Which lens is active is a state (SC 1.4.11, 3:1). Its fill is 1.00:1 against
    the filter's --bg-panel in dark and 1.05:1 in light, and the --accent-border

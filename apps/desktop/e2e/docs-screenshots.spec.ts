@@ -148,7 +148,18 @@ test.describe("documentation screenshots", () => {
     await expect(window.locator(".overlay-panel")).toBeHidden();
 
     // 5. The Stale lens — the answer to "which of these can I delete?".
+    //    An empty lens is inert, and a click that changes nothing would
+    //    quietly capture the previous lens instead, so check it can be
+    //    entered before shooting it.
+    await expect(lensChip(window, "Stale")).not.toHaveAttribute(
+      "aria-disabled",
+      "true"
+    );
     await lensChip(window, "Stale").click();
+    await expect(lensChip(window, "Stale")).toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
     await shoot(window, "stale-lens");
   });
 });

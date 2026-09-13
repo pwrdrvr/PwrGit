@@ -31,6 +31,7 @@ import { ProfileChip } from "./ProfileChip";
 import { RepoRow } from "./RepoRow";
 import { BulkSyncDialog } from "./BulkSyncDialog";
 import {
+  DEFAULT_LENS,
   filterReposByLens,
   FOCUS_REPO_LIMIT,
   focusedRepoPage,
@@ -65,7 +66,10 @@ function readFocusVisits(key: string): FocusVisits {
   }
 }
 
-function readStoredLens(): Lens {
+/** The remembered lens, or null when the user has never picked one — which is
+ *  a different thing from having picked the default, and is what decides where
+ *  a first run lands (see the landing effect below). */
+function readStoredLens(): Lens | null {
   try {
     const stored = window.localStorage.getItem(LENS_KEY);
     // Recent was the pre-Focus default. It showed every repo, so retaining that
@@ -79,7 +83,7 @@ function readStoredLens(): Lens {
   } catch {
     // ignore private-mode failures
   }
-  return "Focused";
+  return null;
 }
 
 /**
@@ -205,13 +209,18 @@ export function Sidebar({
   // DOM now, while nothing is being said, so the screen reader has registered
   // it long before the first ⌘⇧↑/↓ — see lib/announce.
   useEffect(mountLiveRegion, []);
-  const [lens, setLens] = useState<Lens>(readStoredLens);
+  const [storedLens] = useState(readStoredLens);
+  const [lens, setLens] = useState<Lens>(storedLens ?? DEFAULT_LENS);
   const [showAllFocused, setShowAllFocused] = useState(false);
+  // Whether this window's landing lens is settled. A remembered pick settles it
+  // outright; otherwise the effect below decides once the first repo list is in.
+  const landedRef = useRef(storedLens !== null);
   // Only an explicit pick is worth remembering. The reveal effect below also
   // calls setLens, to widen a lens that would hide the row it is scrolling to
   // — persisting that would let one ⌘K jump into an unpinned repo retire the
   // lens the user actually chose.
   const chooseLens = useCallback((next: Lens) => {
+    landedRef.current = true;
     setLens(next);
     if (next === "Focused") setShowAllFocused(false);
     try {
@@ -428,6 +437,22 @@ export function Sidebar({
 
   const focusContext = { selectedWorktreeId, visits: focusVisits };
   const counts = lensCounts(repos, now, focusContext);
+  // Where a window with no remembered lens lands, decided once — the first
+  // time a repo list actually arrives, because until then every count is 0 and
+  // "empty" and "not read yet" look identical.
+  //
+  // A fresh profile starts in DEFAULT_LENS (All): its worktree state is
+  // computed lazily per repo, so Focused/Behind/Stale are empty by
+  // construction and a new user who added their folders landed in a blank
+  // list with four blank lenses behind it. A returning user whose persisted
+  // state already fills Focused still opens there, which is the lens this
+  // sidebar is designed around.
+  useEffect(() => {
+    if (landedRef.current) return;
+    if (repoLoadState.status === "loading") return;
+    landedRef.current = true;
+    if (counts.Focused > 0) setLens("Focused");
+  }, [repoLoadState.status, counts.Focused]);
   const allFiltered = filterReposByLens(repos, lens, now, focusContext);
   const focusedPage = focusedRepoPage(allFiltered, showAllFocused);
   const filtered = lens === "Focused" ? focusedPage.repos : allFiltered;

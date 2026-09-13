@@ -34,6 +34,10 @@ test("collapses unpinned Worktrees by default and remembers an explicit choice",
   sandbox.makeRepo("collapsed-by-default", {
     worktrees: ["feature/one", "feature/two"]
   });
+  // A second repo to pin, so the Pinned lens has something in it. An empty
+  // lens is not selectable — see LensFilter — and this test needs a lens that
+  // unmounts the repo below, not one that cannot be entered at all.
+  sandbox.makeRepo("elsewhere");
   handle = await launchApp();
   const { window } = handle;
 
@@ -53,6 +57,10 @@ test("collapses unpinned Worktrees by default and remembers an explicit choice",
 
   // Switching lenses unmounts this unpinned repo. Returning to All creates a
   // fresh row, which must restore the choice rather than fall back to default.
+  await window
+    .locator(".repo-row", { hasText: "elsewhere" })
+    .locator(".pin")
+    .click();
   await lensChip(window, "Pinned").click();
   await expect(repoGroup(window, "collapsed-by-default")).toHaveCount(0);
   await lensChip(window, "All").click();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Repo, Worktree } from "@pwrgit/shared";
+import type { Lens, Repo, Worktree } from "@pwrgit/shared";
 import {
   dropPositionWithin,
   filterReposByLens,
@@ -13,6 +13,7 @@ import {
   isPrunableWorktree,
   formatLensCount,
   lensCounts,
+  lensIsAvailable,
   linkedWorktreeCount,
   lensIsArrangeable,
   orderWorktrees,
@@ -20,6 +21,7 @@ import {
   reorder,
   repoPinSource,
   repoPrimaryBehind,
+  selectableLenses,
   SORT_CYCLE,
   worktreeFolderLabel
 } from "./repo-view";
@@ -108,6 +110,50 @@ describe("lensCounts / filterReposByLens", () => {
       "v2",
       "v10"
     ]);
+  });
+});
+
+describe("lens availability", () => {
+  // The first-run shape: repos are indexed, but per-worktree state is computed
+  // lazily per repo, so everything but All is empty until rows are opened.
+  const freshScan: Record<Lens, number> = {
+    Focused: 0,
+    Pinned: 0,
+    Behind: 0,
+    Stale: 0,
+    All: 120
+  };
+
+  it("a freshly scanned profile can only enter All", () => {
+    expect(selectableLenses(freshScan, "All")).toEqual(["All"]);
+  });
+
+  it("All stays available even with nothing indexed at all", () => {
+    const nothing: Record<Lens, number> = {
+      Focused: 0,
+      Pinned: 0,
+      Behind: 0,
+      Stale: 0,
+      All: 0
+    };
+    expect(lensIsAvailable("All", nothing)).toBe(true);
+    expect(lensIsAvailable("Focused", nothing)).toBe(false);
+  });
+
+  it("a lens opens as soon as something lands in it", () => {
+    const pinnedOne = { ...freshScan, Pinned: 1, Focused: 1 };
+    expect(selectableLenses(pinnedOne, "All")).toEqual([
+      "Focused",
+      "Pinned",
+      "All"
+    ]);
+  });
+
+  it("the lens you are in stays selectable after it empties under you", () => {
+    // Unpin the last repo while standing in Pinned: the chip has to keep its
+    // roving tab stop and its empty copy rather than going inert underneath
+    // the user's own focus.
+    expect(selectableLenses(freshScan, "Pinned")).toEqual(["Pinned", "All"]);
   });
 });
 
