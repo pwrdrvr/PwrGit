@@ -1289,7 +1289,8 @@ textarea,
   position: relative;
 }
 .wt-section__toggle::after,
-.wt-selbar__btn::after {
+.wt-selbar__btn::after,
+.wt-row .kebab__btn::after {
   content: "";
   position: absolute;
   left: 50%;
@@ -6212,6 +6213,47 @@ body.is-col-resizing {
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease,
     border-color 120ms ease;
+}
+/* The worktree row's kebab is DRAWN smaller than it is TARGETED.
+
+   `.kebab__btn` is 24px, and that is also about the inside of the row it sits
+   in: `.wt-row` floors at 20px and content-sizes to ~24px. Centred on that row
+   it reaches the row's own 1px border — and unlike `.pin` two elements away,
+   the kebab paints something there. It carries a visible `--border-subtle`
+   hairline at rest and fills with an OPAQUE `--bg-hover-strong` on hover, so
+   pointing at it covered the accent border that says the row is selected.
+
+   The star is not better behaved, only luckier: it is the same 24px box over
+   the same border, but its fill is `--accent-soft` — 12% accent, 88%
+   transparent — over a transparent border, so the outline shows through it.
+   Anything opaque in that lane would have had the same bug.
+
+   18px leaves 3px of row on each side. The pointer target is given back by the
+   shared `::after` above, which is the house answer for a control whose drawn
+   size has to be smaller than 24px (`.wt-selbar__btn`, `.wt-section__toggle`);
+   the negative-margin technique `.pin` uses cannot help here, because it moves
+   the layout box and leaves the painted one exactly where it was. */
+/* `padding: 0` below is what keeps the DOTS from shrinking with the box, and it is
+   not cosmetic — it is the reason this fix is safe to make at all.
+
+   `.kebab__btn` never overrode the user agent's `padding: 1px 6px` for
+   `<button>`. `.pin` beside it does (`padding: 0`), which is the whole reason
+   the star has always looked the size it declares and the dots have not: at
+   24px the kebab's content box is 24 − 12 − 2 = 10px wide, and an svg with
+   `preserveAspectRatio="xMidYMid meet"` scales by the NARROWER axis, so the
+   18px glyph has been drawing 10/24 of its size — 7.75px of ink, not 14px.
+   Shrinking the box to 18px took the content box to 4px and the ink to 3.1px,
+   which is a visibly smaller control, and was this rule's first bug.
+
+   Removing the padding makes the content box 16px, so the glyph draws at
+   16/24 — 12.4px of ink, larger than the 7.75px that ships today. The toolbar
+   kebab is untouched: at 32px its height is the binding axis either way. */
+.wt-row .kebab__btn {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 5px;
 }
 .kebab__btn:hover,
 .kebab__btn[aria-expanded="true"] {
