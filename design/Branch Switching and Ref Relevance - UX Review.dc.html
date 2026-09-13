@@ -88,6 +88,7 @@
           .scount { font: 600 9px/1 var(--mono); color: var(--tsub); }
           .son { font: 600 9px/1 var(--mono); color: var(--acc); }
           .ssum { margin-left: auto; font: 600 9px/1 var(--mono); color: var(--warn); }
+          .sgone { margin-left: 6px; font: 600 9px/1 var(--mono); color: var(--tsub); }
           .chev { flex: none; width: 0; height: 0; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 4px solid currentColor; opacity: .82; }
           .chev.open { transform: rotate(90deg); }
           .grow { flex: 1; }
@@ -193,7 +194,7 @@
               <div class="stage" style="width:372px">
                 <div class="stage-h"><span class="pin ok">4</span>After <em>the verb has a control</em></div>
                 <div class="side">
-                  <div class="shead"><span class="chev open"></span><span class="slabel">Branches</span><span class="scount">3</span><span class="son">&#183; on main</span><span class="ssum">2 gone</span></div>
+                  <div class="shead"><span class="chev open"></span><span class="slabel">Branches</span><span class="scount">3</span><span class="son">&#183; on main</span><span class="sgone">2 gone</span></div>
                   <div class="rrow cur"><span class="bico">&#8969;</span><span class="nm">main</span><small class="ok">Synced</small><span class="wtchip here">&#8962;</span></div>
                   <div class="rrow hov"><span class="bico">&#8969;</span><span class="nm">fix/linux&#8209;window&#8209;show</span><small class="warn">Gone</small><span class="mini on">&#8677;</span><span class="mini">+</span></div>
                   <div class="rrow"><span class="bico">&#8969;</span><span class="nm">feat/editor&#8209;blur&#8209;styles</span><small class="warn">Gone</small><span class="mini ghost">&#8677;</span><span class="mini ghost">+</span></div>
@@ -238,6 +239,7 @@
               <div class="tr lab"><span><code>unpublished</code></span><span>Local only</span><span class="st keep">Local only</span><span>Correct.</span></div>
               <div class="tr lab last"><span><code>upstream_missing</code></span><span style="color:var(--warn)">Missing</span><span class="st chg">Gone</span><span>The upstream ref was deleted. Reads as &#8220;something is broken&#8221;; means &#8220;this is finished &#8212; you can delete it&#8221;.</span></div>
             </div>
+            <p class="note">The count is deliberately NOT in the summary&#8217;s warning tier beside <code>&#8593;n&#8202;&#8595;n</code>: those mean the branch and its remote have drifted and something wants doing, while <em>gone</em> means the work landed. Painting completion amber is the same mistake the row label made.</p>
             <p class="note">Two of the three local rows in the reported repository say <b>Missing</b>, in the same warning amber the sidebar uses for <em>behind</em> and <em>diverged</em> &#8212; states that do want action. <code>gone</code> is git&#8217;s own word for this (<code>git branch -vv</code> prints <code>[origin/x: gone]</code>), it is shorter, and it does not read as an error. The browser&#8217;s wider Status column says <b>Upstream gone</b> for the same state.</p>
             <p class="note">The section head gains a <b>&#183;&nbsp;N&nbsp;gone</b> count beside the existing <code>&#8593;n&#8202;&#8595;n</code> summary, so a repository carrying a pile of merged branches says so while collapsed &#8212; which is the moment the user can act on it.</p>
           </div>

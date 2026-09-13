@@ -3554,19 +3554,31 @@ async function remoteSummary(
  * of them. `BranchSwitcher` already hides a remote whose local head exists, so
  * this also brings the three branch lists into agreement about the redundancy.
  *
- * The sort is stable, so committer date still orders each group.
+ * One pass, two buckets, each capped at the preview size — NOT a sort. Sorting
+ * to keep six of a fetched fork network's refs (openclaw: 4,466) copies the
+ * whole array and runs the comparator ~107,000 times, each call slicing two
+ * fresh substrings, and `repo:refs` is called on every expansion, switch and
+ * fetch. Appending in arrival order keeps committer date ordering each bucket
+ * exactly as a stable sort did.
  */
 export function previewRemoteBranches(
   branches: readonly RepoRefRow[],
   prefix: string,
   localNames: ReadonlySet<string>
 ): RemoteBranchSummary[] {
-  return [...branches]
-    .sort(
-      (a, b) =>
-        Number(localNames.has(a.fullName.slice(prefix.length))) -
-        Number(localNames.has(b.fullName.slice(prefix.length)))
-    )
+  const fresh: RepoRefRow[] = [];
+  const shadowed: RepoRefRow[] = [];
+  for (const row of branches) {
+    if (fresh.length >= REMOTE_BRANCH_PREVIEW) break;
+    const bucket = localNames.has(row.fullName.slice(prefix.length))
+      ? shadowed
+      : fresh;
+    // A shadowed row is only ever a filler, so stop collecting them once there
+    // are enough to fill a preview that finds no unshadowed branch at all.
+    if (bucket === shadowed && shadowed.length >= REMOTE_BRANCH_PREVIEW) continue;
+    bucket.push(row);
+  }
+  return [...fresh, ...shadowed]
     .slice(0, REMOTE_BRANCH_PREVIEW)
     .map((row) => remoteBranchOf(row, prefix));
 }

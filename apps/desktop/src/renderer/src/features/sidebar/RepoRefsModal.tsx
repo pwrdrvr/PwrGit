@@ -78,15 +78,28 @@ type BrowserBranch =
 function SwitchHereButton({
   branch,
   worktree,
-  busy,
+  rowKey,
+  inFlight,
   onSwitch
 }: {
   branch: string;
   /** The working target, or null when this repository holds none. */
   worktree: Worktree | null;
-  busy: boolean;
+  /** Identifies THIS row's switch. The bare branch name is not enough: two
+   *  remotes can both carry `feature/x`, and keying on the name lit up
+   *  "Switching…" on a row that was not acting. */
+  rowKey: string;
+  /** The `rowKey` of the switch currently running, or null. */
+  inFlight: string | null;
   onSwitch: () => void;
 }) {
+  const busy = inFlight === rowKey;
+  // Only one switch runs at a time — `switchHere` refuses a second outright.
+  // Without saying so, every other row stayed enabled and swallowed its click
+  // silently: no toast, no spinner, nothing. `aria-disabled` rather than
+  // `disabled`, per styles/AGENTS.md, so a keyboard user is not blurred
+  // mid-operation; the handler does the refusing.
+  const blocked = inFlight !== null && !busy;
   const label =
     worktree === null
       ? `Switch to ${branch} — unavailable, nothing in this repository is the working target`
@@ -101,9 +114,9 @@ function SwitchHereButton({
           : label
       }
       disabled={worktree === null}
-      aria-disabled={busy}
+      aria-disabled={busy || blocked}
       onClick={() => {
-        if (busy) return;
+        if (busy || blocked) return;
         onSwitch();
       }}
     >
@@ -175,8 +188,9 @@ function RemoteBranchList({
   now: number;
   refs: RepoRefs;
   focusedWorktree: Worktree | null;
+  /** The `fullName` of the row whose switch is running, or null. */
   switching: string | null;
-  onSwitch: (branch: string) => void;
+  onSwitch: (rowKey: string, branch: string) => void;
   onPick: (branch: RemoteBranchSummary) => void;
 }) {
   const search = useRemoteBranchSearch({ repoId, remote, query });
@@ -213,8 +227,9 @@ function RemoteBranchList({
                 <SwitchHereButton
                   branch={branch.name}
                   worktree={focusedWorktree}
-                  busy={switching === branch.name}
-                  onSwitch={() => onSwitch(branch.name)}
+                  rowKey={branch.fullName}
+                  inFlight={switching}
+                  onSwitch={() => onSwitch(branch.fullName, branch.name)}
                 />
               )}
               <button
@@ -343,9 +358,12 @@ export function RepoRefsModal({
    * snapshot behind it) is what confirms the switch landed. Revealing a
    * worktree is a navigation, so that one closes.
    */
-  const switchHere = async (branchName: string): Promise<void> => {
+  const switchHere = async (
+    rowKey: string,
+    branchName: string
+  ): Promise<void> => {
     if (switching !== null || focusedWorktree === null) return;
-    setSwitching(branchName);
+    setSwitching(rowKey);
     const outcome = await switchWorktreeToBranch({
       repoId: repo.id,
       worktreeId: focusedWorktree.id,
@@ -628,8 +646,11 @@ export function RepoRefsModal({
                         <SwitchHereButton
                           branch={branch.name}
                           worktree={focusedWorktree}
-                          busy={switching === branch.name}
-                          onSwitch={() => void switchHere(branch.name)}
+                          rowKey={branch.fullName}
+                          inFlight={switching}
+                          onSwitch={() =>
+                            void switchHere(branch.fullName, branch.name)
+                          }
                         />
                         <button
                           className="refs-row-action refs-row-action--quiet"
@@ -697,8 +718,11 @@ export function RepoRefsModal({
                           <SwitchHereButton
                             branch={branch.name}
                             worktree={focusedWorktree}
-                            busy={switching === branch.name}
-                            onSwitch={() => void switchHere(branch.name)}
+                            rowKey={branch.fullName}
+                            inFlight={switching}
+                            onSwitch={() =>
+                              void switchHere(branch.fullName, branch.name)
+                            }
                           />
                           <button
                             className="refs-row-action refs-row-action--quiet"
@@ -959,7 +983,7 @@ export function RepoRefsModal({
                     refs={refs}
                     focusedWorktree={focusedWorktree}
                     switching={switching}
-                    onSwitch={(branch) => void switchHere(branch)}
+                    onSwitch={(rowKey, branch) => void switchHere(rowKey, branch)}
                     onPick={createRemoteWorktree}
                   />
                 </section>

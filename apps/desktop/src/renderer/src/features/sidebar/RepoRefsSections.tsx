@@ -20,7 +20,6 @@ import {
   branchActivation,
   branchFocusState,
   branchSectionSummary,
-  goneBranchCount,
   holderWorktreeId,
   visibleBranches as byRelevance
 } from "./branch-focus";
@@ -42,21 +41,35 @@ function SectionChevron({ open }: { open: boolean }) {
   return <span className={`ref-section__chev${open ? " is-open" : ""}`} />;
 }
 
-function compactTrackingLabel(tracking: ReturnType<typeof trackingLabel>): string {
-  switch (tracking) {
-    case "Up to date":
+/**
+ * The 82px-wide sidebar spelling of a branch's tracking state.
+ *
+ * Keyed on the STATE, not on `trackingLabel`'s prose. It used to switch on that
+ * function's return value, which is typed `string` — so the case literals were
+ * unchecked, and renaming one label ("Upstream missing" → "Upstream gone")
+ * silently dropped the row through to the long form until the literal here was
+ * chased by hand. `BranchTrackingStatus` is a union, so the compiler now
+ * exhaustive-checks this and a new state cannot be forgotten.
+ *
+ * "Gone" is git's own word (`git branch -vv` prints `[origin/x: gone]`), and
+ * the reason the row needs one: "Missing" reads as breakage while the state
+ * means the upstream branch was deleted — the work landed and this branch is
+ * finished.
+ */
+function compactTrackingLabel(branch: LocalBranchSummary): string {
+  switch (branch.tracking) {
+    case "up_to_date":
       return "Synced";
-    case "No upstream":
+    case "unpublished":
       return "Local only";
-    // Git's own word for it (`git branch -vv` prints `[origin/x: gone]`), and
-    // the reason the row needs one: "Missing" sits in the same warning amber as
-    // *behind* and *diverged* — states that want action — while this one means
-    // the upstream branch was deleted, i.e. the work landed and the branch is
-    // finished. It reads as breakage and means completion.
-    case "Upstream gone":
+    case "upstream_missing":
       return "Gone";
-    default:
-      return tracking;
+    case "ahead":
+    case "behind":
+    case "diverged":
+      // The counts are the whole point of these three; `trackingLabel` already
+      // renders them as ↑n / ↓n, which is compact enough as it stands.
+      return trackingLabel(branch);
   }
 }
 
@@ -182,13 +195,37 @@ export function RepoRefsSections({
   // the user is working in. `branchRelevance` puts the working target's branch
   // first (the pairing is invisible otherwise), then held branches, and drops
   // branches whose upstream is gone to the bottom.
-  const shownBranches = byRelevance(
-    refs?.branches ?? [],
-    focusedWorktree,
-    BRANCH_SLICE
+  //
+  // Memoized because this component re-renders on every arrow key: the roving
+  // cursor is state, and an unmemoized copy-and-sort of a 161-branch list per
+  // keystroke is work whose inputs did not move.
+  const shownBranches = useMemo(
+    () => byRelevance(refs?.branches ?? [], focusedWorktree, BRANCH_SLICE),
+    [refs?.branches, focusedWorktree]
   );
   const summary = branchSectionSummary(focusedWorktree);
-  const gone = goneBranchCount(refs?.branches ?? []);
+  /**
+   * The collapsed section's counts, in ONE pass rather than five filters.
+   *
+   * Assembled as parts and joined so the separators only appear between things
+   * that exist — the gone count used to carry its own leading " ·", which read
+   * as a dangling separator on a repository whose branches are all synced apart
+   * from a couple of finished ones.
+   */
+  const counts = useMemo(() => {
+    let ahead = 0;
+    let behind = 0;
+    let gone = 0;
+    for (const branch of refs?.branches ?? []) {
+      if (branch.ahead > 0) ahead += 1;
+      if (branch.behind > 0) behind += 1;
+      if (branch.tracking === "upstream_missing") gone += 1;
+    }
+    const parts: string[] = [];
+    if (ahead > 0) parts.push(`↑${ahead}`);
+    if (behind > 0) parts.push(`↓${behind}`);
+    return { parts, gone };
+  }, [refs?.branches]);
 
   /**
    * "Make this branch the one I am working on", by the cheapest safe route: a
@@ -337,18 +374,19 @@ export function RepoRefsSections({
           {summary !== null && (
             <span className="ref-section__on">· {summary}</span>
           )}
-          {refs !== null && (
-            <span className="ref-section__summary">
-              {refs.branches.filter((branch) => branch.ahead > 0).length > 0 &&
-                `↑${refs.branches.filter((branch) => branch.ahead > 0).length}`}
-              {refs.branches.filter((branch) => branch.behind > 0).length > 0 &&
-                ` ↓${refs.branches.filter((branch) => branch.behind > 0).length}`}
-              {/* Branches whose upstream was deleted. They rank last in the
-                  slice, so without this a repository full of finished work
-                  would say nothing about it at the one moment the reader could
-                  act — while the section is still collapsed. */}
-              {gone > 0 && ` ·${gone} gone`}
-            </span>
+          {refs !== null && counts.parts.length > 0 && (
+            <span className="ref-section__summary">{counts.parts.join(" ")}</span>
+          )}
+          {/* Branches whose upstream was deleted. They rank last in the slice,
+              so without this a repository full of finished work would say
+              nothing about it at the one moment the reader could act — while
+              the section is still collapsed.
+
+              Its own element, not a third part of the summary above: that span
+              is --status-warning, the tier this change argues is wrong for a
+              state that means the work LANDED. Finished is not a warning. */}
+          {refs !== null && counts.gone > 0 && (
+            <span className="ref-section__gone">{counts.gone} gone</span>
           )}
         </button>
         {openSections.has("branches") && (
@@ -429,7 +467,7 @@ export function RepoRefsSections({
                       className={`ref-branch-row__status is-${branch.tracking}`}
                       title={trackingLabel(branch)}
                     >
-                      {compactTrackingLabel(trackingLabel(branch))}
+                      {compactTrackingLabel(branch)}
                     </span>
                     {/* The verb the row already performs on double-click, given
                         a control. It was reachable only through a `title`

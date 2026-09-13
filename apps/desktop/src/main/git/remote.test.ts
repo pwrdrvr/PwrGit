@@ -1698,6 +1698,26 @@ describe("previewRemoteBranches", () => {
     expect(preview.map((b) => b.name)).toEqual(["main", "release"]);
   });
 
+  // The bucketing is capped at the preview size, so a remote whose newest refs
+  // are ALL shadowed must still fill six rows rather than come back short.
+  it("fills the preview from shadowed branches when nothing else is left", () => {
+    const preview = previewRemoteBranches(
+      rows("m1", "m2", "m3", "m4", "m5", "m6", "m7", "solo"),
+      PREFIX,
+      new Set(["m1", "m2", "m3", "m4", "m5", "m6", "m7"])
+    );
+    expect(preview).toHaveLength(REMOTE_BRANCH_PREVIEW);
+    expect(preview[0]?.name).toBe("solo");
+    expect(preview.map((b) => b.name)).toEqual([
+      "solo",
+      "m1",
+      "m2",
+      "m3",
+      "m4",
+      "m5"
+    ]);
+  });
+
   it("keeps committer-date order inside each group", () => {
     const preview = previewRemoteBranches(
       rows("mine-1", "theirs-1", "mine-2", "theirs-2"),

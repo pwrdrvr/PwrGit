@@ -5,7 +5,6 @@ import {
   branchFocusState,
   branchRelevance,
   branchSectionSummary,
-  goneBranchCount,
   holderWorktreeId,
   isBranchSentinel,
   visibleBranches
@@ -195,19 +194,6 @@ describe("branchRelevance", () => {
     expect(branchRelevance(branch("a"), null)).toBe(3);
     expect(branchRelevance(branch("b", [], "unpublished"), null)).toBe(3);
     expect(branchRelevance(branch("c", [], "diverged"), null)).toBe(3);
-  });
-});
-
-describe("goneBranchCount", () => {
-  it("counts only branches whose upstream was deleted", () => {
-    expect(
-      goneBranchCount([
-        branch("a"),
-        goneBranch("b"),
-        branch("c", [], "unpublished"),
-        goneBranch("d")
-      ])
-    ).toBe(2);
   });
 });
 

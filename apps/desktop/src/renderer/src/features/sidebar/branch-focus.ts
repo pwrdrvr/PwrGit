@@ -133,13 +133,6 @@ export function branchRelevance(
   return branch.tracking === "upstream_missing" ? 4 : 3;
 }
 
-/** How many of these branches git would print as `[origin/x: gone]`. */
-export function goneBranchCount(
-  branches: readonly LocalBranchSummary[]
-): number {
-  return branches.filter((b) => b.tracking === "upstream_missing").length;
-}
-
 /**
  * The branches the collapsed slice shows, ranked by `branchRelevance` — which
  * pins the working target's branch first, because tier 1 is unique to it.
