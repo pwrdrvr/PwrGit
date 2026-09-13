@@ -8280,19 +8280,9 @@ body.is-col-resizing {
   color: var(--status-warning);
   font: 500 10.5px/1.35 var(--font-sans);
 }
-/* Same ladder the worktree header walks down (720/680/540): drop the widest
-   thing whose signal survives elsewhere. The subject is also on the commit in
-   the rail and on the row that opened this pane; History, Blame and the close
-   button have nowhere else to be. */
-@container (max-width: 620px) {
-  }
-/* The last rung. Both side panes at their maximum leave this one about 200px
-   on a 1280px window, and the order things go is deliberate: the subject
-   first, then the revision, and the title shrinks to nothing before History,
-   Blame or the close button give up a pixel — losing the actions strands the
-   reader in a pane whose only exits are keyboard ones. */
-@container (max-width: 460px) {
-  }
+/* The pane's pointer exits: never give these a shrinking basis. They overflow
+   and clip before they narrow, which leaves Escape as the only way out — the
+   widths are measured in #254. */
 .diff-pane__tools {
   flex: 0 0 auto;
   display: flex;
