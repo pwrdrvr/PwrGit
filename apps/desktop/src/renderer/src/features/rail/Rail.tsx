@@ -122,8 +122,13 @@ export function Rail({
     commitNudgeCount,
     commitNudgeCount
   );
+  // An INCREASE since this mount, not `> 0`: the count never resets, so a
+  // nudge answered earlier in the session would otherwise yank the rail off
+  // Rebase every time this component remounted.
+  const seenNudge = useRef(commitNudge);
   useEffect(() => {
-    if (commitNudge > 0) setTab("changes");
+    if (commitNudge > seenNudge.current) setTab("changes");
+    seenNudge.current = commitNudge;
   }, [commitNudge]);
 
   return (

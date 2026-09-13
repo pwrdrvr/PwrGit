@@ -1,11 +1,11 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { err, ok, type Result } from "@pwrgit/shared";
-import type { GitExec, GitOutput } from "./dugite";
+import type { GitExec } from "./dugite";
 import { switchBranchCarryingChanges } from "./git-service";
+import { createSystemGit } from "./test-support/system-git";
 
 /**
  * The carrying switch's whole contract is a promise about failure: either the
@@ -13,22 +13,21 @@ import { switchBranchCarryingChanges } from "./git-service";
  * with the work untouched. That cannot be asserted against a mocked git — the
  * interesting paths are what real `git stash pop` does to a real index when it
  * conflicts — so every case here runs the system git over a real repository.
+ *
+ * Through the shared helper, never a local copy: a hand-rolled one settles on
+ * the child's `close`, and Git-for-Windows hands execution to another process
+ * that keeps the inherited pipes open after git itself has exited — so a
+ * millisecond call becomes a multi-second hang and the suite times out having
+ * never learned what git did. #261 removed twenty-four copies of that defect;
+ * this file must not be the twenty-fifth.
  */
-const systemGit: GitExec = (args, cwd) =>
-  new Promise<Result<GitOutput>>((resolve) => {
-    const proc = spawn("git", args, {
-      cwd,
-      env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" }
-    });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
-    proc.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-    proc.on("close", (code) => resolve(ok({ stdout, stderr, exitCode: code ?? 0 })));
-    proc.on("error", (e) =>
-      resolve(err({ kind: "git", code: "spawn_failed", message: e.message }))
-    );
-  });
+const systemGit: GitExec = createSystemGit({
+  env: {
+    ...process.env,
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_SYSTEM: "/dev/null"
+  }
+});
 
 function git(dir: string, args: string[]): void {
   execFileSync("git", args, {
@@ -172,6 +171,47 @@ describe("switchBranchCarryingChanges", () => {
     expect(result.ok).toBe(false);
     expect(branchOf(dir)).toBe("main");
     expect(existsSync(join(dir, "bystander.txt"))).toBe(true);
+  }, 20_000);
+
+  // A detached checkout has no branch to name, so the rollback restores a raw
+  // commit. `git switch` refuses one without `--detach` ("a branch is expected,
+  // got commit", exit 128), which turned every rollback from a detached HEAD
+  // into a broken promise: the work stranded in a stash on a branch the reader
+  // never chose.
+  it("puts a detached checkout back where it was", async () => {
+    const dir = makeRepo();
+    const base = gitOut(dir, ["rev-parse", "HEAD"]);
+    git(dir, ["switch", "--detach", base]);
+    write(dir, "shared.txt", "edited while detached\n");
+    write(dir, "brand-new.txt", "untracked\n");
+
+    const result = await switchBranchCarryingChanges(systemGit, dir, "feature");
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("carry_conflicts");
+    // Still detached, still on the same commit, still holding the work.
+    // `rev-parse --abbrev-ref` answers "HEAD" when detached; `symbolic-ref`
+    // exits 1 there, which `execFileSync` raises as a thrown command failure
+    // rather than a readable assertion.
+    expect(gitOut(dir, ["rev-parse", "HEAD"])).toBe(base);
+    expect(branchOf(dir)).toBe("HEAD");
+    expect(read(dir, "shared.txt")).toBe("edited while detached\n");
+    expect(read(dir, "brand-new.txt")).toBe("untracked\n");
+    expect(stashCount(dir)).toBe(0);
+  }, 20_000);
+
+  it("carries a detached checkout's work onto a branch when it fits", async () => {
+    const dir = makeRepo();
+    git(dir, ["switch", "--detach", gitOut(dir, ["rev-parse", "HEAD"])]);
+    write(dir, "quiet.txt", "edited while detached\n");
+
+    const result = await switchBranchCarryingChanges(systemGit, dir, "feature");
+
+    expect(result.ok).toBe(true);
+    expect(branchOf(dir)).toBe("feature");
+    expect(read(dir, "quiet.txt")).toBe("edited while detached\n");
+    expect(stashCount(dir)).toBe(0);
   }, 20_000);
 
   it("switches with nothing to carry when the tree went clean", async () => {

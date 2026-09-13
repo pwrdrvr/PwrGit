@@ -3805,12 +3805,19 @@ export async function switchBranch(
 /**
  * The stash entry `sha` currently sits at, as a selector `git stash` accepts.
  *
- * Never `stash@{0}`. A stash is a reflog, positions shift when anything else
- * pushes or drops one, and a terminal sitting in the same checkout is outside
- * `WorktreeOperationQueue` — so the entry a positional selector names is not
- * necessarily the entry we made. Resolving by commit identity is the same rule
- * the repository's own agent guidance gives humans, and the rule PwrGit's
- * multi-stash work (#150) applies to every stash action.
+ * A stash is a reflog: positions shift when anything else pushes or drops one,
+ * and a terminal in the same checkout is outside `WorktreeOperationQueue`. So
+ * every touch AFTER the entry is made resolves it by commit identity rather
+ * than by position — the same rule the repository's agent guidance gives humans
+ * and the one PwrGit's multi-stash work (#150) applies to every stash action.
+ *
+ * What this does NOT cover is the capture itself: the sha comes from
+ * `rev-parse refs/stash` immediately after our own `stash push`, which is a
+ * positional read of the top of the stack. A stash pushed from a terminal in
+ * that sub-millisecond window would hand us their commit. Closing it properly
+ * means `stash create` + `stash store`, which does not clean the worktree and
+ * so trades this race for a riskier hand-rolled reset — not obviously a better
+ * deal. Stated rather than papered over.
  *
  * `null` means the entry is gone. `"ambiguous"` means the same commit appears
  * more than once in the reflog — identical content under two occurrences, which
@@ -4011,21 +4018,26 @@ export async function switchBranchCarryingChanges(
   if (!shaResult.ok) return shaResult;
   const sha = shaResult.value.stdout.trim();
 
-  // Read before anything moves: after a conflicted reapply this is the only
-  // bounded description of what to clean up, and `^3` is gone once the entry is.
-  const untracked = await stashUntrackedPaths(git, cwd, sha);
-  if (!untracked.ok) return untracked;
-
   /** Put the work back where it came from, on the branch it came from. */
   const rollback = async (): Promise<string | null> => {
-    const steps: string[][] = [["reset", "--hard", "HEAD"]];
-    for (const args of steps) {
-      const raw = await git(args, cwd);
-      if (!raw.ok || raw.value.exitCode !== 0) return `git ${args.join(" ")} failed`;
+    const reset = await git(["reset", "--hard", "HEAD"], cwd);
+    if (!reset.ok || reset.value.exitCode !== 0) {
+      return "the destination could not be cleared";
     }
+    // Only the rollback path needs this, and a conflicted reapply KEEPS the
+    // entry, so `^3` is still resolvable here — reading it lazily saves two
+    // process spawns on every successful carry.
+    const untracked = await stashUntrackedPaths(git, cwd, sha);
+    if (!untracked.ok) return "the saved changes could not be inspected";
     const cleaned = await cleanPaths(git, cwd, untracked.value);
     if (!cleaned.ok) return "the files it restored could not be cleaned up";
-    const back = await git(["switch", "--force", origin.value], cwd);
+    // `checkout`, not `switch`: `origin` is a raw commit when the checkout was
+    // detached, and `git switch` refuses one without `--detach` — it exits 128
+    // with "a branch is expected, got commit". That turned every rollback from
+    // a detached HEAD into a broken promise, stranding the work in the stash on
+    // a branch the reader never chose. `checkout --force` takes both a branch
+    // name and a commit.
+    const back = await git(["checkout", "--force", origin.value], cwd);
     if (!back.ok || back.value.exitCode !== 0) {
       return `the checkout could not be moved back to ${origin.value}`;
     }

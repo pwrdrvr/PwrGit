@@ -1,7 +1,7 @@
 import type { RepoRefs, WorktreeId } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast } from "../../lib/toast";
-import { holderWorktreeId } from "../sidebar/branch-focus";
+import { holderWorktreeId, isBranchSentinel } from "../sidebar/branch-focus";
 import { nudgeToCommit } from "./commitNudge";
 import { chooseDialog } from "./dialogs";
 
@@ -89,7 +89,13 @@ export async function askDirtyIntent(
   branch: string,
   facts: string[] = []
 ): Promise<DirtyIntent> {
-  const here = isNamedBranch(fromBranch) ? fromBranch : "this checkout";
+  // `branch-focus` owns the rule for which `Worktree.branch` values are not
+  // branch names — a second copy here would drift the first time a sentinel is
+  // added, and print it at the reader as though it were a branch.
+  const here =
+    fromBranch !== "" && !isBranchSentinel(fromBranch)
+      ? fromBranch
+      : "this checkout";
   const answer = await chooseDialog({
     title: `Switch to ${branch}?`,
     message: dirtySwitchMessage(dirty, worktreeLabel, branch),
@@ -113,16 +119,6 @@ export async function askDirtyIntent(
   return "cancel";
 }
 
-/** A `Worktree.branch` that can be printed as a branch — see `branch-focus`. */
-function isNamedBranch(branch: string): boolean {
-  return (
-    branch !== "" &&
-    !branch.startsWith("detached@") &&
-    branch !== "(bare)" &&
-    branch !== "(unknown)"
-  );
-}
-
 /** The handful of paths the prompt lists, so "7 changes" is something the
  *  reader can actually judge. Best-effort: a failed read costs the list, not
  *  the prompt. */
@@ -132,16 +128,24 @@ export async function dirtyFacts(
 ): Promise<string[]> {
   const result = await dispatch("changes:list", { worktreeId });
   if (!result.ok) return [];
-  const paths = [
-    ...result.value.staged.map((file) => file.path),
-    ...result.value.unstaged.map((file) => file.path)
+  const { staged, unstaged, truncated } = result.value;
+  const unique = [
+    ...new Set([
+      ...staged.map((file) => file.path),
+      ...unstaged.map((file) => file.path)
+    ])
   ];
-  const unique = [...new Set(paths)];
-  if (unique.length <= limit) return unique;
-  return [
-    ...unique.slice(0, limit),
-    `…and ${unique.length - limit} more`
-  ];
+  // `changes:list` caps its rows and reports the real totals separately, so a
+  // remainder counted off the returned array undercounts exactly when it
+  // matters most — a regenerated lockfile, a reformatted tree. The cap applies
+  // per list, so a file appearing in both is double-counted here; the number is
+  // an "at least", which is the honest direction for it to be wrong in.
+  const total =
+    truncated === undefined
+      ? unique.length
+      : truncated.staged + truncated.unstaged;
+  if (total <= limit) return unique.slice(0, limit);
+  return [...unique.slice(0, limit), `…and ${total - limit} more`];
 }
 
 export type SwitchOutcome =

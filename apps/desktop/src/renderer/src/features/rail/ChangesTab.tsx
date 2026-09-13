@@ -339,11 +339,20 @@ export function ChangesTab({
   const [changes, setChanges] = useState<ChangeSet | null>(null);
   const [message, setMessage] = useState("");
   const messageRef = useRef<HTMLInputElement>(null);
-  // Answering "Commit on <branch> first" is a promise to put the reader where
-  // they can do that. Skipped at zero so an ordinary mount never steals focus
-  // from whatever the reader was actually typing in.
+  /**
+   * Answering "Commit on <branch> first" is a promise to put the reader where
+   * they can do that.
+   *
+   * Keyed to an INCREASE since this mount, not to `> 0`. The count is
+   * monotonic for the life of the window, so a nudge answered once and a
+   * remount later — clicking a commit swaps this tab for `CommitTab`, closing
+   * it swaps back — would re-fire the effect and pull focus into the message
+   * box out of nowhere, mid-typing, somewhere else entirely.
+   */
+  const seenNudge = useRef(commitNudge);
   useEffect(() => {
-    if (commitNudge > 0) messageRef.current?.focus();
+    if (commitNudge > seenNudge.current) messageRef.current?.focus();
+    seenNudge.current = commitNudge;
   }, [commitNudge]);
   /** Explicit folder disclosure state; unset folders follow the size default. */
   const [folderOpen, setFolderOpen] = useState<Record<string, boolean>>({});

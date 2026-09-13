@@ -462,6 +462,28 @@ describe("dirtyFacts", () => {
     await expect(dirtyFacts("wt-1")).resolves.toEqual(["both.ts"]);
   });
 
+  // `changes:list` caps its rows and carries the real totals in `truncated`.
+  // Counting the remainder off the capped array undercounts exactly when the
+  // number matters — a regenerated lockfile, a reformatted tree.
+  it("counts the overflow from the real totals, not the capped rows", async () => {
+    dispatch.mockResolvedValueOnce({
+      ok: true,
+      value: {
+        staged: [],
+        unstaged: ["a", "b", "c", "d", "e", "f"].map((path) => ({ path })),
+        truncated: { staged: 0, unstaged: 500, largestUntrackedFolder: null }
+      }
+    });
+    await expect(dirtyFacts("wt-1", 5)).resolves.toEqual([
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+      "…and 495 more"
+    ]);
+  });
+
   it("says how many it is not listing", async () => {
     dispatch.mockResolvedValueOnce(
       changeSet("a", "b", "c", "d", "e", "f", "g")
