@@ -2632,8 +2632,9 @@ export function parseBranchRefs(stdout: string): BranchRef[] {
       line.split("\t");
     if (full === "" || name === "") continue;
     const isRemote = full.startsWith("refs/remotes/");
-    // Skip a remote's symbolic HEAD pointer (e.g. origin/HEAD -> origin/main).
-    if (isRemote && name.endsWith("/HEAD")) continue;
+    // Git can shorten refs/remotes/origin/HEAD to just "origin". Filter the
+    // full ref so that alias never becomes a switchable branch.
+    if (isRemote && /^refs\/remotes\/[^/]+\/HEAD$/.test(full)) continue;
     const ref: BranchRef = { name, isRemote, isCurrent: head === "*" };
     if (upstream !== "") ref.upstream = upstream;
     if (date !== "") ref.lastCommitAt = date;

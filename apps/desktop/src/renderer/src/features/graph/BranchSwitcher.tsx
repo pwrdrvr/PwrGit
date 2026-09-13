@@ -53,7 +53,13 @@ export function BranchSwitcher({
     );
     const q = query.trim().toLowerCase();
     const filtered =
-      q === "" ? shown : shown.filter((b) => b.name.toLowerCase().includes(q));
+      q === ""
+        ? shown
+        : shown.filter(
+            (b) =>
+              b.name.toLowerCase().includes(q) ||
+              (!b.isRemote && b.upstream?.toLowerCase().includes(q))
+          );
     // Current first, then other locals, then remotes — each keeping the
     // recency order the list arrived in.
     return [
@@ -140,7 +146,19 @@ export function BranchSwitcher({
               <span
                 className={`branch-item__dot${b.isCurrent ? " is-current" : ""}`}
               />
-              <span className="branch-item__name">{b.name}</span>
+              <span
+                className="branch-item__name"
+                title={
+                  !b.isRemote && b.upstream
+                    ? `${b.name} · tracks ${b.upstream}`
+                    : b.name
+                }
+              >
+                {b.name}
+                {!b.isRemote && b.upstream && (
+                  <span className="branch-item__meta"> · tracks {b.upstream}</span>
+                )}
+              </span>
               {b.isCurrent && <span className="branch-item__here">current</span>}
               {b.isRemote && <span className="branch-item__badge">remote</span>}
               {busy === switchTarget(b) && (

@@ -144,6 +144,8 @@ describe("parseBranchRefs", () => {
     const out = parseBranchRefs(
       [
         row(["refs/remotes/origin/HEAD", "origin/HEAD", " ", "", "", ""]),
+        row(["refs/remotes/origin/HEAD", "origin", " ", "", "", ""]),
+        row(["refs/remotes/upstream/HEAD", "upstream", " ", "", "", ""]),
         row([
           "refs/remotes/origin/main",
           "origin/main",
@@ -156,6 +158,16 @@ describe("parseBranchRefs", () => {
     );
     expect(out).toHaveLength(1);
     expect(out[0].name).toBe("origin/main");
+  });
+
+  it("keeps real branches whose names end in HEAD", () => {
+    const out = parseBranchRefs(
+      [
+        row(["refs/heads/topic/HEAD", "topic/HEAD", " ", "", "", ""]),
+        row(["refs/remotes/origin/topic/HEAD", "origin/topic/HEAD", " ", "", "", ""])
+      ].join("\n")
+    );
+    expect(out.map((ref) => ref.name)).toEqual(["topic/HEAD", "origin/topic/HEAD"]);
   });
 });
 
