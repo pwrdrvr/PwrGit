@@ -7,6 +7,7 @@
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
+import { findRemoteScript, isRendererHtmlEntry } from "./packaged-html-rules.mjs";
 
 const args = process.argv.slice(2);
 const appPath = args[0]
@@ -115,6 +116,67 @@ if (violations.length > 0) {
   process.exit(1);
 }
 
+// A packaged renderer must load every script from inside the asar. The one
+// thing that has ever wanted to break that rule is the dev-only React DevTools
+// bridge (PWRGIT_DEV_REACT_DEVTOOLS), which injects
+// `<script src="http://localhost:8097">` as the first head script at Vite
+// config time. That is a build-time decision, so nothing at app runtime can
+// undo it — this is where it gets caught. The rule is written against the
+// shape, not against the flag, so any remote script trips it.
+//
+// An entry that cannot be read fails the gate rather than being skipped. This
+// is a check whose whole job is to stop something shipping, so "could not
+// look" has to be as loud as "looked and found it" — a silent skip would let
+// the exact file the gate exists for pass unexamined. (`extractFile` does read
+// unpacked files out of the `.unpacked` sidecar, so what throws here is a
+// directory, a link, or real I/O trouble — all of which mean the bundle was
+// not cleared.)
+const remoteScriptViolations = [];
+const unreadableHtmlEntries = [];
+for (const entry of listing.filter(isRendererHtmlEntry)) {
+  let contents;
+  try {
+    contents = asar.extractFile(asarPath, entry.replace(/^\//, "")).toString("utf8");
+  } catch (error) {
+    unreadableHtmlEntries.push({ entry, reason: error?.message ?? String(error) });
+    continue;
+  }
+  const snippet = findRemoteScript(contents);
+  if (snippet) {
+    remoteScriptViolations.push({ entry, snippet });
+  }
+}
+
+if (remoteScriptViolations.length > 0 || unreadableHtmlEntries.length > 0) {
+  if (remoteScriptViolations.length > 0) {
+    console.error(
+      `\nverify-asar-contents: ${remoteScriptViolations.length} packaged HTML file(s) load a remote script\n`,
+    );
+    for (const { entry, snippet } of remoteScriptViolations) {
+      console.error(`  ${entry}`);
+      console.error(`    ${snippet}`);
+    }
+    console.error(
+      "\nBuild without PWRGIT_DEV_REACT_DEVTOOLS set. That bridge is for local"
+      + "\nprofiling builds only and must never reach a packaged app.",
+    );
+  }
+  if (unreadableHtmlEntries.length > 0) {
+    console.error(
+      `\nverify-asar-contents: ${unreadableHtmlEntries.length} packaged HTML file(s) could not be read\n`,
+    );
+    for (const { entry, reason } of unreadableHtmlEntries) {
+      console.error(`  ${entry}`);
+      console.error(`    ${reason}`);
+    }
+    console.error(
+      "\nThese were not inspected for remote scripts, so the bundle is not cleared."
+      + "\nA renderer HTML entry should be a readable, packed file.",
+    );
+  }
+  process.exit(1);
+}
+
 console.log(
-  `verify-asar-contents: OK (${listing.length} entries, main bundle present, no forbidden patterns)`,
+  `verify-asar-contents: OK (${listing.length} entries, main bundle present, no forbidden patterns, no remote scripts)`,
 );
