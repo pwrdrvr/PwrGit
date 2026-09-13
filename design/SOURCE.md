@@ -128,7 +128,7 @@ are spent on, and the two implementations of "switch" that had drifted apart. A
 re-export must not treat it as foreign and drop it.
 
 Turn **5** and `assets/dirty-switch-prompt.png` were added to it during
-[#259](https://github.com/pwrdrvr/PwrGit/pull/259), which is stacked on that PR.
+[#260](https://github.com/pwrdrvr/PwrGit/pull/260), which is stacked on that PR.
 It owns the uncommitted-changes decision: the three answers, why "leave them on
 the old branch" is deliberately not a fourth, and the two outcomes the carrying
 switch owes its callers.
