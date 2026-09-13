@@ -379,6 +379,17 @@ jobs:
             }
           }
 
+      # A byte-for-byte copy of the installer under a stable, version-free name,
+      # so README's "Download for Windows" can point at
+      # releases/latest/download/PwrGit.Setup.exe instead of the releases page.
+      # It must be cut here, from the installer that just passed Authenticode
+      # verification, and never from an unsigned intermediate. The versioned
+      # installer stays: latest.yml names it and electron-updater fetches it by
+      # that name.
+      - name: Add the stable Windows installer alias
+        shell: pwsh
+        run: node apps/desktop/scripts/windows-release-artifacts.mjs apps/desktop/release-stage
+
       - name: Upload Windows installer artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -386,6 +397,7 @@ jobs:
           path: |
             apps/desktop/release-stage/dist/*-setup.exe
             apps/desktop/release-stage/dist/*-setup.exe.blockmap
+            apps/desktop/release-stage/dist/PwrGit.Setup*.exe
             apps/desktop/release-stage/dist/latest.yml
             apps/desktop/release-stage/dist/SHA256SUMS
           retention-days: 7

@@ -106,6 +106,36 @@ describe("desktop release configuration", () => {
     }
   });
 
+  test("the Windows alias is cut from the verified installer, by a script the signing job has", () => {
+    const workflow = read(".github/workflows/release.yml");
+    const archive = read("scripts/release/archive-windows-signing-input.ps1");
+
+    // windows-sign never checks out the repository, so anything it runs has to
+    // travel inside the verified signing-input archive — the script and the
+    // module it imports for its CLI guard alike.
+    for (const input of [
+      "apps/desktop/scripts/windows-release-artifacts.mjs",
+      "scripts/lib/cli-entrypoint.mjs",
+    ]) {
+      expect(archive).toContain(input);
+    }
+
+    // The alias is a byte-for-byte copy, so it inherits whatever it copies.
+    // Cutting it before Authenticode is verified would publish a stable URL
+    // that has never been checked.
+    const verify = workflow.indexOf("Verify Authenticode signatures");
+    const alias = workflow.indexOf("windows-release-artifacts.mjs apps/desktop/release-stage");
+    const upload = workflow.indexOf("Upload Windows installer artifact");
+    expect(verify).toBeGreaterThan(-1);
+    expect(alias).toBeGreaterThan(verify);
+    expect(upload).toBeGreaterThan(alias);
+
+    // An alias the release never uploads is the same as no alias at all.
+    expect(workflow).toContain("apps/desktop/release-stage/dist/PwrGit.Setup*.exe");
+    // And the versioned installer latest.yml names must keep shipping beside it.
+    expect(workflow).toContain("apps/desktop/release-stage/dist/*-setup.exe\n");
+  });
+
   test("macOS signing preloads a generated-password keychain", () => {
     const script = read("apps/desktop/scripts/release.mjs");
 

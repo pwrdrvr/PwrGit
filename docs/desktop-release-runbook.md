@@ -70,7 +70,8 @@ stable tags may be promoted.
 3. Linux validates that the desktop source builds. It produces no package.
 4. Windows prepares a self-contained x64 stage without credentials.
 5. `windows-signing` uses Azure Artifact Signing during NSIS packaging and
-   verifies Authenticode on both the app executable and installer.
+   verifies Authenticode on both the app executable and installer, then copies
+   the verified installer to the stable `PwrGit.Setup.exe` alias.
 6. The publication job waits for macOS, Windows, and the Linux build gate,
    then creates one release with changelog-derived notes and all published
    assets.
@@ -90,7 +91,17 @@ Then confirm that the release body is non-empty and that the assets include:
   their blockmaps, and `latest-mac.yml` listing both ZIPs with universal in the
   legacy top-level `path`/`sha512`;
 - `PwrGit-<version>-windows-x64-setup.exe`, its blockmap, `latest.yml`, and
-  `PwrGit-windows-SHA256SUMS`; and
+  `PwrGit-windows-SHA256SUMS`;
+- the stable `PwrGit.Setup.exe` alias, a byte-for-byte copy of that installer.
+  It is deliberately absent from `PwrGit-windows-SHA256SUMS` — the same bytes
+  under a second name state no new fact, and one build listed twice reads like
+  two builds. Check it against the versioned installer's recorded digest:
+
+  ```bash
+  shasum -a 256 PwrGit.Setup.exe
+  grep -- -setup.exe PwrGit-windows-SHA256SUMS
+  ```
+
 - no Linux installer or package.
 
 ```bash
@@ -103,6 +114,15 @@ Smoke-test installation and launch on macOS and Windows before promotion. Then:
 ```bash
 gh release edit vX.Y.Z --repo pwrdrvr/PwrGit --latest --prerelease=false
 ```
+
+`releases/latest/download/` resolves only for the release marked Latest, so the
+stable aliases start working at this step and not before. After promoting the
+first release that carries `PwrGit.Setup.exe`, point README.md's Windows
+download chip at
+`https://github.com/pwrdrvr/PwrGit/releases/latest/download/PwrGit.Setup.exe`
+and drop the sentence sending readers to pick the asset out of the releases
+page. Confirm the URL downloads the installer first: a chip that 404s is worse
+than one that opens the releases page.
 
 Do not create a partial release by hand while a signing approval or platform
 job is still pending.
