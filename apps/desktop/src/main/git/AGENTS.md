@@ -233,6 +233,130 @@ line. `worktrees.missing` (0027) records that so the sidebar can say
   DB with paths that do not exist, and a live check would turn every one of
   them into a "missing" worktree.
 
+## The pruner: one rule, one removal path, and `clean -X` is not what it looks like
+
+The worktree pruner is `worktree-prune.ts` (the sweep), `worktree-reclaim.ts`
+(the `git clean -Xd` operation) and `prune-handlers.ts` (both commands). Four
+things about it are load-bearing.
+
+**"Safe to prune" has exactly one definition, and it is in `@pwrgit/shared`.**
+`prunableReason` / `isPrunableWorktree` (`packages/shared/src/prunable.ts`) are
+run by the Stale lens in the renderer *and* by the sweep in main. It lives in
+shared because two processes ask the same question from opposite sides of the
+IPC boundary, and a second copy would let the lens and the verb disagree about
+which rows the pruner may touch. Loosening or tightening the rule moves both —
+that is the point, not a side effect.
+
+**The sweep exists because the tree cannot answer.** Per-worktree Git state is
+computed lazily, one repo at a time, on expand (`repo:computeState`) —
+computing all ~150 at launch storms git. So on a profile nobody has browsed the
+Stale lens is empty *by construction*, and a pruner that read the current tree
+would report "nothing to prune" on a disk full of finished worktrees
+(pwrdrvr/PwrGit#248 fixed the first-run confusion this caused; it did not
+change the constraint). `sweepPrunableWorktrees` therefore computes its own,
+capped at `PRUNE_SCAN_CONCURRENCY` (4 — inside the indexer's
+`HYDRATION_GIT_CONCURRENCY` budget) and taking the repository lock per repo.
+It is resumable for free: everything it computes lands in `worktree_state`, so
+a cancelled sweep is not wasted and a re-run reports those repos as `cached`
+and spawns no git. `prune-handlers.test.ts` pins that against real git.
+
+Sizing is a **separate phase** after the candidate set is known, because it is
+the slow half and it is not git — measuring a checkout means walking its
+`node_modules`. `util/dir-size.ts` bounds it: an entry ceiling (the answer
+comes back as a floor, which is the same decision), an abort signal, a yield
+every few directories, and symlinks never followed (a pnpm store outside the
+tree is not this worktree's bytes).
+
+**Removal is `worktree:removeMany`, not a second path.** That command already
+removes in bulk, streams `worktree:removed`, prunes the sidebar rows live and
+owns the dirty/force retry. The pruner passes `{ confirmed: true }` to
+`useRepoTree.removeWorktrees` because its own confirm names the repos, the
+reasons and the bytes; two confirms in a row train people to click through
+both.
+
+**`git clean -e <pattern>` does not spare anything under `-X`.** This is the
+trap, and it is silent. `-e` *adds* to git's ignore rules and `-X` deletes
+exactly the ignored set, so `clean -Xdn -e '.env'` still reports
+`Would remove .env` — a "default spare list" implemented that way would delete
+precisely the files it advertises as protected. Sparing needs a **negated**
+command-line pattern (`-e '!.env'`), which un-ignores the path so `-X` has no
+reason to touch it; command-line excludes outrank `.gitignore`, and globs and
+trailing-slash directory patterns work the same way. `spareArgs` does the
+negation, `excludePatternProblem` refuses a user-typed `!` (it would become
+`!!foo`), and `worktree-reclaim.test.ts` pins both directions against real git.
+If that test ever looks redundant, it is the only thing between this feature
+and a silent data-loss bug.
+
+Three more invariants in the same file:
+
+- **`-X`, never `-x`.** `-x` also deletes untracked files that no rule covers,
+  which is uncommitted work. There is no UI for it, deliberately.
+- **The preview is git's own dry run; the deletion re-runs git.** The parsed
+  `Would remove …` paths are shown to the user and then thrown away. Do not
+  "optimize" `reclaimIgnored` into `clean -- <paths>`: as written, a mis-parse
+  can only mis-*draw* a row, never widen what gets deleted. The dry run is
+  also the reason that command forces `LC_ALL=C` (git translates its own
+  messages, so the prefix would otherwise be a guess) and
+  `-c core.quotePath=false` (or a non-ASCII path arrives as octal escapes).
+- **A single `-f`.** Git refuses to delete a directory holding its own `.git`
+  unless `-f` is given twice, which is what keeps a vendored clone inside an
+  ignored directory alive. One `-f` is the whole authorization wanted here.
+
+And the reason all of this care is warranted: **ignored does not mean
+worthless.** `.env` files, local SQLite databases, keys and scratch notes are
+all routinely gitignored and have no object in the object store, so
+`clean -X` is unrecoverable in a way that `discardAllChanges` (which restores
+from HEAD) is not. `RECLAIM_DEFAULT_EXCLUDES` spares that class by default and
+the user can narrow it; `discardAllChanges`' own `clean -fd` must keep
+excluding ignored paths — two commands, two blast radii, and neither may
+quietly acquire the other's flags.
+
+**A lock is a refusal, and the predicate honours it.** `prunableReason` returns
+null for `locked === true`, alongside dirty and missing. Two reasons, and the
+second is the one that bites: `git worktree lock` is the only explicit "do not
+touch this" in git's worktree model — repo-indexer.ts already reasons from it
+("Git never reports a LOCKED worktree prunable ... that is what locking is
+for") — and removing one needs `--force`, which `removeWorktrees` only offers
+for the *dirty* set behind its own prompt. So a locked row in the list would be
+a confirm promising "Remove 3 worktrees" followed by a failure notice for one of
+them. `PruneCandidate` therefore carries no `locked` field: nothing that reaches
+the dialog can be locked.
+
+**The byte figure is the size of the files, never a promise about free space.**
+Both confirms say what is being deleted ("holding 4.9 GB on disk", "totalling
+3.9 GB") and never "freeing X", because the space returned to the volume is not
+knowable ahead of time and sometimes not even afterwards. Measured on an APFS
+volume: `cp -c` clone and a real `cp` copy of the same 20 MB file are
+indistinguishable in every field `stat` exposes — same `nlink=1`, same
+`st_blocks=40960`, same `du` — yet the volume lost 20 MB for both, and deleting
+the clone returned nothing. `du` accordingly reported 60 MB for 20 MB of real
+consumption. macOS adds a second layer: a local Time Machine snapshot pins the
+blocks of anything deleted until it expires, so a correct measurement would
+read zero and be right. `diskSpaceNote` in the renderer's prune-view.ts carries
+this to the user, in two variants (APFS clones + Time Machine on darwin, hard
+links elsewhere), and says the space does come back — later. Do not "fix" this
+by reintroducing a free-space delta: on a live machine `f_bavail` drifted 1.1 MB
+in the one second of an idle measurement.
+
+**Sizes de-duplicate hard links, and are still a floor.** pnpm fills
+`node_modules` by hard-linking one store blob into every package that needs it,
+so summing `stat.size` per directory entry counts the same blocks repeatedly —
+a 400 MB checkout measures as several GB, and that number becomes "freeing
+4.2 GB" on a confirm. `directorySize` keys multiply-linked files by `dev:ino`
+and counts each once (`hardLinks` reports how many repeats it skipped). Links
+from *another* worktree into the same blob are still counted, because from this
+root's view they are its bytes; what a delete returns to the filesystem is at
+most this, never more.
+
+**The reclaim panel will not delete with unapplied edits.** `reclaim()` sends
+`appliedExcludes` — the patterns the visible preview was taken with — so a
+pattern typed but not applied via "Update preview" would be silently dropped
+and the file it was meant to protect deleted. The Delete button is disabled
+while the field differs from the applied list, and the footer says both things:
+what is currently spared, *and* that it is not applied yet. Do not collapse
+those two messages into one; the dangerous fact must not be displaced by the
+procedural one.
+
 ## Partial staging works through Git, never through renderer patch text
 
 `partial-staging.ts` stages and unstages hunks and lines. Four invariants hold

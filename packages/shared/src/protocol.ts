@@ -51,6 +51,11 @@ import type {
   ForgeStatus,
   PrSummary,
   Profile,
+  PruneScanProgress,
+  PruneScanSummary,
+  ReclaimPlan,
+  ReclaimProgress,
+  ReclaimSummary,
   ProfileId,
   ProfileThemeOverride,
   PartialFileDiff,
@@ -1272,6 +1277,66 @@ export interface Commands {
     req: { operationId: string };
     res: { cancelled: boolean };
   };
+  /**
+   * Sweep a profile for worktrees that are safe to remove.
+   *
+   * Per-worktree Git state is otherwise computed lazily, one repo at a time,
+   * when a sidebar row is expanded — so on a profile nobody has browsed there
+   * is nothing to filter and the Stale lens is empty by construction. This is
+   * the pruner's own bounded pass over every repo: concurrency-capped inside
+   * main, cancellable, and resumable because the states it computes stay
+   * cached (a re-run reports the untouched repos as `cached`).
+   */
+  "prune:scan": {
+    req: {
+      operationId: string;
+      profileId: ProfileId;
+      /** Re-run git even where a fresh state snapshot already exists. */
+      force?: boolean;
+    };
+    res: PruneScanSummary;
+  };
+  /** Request cancellation; repos already swept keep their candidates. */
+  "prune:cancelScan": {
+    req: { operationId: string };
+    res: { cancelled: boolean };
+  };
+  /**
+   * What `git clean -Xd` would delete in one worktree — git's own dry run,
+   * with sizes, biggest first. Read-only; nothing is removed.
+   */
+  "prune:reclaimPreview": {
+    req: {
+      worktreeId: string;
+      /** `-e` patterns; omitted means RECLAIM_DEFAULT_EXCLUDES. */
+      excludes?: string[];
+      /**
+       * Pass one to make this preview cancellable via `prune:cancelReclaim`.
+       * A preview walks every ignored directory it finds, so previewing a
+       * selection of worktrees is minutes of filesystem work holding one
+       * worktree lock at a time — the user has to be able to stop it.
+       */
+      operationId?: string;
+    };
+    res: ReclaimPlan;
+  };
+  /**
+   * Delete the ignored files in each worktree (`git clean -Xd -f`), keeping
+   * every tracked file and the worktree itself. Destructive: ignored files
+   * have no git object behind them. Callers confirm, having shown the preview.
+   */
+  "prune:reclaim": {
+    req: {
+      operationId: string;
+      worktreeIds: string[];
+      excludes?: string[];
+    };
+    res: ReclaimSummary;
+  };
+  "prune:cancelReclaim": {
+    req: { operationId: string };
+    res: { cancelled: boolean };
+  };
   "remote:add": {
     req: { repoId: string; name: string; fetchUrl: string; pushUrl?: string };
     res: null;
@@ -1695,6 +1760,10 @@ export interface Events {
   "remote:bulkSyncProgress": BulkSyncProgress;
   /** A worktree finished being removed (streamed during a batch remove). */
   "worktree:removed": { worktreeId: string };
+  /** Per-repository progress for the pruner's profile-wide sweep. */
+  "prune:scanProgress": PruneScanProgress;
+  /** Per-worktree progress while ignored files are being deleted. */
+  "prune:reclaimProgress": ReclaimProgress;
   /**
    * PR status changed for some of a repo's branches — a targeted delta the
    * renderer patches onto the tree in place (no full reload). null clears a

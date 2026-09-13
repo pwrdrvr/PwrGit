@@ -9,3 +9,5 @@ export * from "./ipc";
 export * from "./product";
 export * from "./appearance";
 export * from "./mcp-policy";
+export * from "./prunable";
+export * from "./reclaim";

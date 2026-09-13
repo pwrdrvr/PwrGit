@@ -57,8 +57,8 @@ test("clone action stays visible above a long scrolling repo list", async () => 
   // child does not collapse into the gap — it adds to it. That is what drew the
   // Clone row 16px under "Add folders…" while every neighbouring seam was 8px.
   // Asserted as equality rather than a pinned 8, so retuning the gap is free.
-  const [underJump, underAddFolders, underCloneRow] = await window.evaluate(
-    () => {
+  const [underJump, underAddFolders, underCloneRow, underBulkSync] =
+    await window.evaluate(() => {
       const box = (selector: string): DOMRect => {
         const element = document.querySelector(selector);
         if (element === null) throw new Error(`missing ${selector}`);
@@ -67,12 +67,16 @@ test("clone action stays visible above a long scrolling repo list", async () => 
       return [
         box(".add-folder").top - box(".jump-btn").bottom,
         box(".clone-repo").top - box(".add-folder").bottom,
-        box(".bulk-sync-action").top - box(".clone-repo").bottom
+        box(".bulk-sync-action").top - box(".clone-repo").bottom,
+        // The pruner's own row is the block's last child, so it is the seam a
+        // future margin would most easily be added to unnoticed — the three
+        // above it are measured and it was not.
+        box(".prune-actions").top - box(".bulk-sync-actions").bottom
       ].map((seam) => Math.round(seam));
-    }
-  );
+    });
   expect(underAddFolders).toBe(underJump);
   expect(underCloneRow).toBe(underJump);
+  expect(underBulkSync).toBe(underJump);
 
   const beforeScroll = await clone.boundingBox();
   await window.locator(".sidebar__list").evaluate((element) => {

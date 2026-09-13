@@ -662,7 +662,7 @@ export function App() {
           onSetRepoPin={setRepoPin}
           onSetWorktreePin={setWorktreePin}
           onRemoveWorktree={(id) => void removeWorktrees([id])}
-          onRemoveWorktrees={(ids) => void removeWorktrees(ids)}
+          onRemoveWorktrees={removeWorktrees}
           onCreateWorktree={createAndRevealWorktree}
           onPersistOrder={persistWorktreeOrder}
           onPersistRepoOrder={persistRepoOrder}

@@ -1,4 +1,10 @@
-import type { Lens, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
+import {
+  isPrunableWorktree,
+  type Lens,
+  type Repo,
+  type Worktree,
+  type WorktreeSort
+} from "@pwrgit/shared";
 import { pathLeaf } from "../../lib/platform";
 import type { FocusVisits } from "./focus-visits";
 
@@ -52,6 +58,14 @@ export function lensIsAvailable(
  * honest on a fresh scan and as a lie to someone who has opened every row and
  * genuinely has nothing behind — so Behind and Stale describe *when* PwrGit
  * checks rather than claiming it has not.
+ *
+ * Stale is the one lens with a way out of that wait: the sidebar's "Prune
+ * worktrees" sweep computes state for every repository without expanding a
+ * single row, which is the whole reason it exists. Naming it here matters more
+ * than it looks — this copy is what a *dimmed, unenterable* Stale chip says on
+ * hover, so it is the only text a first-run user sees at the moment they most
+ * want the thing that would fill it. `Behind` has no such counterpart and so
+ * still only describes when PwrGit looks.
  */
 export const LENS_EMPTY_COPY: Record<Lens, string> = {
   Focused:
@@ -60,7 +74,7 @@ export const LENS_EMPTY_COPY: Record<Lens, string> = {
   Behind:
     "No repo is behind its upstream. PwrGit compares each one with its upstream as you open its row.",
   Stale:
-    "No worktrees look safe to prune. PwrGit works out what's prunable as you open each repo's row.",
+    "No worktrees look safe to prune. PwrGit works out what's prunable as you open each repo's row — or use Prune worktrees to check every repository at once.",
   All: "No repos yet — add a folder above and PwrGit will scan it."
 };
 
@@ -348,27 +362,11 @@ export function groupReposByRoot(repos: Repo[], roots: string[]): RepoGroup[] {
   return groups;
 }
 
-/** A worktree is "safe to prune": clean, fully merged into the default branch,
- *  not the default/primary checkout, and untouched for a while. */
-export const STALE_AGE_DAYS = 14;
-
-export function isPrunableWorktree(w: Worktree, now: number = Date.now()): boolean {
-  if (w.isDefaultBranch || w.isPrimary) return false;
-  // Nothing to prune: the checkout is already gone. The row says so itself,
-  // and "stale" beside "directory missing" would be two answers to one row.
-  if (w.missing === true) return false;
-  if (w.dirty > 0) return false;
-  // A merged PR is definitive — the work is in the base branch, so it's safe to
-  // prune at any age. This catches squash/rebase merges that the git-ancestry
-  // check below can't see (the original commits aren't in the default branch).
-  if (w.pr?.state === "merged") return true;
-  // Otherwise fall back to the git heuristic: contained in the default branch,
-  // or sharing no history with it (rewritten/orphaned) — both plus old + clean.
-  if (!w.mergedIntoDefault && !w.divergedFromDefault) return false;
-  if (w.lastActivityAt === undefined) return false;
-  const ageMs = now - new Date(w.lastActivityAt).getTime();
-  return ageMs > STALE_AGE_DAYS * 24 * 60 * 60 * 1000;
-}
+/** The staleness rule itself lives in `@pwrgit/shared` — the pruner's sweep
+ *  runs it in the main process over freshly computed state, and the Stale lens
+ *  runs it here over the tree it already has. Re-exported so the lens, the
+ *  rows, and their tests keep reading it from one place. */
+export { isPrunableWorktree, STALE_AGE_DAYS } from "@pwrgit/shared";
 
 function repoIsPinned(r: Repo): boolean {
   return r.pinned || r.worktrees.some((w) => w.pinned);
