@@ -8,9 +8,10 @@
   "copyright": "Copyright © 2026 PwrDrvr LLC",
   "type": "module",
   "bin": {
-    "pwrgit-mcp": "./dist/bin.js"
+    "pwrgit-mcp": "./bin/pwrgit-mcp.js"
   },
   "files": [
+    "bin",
     "dist",
     "README.md"
   ],
@@ -21,7 +22,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "start": "node ./dist/bin.js",
+    "prepare": "pnpm run build",
+    "start": "node ./bin/pwrgit-mcp.js",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
