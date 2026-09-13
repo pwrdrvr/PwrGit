@@ -414,6 +414,12 @@ describe("GitCafe settings", () => {
     expect(container.textContent).toContain("bun i -g @gitcafe/cli");
     expect(container.textContent).toContain("0.5.0");
     expect(container.querySelector('[aria-label="GitCafe: Not installed"]')).not.toBeNull();
+    // The registry marks its commands with backticks because it is plain data
+    // shared with main. They must not reach the user as punctuation.
+    expect(container.textContent).not.toContain("`");
+    expect(
+      [...container.querySelectorAll("code")].map((node) => node.textContent)
+    ).toContain("bun i -g @gitcafe/cli");
   });
   it("uses GitCafe's host syntax when signed out of an added host", async () => {
     await render([forge({ kind: "gitcafe", loggedIn: false, hosts: [{ host: "cafe.example", enabled: true, loggedIn: false }] })]);

@@ -1536,6 +1536,21 @@ export type RepoSearchHit = {
   pr?: PrSummary;
 };
 
+/**
+ * How much PwrGit established about a server key on its own.
+ *
+ * Named, because the UI has to *look* different per state. A key that matches
+ * the forge's published list and a key that contradicts it are opposite
+ * answers to the only question the user is being asked, and painting both in
+ * the same error red leaves the reader to find the difference in a paragraph.
+ */
+export type SshHostVerification =
+  | "published-match"
+  | "unpublished"
+  | "lookup-failed"
+  | "mismatch"
+  | "existing-key";
+
 /** A main-owned, expiring SSH trust proposal; never accepts key bytes from UI. */
 export type SshHostTrustProposal = {
   id: string;
@@ -1543,7 +1558,7 @@ export type SshHostTrustProposal = {
   port: number;
   algorithm: string;
   fingerprint: string;
-  verification: "published-match" | "unpublished" | "lookup-failed" | "mismatch" | "existing-key";
+  verification: SshHostVerification;
   sourceUrl: string | null;
   message: string;
   canTrust: boolean;

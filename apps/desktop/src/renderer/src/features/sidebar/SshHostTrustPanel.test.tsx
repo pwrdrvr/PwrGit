@@ -5,7 +5,9 @@ import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { ok, err, type SshHostTrustProposal } from "@pwrgit/shared";
 const mocks = vi.hoisted(() => ({ dispatch: vi.fn() }));
 vi.mock("../../lib/pwrgit", () => mocks);
-import { SshHostTrustPanel } from "./SshHostTrustPanel";
+import { SshHostTrustPanel, sshTrustTone } from "./SshHostTrustPanel";
+const writeText = vi.fn(async () => {});
+Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let container: HTMLDivElement;
 let root: Root;
@@ -49,6 +51,47 @@ it.each(["mismatch", "existing-key"] as const)("does not offer trust for %s", as
   await inspect();
   expect(button("Trust and retry")).toBeUndefined();
 });
+it("reports the verdict upward so the card can retone, and withdraws it on cancel", async () => {
+  const onVerification = vi.fn();
+  proposal.verification = "published-match";
+  await act(async () => root.render(<SshHostTrustPanel kind="github" hostname="github.com" onTrusted={retry} onVerification={onVerification} />));
+  await act(async () => button("Inspect host key").click());
+  expect(onVerification).toHaveBeenLastCalledWith("published-match");
+  await act(async () => button("Cancel").click());
+  expect(onVerification).toHaveBeenLastCalledWith(null);
+});
+
+it("paints the good answer, the bad one, and the undecided ones apart", () => {
+  expect(sshTrustTone("published-match")).toBe("ok");
+  expect(sshTrustTone("mismatch")).toBe("danger");
+  for (const state of ["unpublished", "lookup-failed", "existing-key"] as const) {
+    expect(sshTrustTone(state)).toBe("warn");
+  }
+});
+
+it("offers the fingerprint for copying — it is the value being compared", async () => {
+  await inspect();
+  const fingerprint = container.querySelector(".ssh-trust__fingerprint");
+  expect(fingerprint?.textContent).toBe("SHA256:contrived");
+  await act(async () => button("Copy fingerprint").click());
+  expect(writeText).toHaveBeenCalledWith("SHA256:contrived");
+});
+
+// `disabled` blurs the control in Chromium, so a keyboard activation would
+// drop focus to <body> for the length of the lookup (SC 2.4.3).
+it("marks an in-flight control aria-disabled rather than disabled", async () => {
+  let release: (value: unknown) => void = () => {};
+  mocks.dispatch.mockImplementation(() => new Promise((resolveDispatch) => { release = resolveDispatch; }));
+  await act(async () => root.render(<SshHostTrustPanel kind="gitcafe" hostname="git.cafe" onTrusted={retry} />));
+  await act(async () => button("Inspect host key").click());
+  const busy = button("Checking host key…");
+  expect(busy.disabled).toBe(false);
+  expect(busy.getAttribute("aria-disabled")).toBe("true");
+  busy.click();
+  expect(mocks.dispatch).toHaveBeenCalledTimes(1);
+  await act(async () => { release(ok(proposal)); });
+});
+
 it("never retries the clone when saving the key fails", async () => {
   proposal.verification = "published-match";
   await inspect();

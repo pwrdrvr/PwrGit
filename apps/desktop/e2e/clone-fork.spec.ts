@@ -398,7 +398,14 @@ test("SSH host verification offers a safe command and an explicit CLI retry", as
   await dialog.locator(".clone-dialog__submit").click();
   const recovery = dialog.locator(".clone-submit-error");
   await expect(recovery).toContainText("SSH could not verify the server’s identity");
-  await expect(recovery.locator("code")).toHaveText("ssh -T -o StrictHostKeyChecking=ask -- 'git@github.com'");
+  // The in-app path is the one offer on show; the terminal fallback starts
+  // folded so four same-weight buttons don't share one decision.
+  await expect(recovery.getByRole("button", { name: "Inspect host key" })).toBeVisible();
+  await expect(recovery.locator(".clone-submit-error__command")).toBeHidden();
+  await recovery.locator("details").first().locator("summary").click();
+  await expect(recovery.locator(".clone-submit-error__command code")).toHaveText(
+    "ssh -T -o StrictHostKeyChecking=ask -- 'git@github.com'"
+  );
   await expect(recovery.getByRole("button", { name: "Copy command" })).toBeVisible();
   await expect(recovery).toContainText("Compare the fingerprint");
   await recovery.getByRole("button", { name: "Use GitHub CLI" }).click();

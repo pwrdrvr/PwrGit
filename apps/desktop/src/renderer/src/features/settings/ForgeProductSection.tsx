@@ -359,7 +359,12 @@ export function ForgeProductSection(props: {
           label={blocks(state) ? "What to do" : "Available in PwrGit"}
           control={
             <div className="settings-field__help">
-              {blocks(state) ? remedy(status, state) : capabilities(status)}
+              {/* One sentence, one child. `.settings-field__help` is a flex
+                  column, so bare inline content around a <code> becomes three
+                  anonymous flex items and the command lands on a line of its
+                  own — which is how "Install the GitLab CLI (glab) to see
+                  status here." was reading as three stacked fragments. */}
+              {blocks(state) ? <p>{remedy(status, state)}</p> : capabilities(status)}
             </div>
           }
         />
@@ -615,6 +620,21 @@ function blocks(state: ForgeProductState): boolean {
 }
 
 /**
+ * Render a product's `installHint` the way the hand-written branches beside it
+ * render theirs: commands in a `<code>`.
+ *
+ * The registry is plain data shared with the main process, so it marks its
+ * commands the only way a string can — backticks. Rendered as text those reach
+ * the user literally, which is how `` `bun i -g @gitcafe/cli` `` was showing up
+ * with its quotes in Settings → Forges.
+ */
+export function codeSpans(text: string): ReactNode {
+  return text.split("`").map((part, index) =>
+    index % 2 === 0 ? part : <code key={index}>{part}</code>
+  );
+}
+
+/**
  * A blocked product gets the exact thing that unblocks it — install the CLI,
  * sign in, or turn a host back on. Only called when `blocks` says so.
  */
@@ -623,7 +643,7 @@ function remedy(status: ForgeStatus, state: ForgeProductState): ReactNode {
   const noun = changeRequestNoun(status.kind);
   if (state === "missing") {
     const installHint = forgeProduct(status.kind).installHint;
-    if (installHint !== undefined) return installHint;
+    if (installHint !== undefined) return codeSpans(installHint);
     return (
       <>
         Install the {label} CLI (<code>{status.cli}</code>) to see status here.
