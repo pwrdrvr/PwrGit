@@ -13,6 +13,7 @@ import {
   isPrunableWorktree,
   formatLensCount,
   lensCounts,
+  LENS_EMPTY_COPY,
   lensIsAvailable,
   linkedWorktreeCount,
   lensIsArrangeable,
@@ -154,6 +155,17 @@ describe("lens availability", () => {
     // roving tab stop and its empty copy rather than going inert underneath
     // the user's own focus.
     expect(selectableLenses(freshScan, "Pinned")).toEqual(["Pinned", "All"]);
+  });
+
+  it("points an empty Stale at the sweep that can fill it", () => {
+    // This copy is what a DIMMED Stale chip says on hover, so on a fresh scan
+    // it is the only text shown at the moment the user most wants the thing
+    // that would fill the lens. Describing only when PwrGit looks — true
+    // before the pruner existed — now withholds the answer.
+    expect(LENS_EMPTY_COPY.Stale).toContain("Prune worktrees");
+    expect(LENS_EMPTY_COPY.Stale).toContain("every repository");
+    // Behind has no such counterpart and must not gain a dangling offer.
+    expect(LENS_EMPTY_COPY.Behind).not.toContain("Prune worktrees");
   });
 });
 

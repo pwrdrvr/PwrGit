@@ -58,6 +58,14 @@ export function lensIsAvailable(
  * honest on a fresh scan and as a lie to someone who has opened every row and
  * genuinely has nothing behind — so Behind and Stale describe *when* PwrGit
  * checks rather than claiming it has not.
+ *
+ * Stale is the one lens with a way out of that wait: the sidebar's "Prune
+ * worktrees" sweep computes state for every repository without expanding a
+ * single row, which is the whole reason it exists. Naming it here matters more
+ * than it looks — this copy is what a *dimmed, unenterable* Stale chip says on
+ * hover, so it is the only text a first-run user sees at the moment they most
+ * want the thing that would fill it. `Behind` has no such counterpart and so
+ * still only describes when PwrGit looks.
  */
 export const LENS_EMPTY_COPY: Record<Lens, string> = {
   Focused:
@@ -66,7 +74,7 @@ export const LENS_EMPTY_COPY: Record<Lens, string> = {
   Behind:
     "No repo is behind its upstream. PwrGit compares each one with its upstream as you open its row.",
   Stale:
-    "No worktrees look safe to prune. PwrGit works out what's prunable as you open each repo's row.",
+    "No worktrees look safe to prune. PwrGit works out what's prunable as you open each repo's row — or use Prune worktrees to check every repository at once.",
   All: "No repos yet — add a folder above and PwrGit will scan it."
 };
 
