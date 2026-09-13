@@ -549,7 +549,7 @@ test("the row controls clear the 24px pointer-target floor", async () => {
   expect(repoHeight).toBeLessThanOrEqual(28);
 });
 
-test("first-run Focused stays honest and offers the exhaustive index", async () => {
+test("a first run lands in the one lens that has anything in it", async () => {
   sandbox = createGitSandbox();
   sandbox.makeRepo("zulu");
   sandbox.makeRepo("alpha");
@@ -559,20 +559,23 @@ test("first-run Focused stays honest and offers the exhaustive index", async () 
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
   await window.getByRole("button", { name: /Add folders/i }).click();
-  await expect(window.locator(".repo-row__name")).toHaveCount(0, {
-    timeout: 20_000
-  });
-  await expect(window.locator(".sidebar__empty")).toContainText(
-    "No focused repos yet"
-  );
-  const browseAll = window.getByRole("button", { name: "Browse all 3" });
-  await expect(browseAll).toBeVisible();
-  await browseAll.click();
+
+  // Per-worktree state is computed lazily per repo, so on a profile nobody has
+  // opened yet Focused, Behind and Stale are empty by construction. This used
+  // to land the user in Focused and leave them staring at "No focused repos
+  // yet" with three more empty lenses behind it.
   await expect(lensChip(window, "All")).toHaveAttribute(
     "aria-selected",
-    "true"
+    "true",
+    { timeout: 20_000 }
   );
   await expect(window.locator(".repo-row__name")).toHaveCount(3);
+  for (const lens of ["Focused", "Behind", "Stale"]) {
+    await expect(lensChip(window, lens), `${lens} chip`).toHaveAttribute(
+      "aria-disabled",
+      "true"
+    );
+  }
 
   // All is the index: position follows name, and pinning must not move it.
   expect(await window.locator(".repo-row__name").allTextContents()).toEqual([
@@ -580,7 +583,14 @@ test("first-run Focused stays honest and offers the exhaustive index", async () 
     "mike",
     "zulu"
   ]);
+
+  // One pin is enough to give Focused something to show, and the chip opens
+  // the moment it does.
   await window.locator(".repo-row", { hasText: "zulu" }).locator(".pin").click();
+  await expect(lensChip(window, "Focused")).not.toHaveAttribute(
+    "aria-disabled",
+    "true"
+  );
   await lensChip(window, "Focused").click();
   await expect(window.locator(".repo-row__name")).toHaveText(["zulu"]);
   await expect(window.locator(".repo-row__focus-reason")).toHaveText("Pinned");

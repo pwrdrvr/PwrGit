@@ -10,6 +10,50 @@ export const LENSES: Lens[] = [
   "All"
 ];
 
+/**
+ * Where a window lands before the user has ever picked a lens.
+ *
+ * All, not Focused. Four of the five lenses are answered from per-worktree Git
+ * state (behind/dirty/last activity), and that state is computed lazily, one
+ * repo at a time, when a row is expanded — scanning 150 repos at launch storms
+ * git, so the index deliberately doesn't. The consequence is that on a freshly
+ * scanned profile Focused, Behind and Stale are all *structurally* empty: the
+ * first thing a new user saw after adding their folders was a blank list, and
+ * every other lens they clicked was blank too. All is the only lens that is
+ * right from the first scan, so it is where a first run starts; the Sidebar
+ * promotes a returning user back to Focused once there is something in it.
+ */
+export const DEFAULT_LENS: Lens = "All";
+
+/**
+ * Can this lens show anything at all right now?
+ *
+ * A lens with nothing in it isn't a view worth entering — it can only answer
+ * "nothing", which the dimmed chip already says without costing a click and a
+ * trip back. All is always available: it is the way back, and its own empty
+ * state ("add a folder") is the one empty list that tells a new user what to
+ * do next.
+ */
+export function lensIsAvailable(
+  lens: Lens,
+  counts: Record<Lens, number>
+): boolean {
+  return lens === "All" || counts[lens] > 0;
+}
+
+/**
+ * The lenses the user can actually move to — the available ones, plus whichever
+ * they are in. The active lens stays selectable even once it empties out (unpin
+ * the last repo and Pinned is suddenly 0) because yanking someone out of the
+ * view they chose is worse than showing them its empty copy.
+ */
+export function selectableLenses(
+  counts: Record<Lens, number>,
+  active: Lens
+): Lens[] {
+  return LENSES.filter((l) => l === active || lensIsAvailable(l, counts));
+}
+
 /** Focus is deliberately a small, explainable window rather than a score. */
 export const FOCUS_RECENCY_DAYS = 30;
 export const FOCUS_REPO_LIMIT = 12;
