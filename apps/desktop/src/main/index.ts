@@ -7,7 +7,8 @@ import {
   nativeImage,
   nativeTheme,
   protocol,
-  safeStorage
+  safeStorage,
+  webContents
 } from "electron";
 import {
   GENERAL_DEFAULTS,
@@ -204,21 +205,13 @@ const storedTheme = settings.get().general?.theme;
 // profile's — is repainted by those registries, not by the app controller.
 let hasOwnAppearance = (_window: BrowserWindow): boolean => false;
 let publishAppAppearance = (): void => undefined;
-/** The window a command came from, while it is still around. */
-const senderWindow = (context: CommandContext): BrowserWindow | null =>
-  context.webContentsId === undefined
-    ? null
-    : (BrowserWindow.getAllWindows().find(
-        (window) => window.webContents.id === context.webContentsId
-      ) ?? null);
-/**
- * Open an auxiliary window in the palette of whichever window summoned it —
- * the command's sender, or the focused window for a menu item.
- */
-let openAuxiliaryWindow = (
-  open: (appearance: AppAppearance) => BrowserWindow,
-  _opener?: BrowserWindow | null
-): BrowserWindow => open(appearance.appearance());
+/** The window a command came from, while it is still around. Resolved through
+ *  Electron so an embedded frame answers with the window that owns it. */
+const senderWindow = (context: CommandContext): BrowserWindow | null => {
+  if (context.webContentsId === undefined) return null;
+  const sender = webContents.fromId(context.webContentsId);
+  return sender === undefined ? null : BrowserWindow.fromWebContents(sender);
+};
 const appearance = createNativeThemeController({
   nativeTheme,
   initialTheme: isAppearanceTheme(storedTheme)
@@ -231,6 +224,16 @@ const appearance = createNativeThemeController({
     BrowserWindow.getAllWindows().filter((win) => !hasOwnAppearance(win)),
   onChanged: () => publishAppAppearance()
 });
+
+/**
+ * Open an auxiliary window in the palette of whichever window summoned it —
+ * the command's sender, or the focused window for a menu item. Reassigned
+ * below, once the registries that know which palette that is exist.
+ */
+let openAuxiliaryWindow = (
+  open: (appearance: AppAppearance) => BrowserWindow,
+  _opener?: BrowserWindow | null
+): BrowserWindow => open(appearance.appearance());
 
 const bus = new CommandBus();
 bus.register("ping", () => ok("pong"));
@@ -339,10 +342,7 @@ if (!gotSingleInstanceLock) {
     installWindowDefaults();
     bus.register("logs:read", () => ok(readLogSnapshot()));
     bus.register("logs:openWindow", (_req, context) => {
-      openAuxiliaryWindow(
-        (palette) => openLogsWindow(palette),
-        senderWindow(context)
-      );
+      openAuxiliaryWindow(openLogsWindow, senderWindow(context));
       return ok(null);
     });
     registerAppDocumentHandlers(bus, (kind, context) => {
@@ -714,34 +714,39 @@ if (!gotSingleInstanceLock) {
       emitEventToWindow("appearance:changed", next, window);
     };
 
+    /** One profile's palette changed: repaint its own window, and every
+     *  auxiliary window that borrowed it. */
+    const syncProfileAppearance = (profileId: string): void => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (windowAppearances.sourceFor(window) === profileId) {
+          syncWindowAppearance(window);
+        }
+      }
+    };
+
     openAuxiliaryWindow = (open, from) => {
       const opener = from ?? BrowserWindow.getFocusedWindow();
       const window = open(windowAppearances.appearanceFor(opener));
-      // A singleton that was already up opened in some earlier window's
-      // palette; re-summoning it from elsewhere re-themes it, which is the
-      // gesture for fixing one that reads wrong.
-      const resummoned = windowAppearances.knows(window);
+      const known = windowAppearances.knows(window);
+      const previous = windowAppearances.sourceFor(window);
       windowAppearances.inherit(window, opener);
-      if (resummoned) syncWindowAppearance(window);
+      // A window just constructed already has the right palette. A singleton
+      // that was already up opened in some earlier window's, so summoning it
+      // from a differently-themed one re-themes it — the gesture for fixing
+      // one that reads wrong.
+      if (known && windowAppearances.sourceFor(window) !== previous) {
+        syncWindowAppearance(window);
+      }
       return window;
     };
 
-    // The app default moved: profile windows re-resolve their own overrides,
-    // and so does every window borrowing from a profile that has none. The
-    // controller has already committed the new value by the time it calls.
+    // The app default moved. Every window re-resolves against it: one on the
+    // app palette follows, one borrowing a profile that inherits follows too,
+    // and a pinned profile's windows hold. The controller has already
+    // committed the new value by the time it calls.
     publishAppAppearance = () => {
       for (const window of BrowserWindow.getAllWindows()) {
-        if (windows.profileFor(window) === null) syncWindowAppearance(window);
-      }
-      windows.syncAllAppearances();
-    };
-
-    /** One profile's palette changed; catch the windows that borrowed it. */
-    const syncBorrowedAppearances = (profileId: string): void => {
-      for (const window of BrowserWindow.getAllWindows()) {
-        if (windowAppearances.borrows(window, profileId)) {
-          syncWindowAppearance(window);
-        }
+        syncWindowAppearance(window);
       }
     };
 
@@ -765,10 +770,8 @@ if (!gotSingleInstanceLock) {
         onCheckForUpdates: () => {
           void checkForAppUpdatesFromMenu();
         },
-        onOpenSettings: () =>
-          openAuxiliaryWindow((palette) => openSettingsWindow(palette)),
-        onOpenLogs: () =>
-          openAuxiliaryWindow((palette) => openLogsWindow(palette)),
+        onOpenSettings: () => openAuxiliaryWindow(openSettingsWindow),
+        onOpenLogs: () => openAuxiliaryWindow(openLogsWindow),
         onOpenLicense: () =>
           openAuxiliaryWindow((palette) =>
             openAppDocumentWindow("license", palette)
@@ -822,8 +825,7 @@ if (!gotSingleInstanceLock) {
 
     registerProfileHandlers(bus, profiles, {
       onChanged: (profile) => {
-        windows.syncAppearance(profile.id);
-        syncBorrowedAppearances(profile.id);
+        syncProfileAppearance(profile.id);
         refreshMenu();
       },
       openWindow: openProfileWindow,
@@ -837,9 +839,14 @@ if (!gotSingleInstanceLock) {
         if (windows.close(deletedProfileId)) {
           openProfileWindow(activeProfileId);
         }
-        // A viewer borrowing the deleted profile now resolves to the app
-        // default; repaint it rather than leaving it on a dead palette.
-        syncBorrowedAppearances(deletedProfileId);
+        // Profile ids are slugged from names and recycle, so a window left
+        // bound to this one would be adopted by the next profile that slugs
+        // the same. Hand the borrowers back to the app default.
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (!windowAppearances.borrows(window, deletedProfileId)) continue;
+          windowAppearances.inherit(window, null);
+          syncWindowAppearance(window);
+        }
       },
       consumeReveal: (profileId) => {
         const reveal = pendingReveals.get(profileId) ?? null;
@@ -943,7 +950,7 @@ if (!gotSingleInstanceLock) {
     // standing grant on their repositories, not a default.
     const mcpPolicyFile = join(app.getPath("userData"), "mcp-policy.json");
     const consent = new ConsentBroker(mcpPolicy, () =>
-      openAuxiliaryWindow((palette) => createConsentWindow(palette))
+      openAuxiliaryWindow(createConsentWindow)
     );
     consent.register(bus);
     const agentAccess = new AgentAccessService({

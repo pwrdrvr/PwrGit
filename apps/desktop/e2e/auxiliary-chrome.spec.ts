@@ -28,6 +28,32 @@ async function openMenuItem(
   return windowPromise;
 }
 
+/** Open the Logs window the way the renderer does, so main resolves its
+ *  palette from the sending window rather than from focus. */
+async function openLogsFrom(
+  app: AppHandle["app"],
+  sender: Page
+): Promise<Page> {
+  const windowPromise = app.waitForEvent("window");
+  await sender.evaluate(() =>
+    window.pwrgit.dispatch("logs:openWindow", undefined)
+  );
+  return windowPromise;
+}
+
+/** The native frame colour main painted behind this window. */
+async function frameBackground(
+  app: AppHandle["app"],
+  window: Page
+): Promise<string | null> {
+  return app.evaluate(({ BrowserWindow }, url) => {
+    const target = BrowserWindow.getAllWindows().find(
+      (candidate) => candidate.webContents.getURL() === url
+    );
+    return target?.getBackgroundColor() ?? null;
+  }, window.url());
+}
+
 async function expectAuxiliaryChrome(
   app: AppHandle["app"],
   window: Page,
@@ -111,13 +137,7 @@ test("secondary windows share themed platform chrome", async () => {
       item.title,
       "rgb(247, 244, 239)"
     );
-    const frameBackground = await app.evaluate(({ BrowserWindow }, url) => {
-      const target = BrowserWindow.getAllWindows().find(
-        (candidate) => candidate.webContents.getURL() === url
-      );
-      return target?.getBackgroundColor() ?? null;
-    }, auxiliary.url());
-    expect(frameBackground).toBe("#FFFFFF");
+    expect(await frameBackground(app, auxiliary)).toBe("#FFFFFF");
     await auxiliary.close();
   }
 });
@@ -133,6 +153,17 @@ test("secondary windows borrow the palette of the window that opened them", asyn
   const { app, window: mainWindow } = handle;
 
   await expect(mainWindow.locator("html")).not.toHaveAttribute("data-theme");
+
+  // Nothing to borrow yet: this profile inherits the dark app default, so the
+  // window it opens has to come up dark. Without this the test would still
+  // pass if every auxiliary window were hard-wired light.
+  const inherited = await openLogsFrom(app, mainWindow);
+  await expect(inherited.locator("html")).not.toHaveAttribute("data-theme");
+  expect(await frameBackground(app, inherited)).toBe("#000000");
+  await inherited.close();
+  // Logs is a singleton: it has to be gone before the second open, or that
+  // open focuses this window instead of constructing one.
+  await expect.poll(() => app.windows().length).toBe(1);
 
   // Pin this profile to light; the app default stays dark.
   const pinned = (await mainWindow.evaluate(async () => {
@@ -151,12 +182,9 @@ test("secondary windows borrow the palette of the window that opened them", asyn
   );
 
   // Dispatched from the renderer: the sender is the opener, no focus involved.
-  const logsPromise = app.waitForEvent("window");
-  await mainWindow.evaluate(() =>
-    window.pwrgit.dispatch("logs:openWindow", undefined)
-  );
-  const logs = await logsPromise;
+  const logs = await openLogsFrom(app, mainWindow);
   await expectAuxiliaryChrome(app, logs, "Logs", "rgb(247, 244, 239)");
+  expect(await frameBackground(app, logs)).toBe("#FFFFFF");
   await logs.close();
 
   // From the menu: Electron hands the click the focused window.
@@ -174,12 +202,6 @@ test("secondary windows borrow the palette of the window that opened them", asyn
       window.pwrgit.dispatch("appearance:read", undefined)
     )
   ).toEqual({ ok: true, value: { theme: "light", resolvedTheme: "light" } });
-  const frameBackground = await app.evaluate(({ BrowserWindow }, url) => {
-    const target = BrowserWindow.getAllWindows().find(
-      (candidate) => candidate.webContents.getURL() === url
-    );
-    return target?.getBackgroundColor() ?? null;
-  }, settings.url());
-  expect(frameBackground).toBe("#FFFFFF");
+  expect(await frameBackground(app, settings)).toBe("#FFFFFF");
   await settings.close();
 });
