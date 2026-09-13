@@ -1,5 +1,5 @@
 import { FORGE_PRODUCTS, forgeProductFor } from "./forge-product";
-import { FORGE_KINDS, type ForgeHost } from "./types";
+import { FORGE_KINDS, isForgeKind, type ForgeHost, type ForgeKind } from "./types";
 
 /**
  * The short name a forge host goes by on screen.
@@ -131,6 +131,67 @@ export function forgeHostName(entry: ForgeHostNaming): string {
   const chosen =
     entry.label === undefined ? null : sanitizeForgeHostLabel(entry.label);
   return chosen ?? derivedForgeHostName(entry.hostname, entry.host);
+}
+
+/**
+ * How one host should be drawn: a mark, a name, or both.
+ *
+ * The mark is the short form — a chip that is one glyph costs a repo row almost
+ * nothing, which is the whole reason the chip can be on every row. The name
+ * appears only when the mark cannot carry the answer by itself.
+ */
+export type ForgeHostDisplay = {
+  /** The product whose mark identifies this host, or null when no product
+   *  claims it — then there is no mark and `name` is all there is. */
+  kind: ForgeKind | null;
+  /** Text to draw beside the mark, or null when the mark says it alone. */
+  name: string | null;
+  /** The name in full, whether or not it is drawn. Tooltips and the settings
+   *  placeholder want it even when the chip is a bare glyph. */
+  fullName: string;
+};
+
+/**
+ * Decide the mark-and-name for every host in one set.
+ *
+ * A mark alone answers "which forge" only while this product has ONE host
+ * here: with `github.com` and `ghe.acme.example` both switched on, two
+ * identical marks are two rows that still cannot be told apart — the same
+ * failure `resolveForgeHostNames` guards against for derived names, one level
+ * up. Those hosts get their names back.
+ *
+ * A name the USER typed is always drawn. Typing one is a request to see that
+ * word; replacing it with a glyph reads as the field not having worked.
+ */
+export function resolveForgeHostDisplays(
+  hosts: readonly ForgeHostNaming[]
+): Map<string, ForgeHostDisplay> {
+  const names = resolveForgeHostNames(hosts);
+  const hostsPerKind = new Map<ForgeKind, number>();
+  const seen = new Set<string>();
+  for (const entry of hosts) {
+    if (seen.has(entry.hostname)) continue;
+    seen.add(entry.hostname);
+    if (isForgeKind(entry.host)) {
+      hostsPerKind.set(entry.host, (hostsPerKind.get(entry.host) ?? 0) + 1);
+    }
+  }
+  const out = new Map<string, ForgeHostDisplay>();
+  for (const entry of hosts) {
+    if (out.has(entry.hostname)) continue;
+    const fullName = names.get(entry.hostname) ?? entry.hostname;
+    const kind = isForgeKind(entry.host) ? entry.host : null;
+    const named =
+      entry.label !== undefined && sanitizeForgeHostLabel(entry.label) !== null;
+    const markSpeaksAlone =
+      kind !== null && !named && (hostsPerKind.get(kind) ?? 0) <= 1;
+    out.set(entry.hostname, {
+      kind,
+      name: markSpeaksAlone ? null : fullName,
+      fullName
+    });
+  }
+  return out;
 }
 
 /**

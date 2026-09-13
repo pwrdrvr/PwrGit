@@ -80,7 +80,7 @@ export function RepoRefsSections({
    *  cannot disagree about whether forges are worth naming here. */
   const forgeChipFor = (url: string) => {
     if (!forgeNaming.showChips) return null;
-    const chip = remoteForgeChip(url, forgeNaming.overrides, forgeNaming.names);
+    const chip = remoteForgeChip(url, forgeNaming.overrides, forgeNaming.displays);
     return chip === null ? null : <ForgeChip chip={chip} />;
   };
   const [refs, setRefs] = useState<RepoRefs | null>(null);

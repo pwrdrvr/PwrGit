@@ -434,7 +434,7 @@ export function RepoRow({
   // `forge:hosts` call rather than one per row.
   const forgeNaming = useForgeNaming();
   const forgeChip = forgeNaming.showChips
-    ? repoForgeChip(repo.identity, forgeNaming.names)
+    ? repoForgeChip(repo.identity, forgeNaming.displays)
     : null;
 
   // `aria-label` pins the row's name to the repo name alone — every E2E step

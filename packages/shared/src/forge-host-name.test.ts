@@ -3,6 +3,7 @@ import {
   derivedForgeHostName,
   FORGE_HOST_LABEL_MAX,
   forgeHostName,
+  resolveForgeHostDisplays,
   resolveForgeHostNames,
   sanitizeForgeHostLabel
 } from "./forge-host-name";
@@ -157,5 +158,108 @@ describe("resolveForgeHostNames", () => {
 
   it("is empty for an empty list", () => {
     expect(resolveForgeHostNames([]).size).toBe(0);
+  });
+});
+
+describe("resolveForgeHostDisplays", () => {
+  it("lets the mark speak alone while a product has one host", () => {
+    const displays = resolveForgeHostDisplays([
+      { hostname: "github.com", host: "github" },
+      { hostname: "gitlab.com", host: "gitlab" }
+    ]);
+    expect(displays.get("github.com")).toEqual({
+      kind: "github",
+      name: null,
+      fullName: "GitHub"
+    });
+    expect(displays.get("gitlab.com")).toEqual({
+      kind: "gitlab",
+      name: null,
+      fullName: "GitLab"
+    });
+  });
+
+  it("gives both hosts of one product their names back", () => {
+    // Two identical marks are two rows that still cannot be told apart — the
+    // same failure the name collision guards against, one level up. It is the
+    // PAIR that is ambiguous, so neither keeps the bare mark.
+    const displays = resolveForgeHostDisplays([
+      { hostname: "github.com", host: "github" },
+      { hostname: "ghe.acme.example", host: "github" },
+      { hostname: "gitlab.com", host: "gitlab" }
+    ]);
+    expect(displays.get("github.com")?.name).toBe("GitHub");
+    expect(displays.get("ghe.acme.example")?.name).toBe("acme");
+    // Untouched: the tanuki is still unique.
+    expect(displays.get("gitlab.com")?.name).toBeNull();
+  });
+
+  it("always draws a name the user typed", () => {
+    const displays = resolveForgeHostDisplays([
+      { hostname: "github.com", host: "github", label: "Wile E." },
+      { hostname: "gitlab.com", host: "gitlab" }
+    ]);
+    expect(displays.get("github.com")).toEqual({
+      kind: "github",
+      name: "Wile E.",
+      fullName: "Wile E."
+    });
+  });
+
+  it("treats a label that says nothing as no label at all", () => {
+    const displays = resolveForgeHostDisplays([
+      { hostname: "github.com", host: "github", label: "   " },
+      { hostname: "gitlab.com", host: "gitlab" }
+    ]);
+    expect(displays.get("github.com")?.name).toBeNull();
+  });
+
+  it("has no mark for a host no product claims, so it keeps its words", () => {
+    const displays = resolveForgeHostDisplays([
+      { hostname: "git.acme.test", host: "other" },
+      { hostname: "github.com", host: "github" }
+    ]);
+    expect(displays.get("git.acme.test")).toEqual({
+      kind: null,
+      name: "acme",
+      fullName: "acme"
+    });
+  });
+
+  it("carries the full name even when the chip draws none of it", () => {
+    // The settings placeholder and the tooltip both want the words back.
+    const displays = resolveForgeHostDisplays([
+      { hostname: "ghe.acme.example", host: "github" }
+    ]);
+    expect(displays.get("ghe.acme.example")).toEqual({
+      kind: "github",
+      name: null,
+      fullName: "acme"
+    });
+  });
+
+  it("keeps the collided-name fallback underneath the mark decision", () => {
+    // Both derive to "acme" and both are ambiguous by product count here, so
+    // the names they get back must be the hostnames, not the collided word.
+    const displays = resolveForgeHostDisplays([
+      { hostname: "github.acme.example", host: "github" },
+      { hostname: "ghe.acme.example", host: "github" }
+    ]);
+    expect(displays.get("github.acme.example")?.name).toBe("github.acme.example");
+    expect(displays.get("ghe.acme.example")?.name).toBe("ghe.acme.example");
+  });
+
+  it("counts a hostname listed twice once", () => {
+    const displays = resolveForgeHostDisplays([
+      { hostname: "github.com", host: "github" },
+      { hostname: "github.com", host: "github" }
+    ]);
+    expect(displays.size).toBe(1);
+    // Listed twice is still ONE host, so the mark still speaks alone.
+    expect(displays.get("github.com")?.name).toBeNull();
+  });
+
+  it("is empty for an empty list", () => {
+    expect(resolveForgeHostDisplays([]).size).toBe(0);
   });
 });

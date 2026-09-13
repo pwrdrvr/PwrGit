@@ -1056,6 +1056,12 @@ textarea,
   color: var(--text-muted);
   font: 600 9px/1 var(--font-mono);
 }
+/* A chip that is only a mark is square, not a pill with a glyph rattling
+   around in it — the horizontal padding exists to set words off from the
+   border, and there are none. */
+.forge-chip--mark {
+  padding: 0 2px;
+}
 /* The name is the half that gives way. A derived name that collided with
    another host's is abandoned for the full hostname, which is long enough to
    push the repo name out of a 240px sidebar — and the `title` carries it in

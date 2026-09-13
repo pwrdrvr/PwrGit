@@ -497,6 +497,22 @@ provider or reach a real forge.
   host — which CLI is spawned, whose token is minted — and naming is handed
   the already-resolved kind and only decides which characters to print. A
   wrong answer there is an ugly chip, not a request at the wrong API.
+  - **The chip is usually the product's MARK, not its name**
+    (`resolveForgeHostDisplays`, and `sidebar/ForgeMark.tsx` for the glyphs).
+    One glyph is what lets the chip sit on every repo row in a 320px sidebar
+    without costing the repo name beside it. Words come back in exactly three
+    cases, and all three are "the mark cannot answer": a product with two
+    enabled hosts (one Octocat cannot distinguish `github.com` from
+    `ghe.acme.example` — so BOTH are named, it is the pair that is ambiguous),
+    a name the user typed (typing one is a request to see that word), and a
+    host no product claims (there is no mark). The tooltip always spells every
+    host out, so the mark is an abbreviation rather than a loss.
+  - **The marks are a `Record<ForgeKind, …>` of Lucide paths**, transcribed
+    like the other six icons in the renderer rather than pulled from a
+    dependency — so a third product is a missing-property type error naming
+    `ForgeMark.tsx`, and the marks share the stroke language of the lock and
+    fork glyphs they sit beside instead of dropping filled brand logos into a
+    row of outlines.
 - **Three states, not two.** No `repo_identity` row means *never looked up*;
   `visibility: "unknown"` means *asked, and the forge would not say*. They
   render differently, and neither collapses into `public` — that would

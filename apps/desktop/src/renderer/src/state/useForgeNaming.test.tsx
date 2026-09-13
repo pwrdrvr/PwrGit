@@ -78,8 +78,16 @@ it("stays quiet while one forge host is on, and speaks once a second is", async 
   ]);
   const two = await mount();
   expect(two.latest().showChips).toBe(true);
-  expect(two.latest().names.get("github.com")).toBe("GitHub");
-  expect(two.latest().names.get("gitlab.com")).toBe("GitLab");
+  // One host per product, so each chip is a bare mark.
+  expect(two.latest().displays.get("github.com")).toEqual({
+    kind: "github",
+    name: null,
+    fullName: "GitHub"
+  });
+  expect(two.latest().displays.get("gitlab.com")).toMatchObject({
+    kind: "gitlab",
+    name: null
+  });
   await two.unmount();
 });
 
@@ -106,8 +114,8 @@ it("prefers the name the user gave a host", async () => {
   ]);
   const probe = await mount();
   expect(
-    probe.latest().names.get("github.acme.huge-corp.southeast.us.corp")
-  ).toBe("Acme");
+    probe.latest().displays.get("github.acme.huge-corp.southeast.us.corp")
+  ).toMatchObject({ kind: "github", name: "Acme", fullName: "Acme" });
   await probe.unmount();
 });
 
@@ -117,7 +125,10 @@ it("re-reads when a host is renamed in another window", async () => {
     row({ host: "ghe.acme.example", kindSource: "config" })
   ]);
   const probe = await mount();
-  expect(probe.latest().names.get("ghe.acme.example")).toBe("acme");
+  // Two GitHub hosts, so the Octocat cannot answer alone and both are named.
+  expect(probe.latest().displays.get("ghe.acme.example")).toMatchObject({
+    name: "acme"
+  });
 
   answer([
     row({ host: "github.com" }),
@@ -126,7 +137,9 @@ it("re-reads when a host is renamed in another window", async () => {
   await act(async () => {
     handlers.get("settings:changed")?.(undefined);
   });
-  expect(probe.latest().names.get("ghe.acme.example")).toBe("Wile E.");
+  expect(probe.latest().displays.get("ghe.acme.example")).toMatchObject({
+    name: "Wile E."
+  });
   await probe.unmount();
 });
 

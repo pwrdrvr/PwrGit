@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FORGE_KINDS,
-  resolveForgeHostNames,
+  resolveForgeHostDisplays,
   type ForgeHostConfig,
   type ForgeHostRow,
   type ForgeKind,
@@ -224,9 +224,16 @@ export function ForgesSettings(props: { saving: boolean }) {
    * different products (`github.acme.example` and `gitlab.acme.example` both
    * derive "acme"). Per section, each would promise a short name the sidebar
    * will not print.
+   *
+   * `fullName`, not `name`: the chip may be drawing a bare mark with no words
+   * at all, but the field still has to show what the name would be if one were
+   * needed.
    */
-  const names = resolveForgeHostNames(
+  const displays = resolveForgeHostDisplays(
     (hosts ?? []).map((row) => ({ hostname: row.host, host: row.kind }))
+  );
+  const names = new Map(
+    [...displays].map(([hostname, display]) => [hostname, display.fullName])
   );
 
   /** Genuinely unavailable, not in-flight — the dialog cannot tell a new host

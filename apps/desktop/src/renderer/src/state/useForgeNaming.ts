@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import {
-  resolveForgeHostNames,
+  resolveForgeHostDisplays,
+  type ForgeHostDisplay,
   type ForgeHostMap,
   type ForgeHostRow
 } from "@pwrgit/shared";
@@ -22,9 +23,9 @@ import { dispatch, subscribe } from "../lib/pwrgit";
  * until something else re-rendered it.
  */
 export type ForgeNaming = {
-  /** Canonical hostname → the short name a chip should print. Only hosts with
-   *  a settings row appear; callers name anything else themselves. */
-  names: ReadonlyMap<string, string>;
+  /** Canonical hostname → the mark-and-name a chip should draw. Only hosts
+   *  with a settings row appear; callers resolve anything else themselves. */
+  displays: ReadonlyMap<string, ForgeHostDisplay>;
   /** The host→kind map main itself resolves with, for parsing a remote URL
    *  the same way main would. */
   overrides: ForgeHostMap;
@@ -39,7 +40,7 @@ export type ForgeNaming = {
 };
 
 const EMPTY: ForgeNaming = {
-  names: new Map(),
+  displays: new Map(),
   overrides: {},
   showChips: false
 };
@@ -60,7 +61,7 @@ function notify(): void {
  *  repaint the whole sidebar on every settings write. */
 function signature(value: ForgeNaming): string {
   return JSON.stringify([
-    [...value.names].sort(([a], [b]) => a.localeCompare(b)),
+    [...value.displays].sort(([a], [b]) => a.localeCompare(b)),
     Object.entries(value.overrides).sort(([a], [b]) => a.localeCompare(b)),
     value.showChips
   ]);
@@ -68,9 +69,10 @@ function signature(value: ForgeNaming): string {
 
 function apply(rows: ForgeHostRow[], overrides: ForgeHostMap): void {
   const next: ForgeNaming = {
-    // Named against the whole list, not row by row: two hosts that derive to
-    // the same word have to be told apart, and only the full set knows.
-    names: resolveForgeHostNames(
+    // Resolved against the whole list, not row by row: two hosts that derive
+    // to the same word — or that share a product, and so a mark — have to be
+    // told apart, and only the full set knows.
+    displays: resolveForgeHostDisplays(
       rows.map((row) => ({
         hostname: row.host,
         host: row.kind,
