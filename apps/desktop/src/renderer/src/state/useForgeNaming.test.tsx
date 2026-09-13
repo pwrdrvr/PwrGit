@@ -187,3 +187,44 @@ it("never asks the CLIs to re-enumerate", async () => {
   expect(dispatch).toHaveBeenCalledWith("forge:hosts", {});
   await probe.unmount();
 });
+
+it("names a host the env allowlist added but no settings row lists", async () => {
+  // `forge:hosts` answers with two different sets on purpose: `hosts` is what
+  // has a settings row, `overrides` is what main actually classifies with —
+  // and PWRGIT_GITHUB_HOSTS names hosts that appear only in the second. A
+  // store resolving from the rows alone resolved the env host BY ITSELF, where
+  // one GitHub host is never ambiguous, so it drew a bare Octocat beside a
+  // named github.com: the one pair the chip exists to tell apart, with the
+  // ambiguous half presented as the certain one.
+  dispatch.mockResolvedValue(
+    ok({
+      hosts: [row({ host: "github.com" })],
+      overrides: { "github.com": "github", "ghe.acme.example": "github" }
+    })
+  );
+  const view = await mount();
+  const { displays } = view.latest();
+
+  expect(displays.get("ghe.acme.example")?.kind).toBe("github");
+  expect(displays.get("ghe.acme.example")?.name).toBe("acme");
+  // And the row host stops speaking with a bare mark too — it is the PAIR
+  // that is ambiguous, not either one of them.
+  expect(displays.get("github.com")?.name).toBe("GitHub");
+  await view.unmount();
+});
+
+it("does not duplicate a host that is in both the rows and the overrides", async () => {
+  // The overrides map always repeats the hosts that do have rows. Counting one
+  // of those twice would make a single host look like an ambiguous pair.
+  dispatch.mockResolvedValue(
+    ok({
+      hosts: [row({ host: "github.com", label: "Wile E." })],
+      overrides: { "github.com": "github" }
+    })
+  );
+  const view = await mount();
+  const display = view.latest().displays.get("github.com");
+  expect(display?.name).toBe("Wile E.");
+  expect(display?.fullName).toBe("Wile E.");
+  await view.unmount();
+});

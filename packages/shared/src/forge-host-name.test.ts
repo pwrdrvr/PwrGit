@@ -126,14 +126,37 @@ describe("resolveForgeHostNames", () => {
     expect(names.get("gitlab.acme.example")).toBe("gitlab.acme.example");
   });
 
-  it("keeps a user's name even when it collides with a derived one", () => {
+  it("keeps a user's name and makes the derived one give way to it", () => {
+    // Both halves matter. The typed name stays: they chose it while looking at
+    // the list. The derived one goes, because a collision is a collision — two
+    // chips reading "acme" answer "which one?" with the same word whether the
+    // second "acme" was derived or typed, and this pair was the case an
+    // earlier version let through by counting only the derived names.
     const names = resolveForgeHostNames([
       { hostname: "github.acme.example", host: "github", label: "acme" },
       { hostname: "gitlab.acme.example", host: "gitlab" }
     ]);
     expect(names.get("github.acme.example")).toBe("acme");
-    // The derived side is alone in the derived pool, so it keeps its name.
-    expect(names.get("gitlab.acme.example")).toBe("acme");
+    expect(names.get("gitlab.acme.example")).toBe("gitlab.acme.example");
+  });
+
+  it("compares a typed name against a derived one case-insensitively too", () => {
+    const names = resolveForgeHostNames([
+      { hostname: "github.acme.example", host: "github", label: "ACME" },
+      { hostname: "gitlab.acme.example", host: "gitlab" }
+    ]);
+    expect(names.get("github.acme.example")).toBe("ACME");
+    expect(names.get("gitlab.acme.example")).toBe("gitlab.acme.example");
+  });
+
+  it("leaves a derived name alone when the typed one does not collide", () => {
+    // The guard must not fire on every named host — only on the word itself.
+    const names = resolveForgeHostNames([
+      { hostname: "github.acme.example", host: "github", label: "Wile E." },
+      { hostname: "gitlab.contoso.example", host: "gitlab" }
+    ]);
+    expect(names.get("github.acme.example")).toBe("Wile E.");
+    expect(names.get("gitlab.contoso.example")).toBe("contoso");
   });
 
   it("compares derived names case-insensitively", () => {

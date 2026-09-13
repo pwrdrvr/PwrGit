@@ -75,13 +75,32 @@ export function RepoRefsSections({
   ) => void;
 }) {
   const forgeNaming = useForgeNaming();
-  /** Null whenever a chip would say nothing — one forge host on, or a remote
-   *  no product claims. Same gate the repo row uses, so the two surfaces
-   *  cannot disagree about whether forges are worth naming here. */
-  const forgeChipFor = (url: string) => {
+  /**
+   * Null whenever a chip would say nothing — one forge host on, or a remote
+   * no product claims. Same gate the repo row uses, so the two surfaces cannot
+   * disagree about whether forges are worth naming here.
+   *
+   * Both URLs, because a remote is two URLs and `remote.pushUrl` is exactly
+   * how a checkout keeps a mirror on a second forge. The repo row's `+n`
+   * counts every forge host on any remote, fetch or push (`readRemotes`), so
+   * chipping only the fetch side left that count pointing at a host this list
+   * never showed — the one place the abbreviation is supposed to be cashed in.
+   * Identical URLs draw one chip, which is the ordinary case.
+   */
+  const forgeChipsFor = (remote: { fetchUrl: string; pushUrl: string }) => {
     if (!forgeNaming.showChips) return null;
-    const chip = remoteForgeChip(url, forgeNaming.overrides, forgeNaming.displays);
-    return chip === null ? null : <ForgeChip chip={chip} />;
+    const urls =
+      remote.pushUrl === "" || remote.pushUrl === remote.fetchUrl
+        ? [remote.fetchUrl]
+        : [remote.fetchUrl, remote.pushUrl];
+    const chips = urls
+      .map((url) => remoteForgeChip(url, forgeNaming.overrides, forgeNaming.displays))
+      .filter((chip) => chip !== null);
+    // Two remotes on the same forge is one chip's worth of information.
+    const unique = chips.filter(
+      (chip, index) => chips.findIndex((other) => other.title === chip.title) === index
+    );
+    return unique.map((chip) => <ForgeChip key={chip.title} chip={chip} />);
   };
   const [refs, setRefs] = useState<RepoRefs | null>(null);
   const [loading, setLoading] = useState(true);
@@ -616,9 +635,8 @@ export function RepoRefsSections({
                       {/* Per remote, because the repo row above can only
                           carry a count: this is where a checkout that pushes
                           to one forge and mirrors to another says which is
-                          which. Read from the fetch URL, and silent for a
-                          remote no product claims. */}
-                      {forgeChipFor(remote.fetchUrl)}
+                          which. Silent for a remote no product claims. */}
+                      {forgeChipsFor(remote)}
                       <small>
                         {remote.name === "origin"
                           ? "default"

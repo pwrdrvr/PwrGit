@@ -54,12 +54,19 @@ const GENERIC_LABELS: readonly string[] = [
   "www"
 ];
 
+/** Built once. Nothing here can change at runtime, and `derivedForgeHostName`
+ *  is called per host inside a loop that itself runs on every settings render
+ *  and every `forge:statusChanged` burst. */
+let generic: ReadonlySet<string> | undefined;
+
 function genericLabels(): ReadonlySet<string> {
+  if (generic !== undefined) return generic;
   const words = new Set(GENERIC_LABELS);
   for (const kind of FORGE_KINDS) {
     words.add(FORGE_PRODUCTS[kind].label.toLowerCase());
     words.add(FORGE_PRODUCTS[kind].cli.toLowerCase());
   }
+  generic = words;
   return words;
 }
 
@@ -107,9 +114,9 @@ export function derivedForgeHostName(hostname: string, host: ForgeHost): string 
   const labels = hostname.split(".").filter((label) => label !== "");
   if (labels.length === 0) return hostname;
   const candidates = labels.length > 1 ? labels.slice(0, -1) : labels;
-  const generic = genericLabels();
+  const words = genericLabels();
   return (
-    candidates.find((label) => !generic.has(label)) ??
+    candidates.find((label) => !words.has(label)) ??
     candidates[0] ??
     hostname
   );
@@ -168,10 +175,19 @@ export function resolveForgeHostDisplays(
 ): Map<string, ForgeHostDisplay> {
   const names = resolveForgeHostNames(hosts);
   const hostsPerKind = new Map<ForgeKind, number>();
+  // One decider for "did somebody name this host", shared with the resolver
+  // above rather than re-sanitizing each label here. Two deciders can disagree
+  // about what counts as a name — and only this one gates the mark, so the
+  // disagreement would show up as a chip whose name is drawn while its mark
+  // still believes it is unambiguous.
+  const named = new Set<string>();
   const seen = new Set<string>();
   for (const entry of hosts) {
     if (seen.has(entry.hostname)) continue;
     seen.add(entry.hostname);
+    if (entry.label !== undefined && sanitizeForgeHostLabel(entry.label) !== null) {
+      named.add(entry.hostname);
+    }
     if (isForgeKind(entry.host)) {
       hostsPerKind.set(entry.host, (hostsPerKind.get(entry.host) ?? 0) + 1);
     }
@@ -181,10 +197,10 @@ export function resolveForgeHostDisplays(
     if (out.has(entry.hostname)) continue;
     const fullName = names.get(entry.hostname) ?? entry.hostname;
     const kind = isForgeKind(entry.host) ? entry.host : null;
-    const named =
-      entry.label !== undefined && sanitizeForgeHostLabel(entry.label) !== null;
     const markSpeaksAlone =
-      kind !== null && !named && (hostsPerKind.get(kind) ?? 0) <= 1;
+      kind !== null &&
+      !named.has(entry.hostname) &&
+      (hostsPerKind.get(kind) ?? 0) <= 1;
     out.set(entry.hostname, {
       kind,
       name: markSpeaksAlone ? null : fullName,
@@ -225,8 +241,15 @@ export function resolveForgeHostNames(
       chosen.set(entry.hostname, label);
     }
   }
+  // Counted over BOTH halves. A derived name collides just as badly with a
+  // name somebody typed as with another derived one — name `ghe.acme.example`
+  // "acme" and let `gitlab.acme.example` derive, and without the chosen names
+  // in here the derived one keeps "acme" and two rows read the same word,
+  // which is the failure this whole function exists to prevent. The chosen
+  // names are only ever COUNTED here; the loop below rewrites derived ones
+  // only, so a name the user typed is still never withdrawn.
   const uses = new Map<string, number>();
-  for (const name of derived.values()) {
+  for (const name of [...chosen.values(), ...derived.values()]) {
     const key = name.toLowerCase();
     uses.set(key, (uses.get(key) ?? 0) + 1);
   }
