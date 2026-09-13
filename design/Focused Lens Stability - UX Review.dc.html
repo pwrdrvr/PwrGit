@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --bg-app: #000000; --bg-panel: #0a0a0a; --bg-sidebar: #070707;
+            --bg-elev: #101010; --bg-hover: #14110d; --bg-row-active: #120800;
+            --line: rgba(247, 243, 235, 0.1); --line2: rgba(247, 243, 235, 0.14);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a;
+            --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42);
+            --ok: #5fa969; --okt: #9ce5b3; --oksoft: rgba(95, 169, 105, 0.16);
+            --bad: #b94232; --badsoft: rgba(185, 66, 50, 0.24); --badt: #ffb0a1;
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #050505; }
+          body { margin: 0; background: #050505; font-family: var(--sans); }
+          a { color: var(--accb); text-decoration: none; } a:hover { color: var(--acc); }
+
+          /* ---- review chrome (matches "Tag Chips and Locate - UX Review") ---- */
+          .dv-turn { padding: 40px 44px 32px; background: #050505; }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--sans); color: var(--t3); max-width: 780px; text-wrap: pretty; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--sans); color: var(--tsub); max-width: 700px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+
+          /* ---- sidebar specimen, true size from apps/desktop/src/renderer/src/styles ----
+             .repo-row: min-height calc(13px * 1.25 + 10px) = 26.25px, padding
+             4px 8px 4px 12px, radius 8px, opaque --bg-sidebar.
+             .repo-row__name: 600 13px/1.25 sans. .repo-row__focus-reason:
+             600 9px/1 mono, min-height 15px, 1px --border-subtle. */
+          .side { position: relative; width: 306px; padding: 6px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-sidebar); }
+          .side-h { display: flex; align-items: center; gap: 7px; height: 26px; padding: 0 6px; }
+          .side-h .lens { display: inline-flex; align-items: center; height: 17px; padding: 0 8px; border-radius: 999px; background: var(--asoft); border: 1px solid var(--abord); color: var(--accb); font: 600 9px/1 var(--mono); }
+          .side-h .cnt { margin-left: auto; font: 600 9px/1 var(--mono); color: var(--tsub); }
+          .rows { display: flex; flex-direction: column; }
+          .rrow { position: relative; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 26.25px; padding: 4px 8px 4px 12px; border: 1px solid transparent; border-radius: 8px; background: var(--bg-sidebar); }
+          .rrow .chev { position: absolute; left: 4px; width: 0; height: 0; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 4px solid var(--t3); }
+          .rrow .rnm { flex: 1; min-width: 0; font: 600 13px/1.25 var(--sans); color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .rrow .rage { flex: none; font: 500 11px/1 var(--mono); color: var(--tsub); }
+          .rrow .rbadge { flex: none; display: inline-flex; align-items: center; padding: 0 4px; min-height: 15px; border-radius: 4px; border: 1px solid var(--line); color: var(--tsub); font: 600 9px/1 var(--mono); }
+          .rrow.is-active { background: var(--bg-row-active); }
+          .rrow.is-active .rnm { color: var(--acc); }
+          .rrow.is-active .rbadge { border-color: var(--abord); color: var(--accb); }
+          .rrow.is-hot { background: var(--bg-hover); }
+          .rrow.is-new { border-color: var(--abord); }
+          .proto .rrow { cursor: pointer; }
+          .proto .rrow:hover { background: var(--bg-hover); }
+          .rrow.is-moved::before { content: ""; position: absolute; left: -6px; top: 3px; bottom: 3px; width: 2px; border-radius: 2px; background: var(--bad); }
+
+          /* the pointer, parked where the user left it */
+          .ptr { position: absolute; z-index: 4; width: 15px; height: 20px; pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0,0,0,.8)); }
+          /* The caption sits under the specimen, not on it: at 306px the sidebar
+             has no free horizontal room beside a row, and a label pinned to the
+             cursor covered the age and the reason badge it is there to show. */
+          .ptr-cap { display: flex; align-items: baseline; gap: 6px; padding: 5px 9px; border-radius: 6px; font: 500 10px/1.4 var(--mono); }
+          .ptr-cap b { font-weight: 700; }
+          .ptr-cap.bad { background: var(--badsoft); color: var(--badt); }
+          .ptr-cap.ok { background: var(--oksoft); color: var(--okt); }
+
+          /* ---- stages, notes, findings ---- */
+          .stage { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); }
+          .stage-h { display: flex; align-items: baseline; gap: 8px; font: 600 9.5px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); }
+          .stage-h em { font: 500 9.5px/1 var(--mono); font-style: normal; color: var(--tsub); text-transform: none; letter-spacing: 0; }
+          .pair { display: flex; gap: 22px; align-items: flex-start; }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; max-width: 330px; }
+          .note code, .fitem code, .tr code { font: 500 10px/1.4 var(--mono); color: var(--t2); }
+
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); }
+          .pin.q { background: var(--t3); color: #050505; }
+          .pin.ok { background: var(--ok); color: #050505; }
+          .find { width: 384px; display: flex; flex-direction: column; gap: 11px; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--sans); color: var(--t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+
+          /* ---- ladder + matrix ---- */
+          .tbl { border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); overflow: hidden; }
+          .tr { display: grid; grid-template-columns: 46px 128px minmax(0, 1fr); gap: 12px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); font: 500 10.5px/1.45 var(--sans); color: var(--t2); }
+          .tr.gate { grid-template-columns: 224px 96px minmax(0, 1fr); }
+          .tr.last { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--t3); background: rgba(247, 243, 235, 0.03); }
+          .tr b { font: 600 10.5px/1.45 var(--mono); color: var(--t1); }
+          .st { display: inline-flex; padding: 2px 6px; border-radius: 999px; font: 700 8.5px/1.35 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; }
+          .st.keep { background: var(--oksoft); color: var(--okt); }
+          .st.chg { background: var(--asoft); color: var(--accb); border: 1px solid var(--abord); }
+          .st.bug { background: var(--badsoft); color: var(--badt); }
+          .st.no { background: rgba(247, 243, 235, 0.06); color: var(--t3); }
+
+          /* ---- option verdicts ---- */
+          .verd { display: flex; align-items: center; gap: 7px; font: 600 9px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; }
+          .verd.out { color: var(--badt); }
+          .verd.in { color: var(--okt); }
+
+          /* ---- live prototype chrome ---- */
+          .proto { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--abord); border-radius: 9px; background: var(--bg-panel); width: 356px; }
+          .ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+          .seg { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: 7px; background: #050505; }
+          .seg button { appearance: none; border: 0; padding: 4px 9px; border-radius: 5px; background: transparent; color: var(--t3); font: 600 9.5px/1 var(--mono); cursor: pointer; }
+          .seg button.on { background: var(--acc); color: var(--accon); }
+          .btn { appearance: none; padding: 5px 10px; border: 1px solid var(--line2); border-radius: 7px; background: var(--bg-elev); color: var(--t2); font: 600 9.5px/1 var(--mono); cursor: pointer; }
+          .btn:hover { border-color: var(--abord); color: var(--t1); }
+          .btn.armed { border-color: var(--abord); color: var(--accb); background: var(--asoft); }
+          .readout { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 7px; font: 500 10px/1.4 var(--mono); }
+          .readout.held { background: var(--oksoft); color: var(--okt); }
+          .readout.live { background: rgba(247, 243, 235, 0.05); color: var(--t3); }
+          .hint { margin: 0; font: 400 10px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+        </style>
+      </helmet>
+
+      <!-- ================================ TURN 1 ================================ -->
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Findings &#8212; the lens re&#8209;sorts in response to being read</span>
+        </div>
+        <p class="dv-sub">The Focused lens ranks repositories on a five&#8209;rule ladder, and the first rule is the current selection. So the act of clicking a row changes that row's rank &#8212; it is promoted to the top and every row it passes shifts down. The list is correct; the interaction is not. Specimens below are drawn at shipped size from <code>styles/tokens.css</code> and <code>app.css</code>, on contrived repository names.</p>
+
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a Ladder">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>The ladder, and the rule that fires on click</div>
+            <div class="tbl" style="width:424px;">
+              <div class="tr head"><span>Rank</span><span>Rule</span><span>Admitted because</span></div>
+              <div class="tr"><span><b>0</b></span><span><b>current</b> <span class="st bug">moves</span></span><span>holds the selected worktree</span></div>
+              <div class="tr"><span><b>1</b></span><span><b>pinned</b></span><span>repo or one of its worktrees is pinned</span></div>
+              <div class="tr"><span><b>2</b></span><span><b>viewed</b> <span class="st bug">moves</span></span><span>visited inside 30 days</span></div>
+              <div class="tr"><span><b>3</b></span><span><b>changed</b></span><span>dirty, ahead, or unpublished</span></div>
+              <div class="tr last"><span><b>4</b></span><span><b>recent</b></span><span>committed inside 30 days</span></div>
+            </div>
+            <p class="note">Two of the five rules are written by the pointer. Selecting a worktree sets <code>current</code> on its repo, and the same selection is durably recorded as a visit, which sets <code>viewed</code> on the repo it just left. One click can therefore move two rows.</p>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b Before/after">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>One click, five rows moved &#8212; the pointer never moved</div>
+            <div class="pair">
+              <div class="stage">
+                <div class="stage-h">Before <em>pointer resting on echo&#8209;ui</em></div>
+                <div class="side">
+                  <div class="side-h"><span class="lens">Focused</span><span class="cnt">6</span></div>
+                  <div class="rows">
+                    <div class="rrow"><span class="chev"></span><span class="rnm">atlas-api</span><span class="rage">2h</span><span class="rbadge">Pinned</span></div>
+                    <div class="rrow"><span class="chev"></span><span class="rnm">beacon-web</span><span class="rage">1d</span><span class="rbadge">Pinned</span></div>
+                    <div class="rrow"><span class="chev"></span><span class="rnm">cinder</span><span class="rage">3d</span><span class="rbadge">Viewed</span></div>
+                    <div class="rrow"><span class="chev"></span><span class="rnm">delta-svc</span><span class="rage">4d</span><span class="rbadge">Changed</span></div>
+                    <div class="rrow is-hot"><span class="chev"></span><span class="rnm">echo-ui</span><span class="rage">6d</span><span class="rbadge">Recent</span></div>
+                    <div class="rrow"><span class="chev"></span><span class="rnm">foxtrot-cli</span><span class="rage">11d</span><span class="rbadge">Recent</span></div>
+                  </div>
+                  <svg class="ptr" style="left:150px; top:134px;" viewBox="0 0 12 16" fill="none"><path d="M1 1l9.2 7.6-4.3.5 2.5 4.8-2 1-2.4-4.7-3 2.6z" fill="#f7f3eb" stroke="#050505" stroke-width="1"/></svg>
+                </div>
+                <div class="ptr-cap ok"><span>&#8593;</span><span>the click lands on <b>echo&#8209;ui</b></span></div>
+              </div>
+              <div class="stage">
+                <div class="stage-h">After <em>same pointer, one render later</em></div>
+                <div class="side">
+                  <div class="side-h"><span class="lens">Focused</span><span class="cnt">6</span></div>
+                  <div class="rows">
+                    <div class="rrow is-active is-moved"><span class="chev"></span><span class="rnm">echo-ui</span><span class="rage">6d</span><span class="rbadge">Current</span></div>
+                    <div class="rrow is-moved"><span class="chev"></span><span class="rnm">atlas-api</span><span class="rage">2h</span><span class="rbadge">Pinned</span></div>
+                    <div class="rrow is-moved"><span class="chev"></span><span class="rnm">beacon-web</span><span class="rage">1d</span><span class="rbadge">Pinned</span></div>
+                    <div class="rrow is-moved"><span class="chev"></span><span class="rnm">cinder</span><span class="rage">3d</span><span class="rbadge">Viewed</span></div>
+                    <div class="rrow is-hot is-moved"><span class="chev"></span><span class="rnm">delta-svc</span><span class="rage">4d</span><span class="rbadge">Changed</span></div>
+                    <div class="rrow"><span class="chev"></span><span class="rnm">foxtrot-cli</span><span class="rage">11d</span><span class="rbadge">Recent</span></div>
+                  </div>
+                  <svg class="ptr" style="left:150px; top:134px;" viewBox="0 0 12 16" fill="none"><path d="M1 1l9.2 7.6-4.3.5 2.5 4.8-2 1-2.4-4.7-3 2.6z" fill="#f7f3eb" stroke="#050505" stroke-width="1"/></svg>
+                </div>
+                <div class="ptr-cap bad"><span>&#8593;</span><span>same pixel &#8212; now <b>delta&#8209;svc</b></span></div>
+              </div>
+            </div>
+            <p class="note" style="max-width:700px;">The red rules mark every row whose position changed. The target of the click travelled four rows up and out from under the cursor, and an unrelated repository slid into the slot the pointer is still sitting in &#8212; so a double&#8209;click, or a quick second click to expand what you just opened, acts on <code>delta&#8209;svc</code>.</p>
+          </div>
+
+          <div class="dv-opt" id="1c" data-screen-label="1c Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>What is actually wrong</div>
+            <div class="find">
+              <div class="fitem"><span class="pin">1</span><div><h4>The list answers a question by re&#8209;asking it</h4><p>&#8220;What am I working on&#8221; is a good question for a lens to answer. Re&#8209;answering it on the click that acts on the answer makes the list unreadable: every interaction invalidates the map you used to aim.</p></div></div>
+              <div class="fitem"><span class="pin">2</span><div><h4>The cost is a wrong&#8209;target click, not just a jolt</h4><p>Rows are 26&#8239;px tall and flush against each other. A promotion of four ranks puts a different repository under a stationary pointer, and nothing about the row says it is new there.</p></div></div>
+              <div class="fitem"><span class="pin">3</span><div><h4>It repeats one level down</h4><p>Inside an expanded repo, selecting a worktree promotes it out of <em>More worktrees</em> into the <em>Working</em> block. Same rule, same ladder, same jump &#8212; and it crosses a heading, so the row changes what section it claims to belong to.</p></div></div>
+              <div class="fitem"><span class="pin q">4</span><div><h4>Not only clicks</h4><p>A background refresh that lands a new <code>lastActivityAt</code> re&#8209;sorts the same list with no interaction at all. Any fix scoped to the click leaves that half standing.</p></div></div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;draw 1b for the worktree partition&#8221; &#183; &#8220;what does this look like at the 15&#8239;px title notch?&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 2 ================================ -->
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">When may the list re&#8209;sort?</span>
+        </div>
+        <p class="dv-sub">The ladder is not the problem and must not change &#8212; it is the lens. The only question is <em>when a newer order is allowed to become visible</em>. Three answers, and the one PwrAgnt's navigation sidebar already settled on.</p>
+
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a Sort once">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Sort once, then never again</div>
+            <div class="stage" style="width:330px;">
+              <div class="stage-h">Option <em>freeze at mount; re&#8209;sort on lens switch only</em></div>
+              <p class="note">Nothing ever moves. It is also the end of the lens: a repository you start working in stays wherever it was an hour ago, and the &#8220;current&#8221; rule &#8212; the whole reason Focused is not just a recency list &#8212; never fires while you can see it.</p>
+              <div class="verd out"><span class="pin">&#215;</span>Rejected &#8212; cures the symptom by removing the feature</div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Animate">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Animate the move</div>
+            <div class="stage" style="width:330px;">
+              <div class="stage-h">Option <em>FLIP the rows to their new slots</em></div>
+              <p class="note">Makes the move legible and keeps the ladder honest. It does not make it safe: at the end of the animation the wrong repository is still under the pointer, and the click that lands mid&#8209;flight is worse than one that lands after. Motion answers &#8220;what happened&#8221;; it cannot answer &#8220;what am I about to click&#8221;.</p>
+              <div class="verd out"><span class="pin">&#215;</span>Rejected &#8212; prettier, not safer</div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c Hold">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>Hold under the pointer; newcomers to the bottom</div>
+            <div class="stage" style="width:392px;">
+              <div class="stage-h">Chosen <em>order computed always, shown when the pointer is away</em></div>
+              <p class="note" style="max-width:364px;">The pointer is the one honest signal for &#8220;a human is reading this right now&#8221;. While it rests on the tree, the order it arrived on is held. Rows the lens has since added land at the <b style="color:var(--t2);font-weight:600">bottom</b> &#8212; the one place where arriving cannot move what is being read. Rows that genuinely left are dropped, so the lens stays the authority on <em>membership</em> and only <em>position</em> is held. Moving off the list reveals the newest order in one render.</p>
+              <p class="note" style="max-width:364px;">It covers finding&nbsp;4 for free: a background refresh is held by the same rule, because the hold is on the rendered order rather than on the click.</p>
+              <div class="verd in"><span class="pin ok">&#10003;</span>Shipped &#8212; parity with PwrAgnt's navigation sidebar</div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2d" data-screen-label="2d Prototype">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>Live &#8212; hover the list, then click a row</div>
+            <div class="proto">
+              <div class="ctl">
+                <span class="seg"><button class="{{holdOnCls}}" onClick="{{holdOn}}">Hold on</button><button class="{{holdOffCls}}" onClick="{{holdOff}}">Hold off</button></span>
+                <button class="btn {{armedCls}}" onClick="{{arrive}}">{{arriveLabel}}</button>
+                <button class="btn" onClick="{{reset}}">Reset</button>
+              </div>
+              <div class="side" onPointerOver="{{enter}}" onPointerLeave="{{leave}}">
+                <div class="side-h"><span class="lens">Focused</span><span class="cnt">{{count}}</span></div>
+                <div class="rows">
+                  <sc-for list="{{rows}}" as="r" hint-placeholder-count="6">
+                    <div class="rrow {{r.cls}}" onClick="{{r.pick}}"><span class="chev"></span><span class="rnm">{{r.name}}</span><span class="rage">{{r.age}}</span><span class="rbadge">{{r.reason}}</span></div>
+                  </sc-for>
+                </div>
+              </div>
+              <div class="readout {{stateCls}}">{{stateLine}}</div>
+              <p class="hint">{{hint}}</p>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;add a 2e that holds on keyboard focus instead of the pointer&#8221; &#183; &#8220;show 2d with 40 rows and a scrollport&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 3 ================================ -->
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3">3</a>
+          <span class="dv-tname">The hold's edges</span>
+        </div>
+        <p class="dv-sub">A hold that never lets go is its own defect. The line is authorship: a change the user <em>watched</em> waits for the pointer to leave; a change the user <em>made</em> is shown at once, because holding it would look like the app ignoring them.</p>
+
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a Gates">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>What cuts through the hold, and what does not</div>
+            <div class="tbl" style="width:704px;">
+              <div class="tr gate head"><span>Event while the pointer rests on the list</span><span>Hold</span><span>Why</span></div>
+              <div class="tr gate"><span>Click a row &#8212; selection moves</span><span><span class="st keep">Holds</span></span><span>The reason the hold exists. The row keeps its slot; the selected tint still lands on it.</span></div>
+              <div class="tr gate"><span>Background refresh, new activity</span><span><span class="st keep">Holds</span></span><span>Nothing the user did. Same rule, no special case.</span></div>
+              <div class="tr gate"><span>A repository enters the lens</span><span><span class="st chg">Appends</span></span><span>Lands at the bottom, where arriving moves nothing.</span></div>
+              <div class="tr gate"><span>A repository leaves the lens</span><span><span class="st chg">Drops</span></span><span>Position is held; membership is not. A ghost row would be a lie.</span></div>
+              <div class="tr gate"><span>Pin or unpin from the row's star</span><span><span class="st keep">Holds</span></span><span>In Pinned the row simply leaves; the rest of the list does not re&#8209;sort around it.</span></div>
+              <div class="tr gate"><span>Switch lens</span><span><span class="st bug">Releases</span></span><span>A new question deserves its own answer, not a merge into the old one.</span></div>
+              <div class="tr gate"><span>Drag&#8209;reorder, or &#8984;&#8679;&#8593;/&#8595;</span><span><span class="st bug">Releases</span></span><span>The ids are unchanged and only moved, so a held order would silently undo the drop.</span></div>
+              <div class="tr gate last"><span>Touch, anywhere</span><span><span class="st no">Never holds</span></span><span>A touch has no hover to rest in &#8212; it would enter and never leave.</span></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b Says nothing">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>The hold is silent, on purpose</div>
+            <div class="find">
+              <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>No badge, no shade, no &#8220;paused&#8221; chip</h4><p>The held state is the state the user is already looking at. Marking it would announce a mechanism the user never asked about, on the surface they are trying to read &#8212; and it would appear and vanish with every pass of the mouse.</p></div></div>
+              <div class="fitem"><span class="pin q">?</span><div><h4>Nothing announces the catch&#8209;up either</h4><p>The list settles when the pointer leaves, which is the moment the user has stopped reading it. A live region here would speak over that: order is not content, and screen&#8209;reader navigation never holds, because it never hovers.</p></div></div>
+              <div class="fitem"><span class="pin q">?</span><div><h4>One open edge</h4><p>A &#8984;K pick made while the pointer is parked on the list can target a repository ranked below the Focused fold. Held, it stays hidden until the pointer moves, then rises and scrolls into view. Self&#8209;healing, and narrow enough to leave alone rather than special&#8209;case.</p></div></div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;does the hold belong in the lineage graph's branch lanes too?&#8221; &#183; &#8220;write the 3a table as an AGENTS.md note&#8221;</p>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.base = [
+            { id: "atlas-api", name: "atlas-api", kind: "pinned", age: "2h", t: 2 },
+            { id: "beacon-web", name: "beacon-web", kind: "pinned", age: "1d", t: 24 },
+            { id: "cinder", name: "cinder", kind: "viewed", age: "3d", t: 72 },
+            { id: "delta-svc", name: "delta-svc", kind: "changed", age: "4d", t: 96 },
+            { id: "echo-ui", name: "echo-ui", kind: "recent", age: "6d", t: 144 },
+            { id: "foxtrot-cli", name: "foxtrot-cli", kind: "recent", age: "11d", t: 264 }
+          ];
+          this.newcomer = { id: "gamma-worker", name: "gamma-worker", kind: "changed", age: "1m", t: 0 };
+          this.labels = { current: "Current", pinned: "Pinned", viewed: "Viewed", changed: "Changed", recent: "Recent" };
+          this.ranks = { current: 0, pinned: 1, viewed: 2, changed: 3, recent: 4 };
+          this.state = { hold: true, selected: null, hovering: false, frozen: null, armed: false, arrived: false };
+          this.timer = null;
+        }
+        pool() {
+          const list = this.base.slice();
+          if (this.state.arrived) { list.push(this.newcomer); }
+          return list;
+        }
+        kindOf(repo) {
+          return repo.id === this.state.selected ? "current" : repo.kind;
+        }
+        liveOrder() {
+          const ranked = this.pool().map((repo) => ({ repo: repo, kind: this.kindOf(repo) }));
+          ranked.sort((a, b) => {
+            const byRank = this.ranks[a.kind] - this.ranks[b.kind];
+            return byRank === 0 ? a.repo.t - b.repo.t : byRank;
+          });
+          return ranked.map((x) => x.repo.id);
+        }
+        /** Frozen positions win; anything new lands at the bottom. */
+        retain(frozen, latest) {
+          const held = {};
+          const present = {};
+          for (const id of frozen) { held[id] = true; }
+          for (const id of latest) { present[id] = true; }
+          return frozen.filter((id) => present[id]).concat(latest.filter((id) => !held[id]));
+        }
+        holding() {
+          return Boolean(this.state.hold && this.state.hovering && this.state.frozen);
+        }
+        shownOrder() {
+          const live = this.liveOrder();
+          return this.holding() ? this.retain(this.state.frozen, live) : live;
+        }
+        release() {
+          this.clearTimer();
+          if (!this.state.hovering && this.state.frozen === null) { return; }
+          this.setState({ hovering: false, frozen: null });
+        }
+        clearTimer() {
+          if (this.timer !== null) { clearTimeout(this.timer); this.timer = null; }
+        }
+        componentWillUnmount() { this.clearTimer(); }
+        renderVals() {
+          const s = this.state;
+          const byId = {};
+          for (const repo of this.pool()) { byId[repo.id] = repo; }
+          const order = this.shownOrder();
+          const rows = order.map((id) => {
+            const repo = byId[id];
+            const kind = this.kindOf(repo);
+            const classes = [];
+            if (kind === "current") { classes.push("is-active"); }
+            if (id === this.newcomer.id) { classes.push("is-new"); }
+            return {
+              name: repo.name,
+              age: repo.age,
+              reason: this.labels[kind],
+              cls: classes.join(" "),
+              pick: () => { this.setState({ selected: id }); }
+            };
+          });
+          const held = this.holding();
+          return {
+            rows: rows,
+            count: String(order.length),
+            armedCls: s.armed && !s.arrived ? "armed" : "",
+            holdOnCls: s.hold ? "on" : "",
+            holdOffCls: s.hold ? "" : "on",
+            holdOn: () => { this.clearTimer(); this.setState({ hold: true, hovering: false, frozen: null }); },
+            holdOff: () => { this.clearTimer(); this.setState({ hold: false, hovering: false, frozen: null }); },
+            arriveLabel: s.arrived ? "Arrived" : s.armed ? "Armed — hover the list" : "Arm an arrival",
+            // Arming rather than arriving on the click is the whole point: the
+            // button sits outside the list, so clicking it takes the pointer
+            // off the rows and releases the hold. A background refresh does not
+            // do that — it lands while the pointer is still resting — so the
+            // arrival is deferred until the pointer is back on the list.
+            arrive: () => { this.setState({ armed: true }); },
+            reset: () => {
+              this.clearTimer();
+              this.setState({ selected: null, armed: false, arrived: false, hovering: false, frozen: null });
+            },
+            enter: () => {
+              if (!this.state.hold || this.state.hovering) { return; }
+              this.setState({ hovering: true, frozen: this.liveOrder() });
+              if (this.state.armed && !this.state.arrived && this.timer === null) {
+                this.timer = setTimeout(() => {
+                  this.timer = null;
+                  this.setState({ arrived: true });
+                }, 1100);
+              }
+            },
+            leave: () => { this.release(); },
+            stateCls: held ? "held" : "live",
+            stateLine: held
+              ? "held — the pointer is resting on the list"
+              : s.hold
+                ? "live — the pointer is away"
+                : "live — hold is off",
+            hint: s.hold
+              ? "Rest the pointer on the list, then click a low row: it keeps its slot and only its badge changes. Arm an arrival and put the pointer back — gamma-worker lands at the bottom a second later, not in its ranked slot. Move off the list and everything settles at once."
+              : "Hold is off — this is how the lens behaved before the fix. Click a low row and watch it leave from under the cursor."
+          };
+        }
+      }
+    </script>
+  </body>
+</html>

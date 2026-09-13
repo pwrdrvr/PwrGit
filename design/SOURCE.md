@@ -35,6 +35,7 @@ and records where the retired wireframe disagreed with the code. Read it first.
 | `Refresh Affordances - Normalization.dc.html` | The six refresh/fetch controls, why they diverged, and the one busy language that replaced them. |
 | `Settings Updates.dc.html` | Settings › Updates — the four-slot release matrix, and the two-control layout it replaced. |
 | `Settings Forges - UX Review.dc.html` | Settings › Forges — the pane's measured layout defects, and the per-product sections that replace the one interleaved host list. |
+| `Focused Lens Stability - UX Review.dc.html` | The Focused lens re-sorting under the pointer &mdash; the ladder rule that fires on click, the options weighed, and a live prototype of the hold. |
 | `Tag Chips and Locate - UX Review.dc.html` | The lineage tag chip and the tag locator — chip vocabulary, the light-theme contrast the accent tint could not hold, and the sidebar action column. |
 | `PwrGit Icon.dc.html` | App icon, size ladder, tray templates, DMG background. |
 | `support.js` | Generated `dc-runtime` bundle every `.dc.html` loads. |
@@ -81,6 +82,14 @@ written here the same way, and pushed up the same way. It **supersedes artboard
 interleaved list of every host; the products now get a section each. The rest of
 that file still stands — it owns the host row anatomy, the evidence line, and
 the rule that a product is chosen and never guessed from a hostname.
+
+`Focused Lens Stability - UX Review.dc.html` was written here and pushed up the
+same way, during [#249](https://github.com/pwrdrvr/PwrGit/pull/249). It carries
+no screenshots &mdash; the defect and the fix are both *motion*, so a still frame
+of the sidebar looks identical either way. Card **2d** is a live `DCLogic`
+prototype instead: toggle the hold off and the clicked row leaves from under the
+cursor, toggle it on and it stays. Its repository names are invented, not a real
+profile.
 
 Its two screenshots are 100% contrived: fixture repositories built by
 `apps/desktop/e2e/fixtures/git-sandbox.ts`, a seeded default profile, and a

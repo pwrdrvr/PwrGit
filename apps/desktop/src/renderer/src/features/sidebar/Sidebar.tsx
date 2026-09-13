@@ -714,12 +714,16 @@ export function Sidebar({
   // pair each row needs — within its folder group when grouped, within the
   // filtered list when not. See RepoRow for why they are stated explicitly.
   const renderRepo = (repo: Repo, index: number, list: Repo[]) => {
-    // The reason is the row's position, spelled out — read it from the same
-    // held context the position came from, or a held row would sit at rank 4
-    // wearing a "Current" badge.
+    // Live, not held — unlike the row's position. The selected tint below
+    // (`containsSelection`) follows the selection immediately and cannot
+    // sensibly do otherwise, so a held reason would put two disagreeing signals
+    // on one row: an accent-tinted row still labelled "Recent". Live on both,
+    // the row reads "this is the current one, where it already was", and the
+    // stale part stays the invisible one. The badge is a fixed-height pill at
+    // the end of a flex row, so a word change reflows nothing but itself.
     const focusReason =
       lens === "Focused"
-        ? focusReasonForRepo(repo, orderContext, now)
+        ? focusReasonForRepo(repo, focusContext, now)
         : null;
     return (
       <RepoRow
