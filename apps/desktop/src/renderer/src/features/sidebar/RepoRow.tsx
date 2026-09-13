@@ -16,8 +16,8 @@ import {
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { useViewportTooltip } from "../../lib/useViewportTooltip";
 import { useForgeNaming } from "../../state/useForgeNaming";
-import type { FocusVisits } from "./focus-visits";
 import {
+  type FocusContext,
   type FocusReason,
   groupWorktreesForNavigation,
   linkedWorktreeCount,
@@ -81,7 +81,7 @@ export function RepoRow({
   customOrder,
   now,
   focused,
-  focusVisits,
+  focusContext,
   focusReason,
   onToggleExpand,
   onToggleRepoPin,
@@ -122,7 +122,10 @@ export function RepoRow({
   now: number;
   /** Focused lens elevates its matching linked worktrees above the disclosure. */
   focused: boolean;
-  focusVisits: FocusVisits;
+  /** The ordering inputs the sidebar is currently showing — held while the
+   *  pointer rests on the list, so the Working section can't re-partition
+   *  under a row the list around it is holding still. */
+  focusContext: FocusContext;
   /** The first transparent rule that admitted this repo to Focused. */
   focusReason?: FocusReason;
   onToggleExpand: () => void;
@@ -189,7 +192,7 @@ export function RepoRow({
   const focusPartition = focused
     ? partitionFocusedWorktrees(
         navigation.remaining,
-        { selectedWorktreeId, visits: focusVisits },
+        focusContext,
         now
       )
     : { focused: [], remaining: navigation.remaining };
