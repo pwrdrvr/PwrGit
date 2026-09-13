@@ -698,12 +698,20 @@ textarea,
      two to be kept in step because the sidebars are read side by side.
 
      `min-content`, not `auto`, is the floor that keeps the narrow end safe:
-     each track can never fall below its chip's own width, so at the 240px
-     sidebar minimum this lays out exactly as the fixed-width row did, and only
-     the surplus above that is shared out. The trailing `auto` track is the
-     active lens's count, which keeps its content width at every size. */
+     no track can fall below the 30px one glyph needs, so the row cannot be
+     squeezed into an overflow no matter how little there is to share. It does
+     NOT mean the narrow end is unchanged — at the 240px minimum the container
+     query below frees enough padding that the chips come out around 38px
+     rather than the old fixed 30px. Nothing is clipped there (see
+     `lens-row.spec.ts` and the fit check in `profiles.spec.ts`); they are
+     simply bigger targets.
+
+     The track COUNT is set on the element by LensFilter.tsx, from LENSES
+     itself — a sixth lens added there would otherwise land in the count's
+     trailing `auto` track and push the count into an implicit seventh column.
+     That trailing track is the active lens's count, which keeps its content
+     width at every size. */
   display: grid;
-  grid-template-columns: repeat(5, minmax(min-content, 1fr)) auto;
   align-items: center;
   gap: 2px;
   padding: 3px;
@@ -778,12 +786,14 @@ textarea,
    name, so this only has to answer "is there anything in there".
 
    The offsets are negative because the anchor is now the 15px glyph rather
-   than the 30px chip, and they resolve to the same pixels the chip-anchored
-   4px/5px did: the dot still straddles the glyph's top-right corner. */
+   than the 30px chip. They land within half a pixel of where the chip-anchored
+   4px/5px did — the dot still straddles the glyph's top-right corner — and are
+   kept whole so a 4px dot stays crisp on a 1x display, where a half-pixel
+   offset would smear it across five device pixels. */
 .lens-chip__dot {
   position: absolute;
-  top: -1.5px;
-  right: -2.5px;
+  top: -2px;
+  right: -3px;
   width: 4px;
   height: 4px;
   border-radius: 999px;

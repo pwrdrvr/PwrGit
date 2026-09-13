@@ -111,6 +111,14 @@ export function LensFilter({
       className="lens-filter"
       role="tablist"
       aria-label="Repo filter"
+      // One equal-share track per lens, plus the trailing content-width track
+      // the active count sits in. Derived rather than written into app.css:
+      // the rule there would have to name the number of lenses, and a sixth
+      // one added to LENSES would then be laid into the count's track with
+      // the count spilling into an implicit column after it.
+      style={{
+        gridTemplateColumns: `repeat(${LENSES.length}, minmax(min-content, 1fr)) auto`
+      }}
       onKeyDown={onKeyDown}
     >
       {LENSES.map((l) => {
@@ -156,8 +164,8 @@ export function LensFilter({
             {/* The glyph and its dot travel together. The dot used to hang
                 off the chip's own corner, which was the same thing while every
                 chip was exactly one glyph wide — but the chips now divide the
-                sidebar's surplus, and a dot pinned to a 57px chip's corner
-                drifts halfway to the next icon and starts reading as that
+                sidebar's surplus, and a dot pinned to the corner of a 63px
+                chip drifts halfway to the next icon and starts reading as that
                 one's. */}
             <span className="lens-chip__glyph">
               <svg

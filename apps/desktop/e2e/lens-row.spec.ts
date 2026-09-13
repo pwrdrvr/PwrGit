@@ -163,6 +163,10 @@ test("the lens chips divide the sidebar's surplus width", async () => {
       .first()
       .evaluate((el) => el.getBoundingClientRect().width);
 
+  // Read the width back off the resizer rather than trusting the write: a
+  // renamed storage key would otherwise leave every measurement below taken at
+  // the default 320, and the floor assertion would be measuring the wrong
+  // sidebar while still passing.
   const setWidth = async (px: string): Promise<void> => {
     await window.evaluate((value) => {
       window.localStorage.setItem("pwrgit.sidebarWidth", value);
@@ -171,14 +175,20 @@ test("the lens chips divide the sidebar's surplus width", async () => {
     await expect(window.locator(".lens-chip").first()).toBeVisible({
       timeout: 20_000
     });
+    await expect(
+      window.getByRole("separator", { name: "Resize sidebar" })
+    ).toHaveAttribute("aria-valuenow", px);
   };
 
-  // 240 is useColumnResize's floor. Every track floors at its own chip, so the
-  // row lays out here exactly as a fixed-width row did — which is what keeps
-  // the narrow end safe.
+  // 240 is useColumnResize's floor. `min-content` is each track's floor, so no
+  // chip can be squeezed under the 30px one glyph needs — but the row is free
+  // to hand out whatever surplus the narrow layout leaves, and it does. This
+  // asserts the floor and the fit, NOT a pixel count: the exact width here is
+  // a function of the container query's padding, the options button and the
+  // active count's digits, none of which this test is about.
   await setWidth("240");
   const atFloor = await chipWidth();
-  expect(Math.round(atFloor)).toBe(30);
+  expect(atFloor).toBeGreaterThanOrEqual(30);
   expect(await lensRowOverflow(window)).toBeLessThanOrEqual(0);
 
   // Widen, and the chips take the surplus instead of leaving it as dead space
