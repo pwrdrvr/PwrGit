@@ -118,7 +118,7 @@ if (violations.length > 0) {
 
 // A packaged renderer must load every script from inside the asar. The one
 // thing that has ever wanted to break that rule is the dev-only React DevTools
-// bridge (PWRGIT_DEV_REACT_DEVTOOLS), which injects
+// bridge (PWRGIT_REACT_DEVTOOLS), which injects
 // `<script src="http://localhost:8097">` as the first head script at Vite
 // config time. That is a build-time decision, so nothing at app runtime can
 // undo it — this is where it gets caught. The rule is written against the
@@ -157,7 +157,7 @@ if (remoteScriptViolations.length > 0 || unreadableHtmlEntries.length > 0) {
       console.error(`    ${snippet}`);
     }
     console.error(
-      "\nBuild without PWRGIT_DEV_REACT_DEVTOOLS set. That bridge is for local"
+      "\nBuild without PWRGIT_REACT_DEVTOOLS set. That bridge is for local"
       + "\nprofiling builds only and must never reach a packaged app.",
     );
   }

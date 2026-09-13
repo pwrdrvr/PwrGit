@@ -143,9 +143,9 @@ config time, turn it on:
 
 | Variable | What it does |
 |---|---|
-| `PWRGIT_DEV_REACT_DEVTOOLS=1` | Injects `<script src="http://localhost:8097">` as the first `<head>` script so the renderer loads the standalone DevTools backend. |
-| `PWRGIT_DEV_REACT_DEVTOOLS_HOST` / `_PORT` | Point that script somewhere other than `localhost:8097`. |
-| `PWRGIT_DEV_REACT_PROFILING=1` | Aliases `react-dom/client` → `react-dom/profiling` for `electron-vite build` only. |
+| `PWRGIT_REACT_DEVTOOLS=1` | Injects `<script src="http://localhost:8097">` as the first `<head>` script so the renderer loads the standalone DevTools backend. |
+| `PWRGIT_REACT_DEVTOOLS_HOST` / `_PORT` | Point that script somewhere other than `localhost:8097`. |
+| `PWRGIT_REACT_PROFILING=1` | Aliases `react-dom/client` → `react-dom/profiling` for `electron-vite build` only. |
 
 Both use the repo's usual on/off allowlist (`1`, `true`, `yes`, `on`); `false`,
 `off` and `no` are off. With them unset the plugin is never constructed and the
@@ -153,12 +153,12 @@ alias key is never added, so a normal build is byte-identical to one from a
 tree without this feature — verified by building from both configs and diffing
 `out/renderer`, 38 files, no difference.
 
-These are the only two names here that carry a `DEV_` segment. The rest of the
-repo's diagnostics flags (`PWRGIT_HOT_CPU_PROFILING`, `PWRGIT_HEAP_DIAGNOSTICS`)
-do not, and unlike those, these two are consumed by the build rather than by the
-app process. There is no `rejectDevOnlyEnvVarsInProduction` in `src/main` to
-register them with, so a packaged app says nothing when one is exported — the
-packaging gate below is what actually stops a bridged build.
+Unlike every other `PWRGIT_*` flag, these two are read by the **build** rather
+than by the app process — `electron.vite.config.ts` consumes them at Vite config
+time, and the running app never looks at them. So there is no
+`rejectDevOnlyEnvVarsInProduction` in `src/main` to register them with, and a
+packaged app says nothing when one is exported. The packaging gate below is
+what actually stops a bridged build.
 
 ### Attaching to the dev build
 
@@ -171,7 +171,7 @@ npx react-devtools
 Then, from the repository root, start this checkout with the bridge enabled:
 
 ```bash
-PWRGIT_DEV_REACT_DEVTOOLS=1 pnpm dev
+PWRGIT_REACT_DEVTOOLS=1 pnpm dev
 ```
 
 `npx react-devtools` must already be listening when the renderer loads; the
@@ -192,7 +192,7 @@ other end of its socket. **Do not restart or drive another session's running
 instance to find out.** Two things settle it without touching anything else:
 
 - The bridge is opt-in per process. An instance started without
-  `PWRGIT_DEV_REACT_DEVTOOLS=1` has no script tag and *cannot* connect, so
+  `PWRGIT_REACT_DEVTOOLS=1` has no script tag and *cannot* connect, so
   starting exactly one bridged instance is itself the isolation.
 - The injected bridge logs its endpoint and the checkout it was built from to
   the renderer console:
@@ -205,7 +205,7 @@ To profile two checkouts at once, give each its own port and run one
 
 ```bash
 npx react-devtools --port 8098
-PWRGIT_DEV_REACT_DEVTOOLS=1 PWRGIT_DEV_REACT_DEVTOOLS_PORT=8098 pnpm dev
+PWRGIT_REACT_DEVTOOLS=1 PWRGIT_REACT_DEVTOOLS_PORT=8098 pnpm dev
 ```
 
 Every window in the process loads the same renderer bundle, so auxiliary
@@ -237,7 +237,7 @@ The profiling build is **not** a prerequisite for spotting a storm. Reach for
 it after the dev build has told you where to look.
 
 ```bash
-PWRGIT_DEV_REACT_PROFILING=1 PWRGIT_DEV_REACT_DEVTOOLS=1 pnpm --filter @pwrgit/desktop build
+PWRGIT_REACT_PROFILING=1 PWRGIT_REACT_DEVTOOLS=1 pnpm --filter @pwrgit/desktop build
 pnpm --filter @pwrgit/desktop preview
 ```
 
@@ -280,7 +280,7 @@ hook and no UI. Use the standalone route.
 
 ### Packaging cannot ship the bridge
 
-`PWRGIT_DEV_REACT_DEVTOOLS` is read at build time, so nothing at app runtime
+`PWRGIT_REACT_DEVTOOLS` is read at build time, so nothing at app runtime
 can undo a renderer HTML that was built with it.
 [`verify-asar-contents.mjs`](scripts/verify-asar-contents.mjs) fails packaging
 when any packaged HTML loads a remote script, and `release.mjs` runs it on

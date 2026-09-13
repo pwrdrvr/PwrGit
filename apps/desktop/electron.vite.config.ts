@@ -42,9 +42,9 @@ function copyMigrationsPlugin(): Plugin {
  * HTML it does today. `verify-asar-contents.mjs` fails packaging if a bridged
  * HTML ever reaches an app.asar anyway.
  */
-const REACT_DEVTOOLS_ENV = "PWRGIT_DEV_REACT_DEVTOOLS";
-const REACT_DEVTOOLS_HOST_ENV = "PWRGIT_DEV_REACT_DEVTOOLS_HOST";
-const REACT_DEVTOOLS_PORT_ENV = "PWRGIT_DEV_REACT_DEVTOOLS_PORT";
+const REACT_DEVTOOLS_ENV = "PWRGIT_REACT_DEVTOOLS";
+const REACT_DEVTOOLS_HOST_ENV = "PWRGIT_REACT_DEVTOOLS_HOST";
+const REACT_DEVTOOLS_PORT_ENV = "PWRGIT_REACT_DEVTOOLS_PORT";
 const DEFAULT_REACT_DEVTOOLS_HOST = "localhost";
 const DEFAULT_REACT_DEVTOOLS_PORT = "8097";
 
@@ -61,7 +61,7 @@ const DEFAULT_REACT_DEVTOOLS_PORT = "8097";
  * `react-dom` module for their internals, so swapping the client entry alone
  * cannot produce two copies.
  */
-const REACT_PROFILING_ENV = "PWRGIT_DEV_REACT_PROFILING";
+const REACT_PROFILING_ENV = "PWRGIT_REACT_PROFILING";
 
 /**
  * The allowlist the rest of the repository uses for on/off env flags
