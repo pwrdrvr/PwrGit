@@ -299,7 +299,7 @@ describe("ForgesSettings", () => {
     );
   });
 
-  it("states an unsupported capability as a limit of that forge", async () => {
+  it("states an unsupported capability as an integration limit", async () => {
     await render([
       forge({
         kind: "gitlab",
@@ -314,8 +314,8 @@ describe("ForgesSettings", () => {
       })
     ]);
 
-    // So a missing feature reads as a known limit, not as a bug in PwrGit.
-    expect(container.textContent).toContain("Not supported by this forge");
+    // These flags describe PwrGit support, not the forge's own feature set.
+    expect(container.textContent).toContain("Not available through this integration");
     expect(container.textContent).toContain("commit links in bulk");
   });
 
@@ -423,7 +423,11 @@ describe("GitCafe settings", () => {
   it("shows Connected and Off with the integration's actual capabilities", async () => {
     await render([forge({ kind: "gitcafe", capabilities: forgeProduct("gitcafe").capabilities })]);
     expect(container.querySelector('[aria-label="GitCafe: Connected"]')).not.toBeNull();
-    expect(container.textContent).toContain("Not supported");
+    expect(container.textContent).toContain("Available in PwrGit");
+    expect(container.textContent).toContain("Pull request lookup by branch or number");
+    expect(container.textContent).toContain("Repository lookup · Clone · Fork");
+    expect(container.textContent).toContain("Not available through this integration");
+    expect(container.textContent).not.toContain("Not supported by this forge");
     await act(async () => listener?.({ forges: [forge({ kind: "gitcafe", loggedIn: false, hosts: [{ host: "git.cafe", enabled: false, loggedIn: false }] })] }));
     expect(container.querySelector('[aria-label="GitCafe: Off"]')).not.toBeNull();
   });

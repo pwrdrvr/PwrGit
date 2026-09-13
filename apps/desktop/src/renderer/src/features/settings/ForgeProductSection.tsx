@@ -356,11 +356,11 @@ export function ForgeProductSection(props: {
       )}
       {state === "unknown" || status === undefined ? null : (
         <SettingsField
-          label={blocks(state) ? "What to do" : `What ${label} can report`}
+          label={blocks(state) ? "What to do" : "Available in PwrGit"}
           control={
-            <span className="settings-field__help">
+            <div className="settings-field__help">
               {blocks(state) ? remedy(status, state) : capabilities(status)}
-            </span>
+            </div>
           }
         />
       )}
@@ -645,9 +645,8 @@ function remedy(status: ForgeStatus, state: ForgeProductState): ReactNode {
   );
 }
 
-/** What the integration is able to report, so a missing feature reads as a
- *  known limit of that provider rather than a bug. */
-function capabilities(status: ForgeStatus): string {
+/** Core workflows are available even when every optional capability is false. */
+function capabilities(status: ForgeStatus): ReactNode {
   const keys = Object.keys(CAPABILITY_LABELS) as (keyof ForgeCapabilities)[];
   const supported = keys.filter((key) => status.capabilities[key]);
   const missing = keys.filter((key) => !status.capabilities[key]);
@@ -657,12 +656,19 @@ function capabilities(status: ForgeStatus): string {
   const missingText =
     missing.length === 0
       ? ""
-      : `Not supported by this forge: ${missing
+      : `Not available through this integration: ${missing
           .map((key) => CAPABILITY_LABELS[key].toLowerCase())
           .join(", ")}.`;
-  // Either half may be empty; joining only the present ones keeps a stray
-  // leading ". " out of the hint.
-  return [supportedText, missingText].filter((part) => part !== "").join(". ");
+  return (
+    <>
+      <p>
+        {forgeProduct(status.kind).changeRequestLabel} lookup by branch or number
+        {" · Repository lookup · Clone · Fork"}
+      </p>
+      {supportedText !== "" && <p>Also available: {supportedText}.</p>}
+      {missingText !== "" && <p>{missingText}</p>}
+    </>
+  );
 }
 
 /**
