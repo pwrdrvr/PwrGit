@@ -1,3 +1,4 @@
+import { connectForge } from "../forge/types";
 import type { PrSummary } from "@pwrgit/shared";
 import type { GitExec } from "../git/dugite";
 import type { DB } from "../persistence/db";
@@ -304,13 +305,12 @@ export class PrService {
     if (forge === null || !this.isCurrent(generation)) {
       return emptyPrStatusDeltas();
     }
-    const token = await forge.provider.getToken(forge.repo.host);
-    if (token === null || !this.isCurrent(generation)) {
+    const connection = await connectForge(forge.provider, forge.repo.host);
+    if (connection === null || !this.isCurrent(generation)) {
       return emptyPrStatusDeltas();
     }
     try {
-      const prs = await forge.provider.fetchPrsByNumbers(
-        token,
+      const prs = await connection.fetchPrsByNumbers(
         forge.repo,
         numbers
       );
@@ -347,12 +347,12 @@ export class PrService {
 
     const forge = await this.originForge(repo.path);
     if (forge === null || !this.isCurrent(generation)) return new Map();
-    const token = await forge.provider.getToken(forge.repo.host);
-    if (token === null || !this.isCurrent(generation)) return new Map();
+    const connection = await connectForge(forge.provider, forge.repo.host);
+    if (connection === null || !this.isCurrent(generation)) return new Map();
 
     let prs: Map<string, PrSummary | null>;
     try {
-      prs = await forge.provider.fetchPrsForCommits(token, forge.repo, stale);
+      prs = await connection.fetchPrsForCommits(forge.repo, stale);
     } catch {
       this.recordFailure(repoId, "commits", generation);
       return new Map();
@@ -483,13 +483,12 @@ export class PrService {
 
     const forge = await this.originForge(repo.path);
     if (forge === null || !this.isCurrent(generation)) return empty;
-    const token = await forge.provider.getToken(forge.repo.host);
-    if (token === null || !this.isCurrent(generation)) return empty;
+    const connection = await connectForge(forge.provider, forge.repo.host);
+    if (connection === null || !this.isCurrent(generation)) return empty;
 
     let prs: Map<string, PrSummary | null>;
     try {
-      prs = await forge.provider.fetchPrsForBranches(
-        token,
+      prs = await connection.fetchPrsForBranches(
         forge.repo,
         branches
       );

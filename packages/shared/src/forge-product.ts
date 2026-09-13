@@ -31,6 +31,8 @@ export type ForgeProduct = {
    * drifted would print a command naming a CLI the app never invokes.
    */
   readonly cli: string;
+  readonly installHint?: string;
+  readonly signInHost: { readonly flag: string; readonly apiPath?: string };
   /**
    * The hosted instance.
    *
@@ -125,9 +127,31 @@ export type ForgeProduct = {
  * caller in that process.
  */
 export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze({
+  gitcafe: {
+    label: "GitCafe",
+    cli: "cafe",
+    installHint: "Install Bun, then run `bun i -g @gitcafe/cli` to install or update cafe (0.5.0 or newer). Both bun and cafe must be available.",
+    signInHost: { flag: "--host", apiPath: "/api" },
+    saasHost: "git.cafe",
+    changeRequestLabel: "Pull request",
+    changeRequestSigil: "#",
+    organizationNoun: "organization",
+    maxPathSegments: 2,
+    hostAllowlistEnv: "PWRGIT_GITCAFE_HOSTS",
+    addHost: { button: "Add GitCafe host…", title: "Add a GitCafe host", placeholder: "git.cafe" },
+    forkCompletesAsynchronously: true,
+    capabilities: {
+      batchedBranchLookup: false,
+      batchedCommitAssociation: false,
+      changeSizeAndTimeline: false,
+      commitAuthorIdentity: false,
+      forkDefaultBranchOnly: false
+    }
+  },
   github: {
     label: "GitHub",
     cli: "gh",
+    signInHost: { flag: "--hostname" },
     saasHost: "github.com",
     changeRequestLabel: "Pull request",
     changeRequestSigil: "#",
@@ -153,6 +177,7 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
   gitlab: {
     label: "GitLab",
     cli: "glab",
+    signInHost: { flag: "--hostname" },
     saasHost: "gitlab.com",
     changeRequestLabel: "Merge request",
     changeRequestSigil: "!",
@@ -189,6 +214,7 @@ function freeze(
   for (const product of Object.values(products)) {
     Object.freeze(product.capabilities);
     Object.freeze(product.addHost);
+    Object.freeze(product.signInHost);
     Object.freeze(product);
   }
   return Object.freeze(products);
@@ -318,4 +344,15 @@ export function forgeAllowsPathDepth(kind: ForgeKind, segments: number): boolean
   // throwing out of a resolver whose callers treat it as total.
   const product = forgeProductFor(kind);
   return product !== null && segments >= 2 && segments <= product.maxPathSegments;
+}
+
+/** Copyable CLI sign-in syntax, shared by both settings sections. */
+export function forgeSignInCommand(kind: ForgeKind, hostname?: string): string {
+  const product = forgeProduct(kind);
+  const base = `${product.cli} auth login`;
+  if (hostname === undefined) return base;
+  const value = product.signInHost.apiPath === undefined
+    ? hostname
+    : `https://${hostname}${product.signInHost.apiPath}`;
+  return `${base} ${product.signInHost.flag} ${value}`;
 }

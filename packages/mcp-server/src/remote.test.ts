@@ -110,3 +110,11 @@ describe("remote identity", () => {
     expect(parseRepositoryTarget("https://gitlab.com/a/b", "github")).toBeNull();
   });
 });
+
+
+it("recognizes GitCafe and its explicit host overrides", () => {
+  expect(parseRemoteIdentity("git@git.cafe:sample/demo.git")).toEqual({ provider: "gitcafe", host: "git.cafe", path: "sample/demo" });
+  expect(parseRemoteIdentity("https://cafe.example/sample/demo.git", { PWRGIT_GITCAFE_HOSTS: "cafe.example" })?.provider).toBe("gitcafe");
+  expect(parseRemoteIdentity("https://git.cafe/sample/demo/tree/main")).toBeNull();
+  expect(parseRepositoryTarget("sample/demo", "gitcafe")?.provider).toBe("gitcafe");
+});

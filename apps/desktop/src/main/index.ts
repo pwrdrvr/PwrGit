@@ -416,7 +416,7 @@ if (!gotSingleInstanceLock) {
     // their actual Enterprise hostnames and account names on a screen the
     // fixture exists to keep contrived.
     const forgeHostDirectory = new ForgeHostDirectory(
-      fixtureServices === null ? {} : { discover: async () => [] }
+      fixtureServices === null ? {} : { discover: fixtureServices.discoverHosts }
     );
     const forgeHosts = new ForgeHosts({
       // `?.hosts` as well as `?.forges`: nothing validates settings.json, so a

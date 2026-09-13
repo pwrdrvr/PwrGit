@@ -519,7 +519,7 @@ export type RemoteActivity = {
  * stacks one section per member in this sequence, so a product is placed here
  * deliberately rather than wherever a sort happens to put it.
  */
-export const FORGE_KINDS = ["github", "gitlab"] as const;
+export const FORGE_KINDS = ["github", "gitlab", "gitcafe"] as const;
 
 export type ForgeKind = (typeof FORGE_KINDS)[number];
 

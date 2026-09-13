@@ -37,11 +37,11 @@ describe("resolveForge", () => {
 });
 
 describe("providerFor", () => {
-  it("exposes both providers under the ForgeProvider contract", () => {
-    for (const kind of ["github", "gitlab"] as const) {
+  it("exposes all providers under the ForgeProvider contract", () => {
+    for (const kind of ["github", "gitlab", "gitcafe"] as const) {
       const provider = providerFor(kind);
       expect(provider.kind).toBe(kind);
-      expect(typeof provider.getToken).toBe("function");
+      if (provider.authentication !== "cli") expect(typeof provider.getToken).toBe("function");
       expect(typeof provider.fetchPrsForBranches).toBe("function");
       expect(typeof provider.fetchPrsForCommits).toBe("function");
       expect(typeof provider.fetchPrsByNumbers).toBe("function");

@@ -1,3 +1,4 @@
+import type { DiscoveredForgeHost } from "./cli-hosts";
 import {
   appendFileSync,
   mkdirSync,
@@ -61,6 +62,7 @@ export type E2EForgeHostFixture = {
 };
 
 export type E2EForgeFixtureFile = {
+  discoveredHosts?: DiscoveredForgeHost[];
   callsPath?: string;
   hosts: Partial<Record<ForgeKind, E2EForgeHostFixture>>;
 };
@@ -343,7 +345,7 @@ function readFixture(path: string): E2EForgeFixtureFile {
 export function createE2EForgeFixtureServices(
   fixturePath: string,
   git: GitExec
-): { forges: ForgeRepoRegistry; status: ForgeStatusService } {
+): { forges: ForgeRepoRegistry; status: ForgeStatusService; discoverHosts: () => Promise<DiscoveredForgeHost[]> } {
   const forges = new ForgeRepoRegistry();
   for (const host of FORGE_KINDS) {
     // The factory matters even here. Every provider lookup on the clone and
@@ -372,5 +374,5 @@ export function createE2EForgeFixtureServices(
         readFixture(fixturePath).hosts[kind]?.loggedIn === true
     }))
   });
-  return { forges, status };
+  return { forges, status, discoverHosts: async () => readFixture(fixturePath).discoveredHosts ?? [] };
 }

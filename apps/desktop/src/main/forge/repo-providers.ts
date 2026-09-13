@@ -1,3 +1,4 @@
+import { GitCafeRepoProvider } from "./gitcafe/repo-provider";
 import { FORGE_KINDS, forgeProduct, type ForgeKind } from "@pwrgit/shared";
 import { GitHubRepoProvider } from "./github/repo-provider";
 import { GitLabRepoProvider } from "./gitlab/repo-provider";
@@ -29,7 +30,8 @@ const REPO_PROVIDERS: Readonly<{
   [K in ForgeKind]: (hostname: string) => ForgeRepoProvider & { host: K };
 }> = {
   github: (hostname) => new GitHubRepoProvider(undefined, hostname),
-  gitlab: (hostname) => new GitLabRepoProvider(undefined, hostname)
+  gitlab: (hostname) => new GitLabRepoProvider(undefined, hostname),
+  gitcafe: (hostname) => new GitCafeRepoProvider(undefined, hostname)
 };
 
 /** Register every product's real repository provider. Not called under the E2E
