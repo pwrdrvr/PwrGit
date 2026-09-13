@@ -1,0 +1,1386 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --bg-app: #000000; --bg-panel: #0a0a0a; --bg-input: #080808;
+            --bg-elev: #101010; --bg-side: #050505; --bg-row-active: #120800;
+            --active-strong: #241000;
+            --line-faint: rgba(247, 243, 235, 0.06);
+            --line: rgba(247, 243, 235, 0.1);
+            --line-def: rgba(247, 243, 235, 0.14);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a;
+            --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --atint: rgba(255, 138, 31, 0.08);
+            --abord: rgba(255, 138, 31, 0.42);
+            --ok: #5fa969; --okt: #9ce5b3; --oksoft: rgba(74, 148, 92, 0.18);
+            --warn: #d99a3d; --warnsoft: rgba(217, 154, 61, 0.14);
+            --bad: #b94232; --badt: #ffb0a1; --badsoft: rgba(185, 66, 50, 0.24);
+            --purple: #8a6dc4; --susp: #6b6660;
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          * { box-sizing: border-box; }
+          body { margin: 0; background: #050505; font-family: var(--sans); color: var(--t1); }
+          a { color: var(--accb); } a:hover { color: var(--acc); }
+
+          /* ---- House canvas chrome (matches the other PwrGit artboards) ---- */
+          .dv-turn { padding: 40px 44px 32px; background: #050505; }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.6 var(--sans); color: var(--t3); max-width: 760px; text-wrap: pretty; }
+          .dv-sub code, .dv-note code, .dv-olabel code, .dv-flag code, .dv-tbl code { font: 500 10.5px var(--mono); color: var(--accb); }
+          .dv-sub b, .dv-note b { color: var(--t2); font-weight: 600; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.4 var(--sans); color: var(--tsub); max-width: 680px; }
+          .dv-note { margin: 24px 0 0; padding: 14px 16px; border: 1px solid var(--line); border-left: 3px solid var(--acc); border-radius: 0 8px 8px 0; background: var(--bg-panel); font: 400 11.5px/1.7 var(--sans); color: var(--t2); max-width: 940px; }
+          .dv-note b { color: var(--t1); }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+          .dv-prov { margin-top: 10px; font: 500 10px/1.6 var(--mono); color: var(--tsub); }
+
+          .dv-annot { display: flex; align-items: flex-start; gap: 16px; }
+          .dv-gutter { display: flex; flex-direction: column; gap: 8px; width: 250px; padding-top: 4px; }
+          .dv-flag { padding: 8px 10px; border-radius: 7px; background: var(--badsoft); border: 1px solid var(--bad); color: var(--badt); font: 500 10px/1.5 var(--sans); }
+          .dv-flag b { display: block; font: 600 10px/1.4 var(--mono); color: #ffd7cd; margin-bottom: 3px; }
+          .dv-flag.fix { background: var(--oksoft); border-color: var(--ok); color: var(--okt); }
+          .dv-flag.fix b { color: #cdf3d9; }
+          .dv-flag.warn { background: var(--warnsoft); border-color: var(--warn); color: #f2d6a6; }
+          .dv-flag.warn b { color: #ffe6bd; }
+
+          .dv-tbl { border-collapse: collapse; margin-top: 6px; font: 400 11px/1.5 var(--sans); color: var(--t2); }
+          .dv-tbl th { text-align: left; font: 600 9.5px/1 var(--sans); letter-spacing: 0.09em; text-transform: uppercase; color: var(--t3); padding: 0 22px 8px 0; }
+          .dv-tbl td { padding: 5px 22px 5px 0; border-top: 1px solid var(--line-faint); vertical-align: top; }
+          .dv-tbl td b { color: var(--t1); font-weight: 600; }
+          .dv-mono { font: 500 10.5px var(--mono); color: var(--accb); white-space: nowrap; }
+
+          /* ---- Wizard chrome. Class names are PwrAgnt's, so the build agent
+                 can map this 1:1 onto `OnboardingWizard.tsx`; the values are
+                 PwrGit's tokens. ---- */
+          .onboarding-wizard { width: 980px; background: var(--bg-app); border: 1px solid var(--line-def); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+          .onboarding-wizard--mini { width: 560px; }
+          .onboarding-wizard__titlebar { display: flex; align-items: center; gap: 14px; padding: 14px 18px 12px; border-bottom: 1px solid var(--line); background: var(--bg-panel); }
+          .onboarding-wizard__eyebrow { font: 600 10px/1 var(--sans); color: var(--acc); text-transform: uppercase; letter-spacing: 0.1em; }
+          .onboarding-wizard__sep { color: var(--tsub); }
+          .onboarding-wizard__crumb { font: 600 13px/1 var(--sans); color: var(--t1); }
+          .onboarding-wizard__spacer { flex: 1; }
+          .onboarding-wizard__close { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; color: var(--t3); border: 1px solid var(--line); background: var(--bg-elev); border-radius: 6px; font: 400 13px/1 var(--sans); }
+
+          .onboarding-wizard__rail { display: flex; gap: 6px; padding: 12px 18px 0; border-bottom: 1px solid var(--line); background: var(--bg-panel); }
+          .onboarding-wizard__rail-step { flex: 1; padding: 6px 10px 12px; position: relative; }
+          .onboarding-wizard__rail-num { font: 600 10px/1 var(--mono); color: var(--t3); letter-spacing: 0.08em; text-transform: uppercase; }
+          .onboarding-wizard__rail-label { font: 600 13px/1 var(--sans); color: var(--t2); margin-top: 6px; }
+          .onboarding-wizard__rail-step.is-done .onboarding-wizard__rail-label { color: var(--t2); }
+          .onboarding-wizard__rail-step.is-current .onboarding-wizard__rail-num { color: var(--acc); }
+          .onboarding-wizard__rail-step.is-current .onboarding-wizard__rail-label { color: var(--t1); }
+          .onboarding-wizard__rail-step::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; background: transparent; border-radius: 1px; }
+          .onboarding-wizard__rail-step.is-done::after { background: var(--abord); }
+          .onboarding-wizard__rail-step.is-current::after { background: var(--acc); }
+
+          .onboarding-wizard__body { padding: 22px 30px 18px; }
+          .onboarding-wizard__head { margin-bottom: 16px; }
+          .onboarding-wizard__title { font: 650 22px/1.25 var(--sans); color: var(--t1); margin: 0 0 8px; letter-spacing: -0.005em; }
+          .onboarding-wizard__title--center { text-align: center; }
+          .onboarding-wizard__sub { font: 400 12.5px/1.65 var(--sans); color: var(--t3); margin: 0; max-width: 68ch; text-wrap: pretty; }
+          .onboarding-wizard__sub--center { text-align: center; margin: 0 auto; }
+          .onboarding-wizard__sub code, .onboarding-wizard__hint code, .onboarding-wizard__notice code { font: 500 92% var(--mono); color: var(--accb); }
+          .onboarding-wizard__sub b { color: var(--t2); font-weight: 600; }
+          .onboarding-wizard__brand { font: 700 15px/1 var(--sans); color: var(--t1); letter-spacing: -0.01em; text-align: center; margin-bottom: 14px; }
+          .onboarding-wizard__brand span { color: var(--acc); }
+          .onboarding-wizard__hint { font: 400 11px/1.6 var(--sans); color: var(--tsub); margin: 10px 0 0; }
+          .onboarding-wizard__notice { display: flex; gap: 9px; padding: 11px 13px; border-radius: 8px; border: 1px solid var(--abord); background: var(--atint); font: 400 11.5px/1.6 var(--sans); color: var(--t2); }
+          .onboarding-wizard__notice b { color: var(--t1); font-weight: 600; }
+          .onboarding-wizard__notice--warn { border-color: var(--warn); background: var(--warnsoft); }
+
+          .onboarding-wizard__footer { display: flex; align-items: center; gap: 8px; padding: 13px 18px; border-top: 1px solid var(--line); background: var(--bg-panel); }
+          .onboarding-wizard__btn { height: 30px; padding: 0 14px; border-radius: 7px; font: 600 12px/1 var(--sans); border: 1px solid var(--line-def); background: var(--bg-elev); color: var(--t2); cursor: pointer; }
+          .onboarding-wizard__btn--primary { background: var(--acc); border-color: var(--acc); color: var(--accon); }
+          .onboarding-wizard__btn--ghost { background: transparent; }
+          .onboarding-wizard__btn--link { border-color: transparent; background: transparent; color: var(--t3); font-weight: 500; }
+          .onboarding-wizard__btn[disabled] { opacity: 0.45; cursor: default; }
+
+          .onboarding-wizard__field { display: flex; flex-direction: column; gap: 6px; }
+          .onboarding-wizard__field-head { display: flex; align-items: baseline; gap: 8px; }
+          .onboarding-wizard__field-label { font: 600 11.5px/1 var(--sans); color: var(--t2); }
+          .onboarding-wizard__field-pill { font: 600 9px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.07em; padding: 3px 6px; border-radius: 4px; background: var(--oksoft); color: var(--okt); border: 1px solid var(--ok); }
+          .onboarding-wizard__field-pill--muted { background: rgba(247,243,235,0.06); color: var(--t3); border-color: var(--line); }
+          .onboarding-wizard__input { height: 32px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--line-def); background: var(--bg-input); color: var(--t1); font: 500 12.5px/1 var(--sans); display: flex; align-items: center; }
+          .onboarding-wizard__input.is-empty { color: var(--tsub); font-style: italic; }
+          .onboarding-wizard__field-sub { font: 400 10.5px/1.5 var(--sans); color: var(--tsub); }
+          .onboarding-wizard__field-sub code { font: 500 10px var(--mono); color: var(--t3); }
+
+          .onboarding-wizard__choices { display: flex; gap: 12px; }
+          .onboarding-wizard__choice { flex: 1; text-align: left; padding: 13px 14px; border-radius: 9px; border: 1px solid var(--line-def); background: var(--bg-panel); cursor: pointer; display: flex; flex-direction: column; gap: 5px; }
+          .onboarding-wizard__choice.is-on { border-color: var(--acc); background: var(--atint); }
+          .onboarding-wizard__choice-eyebrow { font: 600 9px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--t3); }
+          .onboarding-wizard__choice.is-on .onboarding-wizard__choice-eyebrow { color: var(--acc); }
+          .onboarding-wizard__choice-title { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .onboarding-wizard__choice-desc { font: 400 11px/1.55 var(--sans); color: var(--t3); }
+
+          /* Forge rows — Settings > Forges, one section per product (#244). */
+          .fg-card { border: 1px solid var(--line); border-radius: 10px; background: var(--bg-panel); overflow: hidden; }
+          .fg-hd { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px 10px; border-bottom: 1px solid var(--line); }
+          .fg-dot { width: 8px; height: 8px; border-radius: 999px; margin-top: 4px; flex: none; }
+          .fg-dot.ok { background: var(--ok); }
+          .fg-dot.warn { background: var(--warn); }
+          .fg-dot.bad { background: var(--bad); }
+          .fg-dot.off { background: var(--susp); }
+          .fg-name { font: 600 13px/1.3 var(--sans); color: var(--t1); }
+          .fg-sent { font: 400 11px/1.55 var(--sans); color: var(--t3); margin-top: 3px; max-width: 46ch; }
+          .fg-sent code { font: 500 10px var(--mono); color: var(--accb); }
+          .fg-chip { margin-left: auto; flex: none; font: 600 9px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.07em; padding: 4px 7px; border-radius: 5px; border: 1px solid var(--line); color: var(--t3); background: var(--bg-elev); }
+          .fg-chip.ok { color: var(--okt); border-color: var(--ok); background: var(--oksoft); }
+          .fg-chip.warn { color: #f2d6a6; border-color: var(--warn); background: var(--warnsoft); }
+          .fg-chip.bad { color: var(--badt); border-color: var(--bad); background: var(--badsoft); }
+          .fg-body { padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 8px; }
+          .fg-row { display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 7px; border: 1px solid var(--line-faint); background: var(--bg-app); }
+          .fg-host { font: 500 11.5px/1 var(--mono); color: var(--t1); }
+          .fg-acct { font: 400 10.5px/1 var(--sans); color: var(--t3); }
+          .fg-cmd { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 7px; background: var(--bg-input); border: 1px solid var(--line); font: 500 11px/1 var(--mono); color: var(--accb); }
+
+          /* Folder tree */
+          .tree { font: 500 11.5px/1.85 var(--mono); color: var(--t2); white-space: pre; }
+          .tree .dim { color: var(--tsub); }
+          .tree .repo { color: var(--accb); }
+          .tree .skip { color: var(--badt); }
+          .tree .lvl { color: var(--t3); font-size: 10px; }
+
+          /* Sidebar payoff */
+          .sb { width: 320px; background: var(--bg-side); border: 1px solid var(--line); border-radius: 10px; display: flex; flex-direction: column; overflow: hidden; }
+          .sb-grp { position: sticky; top: 0; height: 28px; display: flex; align-items: center; gap: 7px; padding: 0 6px; background: var(--bg-side); }
+          .sb-grp-l { font: 600 9.5px/1 var(--sans); color: var(--tsub); letter-spacing: 0.08em; text-transform: uppercase; }
+          .sb-grp-c { font: 500 9.5px/1 var(--mono); color: var(--tsub); }
+          .sb-rule { flex: 1; height: 1px; background: var(--line-faint); }
+          .sb-repo { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border-radius: 7px; }
+          .sb-repo.sel { background: var(--bg-row-active); }
+          .sb-grip { width: 12px; color: var(--tsub); display: flex; align-items: center; }
+          .sb-chev { width: 10px; color: var(--t3); font-size: 9px; }
+          .sb-nm { flex: 1; min-width: 0; font: 600 13px/1.25 var(--sans); color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .sb-wt { font: 500 10px/1 var(--mono); color: var(--tsub); }
+          .sb-badge { display: inline-flex; align-items: center; height: 17px; padding: 0 6px; border-radius: 999px; background: var(--warnsoft); color: var(--warn); font: 600 9.5px/1 var(--mono); }
+          .sb-forge { display: inline-flex; align-items: center; gap: 3px; height: 16px; padding: 0 5px; border-radius: 4px; border: 1px solid var(--line); color: var(--t3); font: 600 8.5px/1 var(--mono); letter-spacing: 0.04em; }
+          .sb-lock { color: var(--t3); display: flex; }
+          .sb-star { color: var(--acc); display: flex; }
+          .sb-kids { padding: 3px 0 6px 8px; margin: 2px 0 4px 15px; border-left: 1px solid var(--line-faint); }
+          .sb-wtrow { display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border-radius: 6px; }
+          .sb-wtrow.sel { background: var(--active-strong); }
+          .sb-br { flex: 1; min-width: 0; font: 500 11.5px/1 var(--mono); color: var(--t2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .sb-wtrow.sel .sb-br { color: var(--accb); }
+          .sb-dirty { display: inline-flex; align-items: center; height: 16px; padding: 0 5px; border-radius: 999px; background: var(--warnsoft); color: var(--warn); font: 600 9.5px/1 var(--mono); }
+          .sb-ahead { font: 600 10px/1 var(--mono); color: var(--okt); }
+          .sb-behind { font: 600 10px/1 var(--mono); color: var(--warn); }
+
+          .lens { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); }
+          .lens button, .lens span.l { display: flex; align-items: center; justify-content: center; gap: 4px; height: 26px; border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--t3); font: 400 12px/1 var(--sans); }
+          .lens .l.on { border-color: var(--abord); background: var(--active-strong); color: var(--accb); }
+          .lens .l.dim { opacity: 0.38; }
+          .lens .c { font: 600 9px/1 var(--mono); color: var(--tsub); }
+          .lens .l.on .c { color: var(--accb); }
+
+          .empty { padding: 26px 18px; text-align: center; }
+          .empty-t { font: 600 12.5px/1.4 var(--sans); color: var(--t2); }
+          .empty-s { font: 400 11px/1.6 var(--sans); color: var(--tsub); margin-top: 5px; }
+
+          .cfg { font: 500 11px/1.75 var(--mono); color: var(--t2); white-space: pre; padding: 12px 14px; background: var(--bg-input); border: 1px solid var(--line); border-radius: 8px; }
+          .cfg .sec { color: var(--accb); }
+          .cfg .hit { background: var(--badsoft); color: #ffd7cd; border-radius: 3px; }
+          .cfg .miss { color: var(--tsub); }
+          .cfg .good { background: var(--oksoft); color: var(--okt); border-radius: 3px; }
+
+          .stepmap { display: flex; flex-direction: column; gap: 5px; }
+          .stepmap-r { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 7px; border: 1px solid var(--line-faint); background: var(--bg-panel); }
+          .stepmap-r.pre { border-style: dashed; background: transparent; }
+          .stepmap-k { font: 500 11px/1 var(--mono); color: var(--accb); width: 148px; flex: none; }
+          .stepmap-n { font: 600 9px/1 var(--mono); color: var(--t3); width: 52px; flex: none; text-transform: uppercase; letter-spacing: 0.06em; }
+          .stepmap-d { font: 400 11px/1.5 var(--sans); color: var(--t3); }
+        </style>
+      </helmet>
+
+      <!-- ==================== TURN 1 ==================== -->
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">The half a first run is still missing, and the four steps that close it</span>
+        </div>
+        <p class="dv-sub"><a href="https://github.com/pwrdrvr/PwrGit/pull/248">PR&nbsp;#248</a> fixed where a new user <b>lands</b>: a window with no remembered lens opens in <code>All</code>, and a lens that cannot be filled yet is dimmed and inert rather than spending a click to say nothing. What it could not fix is that the sentence waiting there is the only instruction PwrGit ever gives. <code>&#8220;add a folder above&#8221;</code> is correct and is not enough &#8212; it does not say <b>which</b> folder, how far down PwrGit will look, or that pointing the app at a home directory will not open <code>.ssh</code>. This turn sets the step model; turns 2&#8211;5 draw the steps; turn 6 walks the whole thing live.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a First run today">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>What a brand-new profile shows today &#8212; correct, and mute</div>
+            <div class="dv-annot">
+              <div class="sb" style="height:290px">
+                <div style="padding:10px 12px 8px; border-bottom:1px solid var(--line-faint);">
+                  <div style="display:flex; align-items:center; gap:9px;">
+                    <span style="width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font:700 12px/1 var(--mono);background:var(--asoft);color:var(--accb);border:1px solid var(--abord);">P</span>
+                    <div style="min-width:0;display:flex;flex-direction:column;gap:2px;">
+                      <span style="font:700 13px/1 var(--sans); color:var(--t1);">Personal</span>
+                      <span style="font:500 10.5px/1 var(--mono); color:var(--t3);">dana@example.com</span>
+                    </div>
+                  </div>
+                </div>
+                <div style="padding:8px 12px 10px; display:flex; gap:6px;">
+                  <span style="flex:1;height:26px;border-radius:8px;border:1px solid var(--line-def);background:var(--bg-input);display:flex;align-items:center;padding:0 9px;font:400 11px/1 var(--sans);color:var(--t3);">Search repos&#8230;</span>
+                </div>
+                <div style="padding:0 12px 10px;">
+                  <div class="lens">
+                    <span class="l dim" title="Focused">&#9678;</span>
+                    <span class="l dim" title="Pinned">&#9733;</span>
+                    <span class="l dim" title="Behind">&#8595;</span>
+                    <span class="l dim" title="Stale">&#9719;</span>
+                    <span class="l on" title="All">&#8801;</span>
+                  </div>
+                </div>
+                <div class="empty">
+                  <div class="empty-s">No repos yet &#8212; add a folder above and PwrGit will scan it.</div>
+                </div>
+              </div>
+              <div class="dv-gutter">
+                <div class="dv-flag fix"><b>#248 &#183; fixed</b>Lands in <code>All</code>, not <code>Focused</code>. The four lenses that are empty by construction on a fresh scan are dimmed and inert instead of each costing a click to say nothing.</div>
+                <div class="dv-flag"><b>still open &#183; which folder?</b>&#8220;A folder&#8221; is every folder. The one question a new user actually has &#8212; <i>is it safe to point this at my home directory?</i> &#8212; is not answered anywhere in the app.</div>
+                <div class="dv-flag"><b>still open &#183; identity</b>The profile already carries a commit e-mail read out of <code>~/.gitconfig</code>, and nothing ever showed it to the user to confirm. See <a href="#2d">2d</a>.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b Step model">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>The step model &#8212; PwrAgnt's shape, four rail steps instead of five</div>
+            <div class="stepmap" style="width:620px">
+              <div class="stepmap-r pre"><span class="stepmap-k">"welcome"</span><span class="stepmap-n">pre-rail</span><span class="stepmap-d">Auto-fires on first launch of a fresh profile.</span></div>
+              <div class="stepmap-r"><span class="stepmap-k">"identity"</span><span class="stepmap-n">rail 0</span><span class="stepmap-d">Who commits look like they came from.</span></div>
+              <div class="stepmap-r"><span class="stepmap-k">"forges"</span><span class="stepmap-n">rail 1</span><span class="stepmap-d">Is <code>gh</code> / <code>glab</code> installed and signed in.</span></div>
+              <div class="stepmap-r"><span class="stepmap-k">"folders-explain"</span><span class="stepmap-n">rail 2</span><span class="stepmap-d">How the scan works, before asking for anything.</span></div>
+              <div class="stepmap-r"><span class="stepmap-k">"folders-pick"</span><span class="stepmap-n">rail 2</span><span class="stepmap-d">Add roots. Home works; a dedicated parent is better.</span></div>
+              <div class="stepmap-r"><span class="stepmap-k">"folders-scan"</span><span class="stepmap-n">rail 2</span><span class="stepmap-d">Watch it find them. The first honest progress PwrGit shows.</span></div>
+              <div class="stepmap-r"><span class="stepmap-k">"done"</span><span class="stepmap-n">rail 3</span><span class="stepmap-d">The populated sidebar, and what each lens will mean tomorrow.</span></div>
+            </div>
+            <table class="dv-tbl" style="width:620px">
+              <tr><th>Rail</th><th>Label before</th><th>Label once past</th></tr>
+              <tr><td><b>Step 1</b></td><td>Identity</td><td><span class="dv-mono">Dana Whitfield</span></td></tr>
+              <tr><td><b>Step 2</b></td><td>Forges</td><td><span class="dv-mono">GitHub &#183; GitLab</span> &#8212; or <span class="dv-mono">Skipped</span></td></tr>
+              <tr><td><b>Step 3</b></td><td>Repo folders</td><td><span class="dv-mono">~/code +1</span></td></tr>
+              <tr><td><b>Done</b></td><td>Review</td><td>&#8212;</td></tr>
+            </table>
+          </div>
+
+          <div class="dv-opt" id="1c" data-screen-label="1c Inherited rules">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>Rules lifted from PwrAgnt's wizard, unchanged</div>
+            <table class="dv-tbl" style="width:560px">
+              <tr><th>Rule</th><th>Why it is not re-litigated here</th></tr>
+              <tr><td><b>One frame width</b><br><span class="dv-mono">980px</span> every step</td><td>PwrAgnt narrowed Welcome and Done first and reverted: the jump between a cozy and an expansive canvas was jarring as the operator advanced. Constrain inner text instead.</td></tr>
+              <tr><td><b>The rail reports the choice</b></td><td>Once a step is behind you its label is replaced by what you picked, so the rail doubles as the review.</td></tr>
+              <tr><td><b>Close &#8801; Skip</b></td><td>Both persist <code>onboarding.completed = true</code>. A wizard that re-fires because you closed it is a wizard you close harder.</td></tr>
+              <tr><td><b>Replay never un-completes</b></td><td>Help &#8594; Replay setup is a transient re-entry path; the per-profile flag stays true once set.</td></tr>
+              <tr><td><b>First-launch detection is per-profile</b></td><td>PwrGit is one window per profile (<code>ProfileService.ensureSeed</code>). A second profile gets its own first run, and should.</td></tr>
+            </table>
+          </div>
+
+        </div>
+        <div class="dv-note"><b>Where the wizard is allowed to write.</b> Three of the four steps have somewhere to land already: identity is <code>profile.authorName</code> / <code>profile.email</code>, roots are <code>profile.roots</code> (<code>onSetRoots</code>), and forges are read-only &#8212; the wizard can probe and instruct but cannot sign anyone in, because <code>gh</code> and <code>glab</code> own that. The one new persistence surface is the completion flag itself.</div>
+        <p class="dv-next">Try next: "draw the Help &#8594; Replay setup entry point" &#183; "what does step 3 look like on a machine with no repos at all?"</p>
+      </section>
+
+      <!-- ==================== TURN 2 ==================== -->
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">Welcome, and Step 1 &#8212; Identity</span>
+        </div>
+        <p class="dv-sub">Welcome states the deal and gets out of the way. Step 1 is the shortest step and the only one that can be wrong <b>silently</b>: PwrGit already seeds a commit e-mail out of <code>~/.gitconfig</code> at <code>ensureSeed</code> time and has never shown it to anyone. Card <a href="#2d">2d</a> is the finding that shaped the rest of this step &#8212; the seed reader is not section-aware and does not follow <code>include</code>, so the value it shows can be a forge handle, a stale default, or nothing at all while <code>git config user.name</code> answers fine.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a Welcome">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Welcome &#8212; pre-rail, auto-fires once per profile</div>
+            <div class="onboarding-wizard">
+              <div class="onboarding-wizard__titlebar">
+                <span class="onboarding-wizard__eyebrow">Setup</span>
+                <span class="onboarding-wizard__sep">/</span>
+                <span class="onboarding-wizard__crumb">Welcome</span>
+                <span class="onboarding-wizard__spacer"></span>
+                <span class="onboarding-wizard__close">&#10005;</span>
+              </div>
+              <div class="onboarding-wizard__body" style="padding:34px 30px 26px;">
+                <div class="onboarding-wizard__brand">Pwr<span>Git</span></div>
+                <h1 class="onboarding-wizard__title onboarding-wizard__title--center">Point PwrGit at your code, and it does the finding.</h1>
+                <p class="onboarding-wizard__sub onboarding-wizard__sub--center">Three short steps: who your commits come from, which forges you are signed in to, and which folders hold your repositories. The third one is the whole app &#8212; PwrGit walks the folders you name and indexes every git checkout under them, including every worktree.</p>
+                <div style="display:flex; gap:10px; justify-content:center; margin-top:22px;">
+                  <div style="width:250px; padding:12px 14px; border:1px solid var(--line); border-radius:9px; background:var(--bg-panel);">
+                    <div class="onboarding-wizard__choice-eyebrow">What you will do</div>
+                    <div style="font:400 11px/1.6 var(--sans); color:var(--t3); margin-top:6px;">Confirm a name and e-mail, add one or two folders, and watch them scan. Under a minute.</div>
+                  </div>
+                  <div style="width:250px; padding:12px 14px; border:1px solid var(--line); border-radius:9px; background:var(--bg-panel);">
+                    <div class="onboarding-wizard__choice-eyebrow">What PwrGit will not do</div>
+                    <div style="font:400 11px/1.6 var(--sans); color:var(--t3); margin-top:6px;">Open a file, touch a working tree, run a fetch, or look inside a hidden folder like <code style="font:500 10px var(--mono);color:var(--accb)">.ssh</code>.</div>
+                  </div>
+                </div>
+              </div>
+              <div class="onboarding-wizard__footer">
+                <span class="onboarding-wizard__btn onboarding-wizard__btn--link">Skip setup</span>
+                <span class="onboarding-wizard__spacer"></span>
+                <span class="onboarding-wizard__btn onboarding-wizard__btn--primary">Start &#8594;</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Identity found">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Step 1 &#8212; something was found, and it says where from</div>
+            <div class="onboarding-wizard">
+              <div class="onboarding-wizard__titlebar">
+                <span class="onboarding-wizard__eyebrow">Setup</span>
+                <span class="onboarding-wizard__sep">/</span>
+                <span class="onboarding-wizard__crumb">Step 1 &#8212; Identity</span>
+                <span class="onboarding-wizard__spacer"></span>
+                <span class="onboarding-wizard__close">&#10005;</span>
+              </div>
+              <nav class="onboarding-wizard__rail">
+                <div class="onboarding-wizard__rail-step is-current"><div class="onboarding-wizard__rail-num">Step 1</div><div class="onboarding-wizard__rail-label">Identity</div></div>
+                <div class="onboarding-wizard__rail-step"><div class="onboarding-wizard__rail-num">Step 2</div><div class="onboarding-wizard__rail-label">Forges</div></div>
+                <div class="onboarding-wizard__rail-step"><div class="onboarding-wizard__rail-num">Step 3</div><div class="onboarding-wizard__rail-label">Repo folders</div></div>
+                <div class="onboarding-wizard__rail-step"><div class="onboarding-wizard__rail-num">Done</div><div class="onboarding-wizard__rail-label">Review</div></div>
+              </nav>
+              <div class="onboarding-wizard__body">
+                <div class="onboarding-wizard__head">
+                  <h1 class="onboarding-wizard__title">Commits from this profile will be signed off as&#8230;</h1>
+                  <p class="onboarding-wizard__sub">This is the author line git writes on every commit you make in PwrGit. It is <b>not</b> your PwrGit profile name &#8212; that one is a workspace label, and it stays &#8220;Personal&#8221;.</p>
+                </div>
+                <div style="display:flex; gap:16px; max-width:720px;">
+                  <div class="onboarding-wizard__field" style="flex:1">
+                    <div class="onboarding-wizard__field-head">
+                      <span class="onboarding-wizard__field-label">Author name</span>
+                      <span class="onboarding-wizard__field-pill">found</span>
+                    </div>
+                    <div class="onboarding-wizard__input">Dana Whitfield</div>
+                    <span class="onboarding-wizard__field-sub">from <code>git config --get user.name</code></span>
+                  </div>
+                  <div class="onboarding-wizard__field" style="flex:1">
+                    <div class="onboarding-wizard__field-head">
+                      <span class="onboarding-wizard__field-label">Author e-mail</span>
+                      <span class="onboarding-wizard__field-pill">found</span>
+                    </div>
+                    <div class="onboarding-wizard__input">dana@example.com</div>
+                    <span class="onboarding-wizard__field-sub">from <code>git config --get user.email</code></span>
+                  </div>
+                </div>
+                <div class="onboarding-wizard__notice" style="margin-top:18px; max-width:720px;">
+                  <span style="color:var(--acc);">&#9432;</span>
+                  <div>Your <code>~/.gitconfig</code> sets a different identity for repositories under <code>~/work/</code>. PwrGit does not override it &#8212; commits there will still be authored as <b>d.whitfield@meridian.example</b>. This name and e-mail are the default everywhere else.</div>
+                </div>
+                <p class="onboarding-wizard__hint">Changing these here writes them to this PwrGit profile only. Your global <code>~/.gitconfig</code> is not edited.</p>
+              </div>
+              <div class="onboarding-wizard__footer">
+                <span class="onboarding-wizard__btn onboarding-wizard__btn--link">Skip setup</span>
+                <span class="onboarding-wizard__spacer"></span>
+                <span class="onboarding-wizard__btn onboarding-wizard__btn--ghost">Back</span>
+                <span class="onboarding-wizard__btn onboarding-wizard__btn--primary">Continue &#8594;</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c Identity blank">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>Nothing found &#8212; the one step that may not be skipped blank</div>
+            <div class="onboarding-wizard onboarding-wizard--mini">
+              <div class="onboarding-wizard__body" style="padding:20px 22px 18px;">
+                <div class="onboarding-wizard__head">
+                  <h1 class="onboarding-wizard__title" style="font-size:18px;">Git does not know who you are yet.</h1>
+                  <p class="onboarding-wizard__sub" style="font-size:12px;">Every commit needs an author. Set one here and PwrGit will use it for this profile.</p>
+                </div>
+                <div class="onboarding-wizard__field" style="margin-bottom:12px;">
+                  <div class="onboarding-wizard__field-head">
+                    <span class="onboarding-wizard__field-label">Author name</span>
+                    <span class="onboarding-wizard__field-pill onboarding-wizard__field-pill--muted">not set</span>
+                  </div>
+                  <div class="onboarding-wizard__input is-empty">Dana Whitfield</div>
+                </div>
+                <div class="onboarding-wizard__field">
+                  <div class="onboarding-wizard__field-head">
+                    <span class="onboarding-wizard__field-label">Author e-mail</span>
+                    <span class="onboarding-wizard__field-pill onboarding-wizard__field-pill--muted">not set</span>
+                  </div>
+                  <div class="onboarding-wizard__input is-empty">dana@example.com</div>
+                  <span class="onboarding-wizard__field-sub">Forges match commits to your account by e-mail. Use the one your forge account carries.</span>
+                </div>
+              </div>
+              <div class="onboarding-wizard__footer">
+                <span class="onboarding-wizard__spacer"></span>
+                <span class="onboarding-wizard__btn onboarding-wizard__btn--ghost">Back</span>
+                <span class="onboarding-wizard__btn onboarding-wizard__btn--primary" disabled>Continue &#8594;</span>
+              </div>
+            </div>
+            <p class="dv-olabel" style="color:var(--t3)">Continue is disabled rather than hidden, and the fields carry the value as a placeholder so the shape of the answer is obvious. Skip still works from the footer of the full frame &#8212; a blank identity is recoverable in Settings, so this is a nudge, not a gate.</p>
+          </div>
+
+          <div class="dv-opt" id="2d" data-screen-label="2d Identity finding">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a><b style="color:var(--badt)">Finding</b> &#8212; what the current seed reader actually reads</div>
+            <div class="dv-annot">
+              <div style="display:flex; flex-direction:column; gap:12px; width:430px;">
+                <div>
+                  <div style="font:600 10px/1 var(--mono); color:var(--t3); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:5px;">A &#183; identity lives in an included file</div>
+                  <div class="cfg"><span class="sec">[include]</span>
+	path = ~/.gitconfig.d/identity
+<span class="sec">[core]</span>
+	editor = nvim</div>
+                  <div style="font:400 10.5px/1.6 var(--sans); color:var(--t3); margin-top:5px;">seeds <span class="dv-mono" style="color:var(--badt)">{}</span> &#8212; while <code style="font:500 10px var(--mono);color:var(--accb)">git config --get user.name</code> answers <b style="color:var(--t1)">Dana Whitfield</b>.</div>
+                </div>
+                <div>
+                  <div style="font:600 10px/1 var(--mono); color:var(--t3); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:5px;">B &#183; a section before [user] carries a name key</div>
+                  <div class="cfg"><span class="sec">[github]</span>
+	<span class="hit">name = dwhitfield</span>
+<span class="sec">[user]</span>
+	<span class="miss">name = Dana Whitfield</span>
+	<span class="good">email = dana@example.com</span></div>
+                  <div style="font:400 10.5px/1.6 var(--sans); color:var(--t3); margin-top:5px;">seeds the forge handle as the author name, and the e-mail from a different section: <span class="dv-mono" style="color:var(--badt)">dwhitfield &lt;dana@example.com&gt;</span>.</div>
+                </div>
+                <div>
+                  <div style="font:600 10px/1 var(--mono); color:var(--t3); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:5px;">C &#183; conditional include per directory</div>
+                  <div class="cfg"><span class="sec">[user]</span>
+	<span class="good">name = Dana Whitfield</span>
+	<span class="good">email = dana@example.com</span>
+<span class="sec">[includeIf "gitdir:~/work/"]</span>
+	path = ~/.gitconfig-work</div>
+                  <div style="font:400 10.5px/1.6 var(--sans); color:var(--t3); margin-top:5px;">seeds the global default, which is right for <code style="font:500 10px var(--mono);color:var(--accb)">~/code</code> and wrong for every repo under <code style="font:500 10px var(--mono);color:var(--accb)">~/work</code> &#8212; the second root this same user adds two steps later.</div>
+                </div>
+              </div>
+              <div class="dv-gutter">
+                <div class="dv-flag"><b>not section-aware</b><code>readGitIdentityDefaults</code> takes the first <code>name =</code> and the first <code>email =</code> anywhere in the file, by regex, with no notion of which section they are in. The two can come from different sections.</div>
+                <div class="dv-flag"><b>does not follow includes</b>One <code>readFileSync</code> of one path. <code>include</code>, <code>includeIf</code>, the system config and any per-repo override are all invisible to it.</div>
+                <div class="dv-flag fix"><b>remedy &#183; ask git</b>Read through <code>git config --get user.name</code>. It resolves sections, precedence and includes, and it is the same answer the commit will actually carry. The wizard already shells out to git constantly; this is not a new dependency.</div>
+                <div class="dv-flag fix"><b>remedy &#183; say where from</b>A one-line provenance under each field (<a href="#2b">2b</a>) turns a silent wrong default into a visible one. Where a conditional include exists, name it: that is the notice in 2b.</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <div class="dv-note"><b>Verified, not assumed.</b> All three configs above were run through the exact regex in <code>apps/desktop/src/main/profiles/git-identity.ts</code>. A&nbsp;&#8594;&nbsp;<code>{}</code>; B&nbsp;&#8594;&nbsp;<code>{name:"dwhitfield", email:"dana@example.com"}</code>; C&nbsp;&#8594;&nbsp;<code>{name:"Dana Whitfield", email:"dana@example.com"}</code>. The reader is documented as &#8220;best-effort&#8230; returns empty when unreadable&#8221;, which it honours &#8212; the gap is that a best-effort value has never had a surface that admits it is one. That is exactly what Step 1 is for.</div>
+        <p class="dv-next">Try next: "draw Step 1 when the profile is the second one on this machine" &#183; "should the wizard offer to write <code>user.email</code> into <code>~/.gitconfig</code> when it is unset?"</p>
+      </section>
+
+      <!-- ==================== TURN 3 ==================== -->
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3">3</a>
+          <span class="dv-tname">Step 2 &#8212; Forges, in the four states they are actually in</span>
+        </div>
+        <p class="dv-sub">This step is a <b>report</b>, not a form. PwrGit reads forges through <code>gh</code> and <code>glab</code>; those CLIs own the credential, so the wizard cannot sign anyone in and must not pretend to. Every sentence below is the one <code>ForgeProductSection.tsx</code> already writes, reused verbatim &#8212; a wizard that invents second phrasings is how &#8220;Signed out&#8221; and &#8220;No host is signed in&#8221; end up disagreeing on the same screen. The step is skippable in one click: PwrGit is a git client before it is a forge client, and a user with no <code>gh</code> gets a working sidebar anyway.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a Forges step">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>Step 2 &#8212; one section per product, as Settings &#8250; Forges draws it since <a href="https://github.com/pwrdrvr/PwrGit/pull/244">#244</a></div>
+            <div class="onboarding-wizard">
+              <div class="onboarding-wizard__titlebar">
+                <span class="onboarding-wizard__eyebrow">Setup</span>
+                <span class="onboarding-wizard__sep">/</span>
+                <span class="onboarding-wizard__crumb">Step 2 &#8212; Forges</span>
+                <span class="onboarding-wizard__spacer"></span>
+                <span class="onboarding-wizard__close">&#10005;</span>
+              </div>
+              <nav class="onboarding-wizard__rail">
+                <div class="onboarding-wizard__rail-step is-done"><div class="onboarding-wizard__rail-num">Step 1 &#10003;</div><div class="onboarding-wizard__rail-label">Dana Whitfield</div></div>
+                <div class="onboarding-wizard__rail-step is-current"><div class="onboarding-wizard__rail-num">Step 2</div><div class="onboarding-wizard__rail-label">Forges</div></div>
+                <div class="onboarding-wizard__rail-step"><div class="onboarding-wizard__rail-num">Step 3</div><div class="onboarding-wizard__rail-label">Repo folders</div></div>
+                <div class="onboarding-wizard__rail-step"><div class="onboarding-wizard__rail-num">Done</div><div class="onboarding-wizard__rail-label">Review</div></div>
+              </nav>
+              <div class="onboarding-wizard__body">
+                <div class="onboarding-wizard__head">
+                  <h1 class="onboarding-wizard__title">Where PwrGit reads pull and merge requests from.</h1>
+                  <p class="onboarding-wizard__sub">Optional. Without a forge, PwrGit still finds, branches, commits and pushes &#8212; you just will not see PR state on a row. PwrGit reads through the CLIs you already have; it never asks for a token.</p>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:12px; max-width:760px;">
+
+                  <div class="fg-card">
+                    <div class="fg-hd">
+                      <span class="fg-dot ok"></span>
+                      <div style="min-width:0;flex:1">
+                        <div class="fg-name">GitHub</div>
+                        <div class="fg-sent">Reading pull requests from github.com through <code>gh</code>.</div>
+                      </div>
+                      <span class="fg-chip ok">Connected</span>
+                    </div>
+                    <div class="fg-body">
+                      <div class="fg-row">
+                        <span class="fg-dot ok" style="margin-top:0"></span>
+                        <span class="fg-host">github.com</span>
+                        <span class="fg-acct">signed in as dwhitfield</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="fg-card">
+                    <div class="fg-hd">
+                      <span class="fg-dot warn"></span>
+                      <div style="min-width:0;flex:1">
+                        <div class="fg-name">GitLab</div>
+                        <div class="fg-sent">No host is signed in to read merge requests from. 1 of 1 host on.</div>
+                      </div>
+                      <span class="fg-chip warn">Signed out</span>
+                    </div>
+                    <div class="fg-body">
+                      <div class="fg-row">
+                        <span class="fg-dot warn" style="margin-top:0"></span>
+                        <span class="fg-host">git.meridian.example</span>
+                        <span class="fg-acct">not signed in</span>
+                      </div>
+                      <div class="fg-cmd">
+                        <span style="color:var(--t3)">$</span>
+                        <span style="flex:1">glab auth login --hostname git.meridian.example</span>
+                        <span style="font:600 9px/1 var(--mono); color:var(--t3); text-transform:uppercase; letter-spacing:0.07em; border:1px solid var(--line); border-radius:4px; padding:4px 6px;">Copy</span>
+                      </div>
+                      <div style="display:flex; align-items:center; gap:8px;">
+                        <span class="onboarding-wizard__btn onboarding-wizard__btn--ghost" style="height:26px; font-size:11px;">Re-check</span>
+                        <span style="font:400 10.5px/1.5 var(--sans); color:var(--tsub);">Run it in a terminal, then re-check &#8212; PwrGit will not notice on its own.</span>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+                <p class="onboarding-wizard__hint">All of this lives in Settings &#8250; Forges afterwards, including adding an Enterprise or self-managed host.</p>
+              </div>
+              <div class="onboarding-wizard__footer">
+                <span class="onboarding-wizard__btn onboarding-wizard__btn--link">Skip setup</span>
+                <span class="onboarding-wizard__spacer"></span>
+                <span class="onboarding-wizard__btn onboarding-wizard__btn--ghost">Back</span>
+                <span class="onboarding-wizard__btn onboarding-wizard__btn--primary">Continue &#8594;</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b Four states">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>The four states, and the remedy each one actually needs</div>
+            <div style="display:flex; flex-direction:column; gap:10px; width:470px;">
+              <div class="fg-card">
+                <div class="fg-hd">
+                  <span class="fg-dot ok"></span>
+                  <div style="min-width:0;flex:1"><div class="fg-name">GitHub</div><div class="fg-sent">Reading pull requests through the <code>gh</code> CLI&#8217;s default host.</div></div>
+                  <span class="fg-chip ok">Connected</span>
+                </div>
+              </div>
+              <div class="fg-card">
+                <div class="fg-hd">
+                  <span class="fg-dot warn"></span>
+                  <div style="min-width:0;flex:1"><div class="fg-name">GitLab</div><div class="fg-sent">No host is signed in to read merge requests from.</div></div>
+                  <span class="fg-chip warn">Signed out</span>
+                </div>
+              </div>
+              <div class="fg-card">
+                <div class="fg-hd">
+                  <span class="fg-dot bad"></span>
+                  <div style="min-width:0;flex:1"><div class="fg-name">GitLab</div><div class="fg-sent">Merge requests need the <code>glab</code> CLI.</div></div>
+                  <span class="fg-chip bad">Not installed</span>
+                </div>
+              </div>
+              <div class="fg-card">
+                <div class="fg-hd">
+                  <span class="fg-dot off"></span>
+                  <div style="min-width:0;flex:1"><div class="fg-name">GitHub</div><div class="fg-sent">Every GitHub host is switched off.</div></div>
+                  <span class="fg-chip">Off</span>
+                </div>
+              </div>
+            </div>
+            <table class="dv-tbl" style="width:470px">
+              <tr><th>State</th><th>What the wizard offers</th></tr>
+              <tr><td><b>Connected</b></td><td>Nothing. The one state that needs no action is the one that stays quiet.</td></tr>
+              <tr><td><b>Signed out</b></td><td>The exact command, per host, plus Re-check.</td></tr>
+              <tr><td><b>Not installed</b></td><td>The install line for the CLI. Never a sign-in command &#8212; that blames the login for a missing binary.</td></tr>
+              <tr><td><b>Off</b></td><td>A switch, not a command. The user turned this off on purpose; the remedy is to turn it back on.</td></tr>
+            </table>
+          </div>
+
+        </div>
+        <div class="dv-note"><b>Two rules this step must not break.</b> A dot is never the only channel &#8212; every state that needs attention also says so in a word, because the dot is <code>aria-hidden</code>. And an <b>unprobed</b> product gets neither dot nor word: &#8220;we have not looked yet&#8221; is honest, and a green dot would be a guess. Both are already load-bearing in the Settings nav, and the wizard is a second consumer of the same read (<code>forge:status</code>), not a second implementation of it.</div>
+        <p class="dv-next">Try next: "draw Step 2 while the first probe is still in flight" &#183; "what does Add Enterprise host look like inside the wizard frame?"</p>
+      </section>
+
+      <!-- ==================== TURN 4 ==================== -->
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t4">4</a>
+          <span class="dv-tname">Step 3 &#8212; Repo folders. Teach first, then ask.</span>
+        </div>
+        <p class="dv-sub">This is the step the app exists for, and the only one where a user is asked to point software at their disk. &#8220;Add a folder&#8221; is alarming until you know what the folder is for and what will be opened &#8212; so the explanation comes <b>before</b> the picker, not in a tooltip beside it. Every number and every name below is read out of <code>apps/desktop/src/main/git/repo-indexer.ts</code>: <code>MAX_SCAN_DEPTH&nbsp;=&nbsp;5</code>, the nine-entry <code>SKIP_DIRS</code> set, and the rule that anything starting with <code>.</code> is skipped.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="4a" data-screen-label="4a How the scan works">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Step 3a &#8212; how PwrGit finds repositories, said in plain words</div>
+            <div class="onboarding-wizard">
+              <div class="onboarding-wizard__titlebar">
+                <span class="onboarding-wizard__eyebrow">Setup</span>
+                <span class="onboarding-wizard__sep">/</span>
+                <span class="onboarding-wizard__crumb">Step 3 &#8212; Repo folders</span>
+                <span class="onboarding-wizard__spacer"></span>
+                <span class="onboarding-wizard__close">&#10005;</span>
+              </div>
+              <nav class="onboarding-wizard__rail">
+                <div class="onboarding-wizard__rail-step is-done"><div class="onboarding-wizard__rail-num">Step 1 &#10003;</div><div class="onboarding-wizard__rail-label">Dana Whitfield</div></div>
+                <div class="onboarding-wizard__rail-step is-done"><div class="onboarding-wizard__rail-num">Step 2 &#10003;</div><div class="onboarding-wizard__rail-label">GitHub &#183; GitLab</div></div>
+                <div class="onboarding-wizard__rail-step is-current"><div class="onboarding-wizard__rail-num">Step 3</div><div class="onboarding-wizard__rail-label">Repo folders</div></div>
+                <div class="onboarding-wizard__rail-step"><div class="onboarding-wizard__rail-num">Done</div><div class="onboarding-wizard__rail-label">Review</div></div>
+              </nav>
+              <div class="onboarding-wizard__body">
+                <div class="onboarding-wizard__head">
+                  <h1 class="onboarding-wizard__title">You name folders. PwrGit does the finding.</h1>
+                  <p class="onboarding-wizard__sub">You will not add repositories one at a time. Point PwrGit at the folder your code already lives in and it walks it, indexing every git checkout it meets &#8212; and every worktree each one owns.</p>
+                </div>
+                <div style="display:flex; gap:20px; align-items:flex-start;">
+                  <div style="flex:1; display:flex; flex-direction:column; gap:11px;">
+                    <div style="display:flex; gap:10px; align-items:flex-start;">
+                      <span style="flex:none;width:20px;height:20px;border-radius:6px;background:var(--asoft);border:1px solid var(--abord);color:var(--accb);font:600 10px/1 var(--mono);display:flex;align-items:center;justify-content:center;">1</span>
+                      <div style="font:400 11.5px/1.65 var(--sans); color:var(--t2);"><b style="color:var(--t1)">It looks five levels down.</b> From the folder you add, PwrGit descends up to five levels looking for a <code>.git</code> entry. Once it finds one it stops there &#8212; it does not walk around inside your repositories.</div>
+                    </div>
+                    <div style="display:flex; gap:10px; align-items:flex-start;">
+                      <span style="flex:none;width:20px;height:20px;border-radius:6px;background:var(--asoft);border:1px solid var(--abord);color:var(--accb);font:600 10px/1 var(--mono);display:flex;align-items:center;justify-content:center;">2</span>
+                      <div style="font:400 11.5px/1.65 var(--sans); color:var(--t2);"><b style="color:var(--t1)">Hidden folders are never opened.</b> Anything whose name starts with a dot is skipped outright &#8212; <code>.ssh</code>, <code>.config</code>, <code>.aws</code>, <code>.gnupg</code>. PwrGit does not look in them, so adding your home folder cannot reach your keys.</div>
+                    </div>
+                    <div style="display:flex; gap:10px; align-items:flex-start;">
+                      <span style="flex:none;width:20px;height:20px;border-radius:6px;background:var(--asoft);border:1px solid var(--abord);color:var(--accb);font:600 10px/1 var(--mono);display:flex;align-items:center;justify-content:center;">3</span>
+                      <div style="font:400 11.5px/1.65 var(--sans); color:var(--t2);"><b style="color:var(--t1)">It reads folder names, not files.</b> The scan lists directory entries and checks for <code>.git</code>. It never opens, reads, copies or sends the contents of anything.</div>
+                    </div>
+                    <div class="onboarding-wizard__notice" style="margin-top:4px;">
+                      <span style="color:var(--acc);">&#9432;</span>
+                      <div>Also skipped, at every level: <code>node_modules</code>, <code>dist</code>, <code>out</code>, <code>build</code>, <code>target</code>, <code>vendor</code>, <code>.cache</code> and macOS <code>Library</code>.</div>
+                    </div>
+                  </div>
+                  <div style="flex:none; width:330px; padding:14px 16px; border:1px solid var(--line); border-radius:9px; background:var(--bg-panel);">
+                    <div class="onboarding-wizard__choice-eyebrow" style="margin-bottom:9px;">A folder you add, as PwrGit sees it</div>
+                    <div class="tree"><span class="dim">~/code</span><span class="lvl">                  &#9679; you add this</span>
+&#9500;&#9472; northwind-labs/
+&#9474;  &#9500;&#9472; <span class="repo">ledger-api/</span><span class="lvl">        &#9679; repo</span>
+&#9474;  &#9492;&#9472; <span class="repo">ledger-web/</span><span class="lvl">        &#9679; repo</span>
+&#9500;&#9472; atlas-forge/
+&#9474;  &#9500;&#9472; <span class="repo">telemetry/</span><span class="lvl">         &#9679; repo</span>
+&#9474;  &#9492;&#9472; <span class="repo">ledger-api/</span><span class="lvl">        &#9679; repo</span>
+&#9500;&#9472; dwhitfield/
+&#9474;  &#9492;&#9472; <span class="repo">dotfiles/</span><span class="lvl">          &#9679; repo</span>
+&#9500;&#9472; <span class="skip">.config/</span><span class="lvl">              &#10005; hidden</span>
+&#9492;&#9472; <span class="skip">node_modules/</span><span class="lvl">         &#10005; skipped</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="onboarding-wizard__footer">
+                <span class="onboarding-wizard__btn onboarding-wizard__btn--link">Skip setup</span>
+                <span class="onboarding-wizard__spacer"></span>
+                <span class="onboarding-wizard__btn onboarding-wizard__btn--ghost">Back</span>
+                <span class="onboarding-wizard__btn onboarding-wizard__btn--primary">Choose folders &#8594;</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="4b" data-screen-label="4b Pick a folder">
+            <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>Step 3b &#8212; the picker. Home works; a dedicated parent is better.</div>
+            <div class="onboarding-wizard">
+              <div class="onboarding-wizard__titlebar">
+                <span class="onboarding-wizard__eyebrow">Setup</span>
+                <span class="onboarding-wizard__sep">/</span>
+                <span class="onboarding-wizard__crumb">Step 3 &#8212; Repo folders</span>
+                <span class="onboarding-wizard__spacer"></span>
+                <span class="onboarding-wizard__close">&#10005;</span>
+              </div>
+              <div class="onboarding-wizard__body">
+                <div class="onboarding-wizard__head">
+                  <h1 class="onboarding-wizard__title">Which folders hold your repositories?</h1>
+                  <p class="onboarding-wizard__sub">Add as many as you like. Most people have one; a work machine often has two.</p>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:8px; max-width:760px;">
+                  <div class="fg-row" style="padding:10px 12px;">
+                    <span style="color:var(--accb); font-size:13px;">&#128193;</span>
+                    <span class="fg-host" style="flex:1">~/code</span>
+                    <span style="font:500 10.5px/1 var(--mono); color:var(--okt);">5 repos found</span>
+                    <span style="font:400 15px/1 var(--sans); color:var(--t3);">&#10005;</span>
+                  </div>
+                  <div class="fg-row" style="padding:10px 12px;">
+                    <span style="color:var(--accb); font-size:13px;">&#128193;</span>
+                    <span class="fg-host" style="flex:1">~/work</span>
+                    <span style="font:500 10.5px/1 var(--mono); color:var(--okt);">2 repos found</span>
+                    <span style="font:400 15px/1 var(--sans); color:var(--t3);">&#10005;</span>
+                  </div>
+                  <div style="display:flex; align-items:center; gap:9px; padding:9px 11px; border:1px dashed var(--line-def); border-radius:7px; color:var(--t3); font:500 11.5px/1 var(--sans);">
+                    <span style="font-size:13px;">+</span> Add a folder&#8230;
+                  </div>
+                </div>
+
+                <div style="margin-top:20px; max-width:760px;">
+                  <div class="onboarding-wizard__choice-eyebrow" style="margin-bottom:8px;">No such folder yet? These are the usual names.</div>
+                  <div class="onboarding-wizard__choices">
+                    <div class="onboarding-wizard__choice">
+                      <div class="onboarding-wizard__choice-title" style="font-family:var(--mono); font-size:12px;">~/projects</div>
+                      <div class="onboarding-wizard__choice-desc">Create it and add it</div>
+                    </div>
+                    <div class="onboarding-wizard__choice is-on">
+                      <div class="onboarding-wizard__choice-title" style="font-family:var(--mono); font-size:12px;">~/github</div>
+                      <div class="onboarding-wizard__choice-desc">Create it and add it</div>
+                    </div>
+                    <div class="onboarding-wizard__choice">
+                      <div class="onboarding-wizard__choice-title" style="font-family:var(--mono); font-size:12px;">~/git</div>
+                      <div class="onboarding-wizard__choice-desc">Create it and add it</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="onboarding-wizard__notice onboarding-wizard__notice--warn" style="margin-top:18px; max-width:760px;">
+                  <span style="color:var(--warn);">&#9888;</span>
+                  <div><b>Adding <code>~</code> works, and we would not.</b> Your home folder holds thousands of directories that are not code, and PwrGit has to walk past all of them on every rescan. A dedicated parent keeps the scan quick and the sidebar honest &#8212; the folder you add becomes a group heading, and &#8220;dana&#8221; is not a useful heading.</div>
+                </div>
+              </div>
+              <div class="onboarding-wizard__footer">
+                <span class="onboarding-wizard__btn onboarding-wizard__btn--link">Skip setup</span>
+                <span class="onboarding-wizard__spacer"></span>
+                <span class="onboarding-wizard__btn onboarding-wizard__btn--ghost">Back</span>
+                <span class="onboarding-wizard__btn onboarding-wizard__btn--primary">Scan 2 folders &#8594;</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="4c" data-screen-label="4c Nesting">
+            <div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>The sentence that does the most work in the whole wizard</div>
+            <div style="width:430px; padding:16px 18px; border:1px solid var(--abord); border-radius:9px; background:var(--atint);">
+              <div style="font:650 14px/1.4 var(--sans); color:var(--t1); margin-bottom:8px;">Nest them however you like.</div>
+              <div style="font:400 11.5px/1.7 var(--sans); color:var(--t2);">One added folder covers every repository beneath it, at any depth up to five. Organising by organisation or by user is normal and PwrGit expects it &#8212; all four of these come from adding <code style="font:500 10.5px var(--mono);color:var(--accb)">~/github</code> once:</div>
+              <div class="tree" style="margin-top:10px; font-size:11px;"><span class="dim">~/github/</span><span class="repo">northwind-labs/ledger-api</span>
+<span class="dim">~/github/</span><span class="repo">northwind-labs/ledger-web</span>
+<span class="dim">~/github/</span><span class="repo">atlas-forge/telemetry</span>
+<span class="dim">~/github/</span><span class="repo">dwhitfield/dotfiles</span></div>
+              <div style="font:400 11px/1.65 var(--sans); color:var(--t3); margin-top:10px;">In the sidebar they are grouped under <b style="color:var(--t2)">GITHUB</b> &#8212; the folder you added, not the folder they sit in.</div>
+            </div>
+            <table class="dv-tbl" style="width:430px">
+              <tr><th>Layout</th><th>Add</th><th>Finds</th></tr>
+              <tr><td><span class="dv-mono">~/code/repo</span></td><td><span class="dv-mono">~/code</span></td><td>flat, depth 1</td></tr>
+              <tr><td><span class="dv-mono">~/github/org/repo</span></td><td><span class="dv-mono">~/github</span></td><td>by org, depth 2</td></tr>
+              <tr><td><span class="dv-mono">~/src/gh/org/team/repo</span></td><td><span class="dv-mono">~/src</span></td><td>depth 4 &#8212; still fine</td></tr>
+              <tr><td><span class="dv-mono">~/a/b/c/d/e/f/repo</span></td><td><span class="dv-mono">~/a</span></td><td><span style="color:var(--badt)">depth 7 &#8212; missed</span></td></tr>
+            </table>
+          </div>
+
+          <div class="dv-opt" id="4d" data-screen-label="4d Scanning">
+            <div class="dv-olabel"><a class="dv-oid" href="#4d">4d</a>Step 3c &#8212; the scan, watched. PwrGit&#8217;s first honest progress.</div>
+            <div class="onboarding-wizard onboarding-wizard--mini" style="width:620px">
+              <div class="onboarding-wizard__body" style="padding:24px 26px 20px;">
+                <div class="onboarding-wizard__head">
+                  <h1 class="onboarding-wizard__title" style="font-size:19px;">Scanning ~/work&#8230;</h1>
+                  <p class="onboarding-wizard__sub" style="font-size:12px;">7 repositories so far. You can carry on &#8212; this keeps running behind the wizard.</p>
+                </div>
+                <div style="height:4px; border-radius:999px; background:var(--bg-elev); overflow:hidden; margin-bottom:14px;">
+                  <div style="width:72%; height:100%; background:var(--acc);"></div>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:5px;">
+                  <div class="fg-row" style="padding:7px 10px;"><span style="color:var(--okt);font-size:11px;">&#10003;</span><span class="fg-host" style="flex:1; font-size:11px;">~/code</span><span style="font:500 10px/1 var(--mono); color:var(--t3);">5 repos &#183; 9 worktrees</span></div>
+                  <div class="fg-row" style="padding:7px 10px;"><span style="color:var(--acc);font-size:11px;">&#9679;</span><span class="fg-host" style="flex:1; font-size:11px;">~/work</span><span style="font:500 10px/1 var(--mono); color:var(--t3);">2 repos so far&#8230;</span></div>
+                </div>
+                <p class="onboarding-wizard__hint">Per-repository git state &#8212; ahead, behind, uncommitted &#8212; is read when you first open a repo, not now. That is why the Focused, Behind and Stale lenses stay empty until you have looked around.</p>
+              </div>
+              <div class="onboarding-wizard__footer">
+                <span class="onboarding-wizard__spacer"></span>
+                <span class="onboarding-wizard__btn onboarding-wizard__btn--primary">See the result &#8594;</span>
+              </div>
+            </div>
+            <p class="dv-olabel" style="color:var(--t3); max-width:430px">That last paragraph is the wizard paying off <a href="https://github.com/pwrdrvr/PwrGit/pull/248">#248</a> directly: the dimmed lenses on the next screen now have a reason the user has already read, instead of four grey chips they have to guess at.</p>
+          </div>
+
+        </div>
+        <div class="dv-note"><b>Why the explanation is a step and not a tooltip.</b> The picker asks for filesystem access in the only vocabulary a user has for that request &#8212; the one they learned from installers that wanted more than they needed. A tooltip is read after the decision. Putting the three facts on their own screen costs one <code>Continue</code> and buys the difference between &#8220;why does it want my home folder&#8221; and &#8220;oh, it skips dotfiles&#8221;. If it must collapse, collapse 3a into 3b as a persistent panel beside the picker &#8212; never into a disclosure.</div>
+        <p class="dv-next">Try next: "draw the scan finding zero repos" &#183; "what happens when a root is an unmounted network volume?"</p>
+      </section>
+
+      <!-- ==================== TURN 5 ==================== -->
+      <section class="dv-turn" id="t5">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t5">5</a>
+          <span class="dv-tname">Done &#8212; show them the thing they just built, without lying about it</span>
+        </div>
+        <p class="dv-sub">A wizard that ends on &#8220;Setup complete&#8221; has spent the user&#8217;s attention and given nothing back. This one ends on their <b>actual sidebar</b> &#8212; and the interesting constraint is that the sidebar at that exact moment is not yet the sidebar they will have tomorrow. Per-worktree git state is computed lazily on expand (the premise of <a href="https://github.com/pwrdrvr/PwrGit/pull/248">#248</a>), and nothing gets pinned by a scan. So 5a draws what is <b>true</b> at Done, 5b draws what it becomes, and the difference between them is the Done screen&#8217;s whole job. Every name is contrived fixture data.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="5a" data-screen-label="5a Done screen">
+            <div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a>Done &#8212; everything a scan actually knows, and not one thing more</div>
+            <div class="onboarding-wizard">
+              <div class="onboarding-wizard__titlebar">
+                <span class="onboarding-wizard__eyebrow">Setup</span>
+                <span class="onboarding-wizard__sep">/</span>
+                <span class="onboarding-wizard__crumb">Done</span>
+                <span class="onboarding-wizard__spacer"></span>
+                <span class="onboarding-wizard__close">&#10005;</span>
+              </div>
+              <nav class="onboarding-wizard__rail">
+                <div class="onboarding-wizard__rail-step is-done"><div class="onboarding-wizard__rail-num">Step 1 &#10003;</div><div class="onboarding-wizard__rail-label">Dana Whitfield</div></div>
+                <div class="onboarding-wizard__rail-step is-done"><div class="onboarding-wizard__rail-num">Step 2 &#10003;</div><div class="onboarding-wizard__rail-label">GitHub &#183; GitLab</div></div>
+                <div class="onboarding-wizard__rail-step is-done"><div class="onboarding-wizard__rail-num">Step 3 &#10003;</div><div class="onboarding-wizard__rail-label">~/code +1</div></div>
+                <div class="onboarding-wizard__rail-step is-current"><div class="onboarding-wizard__rail-num">Done</div><div class="onboarding-wizard__rail-label">Review</div></div>
+              </nav>
+              <div class="onboarding-wizard__body">
+                <div class="onboarding-wizard__head">
+                  <h1 class="onboarding-wizard__title">7 repositories, 12 worktrees, 2 folders.</h1>
+                  <p class="onboarding-wizard__sub">This is your sidebar. It rescans on its own once a day, and whenever you ask it to.</p>
+                </div>
+                <div style="display:flex; gap:24px; align-items:flex-start;">
+                  <div class="sb" style="flex:none;">
+                    <div style="padding:10px 12px 8px;">
+                      <div style="display:flex; align-items:center; gap:9px;">
+                        <span style="width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font:700 12px/1 var(--mono);background:var(--asoft);color:var(--accb);border:1px solid var(--abord);">P</span>
+                        <div style="min-width:0;display:flex;flex-direction:column;gap:2px;">
+                          <span style="font:700 13px/1 var(--sans); color:var(--t1);">Personal</span>
+                          <span style="font:500 10.5px/1 var(--mono); color:var(--t3);">dana@example.com</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div style="padding:0 12px 8px;">
+                      <span style="display:flex;height:30px;border-radius:8px;border:1px solid var(--line-def);background:var(--bg-input);align-items:center;padding:0 9px;gap:7px;font:400 11px/1 var(--sans);color:var(--t3);">&#9906; Search repos&#8230;</span>
+                    </div>
+                    <div style="padding:0 12px 10px; display:flex; align-items:center; gap:6px;">
+                      <div class="lens" style="flex:1"><span class="l dim" title="Focused">&#9678;</span><span class="l dim" title="Pinned">&#9733;</span><span class="l dim" title="Behind">&#8595;</span><span class="l dim" title="Stale">&#9719;</span><span class="l on" title="All">&#8801;<span class="c">7</span></span></div>
+                      <span style="width:26px;height:26px;border-radius:6px;border:1px solid var(--line);color:var(--t3);display:flex;align-items:center;justify-content:center;font-size:11px;">&#9776;</span>
+                    </div>
+                    <div style="flex:1; min-height:0; padding:0 8px 12px;">
+                      <div class="sb-grp"><span class="sb-grp-l">code</span><span class="sb-grp-c">5</span><span class="sb-rule"></span></div>
+                      <div class="sb-repo sel"><span class="sb-grip"><svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor"><circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="2" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="2" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg></span><span class="sb-chev">&#9662;</span><span class="sb-nm">ledger-api</span><span style="color:var(--t3);display:flex"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg></span><span class="sb-lock"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="11" x="4" y="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span><span class="sb-wt">3 wts</span></div>
+                      <div class="sb-kids"><div class="sb-wtrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg><span class="sb-br">main</span></div><div class="sb-wtrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg><span class="sb-br">feat/rate-limits</span></div><div class="sb-wtrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg><span class="sb-br">fix/idem-key</span></div></div>
+                      <div class="sb-repo"><span class="sb-grip"><svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor"><circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="2" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="2" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg></span><span class="sb-chev">&#9656;</span><span class="sb-nm">ledger-api</span><span style="color:var(--t3);display:flex"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg></span><span class="sb-lock"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="11" x="4" y="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span><span class="sb-wt">1 wt</span></div>
+                      <div class="sb-repo"><span class="sb-grip"><svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor"><circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="2" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="2" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg></span><span class="sb-chev">&#9656;</span><span class="sb-nm">ledger-web</span><span style="color:var(--t3);display:flex"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg></span><span class="sb-lock"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="11" x="4" y="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span><span class="sb-wt">2 wts</span></div>
+                      <div class="sb-repo"><span class="sb-grip"><svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor"><circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="2" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="2" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg></span><span class="sb-chev">&#9656;</span><span class="sb-nm">telemetry</span><span style="color:var(--t3);display:flex"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg></span><span class="sb-lock"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg></span><span class="sb-wt">2 wts</span></div>
+                      <div class="sb-repo"><span class="sb-grip"><svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor"><circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="2" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="2" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg></span><span class="sb-chev">&#9656;</span><span class="sb-nm">dotfiles</span><span style="color:var(--t3);display:flex"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg></span><span class="sb-lock"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg></span><span class="sb-wt">1 wt</span></div>
+                      <div style="height:8px"></div><div class="sb-grp"><span class="sb-grp-l">work</span><span class="sb-grp-c">2</span><span class="sb-rule"></span></div>
+                      <div class="sb-repo"><span class="sb-grip"><svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor"><circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="2" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="2" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg></span><span class="sb-chev">&#9656;</span><span class="sb-nm">billing</span><span style="color:var(--t3);display:flex"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M22 13.29l-3.33-10a.42.42 0 0 0-.14-.18.38.38 0 0 0-.22-.11.39.39 0 0 0-.23.07.42.42 0 0 0-.14.18l-2.26 6.67H8.32L6.06 3.26a.42.42 0 0 0-.14-.18.38.38 0 0 0-.22-.11.39.39 0 0 0-.23.07.42.42 0 0 0-.14.18L2 13.29a.74.74 0 0 0 .27.83L12 21l9.73-6.88a.74.74 0 0 0 .27-.83"/></svg></span><span class="sb-lock"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="11" x="4" y="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span><span class="sb-wt">2 wts</span></div>
+                      <div class="sb-repo"><span class="sb-grip"><svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor"><circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="2" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="2" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg></span><span class="sb-chev">&#9656;</span><span class="sb-nm">pipeline</span><span style="color:var(--t3);display:flex"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M22 13.29l-3.33-10a.42.42 0 0 0-.14-.18.38.38 0 0 0-.22-.11.39.39 0 0 0-.23.07.42.42 0 0 0-.14.18l-2.26 6.67H8.32L6.06 3.26a.42.42 0 0 0-.14-.18.38.38 0 0 0-.22-.11.39.39 0 0 0-.23.07.42.42 0 0 0-.14.18L2 13.29a.74.74 0 0 0 .27.83L12 21l9.73-6.88a.74.74 0 0 0 .27-.83"/></svg></span><span class="sb-lock"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="11" x="4" y="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span><span class="sb-wt">1 wt</span></div>
+                    </div>
+                  </div>
+                  <div style="flex:1; display:flex; flex-direction:column; gap:9px; padding-top:2px;">
+                    <div class="onboarding-wizard__choice-eyebrow">Four chips are dim. Here is why, and what fills them.</div>
+                    <div style="display:flex; flex-direction:column; gap:7px;">
+                      <div style="display:flex; gap:9px; align-items:baseline;"><span style="flex:none;width:16px;color:var(--t3);font-size:12px;opacity:0.5;">&#9678;</span><div style="font:400 11px/1.6 var(--sans);color:var(--t2);"><b style="color:var(--t1)">Focused</b> &#8212; what you touched, pinned or changed in the last 30 days. Empty until you start working.</div></div>
+                      <div style="display:flex; gap:9px; align-items:baseline;"><span style="flex:none;width:16px;color:var(--t3);font-size:12px;opacity:0.5;">&#9733;</span><div style="font:400 11px/1.6 var(--sans);color:var(--t2);"><b style="color:var(--t1)">Pinned</b> &#8212; what you star. Nothing yet; a scan does not pin anything for you.</div></div>
+                      <div style="display:flex; gap:9px; align-items:baseline;"><span style="flex:none;width:16px;color:var(--t3);font-size:12px;opacity:0.5;">&#8595;</span><div style="font:400 11px/1.6 var(--sans);color:var(--t2);"><b style="color:var(--t1)">Behind</b> &#8212; behind its upstream. Known once a repo has been opened or fetched.</div></div>
+                      <div style="display:flex; gap:9px; align-items:baseline;"><span style="flex:none;width:16px;color:var(--t3);font-size:12px;opacity:0.5;">&#9719;</span><div style="font:400 11px/1.6 var(--sans);color:var(--t2);"><b style="color:var(--t1)">Stale</b> &#8212; worktrees safe to prune: clean, merged, untouched for two weeks.</div></div>
+                      <div style="display:flex; gap:9px; align-items:baseline;"><span style="flex:none;width:16px;color:var(--accb);font-size:12px;">&#8801;</span><div style="font:400 11px/1.6 var(--sans);color:var(--t2);"><b style="color:var(--t1)">All</b> &#8212; everything the scan found. The one lens that is right from the first second, which is why you are standing in it.</div></div>
+                    </div>
+                    <div class="onboarding-wizard__notice" style="margin-top:6px;">
+                      <span style="color:var(--acc);">&#9432;</span>
+                      <div>A chip with nothing behind it is dimmed and inert, rather than costing you a click to find out. They light up on their own.</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="onboarding-wizard__footer">
+                <span class="onboarding-wizard__btn onboarding-wizard__btn--link">Replay this later from Help</span>
+                <span class="onboarding-wizard__spacer"></span>
+                <span class="onboarding-wizard__btn onboarding-wizard__btn--ghost">Back</span>
+                <span class="onboarding-wizard__btn onboarding-wizard__btn--primary">Start working &#8594;</span>
+              </div>
+            </div>
+            <p class="dv-olabel" style="color:var(--t3); max-width:940px">No dirty counts, no ahead/behind, no stars, one live lens. Every row still carries its name, its forge mark, its visibility and its worktree count &#8212; those come from the scan and from the identity refresh that fires on mount, so they are honest at this instant. This screen is the answer to &#8220;why is most of my sidebar grey?&#8221;, delivered before the question is asked.</p>
+          </div>
+
+          <div class="dv-opt" id="5b" data-screen-label="5b A week later">
+            <div class="dv-olabel"><a class="dv-oid" href="#5b">5b</a>The same sidebar a week later &#8212; what the four dim chips were waiting for</div>
+            <div class="sb" style="width:330px;">
+              <div style="padding:10px 12px 8px;">
+                      <div style="display:flex; align-items:center; gap:9px;">
+                        <span style="width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font:700 12px/1 var(--mono);background:var(--asoft);color:var(--accb);border:1px solid var(--abord);">P</span>
+                        <div style="min-width:0;display:flex;flex-direction:column;gap:2px;">
+                          <span style="font:700 13px/1 var(--sans); color:var(--t1);">Personal</span>
+                          <span style="font:500 10.5px/1 var(--mono); color:var(--t3);">dana@example.com</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div style="padding:0 12px 8px;">
+                      <span style="display:flex;height:30px;border-radius:8px;border:1px solid var(--line-def);background:var(--bg-input);align-items:center;padding:0 9px;gap:7px;font:400 11px/1 var(--sans);color:var(--t3);">&#9906; Search repos&#8230;</span>
+                    </div>
+              <div style="padding:0 12px 10px; display:flex; align-items:center; gap:6px;">
+                <div class="lens" style="flex:1"><span class="l on" title="Focused">&#9678;<span class="c">3</span></span><span class="l" title="Pinned">&#9733;<span class="c">2</span></span><span class="l" title="Behind">&#8595;<span class="c">1</span></span><span class="l" title="Stale">&#9719;<span class="c">1</span></span><span class="l" title="All">&#8801;<span class="c">7</span></span></div>
+                <span style="width:26px;height:26px;border-radius:6px;border:1px solid var(--line);color:var(--t3);display:flex;align-items:center;justify-content:center;font-size:11px;">&#9776;</span>
+              </div>
+              <div style="flex:1; min-height:0; padding:0 8px 12px;">
+                <div class="sb-grp"><span class="sb-grp-l">code</span><span class="sb-grp-c">5</span><span class="sb-rule"></span></div>
+                  <div class="sb-repo sel"><span class="sb-grip"><svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor"><circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="2" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="2" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg></span><span class="sb-chev">&#9662;</span><span class="sb-nm">ledger-api</span><span style="color:var(--t3);display:flex"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg></span><span class="sb-lock"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="11" x="4" y="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span><span class="sb-wt">3 wts</span></div>
+                  <div class="sb-kids"><div class="sb-wtrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg><span class="sb-br">main</span></div><div class="sb-wtrow sel"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--acc)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg><span class="sb-br">feat/rate-limits</span><span class="sb-dirty">3</span></div><div class="sb-wtrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg><span class="sb-br">fix/idem-key</span><span class="sb-ahead">&#8593;2</span></div></div>
+                  <div class="sb-repo"><span class="sb-grip"><svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor"><circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="2" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="2" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg></span><span class="sb-chev">&#9656;</span><span class="sb-nm">ledger-api</span><span style="color:var(--t3);display:flex"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg></span><span class="sb-lock"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="11" x="4" y="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span><span class="sb-wt">1 wt</span></div>
+                  <div class="sb-repo"><span class="sb-grip"><svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor"><circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="2" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="2" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg></span><span class="sb-chev">&#9656;</span><span class="sb-nm">ledger-web</span><span style="color:var(--t3);display:flex"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg></span><span class="sb-lock"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="11" x="4" y="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span><span class="sb-wt">2 wts</span></div>
+                  <div class="sb-repo"><span class="sb-grip"><svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor"><circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="2" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="2" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg></span><span class="sb-chev">&#9656;</span><span class="sb-nm">telemetry</span><span class="sb-badge">&#8595;2</span><span style="color:var(--t3);display:flex"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg></span><span class="sb-lock"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg></span><span class="sb-wt">2 wts</span></div>
+                  <div class="sb-repo"><span class="sb-grip"><svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor"><circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="2" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="2" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg></span><span class="sb-chev">&#9656;</span><span class="sb-nm">dotfiles</span><span style="color:var(--t3);display:flex"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg></span><span class="sb-lock"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg></span><span class="sb-wt">1 wt</span><span class="sb-star"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9Z"/></svg></span></div>
+                  <div style="height:8px"></div><div class="sb-grp"><span class="sb-grp-l">work</span><span class="sb-grp-c">2</span><span class="sb-rule"></span></div>
+                  <div class="sb-repo"><span class="sb-grip"><svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor"><circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="2" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="2" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg></span><span class="sb-chev">&#9656;</span><span class="sb-nm">billing</span><span style="color:var(--t3);display:flex"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M22 13.29l-3.33-10a.42.42 0 0 0-.14-.18.38.38 0 0 0-.22-.11.39.39 0 0 0-.23.07.42.42 0 0 0-.14.18l-2.26 6.67H8.32L6.06 3.26a.42.42 0 0 0-.14-.18.38.38 0 0 0-.22-.11.39.39 0 0 0-.23.07.42.42 0 0 0-.14.18L2 13.29a.74.74 0 0 0 .27.83L12 21l9.73-6.88a.74.74 0 0 0 .27-.83"/></svg></span><span class="sb-lock"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="11" x="4" y="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span><span class="sb-wt">2 wts</span></div>
+                  <div class="sb-repo"><span class="sb-grip"><svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor"><circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="2" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="2" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg></span><span class="sb-chev">&#9656;</span><span class="sb-nm">pipeline</span><span style="color:var(--t3);display:flex"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M22 13.29l-3.33-10a.42.42 0 0 0-.14-.18.38.38 0 0 0-.22-.11.39.39 0 0 0-.23.07.42.42 0 0 0-.14.18l-2.26 6.67H8.32L6.06 3.26a.42.42 0 0 0-.14-.18.38.38 0 0 0-.22-.11.39.39 0 0 0-.23.07.42.42 0 0 0-.14.18L2 13.29a.74.74 0 0 0 .27.83L12 21l9.73-6.88a.74.74 0 0 0 .27-.83"/></svg></span><span class="sb-lock"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="11" x="4" y="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span><span class="sb-wt">1 wt</span><span class="sb-star"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9Z"/></svg></span></div>
+              </div>
+            </div>
+            <p class="dv-olabel" style="color:var(--t3); max-width:430px">Same seven repositories, same two groups. What changed is entirely earned: three repos touched, two starred, one behind its upstream, one worktree dirty and one ahead. The window now opens in <b>Focused</b>, because <a href="https://github.com/pwrdrvr/PwrGit/pull/248">#248</a> promotes it as soon as that lens has something in it.</p>
+          </div>
+
+          <div class="dv-opt" id="5c" data-screen-label="5c Collision finding">
+            <div class="dv-olabel"><a class="dv-oid" href="#5c">5c</a><b style="color:var(--badt)">Finding</b> &#8212; the wizard teaches nesting, and nesting collides</div>
+            <div class="dv-annot">
+              <div style="width:330px; display:flex; flex-direction:column; gap:10px;">
+                <div class="sb" style="padding:6px 8px 8px;">
+                  <div class="sb-grp"><span class="sb-grp-l">code</span><span class="sb-grp-c">5</span><span class="sb-rule"></span></div><div class="sb-repo"><span class="sb-grip"><svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor"><circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="2" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="2" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg></span><span class="sb-chev">&#9656;</span><span class="sb-nm">ledger-api</span><span style="color:var(--t3);display:flex"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg></span><span class="sb-lock"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="11" x="4" y="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span><span class="sb-wt">3 wts</span></div><div class="sb-repo"><span class="sb-grip"><svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor"><circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="2" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="2" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg></span><span class="sb-chev">&#9656;</span><span class="sb-nm">ledger-api</span><span style="color:var(--t3);display:flex"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg></span><span class="sb-lock"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="11" x="4" y="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span><span class="sb-wt">1 wt</span></div>
+                </div>
+                <div class="tree" style="font-size:11px;"><span class="dim">~/code/</span><span class="repo">northwind-labs/ledger-api</span>
+<span class="dim">~/code/</span><span class="repo">atlas-forge/ledger-api</span></div>
+              </div>
+              <div class="dv-gutter">
+                <div class="dv-flag"><b>two rows, one name</b>A repo&#8217;s display name is <code>basename(path)</code>, with no disambiguation anywhere. Two organisations owning a repo of the same name &#8212; <code>api</code>, <code>docs</code>, <code>infra</code>, <code>ledger-api</code> &#8212; produce two identical rows in one group.</div>
+                <div class="dv-flag"><b>the tooltip does not help</b><code>title={repo.name}</code> is the same string as the label. It exists so an ellipsised name can be read, and it answers &#8220;which one is this?&#8221; with the word already on screen.</div>
+                <div class="dv-flag warn"><b>the wizard makes it likelier</b>Step 3 actively teaches <code>~/github/org/repo</code>. That is the right advice and it is the layout that collides &#8212; so this stops being a rare edge and starts being the recommended one.</div>
+                <div class="dv-flag fix"><b>remedy, out of scope here</b>The owner is already on the row: <code>repo.identity.owner</code> is fetched and drives the forge chip. Qualify the name with it when two visible rows in a group share a basename &#8212; and only then, so the common row keeps its short label. Worth its own issue; this pass only records that the wizard raises the stakes.</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <div class="dv-note"><b>Contrived, and checkable.</b> <code>northwind-labs</code>, <code>atlas-forge</code>, <code>dwhitfield</code>, <code>ledger-api</code>, <code>telemetry</code>, <code>billing</code>, <code>pipeline</code> and <code>dana@example.com</code> are invented; <code>example.com</code> is the reserved documentation domain. Nothing here was captured from a real account or a real checkout, which is what lets these frames be attached to a public PR under the repo&#8217;s screenshot rule.</div>
+        <p class="dv-next">Try next: "draw Done when the scan found nothing" &#183; "qualify a colliding repo row with its owner"</p>
+      </section>
+
+      <!-- ==================== TURN 6 ==================== -->
+      <section class="dv-turn" id="t6">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t6">6</a>
+          <span class="dv-tname">The whole wizard, live</span>
+        </div>
+        <p class="dv-sub">Seven surfaces, four rail steps, the real navigation. Walk it with <b>Continue</b> / <b>Back</b>; the rail relabels itself with your answers as you pass each step, which is the behaviour <a href="#1c">1c</a> lifts from PwrAgnt and the reason the Done screen needs no summary table. Add and remove roots on Step 3 and the counts, the rail label and the Done screen all follow.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="6a" data-screen-label="6a Live prototype">
+            <div class="dv-olabel"><a class="dv-oid" href="#6a">6a</a>Interactive &#8212; every step, with state</div>
+            <div class="onboarding-wizard">
+              <div class="onboarding-wizard__titlebar">
+                <span class="onboarding-wizard__eyebrow">Setup</span>
+                <span class="onboarding-wizard__sep">/</span>
+                <span class="onboarding-wizard__crumb">{{crumb}}</span>
+                <span class="onboarding-wizard__spacer"></span>
+                <button onClick="{{onRestart}}" class="onboarding-wizard__close" title="Restart the walkthrough" style="cursor:pointer;">&#8635;</button>
+              </div>
+
+              <sc-if value="{{showRail}}">
+                <nav class="onboarding-wizard__rail" aria-label="Setup progress">
+                  <sc-for list="{{rail}}" as="r" hint-placeholder-count="4">
+                    <div style="{{r.style}}">
+                      <div class="onboarding-wizard__rail-num" style="{{r.numStyle}}">{{r.num}}</div>
+                      <div class="onboarding-wizard__rail-label" style="{{r.labelStyle}}">{{r.label}}</div>
+                    </div>
+                  </sc-for>
+                </nav>
+              </sc-if>
+
+              <div class="onboarding-wizard__body" style="min-height:330px;">
+
+                <sc-if value="{{isWelcome}}">
+                  <div style="padding:22px 0 8px;">
+                    <div class="onboarding-wizard__brand">Pwr<span>Git</span></div>
+                    <h1 class="onboarding-wizard__title onboarding-wizard__title--center">Point PwrGit at your code, and it does the finding.</h1>
+                    <p class="onboarding-wizard__sub onboarding-wizard__sub--center">Three short steps: who your commits come from, which forges you are signed in to, and which folders hold your repositories.</p>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{isIdentity}}">
+                  <div>
+                    <div class="onboarding-wizard__head">
+                      <h1 class="onboarding-wizard__title">Commits from this profile will be signed off as&#8230;</h1>
+                      <p class="onboarding-wizard__sub">Read through <code>git config</code>, so it is the identity the commit will actually carry. Not your profile name &#8212; that stays &#8220;Personal&#8221;.</p>
+                    </div>
+                    <div style="display:flex; gap:16px; max-width:700px;">
+                      <div class="onboarding-wizard__field" style="flex:1">
+                        <div class="onboarding-wizard__field-head"><span class="onboarding-wizard__field-label">Author name</span><span class="onboarding-wizard__field-pill">found</span></div>
+                        <div class="onboarding-wizard__input">{{authorName}}</div>
+                        <span class="onboarding-wizard__field-sub">from <code>git config --get user.name</code></span>
+                      </div>
+                      <div class="onboarding-wizard__field" style="flex:1">
+                        <div class="onboarding-wizard__field-head"><span class="onboarding-wizard__field-label">Author e-mail</span><span class="onboarding-wizard__field-pill">found</span></div>
+                        <div class="onboarding-wizard__input">{{authorEmail}}</div>
+                        <span class="onboarding-wizard__field-sub">from <code>git config --get user.email</code></span>
+                      </div>
+                    </div>
+                    <div class="onboarding-wizard__notice" style="margin-top:16px; max-width:700px;">
+                      <span style="color:var(--acc);">&#9432;</span>
+                      <div>A conditional include sets a different identity under <code>~/work/</code>. PwrGit does not override it.</div>
+                    </div>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{isForges}}">
+                  <div>
+                    <div class="onboarding-wizard__head">
+                      <h1 class="onboarding-wizard__title">Where PwrGit reads pull and merge requests from.</h1>
+                      <p class="onboarding-wizard__sub">Optional. Without a forge, PwrGit still finds, branches, commits and pushes.</p>
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:11px; max-width:700px;">
+                      <div class="fg-card">
+                        <div class="fg-hd">
+                          <span class="fg-dot ok"></span>
+                          <div style="min-width:0;flex:1"><div class="fg-name">GitHub</div><div class="fg-sent">Reading pull requests from github.com through <code>gh</code>.</div></div>
+                          <span class="fg-chip ok">Connected</span>
+                        </div>
+                      </div>
+                      <div class="fg-card">
+                        <div class="fg-hd">
+                          <span style="{{glabDotStyle}}"></span>
+                          <div style="min-width:0;flex:1"><div class="fg-name">GitLab</div><div class="fg-sent">{{glabSentence}}</div></div>
+                          <span style="{{glabChipStyle}}">{{glabChip}}</span>
+                        </div>
+                        <sc-if value="{{glabNeedsLogin}}">
+                          <div class="fg-body">
+                            <div class="fg-cmd"><span style="color:var(--t3)">$</span><span style="flex:1">glab auth login --hostname git.meridian.example</span></div>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                              <button onClick="{{onRecheck}}" class="onboarding-wizard__btn onboarding-wizard__btn--ghost" style="height:26px; font-size:11px;">Re-check</button>
+                              <span style="font:400 10.5px/1.5 var(--sans); color:var(--tsub);">Run it in a terminal, then re-check.</span>
+                            </div>
+                          </div>
+                        </sc-if>
+                      </div>
+                    </div>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{isExplain}}">
+                  <div>
+                    <div class="onboarding-wizard__head">
+                      <h1 class="onboarding-wizard__title">You name folders. PwrGit does the finding.</h1>
+                      <p class="onboarding-wizard__sub">Point PwrGit at the folder your code already lives in and it walks it, indexing every git checkout it meets &#8212; and every worktree each one owns.</p>
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:11px; max-width:700px;">
+                      <div style="display:flex; gap:10px; align-items:flex-start;"><span style="flex:none;width:20px;height:20px;border-radius:6px;background:var(--asoft);border:1px solid var(--abord);color:var(--accb);font:600 10px/1 var(--mono);display:flex;align-items:center;justify-content:center;">1</span><div style="font:400 11.5px/1.65 var(--sans); color:var(--t2);"><b style="color:var(--t1)">It looks five levels down</b>, and stops at the first <code>.git</code> it meets &#8212; it does not walk around inside your repositories.</div></div>
+                      <div style="display:flex; gap:10px; align-items:flex-start;"><span style="flex:none;width:20px;height:20px;border-radius:6px;background:var(--asoft);border:1px solid var(--abord);color:var(--accb);font:600 10px/1 var(--mono);display:flex;align-items:center;justify-content:center;">2</span><div style="font:400 11.5px/1.65 var(--sans); color:var(--t2);"><b style="color:var(--t1)">Hidden folders are never opened</b> &#8212; <code>.ssh</code>, <code>.config</code>, <code>.aws</code>. Nor are <code>node_modules</code>, <code>dist</code>, <code>build</code>, <code>target</code>, <code>vendor</code> or <code>Library</code>.</div></div>
+                      <div style="display:flex; gap:10px; align-items:flex-start;"><span style="flex:none;width:20px;height:20px;border-radius:6px;background:var(--asoft);border:1px solid var(--abord);color:var(--accb);font:600 10px/1 var(--mono);display:flex;align-items:center;justify-content:center;">3</span><div style="font:400 11.5px/1.65 var(--sans); color:var(--t2);"><b style="color:var(--t1)">It reads folder names, not files.</b> The scan never opens, reads, copies or sends the contents of anything.</div></div>
+                    </div>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{isPick}}">
+                  <div>
+                    <div class="onboarding-wizard__head">
+                      <h1 class="onboarding-wizard__title">Which folders hold your repositories?</h1>
+                      <p class="onboarding-wizard__sub">Nesting by organisation or user is expected &#8212; one folder covers everything beneath it.</p>
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:8px; max-width:700px;">
+                      <sc-for list="{{rootRows}}" as="r" hint-placeholder-count="2">
+                        <div class="fg-row" style="padding:10px 12px;">
+                          <span style="color:var(--accb); font-size:13px;">&#128193;</span>
+                          <span class="fg-host" style="flex:1">{{r.path}}</span>
+                          <span style="font:500 10.5px/1 var(--mono); color:var(--okt);">{{r.found}}</span>
+                          <button onClick="{{r.onRemove}}" style="background:transparent;border:none;color:var(--t3);cursor:pointer;font:400 15px/1 var(--sans);">&#10005;</button>
+                        </div>
+                      </sc-for>
+                      <sc-if value="{{noRoots}}">
+                        <div style="padding:14px; border:1px dashed var(--line-def); border-radius:8px; font:400 11.5px/1.6 var(--sans); color:var(--tsub); text-align:center;">No folders yet. Add one below &#8212; or pick a suggested name.</div>
+                      </sc-if>
+                      <sc-for list="{{addable}}" as="a" hint-placeholder-count="3">
+                        <button onClick="{{a.onAdd}}" style="display:flex; align-items:center; gap:9px; padding:9px 11px; border:1px dashed var(--line-def); border-radius:7px; background:transparent; color:var(--t3); font:500 11.5px/1 var(--sans); cursor:pointer; text-align:left;">
+                          <span style="font-size:13px;">+</span><span style="flex:1; font-family:var(--mono);">{{a.path}}</span><span style="font:400 10.5px/1 var(--sans); color:var(--tsub);">{{a.note}}</span>
+                        </button>
+                      </sc-for>
+                    </div>
+                    <sc-if value="{{homeAdded}}">
+                      <div class="onboarding-wizard__notice onboarding-wizard__notice--warn" style="margin-top:16px; max-width:700px;">
+                        <span style="color:var(--warn);">&#9888;</span>
+                        <div><b>Adding <code>~</code> works, and we would not.</b> Your home folder holds thousands of directories that are not code, and PwrGit walks past all of them on every rescan. It also becomes a group heading &#8212; and &#8220;dana&#8221; is not a useful heading.</div>
+                      </div>
+                    </sc-if>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{isScan}}">
+                  <div>
+                    <div class="onboarding-wizard__head">
+                      <h1 class="onboarding-wizard__title">{{scanTitle}}</h1>
+                      <p class="onboarding-wizard__sub">Per-repository git state is read when you first open a repo, not now &#8212; which is why Focused, Behind and Stale stay empty until you have looked around.</p>
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:6px; max-width:700px;">
+                      <sc-for list="{{rootRows}}" as="r" hint-placeholder-count="2">
+                        <div class="fg-row" style="padding:8px 11px;"><span style="color:var(--okt);font-size:11px;">&#10003;</span><span class="fg-host" style="flex:1; font-size:11px;">{{r.path}}</span><span style="font:500 10px/1 var(--mono); color:var(--t3);">{{r.detail}}</span></div>
+                      </sc-for>
+                    </div>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{isDone}}">
+                  <div>
+                    <div class="onboarding-wizard__head">
+                      <h1 class="onboarding-wizard__title">{{doneTitle}}</h1>
+                      <p class="onboarding-wizard__sub">This is your sidebar. It rescans on its own once a day, and whenever you ask it to.</p>
+                    </div>
+                    <div style="display:flex; gap:22px; align-items:flex-start;">
+                      <div class="sb" style="flex:none; width:296px; padding:8px;">
+                        <div class="lens" style="margin-bottom:8px;">
+                          <span style="{{lensFocusedStyle}}">&#9678;<span class="c">{{lensFocused}}</span></span>
+                          <span style="{{lensDimStyle}}">&#9733;</span>
+                          <span style="{{lensDimStyle}}">&#8595;</span>
+                          <span style="{{lensDimStyle}}">&#9719;</span>
+                          <span style="{{lensAllStyle}}">&#8801;<span class="c">{{repoCount}}</span></span>
+                        </div>
+                        <sc-for list="{{doneGroups}}" as="g" hint-placeholder-count="2">
+                          <div style="margin-bottom:6px;">
+                            <div class="sb-grp"><span class="sb-grp-l">{{g.label}}</span><span class="sb-grp-c">{{g.count}}</span><span class="sb-rule"></span></div>
+                            <sc-for list="{{g.repos}}" as="repo" hint-placeholder-count="4">
+                              <div class="sb-repo"><span class="sb-chev">&#9656;</span><span class="sb-nm">{{repo.name}}</span><span class="sb-wt">{{repo.wts}}</span></div>
+                            </sc-for>
+                          </div>
+                        </sc-for>
+                        <sc-if value="{{noRoots}}">
+                          <div class="empty"><div class="empty-s">No repos yet &#8212; add a folder above and PwrGit will scan it.</div></div>
+                        </sc-if>
+                      </div>
+                      <div style="flex:1; font:400 11px/1.7 var(--sans); color:var(--t2);">
+                        <div class="onboarding-wizard__choice-eyebrow" style="margin-bottom:8px;">What you set</div>
+                        <div><b style="color:var(--t1)">Author</b> &#8212; {{authorName}} &lt;{{authorEmail}}&gt;</div>
+                        <div><b style="color:var(--t1)">Forges</b> &#8212; {{forgeSummary}}</div>
+                        <div><b style="color:var(--t1)">Folders</b> &#8212; {{rootSummary}}</div>
+                        <div class="onboarding-wizard__notice" style="margin-top:12px;">
+                          <span style="color:var(--acc);">&#9432;</span>
+                          <div>A chip with nothing behind it is dimmed and inert, rather than costing you a click to find out.</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </sc-if>
+
+              </div>
+
+              <div class="onboarding-wizard__footer">
+                <button onClick="{{onSkip}}" class="onboarding-wizard__btn onboarding-wizard__btn--link" style="cursor:pointer;">{{skipLabel}}</button>
+                <span class="onboarding-wizard__spacer"></span>
+                <sc-if value="{{canBack}}">
+                  <button onClick="{{onBack}}" class="onboarding-wizard__btn onboarding-wizard__btn--ghost" style="cursor:pointer;">Back</button>
+                </sc-if>
+                <button onClick="{{onNext}}" class="onboarding-wizard__btn onboarding-wizard__btn--primary" style="cursor:pointer;">{{nextLabel}}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="dv-note"><b>What this prototype is for.</b> It pins the three things prose keeps getting wrong: that the rail is the review surface, that Step 3 is three screens and not one, and that Done must render the <i>actual</i> result &#8212; remove every root on Step 3 and Done correctly shows the same empty sidebar a new user sees today, which is the state <a href="#1a">1a</a> opens on. A wizard that can only draw the happy path has not been designed yet.</div>
+        <p class="dv-next">Try next: "add the Help &#8594; Replay entry" &#183; "wire Step 1 to a real <code>git config</code> read" &#183; "write the e2e that walks Welcome &#8594; Done"</p>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      const ORDER = ['welcome', 'identity', 'forges', 'explain', 'pick', 'scan', 'done'];
+
+      const CRUMBS = {
+        welcome: 'Welcome',
+        identity: 'Step 1 — Identity',
+        forges: 'Step 2 — Forges',
+        explain: 'Step 3 — Repo folders',
+        pick: 'Step 3 — Repo folders',
+        scan: 'Step 3 — Repo folders',
+        done: 'Done'
+      };
+
+      /* Which rail step each surface belongs to. -1 is pre-rail, exactly as
+         PwrAgnt's `railIndexForStep` treats welcome / bootstrap-confirm. */
+      const RAIL_INDEX = {
+        welcome: -1, identity: 0, forges: 1,
+        explain: 2, pick: 2, scan: 2, done: 3
+      };
+
+      /* Contrived fixture. Invented orgs, invented repos, reserved domain. */
+      const CATALOG = {
+        '~/code': {
+          label: 'code',
+          repos: [
+            { name: 'ledger-api', wts: '3 wts' },
+            { name: 'ledger-api', wts: '1 wt' },
+            { name: 'ledger-web', wts: '2 wts' },
+            { name: 'telemetry', wts: '2 wts' },
+            { name: 'dotfiles', wts: '1 wt' }
+          ],
+          worktrees: 9
+        },
+        '~/work': {
+          label: 'work',
+          repos: [
+            { name: 'billing', wts: '2 wts' },
+            { name: 'pipeline', wts: '1 wt' }
+          ],
+          worktrees: 3
+        },
+        '~': {
+          label: 'dana',
+          repos: [
+            { name: 'ledger-api', wts: '3 wts' },
+            { name: 'ledger-api', wts: '1 wt' },
+            { name: 'ledger-web', wts: '2 wts' },
+            { name: 'telemetry', wts: '2 wts' },
+            { name: 'dotfiles', wts: '1 wt' },
+            { name: 'billing', wts: '2 wts' },
+            { name: 'pipeline', wts: '1 wt' },
+            { name: 'scratch', wts: '1 wt' }
+          ],
+          worktrees: 13
+        }
+      };
+
+      const SUGGESTIONS = ['~/code', '~/work', '~'];
+
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = {
+            step: 'welcome',
+            roots: ['~/code', '~/work'],
+            glabSignedIn: false
+          };
+        }
+
+        go(step) { this.setState({ step: step }); }
+
+        move(delta) {
+          const i = ORDER.indexOf(this.state.step);
+          const next = Math.min(ORDER.length - 1, Math.max(0, i + delta));
+          this.setState({ step: ORDER[next] });
+        }
+
+        addRoot(path) {
+          if (this.state.roots.indexOf(path) >= 0) { return; }
+          this.setState({ roots: this.state.roots.concat([path]) });
+        }
+
+        removeRoot(path) {
+          this.setState({ roots: this.state.roots.filter((r) => r !== path) });
+        }
+
+        reposFor(path) {
+          const entry = CATALOG[path];
+          return entry ? entry.repos : [];
+        }
+
+        renderVals() {
+          const s = this.state;
+          const self = this;
+          const idx = RAIL_INDEX[s.step];
+
+          const railLabels = [
+            idx > 0 ? 'Dana Whitfield' : 'Identity',
+            idx > 1 ? (s.glabSignedIn ? 'GitHub · GitLab' : 'GitHub') : 'Forges',
+            idx > 2 ? (s.roots.length === 0 ? 'None' : s.roots[0] + (s.roots.length > 1 ? ' +' + (s.roots.length - 1) : '')) : 'Repo folders',
+            'Review'
+          ];
+
+          const rail = railLabels.map((label, i) => {
+            const state = i < idx ? 'done' : i === idx ? 'current' : 'pending';
+            const under = state === 'done' ? 'var(--abord)' : state === 'current' ? 'var(--acc)' : 'transparent';
+            return {
+              label: label,
+              num: state === 'done' ? 'Step ' + (i + 1) + ' ✓' : i === 3 ? 'Done' : 'Step ' + (i + 1),
+              style: 'flex:1; padding:6px 10px 12px; position:relative; box-shadow: inset 0 -2px 0 0 ' + under + ';',
+              numStyle: 'color:' + (state === 'current' ? 'var(--acc)' : 'var(--t3)') + ';',
+              labelStyle: 'color:' + (state === 'current' ? 'var(--t1)' : 'var(--t2)') + ';'
+            };
+          });
+
+          const rootRows = s.roots.map((path) => {
+            const entry = CATALOG[path];
+            const n = entry ? entry.repos.length : 0;
+            return {
+              path: path,
+              found: n + (n === 1 ? ' repo found' : ' repos found'),
+              detail: n + ' repos · ' + (entry ? entry.worktrees : 0) + ' worktrees',
+              onRemove: () => { self.removeRoot(path); }
+            };
+          });
+
+          const addable = SUGGESTIONS
+            .filter((p) => s.roots.indexOf(p) < 0)
+            .map((p) => ({
+              path: p,
+              note: p === '~' ? 'your home folder — works, but see below' : 'add this folder',
+              onAdd: () => { self.addRoot(p); }
+            }));
+
+          const doneGroups = s.roots
+            .map((path) => {
+              const entry = CATALOG[path];
+              return {
+                label: entry ? entry.label : path,
+                count: entry ? entry.repos.length : 0,
+                repos: entry ? entry.repos : []
+              };
+            })
+            .filter((g) => g.count > 0);
+
+          let repoCount = 0;
+          doneGroups.forEach((g) => { repoCount += g.count; });
+          let wtCount = 0;
+          s.roots.forEach((p) => { wtCount += CATALOG[p] ? CATALOG[p].worktrees : 0; });
+
+          const lensBase = 'display:flex; align-items:center; justify-content:center; gap:4px; height:26px; border-radius:6px; border:1px solid ';
+          const nextLabel =
+            s.step === 'welcome' ? 'Start →'
+            : s.step === 'explain' ? 'Choose folders →'
+            : s.step === 'pick' ? (s.roots.length === 0 ? 'Continue without folders →' : 'Scan ' + s.roots.length + (s.roots.length === 1 ? ' folder →' : ' folders →'))
+            : s.step === 'scan' ? 'See the result →'
+            : s.step === 'done' ? 'Start working →'
+            : 'Continue →';
+
+          return {
+            crumb: CRUMBS[s.step],
+            showRail: idx >= 0,
+            rail: rail,
+
+            isWelcome: s.step === 'welcome',
+            isIdentity: s.step === 'identity',
+            isForges: s.step === 'forges',
+            isExplain: s.step === 'explain',
+            isPick: s.step === 'pick',
+            isScan: s.step === 'scan',
+            isDone: s.step === 'done',
+
+            authorName: 'Dana Whitfield',
+            authorEmail: 'dana@example.com',
+
+            glabNeedsLogin: !s.glabSignedIn,
+            glabSentence: s.glabSignedIn
+              ? 'Reading merge requests from git.meridian.example through glab.'
+              : 'No host is signed in to read merge requests from. 1 of 1 host on.',
+            glabChip: s.glabSignedIn ? 'Connected' : 'Signed out',
+            glabDotStyle: 'width:8px; height:8px; border-radius:999px; margin-top:4px; flex:none; background:' + (s.glabSignedIn ? 'var(--ok)' : 'var(--warn)') + ';',
+            glabChipStyle: 'margin-left:auto; flex:none; font:600 9px/1 var(--mono); text-transform:uppercase; letter-spacing:0.07em; padding:4px 7px; border-radius:5px; '
+              + (s.glabSignedIn
+                ? 'color:var(--okt); border:1px solid var(--ok); background:var(--oksoft);'
+                : 'color:#f2d6a6; border:1px solid var(--warn); background:var(--warnsoft);'),
+            onRecheck: () => { self.setState({ glabSignedIn: true }); },
+
+            rootRows: rootRows,
+            addable: addable,
+            noRoots: s.roots.length === 0,
+            homeAdded: s.roots.indexOf('~') >= 0,
+
+            scanTitle: s.roots.length === 0
+              ? 'Nothing to scan.'
+              : 'Scanned ' + repoCount + (repoCount === 1 ? ' repository' : ' repositories') + '.',
+
+            doneTitle: repoCount === 0
+              ? 'No repositories yet.'
+              : repoCount + (repoCount === 1 ? ' repository, ' : ' repositories, ') + wtCount + ' worktrees, '
+                + s.roots.length + (s.roots.length === 1 ? ' folder.' : ' folders.'),
+            doneGroups: doneGroups,
+            repoCount: repoCount,
+            lensFocused: '',
+            /* Focused is dim at Done for the same reason #248 dims it: per-worktree
+               state has not been computed for any repo yet. All is the live one. */
+            lensFocusedStyle: lensBase + 'transparent; background:transparent; color:var(--t3); opacity:0.38;',
+            lensDimStyle: lensBase + 'transparent; background:transparent; color:var(--t3); opacity:0.38;',
+            lensAllStyle: lensBase + (repoCount > 0 ? 'var(--abord); background:var(--active-strong); color:var(--accb);' : 'transparent; background:transparent; color:var(--t3); opacity:0.38;'),
+
+            forgeSummary: s.glabSignedIn ? 'GitHub · GitLab' : 'GitHub (GitLab signed out)',
+            rootSummary: s.roots.length === 0 ? 'none' : s.roots.join(', '),
+
+            canBack: s.step !== 'welcome',
+            skipLabel: s.step === 'done' ? 'Replay this later from Help' : 'Skip setup',
+            nextLabel: nextLabel,
+
+            onNext: () => { self.move(1); },
+            onBack: () => { self.move(-1); },
+            onSkip: () => { self.go('done'); },
+            onRestart: () => { self.setState({ step: 'welcome', roots: ['~/code', '~/work'], glabSignedIn: false }); }
+          };
+        }
+      }
+    </script>
+  </body>
+</html>
