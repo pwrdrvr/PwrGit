@@ -192,7 +192,7 @@ describe("applyRebase (system git)", () => {
     expect(msg).toContain("c1");
     expect(msg).toContain("c3");
     expect(gitOut(repo, ["log", "-1", "--format=%ae"])).toBe("me@acme.io");
-  }, 15_000);
+  });
 
   it("reorder reverses the top run without losing commits", async () => {
     const repo = makeRepo();
@@ -204,7 +204,7 @@ describe("applyRebase (system git)", () => {
     expect(r.ok).toBe(true);
     expect(gitOut(repo, ["log", "-1", "--format=%s"])).toBe("c1");
     expect(gitOut(repo, ["rev-list", "--count", "HEAD"])).toBe("4");
-  }, 15_000);
+  });
 
   it("aborts a started cherry-pick and restores every visible source outcome", async () => {
     const repo = makeApplyOnlyConflictRepo();
@@ -254,7 +254,7 @@ describe("applyRebase (system git)", () => {
     }
     expect(sourceSnapshot(repo)).toEqual(before);
     expect(existsSync(join(repo, ".git", "CHERRY_PICK_HEAD"))).toBe(false);
-  }, 15_000);
+  });
 
   it("refuses when the worktree is dirty", async () => {
     const repo = makeRepo();
@@ -264,7 +264,7 @@ describe("applyRebase (system git)", () => {
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe("dirty");
-  }, 15_000);
+  });
 
   it("validateSelection rejects a non-top selection", async () => {
     const repo = makeRepo();
@@ -272,7 +272,7 @@ describe("applyRebase (system git)", () => {
     const notTop = [all[1], all[2]] as RebaseCommitRef[]; // c2, c1 (excludes HEAD)
     const v = await validateSelection(systemGit, repo, notTop);
     expect(v.ok).toBe(false);
-  }, 15_000);
+  });
 
   it("refuses an apply when HEAD no longer matches the checked HEAD", async () => {
     const repo = makeRepo();
@@ -346,7 +346,7 @@ describe("dryRunRebase (disposable clone)", () => {
       }
       expect(sourceSnapshot(repo)).toEqual(before);
       expect(readdirSync(tempParent)).toEqual([]);
-    }, 15_000);
+    });
   }
 
   it("reports a conflicting reorder and still leaves no source or temp changes", async () => {
@@ -370,7 +370,7 @@ describe("dryRunRebase (disposable clone)", () => {
     }
     expect(sourceSnapshot(repo)).toEqual(before);
     expect(readdirSync(tempParent)).toEqual([]);
-  }, 15_000);
+  });
 
   it("fetches only the checked ref through the selected commits and base", async () => {
     const repo = makeRepo();
@@ -406,7 +406,7 @@ describe("dryRunRebase (disposable clone)", () => {
       repo,
       "refs/heads/main"
     ]);
-  }, 15_000);
+  });
 
   it("uses the same no-hooks and no-signing policy for check and apply", async () => {
     const repo = makeRepo();
@@ -441,5 +441,5 @@ describe("dryRunRebase (disposable clone)", () => {
 
     expect(applied.ok).toBe(true);
     expect(gitOut(repo, ["rev-list", "--count", "HEAD"])).toBe("2");
-  }, 15_000);
+  });
 });

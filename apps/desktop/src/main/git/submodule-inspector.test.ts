@@ -300,6 +300,8 @@ describe("inspectSubmodules (system git)", () => {
 
   // Recursive submodule setup spawns many Git processes before inspection;
   // Windows CI can exceed the default 20s even while making progress.
+  // Above the 20s global on purpose: four repos, nested submodules, and a
+  // deinit/URL-change matrix add up to well over a hundred `git` spawns.
   it("isolates multiple and nested checkouts plus missing, uninitialized, deinitialized, and changed-URL failures", async () => {
     const leaf = join(root, "leaf");
     const outer = join(root, "outer");

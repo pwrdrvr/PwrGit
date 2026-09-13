@@ -362,7 +362,7 @@ describe("reviewed remote Git tag actions", () => {
     expect(
       git(fixture.path, "ls-remote", "--tags", "origin", "refs/tags/unrelated")
     ).toBe("");
-  }, 20_000);
+  });
 
   it("reviews and mutates the configured push endpoint, not the fetch URL", async () => {
     const fixture = repo();

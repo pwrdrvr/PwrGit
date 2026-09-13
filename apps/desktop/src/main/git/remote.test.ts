@@ -256,7 +256,7 @@ describe("remote ops (bare-remote fixture)", () => {
         "refs/heads/playwright/main"
       ])
     ).toBe(upstreamHead);
-  }, 20_000);
+  });
 
   it("plans and pushes against a remote's configured push URL", async () => {
     const root = mkdtempSync(join(tmpdir(), "pwrgit-push-url-"));
@@ -394,7 +394,7 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(phases).toEqual(["fetch", "prepare", "fast_forward"]);
     expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(upstreamHead);
     expect(fileText(local, "base.txt")).toBe("base.txt\n");
-  }, 15_000);
+  });
 
   it("restores an unborn checkout after a partial merge failure", async () => {
     const { local } = makeUnbornTrackedFixture();
@@ -426,7 +426,7 @@ describe("remote ops (bare-remote fixture)", () => {
     ).toThrow();
     expect(gitOut(local, ["status", "--porcelain"])).toBe("");
     expect(existsSync(join(local, "base.txt"))).toBe(false);
-  }, 15_000);
+  });
 
   it("restores the original checkout before reapplying work after a partial merge failure", async () => {
     const { local, remote } = makeDivergedFixture();
@@ -522,7 +522,7 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(originalHead);
     expect(gitOut(local, ["status", "--porcelain"])).toBe("");
     expect(existsSync(join(local, "upstream.txt"))).toBe(false);
-  }, 15_000);
+  });
 
   it("preserves an unrelated untracked file created while a failed pull is running", async () => {
     const { local, remote } = makeDivergedFixture();
@@ -552,7 +552,7 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(gitOut(local, ["status", "--porcelain"])).toBe(
       "?? generated-during-pull.txt"
     );
-  }, 15_000);
+  });
 
   it("treats incoming cleanup paths as literals instead of pathspec magic", async () => {
     const { local, remote } = makeDivergedFixture();
@@ -580,7 +580,7 @@ describe("remote ops (bare-remote fixture)", () => {
     if (!result.ok) expect(result.error.code).toBe("merge_failed");
     expect(existsSync(join(local, magicPath))).toBe(false);
     expect(fileText(local, "p.txt")).toBe("keep me\n");
-  }, 15_000);
+  });
 
   it("cleans a partial checkout before reapplying an untracked file with the same path", async () => {
     const { local, remote } = makeDivergedFixture();
@@ -621,7 +621,7 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(gitOut(local, ["status", "--porcelain"])).toBe(originalStatus);
     expect(fileText(local, "upstream.txt")).toBe("local untracked work\n");
     expect(gitOut(local, ["stash", "list"])).toBe("");
-  }, 15_000);
+  });
 
   it("preserves staged and unstaged state when reapplying work after a successful pull", async () => {
     const { local, remote } = makeDivergedFixture();
@@ -660,7 +660,7 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(gitOut(local, ["diff"])).toBe(originalUnstagedDiff);
     expect(fileText(local, "untracked.txt")).toBe("keep me\n");
     expect(gitOut(local, ["stash", "list"])).toBe("");
-  }, 15_000);
+  });
 
   it("keeps a conflicting indexed stash recoverable after a successful pull", async () => {
     const { local, remote } = makeDivergedFixture();
@@ -686,7 +686,7 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(gitOut(local, ["stash", "list"])).toContain(
       "pwrgit: auto-stash before pull"
     );
-  }, 15_000);
+  });
 
   it("stops without merging or losing work when auto-stash exits nonzero", async () => {
     const { local } = makeDivergedFixture();
@@ -709,7 +709,7 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(originalHead);
     expect(fileText(local, "base.txt")).toBe("local work\n");
     expect(gitOut(local, ["stash", "list"])).toBe("");
-  }, 15_000);
+  });
 
   it("stops before stashing or merging when status exits nonzero", async () => {
     const { local } = makeDivergedFixture();
@@ -726,7 +726,7 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe("exit_128");
     expect(stashOrMergeCalled).toBe(false);
-  }, 15_000);
+  });
 
   it("keeps the stash and reports when failed-pull rollback cannot complete", async () => {
     const { local } = makeDivergedFixture();
@@ -753,7 +753,7 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(gitOut(local, ["stash", "list"])).toContain(
       "pwrgit: auto-stash before pull"
     );
-  }, 15_000);
+  });
 
   it("reports a failed stash reapply instead of hiding the cleanup failure", async () => {
     const { local } = makeDivergedFixture();
@@ -777,7 +777,7 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(gitOut(local, ["stash", "list"])).toContain(
       "pwrgit: auto-stash before pull"
     );
-  }, 15_000);
+  });
 
   it("fetch succeeds when already up to date", async () => {
     const result = await fetchRemote(systemGit, cloneA);
@@ -940,8 +940,10 @@ describe("remote ops (bare-remote fixture)", () => {
         relation: "changed"
       }
     ]);
-  }, 15_000);
+  });
 
+  // Above the 20s global on purpose: 15 commits on each side plus the
+  // range-diff over them, so this one test spawns `git` ~35 times.
   it("aligns a rewritten series while preserving commits unique to both sides", async () => {
     const { local, remote } = makeDivergedFixture();
     for (let index = 0; index < 10; index += 1) {
@@ -1010,7 +1012,7 @@ describe("remote ops (bare-remote fixture)", () => {
       upstream: { subject: "feat: shared patch", additions: 1, deletions: 0 }
     });
     expect(equivalent?.local?.hash).not.toBe(equivalent?.upstream?.hash);
-  }, 15_000);
+  });
 
   it("keeps a local merge commit that range-diff omits", async () => {
     const { local, remote } = makeDivergedFixture();
@@ -1046,7 +1048,7 @@ describe("remote ops (bare-remote fixture)", () => {
       upstream: null,
       relation: "local-only"
     });
-  }, 15_000);
+  });
 
   it("keeps an upstream merge commit that range-diff omits", async () => {
     const { local, remote } = makeDivergedFixture();
@@ -1082,7 +1084,7 @@ describe("remote ops (bare-remote fixture)", () => {
       upstream: divergence.value.upstreamCommits[0],
       relation: "upstream-only"
     });
-  }, 15_000);
+  });
 
   it("resets only a clean branch to the exact inspected upstream", async () => {
     const { local, remote } = makeDivergedFixture();
@@ -1111,7 +1113,7 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(
       divergence.value.upstreamHead
     );
-  }, 15_000);
+  });
 
   it("does not reset a dirty worktree and can rebase non-conflicting local work", async () => {
     const { local, remote } = makeDivergedFixture();
@@ -1146,7 +1148,7 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(gitOut(local, ["merge-base", "--is-ancestor", "origin/main", "HEAD"])).toBe(
       ""
     );
-  }, 15_000);
+  });
 
   it("does not recover after the checked-out branch changes", async () => {
     const { local, remote } = makeDivergedFixture();
@@ -1175,7 +1177,7 @@ describe("remote ops (bare-remote fixture)", () => {
     }
     expect(gitOut(local, ["branch", "--show-current"])).toBe("same-upstream");
     expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(switchedHead);
-  }, 15_000);
+  });
 
   it("soft-resets to the exact fetched tip without changing index or worktree", async () => {
     const { local, remote } = makeDivergedFixture();
@@ -1214,7 +1216,7 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(statusAfter).toContain("M base.txt");
     expect(statusAfter).toContain("A  staged.txt");
     expect(statusAfter).toContain("?? untracked.txt");
-  }, 15_000);
+  });
 
   it("hard-resets tracked state but does not clean ordinary untracked or ignored files", async () => {
     const { local, remote } = makeDivergedFixture();
@@ -1253,7 +1255,7 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(existsSync(join(local, "staged.txt"))).toBe(false);
     expect(existsSync(join(local, "untracked.txt"))).toBe(true);
     expect(existsSync(join(local, "ignored.txt"))).toBe(true);
-  }, 15_000);
+  });
 
   it("rejects stale checkouts, changed fetched refs, and non-remote targets", async () => {
     const { local, remote } = makeDivergedFixture();
@@ -1312,7 +1314,7 @@ describe("remote ops (bare-remote fixture)", () => {
       expect(result.ok, invalid).toBe(false);
       if (!result.ok) expect(result.error.code).toBe("invalid_remote_ref");
     }
-  }, 15_000);
+  });
 });
 
 /**
@@ -1377,6 +1379,9 @@ function makePagedRemoteFixture(): { local: string; names: string[] } {
 describe("listRemoteBranchPage (paged remote refs)", () => {
   let fixture: { local: string; names: string[] };
 
+  // `hookTimeout` has no global override, so this is measured against
+  // Vitest's 10s default — far too tight for a fixture that pushes twelve
+  // branches across three remotes.
   beforeAll(() => {
     fixture = makePagedRemoteFixture();
   }, 60_000);
@@ -1403,7 +1408,7 @@ describe("listRemoteBranchPage (paged remote refs)", () => {
       fullName: "refs/remotes/origin/feature/page-12",
       subject: "add widget number 12"
     });
-  }, 20_000);
+  });
 
   it("walks the whole remote through offsets without repeating a ref", async () => {
     const seen: string[] = [];
@@ -1429,7 +1434,7 @@ describe("listRemoteBranchPage (paged remote refs)", () => {
       expect(past.value.rows).toEqual([]);
       expect(past.value.total).toBe(13);
     }
-  }, 20_000);
+  });
 
   it("filters on qualified name and on commit subject", async () => {
     const byName = await listRemoteBranchPage(systemGit, fixture.local, {
@@ -1470,7 +1475,7 @@ describe("listRemoteBranchPage (paged remote refs)", () => {
       expect(miss.value.total).toBe(0);
       expect(miss.value.rows).toEqual([]);
     }
-  }, 20_000);
+  });
 
   it("scopes to one remote, and searches every remote when unscoped", async () => {
     const fork = await listRemoteBranchPage(systemGit, fixture.local, {
@@ -1494,7 +1499,7 @@ describe("listRemoteBranchPage (paged remote refs)", () => {
         all.value.rows.some((row) => row.qualifiedName === "fork/feature/page-01")
       ).toBe(true);
     }
-  }, 20_000);
+  });
 
   it("never returns the remote's symbolic HEAD as a branch", async () => {
     // The fixture set origin/HEAD, so the ref exists and must be filtered out.
@@ -1511,7 +1516,7 @@ describe("listRemoteBranchPage (paged remote refs)", () => {
     expect(
       page.value.rows.some((row) => row.fullName.endsWith("/HEAD"))
     ).toBe(false);
-  }, 20_000);
+  });
 
   it("accepts only names the repository actually has as remotes", async () => {
     // Membership in the configured remotes is the guard, so an option-looking
@@ -1523,7 +1528,7 @@ describe("listRemoteBranchPage (paged remote refs)", () => {
       expect(result.ok, invalid).toBe(false);
       if (!result.ok) expect(result.error.code).toBe("invalid_remote");
     }
-  }, 20_000);
+  });
 
   it("handles a remote whose own name contains a slash", async () => {
     // `git remote add team/fork` is legal, and yields refs shaped
@@ -1572,7 +1577,7 @@ describe("listRemoteBranchPage (paged remote refs)", () => {
         everything.value.rows.some((row) => row.fullName.endsWith("/HEAD"))
       ).toBe(false);
     }
-  }, 20_000);
+  });
 
   it("treats a branch named feature/HEAD as a branch, in both counts", async () => {
     // Only the ref directly at `<remote>/HEAD` is the symbolic pointer. A
@@ -1591,7 +1596,7 @@ describe("listRemoteBranchPage (paged remote refs)", () => {
     if (!refs.ok) return;
     const fork = refs.value.remotes.find((remote) => remote.name === "fork");
     expect(fork?.branchCount).toBe(page.value.total);
-  }, 20_000);
+  });
 
   it("caps an oversized limit instead of honouring it", async () => {
     const page = await listRemoteBranchPage(systemGit, fixture.local, {
@@ -1600,7 +1605,7 @@ describe("listRemoteBranchPage (paged remote refs)", () => {
     expect(page.ok).toBe(true);
     if (!page.ok) return;
     expect(page.value.rows.length).toBeLessThanOrEqual(REMOTE_BRANCH_PAGE_MAX);
-  }, 20_000);
+  });
 
   it("keeps repo:refs bounded: a preview per remote, plus a true total", async () => {
     const refs = await listRepoRefs(systemGit, fixture.local, new Map());
@@ -1631,7 +1636,7 @@ describe("listRemoteBranchPage (paged remote refs)", () => {
         origin.previewBranches.map((branch) => branch.fullName)
       );
     }
-  }, 20_000);
+  });
 });
 
 describe("reset target ranking", () => {
@@ -1748,7 +1753,7 @@ describe("reset target ranking", () => {
     // origin/main, team/main, team/fork/main — both `<remote>/HEAD` pointers
     // drop out of the count, not just the one the short prefix would find.
     expect(targets.value.branchCount).toBe(3);
-  }, 15_000);
+  });
 
   it("does not offer the default branch twice when it is the upstream", async () => {
     const { local } = makeDivergedFixture();
@@ -1800,7 +1805,7 @@ describe("reset preview", () => {
         (row) => row.local !== null && row.upstream !== null
       )
     ).toHaveLength(1);
-  }, 15_000);
+  });
 
   it("counts only what a hard reset overwrites, not untracked files", async () => {
     const { local, remote } = makeDivergedFixture();
@@ -1821,5 +1826,5 @@ describe("reset preview", () => {
     // `reset --hard` leaves untracked.txt exactly where it is.
     expect(preview.value.dirty).toBe(1);
     expect(preview.value.snapshot.remoteRef).toBe("refs/remotes/origin/main");
-  }, 15_000);
+  });
 });
