@@ -21,6 +21,7 @@ $archiveInputs = @(
   "apps/desktop/scripts/mac-release-artifacts.mjs",
   "apps/desktop/scripts/windows-release-artifacts.mjs",
   "apps/desktop/scripts/verify-asar-contents.mjs",
+  "apps/desktop/scripts/packaged-html-rules.mjs",
   "apps/desktop/scripts/verify-embedded-git-notices.mjs",
   # Imported by windows-release-artifacts.mjs for its CLI guard.
   "scripts/lib/cli-entrypoint.mjs",
