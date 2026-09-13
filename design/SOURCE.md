@@ -36,6 +36,7 @@ and records where the retired wireframe disagreed with the code. Read it first.
 | `Settings Updates.dc.html` | Settings › Updates — the four-slot release matrix, and the two-control layout it replaced. |
 | `Settings Forges - UX Review.dc.html` | Settings › Forges — the pane's measured layout defects, and the per-product sections that replace the one interleaved host list. |
 | `Tag Chips and Locate - UX Review.dc.html` | The lineage tag chip and the tag locator — chip vocabulary, the light-theme contrast the accent tint could not hold, and the sidebar action column. |
+| `Onboarding Wizard.dc.html` | The first-run wizard — step model, the four steps, the scan explained, and the Done payoff. Interactive. |
 | `PwrGit Icon.dc.html` | App icon, size ladder, tray templates, DMG background. |
 | `support.js` | Generated `dc-runtime` bundle every `.dc.html` loads. |
 | `github.md` | Provenance note for the icon asset set (matched to PwrSnap's). |
@@ -87,6 +88,24 @@ Its two screenshots are 100% contrived: fixture repositories built by
 `PWRGIT_USER_DATA_DIR` temp dir. Nothing in them came from a real account or a
 real repository, which is why they may live under `design/assets/` in a public
 repo — the rule the "chats/ and uploads/" section below states.
+
+`Onboarding Wizard.dc.html` was written here too, and pushed up the same way,
+in the design pass that followed
+[#248](https://github.com/pwrdrvr/PwrGit/pull/248). It owns the first-run
+wizard: the step model, the four steps, and the Done screen that draws only
+what a fresh scan actually knows. A re-export must not treat it as foreign and
+drop it.
+
+Pushing it up needed `/design-login` in an interactive Claude Code session —
+the `claude-design` MCP server and the built-in `DesignSync` tool both refuse
+with HTTP 403 until that has been run on the machine, and a non-interactive
+session cannot run it. Worth knowing before assuming the project is
+unreachable.
+
+It carries no `assets/` of its own. Every frame in it is drawn from PwrGit's own
+tokens and markup rather than captured, so there is no screenshot to keep in
+sync — and the fixture data in it (`northwind-labs`, `atlas-forge`,
+`ledger-api`, `dana@example.com`) is invented, not sampled from a real machine.
 
 ## Deliberately NOT copied in
 
