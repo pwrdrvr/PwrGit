@@ -25,7 +25,7 @@ it("draws the product's mark and no words when the mark answers alone", async ()
     others: 0,
     title: "origin is on github.com"
   });
-  expect(el.querySelector("svg")).not.toBeNull();
+  expect(el.querySelector("img")).not.toBeNull();
   expect(el.textContent).toBe("");
   // The words it dropped are still reachable — the chip is an abbreviation,
   // not a loss.
@@ -36,14 +36,14 @@ it("draws the product's mark and no words when the mark answers alone", async ()
 
 it("draws a different mark per product", async () => {
   const gh = await draw({ kind: "github", name: null, others: 0, title: "a" });
-  const ghPath = gh.el.querySelector("path")?.getAttribute("d");
+  const ghSrc = gh.el.querySelector("img")?.getAttribute("src");
   await gh.cleanup();
   const gl = await draw({ kind: "gitlab", name: null, others: 0, title: "b" });
-  const glPath = gl.el.querySelector("path")?.getAttribute("d");
+  const glSrc = gl.el.querySelector("img")?.getAttribute("src");
   await gl.cleanup();
-  expect(ghPath).toBeTruthy();
-  expect(glPath).toBeTruthy();
-  expect(ghPath).not.toBe(glPath);
+  expect(ghSrc).toBeTruthy();
+  expect(glSrc).toBeTruthy();
+  expect(ghSrc).not.toBe(glSrc);
 });
 
 it("adds the name beside the mark when the mark is ambiguous", async () => {
@@ -53,7 +53,7 @@ it("adds the name beside the mark when the mark is ambiguous", async () => {
     others: 0,
     title: "origin is on ghe.acme.example"
   });
-  expect(el.querySelector("svg")).not.toBeNull();
+  expect(el.querySelector("img")).not.toBeNull();
   expect(el.querySelector(".forge-chip__name")?.textContent).toBe("acme");
   expect(el.className).not.toContain("forge-chip--mark");
   await cleanup();
@@ -92,7 +92,7 @@ it("falls back to words for a host with no mark", async () => {
     others: 0,
     title: "origin is on git.acme.test"
   });
-  expect(el.querySelector("svg")).toBeNull();
+  expect(el.querySelector("img")).toBeNull();
   expect(el.querySelector(".forge-chip__name")?.textContent).toBe("acme");
   await cleanup();
 });

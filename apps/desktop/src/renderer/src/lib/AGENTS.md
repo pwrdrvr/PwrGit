@@ -219,3 +219,27 @@ A slug carries no host. `chooseRepository` rewrites the query to
 hostname — so the dialog remembers the instance the user picked and resolves the
 slug back to it. Re-confirming an Enterprise repository against github.com is a
 wrong answer, not merely a wasted round trip.
+
+## A vendor's logo is not an icon — it does not take `currentColor`
+
+Every glyph in this renderer is hand-transcribed from Lucide and painted with
+`currentColor`. A trademark is the one case where that is the wrong instinct:
+GitHub and GitLab (and Git itself) publish their marks and forbid redrawing or
+recoloring them, so a stroke-language lookalike is our rendition of someone
+else's logo, and a CSS filter over the real one is a recolor.
+
+Brand marks therefore live as the vendors' own files under
+`renderer/src/assets/<vendor>/`, each beside a README recording the source, the
+usage rules, and the command that re-downloads it. They render as `<img>` —
+never inlined as `<svg stroke="currentColor">` — inside a square box with
+`object-fit: contain`, because none of these artboards is square and a bare
+`width`/`height` pair would stretch the mark.
+
+`brandTheme.ts` is the one subscription they share. Where a vendor publishes
+per-theme colorways (GitHub's black and white Invertocat), `useBrandTheme()`
+picks between THOSE FILES; a vendor that publishes one colorway (GitLab's
+tanuki) keeps it on both themes. Pass `useBrandTheme(false)` when the caller
+cannot use the answer — these marks sit on every repo row, and a subscriber
+that ignores the value still holds the document-wide MutationObserver open.
+
+`sidebar/ForgeMark.tsx` is the worked example.

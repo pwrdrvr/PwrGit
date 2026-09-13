@@ -1,65 +1,75 @@
-import type { ReactElement } from "react";
+import type { CSSProperties } from "react";
 import type { ForgeKind } from "@pwrgit/shared";
+import { useBrandTheme, type BrandTheme } from "../../lib/brandTheme";
+import invertocatBlackUrl from "../../assets/github/invertocat-black.svg";
+import invertocatWhiteUrl from "../../assets/github/invertocat-white.svg";
+import tanukiUrl from "../../assets/gitlab/tanuki.svg";
+
+/**
+ * One forge's mark, as that forge publishes it.
+ *
+ * `themed` is whether the vendor ships per-theme variants this mark has to
+ * choose between, and it is what decides whether a given chip subscribes to
+ * the theme at all — every repo row in the sidebar draws one of these, so a
+ * mark with a single colorway must not hold the document-wide observer open
+ * for an answer it ignores.
+ */
+type Mark = {
+  themed: boolean;
+  url: (theme: BrandTheme) => string;
+};
 
 /**
  * A forge's own mark, at chip size.
  *
- * A glyph rather than the product's name: the chip sits on every repo row in a
+ * A logo rather than the product's name: the chip sits on every repo row in a
  * 320px sidebar, and one recognisable shape costs a fraction of what "GitHub"
  * costs the repo name beside it. The name comes back only where the mark
  * cannot answer alone — see `resolveForgeHostDisplays`.
  *
- * Transcribed from Lucide, like every other icon in this app, so the marks
- * share the stroke language of the lock and fork glyphs they sit beside rather
- * than dropping two filled brand logos into a row of outlines. Stroke 2, not
- * the 2.2 of `RepoIdentityMarks`: these two shapes carry more line than a
- * padlock does, and thicken into a blob at 12px.
+ * These are the **vendors' own files**, unaltered, not transcriptions. Every
+ * other glyph in this renderer is hand-transcribed from Lucide, and that is
+ * the wrong move for a trademark: GitHub and GitLab both publish their marks
+ * and both forbid redrawing them, so a stroke-language lookalike matching the
+ * padlock beside it would be our rendition of someone else's logo. What that
+ * costs is small and deliberate — the marks do not follow the chip's
+ * `--text-muted`, and the tanuki stays full color on both themes.
+ * `assets/github/README.md` and `assets/gitlab/README.md` carry the guidance,
+ * the provenance, and the re-download recipes.
  *
  * A `Record<ForgeKind, …>`, so a third product is a missing-property type
  * error naming this file — `forge/AGENTS.md`, "Why they are all records".
  */
-const MARKS: Record<ForgeKind, (size: number) => ReactElement> = {
-  /** Lucide `github`. */
-  github: (size) => (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4" />
-      <path d="M9 18c-4.51 2-5-2-7-2" />
-    </svg>
-  ),
-  /** Lucide `gitlab`. */
-  gitlab: (size) => (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="m22 13.29-3.33-10a.42.42 0 0 0-.14-.18.38.38 0 0 0-.22-.11.39.39 0 0 0-.23.07.42.42 0 0 0-.14.18l-2.26 6.67H8.32L6.06 3.26a.42.42 0 0 0-.14-.18.38.38 0 0 0-.22-.11.39.39 0 0 0-.23.07.42.42 0 0 0-.14.18L2 13.29a.74.74 0 0 0 .27.83L12 21l9.73-6.88a.74.74 0 0 0 .27-.83Z" />
-    </svg>
-  )
+const MARKS: Record<ForgeKind, Mark> = {
+  /**
+   * GitHub publishes exactly two colorways of the Invertocat and forbids
+   * altering the mark, so this picks between those two files rather than
+   * recoloring one: black on light, white on dark.
+   */
+  github: {
+    themed: true,
+    url: (theme) => (theme === "light" ? invertocatBlackUrl : invertocatWhiteUrl)
+  },
+  /** GitLab publishes the tanuki in full color, and it reads on both themes. */
+  gitlab: { themed: false, url: () => tanukiUrl }
 };
 
-export function ForgeMark({
-  kind,
-  size = 12
-}: {
-  kind: ForgeKind;
-  size?: number;
-}) {
-  return MARKS[kind](size);
+/**
+ * Neither artboard is square — the Invertocat is 98×96 and the tanuki 25×24 —
+ * so the box is square and the mark is fitted inside it. Setting `width` and
+ * `height` alone would stretch both marks ~2%, which is the "no warping" rule
+ * in both vendors' guidance.
+ */
+const FIT: CSSProperties = {
+  display: "inline-block",
+  objectFit: "contain",
+  verticalAlign: "middle"
+};
+
+export function ForgeMark({ kind, size = 12 }: { kind: ForgeKind; size?: number }) {
+  const mark = MARKS[kind];
+  const theme = useBrandTheme(mark.themed);
+  return (
+    <img src={mark.url(theme)} width={size} height={size} alt="" style={FIT} draggable={false} />
+  );
 }

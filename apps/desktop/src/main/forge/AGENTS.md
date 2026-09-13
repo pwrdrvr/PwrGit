@@ -507,12 +507,18 @@ provider or reach a real forge.
     a name the user typed (typing one is a request to see that word), and a
     host no product claims (there is no mark). The tooltip always spells every
     host out, so the mark is an abbreviation rather than a loss.
-  - **The marks are a `Record<ForgeKind, …>` of Lucide paths**, transcribed
-    like the other six icons in the renderer rather than pulled from a
-    dependency — so a third product is a missing-property type error naming
-    `ForgeMark.tsx`, and the marks share the stroke language of the lock and
-    fork glyphs they sit beside instead of dropping filled brand logos into a
-    row of outlines.
+  - **The marks are the vendors' own files, unaltered** — a
+    `Record<ForgeKind, …>` in `sidebar/ForgeMark.tsx`, so a third product is a
+    missing-property type error naming that file. Every other glyph in the
+    renderer is hand-transcribed from Lucide; a trademark is the one case where
+    that is wrong, because GitHub and GitLab both publish their marks and both
+    forbid redrawing them. So these render as `<img>` from
+    `renderer/src/assets/{github,gitlab}/` and never take `currentColor`, a CSS
+    filter, or a `width`/`height` pair that would stretch a non-square artboard.
+    Where a vendor publishes two colorways, the theme picks between THEIR files
+    (`lib/brandTheme.ts`); it never recolors one. The asset READMEs carry the
+    guidance, the provenance, and the re-download recipes — read them before
+    touching the artwork.
 - **Three states, not two.** No `repo_identity` row means *never looked up*;
   `visibility: "unknown"` means *asked, and the forge would not say*. They
   render differently, and neither collapses into `public` — that would
