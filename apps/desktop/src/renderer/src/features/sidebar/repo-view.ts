@@ -42,6 +42,29 @@ export function lensIsAvailable(
 }
 
 /**
+ * What an empty lens says, for the list body AND for the dimmed chip that
+ * cannot be entered. One map because these are one message on two surfaces —
+ * they were two, and `Pinned` had already been written out identically in
+ * both.
+ *
+ * Each states the fact first and the mechanism second, in that order and only
+ * where the mechanism is always true. "PwrGit hasn't looked yet" reads as
+ * honest on a fresh scan and as a lie to someone who has opened every row and
+ * genuinely has nothing behind — so Behind and Stale describe *when* PwrGit
+ * checks rather than claiming it has not.
+ */
+export const LENS_EMPTY_COPY: Record<Lens, string> = {
+  Focused:
+    "No focused repos yet. Browse All, then open or pin what matters.",
+  Pinned: "Nothing pinned yet. Star a repo to keep it here.",
+  Behind:
+    "No repo is behind its upstream. PwrGit compares each one with its upstream as you open its row.",
+  Stale:
+    "No worktrees look safe to prune. PwrGit works out what's prunable as you open each repo's row.",
+  All: "No repos yet — add a folder above and PwrGit will scan it."
+};
+
+/**
  * The lenses the user can actually move to — the available ones, plus whichever
  * they are in. The active lens stays selectable even once it empties out (unpin
  * the last repo and Pinned is suddenly 0) because yanking someone out of the

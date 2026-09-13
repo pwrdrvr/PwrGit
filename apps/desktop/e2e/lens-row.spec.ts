@@ -596,6 +596,44 @@ test("a first run lands in the one lens that has anything in it", async () => {
   await expect(window.locator(".repo-row__focus-reason")).toHaveText("Pinned");
 });
 
+test("a window with no remembered lens opens on Focused once it has one", async () => {
+  sandbox = createGitSandbox();
+  sandbox.makeRepo("alpha");
+  sandbox.makeRepo("bravo");
+
+  handle = await launchApp();
+  const { window } = handle;
+  await handle.setPickDirectory(sandbox.reposDir);
+  await window.getByRole("button", { name: /Add folders/i }).click();
+  await expect(window.locator(".repo-row__name")).toHaveCount(2, {
+    timeout: 20_000
+  });
+
+  // Pin one, so Focused holds something across a reload without depending on
+  // lazily computed Git state.
+  await window
+    .locator(".repo-row", { hasText: "alpha" })
+    .locator(".pin")
+    .click();
+
+  // Drop every stored preference, including the lens the pin click did NOT
+  // set, and remount. This is the returning-user path: nothing remembered, but
+  // a profile whose persisted state already fills Focused.
+  await window.evaluate(() => window.localStorage.clear());
+  await window.reload();
+
+  // The landing has to wait for repos to arrive. Before, it settled on the
+  // "ready" that useRepoTree reports for a window with no profile yet — an
+  // empty tree — so this promotion never happened and every returning user
+  // was dropped into All.
+  await expect(lensChip(window, "Focused")).toHaveAttribute(
+    "aria-selected",
+    "true",
+    { timeout: 20_000 }
+  );
+  await expect(window.locator(".repo-row__name")).toHaveText(["alpha"]);
+});
+
 test("selecting a worktree row does not move it", async () => {
   sandbox = createGitSandbox();
   sandbox.makeRepo("steady", { worktrees: ["feature/one"] });

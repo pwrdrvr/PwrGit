@@ -712,7 +712,14 @@ textarea,
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
 }
-.lens-chip:hover:not(.is-empty) {
+/* :not(.is-active) is load-bearing, not tidiness. This rule and
+   .lens-chip.is-active below both painted at (0,2,0), so .is-active won on
+   source order; adding :not(.is-empty) took it to (0,3,0) and the hover
+   started overriding the active chip's own fill and colour — leaving a hovered
+   active lens identified by nothing but the --accent hairline, which the note
+   below measures at 2.30:1 / 1.87:1, under SC 1.4.11's 3:1. Excluding the
+   active chip restores the previous outcome at any specificity. */
+.lens-chip:hover:not(.is-empty):not(.is-active) {
   background: var(--bg-panel-hover);
   color: var(--text-secondary);
 }

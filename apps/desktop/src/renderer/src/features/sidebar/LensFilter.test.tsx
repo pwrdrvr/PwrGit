@@ -109,7 +109,9 @@ describe("LensFilter", () => {
     expect(document.body.textContent).toContain("Every indexed repo");
 
     act(() => chip("Stale").focus());
-    expect(document.body.textContent).toContain("Nothing here yet");
     expect(document.body.textContent).toContain("prunable");
+    // The lens's own name leads the tooltip — an icon with no label is the
+    // whole problem this is solving.
+    expect(document.body.textContent).toContain("Stale");
   });
 });

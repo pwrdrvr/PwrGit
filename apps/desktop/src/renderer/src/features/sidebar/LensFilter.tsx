@@ -1,7 +1,12 @@
 import { useRef, type ReactNode } from "react";
 import type { Lens } from "@pwrgit/shared";
 import { useViewportTooltip } from "../../lib/useViewportTooltip";
-import { formatLensCount, LENSES, selectableLenses } from "./repo-view";
+import {
+  formatLensCount,
+  LENS_EMPTY_COPY,
+  LENSES,
+  selectableLenses
+} from "./repo-view";
 import { tablistKeyHandler } from "../../lib/tablistKeys";
 
 /**
@@ -65,21 +70,6 @@ const DESCRIPTION: Record<Lens, string> = {
   All: "Every indexed repo"
 };
 
-/**
- * What would put something in an empty lens, for the chip that can't be
- * entered. "Unavailable" is not an answer anybody can act on — and three of
- * these read as empty on a fresh scan for a reason the user has no way to
- * guess, which is that PwrGit hasn't looked at those repos yet.
- */
-const WHEN_EMPTY: Record<Lens, string> = {
-  Focused: "Nothing here yet. Open or pin a repo and it lands in Focused.",
-  Pinned: "Nothing pinned yet. Star a repo to keep it here.",
-  Behind: "Nothing here yet. PwrGit compares a repo with its upstream once you open its row.",
-  Stale: "Nothing here yet. PwrGit works out what's prunable once you open a repo's row.",
-  // All is never unavailable — it is the lens everything else falls back to.
-  All: ""
-};
-
 export function LensFilter({
   lens,
   counts,
@@ -107,6 +97,12 @@ export function LensFilter({
   // selects its way into a view that is empty by construction.
   const reachable = selectableLenses(counts, lens);
   const onKeyDown = tablistKeyHandler(reachable, lens, (next) => {
+    // On a fresh scan the strip can hold exactly one reachable lens, and
+    // nextTabForKey wraps a one-entry list onto itself — so an arrow key here
+    // would "select" the lens already selected. That is not free: onChange
+    // records an explicit pick, which persists a preference the user never
+    // expressed and pins the window to it for good.
+    if (next === lens) return;
     onChange(next);
     chipRefs.current[next]?.focus();
   });
@@ -121,7 +117,11 @@ export function LensFilter({
         const count = counts[l];
         const label = count > 0 ? `${l} (${count})` : l;
         const available = reachable.includes(l);
-        const tooltip = `${label}\n${available ? DESCRIPTION[l] : WHEN_EMPTY[l]}`;
+        // A chip that can be entered says what it answers; one that cannot
+        // says why, in the same words its empty list would have used.
+        const tooltip = `${label}\n${
+          available ? DESCRIPTION[l] : LENS_EMPTY_COPY[l]
+        }`;
         return (
           <button
             key={l}
