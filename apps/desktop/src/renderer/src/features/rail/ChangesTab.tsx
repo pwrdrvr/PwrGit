@@ -3,6 +3,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useRef,
   useState
 } from "react";
 import type { ChangeSet, FileChange, Worktree } from "@pwrgit/shared";
@@ -317,10 +318,15 @@ export function ChangesTab({
   activeEmail,
   onOpenDiff,
   onOpenFileInsight,
-  activeFile
+  activeFile,
+  commitNudge = 0
 }: {
   worktree: Worktree | null;
   activeEmail: string;
+  /** Bumped when something elsewhere asked for the commit box — today, the
+   *  "Commit on <branch> first" answer to a dirty branch-switch prompt. The
+   *  count, not a flag: asking twice must move the caret twice. */
+  commitNudge?: number;
   /** The file the main pane is showing, so this list can mark it. */
   activeFile: { path: string; staged: boolean | null } | null;
   onOpenDiff: (path: string, staged: boolean) => void;
@@ -332,6 +338,13 @@ export function ChangesTab({
 }) {
   const [changes, setChanges] = useState<ChangeSet | null>(null);
   const [message, setMessage] = useState("");
+  const messageRef = useRef<HTMLInputElement>(null);
+  // Answering "Commit on <branch> first" is a promise to put the reader where
+  // they can do that. Skipped at zero so an ordinary mount never steals focus
+  // from whatever the reader was actually typing in.
+  useEffect(() => {
+    if (commitNudge > 0) messageRef.current?.focus();
+  }, [commitNudge]);
   /** Explicit folder disclosure state; unset folders follow the size default. */
   const [folderOpen, setFolderOpen] = useState<Record<string, boolean>>({});
   const [menu, setMenu] = useState<{
@@ -765,6 +778,7 @@ export function ChangesTab({
 
       <div className="commit-box">
         <input
+          ref={messageRef}
           className="commit-input"
           value={message}
           onChange={(e) => setMessage(e.target.value)}

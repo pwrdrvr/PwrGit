@@ -104,6 +104,7 @@ export function BranchSwitcher({
     const outcome = await guardedSwitchBranch({
       worktreeId: worktreeId as WorktreeId,
       worktreeLabel,
+      fromBranch: currentBranch,
       branch: target
     });
     setBusy(null);

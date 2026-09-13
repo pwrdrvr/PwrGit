@@ -351,6 +351,48 @@
         </div>
         <p class="dv-next">Try next: &#8220;compare the same two frames in light theme&#8221; &#183; &#8220;what does this look like at 940px, the narrowest window?&#8221;</p>
       </section>
+
+      <section class="dv-turn" id="t5">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t5">5</a>
+          <span class="dv-tname">Uncommitted changes &#8212; a question with three answers, asked as if it had two</span>
+        </div>
+        <p class="dv-sub">Switching a checkout that has uncommitted work is the one branch flow where PwrGit could not know what the reader wanted, and it guessed anyway: a two&#8209;button confirm offering <em>Carry changes over</em> against Cancel. The label named a git mechanism rather than an intent, and the answer &#8220;these belong on the branch I am leaving&#8221; had nowhere to go but Cancel.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="5a" data-screen-label="5a The three answers">
+            <div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a>What the reader might have meant</div>
+            <div class="tbl" style="width:812px">
+              <div class="tr head"><span>They meant</span><span>Before</span><span>After</span><span>What it does</span></div>
+              <div class="tr"><span>This work continues on the new branch</span><span class="st q">&#8220;Carry changes over&#8221;</span><span class="st chg">Bring them to &lt;branch&gt;</span><span>Saved, switched, restored. If they cannot be applied there, <b style="color:var(--t2)">nothing moves</b>.</span></div>
+              <div class="tr"><span>This work is finished, and belongs here</span><span class="st bug">Cancel, and work it out</span><span class="st chg">Commit on &lt;branch&gt; first</span><span>Runs no git at all. Stays put and puts the caret in the commit box.</span></div>
+              <div class="tr last"><span>I will deal with it myself</span><span class="st keep">Cancel</span><span class="st keep">Cancel</span><span>Unchanged, and now genuinely a third answer rather than the negation of the only other one.</span></div>
+            </div>
+            <p class="note"><b>Not offered: &#8220;leave them on &lt;old branch&gt;&#8221;</b>, which is GitHub Desktop&#8217;s fourth. You are moving the worktree, so the work cannot literally stay &#8212; it has to become a stash, and a stash PwrGit made and named is not one other git tools know to offer back when the reader returns to that branch or checks it out in a worktree later. That is a trap dressed as a convenience. It belongs behind the multi&#8209;stash surface in <a href="https://github.com/pwrdrvr/PwrGit/pull/150">#150</a>, not here.</p>
+          </div>
+
+          <div class="dv-opt" id="5b" data-screen-label="5b The prompt">
+            <div class="dv-olabel"><a class="dv-oid" href="#5b">5b</a>The prompt, in the shipped app</div>
+            <img class="shot" src="./assets/dirty-switch-prompt.png" width="520" alt="PwrGit's uncommitted-changes prompt: it names the three changed files, then offers Bring them to feat/lineage-scope as the primary with its consequence spelled out, Commit on main first, and Cancel">
+            <p class="note" style="max-width:520px">Each answer carries the consequence of picking it, because a choice whose effect the reader has to infer from a verb is a guess. The files are listed rather than counted: &#8220;3 uncommitted changes&#8221; does not tell you whether they belong on the branch you are heading to.</p>
+          </div>
+
+          <div class="dv-opt" id="5c" data-screen-label="5c Two outcomes">
+            <div class="dv-olabel"><a class="dv-oid" href="#5c">5c</a>&#8220;Bring them&#8221; owes exactly two outcomes</div>
+            <div class="find" style="width:430px">
+              <div class="fitem"><span class="pin ok">1</span><div><h4>The work is on the new branch</h4><p>Saved with <code>--include-untracked</code> and restored with <code>--index</code>, so new files come too and what was staged is still staged.</p></div></div>
+              <div class="fitem"><span class="pin ok">2</span><div><h4>Or the checkout is exactly as it was</h4><p>Same branch, same tree, same stash stack &#8212; and no conflict markers on a branch nobody chose to be standing on. A plain <code>git switch</code> cannot offer this: it refuses the moment one changed file would be overwritten and leaves the reader with a wall of git text and nothing attempted.</p></div></div>
+              <div class="fitem"><span class="pin q">3</span><div><h4>The third outcome, which says so</h4><p><code>carry_rollback_failed</code> is the case where the restore itself failed. It is the one break in the contract, so it names the stash the work is sitting in rather than pretending the checkout is clean.</p></div></div>
+            </div>
+            <div class="find" style="width:430px">
+              <div class="fitem"><span class="pin">A</span><div><h4>Never <code>stash@{0}</code></h4><p>A stash is a reflog; positions shift when anything else pushes or drops one, and a terminal in the same checkout is outside the operation queue. The entry is resolved back by <b style="color:var(--t2)">commit identity</b> every time it is touched, and a commit appearing twice is refused rather than guessed &#8212; the same rule <a href="https://github.com/pwrdrvr/PwrGit/pull/150">#150</a> applies to every stash action.</p></div></div>
+              <div class="fitem"><span class="pin">B</span><div><h4>The cleanup is a pathset, not <code>clean -fd</code></h4><p>A conflicted reapply restores the stash&#8217;s untracked files, and <code>reset --hard</code> does not remove them &#8212; so without a cleanup the restore fails on &#8220;already exists&#8221;. Cleaning the repository would be the obvious fix and would delete whatever a build or an editor wrote while the switch was in flight. Only the paths the stash itself owns (<code>&lt;stash&gt;^3</code>) are cleared.</p></div></div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;what should the prompt say for a detached checkout?&#8221; &#183; &#8220;design the leave&#8209;them&#8209;here answer on top of #150&#8221;</p>
+      </section>
     </x-dc>
     <script
       type="text/x-dc"

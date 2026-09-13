@@ -1,6 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore
+} from "react";
 import type { OperationState, Worktree, WorktreeState } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import {
+  commitNudgeCount,
+  subscribeCommitNudges
+} from "../shell/commitNudge";
 import { OperationBanner } from "./OperationBanner";
 import { RebaseTab } from "./RebaseTab";
 import { ChangesTab } from "./ChangesTab";
@@ -103,6 +113,19 @@ export function Rail({
     if (commitFocus !== null) setTab("changes");
   }, [commitFocus]);
 
+  // "Commit on <branch> first", answered at a branch-switch prompt on the other
+  // side of the window. The rail may be sitting on Rebase, and the commit box
+  // only exists inside the Changes tab, so the tab has to move before the
+  // caret can.
+  const commitNudge = useSyncExternalStore(
+    subscribeCommitNudges,
+    commitNudgeCount,
+    commitNudgeCount
+  );
+  useEffect(() => {
+    if (commitNudge > 0) setTab("changes");
+  }, [commitNudge]);
+
   return (
     <aside className="pane pane--rail" data-testid="rail">
       <div className="rail__bar">
@@ -161,6 +184,7 @@ export function Rail({
             onOpenDiff={onOpenDiff}
             onOpenFileInsight={onOpenFileInsight}
             activeFile={activeFile}
+            commitNudge={commitNudge}
           />
         )
       ) : (

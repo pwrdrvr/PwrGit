@@ -266,6 +266,7 @@ export function RepoRefsSections({
       repoId: repo.id,
       worktreeId: target.id,
       worktreeLabel: lastSegment(target.path),
+      fromBranch: target.branch,
       branch: branchName,
       onRevealWorktree,
       onRefs: setRefs

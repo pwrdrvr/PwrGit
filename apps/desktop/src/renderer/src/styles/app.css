@@ -7411,6 +7411,77 @@ body.is-col-resizing {
   color: var(--danger-on);
 }
 
+/* ---- A question with more than two answers ----
+
+   Wider than a confirm because each answer carries its consequence on a second
+   line: a choice whose effect the reader has to infer from a verb is a guess.
+   The stack is the layout, not a row of peers — a row ranks answers by position
+   and says nothing about what any of them does. */
+.modal--choice {
+  width: min(520px, 92vw);
+}
+/* The observable state the decision rests on — which files are at stake. */
+.dialog__facts {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 120px;
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--bg-panel);
+  list-style: none;
+}
+.dialog__facts li {
+  overflow: hidden;
+  color: var(--text-muted);
+  font: 500 11px/1.7 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dialog__choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dialog__choice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.dialog__choice:hover,
+.dialog__choice:focus-visible {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.dialog__choice.is-primary {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.dialog__choice-label {
+  color: var(--text-primary);
+  font: 600 12.5px/1.3 var(--font-sans);
+}
+/* `.is-primary` paints an accent tint, so its label may use the bright end of
+   the ramp; the others sit on a flat surface and must not — see
+   `theme-contract.test.ts`. */
+.dialog__choice.is-primary .dialog__choice-label {
+  color: var(--accent-bright);
+}
+.dialog__choice-detail {
+  color: var(--text-muted);
+  font: 500 11px/1.5 var(--font-sans);
+  text-wrap: pretty;
+}
+.dialog__choice.is-danger .dialog__choice-label {
+  color: var(--danger-text);
+}
+
 /* ---- Diverged-pull recovery ---- */
 
 .pull-divergence-backdrop {
