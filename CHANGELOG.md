@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.14.0 - 2026-09-13
+
+- GitCafe - Added GitCafe forge support through the `cafe` CLI (version 0.5.0 or newer), including sign-in guidance, repository discovery, clone and fork suggestions, and pull-request status.
+- SSH Security - When GitHub or GitLab SSH host-key verification is needed, PwrGit explains the interruption and compares the offered key with that forge's published keys before offering an explicit Trust and retry. Other hosts, including GitCafe, remain available for independent fingerprint verification.
+- Forges - Added per-host support for GitHub Enterprise and self-managed GitLab, with clearer product sections, host controls, labels, and add/remove actions in Settings.
+- Remote Git - Added live fetch, pull, and push activity details: see the active Git command and recent output, understand when it is waiting silently, and cancel a stuck operation safely.
+- macOS - Added native Apple Silicon DMGs and automatic-update ZIPs alongside universal downloads, reducing download size for Apple Silicon Macs while retaining Intel compatibility.
+- Linux - Added Linux-native window controls and app icon handling, plus clear sandbox setup warnings and a `pnpm fix:linux-sandbox` repair command for development installs.
+- Branches - Show each local branch's tracked upstream in the branch picker and hide remote `HEAD` aliases that cannot be switched to.
+- Agents - Made the standalone `pwrgit-mcp` command build and link correctly during installation.
+
 ## v0.13.0 - 2026-09-10
 
 - Agents - Added opt-in local-agent access with OAuth and a native approval window, so approved coding agents can discover your PwrGit profiles, repositories, worktrees, recent activity, and safely request navigation or refreshes without receiving generic Git-write access.
