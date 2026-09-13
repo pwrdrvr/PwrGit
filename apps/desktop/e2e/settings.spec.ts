@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
+import { FORGE_KINDS, forgeProduct } from "@pwrgit/shared";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 
 // The Settings window is a singleton aux window on the `#settings` hash route,
@@ -176,17 +177,54 @@ test("menu opens the Settings window; panes render and settings persist", async 
     )
   ).toEqual([]);
 
-  // Forges: real status from main's probe. Which forges are logged in varies
-  // by machine, so assert the pane resolved to a real state rather than a
-  // particular one — the point is that it consumes forge:status at all.
+  // Forges: one section per product, each from main's probe. Which forges are
+  // logged in varies by machine, so assert each pane resolved to a real state
+  // rather than a particular one — the point is that it consumes forge:status
+  // and forge:hosts at all.
   await settings.locator(".settings-nav__button", { hasText: "Forges" }).click();
-  const forgePanel = settings.locator("section[aria-label='Forges']");
-  await expect(forgePanel).toBeVisible();
-  await expect(forgePanel).toContainText("GitHub");
-  await expect(forgePanel).toContainText("GitLab");
-  await expect(forgePanel.locator(".settings-card__chip").first()).not.toHaveText(
-    "Probing"
-  );
+  // Driven from the product list rather than a pair written here, so this is
+  // the assertion that a third registry entry gets a section in the running
+  // app — not just in the unit test that renders the pane.
+  for (const kind of FORGE_KINDS) {
+    const product = forgeProduct(kind);
+    const section = settings.locator(`section[aria-label='${product.label}']`);
+    await expect(section).toBeVisible();
+    // The chip is the product's own state, so it can never again read
+    // "Connected" for one forge while naming another's hosts.
+    const chip = section.locator(".settings-card__chip").first();
+    await expect(chip).toHaveText(/Connected|Signed out|Off|Not installed/);
+    // Each product owns its own way in, which is what a shared empty state
+    // could not offer. WHICH way in depends on the product's state, and both
+    // branches are real here: CI runners carry `gh` but not `glab`, so one
+    // section is "Not installed" on every run. A missing CLI is the one state
+    // with no Add button — there is no binary to sign in with, so adding a
+    // host would name an instance nothing can reach.
+    // Trimmed: `textContent` is raw, unlike the whitespace-normalizing
+    // `toHaveText` above, so any markup change that puts the label on its own
+    // line would send this to the else branch and assert an Add button a
+    // not-installed product deliberately does not render.
+    if ((await chip.textContent())?.trim() === "Not installed") {
+      await expect(section).toContainText(`Install the ${product.label} CLI`);
+    } else {
+      await expect(
+        section.getByRole("button", { name: product.addHost.button })
+      ).toBeVisible();
+    }
+  }
+  // Folding one section leaves its neighbour alone — the reason collapse state
+  // is per section and not per pane. Needs two products, so it is skipped on a
+  // registry that has only one.
+  const [first, second] = FORGE_KINDS.map((kind) => forgeProduct(kind).label);
+  if (first !== undefined && second !== undefined) {
+    const section = settings.locator(`section[aria-label='${first}']`);
+    await section.getByRole("button", { name: first, exact: true }).click();
+    await expect(
+      section.getByRole("button", { name: first, exact: true })
+    ).toHaveAttribute("aria-expanded", "false");
+    await expect(
+      settings.getByRole("button", { name: second, exact: true })
+    ).toHaveAttribute("aria-expanded", "true");
+  }
 
   // Experimental: the lineage-scope toggle round-trips through
   // settings:update (button state comes from the returned snapshot).

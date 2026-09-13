@@ -1,0 +1,17 @@
+#!/bin/sh
+# Contrived `gh` for design screenshots. Answers only what PwrGit asks.
+case "$1 $2 $3" in
+  "--version  ") echo "gh version 2.99.0 (contrived)"; exit 0 ;;
+esac
+if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+  cat <<'JSON'
+{"hosts":{"github.com":[{"host":"github.com","login":"octo-dev","active":true,"scopes":"repo, read:org, gist"}],"ghe.contoso-labs.test":[{"host":"ghe.contoso-labs.test","login":"a.hopper","active":true,"scopes":"repo, read:org"}]}}
+JSON
+  exit 0
+fi
+if [ "$1" = "auth" ] && [ "$2" = "token" ]; then
+  # Signed in everywhere gh enumerates.
+  echo "ghp_contrived000000000000000000000000"
+  exit 0
+fi
+exit 1

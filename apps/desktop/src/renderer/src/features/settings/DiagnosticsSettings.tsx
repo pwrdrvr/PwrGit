@@ -8,6 +8,7 @@ import { dispatch } from "../../lib/pwrgit";
 import {
   SettingsField,
   SettingsPanelHead,
+  SettingsSectionStack,
   SettingsSection,
   SettingsSegmented
 } from "./SettingsLayout";
@@ -76,7 +77,7 @@ export function DiagnosticsSettings(props: {
   const hotDurationSeconds = HOT_CPU_TUNING.profileDurationMs / 1_000;
 
   return (
-    <div className="settings-stack" aria-label="Memory and CPU profiling settings">
+    <SettingsSectionStack aria-label="Memory and CPU profiling settings" paneId="diagnostics">
       <SettingsPanelHead
         eyebrow="Diagnostics"
         title="Memory / CPU profiling"
@@ -264,6 +265,6 @@ export function DiagnosticsSettings(props: {
           />
         </div>
       </SettingsSection>
-    </div>
+    </SettingsSectionStack>
   );
 }

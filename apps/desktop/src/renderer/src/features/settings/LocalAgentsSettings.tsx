@@ -14,7 +14,11 @@ import {
   type McpAgentRoleInput
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
-import { SettingsPanelHead, SettingsSection } from "./SettingsLayout";
+import {
+  SettingsPanelHead,
+  SettingsSection,
+  SettingsSectionStack
+} from "./SettingsLayout";
 import { AgentAccessSection } from "./AgentAccessSection";
 
 type RoleDraft = {
@@ -133,7 +137,11 @@ export function LocalAgentsSettings() {
   const activeSessions = snapshot?.sessions.filter((session) => session.revokedAt === null).length ?? 0;
 
   return (
-    <div className="settings-stack settings-stack--agents">
+    <SettingsSectionStack
+      aria-label="Local agent settings"
+      className="settings-stack--agents"
+      paneId="agents"
+    >
       <SettingsPanelHead
         eyebrow="Access control"
         title="Local agents"
@@ -272,7 +280,7 @@ export function LocalAgentsSettings() {
       ) : null}
 
       {error !== null ? <p className="settings-field__error" role="alert">{error}</p> : null}
-    </div>
+    </SettingsSectionStack>
   );
 }
 
@@ -296,6 +304,11 @@ function RoleEditor(props: {
   const { draft } = props;
   return (
     <SettingsSection
+      // One key for both titles: the default key is the title, and this one
+      // changes the moment the user switches from creating a role to editing
+      // one — which would re-register the section, drop whatever fold it had,
+      // and strand the old key in the pane's collapse map.
+      sectionId="role-editor"
       title={draft.id === null ? "Create custom role" : "Edit custom role"}
       eyebrow="Role policy"
       description="Permissions are additive. Repository roots narrow every path-taking tool and both live-notification transports."
