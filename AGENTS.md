@@ -43,6 +43,22 @@ desktop dependency, not a root one, so the root rebuild silently no-ops.
 `require("better-sqlite3")` keeps working afterwards and only `new Database()`
 fails, which is a confusing place to start debugging.
 
+## Linux sandbox setup
+
+Install and desktop dev/preview warn when Electron's setuid helper is not
+root-owned with mode 4755. The warning is advisory: user namespaces may allow
+launch without it. For the fatal SUID sandbox error, use
+`pnpm fix:linux-sandbox`; it resolves this checkout's Electron helper and uses
+sudo only for chown/chmod. Do not run the app as root or disable its sandbox.
+The helper may need repair after Electron is replaced. This fixes permissions,
+not renderer/window visibility or host mount/security policy.
+
+Keep a separate `pnpm install` per checkout/worktree. Root `node_modules` alone
+cannot supply a fresh workspace's package-local dependency links. Sharing
+package node_modules can resolve workspace imports into the donor checkout,
+and installs/native staging then mutate shared dependencies. A symlink to the
+same repaired helper inherits its permissions but is not a complete setup fix.
+
 ## Common commands
 
 ```bash
