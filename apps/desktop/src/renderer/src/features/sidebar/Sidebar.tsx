@@ -31,11 +31,13 @@ import { ProfileChip } from "./ProfileChip";
 import { RepoRow } from "./RepoRow";
 import { BulkSyncDialog } from "./BulkSyncDialog";
 import {
+  DEFAULT_LENS,
   filterReposByLens,
   FOCUS_REPO_LIMIT,
   focusedRepoPage,
   focusReasonForRepo,
   groupReposByRoot,
+  LENS_EMPTY_COPY,
   LENSES,
   lensCounts,
   lensIsArrangeable,
@@ -66,7 +68,10 @@ function readFocusVisits(key: string): FocusVisits {
   }
 }
 
-function readStoredLens(): Lens {
+/** The remembered lens, or null when the user has never picked one — which is
+ *  a different thing from having picked the default, and is what decides where
+ *  a first run lands (see the landing effect below). */
+function readStoredLens(): Lens | null {
   try {
     const stored = window.localStorage.getItem(LENS_KEY);
     // Recent was the pre-Focus default. It showed every repo, so retaining that
@@ -80,21 +85,8 @@ function readStoredLens(): Lens {
   } catch {
     // ignore private-mode failures
   }
-  return "Focused";
+  return null;
 }
-
-/**
- * Per-lens empty copy. The old `No ${lens.toLowerCase()} repos.` template
- * produced "No behind repos.", which isn't English — the lens names are a mix
- * of adjective, verb and noun, so no one template fits all five.
- */
-const EMPTY_COPY: Record<Lens, string> = {
-  Focused: "No focused repos yet. Browse All, then open or pin what matters.",
-  All: "No repos yet — add a folder above and PwrGit will scan it.",
-  Pinned: "Nothing pinned yet. Star a repo to keep it here.",
-  Behind: "No repo is behind its upstream.",
-  Stale: "No worktrees look safe to prune."
-};
 
 /** The repo tree, named so the lens switch can point `aria-controls` at it. */
 const REPO_TREE_ID = "sidebar-repo-tree";
@@ -206,13 +198,18 @@ export function Sidebar({
   // DOM now, while nothing is being said, so the screen reader has registered
   // it long before the first ⌘⇧↑/↓ — see lib/announce.
   useEffect(mountLiveRegion, []);
-  const [lens, setLens] = useState<Lens>(readStoredLens);
+  const [storedLens] = useState(readStoredLens);
+  const [lens, setLens] = useState<Lens>(storedLens ?? DEFAULT_LENS);
   const [showAllFocused, setShowAllFocused] = useState(false);
+  // Whether this window's landing lens is settled. A remembered pick settles it
+  // outright; otherwise the effect below decides once the first repo list is in.
+  const landedRef = useRef(storedLens !== null);
   // Only an explicit pick is worth remembering. The reveal effect below also
   // calls setLens, to widen a lens that would hide the row it is scrolling to
   // — persisting that would let one ⌘K jump into an unpinned repo retire the
   // lens the user actually chose.
   const chooseLens = useCallback((next: Lens) => {
+    landedRef.current = true;
     setLens(next);
     if (next === "Focused") setShowAllFocused(false);
     try {
@@ -429,6 +426,32 @@ export function Sidebar({
 
   const focusContext = { selectedWorktreeId, visits: focusVisits };
   const counts = lensCounts(repos, now, focusContext);
+  // Where a window with no remembered lens lands, decided once — the first
+  // time repos actually arrive, because until then every count is 0 and
+  // "empty" and "not read yet" look identical.
+  //
+  // A fresh profile starts in DEFAULT_LENS (All): its worktree state is
+  // computed lazily per repo, so Focused/Behind/Stale are empty by
+  // construction and a new user who added their folders landed in a blank
+  // list with four blank lenses behind it. A returning user whose persisted
+  // state already fills Focused still opens there, which is the lens this
+  // sidebar is designed around.
+  //
+  // The trigger is a non-empty list, NOT a settled read state. `repoLoadState`
+  // reports "ready" before this window has a profile at all — useRepoTree
+  // resolves a null profile id to an empty list — and that ready arrives
+  // first, so gating on it settled the landing against an empty tree every
+  // time and no one was ever promoted. Waiting on a profile instead does not
+  // fix it either: child effects run before the parent's, so this would still
+  // read the stale "ready" in the commit that delivers the profile. A repo in
+  // hand is unambiguous. A profile that genuinely holds none simply never
+  // settles, which costs nothing — All is where it already is.
+  useEffect(() => {
+    if (landedRef.current) return;
+    if (repos.length === 0) return;
+    landedRef.current = true;
+    if (counts.Focused > 0) setLens("Focused");
+  }, [repos.length, counts.Focused]);
   const lensRepos = filterReposByLens(repos, lens, now, focusContext);
   // Selecting a worktree makes its repo `current` — rank 0 of the Focus ladder
   // — so without this the row the user just clicked would leave from under the
@@ -1078,7 +1101,7 @@ export function Sidebar({
               ? "Scanning…"
               : repoLoadState.status === "error"
                 ? "The last repository list is still shown above, if one was available."
-                : EMPTY_COPY[lens]}
+                : LENS_EMPTY_COPY[lens]}
           </div>
         )}
       </div>

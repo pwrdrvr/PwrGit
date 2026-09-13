@@ -84,6 +84,13 @@ moment it becomes disabled, so activating one from the keyboard throws focus to
 `<body>` for the length of the operation (SC 2.4.3). Guard the click handler
 instead. `disabled` still belongs on a genuinely unavailable action.
 
+One considered exception, `.lens-chip.is-empty`: a lens with nothing in it is
+genuinely unavailable, and still uses `aria-disabled` plus a guarded click. A
+`disabled` button receives no pointer events, so it can show no hover card —
+and these five chips are icon-only, which makes "why is this one grey" a
+question the chip itself has to answer. Reach for `disabled` on a genuinely
+unavailable control unless it owes the user an explanation on hover.
+
 ## No raw color literals outside `tokens.css`
 
 `tokens.css` holds the theme blocks — `:root` (dark) and

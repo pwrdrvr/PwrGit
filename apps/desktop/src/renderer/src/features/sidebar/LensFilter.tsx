@@ -1,6 +1,12 @@
 import { useRef, type ReactNode } from "react";
 import type { Lens } from "@pwrgit/shared";
-import { formatLensCount, LENSES } from "./repo-view";
+import { useViewportTooltip } from "../../lib/useViewportTooltip";
+import {
+  formatLensCount,
+  LENS_EMPTY_COPY,
+  LENSES,
+  selectableLenses
+} from "./repo-view";
 import { tablistKeyHandler } from "../../lib/tablistKeys";
 
 /**
@@ -77,11 +83,26 @@ export function LensFilter({
   controlsId: string;
 }) {
   const activeCount = counts[lens];
+  // An in-app tooltip, not `title`. These five icons are the only label the
+  // control has, so the explanation cannot be left to a native tooltip that a
+  // dimmed chip would not show at all — a `disabled` button receives no
+  // pointer events, so the one chip most in need of explaining itself would be
+  // the one that stayed silent. This is the same primitive the repo rows use.
+  const tip = useViewportTooltip();
   // role="tablist" promises one Tab stop with the arrows moving inside it.
   // Every chip used to be its own stop and the arrows did nothing, so reaching
   // the repo list from the sidebar search meant tabbing past all six.
   const chipRefs = useRef<Partial<Record<Lens, HTMLButtonElement>>>({});
-  const onKeyDown = tablistKeyHandler(LENSES, lens, (next) => {
+  // Arrows travel over the lenses that can be entered, so the strip never
+  // selects its way into a view that is empty by construction.
+  const reachable = selectableLenses(counts, lens);
+  const onKeyDown = tablistKeyHandler(reachable, lens, (next) => {
+    // On a fresh scan the strip can hold exactly one reachable lens, and
+    // nextTabForKey wraps a one-entry list onto itself — so an arrow key here
+    // would "select" the lens already selected. That is not free: onChange
+    // records an explicit pick, which persists a preference the user never
+    // expressed and pins the window to it for good.
+    if (next === lens) return;
     onChange(next);
     chipRefs.current[next]?.focus();
   });
@@ -90,11 +111,25 @@ export function LensFilter({
       className="lens-filter"
       role="tablist"
       aria-label="Repo filter"
+      // One equal-share track per lens, plus the trailing content-width track
+      // the active count sits in. Derived rather than written into app.css:
+      // the rule there would have to name the number of lenses, and a sixth
+      // one added to LENSES would then be laid into the count's track with
+      // the count spilling into an implicit column after it.
+      style={{
+        gridTemplateColumns: `repeat(${LENSES.length}, minmax(min-content, 1fr)) auto`
+      }}
       onKeyDown={onKeyDown}
     >
       {LENSES.map((l) => {
         const count = counts[l];
         const label = count > 0 ? `${l} (${count})` : l;
+        const available = reachable.includes(l);
+        // A chip that can be entered says what it answers; one that cannot
+        // says why, in the same words its empty list would have used.
+        const tooltip = `${label}\n${
+          available ? DESCRIPTION[l] : LENS_EMPTY_COPY[l]
+        }`;
         return (
           <button
             key={l}
@@ -109,25 +144,46 @@ export function LensFilter({
             aria-selected={l === lens}
             aria-controls={controlsId}
             aria-label={label}
-            title={`${label} — ${DESCRIPTION[l]}`}
-            className={`lens-chip${l === lens ? " is-active" : ""}`}
-            onClick={() => onChange(l)}
+            // aria-disabled rather than `disabled`, so the chip keeps its
+            // hover and its tooltip: "why is this one grey" is exactly the
+            // question it has to be able to answer.
+            aria-disabled={available ? undefined : true}
+            className={`lens-chip${l === lens ? " is-active" : ""}${
+              available ? "" : " is-empty"
+            }`}
+            onMouseEnter={(e) => tip.show(e.currentTarget, tooltip)}
+            onMouseLeave={tip.hide}
+            onFocus={(e) => tip.show(e.currentTarget, tooltip)}
+            onBlur={tip.hide}
+            onClick={() => {
+              if (!available) return;
+              tip.hide();
+              onChange(l);
+            }}
           >
-            <svg
-              width="15"
-              height="15"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.7"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              {ICONS[l]}
-            </svg>
-            {/* Presence, not quantity — the number is in the accessible name. */}
-            {count > 0 && <span className="lens-chip__dot" aria-hidden="true" />}
+            {/* The glyph and its dot travel together. The dot used to hang
+                off the chip's own corner, which was the same thing while every
+                chip was exactly one glyph wide — but the chips now divide the
+                sidebar's surplus, and a dot pinned to the corner of a 63px
+                chip drifts halfway to the next icon and starts reading as that
+                one's. */}
+            <span className="lens-chip__glyph">
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                {ICONS[l]}
+              </svg>
+              {/* Presence, not quantity — the number is in the accessible name. */}
+              {count > 0 && <span className="lens-chip__dot" aria-hidden="true" />}
+            </span>
           </button>
         );
       })}
@@ -148,6 +204,7 @@ export function LensFilter({
           {formatLensCount(activeCount)}
         </span>
       )}
+      {tip.tooltipNode}
     </div>
   );
 }
