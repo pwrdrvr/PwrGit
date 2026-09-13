@@ -20,6 +20,7 @@ $archiveInputs = @(
   "apps/desktop/scripts/release.mjs",
   "apps/desktop/scripts/mac-release-artifacts.mjs",
   "apps/desktop/scripts/verify-asar-contents.mjs",
+  "apps/desktop/scripts/packaged-html-rules.mjs",
   "apps/desktop/scripts/verify-embedded-git-notices.mjs",
   "scripts/release/install-trusted-signing.ps1"
 )

@@ -320,6 +320,12 @@ one `latest-mac.yml` and stable DMG aliases. Universal must remain the legacy
 `path`/`sha512` fallback and the `PwrGit.dmg` alias. Keep `arm64` in arm64 asset
 names; electron-updater uses that substring to select architecture.
 
-The metadata helper is imported by the common orchestrator, so include it in
-both macOS and Windows signing-input archives. Direct macOS publication is
+**Any script a signing-stage script imports must be added to both
+signing-input archives** — the `tar` file list in `.github/workflows/release.yml`
+and `$files` in `scripts/release/archive-windows-signing-input.ps1`. The sign
+jobs run from a self-contained tarball, not a checkout, so a sibling
+`import "./x.mjs"` that is not listed fails with `ERR_MODULE_NOT_FOUND` at
+release time — and no PR ever catches it, because the packaging lanes skip on
+pull requests. `mac-release-artifacts.mjs`, `stage-better-sqlite3-arch.mjs` and
+`packaged-html-rules.mjs` are all listed for this reason. Direct macOS publication is
 blocked; use the release workflow, which uploads only after validation.

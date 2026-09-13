@@ -7,7 +7,11 @@
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
-import { findRemoteScript, isRendererHtmlEntry } from "./packaged-html-rules.mjs";
+import {
+  asarExtractPath,
+  findRemoteScript,
+  isRendererHtmlEntry,
+} from "./packaged-html-rules.mjs";
 
 const args = process.argv.slice(2);
 const appPath = args[0]
@@ -133,12 +137,31 @@ if (violations.length > 0) {
 // not cleared.)
 const remoteScriptViolations = [];
 const unreadableHtmlEntries = [];
-for (const entry of listing.filter(isRendererHtmlEntry)) {
+const rendererHtmlEntries = listing.filter(isRendererHtmlEntry);
+
+// Finding nothing to scan is a failure, not a pass. The bundle always carries
+// at least the renderer's index.html, so an empty match means the layout moved
+// out from under this rule — and a gate that silently inspects no files is
+// indistinguishable from one that inspected them and approved. Same reasoning
+// as the unreadable-entry branch below, and as the `required` list above.
+if (rendererHtmlEntries.length === 0) {
+  console.error(
+    "\nverify-asar-contents: no renderer HTML found under /out/ to scan\n",
+  );
+  console.error(
+    "  The remote-script rule inspected nothing, so the bundle is not cleared."
+    + "\n  Renderer HTML has moved; update isRendererHtmlEntry in"
+    + "\n  scripts/packaged-html-rules.mjs to match the new layout.",
+  );
+  process.exit(1);
+}
+
+for (const entry of rendererHtmlEntries) {
   let contents;
   try {
-    contents = asar.extractFile(asarPath, entry.replace(/^\//, "")).toString("utf8");
+    contents = asar.extractFile(asarPath, asarExtractPath(entry)).toString("utf8");
   } catch (error) {
-    unreadableHtmlEntries.push({ entry, reason: error?.message ?? String(error) });
+    unreadableHtmlEntries.push({ entry, reason: error?.message || String(error) });
     continue;
   }
   const snippet = findRemoteScript(contents);

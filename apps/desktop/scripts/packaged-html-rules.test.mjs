@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { findRemoteScript, isRendererHtmlEntry } from "./packaged-html-rules.mjs";
+import { sep } from "node:path";
+import {
+  asarExtractPath,
+  findRemoteScript,
+  isRendererHtmlEntry,
+} from "./packaged-html-rules.mjs";
 
 describe("packaged HTML rules", () => {
   it("scopes the scan to the app's own renderer HTML", () => {
@@ -52,5 +57,31 @@ describe("packaged HTML rules", () => {
     expect(
       findRemoteScript('<script data-src="https://cdn.example.com/x.js"></script>')
     ).toBeNull();
+  });
+
+  it("still sees a remote src after a quoted attribute containing '>'", () => {
+    // A plain `[^>]*` attribute run ends at the `>` inside the quoted value,
+    // so the real src after it would never be reached.
+    expect(
+      findRemoteScript('<script data-cfg="a>b" src="https://cdn.example.com/x.js"></script>')
+    ).not.toBeNull();
+    expect(
+      findRemoteScript(`<script data-cfg='x>y' src="//cdn.example.com/x.js"></script>`)
+    ).not.toBeNull();
+  });
+
+  it("converts a listing entry to the path extractFile wants", () => {
+    // `listPackage` output is normalized to forward slashes for matching, but
+    // `@electron/asar` splits lookup paths on `path.sep`. On Windows a
+    // forward-slash path collapses to one bogus segment and every entry fails
+    // to resolve, so the gate rejects a clean bundle.
+    expect(asarExtractPath("/out/renderer/index.html")).toBe(
+      ["out", "renderer", "index.html"].join(sep)
+    );
+    expect(asarExtractPath("/out/index.html")).toBe(["out", "index.html"].join(sep));
+  });
+
+  it("strips exactly the archive-root slash", () => {
+    expect(asarExtractPath("/out/a/b.html").startsWith(sep)).toBe(false);
   });
 });

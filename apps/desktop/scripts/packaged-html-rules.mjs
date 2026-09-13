@@ -1,3 +1,5 @@
+import { normalize } from "node:path";
+
 // Content rules for HTML that ships inside app.asar.
 //
 // The forbidden-pattern table in `verify-asar-contents.mjs` answers "may this
@@ -29,9 +31,28 @@ export function isRendererHtmlEntry(entry) {
  * hyphenated attributes (`data-src`, `x-src`) that lazy-loaders use as inert
  * placeholders, and flagging one of those would fail a release over markup
  * that loads nothing.
+ *
+ * The attribute run is quote-aware rather than a plain `[^>]*`: a `>` inside a
+ * quoted value would end that run early, so a remote `src` after it would go
+ * unseen. This gate is cheaper to make slightly broad than to let one through.
  */
-const REMOTE_SCRIPT_PATTERN = /<script\b[^>]*\ssrc\s*=\s*["']?(?:https?:)?\/\//i;
+const REMOTE_SCRIPT_PATTERN =
+  /<script\b(?:[^>"']|"[^"]*"|'[^']*')*\ssrc\s*=\s*["']?(?:https?:)?\/\//i;
 
 export function findRemoteScript(contents) {
   return REMOTE_SCRIPT_PATTERN.exec(contents)?.[0] ?? null;
+}
+
+/**
+ * Turn a `listPackage` entry into the path `asar.extractFile` wants.
+ *
+ * Two conversions, both required. The leading slash goes because extractFile
+ * addresses from the archive root. The separators go back to the platform's
+ * because the verifier normalizes the listing to forward slashes for pattern
+ * matching, while `@electron/asar` splits lookup paths on `path.sep` — on
+ * Windows `"out/renderer".split("\\")` is one bogus segment, so every entry
+ * would fail to resolve and the gate would fail a perfectly clean build.
+ */
+export function asarExtractPath(entry) {
+  return normalize(entry.replace(/^\//, ""));
 }
