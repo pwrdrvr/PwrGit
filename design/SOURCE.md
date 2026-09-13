@@ -89,15 +89,18 @@ Its two screenshots are 100% contrived: fixture repositories built by
 real repository, which is why they may live under `design/assets/` in a public
 repo — the rule the "chats/ and uploads/" section below states.
 
-`Onboarding Wizard.dc.html` was written here too, and — unlike the two above —
-**has not been pushed up yet**. The `claude-design` MCP server and the built-in
-`DesignSync` tool both refused in the session that wrote it: design-system
-authorization needs an interactive `/design-login`, which a non-interactive
-session cannot run. So the repo is currently *ahead* of the Claude Design
-project on this one file. Push it up from an interactive session
-(`/design-login`, then write `Onboarding Wizard.dc.html` to project
-`88030015-bdd6-424d-8202-005feb3cee12`) and delete this paragraph; until then a
-re-export must not treat the file as foreign and drop it.
+`Onboarding Wizard.dc.html` was written here too, and pushed up the same way,
+in the design pass that followed
+[#248](https://github.com/pwrdrvr/PwrGit/pull/248). It owns the first-run
+wizard: the step model, the four steps, and the Done screen that draws only
+what a fresh scan actually knows. A re-export must not treat it as foreign and
+drop it.
+
+Pushing it up needed `/design-login` in an interactive Claude Code session —
+the `claude-design` MCP server and the built-in `DesignSync` tool both refuse
+with HTTP 403 until that has been run on the machine, and a non-interactive
+session cannot run it. Worth knowing before assuming the project is
+unreachable.
 
 It carries no `assets/` of its own. Every frame in it is drawn from PwrGit's own
 tokens and markup rather than captured, so there is no screenshot to keep in
