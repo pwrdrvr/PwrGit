@@ -163,6 +163,8 @@ selected. Why, how to regenerate, and how to verify: `apps/desktop/AGENTS.md`
   - If a screenshot is not 100% contrived, show it to the operator and wait for approval before attaching. Redact anything that must not ship (secrets, tokens, customer data, private thread text, account identifiers).
 - GitHub CLI 2.99+ (`gh` v2.99.0) can attach images and videos with the repeatable `--attach` flag on `gh pr create`, `gh pr edit`, and `gh pr comment`.
   - Reference the local path in the Markdown body so `gh` rewrites it to the uploaded URL in place. Unreferenced attachments are appended at the end.
+  - **The match is a literal string comparison, and a mismatch fails silently.** `gh` rewrites `](path)` only when `path` is byte-identical to what `--attach` was given — so `--attach /tmp/shots/after.png` against a body saying `![after](./after.png)` does not match. The upload still happens; the broken relative link stays where it was, a second copy is appended at the end, and `gh` exits 0. Pass the same spelling in both places, absolute or relative, and keep the paths short enough to retype exactly.
+  - **Look at the rendered PR before calling it done.** Neither the exit code nor `gh pr view --json body` catches this — the body genuinely does contain `user-attachments` URLs, just in the wrong place. To recover without re-uploading: read those URLs back out of the body and `gh pr edit --body-file` with them inlined where you wanted them.
   - Example:
 
     ```bash
@@ -183,7 +185,7 @@ selected. Why, how to regenerate, and how to verify: `apps/desktop/AGENTS.md`
     ![sidebar after](./after.png)
     ```
 
-  - Alt text can also follow the path after `#`, as in `--attach './after.png#sidebar after'`. Update `gh` to v2.99.0 or later before using `--attach`.
+  - Alt text can also follow the path after `#`, as in `--attach './after.png#sidebar after'`. The `#alt` suffix is not part of the path `gh` matches on. Update `gh` to v2.99.0 or later before using `--attach`.
 
 ## Docs & conventions
 
