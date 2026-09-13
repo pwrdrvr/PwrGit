@@ -384,14 +384,23 @@ if (!gotSingleInstanceLock) {
     // not a person — the git identity name seeds the commit AUTHOR instead.
     // (Seeding name from user.name gave every profile the same title.)
     const identity = readGitIdentityDefaults(process.env["PWRGIT_GITCONFIG"]);
-    profiles.ensureSeed({
-      name: "Personal",
-      email: identity.email ?? "",
-      ...(identity.name !== undefined ? { authorName: identity.name } : {}),
-      mono: "",
-      kind: "Personal",
-      roots: []
-    });
+    profiles.ensureSeed(
+      {
+        name: "Personal",
+        email: identity.email ?? "",
+        ...(identity.name !== undefined ? { authorName: identity.name } : {}),
+        mono: "",
+        kind: "Personal",
+        roots: []
+      },
+      // PWRGIT_E2E_ONBOARDING_DONE (e2e seam): seed the profile as already set
+      // up so the first-run wizard does not cover the window every spec drives.
+      // Unset in a real install, which is how the wizard gets its first run.
+      {
+        onboardingCompleted:
+          process.env["PWRGIT_E2E_ONBOARDING_DONE"] === "1"
+      }
+    );
     const indexer = new RepoIndexer(db, execGit);
     // Both forges are registered unconditionally. A provider whose CLI is
     // missing reports that through `status()`, which is what the dialogs

@@ -68,6 +68,29 @@ describe("ProfileService", () => {
     expect(s.getActiveId()).not.toBeNull();
   });
 
+  it("seeds a first-run profile that has NOT been onboarded", () => {
+    const s = service();
+    s.ensureSeed({ name: "Default", email: "me@example.com", roots: [] });
+    expect(s.list()[0]?.onboardingCompleted).toBe(false);
+  });
+
+  it("seeds an onboarded profile when asked (the E2E seam)", () => {
+    const s = service();
+    s.ensureSeed(
+      { name: "Default", email: "me@example.com", roots: [] },
+      { onboardingCompleted: true }
+    );
+    expect(s.list()[0]?.onboardingCompleted).toBe(true);
+  });
+
+  it("does not re-onboard an existing profile that is mid-setup", () => {
+    const s = service();
+    const seed = { name: "Default", email: "me@example.com", roots: [] };
+    s.ensureSeed(seed);
+    s.ensureSeed(seed, { onboardingCompleted: true });
+    expect(s.list()[0]?.onboardingCompleted).toBe(false);
+  });
+
   it("derives a slug id and mono and persists email + roots", () => {
     const s = service();
     const p = s.create({ name: "Acme Cloud", email: "n@acme.io", roots: ["/x"] });

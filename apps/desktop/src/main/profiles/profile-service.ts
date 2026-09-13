@@ -288,8 +288,18 @@ export class ProfileService {
     return this.get(id);
   }
 
-  /** Ensure at least one profile exists; seeds a default on first run. */
-  ensureSeed(seed: CreateProfileRequest): void {
+  /**
+   * Ensure at least one profile exists; seeds a default on first run.
+   *
+   * `onboardingCompleted` marks the seeded profile as already set up. Only the
+   * E2E harness passes it: a genuinely fresh install must get the wizard, but
+   * every spec launches into a fresh userData dir and would otherwise open
+   * behind a full-screen overlay. See `e2e/fixtures/electron-app.ts`.
+   */
+  ensureSeed(
+    seed: CreateProfileRequest,
+    opts: { onboardingCompleted?: boolean } = {}
+  ): void {
     const count = (
       this.db.prepare("SELECT COUNT(*) AS n FROM profiles").get() as {
         n: number;
@@ -303,7 +313,8 @@ export class ProfileService {
       }
       return;
     }
-    this.create(seed);
+    const created = this.create(seed);
+    if (opts.onboardingCompleted === true) this.completeOnboarding(created.id);
   }
 
   private setActiveId(id: ProfileId): void {
