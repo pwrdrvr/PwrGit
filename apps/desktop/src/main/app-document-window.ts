@@ -26,12 +26,12 @@ function titleFor(kind: AppDocumentKind): string {
 export function openAppDocumentWindow(
   kind: AppDocumentKind,
   appearance: AppAppearance
-): void {
+): BrowserWindow {
   const existing = documentWindows.get(kind);
   if (existing !== undefined && !existing.isDestroyed()) {
     if (existing.isMinimized()) existing.restore();
     existing.focus();
-    return;
+    return existing;
   }
 
   const window = new BrowserWindow({
@@ -69,4 +69,5 @@ export function openAppDocumentWindow(
     if (documentWindows.get(kind) === window) documentWindows.delete(kind);
   });
   documentWindows.set(kind, window);
+  return window;
 }

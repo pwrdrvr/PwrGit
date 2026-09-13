@@ -121,3 +121,65 @@ test("secondary windows share themed platform chrome", async () => {
     await auxiliary.close();
   }
 });
+
+/**
+ * A secondary window has no profile of its own, so it borrows the palette of
+ * whichever window summoned it — the command's sender, or the focused window
+ * for a menu item. Opening Settings from a light-pinned profile window while
+ * the app default is dark is the case this guards.
+ */
+test("secondary windows borrow the palette of the window that opened them", async () => {
+  handle = await launchApp({ theme: "dark" });
+  const { app, window: mainWindow } = handle;
+
+  await expect(mainWindow.locator("html")).not.toHaveAttribute("data-theme");
+
+  // Pin this profile to light; the app default stays dark.
+  const pinned = (await mainWindow.evaluate(async () => {
+    const list = (await window.pwrgit.dispatch("profile:list", undefined)) as {
+      value: { profiles: Array<{ id: string }> };
+    };
+    return window.pwrgit.dispatch("profile:update", {
+      profileId: list.value.profiles[0]?.id,
+      theme: "light"
+    });
+  })) as { ok: boolean };
+  expect(pinned.ok).toBe(true);
+  await expect(mainWindow.locator("html")).toHaveAttribute(
+    "data-theme",
+    "light"
+  );
+
+  // Dispatched from the renderer: the sender is the opener, no focus involved.
+  const logsPromise = app.waitForEvent("window");
+  await mainWindow.evaluate(() =>
+    window.pwrgit.dispatch("logs:openWindow", undefined)
+  );
+  const logs = await logsPromise;
+  await expectAuxiliaryChrome(app, logs, "Logs", "rgb(247, 244, 239)");
+  await logs.close();
+
+  // From the menu: Electron hands the click the focused window.
+  await app.evaluate(({ BrowserWindow }, url) => {
+    BrowserWindow.getAllWindows()
+      .find((candidate) => candidate.webContents.getURL() === url)
+      ?.focus();
+  }, mainWindow.url());
+  const settings = await openMenuItem(app, "Settings…");
+  await expectAuxiliaryChrome(app, settings, "General", "rgb(247, 244, 239)");
+  // The borrowed palette has to survive the renderer's own boot-time read,
+  // which used to answer with the app default and snap the window back.
+  expect(
+    await settings.evaluate(() =>
+      window.pwrgit.dispatch("appearance:read", undefined)
+    )
+  ).toEqual({ ok: true, value: { theme: "light", resolvedTheme: "light" } });
+  const frameBackground = await app.evaluate(({ BrowserWindow }, url) => {
+    const target = BrowserWindow.getAllWindows().find(
+      (candidate) => candidate.webContents.getURL() === url
+    );
+    return target?.getBackgroundColor() ?? null;
+  }, settings.url());
+  expect(frameBackground).toBe("#FFFFFF");
+  await settings.close();
+});
