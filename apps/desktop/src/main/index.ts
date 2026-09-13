@@ -22,7 +22,10 @@ import {
 import { registerAppIdentityHandlers } from "./app-identity";
 import { registerAppDocumentHandlers } from "./app-document-handlers";
 import { wireAppMenuBridge } from "./app-menu-bridge";
-import { wireWindowControlsBridge } from "./window-controls-bridge";
+import {
+  trackWindowFrameState,
+  wireWindowControlsBridge
+} from "./window-controls-bridge";
 import { linuxWindowIconPath } from "./window-icon";
 import { openAppDocumentWindow } from "./app-document-window";
 import {
@@ -228,32 +231,38 @@ function installDevelopmentDockIcon(): void {
 }
 
 /**
- * Give Linux windows an icon of their own.
+ * What every window gets, whoever opens it — profile frames, Settings, Logs,
+ * the document viewers, and anything added later.
  *
- * A Linux desktop matches a window's WM_CLASS to an installed `.desktop` file
- * and takes the icon from there, so a dev run — Electron's own binary, nothing
- * installed — draws the shell's generic application tile instead (the gear in
- * Ubuntu's dock). Every window gets the icon directly, which also covers a
- * packaged build whose WM_CLASS never matches its `.desktop` entry. macOS and
- * Windows read the bundle and the executable, where `linuxWindowIconPath`
- * answers null.
+ * **An icon, on Linux.** A Linux desktop matches a window's WM_CLASS to an
+ * installed `.desktop` file and takes the icon from there, so a dev run —
+ * Electron's own binary, nothing installed — draws the shell's generic
+ * application tile instead (the gear in Ubuntu's dock). Handing the window the
+ * icon covers that, and a packaged build whose WM_CLASS never matches its
+ * `.desktop` entry. macOS and Windows read the bundle and the executable,
+ * where `linuxWindowIconPath` answers null.
+ *
+ * **Its maximize state, everywhere.** The renderer draws two things from it on
+ * Linux — the caption button's glyph and the hairline that stands in for the
+ * window border a frameless window is not given — and the window manager
+ * changes it behind our back.
  */
-function installWindowIcon(): void {
+function installWindowDefaults(): void {
   const iconPath = linuxWindowIconPath({
     platform: process.platform,
     packaged: app.isPackaged,
     appPath: app.getAppPath(),
     resourcesPath: process.resourcesPath
   });
-  if (iconPath === null) return;
-
-  const icon = nativeImage.createFromPath(iconPath);
-  if (icon.isEmpty()) {
+  const icon = iconPath === null ? null : nativeImage.createFromPath(iconPath);
+  if (icon?.isEmpty() === true) {
     logMain("warn", "app", "failed to load the window icon", { iconPath });
-    return;
   }
 
-  app.on("browser-window-created", (_event, window) => window.setIcon(icon));
+  app.on("browser-window-created", (_event, window) => {
+    if (icon !== null && !icon.isEmpty()) window.setIcon(icon);
+    trackWindowFrameState(window);
+  });
 }
 
 /**
@@ -305,7 +314,7 @@ if (!gotSingleInstanceLock) {
     logMain("info", "app", `PwrGit ${app.getVersion()} starting pid=${process.pid}`);
     watchProcessIds();
     installDevelopmentDockIcon();
-    installWindowIcon();
+    installWindowDefaults();
     bus.register("logs:read", () => ok(readLogSnapshot()));
     bus.register("logs:openWindow", () => {
       openLogsWindow(appearance.appearance());

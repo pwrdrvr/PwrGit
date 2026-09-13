@@ -6,7 +6,6 @@ import {
   hideNativeMenuBar,
   mainWindowChromeOptions
 } from "./main-window-chrome";
-import { trackWindowFrameState } from "./window-controls-bridge";
 import { windowChrome } from "./window-chrome";
 
 /**
@@ -15,7 +14,7 @@ import { windowChrome } from "./window-chrome";
  * Linux; the renderer paints its own titlebar row, the top-level menu labels
  * everywhere but macOS, and the caption buttons on Linux. Native submenus and
  * the window itself stay in the main process — see main-window-chrome.ts and
- * window-controls-bridge.ts. The bound profile travels via additionalArguments
+ * window-controls-bridge.ts, which index.ts wires to every window. The bound profile travels via additionalArguments
  * so the preload can expose it before the renderer boots.
  */
 export function createMainWindow(
@@ -44,7 +43,6 @@ export function createMainWindow(
   });
 
   hideNativeMenuBar(window);
-  trackWindowFrameState(window);
   showWindowWhenReady(window);
 
   // Open external links in the OS browser; never navigate the app frame away.

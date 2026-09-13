@@ -212,10 +212,10 @@ describe("platform window chrome", () => {
 
   it("draws a window edge on Linux, and drops it when maximized", () => {
     expect(appCss).toMatch(
-      /:root\[data-platform="linux"\]:not\(\[data-window-frame="maximized"\]\)\s+\.app::after\s*\{[\s\S]*?border:\s*1px solid var\(--border-strong\);/
+      /:root\[data-platform="linux"\]:not\(\[data-window-frame="maximized"\]\)\s+#root::after\s*\{[\s\S]*?border:\s*1px solid var\(--border-strong\);/
     );
     expect(appCss).toMatch(
-      /\.app::after\s*\{[\s\S]*?pointer-events:\s*none;/
+      /#root::after\s*\{[\s\S]*?pointer-events:\s*none;/
     );
   });
 
