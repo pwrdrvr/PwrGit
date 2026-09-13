@@ -1085,13 +1085,17 @@ textarea,
 .repo-row__pin-via {
   flex: 0 0 auto;
   padding: 0 5px;
-  height: 15px;
+  /* Derived for the same reason as the type it holds — 15px at "md". Its
+     neighbour `.repo-row__focus-reason` reaches the same place with a
+     `min-height`; this one is a fixed box because the uppercase text never
+     wraps. */
+  height: calc(var(--sidebar-eyebrow-size) + 5px);
   display: inline-flex;
   align-items: center;
   border-radius: 4px;
   border: 1px solid var(--border-subtle);
   color: var(--text-subtle);
-  font: 600 9px/1 var(--font-mono);
+  font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -1104,16 +1108,16 @@ textarea,
   border-radius: 4px;
   border: 1px solid var(--border-subtle);
   color: var(--text-subtle);
-  font: 600 9px/1 var(--font-mono);
+  font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
 }
 
 /* Which forge a row's repository lives on. Drawn only while more than one
    forge host is switched on — with one, every chip in the sidebar would read
    the same word.
 
-   Fixed size like the counts and the focus reason beside it, deliberately off
-   the `--sidebar-title-size` ladder: these are qualifiers, and a bigger name
-   should read as a bigger name rather than as page zoom. */
+   On the chip tier with the counts and the focus reason beside it, one step
+   under the name: it is a qualifier, and it should stay subordinate to the
+   name at every notch rather than holding still while the name grows. */
 .forge-chip {
   flex: 0 1 auto;
   min-width: 0;
@@ -1121,25 +1125,46 @@ textarea,
   align-items: center;
   gap: 4px;
   padding: 0 6px;
-  /* 16px is the ceiling for a chip on a repo row, not a taste: the row is
-     content-sized over a 26.25px floor with 4px of padding and a 1px border,
-     leaving 16.25px, so anything taller stops fitting and starts DRIVING the
-     row height. It is the same arithmetic that trims `.repo-row .badge` from
-     18px. */
-  min-height: 16px;
+  /* The ceiling for a chip on a repo row is not a taste, it is arithmetic:
+     the row is content-sized over a `--sidebar-repo-row-height` floor with 4px
+     of padding and a 1px border, so a chip taller than floor − 10px stops
+     fitting and starts DRIVING the row height. Both densities trim the token
+     and the padding by the same 2px, so that ceiling is title × 1.25 in
+     either — 16.25px at "md", 18.75px at "xl". Chip + 5px reproduces today's
+     16px at "md" and stays under it everywhere except "xs", where it lands
+     0.25px over and the content-sized row simply absorbs it. Same arithmetic
+     trims `.repo-row .badge` from its base height. */
+  min-height: calc(var(--sidebar-chip-size) + 5px);
   border-radius: 4px;
   border: 1px solid var(--border-subtle);
   color: var(--text-muted);
   /* The house tier for sidebar chrome: `.badge`, `.badge-text`, `.wt-tag` and
-     `.wt-age` all read 10px mono. This chip shipped at 9px — the one thing in
-     the sidebar under that tier — and the `+n` was what paid for it. */
-  font: 600 10px/1 var(--font-mono);
+     `.wt-age` all read `--sidebar-chip-size` mono. This chip shipped at 9px —
+     the one thing in the sidebar under that tier — and the `+n` was what paid
+     for it; it joined the tier before the tier learned to move. */
+  font: 600 var(--sidebar-chip-size)/1 var(--font-mono);
 }
+/* The mark inside a pill is bounded by the pill, so it has to follow the
+   chip's type rather than stay behind it: `1em` resolves to the chip size,
+   which is the 11px `ForgeChip.tsx` used to hard-code at "md" and keeps the
+   same proportion at every notch. It overrides the img's width/height
+   attributes, which stay as the no-CSS fallback.
+
+   A BARE mark is deliberately not in here. It sits among the identity glyphs —
+   the lock, globe and fork `RepoIdentityMarks` draws at 12px — and those are
+   icons on their own tier, not type on this one. */
+.forge-chip:not(.forge-chip--mark) img {
+  width: 1em;
+  height: 1em;
+}
+
 /* A chip that is only a mark keeps no pill at all.
    The border and the fill exist to bind a mark to the word beside it. With no
-   word they are a box drawn around a logo, and inside the 16px ceiling above
-   there is exactly 1px between the two — which does not read as a gap, it
-   reads as touching, because at that size it is. A bare mark sits among the
+   word they are a box drawn around a logo, and inside the ceiling above there
+   is about 1px between the two at the default notch — which does not read as a
+   gap, it reads as touching, because at that size it is. The ceiling moves
+   with the chip tier now, but it moves with the mark inside it too, so the
+   ratio that made the pill unreadable holds at every notch. A bare mark sits among the
    identity glyphs as the peer it is, and spends the room it gives back on
    being larger (see `ForgeChip.tsx`). */
 .forge-chip--mark {
@@ -1222,9 +1247,10 @@ textarea,
   color: var(--accent);
 }
 .repo-row__wtcount {
-  /* Fixed tier: counts hold still across notches, so a bigger name reads as
-     "bigger name", not as page zoom. */
-  font: 500 11px/1 var(--font-mono);
+  /* Chip tier: a count is a qualifier, so it tracks the notch one step under
+     the name beside it. It was the one sidebar count already at 11px, so "md"
+     leaves it exactly where it was. */
+  font: 500 var(--sidebar-chip-size)/1 var(--font-mono);
   color: var(--text-subtle);
   flex: 0 0 auto;
 }
@@ -1335,6 +1361,11 @@ textarea,
   outline-offset: -2px;
 }
 
+/* Fixed, and NOT on the sidebar's type axis: `.badge` is drawn in the main
+   pane too — the dirty count in `.wt-header` (WorktreeHeader.tsx) — and that
+   surface has no business following Settings → Appearance → Sidebar text size.
+   The sidebar's own badges pick up the chip tier in the sidebar-scoped block
+   further down, beside `.wt-row .pr-chip`. */
 .badge {
   display: inline-flex;
   align-items: center;
@@ -1349,7 +1380,7 @@ textarea,
   color: var(--status-warning);
 }
 .badge-text {
-  font: 600 10px/1 var(--font-mono);
+  font: 600 var(--sidebar-chip-size)/1 var(--font-mono);
   flex: 0 0 auto;
 }
 .badge-text--ok {
@@ -1401,7 +1432,7 @@ textarea,
   padding-top: 3px;
 }
 .wt-section__label {
-  font: 600 9px/1 var(--font-sans);
+  font: 600 var(--sidebar-eyebrow-size)/1 var(--font-sans);
   color: var(--text-subtle);
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1420,7 +1451,7 @@ textarea,
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   color: var(--text-muted);
-  font: 600 10px/1 var(--font-mono);
+  font: 600 var(--sidebar-chip-size)/1 var(--font-mono);
   cursor: pointer;
 }
 .wt-refresh {
@@ -1496,18 +1527,18 @@ textarea,
   transform: rotate(90deg);
 }
 .ref-section__label {
-  font: 600 9px/1 var(--font-sans);
+  font: 600 var(--sidebar-eyebrow-size)/1 var(--font-sans);
   color: var(--text-subtle);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 .ref-section__count {
-  font: 600 9px/1 var(--font-mono);
+  font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
   color: var(--text-subtle);
 }
 .ref-section__summary {
   margin-left: auto;
-  font: 600 9px/1 var(--font-mono);
+  font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
   color: var(--status-warning);
 }
 .ref-section__body {
@@ -1618,13 +1649,13 @@ textarea,
   gap: 4px;
   flex: 0 0 auto;
   max-width: 116px;
-  height: 17px;
+  height: calc(var(--sidebar-eyebrow-size) + 7px);
   padding: 0 5px;
   border: 1px solid var(--border-subtle);
   border-radius: 5px;
   background: transparent;
   color: var(--text-muted);
-  font: 600 9px/1 var(--font-mono);
+  font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
   cursor: pointer;
 }
 .ref-checkout-chip__name {
@@ -1653,7 +1684,7 @@ textarea,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font: 600 9px/1 var(--font-mono);
+  font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
   color: var(--accent);
   text-transform: none;
 }
@@ -1989,10 +2020,10 @@ textarea,
 .wt-tag {
   display: inline-flex;
   align-items: center;
-  height: 16px;
+  height: calc(var(--sidebar-chip-size) + 5px);
   padding: 0 5px;
   border-radius: 999px;
-  font: 600 10px/1 var(--font-mono);
+  font: 600 var(--sidebar-chip-size)/1 var(--font-mono);
   flex: 0 0 auto;
 }
 /* Quiet, not a filled pill. "in default" is true of most branches that are
@@ -2034,7 +2065,7 @@ textarea,
   color: var(--accent);
 }
 .wt-age {
-  font: 500 10px/1 var(--font-mono);
+  font: 500 var(--sidebar-chip-size)/1 var(--font-mono);
   color: var(--text-subtle);
   flex: 0 0 auto;
 }
@@ -3089,13 +3120,35 @@ textarea,
   transition: opacity 120ms ease;
 }
 /* Sidebar-scoped sizes for chrome that ships larger elsewhere. Each is under
-   the text ceiling so the row height comes from the type, not the chrome. */
+   the text ceiling so the row height comes from the type, not the chrome —
+   which is why they are derived rather than fixed: the type moves with
+   `--sidebar-chip-size` now, and a height left behind would clip it at the
+   larger notches. The offsets reproduce the old 16px/14px exactly at "md".
+
+   The PR chip needs its FONT scoped here too, not just its box. Its base rule
+   is 9.5px and is shared with the lineage graph's commit card, which sits on
+   the title axis of a different surface and must not follow this one. It is
+   also the only chip in the sidebar that was under the 10px tier, so "md"
+   moves it 1.5px rather than 1. */
 .repo-row .badge,
 .wt-row .pr-chip {
-  height: 16px;
+  height: calc(var(--sidebar-chip-size) + 5px);
+}
+/* The chip tier, scoped. `.badge` and `.pr-chip` both ship larger elsewhere —
+   the main pane's dirty count and the lineage graph's commit card — so the
+   font moves here rather than on either base rule. `.wt-row .badge` keeps the
+   base 18px box (chip + 7px) it always had; only `.repo-row .badge` is trimmed
+   to clear the repo row's ceiling. */
+.repo-row .badge,
+.wt-row .badge,
+.wt-row .pr-chip {
+  font-size: var(--sidebar-chip-size);
+}
+.wt-row .badge {
+  height: calc(var(--sidebar-chip-size) + 7px);
 }
 .wt-row .wt-tag {
-  height: 14px;
+  height: calc(var(--sidebar-chip-size) + 3px);
 }
 /* The floating cluster shows only while the row is actually hovered/focused —
    not on the persistent "selected" (active) row, whose tags stay readable.
@@ -6514,14 +6567,14 @@ body.is-col-resizing {
   );
 }
 .repo-group__label {
-  font: 700 10px/1 var(--font-sans);
+  font: 700 var(--sidebar-eyebrow-size)/1 var(--font-sans);
   color: var(--text-muted);
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
 .repo-group__count {
   margin-left: auto;
-  font: 600 10px/1 var(--font-mono);
+  font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
   color: var(--text-subtle);
 }
 
