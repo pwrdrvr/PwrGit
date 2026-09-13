@@ -293,3 +293,13 @@ reason — two instances can host the same slug.
 
 `apps/desktop/src/main/forge/AGENTS.md` has the whole rule, including why a
 hostname is never evidence of which forge runs on it.
+
+## SSH host approval
+
+`ssh-host-trust.ts` keeps scanned keys in expiring, window-bound proposals.
+The renderer can approve an opaque proposal ID, never submit key bytes or a
+known_hosts path. Inspection sends no account credentials. Approval appends only
+the displayed key, and refuses existing trust entries, published-key mismatches,
+or configuration/trust changes since inspection. Preserve the terminal fallback
+for custom SSH commands, proxy routing, aliases and trust files; do not bypass
+those settings or replace existing keys to make a clone succeed.

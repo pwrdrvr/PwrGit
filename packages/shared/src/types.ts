@@ -519,7 +519,7 @@ export type RemoteActivity = {
  * stacks one section per member in this sequence, so a product is placed here
  * deliberately rather than wherever a sort happens to put it.
  */
-export const FORGE_KINDS = ["github", "gitlab"] as const;
+export const FORGE_KINDS = ["github", "gitlab", "gitcafe"] as const;
 
 export type ForgeKind = (typeof FORGE_KINDS)[number];
 
@@ -1534,4 +1534,32 @@ export type RepoSearchHit = {
   repoName?: string;
   /** The branch's PR, when known (worktree hits only). */
   pr?: PrSummary;
+};
+
+/**
+ * How much PwrGit established about a server key on its own.
+ *
+ * Named, because the UI has to *look* different per state. A key that matches
+ * the forge's published list and a key that contradicts it are opposite
+ * answers to the only question the user is being asked, and painting both in
+ * the same error red leaves the reader to find the difference in a paragraph.
+ */
+export type SshHostVerification =
+  | "published-match"
+  | "unpublished"
+  | "lookup-failed"
+  | "mismatch"
+  | "existing-key";
+
+/** A main-owned, expiring SSH trust proposal; never accepts key bytes from UI. */
+export type SshHostTrustProposal = {
+  id: string;
+  hostname: string;
+  port: number;
+  algorithm: string;
+  fingerprint: string;
+  verification: SshHostVerification;
+  sourceUrl: string | null;
+  message: string;
+  canTrust: boolean;
 };

@@ -9,9 +9,11 @@ import {
   type ForgeHost,
   type ForgeKind,
   type Profile,
-  type Repo
+  type Repo,
+  type SshHostVerification
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { copyText } from "../../lib/copyText";
 import { joinDisplayPath } from "../../lib/platform";
 import {
   cloneDestinationLabel,
@@ -23,6 +25,7 @@ import {
   localRepositoryPath,
   moveCloneSelection,
   rankCloneRepositories,
+  sshHostVerificationCommand,
   unverifiedCloneRepository
 } from "./clone-dialog";
 import type { ExactRepository } from "./clone-dialog";
@@ -35,6 +38,7 @@ import {
 } from "./fork-dialog";
 import { useForgeHostMap } from "../../lib/useForgeHostMap";
 import { FORGE_UNASKED_CODES, useCloneSearch } from "./useCloneSearch";
+import { SshHostTrustPanel, sshTrustTone } from "./SshHostTrustPanel";
 import { RepoIdentityChips } from "./RepoIdentityMarks";
 
 const PROTOCOL_IDS = ["ssh", "https", "cli"] as const;
@@ -141,6 +145,12 @@ export function CloneRepoDialog({
   const [canceling, setCanceling] = useState(false);
   const [cloneProgress, setCloneProgress] = useState<CloneProgress | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [hostVerificationCommand, setHostVerificationCommand] = useState<string | null>(null);
+  /** What the trust panel found, lifted so the whole card can carry the
+   *  verdict: a key that matches the forge's published list must not keep
+   *  wearing the red of the clone failure that exposed it. */
+  const [hostVerification, setHostVerification] = useState<SshHostVerification | null>(null);
+  const [commandCopied, setCommandCopied] = useState(false);
   const activeCloneIdRef = useRef<string | null>(null);
   const sourceInputRef = useRef<HTMLInputElement>(null);
   const destinationInputRef = useRef<HTMLInputElement>(null);
@@ -159,6 +169,13 @@ export function CloneRepoDialog({
       active = false;
     };
   }, [profile.id]);
+
+  // "Copied" acknowledges a click; it is not a state the button rests in.
+  useEffect(() => {
+    if (!commandCopied) return;
+    const timer = setTimeout(() => setCommandCopied(false), 2000);
+    return () => clearTimeout(timer);
+  }, [commandCopied]);
 
   useEffect(
     () =>
@@ -399,6 +416,15 @@ export function CloneRepoDialog({
 
   useEffect(() => setDestinationSelectionPath(null), [destinationQuery]);
 
+  /** One reset for the whole failure card. The SSH recovery affordances hang
+   *  off `submitError`, so clearing the message alone would leave a stale
+   *  terminal command and a stale verdict behind the next one. */
+  const clearSubmitError = (): void => {
+    setSubmitError(null);
+    setHostVerificationCommand(null);
+    setHostVerification(null);
+  };
+
   const chooseRepository = (repository: CloneRepository): void => {
     setSelectedRepository(repository);
     setPicked({
@@ -407,7 +433,7 @@ export function CloneRepoDialog({
       nameWithOwner: repository.nameWithOwner
     });
     setSourceQuery(repository.nameWithOwner);
-    setSubmitError(null);
+    clearSubmitError();
     window.requestAnimationFrame(() => destinationInputRef.current?.focus());
   };
 
@@ -421,7 +447,7 @@ export function CloneRepoDialog({
     setBusy(true);
     setCanceling(false);
     setCloneProgress({ phase: "starting", percent: null });
-    setSubmitError(null);
+    clearSubmitError();
     const result = await dispatch("repo:clone", {
       operationId,
       profileId: profile.id,
@@ -441,6 +467,10 @@ export function CloneRepoDialog({
     else {
       setCloneProgress(null);
       setSubmitError(result.error.message);
+      setCommandCopied(false);
+      setHostVerificationCommand(protocol === "ssh"
+        ? sshHostVerificationCommand(result.error.message, selectedRepository.sshUrl)
+        : null);
     }
   };
 
@@ -529,7 +559,7 @@ export function CloneRepoDialog({
                 onChange={(event) => {
                   setSourceQuery(event.target.value);
                   setSelectedRepository(null);
-                  setSubmitError(null);
+                  clearSubmitError();
                 }}
                 onKeyDown={(event) => {
                   if (event.key === "ArrowDown") {
@@ -657,7 +687,7 @@ export function CloneRepoDialog({
                         ? `${label} must be installed and signed in`
                         : detail
                     }
-                    onClick={() => setProtocol(candidate)}
+                    onClick={() => { setProtocol(candidate); clearSubmitError(); }}
                   >
                     <strong>{label}</strong>
                     <small>{detail}</small>
@@ -703,7 +733,7 @@ export function CloneRepoDialog({
                 onChange={(event) => {
                   setDestinationQuery(event.target.value);
                   setSelectedDestination(null);
-                  setSubmitError(null);
+                  clearSubmitError();
                 }}
                 onKeyDown={(event) => {
                   if (event.key === "ArrowDown") {
@@ -818,7 +848,54 @@ export function CloneRepoDialog({
           </section>
 
           {submitError !== null && (
-            <div className="clone-submit-error">{submitError}</div>
+            hostVerificationCommand === null ? (
+              <div className="clone-submit-error" role="alert">{submitError}</div>
+            ) : (
+              <div className={`clone-submit-error clone-submit-error--${
+                hostVerification === null ? "danger" : sshTrustTone(hostVerification)
+              }`}>
+                {/* Only the headline is the alert. The panel below it is an
+                    interactive region whose contents change as the user works
+                    through it; inside a live region every one of those changes
+                    would re-announce the whole card. */}
+                <strong className="clone-submit-error__title" role="alert">
+                  SSH could not verify the server’s identity.
+                </strong>
+                {selectedRepository !== null && selectedRepository.host !== "other" && <SshHostTrustPanel
+                  key={selectedRepository.hostname}
+                  kind={selectedRepository.host}
+                  hostname={selectedRepository.hostname}
+                  onTrusted={() => { void submit(); }}
+                  onVerification={setHostVerification}
+                />}
+                {/* Folded, because it is the fallback. Left open it competes
+                    with the in-app path for the same decision, and the user
+                    reads four same-weight buttons instead of one next step. */}
+                <details className="clone-submit-error__more">
+                  <summary>Verify in a terminal instead</summary>
+                  <p>Compare the fingerprint with one published by the host or supplied by its administrator before accepting it, then retry the clone. If the key has changed, verify why before replacing a saved key.</p>
+                  <p className="clone-submit-error__command">
+                    <code className="selectable">{hostVerificationCommand}</code>
+                    <button type="button" className="ssh-trust__button ssh-trust__button--quiet" onClick={() => {
+                      void copyText(hostVerificationCommand).then(() => setCommandCopied(true)).catch(() => setCommandCopied(false));
+                    }}>{commandCopied ? "Copied" : "Copy command"}</button>
+                  </p>
+                  {!cliDisabled && (
+                    <p>
+                      <button type="button" className="ssh-trust__button ssh-trust__button--quiet" onClick={() => {
+                        setProtocol("cli");
+                        clearSubmitError();
+                      }}>Use {cliProtocolLabel(activeHost).label}</button>{" "}
+                      Selects the CLI option; click Clone repository to retry. CLI login is separate from SSH trust, and some CLIs may still use SSH.
+                    </p>
+                  )}
+                </details>
+                <details className="clone-submit-error__more">
+                  <summary>Git error</summary>
+                  <p className="clone-submit-error__git selectable">{submitError}</p>
+                </details>
+              </div>
+            )
           )}
         </div>
 

@@ -299,7 +299,7 @@ describe("ForgesSettings", () => {
     );
   });
 
-  it("states an unsupported capability as a limit of that forge", async () => {
+  it("states an unsupported capability as an integration limit", async () => {
     await render([
       forge({
         kind: "gitlab",
@@ -314,8 +314,8 @@ describe("ForgesSettings", () => {
       })
     ]);
 
-    // So a missing feature reads as a known limit, not as a bug in PwrGit.
-    expect(container.textContent).toContain("Not supported by this forge");
+    // These flags describe PwrGit support, not the forge's own feature set.
+    expect(container.textContent).toContain("Not available through this integration");
     expect(container.textContent).toContain("commit links in bulk");
   });
 
@@ -404,5 +404,37 @@ describe("ForgesSettings", () => {
     act(() => root.unmount());
     expect(unsubscribe).toHaveBeenCalled();
     root = createRoot(container);
+  });
+});
+
+describe("GitCafe settings", () => {
+  it("shows the Bun installation and minimum CLI version remedy", async () => {
+    await render([forge({ kind: "gitcafe", installed: false, loggedIn: false })]);
+    expect(container.textContent).toContain("GitCafe");
+    expect(container.textContent).toContain("bun i -g @gitcafe/cli");
+    expect(container.textContent).toContain("0.5.0");
+    expect(container.querySelector('[aria-label="GitCafe: Not installed"]')).not.toBeNull();
+    // The registry marks its commands with backticks because it is plain data
+    // shared with main. They must not reach the user as punctuation.
+    expect(container.textContent).not.toContain("`");
+    expect(
+      [...container.querySelectorAll("code")].map((node) => node.textContent)
+    ).toContain("bun i -g @gitcafe/cli");
+  });
+  it("uses GitCafe's host syntax when signed out of an added host", async () => {
+    await render([forge({ kind: "gitcafe", loggedIn: false, hosts: [{ host: "cafe.example", enabled: true, loggedIn: false }] })]);
+    expect(container.textContent).toContain("cafe auth login --host https://cafe.example/api");
+    expect(container.textContent).not.toContain("--hostname");
+  });
+  it("shows Connected and Off with the integration's actual capabilities", async () => {
+    await render([forge({ kind: "gitcafe", capabilities: forgeProduct("gitcafe").capabilities })]);
+    expect(container.querySelector('[aria-label="GitCafe: Connected"]')).not.toBeNull();
+    expect(container.textContent).toContain("Available in PwrGit");
+    expect(container.textContent).toContain("Pull request lookup by branch or number");
+    expect(container.textContent).toContain("Repository lookup · Clone · Fork");
+    expect(container.textContent).toContain("Not available through this integration");
+    expect(container.textContent).not.toContain("Not supported by this forge");
+    await act(async () => listener?.({ forges: [forge({ kind: "gitcafe", loggedIn: false, hosts: [{ host: "git.cafe", enabled: false, loggedIn: false }] })] }));
+    expect(container.querySelector('[aria-label="GitCafe: Off"]')).not.toBeNull();
   });
 });

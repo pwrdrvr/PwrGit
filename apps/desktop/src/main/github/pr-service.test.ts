@@ -1,9 +1,10 @@
+import { createGitCafeProvider } from "../forge/gitcafe/provider";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ok, type PrSummary } from "@pwrgit/shared";
 import { openDatabase, type DB } from "../persistence/db";
 import type { GitExec } from "../git/dugite";
 import type { ResolvedForge } from "../forge/providers";
-import type { ForgeProvider, ForgeRepo } from "../forge/types";
+import type { TokenForgeProvider, ForgeRepo } from "../forge/types";
 import { PrService } from "./pr-service";
 
 const REMOTE = "git@github.com:pwrdrvr/PwrGit.git\n";
@@ -27,10 +28,10 @@ const GITHUB_ORIGIN: ForgeRepo = {
  * exercising a new path fails loudly rather than hitting the network.
  */
 function fakeForge(
-  overrides: Partial<Omit<ForgeProvider, "kind">> = {},
+  overrides: Partial<Omit<TokenForgeProvider, "kind">> = {},
   repo: ForgeRepo = GITHUB_ORIGIN
 ): () => ResolvedForge {
-  const provider: ForgeProvider = {
+  const provider: TokenForgeProvider = {
     kind: repo.kind,
     getToken: async () => "token",
     fetchPrsForBranches: async () => new Map(),
@@ -109,6 +110,20 @@ describe("PrService", () => {
 
   afterEach(() => {
     if (db) db.close();
+  });
+
+  it("caches CLI-only GitCafe status without a token method", async () => {
+    const provider = createGitCafeProvider(async () => JSON.stringify({ schemaVersion: 1, data: {
+      items: [{ number: 7, title: "Fixture", state: "merged", draft: false, crossFork: false, sourceBranch: "feature/pr-state", targetBranch: "main" }],
+      page: { nextCursor: null, truncated: false }
+    }}));
+    const cafe = new PrService(db, git, {
+      resolveForge: () => ({ provider, repo: { kind: "gitcafe", host: "git.cafe", path: "sample/demo" } }),
+      now: () => now
+    });
+    const result = await cafe.refreshRepo("repo", { branches: ["feature/pr-state"], trigger: "user" });
+    expect(result.get("feature/pr-state")).toMatchObject({ number: 7, state: "merged", forge: "gitcafe" });
+    expect(db.prepare("SELECT number FROM branch_pr WHERE repo_id = ?").get("repo")).toMatchObject({ number: 7 });
   });
 
   it("broadcasts a draft-to-ready change even when the lifecycle stays open", async () => {

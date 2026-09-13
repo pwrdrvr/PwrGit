@@ -1,3 +1,4 @@
+import type { DiscoveredForgeHost } from "./cli-hosts";
 import {
   appendFileSync,
   mkdirSync,
@@ -25,7 +26,7 @@ import {
   type ForkInput,
   type RepoSearch
 } from "./repo-provider";
-import { ForgeStatusService } from "./status";
+import { ForgeStatusService, type ForgeStatusServiceDeps } from "./status";
 
 /** A repository exposed by the hermetic Electron E2E forge. `remotePath` is
  *  an on-disk bare remote; the provider rewrites origin to the forge URL after
@@ -61,6 +62,7 @@ export type E2EForgeHostFixture = {
 };
 
 export type E2EForgeFixtureFile = {
+  discoveredHosts?: DiscoveredForgeHost[];
   callsPath?: string;
   hosts: Partial<Record<ForgeKind, E2EForgeHostFixture>>;
 };
@@ -342,8 +344,9 @@ function readFixture(path: string): E2EForgeFixtureFile {
  *  SQLite, selection and identity refresh all run normally. */
 export function createE2EForgeFixtureServices(
   fixturePath: string,
-  git: GitExec
-): { forges: ForgeRepoRegistry; status: ForgeStatusService } {
+  git: GitExec,
+  hosts?: ForgeStatusServiceDeps["hosts"]
+): { forges: ForgeRepoRegistry; status: ForgeStatusService; discoverHosts: () => Promise<DiscoveredForgeHost[]> } {
   const forges = new ForgeRepoRegistry();
   for (const host of FORGE_KINDS) {
     // The factory matters even here. Every provider lookup on the clone and
@@ -357,10 +360,10 @@ export function createE2EForgeFixtureServices(
       (hostname) => new E2EForgeRepoProvider(host, fixturePath, git, hostname)
     );
   }
-  // The fixture's `hosts` map is keyed by forge KIND, not by hostname: E2E
-  // stubs "is this forge usable", and the SaaS host the service falls back to
-  // without a host list is the one contrived hostname that needs no fixture.
+  // Stub CLI availability and authentication, but keep the app's real host
+  // targets so enable switches drive status and its pushed nav updates.
   const status = new ForgeStatusService({
+    ...(hosts === undefined ? {} : { hosts }),
     probes: FORGE_KINDS.map((kind) => ({
       kind,
       cli: forgeProduct(kind).cli,
@@ -372,5 +375,5 @@ export function createE2EForgeFixtureServices(
         readFixture(fixturePath).hosts[kind]?.loggedIn === true
     }))
   });
-  return { forges, status };
+  return { forges, status, discoverHosts: async () => readFixture(fixturePath).discoveredHosts ?? [] };
 }

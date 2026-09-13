@@ -1,3 +1,4 @@
+import { cafeInstalled, cafeLoggedIn } from "./gitcafe/cafe-cli";
 import {
   FORGE_KINDS,
   FORGE_PRODUCTS,
@@ -75,6 +76,7 @@ export type ForgeProbeTarget = {
  * one of them probing the other's CLI, and the real one not at all.
  */
 const DEFAULT_PROBES: Readonly<{ [K in ForgeKind]: ForgeProbe & { kind: K } }> = {
+  gitcafe: { kind: "gitcafe", cli: "cafe", installed: cafeInstalled, loggedIn: cafeLoggedIn },
   github: {
     kind: "github",
     cli: FORGE_PRODUCTS.github.cli,

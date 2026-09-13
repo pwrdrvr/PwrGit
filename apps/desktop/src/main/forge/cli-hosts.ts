@@ -1,3 +1,4 @@
+import { parseCafeAuthStatus, runCafe, type CafeRunner } from "./gitcafe/cafe-cli";
 import {
   canonicalForgeHostname,
   FORGE_KINDS,
@@ -128,6 +129,7 @@ export function parseGlabHosts(text: string): DiscoveredForgeHost[] {
 }
 
 export type ForgeCliRunners = {
+  cafe?: CafeRunner;
   gh?: (args: string[]) => Promise<string>;
   /** Resolves glab's **stderr**, not its stdout — see `readGlabAuthStatus`. */
   glabAuthStatus?: () => Promise<string>;
@@ -194,6 +196,10 @@ type ForgeHostEnumerator = (
 ) => Promise<DiscoveredForgeHost[]>;
 
 const HOST_ENUMERATORS: Readonly<Record<ForgeKind, ForgeHostEnumerator>> = {
+  gitcafe: async (runners) => {
+    const status = parseCafeAuthStatus(await (runners.cafe ?? runCafe)(["auth", "status", "--json"]));
+    return status === null ? [] : [{ kind: "gitcafe", host: status.host, account: status.account }];
+  },
   github: async (runners) =>
     parseGhHosts(
       await (runners.gh ?? runGh)(["auth", "status", "--json", "hosts"])

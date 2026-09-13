@@ -17,6 +17,7 @@ import type {
   BulkSyncProgress,
   BulkSyncSummary,
   CloneCatalog,
+  SshHostTrustProposal,
   CloneDestination,
   CloneProgress,
   CloneProtocol,
@@ -734,6 +735,13 @@ export interface Commands {
     req: { repoId: string };
     res: RepoWorktreeRefresh;
   };
+  /** Read-only server-key inspection and comparison to published forge keys. */
+  "forge:inspectSshHost": {
+    req: { kind: ForgeKind; hostname: string };
+    res: SshHostTrustProposal;
+  };
+  /** Explicit approval of the exact key retained in a main-owned proposal. */
+  "forge:trustSshHost": { req: { proposalId: string }; res: null };
   /** What the clone and fork dialogs need to open: known owners and forge
    *  availability. Answered from SQLite and a cached probe — no forge call. */
   "repo:cloneCatalog": { req: { profileId: ProfileId }; res: CloneCatalog };

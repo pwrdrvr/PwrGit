@@ -49,7 +49,8 @@ export function forgeOrigin(repo: Pick<ForgeRepo, "host" | "port">): string {
  * you did not get an answer for. See ./AGENTS.md, "Return an entry for every
  * key requested" and the two bullets that qualify it.
  */
-export type ForgeProvider = {
+export type TokenForgeProvider = {
+  authentication?: "token";
   kind: ForgeKind;
   /** A token for this host, or null when the user isn't logged in. */
   getToken(host: string): Promise<string | null>;
@@ -118,4 +119,42 @@ export function withNullsForMissing<K>(
   found: Map<K, PrSummary>
 ): Map<K, PrSummary | null> {
   return new Map(requested.map((key) => [key, found.get(key) ?? null]));
+}
+
+export type ForgeConnection = {
+  fetchPrsForBranches(
+    repo: ForgeRepo,
+    branches: string[]
+  ): Promise<Map<string, PrSummary | null>>;
+  fetchPrsForCommits(
+    repo: ForgeRepo,
+    commits: string[]
+  ): Promise<Map<string, PrSummary | null>>;
+  fetchPrsByNumbers(
+    repo: ForgeRepo,
+    numbers: number[]
+  ): Promise<Map<number, PrSummary | null>>;
+};
+export type CliForgeProvider = ForgeConnection & {
+  kind: ForgeKind;
+  authentication: "cli";
+};
+export type ForgeProvider = TokenForgeProvider | CliForgeProvider;
+
+/** CLI providers authenticate each command internally; token providers stay unchanged. */
+export async function connectForge(
+  provider: ForgeProvider,
+  host: string
+): Promise<ForgeConnection | null> {
+  if (provider.authentication === "cli") return provider;
+  const token = await provider.getToken(host);
+  if (token === null) return null;
+  return {
+    fetchPrsForBranches: (repo, branches) =>
+      provider.fetchPrsForBranches(token, repo, branches),
+    fetchPrsForCommits: (repo, commits) =>
+      provider.fetchPrsForCommits(token, repo, commits),
+    fetchPrsByNumbers: (repo, numbers) =>
+      provider.fetchPrsByNumbers(token, repo, numbers)
+  };
 }

@@ -13,6 +13,10 @@ import { delimiter, win32 } from "node:path";
 export type CliSpec = {
   /** Executable name, spawned from PATH. */
   binary: string;
+  /** Additional user-installed runtime/bin directories for this CLI. */
+  extraSearchPaths?: (env: NodeJS.ProcessEnv) => string[];
+  /** Script CLIs may need an explicit runtime on Windows (no shell/shim). */
+  invocation?: (env: NodeJS.ProcessEnv) => { binary: string; prefix: string[] };
   /** Human label used in error text, e.g. "GitHub CLI". */
   label: string;
   /** `Error.name` this CLI's failures carry, e.g. "GhCliError". */
@@ -97,19 +101,25 @@ export function cliSearchPath(): string {
 export function createCliClient(spec: CliSpec): CliClient {
   const environment = (): NodeJS.ProcessEnv => ({
     ...process.env,
-    PATH: cliSearchPath(),
+    PATH: [cliSearchPath(), ...(spec.extraSearchPaths?.(process.env) ?? [])].filter(Boolean).join(delimiter),
     ...spec.nonInteractiveEnv
   });
 
   const environmentWith = (
     overrides: CliRunOptions["env"]
-  ): NodeJS.ProcessEnv => ({
-    ...environment(),
-    ...overrides,
-    // A caller may add locale or command-specific values, but no GUI call may
-    // opt back into a prompt that can open the inherited controlling TTY.
-    ...spec.nonInteractiveEnv
-  });
+  ): NodeJS.ProcessEnv => {
+    const env = {
+      ...environment(),
+      ...overrides,
+      // A caller may add locale or command-specific values, but no GUI call may
+      // opt back into a prompt that can open the inherited controlling TTY.
+      ...spec.nonInteractiveEnv
+    };
+    if (overrides?.PATH !== undefined && spec.extraSearchPaths !== undefined) {
+      env.PATH = [env.PATH, ...spec.extraSearchPaths(env)].filter(Boolean).join(delimiter);
+    }
+    return env;
+  };
 
   const secretValues = (env: NodeJS.ProcessEnv): string[] =>
     spec.sensitiveEnvNames
@@ -267,7 +277,8 @@ export function createCliClient(spec: CliSpec): CliClient {
     }
     return new Promise((resolve, reject) => {
       const env = environmentWith(options.env);
-      const child = spawn(spec.binary, args, {
+      const invocation = spec.invocation?.(env) ?? { binary: spec.binary, prefix: [] };
+      const child = spawn(invocation.binary, [...invocation.prefix, ...args], {
         env,
         stdio: ["ignore", "pipe", "pipe"],
         // On POSIX this starts a new session without the GUI's inherited

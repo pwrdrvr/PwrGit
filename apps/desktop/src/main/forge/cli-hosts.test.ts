@@ -135,6 +135,7 @@ gitlab.broken.example
 describe("discoverForgeHosts", () => {
   it("merges both CLIs", async () => {
     const hosts = await discoverForgeHosts({
+      cafe: async () => { throw new Error("not installed"); },
       gh: async () => GH_JSON,
       glabAuthStatus: async () => GLAB_TEXT
     });
@@ -149,6 +150,7 @@ describe("discoverForgeHosts", () => {
   it("contributes nothing for a CLI that is missing", async () => {
     // A machine with no glab is the ordinary case, not a failure to report.
     const hosts = await discoverForgeHosts({
+      cafe: async () => { throw new Error("not installed"); },
       gh: async () => GH_JSON,
       glabAuthStatus: async () => {
         throw new Error("spawn glab ENOENT");
@@ -161,6 +163,7 @@ describe("discoverForgeHosts", () => {
   it("returns nothing when neither CLI is installed", async () => {
     expect(
       await discoverForgeHosts({
+      cafe: async () => { throw new Error("not installed"); },
         gh: async () => {
           throw new Error("spawn gh ENOENT");
         },
