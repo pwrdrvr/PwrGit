@@ -83,6 +83,14 @@ describe("ProfileService", () => {
     expect(s.list()[0]?.onboardingCompleted).toBe(true);
   });
 
+  it("a profile created through the UI is not a first run", () => {
+    const s = service();
+    // The New-profile dialog collects identity and roots, so there is nothing
+    // left for the wizard to ask — and its overlay would cover the new window.
+    const p = s.create({ name: "Acme", email: "me@acme.dev", roots: ["/x"] });
+    expect(p.onboardingCompleted).toBe(true);
+  });
+
   it("does not re-onboard an existing profile that is mid-setup", () => {
     const s = service();
     const seed = { name: "Default", email: "me@example.com", roots: [] };
