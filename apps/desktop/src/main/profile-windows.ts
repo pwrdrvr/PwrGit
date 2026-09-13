@@ -1,8 +1,6 @@
 import { BrowserWindow } from "electron";
 import type { AppAppearance } from "@pwrgit/shared";
-import { emitEventToWindow } from "./ipc";
 import { createMainWindow } from "./window";
-import { repaintWindowChrome } from "./window-chrome";
 
 /**
  * One window per profile. Opening a profile that already has a window focuses
@@ -18,10 +16,6 @@ export type ProfileWindows = {
   close: (profileId: string) => boolean;
   /** The profile bound to a window (null for unknown/none). */
   profileFor: (win: BrowserWindow | null) => string | null;
-  /** Re-resolve and repaint one open profile window after an override edit. */
-  syncAppearance: (profileId: string) => void;
-  /** Re-resolve every profile window after the app default changes. */
-  syncAllAppearances: () => void;
   focusedProfileId: () => string | null;
   /** Every profile with a live window. Not the same as "the active profile":
    *  several windows can be up at once, and work that repaints a sidebar has
@@ -64,14 +58,6 @@ export function createProfileWindows(options: {
     return null;
   };
 
-  const syncAppearance = (profileId: string): void => {
-    const win = alive(profileId);
-    if (win === null) return;
-    const next = options.appearance(profileId);
-    repaintWindowChrome(win, next.resolvedTheme);
-    emitEventToWindow("appearance:changed", next, win);
-  };
-
   return {
     open,
     has: (profileId) => alive(profileId) !== null,
@@ -82,10 +68,6 @@ export function createProfileWindows(options: {
       return true;
     },
     profileFor,
-    syncAppearance,
-    syncAllAppearances: () => {
-      for (const profileId of byProfile.keys()) syncAppearance(profileId);
-    },
     focusedProfileId: () => profileFor(BrowserWindow.getFocusedWindow()),
     openProfileIds: () =>
       [...byProfile.keys()].filter((profileId) => alive(profileId) !== null)

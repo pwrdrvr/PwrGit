@@ -1,8 +1,12 @@
 import { app } from "electron";
-import { err, ok, pwrGitError, type AppAppearance } from "@pwrgit/shared";
+import {
+  err,
+  ok,
+  pwrGitError,
+  type AppDocumentKind
+} from "@pwrgit/shared";
 import { isAppDocumentKind, readAppDocument } from "./app-documents";
-import { openAppDocumentWindow } from "./app-document-window";
-import type { CommandBus } from "./command-bus";
+import type { CommandBus, CommandContext } from "./command-bus";
 
 function documentRoots() {
   return {
@@ -22,10 +26,16 @@ function invalidDocumentKind(value: unknown) {
   );
 }
 
-/** Register the allowlisted read/open surface for bundled legal documents. */
+/**
+ * Register the allowlisted read/open surface for bundled legal documents.
+ *
+ * `openWindow` is injected rather than called directly: a document viewer
+ * borrows its palette from the window that summoned it, which only the caller
+ * that owns the window registry can resolve — hence the forwarded context.
+ */
 export function registerAppDocumentHandlers(
   bus: CommandBus,
-  appearance: () => AppAppearance
+  openWindow: (kind: AppDocumentKind, context: CommandContext) => void
 ): void {
   bus.register("app:readDocument", async (req) => {
     if (!isAppDocumentKind(req.kind)) return invalidDocumentKind(req.kind);
@@ -43,9 +53,9 @@ export function registerAppDocumentHandlers(
     }
   });
 
-  bus.register("app:openDocumentWindow", (req) => {
+  bus.register("app:openDocumentWindow", (req, context) => {
     if (!isAppDocumentKind(req.kind)) return invalidDocumentKind(req.kind);
-    openAppDocumentWindow(req.kind, appearance());
+    openWindow(req.kind, context);
     return ok(null);
   });
 }

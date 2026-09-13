@@ -7,7 +7,8 @@ import {
   nativeImage,
   nativeTheme,
   protocol,
-  safeStorage
+  safeStorage,
+  webContents
 } from "electron";
 import {
   GENERAL_DEFAULTS,
@@ -33,7 +34,7 @@ import {
   reconcileDownloadedUpdateEligibility,
   registerAppUpdateHandlers
 } from "./auto-updater";
-import { CommandBus } from "./command-bus";
+import { CommandBus, type CommandContext } from "./command-bus";
 import { registerClipboardHandlers } from "./clipboard-handlers";
 import { registerDialogHandlers } from "./dialog-handlers";
 import { execGit } from "./git/dugite";
@@ -114,6 +115,8 @@ import {
 import { rebuildAppMenu } from "./menu";
 import { checkForAppUpdatesFromMenu } from "./menu-update-check";
 import { createProfileWindows } from "./profile-windows";
+import { createWindowAppearances } from "./window-appearance";
+import { repaintWindowChrome } from "./window-chrome";
 import { openSettingsWindow } from "./settings-window";
 import { createNativeThemeController } from "./native-theme";
 import { McpPolicyStore } from "@pwrgit/mcp-server/access-policy";
@@ -197,18 +200,40 @@ const settings = new SettingsService(
   join(app.getPath("userData"), "settings.json")
 );
 const storedTheme = settings.get().general?.theme;
-let isProfileWindow = (_window: BrowserWindow): boolean => false;
-let publishAppAppearance = (_next: AppAppearance): void => undefined;
+// Assigned once the window registries exist (below). A window with a palette
+// of its own — a profile window, or an auxiliary window that borrowed a
+// profile's — is repainted by those registries, not by the app controller.
+let hasOwnAppearance = (_window: BrowserWindow): boolean => false;
+let publishAppAppearance = (): void => undefined;
+/** The window a command came from, while it is still around. Resolved through
+ *  Electron so an embedded frame answers with the window that owns it. */
+const senderWindow = (context: CommandContext): BrowserWindow | null => {
+  if (context.webContentsId === undefined) return null;
+  const sender = webContents.fromId(context.webContentsId);
+  return sender === undefined ? null : BrowserWindow.fromWebContents(sender);
+};
 const appearance = createNativeThemeController({
   nativeTheme,
   initialTheme: isAppearanceTheme(storedTheme)
     ? storedTheme
     : GENERAL_DEFAULTS.theme,
-  // Profile frames can have their own palette; the app controller owns every
-  // unbound window, while the profile registry repaints its own windows below.
-  windows: () => BrowserWindow.getAllWindows().filter((win) => !isProfileWindow(win)),
-  onChanged: (next) => publishAppAppearance(next)
+  // Profile frames — and the auxiliary windows that borrow from them — can
+  // have their own palette; the app controller owns every window that does
+  // not, while the registries below repaint the ones that do.
+  windows: () =>
+    BrowserWindow.getAllWindows().filter((win) => !hasOwnAppearance(win)),
+  onChanged: () => publishAppAppearance()
 });
+
+/**
+ * Open an auxiliary window in the palette of whichever window summoned it —
+ * the command's sender, or the focused window for a menu item. Reassigned
+ * below, once the registries that know which palette that is exist.
+ */
+let openAuxiliaryWindow = (
+  open: (appearance: AppAppearance) => BrowserWindow,
+  _opener?: BrowserWindow | null
+): BrowserWindow => open(appearance.appearance());
 
 const bus = new CommandBus();
 bus.register("ping", () => ok("pong"));
@@ -316,11 +341,16 @@ if (!gotSingleInstanceLock) {
     installDevelopmentDockIcon();
     installWindowDefaults();
     bus.register("logs:read", () => ok(readLogSnapshot()));
-    bus.register("logs:openWindow", () => {
-      openLogsWindow(appearance.appearance());
+    bus.register("logs:openWindow", (_req, context) => {
+      openAuxiliaryWindow(openLogsWindow, senderWindow(context));
       return ok(null);
     });
-    registerAppDocumentHandlers(bus, appearance.appearance);
+    registerAppDocumentHandlers(bus, (kind, context) => {
+      openAuxiliaryWindow(
+        (palette) => openAppDocumentWindow(kind, palette),
+        senderWindow(context)
+      );
+    });
     registerAppIdentityHandlers(bus);
     const keychainReady = await ensureMacKeychainAccess({
       platform: process.platform,
@@ -668,29 +698,61 @@ if (!gotSingleInstanceLock) {
         appearance.appearance()
       );
     const windows = createProfileWindows({ appearance: appearanceForProfile });
-    isProfileWindow = (window) => windows.profileFor(window) !== null;
-    publishAppAppearance = (next) => {
+    // Settings, Logs and the document viewers have no profile of their own, so
+    // they render in the palette of the window that opened them.
+    const windowAppearances = createWindowAppearances<BrowserWindow>({
+      profileFor: (window) => windows.profileFor(window),
+      appAppearance: () => appearance.appearance(),
+      profileAppearance: appearanceForProfile
+    });
+    hasOwnAppearance = (window) => windowAppearances.sourceFor(window) !== null;
+
+    /** Repaint one window's native frame and tell its renderer. */
+    const syncWindowAppearance = (window: BrowserWindow): void => {
+      const next = windowAppearances.appearanceFor(window);
+      repaintWindowChrome(window, next.resolvedTheme);
+      emitEventToWindow("appearance:changed", next, window);
+    };
+
+    /** One profile's palette changed: repaint its own window, and every
+     *  auxiliary window that borrowed it. */
+    const syncProfileAppearance = (profileId: string): void => {
       for (const window of BrowserWindow.getAllWindows()) {
-        if (windows.profileFor(window) === null) {
-          emitEventToWindow("appearance:changed", next, window);
+        if (windowAppearances.sourceFor(window) === profileId) {
+          syncWindowAppearance(window);
         }
       }
-      windows.syncAllAppearances();
     };
-    bus.register("appearance:read", (_req, context) => {
-      const sender =
-        context.webContentsId === undefined
-          ? null
-          : (BrowserWindow.getAllWindows().find(
-              (window) => window.webContents.id === context.webContentsId
-            ) ?? null);
-      const profileId = windows.profileFor(sender);
-      return ok(
-        profileId === null
-          ? appearance.appearance()
-          : appearanceForProfile(profileId)
-      );
-    });
+
+    openAuxiliaryWindow = (open, from) => {
+      const opener = from ?? BrowserWindow.getFocusedWindow();
+      const window = open(windowAppearances.appearanceFor(opener));
+      const known = windowAppearances.knows(window);
+      const previous = windowAppearances.sourceFor(window);
+      windowAppearances.inherit(window, opener);
+      // A window just constructed already has the right palette. A singleton
+      // that was already up opened in some earlier window's, so summoning it
+      // from a differently-themed one re-themes it — the gesture for fixing
+      // one that reads wrong.
+      if (known && windowAppearances.sourceFor(window) !== previous) {
+        syncWindowAppearance(window);
+      }
+      return window;
+    };
+
+    // The app default moved. Every window re-resolves against it: one on the
+    // app palette follows, one borrowing a profile that inherits follows too,
+    // and a pinned profile's windows hold. The controller has already
+    // committed the new value by the time it calls.
+    publishAppAppearance = () => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        syncWindowAppearance(window);
+      }
+    };
+
+    bus.register("appearance:read", (_req, context) =>
+      ok(windowAppearances.appearanceFor(senderWindow(context)))
+    );
     type Reveal = {
       repoId: string;
       worktreeId: string | null;
@@ -708,14 +770,15 @@ if (!gotSingleInstanceLock) {
         onCheckForUpdates: () => {
           void checkForAppUpdatesFromMenu();
         },
-        onOpenSettings: () => openSettingsWindow(appearance.appearance()),
-        onOpenLogs: () => openLogsWindow(appearance.appearance()),
+        onOpenSettings: () => openAuxiliaryWindow(openSettingsWindow),
+        onOpenLogs: () => openAuxiliaryWindow(openLogsWindow),
         onOpenLicense: () =>
-          openAppDocumentWindow("license", appearance.appearance()),
+          openAuxiliaryWindow((palette) =>
+            openAppDocumentWindow("license", palette)
+          ),
         onOpenThirdPartyNotices: () =>
-          openAppDocumentWindow(
-            "third-party-notices",
-            appearance.appearance()
+          openAuxiliaryWindow((palette) =>
+            openAppDocumentWindow("third-party-notices", palette)
           ),
         onOpenExternalLink: (label, url) => {
           void openExternalUrlFromMenu(label, url);
@@ -762,7 +825,7 @@ if (!gotSingleInstanceLock) {
 
     registerProfileHandlers(bus, profiles, {
       onChanged: (profile) => {
-        windows.syncAppearance(profile.id);
+        syncProfileAppearance(profile.id);
         refreshMenu();
       },
       openWindow: openProfileWindow,
@@ -775,6 +838,14 @@ if (!gotSingleInstanceLock) {
         activeWorktreeId = survivingActiveWorktreeId(db, activeWorktreeId);
         if (windows.close(deletedProfileId)) {
           openProfileWindow(activeProfileId);
+        }
+        // Profile ids are slugged from names and recycle, so a window left
+        // bound to this one would be adopted by the next profile that slugs
+        // the same. Hand the borrowers back to the app default.
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (!windowAppearances.borrows(window, deletedProfileId)) continue;
+          windowAppearances.inherit(window, null);
+          syncWindowAppearance(window);
         }
       },
       consumeReveal: (profileId) => {
@@ -878,7 +949,9 @@ if (!gotSingleInstanceLock) {
     // The loopback listener stays off until the operator turns it on: it is a
     // standing grant on their repositories, not a default.
     const mcpPolicyFile = join(app.getPath("userData"), "mcp-policy.json");
-    const consent = new ConsentBroker(mcpPolicy, () => createConsentWindow(appearance.appearance()));
+    const consent = new ConsentBroker(mcpPolicy, () =>
+      openAuxiliaryWindow(createConsentWindow)
+    );
     consent.register(bus);
     const agentAccess = new AgentAccessService({
       ...(!app.isPackaged && process.env["PWRGIT_E2E_AGENT_ACCESS_PORT"] === "0" ? { port: 0 } : {}),

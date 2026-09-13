@@ -15,11 +15,11 @@ import { windowChrome } from "./window-chrome";
  */
 let logsWindow: BrowserWindow | undefined;
 
-export function openLogsWindow(appearance: AppAppearance): void {
+export function openLogsWindow(appearance: AppAppearance): BrowserWindow {
   if (logsWindow !== undefined && !logsWindow.isDestroyed()) {
     if (logsWindow.isMinimized()) logsWindow.restore();
     logsWindow.focus();
-    return;
+    return logsWindow;
   }
 
   const window = new BrowserWindow({
@@ -61,4 +61,5 @@ export function openLogsWindow(appearance: AppAppearance): void {
     if (logsWindow === window) logsWindow = undefined;
   });
   logsWindow = window;
+  return window;
 }

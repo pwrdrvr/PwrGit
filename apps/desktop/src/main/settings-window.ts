@@ -13,15 +13,17 @@ import { windowChrome } from "./window-chrome";
  * PwrAgnt's window-open-settings): the renderer boots on the `#settings` hash
  * and renders the SettingsWindow feature instead of the app shell. Not
  * profile-bound — app settings are global; the Profiles section manages every
- * profile from one place.
+ * profile from one place. Its *palette* is borrowed from whichever window
+ * opened it (see `window-appearance.ts`), so summoning Settings from a
+ * light-pinned profile window doesn't hand back a dark one.
  */
 let settingsWindow: BrowserWindow | undefined;
 
-export function openSettingsWindow(appearance: AppAppearance): void {
+export function openSettingsWindow(appearance: AppAppearance): BrowserWindow {
   if (settingsWindow !== undefined && !settingsWindow.isDestroyed()) {
     if (settingsWindow.isMinimized()) settingsWindow.restore();
     settingsWindow.focus();
-    return;
+    return settingsWindow;
   }
 
   const window = new BrowserWindow({
@@ -63,4 +65,5 @@ export function openSettingsWindow(appearance: AppAppearance): void {
     if (settingsWindow === window) settingsWindow = undefined;
   });
   settingsWindow = window;
+  return window;
 }
