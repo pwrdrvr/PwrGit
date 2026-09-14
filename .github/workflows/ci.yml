@@ -286,6 +286,7 @@ jobs:
         timeout-minutes: 20
         env:
           PWRGIT_E2E_DISABLE_GPU: "1"
+          DEBUG: "pw:api"
         run: pnpm --filter @pwrgit/desktop test:e2e --fully-parallel --shard=${{ matrix.shard }}/4
 
       - name: Upload desktop Playwright artifacts
