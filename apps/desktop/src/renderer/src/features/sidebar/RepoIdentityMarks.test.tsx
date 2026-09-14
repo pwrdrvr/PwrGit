@@ -206,7 +206,14 @@ it("marks a repo you cannot push to, and stays silent about the other two states
     // reader gets is `identityDescription`, on the row's aria-describedby.
     await act(async () => root.render(marks(false)));
     const passive = container.querySelector(".repo-mark--nopush");
+    // No `title` — these marks speak through `useViewportTooltip`. The name a
+    // screen reader (and the e2e suite) gets is the aria-label, which a
+    // `title` on a span never reliably supplied.
     expect(passive?.getAttribute("title")).toBeNull();
+    expect(passive?.getAttribute("role")).toBe("img");
+    expect(passive?.getAttribute("aria-label")).toBe(
+      "You can't push to desktop/dugite. Fork it to contribute."
+    );
     // Passive with nowhere to send the user — a button that goes nowhere is
     // worse than a statement.
     expect(passive?.tagName.toLowerCase()).toBe("span");

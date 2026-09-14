@@ -252,7 +252,16 @@ export function NoPushMark({
   if (onFork === undefined) {
     return (
       <>
-        <span className="repo-mark repo-mark--nopush" {...hover(title)}>
+        <span
+          className="repo-mark repo-mark--nopush"
+          // A meaningful glyph, so it is named rather than decorative. This is
+          // what `title` was reaching for and could not reliably deliver: a
+          // `title` on a span is advisory, is not a reliable accessible name,
+          // and cannot be dismissed (SC 1.4.13).
+          role="img"
+          aria-label={title}
+          {...hover(title)}
+        >
           <NoPushIcon size={size} />
         </span>
         {tip.tooltipNode}
@@ -366,6 +375,14 @@ export function RepoIdentityGlyphs({
       tip.show(event.currentTarget, content),
     onBlur: tip.hide
   });
+  const forkLineage =
+    identity.parent === undefined
+      ? ""
+      : `Fork of ${identity.parent.nameWithOwner}${
+          identity.root === undefined
+            ? ""
+            : ` (originally ${identity.root.nameWithOwner})`
+        }`;
   const visibilityTip = busy
     ? "Refreshing repository visibility…"
     : `${visibilityTitle(identity.visibility, identity.hostname)}. ${feedback ?? "Click to refresh visibility."}`;
@@ -381,13 +398,9 @@ export function RepoIdentityGlyphs({
       {identity.parent !== undefined && (
         <span
           className="repo-mark repo-mark--fork"
-          {...hover(
-            `Fork of ${identity.parent.nameWithOwner}${
-              identity.root === undefined
-                ? ""
-                : ` (originally ${identity.root.nameWithOwner})`
-            }`
-          )}
+          role="img"
+          aria-label={forkLineage}
+          {...hover(forkLineage)}
         >
           <GitForkIcon size={12} />
         </span>
@@ -395,7 +408,15 @@ export function RepoIdentityGlyphs({
       <button
         type="button"
         className={`repo-mark repo-mark--refresh repo-mark--${identity.visibility}`}
-        aria-label="Refresh repository visibility"
+        // State first, then the action. The name used to be the action alone,
+        // which said nothing about the repository it is on — the visibility
+        // itself lived in a `title` that never rendered. SC 4.1.2 wants the
+        // action named; nothing stops the name from also saying what it is
+        // about, and it is the only place this control states it.
+        aria-label={`${visibilityTitle(
+          identity.visibility,
+          identity.hostname
+        )}. Refresh repository visibility`}
         aria-busy={busy}
         disabled={busy}
         {...hover(visibilityTip)}
