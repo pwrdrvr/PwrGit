@@ -18,8 +18,18 @@ The hosted `macos-26` install job primes the matching macOS/ARM64 cache.
 
 Mac jobs run on main pushes and code-impacting same-repository PRs. Fork PRs
 skip both Mac jobs so untrusted fork code never reaches the persistent guests.
-The existing required `Desktop E2E` check requires Linux and, for eligible
-runs, all Mac shards; Windows retains its separate checks.
+The required `Desktop E2E` check is the `desktop-e2e-result` aggregate, not
+any one platform job. It requires all Linux shards, all Windows shards, and —
+for eligible runs — all Mac shards. A fork PR is the one exception: the Mac
+lane is not scheduled there, so the aggregate records a warning that macOS
+coverage is unverified and passes on the other two. Every other missing result,
+a `skipped` from a broken install job included, fails the check.
+
+Adding a platform to the gate is a change to that job's `needs`, not to branch
+protection: the ruleset names only `Desktop E2E`, so the context stays valid.
+Do not add per-shard job names as required checks — they bind the ruleset to
+the matrix size, and a skipped job satisfies a required check, so a fork-guarded
+lane would gate nothing.
 
 Each shard uses one Playwright worker and uploads its own artifacts. The Mac
 lane uses software rendering to avoid Tart virtual GPU resets and clears
