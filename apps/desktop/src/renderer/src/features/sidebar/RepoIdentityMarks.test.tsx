@@ -39,9 +39,14 @@ it("retries only this repo, blocks duplicate clicks, and explains an unresolved 
       profileId: "profile-1", repoId: "repo-1", force: true
     });
     expect(toggleRow).not.toHaveBeenCalled();
-    expect(button.disabled).toBe(true);
-    await act(async () => resolve(ok({ changed: 0, outcomes: [{ repoId: "repo-1", status: "unknown" }] })));
+    // `aria-disabled`, never `disabled`: Chromium blurs an element the moment
+    // it becomes disabled, so a refresh started from the keyboard threw focus
+    // to <body> until it returned (SC 2.4.3). The duplicate click above is
+    // blocked by the component, which is what the single dispatch proves.
+    expect(button.getAttribute("aria-disabled")).toBe("true");
     expect(button.disabled).toBe(false);
+    await act(async () => resolve(ok({ changed: 0, outcomes: [{ repoId: "repo-1", status: "unknown" }] })));
+    expect(button.getAttribute("aria-disabled")).toBe("false");
     expect(showErrorToast).toHaveBeenCalledWith({
       title: "Repository visibility",
       message: "Visibility is still unknown. Check Settings → Forges or Logs."

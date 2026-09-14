@@ -1,6 +1,6 @@
-import { useRef, useState, type FocusEvent, type MouseEvent } from "react";
+import { useRef, useState } from "react";
 import { dispatch } from "../../lib/pwrgit";
-import { useViewportTooltip } from "../../lib/useViewportTooltip";
+import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import {
   forgeProductFor,
@@ -232,23 +232,24 @@ export function pushAccessTitle(
 export function NoPushMark({
   identity,
   onFork,
+  decorative = false,
   size = 12
 }: {
   identity: Pick<RepoIdentity, "viewerCanPush" | "nameWithOwner">;
   onFork?: () => void;
+  /** Rendered inside a control that already has its own accessible name —
+   *  the `origin` disclosure button under REMOTES. An `aria-label` there is
+   *  not a second name, it is spliced INTO that button's name, which is how
+   *  "origin" becomes "origin You can't push to desktop/dugite. Fork it to
+   *  contribute. default". `ForgeChip` beside it is `aria-hidden` for the same
+   *  reason; the words reach a screen reader through the row's own
+   *  description, and through the fork button's label right beside it. */
+  decorative?: boolean;
   size?: number;
 }) {
   const tip = useViewportTooltip();
   const title = pushAccessTitle(identity);
   if (title === null) return null;
-  const hover = (content: string) => ({
-    onMouseEnter: (event: MouseEvent<HTMLElement>) =>
-      tip.show(event.currentTarget, content),
-    onMouseLeave: tip.hide,
-    onFocus: (event: FocusEvent<HTMLElement>) =>
-      tip.show(event.currentTarget, content),
-    onBlur: tip.hide
-  });
   if (onFork === undefined) {
     return (
       <>
@@ -258,9 +259,10 @@ export function NoPushMark({
           // what `title` was reaching for and could not reliably deliver: a
           // `title` on a span is advisory, is not a reliable accessible name,
           // and cannot be dismissed (SC 1.4.13).
-          role="img"
-          aria-label={title}
-          {...hover(title)}
+          {...(decorative
+            ? { "aria-hidden": true }
+            : { role: "img", "aria-label": title })}
+          {...hoverTooltip(tip, title)}
         >
           <NoPushIcon size={size} />
         </span>
@@ -274,7 +276,7 @@ export function NoPushMark({
         type="button"
         className="repo-mark repo-mark--nopush is-actionable"
         aria-label={`${title} Fork it now.`}
-        {...hover(`${title} Click to fork it.`)}
+        {...hoverTooltip(tip, `${title} Click to fork it.`)}
         onClick={(event) => {
           event.stopPropagation();
           tip.hide();
@@ -291,8 +293,9 @@ export function NoPushMark({
 
 /**
  * The dense variant: glyphs only, for the 320px sidebar. The parent slug has
- * nowhere to go at this width, so it lives in the title — the row already
- * relies on titles for the same reason its name does (SC 1.4.4).
+ * nowhere to go at this width, so it lives on the mark itself — as the
+ * accessible name, and as the hover card `useViewportTooltip` draws. It used
+ * to live in a `title`, which on these marks rendered nothing at all.
  */
 export function RepoIdentityGlyphs({
   identity,
@@ -367,22 +370,7 @@ export function RepoIdentityGlyphs({
   // `aria-describedby` carries `identityDescription`, which states the fork
   // lineage and the read-only fact in words.
   const tip = useViewportTooltip();
-  const hover = (content: string) => ({
-    onMouseEnter: (event: MouseEvent<HTMLElement>) =>
-      tip.show(event.currentTarget, content),
-    onMouseLeave: tip.hide,
-    onFocus: (event: FocusEvent<HTMLElement>) =>
-      tip.show(event.currentTarget, content),
-    onBlur: tip.hide
-  });
-  const forkLineage =
-    identity.parent === undefined
-      ? ""
-      : `Fork of ${identity.parent.nameWithOwner}${
-          identity.root === undefined
-            ? ""
-            : ` (originally ${identity.root.nameWithOwner})`
-        }`;
+  const parent = identity.parent;
   const visibilityTip = busy
     ? "Refreshing repository visibility…"
     : `${visibilityTitle(identity.visibility, identity.hostname)}. ${feedback ?? "Click to refresh visibility."}`;
@@ -395,16 +383,26 @@ export function RepoIdentityGlyphs({
         identity={identity}
         {...(onFork === undefined ? {} : { onFork })}
       />
-      {identity.parent !== undefined && (
-        <span
-          className="repo-mark repo-mark--fork"
-          role="img"
-          aria-label={forkLineage}
-          {...hover(forkLineage)}
-        >
-          <GitForkIcon size={12} />
-        </span>
-      )}
+      {parent !== undefined && (() => {
+        // Built inside the guard rather than above it: an ungated version
+        // needed an empty-string fallback, and an `aria-label=""` on a
+        // `role="img"` is an unnamed image — worse than no mark at all.
+        const lineage = `Fork of ${parent.nameWithOwner}${
+          identity.root === undefined
+            ? ""
+            : ` (originally ${identity.root.nameWithOwner})`
+        }`;
+        return (
+          <span
+            className="repo-mark repo-mark--fork"
+            role="img"
+            aria-label={lineage}
+            {...hoverTooltip(tip, lineage)}
+          >
+            <GitForkIcon size={12} />
+          </span>
+        );
+      })()}
       <button
         type="button"
         className={`repo-mark repo-mark--refresh repo-mark--${identity.visibility}`}
@@ -418,10 +416,17 @@ export function RepoIdentityGlyphs({
           identity.hostname
         )}. Refresh repository visibility`}
         aria-busy={busy}
-        disabled={busy}
-        {...hover(visibilityTip)}
+        /* Busy is `aria-disabled`, never `disabled`: Chromium blurs an element
+           the moment it becomes disabled, so a refresh started from the
+           keyboard threw focus to <body> until it returned (SC 2.4.3) — the
+           same fix `.ref-fetch-all` and `.wt-refresh` already carry. It also
+           kept the busy card below from ever showing, because a disabled
+           control fires no pointer events at all. */
+        aria-disabled={busy}
+        {...hoverTooltip(tip, visibilityTip)}
         onClick={(event) => {
           event.stopPropagation();
+          if (busy) return;
           tip.hide();
           void refresh();
         }}

@@ -4,6 +4,8 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type FocusEvent as ReactFocusEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode
 } from "react";
 import { createPortal } from "react-dom";
@@ -47,6 +49,31 @@ export type ViewportTooltip = {
   visible: boolean;
   tooltipNode: ReactNode;
 };
+
+/**
+ * The handlers that make any element open a card on hover AND on focus.
+ *
+ * One spelling, in one place, because the two halves are not optional
+ * separately: a mark that opens on hover but not on focus is a mark a keyboard
+ * user never sees, and every copy of this that drifts loses one of them.
+ * Pass the tooltip a component already owns; this adds no state of its own.
+ */
+export function hoverTooltip(
+  tip: Pick<ViewportTooltip, "show" | "hide">,
+  content: ReactNode
+): {
+  onMouseEnter: (event: ReactMouseEvent<HTMLElement>) => void;
+  onMouseLeave: () => void;
+  onFocus: (event: ReactFocusEvent<HTMLElement>) => void;
+  onBlur: () => void;
+} {
+  return {
+    onMouseEnter: (event) => tip.show(event.currentTarget, content),
+    onMouseLeave: tip.hide,
+    onFocus: (event) => tip.show(event.currentTarget, content),
+    onBlur: tip.hide
+  };
+}
 
 type ViewportTooltipOptions = {
   /** Interactive cards remain open while the pointer moves from their target. */

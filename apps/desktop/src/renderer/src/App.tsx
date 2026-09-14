@@ -59,8 +59,9 @@ export function App() {
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [overlayOpen, setOverlayOpen] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
-  /** null = closed. A CloneRepository seeds the dialog with the repository the
-   *  sidebar had selected; `undefined` inside the object opens it empty. */
+  /** null = closed. Open carries a `seed`: a CloneRepository opens the dialog
+   *  on the repository the sidebar had selected, and `seed: null` opens it
+   *  empty — which is what a selection with no read identity yields. */
   const [forkOpen, setForkOpen] = useState<
     { seed: CloneRepository | null } | null
   >(null);

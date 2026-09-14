@@ -178,9 +178,18 @@ export function ForkRepoDialog({
     .map((status) => status.kind);
 
   useEffect(() => {
-    if (usableHosts.length > 0 && !usableHosts.includes(host)) {
-      setHost(usableHosts[0]!);
-    }
+    if (usableHosts.length === 0 || usableHosts.includes(host)) return;
+    setHost(usableHosts[0]!);
+    // And drop a selection that belonged to the forge we just left. Before the
+    // dialog could be seeded this effect had nothing to contradict — it only
+    // ever ran with `selectedSource` still null. A seed makes the correction
+    // reachable with a source already in hand, and leaving it would produce
+    // exactly the state `selectHost` clears state to prevent: the picker
+    // reading GITLAB while the targets, preflight and upstream all describe a
+    // GitHub repository.
+    setSelectedSource(null);
+    setPreflight(null);
+    setSourceQuery("");
   }, [usableHosts.join(","), host]);
 
   // Fork targets follow the forge actually in play, not the catalog: they are
@@ -236,7 +245,15 @@ export function ForkRepoDialog({
     profileId: profile.id,
     query: sourceQuery,
     host,
-    enabled: usableHosts.includes(host)
+    // Nothing to search for while the box already names the chosen source.
+    // That is every keystroke-free moment after a pick — and, now that the
+    // dialog can open seeded, the whole of a seeded open: searching there
+    // spent a forge round trip re-finding the repository the user had just
+    // come from, and `exactRepository` then listed an `unknown`-visibility
+    // duplicate of it beneath the real one.
+    enabled:
+      usableHosts.includes(host) &&
+      (selectedSource === null || sourceQuery !== selectedSource.nameWithOwner)
   });
 
   useEffect(() => setSourceSelection(0), [sourceQuery]);

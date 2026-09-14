@@ -28,8 +28,15 @@ it("draws the product's mark and no words when the mark answers alone", async ()
   expect(el.querySelector("img")).not.toBeNull();
   expect(el.textContent).toBe("");
   // The words it dropped are still reachable — the chip is an abbreviation,
-  // not a loss.
-  expect(el.title).toBe("origin is on github.com");
+  // not a loss. Through `useViewportTooltip` rather than a native `title`: the
+  // marks one glyph away draw the house card, and a chip answering with the OS
+  // tooltip made one row speak in two voices.
+  expect(el.getAttribute("title")).toBeNull();
+  await act(async () => {
+    el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    el.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+  });
+  expect(document.body.textContent).toContain("origin is on github.com");
   expect(el.className).toContain("forge-chip--mark");
   await cleanup();
 });

@@ -257,6 +257,17 @@ test("browses local branches and nested remotes, then pushes to a test target", 
     has: window.locator(".ref-remote__main", { hasText: "origin" })
   });
   await compactOrigin.locator(".ref-remote__main").click();
+  // What the remote IS, above the refs it carries. These fixture remotes are
+  // paths in the sandbox, so this also pins the half that must NOT appear: a
+  // path names no forge, and offering "Open on the web" for one would be
+  // inventing a forge from a git remote.
+  await expect(compactOrigin.locator(".ref-remote__wire")).toHaveText(
+    "A local path"
+  );
+  await expect(compactOrigin.locator(".ref-remote__url-text")).toHaveText(
+    box.git(repo.path, "remote", "get-url", "origin")
+  );
+  await expect(compactOrigin.locator(".ref-remote__open")).toHaveCount(0);
   await expect(
     compactOrigin
       .locator(".ref-remote-branch-row", { hasText: "main" })

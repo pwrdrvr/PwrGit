@@ -1890,6 +1890,87 @@ textarea,
   padding-left: 5px;
   border-left: 1px solid var(--border-subtle);
 }
+/* What the remote is, above the refs it carries. Quieter than a branch row —
+   it is read once on opening and then ignored, so it must not compete with
+   the rows a user came here to act on. */
+.ref-remote__info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 5px 6px;
+  color: var(--text-subtle);
+  font: 500 9.5px/1.4 var(--font-sans);
+}
+.ref-remote__info-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.ref-remote__wire {
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 8.5px;
+}
+.ref-remote__url {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+.ref-remote__url-label {
+  flex: 0 0 auto;
+  color: var(--text-subtle);
+  font: 600 8.5px/1 var(--font-sans);
+  text-transform: uppercase;
+}
+/* The URL is the long thing in a 320px column and the only part that may be
+   cut: the wire and the label above it are two words each. */
+.ref-remote__url-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font: 500 9.5px/1.4 var(--font-mono);
+}
+/* A link in everything but markup. It opens an external browser, which is an
+   action, so it is a button — but it reads as the link it behaves like. */
+.ref-remote__open {
+  margin-left: auto;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: 600 9.5px/1.4 var(--font-sans);
+  cursor: pointer;
+}
+/* Underline only. `--accent-bright` is for text sitting on an accent tint
+   (theme-contract.test.ts enforces it), and this link sits on the flat
+   section background — the underline is the affordance a link wants anyway. */
+.ref-remote__open:hover {
+  text-decoration: underline;
+}
+.ref-remote__open:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+/* The card the remote row itself opens: a heading and one or two URLs, which
+   are mono and must not wrap mid-path in a narrow card. */
+.ref-remote__tip {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ref-remote__tip span {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  opacity: 0.85;
+}
 
 .wt-row {
   position: relative;
@@ -2732,7 +2813,10 @@ textarea,
   margin: -3px;
   cursor: pointer;
 }
-.repo-mark--refresh:disabled {
+/* Both spellings: busy is `aria-disabled` here so the keyboard keeps its
+   place (SC 2.4.3), and the rest state must still read as in-flight. */
+.repo-mark--refresh:disabled,
+.repo-mark--refresh[aria-disabled="true"] {
   cursor: progress;
   opacity: 0.5;
 }
@@ -2757,20 +2841,17 @@ textarea,
   color: var(--status-warning);
   opacity: 0.72;
 }
-/* The same mark once it has somewhere to go. It keeps the muted rest state —
-   a read-only clone is the normal state of most things you clone, and a row of
-   bright buttons would say otherwise — and earns full colour on approach. */
 /* The fork verb on the `origin` row, beside its Fetch. Takes the accent
    rather than the warning colour the mark next to it wears: the mark reports a
-   constraint, this offers the way past it. */
+   constraint, this offers the way past it. Rest state only — hover and
+   focus-visible are `.ref-mini-action`'s, whose selector carries two `:not()`s
+   and so outranks anything a single modifier class can say here. */
 .ref-mini-action--fork {
   color: var(--accent);
 }
-.ref-mini-action--fork:hover,
-.ref-mini-action--fork:focus-visible {
-  color: var(--accent);
-  opacity: 1;
-}
+/* The same mark once it has somewhere to go. It keeps the muted rest state —
+   a read-only clone is the normal state of most things you clone, and a row of
+   bright buttons would say otherwise — and earns full colour on approach. */
 .repo-mark--nopush.is-actionable {
   padding: 0;
   border: 0;
