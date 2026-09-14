@@ -2757,6 +2757,35 @@ textarea,
   color: var(--status-warning);
   opacity: 0.72;
 }
+/* The same mark once it has somewhere to go. It keeps the muted rest state —
+   a read-only clone is the normal state of most things you clone, and a row of
+   bright buttons would say otherwise — and earns full colour on approach. */
+/* The fork verb on the `origin` row, beside its Fetch. Takes the accent
+   rather than the warning colour the mark next to it wears: the mark reports a
+   constraint, this offers the way past it. */
+.ref-mini-action--fork {
+  color: var(--accent);
+}
+.ref-mini-action--fork:hover,
+.ref-mini-action--fork:focus-visible {
+  color: var(--accent);
+  opacity: 1;
+}
+.repo-mark--nopush.is-actionable {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.repo-mark--nopush.is-actionable:hover,
+.repo-mark--nopush.is-actionable:focus-visible {
+  opacity: 1;
+}
+.repo-mark--nopush.is-actionable:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  border-radius: 3px;
+}
 
 /* ---- Forge picker, shared by the clone and fork dialogs ---- */
 

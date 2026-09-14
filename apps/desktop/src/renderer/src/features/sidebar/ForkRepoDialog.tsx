@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   forgeLabel,
   forgeProductOrAssumed,
+  isForgeKind,
   type CloneDestination,
   type CloneCatalog,
   type CloneProtocol,
@@ -55,11 +56,18 @@ function destinationMeta(destination: CloneDestination): string {
 
 export function ForkRepoDialog({
   profile,
+  initialSource,
   onForked,
   onReveal,
   onClose
 }: {
   profile: Profile;
+  /** A repository to open on, instead of an empty search box — the one the
+   *  sidebar had selected when Fork… was pressed. Pressing a button labelled
+   *  Fork and being asked what to fork is the gap this closes. Preflight
+   *  upgrades it the same way it upgrades a pasted slug, so an identity-shaped
+   *  placeholder is enough. */
+  initialSource?: CloneRepository;
   onForked: (repo: Repo) => void;
   onReveal: (path: string) => void;
   onClose: () => void;
@@ -68,11 +76,19 @@ export function ForkRepoDialog({
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [destinations, setDestinations] = useState<CloneDestination[]>([]);
   const [destinationsLoading, setDestinationsLoading] = useState(true);
-  const [sourceQuery, setSourceQuery] = useState("");
+  const [sourceQuery, setSourceQuery] = useState(
+    initialSource?.nameWithOwner ?? ""
+  );
   const [sourceSelection, setSourceSelection] = useState(0);
-  const [host, setHost] = useState<ForgeKind>("github");
+  const [host, setHost] = useState<ForgeKind>(
+    // The seed's own forge, so the picker does not open on a tab that cannot
+    // fork it. `other` is not a ForgeKind and falls back like an empty open.
+    initialSource !== undefined && isForgeKind(initialSource.host)
+      ? initialSource.host
+      : "github"
+  );
   const [selectedSource, setSelectedSource] = useState<CloneRepository | null>(
-    null
+    initialSource ?? null
   );
   const [preflight, setPreflight] = useState<ForkPreflight | null>(null);
   const [checking, setChecking] = useState(false);

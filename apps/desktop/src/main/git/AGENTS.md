@@ -462,6 +462,21 @@ Three more things that are easy to undo:
   which the next pruning fetch deletes out from under any local branch
   tracking them.
 
+**Four ways in, and all of them are the same command.** The read-only mark in
+the sidebar repo row, the fork action on the `origin` row under REMOTES, the
+`read-only` chip in the worktree header, and a push the forge refuses all raise
+`ForkCheckoutDialog`. The first three are statements of a constraint and each
+one is also the way past it — a mark that reports "you cannot push here" and
+offers no verb sends people hunting through REMOTES, which is exactly what
+happened when the header chip was the only entry point. The sidebar's `Fork…`
+button is the OTHER operation (`repo:fork`: search, fork, clone somewhere new)
+and seeds itself from the selected row via `forkSeedFromRepo`.
+
+Neither the mark nor the REMOTES action asks the forge whether a fork already
+exists before offering. That answer costs a round trip per row, and the dialog
+resolves it anyway: `forkCheckoutAction` says "Switch origin to my fork"
+instead of "Fork & switch origin" once the preflight lands.
+
 `pushWasDenied` (git-service.ts) is the other half: it classifies the one push
 failure with a remedy inside PwrGit, and deliberately excludes a protected
 branch, which reads almost identically on GitLab and means the opposite thing

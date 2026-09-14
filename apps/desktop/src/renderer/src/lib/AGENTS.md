@@ -48,6 +48,21 @@ of where it entered the trigger, **or** slowed below
 does not hold still — a 10px tremor reads as 0.5 px/ms and would never open a
 card. A sweep satisfies neither, so the extra path costs no suppression.
 
+## A 12px mark in a list gets `useViewportTooltip`, not `title`
+
+`ForgeChip` carries a native `title` and shows one; the `.repo-mark` glyphs
+beside it carried one and did not, so the read-only mark and the
+public/private/internal mark were both mute. The cause was never pinned down —
+nothing sets `pointer-events` on either, and the only structural difference is
+that the chip has padding and a border while a mark is a bare 12×12 box around
+an SVG with `fill="none"`.
+
+Don't chase it. A bare `title` cannot satisfy the Escape rule below anyway, and
+the hook is what every other hover surface in the sidebar already uses —
+including `RepoRow`'s own refresh button, three sections down the same row.
+Reach for it for any new mark, and let the row's `aria-describedby` (built from
+`identityDescription`) carry the words for a screen reader.
+
 ## Popups shown on hover must be dismissible
 
 `useViewportTooltip` handles Escape (WCAG 2.1 SC 1.4.13) and returns focus to

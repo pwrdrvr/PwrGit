@@ -1,5 +1,6 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type FocusEvent, type MouseEvent } from "react";
 import { dispatch } from "../../lib/pwrgit";
+import { useViewportTooltip } from "../../lib/useViewportTooltip";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import {
   forgeProductFor,
@@ -218,6 +219,68 @@ export function pushAccessTitle(
 }
 
 /**
+ * The read-only mark, wherever the fact is true.
+ *
+ * Its own component because two surfaces show it about the same repository —
+ * the repo row, and the `origin` row under REMOTES, which is the remote the
+ * fact is actually about. Both want the same glyph, the same sentence and the
+ * same verb, and a second copy is a second thing to keep in step.
+ *
+ * `onFork` is what turns it from a statement into a way out. Without one it
+ * stays a passive mark rather than growing a button that goes nowhere.
+ */
+export function NoPushMark({
+  identity,
+  onFork,
+  size = 12
+}: {
+  identity: Pick<RepoIdentity, "viewerCanPush" | "nameWithOwner">;
+  onFork?: () => void;
+  size?: number;
+}) {
+  const tip = useViewportTooltip();
+  const title = pushAccessTitle(identity);
+  if (title === null) return null;
+  const hover = (content: string) => ({
+    onMouseEnter: (event: MouseEvent<HTMLElement>) =>
+      tip.show(event.currentTarget, content),
+    onMouseLeave: tip.hide,
+    onFocus: (event: FocusEvent<HTMLElement>) =>
+      tip.show(event.currentTarget, content),
+    onBlur: tip.hide
+  });
+  if (onFork === undefined) {
+    return (
+      <>
+        <span className="repo-mark repo-mark--nopush" {...hover(title)}>
+          <NoPushIcon size={size} />
+        </span>
+        {tip.tooltipNode}
+      </>
+    );
+  }
+  return (
+    <>
+      <button
+        type="button"
+        className="repo-mark repo-mark--nopush is-actionable"
+        aria-label={`${title} Fork it now.`}
+        {...hover(`${title} Click to fork it.`)}
+        onClick={(event) => {
+          event.stopPropagation();
+          tip.hide();
+          onFork();
+        }}
+        onKeyDown={(event) => event.stopPropagation()}
+      >
+        <NoPushIcon size={size} />
+      </button>
+      {tip.tooltipNode}
+    </>
+  );
+}
+
+/**
  * The dense variant: glyphs only, for the 320px sidebar. The parent slug has
  * nowhere to go at this width, so it lives in the title — the row already
  * relies on titles for the same reason its name does (SC 1.4.4).
@@ -225,11 +288,16 @@ export function pushAccessTitle(
 export function RepoIdentityGlyphs({
   identity,
   repoId,
-  profileId
+  profileId,
+  onFork
 }: {
   identity: RepoIdentity;
   repoId: string;
   profileId: string;
+  /** Open the fork prompt for this repository. Optional: without it the
+   *  read-only mark stays the passive statement it was, so a caller that has
+   *  nowhere to send the user does not grow a dead button. */
+  onFork?: () => void;
 }) {
   const pending = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -280,25 +348,46 @@ export function RepoIdentityGlyphs({
       setBusy(false);
     }
   };
-  const noPush = pushAccessTitle(identity);
+  // Every mark in this row speaks through one card rather than a `title`.
+  // `ForgeChip` beside them still uses a native title and shows one; these
+  // 12px marks did not, and a bare `title` could not satisfy the Escape rule
+  // `lib/AGENTS.md` puts on hover surfaces anyway. The refresh button three
+  // sections down this same row already did it this way.
+  //
+  // Dropping the `title` costs a screen reader nothing: the row's
+  // `aria-describedby` carries `identityDescription`, which states the fork
+  // lineage and the read-only fact in words.
+  const tip = useViewportTooltip();
+  const hover = (content: string) => ({
+    onMouseEnter: (event: MouseEvent<HTMLElement>) =>
+      tip.show(event.currentTarget, content),
+    onMouseLeave: tip.hide,
+    onFocus: (event: FocusEvent<HTMLElement>) =>
+      tip.show(event.currentTarget, content),
+    onBlur: tip.hide
+  });
+  const visibilityTip = busy
+    ? "Refreshing repository visibility…"
+    : `${visibilityTitle(identity.visibility, identity.hostname)}. ${feedback ?? "Click to refresh visibility."}`;
   return (
     <>
-      {noPush !== null && (
-        // Not a button. The sidebar is a list: it says what is true and the
-        // verb lives where the user acts on it — the worktree header, beside
-        // the push control this is about.
-        <span className="repo-mark repo-mark--nopush" title={noPush}>
-          <NoPushIcon size={12} />
-        </span>
-      )}
+      {/* A button once there is somewhere to go. It stated a problem and
+          offered no way out of it, which sent people hunting through REMOTES
+          for a verb that lived only in the worktree header. */}
+      <NoPushMark
+        identity={identity}
+        {...(onFork === undefined ? {} : { onFork })}
+      />
       {identity.parent !== undefined && (
         <span
           className="repo-mark repo-mark--fork"
-          title={`Fork of ${identity.parent.nameWithOwner}${
-            identity.root === undefined
-              ? ""
-              : ` (originally ${identity.root.nameWithOwner})`
-          }`}
+          {...hover(
+            `Fork of ${identity.parent.nameWithOwner}${
+              identity.root === undefined
+                ? ""
+                : ` (originally ${identity.root.nameWithOwner})`
+            }`
+          )}
         >
           <GitForkIcon size={12} />
         </span>
@@ -306,21 +395,20 @@ export function RepoIdentityGlyphs({
       <button
         type="button"
         className={`repo-mark repo-mark--refresh repo-mark--${identity.visibility}`}
-        title={busy
-          ? "Refreshing repository visibility…"
-          : `${visibilityTitle(identity.visibility, identity.hostname)}. ${feedback ?? "Click to refresh visibility."}`
-        }
         aria-label="Refresh repository visibility"
         aria-busy={busy}
         disabled={busy}
+        {...hover(visibilityTip)}
         onClick={(event) => {
           event.stopPropagation();
+          tip.hide();
           void refresh();
         }}
         onKeyDown={(event) => event.stopPropagation()}
       >
         <VisibilityIcon visibility={identity.visibility} size={12} />
       </button>
+      {tip.tooltipNode}
       {feedback !== null && (
         <span className="a11y-sr-only" role="status">{feedback}</span>
       )}

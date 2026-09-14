@@ -183,7 +183,8 @@ it("marks a repo you cannot push to, and stays silent about the other two states
   };
   const container = document.createElement("div");
   const root = createRoot(container);
-  const marks = (viewerCanPush?: boolean) => (
+  const forks: number[] = [];
+  const marks = (viewerCanPush?: boolean, onFork?: () => void) => (
     <RepoIdentityGlyphs
       repoId="repo-1"
       profileId="profile-1"
@@ -191,6 +192,7 @@ it("marks a repo you cannot push to, and stays silent about the other two states
         ...identity,
         ...(viewerCanPush === undefined ? {} : { viewerCanPush })
       }}
+      {...(onFork === undefined ? {} : { onFork })}
     />
   );
   try {
@@ -198,14 +200,32 @@ it("marks a repo you cannot push to, and stays silent about the other two states
     expect(container.querySelector(".repo-mark--nopush")).toBeNull();
     await act(async () => root.render(marks(true)));
     expect(container.querySelector(".repo-mark--nopush")).toBeNull();
+
+    // No `title`: these 12px marks speak through `useViewportTooltip`, like
+    // the refresh button further down the same row. The sentence a screen
+    // reader gets is `identityDescription`, on the row's aria-describedby.
     await act(async () => root.render(marks(false)));
-    expect(
-      container.querySelector(".repo-mark--nopush")?.getAttribute("title")
-    ).toBe("You can't push to desktop/dugite. Fork it to contribute.");
-    // A list says what is true; the verb lives where the user acts on it.
-    expect(
-      container.querySelector(".repo-mark--nopush")?.tagName.toLowerCase()
-    ).toBe("span");
+    const passive = container.querySelector(".repo-mark--nopush");
+    expect(passive?.getAttribute("title")).toBeNull();
+    // Passive with nowhere to send the user — a button that goes nowhere is
+    // worse than a statement.
+    expect(passive?.tagName.toLowerCase()).toBe("span");
+
+    // With a destination it becomes the verb.
+    await act(async () =>
+      root.render(marks(false, () => forks.push(1)))
+    );
+    const actionable = container.querySelector<HTMLButtonElement>(
+      ".repo-mark--nopush"
+    );
+    expect(actionable?.tagName.toLowerCase()).toBe("button");
+    expect(actionable?.getAttribute("aria-label")).toBe(
+      "You can't push to desktop/dugite. Fork it to contribute. Fork it now."
+    );
+    await act(async () => {
+      actionable?.click();
+    });
+    expect(forks).toHaveLength(1);
   } finally {
     await act(async () => root.unmount());
   }

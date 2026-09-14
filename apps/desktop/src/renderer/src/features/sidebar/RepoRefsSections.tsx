@@ -15,6 +15,7 @@ import { SwitchGlyph } from "../../lib/SwitchGlyph";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { useForgeNaming } from "../../state/useForgeNaming";
 import { CopyTarget } from "../shell/CopyTarget";
+import { GitForkIcon, NoPushMark } from "./RepoIdentityMarks";
 import { switchWorktreeToBranch } from "../shell/branchSwitch";
 import {
   branchActivation,
@@ -79,7 +80,8 @@ export function RepoRefsSections({
   focusedWorktree,
   onLocateTag,
   onRevealWorktree,
-  onCreateWorktree
+  onCreateWorktree,
+  onFork
 }: {
   repo: Repo;
   now: number;
@@ -94,6 +96,8 @@ export function RepoRefsSections({
     newBranch: boolean,
     startPoint?: string
   ) => void;
+  /** Fork what `origin` points at and re-point this checkout at the fork. */
+  onFork: () => void;
 }) {
   const forgeNaming = useForgeNaming();
   /**
@@ -729,6 +733,15 @@ export function RepoRefsSections({
                           to one forge and mirrors to another says which is
                           which. Silent for a remote no product claims. */}
                       {forgeChipsFor(remote)}
+                      {/* The read-only fact belongs to a REMOTE, and this is
+                          the remote it is about — `origin` is what `git push`
+                          uses and what the repo row's mark is really saying.
+                          Only here: `upstream` being unwritable is the normal
+                          shape of a fork, not news. */}
+                      {remote.name === "origin" &&
+                        repo.identity !== undefined && (
+                          <NoPushMark identity={repo.identity} size={11} />
+                        )}
                       <small>
                         {remote.name === "origin"
                           ? "default"
@@ -737,6 +750,26 @@ export function RepoRefsSections({
                             : `${remote.branchCount} refs`}
                       </small>
                     </button>
+                    {/* A direct action rather than a menu holding one item.
+                        Offered whenever this checkout cannot push, without
+                        first asking the forge whether a fork already exists:
+                        that answer costs a round trip per row, and the dialog
+                        resolves it anyway — it says "Switch origin to my fork"
+                        instead of "Fork" when the fork is already there. */}
+                    {remote.name === "origin" &&
+                      repo.identity?.viewerCanPush === false && (
+                        <button
+                          className="ref-mini-action ref-mini-action--fork"
+                          aria-label={`Fork ${repo.identity.nameWithOwner} and point origin at your fork`}
+                          title={`Fork ${repo.identity.nameWithOwner} — origin moves to your copy, the original is kept as upstream`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onFork();
+                          }}
+                        >
+                          <GitForkIcon size={12} />
+                        </button>
+                      )}
                     <button
                       className="ref-mini-action"
                       aria-label={`Fetch ${remote.name}`}
