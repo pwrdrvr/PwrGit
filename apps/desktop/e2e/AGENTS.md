@@ -47,6 +47,14 @@ the Electron build.
 
 ## Gotchas
 
+- **Keep both hardware video codec switches in `launchApp`, even with
+  `--disable-gpu`.** GPU rendering and media codecs are separate. PwrSnap
+  #366 and PwrAgent #1168 measured VideoToolbox kernel-client leaks in Tart
+  guests that eventually stall Electron teardown. The codec switches prevent
+  accumulation; they do not repair an already-degraded guest. CI records
+  `ioclasscount AppleVideoToolboxParavirtualizationUserClient` before and after
+  each shard. Reboot degraded guests only after their active jobs finish.
+
 - **Tear down anything a Git process is blocked on BEFORE `handle.cleanup()`.**
   `remote-activity.spec.ts` wedges a fetch against a `git://` socket it owns.
   Git for Windows runs git behind a launcher, so terminating the process

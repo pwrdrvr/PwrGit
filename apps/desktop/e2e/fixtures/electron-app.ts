@@ -151,6 +151,12 @@ export async function launchApp(
 
   const app = await electron.launch({
     args: [
+      // Match PwrAgent #1168 / PwrSnap #366: --disable-gpu does not disable
+      // hardware media codecs. VideoToolbox initialization leaks kernel
+      // clients in Tart guests, eventually stalling Electron shutdown.
+      // Keep these unconditional so direct E2E runs also protect the guest.
+      "--disable-accelerated-video-decode",
+      "--disable-accelerated-video-encode",
       ...(process.env.PWRGIT_E2E_DISABLE_GPU === "1" ? ["--disable-gpu"] : []),
       MAIN
     ],
