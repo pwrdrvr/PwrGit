@@ -310,6 +310,10 @@ there:
   macOS, `<userData>/logs` elsewhere — buffered in `src/main/logs.ts` and shown
   by Help › Logs. `src/main/process-ids.ts` puts the main, GPU, renderer and
   utility pids in that log so a pasted log names its own processes.
+- `src/main/log-console.ts` mirrors `logMain` entries through `electron-log`
+  (the same framework as PwrSnap/PwrAgnt). Info and above go to the terminal;
+  debug stays in the file and Logs window. Initialize it before startup work.
+  Its file/IPC transports are disabled because `logs.ts` owns those outputs.
 
 ## macOS release architectures
 

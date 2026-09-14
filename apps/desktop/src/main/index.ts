@@ -131,6 +131,9 @@ import { createDesktopMcpRunner } from "./agent-access/desktop-mcp-runner";
 import { createAppBackend } from "./agent-access/app-backend";
 import { AgentAccessService } from "./agent-access/agent-access-service";
 import { registerAgentAccessHandlers } from "./agent-access/agent-access-handlers";
+import { initLogConsole } from "./log-console";
+
+initLogConsole();
 
 const APP_NAME = "PwrGit";
 
