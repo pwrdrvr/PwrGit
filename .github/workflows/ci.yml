@@ -300,8 +300,10 @@ jobs:
 
   desktop-e2e-result:
     # Preserve the required status-check context across the Linux, macOS and
-    # Windows matrix jobs. `always()` is required so a failed
-    # shard reaches this job and cannot turn the aggregate check into a skip.
+    # Windows matrix jobs. `always()` is required so a failed shard reaches
+    # this job and cannot turn the aggregate check into a skip — branch
+    # protection counts a skipped required check as satisfied, so without it
+    # the gate would stop gating in exactly the case it exists for.
     name: Desktop E2E
     runs-on: ubuntu-latest
     needs: [changes, desktop-e2e, macos-e2e, windows-e2e]
@@ -314,38 +316,61 @@ jobs:
         env:
           LINUX_E2E_RESULT: ${{ needs.desktop-e2e.result }}
           MACOS_E2E_RESULT: ${{ needs.macos-e2e.result }}
-          MACOS_REQUIRED: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
-          # `windows-e2e` is GitHub-hosted and carries the same `if` as the
-          # Linux matrix, so unlike macOS it has no eligibility condition to
-          # mirror: it always runs when the gate runs.
           WINDOWS_E2E_RESULT: ${{ needs.windows-e2e.result }}
+          # `macos-e2e` is deliberately not scheduled for fork PRs — the
+          # self-hosted guests must not run untrusted code — so it reports
+          # `skipped` there and requiring it unconditionally would block fork
+          # PRs on a lane that can never run.
+          #
+          # Test only for the fork and let every OTHER missing macOS result
+          # fail. Restating that job's whole scheduling expression here would
+          # be a second copy that can drift, and it would enumerate the events
+          # on which macOS *should* run: an event neither job anticipated (a
+          # `merge_group` trigger once a merge queue is enabled, say) would
+          # make it false and drop macOS from the gate silently. This way such
+          # an event fails closed instead.
+          MACOS_IS_FORK_PR: >-
+            ${{ github.event_name == 'pull_request'
+            && github.event.pull_request.head.repo.full_name != github.repository }}
         run: |
-          echo "Linux Desktop E2E matrix result:   $LINUX_E2E_RESULT"
-          echo "macOS Desktop E2E matrix result:   $MACOS_E2E_RESULT (required: $MACOS_REQUIRED)"
-          echo "Windows Desktop E2E matrix result: $WINDOWS_E2E_RESULT"
+          set -euo pipefail
+
+          # Mirror each line into the job summary so the PR checks page names
+          # the platform that broke without anyone opening the job log.
+          say() {
+            echo "$1"
+            echo "$1" >> "$GITHUB_STEP_SUMMARY"
+          }
 
           # Report every platform before exiting, so a red gate names the
           # platform that broke instead of stopping at the first check and
           # hiding whether the others were healthy.
-          failed=0
+          status=0
+          require() {
+            if [[ "$2" == "success" ]]; then
+              say "- PASS \`$1\` ($2)"
+            else
+              say "- FAIL \`$1\` ($2)"
+              echo "::error::$1 Desktop E2E did not succeed ($2)."
+              status=1
+            fi
+          }
 
-          if [[ "$LINUX_E2E_RESULT" != "success" ]]; then
-            echo "::error::Linux Desktop E2E did not succeed: $LINUX_E2E_RESULT"
-            failed=1
+          say "### Desktop E2E platform results"
+          require "Linux" "$LINUX_E2E_RESULT"
+          if [[ "$MACOS_IS_FORK_PR" == "true" && "$MACOS_E2E_RESULT" == "skipped" ]]; then
+            say "- SKIP \`macOS\` (skipped) — fork PR; self-hosted lane not scheduled"
+            echo "::warning::macOS Desktop E2E did not run for this fork PR; macOS-only coverage is unverified."
+          else
+            require "macOS" "$MACOS_E2E_RESULT"
           fi
+          # `windows-e2e` has no eligibility condition — it is GitHub-hosted
+          # and carries the same `if` as the Linux matrix — so every
+          # non-success is a real failure, a `skipped` from a broken
+          # `windows-install-deps` included.
+          require "Windows" "$WINDOWS_E2E_RESULT"
 
-          if [[ "$MACOS_REQUIRED" == "true" && "$MACOS_E2E_RESULT" != "success" ]]; then
-            echo "::error::macOS Desktop E2E did not succeed: $MACOS_E2E_RESULT"
-            failed=1
-          fi
-
-          if [[ "$WINDOWS_E2E_RESULT" != "success" ]]; then
-            echo "::error::Windows Desktop E2E did not succeed: $WINDOWS_E2E_RESULT"
-            failed=1
-          fi
-
-          exit "$failed"
-
+          exit "$status"
   windows:
     name: Windows (typecheck + build + test)
     runs-on: windows-latest
