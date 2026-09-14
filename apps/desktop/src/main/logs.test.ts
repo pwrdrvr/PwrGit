@@ -1,10 +1,10 @@
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import electronLog from "electron-log/main.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   _resetLogsForTests,
-  getLogFilePath,
   initLogFile,
   logMain,
   readLogSnapshot,
@@ -12,24 +12,9 @@ import {
 } from "./logs";
 
 afterEach(() => {
+  vi.restoreAllMocks();
   _resetLogsForTests();
 });
-
-// File writes are chained behind init (migration → rotation → appends), so a
-// test waits for the line it wrote rather than for a fixed number of ticks.
-async function readLogFileOnce(marker: string): Promise<string> {
-  const path = getLogFilePath();
-  if (path === null) throw new Error("no log file configured");
-  // Generous on purpose: this waits on four filesystem ops, and the Windows CI
-  // runners are where those are dearest. A genuinely stuck chain still fails,
-  // on vitest's own timeout.
-  for (let attempt = 0; attempt < 1000; attempt += 1) {
-    const text = await readFile(path, "utf8").catch(() => "");
-    if (text.includes(marker)) return text;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error(`log file never received ${marker}`);
-}
 
 describe("logMain", () => {
   it("formats a [ts] [level] (scope) line and buffers it", () => {
@@ -46,9 +31,10 @@ describe("logMain", () => {
   });
 
   it("stringifies non-string parts, including Errors", () => {
-    const entry = logMain("warn", "git", "failed:", new Error("spawn ENOENT"), {
+    logMain("warn", "git", "failed:", new Error("spawn ENOENT"), {
       code: 128
     });
+    const entry = readLogSnapshot().entries[0];
     expect(entry.line).toContain("spawn ENOENT");
     expect(entry.line).toContain('{"code":128}');
   });
@@ -87,6 +73,42 @@ describe("logMain", () => {
 });
 
 describe("initLogFile", () => {
+  it("persists each scoped message once and streams the same line to the Logs window", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pwrgit-logs-"));
+    const path = join(dir, "main.log");
+    await initLogFile(path);
+    const seen: string[] = [];
+    subscribeLogEntries((entry) => seen.push(entry.line));
+    // Direct electron-log callers follow the same route as the logMain facade.
+    electronLog.scope("fixture").info("native scoped log", { count: 2 });
+    logMain("debug", "fixture", "debug probe");
+    expect(readLogSnapshot().logFilePath).toBe(path);
+    expect(seen).toHaveLength(2);
+    expect((await readFile(path, "utf8")).trim().split(/\r?\n/)).toEqual(seen);
+    expect(readLogSnapshot().entries.map((entry) => entry.line)).toEqual(seen);
+  });
+
+  it("rotates while running using electron-log's size limit and archive naming", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pwrgit-logs-"));
+    const path = join(dir, "main.log");
+    await initLogFile(path);
+    logMain("info", "fixture", "x".repeat(2 * 1024 * 1024));
+    logMain("warn", "fixture", "after rotation");
+    expect(await readFile(join(dir, "main.old.log"), "utf8")).toContain("x".repeat(100));
+    expect(await readFile(path, "utf8")).toBe(`${readLogSnapshot().entries[1].line}${process.platform === "win32" ? "\r\n" : "\n"}`);
+    expect(readLogSnapshot().entries).toHaveLength(2);
+  });
+
+  it("keeps the Logs window usable when the file cannot be written", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pwrgit-logs-"));
+    const report = vi.spyOn(electronLog.transports.console, "writeFn").mockImplementation(() => {});
+    // A directory cannot be opened as a log file on any supported platform.
+    await initLogFile(dir);
+    expect(() => logMain("error", "fixture", "must remain visible")).not.toThrow();
+    expect(readLogSnapshot().entries[0].line).toContain("must remain visible");
+    expect(report).toHaveBeenCalled();
+  });
+
   it("adopts the log from a previous location, then keeps appending there", async () => {
     const dir = await mkdtemp(join(tmpdir(), "pwrgit-logs-"));
     const legacyPath = join(dir, "pwrgit-main.log");
@@ -96,10 +118,10 @@ describe("initLogFile", () => {
     await writeFile(legacyPath, "[old] earlier run\n");
     await writeFile(`${legacyPath}.old`, "[old] rotated run\n");
 
-    initLogFile(path, legacyPath);
+    await initLogFile(path, legacyPath);
     logMain("info", "app", "PwrGit 9.9.9 starting pid=311");
 
-    const moved = await readLogFileOnce("starting pid=311");
+    const moved = await readFile(path, "utf8");
     expect(moved).toContain("[old] earlier run");
     await expect(readFile(legacyPath, "utf8")).rejects.toThrow();
     // The rotated sibling travels too, so nothing is left behind in userData.
@@ -114,10 +136,10 @@ describe("initLogFile", () => {
     await writeFile(legacyPath, "[old] earlier run\n");
     await writeFile(path, "[new] current run\n");
 
-    initLogFile(path, legacyPath);
+    await initLogFile(path, legacyPath);
     logMain("info", "app", "PwrGit 9.9.9 starting pid=311");
 
-    const current = await readLogFileOnce("starting pid=311");
+    const current = await readFile(path, "utf8");
     expect(current).toContain("[new] current run");
     expect(current).not.toContain("[old] earlier run");
     expect(await readFile(legacyPath, "utf8")).toContain("[old] earlier run");

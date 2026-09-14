@@ -310,6 +310,11 @@ there:
   macOS, `<userData>/logs` elsewhere — buffered in `src/main/logs.ts` and shown
   by Help › Logs. `src/main/process-ids.ts` puts the main, GPU, renderer and
   utility pids in that log so a pasted log names its own processes.
+- `logMain` delegates to scoped `electron-log` loggers (as in PwrSnap/PwrAgnt).
+  It owns console/file output and 2 MiB rotation (`main.old.log`); a file hook
+  feeds the Logs window buffer. Info and above go to the terminal; debug also
+  reaches the file and Logs window. `log-console.ts` guards closed stdio pipes.
+  Await `initLogFile` before startup logging; it preserves pre-0.14 history.
 
 ## macOS release architectures
 

@@ -131,6 +131,9 @@ import { createDesktopMcpRunner } from "./agent-access/desktop-mcp-runner";
 import { createAppBackend } from "./agent-access/app-backend";
 import { AgentAccessService } from "./agent-access/agent-access-service";
 import { registerAgentAccessHandlers } from "./agent-access/agent-access-handlers";
+import { initLogConsole } from "./log-console";
+
+initLogConsole();
 
 const APP_NAME = "PwrGit";
 
@@ -304,7 +307,7 @@ function appLogFilePath(fallback: string): string {
   try {
     return join(app.getPath("logs"), "main.log");
   } catch (cause) {
-    // Buffered now, written to `fallback` as soon as initLogFile runs.
+    // The console and Logs window can report this before file logging starts.
     logMain("warn", "app", "log directory unavailable; using", fallback, cause);
     return fallback;
   }
@@ -335,7 +338,7 @@ if (!gotSingleInstanceLock) {
     // <userData>/logs elsewhere) beside the other Pwr apps, rather than in
     // userData where nobody goes looking for a log.
     const legacyLogPath = join(app.getPath("userData"), "pwrgit-main.log");
-    initLogFile(appLogFilePath(legacyLogPath), legacyLogPath);
+    await initLogFile(appLogFilePath(legacyLogPath), legacyLogPath);
     subscribeLogEntries((entry) => emitEvent("logs:entry", entry));
     // Process ids ride on the log itself: the main one here, the helpers as
     // watchProcessIds sees them appear, so a copied log identifies its own
