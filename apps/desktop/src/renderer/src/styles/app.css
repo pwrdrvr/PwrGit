@@ -5601,9 +5601,6 @@ textarea,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Default-branch drift ("main +4"). Context, not a sync state — no button acts
-   on it — so it sits a rung below its neighbour: outline instead of a fill,
-   subtle instead of warn. Warn stays reserved for ↓behind, which Pull clears. */
 /* "read-only": this account may not push here. A button, because unlike every
    other chip in this row it has somewhere to go — the fork prompt. It rides
    with the drift chip in the degrade ladder above rather than with the sync
@@ -5622,6 +5619,9 @@ textarea,
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
+/* Default-branch drift ("main +4"). Context, not a sync state — no button acts
+   on it — so it sits a rung below its neighbour: outline instead of a fill,
+   subtle instead of warn. Warn stays reserved for ↓behind, which Pull clears. */
 .sync-chip--drift {
   border: 1px solid var(--border-subtle);
   color: var(--text-subtle);

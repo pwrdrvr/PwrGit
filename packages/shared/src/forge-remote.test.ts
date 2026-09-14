@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   canonicalForgeHostname,
   classifyForgeHost,
+  forgeRemoteUrlLike,
   forgeWebUrl,
   parseForgeRemote
 } from "./forge-remote";
@@ -188,6 +189,61 @@ describe("canonicalForgeHostname", () => {
   it("refuses anything that is not a bare hostname", () => {
     for (const value of ["", "ghe.example:8443", "has space", "https://x.dev/"]) {
       expect(canonicalForgeHostname(value)).toBeNull();
+    }
+  });
+});
+
+describe("forgeRemoteUrlLike", () => {
+  it("swaps the project and keeps everything the parse throws away", () => {
+    // `parseForgeRemote` reports a bare hostname, so a URL rebuilt from its
+    // answer silently loses the port and the SSH user. Re-pointing a remote
+    // that way breaks a checkout that was connecting fine.
+    expect(
+      forgeRemoteUrlLike(
+        "ssh://git@git.corp.example:2222/acme/widget-core.git",
+        "octo-dev/widget-core"
+      )
+    ).toBe("ssh://git@git.corp.example:2222/octo-dev/widget-core.git");
+    expect(
+      forgeRemoteUrlLike(
+        "https://ghe.acme.example:8443/acme/widget-core.git",
+        "octo-dev/widget-core"
+      )
+    ).toBe("https://ghe.acme.example:8443/octo-dev/widget-core.git");
+    expect(
+      forgeRemoteUrlLike(
+        "deploy@git.corp.example:acme/widget-core.git",
+        "octo-dev/widget-core"
+      )
+    ).toBe("deploy@git.corp.example:octo-dev/widget-core.git");
+  });
+
+  it("answers in the template's own spelling, not a canonical one", () => {
+    expect(
+      forgeRemoteUrlLike("git@github.com:acme/widget-core", "octo-dev/widget-core")
+    ).toBe("git@github.com:octo-dev/widget-core.git");
+    expect(
+      forgeRemoteUrlLike(
+        "https://github.com/acme/widget-core",
+        "octo-dev/widget-core"
+      )
+    ).toBe("https://github.com/octo-dev/widget-core.git");
+  });
+
+  it("keeps a GitLab subgroup path whole", () => {
+    expect(
+      forgeRemoteUrlLike(
+        "git@gitlab.com:acme/qa/forge/widget-core.git",
+        "octo-dev/widget-core"
+      )
+    ).toBe("git@gitlab.com:octo-dev/widget-core.git");
+  });
+
+  it("returns null for anything that is not a remote URL", () => {
+    // The caller's signal to fall back to `forgeCloneUrls`; guessing a shape
+    // here would write a remote nobody can fetch from.
+    for (const value of ["", "   ", "/srv/git/widget-core.git", "widget-core"]) {
+      expect(forgeRemoteUrlLike(value, "octo-dev/widget-core")).toBeNull();
     }
   });
 });

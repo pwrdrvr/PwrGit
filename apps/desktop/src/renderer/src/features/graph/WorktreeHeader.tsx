@@ -20,6 +20,7 @@ import { PullDivergenceDialog } from "./PullDivergenceDialog";
 import { openResetToRemote } from "./reset-to-remote";
 import { SshRemoteRecoveryDialog } from "./SshRemoteRecoveryDialog";
 import { ForkCheckoutDialog } from "../sidebar/ForkCheckoutDialog";
+import { pushAccessTitle } from "../sidebar/RepoIdentityMarks";
 
 type Chip = { text: string; tone: "muted" | "ok" | "warn" };
 
@@ -332,7 +333,9 @@ export function WorktreeHeader({
     });
   };
 
-  const readOnly = repo.identity?.viewerCanPush === false;
+  // One sentence, defined beside the sidebar mark that also shows it.
+  const noPushTitle =
+    repo.identity === undefined ? null : pushAccessTitle(repo.identity);
 
   // What is running, from either side: `busy` covers this header's own
   // dispatch before main has registered it, the activity covers an operation
@@ -447,11 +450,11 @@ export function WorktreeHeader({
             because this is where the push it is about lives. Hidden while an
             operation runs, like the drift chip beside it — the progress label
             needs that width. */}
-        {readOnly && running === null && (
+        {noPushTitle !== null && running === null && (
           <button
             type="button"
             className="sync-chip sync-chip--readonly"
-            title={`You can't push to ${repo.identity?.nameWithOwner ?? repo.name}. Fork it to contribute.`}
+            title={noPushTitle}
             onClick={() => setForkPrompt({})}
           >
             read-only

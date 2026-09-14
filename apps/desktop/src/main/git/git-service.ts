@@ -4471,10 +4471,10 @@ export async function pushRemote(
     const code = pushWasDenied(message)
       ? "push_denied"
       : /non-fast-forward|rejected/i.test(message)
-      ? "rejected"
-      : /no upstream|has no upstream/i.test(message)
-        ? "no_upstream"
-        : "push_failed";
+        ? "rejected"
+        : /no upstream|has no upstream/i.test(message)
+          ? "no_upstream"
+          : "push_failed";
     return err({
       kind: "remote",
       code,

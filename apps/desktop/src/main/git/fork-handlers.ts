@@ -1,10 +1,11 @@
-import { err, ok } from "@pwrgit/shared";
+import { err, ok, type Repo } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
 import type { IdentityService } from "../forge/identity-service";
 import type { RepoIndexer } from "./repo-indexer";
 import type { ForkService } from "./fork-service";
+import type { WorktreeRefresher } from "./worktree-handlers";
 
 export function registerForkHandlers(
   bus: CommandBus,
@@ -14,9 +15,30 @@ export function registerForkHandlers(
   /** Re-reads one repository's worktree rows. Only the checkout-rewiring path
    *  needs it: that one changes a repository that is already on screen, where
    *  `repo:fork` produces a new row the tree reload picks up. */
-  refresher?: { refreshRepoWorktrees: (repoId: string) => void }
+  refresher?: Pick<WorktreeRefresher, "refreshRepoWorktrees">
 ): void {
   const active = new Map<string, AbortController>();
+
+  /** Re-read the forge identity of a repository that just changed, and tell
+   *  the renderer if it moved. Both fork paths want it for the same reason:
+   *  the repository the user is looking at is the one repository in the list
+   *  whose identity is worth a round trip right now. */
+  const refreshIdentity = (profileId: string, repo: Repo): void => {
+    void identities
+      .refresh([repo], { force: true })
+      .then((changed) => {
+        if (changed.length > 0) {
+          emitEvent("repo:identityChanged", { profileId, identities: changed });
+        }
+      })
+      .catch((cause: unknown) => {
+        logMain(
+          "warn",
+          "repo",
+          `identity refresh after fork failed for ${repo.id}: ${String(cause)}`
+        );
+      });
+  };
   bus.register("repo:forkTargets", (req) =>
     forks.targets(req.host, req.hostname)
   );
@@ -48,18 +70,7 @@ export function registerForkHandlers(
       );
       if (result.ok) {
         emitEvent("repo:changed", { profileId: req.profileId });
-        // A repo that was just forked has an identity worth knowing immediately
-        // — it is the one repo in the list the user is definitely looking at.
-        void identities
-          .refresh([result.value], { force: true })
-          .then((changed) => {
-            if (changed.length > 0) {
-              emitEvent("repo:identityChanged", {
-                profileId: req.profileId,
-                identities: changed
-              });
-            }
-          });
+        refreshIdentity(req.profileId, result.value);
       }
       return result;
     } finally {
@@ -102,18 +113,14 @@ export function registerForkHandlers(
             `fork rewire branch-index refresh failed for ${req.repoId}: ${refreshed.error.message}`
           );
         }
+        // Both, and not redundantly: this repaints the tree now, while the
+        // refresher re-computes per-worktree state and emits its own
+        // `repo:changed` whenever that lands — which is a git call per
+        // worktree later, and is also skipped entirely for a repo with no
+        // worktree rows.
         emitEvent("repo:changed", { profileId: req.profileId });
         refresher?.refreshRepoWorktrees(req.repoId);
-        void identities
-          .refresh([result.value], { force: true })
-          .then((changed) => {
-            if (changed.length > 0) {
-              emitEvent("repo:identityChanged", {
-                profileId: req.profileId,
-                identities: changed
-              });
-            }
-          });
+        refreshIdentity(req.profileId, result.value);
       }
       return result;
     } finally {

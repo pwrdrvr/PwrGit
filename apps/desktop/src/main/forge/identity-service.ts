@@ -15,6 +15,7 @@ import {
   serializeJsonStringList
 } from "../persistence/json-string-list";
 import type { GitExec } from "../git/dugite";
+import { parseRemoteRows } from "../git/remote-list";
 import { logMain } from "../logs";
 import type { ForgeRepoRegistry } from "./repo-provider";
 
@@ -72,9 +73,6 @@ export type RepoRemotes = {
   hostnames: string[];
 };
 
-/** `name\turl (fetch|push)`, which is `git remote -v`'s whole format. */
-const REMOTE_LINE = /^(\S+)\s+(\S+)\s+\((fetch|push)\)$/;
-
 /**
  * Read every remote of one repository, and pick `origin` out of them.
  *
@@ -97,11 +95,8 @@ export async function readRemotes(
   if (!result.ok || result.value.exitCode !== 0) return empty;
   let origin: OriginRef | null = null;
   const hostnames = new Set<string>();
-  for (const line of result.value.stdout.split("\n")) {
-    const match = REMOTE_LINE.exec(line.trim());
-    if (match === null) continue;
-    const [, name, url, direction] = match;
-    const parsed = parseForgeRemote(url ?? "", hosts);
+  for (const { name, url, direction } of parseRemoteRows(result.value.stdout)) {
+    const parsed = parseForgeRemote(url, hosts);
     if (parsed === null) continue;
     // Only hosts a product actually claims. "A git remote is never a source"
     // (see `forge/AGENTS.md`): a bare repo on a NAS parses perfectly well and

@@ -1,12 +1,14 @@
 import {
   err,
   forgeCloneUrls,
+  forgeRemoteUrlLike,
   ok,
   parseForgeRemote,
   type ForgeHostMap,
   type Result
 } from "@pwrgit/shared";
 import { requireExit0, type GitExec } from "./dugite";
+import { parseRemoteRows } from "./remote-list";
 
 /**
  * Re-pointing an existing checkout at a fork.
@@ -23,9 +25,6 @@ export const UPSTREAM_REMOTE = "upstream";
  *  this is the fetch side, which is what `git remote get-url` answers. */
 export type CheckoutRemote = { name: string; url: string };
 
-/** `name\turl (fetch|push)`, which is `git remote -v`'s whole format. */
-const REMOTE_LINE = /^(\S+)\s+(\S+)\s+\((fetch|push)\)$/;
-
 /** Every remote's fetch URL, in the order Git lists them (alphabetical). */
 export async function readCheckoutRemotes(
   git: GitExec,
@@ -35,17 +34,11 @@ export async function readCheckoutRemotes(
   if (!raw.ok) return raw;
   const checked = requireExit0(raw.value, ["remote", "-v"]);
   if (!checked.ok) return checked;
-  const remotes: CheckoutRemote[] = [];
-  for (const line of checked.value.stdout.split("\n")) {
-    const matched = REMOTE_LINE.exec(line.trim());
-    if (matched === null) continue;
-    const [, name, url, direction] = matched;
-    if (direction !== "fetch" || name === undefined || url === undefined) {
-      continue;
-    }
-    remotes.push({ name, url });
-  }
-  return ok(remotes);
+  return ok(
+    parseRemoteRows(checked.value.stdout)
+      .filter((row) => row.direction === "fetch")
+      .map((row) => ({ name: row.name, url: row.url }))
+  );
 }
 
 /**
@@ -112,18 +105,36 @@ export function planUpstreamRemote(
     const candidate = `${UPSTREAM_REMOTE}-${suffix}`;
     if (!taken.has(candidate)) return { name: candidate, existing: false };
   }
-  // A checkout with `upstream` through `upstream-99` is not a real shape; the
-  // caller reports the failure rather than this inventing a hundredth name.
-  return { name: `${UPSTREAM_REMOTE}-100`, existing: taken.has(`${UPSTREAM_REMOTE}-100`) };
+  // A checkout with `upstream` through `upstream-99` is not a real shape.
+  // `existing: false` even though the name may well be taken, deliberately:
+  // `existing` means "a remote already points at the original", and claiming
+  // it here would tell `applyForkRemotes` to add nothing and tell the dialog
+  // a remote already points there — leaving the checkout with no remote for
+  // the original and no word about it. Reported as a plain add, so the `git
+  // remote add` that cannot succeed says so.
+  return { name: `${UPSTREAM_REMOTE}-100`, existing: false };
 }
 
-/** The fetch URL for a repository on a forge, in one of the two protocols a
- *  remote can hold. */
+/**
+ * The fetch URL for a repository on a forge, written the way this checkout
+ * already writes them.
+ *
+ * `like` is the remote being re-pointed. Composing from protocol + hostname
+ * alone is what `parseForgeRemote` leaves you with, and it silently drops a
+ * non-default SSH port and a non-`git` SSH user — fine for a URL being
+ * invented, and not fine for one replacing a remote that works today. A
+ * template that is not a shape we recognise falls back to the canonical pair.
+ */
 export function forkRemoteUrl(
   protocol: "ssh" | "https",
   hostname: string,
-  nameWithOwner: string
+  nameWithOwner: string,
+  like?: string
 ): string {
+  if (like !== undefined) {
+    const shaped = forgeRemoteUrlLike(like, nameWithOwner);
+    if (shaped !== null) return shaped;
+  }
   const urls = forgeCloneUrls(hostname, nameWithOwner);
   return protocol === "ssh" ? urls.sshUrl : urls.httpsUrl;
 }

@@ -451,6 +451,10 @@ export class ForkService {
       );
     }
 
+    // Both URLs are shaped like the remote being replaced — see
+    // `forkRemoteUrl`. Composing them from protocol + hostname alone drops a
+    // non-default SSH port, which would swap a working `origin` for one that
+    // cannot connect.
     const upstream =
       input.upstream === null
         ? null
@@ -460,21 +464,31 @@ export class ForkService {
               { hostname, nameWithOwner: input.upstream },
               this.hosts()
             ),
-            url: forkRemoteUrl(protocol, hostname, input.upstream)
+            url: forkRemoteUrl(
+              protocol,
+              hostname,
+              input.upstream,
+              origin.value.url
+            )
           };
     if (upstream !== null && !upstream.existing) {
       onProgress({ phase: "adding_upstream", percent: null });
     }
     onProgress({ phase: "repointing_origin", percent: null });
-    const rewired = await applyForkRemotes(
-      this.git,
-      repo.path,
-      {
-        originUrl: forkRemoteUrl(protocol, fork.hostname, fork.nameWithOwner),
-        upstream
-      },
-      signal
-    );
+    // Deliberately NOT cancellable. Everything above this line is; from here
+    // it is two or three local config writes, and an abort landing between
+    // them leaves a checkout with an `upstream` remote and an `origin` still
+    // on the repository the user cannot push to — reported, wrongly, as
+    // "remotes were not changed".
+    const rewired = await applyForkRemotes(this.git, repo.path, {
+      originUrl: forkRemoteUrl(
+        protocol,
+        fork.hostname,
+        fork.nameWithOwner,
+        origin.value.url
+      ),
+      upstream
+    });
     if (!rewired.ok) {
       return err({
         ...rewired.error,

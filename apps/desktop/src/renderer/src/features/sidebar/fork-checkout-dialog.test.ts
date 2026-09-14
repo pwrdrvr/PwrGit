@@ -108,11 +108,38 @@ describe("remoteChanges", () => {
 
   it("follows an HTTPS checkout into HTTPS", () => {
     const rows = remoteChanges({
-      preflight: preflight({ protocol: "https" }),
+      preflight: preflight({
+        protocol: "https",
+        origin: {
+          url: "https://github.com/desktop/dugite.git",
+          nameWithOwner: "desktop/dugite"
+        }
+      }),
       target: "huntharo/dugite",
       upstream: null
     });
     expect(rows[0]?.url).toBe("https://github.com/huntharo/dugite.git");
+  });
+
+  it("keeps the port the checkout is actually reached on", () => {
+    // The list is a promise about what the rewire will write, and main writes
+    // the fork URL in the shape of the remote it replaces. A preview composed
+    // from protocol + hostname would show a URL without the port — the one
+    // difference that decides whether the remote works.
+    const rows = remoteChanges({
+      preflight: preflight({
+        origin: {
+          url: "ssh://git@git.corp.example:2222/acme/widget-core.git",
+          nameWithOwner: "acme/widget-core"
+        }
+      }),
+      target: "octo-dev/widget-core",
+      upstream: "acme/widget-core"
+    });
+    expect(rows.map((row) => row.url)).toEqual([
+      "ssh://git@git.corp.example:2222/octo-dev/widget-core.git",
+      "ssh://git@git.corp.example:2222/acme/widget-core.git"
+    ]);
   });
 
   it("says a remote that already points there is left alone", () => {

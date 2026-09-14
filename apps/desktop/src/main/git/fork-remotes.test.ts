@@ -131,6 +131,26 @@ describe("planUpstreamRemote", () => {
       )
     ).toEqual({ name: UPSTREAM_REMOTE, existing: false });
   });
+
+  it("never reports a name it only ran out of options on as existing", () => {
+    // `existing` means "a remote already points at the original". Saying it
+    // here because the NAME is taken tells `applyForkRemotes` to add nothing
+    // and tells the dialog a remote already points there — a checkout left
+    // with no remote for the original, silently. Reported as a plain add so
+    // the `git remote add` that cannot succeed is the thing that says so.
+    const crowded = [
+      { name: "origin", url: "git@github.com:desktop/dugite.git" },
+      { name: UPSTREAM_REMOTE, url: "git@github.com:someone/else.git" },
+      ...Array.from({ length: 99 }, (_unused, index) => ({
+        name: `${UPSTREAM_REMOTE}-${index + 2}`,
+        url: `git@github.com:someone/else-${index}.git`
+      }))
+    ];
+    expect(planUpstreamRemote(crowded, original)).toEqual({
+      name: `${UPSTREAM_REMOTE}-100`,
+      existing: false
+    });
+  });
 });
 
 describe("readCheckoutRemotes", () => {
@@ -237,5 +257,36 @@ describe("forkRemoteUrl", () => {
     expect(forkRemoteUrl("https", "github.com", "huntharo/dugite")).toBe(
       "https://github.com/huntharo/dugite.git"
     );
+  });
+
+  it("keeps the port the remote it replaces was reached on", () => {
+    // A self-managed forge on 2222 is the case protocol + hostname cannot
+    // express: composing from those alone hands the checkout port 22 and it
+    // stops connecting, on a remote that worked a moment earlier.
+    expect(
+      forkRemoteUrl(
+        "ssh",
+        "git.corp.example",
+        "octo-dev/widget-core",
+        "ssh://git@git.corp.example:2222/acme/widget-core.git"
+      )
+    ).toBe("ssh://git@git.corp.example:2222/octo-dev/widget-core.git");
+  });
+
+  it("keeps the scp-style spelling and its user", () => {
+    expect(
+      forkRemoteUrl(
+        "ssh",
+        "git.corp.example",
+        "octo-dev/widget-core",
+        "deploy@git.corp.example:acme/widget-core.git"
+      )
+    ).toBe("deploy@git.corp.example:octo-dev/widget-core.git");
+  });
+
+  it("falls back to the canonical pair when the template is not a remote", () => {
+    expect(
+      forkRemoteUrl("https", "github.com", "octo-dev/widget-core", "   ")
+    ).toBe("https://github.com/octo-dev/widget-core.git");
   });
 });

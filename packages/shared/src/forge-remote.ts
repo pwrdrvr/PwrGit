@@ -145,6 +145,12 @@ export type ForgeRemote = {
 const SCP = /^(?:[^@\s]+@)?([^\s:/]+):(.+?)(?:\.git)?\/?$/;
 const URL_STYLE =
   /^(?:https?|ssh|git):\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/(.+?)(?:\.git)?\/?$/i;
+/** The two patterns above, captured up to (but not including) the project
+ *  path, so `forgeRemoteUrlLike` can re-attach a different one. Everything the
+ *  parse deliberately discards — user, port — is inside the capture. */
+const URL_STYLE_PREFIX =
+  /^((?:https?|ssh|git):\/\/(?:[^@/]+@)?[^/:]+(?::\d+)?)\/.+$/i;
+const SCP_PREFIX = /^((?:[^@\s]+@)?[^\s:/]+):(?!\/).+$/;
 
 /** GitLab nests groups arbitrarily deep — `group/subgroup/team/repo` is one
  *  project. Everything before the last segment is the owner, which is exactly
@@ -308,6 +314,35 @@ export function isSafeProjectPath(nameWithOwner: string): boolean {
     segments.length <= 8 &&
     segments.every((segment) => /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(segment))
   );
+}
+
+/**
+ * The clone URL for `nameWithOwner`, written in the same shape as an existing
+ * remote — same scheme, same SSH user, same PORT.
+ *
+ * `forgeCloneUrls` composes the two canonical shapes from a bare hostname, and
+ * a bare hostname is all `parseForgeRemote` keeps: it strips `(?::\d+)?` and
+ * the `user@` prefix. That is harmless where the URL is being invented (a
+ * fresh clone, an `upstream` remote nobody had before) and is not harmless
+ * where an existing remote is being RE-POINTED — a self-managed forge reached
+ * at `ssh://git@git.corp:2222/team/app.git` would come back on port 22 and
+ * stop working, on a checkout that pushed fine a moment earlier.
+ *
+ * Null when the template is not a remote URL this recognises, which is the
+ * caller's signal to fall back to `forgeCloneUrls`.
+ */
+export function forgeRemoteUrlLike(
+  template: string,
+  nameWithOwner: string
+): string | null {
+  const trimmed = template.trim();
+  // Same order and the same reason as `parseForgeRemote`: `ssh://git@h:22/o/r`
+  // also matches the scp pattern, where the port would read as the path.
+  const urlStyle = URL_STYLE_PREFIX.exec(trimmed);
+  if (urlStyle !== null) return `${urlStyle[1]}/${nameWithOwner}.git`;
+  const scp = SCP_PREFIX.exec(trimmed);
+  if (scp !== null) return `${scp[1]}:${nameWithOwner}.git`;
+  return null;
 }
 
 /** The SSH and HTTPS clone URLs for a project on a forge. Both forges use the

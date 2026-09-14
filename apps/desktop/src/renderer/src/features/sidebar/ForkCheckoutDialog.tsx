@@ -66,12 +66,15 @@ export function ForkCheckoutDialog({
   const [canceling, setCanceling] = useState(false);
   const [progress, setProgress] = useState<ForkProgress | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  /** Whether the user has named the fork themselves. Until they have, the
+   *  request carries no `targetName` at all and main's own default (the
+   *  source's name) is the right guess — the same rule `ForkRepoDialog`
+   *  follows, and the reason opening this dialog is one round of forge calls
+   *  rather than two: seeding the field from the answer would otherwise settle
+   *  into `debouncedForkName` and re-ask the question main just answered. */
+  const [forkNameTouched, setForkNameTouched] = useState(false);
   const activeForkIdRef = useRef<string | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
-  /** The name field is seeded from the source once and then left alone. A ref
-   *  rather than state: re-seeding is a one-time decision, and as a dependency
-   *  it would re-run the preflight on the first keystroke. */
-  const nameSeeded = useRef(false);
 
   useEffect(
     () =>
@@ -99,9 +102,13 @@ export function ForkCheckoutDialog({
    * only candidate unless the source is itself a fork. Passing it back anyway
    * would spend a second round of forge calls, on every open, to be told the
    * same thing.
+   *
+   * `addUpstream` is deliberately not part of it. Folding the checkbox in here
+   * makes unchecking "Keep the original" drop the query and re-run the whole
+   * preflight — forge round trips spent re-answering a question about the
+   * fork, which a checkbox about a remote cannot change.
    */
   const upstreamQuery =
-    addUpstream &&
     upstream !== null &&
     upstream.toLowerCase() !== preflight?.origin.nameWithOwner.toLowerCase()
       ? upstream
@@ -118,7 +125,7 @@ export function ForkCheckoutDialog({
       profileId,
       repoId,
       ...(targetOwner === null ? {} : { targetOwner: targetOwner.login }),
-      ...(debouncedForkName.trim() === ""
+      ...(!forkNameTouched || debouncedForkName.trim() === ""
         ? {}
         : { targetName: debouncedForkName.trim() }),
       ...(upstreamQuery === null ? {} : { upstream: upstreamQuery })
@@ -126,14 +133,21 @@ export function ForkCheckoutDialog({
       if (!active) return;
       setChecking(false);
       if (!result.ok) {
+        // The answer on screen described a question that has since failed, so
+        // it is cleared rather than left standing beside the error — the
+        // "Afterwards" list would otherwise keep promising a remote layout
+        // nothing has confirmed, and the submit button would stay live.
+        setPreflight(null);
         setCheckError(result.error.message);
         return;
       }
       setCheckError(null);
       setPreflight(result.value);
-      if (!nameSeeded.current) {
-        nameSeeded.current = true;
+      if (!forkNameTouched) {
+        // Both, so the debounce does not fire a second preflight for a name
+        // main already assumed.
         setForkName(result.value.fork.target.name);
+        setDebouncedForkName(result.value.fork.target.name);
       }
       setUpstream((current) =>
         current === null ? defaultUpstream(result.value.fork) : current
@@ -142,7 +156,15 @@ export function ForkCheckoutDialog({
     return () => {
       active = false;
     };
-  }, [profileId, repoId, targetOwner, debouncedForkName, upstreamQuery, busy]);
+  }, [
+    profileId,
+    repoId,
+    targetOwner,
+    forkNameTouched,
+    debouncedForkName,
+    upstreamQuery,
+    busy
+  ]);
 
   // The accounts a fork can land in, from the instance the source lives on.
   const sourceHost = preflight?.fork.source.host;
@@ -350,7 +372,10 @@ export function ForkCheckoutDialog({
                   disabled={busy}
                   autoComplete="off"
                   spellCheck={false}
-                  onChange={(event) => setForkName(event.target.value)}
+                  onChange={(event) => {
+                    setForkNameTouched(true);
+                    setForkName(event.target.value);
+                  }}
                 />
                 {checking && (
                   <span className="clone-input-status">checking…</span>

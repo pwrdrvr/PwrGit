@@ -1,4 +1,8 @@
-import { forgeCloneUrls, type ForkCheckoutPreflight } from "@pwrgit/shared";
+import {
+  forgeCloneUrls,
+  forgeRemoteUrlLike,
+  type ForkCheckoutPreflight
+} from "@pwrgit/shared";
 
 /**
  * Forking a repository that is already checked out.
@@ -71,7 +75,13 @@ export function remoteChanges(input: {
 }): RemoteChange[] {
   const { preflight } = input;
   const hostname = preflight.fork.source.hostname;
+  // Shaped after the remote being replaced, exactly as `forkRemoteUrl` in main
+  // does it — otherwise the list promises a URL the rewire is not going to
+  // write, and on a forge reached at a non-default SSH port that difference is
+  // the difference between a remote that works and one that does not.
   const url = (nameWithOwner: string): string => {
+    const shaped = forgeRemoteUrlLike(preflight.origin.url, nameWithOwner);
+    if (shaped !== null) return shaped;
     const urls = forgeCloneUrls(hostname, nameWithOwner);
     return preflight.protocol === "ssh" ? urls.sshUrl : urls.httpsUrl;
   };
