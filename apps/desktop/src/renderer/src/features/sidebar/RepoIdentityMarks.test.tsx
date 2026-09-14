@@ -3,7 +3,11 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, expect, it, vi } from "vitest";
 import { ok, type RepoIdentityRefreshOutcome } from "@pwrgit/shared";
-import { identityDescription, RepoIdentityGlyphs } from "./RepoIdentityMarks";
+import {
+  identityDescription,
+  RepoIdentityChips,
+  RepoIdentityGlyphs
+} from "./RepoIdentityMarks";
 
 const { dispatch, showErrorToast, showInfoToast } = vi.hoisted(() => ({
   dispatch: vi.fn(), showErrorToast: vi.fn(), showInfoToast: vi.fn()
@@ -163,4 +167,95 @@ it("describes the other forges a repo has remotes on, which the chip only counts
   expect(
     identityDescription({ ...base, remoteHostnames: ["gitlab.com"] })
   ).toBe("public, on gitlab.com");
+});
+
+it("marks a repo you cannot push to, and stays silent about the other two states", async () => {
+  // Three states, one glyph. `true` is the ordinary case — a mark on every row
+  // you CAN push to costs a column to say nothing — and absent is "not known",
+  // where a mark would claim a refusal nobody made.
+  const identity = {
+    host: "github" as const,
+    hostname: "github.com",
+    owner: "desktop",
+    name: "dugite",
+    nameWithOwner: "desktop/dugite",
+    visibility: "public" as const
+  };
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const marks = (viewerCanPush?: boolean) => (
+    <RepoIdentityGlyphs
+      repoId="repo-1"
+      profileId="profile-1"
+      identity={{
+        ...identity,
+        ...(viewerCanPush === undefined ? {} : { viewerCanPush })
+      }}
+    />
+  );
+  try {
+    await act(async () => root.render(marks()));
+    expect(container.querySelector(".repo-mark--nopush")).toBeNull();
+    await act(async () => root.render(marks(true)));
+    expect(container.querySelector(".repo-mark--nopush")).toBeNull();
+    await act(async () => root.render(marks(false)));
+    expect(
+      container.querySelector(".repo-mark--nopush")?.getAttribute("title")
+    ).toBe("You can't push to desktop/dugite. Fork it to contribute.");
+    // A list says what is true; the verb lives where the user acts on it.
+    expect(
+      container.querySelector(".repo-mark--nopush")?.tagName.toLowerCase()
+    ).toBe("span");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
+it("says read-only in the identity sentence too", () => {
+  const base = {
+    host: "github" as const,
+    hostname: "github.com",
+    owner: "desktop",
+    name: "dugite",
+    nameWithOwner: "desktop/dugite",
+    visibility: "public" as const
+  };
+  expect(identityDescription({ ...base, viewerCanPush: false })).toBe(
+    "public, on github.com, read-only, you cannot push"
+  );
+  expect(identityDescription({ ...base, viewerCanPush: true })).toBe(
+    "public, on github.com"
+  );
+});
+
+it("chips read-only in the dialogs, where there is room to spell it out", async () => {
+  const repository = {
+    name: "dugite",
+    owner: "desktop",
+    nameWithOwner: "desktop/dugite",
+    visibility: "public" as const,
+    host: "github" as const,
+    hostname: "github.com",
+    sshUrl: "git@github.com:desktop/dugite.git",
+    httpsUrl: "https://github.com/desktop/dugite.git",
+    localPaths: []
+  };
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(<RepoIdentityChips repository={repository} />)
+    );
+    expect(container.querySelector(".clone-chip--nopush")).toBeNull();
+    await act(async () =>
+      root.render(
+        <RepoIdentityChips repository={{ ...repository, viewerCanPush: false }} />
+      )
+    );
+    expect(container.querySelector(".clone-chip--nopush")?.textContent).toBe(
+      "read-only"
+    );
+  } finally {
+    await act(async () => root.unmount());
+  }
 });

@@ -15,6 +15,7 @@ import {
   err,
   ok,
   type RemoteActivity,
+  type Repo,
   type SshRemoteRecovery,
   type Worktree,
   type WorktreeState
@@ -46,7 +47,12 @@ import {
 } from "../remote/useRemoteActivityPopover";
 import { WorktreeHeader } from "./WorktreeHeader";
 
-const repo = { id: "repo-1", name: "project", path: "/repos/project" };
+const repo = {
+  id: "repo-1",
+  profileId: "profile-1",
+  name: "project",
+  path: "/repos/project"
+};
 const worktree: Worktree = {
   id: "worktree-1",
   repoId: "repo-1",
@@ -834,5 +840,109 @@ describe("WorktreeHeader default-branch drift", () => {
     expect(drift()).toBeNull();
     await render({ ...feature, behindDefault: 0 });
     expect(drift()).toBeNull();
+  });
+});
+
+describe("WorktreeHeader offers a fork when this account cannot push", () => {
+  /** Mount a header outside the shared fixture, with an identity of its own. */
+  async function mount(identity?: Repo["identity"]) {
+    const own = document.createElement("div");
+    document.body.append(own);
+    const ownRoot = createRoot(own);
+    onTestFinished(async () => {
+      await act(async () => ownRoot.unmount());
+      own.remove();
+    });
+    await act(async () => {
+      ownRoot.render(
+        <WorktreeHeader
+          repo={{ ...repo, ...(identity === undefined ? {} : { identity }) }}
+          worktree={worktree}
+          state={null}
+        />
+      );
+    });
+    return own;
+  }
+
+  const readOnly: Repo["identity"] = {
+    host: "github",
+    hostname: "github.com",
+    owner: "desktop",
+    name: "dugite",
+    nameWithOwner: "desktop/dugite",
+    visibility: "public",
+    viewerCanPush: false
+  };
+
+  it("draws the chip only where the forge actually said no", async () => {
+    // Three states, and only one of them draws: `true` is the ordinary case,
+    // and absent is "not known" — a chip there would claim a refusal nobody
+    // made.
+    const unknown = await mount();
+    expect(unknown.querySelector(".sync-chip--readonly")).toBeNull();
+    const writable = await mount({ ...readOnly, viewerCanPush: true });
+    expect(writable.querySelector(".sync-chip--readonly")).toBeNull();
+    const denied = await mount(readOnly);
+    expect(denied.querySelector(".sync-chip--readonly")?.textContent).toBe(
+      "read-only"
+    );
+  });
+
+  it("opens the fork prompt from the chip", async () => {
+    const own = await mount(readOnly);
+    const chip = own.querySelector<HTMLButtonElement>(".sync-chip--readonly")!;
+    await act(async () => chip.click());
+    expect(document.querySelector(".fork-checkout-dialog")).not.toBeNull();
+  });
+
+  it("offers the fork when git itself refuses the push, with git's own words", async () => {
+    // This path deliberately does not consult the stored identity: git has
+    // just said the account may not write there, which is better evidence than
+    // anything cached — and it works on a checkout nothing has ever asked the
+    // forge about.
+    const own = await mount();
+    bridge.dispatch.mockImplementation((name: string) =>
+      name === "remote:push"
+        ? Promise.resolve(
+            err({
+              kind: "remote",
+              code: "push_denied",
+              message: "ERROR: Permission to desktop/dugite.git denied to huntharo."
+            })
+          )
+        : name === "remote:activities"
+          ? Promise.resolve(ok([]))
+          : new Promise(() => undefined)
+    );
+    const push = [...own.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.getAttribute("aria-label") === "Push"
+    )!;
+    await act(async () => push.click());
+    const dialog = document.querySelector(".fork-checkout-dialog");
+    expect(dialog).not.toBeNull();
+    expect(dialog?.textContent).toContain("Permission to desktop/dugite.git denied");
+  });
+
+  it("leaves an ordinary push failure to the error path", async () => {
+    const own = await mount();
+    bridge.dispatch.mockImplementation((name: string) =>
+      name === "remote:push"
+        ? Promise.resolve(
+            err({
+              kind: "remote",
+              code: "rejected",
+              message: "! [rejected] main -> main (non-fast-forward)"
+            })
+          )
+        : name === "remote:activities"
+          ? Promise.resolve(ok([]))
+          : new Promise(() => undefined)
+    );
+    const push = [...own.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.getAttribute("aria-label") === "Push"
+    )!;
+    await act(async () => push.click());
+    expect(document.querySelector(".fork-checkout-dialog")).toBeNull();
   });
 });

@@ -862,3 +862,290 @@ describe("ForkService and the instance a source lives on", () => {
     expect(hostnames).not.toContain(undefined);
   });
 });
+
+/**
+ * Forking a repository that is already checked out.
+ *
+ * Everything here runs the real rewire against a real repository; only the
+ * forge and the network are stood in for. `fetch` is intercepted rather than
+ * allowed through — the fork URLs are real-looking github.com addresses and a
+ * suite that reached for one would be asking the network whether these tests
+ * pass.
+ */
+function checkoutServices(options: {
+  repos?: Record<string, unknown>;
+  /** Commands this spec wants to fail, matched on the joined argv. */
+  failing?: string;
+} = {}): {
+  forks: ForkService;
+  profileId: string;
+  indexer: RepoIndexer;
+  root: string;
+  fetched: string[];
+} {
+  const root = temporaryRoot();
+  const fetched: string[] = [];
+  const forkGit: GitExec = async (args, cwd, gitOptions) => {
+    if (args[0] === "fetch") {
+      fetched.push(args[1] ?? "");
+      return { ok: true as const, value: { stdout: "", stderr: "", exitCode: 0 } };
+    }
+    if (options.failing !== undefined && args.join(" ").includes(options.failing)) {
+      return {
+        ok: true as const,
+        value: { stdout: "", stderr: "git said no", exitCode: 1 }
+      };
+    }
+    return systemGit(args, cwd, gitOptions);
+  };
+  const db = openDatabase(":memory:");
+  const profiles = new ProfileService(db);
+  const profile = profiles.create({
+    name: "Personal",
+    email: "t@pwrgit.com",
+    roots: [root]
+  });
+  const indexer = new RepoIndexer(db, forkGit);
+  const registry = new ForgeRepoRegistry();
+  registry.register(
+    new GitHubRepoProvider(
+      fakeGh(
+        options.repos ?? {
+          "desktop/dugite": {
+            full_name: "desktop/dugite",
+            name: "dugite",
+            visibility: "public",
+            permissions: { push: false, pull: true }
+          },
+          "huntharo/dugite": {
+            full_name: "huntharo/dugite",
+            name: "dugite",
+            visibility: "public",
+            fork: true,
+            parent: { full_name: "desktop/dugite" },
+            permissions: { push: true, pull: true }
+          }
+        }
+      )
+    )
+  );
+  const status = fakeForgeStatus();
+  return {
+    root,
+    fetched,
+    indexer,
+    profileId: profile.id,
+    forks: new ForkService(
+      forkGit,
+      indexer,
+      profiles,
+      registry,
+      new CloneService(db, forkGit, indexer, profiles, registry, status),
+      status
+    )
+  };
+}
+
+/** An indexed checkout of `origin`, ready to be forked in place. */
+async function indexedCheckout(
+  indexer: RepoIndexer,
+  profileId: string,
+  root: string,
+  originUrl = "git@github.com:desktop/dugite.git"
+): Promise<{ repoId: string; path: string }> {
+  const path = join(root, "dugite");
+  initRepo(path);
+  execFileSync("git", ["remote", "add", "origin", originUrl], {
+    cwd: path,
+    stdio: "ignore"
+  });
+  const indexed = await indexer.indexRepoAt(profileId, path);
+  if (!indexed.ok) throw new Error(indexed.error.message);
+  return { repoId: indexed.value.id, path: indexed.value.path };
+}
+
+describe("ForkService.checkoutPreflight", () => {
+  it("answers the fork, the origin it reads it from, and the remote name", async () => {
+    const { forks, indexer, profileId, root } = checkoutServices();
+    const { repoId } = await indexedCheckout(indexer, profileId, root);
+    const result = await forks.checkoutPreflight({ profileId, repoId });
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        fork: { target: { nameWithOwner: "huntharo/dugite" } },
+        origin: {
+          nameWithOwner: "desktop/dugite",
+          url: "git@github.com:desktop/dugite.git"
+        },
+        protocol: "ssh",
+        upstreamRemote: { name: UPSTREAM_REMOTE, existing: false },
+        upstreamFor: "desktop/dugite"
+      }
+    });
+  });
+
+  it("reads the protocol off origin rather than defaulting", async () => {
+    // A checkout cloned over HTTPS has no key loaded; handing it an SSH remote
+    // would break the very push this flow exists to unblock.
+    const { forks, indexer, profileId, root } = checkoutServices();
+    const { repoId } = await indexedCheckout(
+      indexer,
+      profileId,
+      root,
+      "https://github.com/desktop/dugite.git"
+    );
+    const result = await forks.checkoutPreflight({ profileId, repoId });
+    expect(result.ok && result.value.protocol).toBe("https");
+  });
+
+  it("refuses a repository from another profile", async () => {
+    const { forks, indexer, profileId, root } = checkoutServices();
+    const { repoId } = await indexedCheckout(indexer, profileId, root);
+    const result = await forks.checkoutPreflight({
+      profileId: "some-other-profile",
+      repoId
+    });
+    expect(result).toMatchObject({ ok: false, error: { code: "not_found" } });
+  });
+
+  it("reports an origin no forge claims rather than guessing one", async () => {
+    const { forks, indexer, profileId, root } = checkoutServices();
+    const { repoId } = await indexedCheckout(
+      indexer,
+      profileId,
+      root,
+      "git@git.internal.example:team/thing.git"
+    );
+    const result = await forks.checkoutPreflight({ profileId, repoId });
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "unsupported_host" }
+    });
+  });
+});
+
+describe("ForkService.forkCheckout", () => {
+  it("points origin at the fork, keeps the original, and fetches both", async () => {
+    const { forks, indexer, profileId, root, fetched } = checkoutServices();
+    const { repoId, path } = await indexedCheckout(indexer, profileId, root);
+
+    const phases: string[] = [];
+    const result = await forks.forkCheckout(
+      {
+        profileId,
+        repoId,
+        targetOwner: "huntharo",
+        targetOwnerKind: "user",
+        targetName: "dugite",
+        upstream: "desktop/dugite"
+      },
+      (progress) => phases.push(progress.phase)
+    );
+
+    expect(result.ok).toBe(true);
+    const remotes = await systemGit(["remote", "-v"], path);
+    const listing = remotes.ok ? remotes.value.stdout : "";
+    expect(listing).toContain("origin\tgit@github.com:huntharo/dugite.git");
+    expect(listing).toContain(
+      `${UPSTREAM_REMOTE}\tgit@github.com:desktop/dugite.git`
+    );
+    expect(fetched).toEqual(["origin", UPSTREAM_REMOTE]);
+    expect(phases).toContain("creating");
+    expect(phases).toContain("repointing_origin");
+    expect(phases.at(-1)).toBe("indexing");
+  });
+
+  it("leaves the checkout where it was — nothing moves on disk", async () => {
+    const { forks, indexer, profileId, root } = checkoutServices();
+    const { repoId, path } = await indexedCheckout(indexer, profileId, root);
+    const result = await forks.forkCheckout({
+      profileId,
+      repoId,
+      targetOwner: "huntharo",
+      targetOwnerKind: "user",
+      targetName: "dugite",
+      upstream: "desktop/dugite"
+    });
+    expect(result.ok && result.value.path).toBe(path);
+    expect(existsSync(join(path, "README.md"))).toBe(true);
+  });
+
+  it("adds no remote for the original when the user declined one", async () => {
+    const { forks, indexer, profileId, root, fetched } = checkoutServices();
+    const { repoId, path } = await indexedCheckout(indexer, profileId, root);
+    const result = await forks.forkCheckout({
+      profileId,
+      repoId,
+      targetOwner: "huntharo",
+      targetOwnerKind: "user",
+      targetName: "dugite",
+      upstream: null
+    });
+    expect(result.ok).toBe(true);
+    const remotes = await systemGit(["remote"], path);
+    expect(remotes.ok && remotes.value.stdout.trim()).toBe("origin");
+    expect(fetched).toEqual(["origin"]);
+  });
+
+  it("refuses an upstream the fork did not come from", async () => {
+    // The dialog offers only the fork's own lineage; anything else would point
+    // `upstream` at a repository this checkout has nothing to do with.
+    const { forks, indexer, profileId, root } = checkoutServices();
+    const { repoId } = await indexedCheckout(indexer, profileId, root);
+    const result = await forks.forkCheckout({
+      profileId,
+      repoId,
+      targetOwner: "huntharo",
+      targetOwnerKind: "user",
+      targetName: "dugite",
+      upstream: "someone/unrelated"
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "invalid_repository" }
+    });
+  });
+
+  it("refuses a checkout with no origin before it creates anything", async () => {
+    const { forks, indexer, profileId, root } = checkoutServices();
+    const { repoId, path } = await indexedCheckout(indexer, profileId, root);
+    execFileSync("git", ["remote", "remove", "origin"], {
+      cwd: path,
+      stdio: "ignore"
+    });
+    const result = await forks.forkCheckout({
+      profileId,
+      repoId,
+      targetOwner: "huntharo",
+      targetOwnerKind: "user",
+      targetName: "dugite",
+      upstream: "desktop/dugite"
+    });
+    expect(result).toMatchObject({ ok: false, error: { code: "no_origin" } });
+  });
+
+  it("says the fork was created when the rewire failed", async () => {
+    // The fork exists on the forge either way. Reporting only "failed" would
+    // leave the user unsure whether a repository was created in their account
+    // — and the retry would then read as a second fork.
+    const { forks, indexer, profileId, root } = checkoutServices({
+      failing: "remote set-url origin"
+    });
+    const { repoId } = await indexedCheckout(indexer, profileId, root);
+    const result = await forks.forkCheckout({
+      profileId,
+      repoId,
+      targetOwner: "huntharo",
+      targetOwnerKind: "user",
+      targetName: "dugite",
+      upstream: "desktop/dugite"
+    });
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error.message).toContain(
+      "Forked to huntharo/dugite"
+    );
+    expect(result.ok === false && result.error.message).toContain(
+      "remotes were not changed"
+    );
+  });
+});

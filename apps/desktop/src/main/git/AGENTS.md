@@ -431,6 +431,42 @@ reason — two instances can host the same slug.
 `apps/desktop/src/main/forge/AGENTS.md` has the whole rule, including why a
 hostname is never evidence of which forge runs on it.
 
+## Forking a checkout in place: add `upstream` first, then re-point `origin`
+
+`ForkService.forkCheckout` forks what a checkout was cloned from and points the
+checkout at the fork. Nothing is cloned and nothing moves on disk; the remote
+rewire (`fork-remotes.ts`) is the whole operation, and **its order is not
+interchangeable with the obvious one.**
+
+`git remote rename origin upstream` rewrites every `branch.<name>.remote` that
+named it. Renaming and then adding a fresh `origin` therefore leaves every
+local branch tracking the ORIGINAL — so the next push goes straight back to the
+repository the user just established they cannot push to, and the feature
+silently does nothing. Adding the upstream remote first and re-pointing
+`origin` in place leaves tracking untouched and correct: those branches already
+track `origin`, and `origin` is now the fork.
+
+Three more things that are easy to undo:
+
+- **A separate `pushurl` is re-pointed too.** `origin`'s fetch URL alone
+  decides nothing about where a push lands. `SshRemoteRecovery` deliberately
+  *preserves* a custom push URL — it is changing how you reach the same
+  repository, where this changes which repository you push to.
+- **An existing remote is never clobbered.** `planUpstreamRemote` reuses a
+  remote that already points at the original, and otherwise takes `upstream`
+  or a suffixed variant. A remote is something the user may have configured
+  deliberately (a mirror, a second fork).
+- **`defaultBranchOnly` is never set on this path**, and the fetches never
+  `--prune`. A partial fork is a clone-size saving, and this clones nothing —
+  what it buys instead is `origin/*` refs for branches the fork does not have,
+  which the next pruning fetch deletes out from under any local branch
+  tracking them.
+
+`pushWasDenied` (git-service.ts) is the other half: it classifies the one push
+failure with a remedy inside PwrGit, and deliberately excludes a protected
+branch, which reads almost identically on GitLab and means the opposite thing
+about access.
+
 ## SSH host approval
 
 `ssh-host-trust.ts` keeps scanned keys in expiring, window-bound proposals.

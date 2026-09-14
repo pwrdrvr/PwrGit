@@ -196,6 +196,31 @@ describe("IdentityService", () => {
     ).toBeUndefined();
   });
 
+  it("stores push access as three states, and NULL is not \"no\"", async () => {
+    // The read-only mark and the offer to fork are drawn from the `false`, so
+    // a row nobody has asked about must come back undefined rather than false.
+    const { db, identities, indexer, profileId } = await fixture(
+      okGh({
+        full_name: "desktop/dugite",
+        name: "dugite",
+        visibility: "public",
+        permissions: { push: false, pull: true }
+      })
+    );
+    const repo = indexer.listRepos(profileId)[0]!;
+
+    const changes = await identities.refresh([repo]);
+    expect(changes[0]?.identity.viewerCanPush).toBe(false);
+    // Through SQLite and back out both read paths, which is what draws.
+    expect(identities.read([repo.id]).get(repo.id)?.viewerCanPush).toBe(false);
+    expect(indexer.listRepos(profileId)[0]?.identity?.viewerCanPush).toBe(false);
+
+    db.prepare("UPDATE repo_identity SET viewer_can_push = NULL").run();
+    expect(
+      identities.read([repo.id]).get(repo.id)?.viewerCanPush
+    ).toBeUndefined();
+  });
+
   it("reports a new mirror as a change, so the row repaints", async () => {
     // `sameIdentity` decides whether the renderer hears about a refresh at
     // all. Adding a GitLab mirror changes nothing else about the repository.
@@ -789,6 +814,17 @@ describe("sameIdentity", () => {
       sameIdentity(base, { ...base, parent: { nameWithOwner: "f/r", url: "" } })
     ).toBe(false);
     expect(sameIdentity(undefined, base)).toBe(false);
+  });
+
+  it("notices push access arriving, and losing it", () => {
+    // Being added to a repository, or removed from one, repaints the row and
+    // takes the fork offer with it.
+    expect(sameIdentity(base, { ...base, viewerCanPush: false })).toBe(false);
+    expect(
+      sameIdentity({ ...base, viewerCanPush: true }, { ...base, viewerCanPush: false })
+    ).toBe(false);
+    // Still not known on both sides is not a change.
+    expect(sameIdentity(base, base)).toBe(true);
   });
 });
 

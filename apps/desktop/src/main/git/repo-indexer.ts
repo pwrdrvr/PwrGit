@@ -78,6 +78,7 @@ type RepoIdentityRow = {
   root_slug: string | null;
   root_url: string | null;
   remote_hosts: string | null;
+  viewer_can_push: number | null;
   fetched_at: string;
 };
 
@@ -118,6 +119,11 @@ export function repoIdentityFromRow(row: RepoIdentityRow): RepoIdentity {
   // remotes rather than claiming there are none.
   const remoteHostnames = parseJsonStringList(row.remote_hosts);
   if (remoteHostnames !== null) identity.remoteHostnames = remoteHostnames;
+  // Same rule, and it matters more here: NULL widened to `false` would put a
+  // read-only mark on every repository nobody has asked the forge about.
+  if (row.viewer_can_push !== null) {
+    identity.viewerCanPush = row.viewer_can_push !== 0;
+  }
   return identity;
 }
 type WorktreeRow = {
@@ -1037,7 +1043,7 @@ export class RepoIndexer {
       .prepare(
         `SELECT i.repo_id, i.host, i.hostname, i.owner, i.name, i.visibility,
                 i.parent_slug, i.parent_url, i.root_slug, i.root_url,
-                i.remote_hosts, i.fetched_at
+                i.remote_hosts, i.viewer_can_push, i.fetched_at
          FROM repo_identity i
          JOIN repos r ON r.id = i.repo_id
          WHERE r.profile_id = ?`

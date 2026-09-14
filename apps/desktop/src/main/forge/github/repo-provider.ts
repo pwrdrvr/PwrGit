@@ -71,6 +71,22 @@ function searchVisibility(row: Record<string, unknown>): RepoVisibility {
   return "unknown";
 }
 
+/**
+ * Whether REST says the signed-in account may push.
+ *
+ * `permissions` is present on an authenticated read of one repository and
+ * absent on an unauthenticated one, which is exactly the difference between
+ * "GitHub said no" and "nobody asked". Absent stays absent: the offer to fork
+ * is built on this boolean, and defaulting it to `false` would offer to fork
+ * every repository read without a token.
+ */
+export function restViewerCanPush(row: Record<string, unknown>): boolean | undefined {
+  const permissions = row["permissions"];
+  if (permissions === null || typeof permissions !== "object") return undefined;
+  const push = (permissions as Record<string, unknown>)["push"];
+  return typeof push === "boolean" ? push : undefined;
+}
+
 /** One row of `gh search repos --json`. Kept apart from `parseGhRestRepo`
  *  rather than made tolerant of both shapes: a parser that accepts either key
  *  for the slug silently returns `[]` when a field is renamed, instead of
@@ -151,6 +167,8 @@ export function parseGhRestRepo(
   if (description !== undefined) repository.description = description;
   const updatedAt = text(row["updated_at"]) ?? text(row["pushed_at"]);
   if (updatedAt !== undefined) repository.updatedAt = updatedAt;
+  const viewerCanPush = restViewerCanPush(row);
+  if (viewerCanPush !== undefined) repository.viewerCanPush = viewerCanPush;
 
   const refOf = (value: unknown): { nameWithOwner: string; url: string } | null => {
     if (value === null || typeof value !== "object") return null;

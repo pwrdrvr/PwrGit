@@ -220,8 +220,8 @@ export class IdentityService {
     const rows = this.db
       .prepare(
         `SELECT repo_id, host, hostname, owner, name, visibility,
-                parent_slug, parent_url, root_slug, root_url, remote_hosts,
-                fetched_at
+                viewer_can_push, parent_slug, parent_url, root_slug, root_url,
+                remote_hosts, fetched_at
          FROM repo_identity WHERE repo_id IN (${placeholders})`
       )
       .all(...repoIds) as {
@@ -231,6 +231,7 @@ export class IdentityService {
       owner: string;
       name: string;
       visibility: string;
+      viewer_can_push: number | null;
       parent_slug: string | null;
       parent_url: string | null;
       root_slug: string | null;
@@ -253,6 +254,12 @@ export class IdentityService {
             row.visibility === "internal"
               ? row.visibility
               : "unknown",
+          // Absent stays absent. A row written before this column existed
+          // reads NULL and must say nothing until its next refresh fills it
+          // in — the same rule `remote_hosts` follows.
+          ...(row.viewer_can_push === null
+            ? {}
+            : { viewerCanPush: row.viewer_can_push !== 0 }),
           ...(row.parent_slug === null
             ? {}
             : {
@@ -408,6 +415,9 @@ export class IdentityService {
         name: repository.name,
         nameWithOwner: repository.nameWithOwner,
         visibility: repository.visibility,
+        ...(repository.viewerCanPush === undefined
+          ? {}
+          : { viewerCanPush: repository.viewerCanPush }),
         ...(repository.parent === undefined
           ? {}
           : { parent: repository.parent }),
@@ -510,15 +520,16 @@ export class IdentityService {
     this.db
       .prepare(
         `INSERT INTO repo_identity (repo_id, host, hostname, owner, name,
-           visibility, parent_slug, parent_url, root_slug, root_url,
-           remote_hosts, fetched_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+           visibility, viewer_can_push, parent_slug, parent_url, root_slug,
+           root_url, remote_hosts, fetched_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
          ON CONFLICT(repo_id) DO UPDATE SET
            host = excluded.host,
            hostname = excluded.hostname,
            owner = excluded.owner,
            name = excluded.name,
            visibility = excluded.visibility,
+           viewer_can_push = excluded.viewer_can_push,
            parent_slug = excluded.parent_slug,
            parent_url = excluded.parent_url,
            root_slug = excluded.root_slug,
@@ -533,6 +544,14 @@ export class IdentityService {
         identity.owner,
         identity.name,
         identity.visibility,
+        // NULL, not 0, when the forge did not answer: `viewer_can_push` is
+        // read back as three states and the mark drawn from it only speaks
+        // when the answer was real.
+        identity.viewerCanPush === undefined
+          ? null
+          : identity.viewerCanPush
+            ? 1
+            : 0,
         identity.parent?.nameWithOwner ?? null,
         identity.parent?.url ?? null,
         identity.root?.nameWithOwner ?? null,
@@ -556,6 +575,9 @@ export function sameIdentity(
     a.hostname === b.hostname &&
     a.nameWithOwner === b.nameWithOwner &&
     a.visibility === b.visibility &&
+    // Compared, so losing or gaining push access repaints the row. `undefined
+    // === undefined` is the "still not known" case and is correctly no change.
+    a.viewerCanPush === b.viewerCanPush &&
     a.parent?.nameWithOwner === b.parent?.nameWithOwner &&
     a.root?.nameWithOwner === b.root?.nameWithOwner &&
     sameHostnames(a.remoteHostnames, b.remoteHostnames)

@@ -83,6 +83,49 @@ describe("parseGitLabProject", () => {
   });
 });
 
+describe("push access", () => {
+  it("takes the higher of the project and group memberships", () => {
+    // GitLab enforces the maximum of the two, so a Developer through a group
+    // can push to a project they are not a direct member of.
+    expect(
+      parseGitLabProject({
+        ...PROJECT,
+        permissions: {
+          project_access: null,
+          group_access: { access_level: 30 }
+        }
+      })?.viewerCanPush
+    ).toBe(true);
+  });
+
+  it("reads a Reporter as unable to push", () => {
+    expect(
+      parseGitLabProject({
+        ...PROJECT,
+        permissions: {
+          project_access: { access_level: 20 },
+          group_access: null
+        }
+      })?.viewerCanPush
+    ).toBe(false);
+  });
+
+  it("treats no membership at all as an answer, not a gap", () => {
+    // An authenticated read of a project you are not a member of is exactly
+    // how "you cannot push here" is spelled.
+    expect(
+      parseGitLabProject({
+        ...PROJECT,
+        permissions: { project_access: null, group_access: null }
+      })?.viewerCanPush
+    ).toBe(false);
+  });
+
+  it("stays silent when GitLab reported no permissions object", () => {
+    expect(parseGitLabProject(PROJECT)?.viewerCanPush).toBeUndefined();
+  });
+});
+
 describe("parseGitLabProjects", () => {
   it("reads a list and drops unusable rows", () => {
     expect(

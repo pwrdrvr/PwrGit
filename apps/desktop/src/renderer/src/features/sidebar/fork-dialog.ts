@@ -22,6 +22,7 @@ export const FORK_PROGRESS_LABELS: Record<ForkProgress["phase"], string> = {
   resolving: "Resolving deltas",
   checking_out: "Checking out files",
   adding_upstream: "Adding the upstream remote",
+  repointing_origin: "Pointing origin at your fork",
   indexing: "Adding repository to PwrGit"
 };
 

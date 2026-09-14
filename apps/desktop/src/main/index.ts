@@ -654,7 +654,12 @@ if (!gotSingleInstanceLock) {
       profiles,
       forges,
       cloneService,
-      forgeStatus
+      forgeStatus,
+      // Only the checkout-rewiring path reads it, and only to classify the
+      // remotes a checkout already has. Same map, same reason as
+      // `IdentityService`: a hostname is not evidence of which forge runs on
+      // it, and without it a self-managed instance reads as `other`.
+      () => forgeHosts.overrides()
     );
     const worktreeOperations = new WorktreeOperationQueue();
     const stateService = new WorktreeStateService(
@@ -887,7 +892,7 @@ if (!gotSingleInstanceLock) {
     registerSshHostTrustHandlers(bus, new SshHostTrustService({
       allowed: (kind, hostname) => forgeHosts.kindFor(hostname).kind === kind && forgeHosts.isEnabled(hostname).enabled
     }));
-    registerForkHandlers(bus, forkService, identityService, indexer);
+    registerForkHandlers(bus, forkService, identityService, indexer, refresher);
     registerWorktreeHandlers(bus, stateService, db, refresher, execGit, (id) => {
       activeWorktreeId = id;
     });

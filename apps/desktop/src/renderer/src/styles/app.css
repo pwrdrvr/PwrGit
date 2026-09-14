@@ -2693,6 +2693,14 @@ textarea,
   border-color: color-mix(in srgb, var(--info-text) 34%, transparent);
   color: var(--info-text);
 }
+/* The one chip about YOU rather than about the repository: whether this
+   account may write there. Shares the glyph gap of the other two-part chips. */
+.clone-chip--nopush {
+  gap: 4px;
+  letter-spacing: 0;
+  border-color: color-mix(in srgb, var(--status-warning) 40%, transparent);
+  color: var(--status-warning);
+}
 /* Dashed, because "we asked and could not find out" is not the same shape of
    fact as the other three — it is an absence, and it reads as one. */
 .clone-chip--unknown {
@@ -2740,6 +2748,14 @@ textarea,
 }
 .repo-mark--unknown {
   color: color-mix(in srgb, var(--text-subtle) 62%, transparent);
+}
+/* Drawn only where the forge said no (RepoIdentityMarks.tsx), so it is a rare
+   mark and can afford to read as a warning rather than as more furniture.
+   Muted rather than danger: not being able to push to somebody else's
+   repository is the normal state of most repositories you clone. */
+.repo-mark--nopush {
+  color: var(--status-warning);
+  opacity: 0.72;
 }
 
 /* ---- Forge picker, shared by the clone and fork dialogs ---- */
@@ -2974,6 +2990,81 @@ textarea,
 .fork-upstream__row small {
   color: var(--text-muted);
   font: 500 9.5px/1 var(--font-sans);
+}
+
+/* The remote layout the rewire will produce. A statement of the outcome, not a
+   progress log — so it is drawn only while every part of it has been answered
+   about the choices currently on screen (see ForkCheckoutDialog). */
+.fork-remote-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fork-remote-plan__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+/* A remote that already points where it should is part of the outcome and not
+   part of the change, and says so by not taking the accent. */
+.fork-remote-plan__row.is-unchanged {
+  opacity: 0.72;
+}
+.fork-remote-plan__name {
+  flex: 0 0 auto;
+  min-width: 58px;
+  color: var(--accent);
+  font: 600 10.5px/1 var(--font-mono);
+}
+.fork-remote-plan__row.is-unchanged .fork-remote-plan__name {
+  color: var(--text-muted);
+}
+.fork-remote-plan__copy {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fork-remote-plan__copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font: 600 11px/1.15 var(--font-mono);
+}
+.fork-remote-plan__copy small {
+  color: var(--text-muted);
+  font: 500 9.5px/1.2 var(--font-sans);
+}
+/* The URL is the thing a careful user checks, so it is present and never
+   wrapped; it ellipsizes and carries the whole string as a title. */
+.fork-remote-plan__url {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-subtle);
+  font: 500 9.5px/1 var(--font-mono);
+}
+/* What the forge said when it refused the push that raised this dialog. Git's
+   own words, quoted rather than paraphrased. */
+.fork-checkout-reason {
+  margin-bottom: 10px;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--status-warning) 34%, transparent);
+  border-radius: 8px;
+  background: var(--warn-soft);
+  color: var(--status-warning);
+  font: 500 10.5px/1.35 var(--font-mono);
 }
 
 .clone-note--error {
@@ -5267,7 +5358,10 @@ textarea,
    carries its signal, whereas ↓behind survives here as the Pull button's
    `.is-behind` accent. */
 @container (max-width: 680px) {
-  .wt-header__state .sync-chip:not(.sync-chip--progress):not(.sync-chip--drift) {
+  .wt-header__state
+    .sync-chip:not(.sync-chip--progress):not(.sync-chip--drift):not(
+      .sync-chip--readonly
+    ) {
     display: none;
   }
 }
@@ -5510,6 +5604,24 @@ textarea,
 /* Default-branch drift ("main +4"). Context, not a sync state — no button acts
    on it — so it sits a rung below its neighbour: outline instead of a fill,
    subtle instead of warn. Warn stays reserved for ↓behind, which Pull clears. */
+/* "read-only": this account may not push here. A button, because unlike every
+   other chip in this row it has somewhere to go — the fork prompt. It rides
+   with the drift chip in the degrade ladder above rather than with the sync
+   chip, for the same reason: nothing else in the header carries the signal. */
+.sync-chip--readonly {
+  border: 1px solid color-mix(in srgb, var(--status-warning) 40%, transparent);
+  background: transparent;
+  color: var(--status-warning);
+  padding: 0 9px;
+  cursor: pointer;
+}
+.sync-chip--readonly:hover {
+  background: var(--warn-soft);
+}
+.sync-chip--readonly:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
 .sync-chip--drift {
   border: 1px solid var(--border-subtle);
   color: var(--text-subtle);
@@ -5575,6 +5687,7 @@ textarea,
    still carries a broken setup at any width. */
 @container (max-width: 540px) {
   .wt-header__state .sync-chip--drift,
+  .wt-header__state .sync-chip--readonly,
   .wt-header__state .lfs-chip {
     display: none;
   }
