@@ -10,6 +10,10 @@ import {
 import type { LogEntry } from "@pwrgit/shared";
 import { AuxiliaryTitleBar } from "../chrome/AuxiliaryTitleBar";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 
 // Logs window — ported from PwrAgnt's LogsWindow and adapted to PwrGit's
 // command bus. Everything is buffered main-side; level filtering is purely a
@@ -48,6 +52,7 @@ type LogLinePartTone =
   | "scope";
 
 export function LogsWindow() {
+  const tip = useViewportTooltip();
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const activeMatchRef = useRef<HTMLElement | null>(null);
   const followingRef = useRef(true);
@@ -293,7 +298,10 @@ export function LogsWindow() {
         {logFilePath !== null && (
           <div className="log-window__file" aria-label="Log file path">
             <span className="log-window__file-label">File</span>
-            <code className="log-window__file-path" title={logFilePath}>
+            <code
+              className="log-window__file-path"
+              {...hoverTooltip(tip, logFilePath)}
+            >
               {logFilePath}
             </code>
             <button
@@ -347,6 +355,7 @@ export function LogsWindow() {
           )}
         </div>
       </main>
+      {tip.tooltipNode}
     </div>
   );
 }

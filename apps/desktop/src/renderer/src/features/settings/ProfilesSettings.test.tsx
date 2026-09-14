@@ -105,7 +105,11 @@ describe("ProfilesSettings deletion", () => {
 
     const remove = button(row("Personal"), "Delete…");
     expect(remove.disabled).toBe(true);
-    expect(remove.title).toBe("PwrGit must keep at least one profile");
+    // In the NAME: a disabled button announces its name, and AT reads that
+    // over any hover card.
+    expect(remove.getAttribute("aria-label")).toBe(
+      "Delete… Personal — unavailable, PwrGit must keep at least one profile"
+    );
   });
 
   it("names removed and retained data, then requires an exact profile name", async () => {

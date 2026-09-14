@@ -4,6 +4,10 @@ import { dispatch } from "../../lib/pwrgit";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import { guardedSwitchBranch } from "../shell/branchSwitch";
 import { shortWhen } from "./graph-view";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 
 /** The name to hand `git switch` — a remote ref drops its remote prefix so the
  *  DWIM creates/uses the local tracking branch. */
@@ -40,6 +44,7 @@ export function BranchSwitcher({
   onHeldElsewhere: (branch: string) => void;
   onClose: () => void;
 }) {
+  const tip = useViewportTooltip();
   const now = useRelativeClock();
   const [branches, setBranches] = useState<BranchRef[] | null>(null);
   const [query, setQuery] = useState("");
@@ -176,11 +181,12 @@ export function BranchSwitcher({
               />
               <span
                 className="branch-item__name"
-                title={
+                {...hoverTooltip(
+                  tip,
                   !b.isRemote && b.upstream
                     ? `${b.name} · tracks ${b.upstream}`
                     : b.name
-                }
+                )}
               >
                 {b.name}
                 {!b.isRemote && b.upstream && (
@@ -222,6 +228,7 @@ export function BranchSwitcher({
           </div>
         )}
       </div>
+      {tip.tooltipNode}
     </div>
   );
 }

@@ -48,20 +48,84 @@ of where it entered the trigger, **or** slowed below
 does not hold still — a 10px tremor reads as 0.5 px/ms and would never open a
 card. A sweep satisfies neither, so the extra path costs no suppression.
 
-## A 12px mark in a list gets `useViewportTooltip`, not `title`
+## A tooltip is `hoverTooltip`, never a native `title`
 
-`ForgeChip` carries a native `title` and shows one; the `.repo-mark` glyphs
-beside it carried one and did not, so the read-only mark and the
-public/private/internal mark were both mute. The cause was never pinned down —
-nothing sets `pointer-events` on either, and the only structural difference is
-that the chip has padding and a border while a mark is a bare 12×12 box around
-an SVG with `fill="none"`.
+There are no `title` tooltips left in `renderer/src`. Every one of them —
+around 130 across the sidebar, graph, diff, rail, chrome and settings — now
+goes through `hoverTooltip(tip, content)` from `useViewportTooltip.tsx`:
 
-Don't chase it. A bare `title` cannot satisfy the Escape rule below anyway, and
-the hook is what every other hover surface in the sidebar already uses —
-including `RepoRow`'s own refresh button, three sections down the same row.
-Reach for it for any new mark, and let the row's `aria-describedby` (built from
-`identityDescription`) carry the words for a screen reader.
+```tsx
+const tip = useViewportTooltip();
+<button {...hoverTooltip(tip, "Fetch all remotes")}>…</button>
+{tip.tooltipNode}
+```
+
+One hook and one `tooltipNode` per component, however many triggers it has.
+Four separate reasons, and the first is the one that matters most:
+
+- **`title` is pointer-only.** It never appears on keyboard focus, so every
+  keyboard user was being told nothing at all. `hoverTooltip` wires focus and
+  blur alongside enter and leave, which is why it exists as a helper rather
+  than four hand-written props — a call site cannot quietly reintroduce the
+  gap by remembering only `onMouseEnter`.
+- **`title` cannot be dismissed** (SC 1.4.13); the hook handles Escape.
+- **`title` is not a reliable accessible name.** On a `<span>` it is advisory,
+  and on a control with text content the content wins — `.diff-gutter--blame`
+  announced as its own line number until it was given an `aria-label`.
+- **On some elements it never rendered at all.** The `.repo-mark` glyphs are
+  the recorded case: a bare 12×12 box around an SVG with `fill="none"` showed
+  nothing, while `ForgeChip` beside it — same list, same row — showed its
+  title fine. The cause was never pinned down. Don't chase it.
+
+### A disabled control still gets a card — say it in both places
+
+Chromium fires `mouseover`, `mouseenter` and `mousemove` on a disabled
+`<button>`; only the click-shaped events are suppressed. **Verified by probe,
+not assumed** — the opposite is the intuitive answer and it is wrong, so a
+disabled control keeps whatever sentence explains why it is disabled.
+
+**Repeat the visible label verbatim.** `aria-label` *replaces* a button's
+contents for name computation, it does not add to them — so
+`aria-label="Clone — unavailable, …"` on a button reading `Clone…` renames it,
+and the name no longer contains its own visible label. That is SC 2.5.3, it is
+what voice control matches on, and it is what every `getByRole("button", {
+name })` in the e2e suite matches on: four specs went red on exactly this,
+because the reason had been written in place of the label rather than after it.
+The shape is **`<visible label, character for character> — unavailable,
+<reason>`**, trailing ellipsis included.
+
+It also goes in `aria-label`, and that half is not optional: a disabled button
+still announces its name, and AT reads the name over any card. So
+`.clone-repo` with no repo folder is named "Clone — unavailable, add a repo
+folder before cloning" *and* carries the plain sentence on its card.
+
+### What is not a tooltip
+
+`grep 'title='` over this renderer still hits, and none of them should change:
+a `title` prop on a component (`SettingsSection`, `SettingsPanelHead`,
+`ReadError`, `GraphColumn`, `AuxiliaryTitleBar`) renders as a heading or an
+`aria-label`; `<svg><title>` and `<iframe title>` are not tooltips either.
+
+Two `title`s were deleted rather than converted, because the string was
+already fully on screen: `.ssh-trust__link` (`overflow-wrap: anywhere`) and
+`.refs-plan__notice small` (wraps). A card that repeats the line under the
+pointer is noise. Check for `text-overflow: ellipsis` before assuming a
+duplicated string is overflow recovery — most of them are.
+
+### Testing it
+
+The sentence only exists while something is hovered, so assert the **rendered
+card** or the **accessible name** — never restore a `title` to make a spec
+pass. In Playwright, `await el.hover()` then
+`expect(window.getByRole("tooltip"))`. In vitest, dispatch a bubbling
+`mouseover` inside `act` and read `[role="tooltip"]` from `document`
+(`WorktreeRow.test.tsx`, `ForgeChip.test.tsx`). Two cards can be open at once
+when each row owns its own hook, so a test that hovers several rows in turn
+has to dispatch `mouseout` between them — a real pointer always does.
+
+A static-markup test (`renderToStaticMarkup`) cannot see a card at all, and
+`expect(markup).not.toContain("Drag to reorder")` now passes for a *draggable*
+row too. Assertions of that shape are worse than useless after this change.
 
 **Use `hoverTooltip(tip, content)`, not four hand-written handlers.** It is
 exported beside the hook and returns
@@ -100,6 +164,14 @@ and focus was added when a second trigger (`WorktreeHeader`, after `GraphRow`)
 started handing Tab into a card. A keyboard user sets no pointer flag, so
 without it an unrelated scroll — the graph adjusting `scrollTop` as commits
 stream in — took the card away with their focus still inside it.
+
+### Nested triggers restore, they don't just hide
+
+A row carries a card and the path inside it carries another. React fires no
+`mouseenter` on an ancestor the pointer never left, so leaving the inner one
+must put the outer one's card back — `hoverTooltip` leaves through `hideFrom`,
+not `hide`, for exactly this. A native `title` did it for free; a plain `hide()`
+leaves the pointer on a trigger showing nothing.
 
 ## Click-opened overlays go through `useDismissable` / `useModal`
 
@@ -153,6 +225,31 @@ cards — and both listen on `window`, so a hover card showing over an open menu
 had one Escape dismiss both. Each now returns early on `defaultPrevented`.
 A third keydown handler on `window` owes the same on both counts: claim the key
 when you spend it, and leave it alone when someone else already has.
+
+### A hover card claims Escape only if the keyboard summoned it
+
+`useViewportTooltip` dismisses on Escape always; it calls `preventDefault` only
+when the card is where the user actually **is** — focus inside the card, or a
+trigger matching `:focus-visible`. A card the pointer opened does not claim,
+because focus is elsewhere (in the diff pane, in a dialog) and that is the
+surface the user meant. Swallowing the key there is unrecoverable without
+moving the mouse, and moving the mouse is exactly what SC 1.4.13 says a user
+must not have to do.
+
+Claiming unconditionally was the original rule and it survived only because
+few things carried cards. Converting the renderer off native `title` put a card
+on nearly every control in `DiffPane` and `FileInsightsPane`, at which point the
+pointer was **always** resting on one, and "Escape closes the diff pane" and
+"Escape leaves file details" both went red in `e2e/diff.spec.ts`. The bug was
+never in those panes; it was a hover card answering for a user who was not
+looking at it.
+
+`:focus-visible`, never `:focus` — Chromium focuses a button on click without
+making it focus-visible, so the card left under the pointer by a click does not
+pass as a keyboard one. The same browser fact `WHERE_THE_USER_IS` leans on in
+`features/remote`. **jsdom answers `false` to `:focus-visible` for everything**,
+so a unit test reaches the claiming branch by putting focus inside the card, not
+by focusing the trigger.
 
 Deferring alone is not enough, because it settles ties by **listener order**,
 and `useDismissable`'s listener is removed and re-added each time the overlay

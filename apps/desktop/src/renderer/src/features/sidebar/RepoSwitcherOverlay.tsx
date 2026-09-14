@@ -9,6 +9,10 @@ import { createAsyncFill } from "../../lib/asyncFill";
 import { currentPlatform, shortcutLabel } from "../../lib/platform";
 import { dispatch } from "../../lib/pwrgit";
 import { useRelativeClock } from "../../lib/useRelativeClock";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 import { shortWhen } from "../graph/graph-view";
 import { commitHashQuery, searchCommits } from "./commit-search";
 import { PrChip } from "./PrChip";
@@ -322,6 +326,12 @@ export function RepoSwitcherOverlay({
     else if (item?.kind === "repo") onPick(item.hit);
   };
 
+  /** One card for the whole result list — see `hoverTooltip`. The palette
+   *  owns Escape and claims it from a React handler, which runs ahead of this
+   *  hook's window listener, so dismissing the palette still beats dismissing
+   *  a card that happens to be open over it. */
+  const tip = useViewportTooltip();
+
   const selectItem = (index: number): void => {
     const item = items[index];
     setSelectedItemKey(item === undefined ? null : paletteItemKey(item));
@@ -462,6 +472,12 @@ export function RepoSwitcherOverlay({
           {items.map((item, i) => {
             if (item.kind === "commit") {
               const commit = item.commit;
+              const rowTip = hoverTooltip(
+                tip,
+                commitContext === null
+                  ? commit.hash
+                  : `${commitContext.repoName} · ${commitContext.branch} · ${commit.hash}`
+              );
               return (
                 <div
                   key={`commit:${commit.hash}`}
@@ -470,12 +486,13 @@ export function RepoSwitcherOverlay({
                   aria-selected={i === sel}
                   tabIndex={-1}
                   className={`overlay-result${i === sel ? " is-selected" : ""}`}
-                  title={
-                    commitContext === null
-                      ? commit.hash
-                      : `${commitContext.repoName} · ${commitContext.branch} · ${commit.hash}`
-                  }
-                  onMouseEnter={() => selectItem(i)}
+                  {...rowTip}
+                  // The row already moves the selection on enter, so the card's
+                  // own handler is called rather than spread over it.
+                  onMouseEnter={(event) => {
+                    selectItem(i);
+                    rowTip.onMouseEnter(event);
+                  }}
                   onClick={() => onPickCommit(commit)}
                 >
                   <CommitIcon />
@@ -492,6 +509,10 @@ export function RepoSwitcherOverlay({
             }
             if (item.kind === "file") {
               const file = item.hit;
+              const rowTip = hoverTooltip(
+                tip,
+                `${file.path} — open its history and blame`
+              );
               return (
                 <div
                   key={`file:${file.path}`}
@@ -500,8 +521,11 @@ export function RepoSwitcherOverlay({
                   aria-selected={i === sel}
                   tabIndex={-1}
                   className={`overlay-result${i === sel ? " is-selected" : ""}`}
-                  title={`${file.path} — open its history and blame`}
-                  onMouseEnter={() => selectItem(i)}
+                  {...rowTip}
+                  onMouseEnter={(event) => {
+                    selectItem(i);
+                    rowTip.onMouseEnter(event);
+                  }}
                   onClick={() => onPickFile(file.path)}
                 >
                   <FileIcon />
@@ -582,7 +606,10 @@ export function RepoSwitcherOverlay({
                         hide the very segment that explains the row. */}
                     <span
                       className="overlay-result__folder"
-                      title={`${r.name}\nWorktree folder — ${r.path}`}
+                      {...hoverTooltip(
+                        tip,
+                        `${r.name}\nWorktree folder — ${r.path}`
+                      )}
                     >
                       <svg
                         width="11"
@@ -606,11 +633,12 @@ export function RepoSwitcherOverlay({
                 <button
                   type="button"
                   className={`pin${r.pinned ? " is-pinned" : ""}`}
-                  title={
+                  {...hoverTooltip(
+                    tip,
                     r.pinned
                       ? `Unpin ${r.kind === "worktree" ? "worktree" : "repo"}`
                       : `Pin ${r.kind === "worktree" ? "worktree" : "repo"}`
-                  }
+                  )}
                   aria-label={
                     r.pinned
                       ? `Unpin ${r.kind === "worktree" ? "worktree" : "repo"}`
@@ -649,7 +677,7 @@ export function RepoSwitcherOverlay({
                     {s.lastActivityAt !== null && (
                       <span
                         className="hit-status__age"
-                        title={`Last commit ${s.lastActivityAt}`}
+                        {...hoverTooltip(tip, `Last commit ${s.lastActivityAt}`)}
                       >
                         {shortWhen(s.lastActivityAt, now)}
                       </span>
@@ -692,6 +720,7 @@ export function RepoSwitcherOverlay({
           </span>
         </div>
       </div>
+      {tip.tooltipNode}
     </div>
   );
 }

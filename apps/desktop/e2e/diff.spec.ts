@@ -299,7 +299,9 @@ test("file history follows a rename and opens each commit's change in place", as
   // reading line 2, blame line 2" path: blame opens with that line marked.
   await fileRow.click();
   await expect(window.locator(".diff-pane")).toBeVisible();
-  await window.locator('[title="Blame from line 2"]').click();
+  await window
+    .getByRole("button", { name: "Blame from line 2", exact: true })
+    .click();
   const blame = window.getByTestId("file-blame");
   await expect(blame).toBeVisible({ timeout: 20_000 });
   await expect(blame.locator(".file-blame__row.is-target")).toContainText(

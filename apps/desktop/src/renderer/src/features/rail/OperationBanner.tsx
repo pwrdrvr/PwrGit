@@ -3,6 +3,10 @@ import type { GitOperation, OperationState } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { confirmDialog } from "../shell/dialogs";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 
 /**
  * Tells the user what Git is in the middle of, and offers the two ways out
@@ -28,6 +32,7 @@ export function OperationBanner({
   state: OperationState;
   onRefresh: () => void;
 }) {
+  const tip = useViewportTooltip();
   const [busy, setBusy] = useState<"continue" | "abort" | null>(null);
   const { operation, conflictCount } = state;
   if (operation === null && conflictCount === 0) return null;
@@ -147,11 +152,19 @@ export function OperationBanner({
             className="op-banner__continue"
             onClick={() => void runContinue()}
             disabled={busy !== null || blocked}
-            title={
+            /* The block is the NAME as well as the card: a disabled button
+               still announces its name, and AT reads that over a card. */
+            aria-label={
+              blocked
+                ? `Continue ${noun(operation)}… — unavailable, stage all ${conflictsLabel(conflictCount)} first`
+                : undefined
+            }
+            {...hoverTooltip(
+              tip,
               blocked
                 ? `Stage all ${conflictsLabel(conflictCount)} before continuing.`
                 : undefined
-            }
+            )}
           >
             {busy === "continue"
               ? "Continuing…"
@@ -159,6 +172,7 @@ export function OperationBanner({
           </button>
         </div>
       )}
+      {tip.tooltipNode}
     </section>
   );
 }

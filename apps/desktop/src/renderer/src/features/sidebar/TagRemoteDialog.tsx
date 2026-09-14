@@ -171,7 +171,10 @@ export function TagRemoteDialog({
                 {shortObject(plan.remoteObjectId)} · target{" "}
                 {shortObject(plan.localTargetId ?? plan.remoteTargetId)}
               </small>
-              <small title={plan.pushUrl}>Push endpoint {plan.pushUrl}</small>
+              {/* No hover card: `.refs-plan__notice small` wraps rather than
+                  ellipsising, so the endpoint is already on screen in full and
+                  a tooltip would only repeat the line under the pointer. */}
+              <small>Push endpoint {plan.pushUrl}</small>
             </div>
             <div className="refs-plan__hint">
               {plan.status === "create"

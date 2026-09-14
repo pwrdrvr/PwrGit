@@ -81,6 +81,12 @@ async function chooseCloneSource(dialog: Locator, source: string) {
   await row.click();
 }
 
+/** A filesystem path in a locator's name regex — Windows separators and the
+ *  dots in a repo slug are both regex metacharacters. */
+function escapeForRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 async function chooseDestination(
   dialog: Locator,
   destination: string,
@@ -90,9 +96,15 @@ async function chooseDestination(
     kind === "clone" ? "#clone-destination" : "#fork-destination"
   );
   await expect(input).toBeEnabled();
-  // The row itself owns the title; using an attribute locator avoids path
-  // labels whose root basename can be identical on different CI machines.
-  const titled = dialog.getByTitle(destination, { exact: true });
+  // By the row's accessible NAME, which is its absolute path followed by the
+  // "recent" / "N repos" meta. The path is there rather than in a `title`
+  // because the visible label is a `root/relative/` string whose basename can
+  // be identical on two registered roots — and on different CI machines. The
+  // regex anchors the path at the start so a NESTED destination under the same
+  // prefix cannot also match.
+  const titled = dialog.getByRole("option", {
+    name: new RegExp(`^${escapeForRegExp(destination)} — `)
+  });
   await expect(titled).toBeVisible();
   await titled.click();
 }
@@ -151,7 +163,9 @@ test("clone uses the visibly selected default destination without a click", asyn
   const dialog = window.getByRole("dialog", { name: "Clone a repository" });
   await chooseCloneSource(dialog, source);
 
-  const destination = dialog.getByTitle(sandbox.reposDir, { exact: true });
+  const destination = dialog.getByRole("option", {
+    name: new RegExp(`^${escapeForRegExp(sandbox.reposDir)} — `)
+  });
   await expect(destination).toHaveAttribute("aria-selected", "true");
   await expect(dialog.locator(".clone-destination-choice")).toHaveText(
     `Will create ${checkout}`
@@ -244,7 +258,7 @@ for (const host of ["github", "gitlab"] as const) {
     // what a screen reader gets and what this asserts.
     await expect(
       repoBlock(window, name).getByRole("img", {
-        name: new RegExp(`^Fork of ${sourceSlug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`)
+        name: new RegExp(`^Fork of ${escapeForRegExp(sourceSlug)}`)
       })
     ).toBeVisible();
     // The visibility control names the state it is about as well as the action

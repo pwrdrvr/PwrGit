@@ -54,6 +54,21 @@ async function render(
 
 const chip = (): HTMLElement | null => container.querySelector(".lfs-chip");
 
+/**
+ * Park the pointer on one element and read the card it opens.
+ *
+ * These sentences were native `title` attributes, readable straight off the
+ * element; they are `useViewportTooltip` cards now (see `lib/AGENTS.md`), so
+ * they exist only while something is hovered. React turns a bubbling
+ * `mouseover` into `onMouseEnter`.
+ */
+const hoverCard = async (el: Element | null): Promise<string> => {
+  await act(async () => {
+    el?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+  });
+  return document.querySelector('[role="tooltip"]')?.textContent ?? "";
+};
+
 beforeEach(() => {
   container = document.createElement("div");
   document.body.append(container);
@@ -83,10 +98,9 @@ describe("GitLfsChip", () => {
 
     const ready = chip();
     expect(ready?.classList.contains("lfs-chip--ok")).toBe(true);
-    expect(ready?.getAttribute("title")).toContain(
-      "git-lfs/3.7.1 is available"
-    );
-    // The pointer-only title is mirrored for the accessibility tree.
+    expect(await hoverCard(ready)).toContain("git-lfs/3.7.1 is available");
+    // The card is pointer- and focus-only; the same sentence is mirrored for
+    // the accessibility tree.
     expect(ready?.querySelector(".a11y-sr-only")?.textContent).toContain(
       "git-lfs/3.7.1 is available"
     );
@@ -119,9 +133,7 @@ describe("GitLfsChip", () => {
     const broken = chip();
     expect(broken?.tagName).toBe("BUTTON");
     expect(broken?.classList.contains("lfs-chip--broken")).toBe(true);
-    expect(broken?.getAttribute("title")).toContain(
-      "PwrGit cannot run Git LFS"
-    );
+    expect(await hoverCard(broken)).toContain("PwrGit cannot run Git LFS");
     expect(toast.showErrorToast).toHaveBeenCalledExactlyOnceWith({
       key: KEY,
       sticky: true,

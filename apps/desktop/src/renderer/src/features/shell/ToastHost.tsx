@@ -3,6 +3,10 @@ import { AppUpdateToast } from "../update/AppUpdateToast";
 import { RemoteActivityToast } from "../remote/RemoteActivityToast";
 import { dispatch } from "../../lib/pwrgit";
 import { dismissToast, subscribeToasts, type Toast } from "../../lib/toast";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 
 const AUTO_DISMISS_MS = 9_000;
 
@@ -51,6 +55,7 @@ export function ToastHost({
 }
 
 function ToastCard({ toast }: { toast: Toast }) {
+  const tip = useViewportTooltip();
   const [paused, setPaused] = useState(false);
 
   useEffect(() => {
@@ -87,7 +92,7 @@ function ToastCard({ toast }: { toast: Toast }) {
           <button
             className="app-toast__button"
             type="button"
-            title="Open the Logs window"
+            {...hoverTooltip(tip, "Open the Logs window")}
             onClick={() => void dispatch("logs:openWindow", undefined)}
           >
             Logs
@@ -98,7 +103,7 @@ function ToastCard({ toast }: { toast: Toast }) {
             className="app-toast__button"
             type="button"
             aria-label={toast.copyLabel ?? "Copy error"}
-            title={toast.copyLabel ?? "Copy error"}
+            {...hoverTooltip(tip, toast.copyLabel ?? "Copy error")}
             onClick={() => {
               void navigator.clipboard.writeText(
                 toast.copyText ?? [toast.title, toast.message, toast.detail]
@@ -114,7 +119,7 @@ function ToastCard({ toast }: { toast: Toast }) {
           className="app-toast__button"
           type="button"
           aria-label="Dismiss"
-          title="Dismiss"
+          {...hoverTooltip(tip, "Dismiss")}
           onClick={() => dismissToast(toast.id)}
         >
           ✕
@@ -131,6 +136,7 @@ function ToastCard({ toast }: { toast: Toast }) {
           data-paused={paused ? "true" : undefined}
         />
       )}
+      {tip.tooltipNode}
     </aside>
   );
 }

@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import type { RemoteActivity } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
+import {
   formatElapsed,
   remoteActivityMeter,
   remoteActivityReport,
@@ -28,6 +32,7 @@ export function RemoteActivityCard({
   /** Toast placement: tighter, and without the repeated Git output block. */
   compact?: boolean;
 }) {
+  const tip = useViewportTooltip();
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef<number | undefined>(undefined);
   useEffect(
@@ -125,7 +130,7 @@ export function RemoteActivityCard({
         <button
           className="remote-activity__button"
           type="button"
-          title="Open the Logs window"
+          {...hoverTooltip(tip, "Open the Logs window")}
           onClick={() => void dispatch("logs:openWindow", undefined)}
         >
           Logs
@@ -133,12 +138,13 @@ export function RemoteActivityCard({
         <button
           className="remote-activity__button"
           type="button"
-          title="Copy this status and the full Git output"
+          {...hoverTooltip(tip, "Copy this status and the full Git output")}
           onClick={() => void copyReport()}
         >
           {copied ? "Copied" : "Copy"}
         </button>
       </div>
+      {tip.tooltipNode}
     </div>
   );
 }

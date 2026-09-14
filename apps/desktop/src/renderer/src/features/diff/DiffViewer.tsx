@@ -23,6 +23,10 @@ import {
 } from "./lightbox-sequence";
 import type { SideSeed, SideStates } from "./use-image-revisions";
 import { type DiffFile, parseUnifiedDiff } from "./parse-diff";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 
 const STATUS_LABEL: Record<DiffFile["status"], string> = {
   added: "added",
@@ -256,6 +260,7 @@ function DiffFileView({
   onBlameFrom?: (path: string, line: number) => void;
   onOpenImage?: (item: SideKey, states: SideStates) => void;
 }) {
+  const tip = useViewportTooltip();
   const name =
     file.status === "renamed" && file.oldPath !== undefined
       ? `${file.oldPath} → ${file.path}`
@@ -410,7 +415,7 @@ function DiffFileView({
         <span className={`diff-file__status diff-file__status--${file.status}`}>
           {STATUS_LABEL[file.status]}
         </span>
-        <span className="diff-file__path" title={file.path}>
+        <span className="diff-file__path" {...hoverTooltip(tip, file.path)}>
           {name}
         </span>
         <span style={{ flex: 1 }} />
@@ -420,7 +425,7 @@ function DiffFileView({
             className="diff-file__menu"
             onClick={onMenu}
             aria-label={`Actions for ${file.path}`}
-            title="File actions"
+            {...hoverTooltip(tip, "File actions")}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <circle cx="12" cy="5" r="1.6" />
@@ -460,6 +465,7 @@ function DiffFileView({
           />
         ))
       )}
+      {tip.tooltipNode}
     </div>
   );
 }
@@ -487,6 +493,7 @@ function DiffHunkView({
   onAnchor: (id: string) => void;
   onBlameFrom?: (path: string, line: number) => void;
 }) {
+  const tip = useViewportTooltip();
   const metaFor = (line: DiffLine): LineMeta | undefined => {
     const coordinate = coordinateOf(line);
     return coordinate === null ? undefined : byCoordinate.get(coordinate);
@@ -546,7 +553,7 @@ function DiffHunkView({
                   onClick={toggleHunk}
                   aria-pressed={committedAll}
                   aria-label={`Select every changed line in hunk ${hunk.header}`}
-                  title="Select every changed line in this hunk"
+                  {...hoverTooltip(tip, "Select every changed line in this hunk")}
                 >
                   {committedAll ? "✓" : "+"}
                 </button>
@@ -561,7 +568,7 @@ function DiffHunkView({
             className="diff-hunk__action"
             disabled={selection.applying}
             onClick={() => selection.onApply(hunkLines.map((line) => line.id))}
-            title={`${verb} all ${hunkLines.length} changed line${hunkLines.length === 1 ? "" : "s"} in this hunk — j / k move between hunks`}
+            {...hoverTooltip(tip, `${verb} all ${hunkLines.length} changed line${hunkLines.length === 1 ? "" : "s"} in this hunk — j / k move between hunks`)}
           >
             {verb} hunk
           </button>
@@ -585,6 +592,11 @@ function DiffHunkView({
           selection !== undefined &&
           !selection.applying;
         const takeId = canTick && meta !== undefined ? meta.id : null;
+        // One string, read twice: the blame gutter's accessible name and its
+        // card say the same sentence, and two copies of the template are two
+        // places to reword before they disagree.
+        const blameName =
+          line.kind === "del" ? undefined : `Blame from line ${line.newNo}`;
         return (
           <div
             key={index}
@@ -638,7 +650,7 @@ function DiffHunkView({
                     ) : (
                       <span
                         className="diff-line-take diff-line-take--atomic"
-                        title={ATOMIC_LINE_TITLE}
+                        {...hoverTooltip(tip, ATOMIC_LINE_TITLE)}
                         aria-label={ATOMIC_LINE_TITLE}
                         role="img"
                       >
@@ -656,7 +668,12 @@ function DiffHunkView({
               <button
                 className="diff-gutter diff-gutter--blame"
                 onClick={() => onBlameFrom(filePath, line.newNo)}
-                title={`Blame from line ${line.newNo}`}
+                /* The number is the whole button, so `title` was its only
+                   description — and an unreliable one, since a button's own
+                   text wins the name computation. An explicit name says it
+                   for AT; the card says it for the pointer. */
+                aria-label={blameName}
+                {...hoverTooltip(tip, blameName)}
               >
                 {line.newNo}
               </button>
@@ -672,6 +689,7 @@ function DiffHunkView({
           </div>
         );
       })}
+      {tip.tooltipNode}
     </div>
   );
 }

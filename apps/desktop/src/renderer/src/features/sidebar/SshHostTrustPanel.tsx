@@ -120,7 +120,8 @@ export function SshHostTrustPanel(props: {
           <button
             type="button"
             className="ssh-trust__link"
-            title={proposal.sourceUrl}
+            /* No hover card: `.ssh-trust__link` sets `overflow-wrap: anywhere`,
+               so the URL is fully visible in the button's own text. */
             onClick={() => { void dispatch("shell:openExternal", { url: proposal.sourceUrl! }); }}
           >{proposal.sourceUrl}</button>
         </p>}

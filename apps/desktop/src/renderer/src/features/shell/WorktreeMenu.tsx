@@ -10,6 +10,10 @@ import { copyText } from "../../lib/copyText";
 import { revealLabel, revealPath } from "./reveal";
 import { useDismissable } from "../../lib/useDismissable";
 import { useMenuNavigation } from "../../lib/useMenuNavigation";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 
 /**
  * A "⋯" actions menu for a worktree: copy branch/path, reveal in the OS file
@@ -30,6 +34,7 @@ export function WorktreeMenu({
   /** Explicit only in deterministic platform component tests. */
   platform?: string;
 }) {
+  const tip = useViewportTooltip();
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
@@ -85,7 +90,7 @@ export function WorktreeMenu({
         aria-label="Worktree actions"
         aria-haspopup="menu"
         aria-expanded={open}
-        title="More actions"
+        {...hoverTooltip(tip, "More actions")}
         onClick={toggle}
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -150,6 +155,7 @@ export function WorktreeMenu({
           </div>,
           document.body
         )}
+      {tip.tooltipNode}
     </div>
   );
 }

@@ -26,6 +26,10 @@ import {
   hasPrimaryModifier,
   shortcutLabel
 } from "../../lib/platform";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
 import { ReadError } from "../shell/ReadError";
@@ -240,6 +244,10 @@ export function Sidebar({
   // DOM now, while nothing is being said, so the screen reader has registered
   // it long before the first ⌘⇧↑/↓ — see lib/announce.
   useEffect(mountLiveRegion, []);
+  /** One card for the sidebar's own chrome — the search hint, the action
+   *  buttons, the options kebab and the folder-group heads. The rows below
+   *  own theirs, since each is its own component. */
+  const tip = useViewportTooltip();
   const [storedLens] = useState(readStoredLens);
   const [lens, setLens] = useState<Lens>(storedLens ?? DEFAULT_LENS);
   const [showAllFocused, setShowAllFocused] = useState(false);
@@ -933,10 +941,13 @@ export function Sidebar({
           {/* Find is advertised; the K chord stays as a silent alias. */}
           <span
             className="kbd"
-            title={`${shortcutLabel({ key: "F" }, platform)} or ${shortcutLabel(
-              { key: "K" },
-              platform
-            )}`}
+            {...hoverTooltip(
+              tip,
+              `${shortcutLabel({ key: "F" }, platform)} or ${shortcutLabel(
+                { key: "K" },
+                platform
+              )}`
+            )}
           >
             {shortcutLabel({ key: "F" }, platform)}
           </span>
@@ -950,11 +961,26 @@ export function Sidebar({
             className="add-folder"
             onClick={onAddFolder}
             disabled={activeProfile === null}
-            title={
+            /* The reason goes in the NAME as well as the card: a disabled
+               button still announces its name, and AT reads that over a card.
+               Chromium does still fire hover on a disabled control, so the
+               pointer gets the sentence the old `title` gave it.
+               The visible label is repeated VERBATIM, ellipsis and all, because
+               an aria-label replaces the button's contents rather than adding
+               to them: drop a character and the name no longer contains the
+               label the user can see, which is SC 2.5.3 and which is what
+               voice control ("click Add folders") matches on. */
+            aria-label={
+              activeProfile === null
+                ? "Add folders… — unavailable, load or create a profile first"
+                : undefined
+            }
+            {...hoverTooltip(
+              tip,
               activeProfile === null
                 ? "Load or create a profile before adding folders"
                 : undefined
-            }
+            )}
           >
             <span className="new-wt__plus">+</span> Add folders…
           </button>
@@ -969,11 +995,21 @@ export function Sidebar({
               disabled={
                 activeProfile === null || activeProfile.roots.length === 0
               }
-              title={
+              /* The unavailable reason is the NAME as well as the card — a
+                 disabled button announces its name, and AT reads that over any
+                 card. The card carries whichever sentence applies. The visible
+                 label is repeated verbatim; see .add-folder above for why. */
+              aria-label={
+                activeProfile !== null && activeProfile.roots.length === 0
+                  ? "Clone… — unavailable, add a repo folder before cloning"
+                  : undefined
+              }
+              {...hoverTooltip(
+                tip,
                 activeProfile !== null && activeProfile.roots.length === 0
                   ? "Add a repo folder before cloning"
                   : "Clone a repository from GitHub or GitLab"
-              }
+              )}
             >
               <span className="new-wt__plus">↓</span> Clone…
             </button>
@@ -983,11 +1019,18 @@ export function Sidebar({
               disabled={
                 activeProfile === null || activeProfile.roots.length === 0
               }
-              title={
+              /* See .clone-repo above. */
+              aria-label={
+                activeProfile !== null && activeProfile.roots.length === 0
+                  ? "Fork… — unavailable, add a repo folder before forking"
+                  : undefined
+              }
+              {...hoverTooltip(
+                tip,
                 activeProfile !== null && activeProfile.roots.length === 0
                   ? "Add a repo folder before forking"
                   : "Fork a repository, then check out your copy"
-              }
+              )}
             >
               <ForkGlyph /> Fork…
             </button>
@@ -1009,7 +1052,7 @@ export function Sidebar({
             <button
               className="bulk-sync-action"
               disabled={activeProfile === null || repos.length === 0}
-              title="Fetch configured remotes once for every repository"
+              {...hoverTooltip(tip, "Fetch configured remotes once for every repository")}
               onClick={() => setBulkSyncMode("fetch")}
             >
               ↻ Fetch all repos
@@ -1017,7 +1060,7 @@ export function Sidebar({
             <button
               className="bulk-sync-action"
               disabled={activeProfile === null || repos.length === 0}
-              title="Fast-forward only clean, safe tracked worktrees"
+              {...hoverTooltip(tip, "Fast-forward only clean, safe tracked worktrees")}
               onClick={() => setBulkSyncMode("soft-pull")}
             >
               ↓ Try pull all
@@ -1033,7 +1076,7 @@ export function Sidebar({
             <button
               className="bulk-sync-action"
               disabled={activeProfile === null || repos.length === 0}
-              title="Find worktrees that are safe to remove, across every repository"
+              {...hoverTooltip(tip, "Find worktrees that are safe to remove, across every repository")}
               onClick={() => setPruning(true)}
             >
               <PruneGlyph /> Prune worktrees…
@@ -1062,7 +1105,7 @@ export function Sidebar({
             aria-label="Sidebar display options"
             aria-haspopup="menu"
             aria-expanded={options !== null}
-            title="Sidebar display options"
+            {...hoverTooltip(tip, "Sidebar display options")}
             onClick={(event) => {
               const rect = event.currentTarget.getBoundingClientRect();
               setOptions((current) =>
@@ -1155,7 +1198,7 @@ export function Sidebar({
                 >
                   <div
                     className="repo-group__head"
-                    title={g.root || "Not under any added folder"}
+                    {...hoverTooltip(tip, g.root || "Not under any added folder")}
                     aria-hidden="true"
                   >
                     <span className="repo-group__label">{g.label}</span>
@@ -1239,6 +1282,7 @@ export function Sidebar({
           onClose={() => setOptions(null)}
         />
       )}
+      {tip.tooltipNode}
     </aside>
   );
 }

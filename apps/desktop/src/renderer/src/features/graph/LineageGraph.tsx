@@ -18,6 +18,7 @@ import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import {
   type TooltipAnchor,
+  hoverTooltip,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 import { BranchChipMenu, type BranchChipTarget } from "./BranchChipMenu";
@@ -299,6 +300,10 @@ export function LineageGraph({
   const commitContext = useViewportTooltip("commit-context-card", {
     interactive: true
   });
+  /** The graph chrome's own card — the branch menu, the locate button, the
+   *  scope toggle, the lane scrollbar. Separate from `commitContext` above,
+   *  which is an interactive card with its own class and dwell rules. */
+  const tip = useViewportTooltip();
   // One gate for every row: only one trigger is hovered at a time, and this
   // keeps hundreds of rows from each mounting their own listener bookkeeping.
   const hoverIntent = useHoverIntent();
@@ -1052,7 +1057,7 @@ export function LineageGraph({
             className="graph-branches"
             aria-haspopup="menu"
             aria-expanded={branchesOpen}
-            title="Branches drawn in this graph — click one to jump to its tip"
+            {...hoverTooltip(tip, "Branches drawn in this graph — click one to jump to its tip")}
             onClick={() => setBranchesOpen((v) => !v)}
           >
             {countLabel}
@@ -1080,11 +1085,20 @@ export function LineageGraph({
                       className="branch-pop__item"
                       role="menuitem"
                       disabled={vm === undefined}
-                      title={
+                      /* A disabled menuitem announces its name, and AT reads
+                         that over a card — so the reason is the name as well
+                         as the card. */
+                      aria-label={
+                        vm === undefined
+                          ? `${name} — unavailable, its tip is outside the loaded window`
+                          : undefined
+                      }
+                      {...hoverTooltip(
+                        tip,
                         vm === undefined
                           ? "Tip is outside the loaded window"
                           : `Jump to ${name}`
-                      }
+                      )}
                       onClick={() => {
                         if (tipHash !== undefined) {
                           locateHash(tipHash);
@@ -1128,7 +1142,7 @@ export function LineageGraph({
           <button
             className="graph-locate"
             onClick={() => locateHash(head)}
-            title="Scroll to this worktree's current commit (HEAD)"
+            {...hoverTooltip(tip, "Scroll to this worktree's current commit (HEAD)")}
           >
             <LocateGlyph />
             You are here
@@ -1136,11 +1150,12 @@ export function LineageGraph({
         )}
         <button
           className={`only-me${scope === "active" ? " is-on" : ""}`}
-          title={
+          {...hoverTooltip(
+            tip,
             scope === "active"
               ? "Showing your active, unmerged branches. Click to show all branches."
               : "Showing all branches. Click to show only active ones."
-          }
+          )}
           onClick={() => {
             scopeTouchedRef.current = true;
             setScope((s) => (s === "active" ? "all" : "active"));
@@ -1156,7 +1171,7 @@ export function LineageGraph({
           <div
             className="lane-scrollbar"
             ref={laneBarRef}
-            title="Scroll the lane gutter — commits stay put"
+            {...hoverTooltip(tip, "Scroll the lane gutter — commits stay put")}
             style={{ width: gutterW }}
             onScroll={(e) => {
               cardRef.current?.style.setProperty(
@@ -1278,6 +1293,7 @@ export function LineageGraph({
           onClose={() => setBranchFromCommit(null)}
         />
       )}
+      {tip.tooltipNode}
     </>
   );
 }

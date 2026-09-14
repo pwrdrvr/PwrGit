@@ -2,6 +2,10 @@ import { useEffect, useState } from "react";
 import type { CommitFileChange } from "@pwrgit/shared";
 import { fileStatusChipProps } from "../../lib/fileStatus";
 import { dispatch } from "../../lib/pwrgit";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 
 /**
  * Commit-scoped file list in the rail — the mirror of the Changes tab for a
@@ -40,13 +44,14 @@ export function CommitTab({
     };
   }, [worktreeId, hash]);
 
+  const tip = useViewportTooltip();
   return (
     <div className="changes-pane commit-tab">
       <div className="commit-tab__head">
         <button
           className="commit-tab__close"
           onClick={onClose}
-          title="Back to working-tree changes"
+          {...hoverTooltip(tip, "Back to working-tree changes")}
         >
           ‹ Changes
         </button>
@@ -60,12 +65,12 @@ export function CommitTab({
             ? { "aria-current": "true" as const }
             : {})}
           onClick={onOpenFullDiff}
-          title="Open the whole commit as one diff"
+          {...hoverTooltip(tip, "Open the whole commit as one diff")}
         >
           Full diff
         </button>
       </div>
-      <div className="commit-tab__subject" title={subject}>
+      <div className="commit-tab__subject" {...hoverTooltip(tip, subject)}>
         {subject}
       </div>
 
@@ -88,10 +93,10 @@ export function CommitTab({
                   ? { "aria-current": "true" as const }
                   : {})}
                 onClick={() => onOpenFile(f.path)}
-                title="View this file's changes in the commit"
+                {...hoverTooltip(tip, "View this file's changes in the commit")}
               >
                 <span {...fileStatusChipProps(f.status)}>{f.status}</span>
-                <span className="file-path" title={f.path}>
+                <span className="file-path" {...hoverTooltip(tip, f.path)}>
                   {f.path}
                 </span>
               </div>
@@ -102,6 +107,7 @@ export function CommitTab({
           </>
         )}
       </div>
+      {tip.tooltipNode}
     </div>
   );
 }

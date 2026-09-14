@@ -750,11 +750,21 @@ describe("WorktreeHeader default-branch drift", () => {
   };
   const drift = (): HTMLElement | null =>
     container.querySelector(".sync-chip--drift");
+  /** The drift sentence is a `useViewportTooltip` card rather than a `title`,
+   *  so it exists only while the chip is hovered. Unlike the popover tests
+   *  above — which must NOT dispatch a `mouseover` — this one is asserting
+   *  exactly that the hover opens something. */
+  const driftCard = async (): Promise<string> => {
+    await act(async () => {
+      drift()?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+    return document.querySelector('[role="tooltip"]')?.textContent ?? "";
+  };
 
   it("names the branch the count belongs to, without the warn rung", async () => {
     await render(feature);
     expect(drift()?.textContent).toBe("main +4");
-    expect(drift()?.getAttribute("title")).toBe(
+    expect(await driftCard()).toBe(
       "main has 4 commits not in releases/1.0; this is not commits available to pull"
     );
     // Warn is reserved for ↓behind, which Pull actually clears.

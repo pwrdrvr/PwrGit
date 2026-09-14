@@ -10,6 +10,10 @@ import { dispatch, subscribe } from "../../lib/pwrgit";
 import { currentPlatform } from "../../lib/platform";
 import { relativeAge } from "../../lib/relativeAge";
 import { useModal } from "../../lib/useModal";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 import { ReclaimDiskPanel } from "./ReclaimDiskPanel";
 import {
   describeBytes,
@@ -454,6 +458,7 @@ function PruneRow({
   disabled: boolean;
   onToggle: () => void;
 }) {
+  const tip = useViewportTooltip();
   return (
     <label className={`prune__row${checked ? " is-selected" : ""}`}>
       <input
@@ -467,7 +472,10 @@ function PruneRow({
           {candidate.repoName} <span aria-hidden="true">·</span>{" "}
           {candidate.branch}
         </strong>
-        <small className="selectable" title={candidate.path}>
+        <small
+          className="selectable"
+          {...hoverTooltip(tip, candidate.path)}
+        >
           {candidate.path}
         </small>
       </span>
@@ -485,6 +493,7 @@ function PruneRow({
             : `${candidate.sizePartial === true ? "≥ " : ""}${formatBytes(candidate.sizeBytes)}`}
         </span>
       </span>
+      {tip.tooltipNode}
     </label>
   );
 }

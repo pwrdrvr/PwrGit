@@ -14,6 +14,10 @@ import {
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { copyText } from "../../lib/copyText";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 import { joinDisplayPath } from "../../lib/platform";
 import {
   cloneDestinationLabel,
@@ -118,6 +122,11 @@ export function CloneRepoDialog({
   onCloned: (repo: Repo) => void;
   onClose: () => void;
 }) {
+  const tip = useViewportTooltip();
+  /** The card for one destination row. Named so the row's own `onMouseEnter`
+   *  can call it rather than overwrite it — see the call site. */
+  const destinationTip = (destination: CloneDestination) =>
+    hoverTooltip(tip, destination.path);
   const [catalog, setCatalog] = useState<CloneCatalog | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [destinations, setDestinations] = useState<CloneDestination[]>([]);
@@ -633,7 +642,7 @@ export function CloneRepoDialog({
                   {repository.localPaths.length > 0 && (
                     <span
                       className="clone-chip clone-chip--muted"
-                      title={repository.localPaths.join("\n")}
+                      {...hoverTooltip(tip, repository.localPaths.join("\n"))}
                     >
                       cloned
                     </span>
@@ -682,11 +691,19 @@ export function CloneRepoDialog({
                     className={`clone-protocol${
                       protocol === candidate ? " is-active" : ""
                     }`}
-                    title={
+                    /* The unavailable reason goes in the NAME as well as the
+                       card: a disabled button still announces its name, and AT
+                       reads that over any card. The enabled case carries
+                       `detail`, which `.clone-protocol small` ellipsises. */
+                    aria-label={
                       disabled
-                        ? `${label} must be installed and signed in`
-                        : detail
+                        ? `${label} — unavailable, ${label} must be installed and signed in`
+                        : undefined
                     }
+                    {...hoverTooltip(
+                      tip,
+                      disabled ? `${label} must be installed and signed in` : detail
+                    )}
                     onClick={() => { setProtocol(candidate); clearSubmitError(); }}
                   >
                     <strong>{label}</strong>
@@ -789,10 +806,20 @@ export function CloneRepoDialog({
                       : ""
                   }`}
                   disabled={busy || selectedRepository === null}
-                  title={destination.path}
-                  onMouseEnter={() =>
-                    setDestinationSelectionPath(destination.path)
-                  }
+                  /* The full path as the option's NAME, where the row's own
+                     text is a `root/relative/` label whose basename repeats
+                     across registered roots. That ambiguity was why the path
+                     was sitting in a `title` — an attribute no screen reader
+                     reads off a named button, and no keyboard user can open. */
+                  aria-label={`${destination.path} — ${destinationMeta(destination)}`}
+                  {...destinationTip(destination)}
+                  // The row already moves the selection on enter, so the
+                  // card's own handler is called rather than spread over it —
+                  // a later `onMouseEnter` would silently win.
+                  onMouseEnter={(event) => {
+                    setDestinationSelectionPath(destination.path);
+                    tip.show(event.currentTarget, destination.path);
+                  }}
                   onClick={() => {
                     setSelectedDestination(destination);
                     setDestinationQuery(cloneDestinationLabel(destination));
@@ -837,7 +864,10 @@ export function CloneRepoDialog({
                 id="clone-destination-choice"
                 className="clone-destination-choice"
                 role="status"
-                title={checkoutPath(activeDestination, selectedRepository)}
+                {...hoverTooltip(
+                  tip,
+                  checkoutPath(activeDestination, selectedRepository)
+                )}
               >
                 Will create{" "}
                 <strong>
@@ -978,6 +1008,7 @@ export function CloneRepoDialog({
           </button>
         </div>
       </div>
+      {tip.tooltipNode}
     </div>
   );
 }

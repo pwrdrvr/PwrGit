@@ -15,6 +15,10 @@ import { ContextMenu } from "../shell/ContextMenu";
 import { confirmDialog } from "../shell/dialogs";
 import { SubmodulePanel } from "./SubmodulePanel";
 import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
+import {
   canIgnore,
   changesRowMenuItems,
   ignorePathFor,
@@ -187,22 +191,26 @@ function FileRow({
   onDiscard: () => void;
   onContextMenu: (event: ReactMouseEvent) => void;
 }) {
+  const tip = useViewportTooltip();
   return (
     <div
       className={`file-row is-clickable${file.staged ? " is-staged" : ""}${split ? " is-split" : ""}${nested ? " file-row--nested" : ""}${selected ? " is-selected" : ""}`}
       {...(selected ? { "aria-current": "true" as const } : {})}
       onClick={onOpen}
       onContextMenu={onContextMenu}
-      title={split ? "Partly staged — view these changes" : "View changes"}
+      {...hoverTooltip(tip, split ? "Partly staged — view these changes" : "View changes")}
     >
       <span {...fileStatusChipProps(file.status)}>{file.status}</span>
-      <span className="file-path" title={file.path}>
+      <span className="file-path" {...hoverTooltip(tip, file.path)}>
         {label}
       </span>
       {split && (
         <span
           className="file-split"
-          title={`Partly staged — this file also has ${file.staged ? "unstaged" : "staged"} changes`}
+          {...hoverTooltip(
+            tip,
+            `Partly staged — this file also has ${file.staged ? "unstaged" : "staged"} changes`
+          )}
         >
           partial
         </span>
@@ -214,7 +222,7 @@ function FileRow({
             e.stopPropagation();
             onDiscard();
           }}
-          title="Discard changes"
+          {...hoverTooltip(tip, "Discard changes")}
           aria-label={`Discard changes to ${file.path}`}
         >
           <TrashIcon />
@@ -225,12 +233,13 @@ function FileRow({
             e.stopPropagation();
             onToggle();
           }}
-          title={file.staged ? "Unstage" : "Stage"}
+          {...hoverTooltip(tip, file.staged ? "Unstage" : "Stage")}
           aria-label={`${file.staged ? "Unstage" : "Stage"} ${file.path}`}
         >
           {file.staged ? <MinusIcon /> : <PlusIcon />}
         </button>
       </span>
+      {tip.tooltipNode}
     </div>
   );
 }
@@ -255,6 +264,7 @@ function FolderRow({
   onDiscard: () => void;
   onContextMenu: (event: ReactMouseEvent) => void;
 }) {
+  const tip = useViewportTooltip();
   const verb = staged ? "Unstage" : "Stage";
   return (
     <div
@@ -268,7 +278,7 @@ function FolderRow({
           e.stopPropagation();
           onToggleOpen();
         }}
-        title={open ? "Hide files" : "Show files"}
+        {...hoverTooltip(tip, open ? "Hide files" : "Show files")}
         aria-label={`${open ? "Hide" : "Show"} the files in ${dir}`}
         aria-expanded={open}
       >
@@ -281,7 +291,10 @@ function FolderRow({
           <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
         </svg>
       </span>
-      <span className="folder-row__path" title={`${dir}/ — ${count} files`}>
+      <span
+        className="folder-row__path"
+        {...hoverTooltip(tip, `${dir}/ — ${count} files`)}
+      >
         {dir}/
       </span>
       <span className="folder-row__count">{count}</span>
@@ -292,7 +305,7 @@ function FolderRow({
             e.stopPropagation();
             onDiscard();
           }}
-          title={`Discard all ${count} files in this folder`}
+          {...hoverTooltip(tip, `Discard all ${count} files in this folder`)}
           aria-label={`Discard all ${count} files in ${dir}`}
         >
           <TrashIcon />
@@ -303,12 +316,13 @@ function FolderRow({
             e.stopPropagation();
             onToggle();
           }}
-          title={`${verb} all ${count} files in this folder`}
+          {...hoverTooltip(tip, `${verb} all ${count} files in this folder`)}
           aria-label={`${verb} all ${count} files in ${dir}`}
         >
           {staged ? <MinusIcon /> : <PlusIcon />}
         </button>
       </span>
+      {tip.tooltipNode}
     </div>
   );
 }
@@ -336,6 +350,7 @@ export function ChangesTab({
     staged?: boolean
   ) => void;
 }) {
+  const tip = useViewportTooltip();
   const [changes, setChanges] = useState<ChangeSet | null>(null);
   const [message, setMessage] = useState("");
   const messageRef = useRef<HTMLInputElement>(null);
@@ -691,14 +706,17 @@ export function ChangesTab({
 
   return (
     <div className="changes-pane">
-      <div className="changes-wip" title="Uncommitted changes in the working tree">
+      <div
+        className="changes-wip"
+        {...hoverTooltip(tip, "Uncommitted changes in the working tree")}
+      >
         <span className="changes-wip__dot" />
         Work in progress · uncommitted
         <span style={{ flex: 1 }} />
         <button
           className="changes-wip__discard"
           onClick={() => void discardAll()}
-          title="Discard every uncommitted change in this worktree"
+          {...hoverTooltip(tip, "Discard every uncommitted change in this worktree")}
         >
           Discard all
         </button>
@@ -719,7 +737,7 @@ export function ChangesTab({
               <button
                 className="changes-section__action"
                 onClick={() => run("changes:unstage", ["."])}
-                title="Unstage every staged file"
+                {...hoverTooltip(tip, "Unstage every staged file")}
               >
                 Unstage all
               </button>
@@ -743,7 +761,7 @@ export function ChangesTab({
               <button
                 className="changes-section__action"
                 onClick={() => run("changes:stage", ["."])}
-                title="Stage every changed and new file"
+                {...hoverTooltip(tip, "Stage every changed and new file")}
               >
                 Stage all
               </button>
@@ -814,6 +832,7 @@ export function ChangesTab({
         </div>
         <div className="commit-as">as {activeEmail !== "" ? activeEmail : "—"}</div>
       </div>
+      {tip.tooltipNode}
     </div>
   );
 }

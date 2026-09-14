@@ -15,6 +15,10 @@ import { OperationBanner } from "./OperationBanner";
 import { RebaseTab } from "./RebaseTab";
 import { ChangesTab } from "./ChangesTab";
 import { CommitTab } from "./CommitTab";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 
 type RailTab = "changes" | "rebase";
 
@@ -61,6 +65,7 @@ export function Rail({
   /** What the main pane shows OF THE FOCUSED COMMIT, if anything. */
   commitView: { kind: "full" } | { kind: "file"; path: string } | null;
 }) {
+  const tip = useViewportTooltip();
   const [tab, setTab] = useState<RailTab>("changes");
   const dirty = state?.dirty ?? worktree?.dirty ?? 0;
   const worktreeId = worktree?.id ?? null;
@@ -156,7 +161,7 @@ export function Rail({
         <button
           className="icon-btn"
           onClick={onCollapse}
-          title="Collapse panel"
+          {...hoverTooltip(tip, "Collapse panel")}
           aria-label="Collapse panel"
         >
           ›
@@ -201,6 +206,7 @@ export function Rail({
           onClear={onClearSelection}
         />
       )}
+      {tip.tooltipNode}
     </aside>
   );
 }

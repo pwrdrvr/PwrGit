@@ -1,3 +1,7 @@
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 import type {
   DivergenceCommit,
   DivergenceCommitAlignment
@@ -57,12 +61,16 @@ function CommitCell({
   commit: DivergenceCommit | null;
   absentLabel: string;
 }) {
+  const tip = useViewportTooltip();
   if (commit === null) {
     return <span className="commit-align__commit-empty">{absentLabel}</span>;
   }
 
   return (
-    <div className="commit-align__commit" title={commit.subject}>
+    <div
+      className="commit-align__commit"
+      {...hoverTooltip(tip, commit.subject)}
+    >
       <code>{commit.shortHash}</code>
       <span className="commit-align__commit-subject">
         {commit.subject || "(no commit message)"}
@@ -74,6 +82,7 @@ function CommitCell({
         <span>+{commit.additions}</span>
         <span>−{commit.deletions}</span>
       </span>
+      {tip.tooltipNode}
     </div>
   );
 }
@@ -99,6 +108,7 @@ export function CommitAlignment({
   /** Relation label for a commit the other side alone carries. */
   otherOnlyLabel: string;
 }) {
+  const tip = useViewportTooltip();
   return (
     <section className="commit-align">
       <div className="commit-align__head">
@@ -127,7 +137,10 @@ export function CommitAlignment({
               <span
                 className="commit-align__relation"
                 aria-label={relationLabel(row.relation, otherOnlyLabel)}
-                title={relationLabel(row.relation, otherOnlyLabel)}
+                {...hoverTooltip(
+                  tip,
+                  relationLabel(row.relation, otherOnlyLabel)
+                )}
               >
                 {relationGlyph(row.relation)}
               </span>
@@ -138,6 +151,7 @@ export function CommitAlignment({
           ))}
         </div>
       </div>
+      {tip.tooltipNode}
     </section>
   );
 }

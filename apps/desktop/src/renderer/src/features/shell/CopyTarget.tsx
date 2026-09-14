@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { copyHint, copyText } from "../../lib/copyText";
-import { useViewportTooltip } from "../../lib/useViewportTooltip";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 
 /** Comfortably past a platform double-click threshold, short enough that a
  *  deliberate single click still feels immediate. */
@@ -90,10 +93,7 @@ export function CopyTarget({
         tabIndex={0}
         aria-label={label}
         className={className}
-        onMouseEnter={(e) => tooltip.show(e.currentTarget, tipText)}
-        onMouseLeave={tooltip.hide}
-        onFocus={(e) => tooltip.show(e.currentTarget, tipText)}
-        onBlur={tooltip.hide}
+        {...hoverTooltip(tooltip, tipText)}
         onClick={(e) => {
           if (stopPropagation) e.stopPropagation();
           e.preventDefault();

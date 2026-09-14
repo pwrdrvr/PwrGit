@@ -109,7 +109,11 @@ describe("OperationBanner", () => {
 
     const cont = button("Continue rebase");
     expect(cont.disabled).toBe(true);
-    expect(cont.title).toContain("Stage all 3 conflicted paths");
+    // In the NAME: a disabled button announces its name, and AT reads that
+    // over any hover card. (The card says it too, for the pointer.)
+    expect(cont.getAttribute("aria-label")).toContain(
+      "stage all 3 conflicted paths"
+    );
     expect(button("Abort rebase").disabled).toBe(false);
   });
 

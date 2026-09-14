@@ -23,6 +23,10 @@ import { localWhen, shortWhen } from "../graph/graph-view";
 import { DiffViewer } from "./DiffViewer";
 import type { ImageDiffRevisions } from "./ImageDiff";
 import { tablistKeyHandler } from "../../lib/tablistKeys";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 
 export type FileInsightTab = "history" | "blame" | "contents";
 
@@ -149,14 +153,19 @@ function AuthorLabel({
   email: string;
   lookups: Record<string, GitHubCommitAuthorIdentityLookup>;
 }) {
+  const tip = useViewportTooltip();
   const identity = hash === null ? undefined : lookups[hash]?.identity;
   const label = identity?.login === undefined ? name : `@${identity.login}`;
   return (
-    <span className="file-insight__author" title={email || name}>
+    <span
+      className="file-insight__author"
+      {...hoverTooltip(tip, email || name)}
+    >
       {identity?.avatarUrl !== undefined && (
         <img src={identity.avatarUrl} alt="" className="file-insight__avatar" />
       )}
       {label}
+      {tip.tooltipNode}
     </span>
   );
 }
@@ -253,6 +262,7 @@ function HistoryView({
   onShowCommit: (hash: string, subject: string) => void;
   onViewFile: (entry: FileHistoryEntry) => void;
 }) {
+  const tip = useViewportTooltip();
   const [entries, setEntries] = useState<FileHistoryEntry[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -365,7 +375,7 @@ function HistoryView({
             aria-label={`${fileStatusLabel(entry.status)}: show what ${
               entry.shortHash
             } changed in ${entry.path}`}
-            title="Show what this commit changed in this file"
+            {...hoverTooltip(tip, "Show what this commit changed in this file")}
           >
             <span {...fileStatusChipProps(entry.status)}>{entry.status}</span>
             <span className="file-history__content">
@@ -382,7 +392,7 @@ function HistoryView({
                 />
                 <span
                   className="file-insight__time"
-                  title={localWhen(entry.committedAt)}
+                  {...hoverTooltip(tip, localWhen(entry.committedAt))}
                 >
                   {shortWhen(entry.committedAt, now)}
                 </span>
@@ -396,11 +406,12 @@ function HistoryView({
                 <span className="file-history__meta">
                   <span
                     className="file-history__rename"
-                    title={
+                    {...hoverTooltip(
+                      tip,
                       entry.previousPath === undefined
                         ? `This commit is under ${entry.path}`
                         : `Renamed from ${entry.previousPath}`
-                    }
+                    )}
                   >
                     {entry.previousPath === undefined
                       ? entry.path
@@ -414,7 +425,7 @@ function HistoryView({
             className="file-insight__row-action"
             onClick={() => onViewFile(entry)}
             aria-label={`View ${entry.path} as of ${entry.shortHash}`}
-            title="View the file as of this commit"
+            {...hoverTooltip(tip, "View the file as of this commit")}
           >
             <EyeIcon />
           </button>
@@ -422,7 +433,7 @@ function HistoryView({
             className="file-insight__row-action"
             onClick={() => onShowCommit(entry.hash, entry.subject)}
             aria-label={`Show commit ${entry.shortHash} in lineage`}
-            title="Show this commit in the lineage"
+            {...hoverTooltip(tip, "Show this commit in the lineage")}
           >
             <LineageIcon />
           </button>
@@ -443,6 +454,7 @@ function HistoryView({
           {loading ? "Loading…" : "Load older commits"}
         </button>
       )}
+      {tip.tooltipNode}
     </div>
   );
 }
@@ -509,6 +521,7 @@ function BlameView({
   onShowCommit: (hash: string, subject: string) => void;
   onBlameBefore: (hunk: FileBlameHunk) => void;
 }) {
+  const tip = useViewportTooltip();
   const aimedLine = initialLine ?? null;
   const [pages, setPages] = useState<FileBlamePage[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -709,7 +722,10 @@ function BlameView({
                           aria-label={`Show what ${hunk.shortHash ?? ""} changed in ${
                             hunk.sourcePath === "" ? path : hunk.sourcePath
                           }`}
-                          title={`${hunk.subject} — show what this commit changed here`}
+                          {...hoverTooltip(
+                            tip,
+                            `${hunk.subject} — show what this commit changed here`
+                          )}
                         >
                           {hunk.shortHash}
                         </button>
@@ -722,7 +738,7 @@ function BlameView({
                         {hunk.committedAt !== null && (
                           <span
                             className="file-insight__time"
-                            title={localWhen(hunk.committedAt)}
+                            {...hoverTooltip(tip, localWhen(hunk.committedAt))}
                           >
                             {shortWhen(hunk.committedAt, now)}
                           </span>
@@ -734,7 +750,7 @@ function BlameView({
                             aria-label={`Blame ${
                               hunk.sourcePath === "" ? path : hunk.sourcePath
                             } before ${hunk.shortHash ?? ""}`}
-                            title="Blame this file just before this commit"
+                            {...hoverTooltip(tip, "Blame this file just before this commit")}
                           >
                             <RewindIcon />
                           </button>
@@ -742,7 +758,7 @@ function BlameView({
                             className="file-insight__row-action"
                             onClick={() => onShowCommit(hash, hunk.subject)}
                             aria-label={`Show commit ${hunk.shortHash ?? ""} in lineage`}
-                            title="Show this commit in the lineage"
+                            {...hoverTooltip(tip, "Show this commit in the lineage")}
                           >
                             <LineageIcon />
                           </button>
@@ -781,6 +797,7 @@ function BlameView({
           {loading ? "Loading…" : "Load more lines"}
         </button>
       )}
+      {tip.tooltipNode}
     </div>
   );
 }
@@ -910,6 +927,7 @@ function CommitFileDiffView({
   preview: CommitFilePreview;
   onShowCommit: (hash: string, subject: string) => void;
 }) {
+  const tip = useViewportTooltip();
   const [patch, setPatch] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -955,14 +973,17 @@ function CommitFileDiffView({
         <span className="file-insight__commit is-static">
           {preview.shortHash}
         </span>
-        <span className="file-insight-diff__subject" title={preview.subject}>
+        <span
+          className="file-insight-diff__subject"
+          {...hoverTooltip(tip, preview.subject)}
+        >
           {preview.subject}
         </span>
         <button
           className="file-insight__row-action"
           onClick={() => onShowCommit(preview.hash, preview.subject)}
           aria-label={`Show commit ${preview.shortHash} in lineage`}
-          title="Show this commit in the lineage"
+          {...hoverTooltip(tip, "Show this commit in the lineage")}
         >
           <LineageIcon />
         </button>
@@ -982,6 +1003,7 @@ function CommitFileDiffView({
           />
         )}
       </div>
+      {tip.tooltipNode}
     </div>
   );
 }
@@ -1008,6 +1030,7 @@ export function FileInsightsPane({
   onClose: () => void;
   onShowCommit: (hash: string, subject: string) => boolean;
 }) {
+  const tip = useViewportTooltip();
   const [tab, setTab] = useState<FileInsightTab>(initialTab);
   // Panels stay mounted once opened, so flipping between History and Blame
   // costs no Git read and keeps each list's scroll position. Only the tab the
@@ -1093,6 +1116,8 @@ export function FileInsightsPane({
 
   // Escape is scoped to focus inside the pane and deferred a tick, matching
   // DiffPane: an overlay that claims the key with preventDefault still wins.
+  // A hover card under the pointer is not such an overlay — it dismisses
+  // without claiming — so the row the user just clicked cannot eat this.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
@@ -1166,7 +1191,10 @@ export function FileInsightsPane({
         <button className="file-insight-pane__back" onClick={goBack}>
           {backLabel}
         </button>
-        <span className="file-insight-pane__path" title={scope.path}>
+        <span
+          className="file-insight-pane__path"
+          {...hoverTooltip(tip, scope.path)}
+        >
           {scope.path}
         </span>
         <span className="file-insight-pane__context">
@@ -1271,6 +1299,7 @@ export function FileInsightsPane({
             )
         )}
       </div>
+      {tip.tooltipNode}
     </section>
   );
 }
