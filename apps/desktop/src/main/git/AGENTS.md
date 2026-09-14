@@ -34,12 +34,16 @@ fail on the Windows runner, so a green local run proves nothing about them:
   behaviour with a process that exits while a descendant holds its pipes —
   that test fails at ~4s against a `close` implementation.
 
-  One exposure is NOT fixed: `execGit` goes through dugite's `exec`, which is
+  **Only `execGitRecords` is fixed.** The file's other two production execs —
+  `execGit` and `execGitBinary` — both go through dugite's `exec`, which is
   Node's `execFile`, whose callback fires on `close`. Measured: a command that
   prints and exits immediately calls back at 4016ms when a grandchild holds
-  the pipes. Closing that means not using dugite's `exec`, so it is deliberately
-  left alone — don't assume `execGit` is immune because this file's other two
-  execs are.
+  the pipes. And on Windows dugite resolves the binary to `cmd\git.exe`, the
+  launcher shim that does the handing off, so both ends of the hazard are
+  present. Closing it means building those two on dugite's `spawn` (as
+  `execGitRecords` already is) rather than its `exec`, which is why it is not
+  bundled in here. Do not assume `execGit` is immune because it sits next to
+  one that is.
 
 - **`core.autocrlf` defaults to true on Windows.** Anything restored out of
   HEAD comes back with CRLF, and a test comparing file *contents* against the
