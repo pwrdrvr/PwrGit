@@ -5,10 +5,17 @@ This directory is a checked-in copy of the PwrGit project in
 Claude Design access can read the design from the repo. Being out of date is the
 failure mode that matters here — if you change the design, re-export.
 
+**The project is the source of truth; prefer working in it.** The repo copy is
+a mirror, not the original. When Claude Design is reachable — and from Claude
+Code and Claude Desktop it is, see the next section — a design change belongs
+in the project, with this directory updated to match. Hand-authoring a
+`.dc.html` here and never pushing it up is how the mirror and the original
+drift apart, and the mirror is the one that loses.
+
 ## Source
 
 - Project: **PwrGit** — <https://claude.ai/design/p/88030015-bdd6-424d-8202-005feb3cee12>
-- Exported: **2026-09-10**.
+- Exported: **2026-09-13**.
 - Reflects the project's "as built" reconciliation pass of **2026-09-02**, which
   checked the design against `apps/desktop/src/renderer/src/**` and
   `styles/tokens.css` at `main @ bc11343`.
@@ -16,8 +23,45 @@ failure mode that matters here — if you change the design, re-export.
 Sibling projects, for reference — **do not export these here**: PwrSnap
 `019deed3-8009-7107-bd1e-68bcd3fd192f`, PwrAgent `019df437-879b-7ea9-89a7-aa689d28f06f`,
 and the shared PwrDrvr Design System `019debaf-c070-7afe-98db-4c9bbe10e72b`.
-Note that Claude Design's `list_projects` returns design **systems** only, so
-PwrGit will not appear in it; that is not evidence the project is missing.
+
+## Reaching the project from Claude Code or Claude Desktop
+
+Use the **`DesignSync`** tool with the project id above. It reads and writes
+this project — `get_project` reports `canEdit: true`, `list_files` and
+`get_file` pull content down, and `finalize_plan` followed by `write_files`
+pushes content up. Both directions work; neither needs a browser or a zip.
+
+Two things mislead people into concluding otherwise, and both have cost real
+sessions:
+
+- **`list_projects` does not return PwrGit.** That call is filtered to
+  `PROJECT_TYPE_DESIGN_SYSTEM`, and PwrGit is a plain `PROJECT_TYPE_PROJECT`.
+  An empty or PwrGit-less listing is not evidence the project is missing or
+  unreachable — address it by id and it answers.
+- **`mcp__claude-design__*` is not the route here.** That server is not
+  available in Claude Code, so a step that names it reads as "Claude Design
+  cannot be reached from this session". It can. `DesignSync` by id is the
+  route, and step 2 of "How to re-export" below is written against it.
+
+`finalize_plan` wants a `deletes` array even when it is empty, and its
+`localDir` is the directory `write_files` may read `localPath` values from —
+point it at whatever root actually contains the files you are pushing.
+
+**One prerequisite, once per machine.** `DesignSync` refuses with HTTP 403
+until `/design-login` has been run in an *interactive* Claude Code session; a
+non-interactive session cannot run it. A 403 means "this machine has not
+logged in yet", not "the project is unreachable" — and once it is done, it
+stays done.
+
+**A new design goes into the project, not only into this folder.** Adding an
+artboard to the existing project is ordinary, supported work — several of the
+files listed below arrived exactly that way. See "Authored here first".
+
+The one thing an agent cannot do from here is manipulate the canvas directly:
+no dragging, no click-to-select, no properties panel. It authors `.dc.html`
+source and syncs it; a person does the visual editing in Claude Design
+afterwards. That is a limit on *how* the design is made, not on *where* it can
+live.
 
 ## Where to start
 
@@ -39,6 +83,7 @@ and records where the retired wireframe disagreed with the code. Read it first.
 | `Tag Chips and Locate - UX Review.dc.html` | The lineage tag chip and the tag locator — chip vocabulary, the light-theme contrast the accent tint could not hold, and the sidebar action column. |
 | `Onboarding Wizard.dc.html` | The first-run wizard — step model, the four steps, the scan explained, and the Done payoff. Interactive. |
 | `Branch Switching and Ref Relevance - UX Review.dc.html` | Where "switch my checkout to this branch" was missing, the relevance ladder the six-row branch slices are spent on, the one guarded switch path, and the three answers a dirty checkout can give. |
+| `README Header.dc.html` | The repository landing page — download and link chips, the composition on both GitHub surfaces, and what was and was not taken from DockDoor. Reference header for the Pwr family. |
 | `PwrGit Icon.dc.html` | App icon, size ladder, tray templates, DMG background. |
 | `support.js` | Generated `dc-runtime` bundle every `.dc.html` loads. |
 | `github.md` | Provenance note for the icon asset set (matched to PwrSnap's). |
@@ -72,13 +117,20 @@ something the 2026-09-03 export changed.
 
 ## Authored here first
 
+Some artboards were drafted in this repo and pushed **up** into the project
+rather than exported down from it. That direction is supported and expected —
+`DesignSync` writes as readily as it reads — and it is the right move when the
+design is being worked out alongside the code it describes. What it must not
+become is an excuse to skip the push: an artboard that only ever exists here is
+invisible to everyone working in Claude Design.
+
+Two consequences for whoever re-exports: these files are **normal members of
+the bundle**, not foreign matter to drop, and each one must already be in the
+project before a re-export runs, or the export will delete it from the mirror.
+
 `Tag Chips and Locate - UX Review.dc.html` and its two `assets/tag-locate-*.png`
-captures were written in this repo during the review of
-[#211](https://github.com/pwrdrvr/PwrGit/pull/211) and pushed **up** to the
-Claude Design project, which is the opposite of the usual direction. That is
-fine — the project is the source of truth for what the design *is*, and it now
-carries this artboard — but it means a re-export must not treat the file as
-foreign and drop it. It is a normal member of the bundle from here on.
+captures were written this way during the review of
+[#211](https://github.com/pwrdrvr/PwrGit/pull/211).
 
 `Settings Forges - UX Review.dc.html` and `assets/forges-before.png` were
 written here the same way, and pushed up the same way. It **supersedes artboard
@@ -95,7 +147,7 @@ prototype instead: toggle the hold off and the clicked row leaves from under the
 cursor, toggle it on and it stays. Its repository names are invented, not a real
 profile.
 
-Its two screenshots are 100% contrived: fixture repositories built by
+The Tag Chips captures are 100% contrived: fixture repositories built by
 `apps/desktop/e2e/fixtures/git-sandbox.ts`, a seeded default profile, and a
 `PWRGIT_USER_DATA_DIR` temp dir. Nothing in them came from a real account or a
 real repository, which is why they may live under `design/assets/` in a public
@@ -108,11 +160,8 @@ wizard: the step model, the four steps, and the Done screen that draws only
 what a fresh scan actually knows. A re-export must not treat it as foreign and
 drop it.
 
-Pushing it up needed `/design-login` in an interactive Claude Code session —
-the `claude-design` MCP server and the built-in `DesignSync` tool both refuse
-with HTTP 403 until that has been run on the machine, and a non-interactive
-session cannot run it. Worth knowing before assuming the project is
-unreachable.
+Pushing it up was what first turned up the `/design-login` prerequisite now
+recorded under "Reaching the project" above.
 
 It carries no `assets/` of its own. Every frame in it is drawn from PwrGit's own
 tokens and markup rather than captured, so there is no screenshot to keep in
@@ -142,6 +191,14 @@ the second time with `apps/desktop/src` and `packages` checked out at the base
 commit — so the two frames differ only by the change. It uses no selector the
 older build lacks, which is what makes that possible; keep it that way.
 
+`README Header.dc.html` was written here and pushed up the same way, alongside
+the README change that ships the chips it specifies. It is the reference header
+for the Pwr family, so PwrAgent and PwrSnap will carry their own version of it;
+this one stays PwrGit's. Its first push went up with the **repo** spelling of
+the image paths and rendered every chip broken in the project — which is why
+the `../` rewrite for it is written down in the next section rather than left
+to memory.
+
 ## Deliberately NOT copied in
 
 **`apps/desktop/**`.** The Claude Design project carries a working copy of
@@ -166,9 +223,16 @@ reads `icon.png, icon-macos.png, icon.icon/` where the project still says
 `.icns` the repo has not shipped since
 [#196](https://github.com/pwrdrvr/PwrGit/pull/196).
 
-Those two files are the only content differences between the checked-in copies
-and the project, and both are load-bearing — **re-apply them on every
-re-export** or the images break and the provenance note goes stale.
+**`README Header.dc.html` takes the same `../` rewrite**, in both directions.
+Its seven image `src`s are `docs/assets/buttons/*.png` and
+`apps/desktop/build/icon.png` in the project, and `../docs/…` / `../apps/…`
+here. Push the repo spelling up by accident — which is exactly what happened
+the first time it was written — and every chip in the project renders as a
+broken image, silently.
+
+Those three files are the only content differences between the checked-in
+copies and the project, and all three are load-bearing — **re-apply them on
+every re-export** or the images break and the provenance note goes stale.
 
 Also skipped: `.thumbnail` (already covered by `design/**/.thumbnail` in
 `.gitignore`).
@@ -194,21 +258,26 @@ reviewable choice.
 
 1. Read `PwrGit As-Built Coverage.dc.html` first so you know what the project
    is supposed to contain.
-2. Pull the project's files (`mcp__claude-design__list_files` / `read_file`, or
-   the zip from the Projects tab at <https://claude.ai/design>).
+2. Pull the project's files with `DesignSync` (`list_files`, then `get_file`
+   per path) against the project id in "Source". A person without tool access
+   can take the zip from the Projects tab at <https://claude.ai/design>
+   instead, but that is the fallback, not the first move.
 3. **Diff before replacing.** Do not `rm -rf` this directory: `PwrGit.dc.html`
    and `fork-flow/` are not produced by the export and would be lost.
 4. Skip `apps/desktop/**`. `.thumbnail`, `chats/` and `uploads/` are already
    gitignored, but delete them from your working copy anyway so `git status`
    stays readable.
-5. Re-apply both on-import edits (see above): the `../` rewrite and size-ladder
-   repoint in `PwrGit Icon.dc.html`, and the screen-map row in `github.md`. Then
-   confirm every `src` resolves to a real file under `apps/desktop/build/`.
+5. Re-apply all three on-import edits (see above): the `../` rewrite and
+   size-ladder repoint in `PwrGit Icon.dc.html`, the `../` rewrite in
+   `README Header.dc.html`, and the screen-map row in `github.md`. Then confirm
+   every `src` resolves to a real file under `apps/desktop/build/` or
+   `docs/assets/buttons/`.
 6. Verify each file's byte size against the project listing — a truncated or
-   mistranscribed artboard is easy to miss and renders blank. Exactly two files
-   are *expected* to differ, both from step 5: `PwrGit Icon.dc.html` (5,945 here
-   against 5,990 there) and `github.md` (1,211 against 1,210). Do not "correct"
-   those two toward the project.
+   mistranscribed artboard is easy to miss and renders blank. Exactly three
+   files are *expected* to differ, all from step 5: `PwrGit Icon.dc.html`
+   (5,945 here against 5,990 there), `github.md` (1,211 against 1,210), and
+   `README Header.dc.html` (17,833 against 17,773). Do not "correct" those
+   three toward the project.
 7. Update the "Exported" date above.
 
 `support.js` is generated (`dc-runtime`) and is shared byte-for-byte across Pwr

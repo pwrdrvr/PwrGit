@@ -1,7 +1,11 @@
 # PwrGit release assets
 
 Generated to match the PwrSnap / PwrAgent asset system. Everything here is
-regenerable from the two scripts in `apps/desktop/scripts/`.
+regenerable from the icon, tray, and DMG scripts in `apps/desktop/scripts/`.
+That directory also holds `generate-readme-chips.swift`, the one generator that
+writes **outside** this folder — the repository README's download and link
+chips, into `docs/assets/buttons/`. It is here because the brand colours and
+`fonts/Geist-Bold.ttf` are here; its design lives in `design/README Header.dc.html`.
 
 ## The mark
 
