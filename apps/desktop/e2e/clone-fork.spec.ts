@@ -208,6 +208,12 @@ for (const host of ["github", "gitlab"] as const) {
 
     await window.locator(".fork-repo").click();
     const dialog = window.getByRole("dialog", { name: "Fork a repository" });
+    // The catalog can switch the default GitHub host to GitLab and clear the
+    // source input. Its fixture account appears only after that host's targets
+    // load, so wait for initialization before exercising the fork workflow.
+    await expect(
+      dialog.getByRole("button", { name: "tester personal account", exact: true })
+    ).toBeVisible();
     await dialog.locator("#fork-source").fill(sourceSlug);
     const sourceRow = dialog
       .locator(".clone-source-row", { hasText: sourceSlug })
@@ -215,9 +221,6 @@ for (const host of ["github", "gitlab"] as const) {
     await expect(sourceRow).toBeVisible();
     await sourceRow.click();
     await expect(dialog.locator("#fork-name")).toHaveValue(name);
-    await expect(
-      dialog.getByRole("button", { name: "tester personal account", exact: true })
-    ).toBeVisible();
     await dialog
       .locator(".clone-protocol", {
         hasText: host === "github" ? "GitHub CLI" : "GitLab CLI"
