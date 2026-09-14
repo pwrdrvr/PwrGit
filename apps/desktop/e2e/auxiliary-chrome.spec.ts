@@ -10,21 +10,38 @@ test.afterEach(async () => {
 
 async function openMenuItem(
   app: AppHandle["app"],
-  label: string
+  label: string,
+  opener?: Page
 ): Promise<Page> {
   const windowPromise = app.waitForEvent("window");
-  await app.evaluate(({ Menu }, requestedLabel) => {
+  // Check focus and invoke the menu in one main-process turn: macOS can
+  // change focus between separate Playwright evaluate calls.
+  await expect.poll(() => app.evaluate(({ app: electronApp, Menu, BrowserWindow }, request) => {
+    if (request.openerUrl !== undefined &&
+        BrowserWindow.getFocusedWindow()?.webContents.getURL() !== request.openerUrl) {
+      const target = BrowserWindow.getAllWindows().find(
+        (candidate) => candidate.webContents.getURL() === request.openerUrl
+      );
+      if (target === undefined) throw new Error("Menu opener window not found");
+      if (process.platform === "darwin") {
+        electronApp.show();
+        electronApp.focus({ steal: true });
+      }
+      target.show();
+      target.focus();
+      return false;
+    }
     for (const top of Menu.getApplicationMenu()?.items ?? []) {
       const item = top.submenu?.items.find(
-        (candidate) => candidate.label === requestedLabel
+        (candidate) => candidate.label === request.label
       );
       if (item !== undefined) {
         item.click();
-        return;
+        return true;
       }
     }
-    throw new Error(`Menu item not found: ${requestedLabel}`);
-  }, label);
+    throw new Error(`Menu item not found: ${request.label}`);
+  }, { label, openerUrl: opener?.url() })).toBe(true);
   return windowPromise;
 }
 
@@ -187,13 +204,15 @@ test("secondary windows borrow the palette of the window that opened them", asyn
   expect(await frameBackground(app, logs)).toBe("#FFFFFF");
   await logs.close();
 
-  // From the menu: Electron hands the click the focused window.
-  await app.evaluate(({ BrowserWindow }, url) => {
-    BrowserWindow.getAllWindows()
-      .find((candidate) => candidate.webContents.getURL() === url)
-      ?.focus();
-  }, mainWindow.url());
-  const settings = await openMenuItem(app, "Settings…");
+  // Exercise the CI case where the macOS application is not active.
+  await app.evaluate(({ app: electronApp }) => {
+    if (process.platform === "darwin") electronApp.hide();
+  });
+
+  // A real menu click requires an active app. BrowserWindow.focus() alone
+  // does not activate a backgrounded macOS app, so getFocusedWindow() can
+  // still be null and the menu correctly falls back to the dark app default.
+  const settings = await openMenuItem(app, "Settings…", mainWindow);
   await expectAuxiliaryChrome(app, settings, "General", "rgb(247, 244, 239)");
   // The borrowed palette has to survive the renderer's own boot-time read,
   // which used to answer with the app default and snap the window back.
